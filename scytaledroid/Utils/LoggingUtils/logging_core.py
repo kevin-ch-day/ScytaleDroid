@@ -6,6 +6,8 @@ import logging
 import logging.handlers
 from pathlib import Path
 
+from scytaledroid.Config import app_config
+
 
 # Base log directory
 LOG_DIR = Path("logs")
@@ -50,11 +52,11 @@ def setup_logger(
     )
     file_handler.setFormatter(logging.Formatter(LOG_FORMAT, DATE_FORMAT))
 
-    # Console handler (simple)
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(logging.Formatter(LOG_FORMAT, DATE_FORMAT))
-
     logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
+
+    if getattr(app_config, "ENABLE_CONSOLE_LOGS", False):
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(logging.Formatter(LOG_FORMAT, DATE_FORMAT))
+        logger.addHandler(console_handler)
 
     return logger

@@ -1,0 +1,623 @@
+"""inventory.py - Installed package scanning for connected devices."""
+
+from __future__ import annotations
+
+import json
+from collections import Counter
+from datetime import datetime
+from pathlib import Path
+from typing import Callable, Dict, Iterable, List, Optional
+
+from scytaledroid.Config import app_config
+from scytaledroid.Utils.DisplayUtils import menu_utils, status_messages, table_utils, text_blocks
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
+
+from . import adb_utils, package_profiles
+from scytaledroid.Database.db_core import run_sql
+from scytaledroid.Database.db_func import ensure_app_definition
+
+_STATE_ROOT = Path(app_config.DATA_DIR) / app_config.DEVICE_STATE_DIR
+
+_CATEGORY_ORDER = {
+    "User": 0,
+    "OEM": 1,
+    "System": 2,
+    "Mainline": 3,
+    "Vendor": 4,
+    "Other": 5,
+    "Unknown": 6,
+}
+
+_PARTITION_ORDER = [
+    "Data (/data)",
+    "Product (/product)",
+    "System (/system, /system_ext)",
+    "Apex (/apex)",
+    "Vendor (/vendor)",
+    "Other",
+    "Unknown",
+]
+
+
+def _split_count(entry: Dict[str, object]) -> int:
+    value = entry.get("split_count")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            if value.lower() in {"yes", "true"}:
+                paths = entry.get("apk_paths")
+                if isinstance(paths, list) and paths:
+                    return len(paths)
+                return 2
+    return 1
+
+
+def run_inventory_sync(
+    serial: Optional[str],
+    *,
+    filter_name: Optional[str] = None,
+    filter_fn: Optional[Callable[[Dict[str, object]], bool]] = None,
+) -> None:
+    """Scan the device, sync package definitions, and display results."""
+    if not serial:
+        print(status_messages.status("No active device. Connect first to scan.", level="warn"))
+        menu_utils.press_enter_to_continue()
+        return
+
+    print()
+    print(text_blocks.headline("Inventory & database sync", width=70))
+    print(status_messages.status("Collecting installed packages..."))
+    adb_utils.clear_package_caches(serial)
+    package_names = adb_utils.list_packages(serial)
+    if not package_names:
+        print(status_messages.status("No packages returned by adb.", level="warn"))
+        menu_utils.press_enter_to_continue()
+        return
+
+    metadata_rows: List[Dict[str, object]] = []
+    package_definitions: Dict[str, Optional[str]] = {}
+    total = len(package_names)
+    progress_interval = max(20, total // 20 or 1)
+    for index, package_name in enumerate(package_names, start=1):
+        paths = adb_utils.get_package_paths(serial, package_name)
+        metadata = adb_utils.get_package_metadata(serial, package_name)
+        entry = _compose_inventory_entry(package_name, paths, metadata)
+        metadata_rows.append(entry)
+        normalized_package = entry.get("package_name") or package_name
+        app_label = entry.get("app_label")
+        package_definitions.setdefault(str(normalized_package).lower(), app_label if isinstance(app_label, str) else None)
+
+        if index % progress_interval == 0 or index == total:
+            percentage = (index / total) * 100
+            print(status_messages.status(f"Processed {index}/{total} packages ({percentage:.1f}%)."))
+
+    _persist_inventory(serial, metadata_rows)
+
+    synced = 0
+    for pkg, name in package_definitions.items():
+        try:
+            ensure_app_definition(pkg, name)
+            synced += 1
+        except Exception as exc:  # pragma: no cover - defensive logging
+            print(status_messages.status(f"Failed to register {pkg}: {exc}", level="warn"))
+
+    if synced:
+        print(status_messages.status(f"Synced {synced} package definitions to database.", level="info"))
+
+    _render_inventory_summary(metadata_rows)
+
+    if filter_fn:
+        scoped_rows = [row for row in metadata_rows if filter_fn(row)]
+        label = filter_name or "Selected subset"
+        print()
+        print(text_blocks.headline(f"{label} ({len(scoped_rows)})", width=70))
+        if scoped_rows:
+            _render_inventory_table(scoped_rows)
+        else:
+            print(status_messages.status("No packages matched the selected filter.", level="warn"))
+        menu_utils.press_enter_to_continue()
+
+    _inventory_selection_menu(metadata_rows)
+
+
+def inventory_sync_menu(serial: Optional[str]) -> None:
+    if not serial:
+        print(status_messages.status("No active device connected.", level="warn"))
+        menu_utils.press_enter_to_continue()
+        return
+
+    while True:
+        print()
+        menu_utils.print_header("Inventory & Sync")
+        options = {
+            "1": "Sync all packages",
+            "2": "Sync user-installed apps",
+            "3": "Sync system/OEM modules",
+            "4": "Sync social & messaging apps",
+            "5": "Sync finance & shopping apps",
+            "6": "Verify database app definitions",
+        }
+        menu_utils.print_menu(options, is_main=False)
+        choice = menu_utils.get_choice(list(options.keys()) + ["0"])
+
+        if choice == "0":
+            break
+        if choice == "1":
+            run_inventory_sync(serial)
+        elif choice == "2":
+            run_inventory_sync(
+                serial,
+                filter_name="User-installed apps",
+                filter_fn=lambda entry: str(entry.get("category")) == "User",
+            )
+        elif choice == "3":
+            run_inventory_sync(
+                serial,
+                filter_name="System & OEM modules",
+                filter_fn=lambda entry: str(entry.get("category")) in {"System", "OEM", "Mainline", "Vendor"},
+            )
+        elif choice == "4":
+            profiles = {"Social", "Messaging"}
+            run_inventory_sync(
+                serial,
+                filter_name="Social & Messaging apps",
+                filter_fn=lambda entry: str(entry.get("profile_name")) in profiles,
+            )
+        elif choice == "5":
+            profiles = {"Finance", "Shopping"}
+            run_inventory_sync(
+                serial,
+                filter_name="Finance & Shopping apps",
+                filter_fn=lambda entry: str(entry.get("profile_name")) in profiles,
+            )
+        elif choice == "6":
+            _verify_app_definitions()
+        else:
+            print(status_messages.status("Selection not available yet.", level="warn"))
+            menu_utils.press_enter_to_continue()
+
+
+
+def run_device_summary(serial: Optional[str]) -> None:
+    """Display the latest inventory snapshot with highlighted insights."""
+    if not serial:
+        print(status_messages.status("No active device. Connect first to show summary.", level="warn"))
+        menu_utils.press_enter_to_continue()
+        return
+
+    snapshot = load_latest_inventory(serial)
+    if not snapshot:
+        print(status_messages.status("No inventory snapshot found for this device.", level="warn"))
+        if menu_utils.prompt_yes_no("Run a new inventory sync now?", default=True):
+            run_inventory_sync(serial)
+        return
+
+    packages: List[Dict[str, object]] = snapshot.get("packages", [])  # type: ignore[assignment]
+    generated_at = snapshot.get("generated_at")
+
+    print()
+    print(text_blocks.headline("Device inventory overview", width=70))
+    if generated_at:
+        status_messages.print_status(f"Snapshot captured {generated_at}")
+
+    if not packages:
+        print(status_messages.status("Snapshot contains no package entries.", level="warn"))
+        menu_utils.press_enter_to_continue()
+        return
+
+    _render_inventory_summary(packages)
+
+    print()
+    print(text_blocks.headline("User applications (preview)", width=70))
+    user_preview = _preview_packages(packages, category="User", limit=12)
+    if user_preview:
+        table_utils.render_table(["Package", "App", "Version", "Profile", "Split", "Path"], user_preview)
+    else:
+        print(status_messages.status("No user applications detected in snapshot.", level="info"))
+
+    system_preview = _preview_packages(packages, category="System", limit=8)
+    if system_preview:
+        print()
+        print(text_blocks.headline("System components (preview)", width=70))
+        table_utils.render_table(["Package", "Component", "Version", "Profile", "Split", "Path"], system_preview)
+
+    menu_utils.press_enter_to_continue()
+
+
+def _compose_inventory_entry(
+    package_name: str,
+    paths: List[str],
+    metadata: Dict[str, Optional[str]],
+) -> Dict[str, object]:
+    primary_path = paths[0] if paths else ""
+    category, partition = _derive_category(primary_path)
+    installer = _normalise_installer(metadata.get("installer"))
+    source = _derive_source(category, installer)
+
+    profile = package_profiles.lookup_profile(package_name)
+    profile_id = profile.id if profile else None
+    profile_name = profile.name if profile else None
+
+    app_label = metadata.get("app_label") or package_name
+    version_name = metadata.get("version_name")
+    version_code = metadata.get("version_code")
+
+    split_count = len(paths)
+    apk_dirs = sorted({path.rsplit("/", 1)[0] for path in paths if "/" in path})
+
+    entry: Dict[str, object] = {
+        "package_name": package_name,
+        "app_label": app_label,
+        "version_name": version_name,
+        "version_code": version_code,
+        "installer": installer,
+        "first_install": metadata.get("first_install"),
+        "last_update": metadata.get("last_update"),
+        "primary_path": primary_path,
+        "category": category,
+        "partition": partition,
+        "source": source,
+        "profile_id": profile_id,
+        "profile_name": profile_name,
+        "split_flag": "Yes" if split_count > 1 else "No",
+        "apk_paths": paths,
+        "apk_dirs": apk_dirs,
+    }
+
+    entry["split_count"] = split_count  # type: ignore[index]
+
+    return entry
+
+
+def _derive_category(primary_path: str) -> Tuple[str, str]:
+    if primary_path.startswith("/data/"):
+        return "User", "Data (/data)"
+    if primary_path.startswith("/product/"):
+        return "OEM", "Product (/product)"
+    if primary_path.startswith("/system_ext/") or primary_path.startswith("/system/"):
+        return "System", "System (/system, /system_ext)"
+    if primary_path.startswith("/apex/"):
+        return "Mainline", "Apex (/apex)"
+    if primary_path.startswith("/vendor/"):
+        return "Vendor", "Vendor (/vendor)"
+    if primary_path:
+        return "Other", "Other"
+    return "Unknown", "Unknown"
+
+
+def _derive_source(category: str, installer: Optional[str]) -> str:
+    if category == "User":
+        if installer == "com.android.vending":
+            return "Play Store"
+        if installer and installer not in {"Unknown", "unset"}:
+            return installer
+        return "Sideload"
+    if category == "Mainline":
+        return "Google Mainline"
+    if category == "OEM":
+        return "OEM/Carrier"
+    if category == "Vendor":
+        return "Vendor"
+    if category == "System":
+        return "System"
+    return category
+
+
+def _normalise_installer(installer: Optional[str]) -> Optional[str]:
+    if not installer or installer.lower() in {"null", "none", ""}:
+        return None
+    return installer
+
+
+def _persist_inventory(serial: str, rows: List[Dict[str, object]]) -> None:
+    """Persist inventory information under the state directory."""
+    timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    device_dir = _STATE_ROOT / serial / "inventory"
+    device_dir.mkdir(parents=True, exist_ok=True)
+
+    payload = {
+        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "device_serial": serial,
+        "package_count": len(rows),
+        "packages": rows,
+    }
+
+    target_file = device_dir / f"inventory_{timestamp}.json"
+    target_file.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+    latest_file = device_dir / "latest.json"
+    latest_file.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+    resolved_path = target_file.resolve()
+    try:
+        display_path = resolved_path.relative_to(Path.cwd())
+    except ValueError:
+        display_path = resolved_path
+
+    log.info(
+        f"Inventory written to {display_path}",
+        category="device",
+    )
+    status_messages.print_status(f"Snapshot saved to {display_path}")
+
+
+def _render_inventory_table(rows: List[Dict[str, object]]) -> None:
+    """Render a concise inventory table to the console."""
+    if not rows:
+        print("No inventory data available.")
+        return
+
+    sorted_rows = sorted(
+        rows,
+        key=lambda entry: (
+            _CATEGORY_ORDER.get(str(entry.get("category")), 99),
+            str(entry.get("app_label") or entry.get("package_name") or "").lower(),
+        ),
+    )
+
+    headers = [
+        "#",
+        "Package",
+        "App",
+        "Version",
+        "Category",
+        "Source",
+        "Profile",
+        "Split",
+        "Primary Path",
+    ]
+
+    table_rows: List[List[str]] = []
+    for index, entry in enumerate(sorted_rows, start=1):
+        package_name = str(entry.get("package_name") or "?")
+        label = str(entry.get("app_label") or package_name)
+        version = str(
+            entry.get("version_name")
+            or entry.get("version_code")
+            or "?"
+        )
+        category = str(entry.get("category") or "Unknown")
+        source = str(entry.get("source") or category)
+        split_count = _split_count(entry)
+        split_display = "Single" if split_count <= 1 else f"{split_count} parts"
+        primary_path = str(entry.get("primary_path") or "?")
+        profile_name = str(entry.get("profile_name") or "-")
+
+        table_rows.append(
+            [
+                str(index),
+                package_name,
+                label,
+                version,
+                category,
+                source,
+                profile_name,
+                split_display,
+                primary_path,
+            ]
+        )
+
+    max_preview = 25
+    sliced_rows = table_rows[:max_preview]
+    table_utils.render_table(headers, sliced_rows)
+
+    if len(table_rows) > max_preview:
+        remaining = len(table_rows) - max_preview
+        print(status_messages.status(f"+ {remaining} more entries saved to report.", level="info"))
+
+
+def load_latest_inventory(serial: str) -> Optional[Dict[str, object]]:
+    """Return the most recently persisted inventory snapshot if available."""
+    latest_file = _STATE_ROOT / serial / "inventory" / "latest.json"
+    if not latest_file.exists():
+        return None
+
+    try:
+        return json.loads(latest_file.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        log.warning(
+            f"Failed to parse {latest_file.relative_to(Path.cwd())}",
+            category="device",
+        )
+        return None
+
+
+def _render_inventory_summary(rows: List[Dict[str, object]]) -> None:
+    total = len(rows)
+    category_counts = Counter(str(entry.get("category") or "Unknown") for entry in rows)
+    source_counts = Counter(str(entry.get("source") or "Unknown") for entry in rows)
+    split_packages = sum(1 for entry in rows if _split_count(entry) > 1)
+    profile_counts = Counter(str(entry.get("profile_name") or "Unclassified") for entry in rows)
+
+    print()
+    print(text_blocks.headline("Inventory summary", width=70))
+    summary_pairs: List[tuple[str, str]] = [
+        ("Total packages", str(total)),
+        ("User apps (/data)", str(category_counts.get("User", 0))),
+        ("OEM overlays (/product)", str(category_counts.get("OEM", 0))),
+        ("System core (/system*)", str(category_counts.get("System", 0))),
+        ("Google mainline (/apex)", str(category_counts.get("Mainline", 0))),
+        ("Vendor partitions", str(category_counts.get("Vendor", 0))),
+        ("Split APK packages", str(split_packages)),
+        ("Play Store installs", str(source_counts.get("Play Store", 0))),
+        ("Sideload/unknown", str(source_counts.get("Sideload", 0))),
+    ]
+
+    partition_counts = _partition_breakdown(rows)
+    summary_pairs.extend(partition_counts)
+    table_utils.render_key_value_pairs([pair for pair in summary_pairs if not pair[1].startswith("0")])
+
+    notable_profiles = [
+        (name, str(count))
+        for name, count in profile_counts.items()
+        if name != "Unclassified" and count > 0
+    ]
+    if notable_profiles:
+        print()
+        print(text_blocks.headline("Category matches", width=70))
+        table_utils.render_key_value_pairs(notable_profiles)
+
+
+def _partition_breakdown(rows: List[Dict[str, object]]) -> List[tuple[str, str]]:
+    counts = Counter(str(entry.get("partition") or "Other") for entry in rows)
+    ordered: List[tuple[str, str]] = []
+    for label in _PARTITION_ORDER:
+        value = counts.get(label, 0)
+        if value:
+            ordered.append((label, str(value)))
+    for label, value in counts.items():
+        if label not in _PARTITION_ORDER and value:
+            ordered.append((label, str(value)))
+    return ordered
+
+
+def _preview_packages(
+    packages: List[Dict[str, object]],
+    *,
+    category: str,
+    limit: int,
+) -> List[List[str]]:
+    filtered = [
+        pkg
+        for pkg in packages
+        if str(pkg.get("category") or "User") == category
+    ]
+
+    def sort_key(pkg: Dict[str, object]) -> str:
+        return str(pkg.get("app_label") or pkg.get("package_name") or "").lower()
+
+    filtered.sort(key=sort_key)
+    preview_rows: List[List[str]] = []
+    for pkg in filtered[:limit]:
+        package_name = str(pkg.get("package_name") or "?")
+        app_label = str(pkg.get("app_label") or package_name)
+        version = str(pkg.get("version_name") or pkg.get("version_code") or "?")
+        split_flag = "Yes" if _split_count(pkg) > 1 else "No"
+        paths = pkg.get("apk_paths")
+        if isinstance(paths, list) and paths:
+            path = str(paths[0])
+        else:
+            path = str(pkg.get("primary_path") or "?")
+        profile_name = str(pkg.get("profile_name") or "-")
+        preview_rows.append([package_name, app_label, version, profile_name, split_flag, path])
+
+    return preview_rows
+
+
+def _inventory_selection_menu(rows: List[Dict[str, object]]) -> None:
+    if not rows:
+        print(status_messages.status("No inventory results available.", level="warn"))
+        menu_utils.press_enter_to_continue()
+        return
+
+    grouped = _group_packages_by_profile(rows)
+    profile_items = sorted(grouped.items(), key=lambda item: (-len(item[1]), item[0].lower()))
+    profile_names = [name for name, _ in profile_items]
+
+    while True:
+        print()
+        print(text_blocks.headline("Inventory subsets", width=70))
+        option_labels: Dict[str, str] = {}
+        for index, name in enumerate(profile_names, start=1):
+            option_labels[str(index)] = f"{name} ({len(grouped[name])})"
+        option_labels["A"] = f"Show all packages ({len(rows)})"
+        menu_utils.print_menu(option_labels, is_main=False)
+        choice = menu_utils.get_choice(list(option_labels.keys()) + ["0"])
+
+        if choice == "0":
+            break
+
+        normalized_choice = choice.upper()
+        if normalized_choice == "A":
+            _render_inventory_table(rows)
+            menu_utils.press_enter_to_continue()
+            continue
+
+        try:
+            selected_index = int(choice) - 1
+            if selected_index < 0 or selected_index >= len(profile_names):
+                raise ValueError
+        except ValueError:
+            print(status_messages.status("Invalid selection.", level="warn"))
+            continue
+
+        selected_profile = profile_names[selected_index]
+        _render_inventory_table(grouped[selected_profile])
+        menu_utils.press_enter_to_continue()
+
+
+def _group_packages_by_profile(rows: List[Dict[str, object]]) -> Dict[str, List[Dict[str, object]]]:
+    grouped: Dict[str, List[Dict[str, object]]] = {}
+    for entry in rows:
+        profile = entry.get("profile_name")
+        if not profile or str(profile).strip() in {"", "-"}:
+            profile_key = "Unclassified"
+        else:
+            profile_key = str(profile)
+        grouped.setdefault(profile_key, []).append(entry)
+    return grouped
+
+
+def _verify_app_definitions() -> None:
+    print()
+    menu_utils.print_header("Android App Definitions")
+
+    missing_defs = run_sql(
+        """
+        SELECT DISTINCT LOWER(r.package_name) AS package_name
+        FROM android_apk_repository r
+        LEFT JOIN android_app_definitions d ON LOWER(r.package_name) = d.package_name
+        WHERE d.app_id IS NULL
+        ORDER BY package_name
+        """,
+        fetch="all",
+        dictionary=True,
+    ) or []
+
+    null_names = run_sql(
+        """
+        SELECT package_name
+        FROM android_app_definitions
+        WHERE app_name IS NULL OR app_name = ''
+        ORDER BY package_name
+        """,
+        fetch="all",
+        dictionary=True,
+    ) or []
+
+    orphan_defs = run_sql(
+        """
+        SELECT d.package_name
+        FROM android_app_definitions d
+        LEFT JOIN android_apk_repository r ON d.package_name = LOWER(r.package_name)
+        WHERE r.apk_id IS NULL
+        ORDER BY d.package_name
+        """,
+        fetch="all",
+        dictionary=True,
+    ) or []
+
+    print(status_messages.status(f"Definitions missing for repository packages: {len(missing_defs)}", level="info"))
+    _print_samples(missing_defs)
+
+    print(status_messages.status(f"Definitions lacking friendly app name: {len(null_names)}", level="info"))
+    _print_samples(null_names)
+
+    print(status_messages.status(f"Definitions without repository APKs: {len(orphan_defs)}", level="info"))
+    _print_samples(orphan_defs)
+
+    menu_utils.press_enter_to_continue()
+
+
+def _print_samples(rows: List[Dict[str, object]], limit: int = 10) -> None:
+    if not rows:
+        print("  (none)")
+        return
+    for row in rows[:limit]:
+        package = row.get("package_name") or row.get("PACKAGE_NAME")
+        print(f"  - {package}")
+    if len(rows) > limit:
+        print(f"  ... {len(rows) - limit} more")

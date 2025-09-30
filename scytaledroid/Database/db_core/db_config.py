@@ -10,6 +10,6 @@ DB_CONFIG: Dict[str, Union[str, int]] = {
     "port": 3306,
     "user": "root",
     "password": "Password123!",
-    "database": "scytaledroid_db_dev",
+    "database": "scytaledroid_droid_intel_db_dev",
     "charset": "utf8mb4",
 }

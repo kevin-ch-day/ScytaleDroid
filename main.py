@@ -8,6 +8,11 @@ import zoneinfo
 from scytaledroid.Config import app_config
 from scytaledroid.Utils.AboutApp.about_app import about_app
 from scytaledroid.DeviceAnalysis.device_analysis_menu import device_menu
+from scytaledroid.Reporting.menu import reporting_menu
+from scytaledroid.StaticAnalysis.menu import static_analysis_menu
+from scytaledroid.DynamicAnalysis.menu import dynamic_analysis_menu
+from scytaledroid.VirusTotal.menu import virustotal_menu
+from scytaledroid.Utils.System.utils_menu import utils_menu
 from scytaledroid.Utils.DisplayUtils import menu_utils
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
@@ -86,28 +91,23 @@ def handle_device() -> None:
 
 
 def handle_virustotal() -> None:
-    print("\n[VirusTotal analysis menu coming soon...]\n")
-    menu_utils.press_enter_to_continue()
+    virustotal_menu()
 
 
 def handle_static() -> None:
-    print("\n[Static analysis menu coming soon...]\n")
-    menu_utils.press_enter_to_continue()
+    static_analysis_menu()
 
 
 def handle_dynamic() -> None:
-    print("\n[Dynamic analysis menu coming soon...]\n")
-    menu_utils.press_enter_to_continue()
+    dynamic_analysis_menu()
 
 
 def handle_reporting() -> None:
-    print("\n[Reporting menu coming soon...]\n")
-    menu_utils.press_enter_to_continue()
+    reporting_menu()
 
 
 def handle_utils() -> None:
-    print("\n[Utils menu coming soon...]\n")
-    menu_utils.press_enter_to_continue()
+    utils_menu()
 
 
 def handle_about() -> None:

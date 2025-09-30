@@ -5,7 +5,7 @@ db_utils.py - Helper utilities for database
 from mysql.connector import Error
 from typing import Dict, Any
 
-from .db_engine import DatabaseEngine
+from ..db_core.db_engine import DatabaseEngine
 
 
 def check_connection() -> bool:

@@ -5,7 +5,7 @@ db_engine.py - Database connection engine for ScytaleDroid
 import mysql.connector
 from mysql.connector import Error
 from mysql.connector.abstracts import MySQLConnectionAbstract
-from typing import Optional, Tuple, List, cast, Any
+from typing import Dict, Optional, Tuple, List, cast, Any
 
 from . import db_config
 
@@ -54,6 +54,22 @@ class DatabaseEngine:
         except Error as e:
             raise RuntimeError(f"[DB_ENGINE] Query execution failed: {e}")
 
+    def execute_with_lastrowid(
+        self, query: str, params: Optional[Tuple[Any, ...]] = None
+    ) -> int:
+        """Execute a statement and return the lastrowid when available."""
+        self.reconnect()
+        assert self.conn is not None
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute(query, params or ())
+            self.conn.commit()
+            last_row_id = cursor.lastrowid or 0
+            cursor.close()
+            return int(last_row_id)
+        except Error as e:
+            raise RuntimeError(f"[DB_ENGINE] Query execution (with lastrowid) failed: {e}")
+
     def fetch_one(
         self, query: str, params: Optional[Tuple[Any, ...]] = None
     ) -> Optional[Tuple[Any, ...]]:
@@ -83,3 +99,33 @@ class DatabaseEngine:
             return cast(List[Tuple[Any, ...]], results)
         except Error as e:
             raise RuntimeError(f"[DB_ENGINE] Query fetch_all failed: {e}")
+
+    def fetch_one_dict(
+        self, query: str, params: Optional[Tuple[Any, ...]] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Fetch a single row and return it as a dictionary."""
+        self.reconnect()
+        assert self.conn is not None
+        try:
+            cursor = self.conn.cursor(dictionary=True)
+            cursor.execute(query, params or ())
+            result = cursor.fetchone()
+            cursor.close()
+            return cast(Optional[Dict[str, Any]], result)
+        except Error as e:
+            raise RuntimeError(f"[DB_ENGINE] Query fetch_one_dict failed: {e}")
+
+    def fetch_all_dict(
+        self, query: str, params: Optional[Tuple[Any, ...]] = None
+    ) -> List[Dict[str, Any]]:
+        """Fetch all rows as dictionaries."""
+        self.reconnect()
+        assert self.conn is not None
+        try:
+            cursor = self.conn.cursor(dictionary=True)
+            cursor.execute(query, params or ())
+            results = cursor.fetchall()
+            cursor.close()
+            return cast(List[Dict[str, Any]], results)
+        except Error as e:
+            raise RuntimeError(f"[DB_ENGINE] Query fetch_all_dict failed: {e}")
