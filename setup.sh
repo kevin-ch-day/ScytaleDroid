@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REQ_FILE="$ROOT_DIR/requirements.txt"
+
+command_exists() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+echo "[Setup] Verifying Python 3 availability..."
+if ! command_exists python3; then
+  echo "Error: python3 is not installed. Please install Python 3 (e.g. 'sudo dnf install python3') and re-run." >&2
+  exit 1
+fi
+
+# ensure pip
+if ! python3 -m pip --version >/dev/null 2>&1; then
+  echo "[Setup] pip not detected, attempting to bootstrap with ensurepip..."
+  python3 -m ensurepip --upgrade >/dev/null 2>&1 || {
+    echo "Error: Failed to bootstrap pip. Consider installing python3-pip via 'sudo dnf install python3-pip'." >&2
+    exit 1
+  }
+fi
+
+# upgrade pip
+echo "[Setup] Upgrading pip to the latest version..."
+python3 -m pip install --upgrade pip
+
+if [[ -f "$REQ_FILE" && -s "$REQ_FILE" ]]; then
+  echo "[Setup] Installing Python requirements from $REQ_FILE..."
+  python3 -m pip install -r "$REQ_FILE"
+else
+  echo "[Setup] No requirements.txt found or file is empty. Skipping dependency installation."
+fi
+
+echo "[Setup] Completed."
