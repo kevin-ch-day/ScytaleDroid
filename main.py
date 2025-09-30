@@ -13,21 +13,27 @@ from scytaledroid.StaticAnalysis.menu import static_analysis_menu
 from scytaledroid.DynamicAnalysis.menu import dynamic_analysis_menu
 from scytaledroid.VirusTotal.menu import virustotal_menu
 from scytaledroid.Utils.System.utils_menu import utils_menu
-from scytaledroid.Utils.DisplayUtils import menu_utils
+from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
 def print_banner() -> None:
     """Display welcome banner with app metadata and local time in Minneapolis."""
+
     now_ct = datetime.now(zoneinfo.ZoneInfo("America/Chicago"))
     timestamp = now_ct.strftime("%Y-%m-%d %H:%M:%S %Z")
 
-    print("=" * 40)
-    print(f"   Welcome to {app_config.APP_NAME}")
-    print(f"   {app_config.APP_DESCRIPTION}")
-    print(f"   Version {app_config.APP_VERSION} ({app_config.APP_RELEASE})")
-    print(f"   Local time (Minneapolis): {timestamp}")
-    print("=" * 40)
+    menu_utils.print_banner(
+        app_config.APP_NAME,
+        app_config.APP_VERSION,
+        app_config.APP_RELEASE,
+        app_config.APP_DESCRIPTION,
+    )
+    menu_utils.print_metrics(
+        [
+            ("Local time (Minneapolis)", timestamp),
+        ]
+    )
     print()
 
     log.info(
@@ -51,7 +57,7 @@ def main_menu() -> None:
             "7": "About App",
         }
         menu_utils.print_menu(options, is_main=True)
-        choice = menu_utils.get_choice(valid=list(options.keys()) + ["0"])
+        choice = prompt_utils.get_choice(valid=list(options.keys()) + ["0"])
 
         if choice == "1":
             log.info("User selected: Connect to Android Device", category="application")

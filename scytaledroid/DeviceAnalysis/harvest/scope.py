@@ -4,236 +4,285 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from dataclasses import dataclass
-from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
-from scytaledroid.Utils.DisplayUtils import menu_utils, status_messages, text_blocks
+from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 
-PLAY_STORE_INSTALLER = "com.android.vending"
+from .models import InventoryRow, ScopeSelection
+from . import rules
 
 
-@dataclass(frozen=True)
-class PackageInfo:
-    """Derived metadata used when filtering packages prior to harvest."""
+def _maybe_str(value: object) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
-    package: Dict[str, object]
-    package_name: str
-    profile_name: str
-    is_play_store: bool
-    is_user_app: bool
-    is_motorola: bool
-    is_android_core: bool
-    is_google_core: bool
-    is_social: bool
-    is_messaging: bool
-    is_shopping: bool
+_LAST_SCOPE: Optional[ScopeSelection] = None
+
+
+def _append_non_root_note(label: str) -> str:
+    if "→" in label:
+        head, tail = label.split("→", 1)
+        head = head.rstrip()
+        if "(non-root" not in head:
+            head = f"{head} (non-root skip) "
+        return f"{head}→{tail}"
+    if "(non-root" in label:
+        return label
+    return f"{label} (non-root skip)"
+
+
+def build_inventory_rows(packages: Sequence[Dict[str, object]]) -> List[InventoryRow]:
+    """Normalise raw inventory package dictionaries into ``InventoryRow`` entries."""
+
+    rows: List[InventoryRow] = []
+    for pkg in packages:
+        package_name = str(pkg.get("package_name") or "").strip()
+        if not package_name:
+            continue
+        apk_paths = [
+            str(path).strip()
+            for path in pkg.get("apk_paths", [])  # type: ignore[arg-type]
+            if str(path).strip()
+        ]
+        split_count = int(pkg.get("split_count") or len(apk_paths) or 0)
+        rows.append(
+            InventoryRow(
+                raw=dict(pkg),
+                package_name=package_name,
+                app_label=_maybe_str(pkg.get("app_label")),
+                installer=_maybe_str(pkg.get("installer")),
+                category=_maybe_str(pkg.get("category")),
+                primary_path=_maybe_str(pkg.get("primary_path")),
+                profile=_maybe_str(pkg.get("profile_name")),
+                version_name=_maybe_str(pkg.get("version_name")),
+                version_code=_maybe_str(pkg.get("version_code")),
+                apk_paths=apk_paths,
+                split_count=split_count,
+            )
+        )
+    return rows
 
 
 def select_package_scope(
-    packages: Sequence[Dict[str, object]],
-) -> Tuple[Optional[str], List[Dict[str, object]]]:
+    rows: Sequence[InventoryRow],
+    *,
+    device_serial: str,
+    is_rooted: bool,
+    google_allowlist: Optional[Iterable[str]] = None,
+) -> Optional[ScopeSelection]:
     """Prompt the analyst to choose a harvesting scope and return the filtered list."""
 
-    analysed = [_analyse_package(pkg) for pkg in packages]
-    summary = _summarise_scope(analysed)
+    if not rows:
+        print(status_messages.status("No inventory data available for harvest.", level="warn"))
+        return None
 
-    _print_scope_overview(summary)
-
-    profile_counts = _profile_counts(analysed)
-
-    option_handlers: Dict[str, Callable[[], Tuple[str, List[Dict[str, object]], bool]]] = {
-        "1": lambda: _apply_predicate(
-            "Play Store & user-installed apps",
-            analysed,
-            lambda info: info.is_play_store
-            or (
-                info.is_user_app
-                and not info.is_android_core
-                and not info.is_motorola
-                and not (info.is_google_core and not info.is_play_store)
-            ),
-        ),
-        "3": lambda: _apply_predicate(
-            "Google core modules",
-            analysed,
-            lambda info: info.is_google_core and not info.is_play_store,
-        ),
-        "4": lambda: _apply_predicate(
-            "Android core modules",
-            analysed,
-            lambda info: info.is_android_core,
-        ),
-        "5": lambda: _apply_predicate(
-            "Motorola components",
-            analysed,
-            lambda info: info.is_motorola,
-        ),
-        "6": lambda: _custom_package_selection(analysed),
-        "7": lambda: _apply_predicate(
-            "All packages",
-            analysed,
-            lambda _: True,
-        ),
-    }
-
-    menu_entries: List[Tuple[str, str]] = [
-        ("1", "Play Store & user-installed apps"),
-    ]
-
-    has_profiles = bool(profile_counts)
-    if has_profiles:
-        option_handlers["2"] = lambda: _select_profile_group(profile_counts, analysed)
-        menu_entries.append(("2", "Profile targets..."))
-
-    menu_entries.extend(
-        [
-            ("3", "Google core modules"),
-            ("4", "Android core modules"),
-            ("5", "Motorola components"),
-            ("6", "Custom selection..."),
-            ("7", "All packages"),
-        ]
-    )
-
-    print()
-    menu_utils.print_header("APK Pull Scope")
-    menu_utils.print_menu(dict(menu_entries), is_main=False)
+    allow = set(google_allowlist or rules.GOOGLE_ALLOWLIST)
+    context = _build_scope_context(rows, allow)
+    profile_counts: Counter[str] = context["profile_counts"]  # type: ignore[assignment]
 
     while True:
-        choice = menu_utils.get_choice(list(option_handlers.keys()) + ["0"], default="1")
+        _print_scope_overview(rows, device_serial, is_rooted, context)
+        menu_entries: List[Tuple[str, str]] = [
+            ("1", _format_option_label("Play Store & user-installed apps", context["default_counts"])),
+        ]
 
+        option_handlers: Dict[str, Callable[[], Optional[ScopeSelection]]] = {
+            "1": lambda: _scope_default(rows, allow),
+        }
+
+        if profile_counts:
+            menu_entries.append(
+                ("2", _format_option_label("Profile targets…", context["profile_summary"]))
+            )
+            option_handlers["2"] = lambda: _scope_profiles(rows, profile_counts, allow)
+
+        menu_entries.extend(
+            [
+                ("3", _format_option_label("Google exceptions", context["google_exceptions"])),
+                ("4", _format_option_label("Families (Android/Google/Motorola system)", context["families"])),
+                ("5", "Custom patterns (comma, supports prefix *)"),
+                ("9", _format_option_label("Everything (include system/vendor)", context["everything"])),
+            ]
+        )
+
+        option_handlers.update(
+            {
+                "3": lambda: _scope_google_allowlist(rows, allow),
+                "4": lambda: _scope_families(rows),
+                "5": lambda: _scope_custom(rows, allow),
+                "9": lambda: ScopeSelection(
+                    label="Everything",
+                    packages=list(rows),
+                    kind="everything",
+                    metadata={"estimated_files": context["everything"].get("files", 0)},
+                ),
+            }
+        )
+
+        if _LAST_SCOPE is not None:
+            menu_entries.insert(0, ("R", _format_rerun_label(_LAST_SCOPE)))
+            option_handlers["R"] = lambda: _LAST_SCOPE
+
+        menu_utils.print_header("APK Pull Scope")
+        if _LAST_SCOPE is not None:
+            menu_utils.print_hint("Press R to re-run the previous selection instantly.")
+        if not is_rooted:
+            menu_entries = [
+                (
+                    key,
+                    _append_non_root_note(label) if key == "4" else label,
+                )
+                for key, label in menu_entries
+            ]
+        menu_utils.print_menu(menu_entries, is_main=False, default="1", exit_label="Cancel")
+
+        choice = prompt_utils.get_choice([key for key, _ in menu_entries] + ["0"], default="1")
         if choice == "0":
-            return None, []
+            return None
 
         handler = option_handlers.get(choice)
         if handler is None:
             print(status_messages.status("Selection not available.", level="warn"))
             continue
-        label, filtered, aborted = handler()
-        if aborted:
+
+        selection = handler()
+        if selection is None:
             continue
-        return label, filtered
+
+        _store_last_scope(selection)
+        return selection
 
 
-def _analyse_package(pkg: Dict[str, object]) -> PackageInfo:
-    package_name = str(pkg.get("package_name") or "")
-    installer = str(pkg.get("installer") or "")
-    source = str(pkg.get("source") or "")
-    category = str(pkg.get("category") or "")
-    primary_path = str(pkg.get("primary_path") or "")
-    if not primary_path and pkg.get("apk_paths"):
-        first_path = pkg.get("apk_paths")[0]
-        primary_path = str(first_path) if first_path else ""
+def _format_option_label(label: str, stats: Dict[str, int]) -> str:
+    packages = stats.get("packages", 0)
+    files = stats.get("files", 0)
+    if packages:
+        return f"{label:<55} → {packages} pkg(s) / ~{files} file(s)"
+    return f"{label:<55} → 0"
 
-    profile_name = str(pkg.get("profile_name") or "")
-    profile_slug = profile_name.lower()
 
-    is_play_store = installer == PLAY_STORE_INSTALLER or source.lower() == "play store"
-    is_user_app = category == "User" or primary_path.startswith("/data/")
-    is_motorola = package_name.startswith("com.motorola.")
-    is_android_core = package_name.startswith("com.android.")
-    is_google_core = package_name.startswith("com.google.")
-    is_social = profile_slug == "social"
-    is_messaging = profile_slug.startswith("messaging") or "messaging" in profile_slug or "comms" in profile_slug
-    is_shopping = profile_slug == "shopping"
+def _format_rerun_label(selection: ScopeSelection) -> str:
+    pkg_count = len(selection.packages)
+    return f"Re-run last scope ({selection.label} – {pkg_count} pkg(s))"
 
-    return PackageInfo(
-        package=pkg,
-        package_name=package_name,
-        profile_name=profile_name,
-        is_play_store=is_play_store,
-        is_user_app=is_user_app,
-        is_motorola=is_motorola,
-        is_android_core=is_android_core,
-        is_google_core=is_google_core,
-        is_social=is_social,
-        is_messaging=is_messaging,
-        is_shopping=is_shopping,
+
+def _scope_default(rows: Sequence[InventoryRow], allow: Set[str]) -> ScopeSelection:
+    selected, excluded = _apply_default_scope(rows, allow)
+    metadata = {
+        "estimated_files": _estimated_files(selected),
+        "allowlist_size": len(allow),
+        "excluded_counts": excluded,
+    }
+    return ScopeSelection("Play Store & user-installed", selected, "default", metadata)
+
+
+def _scope_profiles(
+    rows: Sequence[InventoryRow],
+    profile_counts: Counter[str],
+    allow: Set[str],
+) -> Optional[ScopeSelection]:
+    if not profile_counts:
+        print(status_messages.status("No profiled packages available.", level="warn"))
+        return None
+
+    print()
+    menu_utils.print_header("Choose profile(s)")
+    sorted_profiles = sorted(
+        [(name, count) for name, count in profile_counts.items() if name],
+        key=lambda item: (-item[1], item[0].lower()),
+    )
+    profile_menu: Dict[str, str] = {}
+    for index, (profile, count) in enumerate(sorted_profiles, start=1):
+        profile_menu[str(index)] = f"{profile} ({count})"
+    profile_menu["A"] = "All profiles"
+
+    menu_utils.print_menu(profile_menu, is_main=False)
+    raw = input("Selection (e.g., 1,3 or A): ").strip()
+    if not raw:
+        print(status_messages.status("Profile selection cancelled.", level="warn"))
+        return None
+
+    if raw.upper() == "A":
+        selected = {name for name, _ in sorted_profiles}
+    else:
+        tokens = {token.strip() for token in re.split(r"[,\s]+", raw) if token.strip()}
+        selected: Set[str] = set()
+        for token in tokens:
+            if token in profile_menu and token.isdigit():
+                idx = int(token) - 1
+                if 0 <= idx < len(sorted_profiles):
+                    selected.add(sorted_profiles[idx][0])
+            else:
+                selected.add(token)
+        selected = {name for name in selected if name}
+
+    if not selected:
+        print(status_messages.status("No valid profiles selected.", level="warn"))
+        return None
+
+    profile_rows = [row for row in rows if row.profile and row.profile in selected]
+    if not profile_rows:
+        print(status_messages.status("No packages matched the selected profiles.", level="warn"))
+        return None
+
+    filtered, excluded = _apply_default_scope(profile_rows, allow)
+    if not filtered:
+        print(
+            status_messages.status(
+                "Selected profiles matched only packages filtered by scope rules.",
+                level="warn",
+            )
+        )
+        return None
+
+    metadata = {
+        "profiles": sorted(selected),
+        "estimated_files": _estimated_files(filtered),
+        "excluded_counts": excluded,
+    }
+    return ScopeSelection(
+        label=f"Profiles: {', '.join(sorted(selected))}",
+        packages=filtered,
+        kind="profiles",
+        metadata=metadata,
     )
 
 
-def _summarise_scope(analysed: Sequence[PackageInfo]) -> Dict[str, int]:
-    summary = {
-        "total": 0,
-        "play_store": 0,
-        "user_sideload": 0,
-        "motorola": 0,
-        "google_core": 0,
-        "android_core": 0,
-        "other_system": 0,
-        "social": 0,
-        "messaging": 0,
-        "shopping": 0,
+def _scope_google_allowlist(
+    rows: Sequence[InventoryRow], allow: Set[str]
+) -> Optional[ScopeSelection]:
+    candidates = [row for row in rows if row.package_name in allow]
+    if not candidates:
+        print(status_messages.status("No Google allow-list packages found in inventory.", level="warn"))
+        return None
+    filtered, excluded = _apply_default_scope(candidates, allow)
+    if not filtered:
+        message = (
+            "Google allow-list packages present but filtered by scope policy."
+            if excluded
+            else "No Google allow-list packages matched the current scope."
+        )
+        print(status_messages.status(message, level="warn"))
+        return None
+    metadata = {
+        "estimated_files": _estimated_files(filtered),
+        "excluded_counts": excluded,
     }
-
-    for info in analysed:
-        summary["total"] += 1
-        if info.is_play_store:
-            summary["play_store"] += 1
-        if info.is_user_app and not info.is_play_store:
-            summary["user_sideload"] += 1
-        if info.is_motorola:
-            summary["motorola"] += 1
-        if info.is_google_core:
-            summary["google_core"] += 1
-        if info.is_android_core:
-            summary["android_core"] += 1
-        if (
-            not info.is_user_app
-            and not info.is_motorola
-            and not info.is_android_core
-            and not info.is_google_core
-        ):
-            summary["other_system"] += 1
-        if info.is_social:
-            summary["social"] += 1
-        if info.is_messaging:
-            summary["messaging"] += 1
-        if info.is_shopping:
-            summary["shopping"] += 1
-
-    return summary
+    return ScopeSelection("Google exceptions", filtered, "google_allow", metadata)
 
 
-def _profile_counts(analysed: Sequence[PackageInfo]) -> Counter[str]:
-    counts: Counter[str] = Counter()
-    for info in analysed:
-        if info.profile_name:
-            counts[info.profile_name] += 1
-    return counts
+def _scope_families(rows: Sequence[InventoryRow]) -> Optional[ScopeSelection]:
+    filtered = [row for row in rows if rules.family(row.package_name) in {"android", "google", "motorola"}]
+    if not filtered:
+        print(status_messages.status("No Android/Google/Motorola packages found.", level="warn"))
+        return None
+    metadata = {"estimated_files": _estimated_files(filtered)}
+    return ScopeSelection("System families", filtered, "families", metadata)
 
 
-def _print_scope_overview(summary: Dict[str, int]) -> None:
-    print()
-    print(text_blocks.headline("Package Scope Overview", width=70))
-    bullets = [
-        f"Total packages discovered: {summary['total']}",
-        f"Play Store apps: {summary['play_store']}",
-        f"User / sideloaded apps: {summary['user_sideload']}",
-        f"Motorola components: {summary['motorola']}",
-        f"Google core modules: {summary['google_core']}",
-        f"Android core modules: {summary['android_core']}",
-        f"Other system/OEM entries: {summary['other_system']}",
-        f"Social profile apps: {summary['social']}",
-        f"Messaging / comms apps: {summary['messaging']}",
-        f"Shopping apps: {summary['shopping']}",
-    ]
-    for line in bullets:
-        print(status_messages.status(line))
-
-
-def _apply_predicate(
-    label: str,
-    analysed: Sequence[PackageInfo],
-    predicate: Callable[[PackageInfo], bool],
-) -> Tuple[str, List[Dict[str, object]], bool]:
-    filtered = [info.package for info in analysed if predicate(info)]
-    return label, filtered, False
-
-
-def _custom_package_selection(
-    analysed: Sequence[PackageInfo],
-) -> Tuple[str, List[Dict[str, object]], bool]:
+def _scope_custom(rows: Sequence[InventoryRow], allow: Set[str]) -> Optional[ScopeSelection]:
     print()
     print(
         status_messages.status(
@@ -244,24 +293,120 @@ def _custom_package_selection(
     raw = input("Packages: ").strip()
     if not raw:
         print(status_messages.status("Custom selection cancelled.", level="warn"))
-        return "Custom selection", [], True
+        return None
 
     patterns = [token.strip().lower() for token in re.split(r"[\s,]+", raw) if token.strip()]
     if not patterns:
         print(status_messages.status("No valid package identifiers provided.", level="warn"))
-        return "Custom selection", [], True
+        return None
 
-    matches: List[Dict[str, object]] = []
-    for info in analysed:
-        name = info.package_name.lower()
+    matches: List[InventoryRow] = []
+    for row in rows:
+        name = row.package_name.lower()
         if any(_pattern_matches(pattern, name) for pattern in patterns):
-            matches.append(info.package)
+            matches.append(row)
 
     if not matches:
         print(status_messages.status("No packages matched the provided patterns.", level="warn"))
+        return None
 
-    label = f"Custom selection ({', '.join(patterns)})"
-    return label, matches, False
+    filtered, excluded = _apply_default_scope(matches, allow)
+    if not filtered:
+        print(
+            status_messages.status(
+                "Custom patterns matched packages filtered by scope policy.",
+                level="warn",
+            )
+        )
+        return None
+
+    metadata = {
+        "patterns": patterns,
+        "estimated_files": _estimated_files(filtered),
+        "excluded_counts": excluded,
+    }
+    return ScopeSelection(
+        label=f"Custom ({', '.join(patterns)})",
+        packages=filtered,
+        kind="custom",
+        metadata=metadata,
+    )
+
+
+def _store_last_scope(selection: ScopeSelection) -> None:
+    global _LAST_SCOPE
+    _LAST_SCOPE = selection
+
+
+def _build_scope_context(rows: Sequence[InventoryRow], allow: Set[str]) -> Dict[str, object]:
+    def estimate(selection: Sequence[InventoryRow]) -> Dict[str, int]:
+        return {"packages": len(selection), "files": _estimated_files(selection)}
+
+    profile_counts: Counter[str] = Counter(row.profile for row in rows if row.profile)
+    profile_total_rows = [row for row in rows if row.profile]
+
+    default_rows, default_excluded = _apply_default_scope(rows, allow)
+    google_rows = [row for row in rows if row.package_name in allow]
+    google_filtered, _ = _apply_default_scope(google_rows, allow)
+
+    return {
+        "default_counts": estimate(default_rows),
+        "default_excluded": default_excluded,
+        "profile_counts": profile_counts,
+        "profile_summary": estimate(profile_total_rows),
+        "google_exceptions": estimate(google_filtered),
+        "families": estimate([row for row in rows if rules.family(row.package_name) in {"android", "google", "motorola"}]),
+        "everything": estimate(rows),
+    }
+
+
+def _estimated_files(rows: Sequence[InventoryRow]) -> int:
+    total = 0
+    for row in rows:
+        if row.split_count:
+            total += row.split_count
+        elif row.apk_paths:
+            total += len(row.apk_paths)
+        else:
+            total += 1
+    return total
+
+
+def _in_default_scope(row: InventoryRow, allow: Set[str]) -> bool:
+    include, _ = _default_scope_decision(row, allow)
+    return include
+
+
+def _apply_default_scope(
+    rows: Sequence[InventoryRow], allow: Set[str]
+) -> Tuple[List[InventoryRow], Dict[str, int]]:
+    selected: List[InventoryRow] = []
+    excluded: Dict[str, int] = {}
+    for row in rows:
+        include, reason = _default_scope_decision(row, allow)
+        if include:
+            selected.append(row)
+        elif reason:
+            excluded[reason] = excluded.get(reason, 0) + 1
+    return selected, dict(sorted(excluded.items()))
+
+
+def _default_scope_decision(row: InventoryRow, allow: Set[str]) -> Tuple[bool, Optional[str]]:
+    is_play = row.installer == rules.PLAY_STORE_INSTALLER
+    is_user = rules.is_user_path(row.primary_path)
+    if not (is_play or is_user):
+        return False, "not_in_scope"
+
+    fam = rules.family(row.package_name)
+    if fam in {"android", "motorola"}:
+        if is_play:
+            return True, None
+        return False, "family_excluded"
+    if fam == "google":
+        if is_play or row.package_name in allow:
+            return True, None
+        return False, "google_core"
+    return True, None
 
 
 def _pattern_matches(pattern: str, value: str) -> bool:
@@ -273,27 +418,44 @@ def _pattern_matches(pattern: str, value: str) -> bool:
     return pattern == value
 
 
-def _select_profile_group(
-    profile_counts: Counter,
-    analysed: Sequence[PackageInfo],
-) -> Tuple[str, List[Dict[str, object]], bool]:
-    if not profile_counts:
-        print(status_messages.status("No profiled packages available.", level="warn"))
-        return "Profiles", [], True
-
+def _print_scope_overview(
+    rows: Sequence[InventoryRow],
+    device_serial: str,
+    is_rooted: bool,
+    context: Dict[str, Dict[str, int]],
+) -> None:
     print()
-    menu_utils.print_header("Select profile")
-    sorted_profiles = sorted(profile_counts.items(), key=lambda item: (-item[1], item[0].lower()))
-    profile_menu: Dict[str, str] = {}
-    for index, (profile, count) in enumerate(sorted_profiles, start=1):
-        profile_menu[str(index)] = f"{profile} ({count})"
+    menu_utils.print_header(
+        "Package Scope Overview",
+        subtitle=f"{device_serial} · {'root' if is_rooted else 'non-root'}",
+    )
 
-    menu_utils.print_menu(profile_menu, is_main=False)
-    choice = menu_utils.get_choice(list(profile_menu.keys()) + ["0"], default="1")
+    metrics = [
+        ("Total packages", len(rows)),
+        ("Play Store apps", sum(1 for row in rows if row.installer == rules.PLAY_STORE_INSTALLER)),
+        ("User / sideloaded", sum(1 for row in rows if rules.is_user_path(row.primary_path))),
+        ("Google core", sum(1 for row in rows if rules.family(row.package_name) == "google")),
+        ("Android core", sum(1 for row in rows if rules.family(row.package_name) == "android")),
+        ("Motorola components", sum(1 for row in rows if rules.family(row.package_name) == "motorola")),
+    ]
+    menu_utils.print_metrics(metrics)
 
-    if choice == "0":
-        return "Profiles", [], True
+    default_stats = context["default_counts"]
+    menu_utils.print_hint(
+        f"Default scope → {default_stats.get('packages', 0)} pkg(s) / ~{default_stats.get('files', 0)} file(s)"
+    )
 
-    selected_profile, _ = sorted_profiles[int(choice) - 1]
-    filtered = [info.package for info in analysed if info.profile_name == selected_profile]
-    return f"Profile: {selected_profile}", filtered, False
+
+def reset_last_scope() -> None:
+    """Reset cached scope state (mainly used in tests)."""
+
+    global _LAST_SCOPE
+    _LAST_SCOPE = None
+
+
+__all__ = [
+    "build_inventory_rows",
+    "reset_last_scope",
+    "select_package_scope",
+]
+

@@ -9,7 +9,13 @@ from typing import Dict, Iterable, List, Optional
 from collections import Counter
 
 from scytaledroid.Config import app_config
-from scytaledroid.Utils.DisplayUtils import menu_utils, status_messages, table_utils, text_blocks
+from scytaledroid.Utils.DisplayUtils import (
+    error_panels,
+    prompt_utils,
+    status_messages,
+    table_utils,
+    text_blocks,
+)
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from . import adb_utils, inventory, package_profiles
@@ -18,20 +24,30 @@ from . import adb_utils, inventory, package_profiles
 def generate_device_report(serial: Optional[str]) -> None:
     """Create a markdown report for the active device."""
     if not serial:
-        print(status_messages.status("No active device. Connect to a device first.", level="warn"))
-        menu_utils.press_enter_to_continue()
+        error_panels.print_error_panel(
+            "Device Report",
+            "No active device. Connect to a device first.",
+            hint="Use option 1 from the Device Analysis menu to select a device.",
+        )
+        prompt_utils.press_enter_to_continue()
         return
 
     device_entry = _get_device_entry(serial)
     if not device_entry:
-        print(status_messages.status("Unable to locate the active device via adb.", level="error"))
-        menu_utils.press_enter_to_continue()
+        error_panels.print_error_panel(
+            "Device Report",
+            "Unable to locate the active device via adb.",
+            hint="Verify the device is connected and adb is authorized.",
+        )
+        prompt_utils.press_enter_to_continue()
         return
 
     summary = adb_utils.build_device_summary(device_entry)
     inventory_payload = inventory.load_latest_inventory(serial)
     if not inventory_payload:
-        if menu_utils.prompt_yes_no("No inventory data found. Run a new inventory sync now?", default=True):
+        if prompt_utils.prompt_yes_no(
+            "No inventory data found. Run a new inventory sync now?", default=True
+        ):
             inventory.run_inventory_sync(serial)
             inventory_payload = inventory.load_latest_inventory(serial)
         else:
@@ -73,7 +89,7 @@ def generate_device_report(serial: Optional[str]) -> None:
 
     print(status_messages.status(f"Report written to {display_path}", level="success"))
     log.info(f"Device report generated at {report_path}", category="device")
-    menu_utils.press_enter_to_continue("Press Enter to return to the Device Analysis menu...")
+    prompt_utils.press_enter_to_continue("Press Enter to return to the Device Analysis menu...")
 
 
 def _get_device_entry(serial: str) -> Optional[Dict[str, Optional[str]]]:

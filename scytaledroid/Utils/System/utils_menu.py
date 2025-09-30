@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from typing import Callable, Dict
 
-from scytaledroid.Utils.DisplayUtils import menu_utils, status_messages
+from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 
 
 def utils_menu() -> None:
@@ -22,7 +22,7 @@ def utils_menu() -> None:
         print()
         menu_utils.print_header("Utilities")
         menu_utils.print_menu(labels, is_main=False)
-        choice = menu_utils.get_choice(list(labels.keys()) + ["0"])
+        choice = prompt_utils.get_choice(list(labels.keys()) + ["0"])
 
         if choice == "0":
             break
@@ -32,7 +32,7 @@ def utils_menu() -> None:
             action()
         else:
             print(status_messages.status("Action not available.", level="warn"))
-        menu_utils.press_enter_to_continue()
+        prompt_utils.press_enter_to_continue()
 
 
 def clear_screen() -> None:

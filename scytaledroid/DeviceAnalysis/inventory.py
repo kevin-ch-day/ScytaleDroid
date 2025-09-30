@@ -9,7 +9,14 @@ from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional
 
 from scytaledroid.Config import app_config
-from scytaledroid.Utils.DisplayUtils import menu_utils, status_messages, table_utils, text_blocks
+from scytaledroid.Utils.DisplayUtils import (
+    error_panels,
+    menu_utils,
+    prompt_utils,
+    status_messages,
+    table_utils,
+    text_blocks,
+)
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from . import adb_utils, package_profiles
@@ -63,8 +70,12 @@ def run_inventory_sync(
 ) -> None:
     """Scan the device, sync package definitions, and display results."""
     if not serial:
-        print(status_messages.status("No active device. Connect first to scan.", level="warn"))
-        menu_utils.press_enter_to_continue()
+        error_panels.print_error_panel(
+            "Inventory",
+            "No active device. Connect first to scan.",
+            hint="Use the device selector before running inventory.",
+        )
+        prompt_utils.press_enter_to_continue()
         return
 
     print()
@@ -73,8 +84,12 @@ def run_inventory_sync(
     adb_utils.clear_package_caches(serial)
     package_names = adb_utils.list_packages(serial)
     if not package_names:
-        print(status_messages.status("No packages returned by adb.", level="warn"))
-        menu_utils.press_enter_to_continue()
+        error_panels.print_error_panel(
+            "Inventory",
+            "adb did not return any packages.",
+            hint="Check that the device is unlocked and adb has permissions.",
+        )
+        prompt_utils.press_enter_to_continue()
         return
 
     metadata_rows: List[Dict[str, object]] = []
@@ -118,15 +133,19 @@ def run_inventory_sync(
             _render_inventory_table(scoped_rows)
         else:
             print(status_messages.status("No packages matched the selected filter.", level="warn"))
-        menu_utils.press_enter_to_continue()
+        prompt_utils.press_enter_to_continue()
 
     _inventory_selection_menu(metadata_rows)
 
 
 def inventory_sync_menu(serial: Optional[str]) -> None:
     if not serial:
-        print(status_messages.status("No active device connected.", level="warn"))
-        menu_utils.press_enter_to_continue()
+        error_panels.print_error_panel(
+            "Inventory",
+            "No active device connected.",
+            hint="Select a device from the Device Analysis dashboard first.",
+        )
+        prompt_utils.press_enter_to_continue()
         return
 
     while True:
@@ -141,7 +160,7 @@ def inventory_sync_menu(serial: Optional[str]) -> None:
             "6": "Verify database app definitions",
         }
         menu_utils.print_menu(options, is_main=False)
-        choice = menu_utils.get_choice(list(options.keys()) + ["0"])
+        choice = prompt_utils.get_choice(list(options.keys()) + ["0"])
 
         if choice == "0":
             break
@@ -177,21 +196,28 @@ def inventory_sync_menu(serial: Optional[str]) -> None:
             _verify_app_definitions()
         else:
             print(status_messages.status("Selection not available yet.", level="warn"))
-            menu_utils.press_enter_to_continue()
+            prompt_utils.press_enter_to_continue()
 
 
 
 def run_device_summary(serial: Optional[str]) -> None:
     """Display the latest inventory snapshot with highlighted insights."""
     if not serial:
-        print(status_messages.status("No active device. Connect first to show summary.", level="warn"))
-        menu_utils.press_enter_to_continue()
+        error_panels.print_error_panel(
+            "Inventory Summary",
+            "No active device. Connect first to show summary.",
+        )
+        prompt_utils.press_enter_to_continue()
         return
 
     snapshot = load_latest_inventory(serial)
     if not snapshot:
-        print(status_messages.status("No inventory snapshot found for this device.", level="warn"))
-        if menu_utils.prompt_yes_no("Run a new inventory sync now?", default=True):
+        error_panels.print_error_panel(
+            "Inventory Summary",
+            "No inventory snapshot found for this device.",
+            hint="Run a new inventory sync to capture the current state.",
+        )
+        if prompt_utils.prompt_yes_no("Run a new inventory sync now?", default=True):
             run_inventory_sync(serial)
         return
 
@@ -205,7 +231,7 @@ def run_device_summary(serial: Optional[str]) -> None:
 
     if not packages:
         print(status_messages.status("Snapshot contains no package entries.", level="warn"))
-        menu_utils.press_enter_to_continue()
+        prompt_utils.press_enter_to_continue()
         return
 
     _render_inventory_summary(packages)
@@ -224,7 +250,7 @@ def run_device_summary(serial: Optional[str]) -> None:
         print(text_blocks.headline("System components (preview)", width=70))
         table_utils.render_table(["Package", "Component", "Version", "Profile", "Split", "Path"], system_preview)
 
-    menu_utils.press_enter_to_continue()
+    prompt_utils.press_enter_to_continue()
 
 
 def _compose_inventory_entry(
@@ -510,7 +536,7 @@ def _preview_packages(
 def _inventory_selection_menu(rows: List[Dict[str, object]]) -> None:
     if not rows:
         print(status_messages.status("No inventory results available.", level="warn"))
-        menu_utils.press_enter_to_continue()
+        prompt_utils.press_enter_to_continue()
         return
 
     grouped = _group_packages_by_profile(rows)
@@ -525,7 +551,7 @@ def _inventory_selection_menu(rows: List[Dict[str, object]]) -> None:
             option_labels[str(index)] = f"{name} ({len(grouped[name])})"
         option_labels["A"] = f"Show all packages ({len(rows)})"
         menu_utils.print_menu(option_labels, is_main=False)
-        choice = menu_utils.get_choice(list(option_labels.keys()) + ["0"])
+        choice = prompt_utils.get_choice(list(option_labels.keys()) + ["0"])
 
         if choice == "0":
             break
@@ -533,7 +559,7 @@ def _inventory_selection_menu(rows: List[Dict[str, object]]) -> None:
         normalized_choice = choice.upper()
         if normalized_choice == "A":
             _render_inventory_table(rows)
-            menu_utils.press_enter_to_continue()
+            prompt_utils.press_enter_to_continue()
             continue
 
         try:
@@ -546,7 +572,7 @@ def _inventory_selection_menu(rows: List[Dict[str, object]]) -> None:
 
         selected_profile = profile_names[selected_index]
         _render_inventory_table(grouped[selected_profile])
-        menu_utils.press_enter_to_continue()
+        prompt_utils.press_enter_to_continue()
 
 
 def _group_packages_by_profile(rows: List[Dict[str, object]]) -> Dict[str, List[Dict[str, object]]]:
@@ -609,7 +635,7 @@ def _verify_app_definitions() -> None:
     print(status_messages.status(f"Definitions without repository APKs: {len(orphan_defs)}", level="info"))
     _print_samples(orphan_defs)
 
-    menu_utils.press_enter_to_continue()
+    prompt_utils.press_enter_to_continue()
 
 
 def _print_samples(rows: List[Dict[str, object]], limit: int = 10) -> None:
