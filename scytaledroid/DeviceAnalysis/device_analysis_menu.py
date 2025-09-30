@@ -7,8 +7,13 @@ from importlib import import_module
 import time
 from typing import Dict, List, Optional, Tuple
 
-from scytaledroid.Utils.DisplayUtils import menu_utils
-from scytaledroid.Utils.DisplayUtils import table_utils
+from scytaledroid.Utils.DisplayUtils import (
+    error_panels,
+    menu_utils,
+    prompt_utils,
+    status_messages,
+    table_utils,
+)
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from . import adb_utils, device_manager
@@ -53,7 +58,7 @@ def device_menu() -> None:
             "11": "Export device dossier",
         }
         menu_utils.print_menu(options, is_main=False)
-        choice = menu_utils.get_choice(list(options.keys()) + ["0"], default="2")
+        choice = prompt_utils.get_choice(list(options.keys()) + ["0"], default="2")
 
         if choice == "0":
             return
@@ -124,7 +129,7 @@ def _print_dashboard(
     serial_map: Dict[str, Dict[str, Optional[str]]],
 ) -> None:
     devices_found = len(devices)
-    connection_status = device_manager.get_connection_status()
+    connection_status = device_manager.get_connection_status() or "Unknown"
 
     refreshed = (
         datetime.fromtimestamp(last_refresh_ts).strftime("%Y-%m-%d %H:%M:%S")
@@ -132,15 +137,21 @@ def _print_dashboard(
         else "Unknown"
     )
 
-    print("\n--- Device Dashboard ---")
-    print(f"Refreshed: {refreshed}")
-    print(f"Devices Detected: {devices_found}")
-    print(f"Connection Status: {connection_status}")
+    print()
+    menu_utils.print_header("Device Dashboard")
+    menu_utils.print_metrics(
+        [
+            ("Refreshed", refreshed),
+            ("Devices Detected", devices_found),
+            ("Connection Status", connection_status),
+        ]
+    )
+    print()
 
     if active_details:
         serial = active_details.get("serial") or "Unknown"
         headline = _format_device_line(active_details, include_release=True)
-        print(f"Active Device: {headline}")
+        print(status_messages.status(f"Active Device: {headline}", level="info"))
         snapshot_headers = ["Model", "Android", "Battery", "Wi-Fi", "Root"]
         snapshot_rows = [[
             _prettify_model(active_details.get("model") or active_details.get("device")),
@@ -151,26 +162,28 @@ def _print_dashboard(
         ]]
         print()
         table_utils.render_table(snapshot_headers, snapshot_rows)
-        print(f"Serial: {serial}")
+        menu_utils.print_hint(f"Serial: {serial}")
     else:
-        print("Active Device: None")
+        print(status_messages.status("No active device connected.", level="warn"))
         last_serial = device_manager.get_last_serial()
         if last_serial:
             last_summary = serial_map.get(last_serial)
             if last_summary:
                 formatted = _format_device_line(last_summary, include_release=True)
-                print(f"Last Connection: {formatted}")
+                menu_utils.print_hint(f"Last Connection: {formatted}")
             else:
-                print(f"Last Connection: {last_serial}")
+                menu_utils.print_hint(f"Last Connection: {last_serial}")
         if devices_found:
-            print("Tip: Use option 3 to connect. Press Enter to refresh.")
+            menu_utils.print_hint("Use option 3 to connect. Press Enter to refresh.")
         else:
-            print("Tip: Attach a device with USB debugging enabled, then press Enter to refresh.")
+            menu_utils.print_hint(
+                "Attach a device with USB debugging enabled, then press Enter to refresh."
+            )
 
-    print()
-
+    if warnings:
+        print()
     for warning in warnings:
-        print(f"(!) {warning}")
+        print(status_messages.status(warning, level="warn"))
         log.warning(warning, category="device")
 
 
@@ -211,15 +224,23 @@ def _handle_choice(
     elif choice in {"6", "7", "8", "9", "11"}:
         _forward_to_helper(choice, active_device)
     else:
-        print(f"[Device option {choice} not implemented yet]")
-        menu_utils.press_enter_to_continue()
+        error_panels.print_error_panel(
+            "Device Analysis",
+            f"Device option {choice} is not implemented yet.",
+            hint="Track the roadmap for availability of this action.",
+        )
+        prompt_utils.press_enter_to_continue()
 
     return False
 
 
 def _list_devices(summaries: List[Dict[str, Optional[str]]]) -> None:
     if not summaries:
-        print("\nNo Android devices detected. Ensure USB debugging is enabled and the device is connected.")
+        error_panels.print_error_panel(
+            "Device List",
+            "No Android devices detected.",
+            hint="Ensure USB debugging is enabled and the device is connected.",
+        )
     else:
         print("\nConnected devices:")
         headers = ["#", "Serial", "Model", "Android", "Type", "Battery", "Wi-Fi", "Root", "State"]
@@ -249,7 +270,7 @@ def _list_devices(summaries: List[Dict[str, Optional[str]]]) -> None:
                 ]
             )
         table_utils.render_table(headers, rows)
-    menu_utils.press_enter_to_continue()
+    prompt_utils.press_enter_to_continue()
 
 
 def _connect_to_device(
@@ -257,8 +278,12 @@ def _connect_to_device(
     summaries: List[Dict[str, Optional[str]]],
 ) -> None:
     if not devices:
-        print("\nNo devices available to connect.")
-        menu_utils.press_enter_to_continue()
+        error_panels.print_error_panel(
+            "Connect to Device",
+            "No devices available to connect.",
+            hint="Attach a device and ensure adb recognizes it (adb devices).",
+        )
+        prompt_utils.press_enter_to_continue()
         return
 
     print("\nSelect a device to connect:")
@@ -268,15 +293,18 @@ def _connect_to_device(
         print(f"{idx}) {label}")
     print("0) Cancel")
 
-    choice = menu_utils.get_choice(list(numbered_devices.keys()) + ["0"])
+    choice = prompt_utils.get_choice(list(numbered_devices.keys()) + ["0"])
     if choice == "0":
         return
 
     summary = numbered_devices[choice]
     serial = summary.get("serial")
     if not serial:
-        print("[DeviceManager] Selected device has no serial identifier.")
-        menu_utils.press_enter_to_continue()
+        error_panels.print_error_panel(
+            "Connect to Device",
+            "Selected device has no serial identifier.",
+        )
+        prompt_utils.press_enter_to_continue()
         return
 
     if device_manager.set_active_device(serial):
@@ -284,9 +312,13 @@ def _connect_to_device(
         print(f"\nActive device set to {label}.")
         log.info(f"Active device set to {serial}.", category="device")
     else:
-        print(f"\nFailed to activate device with serial {serial}.")
+        error_panels.print_error_panel(
+            "Connect to Device",
+            f"Failed to activate device with serial {serial}.",
+            hint="Retry after verifying adb authorization on the device.",
+        )
         log.warning(f"Failed to activate device {serial}.", category="device")
-    menu_utils.press_enter_to_continue()
+    prompt_utils.press_enter_to_continue()
 
 
 def _show_device_info(
@@ -294,19 +326,29 @@ def _show_device_info(
     active_details: Optional[Dict[str, Optional[str]]],
 ) -> None:
     if not active_device:
-        print("\nNo active device. Use option 3 to connect first.")
-        menu_utils.press_enter_to_continue()
+        error_panels.print_error_panel(
+            "Device Info",
+            "No active device. Use option 3 to connect first.",
+        )
+        prompt_utils.press_enter_to_continue()
         return
 
     serial = active_device.get("serial")
     if not serial:
-        print("\nUnable to determine the serial for the active device.")
-        menu_utils.press_enter_to_continue()
+        error_panels.print_error_panel(
+            "Device Info",
+            "Unable to determine the serial for the active device.",
+        )
+        prompt_utils.press_enter_to_continue()
         return
 
     properties = active_details or adb_utils.get_basic_properties(serial)
     if not properties:
-        print("\nNo additional properties could be retrieved.")
+        error_panels.print_error_panel(
+            "Device Info",
+            "No additional properties could be retrieved.",
+            hint="Ensure the device is unlocked and responsive.",
+        )
     else:
         print("\nDevice information:")
         info_rows = [
@@ -327,7 +369,7 @@ def _show_device_info(
             ("Emulator", _format_emulator_flag(properties.get("is_emulator_flag"))),
         ]
         table_utils.render_table(["Field", "Value"], [[field, value] for field, value in info_rows])
-    menu_utils.press_enter_to_continue()
+    prompt_utils.press_enter_to_continue()
 
 
 def _disconnect_device() -> None:
@@ -338,7 +380,7 @@ def _disconnect_device() -> None:
     else:
         print("\nNo active device to disconnect.")
         log.info("Disconnect request received but no active device was set.", category="device")
-    menu_utils.press_enter_to_continue()
+    prompt_utils.press_enter_to_continue()
 
 
 _HELPER_ROUTES = {
@@ -354,21 +396,31 @@ def _forward_to_helper(option: str, active_device: Optional[Dict[str, Optional[s
     module_name, func_name, requires_device, description = _HELPER_ROUTES[option]
 
     if requires_device and not active_device:
-        print(f"\n{description} requires an active device. Please connect first.")
-        menu_utils.press_enter_to_continue()
+        error_panels.print_error_panel(
+            description,
+            "This action requires an active device. Please connect first.",
+        )
+        prompt_utils.press_enter_to_continue()
         return
 
     try:
         module = import_module(f"scytaledroid.DeviceAnalysis.{module_name}")
     except ModuleNotFoundError:
-        print(f"\n[{module_name}] helper not available yet. This action will be wired once the module exists.")
-        menu_utils.press_enter_to_continue()
+        error_panels.print_error_panel(
+            description,
+            f"[{module_name}] helper not available yet.",
+            hint="Check that the module has been implemented before running this option.",
+        )
+        prompt_utils.press_enter_to_continue()
         return
 
     handler = getattr(module, func_name, None)
     if not callable(handler):
-        print(f"\n[{module_name}] Missing callable '{func_name}'. Placeholder will be implemented later.")
-        menu_utils.press_enter_to_continue()
+        error_panels.print_error_panel(
+            description,
+            f"[{module_name}] is missing the '{func_name}' handler.",
+        )
+        prompt_utils.press_enter_to_continue()
         return
 
     serial = active_device.get("serial") if active_device else None
