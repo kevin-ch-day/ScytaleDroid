@@ -121,9 +121,22 @@ def fetch_duplicate_hashes(limit: int = 100) -> List[Dict[str, object]]:
 
 def ensure_app_definition(package_name: str, app_name: Optional[str] = None) -> int:
     """Upsert a canonical app definition row and return app_id."""
-    normalized = package_name.lower().strip()
-    run_sql(queries.UPSERT_APP_DEFINITION, (normalized, app_name))
-    row = run_sql(queries.SELECT_APP_ID_BY_PACKAGE, (normalized,), fetch="one")
+    cleaned_package = package_name.strip()
+    if not cleaned_package:
+        raise ValueError("package_name is required")
+
+    label: Optional[str]
+    if app_name and app_name.strip():
+        candidate = app_name.strip()
+        if candidate.lower() == cleaned_package.lower():
+            label = None
+        else:
+            label = candidate
+    else:
+        label = None
+
+    run_sql(queries.UPSERT_APP_DEFINITION, (cleaned_package, label))
+    row = run_sql(queries.SELECT_APP_ID_BY_PACKAGE, (cleaned_package,), fetch="one")
     if not row:
         raise RuntimeError(f"Failed to resolve app_id for package {package_name}")
     return int(row[0])

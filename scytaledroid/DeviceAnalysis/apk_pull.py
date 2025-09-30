@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import hashlib
-import re
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from scytaledroid.Config import app_config
 from scytaledroid.Database.db_func import apk_repository as repo
 from scytaledroid.DeviceAnalysis import adb_utils, inventory
+from scytaledroid.DeviceAnalysis.harvest import select_package_scope
 from scytaledroid.Utils.DisplayUtils import menu_utils, status_messages, text_blocks
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
@@ -44,14 +44,30 @@ def pull_apks(serial: Optional[str]) -> None:
         return
 
     packages: List[Dict[str, object]] = snapshot.get("packages", [])  # type: ignore[assignment]
-    total_packages = len(packages)
-    total_files = sum(len(pkg.get("apk_paths", [])) for pkg in packages)
+    if not packages:
+        print(status_messages.status("Inventory snapshot contains no packages.", level="warn"))
+        menu_utils.press_enter_to_continue()
+        return
+
+    selection, filtered_packages = select_package_scope(packages)
+    if selection is None:
+        print(status_messages.status("APK pull cancelled by user.", level="warn"))
+        menu_utils.press_enter_to_continue()
+        return
+    if not filtered_packages:
+        print(status_messages.status("Selection contains no packages. Nothing to pull.", level="warn"))
+        menu_utils.press_enter_to_continue()
+        return
+
+    total_packages = len(filtered_packages)
+    total_files = sum(len(pkg.get("apk_paths", [])) for pkg in filtered_packages)
 
     print()
     print(text_blocks.headline("APK Harvest", width=70))
     print(status_messages.status(
         f"Preparing to pull {total_files} APK file(s) across {total_packages} package(s)."
     ))
+    print(status_messages.status(f"Scope: {selection}"))
 
     if not menu_utils.prompt_yes_no("Proceed with APK pull?", default=True):
         print(status_messages.status("APK pull cancelled by user.", level="warn"))
@@ -72,9 +88,10 @@ def pull_apks(serial: Optional[str]) -> None:
     processed_files = 0
     stored_records = 0
     skipped_files = 0
+    permission_denied: set[str] = set()
     failures: List[str] = []
 
-    for index, package in enumerate(packages, start=1):
+    for index, package in enumerate(filtered_packages, start=1):
         package_name = str(package.get("package_name") or "").strip()
         if not package_name:
             failures.append("Encountered package without package_name; skipping entry.")
@@ -129,9 +146,13 @@ def pull_apks(serial: Optional[str]) -> None:
             base_name = f"{slug}_{version_code}__{source_name}"
             dest_path = package_dir / base_name
 
-            pulled = _ensure_local_copy(adb_path, serial, source_path, dest_path, package_name)
+            pulled, reason = _ensure_local_copy(
+                adb_path, serial, source_path, dest_path, package_name
+            )
             if not pulled:
                 skipped_files += 1
+                if reason == "permission-denied":
+                    permission_denied.add(package_name)
                 continue
 
             hash_payload = _compute_hashes(dest_path)
@@ -168,16 +189,21 @@ def pull_apks(serial: Optional[str]) -> None:
 
         processed_packages += 1
 
-    _render_summary(processed_packages, processed_files, stored_records, skipped_files, failures)
+    _render_summary(
+        processed_packages,
+        processed_files,
+        stored_records,
+        skipped_files,
+        sorted(permission_denied),
+        failures,
+    )
     menu_utils.press_enter_to_continue()
-
-
 def _ensure_local_copy(
     adb_path: str, serial: str, source_path: str, dest_path: Path, package_name: str
-) -> bool:
+) -> Tuple[bool, Optional[str]]:
     """Ensure the APK file is present locally, pulling it via adb when necessary."""
     if dest_path.exists():
-        return True
+        return True, None
 
     command = [adb_path, "-s", serial, "pull", source_path, str(dest_path)]
     try:
@@ -187,20 +213,22 @@ def _ensure_local_copy(
         print(status_messages.status(
             f"Failed to execute adb pull for {package_name}: {exc}", level="error"
         ))
-        return False
+        return False, "other-error"
 
     if result.returncode != 0:
+        stderr = result.stderr.strip()
         log.warning(
-            f"adb pull returned {result.returncode} for {package_name}: {result.stderr.strip()}",
+            f"adb pull returned {result.returncode} for {package_name}: {stderr}",
             category="device",
         )
         print(status_messages.status(
-            f"adb pull failed for {package_name}: {result.stderr.strip() or 'Unknown error'}",
+            f"adb pull failed for {package_name}: {stderr or 'Unknown error'}",
             level="error",
         ))
-        return False
+        reason = "permission-denied" if "Permission denied" in stderr else "other-error"
+        return False, reason
 
-    return True
+    return True, None
 
 
 def _compute_hashes(path: Path) -> Dict[str, object]:
@@ -232,6 +260,7 @@ def _render_summary(
     processed_files: int,
     stored_records: int,
     skipped_files: int,
+    permission_denied: Sequence[str],
     failures: List[str],
 ) -> None:
     print()
@@ -241,6 +270,12 @@ def _render_summary(
     print(status_messages.status(f"Records upserted: {stored_records}", level="info"))
     if skipped_files:
         print(status_messages.status(f"Files skipped: {skipped_files}", level="warn"))
+    if permission_denied:
+        print(status_messages.status(
+            "Packages skipped due to permission restrictions:", level="warn"
+        ))
+        for pkg in permission_denied:
+            print(f"  - {pkg}")
     if failures:
         print(status_messages.status(f"Failures encountered: {len(failures)}", level="error"))
         for message in failures[:10]:
