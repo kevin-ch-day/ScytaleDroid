@@ -30,6 +30,7 @@ pytest_cache/
 logs/
 output/
 data/state/
+data/apks/
 *.log
 *.tmp
 *.bak

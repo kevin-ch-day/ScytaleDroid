@@ -2,6 +2,7 @@
 
 UPSERT_APK = """
 INSERT INTO android_apk_repository (
+    app_id,
     package_name,
     file_name,
     file_size,
@@ -13,9 +14,14 @@ INSERT INTO android_apk_repository (
     sha1,
     sha256,
     signer_fingerprint,
+    device_serial,
+    source_path,
+    local_path,
+    harvested_at,
     is_split_member,
     split_group_id
 ) VALUES (
+    %(app_id)s,
     %(package_name)s,
     %(file_name)s,
     %(file_size)s,
@@ -27,10 +33,15 @@ INSERT INTO android_apk_repository (
     %(sha1)s,
     %(sha256)s,
     %(signer_fingerprint)s,
+    %(device_serial)s,
+    %(source_path)s,
+    %(local_path)s,
+    %(harvested_at)s,
     %(is_split_member)s,
     %(split_group_id)s
 )
 ON DUPLICATE KEY UPDATE
+    app_id = COALESCE(VALUES(app_id), app_id),
     file_name = VALUES(file_name),
     file_size = VALUES(file_size),
     is_system = VALUES(is_system),
@@ -38,6 +49,10 @@ ON DUPLICATE KEY UPDATE
     version_name = VALUES(version_name),
     version_code = VALUES(version_code),
     signer_fingerprint = COALESCE(VALUES(signer_fingerprint), signer_fingerprint),
+    device_serial = VALUES(device_serial),
+    source_path = VALUES(source_path),
+    local_path = VALUES(local_path),
+    harvested_at = COALESCE(VALUES(harvested_at), harvested_at),
     is_split_member = GREATEST(is_split_member, VALUES(is_split_member)),
     split_group_id = COALESCE(VALUES(split_group_id), split_group_id),
     updated_at = CURRENT_TIMESTAMP

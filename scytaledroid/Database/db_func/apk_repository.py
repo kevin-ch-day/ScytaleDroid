@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Sequence
+from datetime import datetime
+from typing import Dict, Iterable, List, Optional, Sequence, Union
 
 from ..db_core import run_sql
 from ..db_queries import apk_repository as queries
@@ -14,6 +15,7 @@ class ApkRecord:
     """Payload used when ingesting APK metadata into the repository."""
 
     package_name: str
+    app_id: Optional[int] = None
     file_name: Optional[str] = None
     file_size: Optional[int] = None
     is_system: bool = False
@@ -24,6 +26,10 @@ class ApkRecord:
     sha1: Optional[str] = None
     sha256: Optional[str] = None
     signer_fingerprint: Optional[str] = None
+    device_serial: Optional[str] = None
+    source_path: Optional[str] = None
+    local_path: Optional[str] = None
+    harvested_at: Optional[Union[datetime, str]] = None
     is_split_member: bool = False
     split_group_id: Optional[int] = None
 
@@ -32,7 +38,17 @@ class ApkRecord:
             raise ValueError("package_name is required")
         if not self.sha256:
             raise ValueError("sha256 is required for deduplication")
+
+        harvested_at: Optional[object]
+        if isinstance(self.harvested_at, str):
+            try:
+                harvested_at = datetime.fromisoformat(self.harvested_at)
+            except ValueError:
+                harvested_at = self.harvested_at
+        else:
+            harvested_at = self.harvested_at
         return {
+            "app_id": self.app_id,
             "package_name": self.package_name,
             "file_name": self.file_name,
             "file_size": self.file_size,
@@ -44,6 +60,10 @@ class ApkRecord:
             "sha1": self.sha1,
             "sha256": self.sha256,
             "signer_fingerprint": self.signer_fingerprint,
+            "device_serial": self.device_serial,
+            "source_path": self.source_path,
+            "local_path": self.local_path,
+            "harvested_at": harvested_at,
             "is_split_member": 1 if self.is_split_member else 0,
             "split_group_id": self.split_group_id,
         }
