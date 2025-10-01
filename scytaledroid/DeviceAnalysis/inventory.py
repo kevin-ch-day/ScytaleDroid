@@ -8,6 +8,8 @@ import time
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
+import re
+
 from typing import Callable, Dict, Iterable, List, Optional
 
 from scytaledroid.Config import app_config
@@ -31,6 +33,16 @@ class InventorySyncAborted(RuntimeError):
 
 
 ProgressCallback = Callable[[Dict[str, object]], bool | None]
+
+
+_PROGRESS_VERBOSE = False
+
+
+def set_inventory_progress_verbose(enabled: bool) -> None:
+    """Enable or disable verbose progress output for this session."""
+
+    global _PROGRESS_VERBOSE
+    _PROGRESS_VERBOSE = bool(enabled)
 
 
 def _emit_progress(
@@ -135,6 +147,26 @@ def run_inventory_sync(
         prompt_utils.press_enter_to_continue()
         return
 
+    previous_meta = inventory_meta.load_latest(serial) if serial else None
+    previous_snapshot = load_latest_inventory(serial) if serial else None
+    previous_packages: set[str] | None = None
+    previous_split_packages: Optional[int] = None
+    had_previous_snapshot = previous_snapshot is not None
+    if previous_snapshot:
+        packages_payload = previous_snapshot.get("packages")
+        if isinstance(packages_payload, list):
+            extracted: set[str] = set()
+            split_counter = 0
+            for item in packages_payload:
+                if isinstance(item, dict):
+                    name = item.get("package_name")
+                    if isinstance(name, str) and name:
+                        extracted.add(name)
+                    if _split_count(item) > 1:
+                        split_counter += 1
+            previous_packages = extracted
+            previous_split_packages = split_counter
+
     if interactive:
         print()
         print(text_blocks.headline("Inventory & database sync", width=70))
@@ -169,6 +201,9 @@ def run_inventory_sync(
     package_definitions: Dict[str, Optional[str]] = {}
     progress_interval = max(20, total // 20 or 1)
     scan_start = time.time()
+    progress_line_length = 0
+    progress_line_visible = False
+    split_processed = 0
     for index, package_name in enumerate(package_names, start=1):
         paths = adb_utils.get_package_paths(serial, package_name)
         metadata = adb_utils.get_package_metadata(serial, package_name)
@@ -178,9 +213,17 @@ def run_inventory_sync(
         app_label = entry.get("app_label")
         package_definitions.setdefault(str(normalized_package).lower(), app_label if isinstance(app_label, str) else None)
 
-        if interactive and (index % progress_interval == 0 or index == total):
+        if _split_count(entry) > 1:
+            split_processed += 1
+
+        if interactive and _PROGRESS_VERBOSE:
             percentage = (index / total) * 100
-            print(status_messages.status(f"Processed {index}/{total} packages ({percentage:.1f}%)."))
+            print(
+                status_messages.status(
+                    f"Processed {index}/{total} packages ({percentage:.1f}%).",
+                    level="info",
+                )
+            )
 
         if index % progress_interval == 0 or index == total:
             elapsed = time.time() - scan_start
@@ -201,13 +244,30 @@ def run_inventory_sync(
                 },
             )
 
+            if interactive and not _PROGRESS_VERBOSE:
+                progress_line = _format_progress_line(
+                    processed=index,
+                    total=total,
+                    elapsed_seconds=elapsed,
+                    eta_seconds=eta,
+                    split_processed=split_processed,
+                )
+                visible_length = _visible_length(progress_line)
+                padding = " " * max(0, progress_line_length - visible_length)
+                print(f"\r{progress_line}{padding}", end="", flush=True)
+                progress_line_length = visible_length
+                progress_line_visible = True
+
+    if interactive and progress_line_visible:
+        print()
+
     package_hash = _hash_rows(metadata_rows)
     package_list_hash = inventory_meta.compute_name_hash(package_names)
     package_signature_hash = inventory_meta.compute_signature_hash(
         inventory_meta.snapshot_signatures(metadata_rows)
     )
     total_elapsed = time.time() - run_start
-    _persist_inventory(
+    snapshot_path = _persist_inventory(
         serial,
         metadata_rows,
         package_hash=package_hash,
@@ -226,6 +286,31 @@ def run_inventory_sync(
         },
     )
 
+    split_packages = split_processed
+    current_package_names: set[str] = set()
+    for entry in metadata_rows:
+        package_value = entry.get("package_name")
+        if isinstance(package_value, str) and package_value:
+            current_package_names.add(package_value)
+    new_packages = None
+    removed_packages = None
+    if had_previous_snapshot:
+        previous_set = previous_packages or set()
+        new_packages = len(current_package_names - previous_set)
+        removed_packages = len(previous_set - current_package_names)
+
+    if interactive:
+        _print_sync_summary(
+            snapshot_path,
+            total_packages=len(metadata_rows),
+            split_packages=split_packages,
+            elapsed_seconds=total_elapsed,
+            previous_total=previous_meta.package_count if previous_meta else None,
+            previous_split=previous_split_packages,
+            new_packages=new_packages,
+            removed_packages=removed_packages,
+        )
+
     synced = 0
     for pkg, name in package_definitions.items():
         try:
@@ -240,9 +325,10 @@ def run_inventory_sync(
     if interactive:
         _render_inventory_summary(metadata_rows)
     else:
-        status_messages.print_status(
-            f"Inventory captured: {len(metadata_rows)} packages", level="info"
-        )
+        base_message = f"Inventory captured: {len(metadata_rows)} packages"
+        if snapshot_path:
+            base_message += f" (saved to {snapshot_path})"
+        status_messages.print_status(base_message, level="info")
 
     if filter_fn:
         scoped_rows = [row for row in metadata_rows if filter_fn(row)]
@@ -468,7 +554,7 @@ def _persist_inventory(
     package_signature_hash: Optional[str] = None,
     build_fingerprint: Optional[str] = None,
     duration_seconds: Optional[float] = None,
-) -> None:
+) -> Path:
     """Persist inventory information under the state directory."""
     timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
     device_dir = _STATE_ROOT / serial / "inventory"
@@ -508,8 +594,6 @@ def _persist_inventory(
         f"Inventory written to {display_path}",
         category="device",
     )
-    status_messages.print_status(f"Snapshot saved to {display_path}")
-
     captured_at = datetime.utcnow().replace(tzinfo=timezone.utc)
     meta = inventory_meta.InventoryMeta(
         serial=serial,
@@ -521,6 +605,103 @@ def _persist_inventory(
         duration_seconds=duration_seconds,
     )
     meta.write_files(timestamp)
+
+    return display_path
+
+
+def _format_duration(seconds: Optional[float]) -> str:
+    if seconds is None or seconds < 0:
+        return "--:--"
+
+    total_seconds = int(round(seconds))
+    minutes, secs = divmod(total_seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours:d}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
+
+
+def _format_delta_text(current: int, previous: Optional[int]) -> str:
+    if previous is None:
+        return "(first snapshot)"
+
+    delta = current - previous
+    if delta == 0:
+        return "(no change vs last snapshot)"
+
+    sign = "+" if delta > 0 else "-"
+    return f"(Δ {sign}{abs(delta)} vs last snapshot)"
+
+
+def _format_progress_line(
+    *,
+    processed: int,
+    total: int,
+    elapsed_seconds: float,
+    eta_seconds: Optional[float],
+    split_processed: int,
+) -> str:
+    percentage = (processed / total) * 100 if total else 0.0
+    eta_text = _format_duration(eta_seconds)
+    elapsed_text = _format_duration(elapsed_seconds)
+    message = (
+        f"Processed {processed}/{total} packages ({percentage:.1f}%) "
+        f"• ETA {eta_text} • Elapsed {elapsed_text} • Split APKs {split_processed}"
+    )
+    return status_messages.status(message, show_icon=False)
+
+
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def _visible_length(text: str) -> int:
+    return len(_ANSI_ESCAPE_RE.sub("", text))
+
+
+def _print_sync_summary(
+    snapshot_path: Path,
+    *,
+    total_packages: int,
+    split_packages: int,
+    elapsed_seconds: float,
+    previous_total: Optional[int],
+    previous_split: Optional[int],
+    new_packages: Optional[int],
+    removed_packages: Optional[int],
+) -> None:
+    summary_lines = [
+        status_messages.status("Inventory sync complete", level="success"),
+        status_messages.status(
+            f"Snapshot saved to {snapshot_path}",
+            show_icon=False,
+        ),
+        status_messages.status(
+            f"Packages captured: {total_packages} {_format_delta_text(total_packages, previous_total)}",
+            show_icon=False,
+        ),
+        status_messages.status(
+            f"Split APKs: {split_packages} {_format_delta_text(split_packages, previous_split)}",
+            show_icon=False,
+        ),
+    ]
+
+    if new_packages is not None and removed_packages is not None:
+        summary_lines.append(
+            status_messages.status(
+                f"New packages: {new_packages} • Removed: {removed_packages}",
+                show_icon=False,
+            )
+        )
+
+    summary_lines.append(
+        status_messages.status(
+            f"Scan duration: {_format_duration(elapsed_seconds)}",
+            show_icon=False,
+        )
+    )
+
+    print()
+    print(text_blocks.boxed(summary_lines, width=70))
 
 
 def _render_inventory_table(rows: List[Dict[str, object]]) -> None:
