@@ -119,9 +119,16 @@ def fetch_duplicate_hashes(limit: int = 100) -> List[Dict[str, object]]:
     return run_sql(queries.SELECT_DUPLICATE_HASHES, (limit,), fetch="all", dictionary=True)
 
 
-def ensure_app_definition(package_name: str, app_name: Optional[str] = None) -> int:
+def ensure_app_definition(
+    package_name: str,
+    app_name: Optional[str] = None,
+    *,
+    category_name: Optional[str] = None,
+    profile_id: Optional[str] = None,
+    profile_name: Optional[str] = None,
+) -> int:
     """Upsert a canonical app definition row and return app_id."""
-    cleaned_package = package_name.strip()
+    cleaned_package = package_name.strip().lower()
     if not cleaned_package:
         raise ValueError("package_name is required")
 
@@ -139,7 +146,35 @@ def ensure_app_definition(package_name: str, app_name: Optional[str] = None) -> 
     row = run_sql(queries.SELECT_APP_ID_BY_PACKAGE, (cleaned_package,), fetch="one")
     if not row:
         raise RuntimeError(f"Failed to resolve app_id for package {package_name}")
-    return int(row[0])
+    app_id = int(row[0])
+
+    update_fields: List[str] = []
+    update_params: List[object] = []
+
+    if category_name and category_name.strip():
+        category_id = get_category_id(category_name.strip())
+        update_fields.append("category_id = %s")
+        update_params.append(category_id)
+
+    if profile_id and str(profile_id).strip():
+        update_fields.append("profile_id = %s")
+        update_params.append(str(profile_id).strip())
+
+    if profile_name and profile_name.strip():
+        update_fields.append("profile_name = %s")
+        update_params.append(profile_name.strip())
+
+    if update_fields:
+        set_clause = ", ".join(update_fields + ["updated_at = CURRENT_TIMESTAMP"])
+        update_params.append(cleaned_package)
+        run_sql(
+            f"""UPDATE android_app_definitions
+            SET {set_clause}
+            WHERE package_name = %s""",
+            tuple(update_params),
+        )
+
+    return app_id
 
 
 def get_category_id(category_name: str) -> int:

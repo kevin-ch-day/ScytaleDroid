@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import re
 
-from typing import Callable, Dict, Iterable, List, Optional
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 from scytaledroid.Config import app_config
 from scytaledroid.Utils.DisplayUtils import (
@@ -128,6 +128,43 @@ def _hash_rows(rows: Iterable[Dict[str, object]]) -> str:
     return digest.hexdigest()
 
 
+def _load_canonical_metadata(package_names: Iterable[str]) -> Dict[str, Dict[str, object]]:
+    """Fetch canonical definitions keyed by package name."""
+
+    normalised = sorted({str(name).lower() for name in package_names if name})
+    if not normalised:
+        return {}
+
+    placeholders = ", ".join(["%s"] * len(normalised))
+    query = f"""
+        SELECT
+            LOWER(d.package_name) AS package_key,
+            d.app_name,
+            d.category_id,
+            c.category_name,
+            d.profile_id,
+            d.profile_name
+        FROM android_app_definitions d
+        LEFT JOIN android_app_categories c ON c.category_id = d.category_id
+        WHERE LOWER(d.package_name) IN ({placeholders})
+    """
+
+    rows = run_sql(query, tuple(normalised), fetch="all", dictionary=True) or []
+    canonical: Dict[str, Dict[str, object]] = {}
+    for row in rows:
+        key = str(row.get("package_key") or "").lower()
+        if not key:
+            continue
+        canonical[key] = {
+            "app_name": row.get("app_name"),
+            "category_id": row.get("category_id"),
+            "category_name": row.get("category_name"),
+            "profile_id": row.get("profile_id"),
+            "profile_name": row.get("profile_name"),
+        }
+    return canonical
+
+
 def run_inventory_sync(
     serial: Optional[str],
     *,
@@ -197,8 +234,11 @@ def run_inventory_sync(
     device_properties = adb_utils.get_basic_properties(serial)
     fingerprint = device_properties.get("build_fingerprint") if device_properties else None
 
+    canonical_metadata = _load_canonical_metadata(package_names)
+
     metadata_rows: List[Dict[str, object]] = []
     package_definitions: Dict[str, Optional[str]] = {}
+    entries_by_package: Dict[str, Dict[str, object]] = {}
     progress_interval = max(20, total // 20 or 1)
     scan_start = time.time()
     progress_line_length = 0
@@ -207,11 +247,15 @@ def run_inventory_sync(
     for index, package_name in enumerate(package_names, start=1):
         paths = adb_utils.get_package_paths(serial, package_name)
         metadata = adb_utils.get_package_metadata(serial, package_name)
-        entry = _compose_inventory_entry(package_name, paths, metadata)
+        package_key = package_name.lower()
+        canonical_entry = canonical_metadata.get(package_key)
+        entry = _compose_inventory_entry(package_name, paths, metadata, canonical_entry)
         metadata_rows.append(entry)
         normalized_package = entry.get("package_name") or package_name
+        normalized_key = str(normalized_package).lower()
         app_label = entry.get("app_label")
-        package_definitions.setdefault(str(normalized_package).lower(), app_label if isinstance(app_label, str) else None)
+        package_definitions.setdefault(normalized_key, app_label if isinstance(app_label, str) else None)
+        entries_by_package[normalized_key] = entry
 
         if _split_count(entry) > 1:
             split_processed += 1
@@ -313,8 +357,21 @@ def run_inventory_sync(
 
     synced = 0
     for pkg, name in package_definitions.items():
+        entry = entries_by_package.get(pkg)
+        inferred_category = bool(entry.get("inferred_category")) if entry else False
+        inferred_profile = bool(entry.get("inferred_profile")) if entry else False
+
+        category_name = _get_canonical_category(entry) if entry else None
+        profile_id = entry.get("profile_id") if entry else None
+        profile_name = entry.get("profile_name") if entry else None
         try:
-            ensure_app_definition(pkg, name)
+            ensure_app_definition(
+                pkg,
+                name,
+                category_name=category_name if inferred_category else None,
+                profile_id=str(profile_id) if inferred_profile and profile_id else None,
+                profile_name=profile_name if inferred_profile and profile_name else None,
+            )
             synced += 1
         except Exception as exc:  # pragma: no cover - defensive logging
             print(status_messages.status(f"Failed to register {pkg}: {exc}", level="warn"))
@@ -377,13 +434,18 @@ def inventory_sync_menu(serial: Optional[str]) -> None:
             run_inventory_sync(
                 serial,
                 filter_name="User-installed apps",
-                filter_fn=lambda entry: str(entry.get("category")) == "User",
+                filter_fn=lambda entry: (
+                    (_get_canonical_category(entry) or "Unknown") == "User"
+                ),
             )
         elif choice == "3":
             run_inventory_sync(
                 serial,
                 filter_name="System & OEM modules",
-                filter_fn=lambda entry: str(entry.get("category")) in {"System", "OEM", "Mainline", "Vendor"},
+                filter_fn=lambda entry: (
+                    (_get_canonical_category(entry) or "Unknown")
+                    in {"System", "OEM", "Mainline", "Vendor"}
+                ),
             )
         elif choice == "4":
             profiles = {"Social", "Messaging"}
@@ -464,17 +526,40 @@ def _compose_inventory_entry(
     package_name: str,
     paths: List[str],
     metadata: Dict[str, Optional[str]],
+    canonical: Optional[Dict[str, object]] = None,
 ) -> Dict[str, object]:
     primary_path = paths[0] if paths else ""
-    category, partition = _derive_category(primary_path)
+    fallback_category, partition = _derive_category(primary_path)
     installer = _normalise_installer(metadata.get("installer"))
-    source = _derive_source(category, installer)
+    review_needed = canonical is None
 
-    profile = package_profiles.lookup_profile(package_name)
-    profile_id = profile.id if profile else None
-    profile_name = profile.name if profile else None
+    category_id = canonical.get("category_id") if canonical else None
+    category_name = canonical.get("category_name") if canonical else None
+    heuristic_category = False
+    if not category_name:
+        category_name = fallback_category
+        heuristic_category = True
 
-    app_label = metadata.get("app_label") or package_name
+    profile_id = canonical.get("profile_id") if canonical else None
+    profile_name = canonical.get("profile_name") if canonical else None
+    heuristic_profile = False
+    if not profile_id and not profile_name:
+        profile = package_profiles.lookup_profile(package_name)
+        profile_id = profile.id if profile else None
+        profile_name = profile.name if profile else None
+        heuristic_profile = bool(profile_id or profile_name)
+
+    if heuristic_category or heuristic_profile:
+        review_needed = True
+
+    source_category = category_name if category_name in _CATEGORY_ORDER else fallback_category
+    source = _derive_source(str(source_category or fallback_category), installer)
+
+    app_label = (
+        (canonical.get("app_name") if canonical else None)
+        or metadata.get("app_label")
+        or package_name
+    )
     version_name = metadata.get("version_name")
     version_code = metadata.get("version_code")
 
@@ -490,7 +575,9 @@ def _compose_inventory_entry(
         "first_install": metadata.get("first_install"),
         "last_update": metadata.get("last_update"),
         "primary_path": primary_path,
-        "category": category,
+        "category": category_name,
+        "category_name": category_name,
+        "category_id": category_id,
         "partition": partition,
         "source": source,
         "profile_id": profile_id,
@@ -498,6 +585,9 @@ def _compose_inventory_entry(
         "split_flag": "Yes" if split_count > 1 else "No",
         "apk_paths": paths,
         "apk_dirs": apk_dirs,
+        "review_needed": review_needed,
+        "inferred_category": heuristic_category,
+        "inferred_profile": heuristic_profile,
     }
 
     entry["split_count"] = split_count  # type: ignore[index]
@@ -519,6 +609,13 @@ def _derive_category(primary_path: str) -> Tuple[str, str]:
     if primary_path:
         return "Other", "Other"
     return "Unknown", "Unknown"
+
+
+def _get_canonical_category(entry: Dict[str, object]) -> Optional[str]:
+    value = entry.get("category_name") or entry.get("category")
+    if value is None or value == "":
+        return None
+    return str(value)
 
 
 def _derive_source(category: str, installer: Optional[str]) -> str:
@@ -713,7 +810,7 @@ def _render_inventory_table(rows: List[Dict[str, object]]) -> None:
     sorted_rows = sorted(
         rows,
         key=lambda entry: (
-            _CATEGORY_ORDER.get(str(entry.get("category")), 99),
+            _CATEGORY_ORDER.get(_get_canonical_category(entry) or "Unknown", 99),
             str(entry.get("app_label") or entry.get("package_name") or "").lower(),
         ),
     )
@@ -739,7 +836,7 @@ def _render_inventory_table(rows: List[Dict[str, object]]) -> None:
             or entry.get("version_code")
             or "?"
         )
-        category = str(entry.get("category") or "Unknown")
+        category = _get_canonical_category(entry) or "Unknown"
         source = str(entry.get("source") or category)
         split_count = _split_count(entry)
         split_display = "Single" if split_count <= 1 else f"{split_count} parts"
@@ -787,7 +884,10 @@ def load_latest_inventory(serial: str) -> Optional[Dict[str, object]]:
 
 def _render_inventory_summary(rows: List[Dict[str, object]]) -> None:
     total = len(rows)
-    category_counts = Counter(str(entry.get("category") or "Unknown") for entry in rows)
+    category_counts = Counter(
+        (_get_canonical_category(entry) or "Unknown")
+        for entry in rows
+    )
     source_counts = Counter(str(entry.get("source") or "Unknown") for entry in rows)
     split_packages = sum(1 for entry in rows if _split_count(entry) > 1)
     profile_counts = Counter(str(entry.get("profile_name") or "Unclassified") for entry in rows)
@@ -808,6 +908,10 @@ def _render_inventory_summary(rows: List[Dict[str, object]]) -> None:
 
     partition_counts = _partition_breakdown(rows)
     summary_pairs.extend(partition_counts)
+    review_flags = sum(1 for entry in rows if entry.get("review_needed"))
+    if review_flags:
+        summary_pairs.append(("Needs review", str(review_flags)))
+
     table_utils.render_key_value_pairs([pair for pair in summary_pairs if not pair[1].startswith("0")])
 
     notable_profiles = [
@@ -840,11 +944,11 @@ def _preview_packages(
     category: str,
     limit: int,
 ) -> List[List[str]]:
-    filtered = [
-        pkg
-        for pkg in packages
-        if str(pkg.get("category") or "User") == category
-    ]
+    filtered = []
+    for pkg in packages:
+        category_value = _get_canonical_category(pkg) or "User"
+        if category_value == category:
+            filtered.append(pkg)
 
     def sort_key(pkg: Dict[str, object]) -> str:
         return str(pkg.get("app_label") or pkg.get("package_name") or "").lower()
