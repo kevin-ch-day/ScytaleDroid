@@ -179,13 +179,20 @@ def _ensure_local_copy(
     if verbose:
         print(status_messages.status(f"Executing: {' '.join(command)}", level="info"))
     try:
-        completed = subprocess.run(command, capture_output=True, text=True, check=False)
+        completed = subprocess.run(
+            command,
+            capture_output=not verbose,
+            text=True,
+            check=False,
+        )
     except Exception as exc:
         log.error(f"adb pull execution failed for {package_name}: {exc}", category="device")
         return ArtifactError(source_path=source_path, reason=str(exc))
 
     if completed.returncode != 0:
-        stderr = completed.stderr.strip() or completed.stdout.strip() or "adb pull failed"
+        stdout = (completed.stdout or "").strip()
+        stderr = (completed.stderr or "").strip()
+        stderr = stderr or stdout or "adb pull failed"
         log.warning(
             f"adb pull returned {completed.returncode} for {package_name}: {stderr}",
             category="device",

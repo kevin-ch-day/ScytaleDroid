@@ -188,7 +188,7 @@ def _prompt_plan_action() -> str:
     print(text_blocks.headline("Plan actions", width=70))
     options = {
         "1": "Start pull (quiet)",
-        "2": "Start pull (verbose adb)",
+        "2": "Start pull (verbose adb, stream output)",
         "3": "Dry-run preview",
         "4": "Change scope",
         "0": "Cancel",
