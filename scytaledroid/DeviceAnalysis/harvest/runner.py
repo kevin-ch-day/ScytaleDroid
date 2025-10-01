@@ -27,7 +27,10 @@ def execute_harvest(
     """Execute the provided harvest plan and return per-package results."""
 
     results: List[PullResult] = []
-    for plan in plans:
+    total = len(plans)
+    for index, plan in enumerate(plans, start=1):
+        if not verbose:
+            _print_progress(index, total, plan)
         results.append(
             _execute_package_plan(
                 serial=serial,
@@ -208,5 +211,14 @@ def _compute_hashes(dest_path: Path) -> Dict[str, str]:
     return {name: hasher.hexdigest() for name, hasher in hashers.items()}
 
 
-__all__ = ["execute_harvest"]
+def _print_progress(index: int, total: int, plan: PackagePlan) -> None:
+    artifact_count = len(plan.artifacts)
+    suffix = "artifact" if artifact_count == 1 else "artifacts"
+    message = (
+        f"[{index:>3}/{total}] {plan.inventory.package_name} "
+        f"({artifact_count} {suffix})"
+    )
+    print(status_messages.status(message))
 
+
+__all__ = ["execute_harvest"]

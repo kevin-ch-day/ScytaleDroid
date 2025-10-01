@@ -75,6 +75,7 @@ def pull_apks(serial: Optional[str]) -> None:
     active_plan = None
     active_selection = None
     include_system_partitions = False
+    verbose = False
     google_allowlist = harvest.rules.load_google_allowlist()
 
     while True:
@@ -128,6 +129,12 @@ def pull_apks(serial: Optional[str]) -> None:
             print(status_messages.status("APK pull cancelled by user.", level="warn"))
             prompt_utils.press_enter_to_continue()
             return
+        if action == "pull_verbose":
+            verbose = True
+        elif action == "pull_quiet":
+            verbose = False
+        else:
+            continue
 
         active_plan = plan
         active_selection = selection
@@ -155,8 +162,6 @@ def pull_apks(serial: Optional[str]) -> None:
     dest_root = Path(app_config.DATA_DIR) / "apks" / "device_apks" / serial
     dest_root.mkdir(parents=True, exist_ok=True)
 
-    verbose = prompt_utils.prompt_yes_no("Enable verbose adb logging?", default=False)
-
     results = harvest.execute_harvest(
         serial=serial,
         adb_path=adb_path,
@@ -166,10 +171,15 @@ def pull_apks(serial: Optional[str]) -> None:
         verbose=verbose,
     )
 
-    for result in results:
-        harvest.print_package_result(result)
+    if verbose:
+        for result in results:
+            harvest.print_package_result(result, verbose=True)
+    else:
+        for result in results:
+            harvest.print_package_result(result, verbose=False)
 
     harvest.render_harvest_summary(active_plan, results, selection=active_selection)
+    _maybe_save_watchlist(active_selection)
     prompt_utils.press_enter_to_continue()
 
 
@@ -177,18 +187,21 @@ def _prompt_plan_action() -> str:
     print()
     print(text_blocks.headline("Plan actions", width=70))
     options = {
-        "1": "Proceed with APK pull",
-        "2": "Dry-run preview",
-        "3": "Change scope",
+        "1": "Start pull (quiet)",
+        "2": "Start pull (verbose adb)",
+        "3": "Dry-run preview",
+        "4": "Change scope",
         "0": "Cancel",
     }
     menu_utils.print_menu(options, is_main=False, default="1", exit_label="Cancel")
     choice = prompt_utils.get_choice(list(options.keys()), default="1")
     if choice == "1":
-        return "proceed"
+        return "pull_quiet"
     if choice == "2":
-        return "dry-run"
+        return "pull_verbose"
     if choice == "3":
+        return "dry-run"
+    if choice == "4":
         return "rescope"
     return "cancel"
 
@@ -204,5 +217,34 @@ def _device_is_rooted(serial: str) -> bool:
     return completed.stdout.strip() == "0"
 
 
-__all__ = ["pull_apks"]
+def _maybe_save_watchlist(selection: harvest.ScopeSelection) -> None:
+    if selection.kind not in {"profile_subset", "profiles"}:
+        return
 
+    packages = [row.package_name for row in selection.packages]
+    if len(packages) < 2:
+        return
+    if not prompt_utils.prompt_yes_no("Save this scope as a watchlist?", default=False):
+        return
+
+    default_name = selection.metadata.get("watchlist", selection.label)
+    default_name = str(default_name).replace("Watchlist:", "").strip() or "New Watchlist"
+
+    while True:
+        name = prompt_utils.prompt_text("Watchlist name", default=default_name)
+        try:
+            path = harvest.save_watchlist(name, packages, overwrite=False)
+        except FileExistsError:
+            overwrite = prompt_utils.prompt_yes_no(
+                "Watchlist exists. Overwrite?", default=False
+            )
+            if overwrite:
+                path = harvest.save_watchlist(name, packages, overwrite=True)
+            else:
+                default_name = f"{name}-copy"
+                continue
+        print(status_messages.status(f"Watchlist saved to {path}", level="success"))
+        break
+
+
+__all__ = ["pull_apks"]

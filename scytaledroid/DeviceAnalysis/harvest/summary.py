@@ -39,25 +39,24 @@ def render_plan_summary(
     scheduled_packages = sum(1 for pkg in plan.packages if not pkg.skip_reason)
     blocked_packages = sum(1 for pkg in plan.packages if pkg.skip_reason)
     scheduled_files = sum(len(pkg.artifacts) for pkg in plan.packages if not pkg.skip_reason)
-    print()
-    print(text_blocks.headline("Plan summary", width=70))
-    print(status_messages.status(f"Scope: {selection.label}"))
-    print(status_messages.status(f"Packages scheduled: {scheduled_packages}"))
-    print(status_messages.status(f"Estimated artifacts: {scheduled_files}"))
-    if blocked_packages:
-        print(status_messages.status(f"Packages blocked pre-run: {blocked_packages}", level="warn"))
+    blocked_text = f" (blocked {blocked_packages})" if blocked_packages else ""
+    card_lines = [
+        f"Scope    : {selection.label}",
+        f"Packages : {scheduled_packages}{blocked_text}",
+        f"Artifacts: ~{scheduled_files}",
+    ]
+
     if plan.policy_filtered:
         policy_details = _format_policy_details(plan.policy_filtered)
-        print(status_messages.status(f"Protected-partition artifacts filtered: {policy_details}", level="warn"))
+        card_lines.append(f"Policy   : {policy_details}")
     if not include_system_partitions and not is_rooted:
-        print(
-            status_messages.status(
-                "System/vendor/mainline artifacts skipped (non-root policy).",
-                level="warn",
-            )
-        )
+        card_lines.append("Policy   : System/vendor filtered (non-root)")
+
+    print()
+    print(text_blocks.boxed(card_lines, width=70))
 
     _print_exclusions(selection.metadata.get("excluded_counts"))
+    _print_sample_focus(selection)
 
 
 def preview_plan(plan: HarvestPlan, *, limit: int = 10) -> None:
@@ -83,21 +82,32 @@ def preview_plan(plan: HarvestPlan, *, limit: int = 10) -> None:
         print(status_messages.status(item))
 
 
-def print_package_result(result: PullResult) -> None:
+def print_package_result(result: PullResult, *, verbose: bool = False) -> None:
     """Emit per-package harvest results with apk_id references."""
+
+    if not verbose and not (result.errors or result.skipped):
+        return
 
     plan = result.plan
     inventory = plan.inventory
     header = (
-        f"{inventory.package_name}"
+        f"{inventory.display_name()}"
+        f" ({inventory.package_name})"
         f" v{inventory.version_code or '?'}"
         f" ({inventory.version_name or 'n/a'})"
         f" installer={inventory.installer or 'unknown'}"
     )
-    print(status_messages.status(header, level="info"))
+    level = "info" if verbose else "warn"
+    print(status_messages.status(header, level=level))
 
-    for artifact in result.ok:
-        print(status_messages.status(f"  ✓ apk_id={artifact.apk_id} {artifact.file_name}", level="success"))
+    if verbose:
+        for artifact in result.ok:
+            print(
+                status_messages.status(
+                    f"  ✓ apk_id={artifact.apk_id} {artifact.file_name}", level="success"
+                )
+            )
+
     for error in result.errors:
         print(status_messages.status(f"  ✗ {error.source_path}: {error.reason}", level="error"))
     for reason in result.skipped:
@@ -136,8 +146,31 @@ def render_harvest_summary(
         )
         print(status_messages.status(f"Skipped packages: {skip_parts}", level="warn"))
 
+    denied = sorted(
+        {
+            result.plan.inventory.package_name
+            for result in results
+            for error in result.errors
+            if "permission" in error.reason.lower()
+        }
+    )
+    if denied:
+        print(status_messages.status("Permission denied (requires root):", level="warn"))
+        for package in denied:
+            print(status_messages.status(f"  - {package}", level="warn"))
+
     _print_exclusions(selection.metadata.get("excluded_counts"))
     _print_top_packages(results)
+    _print_sample_focus(selection)
+
+    print()
+    print(status_messages.status("Next steps:", level="info"))
+    print(status_messages.status("  • Review metadata via view sd_app_catalog_flags", level="info"))
+    print(
+        status_messages.status(
+            "  • Run static analysis on harvested APKs (see docs/static_analysis)", level="info"
+        )
+    )
 
 
 def _print_top_packages(results: Sequence[PullResult], limit: int = 5) -> None:
@@ -157,7 +190,8 @@ def _print_top_packages(results: Sequence[PullResult], limit: int = 5) -> None:
     for ok_count, err_count, result in scored[:limit]:
         skipped = ",".join(result.skipped) if result.skipped else "0"
         summary = (
-            f"- {result.plan.inventory.package_name} "
+            f"- {result.plan.inventory.display_name()} "
+            f"({result.plan.inventory.package_name}) "
             f"ok:{ok_count} err:{err_count} skip:{skipped}"
         )
         print(status_messages.status(summary))
@@ -200,3 +234,12 @@ def _format_policy_details(policy_counts: Dict[str, int]) -> str:
         return str(total)
     return ", ".join(parts)
 
+
+def _print_sample_focus(selection: ScopeSelection) -> None:
+    samples = selection.metadata.get("sample_names")
+    if not samples:
+        return
+    preview = ", ".join(samples)
+    if len(selection.packages) > len(samples):
+        preview += ", …"
+    print(status_messages.status(f"Focus packages: {preview}"))

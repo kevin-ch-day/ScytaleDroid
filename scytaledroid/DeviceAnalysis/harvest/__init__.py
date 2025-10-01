@@ -20,6 +20,13 @@ from .summary import (
     render_harvest_summary,
     render_plan_summary,
 )
+from .watchlists import (
+    Watchlist,
+    filter_rows_by_watchlist,
+    load_watchlists,
+    reset_watchlist_cache,
+    save_watchlist,
+)
 
 __all__ = [
     "ArtifactError",
@@ -40,5 +47,9 @@ __all__ = [
     "reset_last_scope",
     "rules",
     "select_package_scope",
+    "Watchlist",
+    "filter_rows_by_watchlist",
+    "load_watchlists",
+    "reset_watchlist_cache",
+    "save_watchlist",
 ]
-

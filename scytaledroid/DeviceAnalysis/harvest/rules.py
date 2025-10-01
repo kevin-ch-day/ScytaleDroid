@@ -22,6 +22,22 @@ FAMILY_PREFIXES = {
     "motorola": "com.motorola.",
 }
 
+_GOOGLE_USER_APP_DEFAULTS = {
+    "com.google.android.youtube",
+    "com.google.android.apps.youtube.music",
+    "com.google.android.apps.maps",
+    "com.google.android.apps.photos",
+    "com.google.android.apps.docs",
+    "com.google.android.gm",
+    "com.google.android.apps.chromecast.app",
+    "com.google.android.apps.walletnfcrel",
+    "com.android.chrome",
+    "com.google.android.apps.messaging",
+    "com.google.android.contacts",
+    "com.google.android.apps.youtube.kids",
+    "com.google.android.apps.tasks",
+}
+
 _DEFAULT_GOOGLE_ALLOWLIST = {
     "com.google.android.youtube",
     "com.google.android.apps.youtube.music",
@@ -100,6 +116,20 @@ def load_google_allowlist(candidates: Optional[Sequence[str]] = None) -> Set[str
 GOOGLE_ALLOWLIST: Set[str] = load_google_allowlist()
 
 
+def _base_google_user_apps() -> Set[str]:
+    config_value = getattr(app_config, "DEVICE_ANALYSIS_GOOGLE_USER_APPS", None)
+    return _coerce_allowlist(config_value) or set(_GOOGLE_USER_APP_DEFAULTS)
+
+
+GOOGLE_USER_APPS: Set[str] = _base_google_user_apps()
+
+
+def is_google_user_app(package_name: str) -> bool:
+    """Return True when the package is a user-facing Google application."""
+
+    return package_name in GOOGLE_USER_APPS
+
+
 def canonical_filename(package_name: str, version_code: str, artifact: str) -> str:
     """Return deterministic ``package_version__artifact.apk`` filenames."""
 
@@ -140,5 +170,5 @@ __all__ = [
     "family",
     "is_user_path",
     "is_system_path",
+    "is_google_user_app",
 ]
-

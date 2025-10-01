@@ -23,6 +23,9 @@ class InventoryRow:
     apk_paths: List[str] = field(default_factory=list)
     split_count: int = 0
 
+    def display_name(self) -> str:
+        return (self.app_label or self.package_name).strip()
+
 
 @dataclass(frozen=True)
 class ArtifactPlan:
@@ -91,4 +94,3 @@ class ScopeSelection:
     packages: List[InventoryRow]
     kind: str
     metadata: Dict[str, object] = field(default_factory=dict)
-

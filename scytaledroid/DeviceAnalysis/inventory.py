@@ -67,6 +67,7 @@ def run_inventory_sync(
     *,
     filter_name: Optional[str] = None,
     filter_fn: Optional[Callable[[Dict[str, object]], bool]] = None,
+    interactive: bool = True,
 ) -> None:
     """Scan the device, sync package definitions, and display results."""
     if not serial:
@@ -78,9 +79,10 @@ def run_inventory_sync(
         prompt_utils.press_enter_to_continue()
         return
 
-    print()
-    print(text_blocks.headline("Inventory & database sync", width=70))
-    print(status_messages.status("Collecting installed packages..."))
+    if interactive:
+        print()
+        print(text_blocks.headline("Inventory & database sync", width=70))
+        print(status_messages.status("Collecting installed packages..."))
     adb_utils.clear_package_caches(serial)
     package_names = adb_utils.list_packages(serial)
     if not package_names:
@@ -105,7 +107,7 @@ def run_inventory_sync(
         app_label = entry.get("app_label")
         package_definitions.setdefault(str(normalized_package).lower(), app_label if isinstance(app_label, str) else None)
 
-        if index % progress_interval == 0 or index == total:
+        if interactive and (index % progress_interval == 0 or index == total):
             percentage = (index / total) * 100
             print(status_messages.status(f"Processed {index}/{total} packages ({percentage:.1f}%)."))
 
@@ -119,10 +121,15 @@ def run_inventory_sync(
         except Exception as exc:  # pragma: no cover - defensive logging
             print(status_messages.status(f"Failed to register {pkg}: {exc}", level="warn"))
 
-    if synced:
+    if synced and interactive:
         print(status_messages.status(f"Synced {synced} package definitions to database.", level="info"))
 
-    _render_inventory_summary(metadata_rows)
+    if interactive:
+        _render_inventory_summary(metadata_rows)
+    else:
+        status_messages.print_status(
+            f"Inventory captured: {len(metadata_rows)} packages", level="info"
+        )
 
     if filter_fn:
         scoped_rows = [row for row in metadata_rows if filter_fn(row)]
@@ -135,7 +142,8 @@ def run_inventory_sync(
             print(status_messages.status("No packages matched the selected filter.", level="warn"))
         prompt_utils.press_enter_to_continue()
 
-    _inventory_selection_menu(metadata_rows)
+    if interactive:
+        _inventory_selection_menu(metadata_rows)
 
 
 def inventory_sync_menu(serial: Optional[str]) -> None:

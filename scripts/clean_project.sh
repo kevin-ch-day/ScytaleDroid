@@ -20,6 +20,11 @@ clean_logs_and_output() {
   rm -rf "$ROOT_DIR/data/state"/* 2>/dev/null || true
 }
 
+clean_harvest_artifacts() {
+  rm -rf "$ROOT_DIR/data/apks/device_apks"/* 2>/dev/null || true
+  rm -rf "$ROOT_DIR/data/watchlists"/* 2>/dev/null || true
+}
+
 clean_temp_files() {
   find "$ROOT_DIR" -name '*.tmp' -delete
   find "$ROOT_DIR" -name '*.bak' -delete
@@ -28,10 +33,11 @@ clean_temp_files() {
 
 print_usage() {
   cat <<USAGE
-Usage: $(basename "$0") [--bytecode] [--tools] [--logs] [--temp] [--all]
+Usage: $(basename "$0") [--bytecode] [--tools] [--logs] [--harvest] [--temp] [--all]
   --bytecode   Remove Python bytecode and __pycache__ directories
   --tools      Remove tooling artifacts (pytest, coverage, mypy caches)
   --logs       Clear logs/, output/, data/state/
+  --harvest    Remove harvested APK artifacts and saved watchlists
   --temp       Remove temporary files (*.tmp, *.bak, backup files)
   --all        Run all cleanup routines (default if no flags supplied)
 USAGE
@@ -41,6 +47,7 @@ if [ "$#" -eq 0 ]; then
   clean_bytecode
   clean_tooling_artifacts
   clean_logs_and_output
+  clean_harvest_artifacts
   clean_temp_files
 else
   run_all=false
@@ -49,11 +56,13 @@ else
       --bytecode) clean_bytecode ;;
       --tools) clean_tooling_artifacts ;;
       --logs) clean_logs_and_output ;;
+      --harvest) clean_harvest_artifacts ;;
       --temp) clean_temp_files ;;
       --all)
         clean_bytecode
         clean_tooling_artifacts
         clean_logs_and_output
+        clean_harvest_artifacts
         clean_temp_files
         ;;
       --help|-h)

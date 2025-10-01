@@ -31,6 +31,8 @@ PROFILES: List[PackageProfile] = [
             "com.tiktok.",
             "com.whatsapp",
             "com.linkedin.",
+            "com.zhiliaoapp.musically",
+            "com.ss.android.ugc.aweme",
         ),
         description=(
             "High-profile social media clients with heavy background connectivity, "

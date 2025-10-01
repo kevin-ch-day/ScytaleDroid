@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from importlib import import_module
 import time
 from typing import Dict, List, Optional, Tuple
@@ -18,6 +18,10 @@ from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from . import adb_utils, device_manager
 from .inventory import inventory_sync_menu
+from . import inventory as inventory_module
+from . import watchlist_manager
+
+INVENTORY_STALE_SECONDS = 600
 
 
 def device_menu() -> None:
@@ -43,22 +47,9 @@ def device_menu() -> None:
             serial_map,
         )
         menu_utils.print_header("Device Analysis")
-
-        options = {
-            "1": "List devices",
-            "2": "Refresh status",
-            "3": "Connect to a device",
-            "4": "Show device info",
-            "5": "Inventory & database sync",
-            "6": "Run detailed device report",
-            "7": "Pull APKs",
-            "8": "Logcat",
-            "9": "Open ADB shell",
-            "10": "Disconnect device",
-            "11": "Export device dossier",
-        }
-        menu_utils.print_menu(options, is_main=False)
-        choice = prompt_utils.get_choice(list(options.keys()) + ["0"], default="2")
+        options = _build_main_menu_options(active_details)
+        menu_utils.print_menu(options, is_main=False, default="1", exit_label="Back")
+        choice = prompt_utils.get_choice(list(options.keys()) + ["0"], default="1")
 
         if choice == "0":
             return
@@ -219,9 +210,13 @@ def _handle_choice(
     elif choice == "5":
         serial = active_device.get("serial") if active_device else device_manager.get_active_serial()
         inventory_sync_menu(serial)
+    elif choice == "6":
+        _forward_to_helper(choice, active_device)
+    elif choice == "7":
+        _run_apk_pull(active_device)
     elif choice == "10":
         _disconnect_device()
-    elif choice in {"6", "7", "8", "9", "11"}:
+    elif choice in {"8", "9", "11", "12"}:
         _forward_to_helper(choice, active_device)
     else:
         error_panels.print_error_panel(
@@ -389,6 +384,7 @@ _HELPER_ROUTES = {
     "8": ("logcat", "stream_logcat", True, "Stream logcat output"),
     "9": ("shell", "open_shell", True, "Open interactive adb shell"),
     "11": ("report", "generate_device_report", True, "Export the device dossier"),
+    "12": ("watchlist_manager", "manage_watchlists", False, "Manage harvest watchlists"),
 }
 
 
@@ -425,6 +421,124 @@ def _forward_to_helper(option: str, active_device: Optional[Dict[str, Optional[s
 
     serial = active_device.get("serial") if active_device else None
     handler(serial=serial)  # type: ignore[arg-type,call-arg]
+
+
+def _build_main_menu_options(
+    active_details: Optional[Dict[str, Optional[str]]]
+) -> Dict[str, str]:
+    options = {
+        "1": "List devices",
+        "2": "Refresh status",
+        "3": "Connect to a device",
+        "4": "Show device info",
+        "5": "Inventory & database sync",
+        "6": "Run detailed device report",
+        "7": "Pull APKs",
+        "8": "Logcat",
+        "9": "Open ADB shell",
+        "10": "Disconnect device",
+        "11": "Export device dossier",
+        "12": "Manage harvest watchlists",
+    }
+
+    serial = active_details.get("serial") if active_details else device_manager.get_active_serial()
+    options["5"] = f"Inventory & database sync ({_format_inventory_status(serial)})"
+    options["7"] = f"Pull APKs ({_format_pull_hint(serial)})"
+
+    if not serial:
+        options["6"] += " (requires device)"
+        options["7"] += ""
+        options["8"] += " (requires device)"
+        options["9"] += " (requires device)"
+        options["11"] += " (requires device)"
+
+    return options
+
+
+def _run_apk_pull(active_device: Optional[Dict[str, Optional[str]]]) -> None:
+    serial = active_device.get("serial") if active_device else device_manager.get_active_serial()
+    if not serial:
+        error_panels.print_error_panel(
+            "Pull APKs",
+            "No active device. Connect first to pull APKs.",
+        )
+        prompt_utils.press_enter_to_continue()
+        return
+
+    if not _ensure_recent_inventory(serial):
+        return
+
+    device_context = active_device or {"serial": serial}
+    _forward_to_helper("7", device_context)
+
+
+def _ensure_recent_inventory(serial: str) -> bool:
+    metadata = _get_latest_inventory_metadata(serial)
+    if metadata and metadata.get("timestamp"):
+        age = (datetime.now(timezone.utc) - metadata["timestamp"]).total_seconds()
+        if age <= INVENTORY_STALE_SECONDS:
+            return True
+
+    print(status_messages.status("Inventory snapshot is stale—refreshing before pull.", level="info"))
+    inventory_module.run_inventory_sync(serial, interactive=False)
+    return True
+
+
+def _get_latest_inventory_metadata(serial: Optional[str]) -> Optional[Dict[str, object]]:
+    if not serial:
+        return None
+    snapshot = inventory_module.load_latest_inventory(serial)
+    if not snapshot:
+        return None
+    generated_at = snapshot.get("generated_at")
+    package_count = snapshot.get("package_count")
+    timestamp = None
+    if isinstance(generated_at, str):
+        try:
+            timestamp = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
+        except ValueError:
+            timestamp = None
+    return {
+        "timestamp": timestamp,
+        "package_count": package_count,
+    }
+
+
+def _format_inventory_status(serial: Optional[str]) -> str:
+    if not serial:
+        return "connect device"
+    metadata = _get_latest_inventory_metadata(serial)
+    if not metadata or not metadata.get("timestamp"):
+        return "not yet run"
+    age_seconds = (datetime.now(timezone.utc) - metadata["timestamp"]).total_seconds()
+    if age_seconds < 0:
+        age_seconds = 0
+    return f"synced { _humanize_seconds(age_seconds) } ago"
+
+
+def _format_pull_hint(serial: Optional[str]) -> str:
+    if not serial:
+        return "requires device"
+    metadata = _get_latest_inventory_metadata(serial)
+    if not metadata or not metadata.get("timestamp"):
+        return "needs inventory sync"
+    count = metadata.get("package_count")
+    if isinstance(count, int):
+        return f"inventory ready ({count} packages)"
+    if isinstance(count, str) and count.isdigit():
+        return f"inventory ready ({int(count)} packages)"
+    return f"inventory ready"
+
+
+def _humanize_seconds(seconds: float) -> str:
+    seconds = int(seconds)
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes, sec = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m {sec}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes}m"
 
 
 def _format_battery(properties: Dict[str, Optional[str]]) -> str:
