@@ -221,6 +221,10 @@ def get_basic_properties(serial: str) -> Dict[str, str]:
     if tags:
         result["build_tags"] = tags
 
+    fingerprint = props.get("ro.build.fingerprint")
+    if fingerprint:
+        result["build_fingerprint"] = fingerprint
+
     return result
 
 
@@ -250,6 +254,31 @@ def list_packages(serial: str) -> List[str]:
         if stripped.startswith("package:"):
             packages.append(stripped.split(":", 1)[1].strip())
     return packages
+
+
+def list_packages_with_versions(serial: str) -> List[Tuple[str, Optional[str], Optional[str]]]:
+    """Return package identifiers along with version metadata when available."""
+
+    attempts = [
+        ["pm", "list", "packages", "--show-versioncode", "--show-versionname"],
+        ["pm", "list", "packages", "--show-versioncode"],
+    ]
+
+    for command in attempts:
+        try:
+            completed = run_shell_command(serial, command, timeout=20)
+        except RuntimeError:
+            continue
+
+        if completed.returncode != 0:
+            continue
+
+        parsed = _parse_package_listing(completed.stdout)
+        if parsed:
+            return parsed
+
+    # Fallback to basic package names if newer flags are unsupported.
+    return [(package, None, None) for package in list_packages(serial)]
 
 
 def get_package_paths(serial: str, package_name: str, refresh: bool = False) -> List[str]:
@@ -407,6 +436,31 @@ def _get_battery_info(serial: str) -> Dict[str, Optional[str]]:
         result["battery_status"] = status
 
     return result
+
+
+def _parse_package_listing(output: str) -> List[Tuple[str, Optional[str], Optional[str]]]:
+    packages: List[Tuple[str, Optional[str], Optional[str]]] = []
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if not line.startswith("package:"):
+            continue
+
+        package_name: Optional[str] = None
+        version_code: Optional[str] = None
+        version_name: Optional[str] = None
+
+        for token in line.split():
+            if token.startswith("package:"):
+                package_name = token.split(":", 1)[1].strip()
+            elif token.startswith("versionCode:"):
+                version_code = token.split(":", 1)[1].strip()
+            elif token.startswith("versionName:"):
+                version_name = token.split(":", 1)[1].strip()
+
+        if package_name:
+            packages.append((package_name, version_code or None, version_name or None))
+
+    return packages
 
 
 def _get_wifi_state(serial: str) -> Optional[str]:

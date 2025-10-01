@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import time
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional
 
@@ -19,9 +21,33 @@ from scytaledroid.Utils.DisplayUtils import (
 )
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
-from . import adb_utils, package_profiles
+from . import adb_utils, inventory_meta, package_profiles
 from scytaledroid.Database.db_core import run_sql
 from scytaledroid.Database.db_func import ensure_app_definition
+
+
+class InventorySyncAborted(RuntimeError):
+    """Raised when a sync is cancelled via progress callback."""
+
+
+ProgressCallback = Callable[[Dict[str, object]], bool | None]
+
+
+def _emit_progress(
+    callback: ProgressCallback | None, event: Dict[str, object]
+) -> None:
+    """Invoke *callback* with *event* and abort if it requests cancellation."""
+
+    if not callback:
+        return
+
+    try:
+        should_continue = callback(event)
+    except Exception as exc:  # pragma: no cover - defensive
+        raise InventorySyncAborted("Progress callback raised an exception") from exc
+
+    if should_continue is False:
+        raise InventorySyncAborted("Inventory sync cancelled by progress callback")
 
 _STATE_ROOT = Path(app_config.DATA_DIR) / app_config.DEVICE_STATE_DIR
 
@@ -62,12 +88,42 @@ def _split_count(entry: Dict[str, object]) -> int:
     return 1
 
 
+def _normalise_hash_token(*values: object) -> str:
+    parts = []
+    for value in values:
+        if value is None:
+            parts.append("")
+        else:
+            parts.append(str(value))
+    return "|".join(parts)
+
+
+def _hash_rows(rows: Iterable[Dict[str, object]]) -> str:
+    digest = hashlib.sha256()
+    tokens = []
+    for row in rows:
+        tokens.append(
+            _normalise_hash_token(
+                row.get("package_name"),
+                row.get("version_name"),
+                row.get("version_code"),
+                row.get("primary_path"),
+            )
+        )
+    for token in sorted(tokens):
+        digest.update(token.encode("utf-8"))
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
 def run_inventory_sync(
     serial: Optional[str],
     *,
     filter_name: Optional[str] = None,
     filter_fn: Optional[Callable[[Dict[str, object]], bool]] = None,
     interactive: bool = True,
+    progress_callback: ProgressCallback | None = None,
+    expected_total_seconds: Optional[float] = None,
 ) -> None:
     """Scan the device, sync package definitions, and display results."""
     if not serial:
@@ -83,6 +139,8 @@ def run_inventory_sync(
         print()
         print(text_blocks.headline("Inventory & database sync", width=70))
         print(status_messages.status("Collecting installed packages..."))
+    run_start = time.time()
+
     adb_utils.clear_package_caches(serial)
     package_names = adb_utils.list_packages(serial)
     if not package_names:
@@ -94,10 +152,23 @@ def run_inventory_sync(
         prompt_utils.press_enter_to_continue()
         return
 
+    total = len(package_names)
+    _emit_progress(
+        progress_callback,
+        {
+            "phase": "start",
+            "total": total,
+            "estimated_total_seconds": expected_total_seconds,
+        },
+    )
+
+    device_properties = adb_utils.get_basic_properties(serial)
+    fingerprint = device_properties.get("build_fingerprint") if device_properties else None
+
     metadata_rows: List[Dict[str, object]] = []
     package_definitions: Dict[str, Optional[str]] = {}
-    total = len(package_names)
     progress_interval = max(20, total // 20 or 1)
+    scan_start = time.time()
     for index, package_name in enumerate(package_names, start=1):
         paths = adb_utils.get_package_paths(serial, package_name)
         metadata = adb_utils.get_package_metadata(serial, package_name)
@@ -111,7 +182,49 @@ def run_inventory_sync(
             percentage = (index / total) * 100
             print(status_messages.status(f"Processed {index}/{total} packages ({percentage:.1f}%)."))
 
-    _persist_inventory(serial, metadata_rows)
+        if index % progress_interval == 0 or index == total:
+            elapsed = time.time() - scan_start
+            estimated_total = None
+            if index:
+                estimated_total = (elapsed / index) * total if elapsed else expected_total_seconds
+            eta = (estimated_total - elapsed) if estimated_total and estimated_total > elapsed else None
+            _emit_progress(
+                progress_callback,
+                {
+                    "phase": "progress",
+                    "processed": index,
+                    "total": total,
+                    "percentage": (index / total) * 100,
+                    "elapsed_seconds": elapsed,
+                    "eta_seconds": eta,
+                    "estimated_total_seconds": estimated_total or expected_total_seconds,
+                },
+            )
+
+    package_hash = _hash_rows(metadata_rows)
+    package_list_hash = inventory_meta.compute_name_hash(package_names)
+    package_signature_hash = inventory_meta.compute_signature_hash(
+        inventory_meta.snapshot_signatures(metadata_rows)
+    )
+    total_elapsed = time.time() - run_start
+    _persist_inventory(
+        serial,
+        metadata_rows,
+        package_hash=package_hash,
+        package_list_hash=package_list_hash,
+        package_signature_hash=package_signature_hash,
+        build_fingerprint=fingerprint,
+        duration_seconds=total_elapsed,
+    )
+
+    _emit_progress(
+        progress_callback,
+        {
+            "phase": "complete",
+            "total": total,
+            "elapsed_seconds": total_elapsed,
+        },
+    )
 
     synced = 0
     for pkg, name in package_definitions.items():
@@ -346,18 +459,38 @@ def _normalise_installer(installer: Optional[str]) -> Optional[str]:
     return installer
 
 
-def _persist_inventory(serial: str, rows: List[Dict[str, object]]) -> None:
+def _persist_inventory(
+    serial: str,
+    rows: List[Dict[str, object]],
+    *,
+    package_hash: Optional[str] = None,
+    package_list_hash: Optional[str] = None,
+    package_signature_hash: Optional[str] = None,
+    build_fingerprint: Optional[str] = None,
+    duration_seconds: Optional[float] = None,
+) -> None:
     """Persist inventory information under the state directory."""
     timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
     device_dir = _STATE_ROOT / serial / "inventory"
     device_dir.mkdir(parents=True, exist_ok=True)
 
-    payload = {
+    payload: Dict[str, object] = {
         "generated_at": datetime.utcnow().isoformat() + "Z",
         "device_serial": serial,
         "package_count": len(rows),
         "packages": rows,
     }
+
+    if package_hash:
+        payload["package_hash"] = package_hash
+    if package_list_hash:
+        payload["package_list_hash"] = package_list_hash
+    if package_signature_hash:
+        payload["package_signature_hash"] = package_signature_hash
+    if build_fingerprint:
+        payload["build_fingerprint"] = build_fingerprint
+    if duration_seconds is not None:
+        payload["duration_seconds"] = duration_seconds
 
     target_file = device_dir / f"inventory_{timestamp}.json"
     target_file.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
@@ -376,6 +509,18 @@ def _persist_inventory(serial: str, rows: List[Dict[str, object]]) -> None:
         category="device",
     )
     status_messages.print_status(f"Snapshot saved to {display_path}")
+
+    captured_at = datetime.utcnow().replace(tzinfo=timezone.utc)
+    meta = inventory_meta.InventoryMeta(
+        serial=serial,
+        captured_at=captured_at,
+        package_count=len(rows),
+        package_list_hash=package_list_hash,
+        package_signature_hash=package_signature_hash,
+        build_fingerprint=build_fingerprint,
+        duration_seconds=duration_seconds,
+    )
+    meta.write_files(timestamp)
 
 
 def _render_inventory_table(rows: List[Dict[str, object]]) -> None:
