@@ -1,4 +1,4 @@
-"""Rendering helpers for the world clock dashboard."""
+"""world_clock_display.py - Rendering helpers for the world clock dashboard."""
 
 from __future__ import annotations
 
@@ -134,7 +134,7 @@ def render_clock_overview(
         "Primary",
         "Local Ref",
         "Timezone",
-        "UTC",
+        "UTC±",
         "Local Time",
     ]
 
@@ -205,7 +205,7 @@ def _print_local_reference_details(
     label_display = local_label or "Local Reference"
     print(
         status_messages.status(
-            f"Local reference: {label_display} — {local_timezone} ({offset_long}) {formatted}",
+            f"Local reference — {label_display} ({local_timezone}, {offset_long}) · {formatted}",
             level="info",
         )
     )

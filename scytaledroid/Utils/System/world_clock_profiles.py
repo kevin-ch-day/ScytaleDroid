@@ -1,4 +1,4 @@
-"""Profiles and metadata for world clock presentations."""
+"""world_clock_profiles.py - Profiles and metadata for world clock presentations."""
 
 from __future__ import annotations
 
