@@ -20,6 +20,36 @@ DEVICE_STATE_FILE = "active_device.json"
 # Logging behaviour
 ENABLE_CONSOLE_LOGS = False
 
+# Harvest behaviour
+HARVEST_DEDUP_SHA256 = True
+HARVEST_KEEP_LAST = 1
+HARVEST_WRITE_DB = True
+HARVEST_WRITE_META = True
+HARVEST_META_FIELDS = (
+    "package_name",
+    "app_label",
+    "installer",
+    "version_name",
+    "version_code",
+    "file_name",
+    "file_size",
+    "source_path",
+    "local_path",
+    "sha256",
+    "sha1",
+    "md5",
+    "captured_at",
+    "session_stamp",
+    "device_serial",
+    "pull_mode",
+    "is_split_member",
+    "split_group_id",
+    "apk_id",
+    "occurrence_index",
+    "category",
+    "artifact",
+)
+
 # Device analysis tuning
 DEVICE_PROPERTY_KEYS = {
     "ro.product.brand": "brand",

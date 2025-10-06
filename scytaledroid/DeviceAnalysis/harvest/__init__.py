@@ -12,6 +12,7 @@ from .models import (
     ScopeSelection,
 )
 from .planner import build_harvest_plan
+from .quick_harvest import quick_harvest
 from .runner import execute_harvest
 from .scope import build_inventory_rows, reset_last_scope, select_package_scope
 from .summary import (
@@ -39,6 +40,7 @@ __all__ = [
     "ScopeSelection",
     "build_harvest_plan",
     "build_inventory_rows",
+    "quick_harvest",
     "execute_harvest",
     "preview_plan",
     "print_package_result",

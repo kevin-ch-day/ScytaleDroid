@@ -45,6 +45,9 @@ inventory to curated APK harvesting and repository ingestion.
 
 ### Harvest (tightening right now)
 
+- Detects when inventories are only soft-stale and routes to the
+  **quick-harvest** runner, which resolves live paths with `pm path` and skips
+  the legacy snapshot dependency entirely.
 - Presents a scope selector before any pulls. The default scope harvests only
   Play Store apps plus `/data` user apps.
 - Optional filters allow profile-only pulls, family targeting with a Google
@@ -54,8 +57,12 @@ inventory to curated APK harvesting and repository ingestion.
   artifacts are skipped on non-root devices.
 - Enforces filenames shaped like `com_package_name_<vercode>__artifact.apk`
   (e.g., `com_motorola_aiservices_281117118__split_config.arm64_v8a.apk`).
+- Deduplicates artifacts by `sha256`, optionally keeping the latest copy when
+  `HARVEST_KEEP_LAST` is enabled, and records any skips in the CLI summary.
+- Emits `*.meta.json` sidecars per artifact with configurable fields and writes
+  database rows when `HARVEST_WRITE_DB` remains enabled.
 - Inserts one repository row per artifact and prints each `apk_id` so analysts
-  can immediately find the files in the database.
+  can immediately find the files in the database when DB writes are active.
 
 ### Database integration (foundation for all phases)
 

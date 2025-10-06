@@ -63,7 +63,7 @@ class ArtifactResult:
     """Successful artifact harvest result."""
 
     file_name: str
-    apk_id: int
+    apk_id: Optional[int]
     dest_path: Path
     source_path: str
 
