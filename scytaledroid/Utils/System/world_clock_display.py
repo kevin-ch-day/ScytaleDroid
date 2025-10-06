@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 
 import zoneinfo
 
-from scytaledroid.Utils.DisplayUtils import colors, status_messages, table_utils
+from scytaledroid.Utils.DisplayUtils import status_messages, table_utils
 
 from .world_clock_profiles import ClockProfile, featured_timezones, get_profile
 
@@ -23,18 +23,26 @@ class ClockSnapshot:
     is_primary: bool
     is_local_reference: bool
     local_time: datetime
-    utc_offset: str
+    utc_offset_long: str
+    utc_offset_compact: str
     category: str
 
 
-def _format_offset(dt: datetime) -> str:
+def _format_offset(dt: datetime) -> tuple[str, str]:
     offset = dt.utcoffset()
     if offset is None:
-        return "UTC"
+        return "UTC", "+0"
     total_minutes = int(offset.total_seconds() // 60)
     hours, minutes = divmod(abs(total_minutes), 60)
     sign = "+" if total_minutes >= 0 else "-"
-    return f"UTC{sign}{hours:02d}:{minutes:02d}"
+    long_form = f"UTC{sign}{hours:02d}:{minutes:02d}"
+    if total_minutes == 0:
+        compact = "+0"
+    elif minutes == 0:
+        compact = f"{sign}{hours}"
+    else:
+        compact = f"{sign}{hours}:{minutes:02d}"
+    return long_form, compact
 
 
 def _snapshot_clocks(
@@ -60,7 +68,7 @@ def _snapshot_clocks(
             timezone_name = timezone_name or "Etc/UTC"
 
         profile = get_profile(label, timezone_name)
-        utc_offset = _format_offset(local_time if tz else now_utc)
+        utc_offset_long, utc_offset_compact = _format_offset(local_time if tz else now_utc)
 
         snapshots.append(
             ClockSnapshot(
@@ -70,7 +78,8 @@ def _snapshot_clocks(
                 is_primary=label == primary,
                 is_local_reference=label == local_label,
                 local_time=local_time,
-                utc_offset=utc_offset,
+                utc_offset_long=utc_offset_long,
+                utc_offset_compact=utc_offset_compact,
                 category=category,
             )
         )
@@ -125,13 +134,13 @@ def render_clock_overview(
         "Primary",
         "Local Ref",
         "Timezone",
-        "UTC Offset",
+        "UTC",
         "Local Time",
     ]
 
     rows = []
     for snapshot in snapshots:
-        marker = "★" if snapshot.is_primary else "•"
+        marker = "*" if snapshot.category == "configured" else ""
         primary_text = "Yes" if snapshot.is_primary else ""
         local_text = "Yes" if snapshot.is_local_reference else ""
         rows.append(
@@ -143,7 +152,7 @@ def render_clock_overview(
                 primary_text,
                 local_text,
                 snapshot.timezone,
-                snapshot.utc_offset,
+                snapshot.utc_offset_compact,
                 _format_display_time(snapshot.local_time),
             ]
         )
@@ -152,14 +161,14 @@ def render_clock_overview(
         for snapshot in featured:
             rows.append(
                 [
-                    "○",
+                    "",
                     snapshot.profile.city,
                     snapshot.profile.country,
                     snapshot.profile.region,
                     "",
                     "",
                     snapshot.timezone,
-                    snapshot.utc_offset,
+                    snapshot.utc_offset_compact,
                     _format_display_time(snapshot.local_time),
                 ]
             )
@@ -187,43 +196,18 @@ def _print_local_reference_details(
     try:
         tz = zoneinfo.ZoneInfo(local_timezone)
         now_local = datetime.now(tz)
-        offset = _format_offset(now_local)
+        offset_long, _ = _format_offset(now_local)
         formatted = _format_display_time(now_local)
     except Exception:
         formatted = "Unavailable"
-        offset = "UTC"
+        offset_long = "UTC"
 
     label_display = local_label or "Local Reference"
     print(
         status_messages.status(
-            f"Local reference — {label_display} ({local_timezone}) [{offset}] {formatted}",
+            f"Local reference: {label_display} — {local_timezone} ({offset_long}) {formatted}",
             level="info",
         )
     )
 
-
-def print_featured_snapshots() -> None:
-    """Display curated world times for Paris and London."""
-
-    palette = colors.get_palette()
-    heading = colors.apply("Paris & London reference clocks", palette.header, bold=True)
-    print(heading)
-
-    headers = ["City", "Country", "Region", "Timezone", "UTC Offset", "Local Time"]
-    rows = [
-        [
-            snapshot.profile.city,
-            snapshot.profile.country,
-            snapshot.profile.region,
-            snapshot.timezone,
-            snapshot.utc_offset,
-            _format_display_time(snapshot.local_time),
-        ]
-        for snapshot in _featured_snapshots()
-    ]
-
-    table_utils.render_table(headers, rows, accent_first_column=False)
-    print()
-
-
-__all__ = ["print_featured_snapshots", "render_clock_overview"]
+__all__ = ["render_clock_overview"]

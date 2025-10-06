@@ -13,7 +13,7 @@ from scytaledroid.Utils.DisplayUtils import (
     status_messages,
 )
 
-from .world_clock_display import print_featured_snapshots, render_clock_overview
+from .world_clock_display import render_clock_overview
 
 
 def utils_menu() -> None:
@@ -133,18 +133,13 @@ def configure_world_clocks() -> None:
             ),
             menu_utils.MenuOption(
                 "6",
-                "View featured cities",
-                "Paris and London snapshots (UTC alignment)",
-            ),
-            menu_utils.MenuOption(
-                "7",
                 "Refresh snapshot",
                 "Update the table with the current times",
                 hint="Useful when leaving the menu open during demos",
             ),
         ]
         menu_utils.print_menu(menu, boxed=False)
-        choice = prompt_utils.get_choice(["1", "2", "3", "4", "5", "6", "7", "0"])
+        choice = prompt_utils.get_choice(["1", "2", "3", "4", "5", "6", "0"])
 
         if choice == "0":
             break
@@ -303,9 +298,6 @@ def configure_world_clocks() -> None:
             )
 
         elif choice == "6":
-            print_featured_snapshots()
-
-        elif choice == "7":
             # Loop iteration will re-render the table with up-to-date times.
             print(status_messages.status("Refreshing clock snapshot...", level="info"))
 

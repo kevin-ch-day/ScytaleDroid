@@ -118,8 +118,8 @@ def featured_timezones() -> Iterable[tuple[str, str]]:
     """Return curated reference cities to highlight alongside the dashboard."""
 
     return (
+        ("London, United Kingdom", "Etc/UTC"),
         ("Paris, France", "Europe/Paris"),
-        ("London (UTC)", "Etc/UTC"),
     )
 
 

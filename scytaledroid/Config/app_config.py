@@ -23,7 +23,7 @@ DEFAULT_UI_TIMEZONES = {
     "Las Vegas, USA": "America/Los_Angeles",
     "Dubai, UAE": "Asia/Dubai",
     "Paris, France": "Europe/Paris",
-    "London (UTC)": "Etc/UTC",
+    "London, United Kingdom": "Etc/UTC",
 }
 UI_MAX_CLOCKS = 3
 UI_TIMEZONES = {
