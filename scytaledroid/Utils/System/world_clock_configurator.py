@@ -14,7 +14,6 @@ from .world_clock_state import (
     WorldClockState,
     load_state,
     remove_clock,
-    reset_to_defaults,
     set_primary_clock,
     upsert_clock,
 )
@@ -30,13 +29,16 @@ def configure_world_clocks() -> None:
             state.clocks,
             primary=state.primary,
             primary_timezone=state.primary_timezone,
-            max_clocks=state.max_clocks,
         )
 
         menu = _build_menu(state)
         menu_utils.print_menu(menu, boxed=False)
         valid_choices = [option.key for option in menu]
-        choice = prompt_utils.get_choice(valid_choices + ["0"])
+        disabled_choices = [option.key for option in menu if getattr(option, "disabled", False)]
+        choice = prompt_utils.get_choice(
+            valid_choices + ["0"],
+            disabled=disabled_choices,
+        )
 
         if choice == "0":
             break
@@ -53,36 +55,36 @@ def configure_world_clocks() -> None:
 def _build_menu(state: WorldClockState) -> list[menu_utils.MenuOption]:
     configured_count = len(state.clocks)
     remove_disabled = configured_count <= 1
+    add_disabled = configured_count >= state.max_clocks
 
     options = [
         menu_utils.MenuOption(
             "1",
             "Add or update clock",
-            f"Store up to {state.max_clocks} cities (currently {configured_count})",
-            hint="Reusing an existing label updates its timezone",
+            f"Manage up to {state.max_clocks} cities (currently {configured_count})",
+            disabled=add_disabled,
+            hint=(
+                "At capacity — update an existing label instead"
+                if add_disabled
+                else "Reusing an existing label updates its timezone"
+            ),
         ),
         menu_utils.MenuOption(
             "2",
             "Remove clock",
             "Keep at least one clock",
             disabled=remove_disabled,
-            hint="Remove is disabled when only one clock remains" if remove_disabled else None,
+            hint="Removal is disabled when only one clock remains" if remove_disabled else None,
         ),
         menu_utils.MenuOption(
             "3",
-            "Reset to defaults",
-            "Restore Minneapolis, Las Vegas, and Dubai",
-        ),
-        menu_utils.MenuOption(
-            "4",
             "Set primary clock",
             "Controls highlighted ordering",
         ),
         menu_utils.MenuOption(
-            "5",
-            "Refresh snapshot",
-            "Update the table with the current times",
-            hint="Helpful when leaving the menu open",
+            "4",
+            "Refresh time",
+            "Update the table with the latest snapshot",
         ),
     ]
     return options
@@ -143,14 +145,6 @@ def _handle_remove(state: WorldClockState) -> None:
         print(status_messages.status(f"No clock named '{cleaned_label}'.", level="warn"))
 
 
-def _handle_reset(state: WorldClockState) -> None:
-    if not prompt_utils.prompt_yes_no("Reset clocks to defaults?", default=False):
-        return
-
-    reset_to_defaults(state.max_clocks)
-    print(status_messages.status("World clocks reset to defaults.", level="success"))
-
-
 def _handle_set_primary(state: WorldClockState) -> None:
     if not state.clocks:
         print(status_messages.status("No clocks configured yet.", level="warn"))
@@ -178,9 +172,8 @@ def _handle_refresh(_: WorldClockState) -> None:
 _ACTION_HANDLERS: Dict[str, Callable[[WorldClockState], None]] = {
     "1": _handle_add_or_update,
     "2": _handle_remove,
-    "3": _handle_reset,
-    "4": _handle_set_primary,
-    "5": _handle_refresh,
+    "3": _handle_set_primary,
+    "4": _handle_refresh,
 }
 
 

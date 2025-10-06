@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 
 import zoneinfo
 
-from scytaledroid.Utils.DisplayUtils import status_messages, table_utils
+from scytaledroid.Utils.DisplayUtils import colors, status_messages, table_utils
 
 from .world_clock_profiles import ClockProfile, featured_timezones, get_profile
 
@@ -24,13 +24,14 @@ class ClockSnapshot:
     local_time: datetime
     utc_offset_long: str
     utc_offset_compact: str
+    utc_offset_minutes: int
     category: str
 
 
-def _format_offset(dt: datetime) -> tuple[str, str]:
+def _format_offset(dt: datetime) -> tuple[str, str, int]:
     offset = dt.utcoffset()
     if offset is None:
-        return "UTC", "+0"
+        return "UTC", "+0", 0
     total_minutes = int(offset.total_seconds() // 60)
     hours, minutes = divmod(abs(total_minutes), 60)
     sign = "+" if total_minutes >= 0 else "-"
@@ -41,7 +42,7 @@ def _format_offset(dt: datetime) -> tuple[str, str]:
         compact = f"{sign}{hours}"
     else:
         compact = f"{sign}{hours}:{minutes:02d}"
-    return long_form, compact
+    return long_form, compact, total_minutes
 
 
 def _snapshot_clocks(
@@ -66,7 +67,11 @@ def _snapshot_clocks(
             timezone_name = timezone_name or "Etc/UTC"
 
         profile = get_profile(label, timezone_name)
-        utc_offset_long, utc_offset_compact = _format_offset(local_time if tz else now_utc)
+        (
+            utc_offset_long,
+            utc_offset_compact,
+            utc_offset_minutes,
+        ) = _format_offset(local_time if tz else now_utc)
 
         snapshots.append(
             ClockSnapshot(
@@ -77,6 +82,7 @@ def _snapshot_clocks(
                 local_time=local_time,
                 utc_offset_long=utc_offset_long,
                 utc_offset_compact=utc_offset_compact,
+                utc_offset_minutes=utc_offset_minutes,
                 category=category,
             )
         )
@@ -106,15 +112,15 @@ def _describe_timezone(timezone_name: str, local_time: datetime) -> str:
     abbreviation = local_time.tzname() or "UTC"
     friendly = _FRIENDLY_TIMEZONE_NAMES.get(timezone_name)
     if friendly:
-        return f"{friendly} ({abbreviation})"
+        return f"{friendly} — {abbreviation}"
 
     if "/" in timezone_name:
         region, city = timezone_name.split("/", 1)
         city = city.replace("_", " ")
         region = region.replace("_", " ").title()
-        return f"{abbreviation} · {city}, {region}"
+        return f"{abbreviation} — {city}, {region}"
 
-    return f"{abbreviation} · {timezone_name}"
+    return f"{abbreviation} — {timezone_name}"
 
 
 def _format_display_time(dt: datetime) -> str:
@@ -128,7 +134,6 @@ def render_clock_overview(
     *,
     primary: Optional[str],
     primary_timezone: Optional[str],
-    max_clocks: int,
 ) -> None:
     """Render the configured clocks in a professional table with context."""
 
@@ -143,69 +148,66 @@ def render_clock_overview(
     )
     featured = _featured_snapshots()
 
+    configured_labels = {snapshot.label for snapshot in snapshots}
+    combined: List[ClockSnapshot] = list(snapshots)
+    combined.extend(snapshot for snapshot in featured if snapshot.label not in configured_labels)
+
+    combined.sort(
+        key=lambda snap: (
+            snap.utc_offset_minutes,
+            0 if snap.category == "configured" and snap.is_primary else 1 if snap.category == "configured" else 2,
+            snap.profile.city.lower(),
+        )
+    )
+
     headers = [
         "Display",
         "City",
         "Country",
         "Region",
-        "Primary",
         "Time Zone",
         "UTC±",
         "Local Time",
     ]
 
-    rows = []
-    configured_labels = set()
+    use_color = colors.colors_enabled()
+
+    def _role_cell(snapshot: ClockSnapshot) -> str:
+        if snapshot.category == "reference":
+            text = "○ Reference"
+            style = colors.style("muted") if use_color else ()
+        elif snapshot.is_primary:
+            text = "★ Primary"
+            style = colors.style("badge") if use_color else ()
+        else:
+            text = "• Configured"
+            style = colors.style("accent") if use_color else ()
+        return colors.apply(text, style) if use_color else text
+
+    rows: List[List[str]] = []
     primary_snapshot: Optional[ClockSnapshot] = None
-    for snapshot in snapshots:
-        configured_labels.add(snapshot.label)
-        marker = "*"
-        primary_text = "Yes" if snapshot.is_primary else ""
-        tz_display = _describe_timezone(snapshot.timezone, snapshot.local_time)
-        if snapshot.is_primary:
+    for snapshot in combined:
+        if snapshot.is_primary and snapshot.category == "configured":
             primary_snapshot = snapshot
+        tz_display = _describe_timezone(snapshot.timezone, snapshot.local_time)
+        local_time_display = _format_display_time(snapshot.local_time)
+        if use_color and snapshot.is_primary and snapshot.category == "configured":
+            local_time_display = colors.apply(local_time_display, colors.style("badge"))
         rows.append(
             [
-                marker,
+                _role_cell(snapshot),
                 snapshot.profile.city,
                 snapshot.profile.country,
                 snapshot.profile.region,
-                primary_text,
                 tz_display,
                 snapshot.utc_offset_compact,
-                _format_display_time(snapshot.local_time),
+                local_time_display,
             ]
         )
 
-    if featured:
-        for snapshot in featured:
-            if snapshot.label in configured_labels:
-                continue
-            tz_display = _describe_timezone(snapshot.timezone, snapshot.local_time)
-            rows.append(
-                [
-                    "",
-                    snapshot.profile.city,
-                    snapshot.profile.country,
-                    snapshot.profile.region,
-                    "",
-                    tz_display,
-                    snapshot.utc_offset_compact,
-                    _format_display_time(snapshot.local_time),
-                ]
-            )
-
-    table_utils.render_table(headers, rows, accent_first_column=False)
+    table_utils.render_table(headers, rows, accent_first_column=False, use_color=use_color)
     print()
 
-    print(
-        status_messages.status(
-            f"Configured {len(clocks)}/{max_clocks} clocks — maintain between 1 and {max_clocks}.",
-            level="info",
-        )
-    )
-
-    print()
     _print_primary_details(primary or None, primary_timezone, primary_snapshot)
 
 
@@ -224,7 +226,7 @@ def _print_primary_details(
         tz = zoneinfo.ZoneInfo("UTC")
         now_local = datetime.now(tz)
 
-    offset_long, _ = _format_offset(now_local)
+    offset_long, _, _ = _format_offset(now_local)
     formatted = _format_display_time(now_local)
     tz_description = _describe_timezone(primary_timezone, now_local)
 
