@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import re
 
-from typing import Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from scytaledroid.Config import app_config
 from scytaledroid.Utils.DisplayUtils import (
@@ -319,6 +319,7 @@ def run_inventory_sync(
         package_signature_hash=package_signature_hash,
         build_fingerprint=fingerprint,
         duration_seconds=total_elapsed,
+        snapshot_type="full",
     )
 
     _emit_progress(
@@ -519,7 +520,121 @@ def run_device_summary(serial: Optional[str]) -> None:
         print(text_blocks.headline("System components (preview)", width=70))
         table_utils.render_table(["Package", "Component", "Version", "Profile", "Split", "Path"], system_preview)
 
-    prompt_utils.press_enter_to_continue()
+        prompt_utils.press_enter_to_continue()
+
+
+def sync_subset(
+    packages: Sequence[object],
+    *,
+    serial: str,
+    progress_callback: ProgressCallback | None = None,
+) -> Optional[Path]:
+    """Capture a scoped inventory snapshot for ``packages`` only."""
+
+    if not serial:
+        raise ValueError("serial is required for sync_subset")
+
+    normalized: List[str] = []
+    seen: set[str] = set()
+    for entry in packages:
+        package_name: Optional[str]
+        if isinstance(entry, str):
+            package_name = entry.strip()
+        elif isinstance(entry, dict):
+            raw_name = entry.get("package_name")
+            package_name = raw_name.strip() if isinstance(raw_name, str) else None
+        else:
+            raw_name = getattr(entry, "package_name", None)
+            package_name = raw_name.strip() if isinstance(raw_name, str) else None
+
+        if not package_name:
+            continue
+        if package_name in seen:
+            continue
+        normalized.append(package_name)
+        seen.add(package_name)
+
+    if not normalized:
+        return None
+
+    total = len(normalized)
+    _emit_progress(
+        progress_callback,
+        {"phase": "start", "total": total},
+    )
+
+    device_properties = adb_utils.get_basic_properties(serial)
+    fingerprint = device_properties.get("build_fingerprint") if device_properties else None
+
+    canonical_metadata = _load_canonical_metadata(normalized)
+
+    metadata_rows: List[Dict[str, object]] = []
+    progress_interval = max(1, total // 10 or 1)
+    scan_start = time.time()
+    split_processed = 0
+
+    for index, package_name in enumerate(normalized, start=1):
+        paths = adb_utils.get_package_paths(serial, package_name)
+        metadata = adb_utils.get_package_metadata(serial, package_name)
+        package_key = package_name.lower()
+        canonical_entry = canonical_metadata.get(package_key)
+        entry = _compose_inventory_entry(package_name, paths, metadata, canonical_entry)
+        metadata_rows.append(entry)
+
+        if _split_count(entry) > 1:
+            split_processed += 1
+
+        if index % progress_interval == 0 or index == total:
+            elapsed = time.time() - scan_start
+            estimated_total = (elapsed / index) * total if index else None
+            eta = (estimated_total - elapsed) if estimated_total and estimated_total > elapsed else None
+            _emit_progress(
+                progress_callback,
+                {
+                    "phase": "progress",
+                    "processed": index,
+                    "total": total,
+                    "percentage": (index / total) * 100,
+                    "elapsed_seconds": elapsed,
+                    "eta_seconds": eta,
+                    "estimated_total_seconds": estimated_total,
+                    "split_processed": split_processed,
+                },
+            )
+
+    run_elapsed = time.time() - scan_start
+
+    package_hash = _hash_rows(metadata_rows)
+    package_list_hash = inventory_meta.compute_name_hash(normalized)
+    package_signature_hash = inventory_meta.compute_signature_hash(
+        inventory_meta.snapshot_signatures(metadata_rows)
+    )
+    scope_hash = inventory_meta.compute_scope_hash(metadata_rows)
+
+    snapshot_path = _persist_inventory(
+        serial,
+        metadata_rows,
+        package_hash=package_hash,
+        package_list_hash=package_list_hash,
+        package_signature_hash=package_signature_hash,
+        build_fingerprint=fingerprint,
+        duration_seconds=run_elapsed,
+        snapshot_type="subset",
+        scope_hash=scope_hash,
+        filename_suffix="subset",
+    )
+
+    _emit_progress(
+        progress_callback,
+        {
+            "phase": "complete",
+            "total": total,
+            "elapsed_seconds": run_elapsed,
+            "scope_hash": scope_hash,
+        },
+    )
+
+    return snapshot_path
 
 
 def _compose_inventory_entry(
@@ -651,6 +766,9 @@ def _persist_inventory(
     package_signature_hash: Optional[str] = None,
     build_fingerprint: Optional[str] = None,
     duration_seconds: Optional[float] = None,
+    snapshot_type: str = "full",
+    scope_hash: Optional[str] = None,
+    filename_suffix: Optional[str] = None,
 ) -> Path:
     """Persist inventory information under the state directory."""
     timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
@@ -664,6 +782,13 @@ def _persist_inventory(
         "packages": rows,
     }
 
+    if snapshot_type:
+        payload["snapshot_type"] = snapshot_type
+    if scope_hash:
+        payload["scope_hash"] = scope_hash
+    if filename_suffix:
+        payload["snapshot_variant"] = filename_suffix
+
     if package_hash:
         payload["package_hash"] = package_hash
     if package_list_hash:
@@ -675,11 +800,17 @@ def _persist_inventory(
     if duration_seconds is not None:
         payload["duration_seconds"] = duration_seconds
 
-    target_file = device_dir / f"inventory_{timestamp}.json"
-    target_file.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    suffix_segment = f".{filename_suffix}" if filename_suffix else ""
+    target_file = device_dir / f"inventory_{timestamp}{suffix_segment}.json"
+    payload_text = json.dumps(payload, indent=2, sort_keys=True)
+    target_file.write_text(payload_text, encoding="utf-8")
 
     latest_file = device_dir / "latest.json"
-    latest_file.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    latest_file.write_text(payload_text, encoding="utf-8")
+
+    if filename_suffix:
+        latest_suffix_file = device_dir / f"latest{suffix_segment}.json"
+        latest_suffix_file.write_text(payload_text, encoding="utf-8")
 
     resolved_path = target_file.resolve()
     try:
@@ -700,8 +831,11 @@ def _persist_inventory(
         package_signature_hash=package_signature_hash,
         build_fingerprint=build_fingerprint,
         duration_seconds=duration_seconds,
+        snapshot_type=snapshot_type,
+        scope_hash=scope_hash,
+        scope_size=len(rows),
     )
-    meta.write_files(timestamp)
+    meta.write_files(timestamp, suffix=filename_suffix)
 
     return display_path
 

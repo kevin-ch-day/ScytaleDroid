@@ -52,6 +52,9 @@ def get_latest_inventory_metadata(
 
     package_count: Optional[int]
     scope_hashes: Optional[Dict[str, str]] = None
+    snapshot_type: Optional[str] = None
+    snapshot_scope_hash: Optional[str] = None
+    snapshot_scope_size: Optional[int] = None
     if snapshot_meta:
         timestamp = snapshot_meta.captured_at
         package_count = snapshot_meta.package_count
@@ -60,6 +63,9 @@ def get_latest_inventory_metadata(
         build_fingerprint = snapshot_meta.build_fingerprint
         duration_seconds = snapshot_meta.duration_seconds
         scope_hashes = snapshot_meta.scope_hashes
+        snapshot_type = snapshot_meta.snapshot_type
+        snapshot_scope_hash = snapshot_meta.scope_hash
+        snapshot_scope_size = snapshot_meta.scope_size
     else:
         snapshot = inventory_module.load_latest_inventory(serial)
         if not snapshot:
@@ -116,6 +122,18 @@ def get_latest_inventory_metadata(
 
         duration_seconds = coerce_float(snapshot.get("duration_seconds"))
 
+        snapshot_type_value = snapshot.get("snapshot_type") or snapshot.get("type")
+        if isinstance(snapshot_type_value, str) and snapshot_type_value:
+            snapshot_type = snapshot_type_value
+        scope_hash_value = snapshot.get("scope_hash")
+        if isinstance(scope_hash_value, str) and scope_hash_value:
+            snapshot_scope_hash = scope_hash_value
+        scope_size_value = snapshot.get("scope_size")
+        if isinstance(scope_size_value, int):
+            snapshot_scope_size = scope_size_value
+        elif isinstance(scope_size_value, str) and scope_size_value.isdigit():
+            snapshot_scope_size = int(scope_size_value)
+
     metadata: Dict[str, object] = {"timestamp": timestamp}
     if package_count is not None:
         metadata["package_count"] = package_count
@@ -129,6 +147,12 @@ def get_latest_inventory_metadata(
         metadata["duration_seconds"] = duration_seconds
     if scope_hashes:
         metadata["scope_hashes"] = dict(scope_hashes)
+    if snapshot_type:
+        metadata["snapshot_type"] = snapshot_type
+    if snapshot_scope_hash:
+        metadata["scope_hash"] = snapshot_scope_hash
+    if snapshot_scope_size is not None:
+        metadata["snapshot_scope_size"] = snapshot_scope_size
 
     normalized_scope = _normalize_scope_entries(scope_packages) if scope_packages else []
     resolved_scope_id = scope_id
@@ -141,6 +165,7 @@ def get_latest_inventory_metadata(
 
     previous_scope_hash: Optional[str] = None
     scope_hash_changed = False
+    subset_scope_match = False
     if normalized_scope:
         metadata["scope_hash_id"] = resolved_scope_id
         if expected_scope_hash:
@@ -151,6 +176,14 @@ def get_latest_inventory_metadata(
                 metadata["previous_scope_hash"] = previous_scope_hash
                 if expected_scope_hash:
                     scope_hash_changed = expected_scope_hash != previous_scope_hash
+        if (
+            snapshot_type == "subset"
+            and snapshot_scope_hash
+            and expected_scope_hash
+            and snapshot_scope_hash == expected_scope_hash
+        ):
+            subset_scope_match = True
+            scope_hash_changed = False
         metadata["scope_hash_changed"] = scope_hash_changed
 
         if (
@@ -174,6 +207,8 @@ def get_latest_inventory_metadata(
     else:
         metadata.setdefault("scope_hash_changed", False)
 
+    metadata["subset_scope_match"] = subset_scope_match
+
     if not with_current_state:
         return metadata
 
@@ -189,22 +224,17 @@ def get_latest_inventory_metadata(
         current_fingerprint = device_props.get("build_fingerprint")
 
     packages_changed = False
-    if package_signature_hash and current_signature_hash:
-        packages_changed = package_signature_hash != current_signature_hash
-    elif package_list_hash and current_hash:
-        packages_changed = package_list_hash != current_hash
-    elif package_count is not None and package_count != current_count:
-        packages_changed = True
+    if snapshot_type != "subset":
+        if package_signature_hash and current_signature_hash:
+            packages_changed = package_signature_hash != current_signature_hash
+        elif package_list_hash and current_hash:
+            packages_changed = package_list_hash != current_hash
+        elif package_count is not None and package_count != current_count:
+            packages_changed = True
 
     fingerprint_changed = False
     if build_fingerprint and current_fingerprint:
         fingerprint_changed = build_fingerprint != current_fingerprint
-
-    state_changed = (
-        packages_changed
-        or fingerprint_changed
-        or bool(metadata.get("scope_hash_changed"))
-    )
 
     metadata["current_package_count"] = current_count
     if current_hash:
@@ -213,8 +243,6 @@ def get_latest_inventory_metadata(
         metadata["current_package_signature_hash"] = current_signature_hash
     if current_fingerprint:
         metadata["current_build_fingerprint"] = current_fingerprint
-    metadata["state_changed"] = state_changed
-    metadata["packages_changed"] = packages_changed
     metadata["build_fingerprint_changed"] = fingerprint_changed
 
     estimated_duration = None
@@ -227,6 +255,7 @@ def get_latest_inventory_metadata(
     if estimated_duration is not None:
         metadata["estimated_duration_seconds"] = estimated_duration
 
+    current_scope_hash = None
     if normalized_scope and expected_scope_hash:
         scope_names = {entry["package_name"] for entry in normalized_scope}
         filtered_scope: List[Dict[str, object]] = []
@@ -248,6 +277,25 @@ def get_latest_inventory_metadata(
         metadata["scope_changed"] = scope_changed
     else:
         metadata.setdefault("scope_changed", False)
+
+    if snapshot_type == "subset":
+        if subset_scope_match and current_scope_hash:
+            packages_changed = current_scope_hash != snapshot_scope_hash
+        elif subset_scope_match and not current_scope_hash:
+            packages_changed = True
+        elif normalized_scope:
+            packages_changed = True
+        metadata["packages_changed"] = packages_changed
+    else:
+        metadata["packages_changed"] = packages_changed
+
+    final_packages_changed = bool(metadata.get("packages_changed"))
+    state_changed = (
+        final_packages_changed
+        or fingerprint_changed
+        or bool(metadata.get("scope_hash_changed"))
+    )
+    metadata["state_changed"] = state_changed
 
     return metadata
 

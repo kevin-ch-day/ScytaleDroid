@@ -27,11 +27,23 @@ class InventoryMeta:
     package_signature_hash: Optional[str] = None
     build_fingerprint: Optional[str] = None
     duration_seconds: Optional[float] = None
+    snapshot_type: Optional[str] = None
+    scope_hash: Optional[str] = None
+    scope_size: Optional[int] = None
     scope_hashes: Optional[Dict[str, str]] = None
 
     def to_payload(self) -> dict:
         payload = asdict(self)
         payload["captured_at"] = self.captured_at.astimezone(timezone.utc).isoformat()
+        snapshot_type = payload.pop("snapshot_type", None)
+        if snapshot_type:
+            payload["type"] = snapshot_type
+        scope_hash = payload.get("scope_hash")
+        if scope_hash is None:
+            payload.pop("scope_hash", None)
+        scope_size = payload.get("scope_size")
+        if scope_size is None:
+            payload.pop("scope_size", None)
         if self.scope_hashes is None:
             payload.pop("scope_hashes", None)
         return payload
@@ -82,6 +94,22 @@ class InventoryMeta:
             if filtered:
                 scope_hashes = filtered
 
+        snapshot_type = payload.get("type") or payload.get("snapshot_type")
+        if not isinstance(snapshot_type, str):
+            snapshot_type = None
+
+        scope_hash = payload.get("scope_hash")
+        if not isinstance(scope_hash, str):
+            scope_hash = None
+
+        scope_size_value = payload.get("scope_size")
+        if isinstance(scope_size_value, int):
+            scope_size = scope_size_value
+        elif isinstance(scope_size_value, str) and scope_size_value.isdigit():
+            scope_size = int(scope_size_value)
+        else:
+            scope_size = None
+
         return InventoryMeta(
             serial=serial,
             captured_at=captured_at,
@@ -90,10 +118,13 @@ class InventoryMeta:
             package_signature_hash=package_signature_hash,
             build_fingerprint=fingerprint,
             duration_seconds=duration_value,
+            snapshot_type=snapshot_type,
+            scope_hash=scope_hash,
+            scope_size=scope_size,
             scope_hashes=scope_hashes,
         )
 
-    def write_files(self, timestamp: str) -> None:
+    def write_files(self, timestamp: str, *, suffix: Optional[str] = None) -> None:
         base_dir = _state_root() / self.serial / "inventory"
         base_dir.mkdir(parents=True, exist_ok=True)
 
@@ -101,8 +132,13 @@ class InventoryMeta:
         latest_path = base_dir / "latest.meta.json"
         latest_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
+        if suffix:
+            suffix_path = base_dir / f"latest.{suffix}.meta.json"
+            suffix_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
         if timestamp:
-            history_path = base_dir / f"inventory_{timestamp}.meta.json"
+            suffix_segment = f".{suffix}" if suffix else ""
+            history_path = base_dir / f"inventory_{timestamp}{suffix_segment}.meta.json"
             history_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
