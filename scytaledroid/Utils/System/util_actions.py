@@ -1,4 +1,4 @@
-"""util_actions.py - Shared utility submenu actions."""
+"""util_actions.py - Standalone utility actions for the system menu."""
 
 from __future__ import annotations
 

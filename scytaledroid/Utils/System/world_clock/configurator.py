@@ -9,6 +9,7 @@ from typing import Callable, Dict
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 
 from .display import render_clock_overview
+from .log_alignment import derive_reference_from_log
 from .state import (
     ClockLimitError,
     MinimumClockError,
@@ -198,7 +199,12 @@ def _handle_reference(state: WorldClockState) -> None:
 
     options = [
         menu_utils.MenuOption("1", "Live system time", "Always show the current moment"),
-        menu_utils.MenuOption("2", "Custom reference", "Match logs or demo timelines"),
+        menu_utils.MenuOption("2", "Custom reference", "Manually set date and time"),
+        menu_utils.MenuOption(
+            "3",
+            "Derive from log timestamp",
+            "Preview alignment and optionally adopt the result",
+        ),
     ]
     menu_utils.print_menu(options, boxed=False)
     choice = prompt_utils.get_choice([opt.key for opt in options] + ["0"], default="1")
@@ -208,6 +214,10 @@ def _handle_reference(state: WorldClockState) -> None:
     if choice == "1":
         set_reference_now()
         print(status_messages.status("Reference reset to live time.", level="success"))
+        return
+
+    if choice == "3":
+        derive_reference_from_log(state)
         return
 
     label = prompt_utils.prompt_text(

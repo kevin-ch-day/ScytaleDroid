@@ -2,6 +2,7 @@
 
 from .configurator import configure_world_clocks
 from .display import render_clock_overview
+from .log_alignment import derive_reference_from_log
 from .state import (
     ClockLimitError,
     ClockReference,
@@ -26,6 +27,7 @@ __all__ = [
     "WorldClockError",
     "WorldClockState",
     "configure_world_clocks",
+    "derive_reference_from_log",
     "load_state",
     "remove_clock",
     "render_clock_overview",

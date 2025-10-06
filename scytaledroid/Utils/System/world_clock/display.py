@@ -32,7 +32,7 @@ class ClockSnapshot:
     dst_offset_change: Optional[int]
 
 
-def _format_offset(dt: datetime) -> tuple[str, str, int]:
+def format_offset(dt: datetime) -> tuple[str, str, int]:
     offset = dt.utcoffset()
     if offset is None:
         return "UTC", "+0", 0
@@ -49,7 +49,7 @@ def _format_offset(dt: datetime) -> tuple[str, str, int]:
     return long_form, compact, total_minutes
 
 
-def _dst_details(
+def compute_dst_details(
     tz: Optional[zoneinfo.ZoneInfo],
     reference_utc: datetime,
 ) -> tuple[str, Optional[datetime], Optional[int]]:
@@ -86,7 +86,7 @@ def _dst_details(
     return status, next_change, offset_change
 
 
-def _snapshot_clocks(
+def snapshot_clocks(
     clocks: Dict[str, str],
     *,
     primary: Optional[str],
@@ -113,8 +113,8 @@ def _snapshot_clocks(
             utc_offset_long,
             utc_offset_compact,
             utc_offset_minutes,
-        ) = _format_offset(local_time if tz else anchor_utc)
-        dst_status, next_change, offset_change = _dst_details(tz, anchor_utc)
+        ) = format_offset(local_time if tz else anchor_utc)
+        dst_status, next_change, offset_change = compute_dst_details(tz, anchor_utc)
 
         snapshots.append(
             ClockSnapshot(
@@ -136,9 +136,9 @@ def _snapshot_clocks(
     return snapshots
 
 
-def _featured_snapshots(reference: ClockReference) -> List[ClockSnapshot]:
+def featured_snapshots(reference: ClockReference) -> List[ClockSnapshot]:
     featured = {label: tz for label, tz in featured_timezones()}
-    return _snapshot_clocks(
+    return snapshot_clocks(
         featured,
         primary=None,
         category="reference",
@@ -155,7 +155,7 @@ _FRIENDLY_TIMEZONE_NAMES = {
 }
 
 
-def _describe_timezone(timezone_name: str, local_time: datetime) -> str:
+def describe_timezone(timezone_name: str, local_time: datetime) -> str:
     abbreviation = local_time.tzname() or "UTC"
     friendly = _FRIENDLY_TIMEZONE_NAMES.get(timezone_name)
     if friendly:
@@ -170,7 +170,48 @@ def _describe_timezone(timezone_name: str, local_time: datetime) -> str:
     return f"{abbreviation} — {timezone_name}"
 
 
-def _format_display_time(dt: datetime) -> str:
+def format_dst_status_text(
+    status: str,
+    next_change: Optional[datetime],
+    offset_change: Optional[int],
+    *,
+    use_color: bool = False,
+) -> str:
+    status_map = {
+        "daylight": "DST active",
+        "standard": "Standard",
+        "none": "No DST",
+        "unknown": "Unknown",
+    }
+    text = status_map.get(status, status)
+
+    if next_change is not None:
+        change_str = next_change.strftime("%b %d %Y %H:%M")
+        delta = offset_change or 0
+        if delta:
+            hours, minutes = divmod(abs(delta), 60)
+            change_delta = f"{'+' if delta > 0 else '-'}{hours}h"
+            if minutes:
+                change_delta += f"{minutes:02d}m"
+            text += f" → {change_str} ({change_delta})"
+        else:
+            text += f" → {change_str}"
+
+    if not use_color:
+        return text
+
+    if status == "daylight":
+        style = colors.style("badge")
+    elif status == "standard":
+        style = colors.style("accent")
+    elif status == "none":
+        style = colors.style("muted")
+    else:
+        style = colors.style("warning")
+    return colors.apply(text, style)
+
+
+def format_display_time(dt: datetime) -> str:
     time_part = dt.strftime("%I:%M %p").lstrip("0")
     date_part = f"{dt.month}-{dt.day}-{dt.year}"
     return f"{date_part} {time_part}"
@@ -189,13 +230,13 @@ def render_clock_overview(
         print(status_messages.status("No world clocks configured.", level="warn"))
         return
 
-    snapshots = _snapshot_clocks(
+    snapshots = snapshot_clocks(
         clocks,
         primary=primary,
         category="configured",
         reference=reference,
     )
-    featured = _featured_snapshots(reference)
+    featured = featured_snapshots(reference)
 
     configured_labels = {snapshot.label for snapshot in snapshots}
     combined: List[ClockSnapshot] = list(snapshots)
@@ -234,47 +275,13 @@ def render_clock_overview(
             style = colors.style("accent") if use_color else ()
         return colors.apply(text, style) if use_color else text
 
-    def _dst_cell(snapshot: ClockSnapshot) -> str:
-        status_map = {
-            "daylight": "DST active",
-            "standard": "Standard",
-            "none": "No DST",
-            "unknown": "Unknown",
-        }
-        text = status_map.get(snapshot.dst_status, snapshot.dst_status)
-
-        if snapshot.dst_next_change is not None:
-            change_str = snapshot.dst_next_change.strftime("%b %d %Y %H:%M")
-            delta = snapshot.dst_offset_change or 0
-            if delta:
-                hours, minutes = divmod(abs(delta), 60)
-                change_delta = f"{'+' if delta > 0 else '-'}{hours}h"
-                if minutes:
-                    change_delta += f"{minutes:02d}m"
-                text += f" → {change_str} ({change_delta})"
-            else:
-                text += f" → {change_str}"
-
-        if use_color:
-            if snapshot.dst_status == "daylight":
-                style = colors.style("badge")
-            elif snapshot.dst_status == "standard":
-                style = colors.style("accent")
-            elif snapshot.dst_status == "none":
-                style = colors.style("muted")
-            else:
-                style = colors.style("warning")
-            return colors.apply(text, style)
-
-        return text
-
     rows: List[List[str]] = []
     primary_snapshot: Optional[ClockSnapshot] = None
     for snapshot in combined:
         if snapshot.is_primary and snapshot.category == "configured":
             primary_snapshot = snapshot
-        tz_display = _describe_timezone(snapshot.timezone, snapshot.local_time)
-        local_time_display = _format_display_time(snapshot.local_time)
+        tz_display = describe_timezone(snapshot.timezone, snapshot.local_time)
+        local_time_display = format_display_time(snapshot.local_time)
         if use_color and snapshot.is_primary and snapshot.category == "configured":
             local_time_display = colors.apply(local_time_display, colors.style("badge"))
         rows.append(
@@ -286,7 +293,12 @@ def render_clock_overview(
                 tz_display,
                 snapshot.utc_offset_compact,
                 local_time_display,
-                _dst_cell(snapshot),
+                format_dst_status_text(
+                    snapshot.dst_status,
+                    snapshot.dst_next_change,
+                    snapshot.dst_offset_change,
+                    use_color=use_color,
+                ),
             ]
         )
 
@@ -313,15 +325,15 @@ def _print_primary_details(
         tz = zoneinfo.ZoneInfo("UTC")
         now_local = datetime.now(tz)
 
-    offset_long, _, _ = _format_offset(now_local)
-    formatted = _format_display_time(now_local)
-    tz_description = _describe_timezone(primary_timezone, now_local)
+    offset_long, _, _ = format_offset(now_local)
+    formatted = format_display_time(now_local)
+    tz_description = describe_timezone(primary_timezone, now_local)
 
     dst_note = ""
     if snapshot is not None:
-        tz_description = _describe_timezone(snapshot.timezone, snapshot.local_time)
+        tz_description = describe_timezone(snapshot.timezone, snapshot.local_time)
         offset_long = snapshot.utc_offset_long
-        formatted = _format_display_time(snapshot.local_time)
+        formatted = format_display_time(snapshot.local_time)
         if snapshot.dst_status == "daylight":
             dst_note = " — DST active"
         elif snapshot.dst_status == "standard":
@@ -346,8 +358,8 @@ def _print_reference_details(reference: ClockReference) -> None:
         tz_name = "UTC"
 
     localized = reference.utc.astimezone(tz)
-    offset_long, _, _ = _format_offset(localized)
-    formatted = _format_display_time(localized)
+    offset_long, _, _ = format_offset(localized)
+    formatted = format_display_time(localized)
     label = reference.label or "Live (current time)"
     prefix = "Custom reference" if reference.mode == "custom" else "Live reference"
 
@@ -404,4 +416,14 @@ def _print_dst_transitions(snapshots: List[ClockSnapshot]) -> None:
             )
         )
 
-__all__ = ["render_clock_overview"]
+__all__ = [
+    "ClockSnapshot",
+    "compute_dst_details",
+    "describe_timezone",
+    "featured_snapshots",
+    "format_display_time",
+    "format_dst_status_text",
+    "format_offset",
+    "render_clock_overview",
+    "snapshot_clocks",
+]
