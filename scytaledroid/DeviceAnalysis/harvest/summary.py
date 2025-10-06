@@ -136,6 +136,24 @@ def render_harvest_summary(
     print(text_blocks.headline("APK Harvest Summary", width=70))
     print(status_messages.status(f"Scope: {selection.label}"))
     print(status_messages.status(f"Pull mode: {pull_mode}"))
+    guard_policy = selection.metadata.get("inventory_policy")
+    if guard_policy:
+        policy_label = "Quick harvest" if guard_policy == "quick" else "Inventory refresh"
+        stale_level = selection.metadata.get("inventory_stale_level")
+        if isinstance(stale_level, str) and stale_level:
+            policy_label = f"{policy_label} (stale={stale_level})"
+        print(status_messages.status(f"Inventory policy: {policy_label}"))
+        guard_reason = selection.metadata.get("inventory_guard_reason")
+        if isinstance(guard_reason, str) and guard_reason:
+            print(status_messages.status(guard_reason, level="info"))
+    scope_hash_changed = selection.metadata.get("inventory_scope_hash_changed")
+    if scope_hash_changed:
+        print(
+            status_messages.status(
+                "Selected scope differs from the last recorded inventory.",
+                level="warn",
+            )
+        )
     print(status_messages.status(f"Packages processed: {total_packages}"))
     print(status_messages.status(f"Files written: {files_written}"))
     if pull_errors:

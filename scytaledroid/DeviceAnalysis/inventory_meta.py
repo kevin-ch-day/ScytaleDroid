@@ -7,7 +7,7 @@ import hashlib
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Iterator, Optional, Sequence, Tuple
+from typing import Dict, Iterable, Iterator, Mapping, Optional, Sequence, Tuple
 
 from scytaledroid.Config import app_config
 
@@ -27,10 +27,13 @@ class InventoryMeta:
     package_signature_hash: Optional[str] = None
     build_fingerprint: Optional[str] = None
     duration_seconds: Optional[float] = None
+    scope_hashes: Optional[Dict[str, str]] = None
 
     def to_payload(self) -> dict:
         payload = asdict(self)
         payload["captured_at"] = self.captured_at.astimezone(timezone.utc).isoformat()
+        if self.scope_hashes is None:
+            payload.pop("scope_hashes", None)
         return payload
 
     @staticmethod
@@ -69,6 +72,16 @@ class InventoryMeta:
         else:
             duration_value = None
 
+        scope_hashes_payload = payload.get("scope_hashes")
+        scope_hashes: Optional[Dict[str, str]] = None
+        if isinstance(scope_hashes_payload, dict):
+            filtered: Dict[str, str] = {}
+            for key, value in scope_hashes_payload.items():
+                if isinstance(key, str) and isinstance(value, str):
+                    filtered[key] = value
+            if filtered:
+                scope_hashes = filtered
+
         return InventoryMeta(
             serial=serial,
             captured_at=captured_at,
@@ -77,6 +90,7 @@ class InventoryMeta:
             package_signature_hash=package_signature_hash,
             build_fingerprint=fingerprint,
             duration_seconds=duration_value,
+            scope_hashes=scope_hashes,
         )
 
     def write_files(self, timestamp: str) -> None:
@@ -136,6 +150,68 @@ def compute_signature_hash(
     return digest.hexdigest()
 
 
+def compute_scope_hash(packages: Sequence[Mapping[str, object]]) -> Optional[str]:
+    tokens = []
+    for entry in packages:
+        if not isinstance(entry, Mapping):
+            continue
+        package_name = entry.get("package_name")
+        if not isinstance(package_name, str) or not package_name:
+            continue
+        version_code = entry.get("version_code")
+        if isinstance(version_code, (int, float)):
+            version_token = str(int(version_code))
+        elif isinstance(version_code, str) and version_code.strip():
+            version_token = version_code.strip()
+        else:
+            version_token = ""
+        tokens.append(f"{package_name}:{version_token}" if version_token else package_name)
+
+    if not tokens:
+        return None
+
+    digest = hashlib.sha256()
+    for token in sorted(tokens):
+        digest.update(token.encode("utf-8"))
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
+def update_scope_hash(serial: str, scope_id: str, scope_hash: Optional[str]) -> Optional[Dict[str, str]]:
+    base_dir = _state_root() / serial / "inventory"
+    latest_path = base_dir / "latest.meta.json"
+    if not latest_path.exists():
+        return None
+
+    try:
+        payload = json.loads(latest_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+
+    existing = payload.get("scope_hashes")
+    scope_hashes: Dict[str, str] = {}
+    if isinstance(existing, dict):
+        for key, value in existing.items():
+            if isinstance(key, str) and isinstance(value, str):
+                scope_hashes[key] = value
+
+    if scope_hash:
+        scope_hashes[scope_id] = scope_hash
+    elif scope_id in scope_hashes:
+        del scope_hashes[scope_id]
+
+    if scope_hashes:
+        payload["scope_hashes"] = scope_hashes
+    elif "scope_hashes" in payload:
+        payload.pop("scope_hashes")
+
+    latest_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    return scope_hashes or None
+
+
 def snapshot_signatures(rows: Sequence[dict]) -> Iterator[Tuple[str, Optional[str], Optional[str]]]:
     for row in rows:
         if not isinstance(row, dict):
@@ -193,5 +269,7 @@ __all__ = [
     "load_latest",
     "compute_name_hash",
     "compute_signature_hash",
+    "compute_scope_hash",
+    "update_scope_hash",
     "snapshot_signatures",
 ]

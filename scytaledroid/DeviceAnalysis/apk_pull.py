@@ -10,6 +10,7 @@ from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis import adb_utils, harvest, inventory
 from scytaledroid.DeviceAnalysis.device_menu.inventory_guard import (
     INVENTORY_STALE_SECONDS,
+    get_last_guard_decision,
     get_latest_inventory_metadata,
 )
 from scytaledroid.Utils.DisplayUtils import (
@@ -84,6 +85,7 @@ def pull_apks(serial: Optional[str]) -> None:
     guard_metadata: Optional[Dict[str, object]] = get_latest_inventory_metadata(
         serial, with_current_state=True
     )
+    guard_decision = get_last_guard_decision()
     pull_mode: Optional[str] = None
 
     while True:
@@ -100,6 +102,31 @@ def pull_apks(serial: Optional[str]) -> None:
         if not selection.packages:
             print(status_messages.status("Selection contains no packages. Nothing to pull.", level="warn"))
             continue
+
+        scoped_metadata = get_latest_inventory_metadata(
+            serial,
+            with_current_state=True,
+            scope_packages=selection.packages,
+        )
+        if scoped_metadata:
+            guard_metadata = scoped_metadata
+        guard_decision = get_last_guard_decision()
+        if guard_decision:
+            policy_value = guard_decision.get("policy")
+            if policy_value:
+                selection.metadata["inventory_policy"] = policy_value
+            stale_level_value = guard_decision.get("stale_level")
+            if stale_level_value:
+                selection.metadata["inventory_stale_level"] = stale_level_value
+            reason_value = guard_decision.get("reason")
+            if reason_value:
+                selection.metadata["inventory_guard_reason"] = reason_value
+            scope_hash_delta = guard_decision.get("scope_hash_changed")
+            if scope_hash_delta is not None:
+                selection.metadata["inventory_scope_hash_changed"] = bool(scope_hash_delta)
+            scope_delta = guard_decision.get("scope_changed")
+            if scope_delta is not None:
+                selection.metadata["inventory_scope_changed"] = bool(scope_delta)
 
         include_system_partitions = (
             selection.kind in {"families", "everything"} and is_rooted
@@ -247,8 +274,21 @@ def _device_is_rooted(serial: str) -> bool:
 
 
 def _prefer_quick_mode(metadata: Optional[Dict[str, object]]) -> bool:
+    decision = get_last_guard_decision()
+    policy = decision.get("policy") if isinstance(decision, dict) else None
+    if policy == "quick":
+        return True
+
+    stale_level = decision.get("stale_level") if isinstance(decision, dict) else None
+    if stale_level == "soft":
+        return True
+
     if not metadata:
         return False
+
+    metadata_stale_level = metadata.get("stale_level")
+    if isinstance(metadata_stale_level, str) and metadata_stale_level == "soft":
+        return True
 
     timestamp = metadata.get("timestamp")
     if not isinstance(timestamp, datetime):
