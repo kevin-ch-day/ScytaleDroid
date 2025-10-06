@@ -23,7 +23,7 @@ DEFAULT_UI_TIMEZONES = {
     "Las Vegas, USA": "America/Los_Angeles",
     "Dubai, UAE": "Asia/Dubai",
     "Paris, France": "Europe/Paris",
-    "London (UTC)": "Etc/UTC",
+    "London, United Kingdom": "Etc/UTC",
 }
 UI_MAX_CLOCKS = 3
 UI_TIMEZONES = {
@@ -31,6 +31,12 @@ UI_TIMEZONES = {
     for label, tz in list(DEFAULT_UI_TIMEZONES.items())[:UI_MAX_CLOCKS]
 }
 UI_PRIMARY_CLOCK = "Minneapolis, USA"
+UI_LOCAL_TIME_LABEL = UI_PRIMARY_CLOCK
+UI_LOCAL_TIMEZONE = UI_TIMEZONES.get(UI_LOCAL_TIME_LABEL, "Etc/UTC")
+UI_CLOCK_REFERENCE_MODE = "now"
+UI_CLOCK_REFERENCE_LABEL = "Live (current time)"
+UI_CLOCK_REFERENCE_TIMEZONE = UI_LOCAL_TIMEZONE
+UI_CLOCK_REFERENCE_UTC = None
 
 # Logging behaviour
 ENABLE_CONSOLE_LOGS = False

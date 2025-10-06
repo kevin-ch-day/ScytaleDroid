@@ -1,4 +1,4 @@
-"""System-level utility menu."""
+"""__init__.py - System-level utility menu exports."""
 
 from .utils_menu import utils_menu
 
