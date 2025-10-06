@@ -2,34 +2,30 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict
 
-import zoneinfo
-
-from scytaledroid.Config import app_config
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 
 from .world_clock_display import render_clock_overview
-
-
-@dataclass
-class ClockState:
-    """Current configuration snapshot for the world clock workflow."""
-
-    clocks: Dict[str, str]
-    defaults: Dict[str, str]
-    max_clocks: int
-    primary: Optional[str]
-    local_label: Optional[str]
-    local_timezone: Optional[str]
+from .world_clock_state import (
+    ClockLimitError,
+    MinimumClockError,
+    TimezoneValidationError,
+    WorldClockState,
+    load_state,
+    remove_clock,
+    reset_to_defaults,
+    set_local_reference,
+    set_primary_clock,
+    upsert_clock,
+)
 
 
 def configure_world_clocks() -> None:
     """Entry point for the interactive world clock configuration loop."""
 
     while True:
-        state = _load_state()
+        state = load_state()
 
         render_clock_overview(
             state.clocks,
@@ -41,7 +37,8 @@ def configure_world_clocks() -> None:
 
         menu = _build_menu(state)
         menu_utils.print_menu(menu, boxed=False)
-        choice = prompt_utils.get_choice(["1", "2", "3", "4", "5", "6", "0"])
+        valid_choices = [option.key for option in menu]
+        choice = prompt_utils.get_choice(valid_choices + ["0"])
 
         if choice == "0":
             break
@@ -55,57 +52,27 @@ def configure_world_clocks() -> None:
         print()
 
 
-def _load_state() -> ClockState:
-    clocks = dict(getattr(app_config, "UI_TIMEZONES", {}))
-    defaults = dict(getattr(app_config, "DEFAULT_UI_TIMEZONES", {}))
-    configured_max = int(getattr(app_config, "UI_MAX_CLOCKS", 3))
-    max_clocks = max(1, min(configured_max, 3))
-
-    if len(clocks) > max_clocks:
-        trimmed = list(clocks.items())[:max_clocks]
-        clocks = dict(trimmed)
-        app_config.UI_TIMEZONES = dict(trimmed)
-
-    primary = getattr(app_config, "UI_PRIMARY_CLOCK", next(iter(clocks), None))
-    if primary not in clocks:
-        primary = next(iter(clocks), None)
-        app_config.UI_PRIMARY_CLOCK = primary
-
-    local_label = getattr(app_config, "UI_LOCAL_TIME_LABEL", primary)
-    local_timezone = getattr(app_config, "UI_LOCAL_TIMEZONE", None)
-
-    if local_label and local_label in clocks:
-        local_timezone = clocks.get(local_label)
-    if not local_timezone:
-        local_timezone = clocks.get(primary) or "Etc/UTC"
-        app_config.UI_LOCAL_TIMEZONE = local_timezone
-
-    app_config.UI_LOCAL_TIME_LABEL = local_label or primary
-    local_label = app_config.UI_LOCAL_TIME_LABEL
-
-    return ClockState(
-        clocks=clocks,
-        defaults=defaults,
-        max_clocks=max_clocks,
-        primary=primary,
-        local_label=local_label,
-        local_timezone=local_timezone,
+def _build_menu(state: WorldClockState) -> list[menu_utils.MenuOption]:
+    subtitle = (
+        f"Currently {state.local_label} — {state.local_timezone}" if state.local_label else None
     )
 
-
-def _build_menu(state: ClockState) -> list[menu_utils.MenuOption]:
-    subtitle = f"Currently {state.local_label} — {state.local_timezone}" if state.local_label else None
+    configured_count = len(state.clocks)
+    remove_disabled = configured_count <= 1
 
     options = [
         menu_utils.MenuOption(
             "1",
             "Add or update clock",
-            f"Store up to {state.max_clocks} cities",
+            f"Store up to {state.max_clocks} cities (currently {configured_count})",
+            hint="Reusing an existing label updates its timezone",
         ),
         menu_utils.MenuOption(
             "2",
             "Remove clock",
             "Keep at least one clock",
+            disabled=remove_disabled,
+            hint="Remove is disabled when only one clock remains" if remove_disabled else None,
         ),
         menu_utils.MenuOption(
             "3",
@@ -132,7 +99,7 @@ def _build_menu(state: ClockState) -> list[menu_utils.MenuOption]:
     return options
 
 
-def _handle_add_or_update(state: ClockState) -> None:
+def _handle_add_or_update(state: WorldClockState) -> None:
     label = prompt_utils.prompt_text(
         "Clock label",
         default="City, Country",
@@ -143,16 +110,6 @@ def _handle_add_or_update(state: ClockState) -> None:
         print(status_messages.status("Clock label cannot be blank.", level="warn"))
         return
 
-    existing = cleaned_label in state.clocks
-    if not existing and len(state.clocks) >= state.max_clocks:
-        print(
-            status_messages.status(
-                f"Limit of {state.max_clocks} clocks reached. Remove one before adding a new city.",
-                level="warn",
-            )
-        )
-        return
-
     menu_utils.print_hint("Use a tz database name such as Europe/Paris or Etc/UTC.")
     existing_timezone = state.clocks.get(cleaned_label)
     tz_name = prompt_utils.prompt_text(
@@ -161,56 +118,51 @@ def _handle_add_or_update(state: ClockState) -> None:
         required=True,
     )
     try:
-        zoneinfo.ZoneInfo(tz_name)
-    except Exception:
-        print(
-            status_messages.status(
-                "Invalid timezone identifier. Refer to the IANA tz database list.",
-                level="error",
-            )
+        existed = upsert_clock(cleaned_label, tz_name, max_clocks=state.max_clocks)
+    except ClockLimitError as exc:
+        print(status_messages.status(str(exc), level="warn"))
+        return
+    except TimezoneValidationError as exc:
+        print(status_messages.status(str(exc), level="error"))
+        return
+
+    action = "Updated" if existed else "Added"
+    print(
+        status_messages.status(
+            f"{action} clock '{cleaned_label}' ({tz_name}).",
+            level="success",
         )
-        return
-
-    app_config.UI_TIMEZONES[cleaned_label] = tz_name
-    if not app_config.UI_PRIMARY_CLOCK:
-        app_config.UI_PRIMARY_CLOCK = cleaned_label
-    print(status_messages.status(f"Clock for {cleaned_label} set to {tz_name}.", level="success"))
+    )
 
 
-def _handle_remove(state: ClockState) -> None:
-    if len(state.clocks) <= 1:
-        print(status_messages.status("At least one clock must remain configured.", level="warn"))
-        return
-
+def _handle_remove(state: WorldClockState) -> None:
     label = prompt_utils.prompt_text(
         "Clock label to remove",
         default=next(iter(state.clocks.keys())),
         required=True,
     )
     cleaned_label = label.strip()
-    if cleaned_label in app_config.UI_TIMEZONES:
-        del app_config.UI_TIMEZONES[cleaned_label]
-        if getattr(app_config, "UI_PRIMARY_CLOCK", None) == cleaned_label:
-            app_config.UI_PRIMARY_CLOCK = next(iter(app_config.UI_TIMEZONES), None)
+    try:
+        removed = remove_clock(cleaned_label, min_clocks=1)
+    except MinimumClockError as exc:
+        print(status_messages.status(str(exc), level="warn"))
+        return
+
+    if removed:
         print(status_messages.status(f"Removed clock '{cleaned_label}'.", level="success"))
     else:
         print(status_messages.status(f"No clock named '{cleaned_label}'.", level="warn"))
 
 
-def _handle_reset(state: ClockState) -> None:
+def _handle_reset(state: WorldClockState) -> None:
     if not prompt_utils.prompt_yes_no("Reset clocks to defaults?", default=False):
         return
 
-    restored = {
-        label: tz
-        for label, tz in list(state.defaults.items())[: state.max_clocks]
-    }
-    app_config.UI_TIMEZONES = restored
-    app_config.UI_PRIMARY_CLOCK = next(iter(restored), None)
+    reset_to_defaults(state.max_clocks)
     print(status_messages.status("World clocks reset to defaults.", level="success"))
 
 
-def _handle_set_primary(state: ClockState) -> None:
+def _handle_set_primary(state: WorldClockState) -> None:
     if not state.clocks:
         print(status_messages.status("No clocks configured yet.", level="warn"))
         return
@@ -221,14 +173,16 @@ def _handle_set_primary(state: ClockState) -> None:
         hint="Choose from the configured labels",
     )
     cleaned_label = label.strip()
-    if cleaned_label in app_config.UI_TIMEZONES:
-        app_config.UI_PRIMARY_CLOCK = cleaned_label
-        print(status_messages.status(f"Primary clock set to {cleaned_label}.", level="success"))
-    else:
+    try:
+        set_primary_clock(cleaned_label)
+    except KeyError:
         print(status_messages.status(f"No clock named '{cleaned_label}'.", level="warn"))
+        return
+
+    print(status_messages.status(f"Primary clock set to {cleaned_label}.", level="success"))
 
 
-def _handle_set_local_reference(state: ClockState) -> None:
+def _handle_set_local_reference(state: WorldClockState) -> None:
     suggested_label = state.local_label or state.primary or next(iter(state.clocks), "Local Reference")
     label = prompt_utils.prompt_text(
         "Local reference label",
@@ -250,26 +204,26 @@ def _handle_set_local_reference(state: ClockState) -> None:
         required=True,
     )
     try:
-        zoneinfo.ZoneInfo(tz_name)
-    except Exception:
-        print(
-            status_messages.status(
-                "Invalid timezone identifier provided for the local reference.",
-                level="error",
-            )
-        )
+        set_local_reference(cleaned_label, tz_name)
+    except TimezoneValidationError as exc:
+        print(status_messages.status(str(exc), level="error"))
         return
 
-    app_config.UI_LOCAL_TIME_LABEL = cleaned_label
-    app_config.UI_LOCAL_TIMEZONE = tz_name
-    print(status_messages.status(f"Local reference set to {cleaned_label} ({tz_name}).", level="success"))
+    updated_state = load_state()
+    stored_timezone = updated_state.local_timezone
+    print(
+        status_messages.status(
+            f"Local reference set to {cleaned_label} ({stored_timezone}).",
+            level="success",
+        )
+    )
 
 
-def _handle_refresh(_: ClockState) -> None:
+def _handle_refresh(_: WorldClockState) -> None:
     print(status_messages.status("Refreshing clock snapshot...", level="info"))
 
 
-_ACTION_HANDLERS: Dict[str, Callable[[ClockState], None]] = {
+_ACTION_HANDLERS: Dict[str, Callable[[WorldClockState], None]] = {
     "1": _handle_add_or_update,
     "2": _handle_remove,
     "3": _handle_reset,

@@ -139,8 +139,10 @@ def render_clock_overview(
     ]
 
     rows = []
+    configured_labels = set()
     for snapshot in snapshots:
-        marker = "*" if snapshot.category == "configured" else ""
+        configured_labels.add(snapshot.label)
+        marker = "★" if snapshot.is_primary else "•"
         primary_text = "Yes" if snapshot.is_primary else ""
         local_text = "Yes" if snapshot.is_local_reference else ""
         rows.append(
@@ -159,9 +161,11 @@ def render_clock_overview(
 
     if featured:
         for snapshot in featured:
+            if snapshot.label in configured_labels:
+                continue
             rows.append(
                 [
-                    "",
+                    "○",
                     snapshot.profile.city,
                     snapshot.profile.country,
                     snapshot.profile.region,
