@@ -5,7 +5,7 @@ from .constants import (
     LONG_RUNNING_SYNC_THRESHOLD,
     LOW_BATTERY_THRESHOLD,
 )
-from .ensure_recent_inventory import ensure_recent_inventory
+from .ensure_recent_inventory import ensure_recent_inventory, get_last_guard_decision
 from .metadata import (
     format_inventory_status,
     format_pull_hint,
@@ -15,6 +15,7 @@ from .utils import humanize_seconds
 
 __all__ = [
     "ensure_recent_inventory",
+    "get_last_guard_decision",
     "get_latest_inventory_metadata",
     "format_inventory_status",
     "format_pull_hint",

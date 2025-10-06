@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .. import adb_utils
 from .. import inventory as inventory_module
@@ -19,15 +20,56 @@ from .prompts import prompt_inventory_decision
 from .utils import coerce_float, humanize_seconds
 
 
+_LAST_GUARD_DECISION: Dict[str, object] = {
+    "policy": None,
+    "stale_level": "unknown",
+    "reason": "",
+    "scope_changed": False,
+    "scope_hash_changed": False,
+    "packages_changed": False,
+    "age_seconds": None,
+}
+
+
 def ensure_recent_inventory(
     serial: str,
     *,
     device_context: Optional[Dict[str, Optional[str]]] = None,
+    scope_packages: Optional[Sequence[object]] = None,
 ) -> bool:
-    metadata = get_latest_inventory_metadata(serial, with_current_state=True)
+    global _LAST_GUARD_DECISION
+
+    _LAST_GUARD_DECISION = {
+        "policy": None,
+        "stale_level": "unknown",
+        "reason": "",
+        "scope_changed": False,
+        "scope_hash_changed": False,
+        "packages_changed": False,
+        "age_seconds": None,
+    }
+
+    if scope_packages is None:
+        snapshot_payload = inventory_module.load_latest_inventory(serial)
+        if isinstance(snapshot_payload, dict):
+            packages_value = snapshot_payload.get("packages")
+            if isinstance(packages_value, list):
+                scope_packages = packages_value
+
+    metadata = get_latest_inventory_metadata(
+        serial,
+        with_current_state=True,
+        scope_packages=scope_packages,
+    )
 
     timestamp = metadata.get("timestamp") if metadata else None
-    state_changed = bool(metadata.get("state_changed")) if metadata else False
+    packages_changed = bool(metadata.get("packages_changed")) if metadata else False
+    fingerprint_changed = bool(metadata.get("build_fingerprint_changed")) if metadata else False
+    scope_changed = bool(metadata.get("scope_changed")) if metadata else False
+    scope_hash_changed = bool(metadata.get("scope_hash_changed")) if metadata else False
+    state_changed = (
+        packages_changed or fingerprint_changed or scope_changed or scope_hash_changed
+    )
     expected_duration = coerce_float(
         metadata.get("estimated_duration_seconds") if metadata else None
     )
@@ -36,29 +78,115 @@ def ensure_recent_inventory(
     if timestamp:
         age_seconds = (datetime.now(timezone.utc) - timestamp).total_seconds()
         if age_seconds <= INVENTORY_STALE_SECONDS and not state_changed:
+            _set_guard_context(
+                stale_level="fresh",
+                reason="Inventory snapshot is within freshness window.",
+                scope_changed=scope_changed,
+                scope_hash_changed=scope_hash_changed,
+                packages_changed=packages_changed,
+                age_seconds=age_seconds,
+            )
+            _record_guard_policy("quick")
             return True
 
-    if not timestamp:
-        refresh_reason = "No inventory snapshot found—inventory sync required before pull."
-    elif state_changed and age_seconds is not None and age_seconds <= INVENTORY_STALE_SECONDS:
+    stale_level = "hard"
+    refresh_reason = "Inventory snapshot is stale—sync recommended before pull."
+    if not metadata or not timestamp:
         refresh_reason = (
-            "Device state changed since last inventory—sync recommended before pull. "
-            "You can reuse the previous snapshot if you understand the risks."
+            "No inventory snapshot found—inventory sync required before pull."
         )
     else:
-        refresh_reason = (
-            "Inventory snapshot is stale—sync recommended before pull. "
-            "Choose whether to refresh or proceed with the existing data."
+        age_stale = age_seconds is not None and age_seconds > INVENTORY_STALE_SECONDS
+        if packages_changed or scope_changed:
+            if scope_changed and not packages_changed:
+                refresh_reason = (
+                    "Package versions for the selected scope differ from the last inventory. "
+                    "Run a sync to capture the updated data or proceed with caution."
+                )
+            else:
+                refresh_reason = (
+                    "Device packages differ from the last inventory—sync recommended before pull. "
+                    "You can reuse the previous snapshot if you understand the risks."
+                )
+        elif scope_hash_changed:
+            refresh_reason = (
+                "Selected inventory scope differs from the last recorded scope. "
+                "Run a sync to capture the updated data or proceed with caution."
+            )
+        elif age_stale:
+            refresh_reason = (
+                "Inventory snapshot exceeds the freshness threshold—sync recommended before pull."
+            )
+        elif fingerprint_changed:
+            stale_level = "soft"
+            refresh_reason = (
+                "Build fingerprint changed since the last inventory. Packages appear unchanged, so a quick harvest is recommended."
+            )
+
+        if packages_changed or scope_changed or scope_hash_changed or age_stale:
+            stale_level = "hard"
+        elif not (packages_changed or scope_changed or age_stale):
+            stale_level = "soft" if fingerprint_changed else "fresh"
+
+    if stale_level == "fresh" and timestamp:
+        _set_guard_context(
+            stale_level="fresh",
+            reason="Inventory snapshot is within freshness window.",
+            scope_changed=scope_changed,
+            scope_hash_changed=scope_hash_changed,
+            packages_changed=packages_changed,
+            age_seconds=age_seconds,
         )
+        _record_guard_policy("quick")
+        return True
+
+    _set_guard_context(
+        stale_level=stale_level,
+        reason=refresh_reason,
+        scope_changed=scope_changed,
+        scope_hash_changed=scope_hash_changed,
+        packages_changed=packages_changed,
+        age_seconds=age_seconds,
+    )
 
     print(status_messages.status(refresh_reason, level="info"))
 
+    battery_context = _resolve_battery_context(serial, device_context)
+    battery_level = battery_context.get("level")
+    low_battery = (
+        isinstance(battery_level, int)
+        and battery_level < LOW_BATTERY_THRESHOLD
+        and not battery_context.get("is_charging")
+    )
+
     require_sync = not timestamp
     if not require_sync:
+        quick_hint = None
+        hints: List[str] = []
+        if stale_level == "soft":
+            hints.append(
+                "Quick harvest recommended: build fingerprint changed but packages match the last snapshot."
+            )
+        if low_battery:
+            hints.append(
+                f"Battery is low ({battery_level}%). Defaulting to reuse the existing snapshot to avoid a long sync."
+            )
+        if scope_hash_changed:
+            hints.append(
+                "Scope selection changed since the last inventory; refresh recommended for complete coverage."
+            )
+        if hints:
+            quick_hint = " ".join(hints)
+
+        default_choice = "2" if (stale_level == "soft" or low_battery) else "1"
+
         decision = prompt_inventory_decision(
             timestamp=timestamp,
             age_seconds=age_seconds,
             state_changed=state_changed,
+            stale_level=stale_level,
+            default_choice=default_choice,
+            quick_hint=quick_hint,
         )
 
         if decision == "use_snapshot":
@@ -75,6 +203,7 @@ def ensure_recent_inventory(
                     "Proceeding with existing inventory snapshot; results may be outdated."
                 )
             print(status_messages.status(warning, level="warn"))
+            _record_guard_policy("quick")
             return True
 
         if decision == "cancel":
@@ -83,9 +212,9 @@ def ensure_recent_inventory(
                     "APK pull cancelled until inventory sync is run.", level="warn"
                 )
             )
+            _record_guard_policy(None)
             return False
 
-    battery_context = _resolve_battery_context(serial, device_context)
     prompt_message = _build_sync_warning(battery_context, expected_duration)
 
     if prompt_message:
@@ -98,6 +227,7 @@ def ensure_recent_inventory(
                     "APK pull cancelled until inventory sync is run.", level="warn"
                 )
             )
+            _record_guard_policy(None)
             return False
         abort_on_long_running = False
     else:
@@ -208,7 +338,15 @@ def ensure_recent_inventory(
             expected_duration = estimate
         aborted, estimate = _execute_sync(False)
 
+    _record_guard_policy("refresh")
+    _LAST_GUARD_DECISION["reason"] = "Inventory sync completed before APK pull."
     return True
+
+
+def get_last_guard_decision() -> Dict[str, object]:
+    """Return a copy of the most recent guard decision context."""
+
+    return dict(_LAST_GUARD_DECISION)
 
 
 def _build_sync_warning(
@@ -281,3 +419,39 @@ def _resolve_battery_context(
     is_charging = "charg" in normalized_status
 
     return {"level": level, "status": status, "is_charging": is_charging}
+
+
+def _set_guard_context(
+    *,
+    stale_level: str,
+    reason: str,
+    scope_changed: bool,
+    scope_hash_changed: bool,
+    packages_changed: bool,
+    age_seconds: Optional[float],
+) -> None:
+    _LAST_GUARD_DECISION.update(
+        {
+            "stale_level": stale_level,
+            "reason": reason,
+            "scope_changed": scope_changed,
+            "scope_hash_changed": scope_hash_changed,
+            "packages_changed": packages_changed,
+            "age_seconds": age_seconds,
+        }
+    )
+
+
+def _record_guard_policy(policy: Optional[str]) -> None:
+    _LAST_GUARD_DECISION["policy"] = policy
+    if policy:
+        log.info(
+            (
+                f"Inventory guard policy {policy} selected "
+                f"(stale_level={_LAST_GUARD_DECISION.get('stale_level')}, "
+                f"scope_changed={_LAST_GUARD_DECISION.get('scope_changed')}, "
+                f"scope_hash_changed={_LAST_GUARD_DECISION.get('scope_hash_changed')}, "
+                f"packages_changed={_LAST_GUARD_DECISION.get('packages_changed')})"
+            ),
+            category="device",
+        )

@@ -15,6 +15,9 @@ def prompt_inventory_decision(
     timestamp: Optional[datetime],
     age_seconds: Optional[float],
     state_changed: bool,
+    stale_level: str,
+    default_choice: str = "1",
+    quick_hint: Optional[str] = None,
 ) -> str:
     """Return the preferred inventory handling strategy.
 
@@ -39,14 +42,33 @@ def prompt_inventory_decision(
             )
         )
 
+    if stale_level == "soft":
+        print(
+            status_messages.status(
+                "Guard marked inventory as soft-stale (packages unchanged).", level="info"
+            )
+        )
+    elif stale_level == "hard":
+        print(
+            status_messages.status(
+                "Guard marked inventory as stale; consider refreshing before pull.",
+                level="warn",
+            )
+        )
+
+    if quick_hint:
+        print(status_messages.status(quick_hint, level="info"))
+
     print("How would you like to proceed?")
     print("  1) Run inventory sync now (recommended)")
     print("  2) Use existing snapshot (may be outdated)")
     print("  0) Cancel APK pull")
 
-    choice = prompt_utils.get_choice(
-        ["1", "2", "0"], default="1", prompt="Select option [1]: "
-    )
+    if default_choice not in {"0", "1", "2"}:
+        default_choice = "1"
+
+    prompt_text = f"Select option [{default_choice}]: "
+    choice = prompt_utils.get_choice(["1", "2", "0"], default=default_choice, prompt=prompt_text)
 
     if choice == "2":
         return "use_snapshot"

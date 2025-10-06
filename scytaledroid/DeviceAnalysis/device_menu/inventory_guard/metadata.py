@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence
 
 from .. import adb_utils
 from .. import inventory as inventory_module
@@ -12,10 +12,37 @@ from .constants import INVENTORY_STALE_SECONDS
 from .utils import coerce_float, coerce_int, humanize_seconds
 
 
+def _normalize_scope_entries(
+    scope_packages: Sequence[object],
+) -> List[Dict[str, object]]:
+    normalized: List[Dict[str, object]] = []
+    for entry in scope_packages:
+        package_name: Optional[str]
+        version_code: Optional[object]
+
+        if isinstance(entry, dict):
+            package_name = entry.get("package_name") if isinstance(entry.get("package_name"), str) else None
+            version_code = entry.get("version_code")
+        else:
+            package_name = getattr(entry, "package_name", None)
+            if not isinstance(package_name, str):
+                package_name = None
+            version_code = getattr(entry, "version_code", None)
+
+        if not package_name:
+            continue
+
+        normalized.append({"package_name": package_name, "version_code": version_code})
+
+    return normalized
+
+
 def get_latest_inventory_metadata(
     serial: Optional[str],
     *,
     with_current_state: bool = False,
+    scope_packages: Optional[Sequence[object]] = None,
+    scope_id: str = "last_scope",
 ) -> Optional[Dict[str, object]]:
     if not serial:
         return None
@@ -24,6 +51,7 @@ def get_latest_inventory_metadata(
     snapshot_payload: Optional[Dict[str, object]] = None
 
     package_count: Optional[int]
+    scope_hashes: Optional[Dict[str, str]] = None
     if snapshot_meta:
         timestamp = snapshot_meta.captured_at
         package_count = snapshot_meta.package_count
@@ -31,6 +59,7 @@ def get_latest_inventory_metadata(
         package_signature_hash = snapshot_meta.package_signature_hash
         build_fingerprint = snapshot_meta.build_fingerprint
         duration_seconds = snapshot_meta.duration_seconds
+        scope_hashes = snapshot_meta.scope_hashes
     else:
         snapshot = inventory_module.load_latest_inventory(serial)
         if not snapshot:
@@ -98,6 +127,52 @@ def get_latest_inventory_metadata(
         metadata["build_fingerprint"] = build_fingerprint
     if duration_seconds is not None:
         metadata["duration_seconds"] = duration_seconds
+    if scope_hashes:
+        metadata["scope_hashes"] = dict(scope_hashes)
+
+    normalized_scope = _normalize_scope_entries(scope_packages) if scope_packages else []
+    resolved_scope_id = scope_id
+    expected_scope_hash: Optional[str] = None
+
+    if normalized_scope:
+        expected_scope_hash = inventory_meta.compute_scope_hash(normalized_scope)
+        if expected_scope_hash and scope_id == "last_scope":
+            resolved_scope_id = f"scope:{expected_scope_hash[:12]}"
+
+    previous_scope_hash: Optional[str] = None
+    scope_hash_changed = False
+    if normalized_scope:
+        metadata["scope_hash_id"] = resolved_scope_id
+        if expected_scope_hash:
+            metadata["expected_scope_hash"] = expected_scope_hash
+        if scope_hashes:
+            previous_scope_hash = scope_hashes.get(resolved_scope_id)
+            if previous_scope_hash:
+                metadata["previous_scope_hash"] = previous_scope_hash
+                if expected_scope_hash:
+                    scope_hash_changed = expected_scope_hash != previous_scope_hash
+        metadata["scope_hash_changed"] = scope_hash_changed
+
+        if (
+            serial
+            and scope_id != resolved_scope_id
+            and scope_hashes
+            and scope_id in scope_hashes
+        ):
+            removed_map = inventory_meta.update_scope_hash(serial, scope_id, None)
+            if removed_map is not None:
+                scope_hashes = removed_map
+                metadata["scope_hashes"] = removed_map
+
+        if serial and expected_scope_hash:
+            updated = inventory_meta.update_scope_hash(
+                serial, resolved_scope_id, expected_scope_hash
+            )
+            if updated is not None:
+                metadata["scope_hashes"] = updated
+                scope_hashes = updated
+    else:
+        metadata.setdefault("scope_hash_changed", False)
 
     if not with_current_state:
         return metadata
@@ -113,16 +188,23 @@ def get_latest_inventory_metadata(
     if device_props:
         current_fingerprint = device_props.get("build_fingerprint")
 
-    state_changed = False
+    packages_changed = False
     if package_signature_hash and current_signature_hash:
-        state_changed = package_signature_hash != current_signature_hash
+        packages_changed = package_signature_hash != current_signature_hash
     elif package_list_hash and current_hash:
-        state_changed = package_list_hash != current_hash
+        packages_changed = package_list_hash != current_hash
     elif package_count is not None and package_count != current_count:
-        state_changed = True
+        packages_changed = True
 
-    if not state_changed and build_fingerprint and current_fingerprint:
-        state_changed = build_fingerprint != current_fingerprint
+    fingerprint_changed = False
+    if build_fingerprint and current_fingerprint:
+        fingerprint_changed = build_fingerprint != current_fingerprint
+
+    state_changed = (
+        packages_changed
+        or fingerprint_changed
+        or bool(metadata.get("scope_hash_changed"))
+    )
 
     metadata["current_package_count"] = current_count
     if current_hash:
@@ -132,6 +214,8 @@ def get_latest_inventory_metadata(
     if current_fingerprint:
         metadata["current_build_fingerprint"] = current_fingerprint
     metadata["state_changed"] = state_changed
+    metadata["packages_changed"] = packages_changed
+    metadata["build_fingerprint_changed"] = fingerprint_changed
 
     estimated_duration = None
     if duration_seconds and package_count and current_count:
@@ -142,6 +226,28 @@ def get_latest_inventory_metadata(
 
     if estimated_duration is not None:
         metadata["estimated_duration_seconds"] = estimated_duration
+
+    if normalized_scope and expected_scope_hash:
+        scope_names = {entry["package_name"] for entry in normalized_scope}
+        filtered_scope: List[Dict[str, object]] = []
+        for name, version_code, _ in current_signatures:
+            if name in scope_names:
+                filtered_scope.append(
+                    {"package_name": name, "version_code": version_code}
+                )
+
+        current_scope_hash = inventory_meta.compute_scope_hash(filtered_scope)
+        if current_scope_hash:
+            metadata["current_scope_hash"] = current_scope_hash
+
+        scope_changed = bool(
+            expected_scope_hash
+            and current_scope_hash
+            and expected_scope_hash != current_scope_hash
+        )
+        metadata["scope_changed"] = scope_changed
+    else:
+        metadata.setdefault("scope_changed", False)
 
     return metadata
 
