@@ -55,7 +55,12 @@ def _resolve_timezones() -> Dict[str, str]:
 def _format_time(tz_name: str) -> str:
     tz = zoneinfo.ZoneInfo(tz_name)
     now = datetime.now(tz)
-    return now.strftime("%Y-%m-%d %H:%M:%S %Z")
+    time_part = now.strftime("%I:%M %p")
+    if time_part.startswith("0"):
+        time_part = time_part[1:]
+    date_part = f"{now.month}-{now.day}-{now.year}"
+    tz_label = now.tzname() or tz_name
+    return f"{time_part} {date_part} {tz_label}".strip()
 
 
 def print_banner() -> None:
@@ -72,7 +77,7 @@ def print_banner() -> None:
     metrics = []
     for label, tz_name in tz_mapping.items():
         try:
-            metrics.append((f"Local time ({label})", _format_time(tz_name)))
+            metrics.append((label, _format_time(tz_name)))
         except Exception as exc:
             log.warning(f"Failed to render time for {label}: {exc}", category="application")
     if metrics:
@@ -99,7 +104,7 @@ def main_menu() -> None:
             menu_utils.MenuOption("7", "Utilities", "Console helpers and configuration"),
             menu_utils.MenuOption("8", "About App", "Show version and licensing information"),
         ]
-        menu_utils.print_menu(options, is_main=True, boxed=True, default="1")
+        menu_utils.print_menu(options, is_main=True, boxed=False, default="1")
         choice = prompt_utils.get_choice(valid=[opt.key for opt in options] + ["0"], default="1")
 
         if choice == "1":
