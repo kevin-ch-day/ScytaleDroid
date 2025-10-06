@@ -4,6 +4,7 @@ from .configurator import configure_world_clocks
 from .display import render_clock_overview
 from .state import (
     ClockLimitError,
+    ClockReference,
     MinimumClockError,
     TimezoneValidationError,
     WorldClockError,
@@ -12,11 +13,14 @@ from .state import (
     remove_clock,
     reset_to_defaults,
     set_primary_clock,
+    set_reference_custom,
+    set_reference_now,
     upsert_clock,
 )
 
 __all__ = [
     "ClockLimitError",
+    "ClockReference",
     "MinimumClockError",
     "TimezoneValidationError",
     "WorldClockError",
@@ -27,5 +31,7 @@ __all__ = [
     "render_clock_overview",
     "reset_to_defaults",
     "set_primary_clock",
+    "set_reference_custom",
+    "set_reference_now",
     "upsert_clock",
 ]

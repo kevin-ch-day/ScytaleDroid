@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Dict, Optional
 
 import zoneinfo
@@ -26,6 +27,16 @@ class TimezoneValidationError(WorldClockError):
     """Raised when a supplied timezone identifier cannot be resolved."""
 
 
+@dataclass(frozen=True)
+class ClockReference:
+    """Describe how world clock snapshots should anchor their time."""
+
+    mode: str
+    label: str
+    timezone: Optional[str]
+    utc: datetime
+
+
 @dataclass
 class WorldClockState:
     """Snapshot of the persisted world clock configuration."""
@@ -35,6 +46,7 @@ class WorldClockState:
     max_clocks: int
     primary: Optional[str]
     primary_timezone: Optional[str]
+    reference: ClockReference
 
 
 def _normalise_max(value: object) -> int:
@@ -52,6 +64,39 @@ def _validate_timezone(tz_name: str) -> None:
         raise TimezoneValidationError(
             f"Invalid timezone identifier '{tz_name}'."
         ) from exc
+
+
+def _resolve_reference() -> ClockReference:
+    """Return the stored reference snapshot information."""
+
+    mode = str(getattr(app_config, "UI_CLOCK_REFERENCE_MODE", "now"))
+    label = str(getattr(app_config, "UI_CLOCK_REFERENCE_LABEL", "Live (current time)"))
+    timezone_name = getattr(app_config, "UI_CLOCK_REFERENCE_TIMEZONE", None) or None
+    stored_timestamp = getattr(app_config, "UI_CLOCK_REFERENCE_UTC", None)
+
+    utc_zone = zoneinfo.ZoneInfo("UTC")
+
+    if mode == "custom" and stored_timestamp:
+        try:
+            parsed = datetime.fromisoformat(str(stored_timestamp))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=utc_zone)
+            reference_utc = parsed.astimezone(utc_zone)
+        except Exception:  # pragma: no cover - defensive fallback
+            mode = "now"
+            reference_utc = datetime.now(utc_zone)
+        else:
+            return ClockReference(mode=mode, label=label, timezone=timezone_name, utc=reference_utc)
+
+    reference_utc = datetime.now(utc_zone)
+    mode = "now"
+    label = label or "Live (current time)"
+    app_config.UI_CLOCK_REFERENCE_MODE = mode
+    app_config.UI_CLOCK_REFERENCE_LABEL = label
+    app_config.UI_CLOCK_REFERENCE_TIMEZONE = timezone_name
+    app_config.UI_CLOCK_REFERENCE_UTC = None
+
+    return ClockReference(mode=mode, label=label, timezone=timezone_name, utc=reference_utc)
 
 
 def load_state() -> WorldClockState:
@@ -82,12 +127,15 @@ def load_state() -> WorldClockState:
     app_config.UI_LOCAL_TIME_LABEL = primary
     app_config.UI_LOCAL_TIMEZONE = primary_timezone
 
+    reference = _resolve_reference()
+
     return WorldClockState(
         clocks=clocks,
         defaults=defaults,
         max_clocks=max_clocks,
         primary=primary,
         primary_timezone=primary_timezone,
+        reference=reference,
     )
 
 
@@ -164,6 +212,8 @@ def reset_to_defaults(max_clocks: int) -> None:
     app_config.UI_LOCAL_TIME_LABEL = primary_label
     app_config.UI_LOCAL_TIMEZONE = restored.get(primary_label, "Etc/UTC")
 
+    set_reference_now()
+
 
 def set_primary_clock(label: str) -> None:
     """Designate *label* as the primary display clock."""
@@ -177,8 +227,39 @@ def set_primary_clock(label: str) -> None:
     app_config.UI_LOCAL_TIMEZONE = clocks.get(label, "Etc/UTC")
 
 
+def set_reference_now() -> None:
+    """Anchor the dashboard to the live current time."""
+
+    app_config.UI_CLOCK_REFERENCE_MODE = "now"
+    app_config.UI_CLOCK_REFERENCE_LABEL = "Live (current time)"
+    app_config.UI_CLOCK_REFERENCE_TIMEZONE = None
+    app_config.UI_CLOCK_REFERENCE_UTC = None
+
+
+def set_reference_custom(
+    label: str,
+    timezone_name: str,
+    local_datetime: datetime,
+) -> None:
+    """Anchor the dashboard to a specific *local_datetime* in *timezone_name*."""
+
+    _validate_timezone(timezone_name)
+    tz = zoneinfo.ZoneInfo(timezone_name)
+    if local_datetime.tzinfo is None:
+        localized = local_datetime.replace(tzinfo=tz)
+    else:
+        localized = local_datetime.astimezone(tz)
+    reference_utc = localized.astimezone(zoneinfo.ZoneInfo("UTC"))
+
+    app_config.UI_CLOCK_REFERENCE_MODE = "custom"
+    app_config.UI_CLOCK_REFERENCE_LABEL = label
+    app_config.UI_CLOCK_REFERENCE_TIMEZONE = timezone_name
+    app_config.UI_CLOCK_REFERENCE_UTC = reference_utc.isoformat()
+
+
 __all__ = [
     "ClockLimitError",
+    "ClockReference",
     "MinimumClockError",
     "TimezoneValidationError",
     "WorldClockError",
@@ -187,5 +268,7 @@ __all__ = [
     "remove_clock",
     "reset_to_defaults",
     "set_primary_clock",
+    "set_reference_custom",
+    "set_reference_now",
     "upsert_clock",
 ]

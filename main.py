@@ -4,7 +4,6 @@ main.py - Entry point for ScytaleDroid CLI
 
 from datetime import datetime
 import zoneinfo
-from typing import Dict
 
 from scytaledroid.Config import app_config
 from scytaledroid.Utils.AboutApp.about_app import about_app
@@ -17,48 +16,40 @@ from scytaledroid.Utils.System.utils_menu import utils_menu
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Database.db_utils.menu import database_menu
+from scytaledroid.Utils.System.world_clock.state import ClockReference, WorldClockState, load_state
 
 
-def _resolve_timezones() -> Dict[str, str]:
-    base = dict(getattr(app_config, "DEFAULT_UI_TIMEZONES", {}))
-    custom = dict(getattr(app_config, "UI_TIMEZONES", {}))
-
-    # Validate custom entries and fall back to defaults as needed
-    validated: Dict[str, str] = {}
-    for label, tz in custom.items():
-        try:
-            zoneinfo.ZoneInfo(tz)
-        except Exception:
-            log.warning(f"Invalid timezone '{tz}' for label '{label}'", category="application")
-            continue
-        validated[str(label)] = str(tz)
-
-    max_clocks = getattr(app_config, "UI_MAX_CLOCKS", 3)
-    if len(validated) > max_clocks:
-        validated = dict(list(validated.items())[:max_clocks])
-
-    if not validated:
-        validated = dict(list(base.items())[:max_clocks])
-
-    primary = getattr(app_config, "UI_PRIMARY_CLOCK", None)
-    ordered: Dict[str, str] = {}
-
-    if primary and primary in validated:
-        ordered[primary] = validated.pop(primary)
-
-    for label, tz in validated.items():
-        ordered[label] = tz
-
-    return ordered
+def _resolve_timezones() -> WorldClockState:
+    return load_state()
 
 
-def _format_time(tz_name: str) -> str:
+def _format_time(tz_name: str, reference: ClockReference) -> str:
     tz = zoneinfo.ZoneInfo(tz_name)
-    now = datetime.now(tz)
-    time_part = now.strftime("%I:%M %p").lstrip("0")
-    date_part = f"{now.month}-{now.day}-{now.year}"
-    tz_label = now.tzname() or tz_name
-    return f"{date_part} {time_part} {tz_label}".strip()
+    snapshot = reference.utc.astimezone(tz)
+    time_part = snapshot.strftime("%I:%M %p").lstrip("0")
+    date_part = f"{snapshot.month}-{snapshot.day}-{snapshot.year}"
+    tz_label = snapshot.tzname() or tz_name
+    dst_delta = tz.dst(snapshot)
+    dst_active = bool(dst_delta and dst_delta.total_seconds())
+    dst_label = "DST" if dst_active else "Std"
+    return f"{date_part} {time_part} {tz_label} ({dst_label})"
+
+
+def _reference_banner(reference: ClockReference) -> str:
+    tz_name = reference.timezone or app_config.UI_LOCAL_TIMEZONE or "Etc/UTC"
+    try:
+        tz = zoneinfo.ZoneInfo(tz_name)
+    except Exception:
+        tz = zoneinfo.ZoneInfo("UTC")
+        tz_name = "UTC"
+
+    localized = reference.utc.astimezone(tz)
+    date_part = f"{localized.month}-{localized.day}-{localized.year}"
+    time_part = localized.strftime("%I:%M %p").lstrip("0")
+    offset_label = localized.tzname() or tz_name
+    prefix = "Custom reference" if reference.mode == "custom" else "Live reference"
+    label = reference.label or "Live (current time)"
+    return f"{prefix}: {label} — {date_part} {time_part} {offset_label}"
 
 
 def print_banner() -> None:
@@ -71,15 +62,22 @@ def print_banner() -> None:
         app_config.APP_DESCRIPTION,
     )
 
-    tz_mapping = _resolve_timezones()
+    state = _resolve_timezones()
+    tz_mapping = state.clocks
     metrics = []
     for label, tz_name in tz_mapping.items():
         try:
-            metrics.append((label, _format_time(tz_name)))
+            metrics.append((label, _format_time(tz_name, state.reference)))
         except Exception as exc:
             log.warning(f"Failed to render time for {label}: {exc}", category="application")
     if metrics:
         menu_utils.print_metrics(metrics)
+        print(
+            status_messages.status(
+                _reference_banner(state.reference),
+                level="info",
+            )
+        )
     print()
 
     log.info(
