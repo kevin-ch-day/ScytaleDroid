@@ -73,27 +73,25 @@ def _normalise_options(
 
 
 def _stylise_box(lines: Sequence[str]) -> str:
-    palette = colors.get_palette()
     styled: list[str] = []
     for idx, line in enumerate(lines):
         if idx in {0, len(lines) - 1}:
-            styled.append(colors.apply(line, palette.divider))
-        elif idx == 1:
-            styled.append(colors.apply(line, palette.header))
+            styled.append(colors.apply(line, colors.style("divider")))
         else:
-            styled.append(colors.apply(line, palette.text))
+            styled.append(line)
     return "\n".join(styled)
 
 
 def print_banner(app_name: str, app_version: str, app_release: str, app_description: str) -> None:
     """Print the global banner shown at startup."""
 
-    lines = [
-        f"Welcome to {app_name}",
-        app_description,
-        f"Version {app_version} ({app_release})",
-    ]
-    boxed = text_blocks.boxed(lines, width=70).splitlines()
+    palette = colors.get_palette()
+    heading = colors.apply(f"Welcome to {app_name}", palette.header, bold=True)
+    tagline = colors.apply(app_description, palette.muted)
+    version = colors.apply(f"Version {app_version} ({app_release})", palette.accent, bold=True)
+
+    lines = [heading, tagline, version]
+    boxed = text_blocks.boxed(lines, width=72).splitlines()
     print(_stylise_box(boxed))
     print()
 
@@ -143,6 +141,8 @@ def print_menu(
     default: Optional[str] = None,
     exit_label: Optional[str] = None,
     show_descriptions: bool = True,
+    boxed: bool = False,
+    width: int = 72,
 ) -> None:
     """Render a numbered menu with coloured keys and optional default."""
 
@@ -151,6 +151,9 @@ def print_menu(
     primary_items = [item for item in items if item.key != "0"]
 
     key_width = max((len(item.key) for item in primary_items), default=1) + 1
+    indent = " " * (key_width + 2)
+
+    rendered_lines: list[str] = []
 
     for item in primary_items:
         if item.disabled:
@@ -171,15 +174,14 @@ def print_menu(
         disabled_note = (
             f" {colors.apply('(disabled)', palette.muted)}" if item.disabled else ""
         )
-        print(f"{key_token} {label_token}{badge_token}{disabled_note}")
+        rendered_lines.append(f"{key_token} {label_token}{badge_token}{disabled_note}")
 
-        indent = " " * (key_width + 2)
         if show_descriptions and item.description:
             description = colors.apply(item.description, palette.muted)
-            print(f"{indent}{description}")
+            rendered_lines.append(f"{indent}{description}")
         if item.hint:
             hint_text = colors.apply(item.hint, palette.hint)
-            print(f"{indent}{hint_text}")
+            rendered_lines.append(f"{indent}{hint_text}")
 
     exit_text = exit_label or ("Exit" if is_main else "Back")
     exit_item = MenuOption("0", exit_text)
@@ -188,7 +190,13 @@ def print_menu(
     exit_label_style = palette.accent if exit_is_default else palette.option_text
     exit_key = colors.apply("0)", exit_key_style)
     exit_label_coloured = colors.apply(exit_item.label, exit_label_style)
-    print(f"{exit_key} {exit_label_coloured}")
+    rendered_lines.append(f"{exit_key} {exit_label_coloured}")
+
+    if boxed:
+        print(text_blocks.boxed(rendered_lines, width=width))
+    else:
+        for line in rendered_lines:
+            print(line)
 def print_table(headers: Iterable[str], rows: Iterable[Iterable[object]]) -> None:
     """Convenience wrapper around table rendering helper."""
 

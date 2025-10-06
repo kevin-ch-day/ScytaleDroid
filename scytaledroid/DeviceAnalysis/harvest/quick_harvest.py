@@ -20,6 +20,8 @@ from .common import (
     inventory_payload as build_inventory_payload,
     is_system_package,
     load_options,
+    normalise_local_path,
+    resolve_storage_root,
     write_metadata_sidecar,
 )
 from .models import ArtifactError, ArtifactPlan, ArtifactResult, InventoryRow, PackagePlan, PullResult
@@ -42,6 +44,11 @@ def quick_harvest(
 
     options = load_options(config, pull_mode="quick")
     tracker = DedupeTracker(options)
+    if options.write_db:
+        host_name, data_root = resolve_storage_root()
+        storage_root_id: Optional[int] = repo.ensure_storage_root(host_name, data_root)
+    else:
+        storage_root_id = None
 
     results: List[PullResult] = []
     for plan in packages:
@@ -145,6 +152,7 @@ def quick_harvest(
 
             apk_id: Optional[int] = None
             if options.write_db:
+                local_rel_path = normalise_local_path(dest_path)
                 record = repo.ApkRecord(
                     package_name=inventory.package_name,
                     app_id=app_id,
@@ -159,7 +167,6 @@ def quick_harvest(
                     sha256=hashes["sha256"],
                     device_serial=resolved_serial,
                     source_path=artifact.source_path,
-                    local_path=str(dest_path.resolve()),
                     harvested_at=datetime.utcnow(),
                     is_split_member=artifact.is_split_member,
                     split_group_id=group_id,
@@ -173,6 +180,22 @@ def quick_harvest(
                     )
                     result.errors.append(ArtifactError(source_path=artifact.source_path, reason=str(exc)))
                     continue
+
+                if storage_root_id is not None:
+                    try:
+                        repo.upsert_artifact_path(
+                            apk_id,
+                            storage_root_id=storage_root_id,
+                            source_path=artifact.source_path,
+                            local_rel_path=local_rel_path,
+                        )
+                    except Exception as exc:  # pragma: no cover - database failures
+                        log.warning(
+                            f"Failed to persist artifact path for apk_id={apk_id}: {exc}",
+                            category="database",
+                        )
+                        result.errors.append(ArtifactError(source_path=artifact.source_path, reason=str(exc)))
+                        continue
 
             inventory_meta = build_inventory_payload(inventory)
             extra_meta = {
@@ -203,6 +226,7 @@ def quick_harvest(
                     apk_id=apk_id,
                     dest_path=dest_path,
                     source_path=artifact.source_path,
+                    sha256=hashes.get("sha256"),
                 )
             )
 

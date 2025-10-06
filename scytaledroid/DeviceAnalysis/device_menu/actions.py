@@ -7,6 +7,7 @@ from typing import Dict, List, Optional
 
 from scytaledroid.Utils.DisplayUtils import (
     error_panels,
+    menu_utils,
     prompt_utils,
     table_utils,
 )
@@ -80,31 +81,89 @@ def handle_choice(
 
 def build_main_menu_options(
     active_details: Optional[Dict[str, Optional[str]]]
-) -> Dict[str, str]:
-    options = {
-        "1": "List devices",
-        "2": "Refresh status",
-        "3": "Connect to a device",
-        "4": "Show device info",
-        "5": "Inventory & database sync",
-        "6": "Run detailed device report",
-        "7": "Pull APKs",
-        "8": "Logcat",
-        "9": "Open ADB shell",
-        "10": "Disconnect device",
-        "11": "Export device dossier",
-        "12": "Manage harvest watchlists",
-    }
-
+) -> List[menu_utils.MenuOption]:
     serial = active_details.get("serial") if active_details else device_manager.get_active_serial()
-    options["5"] = f"Inventory & database sync ({format_inventory_status(serial)})"
-    options["7"] = f"Pull APKs ({format_pull_hint(serial)})"
+    has_device = bool(serial)
 
-    if not serial:
-        options["6"] += " (requires device)"
-        options["8"] += " (requires device)"
-        options["9"] += " (requires device)"
-        options["11"] += " (requires device)"
+    inventory_status = format_inventory_status(serial)
+    pull_hint = format_pull_hint(serial)
+
+    options: List[menu_utils.MenuOption] = [
+        menu_utils.MenuOption(
+            "1",
+            "List devices",
+            description="View all detected and recent devices",
+        ),
+        menu_utils.MenuOption(
+            "2",
+            "Refresh status",
+            description="Rescan adb and refresh dashboard information",
+        ),
+        menu_utils.MenuOption(
+            "3",
+            "Connect to a device",
+            description="Select an attached device as the active target",
+        ),
+        menu_utils.MenuOption(
+            "4",
+            "Show device info",
+            description="Display details for the active device",
+            disabled=not has_device,
+            hint=None if has_device else "Requires an active device",
+        ),
+        menu_utils.MenuOption(
+            "5",
+            "Inventory & database sync",
+            description=f"Status: {inventory_status}",
+        ),
+        menu_utils.MenuOption(
+            "6",
+            "Run detailed device report",
+            description="Gather extended telemetry and snapshots",
+            disabled=not has_device,
+            hint=None if has_device else "Requires an active device",
+        ),
+        menu_utils.MenuOption(
+            "7",
+            "Pull APKs",
+            description=f"Hint: {pull_hint}",
+            disabled=not has_device,
+            hint=None if has_device else "Requires an active device",
+        ),
+        menu_utils.MenuOption(
+            "8",
+            "Logcat",
+            description="Stream device logs in real time",
+            disabled=not has_device,
+            hint=None if has_device else "Requires an active device",
+        ),
+        menu_utils.MenuOption(
+            "9",
+            "Open ADB shell",
+            description="Launch an interactive adb shell session",
+            disabled=not has_device,
+            hint=None if has_device else "Requires an active device",
+        ),
+        menu_utils.MenuOption(
+            "10",
+            "Disconnect device",
+            description="Clear the active device selection",
+            disabled=not has_device,
+            hint=None if has_device else "No device currently connected",
+        ),
+        menu_utils.MenuOption(
+            "11",
+            "Export device dossier",
+            description="Produce a curated report bundle",
+            disabled=not has_device,
+            hint=None if has_device else "Requires an active device",
+        ),
+        menu_utils.MenuOption(
+            "12",
+            "Manage harvest watchlists",
+            description="Create and edit watchlists for pull scopes",
+        ),
+    ]
 
     return options
 
@@ -157,29 +216,32 @@ def _connect_to_device(
     summaries: List[Dict[str, Optional[str]]],
 ) -> None:
     if not devices:
-        error_panels.print_error_panel(
+        error_panels.print_info_panel(
             "Connect to Device",
-            "No devices available to connect.",
+            "No devices detected by adb.",
             hint="Attach a device and ensure adb recognizes it (adb devices).",
         )
         prompt_utils.press_enter_to_continue()
         return
 
-    print("\nSelect a device to connect:")
+    print()
+    menu_utils.print_header("Select Device", subtitle="Available adb devices")
     numbered_devices = {str(idx): summary for idx, summary in enumerate(summaries, start=1)}
+    options = []
     for idx, summary in numbered_devices.items():
         label = format_device_line(summary, include_release=True)
-        print(f"{idx}) {label}")
-    print("0) Cancel")
+        description = format_battery(summary)
+        options.append(menu_utils.MenuOption(str(idx), label, description=description))
+    menu_utils.print_menu(options, boxed=True)
 
-    choice = prompt_utils.get_choice(list(numbered_devices.keys()) + ["0"])
+    choice = prompt_utils.get_choice(list(numbered_devices.keys()) + ["0"], default="1")
     if choice == "0":
         return
 
     summary = numbered_devices[choice]
     serial = summary.get("serial")
     if not serial:
-        error_panels.print_error_panel(
+        error_panels.print_warning_panel(
             "Connect to Device",
             "Selected device has no serial identifier.",
         )
@@ -191,7 +253,7 @@ def _connect_to_device(
         print(f"\nActive device set to {label}.")
         log.info(f"Active device set to {serial}.", category="device")
     else:
-        error_panels.print_error_panel(
+        error_panels.print_warning_panel(
             "Connect to Device",
             f"Failed to activate device with serial {serial}.",
             hint="Retry after verifying adb authorization on the device.",

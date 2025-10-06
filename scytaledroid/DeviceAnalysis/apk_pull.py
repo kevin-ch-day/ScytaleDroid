@@ -129,12 +129,21 @@ def pull_apks(serial: Optional[str]) -> None:
             reason_value = guard_decision.get("reason")
             if reason_value:
                 selection.metadata["inventory_guard_reason"] = reason_value
+            guard_brief_value = guard_decision.get("guard_brief")
+            if guard_brief_value:
+                selection.metadata["inventory_guard_brief"] = guard_brief_value
             scope_hash_delta = guard_decision.get("scope_hash_changed")
             if scope_hash_delta is not None:
                 selection.metadata["inventory_scope_hash_changed"] = bool(scope_hash_delta)
             scope_delta = guard_decision.get("scope_changed")
             if scope_delta is not None:
                 selection.metadata["inventory_scope_changed"] = bool(scope_delta)
+            delta_summary_value = guard_decision.get("package_delta")
+            if delta_summary_value:
+                selection.metadata["package_delta_summary"] = delta_summary_value
+            delta_brief_value = guard_decision.get("package_delta_brief")
+            if delta_brief_value:
+                selection.metadata["package_delta_brief"] = delta_brief_value
 
         include_system_partitions = (
             selection.kind in {"families", "everything"} and is_rooted
@@ -324,7 +333,13 @@ def pull_apks(serial: Optional[str]) -> None:
             harvest.print_package_result(result, verbose=False)
 
     harvest.render_harvest_summary(
-        active_plan, results, selection=active_selection, pull_mode=pull_mode
+        active_plan,
+        results,
+        selection=active_selection,
+        pull_mode=pull_mode,
+        serial=serial,
+        run_timestamp=session_stamp,
+        guard_brief=active_selection.metadata.get("inventory_guard_brief"),
     )
     _maybe_save_watchlist(active_selection)
     prompt_utils.press_enter_to_continue()

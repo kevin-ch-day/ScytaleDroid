@@ -29,8 +29,6 @@ class ApkRecord:
     sha256: Optional[str] = None
     signer_fingerprint: Optional[str] = None
     device_serial: Optional[str] = None
-    source_path: Optional[str] = None
-    local_path: Optional[str] = None
     harvested_at: Optional[Union[datetime, str]] = None
     is_split_member: bool = False
     split_group_id: Optional[int] = None
@@ -63,8 +61,6 @@ class ApkRecord:
             "sha256": self.sha256,
             "signer_fingerprint": self.signer_fingerprint,
             "device_serial": self.device_serial,
-            "source_path": self.source_path,
-            "local_path": self.local_path,
             "harvested_at": harvested_at,
             "is_split_member": 1 if self.is_split_member else 0,
             "split_group_id": self.split_group_id,
@@ -265,6 +261,40 @@ def assign_split_members(package_name: str, apk_ids: Iterable[int]) -> int:
     return group_id
 
 
+def ensure_storage_root(host_name: str, data_root: str) -> int:
+    """Insert or update a storage root entry and return its identifier."""
+
+    run_sql(queries.UPSERT_STORAGE_ROOT, (host_name, data_root))
+    row = run_sql(
+        queries.SELECT_STORAGE_ROOT_ID,
+        (host_name, data_root),
+        fetch="one",
+    )
+    if not row:
+        raise RuntimeError("Failed to resolve storage root id")
+    return int(row[0])
+
+
+def upsert_artifact_path(
+    apk_id: int,
+    *,
+    storage_root_id: int,
+    source_path: Optional[str],
+    local_rel_path: Optional[str],
+) -> None:
+    """Persist or update path metadata for the given artifact."""
+
+    run_sql(
+        queries.UPSERT_ARTIFACT_PATH,
+        (
+            apk_id,
+            storage_root_id,
+            source_path,
+            local_rel_path,
+        ),
+    )
+
+
 __all__ = [
     "ApkRecord",
     "upsert_apk_record",
@@ -277,4 +307,6 @@ __all__ = [
     "list_categories",
     "assign_split_members",
     "ensure_app_definition",
+    "ensure_storage_root",
+    "upsert_artifact_path",
 ]

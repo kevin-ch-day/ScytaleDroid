@@ -17,6 +17,21 @@ LOGS_DIR   = "logs"
 DEVICE_STATE_DIR = "state"
 DEVICE_STATE_FILE = "active_device.json"
 
+# UI preferences
+DEFAULT_UI_TIMEZONES = {
+    "Minneapolis, USA": "America/Chicago",
+    "Las Vegas, USA": "America/Los_Angeles",
+    "Dubai, UAE": "Asia/Dubai",
+    "Paris, France": "Europe/Paris",
+    "London (UTC)": "Etc/UTC",
+}
+UI_MAX_CLOCKS = 3
+UI_TIMEZONES = {
+    label: tz
+    for label, tz in list(DEFAULT_UI_TIMEZONES.items())[:UI_MAX_CLOCKS]
+}
+UI_PRIMARY_CLOCK = "Minneapolis, USA"
+
 # Logging behaviour
 ENABLE_CONSOLE_LOGS = False
 

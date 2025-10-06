@@ -6,7 +6,7 @@ import time
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
-from scytaledroid.Utils.DisplayUtils import menu_utils, status_messages, table_utils
+from scytaledroid.Utils.DisplayUtils import menu_utils, status_messages, table_utils, error_panels
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from scytaledroid.DeviceAnalysis import adb_utils, device_manager
@@ -78,41 +78,39 @@ def print_dashboard(
     )
 
     print()
-    menu_utils.print_header("Device Dashboard")
-    menu_utils.print_metrics(
-        [
-            ("Refreshed", refreshed),
-            ("Devices Detected", devices_found),
-            ("Connection Status", connection_status),
-        ]
-    )
+    menu_utils.print_header("Device Dashboard", subtitle="Connected hardware overview")
+    metric_rows = [
+        ("Refreshed", refreshed),
+        ("Devices Detected", devices_found),
+        ("Connection Status", connection_status),
+    ]
+    menu_utils.print_metrics(metric_rows)
     print()
 
     if active_details:
         serial = active_details.get("serial") or "Unknown"
         headline = format_device_line(active_details, include_release=True)
-        print(status_messages.status(f"Active Device: {headline}", level="info"))
-        snapshot_headers = ["Model", "Android", "Battery", "Wi-Fi", "Root"]
-        snapshot_rows = [[
-            prettify_model(active_details.get("model") or active_details.get("device")),
-            format_android_release(active_details),
-            format_battery(active_details),
-            format_wifi_state(active_details.get("wifi_state")),
-            active_details.get("is_rooted") or "Unknown",
-        ]]
-        print()
-        table_utils.render_table(snapshot_headers, snapshot_rows)
-        menu_utils.print_hint(f"Serial: {serial}")
+        details = [
+            f"Serial: {serial}",
+            f"Android: {format_android_release(active_details)}",
+            f"Battery: {format_battery(active_details)}",
+            f"Wi-Fi: {format_wifi_state(active_details.get('wifi_state'))}",
+            f"Rooted: {active_details.get('is_rooted') or 'Unknown'}",
+        ]
+        error_panels.print_success_panel("Active device", headline, details=details)
     else:
-        print(status_messages.status("No active device connected.", level="warn"))
+        error_panels.print_warning_panel(
+            "No active device",
+            "No device is currently connected.",
+        )
         last_serial = device_manager.get_last_serial()
         if last_serial:
             last_summary = serial_map.get(last_serial)
             if last_summary:
                 formatted = format_device_line(last_summary, include_release=True)
-                menu_utils.print_hint(f"Last Connection: {formatted}")
+                menu_utils.print_hint(f"Last connection: {formatted}")
             else:
-                menu_utils.print_hint(f"Last Connection: {last_serial}")
+                menu_utils.print_hint(f"Last connection: {last_serial}")
         if devices_found:
             menu_utils.print_hint("Use option 3 to connect. Press Enter to refresh.")
         else:
@@ -122,9 +120,9 @@ def print_dashboard(
 
     if warnings:
         print()
-    for warning in warnings:
-        print(status_messages.status(warning, level="warn"))
-        log.warning(warning, category="device")
+        for warning in warnings:
+            error_panels.print_warning_panel("ADB warning", warning)
+            log.warning(warning, category="device")
 
 
 def resolve_active_device(

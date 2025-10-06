@@ -34,6 +34,8 @@ _LAST_GUARD_DECISION: Dict[str, object] = {
     "packages_changed": False,
     "age_seconds": None,
     "package_delta": None,
+    "package_delta_brief": None,
+    "guard_brief": None,
 }
 
 
@@ -53,6 +55,9 @@ def ensure_recent_inventory(
         "scope_hash_changed": False,
         "packages_changed": False,
         "age_seconds": None,
+        "package_delta": None,
+        "package_delta_brief": None,
+        "guard_brief": None,
     }
 
     if scope_packages is None:
@@ -78,6 +83,7 @@ def ensure_recent_inventory(
     )
     package_delta_summary: Optional[Dict[str, object]] = None
     total_delta = 0
+    delta_brief: Optional[str] = None
     if metadata:
         raw_delta = metadata.get("package_delta_summary")
         if isinstance(raw_delta, dict):
@@ -86,6 +92,9 @@ def ensure_recent_inventory(
                 total_delta = int(raw_delta.get("total_changed") or 0)
             except (TypeError, ValueError):
                 total_delta = 0
+            delta_brief = _format_package_delta_brief(
+                package_delta_summary, limit=PACKAGE_DELTA_DISPLAY_LIMIT
+            )
         else:
             package_delta_summary = None
     expected_duration = coerce_float(
@@ -104,6 +113,7 @@ def ensure_recent_inventory(
                 packages_changed=packages_changed,
                 age_seconds=age_seconds,
                 package_delta=package_delta_summary,
+                package_delta_brief=delta_brief,
             )
             _record_guard_policy("quick")
             return True
@@ -127,12 +137,8 @@ def ensure_recent_inventory(
                     "Device packages differ from the last inventory—sync recommended before pull. "
                     "You can reuse the previous snapshot if you understand the risks."
                 )
-                if package_delta_summary:
-                    delta_brief = _format_package_delta_brief(
-                        package_delta_summary, limit=PACKAGE_DELTA_DISPLAY_LIMIT
-                    )
-                    if delta_brief:
-                        refresh_reason = f"{refresh_reason} Recent changes: {delta_brief}."
+                if delta_brief:
+                    refresh_reason = f"{refresh_reason} Recent changes: {delta_brief}."
         elif scope_hash_changed:
             refresh_reason = (
                 "Selected inventory scope differs from the last recorded scope. "
@@ -184,6 +190,7 @@ def ensure_recent_inventory(
         packages_changed=packages_changed,
         age_seconds=age_seconds,
         package_delta=package_delta_summary,
+        package_delta_brief=delta_brief,
     )
 
     print(status_messages.status(refresh_reason, level="info"))
@@ -484,6 +491,7 @@ def _set_guard_context(
     packages_changed: bool,
     age_seconds: Optional[float],
     package_delta: Optional[Dict[str, object]],
+    package_delta_brief: Optional[str],
 ) -> None:
     _LAST_GUARD_DECISION.update(
         {
@@ -494,6 +502,8 @@ def _set_guard_context(
             "packages_changed": packages_changed,
             "age_seconds": age_seconds,
             "package_delta": package_delta,
+            "package_delta_brief": package_delta_brief,
+            "guard_brief": reason,
         }
     )
 

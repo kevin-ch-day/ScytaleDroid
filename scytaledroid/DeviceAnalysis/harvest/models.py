@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 @dataclass(frozen=True)
@@ -66,6 +66,9 @@ class ArtifactResult:
     apk_id: Optional[int]
     dest_path: Path
     source_path: str
+    sha256: Optional[str] = None
+    status: str = "written"
+    skip_reason: Optional[str] = None
 
 
 @dataclass
@@ -84,6 +87,40 @@ class PullResult:
     ok: List[ArtifactResult] = field(default_factory=list)
     errors: List[ArtifactError] = field(default_factory=list)
     skipped: List[str] = field(default_factory=list)
+
+
+@dataclass
+class ArtifactSummary:
+    """Lightweight artifact descriptor for summary/logging."""
+
+    file_name: str
+    status: str
+    dest_path: Optional[str] = None
+    sha256: Optional[str] = None
+    skip_reason: Optional[str] = None
+
+
+@dataclass
+class PackageHarvestResult:
+    """Aggregated harvest outcome for a single package."""
+
+    package_name: str
+    app_label: str
+    artifacts: List[ArtifactSummary] = field(default_factory=list)
+    errors: List[ArtifactError] = field(default_factory=list)
+    skipped_reasons: List[str] = field(default_factory=list)
+
+
+@dataclass
+class HarvestResult:
+    """Aggregated harvest run context for summaries/logging."""
+
+    serial: Optional[str] = None
+    run_timestamp: Optional[str] = None
+    scope_name: Optional[str] = None
+    guard_brief: Optional[str] = None
+    packages: List[PackageHarvestResult] = field(default_factory=list)
+    meta: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

@@ -6,10 +6,12 @@ import hashlib
 import json
 import subprocess
 from dataclasses import dataclass, field
+import socket
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Mapping, MutableMapping, Optional, Tuple
 
+from scytaledroid.Config import app_config
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
@@ -39,6 +41,32 @@ DEFAULT_META_FIELDS: Tuple[str, ...] = (
     "category",
     "artifact",
 )
+
+
+def _harvest_base_dir() -> Path:
+    """Return the absolute base directory for harvested APKs."""
+
+    return (Path(app_config.DATA_DIR) / "apks").resolve()
+
+
+def normalise_local_path(dest_path: Path) -> str:
+    """Return the harvest-relative path for *dest_path*."""
+
+    try:
+        base = _harvest_base_dir()
+        relative = dest_path.resolve().relative_to(base)
+        return relative.as_posix()
+    except ValueError:
+        # Fallback to POSIX string when the file is outside the expected tree
+        return dest_path.as_posix()
+
+
+def resolve_storage_root() -> tuple[str, str]:
+    """Return (host_name, data_root) used for storage root registration."""
+
+    host = socket.gethostname()
+    data_root = _harvest_base_dir().as_posix()
+    return host, data_root
 
 
 @dataclass(frozen=True)
@@ -154,7 +182,7 @@ def write_metadata_sidecar(
         "file_name": dest_path.name,
         "file_size": dest_path.stat().st_size if dest_path.exists() else None,
         "source_path": artifact.get("source_path"),
-        "local_path": str(dest_path.resolve()),
+        "local_path": normalise_local_path(dest_path),
         "sha256": hashes.get("sha256"),
         "sha1": hashes.get("sha1"),
         "md5": hashes.get("md5"),

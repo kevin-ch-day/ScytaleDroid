@@ -15,8 +15,6 @@ INSERT INTO android_apk_repository (
     sha256,
     signer_fingerprint,
     device_serial,
-    source_path,
-    local_path,
     harvested_at,
     is_split_member,
     split_group_id
@@ -34,8 +32,6 @@ INSERT INTO android_apk_repository (
     %(sha256)s,
     %(signer_fingerprint)s,
     %(device_serial)s,
-    %(source_path)s,
-    %(local_path)s,
     %(harvested_at)s,
     %(is_split_member)s,
     %(split_group_id)s
@@ -50,8 +46,6 @@ ON DUPLICATE KEY UPDATE
     version_code = VALUES(version_code),
     signer_fingerprint = COALESCE(VALUES(signer_fingerprint), signer_fingerprint),
     device_serial = VALUES(device_serial),
-    source_path = VALUES(source_path),
-    local_path = VALUES(local_path),
     harvested_at = COALESCE(VALUES(harvested_at), harvested_at),
     is_split_member = GREATEST(is_split_member, VALUES(is_split_member)),
     split_group_id = COALESCE(VALUES(split_group_id), split_group_id),
@@ -80,6 +74,35 @@ GROUP BY sha256
 HAVING COUNT(*) > 1
 ORDER BY occurrences DESC
 LIMIT %s
+"""
+
+UPSERT_STORAGE_ROOT = """
+INSERT INTO harvest_storage_roots (host_name, data_root)
+VALUES (%s, %s)
+ON DUPLICATE KEY UPDATE
+    data_root = VALUES(data_root),
+    updated_at = CURRENT_TIMESTAMP
+"""
+
+SELECT_STORAGE_ROOT_ID = """
+SELECT root_id
+FROM harvest_storage_roots
+WHERE host_name = %s AND data_root = %s
+LIMIT 1
+"""
+
+UPSERT_ARTIFACT_PATH = """
+INSERT INTO harvest_artifact_paths (
+    apk_id,
+    storage_root_id,
+    source_path,
+    local_rel_path
+) VALUES (%s, %s, %s, %s)
+ON DUPLICATE KEY UPDATE
+    storage_root_id = VALUES(storage_root_id),
+    source_path = VALUES(source_path),
+    local_rel_path = VALUES(local_rel_path),
+    updated_at = CURRENT_TIMESTAMP
 """
 
 UPDATE_APK_SPLIT_GROUP_TEMPLATE = """

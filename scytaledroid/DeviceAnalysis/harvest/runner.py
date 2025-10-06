@@ -19,6 +19,8 @@ from .common import (
     inventory_payload,
     is_system_package,
     load_options,
+    normalise_local_path,
+    resolve_storage_root,
     write_metadata_sidecar,
 )
 from .models import ArtifactError, ArtifactPlan, ArtifactResult, PackagePlan, PullResult
@@ -39,6 +41,12 @@ def execute_harvest(
 
     options = load_options(config, pull_mode=pull_mode)
     tracker = DedupeTracker(options)
+    storage_root_id: Optional[int]
+    if options.write_db:
+        host_name, data_root = resolve_storage_root()
+        storage_root_id = repo.ensure_storage_root(host_name, data_root)
+    else:
+        storage_root_id = None
     results: List[PullResult] = []
     total = len(plans)
     for index, plan in enumerate(plans, start=1):
@@ -54,6 +62,7 @@ def execute_harvest(
                 verbose=verbose,
                 options=options,
                 tracker=tracker,
+                storage_root_id=storage_root_id if storage_root_id is not None else 0,
             )
         )
     return results
@@ -69,6 +78,7 @@ def _execute_package_plan(
     verbose: bool,
     options: HarvestOptions,
     tracker: DedupeTracker,
+    storage_root_id: Optional[int],
 ) -> PullResult:
     result = PullResult(plan=plan)
 
@@ -114,6 +124,7 @@ def _execute_package_plan(
             options=options,
             tracker=tracker,
             session_stamp=session_stamp,
+            storage_root_id=storage_root_id,
         )
         if skip_reason:
             result.skipped.append(skip_reason)
@@ -138,6 +149,7 @@ def _pull_and_record(
     options: HarvestOptions,
     tracker: DedupeTracker,
     session_stamp: str,
+    storage_root_id: Optional[int],
 ) -> Tuple[ArtifactResult | ArtifactError | None, Optional[str]]:
     dest_path = package_dir / artifact.file_name
     pull_result = adb_pull(
@@ -161,6 +173,8 @@ def _pull_and_record(
         cleanup_duplicate(dest_path)
         return None, "dedupe_sha256"
 
+    local_rel_path = normalise_local_path(dest_path)
+
     apk_id: Optional[int] = None
     if options.write_db:
         record = repo.ApkRecord(
@@ -177,7 +191,6 @@ def _pull_and_record(
             sha256=hashes["sha256"],
             device_serial=serial,
             source_path=artifact.source_path,
-            local_path=str(dest_path.resolve()),
             harvested_at=datetime.utcnow(),
             is_split_member=artifact.is_split_member,
             split_group_id=group_id,
@@ -192,6 +205,20 @@ def _pull_and_record(
             )
             log.error(message, category="database")
             return ArtifactError(source_path=artifact.source_path, reason=str(exc)), None
+
+        if storage_root_id is not None:
+            try:
+                repo.upsert_artifact_path(
+                    apk_id,
+                    storage_root_id=storage_root_id,
+                    source_path=artifact.source_path,
+                    local_rel_path=local_rel_path,
+                )
+            except Exception as exc:
+                log.warning(
+                    f"Failed to persist artifact path for apk_id={apk_id}: {exc}",
+                    category="database",
+                )
 
     artifact_payload = {
         "source_path": artifact.source_path,
@@ -227,6 +254,7 @@ def _pull_and_record(
             apk_id=apk_id,
             dest_path=dest_path,
             source_path=artifact.source_path,
+            sha256=hashes.get("sha256"),
         ),
         None,
     )

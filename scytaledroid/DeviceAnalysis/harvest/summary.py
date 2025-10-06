@@ -2,12 +2,23 @@
 
 from __future__ import annotations
 
+import json
 from collections import Counter
-from typing import Dict, List, Sequence
+from pathlib import Path
+from typing import Dict, List, Optional, Sequence
 
 from scytaledroid.Utils.DisplayUtils import status_messages, text_blocks
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
-from .models import HarvestPlan, PullResult, ScopeSelection
+from .common import normalise_local_path
+from .models import (
+    ArtifactSummary,
+    HarvestPlan,
+    HarvestResult,
+    PackageHarvestResult,
+    PullResult,
+    ScopeSelection,
+)
 
 
 _EXCLUSION_LABELS = {
@@ -122,12 +133,30 @@ def render_harvest_summary(
     *,
     selection: ScopeSelection,
     pull_mode: str = "legacy",
+    serial: Optional[str] = None,
+    run_timestamp: Optional[str] = None,
+    guard_brief: Optional[str] = None,
+    log_summary: bool = True,
 ) -> None:
     """Render the end-of-run summary with diagnostics."""
 
+    harvest_result = _build_harvest_result(
+        plan,
+        results,
+        selection,
+        serial=serial,
+        run_timestamp=run_timestamp,
+        guard_brief=guard_brief,
+    )
+
     total_packages = len(plan.packages)
-    files_written = sum(len(result.ok) for result in results)
-    pull_errors = sum(len(result.errors) for result in results)
+    files_written = sum(
+        1
+        for package in harvest_result.packages
+        for artifact in package.artifacts
+        if artifact.status == "written"
+    )
+    pull_errors = sum(len(package.errors) for package in harvest_result.packages)
     skip_counter: Counter[str] = Counter()
     for result in results:
         skip_counter.update(result.skipped)
@@ -136,17 +165,18 @@ def render_harvest_summary(
     print(text_blocks.headline("APK Harvest Summary", width=70))
     print(status_messages.status(f"Scope: {selection.label}"))
     print(status_messages.status(f"Pull mode: {pull_mode}"))
-    guard_policy = selection.metadata.get("inventory_policy")
+    metadata = selection.metadata or {}
+    guard_policy = metadata.get("inventory_policy")
     if guard_policy:
         policy_label = "Quick harvest" if guard_policy == "quick" else "Inventory refresh"
-        stale_level = selection.metadata.get("inventory_stale_level")
+        stale_level = metadata.get("inventory_stale_level")
         if isinstance(stale_level, str) and stale_level:
             policy_label = f"{policy_label} (stale={stale_level})"
         print(status_messages.status(f"Inventory policy: {policy_label}"))
-        guard_reason = selection.metadata.get("inventory_guard_reason")
-        if isinstance(guard_reason, str) and guard_reason:
-            print(status_messages.status(guard_reason, level="info"))
-    scope_hash_changed = selection.metadata.get("inventory_scope_hash_changed")
+    guard_brief_value = guard_brief or metadata.get("inventory_guard_brief")
+    if metadata.get("render_guard_in_summary") and guard_brief_value:
+        print(status_messages.status(guard_brief_value, level="info"))
+    scope_hash_changed = metadata.get("inventory_scope_hash_changed")
     if scope_hash_changed:
         print(
             status_messages.status(
@@ -189,9 +219,48 @@ def render_harvest_summary(
         for package in denied:
             print(status_messages.status(f"  - {package}", level="warn"))
 
-    _print_exclusions(selection.metadata.get("excluded_counts"))
+    _print_exclusions(metadata.get("excluded_counts"))
     _print_top_packages(results)
     _print_sample_focus(selection)
+
+    output_root = _run_output_root(harvest_result)
+    if output_root:
+        print()
+        print(status_messages.status("Artifacts saved under:", level="info"))
+        print(status_messages.status(f"  {output_root}", level="info"))
+        shown = 0
+        for package in harvest_result.packages:
+            dest = _package_dest_dir(package)
+            if not dest:
+                continue
+            label = f"  • {package.app_label} ({package.package_name}) → {dest}"
+            print(status_messages.status(label, level="info"))
+            shown += 1
+            if shown >= 5:
+                break
+
+    no_new = _packages_without_writes(harvest_result)
+    if no_new:
+        print()
+        print(text_blocks.headline("No new artifacts", width=70))
+        for package, reason in no_new:
+            suffix = f" — {reason}" if reason else ""
+            print(
+                status_messages.status(
+                    f" • {package.app_label} ({package.package_name}){suffix}",
+                    level="warn",
+                )
+            )
+
+    delta_summary = metadata.get("package_delta_summary")
+    if delta_summary:
+        print()
+        print(
+            text_blocks.headline(
+                "Package changes since last snapshot", width=70
+            )
+        )
+        _print_package_delta_summary(delta_summary)
 
     print()
     print(status_messages.status("Next steps:", level="info"))
@@ -202,11 +271,24 @@ def render_harvest_summary(
         )
     )
 
+    if log_summary:
+        _log_harvest_summary(
+            harvest_result,
+            no_new,
+            output_root,
+            metadata,
+            pull_mode,
+            total_packages,
+            files_written,
+        )
+
 
 def _print_top_packages(results: Sequence[PullResult], limit: int = 5) -> None:
     scored = []
     for result in results:
-        ok_count = len(result.ok)
+        ok_count = sum(
+            1 for artifact in result.ok if getattr(artifact, "status", "written") == "written"
+        )
         err_count = len(result.errors)
         if ok_count or err_count or result.skipped:
             scored.append((ok_count, err_count, result))
@@ -273,3 +355,148 @@ def _print_sample_focus(selection: ScopeSelection) -> None:
     if len(selection.packages) > len(samples):
         preview += ", …"
     print(status_messages.status(f"Focus packages: {preview}"))
+
+
+def _build_harvest_result(
+    plan: HarvestPlan,
+    results: Sequence[PullResult],
+    selection: ScopeSelection,
+    *,
+    serial: Optional[str],
+    run_timestamp: Optional[str],
+    guard_brief: Optional[str],
+) -> HarvestResult:
+    metadata = selection.metadata or {}
+    harvest_result = HarvestResult(
+        serial=serial,
+        run_timestamp=run_timestamp,
+        scope_name=selection.label,
+        guard_brief=guard_brief or metadata.get("inventory_guard_brief"),
+    )
+
+    harvest_result.meta.update(
+        {
+            "inventory_policy": metadata.get("inventory_policy"),
+            "inventory_stale_level": metadata.get("inventory_stale_level"),
+            "package_delta_summary": metadata.get("package_delta_summary"),
+        }
+    )
+
+    for pull in results:
+        inventory = pull.plan.inventory
+        package_result = PackageHarvestResult(
+            package_name=inventory.package_name,
+            app_label=inventory.display_name(),
+            skipped_reasons=list(pull.skipped),
+            errors=list(pull.errors),
+        )
+
+        for artifact in pull.ok:
+            dest_path_obj = (
+                artifact.dest_path
+                if isinstance(artifact.dest_path, Path)
+                else Path(str(artifact.dest_path))
+            )
+            package_result.artifacts.append(
+                ArtifactSummary(
+                    file_name=artifact.file_name,
+                    status=getattr(artifact, "status", "written"),
+                    dest_path=normalise_local_path(dest_path_obj),
+                    sha256=getattr(artifact, "sha256", None),
+                    skip_reason=getattr(artifact, "skip_reason", None),
+                )
+            )
+
+        harvest_result.packages.append(package_result)
+
+    return harvest_result
+
+
+def _package_dest_dir(package: PackageHarvestResult) -> Optional[str]:
+    for artifact in package.artifacts:
+        if artifact.dest_path:
+            dest = Path(artifact.dest_path)
+            return str(dest.parent)
+    return None
+
+
+def _run_output_root(result: HarvestResult) -> Optional[str]:
+    if not (result.serial and result.run_timestamp):
+        return None
+    return f"data/apks/device_apks/{result.serial}/{result.run_timestamp}/"
+
+
+def _packages_without_writes(
+    harvest_result: HarvestResult,
+) -> List[tuple[PackageHarvestResult, Optional[str]]]:
+    packages: List[tuple[PackageHarvestResult, Optional[str]]] = []
+    for package in harvest_result.packages:
+        has_written = any(artifact.status == "written" for artifact in package.artifacts)
+        if has_written:
+            continue
+        reason = None
+        if package.skipped_reasons:
+            reason = _describe_reason(package.skipped_reasons[0], _SKIP_LABELS)
+        elif package.errors:
+            reason = package.errors[0].reason
+        packages.append((package, reason))
+    return packages
+
+
+def _print_package_delta_summary(summary: Dict[str, object], *, limit: int = 10) -> None:
+    updated = summary.get("updated") or []
+    added = summary.get("added") or []
+    removed = summary.get("removed") or []
+
+    if updated:
+        print(status_messages.status("Updated:", level="info"))
+        for entry in updated[:limit]:
+            if not isinstance(entry, dict):
+                continue
+            package = entry.get("package") or entry.get("package_name") or "unknown"
+            before = entry.get("before") or entry.get("from") or entry.get("previous") or "?"
+            after = entry.get("after") or entry.get("to") or entry.get("current") or "?"
+            print(status_messages.status(f" • {package}: {before} → {after}", level="info"))
+
+    if added:
+        print(status_messages.status("Added:", level="info"))
+        for package in added[:limit]:
+            print(status_messages.status(f" • {package}", level="info"))
+
+    if removed:
+        print(status_messages.status("Removed:", level="info"))
+        for package in removed[:limit]:
+            print(status_messages.status(f" • {package}", level="info"))
+
+
+def _log_harvest_summary(
+    harvest_result: HarvestResult,
+    no_new: List[tuple[PackageHarvestResult, Optional[str]]],
+    output_root: Optional[str],
+    metadata: Dict[str, object],
+    pull_mode: str,
+    total_packages: int,
+    files_written: int,
+) -> None:
+    payload = {
+        "event": "apk_harvest_summary",
+        "serial": harvest_result.serial,
+        "run_timestamp": harvest_result.run_timestamp,
+        "scope": harvest_result.scope_name,
+        "pull_mode": pull_mode,
+        "packages_processed": total_packages,
+        "files_written": files_written,
+        "output_root": output_root,
+        "guard_brief": harvest_result.guard_brief,
+        "package_delta_summary": metadata.get("package_delta_summary"),
+        "no_new_artifacts": [
+            {
+                "package": package.package_name,
+                "label": package.app_label,
+                "reason": reason,
+            }
+            for package, reason in no_new
+        ],
+    }
+
+    log.info(json.dumps(payload, default=str), category="device_analysis")

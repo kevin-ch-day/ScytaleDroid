@@ -86,6 +86,7 @@ def prompt_text(
     validator: Optional[Callable[[str], bool]] = None,
     error_message: str = "Please provide a value.",
     error_hint: Optional[str] = None,
+    hint: Optional[str] = None,
 ) -> str:
     """Prompt for free-form text, optionally validating the response."""
 
@@ -95,6 +96,9 @@ def prompt_text(
     default_hint = (
         f" {colors.apply(f'[{default}]', palette.muted)}" if default is not None else ""
     )
+    if hint:
+        hint_text = colors.apply(hint, palette.hint)
+        print(hint_text)
     rendered_prompt = f"{arrow} {label}{default_hint} "
 
     while True:

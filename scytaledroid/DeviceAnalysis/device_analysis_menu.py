@@ -43,8 +43,9 @@ def device_menu() -> None:
         )
         menu_utils.print_header("Device Analysis")
         options = build_main_menu_options(active_details)
-        menu_utils.print_menu(options, is_main=False, default="1", exit_label="Back")
-        choice = prompt_utils.get_choice(list(options.keys()) + ["0"], default="1")
+        menu_utils.print_menu(options, is_main=False, default="1", exit_label="Back", boxed=True)
+        valid_keys = [option.key for option in options]
+        choice = prompt_utils.get_choice(valid_keys + ["0"], default="1")
 
         if choice == "0":
             return
