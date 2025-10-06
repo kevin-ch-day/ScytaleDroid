@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, Tuple
 from scytaledroid.Utils.DisplayUtils import menu_utils, status_messages, table_utils
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
-from .. import adb_utils, device_manager
+from scytaledroid.DeviceAnalysis import adb_utils, device_manager
 from .formatters import (
     format_android_release,
     format_battery,

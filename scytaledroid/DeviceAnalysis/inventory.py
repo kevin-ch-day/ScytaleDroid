@@ -136,20 +136,38 @@ def _load_canonical_metadata(package_names: Iterable[str]) -> Dict[str, Dict[str
         return {}
 
     placeholders = ", ".join(["%s"] * len(normalised))
-    query = f"""
-        SELECT
-            LOWER(d.package_name) AS package_key,
-            d.app_name,
-            d.category_id,
-            c.category_name,
-            d.profile_id,
-            d.profile_name
-        FROM android_app_definitions d
-        LEFT JOIN android_app_categories c ON c.category_id = d.category_id
-        WHERE LOWER(d.package_name) IN ({placeholders})
-    """
 
-    rows = run_sql(query, tuple(normalised), fetch="all", dictionary=True) or []
+    def _build_query(include_profiles: bool) -> str:
+        profile_select = (
+            "            d.profile_id,\n            d.profile_name"
+            if include_profiles
+            else "            NULL AS profile_id,\n            NULL AS profile_name"
+        )
+        return f"""
+            SELECT
+                LOWER(d.package_name) AS package_key,
+                d.app_name,
+                d.category_id,
+                c.category_name,
+                {profile_select}
+            FROM android_app_definitions d
+            LEFT JOIN android_app_categories c ON c.category_id = d.category_id
+            WHERE LOWER(d.package_name) IN ({placeholders})
+        """
+
+    rows: List[Dict[str, object]]
+    query = _build_query(include_profiles=True)
+    try:
+        rows = run_sql(query, tuple(normalised), fetch="all", dictionary=True) or []
+    except RuntimeError as exc:
+        if "Unknown column 'd.profile_id'" not in str(exc):
+            raise
+        log.warning(
+            "Profiles unsupported by current android_app_definitions schema; continuing without profile metadata.",
+            category="inventory",
+        )
+        fallback_query = _build_query(include_profiles=False)
+        rows = run_sql(fallback_query, tuple(normalised), fetch="all", dictionary=True) or []
     canonical: Dict[str, Dict[str, object]] = {}
     for row in rows:
         key = str(row.get("package_key") or "").lower()

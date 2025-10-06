@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from functools import lru_cache
 from typing import Dict, Iterable, List, Optional, Sequence, Union
 
 from ..db_core import run_sql
 from ..db_queries import apk_repository as queries
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
 @dataclass
@@ -151,18 +153,25 @@ def ensure_app_definition(
     update_fields: List[str] = []
     update_params: List[object] = []
 
+    column_flags = _get_definition_profile_columns()
     if category_name and category_name.strip():
         category_id = get_category_id(category_name.strip())
         update_fields.append("category_id = %s")
         update_params.append(category_id)
 
     if profile_id and str(profile_id).strip():
-        update_fields.append("profile_id = %s")
-        update_params.append(str(profile_id).strip())
+        if column_flags["profile_id"]:
+            update_fields.append("profile_id = %s")
+            update_params.append(str(profile_id).strip())
+        else:
+            _warn_missing_profile_columns()
 
     if profile_name and profile_name.strip():
-        update_fields.append("profile_name = %s")
-        update_params.append(profile_name.strip())
+        if column_flags["profile_name"]:
+            update_fields.append("profile_name = %s")
+            update_params.append(profile_name.strip())
+        else:
+            _warn_missing_profile_columns()
 
     if update_fields:
         set_clause = ", ".join(update_fields + ["updated_at = CURRENT_TIMESTAMP"])
@@ -175,6 +184,56 @@ def ensure_app_definition(
         )
 
     return app_id
+
+
+@lru_cache(maxsize=1)
+def _get_definition_profile_columns() -> Dict[str, bool]:
+    """Return availability flags for profile columns on android_app_definitions."""
+
+    try:
+        rows = run_sql(
+            """
+            SELECT COLUMN_NAME
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE() AND table_name = 'android_app_definitions'
+            """,
+            fetch="all",
+            dictionary=True,
+        ) or []
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning(
+            f"Failed to inspect android_app_definitions columns: {exc}",
+            category="database",
+        )
+        return {"profile_id": False, "profile_name": False}
+
+    normalised = {
+        str(entry.get("COLUMN_NAME")).lower()
+        for entry in rows
+        if isinstance(entry, dict) and entry.get("COLUMN_NAME")
+    }
+    return {
+        "profile_id": "profile_id" in normalised,
+        "profile_name": "profile_name" in normalised,
+    }
+
+
+_PROFILE_WARNING_EMITTED = False
+
+
+def _warn_missing_profile_columns() -> None:
+    """Log a single actionable warning when profile columns are missing."""
+
+    global _PROFILE_WARNING_EMITTED
+    if _PROFILE_WARNING_EMITTED:
+        return
+
+    _PROFILE_WARNING_EMITTED = True
+    log.warning(
+        "Profile metadata detected but android_app_definitions lacks profile_id/profile_name columns."
+        " Run the database migration to add them.",
+        category="database",
+    )
 
 
 def get_category_id(category_name: str) -> int:

@@ -8,8 +8,8 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
-from .. import adb_utils
-from .. import inventory as inventory_module
+from scytaledroid.DeviceAnalysis import adb_utils
+from scytaledroid.DeviceAnalysis import inventory as inventory_module
 from .constants import (
     INVENTORY_STALE_SECONDS,
     LONG_RUNNING_SYNC_THRESHOLD,
@@ -20,6 +20,11 @@ from .prompts import prompt_inventory_decision
 from .utils import coerce_float, humanize_seconds
 
 
+RECENT_CHANGE_WINDOW_SECONDS = 3600
+RECENT_CHANGE_SOFT_LIMIT = 3
+PACKAGE_DELTA_DISPLAY_LIMIT = 3
+
+
 _LAST_GUARD_DECISION: Dict[str, object] = {
     "policy": None,
     "stale_level": "unknown",
@@ -28,6 +33,7 @@ _LAST_GUARD_DECISION: Dict[str, object] = {
     "scope_hash_changed": False,
     "packages_changed": False,
     "age_seconds": None,
+    "package_delta": None,
 }
 
 
@@ -70,6 +76,18 @@ def ensure_recent_inventory(
     state_changed = (
         packages_changed or fingerprint_changed or scope_changed or scope_hash_changed
     )
+    package_delta_summary: Optional[Dict[str, object]] = None
+    total_delta = 0
+    if metadata:
+        raw_delta = metadata.get("package_delta_summary")
+        if isinstance(raw_delta, dict):
+            package_delta_summary = raw_delta
+            try:
+                total_delta = int(raw_delta.get("total_changed") or 0)
+            except (TypeError, ValueError):
+                total_delta = 0
+        else:
+            package_delta_summary = None
     expected_duration = coerce_float(
         metadata.get("estimated_duration_seconds") if metadata else None
     )
@@ -85,6 +103,7 @@ def ensure_recent_inventory(
                 scope_hash_changed=scope_hash_changed,
                 packages_changed=packages_changed,
                 age_seconds=age_seconds,
+                package_delta=package_delta_summary,
             )
             _record_guard_policy("quick")
             return True
@@ -108,6 +127,12 @@ def ensure_recent_inventory(
                     "Device packages differ from the last inventory—sync recommended before pull. "
                     "You can reuse the previous snapshot if you understand the risks."
                 )
+                if package_delta_summary:
+                    delta_brief = _format_package_delta_brief(
+                        package_delta_summary, limit=PACKAGE_DELTA_DISPLAY_LIMIT
+                    )
+                    if delta_brief:
+                        refresh_reason = f"{refresh_reason} Recent changes: {delta_brief}."
         elif scope_hash_changed:
             refresh_reason = (
                 "Selected inventory scope differs from the last recorded scope. "
@@ -128,6 +153,17 @@ def ensure_recent_inventory(
         elif not (packages_changed or scope_changed or age_stale):
             stale_level = "soft" if fingerprint_changed else "fresh"
 
+        if (
+            packages_changed
+            and not scope_changed
+            and not scope_hash_changed
+            and not fingerprint_changed
+            and age_seconds is not None
+            and age_seconds <= RECENT_CHANGE_WINDOW_SECONDS
+            and 0 < total_delta <= RECENT_CHANGE_SOFT_LIMIT
+        ):
+            stale_level = "soft"
+
     if stale_level == "fresh" and timestamp:
         _set_guard_context(
             stale_level="fresh",
@@ -147,6 +183,7 @@ def ensure_recent_inventory(
         scope_hash_changed=scope_hash_changed,
         packages_changed=packages_changed,
         age_seconds=age_seconds,
+        package_delta=package_delta_summary,
     )
 
     print(status_messages.status(refresh_reason, level="info"))
@@ -175,19 +212,36 @@ def ensure_recent_inventory(
             hints.append(
                 "Scope selection changed since the last inventory; refresh recommended for complete coverage."
             )
+        if package_delta_summary:
+            delta_hint = _format_package_delta_hint(
+                package_delta_summary, limit=PACKAGE_DELTA_DISPLAY_LIMIT
+            )
+            if delta_hint:
+                hints.append(delta_hint)
+
         if hints:
             quick_hint = " ".join(hints)
 
         default_choice = "2" if (stale_level == "soft" or low_battery) else "1"
 
-        decision = prompt_inventory_decision(
-            timestamp=timestamp,
-            age_seconds=age_seconds,
-            state_changed=state_changed,
-            stale_level=stale_level,
-            default_choice=default_choice,
-            quick_hint=quick_hint,
-        )
+        try:
+            decision = prompt_inventory_decision(
+                timestamp=timestamp,
+                age_seconds=age_seconds,
+                state_changed=state_changed,
+                stale_level=stale_level,
+                default_choice=default_choice,
+                quick_hint=quick_hint,
+            )
+        except KeyboardInterrupt:
+            print()
+            print(
+                status_messages.status(
+                    "Inventory guard cancelled; APK pull aborted.", level="warn"
+                )
+            )
+            _record_guard_policy("cancelled")
+            return False
 
         if decision == "use_snapshot":
             snapshot_age_text = None
@@ -429,6 +483,7 @@ def _set_guard_context(
     scope_hash_changed: bool,
     packages_changed: bool,
     age_seconds: Optional[float],
+    package_delta: Optional[Dict[str, object]],
 ) -> None:
     _LAST_GUARD_DECISION.update(
         {
@@ -438,6 +493,7 @@ def _set_guard_context(
             "scope_hash_changed": scope_hash_changed,
             "packages_changed": packages_changed,
             "age_seconds": age_seconds,
+            "package_delta": package_delta,
         }
     )
 
@@ -455,3 +511,76 @@ def _record_guard_policy(policy: Optional[str]) -> None:
             ),
             category="device",
         )
+
+
+def _format_package_delta_brief(
+    summary: Dict[str, object], *, limit: int = PACKAGE_DELTA_DISPLAY_LIMIT
+) -> Optional[str]:
+    parts: List[str] = []
+
+    def _format_names(key: str, total_key: str) -> Optional[str]:
+        items = summary.get(key)
+        if not isinstance(items, list) or not items:
+            return None
+        names = [str(item) for item in items[:limit]]
+        if not names:
+            return None
+        extra = max(_safe_int(summary.get(total_key)) - len(names), 0)
+        text = ", ".join(names)
+        if extra:
+            text = f"{text}, …"
+        return text
+
+    updated_items = summary.get("updated")
+    if isinstance(updated_items, list) and updated_items:
+        formatted_updates: List[str] = []
+        for entry in updated_items[:limit]:
+            if not isinstance(entry, dict):
+                continue
+            package = entry.get("package")
+            if not isinstance(package, str) or not package:
+                continue
+            before = entry.get("before") or "?"
+            after = entry.get("after") or "?"
+            formatted_updates.append(f"{package} ({before}→{after})")
+        if formatted_updates:
+            extra = max(
+                _safe_int(summary.get("total_updated")) - len(formatted_updates), 0
+            )
+            text = ", ".join(formatted_updates)
+            if extra:
+                text = f"{text}, …"
+            parts.append(f"updates: {text}")
+
+    added_text = _format_names("added", "total_added")
+    if added_text:
+        parts.append(f"added: {added_text}")
+
+    removed_text = _format_names("removed", "total_removed")
+    if removed_text:
+        parts.append(f"removed: {removed_text}")
+
+    if not parts:
+        return None
+    return "; ".join(parts)
+
+
+def _format_package_delta_hint(
+    summary: Dict[str, object], *, limit: int = PACKAGE_DELTA_DISPLAY_LIMIT
+) -> Optional[str]:
+    total = _safe_int(summary.get("total_changed"))
+    brief = _format_package_delta_brief(summary, limit=limit)
+    if brief:
+        if total:
+            return f"Recent package changes ({total}): {brief}."
+        return f"Recent package changes: {brief}."
+    if total:
+        return f"Recent package changes detected ({total})."
+    return None
+
+
+def _safe_int(value: object) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0

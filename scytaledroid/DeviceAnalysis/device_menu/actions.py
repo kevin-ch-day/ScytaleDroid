@@ -12,8 +12,8 @@ from scytaledroid.Utils.DisplayUtils import (
 )
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
-from .. import adb_utils, device_manager
-from ..inventory import inventory_sync_menu
+from scytaledroid.DeviceAnalysis import adb_utils, device_manager
+from scytaledroid.DeviceAnalysis.inventory import inventory_sync_menu
 from .formatters import (
     format_android_release,
     format_build_tags,

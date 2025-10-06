@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
-from .. import adb_utils
-from .. import inventory as inventory_module
-from .. import inventory_meta
+from scytaledroid.DeviceAnalysis import adb_utils
+from scytaledroid.DeviceAnalysis import inventory as inventory_module
+from scytaledroid.DeviceAnalysis import inventory_meta
 from .constants import INVENTORY_STALE_SECONDS
 from .utils import coerce_float, coerce_int, humanize_seconds
 
@@ -37,6 +37,110 @@ def _normalize_scope_entries(
     return normalized
 
 
+def _normalise_version_code(value: Optional[object]) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return str(int(value))
+    if isinstance(value, str):
+        candidate = value.strip()
+        return candidate or None
+    return str(value)
+
+
+def _display_version(version_code: Optional[object], version_name: Optional[object]) -> Optional[str]:
+    code = _normalise_version_code(version_code)
+    if code:
+        return code
+    if isinstance(version_name, str):
+        candidate = version_name.strip()
+        if candidate:
+            return candidate
+    return None
+
+
+def _build_package_delta_summary(
+    snapshot_packages: Sequence[Dict[str, object]] | None,
+    current_signatures: Sequence[Tuple[str, Optional[str], Optional[str]]],
+    *,
+    limit: int = 5,
+) -> Optional[Dict[str, object]]:
+    if not snapshot_packages:
+        return None
+
+    previous_map: Dict[str, Dict[str, Optional[str]]] = {}
+    for entry in snapshot_packages:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("package_name")
+        if not isinstance(name, str) or not name:
+            continue
+        previous_map[name] = {
+            "version_code": _normalise_version_code(entry.get("version_code")),
+            "version_name": entry.get("version_name") if isinstance(entry.get("version_name"), str) else None,
+        }
+
+    current_map: Dict[str, Dict[str, Optional[str]]] = {}
+    for name, version_code, version_name in current_signatures:
+        if not isinstance(name, str) or not name:
+            continue
+        current_map[name] = {
+            "version_code": _normalise_version_code(version_code),
+            "version_name": version_name if isinstance(version_name, str) else None,
+        }
+
+    if not previous_map and not current_map:
+        return None
+
+    previous_names = set(previous_map)
+    current_names = set(current_map)
+
+    added = sorted(current_names - previous_names)
+    removed = sorted(previous_names - current_names)
+    updated: List[Dict[str, Optional[str]]] = []
+    for name in sorted(previous_names & current_names):
+        previous_entry = previous_map.get(name) or {}
+        current_entry = current_map.get(name) or {}
+        previous_token = _display_version(
+            previous_entry.get("version_code"), previous_entry.get("version_name")
+        )
+        current_token = _display_version(
+            current_entry.get("version_code"), current_entry.get("version_name")
+        )
+        if previous_token == current_token:
+            continue
+        updated.append(
+            {
+                "package": name,
+                "before": previous_token,
+                "after": current_token,
+            }
+        )
+
+    total_added = len(added)
+    total_removed = len(removed)
+    total_updated = len(updated)
+    total_changed = total_added + total_removed + total_updated
+    if total_changed == 0:
+        return None
+
+    summary: Dict[str, object] = {
+        "total_added": total_added,
+        "total_removed": total_removed,
+        "total_updated": total_updated,
+        "total_changed": total_changed,
+    }
+
+    if added:
+        summary["added"] = added[:limit]
+    if removed:
+        summary["removed"] = removed[:limit]
+    if updated:
+        summary["updated"] = updated[:limit]
+
+    return summary
+
+
 def get_latest_inventory_metadata(
     serial: Optional[str],
     *,
@@ -49,6 +153,7 @@ def get_latest_inventory_metadata(
 
     snapshot_meta = inventory_meta.load_latest(serial)
     snapshot_payload: Optional[Dict[str, object]] = None
+    snapshot_packages: Optional[List[Dict[str, object]]] = None
 
     package_count: Optional[int]
     scope_hashes: Optional[Dict[str, str]] = None
@@ -66,6 +171,12 @@ def get_latest_inventory_metadata(
         snapshot_type = snapshot_meta.snapshot_type
         snapshot_scope_hash = snapshot_meta.scope_hash
         snapshot_scope_size = snapshot_meta.scope_size
+        if with_current_state:
+            snapshot_payload_candidate = inventory_module.load_latest_inventory(serial)
+            if isinstance(snapshot_payload_candidate, dict):
+                packages_candidate = snapshot_payload_candidate.get("packages")
+                if isinstance(packages_candidate, list):
+                    snapshot_packages = packages_candidate  # type: ignore[assignment]
     else:
         snapshot = inventory_module.load_latest_inventory(serial)
         if not snapshot:
@@ -99,6 +210,7 @@ def get_latest_inventory_metadata(
             packages_candidate = snapshot_payload.get("packages")
             if isinstance(packages_candidate, list):
                 packages_list = packages_candidate
+                snapshot_packages = packages_list
 
         if not package_list_hash and packages_list:
             names = [
@@ -288,6 +400,14 @@ def get_latest_inventory_metadata(
         metadata["packages_changed"] = packages_changed
     else:
         metadata["packages_changed"] = packages_changed
+
+    if packages_changed:
+        package_delta_summary = _build_package_delta_summary(
+            snapshot_packages,
+            current_signatures,
+        )
+        if package_delta_summary:
+            metadata["package_delta_summary"] = package_delta_summary
 
     final_packages_changed = bool(metadata.get("packages_changed"))
     state_changed = (
