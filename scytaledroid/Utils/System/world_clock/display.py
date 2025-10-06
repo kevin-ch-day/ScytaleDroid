@@ -10,7 +10,7 @@ import zoneinfo
 
 from scytaledroid.Utils.DisplayUtils import colors, status_messages, table_utils
 
-from .world_clock_profiles import ClockProfile, featured_timezones, get_profile
+from .profiles import ClockProfile, featured_timezones, get_profile
 
 
 @dataclass

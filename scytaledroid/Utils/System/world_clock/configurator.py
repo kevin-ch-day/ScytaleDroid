@@ -6,8 +6,8 @@ from typing import Callable, Dict
 
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 
-from .world_clock_display import render_clock_overview
-from .world_clock_state import (
+from .display import render_clock_overview
+from .state import (
     ClockLimitError,
     MinimumClockError,
     TimezoneValidationError,

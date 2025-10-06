@@ -11,7 +11,7 @@ from scytaledroid.Utils.DisplayUtils import (
 )
 
 from . import util_actions
-from .world_clock_configurator import configure_world_clocks
+from .world_clock.configurator import configure_world_clocks
 
 
 def utils_menu() -> None:
