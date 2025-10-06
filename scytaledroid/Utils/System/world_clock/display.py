@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import zoneinfo
 
@@ -159,15 +159,61 @@ def describe_timezone(timezone_name: str, local_time: datetime) -> str:
     abbreviation = local_time.tzname() or "UTC"
     friendly = _FRIENDLY_TIMEZONE_NAMES.get(timezone_name)
     if friendly:
-        return f"{friendly} — {abbreviation}"
+        return f"{friendly} ({abbreviation})"
 
     if "/" in timezone_name:
         region, city = timezone_name.split("/", 1)
         city = city.replace("_", " ")
         region = region.replace("_", " ").title()
-        return f"{abbreviation} — {city}, {region}"
+        return f"{city}, {region} ({abbreviation})"
 
-    return f"{abbreviation} — {timezone_name}"
+    cleaned = timezone_name.replace("_", " ") if timezone_name else abbreviation
+    return f"{cleaned} ({abbreviation})"
+
+
+def friendly_zone_label(timezone_name: str) -> str:
+    friendly = _FRIENDLY_TIMEZONE_NAMES.get(timezone_name)
+    if friendly:
+        return friendly
+    if "/" in timezone_name:
+        _, city = timezone_name.split("/", 1)
+        return city.replace("_", " ")
+    return timezone_name.replace("_", " ")
+
+
+def collect_snapshot_sets(
+    clocks: Dict[str, str],
+    *,
+    primary: Optional[str],
+    reference: ClockReference,
+) -> Tuple[List[ClockSnapshot], List[ClockSnapshot], List[ClockSnapshot]]:
+    configured = snapshot_clocks(
+        clocks,
+        primary=primary,
+        category="configured",
+        reference=reference,
+    )
+    featured = featured_snapshots(reference)
+
+    configured_labels = {snapshot.label for snapshot in configured}
+    combined: List[ClockSnapshot] = list(configured)
+    combined.extend(
+        snapshot for snapshot in featured if snapshot.label not in configured_labels
+    )
+
+    combined.sort(
+        key=lambda snap: (
+            snap.utc_offset_minutes,
+            0
+            if snap.category == "configured" and snap.is_primary
+            else 1
+            if snap.category == "configured"
+            else 2,
+            snap.profile.city.lower(),
+        )
+    )
+
+    return configured, featured, combined
 
 
 def format_dst_status_text(
@@ -230,84 +276,60 @@ def render_clock_overview(
         print(status_messages.status("No world clocks configured.", level="warn"))
         return
 
-    snapshots = snapshot_clocks(
-        clocks,
-        primary=primary,
-        category="configured",
-        reference=reference,
-    )
-    featured = featured_snapshots(reference)
-
-    configured_labels = {snapshot.label for snapshot in snapshots}
-    combined: List[ClockSnapshot] = list(snapshots)
-    combined.extend(snapshot for snapshot in featured if snapshot.label not in configured_labels)
-
-    combined.sort(
-        key=lambda snap: (
-            snap.utc_offset_minutes,
-            0 if snap.category == "configured" and snap.is_primary else 1 if snap.category == "configured" else 2,
-            snap.profile.city.lower(),
-        )
+    snapshots, _, combined = collect_snapshot_sets(
+        clocks, primary=primary, reference=reference
     )
 
     headers = [
+        "Mark",
         "Role",
         "City",
         "Country",
         "Region",
-        "Time Zone",
+        "Zone",
         "UTC±",
-        "Local Time",
-        "DST",
     ]
 
     use_color = colors.colors_enabled()
 
-    def _role_cell(snapshot: ClockSnapshot) -> str:
+    def _role_marker(snapshot: ClockSnapshot) -> str:
         if snapshot.category == "reference":
-            text = "○ Reference"
-            style = colors.style("muted") if use_color else ()
-        elif snapshot.is_primary:
-            text = "★ Primary"
-            style = colors.style("badge") if use_color else ()
-        else:
-            text = "• Configured"
-            style = colors.style("accent") if use_color else ()
-        return colors.apply(text, style) if use_color else text
+            return "○"
+        if snapshot.is_primary:
+            return "★"
+        return "•"
+
+    def _role_label(snapshot: ClockSnapshot) -> str:
+        if snapshot.category == "reference":
+            return "Reference"
+        if snapshot.is_primary:
+            return "Primary"
+        return "Configured"
 
     rows: List[List[str]] = []
     primary_snapshot: Optional[ClockSnapshot] = None
     for snapshot in combined:
         if snapshot.is_primary and snapshot.category == "configured":
             primary_snapshot = snapshot
-        tz_display = describe_timezone(snapshot.timezone, snapshot.local_time)
-        local_time_display = format_display_time(snapshot.local_time)
-        if use_color and snapshot.is_primary and snapshot.category == "configured":
-            local_time_display = colors.apply(local_time_display, colors.style("badge"))
+        zone_label = friendly_zone_label(snapshot.timezone)
         rows.append(
             [
-                _role_cell(snapshot),
+                _role_marker(snapshot),
+                _role_label(snapshot),
                 snapshot.profile.city,
                 snapshot.profile.country,
                 snapshot.profile.region,
-                tz_display,
+                zone_label,
                 snapshot.utc_offset_compact,
-                local_time_display,
-                format_dst_status_text(
-                    snapshot.dst_status,
-                    snapshot.dst_next_change,
-                    snapshot.dst_offset_change,
-                    use_color=use_color,
-                ),
             ]
         )
 
-    table_utils.render_table(headers, rows, accent_first_column=False, use_color=use_color)
+    table_utils.render_table(headers, rows, accent_first_column=True, use_color=use_color)
     print()
 
+    _render_snapshot_summary(combined, use_color=use_color)
     _print_reference_details(reference)
     _print_primary_details(primary or None, primary_timezone, primary_snapshot)
-    _print_dst_transitions(snapshots)
 
 
 def _print_primary_details(
@@ -371,6 +393,70 @@ def _print_reference_details(reference: ClockReference) -> None:
     )
 
 
+def _render_snapshot_summary(
+    snapshots: List[ClockSnapshot], *, use_color: bool = False
+) -> None:
+    if not snapshots:
+        return
+
+    print("Current times:")
+    for snapshot in snapshots:
+        marker = "★" if snapshot.is_primary and snapshot.category == "configured" else (
+            "○" if snapshot.category == "reference" else "•"
+        )
+        descriptor = f"{snapshot.profile.city}, {snapshot.profile.country}"
+        timestamp = format_display_time(snapshot.local_time)
+        tz_display = describe_timezone(snapshot.timezone, snapshot.local_time)
+        line = f"  {marker} {descriptor} — {timestamp} ({tz_display})"
+        if use_color and snapshot.is_primary and snapshot.category == "configured":
+            line = colors.apply(line, colors.style("badge"))
+        print(line)
+    print()
+
+
+def render_dst_schedule(
+    clocks: Dict[str, str],
+    *,
+    primary: Optional[str],
+    reference: ClockReference,
+) -> None:
+    snapshots = snapshot_clocks(
+        clocks,
+        primary=primary,
+        category="configured",
+        reference=reference,
+    )
+
+    if not snapshots:
+        print(status_messages.status("No clocks configured for DST review.", level="warn"))
+        return
+
+    use_color = colors.colors_enabled()
+    headers = ["City", "Country", "Zone", "DST status"]
+    rows: List[List[str]] = []
+
+    for snapshot in snapshots:
+        zone_label = friendly_zone_label(snapshot.timezone)
+        rows.append(
+            [
+                snapshot.profile.city,
+                snapshot.profile.country,
+                zone_label,
+                format_dst_status_text(
+                    snapshot.dst_status,
+                    snapshot.dst_next_change,
+                    snapshot.dst_offset_change,
+                    use_color=use_color,
+                ),
+            ]
+        )
+
+    table_utils.render_table(headers, rows, accent_first_column=True, use_color=use_color)
+    print()
+
+    _print_dst_transitions(snapshots)
+
+
 def _print_dst_transitions(snapshots: List[ClockSnapshot]) -> None:
     upcoming = [
         snap
@@ -418,12 +504,15 @@ def _print_dst_transitions(snapshots: List[ClockSnapshot]) -> None:
 
 __all__ = [
     "ClockSnapshot",
+    "collect_snapshot_sets",
     "compute_dst_details",
     "describe_timezone",
     "featured_snapshots",
     "format_display_time",
     "format_dst_status_text",
     "format_offset",
+    "friendly_zone_label",
     "render_clock_overview",
+    "render_dst_schedule",
     "snapshot_clocks",
 ]

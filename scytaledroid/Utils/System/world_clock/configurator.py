@@ -8,7 +8,7 @@ from typing import Callable, Dict
 
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 
-from .display import render_clock_overview
+from .display import render_clock_overview, render_dst_schedule
 from .log_alignment import derive_reference_from_log
 from .state import (
     ClockLimitError,
@@ -89,13 +89,8 @@ def _build_menu(state: WorldClockState) -> list[menu_utils.MenuOption]:
         ),
         menu_utils.MenuOption(
             "4",
-            "Adjust reference time",
-            "Align the dashboard to live or log timestamps",
-        ),
-        menu_utils.MenuOption(
-            "5",
             "Refresh time",
-            "Update the table with the latest snapshot",
+            "Refresh snapshot or open reference tools",
         ),
     ]
     return options
@@ -309,12 +304,47 @@ def _handle_reference(state: WorldClockState) -> None:
     )
 
 
+def _handle_dst_schedule(state: WorldClockState) -> None:
+    render_dst_schedule(
+        state.clocks,
+        primary=state.primary,
+        reference=state.reference,
+    )
+
+
+def _handle_refresh_menu(state: WorldClockState) -> None:
+    options = [
+        menu_utils.MenuOption("1", "Refresh snapshot", "Update to the latest times"),
+        menu_utils.MenuOption(
+            "2",
+            "Adjust reference time",
+            "Align to live, custom, or log timestamps",
+        ),
+        menu_utils.MenuOption(
+            "3",
+            "View DST schedule",
+            "Review daylight saving status for configured cities",
+        ),
+    ]
+
+    menu_utils.print_menu(options, boxed=False)
+    choice = prompt_utils.get_choice([opt.key for opt in options] + ["0"], default="1")
+
+    if choice == "0":
+        return
+    if choice == "1":
+        _handle_refresh(state)
+    elif choice == "2":
+        _handle_reference(state)
+    elif choice == "3":
+        _handle_dst_schedule(state)
+
+
 _ACTION_HANDLERS: Dict[str, Callable[[WorldClockState], None]] = {
     "1": _handle_add_or_update,
     "2": _handle_remove,
     "3": _handle_set_primary,
-    "4": _handle_reference,
-    "5": _handle_refresh,
+    "4": _handle_refresh_menu,
 }
 
 
