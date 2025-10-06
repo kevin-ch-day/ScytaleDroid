@@ -55,12 +55,10 @@ def _resolve_timezones() -> Dict[str, str]:
 def _format_time(tz_name: str) -> str:
     tz = zoneinfo.ZoneInfo(tz_name)
     now = datetime.now(tz)
-    time_part = now.strftime("%I:%M %p")
-    if time_part.startswith("0"):
-        time_part = time_part[1:]
+    time_part = now.strftime("%I:%M %p").lstrip("0")
     date_part = f"{now.month}-{now.day}-{now.year}"
     tz_label = now.tzname() or tz_name
-    return f"{time_part} {date_part} {tz_label}".strip()
+    return f"{date_part} {time_part} {tz_label}".strip()
 
 
 def print_banner() -> None:

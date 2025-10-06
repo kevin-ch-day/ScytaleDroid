@@ -15,7 +15,6 @@ from .world_clock_state import (
     load_state,
     remove_clock,
     reset_to_defaults,
-    set_local_reference,
     set_primary_clock,
     upsert_clock,
 )
@@ -30,8 +29,7 @@ def configure_world_clocks() -> None:
         render_clock_overview(
             state.clocks,
             primary=state.primary,
-            local_label=state.local_label,
-            local_timezone=state.local_timezone,
+            primary_timezone=state.primary_timezone,
             max_clocks=state.max_clocks,
         )
 
@@ -53,10 +51,6 @@ def configure_world_clocks() -> None:
 
 
 def _build_menu(state: WorldClockState) -> list[menu_utils.MenuOption]:
-    subtitle = (
-        f"Currently {state.local_label} — {state.local_timezone}" if state.local_label else None
-    )
-
     configured_count = len(state.clocks)
     remove_disabled = configured_count <= 1
 
@@ -86,11 +80,6 @@ def _build_menu(state: WorldClockState) -> list[menu_utils.MenuOption]:
         ),
         menu_utils.MenuOption(
             "5",
-            "Set local reference clock",
-            subtitle,
-        ),
-        menu_utils.MenuOption(
-            "6",
             "Refresh snapshot",
             "Update the table with the current times",
             hint="Helpful when leaving the menu open",
@@ -182,43 +171,6 @@ def _handle_set_primary(state: WorldClockState) -> None:
     print(status_messages.status(f"Primary clock set to {cleaned_label}.", level="success"))
 
 
-def _handle_set_local_reference(state: WorldClockState) -> None:
-    suggested_label = state.local_label or state.primary or next(iter(state.clocks), "Local Reference")
-    label = prompt_utils.prompt_text(
-        "Local reference label",
-        default=suggested_label,
-        hint="Used in reports and summaries",
-    )
-    cleaned_label = label.strip() or suggested_label
-
-    default_timezone = (
-        state.clocks.get(cleaned_label)
-        or state.local_timezone
-        or state.clocks.get(state.primary)
-        or "Etc/UTC"
-    )
-    menu_utils.print_hint("Enter an IANA timezone such as America/Chicago or Europe/Paris.")
-    tz_name = prompt_utils.prompt_text(
-        "Local reference timezone",
-        default=default_timezone,
-        required=True,
-    )
-    try:
-        set_local_reference(cleaned_label, tz_name)
-    except TimezoneValidationError as exc:
-        print(status_messages.status(str(exc), level="error"))
-        return
-
-    updated_state = load_state()
-    stored_timezone = updated_state.local_timezone
-    print(
-        status_messages.status(
-            f"Local reference set to {cleaned_label} ({stored_timezone}).",
-            level="success",
-        )
-    )
-
-
 def _handle_refresh(_: WorldClockState) -> None:
     print(status_messages.status("Refreshing clock snapshot...", level="info"))
 
@@ -228,8 +180,7 @@ _ACTION_HANDLERS: Dict[str, Callable[[WorldClockState], None]] = {
     "2": _handle_remove,
     "3": _handle_reset,
     "4": _handle_set_primary,
-    "5": _handle_set_local_reference,
-    "6": _handle_refresh,
+    "5": _handle_refresh,
 }
 
 

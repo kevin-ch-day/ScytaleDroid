@@ -21,7 +21,6 @@ class ClockSnapshot:
     timezone: str
     profile: ClockProfile
     is_primary: bool
-    is_local_reference: bool
     local_time: datetime
     utc_offset_long: str
     utc_offset_compact: str
@@ -49,7 +48,6 @@ def _snapshot_clocks(
     clocks: Dict[str, str],
     *,
     primary: Optional[str],
-    local_label: Optional[str],
     category: str,
 ) -> List[ClockSnapshot]:
     now_utc = datetime.now(zoneinfo.ZoneInfo("UTC"))
@@ -76,7 +74,6 @@ def _snapshot_clocks(
                 timezone=timezone_name,
                 profile=profile,
                 is_primary=label == primary,
-                is_local_reference=label == local_label,
                 local_time=local_time,
                 utc_offset_long=utc_offset_long,
                 utc_offset_compact=utc_offset_compact,
@@ -92,24 +89,45 @@ def _featured_snapshots() -> List[ClockSnapshot]:
     return _snapshot_clocks(
         featured,
         primary=None,
-        local_label=None,
         category="reference",
     )
 
 
+_FRIENDLY_TIMEZONE_NAMES = {
+    "America/Chicago": "Central Time",
+    "America/Los_Angeles": "Pacific Time",
+    "Asia/Dubai": "Gulf Standard Time",
+    "Europe/Paris": "Central European Time",
+    "Etc/UTC": "Coordinated Universal Time",
+}
+
+
+def _describe_timezone(timezone_name: str, local_time: datetime) -> str:
+    abbreviation = local_time.tzname() or "UTC"
+    friendly = _FRIENDLY_TIMEZONE_NAMES.get(timezone_name)
+    if friendly:
+        return f"{friendly} ({abbreviation})"
+
+    if "/" in timezone_name:
+        region, city = timezone_name.split("/", 1)
+        city = city.replace("_", " ")
+        region = region.replace("_", " ").title()
+        return f"{abbreviation} · {city}, {region}"
+
+    return f"{abbreviation} · {timezone_name}"
+
+
 def _format_display_time(dt: datetime) -> str:
-    time_part = dt.strftime("%I:%M %p")
-    if time_part.startswith("0"):
-        time_part = time_part[1:]
-    return f"{time_part} {dt.month}-{dt.day}-{dt.year}"
+    time_part = dt.strftime("%I:%M %p").lstrip("0")
+    date_part = f"{dt.month}-{dt.day}-{dt.year}"
+    return f"{date_part} {time_part}"
 
 
 def render_clock_overview(
     clocks: Dict[str, str],
     *,
     primary: Optional[str],
-    local_label: Optional[str],
-    local_timezone: Optional[str],
+    primary_timezone: Optional[str],
     max_clocks: int,
 ) -> None:
     """Render the configured clocks in a professional table with context."""
@@ -121,7 +139,6 @@ def render_clock_overview(
     snapshots = _snapshot_clocks(
         clocks,
         primary=primary,
-        local_label=local_label,
         category="configured",
     )
     featured = _featured_snapshots()
@@ -132,19 +149,21 @@ def render_clock_overview(
         "Country",
         "Region",
         "Primary",
-        "Local Ref",
-        "Timezone",
+        "Time Zone",
         "UTC±",
         "Local Time",
     ]
 
     rows = []
     configured_labels = set()
+    primary_snapshot: Optional[ClockSnapshot] = None
     for snapshot in snapshots:
         configured_labels.add(snapshot.label)
-        marker = "★" if snapshot.is_primary else "•"
+        marker = "*"
         primary_text = "Yes" if snapshot.is_primary else ""
-        local_text = "Yes" if snapshot.is_local_reference else ""
+        tz_display = _describe_timezone(snapshot.timezone, snapshot.local_time)
+        if snapshot.is_primary:
+            primary_snapshot = snapshot
         rows.append(
             [
                 marker,
@@ -152,8 +171,7 @@ def render_clock_overview(
                 snapshot.profile.country,
                 snapshot.profile.region,
                 primary_text,
-                local_text,
-                snapshot.timezone,
+                tz_display,
                 snapshot.utc_offset_compact,
                 _format_display_time(snapshot.local_time),
             ]
@@ -163,15 +181,15 @@ def render_clock_overview(
         for snapshot in featured:
             if snapshot.label in configured_labels:
                 continue
+            tz_display = _describe_timezone(snapshot.timezone, snapshot.local_time)
             rows.append(
                 [
-                    "○",
+                    "",
                     snapshot.profile.city,
                     snapshot.profile.country,
                     snapshot.profile.region,
                     "",
-                    "",
-                    snapshot.timezone,
+                    tz_display,
                     snapshot.utc_offset_compact,
                     _format_display_time(snapshot.local_time),
                 ]
@@ -188,28 +206,36 @@ def render_clock_overview(
     )
 
     print()
-    _print_local_reference_details(local_label, local_timezone)
+    _print_primary_details(primary or None, primary_timezone, primary_snapshot)
 
 
-def _print_local_reference_details(
-    local_label: Optional[str], local_timezone: Optional[str]
+def _print_primary_details(
+    primary_label: Optional[str],
+    primary_timezone: Optional[str],
+    snapshot: Optional[ClockSnapshot],
 ) -> None:
-    if not local_timezone:
+    if not primary_label or not primary_timezone:
         return
 
     try:
-        tz = zoneinfo.ZoneInfo(local_timezone)
+        tz = zoneinfo.ZoneInfo(primary_timezone)
         now_local = datetime.now(tz)
-        offset_long, _ = _format_offset(now_local)
-        formatted = _format_display_time(now_local)
     except Exception:
-        formatted = "Unavailable"
-        offset_long = "UTC"
+        tz = zoneinfo.ZoneInfo("UTC")
+        now_local = datetime.now(tz)
 
-    label_display = local_label or "Local Reference"
+    offset_long, _ = _format_offset(now_local)
+    formatted = _format_display_time(now_local)
+    tz_description = _describe_timezone(primary_timezone, now_local)
+
+    if snapshot is not None:
+        tz_description = _describe_timezone(snapshot.timezone, snapshot.local_time)
+        offset_long = snapshot.utc_offset_long
+        formatted = _format_display_time(snapshot.local_time)
+
     print(
         status_messages.status(
-            f"Local reference — {label_display} ({local_timezone}, {offset_long}) · {formatted}",
+            f"Primary clock — {primary_label} ({tz_description}, {offset_long}) · {formatted}",
             level="info",
         )
     )

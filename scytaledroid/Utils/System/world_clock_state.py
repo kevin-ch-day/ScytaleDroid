@@ -34,8 +34,7 @@ class WorldClockState:
     defaults: Dict[str, str]
     max_clocks: int
     primary: Optional[str]
-    local_label: Optional[str]
-    local_timezone: Optional[str]
+    primary_timezone: Optional[str]
 
 
 def _normalise_max(value: object) -> int:
@@ -75,24 +74,20 @@ def load_state() -> WorldClockState:
         primary = next(iter(clocks), None)
         app_config.UI_PRIMARY_CLOCK = primary
 
-    local_label = getattr(app_config, "UI_LOCAL_TIME_LABEL", primary)
-    local_timezone = getattr(app_config, "UI_LOCAL_TIMEZONE", None)
-    if local_label in clocks:
-        local_timezone = clocks[local_label]
-    if not local_timezone:
-        fallback = clocks.get(primary) or "Etc/UTC"
-        app_config.UI_LOCAL_TIMEZONE = fallback
-        local_timezone = fallback
+    primary_timezone = clocks.get(primary)
+    if not primary_timezone:
+        primary_timezone = next(iter(clocks.values()), "Etc/UTC")
 
-    app_config.UI_LOCAL_TIME_LABEL = local_label or primary
+    # Keep legacy attributes aligned with the primary selection for compatibility
+    app_config.UI_LOCAL_TIME_LABEL = primary
+    app_config.UI_LOCAL_TIMEZONE = primary_timezone
 
     return WorldClockState(
         clocks=clocks,
         defaults=defaults,
         max_clocks=max_clocks,
         primary=primary,
-        local_label=app_config.UI_LOCAL_TIME_LABEL,
-        local_timezone=app_config.UI_LOCAL_TIMEZONE,
+        primary_timezone=primary_timezone,
     )
 
 
@@ -118,6 +113,8 @@ def upsert_clock(label: str, tz_name: str, *, max_clocks: int) -> bool:
 
     if not getattr(app_config, "UI_PRIMARY_CLOCK", None):
         app_config.UI_PRIMARY_CLOCK = cleaned_label
+        app_config.UI_LOCAL_TIME_LABEL = cleaned_label
+        app_config.UI_LOCAL_TIMEZONE = tz_name
 
     return exists
 
@@ -139,11 +136,15 @@ def remove_clock(label: str, *, min_clocks: int = 1) -> bool:
     if getattr(app_config, "UI_PRIMARY_CLOCK", None) == label:
         app_config.UI_PRIMARY_CLOCK = next(iter(clocks), None)
 
-    if getattr(app_config, "UI_LOCAL_TIME_LABEL", None) == label:
-        fallback_label = next(iter(clocks), None)
-        fallback_timezone = clocks.get(fallback_label, "Etc/UTC")
-        app_config.UI_LOCAL_TIME_LABEL = fallback_label
-        app_config.UI_LOCAL_TIMEZONE = fallback_timezone
+    primary_label = getattr(app_config, "UI_PRIMARY_CLOCK", None)
+    if primary_label not in clocks:
+        primary_label = next(iter(clocks), None)
+        app_config.UI_PRIMARY_CLOCK = primary_label
+    fallback_timezone = clocks.get(primary_label) or next(
+        iter(clocks.values()), "Etc/UTC"
+    )
+    app_config.UI_LOCAL_TIME_LABEL = primary_label
+    app_config.UI_LOCAL_TIMEZONE = fallback_timezone
 
     return True
 
@@ -159,11 +160,9 @@ def reset_to_defaults(max_clocks: int) -> None:
     app_config.UI_TIMEZONES = dict(restored)
     app_config.UI_PRIMARY_CLOCK = next(iter(restored), None)
 
-    local_label = getattr(app_config, "UI_LOCAL_TIME_LABEL", app_config.UI_PRIMARY_CLOCK)
-    if local_label not in restored:
-        local_label = app_config.UI_PRIMARY_CLOCK
-    app_config.UI_LOCAL_TIME_LABEL = local_label
-    app_config.UI_LOCAL_TIMEZONE = restored.get(local_label, "Etc/UTC")
+    primary_label = app_config.UI_PRIMARY_CLOCK
+    app_config.UI_LOCAL_TIME_LABEL = primary_label
+    app_config.UI_LOCAL_TIMEZONE = restored.get(primary_label, "Etc/UTC")
 
 
 def set_primary_clock(label: str) -> None:
@@ -174,19 +173,8 @@ def set_primary_clock(label: str) -> None:
         raise KeyError(label)
     app_config.UI_PRIMARY_CLOCK = label
 
-
-def set_local_reference(label: str, timezone: str) -> None:
-    """Persist the local reference label and timezone used in reports."""
-
-    clocks = getattr(app_config, "UI_TIMEZONES", {})
-    if label in clocks:
-        timezone = clocks[label]
-    else:
-        _validate_timezone(timezone.strip())
-        timezone = timezone.strip()
-
     app_config.UI_LOCAL_TIME_LABEL = label
-    app_config.UI_LOCAL_TIMEZONE = timezone
+    app_config.UI_LOCAL_TIMEZONE = clocks.get(label, "Etc/UTC")
 
 
 __all__ = [
@@ -198,7 +186,6 @@ __all__ = [
     "load_state",
     "remove_clock",
     "reset_to_defaults",
-    "set_local_reference",
     "set_primary_clock",
     "upsert_clock",
 ]
