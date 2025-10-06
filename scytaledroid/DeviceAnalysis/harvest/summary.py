@@ -24,6 +24,7 @@ _SKIP_LABELS = {
     "policy_non_root": "System/vendor/mainline filtered by policy",
     "no_paths": "Package returned no APK paths",
     "app_definition_failed": "Failed to record app definition",
+    "dedupe_sha256": "Duplicate artifact (sha256 dedupe)",
 }
 
 
@@ -102,9 +103,10 @@ def print_package_result(result: PullResult, *, verbose: bool = False) -> None:
 
     if verbose:
         for artifact in result.ok:
+            apk_id_text = artifact.apk_id if artifact.apk_id is not None else "?"
             print(
                 status_messages.status(
-                    f"  ✓ apk_id={artifact.apk_id} {artifact.file_name}", level="success"
+                    f"  ✓ apk_id={apk_id_text} {artifact.file_name}", level="success"
                 )
             )
 
@@ -119,6 +121,7 @@ def render_harvest_summary(
     results: Sequence[PullResult],
     *,
     selection: ScopeSelection,
+    pull_mode: str = "legacy",
 ) -> None:
     """Render the end-of-run summary with diagnostics."""
 
@@ -132,10 +135,19 @@ def render_harvest_summary(
     print()
     print(text_blocks.headline("APK Harvest Summary", width=70))
     print(status_messages.status(f"Scope: {selection.label}"))
+    print(status_messages.status(f"Pull mode: {pull_mode}"))
     print(status_messages.status(f"Packages processed: {total_packages}"))
     print(status_messages.status(f"Files written: {files_written}"))
     if pull_errors:
         print(status_messages.status(f"Pull errors: {pull_errors}", level="warn"))
+    dedupe_skips = sum(result.skipped.count("dedupe_sha256") for result in results)
+    if dedupe_skips:
+        print(
+            status_messages.status(
+                f"Artifacts skipped (dedupe): {dedupe_skips}", level="info"
+            )
+        )
+
     if plan.policy_filtered:
         policy_details = _format_policy_details(plan.policy_filtered)
         print(status_messages.status(f"Filtered before pull (policy): {policy_details}", level="warn"))

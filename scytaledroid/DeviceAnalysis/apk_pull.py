@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis import adb_utils, harvest, inventory
+from scytaledroid.DeviceAnalysis.device_menu.inventory_guard import (
+    INVENTORY_STALE_SECONDS,
+    get_latest_inventory_metadata,
+)
 from scytaledroid.Utils.DisplayUtils import (
     error_panels,
     menu_utils,
@@ -77,6 +81,10 @@ def pull_apks(serial: Optional[str]) -> None:
     include_system_partitions = False
     verbose = False
     google_allowlist = harvest.rules.load_google_allowlist()
+    guard_metadata: Optional[Dict[str, object]] = get_latest_inventory_metadata(
+        serial, with_current_state=True
+    )
+    pull_mode: Optional[str] = None
 
     while True:
         selection = harvest.select_package_scope(
@@ -118,7 +126,7 @@ def pull_apks(serial: Optional[str]) -> None:
             )
             continue
 
-        action = _prompt_plan_action()
+        action = _prompt_plan_action(prefer_quick=_prefer_quick_mode(guard_metadata))
         if action == "dry-run":
             harvest.preview_plan(plan)
             prompt_utils.press_enter_to_continue()
@@ -129,10 +137,9 @@ def pull_apks(serial: Optional[str]) -> None:
             print(status_messages.status("APK pull cancelled by user.", level="warn"))
             prompt_utils.press_enter_to_continue()
             return
-        if action == "pull_verbose":
-            verbose = True
-        elif action == "pull_quiet":
-            verbose = False
+        if action in {"quick_verbose", "quick_quiet", "legacy_verbose", "legacy_quiet"}:
+            pull_mode = "quick" if action.startswith("quick") else "legacy"
+            verbose = action.endswith("verbose")
         else:
             continue
 
@@ -140,7 +147,7 @@ def pull_apks(serial: Optional[str]) -> None:
         active_selection = selection
         break
 
-    if not active_plan or not active_selection:
+    if not active_plan or not active_selection or not pull_mode:
         error_panels.print_error_panel(
             "APK Pull",
             "No harvest plan available.",
@@ -162,14 +169,27 @@ def pull_apks(serial: Optional[str]) -> None:
     dest_root = Path(app_config.DATA_DIR) / "apks" / "device_apks" / serial
     dest_root.mkdir(parents=True, exist_ok=True)
 
-    results = harvest.execute_harvest(
-        serial=serial,
-        adb_path=adb_path,
-        dest_root=dest_root,
-        session_stamp=session_stamp,
-        plans=active_plan.packages,
-        verbose=verbose,
-    )
+    if pull_mode == "quick":
+        results = harvest.quick_harvest(
+            active_plan.packages,
+            adb_path=adb_path,
+            dest_root=dest_root,
+            session_stamp=session_stamp,
+            config=app_config,
+            serial=serial,
+            verbose=verbose,
+        )
+    else:
+        results = harvest.execute_harvest(
+            serial=serial,
+            adb_path=adb_path,
+            dest_root=dest_root,
+            session_stamp=session_stamp,
+            plans=active_plan.packages,
+            config=app_config,
+            verbose=verbose,
+            pull_mode=pull_mode,
+        )
 
     if verbose:
         for result in results:
@@ -178,27 +198,36 @@ def pull_apks(serial: Optional[str]) -> None:
         for result in results:
             harvest.print_package_result(result, verbose=False)
 
-    harvest.render_harvest_summary(active_plan, results, selection=active_selection)
+    harvest.render_harvest_summary(
+        active_plan, results, selection=active_selection, pull_mode=pull_mode
+    )
     _maybe_save_watchlist(active_selection)
     prompt_utils.press_enter_to_continue()
 
 
-def _prompt_plan_action() -> str:
+def _prompt_plan_action(*, prefer_quick: bool) -> str:
     print()
     print(text_blocks.headline("Plan actions", width=70))
     options = {
-        "1": "Start pull (quiet)",
-        "2": "Start pull (verbose adb, stream output)",
+        "1": "Start quick pull (quiet)",
+        "2": "Start quick pull (verbose adb, stream output)",
         "3": "Dry-run preview",
         "4": "Change scope",
+        "5": "Start legacy pull (quiet)",
+        "6": "Start legacy pull (verbose adb, stream output)",
         "0": "Cancel",
     }
-    menu_utils.print_menu(options, is_main=False, default="1", exit_label="Cancel")
-    choice = prompt_utils.get_choice(list(options.keys()), default="1")
+    default_choice = "1" if prefer_quick else "5"
+    menu_utils.print_menu(options, is_main=False, default=default_choice, exit_label="Cancel")
+    choice = prompt_utils.get_choice(list(options.keys()), default=default_choice)
     if choice == "1":
-        return "pull_quiet"
+        return "quick_quiet"
     if choice == "2":
-        return "pull_verbose"
+        return "quick_verbose"
+    if choice == "5":
+        return "legacy_quiet"
+    if choice == "6":
+        return "legacy_verbose"
     if choice == "3":
         return "dry-run"
     if choice == "4":
@@ -215,6 +244,24 @@ def _device_is_rooted(serial: str) -> bool:
     if completed.returncode != 0:
         return False
     return completed.stdout.strip() == "0"
+
+
+def _prefer_quick_mode(metadata: Optional[Dict[str, object]]) -> bool:
+    if not metadata:
+        return False
+
+    timestamp = metadata.get("timestamp")
+    if not isinstance(timestamp, datetime):
+        return False
+
+    now = datetime.now(timezone.utc)
+    age_seconds = (now - timestamp).total_seconds()
+    if age_seconds < 0:
+        age_seconds = 0
+
+    stale = age_seconds > INVENTORY_STALE_SECONDS
+    state_changed = bool(metadata.get("state_changed"))
+    return stale and not state_changed
 
 
 def _maybe_save_watchlist(selection: harvest.ScopeSelection) -> None:

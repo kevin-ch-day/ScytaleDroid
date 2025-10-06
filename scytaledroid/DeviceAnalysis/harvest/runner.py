@@ -2,16 +2,25 @@
 
 from __future__ import annotations
 
-import hashlib
-import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Sequence
+from typing import List, Optional, Sequence, Tuple
 
 from scytaledroid.Database.db_func import apk_repository as repo
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
+from .common import (
+    DedupeTracker,
+    HarvestOptions,
+    adb_pull,
+    cleanup_duplicate,
+    compute_hashes,
+    inventory_payload,
+    is_system_package,
+    load_options,
+    write_metadata_sidecar,
+)
 from .models import ArtifactError, ArtifactPlan, ArtifactResult, PackagePlan, PullResult
 
 
@@ -21,11 +30,15 @@ def execute_harvest(
     dest_root: Path,
     session_stamp: str,
     plans: Sequence[PackagePlan],
+    config: object,
     *,
     verbose: bool = False,
+    pull_mode: str = "legacy",
 ) -> List[PullResult]:
     """Execute the provided harvest plan and return per-package results."""
 
+    options = load_options(config, pull_mode=pull_mode)
+    tracker = DedupeTracker(options)
     results: List[PullResult] = []
     total = len(plans)
     for index, plan in enumerate(plans, start=1):
@@ -39,6 +52,8 @@ def execute_harvest(
                 session_stamp=session_stamp,
                 plan=plan,
                 verbose=verbose,
+                options=options,
+                tracker=tracker,
             )
         )
     return results
@@ -52,6 +67,8 @@ def _execute_package_plan(
     session_stamp: str,
     plan: PackagePlan,
     verbose: bool,
+    options: HarvestOptions,
+    tracker: DedupeTracker,
 ) -> PullResult:
     result = PullResult(plan=plan)
 
@@ -64,16 +81,18 @@ def _execute_package_plan(
     package_dir = dest_root / package_name / session_stamp
     package_dir.mkdir(parents=True, exist_ok=True)
 
-    try:
-        app_id = repo.ensure_app_definition(package_name, inventory.app_label)
-    except Exception as exc:
-        message = f"Failed to ensure app definition for {package_name}: {exc}"
-        log.error(message, category="database")
-        result.skipped.append("app_definition_failed")
-        return result
+    app_id: Optional[int] = None
+    if options.write_db:
+        try:
+            app_id = repo.ensure_app_definition(package_name, inventory.app_label)
+        except Exception as exc:
+            message = f"Failed to ensure app definition for {package_name}: {exc}"
+            log.error(message, category="database")
+            result.skipped.append("app_definition_failed")
+            return result
 
-    group_id = None
-    if len(plan.artifacts) > 1:
+    group_id: Optional[int] = None
+    if options.write_db and len(plan.artifacts) > 1:
         try:
             group_id = repo.ensure_split_group(package_name)
         except Exception as exc:
@@ -83,7 +102,7 @@ def _execute_package_plan(
             return result
 
     for artifact in plan.artifacts:
-        artifact_result = _pull_and_record(
+        artifact_result, skip_reason = _pull_and_record(
             serial=serial,
             adb_path=adb_path,
             package_dir=package_dir,
@@ -92,10 +111,15 @@ def _execute_package_plan(
             app_id=app_id,
             group_id=group_id,
             verbose=verbose,
+            options=options,
+            tracker=tracker,
+            session_stamp=session_stamp,
         )
-        if isinstance(artifact_result, ArtifactResult):
+        if skip_reason:
+            result.skipped.append(skip_reason)
+        elif isinstance(artifact_result, ArtifactResult):
             result.ok.append(artifact_result)
-        else:
+        elif isinstance(artifact_result, ArtifactError):
             result.errors.append(artifact_result)
 
     return result
@@ -108,114 +132,104 @@ def _pull_and_record(
     package_dir: Path,
     plan: PackagePlan,
     artifact: ArtifactPlan,
-    app_id: int,
-    group_id: int | None,
+    app_id: Optional[int],
+    group_id: Optional[int],
     verbose: bool,
-):
+    options: HarvestOptions,
+    tracker: DedupeTracker,
+    session_stamp: str,
+) -> Tuple[ArtifactResult | ArtifactError | None, Optional[str]]:
     dest_path = package_dir / artifact.file_name
-    pull_result = _ensure_local_copy(
+    pull_result = adb_pull(
         adb_path=adb_path,
         serial=serial,
         source_path=artifact.source_path,
         dest_path=dest_path,
-        verbose=verbose,
         package_name=plan.inventory.package_name,
+        verbose=verbose,
     )
     if isinstance(pull_result, ArtifactError):
-        return pull_result
-
-    hashes = _compute_hashes(dest_path)
-    record = repo.ApkRecord(
-        package_name=plan.inventory.package_name,
-        app_id=app_id,
-        file_name=dest_path.name,
-        file_size=dest_path.stat().st_size,
-        is_system=(plan.inventory.category or "").lower() != "user",
-        installer=plan.inventory.installer,
-        version_name=plan.inventory.version_name,
-        version_code=plan.inventory.version_code,
-        md5=hashes["md5"],
-        sha1=hashes["sha1"],
-        sha256=hashes["sha256"],
-        device_serial=serial,
-        source_path=artifact.source_path,
-        local_path=str(dest_path.resolve()),
-        harvested_at=datetime.utcnow(),
-        is_split_member=artifact.is_split_member,
-        split_group_id=group_id,
-    )
+        return pull_result, None
 
     try:
-        apk_id = repo.upsert_apk_record(record)
-    except Exception as exc:
-        message = (
-            f"Failed to upsert APK metadata for {plan.inventory.package_name} "
-            f"({artifact.source_path}): {exc}"
+        hashes = compute_hashes(dest_path)
+    except FileNotFoundError as exc:  # pragma: no cover - IO race
+        return ArtifactError(source_path=artifact.source_path, reason=str(exc)), None
+
+    keep, occurrence = tracker.register(hashes["sha256"])
+    if not keep:
+        cleanup_duplicate(dest_path)
+        return None, "dedupe_sha256"
+
+    apk_id: Optional[int] = None
+    if options.write_db:
+        record = repo.ApkRecord(
+            package_name=plan.inventory.package_name,
+            app_id=app_id,
+            file_name=dest_path.name,
+            file_size=dest_path.stat().st_size,
+            is_system=is_system_package(plan.inventory),
+            installer=plan.inventory.installer,
+            version_name=plan.inventory.version_name,
+            version_code=plan.inventory.version_code,
+            md5=hashes["md5"],
+            sha1=hashes["sha1"],
+            sha256=hashes["sha256"],
+            device_serial=serial,
+            source_path=artifact.source_path,
+            local_path=str(dest_path.resolve()),
+            harvested_at=datetime.utcnow(),
+            is_split_member=artifact.is_split_member,
+            split_group_id=group_id,
         )
-        log.error(message, category="database")
-        return ArtifactError(source_path=artifact.source_path, reason=str(exc))
 
-    return ArtifactResult(
-        file_name=dest_path.name,
-        apk_id=apk_id,
-        dest_path=dest_path,
-        source_path=artifact.source_path,
-    )
+        try:
+            apk_id = repo.upsert_apk_record(record)
+        except Exception as exc:
+            message = (
+                f"Failed to upsert APK metadata for {plan.inventory.package_name} "
+                f"({artifact.source_path}): {exc}"
+            )
+            log.error(message, category="database")
+            return ArtifactError(source_path=artifact.source_path, reason=str(exc)), None
 
-
-def _ensure_local_copy(
-    *,
-    adb_path: str,
-    serial: str,
-    source_path: str,
-    dest_path: Path,
-    package_name: str,
-    verbose: bool,
-):
-    if dest_path.exists():
-        return True
-
-    command = [adb_path, "-s", serial, "pull", source_path, str(dest_path)]
-    if verbose:
-        print(status_messages.status(f"Executing: {' '.join(command)}", level="info"))
-    try:
-        completed = subprocess.run(
-            command,
-            capture_output=not verbose,
-            text=True,
-            check=False,
-        )
-    except Exception as exc:
-        log.error(f"adb pull execution failed for {package_name}: {exc}", category="device")
-        return ArtifactError(source_path=source_path, reason=str(exc))
-
-    if completed.returncode != 0:
-        stdout = (completed.stdout or "").strip()
-        stderr = (completed.stderr or "").strip()
-        stderr = stderr or stdout or "adb pull failed"
-        log.warning(
-            f"adb pull returned {completed.returncode} for {package_name}: {stderr}",
-            category="device",
-        )
-        level = "warn" if "permission denied" in stderr.lower() else "error"
-        print(status_messages.status(f"adb pull failed: {stderr}", level=level))
-        reason = "permission denied" if "permission denied" in stderr.lower() else stderr
-        return ArtifactError(source_path=source_path, reason=reason)
-
-    return True
-
-
-def _compute_hashes(dest_path: Path) -> Dict[str, str]:
-    hashers = {
-        "md5": hashlib.md5(),
-        "sha1": hashlib.sha1(),
-        "sha256": hashlib.sha256(),
+    artifact_payload = {
+        "source_path": artifact.source_path,
+        "is_split_member": artifact.is_split_member,
+        "split_group_id": group_id,
     }
-    with dest_path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            for hasher in hashers.values():
-                hasher.update(chunk)
-    return {name: hasher.hexdigest() for name, hasher in hashers.items()}
+    inventory_meta = inventory_payload(plan.inventory)
+    extra_meta = {
+        "apk_id": apk_id,
+        "occurrence_index": occurrence,
+        "artifact": artifact.artifact,
+    }
+    try:
+        write_metadata_sidecar(
+            dest_path,
+            inventory=inventory_meta,
+            artifact=artifact_payload,
+            hashes=hashes,
+            serial=serial,
+            session_stamp=session_stamp,
+            options=options,
+            extra=extra_meta,
+        )
+    except Exception as exc:  # pragma: no cover - filesystem issues
+        log.warning(
+            f"Failed to write metadata sidecar for {dest_path}: {exc}",
+            category="filesystem",
+        )
+
+    return (
+        ArtifactResult(
+            file_name=dest_path.name,
+            apk_id=apk_id,
+            dest_path=dest_path,
+            source_path=artifact.source_path,
+        ),
+        None,
+    )
 
 
 def _print_progress(index: int, total: int, plan: PackagePlan) -> None:
