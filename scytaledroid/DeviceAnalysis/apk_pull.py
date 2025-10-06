@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Callable, Dict, Optional, Sequence, Tuple
 
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis import adb_utils, harvest, inventory
@@ -12,6 +12,10 @@ from scytaledroid.DeviceAnalysis.device_menu.inventory_guard import (
     INVENTORY_STALE_SECONDS,
     get_last_guard_decision,
     get_latest_inventory_metadata,
+)
+from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.utils import (
+    coerce_float,
+    humanize_seconds,
 )
 from scytaledroid.Utils.DisplayUtils import (
     error_panels,
@@ -89,6 +93,10 @@ def pull_apks(serial: Optional[str]) -> None:
     pull_mode: Optional[str] = None
 
     while True:
+        active_plan = None
+        active_selection = None
+        pull_mode = None
+        verbose = False
         selection = harvest.select_package_scope(
             rows,
             device_serial=serial,
@@ -153,26 +161,116 @@ def pull_apks(serial: Optional[str]) -> None:
             )
             continue
 
-        action = _prompt_plan_action(prefer_quick=_prefer_quick_mode(guard_metadata))
-        if action == "dry-run":
-            harvest.preview_plan(plan)
-            prompt_utils.press_enter_to_continue()
-            continue
-        if action == "rescope":
-            continue
-        if action == "cancel":
-            print(status_messages.status("APK pull cancelled by user.", level="warn"))
-            prompt_utils.press_enter_to_continue()
-            return
-        if action in {"quick_verbose", "quick_quiet", "legacy_verbose", "legacy_quiet"}:
-            pull_mode = "quick" if action.startswith("quick") else "legacy"
-            verbose = action.endswith("verbose")
-        else:
-            continue
+        refresh_requested = False
+        while True:
+            action = _prompt_plan_action()
+            if action == "dry-run":
+                harvest.preview_plan(plan)
+                prompt_utils.press_enter_to_continue()
+                continue
+            if action == "rescope":
+                break
+            if action == "cancel":
+                print(status_messages.status("APK pull cancelled by user.", level="warn"))
+                prompt_utils.press_enter_to_continue()
+                return
+            if action == "use_snapshot":
+                print(
+                    status_messages.status(
+                        "Proceeding with existing inventory snapshot only.",
+                        level="warn",
+                    )
+                )
+                prompt_utils.press_enter_to_continue()
+                return
+            if action == "refresh_subset":
+                if _run_scope_refresh(serial, selection.packages):
+                    snapshot = inventory.load_latest_inventory(serial)
+                    if not snapshot or not snapshot.get("packages"):
+                        error_panels.print_error_panel(
+                            "APK Pull",
+                            "Scoped refresh did not yield a valid snapshot.",
+                            hint="Run a full inventory sync to recover.",
+                        )
+                        prompt_utils.press_enter_to_continue()
+                        return
+                    packages = snapshot.get("packages", [])
+                    rows = harvest.build_inventory_rows(packages)
+                    if not rows:
+                        error_panels.print_error_panel(
+                            "APK Pull",
+                            "Scoped snapshot contains no packages.",
+                            hint="Adjust your selection or run a full sync.",
+                        )
+                        prompt_utils.press_enter_to_continue()
+                        return
+                    latest_metadata = get_latest_inventory_metadata(
+                        serial,
+                        with_current_state=True,
+                        scope_packages=selection.packages,
+                    )
+                    if latest_metadata:
+                        guard_metadata = latest_metadata
+                    refresh_requested = True
+                break
+            if action == "refresh_full":
+                progress = _make_progress_callback("Refreshing full inventory")
+                try:
+                    inventory.run_inventory_sync(
+                        serial,
+                        interactive=False,
+                        progress_callback=progress,
+                    )
+                except inventory.InventorySyncAborted:
+                    print(
+                        status_messages.status(
+                            "Inventory sync cancelled before completion.",
+                            level="warn",
+                        )
+                    )
+                    continue
 
-        active_plan = plan
-        active_selection = selection
-        break
+                snapshot = inventory.load_latest_inventory(serial)
+                if not snapshot or not snapshot.get("packages"):
+                    error_panels.print_error_panel(
+                        "APK Pull",
+                        "Inventory refresh did not yield a valid snapshot.",
+                        hint="Run inventory sync from the main menu.",
+                    )
+                    prompt_utils.press_enter_to_continue()
+                    return
+                packages = snapshot.get("packages", [])
+                rows = harvest.build_inventory_rows(packages)
+                if not rows:
+                    error_panels.print_error_panel(
+                        "APK Pull",
+                        "Inventory snapshot contains no packages after refresh.",
+                    )
+                    prompt_utils.press_enter_to_continue()
+                    return
+                latest_metadata = get_latest_inventory_metadata(
+                    serial,
+                    with_current_state=True,
+                    scope_packages=selection.packages,
+                )
+                if latest_metadata:
+                    guard_metadata = latest_metadata
+                refresh_requested = True
+                break
+            if action == "quick":
+                harvest_mode = _prompt_harvest_mode(
+                    prefer_quick=_prefer_quick_mode(guard_metadata)
+                )
+                if not harvest_mode:
+                    continue
+                pull_mode, verbose = harvest_mode
+                active_plan = plan
+                active_selection = selection
+                break
+        if refresh_requested:
+            continue
+        if active_plan and active_selection:
+            break
 
     if not active_plan or not active_selection or not pull_mode:
         error_panels.print_error_panel(
@@ -232,34 +330,147 @@ def pull_apks(serial: Optional[str]) -> None:
     prompt_utils.press_enter_to_continue()
 
 
-def _prompt_plan_action(*, prefer_quick: bool) -> str:
+def _make_progress_callback(action_label: str) -> Callable[[Dict[str, object]], bool]:
+    last_reported = 0.0
+
+    def _callback(event: Dict[str, object]) -> bool:
+        nonlocal last_reported
+
+        phase = event.get("phase")
+        if phase == "start":
+            total = event.get("total")
+            if isinstance(total, int) and total > 0:
+                message = f"{action_label}: {total} packages"
+            else:
+                message = f"{action_label}..."
+            print(status_messages.status(message, level="info"))
+            return True
+
+        if phase == "progress":
+            percentage = event.get("percentage")
+            eta_seconds = coerce_float(event.get("eta_seconds"))
+            percent_value = None
+            if isinstance(percentage, (int, float)):
+                percent_value = float(percentage)
+            else:
+                processed = event.get("processed")
+                total = event.get("total")
+                if isinstance(processed, int) and isinstance(total, int) and total:
+                    percent_value = (processed / total) * 100
+
+            if percent_value is not None:
+                if percent_value >= 100 or percent_value - last_reported >= 5:
+                    last_reported = percent_value
+                    if eta_seconds is not None and eta_seconds > 0:
+                        eta_text = humanize_seconds(eta_seconds)
+                        message = f"{action_label} progress: {percent_value:.1f}% (ETA {eta_text})"
+                    else:
+                        message = f"{action_label} progress: {percent_value:.1f}%"
+                    print(status_messages.status(message, level="info"))
+            elif eta_seconds is not None and eta_seconds > 0:
+                eta_text = humanize_seconds(eta_seconds)
+                print(
+                    status_messages.status(
+                        f"{action_label} progress (ETA {eta_text})",
+                        level="info",
+                    )
+                )
+
+            return True
+
+        if phase == "complete":
+            elapsed = coerce_float(event.get("elapsed_seconds"))
+            if elapsed is not None and elapsed >= 0:
+                message = f"{action_label} completed in {humanize_seconds(elapsed)}."
+            else:
+                message = f"{action_label} completed."
+            print(status_messages.status(message, level="success"))
+            return True
+
+        return True
+
+    return _callback
+
+
+def _run_scope_refresh(serial: str, packages: Sequence[object]) -> bool:
+    if not packages:
+        print(status_messages.status("No packages provided for scoped refresh.", level="warn"))
+        return False
+
+    progress = _make_progress_callback("Refreshing scoped inventory")
+    try:
+        snapshot_path = inventory.sync_subset(
+            packages,
+            serial=serial,
+            progress_callback=progress,
+        )
+    except inventory.InventorySyncAborted:
+        print(status_messages.status("Scoped refresh cancelled.", level="warn"))
+        return False
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log.warning(f"Scoped inventory refresh failed: {exc}", category="device")
+        print(status_messages.status("Scoped refresh failed.", level="error"))
+        return False
+
+    if not snapshot_path:
+        print(status_messages.status("Scoped refresh produced no snapshot.", level="warn"))
+        return False
+
+    print(status_messages.status(f"Scoped inventory saved to {str(snapshot_path)}", level="success"))
+    return True
+
+
+def _prompt_plan_action() -> str:
     print()
     print(text_blocks.headline("Plan actions", width=70))
     options = {
-        "1": "Start quick pull (quiet)",
-        "2": "Start quick pull (verbose adb, stream output)",
-        "3": "Dry-run preview",
-        "4": "Change scope",
-        "5": "Start legacy pull (quiet)",
-        "6": "Start legacy pull (verbose adb, stream output)",
+        "1": "Quick harvest (no sync)",
+        "2": "Use last snapshot",
+        "3": "Refresh scope only (fast)",
+        "4": "Refresh full inventory (slow)",
+        "5": "Dry-run preview",
+        "6": "Change scope",
         "0": "Cancel",
     }
-    default_choice = "1" if prefer_quick else "5"
-    menu_utils.print_menu(options, is_main=False, default=default_choice, exit_label="Cancel")
-    choice = prompt_utils.get_choice(list(options.keys()), default=default_choice)
+    menu_utils.print_menu(options, is_main=False, default="1", exit_label="Cancel")
+    choice = prompt_utils.get_choice(list(options.keys()), default="1")
     if choice == "1":
-        return "quick_quiet"
+        return "quick"
     if choice == "2":
-        return "quick_verbose"
-    if choice == "5":
-        return "legacy_quiet"
-    if choice == "6":
-        return "legacy_verbose"
+        return "use_snapshot"
     if choice == "3":
-        return "dry-run"
+        return "refresh_subset"
     if choice == "4":
+        return "refresh_full"
+    if choice == "5":
+        return "dry-run"
+    if choice == "6":
         return "rescope"
     return "cancel"
+
+
+def _prompt_harvest_mode(*, prefer_quick: bool) -> Optional[Tuple[str, bool]]:
+    print()
+    print(text_blocks.headline("Harvest execution", width=70))
+    options = {
+        "1": "Quick pull (quiet)",
+        "2": "Quick pull (verbose adb, stream output)",
+        "3": "Legacy pull (quiet)",
+        "4": "Legacy pull (verbose adb, stream output)",
+        "0": "Back",
+    }
+    default_choice = "1" if prefer_quick else "3"
+    menu_utils.print_menu(options, is_main=False, default=default_choice, exit_label="Back")
+    choice = prompt_utils.get_choice(list(options.keys()), default=default_choice)
+    if choice == "1":
+        return ("quick", False)
+    if choice == "2":
+        return ("quick", True)
+    if choice == "3":
+        return ("legacy", False)
+    if choice == "4":
+        return ("legacy", True)
+    return None
 
 
 def _device_is_rooted(serial: str) -> bool:
