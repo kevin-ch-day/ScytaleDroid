@@ -151,8 +151,6 @@ def _configure_loguru(
 
     target_attr = _LOGURU_FILTER_ATTR
 
-    # Ensure previously attached filter handles are forgotten so repeated calls do
-    # not leak references.
     if hasattr(_loguru_logger, target_attr):
         try:
             delattr(_loguru_logger, target_attr)
@@ -161,13 +159,21 @@ def _configure_loguru(
 
     if verbosity != "debug":
         try:
-            _loguru_logger.disable("androguard")
+            _loguru_logger.disable("")
+        except Exception:  # pragma: no cover - defensive
+            pass
+
+        def _sink(_: object) -> None:  # pragma: no cover - trivial sink
+            return None
+
+        try:
+            _loguru_logger.add(_sink, level=1000)
         except Exception:  # pragma: no cover - defensive
             pass
         return
 
     try:
-        _loguru_logger.enable("androguard")
+        _loguru_logger.enable("")
     except Exception:  # pragma: no cover - defensive
         pass
 
@@ -176,12 +182,13 @@ def _configure_loguru(
 
     def _loguru_filter(record: dict) -> bool:
         try:
-            if not str(record.get("name", "")).startswith("androguard"):
-                return False
-            message = record.get("message", "")
+            message = str(record.get("message", ""))
+            name = str(record.get("name", ""))
         except Exception:  # pragma: no cover - defensive
             return False
-        return noise_filter(str(message))
+        if not name.startswith("androguard"):
+            return False
+        return noise_filter(message)
 
     filter_handle = _loguru_filter
     setattr(_loguru_logger, target_attr, filter_handle)
