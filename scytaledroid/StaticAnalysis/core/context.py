@@ -9,7 +9,7 @@ from xml.etree.ElementTree import Element
 
 if TYPE_CHECKING:  # pragma: no cover - type checking imports only
     from androguard.core.apk import APK
-    from .pipeline import (
+    from .models import (
         ComponentSummary,
         ManifestFlags,
         ManifestSummary,
