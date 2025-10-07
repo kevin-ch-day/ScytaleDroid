@@ -272,8 +272,20 @@ def _load_manifest_root(apk: APK) -> ElementTree.Element:
     except Exception as exc:  # pragma: no cover - defensive, androguard handles parsing
         raise StaticAnalysisError(f"Unable to parse AndroidManifest.xml: {exc}") from exc
 
+    if hasattr(manifest_xml, "tag"):
+        # Androguard may return an lxml element when that dependency is available.
+        try:
+            manifest_xml = ElementTree.tostring(manifest_xml, encoding="utf-8")
+        except Exception:
+            manifest_xml = ElementTree.tostring(manifest_xml)
+
+    if isinstance(manifest_xml, str):
+        manifest_bytes = manifest_xml.encode("utf-8")
+    else:
+        manifest_bytes = manifest_xml
+
     try:
-        return ElementTree.fromstring(manifest_xml)
+        return ElementTree.fromstring(manifest_bytes)
     except ElementTree.ParseError as exc:
         raise StaticAnalysisError(f"Malformed AndroidManifest.xml: {exc}") from exc
 

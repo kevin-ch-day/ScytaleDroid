@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from pathlib import Path
+from time import perf_counter
 from typing import List, Mapping, Optional
 
 from scytaledroid.Config import app_config
@@ -11,29 +13,14 @@ from scytaledroid.Utils.DisplayUtils import (
     prompt_utils,
     status_messages,
     table_utils,
-    text_blocks,
 )
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
-from ..core import (
-    AnalysisConfig,
-    StaticAnalysisError,
-    StaticAnalysisReport,
-    analyze_apk,
-)
-from ..core.repository import (
-    ArtifactGroup,
-    RepositoryArtifact,
-    discover_repository_artifacts,
-    group_artifacts,
-    list_categories,
-    list_packages,
-)
-from ..persistence import (
-    ReportStorageError,
-    list_reports,
-    save_report,
-)
+from ..core import AnalysisConfig, StaticAnalysisError, StaticAnalysisReport, analyze_apk
+from ..core.repository import ArtifactGroup, group_artifacts, list_categories, list_packages
+from ..persistence import ReportStorageError, save_report
+from .options import ScanDisplayOptions, resolve_display_options
+from .progress import ScanProgress
 
 
 def static_analysis_menu() -> None:
@@ -43,12 +30,9 @@ def static_analysis_menu() -> None:
         print()
         menu_utils.print_header("Static Analysis")
         options = {
-            "1": "Analyze APK from repository",
-            "2": "Analyze APK from local path",
-            "3": "Review saved reports",
-            "4": "Run full repository scan",
-            "5": "Run scan for specific app",
-            "6": "Run scan for category",
+            "1": "Run static analysis for all repository apps",
+            "2": "Run static analysis for a category",
+            "3": "Run static analysis for a specific app",
         }
         menu_utils.print_menu(options, is_main=False)
         choice = prompt_utils.get_choice(list(options.keys()) + ["0"], default="0")
@@ -56,131 +40,11 @@ def static_analysis_menu() -> None:
         if choice == "0":
             break
         if choice == "1":
-            _handle_repository_analysis()
-        elif choice == "2":
-            _handle_manual_analysis()
-        elif choice == "3":
-            _review_saved_reports()
-        elif choice == "4":
             _run_full_repository_scan()
-        elif choice == "5":
-            _run_package_scan()
-        elif choice == "6":
+        elif choice == "2":
             _run_category_scan()
-
-
-def _handle_repository_analysis() -> None:
-    entry = _select_repository_apk()
-    if not entry:
-        return
-    storage_root = (Path(app_config.DATA_DIR) / "apks").resolve()
-    _run_analysis(entry.path, metadata=entry.metadata, storage_root=storage_root)
-
-
-def _handle_manual_analysis() -> None:
-    apk_path = _prompt_apk_path()
-    if not apk_path:
-        return
-    _run_analysis(apk_path)
-
-
-def _run_analysis(
-    apk_path: Path,
-    *,
-    metadata: Optional[Mapping[str, object]] = None,
-    storage_root: Optional[Path] = None,
-    config: Optional[AnalysisConfig] = None,
-) -> None:
-    print()
-    print(status_messages.status(f"Analyzing {apk_path.name}...", level="info"))
-
-    report, saved_path, message, fatal = _generate_report(
-        apk_path,
-        metadata=metadata,
-        storage_root=storage_root,
-        config=config,
-    )
-    if fatal or report is None:
-        print(status_messages.status(message or "Analysis failed", level="error"))
-        prompt_utils.press_enter_to_continue()
-        return
-    if message:
-        print(status_messages.status(message, level="warn"))
-
-    if saved_path is None and not message:
-        print(
-            status_messages.status(
-                "Report could not be saved to disk; check logs for details.",
-                level="warn",
-            )
-        )
-
-    _display_report(report, saved_path=saved_path)
-
-
-def _select_repository_apk() -> Optional[RepositoryArtifact]:
-    base_dir = (Path(app_config.DATA_DIR) / "apks").resolve()
-    entries = discover_repository_artifacts(base_dir)
-    if not entries:
-        print(
-            status_messages.status(
-                "No harvested APKs found. Run Device Analysis → 7 to pull artifacts.",
-                level="warn",
-            )
-        )
-        prompt_utils.press_enter_to_continue()
-        return None
-
-    print()
-    menu_utils.print_header("Repository APKs", "Select an artifact to analyse")
-    rows = []
-    for idx, entry in enumerate(entries, start=1):
-        meta = entry.metadata
-        label = str(meta.get("app_label") or meta.get("package_name") or entry.path.stem)
-        version = str(meta.get("version_name") or meta.get("version_code") or "-")
-        rows.append([str(idx), label, version, entry.display_path])
-    table_utils.render_table(["#", "Package", "Version", "Path"], rows)
-    print()
-    choice = prompt_utils.get_choice(
-        [str(idx) for idx in range(1, len(entries) + 1)] + ["0"],
-        prompt="Select APK #: ",
-        default="0",
-    )
-    if choice == "0":
-        return None
-    return entries[int(choice) - 1]
-
-
-def _review_saved_reports() -> None:
-    stored = list_reports()
-    if not stored:
-        print(status_messages.status("No analysis reports found yet.", level="warn"))
-        prompt_utils.press_enter_to_continue()
-        return
-
-    print()
-    menu_utils.print_header("Saved Reports", "Most recent first")
-    rows = []
-    for idx, entry in enumerate(stored, start=1):
-        report = entry.report
-        manifest = report.manifest
-        version = manifest.version_name or manifest.version_code or "-"
-        sha256 = report.hashes.get("sha256") or "-"
-        display_sha = sha256[:12] + ("…" if len(sha256) > 12 else "") if sha256 != "-" else "-"
-        rows.append([str(idx), manifest.package_name or report.file_name, version, display_sha, report.generated_at])
-    table_utils.render_table(["#", "Package", "Version", "SHA256", "Generated"], rows)
-    print()
-    menu_utils.print_hint("Enter the report number to view details.")
-    choice = prompt_utils.get_choice(
-        [str(idx) for idx in range(1, len(stored) + 1)] + ["0"],
-        prompt="Select report #: ",
-        default="0",
-    )
-    if choice == "0":
-        return
-
-    selected = stored[int(choice) - 1]
-    _display_report(selected.report, saved_path=selected.path)
+        elif choice == "3":
+            _run_package_scan()
 
 
 def _run_full_repository_scan() -> None:
@@ -190,11 +54,13 @@ def _run_full_repository_scan() -> None:
         _print_no_groups_warning()
         return
 
+    options = resolve_display_options()
     _scan_groups(
         groups,
         base_dir=base_dir,
         heading="Full Repository Scan",
         description=f"{len(groups)} group(s), {sum(len(g.artifacts) for g in groups)} artifact(s)",
+        options=options,
     )
 
 
@@ -232,11 +98,13 @@ def _run_package_scan() -> None:
         prompt_utils.press_enter_to_continue()
         return
 
+    options = resolve_display_options()
     _scan_groups(
         scoped_groups,
         base_dir=base_dir,
-        heading=f"Package Scan — {package_name}",
+        heading=f"App Scan — {package_name}",
         description=f"{len(scoped_groups)} group(s)",
+        options=options,
     )
 
 
@@ -275,11 +143,13 @@ def _run_category_scan() -> None:
         prompt_utils.press_enter_to_continue()
         return
 
+    options = resolve_display_options()
     _scan_groups(
         scoped_groups,
         base_dir=base_dir,
         heading=f"Category Scan — {category_name}",
         description=f"{len(scoped_groups)} group(s)",
+        options=options,
     )
 
 
@@ -314,56 +184,86 @@ def _scan_groups(
     base_dir: Path,
     heading: str,
     description: str,
+    options: ScanDisplayOptions,
 ) -> None:
     print()
     menu_utils.print_header(heading, description)
 
+    progress = ScanProgress(total_groups=len(groups), options=options)
+    progress.announce_options()
+
     config = AnalysisConfig(profile="full")
     successes = 0
     failures = 0
+    severity_totals: Counter[str] = Counter()
 
-    total_groups = len(groups)
+    scan_started = perf_counter()
+
     for index, group in enumerate(groups, start=1):
-        banner = f"[{index}/{total_groups}] {group.package_name} ({group.version_display})"
-        print(
-            status_messages.status(
-                f"{banner}: scanning {len(group.artifacts)} artifact(s)", level="info"
-            )
+        progress.start_group(
+            index=index,
+            package_name=group.package_name,
+            version=group.version_display,
+            category=group.category,
+            artifact_count=len(group.artifacts),
         )
 
-        for artifact in group.artifacts:
+        for artifact_index, artifact in enumerate(group.artifacts, start=1):
+            label = artifact.artifact_label or artifact.display_path
+            progress.artifact_started(
+                artifact_index=artifact_index,
+                artifact_total=len(group.artifacts),
+                label=label,
+            )
+
+            artifact_started = perf_counter()
             report, saved_path, message, fatal = _generate_report(
                 artifact.path,
                 metadata=artifact.metadata,
                 storage_root=base_dir,
                 config=config,
             )
-            label = artifact.artifact_label or artifact.display_path
+            artifact_duration = perf_counter() - artifact_started
+
             if fatal or report is None:
                 failures += 1
-                print(
-                    status_messages.status(
-                        f"  ✖ {label}: {message or 'Analysis failed'}",
-                        level="error",
-                    )
-                )
+                progress.artifact_failed(label, message or "analysis failed")
                 continue
 
             successes += 1
-            if saved_path:
-                saved_display = _format_saved_path(saved_path)
-                print(status_messages.status(f"  ✓ {label}: {saved_display}", level="success"))
-            else:
-                print(status_messages.status(f"  ✓ {label}: report generated (not saved)", level="success"))
-            if message:
-                print(status_messages.status(f"    warning: {message}", level="warn"))
+            counter = progress.artifact_completed(
+                label=label,
+                saved_path=saved_path,
+                findings=report.findings,
+                duration_seconds=artifact_duration if options.show_timings else None,
+                warning=message,
+            )
+            severity_totals.update(counter)
+
+    elapsed = perf_counter() - scan_started
 
     summary_lines = [
-        ("Groups processed", total_groups),
+        ("Groups processed", len(groups)),
         ("Artifacts analysed", successes + failures),
         ("Successful reports", successes),
         ("Failures", failures),
     ]
+
+    if severity_totals:
+        ordered_labels = ["P0", "P1", "P2", "NOTE"]
+        summary_lines.append(
+            (
+                "Findings",
+                ", ".join(
+                    f"{label}:{severity_totals[label]}"
+                    for label in ordered_labels
+                    if severity_totals.get(label, 0)
+                )
+                or "none recorded",
+            )
+        )
+
+    summary_lines.append(("Elapsed", _format_duration(elapsed)))
 
     print()
     table_utils.render_key_value_pairs(summary_lines)
@@ -381,196 +281,12 @@ def _print_no_groups_warning() -> None:
     prompt_utils.press_enter_to_continue()
 
 
-def _prompt_apk_path() -> Optional[Path]:
-    while True:
-        response = prompt_utils.prompt_text(
-            "APK file path",
-            hint="Provide an absolute or relative path to the APK you want to analyse.",
-        )
-        candidate = Path(response).expanduser()
-        if not candidate.exists():
-            print(status_messages.status("File not found.", level="error"))
-            if not prompt_utils.prompt_yes_no("Try another path?", default=True):
-                return None
-            continue
-        if candidate.is_dir():
-            print(status_messages.status("Path points to a directory.", level="error"))
-            if not prompt_utils.prompt_yes_no("Try another path?", default=True):
-                return None
-            continue
-        if candidate.suffix.lower() != ".apk":
-            if not prompt_utils.prompt_yes_no(
-                "File does not end with .apk. Analyse anyway?", default=False
-            ):
-                if not prompt_utils.prompt_yes_no("Try another path?", default=True):
-                    return None
-                continue
-        return candidate
-
-
-def _display_report(report: StaticAnalysisReport, *, saved_path: Optional[Path]) -> None:
-    print()
-    subtitle = report.manifest.package_name or report.file_name
-    menu_utils.print_header("Static Analysis Report", subtitle)
-
-    metrics = [
-        ("Declared permissions", len(report.permissions.declared)),
-        ("Dangerous permissions", len(report.permissions.dangerous)),
-        ("Custom permissions", len(report.permissions.custom)),
-        ("Exported components", report.exported_components.total()),
-        ("Declared features", len(report.features)),
-    ]
-    menu_utils.print_metrics(metrics)
-
-    print()
-    print(text_blocks.headline("File overview", width=70))
-    overview_pairs = [
-        ("File name", report.file_name),
-        ("File size", _format_bytes(report.file_size)),
-        ("SHA256", report.hashes.get("sha256") or "-"),
-        ("SHA1", report.hashes.get("sha1") or "-"),
-        ("MD5", report.hashes.get("md5") or "-"),
-        ("Location", report.relative_path or report.file_path),
-    ]
-    table_utils.render_key_value_pairs(overview_pairs)
-
-    manifest = report.manifest
-    print()
-    print(text_blocks.headline("Manifest summary", width=70))
-    manifest_pairs = [
-        ("Package", manifest.package_name or "Unknown"),
-        ("Version", manifest.version_name or manifest.version_code or "Unknown"),
-        ("Min SDK", manifest.min_sdk or "Unknown"),
-        ("Target SDK", manifest.target_sdk or "Unknown"),
-        ("Compile SDK", manifest.compile_sdk or "Unknown"),
-        ("Main activity", manifest.main_activity or "None"),
-        ("App label", manifest.app_label or "Unknown"),
-    ]
-    table_utils.render_key_value_pairs(manifest_pairs)
-
-    flag_pairs = [
-        ("Uses cleartext traffic", _format_flag(report.manifest_flags.uses_cleartext_traffic)),
-        ("Debuggable", _format_flag(report.manifest_flags.debuggable)),
-        ("Allow backup", _format_flag(report.manifest_flags.allow_backup)),
-    ]
-    print()
-    table_utils.render_key_value_pairs(flag_pairs)
-
-    print()
-    print(text_blocks.headline("Components", width=70))
-    component_rows = [
-        [
-            "Activities",
-            len(report.components.activities),
-            len(report.exported_components.activities),
-        ],
-        [
-            "Services",
-            len(report.components.services),
-            len(report.exported_components.services),
-        ],
-        [
-            "Broadcast receivers",
-            len(report.components.receivers),
-            len(report.exported_components.receivers),
-        ],
-        [
-            "Content providers",
-            len(report.components.providers),
-            len(report.exported_components.providers),
-        ],
-    ]
-    table_utils.render_table(["Component", "Declared", "Exported"], component_rows)
-
-    _print_compact_list("Dangerous permissions", report.permissions.dangerous)
-    _print_compact_list("Custom permissions", report.permissions.custom)
-    _print_compact_list("Declared features", report.features)
-    _print_compact_list("Linked libraries", report.libraries)
-    _print_compact_list("Signatures", report.signatures, empty_message="Signature data unavailable.")
-
-    metadata_pairs = _metadata_pairs(report)
-    if metadata_pairs:
-        print()
-        print(text_blocks.headline("Harvest metadata", width=70))
-        table_utils.render_key_value_pairs(metadata_pairs)
-
-    if saved_path:
-        try:
-            display_path = saved_path.resolve().relative_to(Path.cwd())
-        except ValueError:
-            display_path = saved_path.resolve()
-        print()
-        print(status_messages.status(f"Report saved to {display_path}", level="success"))
-
-    prompt_utils.press_enter_to_continue("Press Enter to return to the Static Analysis menu...")
-
-
-def _print_compact_list(
-    title: str,
-    items: Mapping[str, object] | List[str] | tuple[str, ...],
-    *,
-    limit: int = 10,
-    empty_message: str = "None detected.",
-) -> None:
-    values = list(items) if not isinstance(items, Mapping) else list(items.keys())
-    print()
-    print(text_blocks.headline(title, width=70))
-    if not values:
-        print(f"  • {empty_message}")
-        return
-    for entry in values[:limit]:
-        print(f"  • {entry}")
-    if len(values) > limit:
-        remaining = len(values) - limit
-        print(f"  • … {remaining} more not shown")
-
-
-def _metadata_pairs(report: StaticAnalysisReport) -> List[tuple[str, object]]:
-    metadata = report.metadata or {}
-    if not metadata:
-        return []
-    fields = [
-        ("package_name", "Harvest package"),
-        ("app_label", "Harvest label"),
-        ("device_serial", "Device serial"),
-        ("session_stamp", "Harvest session"),
-        ("captured_at", "Captured at"),
-        ("local_path", "Repository path"),
-        ("source_path", "Device path"),
-        ("apk_id", "APK ID"),
-        ("category", "Category"),
-        ("artifact", "Artifact"),
-    ]
-    pairs: List[tuple[str, object]] = []
-    for key, label in fields:
-        if key in metadata and metadata[key] not in (None, ""):
-            pairs.append((label, metadata[key]))
-    return pairs
-
-
-def _format_flag(value: Optional[bool]) -> str:
-    if value is None:
-        return "Unknown"
-    return "Enabled" if value else "Disabled"
-
-
-def _format_bytes(size: int) -> str:
-    units = ["B", "KiB", "MiB", "GiB", "TiB"]
-    value = float(size)
-    for unit in units:
-        if value < 1024.0 or unit == units[-1]:
-            if unit == "B":
-                return f"{int(value)} {unit}"
-            return f"{value:.1f} {unit}"
-        value /= 1024.0
-    return f"{size} B"
-
-
-def _format_saved_path(path: Path) -> str:
-    try:
-        return path.resolve().relative_to(Path.cwd()).as_posix()
-    except ValueError:
-        return path.resolve().as_posix()
+def _format_duration(seconds: float) -> str:
+    if seconds < 0.001:
+        return "<1 ms"
+    if seconds < 1.0:
+        return f"{seconds * 1000:.0f} ms"
+    return f"{seconds:.2f} s"
 
 
 __all__ = ["static_analysis_menu"]

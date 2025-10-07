@@ -1,5 +1,27 @@
 """Static analysis package."""
 
+from __future__ import annotations
+
+import logging
+
+_ANDROGUARD_LOGGERS = (
+    "androguard",
+    "androguard.core",
+    "androguard.core.axml",
+    "androguard.core.apk",
+    "androguard.core.bytecodes",
+    "androguard.core.api_specific_resources",
+)
+
+for _logger_name in _ANDROGUARD_LOGGERS:
+    _logger = logging.getLogger(_logger_name)
+    # Drop any handlers androguard may have attached so we control verbosity.
+    for handler in list(_logger.handlers):
+        _logger.removeHandler(handler)
+    _logger.addHandler(logging.NullHandler())
+    _logger.setLevel(logging.CRITICAL)
+    _logger.propagate = False
+
 from .cli import static_analysis_menu
 from .core import (
     AnalysisConfig,

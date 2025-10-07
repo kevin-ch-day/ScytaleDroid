@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Dict, Tuple
 
-from ..core import (
-    DetectorContext,
+from ..core.context import DetectorContext
+from ..core.findings import (
     DetectorResult,
     EvidencePointer,
     Finding,

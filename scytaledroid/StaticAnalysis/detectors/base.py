@@ -7,7 +7,8 @@ from typing import Dict, Iterable, List, Sequence, Tuple, Type, TypeVar
 
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
-from ..core import AnalysisConfig, DetectorContext, DetectorResult
+from ..core.context import AnalysisConfig, DetectorContext
+from ..core.findings import DetectorResult
 
 
 class DetectorRegistrationError(RuntimeError):
