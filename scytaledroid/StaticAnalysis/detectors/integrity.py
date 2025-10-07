@@ -52,6 +52,29 @@ class ModuleProfile:
     payloads: Sequence[PayloadIndicator]
 
 
+def _looks_like_config_split(
+    apk_path: Path,
+    split_name: Optional[str],
+    config_for: Optional[str],
+) -> bool:
+    if not split_name:
+        return False
+
+    if config_for:
+        return True
+
+    split_lower = split_name.lower()
+    filename_lower = apk_path.name.lower()
+
+    if split_lower.startswith("config."):
+        return True
+
+    if "split_config" in filename_lower or ".config." in filename_lower:
+        return True
+
+    return False
+
+
 @register_detector
 class IntegrityIdentityDetector(BaseDetector):
     """Summarises APK topology, signing lineage, and payload indicators."""
@@ -84,9 +107,15 @@ class IntegrityIdentityDetector(BaseDetector):
         }
 
         missing_required = sorted(required_types - available_types)
+        required_summary, required_note = _summarise_required_types(
+            current_module=current_module,
+            required_types=sorted(required_types),
+            missing_required=missing_required,
+            config_modules=config_modules,
+        )
 
         signatures_consistent = _signature_consistency(modules)
-        debug_cert_state = _debug_certificate_state(current_module)
+        debug_cert_state = _aggregate_debug_certificate_state(modules)
 
         multi_dex_total = sum(
             module.multi_dex_count
@@ -100,29 +129,41 @@ class IntegrityIdentityDetector(BaseDetector):
             for payload in module.payloads
         )
 
+        presentation = _build_presentation_payload(
+            context=context,
+            modules=modules,
+            current_module=current_module,
+            feature_modules=feature_modules,
+            config_modules=config_modules,
+            instant_modules=instant_modules,
+            required_types=sorted(required_types),
+            missing_required=missing_required,
+            payloads=payloads,
+            multi_dex_total=multi_dex_total,
+            signatures_consistent=signatures_consistent,
+            debug_cert_state=debug_cert_state,
+        )
+
         metrics = {
+            "presentation": presentation,
             "APK Topology": _build_topology_lines(
                 context=context,
                 current_module=current_module,
                 feature_modules=feature_modules,
                 config_modules=config_modules,
                 instant_modules=instant_modules,
-                required_types=sorted(required_types),
-                missing_required=missing_required,
+                required_summary=required_summary,
                 multi_dex_total=multi_dex_total,
                 payloads=payloads,
                 signatures_consistent=signatures_consistent,
                 debug_cert_state=debug_cert_state,
-            )
+            ),
         }
 
         evidence = _select_evidence(modules, payloads)
 
-        if missing_required:
-            notes.append(
-                "Required split types missing: "
-                + ", ".join(missing_required)
-            )
+        if required_note:
+            notes.append(required_note)
 
         status = _determine_status(
             modules=modules,
@@ -188,12 +229,18 @@ def _profile_module(
     manifest_root: ElementTree.Element,
 ) -> ModuleProfile:
     split_name = _coerce_optional_str(manifest_root.get("split"))
-    config_for = _coerce_optional_str(manifest_root.get("configForSplit"))
+    config_for_attr = _coerce_optional_str(manifest_root.get("configForSplit"))
     required_split_types = tuple(sorted(_extract_required_split_types(manifest_root)))
 
     install_mode, is_instant = _extract_delivery_info(manifest_root)
 
-    if split_name and config_for:
+    is_config_split = _looks_like_config_split(
+        apk_path,
+        split_name,
+        config_for_attr,
+    )
+
+    if is_config_split:
         role = "config"
         config_category = _infer_config_category(split_name)
     elif split_name:
@@ -205,17 +252,19 @@ def _profile_module(
 
     signatures = tuple(sorted(_normalise_signature_names(apk_obj.get_signature_names())))
 
-    manifest_pointer = _build_manifest_pointer(apk_path, split_name, config_for)
+    manifest_pointer = _build_manifest_pointer(apk_path, split_name, config_for_attr)
     manifest_hash = _manifest_hash(manifest_root)
 
     multi_dex_count = _count_multidex(apk_path)
     payloads = _detect_payloads(apk_path)
 
+    effective_config_for = config_for_attr or ("base" if is_config_split else None)
+
     return ModuleProfile(
         path=apk_path.resolve(),
         role=role,
         split_name=split_name,
-        config_for=config_for,
+        config_for=effective_config_for,
         config_category=config_category,
         install_mode=install_mode,
         is_instant=is_instant,
@@ -235,8 +284,7 @@ def _build_topology_lines(
     feature_modules: Sequence[ModuleProfile],
     config_modules: Sequence[ModuleProfile],
     instant_modules: Sequence[ModuleProfile],
-    required_types: Sequence[str],
-    missing_required: Sequence[str],
+    required_summary: str,
     multi_dex_total: int,
     payloads: Sequence[PayloadIndicator],
     signatures_consistent: Optional[bool],
@@ -249,7 +297,7 @@ def _build_topology_lines(
     feature_line = f"Feature splits: {feature_summary}"
     config_line = f"Config splits: {config_summary}"
 
-    required_text = ", ".join(required_types) if required_types else "—"
+    required_text = required_summary or "—"
 
     if hasattr(context.apk, "is_signed_v4") and callable(getattr(context.apk, "is_signed_v4")):
         v4_signed = bool(context.apk.is_signed_v4())  # type: ignore[attr-defined]
@@ -268,26 +316,205 @@ def _build_topology_lines(
     signing_text = ",".join(signing_schemes) + " present" if signing_schemes else "v2,v3 absent"
 
     signature_consistency_text = _describe_consistency(signatures_consistent)
+    payload_text = _format_payload_summary(payloads, current_module)
+    scan_scope_text = _format_scan_scope(
+        current_module,
+        feature_modules,
+        config_modules,
+        instant_modules,
+    )
+    multi_dex_text = _format_multidex_value(current_module, multi_dex_total)
 
-    payload_text = _format_payload_summary(payloads)
-
-    scan_scope_text = _format_scan_scope(current_module, feature_modules, config_modules, instant_modules)
-
-    lines = [
-        f"Role: {role_label}",
-        f"{feature_line}   {config_line}",
-        f"Required split types: {required_text}",
-        f"Multi-dex: {multi_dex_total}",
-        "Signing: "
-        f"{signing_text}  |  Debug cert: {debug_cert_state}  |  Split signatures consistent: {signature_consistency_text}",
-        f"Payloads: {payload_text}",
-        f"Scan scope: {scan_scope_text}",
-    ]
-
-    if missing_required:
-        lines.append("Missing required types: " + ", ".join(missing_required))
+    lines: list[str] = []
+    delivery_summary = _build_delivery_summary(feature_modules, config_modules)
+    if delivery_summary:
+        lines.append(delivery_summary)
+    lines.extend(
+        [
+            f"Role: {role_label}",
+            f"{feature_line}   {config_line}",
+            f"Required split types: {required_text}",
+            f"Multi-dex: {multi_dex_text}",
+            (
+                "Signing: "
+                f"{signing_text}  |  Debug cert: {debug_cert_state}  |  "
+                f"Split signatures consistent: {signature_consistency_text}"
+            ),
+            f"Payloads: {payload_text}",
+            f"Scan scope: {scan_scope_text}",
+        ]
+    )
 
     return lines
+
+
+def _build_delivery_summary(
+    feature_modules: Sequence[ModuleProfile],
+    config_modules: Sequence[ModuleProfile],
+) -> str:
+    feature_count = len(feature_modules)
+    config_count = len(config_modules)
+
+    if not feature_count and not config_count:
+        return "This package delivers a single base module."
+
+    segments: list[str] = []
+    if feature_count:
+        segments.append(
+            f"{feature_count} feature split{'s' if feature_count != 1 else ''}"
+        )
+    if config_count:
+        category_labels = _describe_config_categories(config_modules)
+        if category_labels:
+            segments.append(
+                f"{config_count} config split{'s' if config_count != 1 else ''} ({category_labels})"
+            )
+        else:
+            segments.append(
+                f"{config_count} config split{'s' if config_count != 1 else ''}"
+            )
+
+    return "This package uses Play Feature/Config Delivery: base + " + " + ".join(segments)
+
+
+def _build_presentation_payload(
+    *,
+    context: DetectorContext,
+    modules: Sequence[ModuleProfile],
+    current_module: Optional[ModuleProfile],
+    feature_modules: Sequence[ModuleProfile],
+    config_modules: Sequence[ModuleProfile],
+    instant_modules: Sequence[ModuleProfile],
+    required_types: Sequence[str],
+    missing_required: Sequence[str],
+    payloads: Sequence[PayloadIndicator],
+    multi_dex_total: int,
+    signatures_consistent: Optional[bool],
+    debug_cert_state: str,
+) -> dict[str, object]:
+    delivery_summary = _build_delivery_summary(feature_modules, config_modules)
+    feature_counts = Counter(_normalise_mode(module.install_mode) for module in feature_modules)
+    config_counts = Counter(module.config_category or "other" for module in config_modules)
+
+    module_counts = {
+        "features": {
+            "count": len(feature_modules),
+            "install_modes": {
+                "install-time": feature_counts.get("install-time", 0),
+                "on-demand": feature_counts.get("on-demand", 0),
+                "unknown": feature_counts.get("unknown", 0),
+            },
+        },
+        "configs": {
+            "count": len(config_modules),
+            "categories": {
+                "abi": config_counts.get("abi", 0),
+                "density": config_counts.get("density", 0),
+                "language": config_counts.get("locale", 0),
+                "other": config_counts.get("other", 0),
+            },
+        },
+    }
+
+    requirements = [
+        {
+            "label": requirement,
+            "state": "present" if requirement not in missing_required else "missing",
+        }
+        for requirement in required_types
+    ]
+
+    signing_profile = _build_signing_profile(
+        apk=context.apk,
+        modules=modules,
+        signatures_consistent=signatures_consistent,
+        debug_cert_state=debug_cert_state,
+    )
+
+    payload_inventory = _summarise_payload_inventory(
+        payloads=payloads,
+        multi_dex_total=multi_dex_total,
+    )
+
+    scan_plan = _build_scan_plan_profile(
+        current_module=current_module,
+        feature_modules=feature_modules,
+        config_modules=config_modules,
+        instant_modules=instant_modules,
+        missing_required=missing_required,
+    )
+
+    try:
+        size_bytes = context.apk_path.stat().st_size
+    except OSError:  # pragma: no cover - file may be missing in edge cases
+        size_bytes = 0
+
+    manifest = getattr(context, "manifest_summary", None)
+    hashes = dict(context.hashes) if context.hashes else {}
+
+    package_profile = {
+        "delivery": delivery_summary,
+        "module_counts": module_counts,
+        "install_requirements": requirements,
+        "signing": signing_profile,
+        "payload_inventory": payload_inventory,
+    }
+
+    artifact_profile = {
+        "role": _describe_role(current_module),
+        "scan_plan": scan_plan,
+    }
+
+    integrity_card = {
+        "size_bytes": size_bytes,
+        "multi_dex_total": multi_dex_total,
+        "role_label": _describe_role(current_module),
+        "sdk": {
+            "min": getattr(manifest, "min_sdk", None),
+            "target": getattr(manifest, "target_sdk", None),
+            "compile": getattr(manifest, "compile_sdk", None),
+        },
+        "hashes": {
+            "md5": hashes.get("md5"),
+            "sha1": hashes.get("sha1"),
+            "sha256": hashes.get("sha256"),
+        },
+    }
+
+    return {
+        "package": package_profile,
+        "artifact": artifact_profile,
+        "integrity": integrity_card,
+    }
+
+
+def _summarise_required_types(
+    *,
+    current_module: Optional[ModuleProfile],
+    required_types: Sequence[str],
+    missing_required: Sequence[str],
+    config_modules: Sequence[ModuleProfile],
+) -> tuple[str, Optional[str]]:
+    """Return display text and optional note for required split types."""
+
+    if current_module is None or current_module.role != "base":
+        return "—", None
+
+    if not required_types:
+        return "—", None
+
+    summary = ", ".join(required_types)
+
+    if missing_required:
+        note = "Required split types missing from scan set: " + ", ".join(missing_required)
+        return f"{summary} (not found in scan set)", note
+
+    if config_modules:
+        return f"{summary} (present)", None
+
+    # Required types declared but no matching config splits were scanned.
+    note = "Required split types missing from scan set: " + summary
+    return f"{summary} (not found in scan set)", note
 
 
 def _format_feature_summary(modules: Sequence[ModuleProfile]) -> str:
@@ -313,20 +540,161 @@ def _format_config_summary(modules: Sequence[ModuleProfile]) -> str:
 
     counts = Counter(module.config_category or "other" for module in modules)
     ordered = ["abi", "density", "locale", "other"]
-    details = [
-        f"{key}: {counts[key]}"
-        for key in ordered
-        if counts.get(key)
-    ]
+    details: list[str] = []
+    for key in ordered:
+        if not counts.get(key):
+            continue
+        label = "lang" if key == "locale" else key
+        details.append(f"{label}: {counts[key]}")
     summary = str(len(modules))
     if details:
         summary += " (" + ", ".join(details) + ")"
     return summary
 
 
-def _format_payload_summary(payloads: Sequence[PayloadIndicator]) -> str:
+def _build_signing_profile(
+    *,
+    apk: APK,
+    modules: Sequence[ModuleProfile],
+    signatures_consistent: Optional[bool],
+    debug_cert_state: str,
+) -> dict[str, object]:
+    v2_signed = bool(getattr(apk, "is_signed_v2", lambda: False)())  # type: ignore[attr-defined]
+    v3_signed = bool(getattr(apk, "is_signed_v3", lambda: False)())  # type: ignore[attr-defined]
+    if hasattr(apk, "is_signed_v4") and callable(getattr(apk, "is_signed_v4")):
+        v4_signed = bool(apk.is_signed_v4())  # type: ignore[attr-defined]
+    else:
+        v4_signed = False
+
+    signer_sets = _count_signer_sets(modules)
+
+    return {
+        "schemes": {"v2": v2_signed, "v3": v3_signed, "v4": v4_signed},
+        "debug_cert": _debug_cert_to_bool(debug_cert_state),
+        "consistency_state": signatures_consistent,
+        "signer_sets": signer_sets,
+        "artifact_total": len(modules),
+    }
+
+
+def _summarise_payload_inventory(
+    *,
+    payloads: Sequence[PayloadIndicator],
+    multi_dex_total: int,
+) -> dict[str, object]:
+    native_count = sum(1 for payload in payloads if payload.payload_type == "so")
+    resource_count = len(payloads)
+    return {
+        "dex": multi_dex_total,
+        "native": native_count,
+        "resources": resource_count,
+        "notable": _detect_notable_payloads(payloads),
+    }
+
+
+def _detect_notable_payloads(payloads: Sequence[PayloadIndicator]) -> list[str]:
+    notes: set[str] = set()
+    for payload in payloads:
+        location_lower = payload.location.lower()
+        if "index.android.bundle" in location_lower:
+            notes.add("react-native JS bundle")
+        if "assetpack/" in location_lower or payload.payload_type == "assetpack":
+            notes.add("Play Asset Delivery content")
+    return sorted(notes)
+
+
+def _build_scan_plan_profile(
+    *,
+    current_module: Optional[ModuleProfile],
+    feature_modules: Sequence[ModuleProfile],
+    config_modules: Sequence[ModuleProfile],
+    instant_modules: Sequence[ModuleProfile],
+    missing_required: Sequence[str],
+) -> dict[str, str]:
+    scope_text = _format_scan_scope(
+        current_module,
+        feature_modules,
+        config_modules,
+        instant_modules,
+    )
+
+    depth = "—"
+    cross_refs = "—"
+    if scope_text:
+        for segment in scope_text.split("|"):
+            if "=" not in segment:
+                continue
+            label, values = segment.split("=", 1)
+            label = label.strip().lower()
+            values = values.strip()
+            if label == "deep":
+                depth = "Deep"
+                cross_refs = values
+            elif label == "skim":
+                if depth == "—" or (current_module and current_module.role == "config"):
+                    depth = "Skim"
+                    cross_refs = values
+
+    if missing_required:
+        coverage = "Missing required config splits reduce runtime parity."
+    elif current_module and current_module.role == "config":
+        coverage = "Config split skimmed; referencing base manifest."
+    elif config_modules:
+        coverage = "Config splits skimmed; deep code analysis on base/features."
+    else:
+        coverage = "Full deep coverage on scanned artifact."
+
+    return {
+        "depth": depth,
+        "cross_refs": cross_refs,
+        "coverage": coverage,
+    }
+
+
+def _count_signer_sets(modules: Sequence[ModuleProfile]) -> Optional[int]:
+    signer_sets: set[frozenset[str]] = set()
+    for module in modules:
+        if not module.signatures:
+            return None
+        signer_sets.add(frozenset(module.signatures))
+    if not signer_sets:
+        return None
+    return len(signer_sets)
+
+
+def _debug_cert_to_bool(state: str) -> Optional[bool]:
+    if not state:
+        return None
+    lowered = state.strip().lower()
+    if lowered.startswith("y"):
+        return True
+    if lowered.startswith("n"):
+        return False
+    return None
+
+
+def _describe_config_categories(modules: Sequence[ModuleProfile]) -> str:
+    categories = sorted({module.config_category or "other" for module in modules})
+    if not categories:
+        return ""
+    display: list[str] = []
+    for category in categories:
+        if category == "locale":
+            display.append("lang")
+        else:
+            display.append(category)
+    return ", ".join(display)
+
+
+def _format_payload_summary(
+    payloads: Sequence[PayloadIndicator],
+    current_module: Optional[ModuleProfile],
+) -> str:
+    if current_module and current_module.role == "config":
+        return "—"
+
     if not payloads:
-        return "none detected"
+        return "—"
 
     counts = Counter(payload.payload_type for payload in payloads)
 
@@ -356,6 +724,17 @@ def _format_payload_summary(payloads: Sequence[PayloadIndicator]) -> str:
     return ", ".join(parts) if parts else "detected"
 
 
+def _format_multidex_value(
+    current_module: Optional[ModuleProfile],
+    multi_dex_total: int,
+) -> str:
+    if current_module and current_module.role == "config":
+        return "—"
+    if multi_dex_total <= 0:
+        return "—"
+    return str(multi_dex_total)
+
+
 def _format_scan_scope(
     current_module: Optional[ModuleProfile],
     feature_modules: Sequence[ModuleProfile],
@@ -380,7 +759,10 @@ def _format_scan_scope(
     deep_text = ",".join(deep_parts)
 
     config_categories = sorted({module.config_category or "other" for module in config_modules})
-    skim_text = ",".join(config_categories) if config_categories else "none"
+    if current_module and current_module.role == "config":
+        skim_text = "config-only"
+    else:
+        skim_text = ",".join(config_categories) if config_categories else "none"
 
     return f"Deep = {deep_text} | Skim = {skim_text}"
 
@@ -428,26 +810,38 @@ def _select_evidence(
 
 
 def _signature_consistency(modules: Sequence[ModuleProfile]) -> Optional[bool]:
-    if not modules:
+    reference: Optional[set[str]] = None
+    for module in modules:
+        if module.signatures:
+            reference = set(module.signatures)
+            break
+
+    if reference is None:
         return None
 
-    base_signatures = set(modules[0].signatures)
-    if not base_signatures:
-        return None
-
-    for module in modules[1:]:
-        if set(module.signatures) != base_signatures:
+    for module in modules:
+        if not module.signatures:
+            continue
+        if set(module.signatures) != reference:
             return False
+
+    if any(not module.signatures for module in modules):
+        return None
+
     return True
 
 
-def _debug_certificate_state(module: Optional[ModuleProfile]) -> str:
-    if module is None or not module.signatures:
-        return "Unknown"
-    for signature in module.signatures:
-        if "android debug" in signature.lower():
+def _aggregate_debug_certificate_state(modules: Sequence[ModuleProfile]) -> str:
+    saw_signatures = False
+    for module in modules:
+        if not module.signatures:
+            continue
+        saw_signatures = True
+        if any("android debug" in signature.lower() for signature in module.signatures):
             return "Yes"
-    return "No"
+    if saw_signatures:
+        return "No"
+    return "—"
 
 
 def _describe_role(module: Optional[ModuleProfile]) -> str:
@@ -468,7 +862,7 @@ def _describe_consistency(value: Optional[bool]) -> str:
         return "Yes"
     if value is False:
         return "No"
-    return "Unknown"
+    return "—"
 
 
 def _normalise_mode(value: Optional[str]) -> str:

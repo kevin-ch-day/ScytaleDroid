@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from pathlib import Path
 from time import perf_counter
-from typing import List, Mapping, Optional
+from typing import Any, List, Mapping, Optional
 
 from scytaledroid.Config import app_config
 from scytaledroid.Utils.DisplayUtils import (
@@ -198,6 +198,7 @@ def _scan_groups(
     failures = 0
     severity_totals: Counter[str] = Counter()
     printed_logs: set[str] = set()
+    package_cache: dict[tuple[str, str, str], Mapping[str, Any]] = {}
 
     scan_started = perf_counter()
 
@@ -254,8 +255,13 @@ def _scan_groups(
                     started_at=wall_clock_started,
                 )
                 section_lines = render_sections(
-                    report.detector_results,
+                    report,
                     options=options,
+                    glyphs=progress.glyphs,
+                    artifact_label=label,
+                    artifact_index=artifact_index,
+                    artifact_total=len(group.artifacts),
+                    package_cache=package_cache,
                 )
                 for section_line in section_lines:
                     progress.stream.write(section_line + "\n")
