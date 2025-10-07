@@ -22,6 +22,8 @@ LOG_FILES = {
 # Cache loggers so we don’t recreate them
 _LOGGERS: dict[str, logging.Logger] = {}
 
+_FILTER_ATTR = "_scd_androguard_filter"
+
 
 class _AndroguardNoiseFilter(logging.Filter):
     """Filter extremely noisy androguard messages."""
@@ -34,6 +36,17 @@ class _AndroguardNoiseFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:  # pragma: no cover - trivial
         message = record.getMessage()
         return not any(snippet in message for snippet in self._SUBSTRINGS)
+
+
+class _AndroguardGateFilter(logging.Filter):
+    """Filter out androguard records below a minimum level."""
+
+    def __init__(self, minimum: int) -> None:
+        super().__init__()
+        self.minimum = minimum
+
+    def filter(self, record: logging.LogRecord) -> bool:  # pragma: no cover - trivial
+        return record.levelno >= self.minimum
 
 
 def get_logger(category: str) -> logging.Logger:
@@ -90,6 +103,52 @@ def _clear_handlers(logger: logging.Logger) -> None:
             pass
 
 
+def _detach_owned_filter(logger: logging.Logger) -> None:
+    """Remove any gate filter previously attached by this module."""
+
+    owned = getattr(logger, _FILTER_ATTR, None)
+    if owned is None:
+        return
+    try:
+        logger.removeFilter(owned)
+    except ValueError:  # pragma: no cover - defensive cleanup
+        pass
+    try:
+        delattr(logger, _FILTER_ATTR)
+    except AttributeError:  # pragma: no cover - defensive cleanup
+        pass
+
+
+def _iter_androguard_loggers() -> tuple[logging.Logger, list[logging.Logger]]:
+    """Return the base androguard logger and all instantiated descendants."""
+
+    base_logger = logging.getLogger("androguard")
+    discovered: dict[str, logging.Logger] = {"androguard": base_logger}
+
+    for name, instance in logging.Logger.manager.loggerDict.items():
+        if not name.startswith("androguard"):
+            continue
+        if isinstance(instance, logging.PlaceHolder):  # pragma: no cover - defensive
+            logger = logging.getLogger(name)
+        elif isinstance(instance, logging.Logger):
+            logger = instance
+        else:  # pragma: no cover - defensive
+            continue
+        discovered[name] = logger
+
+    ordered = list(discovered.values())
+    descendants = [logger for logger in ordered if logger is not base_logger]
+    return base_logger, descendants
+
+
+def _apply_gate_filter(logger: logging.Logger, *, minimum: int) -> None:
+    """Attach a gating filter to ``logger`` and record the attachment."""
+
+    filter_instance = _AndroguardGateFilter(minimum)
+    logger.addFilter(filter_instance)
+    setattr(logger, _FILTER_ATTR, filter_instance)
+
+
 def configure_third_party_loggers(
     *,
     verbosity: str,
@@ -102,16 +161,24 @@ def configure_third_party_loggers(
     ``None``.
     """
 
-    logger = logging.getLogger("androguard")
-    logger.propagate = False
+    base_logger, descendants = _iter_androguard_loggers()
+    all_loggers = [base_logger, *descendants]
+    base_logger.propagate = False
 
-    _clear_handlers(logger)
+    for logger in all_loggers:
+        if logger is not base_logger:
+            logger.propagate = True
+        logger.disabled = False
+        _clear_handlers(logger)
+        _detach_owned_filter(logger)
 
     if verbosity not in {"detail", "debug", "normal"}:
         verbosity = "normal"
 
     if verbosity != "debug":
-        logger.setLevel(logging.WARNING)
+        for logger in all_loggers:
+            logger.setLevel(logging.ERROR)
+            _apply_gate_filter(logger, minimum=logging.ERROR)
         return None
 
     target_dir = Path(debug_dir).expanduser().resolve()
@@ -127,8 +194,10 @@ def configure_third_party_loggers(
     )
     file_handler.addFilter(_AndroguardNoiseFilter())
 
-    logger.addHandler(file_handler)
-    logger.setLevel(logging.DEBUG)
+    base_logger.addHandler(file_handler)
+
+    for logger in all_loggers:
+        logger.setLevel(logging.DEBUG)
 
     return log_path
 
