@@ -1,12 +1,8 @@
-"""Static analysis package."""
+"""Core pipeline components for static analysis."""
 
-from .cli import static_analysis_menu
-from .core import (
-    AnalysisConfig,
-    DetectorContext,
-    analyze_apk,
-    StaticAnalysisReport,
-    StaticAnalysisError,
+from .context import AnalysisConfig, DetectorContext
+from .pipeline import analyze_apk, StaticAnalysisReport, StaticAnalysisError
+from .findings import (
     SeverityLevel,
     MasvsCategory,
     EvidencePointer,
@@ -15,7 +11,6 @@ from .core import (
 )
 
 __all__ = [
-    "static_analysis_menu",
     "AnalysisConfig",
     "DetectorContext",
     "analyze_apk",

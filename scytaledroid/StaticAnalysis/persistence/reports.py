@@ -10,7 +10,7 @@ from typing import List, Optional
 from scytaledroid.Config import app_config
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
-from .analyzer import StaticAnalysisReport
+from ..core import StaticAnalysisReport
 
 
 REPORTS_DIR = Path(app_config.DATA_DIR) / "static_analysis" / "reports"

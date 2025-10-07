@@ -12,6 +12,10 @@ from androguard.core.apk import APK
 
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis.harvest.common import compute_hashes, normalise_local_path
+from .context import AnalysisConfig, DetectorContext
+from ..detectors import execute_detectors
+from .findings import Finding
+from ..modules import StringIndex, build_string_index
 
 
 class StaticAnalysisError(Exception):
@@ -96,6 +100,10 @@ class StaticAnalysisReport:
     libraries: tuple[str, ...] = ()
     signatures: tuple[str, ...] = ()
     metadata: Mapping[str, object] = field(default_factory=dict)
+    scan_profile: Optional[str] = None
+    analysis_version: str = "2.0.0-alpha"
+    findings: tuple[Finding, ...] = ()
+    detector_metrics: Mapping[str, object] = field(default_factory=dict)
     generated_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
@@ -118,6 +126,10 @@ class StaticAnalysisReport:
             "libraries": list(self.libraries),
             "signatures": list(self.signatures),
             "metadata": dict(self.metadata),
+            "scan_profile": self.scan_profile,
+            "analysis_version": self.analysis_version,
+            "findings": [finding.to_dict() for finding in self.findings],
+            "detector_metrics": dict(self.detector_metrics),
             "generated_at": self.generated_at,
         }
         return payload
@@ -163,6 +175,26 @@ class StaticAnalysisReport:
         metadata_raw = payload.get("metadata")
         metadata = metadata_raw if isinstance(metadata_raw, Mapping) else {}
 
+        findings_payload = payload.get("findings")
+        findings: tuple[Finding, ...]
+        if isinstance(findings_payload, Sequence) and not isinstance(
+            findings_payload, (str, bytes)
+        ):
+            findings = tuple(
+                Finding.from_dict(entry)
+                for entry in findings_payload
+                if isinstance(entry, Mapping)
+            )
+        else:
+            findings = tuple()
+
+        detector_metrics_payload = payload.get("detector_metrics")
+        detector_metrics = (
+            {str(k): v for k, v in dict(detector_metrics_payload).items()}
+            if isinstance(detector_metrics_payload, Mapping)
+            else {}
+        )
+
         return cls(
             file_path=str(payload.get("file_path") or ""),
             relative_path=payload.get("relative_path") or None,
@@ -178,6 +210,10 @@ class StaticAnalysisReport:
             libraries=tuple(payload.get("libraries", ())),
             signatures=tuple(payload.get("signatures", ())),
             metadata=metadata,
+            scan_profile=_coerce_optional_str(payload.get("scan_profile")),
+            analysis_version=str(payload.get("analysis_version") or "2.0.0-alpha"),
+            findings=findings,
+            detector_metrics=detector_metrics,
             generated_at=str(payload.get("generated_at") or datetime.now(timezone.utc).isoformat()),
         )
 
@@ -200,6 +236,15 @@ def _coerce_bool(value: Optional[str]) -> Optional[bool]:
     if lowered in {"false", "0", "no"}:
         return False
     return None
+
+
+def _coerce_optional_str(value: object) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped if stripped else None
+    return str(value)
 
 
 def _collect_dangerous_permissions(
@@ -285,6 +330,7 @@ def analyze_apk(
     *,
     metadata: Optional[Mapping[str, object]] = None,
     storage_root: Optional[Path] = None,
+    config: Optional[AnalysisConfig] = None,
 ) -> StaticAnalysisReport:
     """Run lightweight static analysis on *apk_path* and return a report."""
 
@@ -345,6 +391,39 @@ def analyze_apk(
     relative = _resolve_relative_path(apk_path, storage_root)
     file_size = apk_path.stat().st_size
 
+    analysis_config = config or AnalysisConfig()
+    string_index = (
+        build_string_index(apk) if analysis_config.enable_string_index else None
+    )
+
+    context = _build_detector_context(
+        apk_path=apk_path,
+        apk=apk,
+        manifest_root=manifest_root,
+        manifest=manifest,
+        manifest_flags=flags,
+        permissions=permissions,
+        components=components,
+        exported=exported,
+        features=features,
+        libraries=libraries,
+        signatures=signatures,
+        metadata=report_metadata,
+        hashes=hashes,
+        config=analysis_config,
+        string_index=string_index,
+    )
+
+    detector_results = execute_detectors(context)
+    findings = tuple(
+        finding for result in detector_results for finding in result.findings
+    )
+    detector_metrics = {
+        result.detector_id: dict(result.metrics)
+        for result in detector_results
+        if result.metrics
+    }
+
     return StaticAnalysisReport(
         file_path=str(apk_path.resolve()),
         relative_path=relative,
@@ -360,6 +439,47 @@ def analyze_apk(
         libraries=libraries,
         signatures=signatures,
         metadata=report_metadata,
+        scan_profile=analysis_config.profile,
+        analysis_version=analysis_config.analysis_version,
+        findings=findings,
+        detector_metrics=detector_metrics,
+    )
+
+
+def _build_detector_context(
+    *,
+    apk_path: Path,
+    apk: APK,
+    manifest_root: ElementTree.Element,
+    manifest: ManifestSummary,
+    manifest_flags: ManifestFlags,
+    permissions: PermissionSummary,
+    components: ComponentSummary,
+    exported: ComponentSummary,
+    features: Sequence[str],
+    libraries: Sequence[str],
+    signatures: Sequence[str],
+    metadata: Mapping[str, object],
+    hashes: Mapping[str, str],
+    config: AnalysisConfig,
+    string_index: Optional[StringIndex],
+) -> DetectorContext:
+    return DetectorContext(
+        apk_path=apk_path,
+        apk=apk,
+        manifest_root=manifest_root,
+        manifest_summary=manifest,
+        manifest_flags=manifest_flags,
+        permissions=permissions,
+        components=components,
+        exported_components=exported,
+        features=tuple(features),
+        libraries=tuple(libraries),
+        signatures=tuple(signatures),
+        metadata=metadata,
+        hashes=hashes,
+        string_index=string_index,
+        config=config,
     )
 
 

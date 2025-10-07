@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Mapping, Optional
 
@@ -17,17 +15,25 @@ from scytaledroid.Utils.DisplayUtils import (
 )
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
-from .analyzer import StaticAnalysisError, StaticAnalysisReport, analyze_apk
-from . import reports
-
-
-@dataclass(frozen=True)
-class RepositoryApk:
-    """APK discovered within the harvested repository."""
-
-    path: Path
-    display_path: str
-    metadata: Mapping[str, object]
+from ..core import (
+    AnalysisConfig,
+    StaticAnalysisError,
+    StaticAnalysisReport,
+    analyze_apk,
+)
+from ..core.repository import (
+    ArtifactGroup,
+    RepositoryArtifact,
+    discover_repository_artifacts,
+    group_artifacts,
+    list_categories,
+    list_packages,
+)
+from ..persistence import (
+    ReportStorageError,
+    list_reports,
+    save_report,
+)
 
 
 def static_analysis_menu() -> None:
@@ -40,6 +46,9 @@ def static_analysis_menu() -> None:
             "1": "Analyze APK from repository",
             "2": "Analyze APK from local path",
             "3": "Review saved reports",
+            "4": "Run full repository scan",
+            "5": "Run scan for specific app",
+            "6": "Run scan for category",
         }
         menu_utils.print_menu(options, is_main=False)
         choice = prompt_utils.get_choice(list(options.keys()) + ["0"], default="0")
@@ -52,6 +61,12 @@ def static_analysis_menu() -> None:
             _handle_manual_analysis()
         elif choice == "3":
             _review_saved_reports()
+        elif choice == "4":
+            _run_full_repository_scan()
+        elif choice == "5":
+            _run_package_scan()
+        elif choice == "6":
+            _run_category_scan()
 
 
 def _handle_repository_analysis() -> None:
@@ -74,29 +89,38 @@ def _run_analysis(
     *,
     metadata: Optional[Mapping[str, object]] = None,
     storage_root: Optional[Path] = None,
+    config: Optional[AnalysisConfig] = None,
 ) -> None:
     print()
     print(status_messages.status(f"Analyzing {apk_path.name}...", level="info"))
 
-    try:
-        report = analyze_apk(apk_path, metadata=metadata, storage_root=storage_root)
-    except StaticAnalysisError as exc:
-        print(status_messages.status(str(exc), level="error"))
+    report, saved_path, message, fatal = _generate_report(
+        apk_path,
+        metadata=metadata,
+        storage_root=storage_root,
+        config=config,
+    )
+    if fatal or report is None:
+        print(status_messages.status(message or "Analysis failed", level="error"))
         prompt_utils.press_enter_to_continue()
         return
+    if message:
+        print(status_messages.status(message, level="warn"))
 
-    try:
-        saved_path = reports.save_report(report)
-    except reports.ReportStorageError as exc:
-        log.error(str(exc), category="static_analysis")
-        print(status_messages.status(str(exc), level="error"))
-        saved_path = None
+    if saved_path is None and not message:
+        print(
+            status_messages.status(
+                "Report could not be saved to disk; check logs for details.",
+                level="warn",
+            )
+        )
 
     _display_report(report, saved_path=saved_path)
 
 
-def _select_repository_apk() -> Optional[RepositoryApk]:
-    entries = _discover_repository_apks()
+def _select_repository_apk() -> Optional[RepositoryArtifact]:
+    base_dir = (Path(app_config.DATA_DIR) / "apks").resolve()
+    entries = discover_repository_artifacts(base_dir)
     if not entries:
         print(
             status_messages.status(
@@ -128,7 +152,7 @@ def _select_repository_apk() -> Optional[RepositoryApk]:
 
 
 def _review_saved_reports() -> None:
-    stored = reports.list_reports()
+    stored = list_reports()
     if not stored:
         print(status_messages.status("No analysis reports found yet.", level="warn"))
         prompt_utils.press_enter_to_continue()
@@ -157,6 +181,204 @@ def _review_saved_reports() -> None:
 
     selected = stored[int(choice) - 1]
     _display_report(selected.report, saved_path=selected.path)
+
+
+def _run_full_repository_scan() -> None:
+    base_dir = (Path(app_config.DATA_DIR) / "apks").resolve()
+    groups: List[ArtifactGroup] = group_artifacts(base_dir)
+    if not groups:
+        _print_no_groups_warning()
+        return
+
+    _scan_groups(
+        groups,
+        base_dir=base_dir,
+        heading="Full Repository Scan",
+        description=f"{len(groups)} group(s), {sum(len(g.artifacts) for g in groups)} artifact(s)",
+    )
+
+
+def _run_package_scan() -> None:
+    base_dir = (Path(app_config.DATA_DIR) / "apks").resolve()
+    groups: List[ArtifactGroup] = group_artifacts(base_dir)
+    if not groups:
+        _print_no_groups_warning()
+        return
+
+    packages = list_packages(groups)
+    if not packages:
+        _print_no_groups_warning()
+        return
+
+    print()
+    menu_utils.print_header("Package Scan", "Select an app")
+    rows = []
+    for idx, (package_name, count) in enumerate(packages, start=1):
+        rows.append([str(idx), package_name, str(count)])
+    table_utils.render_table(["#", "Package", "Groups"], rows)
+    print()
+    choice = prompt_utils.get_choice(
+        [str(idx) for idx in range(1, len(packages) + 1)] + ["0"],
+        prompt="Select package #: ",
+        default="0",
+    )
+    if choice == "0":
+        return
+
+    package_name, _ = packages[int(choice) - 1]
+    scoped_groups = [group for group in groups if group.package_name == package_name]
+    if not scoped_groups:
+        print(status_messages.status("No artifacts found for the selected package.", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    _scan_groups(
+        scoped_groups,
+        base_dir=base_dir,
+        heading=f"Package Scan — {package_name}",
+        description=f"{len(scoped_groups)} group(s)",
+    )
+
+
+def _run_category_scan() -> None:
+    base_dir = (Path(app_config.DATA_DIR) / "apks").resolve()
+    groups: List[ArtifactGroup] = group_artifacts(base_dir)
+    if not groups:
+        _print_no_groups_warning()
+        return
+
+    categories = list_categories(groups)
+    if not categories:
+        print(status_messages.status("No category data available.", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    print()
+    menu_utils.print_header("Category Scan", "Select a category")
+    rows = []
+    for idx, (category, count) in enumerate(categories, start=1):
+        rows.append([str(idx), category, str(count)])
+    table_utils.render_table(["#", "Category", "Groups"], rows)
+    print()
+    choice = prompt_utils.get_choice(
+        [str(idx) for idx in range(1, len(categories) + 1)] + ["0"],
+        prompt="Select category #: ",
+        default="0",
+    )
+    if choice == "0":
+        return
+
+    category_name, _ = categories[int(choice) - 1]
+    scoped_groups = [group for group in groups if group.category == category_name]
+    if not scoped_groups:
+        print(status_messages.status("No artifacts found for the selected category.", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    _scan_groups(
+        scoped_groups,
+        base_dir=base_dir,
+        heading=f"Category Scan — {category_name}",
+        description=f"{len(scoped_groups)} group(s)",
+    )
+
+
+def _generate_report(
+    apk_path: Path,
+    *,
+    metadata: Optional[Mapping[str, object]] = None,
+    storage_root: Optional[Path] = None,
+    config: Optional[AnalysisConfig] = None,
+) -> tuple[Optional[StaticAnalysisReport], Optional[Path], Optional[str], bool]:
+    try:
+        report = analyze_apk(
+            apk_path,
+            metadata=metadata,
+            storage_root=storage_root,
+            config=config,
+        )
+    except StaticAnalysisError as exc:
+        return None, None, str(exc), True
+
+    try:
+        saved_path = save_report(report)
+        return report, saved_path, None, False
+    except ReportStorageError as exc:
+        log.error(str(exc), category="static_analysis")
+        return report, None, str(exc), False
+
+
+def _scan_groups(
+    groups: List[ArtifactGroup],
+    *,
+    base_dir: Path,
+    heading: str,
+    description: str,
+) -> None:
+    print()
+    menu_utils.print_header(heading, description)
+
+    config = AnalysisConfig(profile="full")
+    successes = 0
+    failures = 0
+
+    total_groups = len(groups)
+    for index, group in enumerate(groups, start=1):
+        banner = f"[{index}/{total_groups}] {group.package_name} ({group.version_display})"
+        print(
+            status_messages.status(
+                f"{banner}: scanning {len(group.artifacts)} artifact(s)", level="info"
+            )
+        )
+
+        for artifact in group.artifacts:
+            report, saved_path, message, fatal = _generate_report(
+                artifact.path,
+                metadata=artifact.metadata,
+                storage_root=base_dir,
+                config=config,
+            )
+            label = artifact.artifact_label or artifact.display_path
+            if fatal or report is None:
+                failures += 1
+                print(
+                    status_messages.status(
+                        f"  ✖ {label}: {message or 'Analysis failed'}",
+                        level="error",
+                    )
+                )
+                continue
+
+            successes += 1
+            if saved_path:
+                saved_display = _format_saved_path(saved_path)
+                print(status_messages.status(f"  ✓ {label}: {saved_display}", level="success"))
+            else:
+                print(status_messages.status(f"  ✓ {label}: report generated (not saved)", level="success"))
+            if message:
+                print(status_messages.status(f"    warning: {message}", level="warn"))
+
+    summary_lines = [
+        ("Groups processed", total_groups),
+        ("Artifacts analysed", successes + failures),
+        ("Successful reports", successes),
+        ("Failures", failures),
+    ]
+
+    print()
+    table_utils.render_key_value_pairs(summary_lines)
+    print()
+    prompt_utils.press_enter_to_continue("Scan complete. Press Enter to return...")
+
+
+def _print_no_groups_warning() -> None:
+    print(
+        status_messages.status(
+            "No harvested APK groups found. Run Device Analysis → 7 to pull artifacts.",
+            level="warn",
+        )
+    )
+    prompt_utils.press_enter_to_continue()
 
 
 def _prompt_apk_path() -> Optional[Path]:
@@ -332,37 +554,6 @@ def _format_flag(value: Optional[bool]) -> str:
     return "Enabled" if value else "Disabled"
 
 
-def _discover_repository_apks() -> List[RepositoryApk]:
-    base_dir = (Path(app_config.DATA_DIR) / "apks").resolve()
-    if not base_dir.exists():
-        return []
-
-    entries: List[RepositoryApk] = []
-    for apk_path in sorted(base_dir.rglob("*.apk")):
-        metadata = _load_metadata(apk_path)
-        try:
-            display = apk_path.resolve().relative_to(base_dir).as_posix()
-        except ValueError:
-            display = apk_path.name
-        entries.append(RepositoryApk(path=apk_path, display_path=display, metadata=metadata))
-    return entries
-
-
-def _load_metadata(apk_path: Path) -> Mapping[str, object]:
-    meta_path = apk_path.with_suffix(apk_path.suffix + ".meta.json")
-    if not meta_path.exists():
-        return {}
-    try:
-        with meta_path.open("r", encoding="utf-8") as handle:
-            return json.load(handle)
-    except (OSError, json.JSONDecodeError) as exc:
-        log.warning(
-            f"Failed to parse metadata for {apk_path.name}: {exc}",
-            category="static_analysis",
-        )
-        return {}
-
-
 def _format_bytes(size: int) -> str:
     units = ["B", "KiB", "MiB", "GiB", "TiB"]
     value = float(size)
@@ -373,6 +564,13 @@ def _format_bytes(size: int) -> str:
             return f"{value:.1f} {unit}"
         value /= 1024.0
     return f"{size} B"
+
+
+def _format_saved_path(path: Path) -> str:
+    try:
+        return path.resolve().relative_to(Path.cwd()).as_posix()
+    except ValueError:
+        return path.resolve().as_posix()
 
 
 __all__ = ["static_analysis_menu"]
