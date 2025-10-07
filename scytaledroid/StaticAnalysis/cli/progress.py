@@ -1,168 +1,177 @@
-"""Progress rendering helpers for static-analysis runs."""
+"""Progress and formatting helpers for static-analysis scans."""
 
 from __future__ import annotations
 
 from collections import Counter
-from pathlib import Path
-from typing import Iterable, Mapping, Sequence
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Iterable, Sequence
+
+from zoneinfo import ZoneInfo
 
 from scytaledroid.Utils.DisplayUtils import status_messages
 
-from ..core.findings import Finding, SeverityLevel
+from ..core import StaticAnalysisReport
+from ..core.findings import Finding
+from ..core.repository import ArtifactGroup
 from .options import ScanDisplayOptions
 
-_SEVERITY_ORDER: tuple[SeverityLevel, ...] = (
-    SeverityLevel.P0,
-    SeverityLevel.P1,
-    SeverityLevel.P2,
-    SeverityLevel.NOTE,
-)
+_CT = ZoneInfo("America/Chicago")
 
 
-def _format_duration(seconds: float) -> str:
-    if seconds < 0.001:
-        return "<1 ms"
-    if seconds < 1.0:
-        return f"{seconds * 1000:.0f} ms"
-    return f"{seconds:.2f} s"
+@dataclass
+class ScanRunProgress:
+    """Coordinates presentation of repository/group/app progress."""
 
+    total_groups: int
+    options: ScanDisplayOptions
 
-def _severity_summary(findings: Sequence[Finding]) -> tuple[str, Counter[str]]:
-    counter: Counter[str] = Counter()
-    for finding in findings:
-        counter[finding.severity.value] += 1
-    if not counter:
-        return "none recorded", counter
+    def __post_init__(self) -> None:
+        self._severity_totals: Counter[str] = Counter()
 
-    ordered_parts: list[str] = []
-    seen: set[str] = set()
-    for level in _SEVERITY_ORDER:
-        label = level.value
-        count = counter.get(label, 0)
-        if count:
-            ordered_parts.append(f"{label}:{count}")
-            seen.add(label)
+    def now(self) -> datetime:
+        return datetime.now(_CT)
 
-    for label, count in sorted(counter.items()):
-        if label in seen:
-            continue
-        ordered_parts.append(f"{label}:{count}")
-        seen.add(label)
-
-    return ", ".join(ordered_parts), counter
-
-
-def _top_findings(findings: Sequence[Finding], limit: int) -> Iterable[str]:
-    if limit <= 0:
-        return []
-    priority = {level.value: index for index, level in enumerate(_SEVERITY_ORDER)}
-    sorted_findings = sorted(
-        findings,
-        key=lambda finding: (
-            priority.get(finding.severity.value, len(priority)),
-            finding.detector_id,
-            finding.title,
-        ),
-    )
-    lines: list[str] = []
-    for finding in sorted_findings[:limit]:
-        prefix = finding.severity.value
-        title = finding.title or finding.summary
-        lines.append(f"{prefix} · {title}")
-    return lines
-
-
-class ScanProgress:
-    """Renders live feedback for static-analysis scans."""
-
-    def __init__(self, *, total_groups: int, options: ScanDisplayOptions) -> None:
-        self.total_groups = total_groups
-        self.options = options
-
-    def announce_options(self) -> None:
-        if self.options.quiet:
-            return
-        print(status_messages.status(f"Display options: {self.options.describe()}", level="info"))
-
-    def start_group(
+    def print_repository_header(
         self,
         *,
-        index: int,
-        package_name: str,
-        version: str,
-        category: str | None,
-        artifact_count: int,
+        title: str,
+        total_groups: int,
+        total_artifacts: int,
+        profile: str,
+        verbosity: str,
+        started: datetime,
     ) -> None:
-        details = [f"[{index}/{self.total_groups}] {package_name} ({version})"]
-        if category and not self.options.quiet:
-            details.append(f"category: {category}")
-        details.append(f"artifacts: {artifact_count}")
-        level = "info"
-        print(status_messages.status(" – ".join(details), level=level))
+        print()
+        print(title)
+        print("=" * len(title))
+        print(
+            f"Groups: {total_groups}    Artifacts: {total_artifacts}    Profile: {profile.title()}    Verbosity: {verbosity}"
+        )
+        print(f"Started: {format_timestamp(started)}")
+        print()
 
-    def artifact_started(
+    def print_group_header(self, *, index: int, group: ArtifactGroup) -> None:
+        category = group.category or "Uncategorised"
+        artifact_count = len(group.artifacts)
+        print(f"[{index}/{self.total_groups}] Group: {category} — Apps: 1  Artifacts: {artifact_count}")
+
+    def print_artifact_notice(
         self,
         *,
+        package_name: str,
+        label: str,
         artifact_index: int,
         artifact_total: int,
-        label: str,
     ) -> None:
-        if self.options.quiet:
-            return
-        print(
-            status_messages.status(
-                f"  • [{artifact_index}/{artifact_total}] {label} → analysis started",
-                level="info",
-            )
-        )
+        print(f"→ Analyzing: {package_name} (artifact {artifact_index}/{artifact_total}: {label})")
 
-    def artifact_failed(self, label: str, message: str) -> None:
+    def print_artifact_failure(self, label: str, message: str) -> None:
         print(status_messages.status(f"    ✖ {label}: {message}", level="error"))
 
-    def artifact_completed(
+    def print_artifact_header(
         self,
         *,
-        label: str,
-        saved_path: Path | None,
-        findings: Sequence[Finding],
-        duration_seconds: float | None,
-        warning: str | None,
-    ) -> Counter[str]:
-        if saved_path:
-            destination = _format_saved_path(saved_path)
-            print(status_messages.status(f"    ✓ {label}: report saved → {destination}", level="success"))
+        report: StaticAnalysisReport,
+        artifact_label: str,
+        artifact_index: int,
+        artifact_total: int,
+        category: str | None,
+        started_at: datetime,
+    ) -> None:
+        metadata = report.metadata or {}
+        manifest = report.manifest
+
+        name = metadata.get("app_label") or manifest.app_label or manifest.package_name or "—"
+        package_name = manifest.package_name or metadata.get("package_name") or "—"
+        version_name = manifest.version_name or metadata.get("version_name") or "—"
+        version_code = manifest.version_code or metadata.get("version_code") or "—"
+        if version_code and version_code != "—":
+            version_line = f"Version:    {version_name} ({version_code})"
         else:
-            print(status_messages.status(f"    ✓ {label}: report generated", level="success"))
+            version_line = f"Version:    {version_name}"
 
-        summary, counter = _severity_summary(findings)
+        artifact_text = f"{artifact_label} ({artifact_index}/{artifact_total})"
+        category_text = category or metadata.get("category") or "—"
 
-        info_segments: list[str] = [f"findings: {summary}"]
-        if self.options.show_timings and duration_seconds is not None:
-            info_segments.append(f"duration: {_format_duration(duration_seconds)}")
+        print()
+        print("App")
+        print("---")
+        print(f"Name:       {name}")
+        print(f"Package:    {package_name}")
+        print(version_line)
+        print(f"Artifact:   {artifact_text}")
+        print(f"Category:   {category_text}")
+        print(f"Started:    {format_timestamp(started_at)}")
+        print()
 
-        if not self.options.quiet:
-            print(status_messages.status(f"      ↳ {'; '.join(info_segments)}", level="info"))
+    def print_artifact_summary(
+        self,
+        *,
+        report: StaticAnalysisReport,
+        runtime_seconds: float,
+        finished_at: datetime,
+    ) -> None:
+        findings = report.findings
+        severity_counter = Counter(finding.severity.value for finding in findings)
+        self._record_findings(findings)
 
-        if warning:
-            print(status_messages.status(f"      warning: {warning}", level="warn"))
+        categories_touched = sorted(
+            {finding.masvs_category.value for finding in findings if finding.masvs_category}
+        )
 
-        if self.options.show_findings and not self.options.quiet and findings:
-            for line in _top_findings(findings, self.options.finding_limit):
-                print(status_messages.status(f"        • {line}", level="info"))
+        print("Summary")
+        print("-------")
+        print(
+            f"Severity counts:  P0={severity_counter.get('P0', 0)}   "
+            f"P1={severity_counter.get('P1', 0)}   P2={severity_counter.get('P2', 0)}"
+        )
+        print(
+            "Categories:       " + (", ".join(categories_touched) if categories_touched else "—")
+        )
+        print(f"Runtime:          {format_seconds(runtime_seconds)}")
+        print(f"Finished:         {format_timestamp(finished_at)}")
+        print(f"Result:           {self._result_badge(severity_counter)}")
+        print("Next steps:       —")
+        print()
 
-        return counter
+    def print_repository_summary(self, *, started: datetime, finished: datetime) -> None:
+        duration = (finished - started).total_seconds()
+        ordered_labels = ["P0", "P1", "P2"]
+        severity_line = "Severities: " + "   ".join(
+            f"{label}={self._severity_totals.get(label, 0)}" for label in ordered_labels
+        )
 
-    def artifact_warning(self, label: str, message: str) -> None:
-        if self.options.quiet:
-            return
-        print(status_messages.status(f"    warning for {label}: {message}", level="warn"))
+        print("Repository Summary")
+        print("------------------")
+        print(severity_line)
+        print(f"Started:   {format_timestamp(started)}")
+        print(f"Finished:  {format_timestamp(finished)}")
+        print(f"Duration:  {format_seconds(duration)}")
+        print()
+
+    def _record_findings(self, findings: Sequence[Finding]) -> None:
+        self._severity_totals.update(finding.severity.value for finding in findings)
+
+    @staticmethod
+    def _result_badge(counter: Mapping[str, int]) -> str:
+        if counter.get("P0", 0):
+            return "[ATTENTION REQUIRED] (P0 present)"
+        if counter.get("P1", 0):
+            return "[REVIEW] (P1 present)"
+        return "[OK]"
 
 
-def _format_saved_path(path: Path) -> str:
-    try:
-        return path.resolve().relative_to(Path.cwd()).as_posix()
-    except ValueError:
-        return path.resolve().as_posix()
+def format_timestamp(dt: datetime) -> str:
+    local = dt.astimezone(_CT)
+    hour = local.hour % 12 or 12
+    minute = local.minute
+    am_pm = "AM" if local.hour < 12 else "PM"
+    return f"{local.month}-{local.day}-{local.year} {hour}:{minute:02d} {am_pm}"
 
 
-__all__ = ["ScanProgress"]
+def format_seconds(seconds: float) -> str:
+    return f"{seconds:.1f}s"
+
+
+__all__ = ["ScanRunProgress", "format_timestamp", "format_seconds"]
