@@ -1,4 +1,4 @@
-"""Manifest-oriented detectors."""
+"""Native/JNI hardening detector scaffolding."""
 
 from __future__ import annotations
 
@@ -9,21 +9,21 @@ from .section_utils import placeholder_result
 
 
 @register_detector
-class ManifestBaselineDetector(BaseDetector):
-    """Placeholder manifest hygiene detector (superseded by new components module)."""
+class NativeHardeningDetector(BaseDetector):
+    """Summarises native library posture (placeholder)."""
 
-    detector_id = "manifest_baseline"
-    name = "Manifest baseline detector"
-    default_profiles = ()
-    section_key = "manifest_hygiene"
+    detector_id = "native_hardening"
+    name = "Native / JNI detector"
+    default_profiles = ("full",)
+    section_key = "native_jni"
 
     def run(self, context: DetectorContext) -> DetectorResult:
         return placeholder_result(
             detector_id=self.detector_id,
             section_key=self.section_key,
-            summary="Manifest baseline detector superseded",
+            summary="Native analysis placeholder",
             status=Badge.SKIPPED,
         )
 
 
-__all__ = ["ManifestBaselineDetector"]
+__all__ = ["NativeHardeningDetector"]

@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from time import perf_counter
 from typing import Dict, Iterable, List, Sequence, Tuple, Type, TypeVar
 
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ..core.context import AnalysisConfig, DetectorContext
-from ..core.findings import DetectorResult
+from ..core.findings import Badge, DetectorResult
 
 
 class DetectorRegistrationError(RuntimeError):
@@ -58,6 +59,7 @@ class BaseDetector(ABC):
     detector_id: str = "base"
     name: str = "Base detector"
     default_profiles: Sequence[str] = ("quick", "full")
+    section_key: str = "generic"
 
     def applies_to_profile(self, profile: str) -> bool:
         if not self.default_profiles:
@@ -85,8 +87,10 @@ def execute_detectors(context: DetectorContext) -> Tuple[DetectorResult, ...]:
     results: List[DetectorResult] = []
 
     for detector in detectors:
+        started = perf_counter()
         try:
             result = detector.run(context)
+            duration = round(perf_counter() - started, 4)
         except Exception as exc:  # pragma: no cover - detectors should not crash pipeline
             log.error(
                 f"Detector {detector.detector_id} failed: {exc}",
@@ -94,9 +98,34 @@ def execute_detectors(context: DetectorContext) -> Tuple[DetectorResult, ...]:
             )
             result = DetectorResult(
                 detector_id=detector.detector_id,
-                findings=tuple(),
+                section_key=getattr(detector, "section_key", detector.detector_id),
+                status=Badge.SKIPPED,
+                duration_sec=round(perf_counter() - started, 4),
                 metrics={"error": str(exc)},
+                evidence=tuple(),
+                notes=(f"Detector error: {exc}",),
             )
+            duration = result.duration_sec
+        else:
+            if not isinstance(result, DetectorResult):
+                duration = round(perf_counter() - started, 4)
+                log.error(
+                    f"Detector {detector.detector_id} returned invalid result",
+                    category="static_analysis",
+                )
+                result = DetectorResult(
+                    detector_id=detector.detector_id,
+                    section_key=getattr(detector, "section_key", detector.detector_id),
+                    status=Badge.SKIPPED,
+                    duration_sec=duration,
+                    metrics={"error": "invalid result"},
+                    evidence=tuple(),
+                    notes=("Detector returned invalid result",),
+                )
+            elif result.duration_sec <= 0:
+                object.__setattr__(result, "duration_sec", duration)
+        if result.duration_sec <= 0:
+            object.__setattr__(result, "duration_sec", duration)
         results.append(result)
 
     return tuple(results)

@@ -77,8 +77,11 @@ class ManifestFlags:
     uses_cleartext_traffic: Optional[bool] = None
     debuggable: Optional[bool] = None
     allow_backup: Optional[bool] = None
+    request_legacy_external_storage: Optional[bool] = None
+    full_backup_content: Optional[str] = None
+    network_security_config: Optional[str] = None
 
-    def to_dict(self) -> MutableMapping[str, Optional[bool]]:
+    def to_dict(self) -> MutableMapping[str, object]:
         return asdict(self)
 
 
@@ -301,6 +304,15 @@ def _build_manifest_flags(root: ElementTree.Element) -> ManifestFlags:
         uses_cleartext_traffic=_coerce_bool(application.get(f"{_ANDROID_NS}usesCleartextTraffic")),
         debuggable=_coerce_bool(application.get(f"{_ANDROID_NS}debuggable")),
         allow_backup=_coerce_bool(application.get(f"{_ANDROID_NS}allowBackup")),
+        request_legacy_external_storage=_coerce_bool(
+            application.get(f"{_ANDROID_NS}requestLegacyExternalStorage")
+        ),
+        full_backup_content=_coerce_optional_str(
+            application.get(f"{_ANDROID_NS}fullBackupContent")
+        ),
+        network_security_config=_coerce_optional_str(
+            application.get(f"{_ANDROID_NS}networkSecurityConfig")
+        ),
     )
 
 

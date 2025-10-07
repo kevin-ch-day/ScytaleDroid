@@ -1,4 +1,4 @@
-"""Manifest-oriented detectors."""
+"""Content provider ACL detector scaffolding."""
 
 from __future__ import annotations
 
@@ -9,21 +9,21 @@ from .section_utils import placeholder_result
 
 
 @register_detector
-class ManifestBaselineDetector(BaseDetector):
-    """Placeholder manifest hygiene detector (superseded by new components module)."""
+class ProviderAclDetector(BaseDetector):
+    """Analyses exported content providers (placeholder)."""
 
-    detector_id = "manifest_baseline"
-    name = "Manifest baseline detector"
-    default_profiles = ()
-    section_key = "manifest_hygiene"
+    detector_id = "provider_acl"
+    name = "Provider ACL detector"
+    default_profiles = ("quick", "full")
+    section_key = "provider_acl"
 
     def run(self, context: DetectorContext) -> DetectorResult:
         return placeholder_result(
             detector_id=self.detector_id,
             section_key=self.section_key,
-            summary="Manifest baseline detector superseded",
+            summary="Provider ACL analysis placeholder",
             status=Badge.SKIPPED,
         )
 
 
-__all__ = ["ManifestBaselineDetector"]
+__all__ = ["ProviderAclDetector"]

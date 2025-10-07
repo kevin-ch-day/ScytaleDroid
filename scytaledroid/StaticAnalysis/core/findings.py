@@ -28,23 +28,29 @@ class MasvsCategory(str, Enum):
     OTHER = "OTHER"
 
 
+class Badge(str, Enum):
+    """Presentation badges for detector status."""
+
+    OK = "OK"
+    INFO = "INFO"
+    WARN = "WARN"
+    FAIL = "FAIL"
+    SKIPPED = "skipped"
+
+
 @dataclass(frozen=True)
 class EvidencePointer:
     """Lightweight pointer describing where evidence for a finding lives."""
 
-    file_path: Optional[str] = None
-    line_number: Optional[int] = None
-    manifest_xpath: Optional[str] = None
-    string_hash: Optional[str] = None
+    location: str
+    hash_short: Optional[str] = None
     description: Optional[str] = None
     extra: Mapping[str, object] = field(default_factory=dict)
 
     def to_dict(self) -> MutableMapping[str, object]:
         payload: MutableMapping[str, object] = {
-            "file_path": self.file_path,
-            "line_number": self.line_number,
-            "manifest_xpath": self.manifest_xpath,
-            "string_hash": self.string_hash,
+            "location": self.location,
+            "hash_short": self.hash_short,
             "description": self.description,
             "extra": dict(self.extra),
         }
@@ -52,11 +58,10 @@ class EvidencePointer:
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, object]) -> "EvidencePointer":
+        location = _coerce_optional_str(payload.get("location")) or ""
         return cls(
-            file_path=_coerce_optional_str(payload.get("file_path")),
-            line_number=_coerce_optional_int(payload.get("line_number")),
-            manifest_xpath=_coerce_optional_str(payload.get("manifest_xpath")),
-            string_hash=_coerce_optional_str(payload.get("string_hash")),
+            location=location,
+            hash_short=_coerce_optional_str(payload.get("hash_short")),
             description=_coerce_optional_str(payload.get("description")),
             extra=_coerce_mapping(payload.get("extra")),
         )
@@ -68,80 +73,83 @@ class Finding:
 
     finding_id: str
     title: str
-    summary: str
-    detector_id: str
-    severity: SeverityLevel
-    masvs_category: MasvsCategory = MasvsCategory.OTHER
-    evidence: EvidencePointer = field(default_factory=EvidencePointer)
-    remediation: Optional[str] = None
-    correlation_chain: Sequence[str] = field(default_factory=tuple)
+    severity_gate: SeverityLevel
+    category_masvs: MasvsCategory
+    status: Badge
+    because: str
+    evidence: Sequence[EvidencePointer] = field(default_factory=tuple)
+    remediate: Optional[str] = None
+    metrics: Mapping[str, object] = field(default_factory=dict)
     tags: Sequence[str] = field(default_factory=tuple)
-    supporting_data: Mapping[str, object] = field(default_factory=dict)
 
     def to_dict(self) -> MutableMapping[str, object]:
         payload: MutableMapping[str, object] = {
             "finding_id": self.finding_id,
             "title": self.title,
-            "summary": self.summary,
-            "detector_id": self.detector_id,
-            "severity": self.severity.value,
-            "masvs_category": self.masvs_category.value,
-            "evidence": self.evidence.to_dict(),
-            "remediation": self.remediation,
-            "correlation_chain": list(self.correlation_chain),
+            "severity_gate": self.severity_gate.value,
+            "category_masvs": self.category_masvs.value,
+            "status": self.status.value,
+            "because": self.because,
+            "evidence": [pointer.to_dict() for pointer in self.evidence],
+            "remediate": self.remediate,
+            "metrics": dict(self.metrics),
             "tags": list(self.tags),
-            "supporting_data": dict(self.supporting_data),
         }
         return payload
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, object]) -> "Finding":
-        severity_raw = payload.get("severity") or SeverityLevel.NOTE.value
+        severity_raw = payload.get("severity_gate") or SeverityLevel.NOTE.value
         try:
             severity = SeverityLevel(severity_raw)
         except ValueError:
             severity = SeverityLevel.NOTE
 
-        masvs_raw = payload.get("masvs_category") or MasvsCategory.OTHER.value
+        category_raw = payload.get("category_masvs") or MasvsCategory.OTHER.value
         try:
-            masvs = MasvsCategory(masvs_raw)
+            category = MasvsCategory(category_raw)
         except ValueError:
-            masvs = MasvsCategory.OTHER
+            category = MasvsCategory.OTHER
+
+        status_raw = payload.get("status") or Badge.INFO.value
+        try:
+            status = Badge(status_raw)
+        except ValueError:
+            status = Badge.INFO
 
         evidence_payload = payload.get("evidence")
-        evidence = (
-            EvidencePointer.from_dict(evidence_payload)
-            if isinstance(evidence_payload, Mapping)
-            else EvidencePointer()
-        )
-
-        correlation = payload.get("correlation_chain")
-        if isinstance(correlation, Sequence) and not isinstance(correlation, (str, bytes)):
-            correlation_chain = tuple(str(entry) for entry in correlation)
+        evidence: Sequence[EvidencePointer]
+        if isinstance(evidence_payload, Sequence) and not isinstance(
+            evidence_payload, (str, bytes)
+        ):
+            evidence = tuple(
+                EvidencePointer.from_dict(entry)
+                for entry in evidence_payload
+                if isinstance(entry, Mapping)
+            )
         else:
-            correlation_chain = tuple()
+            evidence = tuple()
 
-        tags_raw = payload.get("tags")
-        if isinstance(tags_raw, Sequence) and not isinstance(tags_raw, (str, bytes)):
-            tags = tuple(str(tag) for tag in tags_raw)
+        tags_payload = payload.get("tags")
+        if isinstance(tags_payload, Sequence) and not isinstance(tags_payload, (str, bytes)):
+            tags = tuple(str(entry) for entry in tags_payload)
         else:
             tags = tuple()
 
-        supporting_raw = payload.get("supporting_data")
-        supporting = supporting_raw if isinstance(supporting_raw, Mapping) else {}
+        metrics_payload = payload.get("metrics")
+        metrics = metrics_payload if isinstance(metrics_payload, Mapping) else {}
 
         return cls(
             finding_id=str(payload.get("finding_id") or ""),
             title=str(payload.get("title") or ""),
-            summary=str(payload.get("summary") or ""),
-            detector_id=str(payload.get("detector_id") or ""),
-            severity=severity,
-            masvs_category=masvs,
+            severity_gate=severity,
+            category_masvs=category,
+            status=status,
+            because=str(payload.get("because") or ""),
             evidence=evidence,
-            remediation=_coerce_optional_str(payload.get("remediation")),
-            correlation_chain=correlation_chain,
+            remediate=_coerce_optional_str(payload.get("remediate")),
+            metrics=metrics,
             tags=tags,
-            supporting_data=supporting,
         )
 
 
@@ -150,14 +158,28 @@ class DetectorResult:
     """Aggregated result from a detector run."""
 
     detector_id: str
-    findings: Sequence[Finding] = field(default_factory=tuple)
+    section_key: str
+    status: Badge
+    duration_sec: float
     metrics: Mapping[str, object] = field(default_factory=dict)
+    evidence: Sequence[EvidencePointer] = field(default_factory=tuple)
+    notes: Sequence[str] = field(default_factory=tuple)
+    findings: Sequence[Finding] = field(default_factory=tuple)
+    subitems: Optional[Sequence[Mapping[str, object]]] = None
+    raw_debug: Optional[str] = None
 
     def to_dict(self) -> MutableMapping[str, object]:
         return {
             "detector_id": self.detector_id,
+            "section_key": self.section_key,
+            "status": self.status.value,
+            "duration_sec": self.duration_sec,
             "findings": [finding.to_dict() for finding in self.findings],
             "metrics": dict(self.metrics),
+            "evidence": [pointer.to_dict() for pointer in self.evidence],
+            "notes": list(self.notes),
+            "subitems": list(self.subitems) if self.subitems else None,
+            "raw_debug": self.raw_debug,
         }
 
 
@@ -170,15 +192,6 @@ def _coerce_optional_str(value: object) -> Optional[str]:
     return str(value)
 
 
-def _coerce_optional_int(value: object) -> Optional[int]:
-    if value is None:
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-
 def _coerce_mapping(value: object) -> Mapping[str, object]:
     return value if isinstance(value, Mapping) else {}
 
@@ -186,6 +199,7 @@ def _coerce_mapping(value: object) -> Mapping[str, object]:
 __all__ = [
     "SeverityLevel",
     "MasvsCategory",
+    "Badge",
     "EvidencePointer",
     "Finding",
     "DetectorResult",

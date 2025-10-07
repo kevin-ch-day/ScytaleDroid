@@ -1,4 +1,4 @@
-"""Manifest-oriented detectors."""
+"""Dynamic code loading and reflection detector scaffolding."""
 
 from __future__ import annotations
 
@@ -9,21 +9,21 @@ from .section_utils import placeholder_result
 
 
 @register_detector
-class ManifestBaselineDetector(BaseDetector):
-    """Placeholder manifest hygiene detector (superseded by new components module)."""
+class DynamicLoadingDetector(BaseDetector):
+    """Summarises dynamic loading patterns (placeholder)."""
 
-    detector_id = "manifest_baseline"
-    name = "Manifest baseline detector"
-    default_profiles = ()
-    section_key = "manifest_hygiene"
+    detector_id = "dynamic_loading"
+    name = "Dynamic / Reflection detector"
+    default_profiles = ("quick", "full")
+    section_key = "dynamic_loading"
 
     def run(self, context: DetectorContext) -> DetectorResult:
         return placeholder_result(
             detector_id=self.detector_id,
             section_key=self.section_key,
-            summary="Manifest baseline detector superseded",
+            summary="Dynamic loading analysis placeholder",
             status=Badge.SKIPPED,
         )
 
 
-__all__ = ["ManifestBaselineDetector"]
+__all__ = ["DynamicLoadingDetector"]

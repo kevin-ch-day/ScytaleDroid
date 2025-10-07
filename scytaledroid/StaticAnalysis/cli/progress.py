@@ -113,11 +113,15 @@ class ScanRunProgress:
         finished_at: datetime,
     ) -> None:
         findings = report.findings
-        severity_counter = Counter(finding.severity.value for finding in findings)
+        severity_counter = Counter(finding.severity_gate.value for finding in findings)
         self._record_findings(findings)
 
         categories_touched = sorted(
-            {finding.masvs_category.value for finding in findings if finding.masvs_category}
+            {
+                finding.category_masvs.value
+                for finding in findings
+                if finding.category_masvs
+            }
         )
 
         print("Summary")
@@ -151,7 +155,7 @@ class ScanRunProgress:
         print()
 
     def _record_findings(self, findings: Sequence[Finding]) -> None:
-        self._severity_totals.update(finding.severity.value for finding in findings)
+        self._severity_totals.update(finding.severity_gate.value for finding in findings)
 
     @staticmethod
     def _result_badge(counter: Mapping[str, int]) -> str:
