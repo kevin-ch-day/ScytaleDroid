@@ -227,6 +227,10 @@ def configure_third_party_loggers(
     if verbosity not in {"detail", "debug", "normal"}:
         verbosity = "normal"
 
+    root_logger = logging.getLogger()
+    root_level = logging.DEBUG if verbosity == "debug" else logging.WARNING
+    root_logger.setLevel(root_level)
+
     noise_filter = lambda message: not any(  # noqa: E731 - simple predicate
         snippet in message
         for snippet in (
@@ -240,16 +244,17 @@ def configure_third_party_loggers(
 
     if verbosity != "debug":
         for logger in all_loggers:
-            logger.setLevel(logging.CRITICAL)
+            logger.setLevel(logging.ERROR)
             logger.propagate = False
-            logger.disabled = True
-            logger.addHandler(logging.NullHandler())
+            null_handler = logging.NullHandler()
+            logger.addHandler(null_handler)
         _configure_loguru(verbosity=verbosity, log_path=None, noise_filter=noise_filter)
         return None
 
     base_logger.propagate = False
     for logger in descendants:
         logger.propagate = True
+        logger.setLevel(logging.DEBUG)
 
     target_dir = Path(debug_dir).expanduser().resolve()
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -264,10 +269,8 @@ def configure_third_party_loggers(
     )
     file_handler.addFilter(_AndroguardNoiseFilter())
 
+    base_logger.setLevel(logging.DEBUG)
     base_logger.addHandler(file_handler)
-
-    for logger in all_loggers:
-        logger.setLevel(logging.DEBUG)
 
     _configure_loguru(verbosity=verbosity, log_path=log_path, noise_filter=noise_filter)
 

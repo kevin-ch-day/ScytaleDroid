@@ -4,6 +4,7 @@ from __future__ import annotations
 """High-level orchestration entry point for static analysis runs."""
 
 from hashlib import sha256
+from time import perf_counter
 from pathlib import Path
 from typing import Mapping, Optional, Sequence
 from xml.etree import ElementTree
@@ -15,8 +16,8 @@ from scytaledroid.DeviceAnalysis.harvest.common import compute_hashes, normalise
 from scytaledroid.Utils.LoggingUtils.logging_engine import configure_third_party_loggers
 
 from .context import AnalysisConfig, DetectorContext
-from .detector_runner import PIPELINE_STAGES, PipelineStage, run_detector_pipeline
 from .errors import StaticAnalysisError
+from .findings import Badge, DetectorResult, EvidencePointer, Finding
 from .manifest_utils import (
     build_manifest_flags,
     collect_exported_components,
@@ -31,6 +32,48 @@ from .models import (
     StaticAnalysisReport,
 )
 from ..modules import StringIndex, build_string_index
+
+
+def make_detector_result(
+    *,
+    detector_id: str,
+    section_key: str,
+    status: Badge,
+    started_at: float,
+    findings: Sequence[Finding] | None = None,
+    metrics: Mapping[str, object] | None = None,
+    evidence: Sequence[EvidencePointer] | None = None,
+    notes: Sequence[str] | None = None,
+    subitems: Sequence[Mapping[str, object]] | None = None,
+    raw_debug: Optional[str] = None,
+) -> DetectorResult:
+    """Build a deterministic :class:`DetectorResult` instance."""
+
+    duration = max(0.0, round(perf_counter() - started_at, 1))
+    metrics_payload = dict(metrics or {})
+    evidence_payload = tuple(evidence or ())
+    notes_payload = tuple(note for note in notes or () if note)
+    findings_payload = tuple(findings or ())
+    if subitems:
+        subitems_payload = tuple(dict(item) for item in subitems)
+    else:
+        subitems_payload = None
+
+    return DetectorResult(
+        detector_id=detector_id,
+        section_key=section_key,
+        status=status,
+        duration_sec=duration,
+        metrics=metrics_payload,
+        evidence=evidence_payload,
+        notes=notes_payload,
+        findings=findings_payload,
+        subitems=subitems_payload,
+        raw_debug=raw_debug,
+    )
+
+
+from .detector_runner import PIPELINE_STAGES, PipelineStage, run_detector_pipeline
 
 
 def analyze_apk(
@@ -267,4 +310,5 @@ __all__ = [
     "ComponentSummary",
     "StaticAnalysisError",
     "analyze_apk",
+    "make_detector_result",
 ]

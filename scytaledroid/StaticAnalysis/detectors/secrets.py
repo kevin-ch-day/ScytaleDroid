@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
+from time import perf_counter
 from typing import Dict, Iterable, List, Mapping, MutableMapping, Sequence
 
 from ..core.context import DetectorContext
 from ..core.findings import (
+    Badge,
     DetectorResult,
     EvidencePointer,
     Finding,
     MasvsCategory,
     SeverityLevel,
 )
+from ..core.pipeline import make_detector_result
 from ..modules.string_analysis.extractor import IndexedString
 from ..modules.string_analysis.patterns import DEFAULT_PATTERNS, StringPattern
 from .base import BaseDetector, register_detector
@@ -115,9 +119,6 @@ def _group_matches(matches: Iterable[_SecretMatch]) -> Mapping[str, Sequence[_Se
 
 def _build_metrics(grouped: Mapping[str, Sequence[_SecretMatch]]) -> Dict[str, object]:
     secret_types: Dict[str, Dict[str, int]] = {}
-    evidence: List[Dict[str, str]] = []
-    evidence_budget = 2
-
     for pattern_name, entries in sorted(grouped.items()):
         real = [entry for entry in entries if not entry.is_test_like]
         filtered = len(entries) - len(real)
@@ -125,19 +126,6 @@ def _build_metrics(grouped: Mapping[str, Sequence[_SecretMatch]]) -> Dict[str, o
             "found": len(real),
             "filtered": filtered,
         }
-        if evidence_budget <= 0:
-            continue
-        for entry in real:
-            if evidence_budget <= 0:
-                break
-            evidence.append(
-                {
-                    "type": pattern_name,
-                    "origin": entry.string_entry.origin,
-                    "hash": entry.string_entry.sha256,
-                }
-            )
-            evidence_budget -= 1
 
     matched_strings = sum(len(entries) for entries in grouped.values())
     real_strings = sum(
@@ -147,14 +135,61 @@ def _build_metrics(grouped: Mapping[str, Sequence[_SecretMatch]]) -> Dict[str, o
 
     return {
         "secret_types": secret_types,
-        "evidence": evidence,
         "matched_strings": matched_strings,
         "real_strings": real_strings,
         "filtered_strings": matched_strings - real_strings,
     }
 
 
-def _build_findings(grouped: Mapping[str, Sequence[_SecretMatch]]) -> Sequence[Finding]:
+def _string_pointer(
+    entry: IndexedString,
+    *,
+    apk_path: Path,
+    pattern: StringPattern | None,
+) -> EvidencePointer:
+    base_location = apk_path.resolve().as_posix()
+    extra: Dict[str, object] = {
+        "origin": entry.origin,
+        "origin_type": entry.origin_type,
+    }
+    if pattern is not None:
+        extra["pattern"] = pattern.name
+    return EvidencePointer(
+        location=f"{base_location}!string[{entry.origin}]",
+        hash_short=f"#h:{entry.sha256[:8]}",
+        description=f"{entry.origin} #h:{entry.sha256[:12]}",
+        extra=extra,
+    )
+
+
+def _collect_result_evidence(
+    grouped: Mapping[str, Sequence[_SecretMatch]],
+    *,
+    apk_path: Path,
+    limit: int = 2,
+) -> Sequence[EvidencePointer]:
+    pointers: List[EvidencePointer] = []
+    for _, entries in sorted(grouped.items()):
+        for match in entries:
+            if match.is_test_like:
+                continue
+            pointers.append(
+                _string_pointer(
+                    match.string_entry,
+                    apk_path=apk_path,
+                    pattern=match.pattern,
+                )
+            )
+            if len(pointers) >= limit:
+                return tuple(pointers)
+    return tuple(pointers)
+
+
+def _build_findings(
+    grouped: Mapping[str, Sequence[_SecretMatch]],
+    *,
+    apk_path: Path,
+) -> Sequence[Finding]:
     findings: List[Finding] = []
 
     for pattern_name, entries in sorted(grouped.items()):
@@ -171,30 +206,26 @@ def _build_findings(grouped: Mapping[str, Sequence[_SecretMatch]]) -> Sequence[F
 
         supporting_hashes = [entry.string_entry.sha256 for entry in real_entries[:10]]
         filtered = len(entries) - count
+        pointer = _string_pointer(sample, apk_path=apk_path, pattern=pattern)
+
+        metrics_payload = {
+            "hashes": supporting_hashes,
+            "filtered": filtered,
+            "origin_types": sorted({entry.string_entry.origin_type for entry in real_entries}),
+        }
 
         findings.append(
             Finding(
                 finding_id=f"secret_{pattern_name}",
                 title=f"{pattern.description}",
-                summary=summary,
-                detector_id="secrets_credentials",
-                severity=SeverityLevel.P1,
-                masvs_category=MasvsCategory.PRIVACY,
-                evidence=EvidencePointer(
-                    string_hash=sample.sha256,
-                    description=f"{sample.origin} #h:{sample.sha256[:12]}",
-                    extra={
-                        "origin": sample.origin,
-                        "origin_type": sample.origin_type,
-                    },
-                ),
-                remediation="Rotate the credential and remove hardcoded secrets from the artifact.",
+                severity_gate=SeverityLevel.P1,
+                category_masvs=MasvsCategory.PRIVACY,
+                status=Badge.WARN,
+                because=summary,
+                evidence=(pointer,),
+                remediate="Rotate the credential and remove hardcoded secrets from the artifact.",
+                metrics=metrics_payload,
                 tags=("secret", pattern_name),
-                supporting_data={
-                    "hashes": supporting_hashes,
-                    "filtered": filtered,
-                    "origin_types": sorted({entry.string_entry.origin_type for entry in real_entries}),
-                },
             )
         )
 
@@ -208,20 +239,33 @@ class SecretsDetector(BaseDetector):
     detector_id = "secrets_credentials"
     name = "Secrets & Credentials detector"
     default_profiles = ("quick", "full")
+    section_key = "secrets"
 
     def run(self, context: DetectorContext) -> DetectorResult:
+        started = perf_counter()
         index = context.string_index
         if index is None or index.is_empty():
-            return DetectorResult(
+            metrics = {
+                "matched_strings": 0,
+                "real_strings": 0,
+                "filtered_strings": 0,
+                "status": "ok",
+            }
+            return make_detector_result(
                 detector_id=self.detector_id,
+                section_key=self.section_key,
+                status=Badge.OK,
+                started_at=started,
                 findings=tuple(),
-                metrics={"matched_strings": 0, "real_strings": 0, "filtered_strings": 0},
+                metrics={key: value for key, value in metrics.items() if key != "status"},
+                evidence=tuple(),
             )
 
         matches = _detect_matches(index.strings)
         grouped = _group_matches(matches)
         metrics = _build_metrics(grouped)
-        findings = _build_findings(grouped)
+        findings = _build_findings(grouped, apk_path=context.apk_path)
+        evidence = _collect_result_evidence(grouped, apk_path=context.apk_path)
 
         # Downgrade severity when nothing real remains.
         if not findings and metrics["filtered_strings"]:
@@ -231,10 +275,24 @@ class SecretsDetector(BaseDetector):
         else:
             metrics["status"] = "ok"
 
-        return DetectorResult(
+        status_key = str(metrics.get("status", "ok")).lower()
+        badge = {
+            "warn": Badge.WARN,
+            "ok": Badge.OK,
+            "filtered": Badge.INFO,
+        }.get(status_key, Badge.INFO)
+
+        metrics_payload = dict(metrics)
+        metrics_payload.pop("status", None)
+
+        return make_detector_result(
             detector_id=self.detector_id,
+            section_key=self.section_key,
+            status=badge,
+            started_at=started,
             findings=findings,
-            metrics=metrics,
+            metrics=metrics_payload,
+            evidence=evidence,
         )
 
 
