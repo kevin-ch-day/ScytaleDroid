@@ -21,6 +21,7 @@ from ..core.repository import ArtifactGroup, group_artifacts, list_categories, l
 from ..persistence import ReportStorageError, save_report
 from .options import ScanDisplayOptions, resolve_display_options
 from .progress import ScanProgress
+from .sections import render_sections
 
 
 def static_analysis_menu() -> None:
@@ -192,10 +193,11 @@ def _scan_groups(
     progress = ScanProgress(total_groups=len(groups), options=options)
     progress.announce_options()
 
-    config = AnalysisConfig(profile="full")
+    config = AnalysisConfig(profile=options.profile, verbosity=options.verbosity)
     successes = 0
     failures = 0
     severity_totals: Counter[str] = Counter()
+    printed_logs: set[str] = set()
 
     scan_started = perf_counter()
 
@@ -216,6 +218,7 @@ def _scan_groups(
                 label=label,
             )
 
+            wall_clock_started = progress.now()
             artifact_started = perf_counter()
             report, saved_path, message, fatal = _generate_report(
                 artifact.path,
@@ -223,6 +226,7 @@ def _scan_groups(
                 storage_root=base_dir,
                 config=config,
             )
+            wall_clock_finished = progress.now()
             artifact_duration = perf_counter() - artifact_started
 
             if fatal or report is None:
@@ -239,6 +243,38 @@ def _scan_groups(
                 warning=message,
             )
             severity_totals.update(counter)
+
+            if not options.quiet:
+                progress.print_artifact_header(
+                    report=report,
+                    artifact_label=label,
+                    artifact_index=artifact_index,
+                    artifact_total=len(group.artifacts),
+                    category=group.category,
+                    started_at=wall_clock_started,
+                )
+                section_lines = render_sections(
+                    report.detector_results,
+                    options=options,
+                )
+                for section_line in section_lines:
+                    progress.stream.write(section_line + "\n")
+                progress.stream.write("\n")
+                progress.print_artifact_summary(
+                    report=report,
+                    runtime_seconds=artifact_duration,
+                    finished_at=wall_clock_finished,
+                    severity_counter=counter,
+                )
+
+            if options.verbosity == "debug":
+                metadata_map = getattr(report, "metadata", {})
+                debug_log_path = None
+                if isinstance(metadata_map, Mapping):
+                    debug_log_path = metadata_map.get("androguard_log_path")
+                if debug_log_path and debug_log_path not in printed_logs:
+                    print(f"Raw tool log: {debug_log_path}")
+                    printed_logs.add(debug_log_path)
 
     elapsed = perf_counter() - scan_started
 

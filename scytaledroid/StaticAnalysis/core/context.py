@@ -9,7 +9,7 @@ from xml.etree.ElementTree import Element
 
 if TYPE_CHECKING:  # pragma: no cover - type checking imports only
     from androguard.core.apk import APK
-    from .pipeline import (
+    from .models import (
         ComponentSummary,
         ManifestFlags,
         ManifestSummary,
@@ -23,6 +23,7 @@ class AnalysisConfig:
     """Configuration flags controlling a static-analysis run."""
 
     profile: str = "quick"
+    verbosity: str = "normal"
     persistence_mode: str = "json_only"
     analysis_version: str = "2.0.0-alpha"
     enabled_detectors: Optional[Sequence[str]] = None

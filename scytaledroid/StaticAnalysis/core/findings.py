@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Mapping, MutableMapping, Optional, Sequence
+from typing import List, Mapping, MutableMapping, Optional, Sequence
 
 
 class SeverityLevel(str, Enum):
@@ -181,6 +181,88 @@ class DetectorResult:
             "subitems": list(self.subitems) if self.subitems else None,
             "raw_debug": self.raw_debug,
         }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, object]) -> "DetectorResult":
+        detector_id = _coerce_optional_str(payload.get("detector_id")) or ""
+        section_key = _coerce_optional_str(payload.get("section_key")) or ""
+
+        status_raw = payload.get("status") or Badge.INFO.value
+        try:
+            status = Badge(status_raw)
+        except ValueError:
+            status = Badge.INFO
+
+        try:
+            duration = float(payload.get("duration_sec", 0.0))
+        except (TypeError, ValueError):
+            duration = 0.0
+
+        evidence_payload = payload.get("evidence")
+        if isinstance(evidence_payload, Sequence) and not isinstance(
+            evidence_payload, (str, bytes)
+        ):
+            evidence = tuple(
+                EvidencePointer.from_dict(entry)
+                for entry in evidence_payload
+                if isinstance(entry, Mapping)
+            )
+        else:
+            evidence = tuple()
+
+        notes_payload = payload.get("notes")
+        if isinstance(notes_payload, Sequence) and not isinstance(
+            notes_payload, (str, bytes)
+        ):
+            collected: list[str] = []
+            for note_entry in notes_payload:
+                note_text = _coerce_optional_str(note_entry)
+                if note_text:
+                    collected.append(note_text)
+            notes = tuple(collected)
+        else:
+            note = _coerce_optional_str(notes_payload)
+            notes = (note,) if note else tuple()
+
+        findings_payload = payload.get("findings")
+        if isinstance(findings_payload, Sequence) and not isinstance(
+            findings_payload, (str, bytes)
+        ):
+            findings = tuple(
+                Finding.from_dict(entry)
+                for entry in findings_payload
+                if isinstance(entry, Mapping)
+            )
+        else:
+            findings = tuple()
+
+        metrics_payload = payload.get("metrics")
+        metrics = dict(metrics_payload) if isinstance(metrics_payload, Mapping) else {}
+
+        subitems_payload = payload.get("subitems")
+        if isinstance(subitems_payload, Sequence) and not isinstance(
+            subitems_payload, (str, bytes)
+        ):
+            subitems = tuple(
+                dict(entry) for entry in subitems_payload if isinstance(entry, Mapping)
+            )
+        else:
+            subitems = None
+
+        raw_debug = _coerce_optional_str(payload.get("raw_debug"))
+
+        return cls(
+            detector_id=detector_id,
+            section_key=section_key,
+            status=status,
+            duration_sec=duration,
+            metrics=metrics,
+            evidence=evidence,
+            notes=notes,
+            findings=findings,
+            subitems=subitems,
+            raw_debug=raw_debug,
+        )
 
 
 def _coerce_optional_str(value: object) -> Optional[str]:
