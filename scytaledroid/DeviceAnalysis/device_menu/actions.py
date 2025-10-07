@@ -15,6 +15,7 @@ from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from scytaledroid.DeviceAnalysis import adb_utils, device_manager
 from scytaledroid.DeviceAnalysis.inventory import inventory_sync_menu
+from .device_library import browse_saved_apk_library
 from .formatters import (
     format_android_release,
     format_build_tags,
@@ -66,6 +67,8 @@ def handle_choice(
         _run_apk_pull(active_device)
     elif choice == "10":
         _disconnect_device()
+    elif choice == "13":
+        browse_saved_apk_library()
     elif choice in {"8", "9", "11", "12"}:
         _forward_to_helper(choice, active_device)
     else:
@@ -163,6 +166,11 @@ def build_main_menu_options(
             "Manage harvest watchlists",
             description="Create and edit watchlists for pull scopes",
         ),
+        menu_utils.MenuOption(
+            "13",
+            "Browse saved APKs",
+            description="Review harvested artifacts stored on disk",
+        ),
     ]
 
     return options
@@ -232,7 +240,7 @@ def _connect_to_device(
         label = format_device_line(summary, include_release=True)
         description = format_battery(summary)
         options.append(menu_utils.MenuOption(str(idx), label, description=description))
-    menu_utils.print_menu(options, boxed=True)
+    menu_utils.print_menu(options)
 
     choice = prompt_utils.get_choice(list(numbered_devices.keys()) + ["0"], default="1")
     if choice == "0":

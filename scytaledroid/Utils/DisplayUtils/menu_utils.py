@@ -72,27 +72,20 @@ def _normalise_options(
     return normalised
 
 
-def _stylise_box(lines: Sequence[str]) -> str:
-    styled: list[str] = []
-    for idx, line in enumerate(lines):
-        if idx in {0, len(lines) - 1}:
-            styled.append(colors.apply(line, colors.style("divider")))
-        else:
-            styled.append(line)
-    return "\n".join(styled)
-
-
 def print_banner(app_name: str, app_version: str, app_release: str, app_description: str) -> None:
     """Print the global banner shown at startup."""
 
     palette = colors.get_palette()
-    heading = colors.apply(f"Welcome to {app_name}", palette.header, bold=True)
-    tagline = colors.apply(app_description, palette.muted)
+    title = colors.apply(app_name, palette.header, bold=True)
+    description = colors.apply(app_description, palette.muted)
     version = colors.apply(f"Version {app_version} ({app_release})", palette.accent, bold=True)
 
-    lines = [heading, tagline, version]
-    boxed = text_blocks.boxed(lines, width=72).splitlines()
-    print(_stylise_box(boxed))
+    divider = colors.apply("".ljust(max(len(app_name), 32), "═"), palette.divider)
+
+    print(title)
+    print(divider)
+    print(description)
+    print(version)
     print()
 
 
@@ -143,6 +136,7 @@ def print_menu(
     show_descriptions: bool = True,
     boxed: bool = False,
     width: int = 72,
+    padding: bool = False,
 ) -> None:
     """Render a numbered menu with coloured keys and optional default."""
 
@@ -151,9 +145,9 @@ def print_menu(
     primary_items = [item for item in items if item.key != "0"]
 
     key_width = max((len(item.key) for item in primary_items), default=1) + 1
-    indent = " " * (key_width + 2)
+    indent = " " * (key_width + 1)
 
-    rendered_lines: list[str] = []
+    rendered_blocks: list[list[str]] = []
 
     for item in primary_items:
         if item.disabled:
@@ -166,6 +160,7 @@ def print_menu(
             key_style = palette.option_key
             label_style = palette.option_text
 
+        block: list[str] = []
         key_token = colors.apply(f"{item.key})", key_style)
         label_token = colors.apply(item.label, label_style)
         badge_token = ""
@@ -174,14 +169,16 @@ def print_menu(
         disabled_note = (
             f" {colors.apply('(disabled)', palette.muted)}" if item.disabled else ""
         )
-        rendered_lines.append(f"{key_token} {label_token}{badge_token}{disabled_note}")
+        block.append(f"{key_token} {label_token}{badge_token}{disabled_note}")
 
         if show_descriptions and item.description:
             description = colors.apply(item.description, palette.muted)
-            rendered_lines.append(f"{indent}{description}")
+            block.append(f"{indent}{description}")
         if item.hint:
             hint_text = colors.apply(item.hint, palette.hint)
-            rendered_lines.append(f"{indent}{hint_text}")
+            block.append(f"{indent}{hint_text}")
+
+        rendered_blocks.append(block)
 
     exit_text = exit_label or ("Exit" if is_main else "Back")
     exit_item = MenuOption("0", exit_text)
@@ -190,13 +187,28 @@ def print_menu(
     exit_label_style = palette.accent if exit_is_default else palette.option_text
     exit_key = colors.apply("0)", exit_key_style)
     exit_label_coloured = colors.apply(exit_item.label, exit_label_style)
-    rendered_lines.append(f"{exit_key} {exit_label_coloured}")
+    rendered_blocks.append([f"{exit_key} {exit_label_coloured}"])
 
     if boxed:
-        print(text_blocks.boxed(rendered_lines, width=width))
-    else:
-        for line in rendered_lines:
+        flat_lines = []
+        for block in rendered_blocks:
+            flat_lines.extend(block)
+        if padding:
+            print()
+        print(text_blocks.boxed(flat_lines, width=width))
+        if padding:
+            print()
+        return
+
+    if padding:
+        print()
+
+    for block in rendered_blocks:
+        for line in block:
             print(line)
+
+    if padding:
+        print()
 def print_table(headers: Iterable[str], rows: Iterable[Iterable[object]]) -> None:
     """Convenience wrapper around table rendering helper."""
 

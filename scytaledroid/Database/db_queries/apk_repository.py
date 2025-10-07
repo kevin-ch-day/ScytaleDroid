@@ -95,13 +95,21 @@ UPSERT_ARTIFACT_PATH = """
 INSERT INTO harvest_artifact_paths (
     apk_id,
     storage_root_id,
-    source_path,
     local_rel_path
-) VALUES (%s, %s, %s, %s)
+) VALUES (%s, %s, %s)
 ON DUPLICATE KEY UPDATE
     storage_root_id = VALUES(storage_root_id),
-    source_path = VALUES(source_path),
     local_rel_path = VALUES(local_rel_path),
+    updated_at = CURRENT_TIMESTAMP
+"""
+
+UPSERT_SOURCE_PATH = """
+INSERT INTO harvest_source_paths (
+    apk_id,
+    source_path
+) VALUES (%s, %s)
+ON DUPLICATE KEY UPDATE
+    source_path = VALUES(source_path),
     updated_at = CURRENT_TIMESTAMP
 """
 

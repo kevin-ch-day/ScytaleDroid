@@ -26,15 +26,7 @@ _LAST_SCOPE: Optional[ScopeSelection] = None
 
 
 def _append_non_root_note(label: str) -> str:
-    if "→" in label:
-        head, tail = label.split("→", 1)
-        head = head.rstrip()
-        if "(non-root" not in head:
-            head = f"{head} (non-root skip) "
-        return f"{head}→{tail}"
-    if "(non-root" in label:
-        return label
-    return f"{label} (non-root skip)"
+    return label
 
 
 def build_inventory_rows(packages: Sequence[Dict[str, object]]) -> List[InventoryRow]:
@@ -117,42 +109,51 @@ def select_package_scope(
         menu_items.append(
             MenuOption(
                 "1",
-                "Play Store & user-installed apps",
-                description=_format_menu_count(context["default_counts"]),
-                badge=str(context["default_counts"].get("packages", 0)),
+                _scope_option_label(
+                    "Play Store & user-installed apps",
+                    packages=context["default_counts"].get("packages"),
+                    files=context["default_counts"].get("files"),
+                ),
             )
         )
         option_handlers["1"] = lambda: _scope_default(rows, allow)
 
+        social_rows = category_groups.get("Social")
         menu_items.append(
             MenuOption(
                 "2",
-                "Social apps only",
-                description=_format_count_summary(category_groups.get("Social")),
+                _scope_option_label(
+                    "Social apps only",
+                    packages=len(social_rows) if social_rows else 0,
+                ),
             )
         )
         option_handlers["2"] = lambda: _scope_category_subset(
             category_groups, allow, {"Social"}
         )
 
+        messaging_rows = category_groups.get("Messaging")
         menu_items.append(
             MenuOption(
                 "3",
-                "Messaging apps only",
-                description=_format_count_summary(category_groups.get("Messaging")),
+                _scope_option_label(
+                    "Messaging apps only",
+                    packages=len(messaging_rows) if messaging_rows else 0,
+                ),
             )
         )
         option_handlers["3"] = lambda: _scope_category_subset(
             category_groups, allow, {"Messaging"}
         )
 
+        combined_rows = (social_rows or []) + (messaging_rows or [])
         menu_items.append(
             MenuOption(
                 "4",
-                "Social + Messaging",
-                description=_format_count_summary(
-                    (category_groups.get("Social") or [])
-                    + (category_groups.get("Messaging") or [])
+                _scope_option_label(
+                    "Social + Messaging",
+                    packages=len(combined_rows) if combined_rows else 0,
+                    note="non-root filtered" if not is_rooted else None,
                 ),
             )
         )
@@ -166,8 +167,11 @@ def select_package_scope(
         menu_items.append(
             MenuOption(
                 "5",
-                "Google user apps",
-                description=_format_menu_count(context["google_user"]),
+                _scope_option_label(
+                    "Google user apps",
+                    packages=context["google_user"].get("packages"),
+                    files=context["google_user"].get("files"),
+                ),
             )
         )
         option_handlers["5"] = lambda: _scope_google_user_apps(rows, allow)
@@ -176,9 +180,12 @@ def select_package_scope(
             menu_items.append(
                 MenuOption(
                     "6",
-                    "Profile targets…",
-                    description=_format_menu_count(context["profile_summary"]),
-                    hint="Select any profile mix",
+                    _scope_option_label(
+                        "Profile targets…",
+                        packages=context["profile_summary"].get("packages"),
+                        files=context["profile_summary"].get("files"),
+                        note="Select any profile mix",
+                    ),
                 )
             )
             option_handlers["6"] = lambda: _scope_profiles(rows, profile_counts, allow)
@@ -189,9 +196,12 @@ def select_package_scope(
                 menu_items.append(
                     MenuOption(
                         key,
-                        f"Watchlist · {entry.watchlist.name}",
-                        description=_format_menu_count(entry.counts),
-                        hint=_format_watchlist_hint(entry),
+                        _scope_option_label(
+                            f"Watchlist · {entry.watchlist.name}",
+                            packages=entry.counts.get("packages"),
+                            files=entry.counts.get("files"),
+                            note=_format_watchlist_hint(entry),
+                        ),
                     )
                 )
                 option_handlers[key] = lambda e=entry: _scope_watchlist(e)
@@ -200,24 +210,35 @@ def select_package_scope(
             [
                 MenuOption(
                     "7",
-                    "Google exceptions",
-                    description=_format_menu_count(context["google_exceptions"]),
+                    _scope_option_label(
+                        "Google exceptions",
+                        packages=context["google_exceptions"].get("packages"),
+                        files=context["google_exceptions"].get("files"),
+                    ),
                 ),
                 MenuOption(
                     "8",
-                    "Families (Android/Google/Motorola system)",
-                    description=_format_menu_count(context["families"]),
-                    hint="Requires root to capture protected partitions.",
+                    _scope_option_label(
+                        "Families (Android/Google/Motorola system)",
+                        packages=context["families"].get("packages"),
+                        files=context["families"].get("files"),
+                        note="Requires root",
+                    ),
                 ),
                 MenuOption(
                     "9",
-                    "Custom patterns…",
-                    description="Comma-separated packages; * supports prefix wildcards.",
+                    _scope_option_label(
+                        "Custom patterns…",
+                        note="Comma-separated; * supports prefix wildcards",
+                    ),
                 ),
                 MenuOption(
                     "E",
-                    "Everything (include system/vendor)",
-                    description=_format_menu_count(context["everything"]),
+                    _scope_option_label(
+                        "Everything (include system/vendor)",
+                        packages=context["everything"].get("packages"),
+                        files=context["everything"].get("files"),
+                    ),
                 ),
             ]
         )
@@ -235,20 +256,13 @@ def select_package_scope(
             }
         )
 
-        if not is_rooted:
-            menu_items = [
-                MenuOption(
-                    item.key,
-                    _append_non_root_note(item.label) if item.key == "4" else item.label,
-                    item.description,
-                    item.badge,
-                    item.disabled,
-                    item.hint,
-                )
-                for item in menu_items
-            ]
-
-        menu_utils.print_menu(menu_items, is_main=False, default="1", exit_label="Cancel")
+        menu_utils.print_menu(
+            menu_items,
+            is_main=False,
+            default="1",
+            exit_label="Cancel",
+            show_descriptions=False,
+        )
         choice = prompt_utils.get_choice(
             [item.key for item in menu_items] + ["0"],
             default="1",
@@ -699,6 +713,26 @@ def _format_count_summary(rows: Optional[Sequence[InventoryRow]]) -> str:
     if not rows:
         return "0 pkg(s)"
     return f"{len(rows)} pkg(s)"
+
+
+def _scope_option_label(
+    title: str,
+    *,
+    packages: Optional[int] = None,
+    files: Optional[int] = None,
+    note: Optional[str] = None,
+) -> str:
+    parts: List[str] = [title]
+    metrics: List[str] = []
+    if packages is not None:
+        metrics.append(f"{packages} pkg(s)")
+    if files is not None:
+        metrics.append(f"~{files} file(s)")
+    if metrics:
+        parts.append("· " + " · ".join(metrics))
+    if note:
+        parts.append(f"— {note}")
+    return " ".join(parts)
 
 
 def _in_default_scope(row: InventoryRow, allow: Set[str]) -> bool:

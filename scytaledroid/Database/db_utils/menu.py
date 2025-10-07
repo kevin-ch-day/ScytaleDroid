@@ -12,6 +12,7 @@ _CORE_TABLES: List[str] = [
     "android_apk_repository",
     "harvest_storage_roots",
     "harvest_artifact_paths",
+    "harvest_source_paths",
 ]
 
 _EXPECTED_COLUMNS = {
@@ -46,8 +47,13 @@ _EXPECTED_COLUMNS = {
     "harvest_artifact_paths": {
         "apk_id",
         "storage_root_id",
-        "source_path",
         "local_rel_path",
+        "created_at",
+        "updated_at",
+    },
+    "harvest_source_paths": {
+        "apk_id",
+        "source_path",
         "created_at",
         "updated_at",
     },
@@ -58,6 +64,7 @@ def database_menu() -> None:
     """Render the database utilities menu."""
 
     while True:
+        print()
         menu_utils.print_header("Database Utilities")
         options = {
             "1": "Check database connection",

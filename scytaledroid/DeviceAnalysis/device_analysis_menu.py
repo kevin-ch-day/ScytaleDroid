@@ -41,9 +41,10 @@ def device_menu() -> None:
             last_refresh_ts,
             serial_map,
         )
+        print()
         menu_utils.print_header("Device Analysis")
         options = build_main_menu_options(active_details)
-        menu_utils.print_menu(options, is_main=False, default="1", exit_label="Back", boxed=True)
+        menu_utils.print_menu(options, is_main=False, default="1", exit_label="Back")
         valid_keys = [option.key for option in options]
         choice = prompt_utils.get_choice(valid_keys + ["0"], default="1")
 

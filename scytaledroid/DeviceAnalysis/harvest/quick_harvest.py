@@ -12,6 +12,7 @@ from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from . import rules
+from . import common
 from .common import (
     DedupeTracker,
     adb_pull,
@@ -25,6 +26,19 @@ from .common import (
     write_metadata_sidecar,
 )
 from .models import ArtifactError, ArtifactPlan, ArtifactResult, InventoryRow, PackagePlan, PullResult
+
+
+def _print_package_header(plan: PackagePlan, package_index: int, package_total: int, artifact_total: int) -> None:
+    label = plan.inventory.display_name()
+    detail = f"{artifact_total} artifact(s)"
+    if package_index > 1:
+        print()
+    print(
+        status_messages.status(
+            f"→ Package {package_index}/{package_total}: {label} ({detail})",
+            level="info",
+        )
+    )
 
 
 def quick_harvest(
@@ -51,7 +65,8 @@ def quick_harvest(
         storage_root_id = None
 
     results: List[PullResult] = []
-    for plan in packages:
+    total_packages = len(packages)
+    for package_index, plan in enumerate(packages, start=1):
         result = PullResult(plan=plan)
         skip_reason = plan.skip_reason
         if skip_reason and skip_reason != "no_paths":
@@ -119,7 +134,9 @@ def quick_harvest(
                 results.append(result)
                 continue
 
-        for artifact in artifact_plans:
+        artifact_total = len(artifact_plans)
+        _print_package_header(plan, package_index, total_packages, artifact_total)
+        for artifact_index, artifact in enumerate(artifact_plans, start=1):
             artifact_payload = {
                 "source_path": artifact.source_path,
                 "is_split_member": artifact.is_split_member,
@@ -135,6 +152,14 @@ def quick_harvest(
                 verbose=verbose,
             )
             if isinstance(pull_outcome, ArtifactError):
+                common.print_artifact_status(
+                    inventory.display_name(),
+                    artifact.file_name,
+                    index=artifact_index,
+                    total=artifact_total,
+                    suffix=pull_outcome.reason,
+                    level="error",
+                )
                 result.errors.append(pull_outcome)
                 continue
 
@@ -147,6 +172,14 @@ def quick_harvest(
             keep, occurrence = tracker.register(hashes["sha256"])
             if not keep:
                 cleanup_duplicate(dest_path)
+                common.print_artifact_status(
+                    inventory.display_name(),
+                    artifact.file_name,
+                    index=artifact_index,
+                    total=artifact_total,
+                    suffix="skipped duplicate (sha256 match)",
+                    level="warn",
+                )
                 result.skipped.append("dedupe_sha256")
                 continue
 
@@ -166,7 +199,6 @@ def quick_harvest(
                     sha1=hashes["sha1"],
                     sha256=hashes["sha256"],
                     device_serial=resolved_serial,
-                    source_path=artifact.source_path,
                     harvested_at=datetime.utcnow(),
                     is_split_member=artifact.is_split_member,
                     split_group_id=group_id,
@@ -186,12 +218,22 @@ def quick_harvest(
                         repo.upsert_artifact_path(
                             apk_id,
                             storage_root_id=storage_root_id,
-                            source_path=artifact.source_path,
                             local_rel_path=local_rel_path,
                         )
                     except Exception as exc:  # pragma: no cover - database failures
                         log.warning(
                             f"Failed to persist artifact path for apk_id={apk_id}: {exc}",
+                            category="database",
+                        )
+                        result.errors.append(ArtifactError(source_path=artifact.source_path, reason=str(exc)))
+                        continue
+
+                if apk_id and artifact.source_path:
+                    try:
+                        repo.upsert_source_path(apk_id, artifact.source_path)
+                    except Exception as exc:  # pragma: no cover - database failures
+                        log.warning(
+                            f"Failed to persist source path for apk_id={apk_id}: {exc}",
                             category="database",
                         )
                         result.errors.append(ArtifactError(source_path=artifact.source_path, reason=str(exc)))
@@ -220,6 +262,15 @@ def quick_harvest(
                     category="filesystem",
                 )
 
+            common.print_artifact_status(
+                inventory.display_name(),
+                artifact.file_name,
+                index=artifact_index,
+                total=artifact_total,
+                suffix=f"saved ({common.format_file_size(dest_path.stat().st_size)})",
+                level="success",
+            )
+
             result.ok.append(
                 ArtifactResult(
                     file_name=dest_path.name,
@@ -233,6 +284,16 @@ def quick_harvest(
         results.append(result)
 
     return results
+
+
+def _print_package_header(plan: PackagePlan, package_index: int, package_total: int) -> None:
+    label = plan.inventory.display_name()
+    print(
+        status_messages.status(
+            f"→ Package {package_index}/{package_total}: {label}",
+            level="info",
+        )
+    )
 
 
 def _resolve_package_paths(

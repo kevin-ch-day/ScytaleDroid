@@ -5,7 +5,7 @@ from __future__ import annotations
 import traceback
 from typing import Iterable, Optional
 
-from . import colors, text_blocks
+from . import colors
 
 
 _TONES = ("info", "warning", "success", "error")
@@ -42,28 +42,6 @@ def _resolve_styles(tone: str) -> tuple:
     return mapping.get(tone, mapping["error"])
 
 
-def _style_box(lines: list[str], kinds: list[str], tone: str) -> str:
-    border_style, title_style, message_style, hint_style = _resolve_styles(tone)
-    styled: list[str] = []
-    last_index = len(lines) - 1
-    for idx, line in enumerate(lines):
-        if idx == 0 or idx == last_index:
-            styled.append(colors.apply(line, border_style))
-            continue
-        prefix = colors.apply(line[:2], border_style)
-        suffix = colors.apply(line[-2:], border_style)
-        inner = line[2:-2]
-        kind = kinds[idx - 1]
-        if kind == "title":
-            content = colors.apply(inner, title_style, bold=True)
-        elif kind == "hint":
-            content = colors.apply(inner, hint_style)
-        else:
-            content = colors.apply(inner, message_style)
-        styled.append(f"{prefix}{content}{suffix}")
-    return "\n".join(styled)
-
-
 def format_panel(
     title: str,
     message: str,
@@ -76,29 +54,32 @@ def format_panel(
     """Return a coloured panel containing *message* and optional extras."""
 
     tone = tone if tone in _TONES else "info"
+    border_style, title_style, message_style, hint_style = _resolve_styles(tone)
 
-    content_lines: list[str] = []
-    kinds: list[str] = []
+    content: list[str] = []
 
     stripped_title = title.strip()
     if stripped_title:
-        content_lines.append(stripped_title.upper())
-        kinds.append("title")
+        content.append(colors.apply(stripped_title.upper(), title_style, bold=True))
 
-    content_lines.append(message.strip())
-    kinds.append("message")
+    content.append(colors.apply(message.strip(), message_style))
 
     for line in details or ():
-        content_lines.append(line.rstrip())
-        kinds.append("detail")
+        detail = line.rstrip()
+        if not detail:
+            continue
+        content.append(colors.apply(f"  • {detail}", message_style))
 
     if hint:
-        content_lines.append(f"Hint: {hint.strip()}")
-        kinds.append("hint")
+        content.append(colors.apply(f"Hint: {hint.strip()}", hint_style))
 
-    boxed = text_blocks.boxed(content_lines, width=width)
-    box_lines = boxed.splitlines()
-    return _style_box(box_lines, kinds, tone)
+    divider_length = max(32, min(width, 80))
+    divider = colors.apply("─" * divider_length, border_style)
+
+    block = [divider]
+    block.extend(content)
+    block.append(divider)
+    return "\n".join(block)
 
 
 def print_panel(
@@ -112,7 +93,10 @@ def print_panel(
 ) -> None:
     """Print a formatted panel."""
 
-    print(format_panel(title, message, details=details, hint=hint, width=width, tone=tone))
+    panel = format_panel(title, message, details=details, hint=hint, width=width, tone=tone)
+    print()
+    print(panel)
+    print()
 
 
 def print_exception(

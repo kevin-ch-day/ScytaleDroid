@@ -89,6 +89,7 @@ def print_banner() -> None:
 def main_menu() -> None:
     """Render the main menu loop using the shared menu framework."""
     while True:
+        print()
         menu_utils.print_header("Main Menu")
         options = [
             menu_utils.MenuOption("1", "Connect to Android Device", "Manage connected devices, inventory, and pulls"),
@@ -173,4 +174,8 @@ def handle_about() -> None:
 
 if __name__ == "__main__":
     print_banner()
-    main_menu()
+    try:
+        main_menu()
+    except KeyboardInterrupt:
+        print("\nInterrupted by user. Exiting...")
+        log.info("Application interrupted by user.", category="application")

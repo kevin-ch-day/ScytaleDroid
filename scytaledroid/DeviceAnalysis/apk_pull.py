@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Dict, Optional, Sequence, Tuple
 
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis import adb_utils, harvest, inventory
 from scytaledroid.DeviceAnalysis.device_menu.inventory_guard import (
-    INVENTORY_STALE_SECONDS,
     get_last_guard_decision,
     get_latest_inventory_metadata,
 )
@@ -160,6 +159,8 @@ def pull_apks(serial: Optional[str]) -> None:
             include_system_partitions=include_system_partitions,
         )
 
+        scheduled_packages = sum(1 for pkg in plan.packages if not pkg.skip_reason)
+        blocked_packages = sum(1 for pkg in plan.packages if pkg.skip_reason)
         scheduled_files = sum(len(pkg.artifacts) for pkg in plan.packages if not pkg.skip_reason)
         if scheduled_files == 0:
             print(
@@ -170,9 +171,11 @@ def pull_apks(serial: Optional[str]) -> None:
             )
             continue
 
+        _print_plan_ready_summary(selection, scheduled_packages, scheduled_files, blocked_packages)
+
         refresh_requested = False
         while True:
-            action = _prompt_plan_action()
+            action = _prompt_plan_action(selection, plan)
             if action == "dry-run":
                 harvest.preview_plan(plan)
                 prompt_utils.press_enter_to_continue()
@@ -221,6 +224,7 @@ def pull_apks(serial: Optional[str]) -> None:
                     if latest_metadata:
                         guard_metadata = latest_metadata
                     refresh_requested = True
+                    break
                 break
             if action == "refresh_full":
                 progress = _make_progress_callback("Refreshing full inventory")
@@ -266,13 +270,13 @@ def pull_apks(serial: Optional[str]) -> None:
                     guard_metadata = latest_metadata
                 refresh_requested = True
                 break
-            if action == "quick":
-                harvest_mode = _prompt_harvest_mode(
-                    prefer_quick=_prefer_quick_mode(guard_metadata)
-                )
-                if not harvest_mode:
-                    continue
-                pull_mode, verbose = harvest_mode
+            if action in {"pull_quick", "pull_quick_verbose", "pull_snapshot", "pull_snapshot_verbose"}:
+                if action in {"pull_quick", "pull_quick_verbose"}:
+                    pull_mode = "quick"
+                    verbose = action == "pull_quick_verbose"
+                else:
+                    pull_mode = "inventory"
+                    verbose = action == "pull_snapshot_verbose"
                 active_plan = plan
                 active_selection = selection
                 break
@@ -435,57 +439,108 @@ def _run_scope_refresh(serial: str, packages: Sequence[object]) -> bool:
     return True
 
 
-def _prompt_plan_action() -> str:
+def _print_plan_ready_summary(
+    selection: harvest.ScopeSelection,
+    packages: int,
+    files: int,
+    blocked_packages: int,
+) -> None:
+    print()
+    print(
+        status_messages.status(
+            f"Ready to pull {packages} package(s) (~{files} artifact(s)) for scope '{selection.label}'",
+            level="info",
+        )
+    )
+    if blocked_packages:
+        print(
+            status_messages.status(
+                f"Filtered during planning: {blocked_packages} package(s)",
+                level="warn",
+            )
+        )
+
+
+def _prompt_plan_action(
+    selection: harvest.ScopeSelection, plan: harvest.HarvestPlan
+) -> str:
     print()
     print(text_blocks.headline("Plan actions", width=70))
-    options = {
-        "1": "Quick harvest (no sync)",
-        "2": "Use last snapshot",
-        "3": "Refresh scope only (fast)",
-        "4": "Refresh full inventory (slow)",
-        "5": "Dry-run preview",
-        "6": "Change scope",
-        "0": "Cancel",
-    }
-    menu_utils.print_menu(options, is_main=False, default="1", exit_label="Cancel")
-    choice = prompt_utils.get_choice(list(options.keys()), default="1")
+    menu_items = [
+        menu_utils.MenuOption(
+            "1",
+            "Quick pull",
+            "Resolve paths via pm (fast, recommended)",
+        ),
+        menu_utils.MenuOption(
+            "2",
+            "Quick pull + adb logs",
+            "Same as quick pull but streams adb output",
+        ),
+        menu_utils.MenuOption(
+            "3",
+            "Snapshot pull",
+            "Use inventory paths (slower, honours snapshot order)",
+        ),
+        menu_utils.MenuOption(
+            "4",
+            "Snapshot pull + adb logs",
+            "Snapshot pull with live adb output",
+        ),
+        menu_utils.MenuOption(
+            "5",
+            "Refresh selected scope",
+            "Re-scan the current scope before pulling",
+        ),
+        menu_utils.MenuOption(
+            "6",
+            "Refresh full inventory",
+            "Rebuild device inventory (slow)",
+        ),
+        menu_utils.MenuOption(
+            "7",
+            "Preview without pulling",
+            "Dry-run to list the artifacts only",
+        ),
+        menu_utils.MenuOption(
+            "8",
+            "Use cached snapshot",
+            "Skip new pulls and exit",
+        ),
+        menu_utils.MenuOption(
+            "9",
+            "Change scope",
+            "Return to the scope selector",
+        ),
+    ]
+    menu_utils.print_menu(
+        menu_items,
+        is_main=False,
+        default="1",
+        exit_label="Cancel",
+        padding=True,
+    )
+    valid_keys = [item.key for item in menu_items]
+    choice = prompt_utils.get_choice(valid_keys + ["0"], default="1")
     if choice == "1":
-        return "quick"
+        return "pull_quick"
     if choice == "2":
-        return "use_snapshot"
+        return "pull_quick_verbose"
     if choice == "3":
-        return "refresh_subset"
+        return "pull_snapshot"
     if choice == "4":
-        return "refresh_full"
+        return "pull_snapshot_verbose"
     if choice == "5":
-        return "dry-run"
+        return "refresh_subset"
     if choice == "6":
+        return "refresh_full"
+    if choice == "7":
+        return "dry-run"
+    if choice == "8":
+        return "use_snapshot"
+    if choice == "9":
         return "rescope"
     return "cancel"
-
-
-def _prompt_harvest_mode(*, prefer_quick: bool) -> Optional[Tuple[str, bool]]:
-    print()
-    print(text_blocks.headline("Harvest execution", width=70))
-    options = {
-        "1": "Quick pull (quiet)",
-        "2": "Quick pull (verbose adb, stream output)",
-        "3": "Legacy pull (quiet)",
-        "4": "Legacy pull (verbose adb, stream output)",
-        "0": "Back",
-    }
-    default_choice = "1" if prefer_quick else "3"
-    menu_utils.print_menu(options, is_main=False, default=default_choice, exit_label="Back")
-    choice = prompt_utils.get_choice(list(options.keys()), default=default_choice)
-    if choice == "1":
-        return ("quick", False)
-    if choice == "2":
-        return ("quick", True)
-    if choice == "3":
-        return ("legacy", False)
-    if choice == "4":
-        return ("legacy", True)
-    return None
 
 
 def _device_is_rooted(serial: str) -> bool:
@@ -497,37 +552,6 @@ def _device_is_rooted(serial: str) -> bool:
     if completed.returncode != 0:
         return False
     return completed.stdout.strip() == "0"
-
-
-def _prefer_quick_mode(metadata: Optional[Dict[str, object]]) -> bool:
-    decision = get_last_guard_decision()
-    policy = decision.get("policy") if isinstance(decision, dict) else None
-    if policy == "quick":
-        return True
-
-    stale_level = decision.get("stale_level") if isinstance(decision, dict) else None
-    if stale_level == "soft":
-        return True
-
-    if not metadata:
-        return False
-
-    metadata_stale_level = metadata.get("stale_level")
-    if isinstance(metadata_stale_level, str) and metadata_stale_level == "soft":
-        return True
-
-    timestamp = metadata.get("timestamp")
-    if not isinstance(timestamp, datetime):
-        return False
-
-    now = datetime.now(timezone.utc)
-    age_seconds = (now - timestamp).total_seconds()
-    if age_seconds < 0:
-        age_seconds = 0
-
-    stale = age_seconds > INVENTORY_STALE_SECONDS
-    state_changed = bool(metadata.get("state_changed"))
-    return stale and not state_changed
 
 
 def _maybe_save_watchlist(selection: harvest.ScopeSelection) -> None:

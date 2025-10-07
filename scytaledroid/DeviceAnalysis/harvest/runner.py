@@ -10,6 +10,7 @@ from scytaledroid.Database.db_func import apk_repository as repo
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
+from . import common
 from .common import (
     DedupeTracker,
     HarvestOptions,
@@ -63,6 +64,8 @@ def execute_harvest(
                 options=options,
                 tracker=tracker,
                 storage_root_id=storage_root_id if storage_root_id is not None else 0,
+                package_index=index,
+                package_total=total,
             )
         )
     return results
@@ -79,6 +82,8 @@ def _execute_package_plan(
     options: HarvestOptions,
     tracker: DedupeTracker,
     storage_root_id: Optional[int],
+    package_index: int,
+    package_total: int,
 ) -> PullResult:
     result = PullResult(plan=plan)
 
@@ -111,7 +116,11 @@ def _execute_package_plan(
             result.errors.append(ArtifactError(source_path="split-group", reason=str(exc)))
             return result
 
-    for artifact in plan.artifacts:
+    _print_package_header(plan, package_index, package_total)
+
+    artifact_total = len(plan.artifacts)
+    package_stats = {"saved": 0, "skipped": 0, "errors": 0, "bytes": 0}
+    for artifact_index, artifact in enumerate(plan.artifacts, start=1):
         artifact_result, skip_reason = _pull_and_record(
             serial=serial,
             adb_path=adb_path,
@@ -125,14 +134,25 @@ def _execute_package_plan(
             tracker=tracker,
             session_stamp=session_stamp,
             storage_root_id=storage_root_id,
+            artifact_index=artifact_index,
+            artifact_total=artifact_total,
+            verbose_output=verbose,
         )
         if skip_reason:
             result.skipped.append(skip_reason)
+            package_stats["skipped"] += 1
         elif isinstance(artifact_result, ArtifactResult):
             result.ok.append(artifact_result)
+            package_stats["saved"] += 1
+            try:
+                package_stats["bytes"] += artifact_result.dest_path.stat().st_size
+            except FileNotFoundError:
+                pass
         elif isinstance(artifact_result, ArtifactError):
             result.errors.append(artifact_result)
+            package_stats["errors"] += 1
 
+    _print_package_footer(plan, package_stats)
     return result
 
 
@@ -150,6 +170,9 @@ def _pull_and_record(
     tracker: DedupeTracker,
     session_stamp: str,
     storage_root_id: Optional[int],
+    artifact_index: int,
+    artifact_total: int,
+    verbose_output: bool,
 ) -> Tuple[ArtifactResult | ArtifactError | None, Optional[str]]:
     dest_path = package_dir / artifact.file_name
     pull_result = adb_pull(
@@ -158,9 +181,17 @@ def _pull_and_record(
         source_path=artifact.source_path,
         dest_path=dest_path,
         package_name=plan.inventory.package_name,
-        verbose=verbose,
+        verbose=verbose_output,
     )
     if isinstance(pull_result, ArtifactError):
+        common.print_artifact_status(
+            plan.inventory.display_name(),
+            artifact.file_name,
+            index=artifact_index,
+            total=artifact_total,
+            suffix=pull_result.reason,
+            level="error",
+        )
         return pull_result, None
 
     try:
@@ -171,6 +202,14 @@ def _pull_and_record(
     keep, occurrence = tracker.register(hashes["sha256"])
     if not keep:
         cleanup_duplicate(dest_path)
+        common.print_artifact_status(
+            plan.inventory.display_name(),
+            artifact.file_name,
+            index=artifact_index,
+            total=artifact_total,
+            suffix="skipped duplicate (sha256 match)",
+            level="warn",
+        )
         return None, "dedupe_sha256"
 
     local_rel_path = normalise_local_path(dest_path)
@@ -190,7 +229,6 @@ def _pull_and_record(
             sha1=hashes["sha1"],
             sha256=hashes["sha256"],
             device_serial=serial,
-            source_path=artifact.source_path,
             harvested_at=datetime.utcnow(),
             is_split_member=artifact.is_split_member,
             split_group_id=group_id,
@@ -211,12 +249,20 @@ def _pull_and_record(
                 repo.upsert_artifact_path(
                     apk_id,
                     storage_root_id=storage_root_id,
-                    source_path=artifact.source_path,
                     local_rel_path=local_rel_path,
                 )
             except Exception as exc:
                 log.warning(
                     f"Failed to persist artifact path for apk_id={apk_id}: {exc}",
+                    category="database",
+                )
+
+        if apk_id and artifact.source_path:
+            try:
+                repo.upsert_source_path(apk_id, artifact.source_path)
+            except Exception as exc:
+                log.warning(
+                    f"Failed to persist source path for apk_id={apk_id}: {exc}",
                     category="database",
                 )
 
@@ -248,6 +294,16 @@ def _pull_and_record(
             category="filesystem",
         )
 
+    file_size_text = common.format_file_size(dest_path.stat().st_size)
+    common.print_artifact_status(
+        plan.inventory.display_name(),
+        artifact.file_name,
+        index=artifact_index,
+        total=artifact_total,
+        suffix=f"saved ({file_size_text})",
+        level="success",
+    )
+
     return (
         ArtifactResult(
             file_name=dest_path.name,
@@ -268,6 +324,20 @@ def _print_progress(index: int, total: int, plan: PackagePlan) -> None:
         f"({artifact_count} {suffix})"
     )
     print(status_messages.status(message))
+
+
+def _print_package_header(plan: PackagePlan, package_index: int, package_total: int) -> None:
+    label = plan.inventory.display_name()
+    artifact_total = len(plan.artifacts)
+    detail = f"{artifact_total} artifact(s)"
+    if package_index > 1:
+        print()
+    print(
+        status_messages.status(
+            f"→ Package {package_index}/{package_total}: {label} ({detail})",
+            level="info",
+        )
+    )
 
 
 __all__ = ["execute_harvest"]

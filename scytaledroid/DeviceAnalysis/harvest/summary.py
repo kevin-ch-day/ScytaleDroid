@@ -164,7 +164,12 @@ def render_harvest_summary(
     print()
     print(text_blocks.headline("APK Harvest Summary", width=70))
     print(status_messages.status(f"Scope: {selection.label}"))
-    print(status_messages.status(f"Pull mode: {pull_mode}"))
+    pull_labels = {
+        "quick": "Quick pull",
+        "inventory": "Snapshot pull",
+    }
+    pull_label = pull_labels.get(pull_mode, pull_mode)
+    print(status_messages.status(f"Pull mode: {pull_label}"))
     metadata = selection.metadata or {}
     guard_policy = metadata.get("inventory_policy")
     if guard_policy:

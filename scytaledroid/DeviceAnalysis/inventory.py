@@ -417,8 +417,16 @@ def run_inventory_sync(
             print(status_messages.status("No packages matched the selected filter.", level="warn"))
         prompt_utils.press_enter_to_continue()
 
-    if interactive:
-        _inventory_selection_menu(metadata_rows)
+    if interactive and not filter_fn:
+        print()
+        print(
+            status_messages.status(
+                "Next: choose 'Pull APKs' from Device Analysis to start harvesting.",
+                level="info",
+            )
+        )
+        if prompt_utils.prompt_yes_no("View inventory subsets now?", default=False):
+            _inventory_selection_menu(metadata_rows)
 
 
 def inventory_sync_menu(serial: Optional[str]) -> None:
@@ -449,6 +457,7 @@ def inventory_sync_menu(serial: Optional[str]) -> None:
             break
         if choice == "1":
             run_inventory_sync(serial)
+            return
         elif choice == "2":
             run_inventory_sync(
                 serial,
@@ -457,6 +466,7 @@ def inventory_sync_menu(serial: Optional[str]) -> None:
                     (_get_canonical_category(entry) or "Unknown") == "User"
                 ),
             )
+            return
         elif choice == "3":
             run_inventory_sync(
                 serial,
@@ -466,6 +476,7 @@ def inventory_sync_menu(serial: Optional[str]) -> None:
                     in {"System", "OEM", "Mainline", "Vendor"}
                 ),
             )
+            return
         elif choice == "4":
             profiles = {"Social", "Messaging"}
             run_inventory_sync(
@@ -473,6 +484,7 @@ def inventory_sync_menu(serial: Optional[str]) -> None:
                 filter_name="Social & Messaging apps",
                 filter_fn=lambda entry: str(entry.get("profile_name")) in profiles,
             )
+            return
         elif choice == "5":
             profiles = {"Finance", "Shopping"}
             run_inventory_sync(
@@ -480,6 +492,7 @@ def inventory_sync_menu(serial: Optional[str]) -> None:
                 filter_name="Finance & Shopping apps",
                 filter_fn=lambda entry: str(entry.get("profile_name")) in profiles,
             )
+            return
         elif choice == "6":
             _verify_app_definitions()
         else:
@@ -1225,7 +1238,7 @@ def _verify_app_definitions() -> None:
     print(status_messages.status(f"Definitions without repository APKs: {len(orphan_defs)}", level="info"))
     _print_samples(orphan_defs)
 
-    prompt_utils.press_enter_to_continue()
+    print(status_messages.status("Returning to inventory menu...", level="info"))
 
 
 def _print_samples(rows: List[Dict[str, object]], limit: int = 10) -> None:

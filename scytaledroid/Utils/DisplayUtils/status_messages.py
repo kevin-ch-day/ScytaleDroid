@@ -35,18 +35,26 @@ def _apply(text: str, style_name: str, *, bold: bool = False) -> str:
     return colors.apply(text, _style_for(style_name), bold=bold)
 
 
-def status(message: str, level: str = "info", *, show_icon: bool = True) -> str:
+def status(
+    message: str,
+    level: str = "info",
+    *,
+    show_icon: bool = True,
+    show_prefix: bool = True,
+) -> str:
     """Return a formatted status line."""
 
     prefix_text = _STATUS_PREFIX.get(level, "[INFO]")
     styles = _STATUS_STYLES.get(level, ("info", "text"))
-    prefix = _apply(prefix_text, styles[0], bold=True)
     formatted_message = _apply(message, styles[1])
     icon = _STATUS_ICONS.get(level) if show_icon else None
+    token_parts: list[str] = []
     if icon:
-        icon_text = colors.apply(icon, colors.style("hint"))
-        return f"{icon_text} {prefix} {formatted_message}"
-    return f"{prefix} {formatted_message}"
+        token_parts.append(colors.apply(icon, colors.style("hint")))
+    if show_prefix:
+        token_parts.append(_apply(prefix_text, styles[0], bold=True))
+    token_parts.append(formatted_message)
+    return " ".join(part for part in token_parts if part)
 
 
 def print_status(message: str, level: str = "info") -> None:

@@ -246,6 +246,41 @@ def adb_pull(
     return True
 
 
+def format_file_size(num_bytes: int) -> str:
+    units = ["B", "KB", "MB", "GB", "TB"]
+    value = float(num_bytes)
+    for unit in units:
+        if value < 1024 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(value)} {unit}"
+            return f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{value:.1f} {units[-1]}"
+
+
+def print_artifact_status(
+    package_label: str,
+    artifact_label: str,
+    *,
+    index: int,
+    total: int,
+    suffix: Optional[str] = None,
+    level: str = "info",
+) -> None:
+    message = f"    ▸ {package_label} [{index}/{total}] {artifact_label}"
+    if suffix:
+        message = f"{message} — {suffix}"
+    show_highlight = level != "info"
+    print(
+        status_messages.status(
+            message,
+            level=level,
+            show_icon=show_highlight,
+            show_prefix=show_highlight,
+        )
+    )
+
+
 def inventory_payload(inventory: InventoryRow) -> Dict[str, Optional[str]]:
     """Return a serialisable view of key inventory attributes."""
 

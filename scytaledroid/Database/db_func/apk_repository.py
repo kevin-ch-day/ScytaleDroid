@@ -279,7 +279,6 @@ def upsert_artifact_path(
     apk_id: int,
     *,
     storage_root_id: int,
-    source_path: Optional[str],
     local_rel_path: Optional[str],
 ) -> None:
     """Persist or update path metadata for the given artifact."""
@@ -289,8 +288,22 @@ def upsert_artifact_path(
         (
             apk_id,
             storage_root_id,
-            source_path,
             local_rel_path,
+        ),
+    )
+
+
+def upsert_source_path(apk_id: int, source_path: Optional[str]) -> None:
+    """Persist the source path metadata for an artifact."""
+
+    if not source_path:
+        return
+
+    run_sql(
+        queries.UPSERT_SOURCE_PATH,
+        (
+            apk_id,
+            source_path,
         ),
     )
 
@@ -309,4 +322,5 @@ __all__ = [
     "ensure_app_definition",
     "ensure_storage_root",
     "upsert_artifact_path",
+    "upsert_source_path",
 ]
