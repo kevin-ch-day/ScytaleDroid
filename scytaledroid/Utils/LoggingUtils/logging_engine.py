@@ -38,17 +38,6 @@ class _AndroguardNoiseFilter(logging.Filter):
         return not any(snippet in message for snippet in self._SUBSTRINGS)
 
 
-class _AndroguardGateFilter(logging.Filter):
-    """Filter out androguard records below a minimum level."""
-
-    def __init__(self, minimum: int) -> None:
-        super().__init__()
-        self.minimum = minimum
-
-    def filter(self, record: logging.LogRecord) -> bool:  # pragma: no cover - trivial
-        return record.levelno >= self.minimum
-
-
 def get_logger(category: str) -> logging.Logger:
     """
     Get a logger for a given category.
@@ -141,14 +130,6 @@ def _iter_androguard_loggers() -> tuple[logging.Logger, list[logging.Logger]]:
     return base_logger, descendants
 
 
-def _apply_gate_filter(logger: logging.Logger, *, minimum: int) -> None:
-    """Attach a gating filter to ``logger`` and record the attachment."""
-
-    filter_instance = _AndroguardGateFilter(minimum)
-    logger.addFilter(filter_instance)
-    setattr(logger, _FILTER_ATTR, filter_instance)
-
-
 def configure_third_party_loggers(
     *,
     verbosity: str,
@@ -163,23 +144,26 @@ def configure_third_party_loggers(
 
     base_logger, descendants = _iter_androguard_loggers()
     all_loggers = [base_logger, *descendants]
-    base_logger.propagate = False
 
     for logger in all_loggers:
-        if logger is not base_logger:
-            logger.propagate = True
-        logger.disabled = False
         _clear_handlers(logger)
         _detach_owned_filter(logger)
+        logger.disabled = False
 
     if verbosity not in {"detail", "debug", "normal"}:
         verbosity = "normal"
 
     if verbosity != "debug":
         for logger in all_loggers:
-            logger.setLevel(logging.ERROR)
-            _apply_gate_filter(logger, minimum=logging.ERROR)
+            logger.setLevel(logging.CRITICAL)
+            logger.propagate = False
+            logger.disabled = True
+            logger.addHandler(logging.NullHandler())
         return None
+
+    base_logger.propagate = False
+    for logger in descendants:
+        logger.propagate = True
 
     target_dir = Path(debug_dir).expanduser().resolve()
     target_dir.mkdir(parents=True, exist_ok=True)
