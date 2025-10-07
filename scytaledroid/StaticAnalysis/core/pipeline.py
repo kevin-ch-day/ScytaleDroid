@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
+from hashlib import sha256
 from pathlib import Path
 from time import perf_counter
 from typing import Iterable, Mapping, MutableMapping, Optional, Sequence, Tuple, Type
@@ -13,6 +14,7 @@ from androguard.core.apk import APK
 
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis.harvest.common import compute_hashes, normalise_local_path
+from scytaledroid.Utils.LoggingUtils.logging_engine import configure_third_party_loggers
 from .context import AnalysisConfig, DetectorContext
 from .findings import Badge, DetectorResult, Finding
 from ..detectors.base import BaseDetector
@@ -464,6 +466,23 @@ def run_detector_pipeline(context: DetectorContext) -> Tuple[DetectorResult, ...
     return tuple(results)
 
 
+def _derive_run_id(apk_sha256: str, config: AnalysisConfig) -> str:
+    """Return a deterministic identifier for debug log artefacts."""
+
+    detector_list = ",".join(sorted(config.enabled_detectors or ()))
+    seed = "|".join(
+        (
+            apk_sha256 or "unknown",
+            config.profile,
+            config.verbosity,
+            config.persistence_mode,
+            config.analysis_version,
+            detector_list,
+        )
+    )
+    return sha256(seed.encode("utf-8")).hexdigest()[:16]
+
+
 def _build_skipped_result(
     detector: BaseDetector,
     section_key: str,
@@ -509,6 +528,21 @@ def analyze_apk(
     if not apk_path.exists():
         raise StaticAnalysisError(f"APK not found: {apk_path}")
 
+    analysis_config = config or AnalysisConfig()
+    report_metadata: dict[str, object] = dict(metadata or {})
+
+    hashes = compute_hashes(apk_path)
+    apk_sha256 = hashes.get("sha256", "")
+    run_id = _derive_run_id(apk_sha256, analysis_config)
+
+    log_path = configure_third_party_loggers(
+        verbosity=analysis_config.verbosity,
+        run_id=run_id,
+        debug_dir=str(Path(app_config.LOGS_DIR).resolve()),
+    )
+    if log_path is not None:
+        report_metadata["androguard_log_path"] = str(log_path)
+
     try:
         apk = APK(str(apk_path))
     except Exception as exc:
@@ -517,8 +551,6 @@ def analyze_apk(
     manifest_root = _load_manifest_root(apk)
     flags = _build_manifest_flags(manifest_root)
     compile_sdk = _extract_compile_sdk(manifest_root)
-
-    hashes = compute_hashes(apk_path)
     manifest = ManifestSummary(
         package_name=apk.get_package(),
         version_name=apk.get_androidversion_name(),
@@ -553,12 +585,8 @@ def analyze_apk(
     libraries = tuple(sorted(apk.get_libraries()))
     signatures = tuple(sorted(apk.get_signature_names()))
 
-    report_metadata: Mapping[str, object] = metadata or {}
-
     relative = _resolve_relative_path(apk_path, storage_root)
     file_size = apk_path.stat().st_size
-
-    analysis_config = config or AnalysisConfig()
     string_index = (
         build_string_index(apk) if analysis_config.enable_string_index else None
     )

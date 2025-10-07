@@ -192,10 +192,11 @@ def _scan_groups(
     progress = ScanProgress(total_groups=len(groups), options=options)
     progress.announce_options()
 
-    config = AnalysisConfig(profile="full")
+    config = AnalysisConfig(profile=options.profile, verbosity=options.verbosity)
     successes = 0
     failures = 0
     severity_totals: Counter[str] = Counter()
+    printed_logs: set[str] = set()
 
     scan_started = perf_counter()
 
@@ -239,6 +240,15 @@ def _scan_groups(
                 warning=message,
             )
             severity_totals.update(counter)
+
+            if options.verbosity == "debug":
+                metadata_map = getattr(report, "metadata", {})
+                debug_log_path = None
+                if isinstance(metadata_map, Mapping):
+                    debug_log_path = metadata_map.get("androguard_log_path")
+                if debug_log_path and debug_log_path not in printed_logs:
+                    print(f"Raw tool log: {debug_log_path}")
+                    printed_logs.add(debug_log_path)
 
     elapsed = perf_counter() - scan_started
 
