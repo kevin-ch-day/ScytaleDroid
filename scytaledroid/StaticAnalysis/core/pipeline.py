@@ -547,12 +547,7 @@ def analyze_apk(
         receivers=tuple(sorted(apk.get_receivers())),
         providers=tuple(sorted(apk.get_providers())),
     )
-    exported = ComponentSummary(
-        activities=tuple(sorted(apk.get_exported_activities())),
-        services=tuple(sorted(apk.get_exported_services())),
-        receivers=tuple(sorted(apk.get_exported_receivers())),
-        providers=tuple(sorted(apk.get_exported_content_providers())),
-    )
+    exported = _collect_exported_components(manifest_root)
 
     features = tuple(sorted(apk.get_features()))
     libraries = tuple(sorted(apk.get_libraries()))
@@ -653,6 +648,53 @@ def _build_detector_context(
         string_index=string_index,
         config=config,
     )
+
+
+def _collect_exported_components(
+    manifest_root: ElementTree.Element,
+) -> ComponentSummary:
+    """Derive exported component lists by inspecting manifest nodes."""
+
+    def exported_names(
+        tags: tuple[str, ...], *, default_exported: bool = False
+    ) -> tuple[str, ...]:
+        names: set[str] = set()
+        for tag in tags:
+            for element in manifest_root.iter(tag):
+                name = element.get(f"{_ANDROID_NS}name")
+                if not name:
+                    continue
+                exported_attr = element.get(f"{_ANDROID_NS}exported")
+                if exported_attr is not None:
+                    is_exported = exported_attr.strip().lower() == "true"
+                else:
+                    is_exported = (
+                        default_exported
+                        if tag == "provider"
+                        else _element_has_intent_filter(element)
+                    )
+                if is_exported:
+                    names.add(name)
+        return tuple(sorted(names))
+
+    return ComponentSummary(
+        activities=exported_names(("activity", "activity-alias")),
+        services=exported_names(("service",)),
+        receivers=exported_names(("receiver",)),
+        providers=exported_names(("provider",), default_exported=False),
+    )
+
+
+def _element_has_intent_filter(element: ElementTree.Element) -> bool:
+    """Return True if the manifest element declares an intent-filter child."""
+
+    for child in element:
+        tag = child.tag
+        if "}" in tag:
+            tag = tag.rsplit("}", 1)[-1]
+        if tag == "intent-filter":
+            return True
+    return False
 
 
 __all__ = [
