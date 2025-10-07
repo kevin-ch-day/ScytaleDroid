@@ -4,9 +4,14 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from .logging_core import setup_logger
+
+try:  # pragma: no cover - optional dependency
+    from loguru import logger as _loguru_logger
+except Exception:  # pragma: no cover - optional dependency
+    _loguru_logger = None
 
 # Define log file mapping
 LOG_FILES = {
@@ -23,6 +28,7 @@ LOG_FILES = {
 _LOGGERS: dict[str, logging.Logger] = {}
 
 _FILTER_ATTR = "_scd_androguard_filter"
+_LOGURU_FILTER_ATTR = "_scd_loguru_filter"
 
 
 class _AndroguardNoiseFilter(logging.Filter):
@@ -130,6 +136,67 @@ def _iter_androguard_loggers() -> tuple[logging.Logger, list[logging.Logger]]:
     return base_logger, descendants
 
 
+def _configure_loguru(
+    *, verbosity: str, log_path: Optional[Path], noise_filter: Callable[[str], bool]
+) -> None:
+    """Apply loguru gating that mirrors the python-logging behaviour."""
+
+    if _loguru_logger is None:  # pragma: no cover - optional dependency
+        return
+
+    try:
+        _loguru_logger.remove()
+    except Exception:  # pragma: no cover - defensive cleanup
+        pass
+
+    target_attr = _LOGURU_FILTER_ATTR
+
+    # Ensure previously attached filter handles are forgotten so repeated calls do
+    # not leak references.
+    if hasattr(_loguru_logger, target_attr):
+        try:
+            delattr(_loguru_logger, target_attr)
+        except Exception:  # pragma: no cover - defensive cleanup
+            pass
+
+    if verbosity != "debug":
+        try:
+            _loguru_logger.disable("androguard")
+        except Exception:  # pragma: no cover - defensive
+            pass
+        return
+
+    try:
+        _loguru_logger.enable("androguard")
+    except Exception:  # pragma: no cover - defensive
+        pass
+
+    if log_path is None:
+        return
+
+    def _loguru_filter(record: dict) -> bool:
+        try:
+            if not str(record.get("name", "")).startswith("androguard"):
+                return False
+            message = record.get("message", "")
+        except Exception:  # pragma: no cover - defensive
+            return False
+        return noise_filter(str(message))
+
+    filter_handle = _loguru_filter
+    setattr(_loguru_logger, target_attr, filter_handle)
+
+    _loguru_logger.add(
+        str(log_path),
+        level="DEBUG",
+        filter=filter_handle,
+        format="{time:YYYY-MM-DD HH:mm:ss.SSS} {level:<8} {name}:{function}:{line} - {message}",
+        enqueue=False,
+        backtrace=False,
+        diagnose=False,
+    )
+
+
 def configure_third_party_loggers(
     *,
     verbosity: str,
@@ -153,12 +220,24 @@ def configure_third_party_loggers(
     if verbosity not in {"detail", "debug", "normal"}:
         verbosity = "normal"
 
+    noise_filter = lambda message: not any(  # noqa: E731 - simple predicate
+        snippet in message
+        for snippet in (
+            "get_resource_dimen",
+            "Out of range dimension unit index",
+            "invalid decoded string length",
+        )
+    )
+
+    log_path: Optional[Path] = None
+
     if verbosity != "debug":
         for logger in all_loggers:
             logger.setLevel(logging.CRITICAL)
             logger.propagate = False
             logger.disabled = True
             logger.addHandler(logging.NullHandler())
+        _configure_loguru(verbosity=verbosity, log_path=None, noise_filter=noise_filter)
         return None
 
     base_logger.propagate = False
@@ -182,6 +261,8 @@ def configure_third_party_loggers(
 
     for logger in all_loggers:
         logger.setLevel(logging.DEBUG)
+
+    _configure_loguru(verbosity=verbosity, log_path=log_path, noise_filter=noise_filter)
 
     return log_path
 

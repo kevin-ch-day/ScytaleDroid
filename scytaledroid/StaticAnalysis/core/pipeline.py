@@ -80,7 +80,10 @@ def analyze_apk(
     )
 
     declared_permissions = tuple(sorted(apk.get_permissions()))
-    permission_details = apk.get_details_permissions()
+    try:
+        permission_details = apk.get_details_permissions()
+    except KeyError:
+        permission_details = {}
     dangerous = _collect_dangerous_permissions(permission_details)
     custom_permissions = tuple(sorted(apk.get_declared_permissions()))
 
