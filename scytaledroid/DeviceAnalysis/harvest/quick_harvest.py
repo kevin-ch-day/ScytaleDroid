@@ -286,16 +286,6 @@ def quick_harvest(
     return results
 
 
-def _print_package_header(plan: PackagePlan, package_index: int, package_total: int) -> None:
-    label = plan.inventory.display_name()
-    print(
-        status_messages.status(
-            f"→ Package {package_index}/{package_total}: {label}",
-            level="info",
-        )
-    )
-
-
 def _resolve_package_paths(
     adb_path: str,
     serial: str,
