@@ -20,6 +20,18 @@ analysis.
   `sha256`, emit metadata sidecars, and optionally persist database records on
   the fly.
 
+### Static analysis preview
+
+- Use the main menu option **Static analysis** to review harvested APKs without
+  leaving the CLI. The workflow summarises manifest metadata, component export
+  status, permissions (with a dangerous-permission spotlight), requested
+  features, linked libraries, and signer information.
+- Analyses are saved as JSON reports under `data/static_analysis/reports/` so
+  investigators can re-open previous runs from the menu or ingest them into
+  downstream tooling.
+- You can also analyse a standalone APK outside the repository by choosing the
+  "Analyze APK from local path" option and pointing the CLI at the file.
+
 ### Harvest configuration highlights
 
 - `HARVEST_DEDUP_SHA256` / `HARVEST_KEEP_LAST` control hash-based dedupe. Keep
