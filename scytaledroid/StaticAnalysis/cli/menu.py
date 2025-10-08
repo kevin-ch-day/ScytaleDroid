@@ -35,6 +35,7 @@ from ..core.repository import (
     list_packages,
 )
 from ..persistence import ReportStorageError, save_report
+from ..modules.permissions import collect_permissions, print_permission_report
 from .renderer import render_app_result, write_baseline_json
 from .sections import SECTION_DEFINITIONS, extract_integrity_profiles
 
@@ -245,6 +246,10 @@ def _launch_scan_flow(initial_profile: str) -> None:
     print("-" * 41)
 
     _configure_logging_for_cli(params.log_level)
+    if params.profile == "permissions":
+        _execute_permission_scan(selection, params)
+        return
+
     outcome = _execute_scan(selection, params, base_dir)
     _render_run_results(outcome, params)
 
@@ -513,6 +518,34 @@ def _execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pa
         warnings=warnings,
         failures=failures,
     )
+
+
+def _execute_permission_scan(selection: ScopeSelection, params: RunParameters) -> None:
+    total_groups = len(selection.groups)
+
+    for group_index, group in enumerate(selection.groups, start=1):
+        artifact_total = len(group.artifacts)
+
+        for artifact_index, artifact in enumerate(group.artifacts, start=1):
+            progress_label = f"[{group_index}/{total_groups}] {group.package_name}"
+            if artifact_total > 1:
+                progress_label += f" ({artifact_index}/{artifact_total})"
+
+            artifact_label = artifact.artifact_label or artifact.display_path
+            print(f"{progress_label} … analyzing {artifact_label}")
+
+            try:
+                declared, defined = collect_permissions(str(artifact.path))
+            except Exception as exc:  # pragma: no cover - defensive path
+                print(f"{progress_label} … failed ({exc})")
+                continue
+
+            print_permission_report(
+                package_name=group.package_name,
+                artifact_label=artifact_label,
+                declared=declared,
+                defined=defined,
+            )
 
 
 def _build_analysis_config(params: RunParameters) -> AnalysisConfig:
