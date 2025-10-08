@@ -1,15 +1,25 @@
 # Static Analysis Pipeline Contract
 
-This document captures the agreed-upon contracts, execution order, and ownership boundaries for the Static Analysis pipeline and CLI. It is intended as a reference for future implementation work so that each component can be developed independently without ambiguity.
+This document captures the agreed-upon contracts, execution order, and
+ownership boundaries for the Static Analysis pipeline and CLI. It reflects the
+current v2 implementation that now ships a modular detector framework,
+reproducibility bundles, and a correlation layer that synthesises composite
+findings.
 
 ## 0. Cross-Cutting Rules
 
-- **Timestamp format:** All rendered timestamps must use `M-D-YYYY h:mm AM/PM` (America/Chicago time zone).
+- **Timestamp format:** All rendered timestamps must use `M-D-YYYY h:mm AM/PM`
+  (America/Chicago time zone). If the host lacks the required zone data, fall
+  back to UTC and annotate the fallback zone label.
 - **Determinism:** Outputs must have fixed wording and deterministic ordering (sort lists before rendering).
 - **Safety:** Never render raw secret values—only evidence pointers and short hashes.
 - **Badges:** Valid status badges are `[OK]`, `[INFO]`, `[WARN]`, `[FAIL]`, and `[skipped]`.
 - **Timing:** Every section returns a `duration_sec` (float) and renders it with one decimal place.
 - **Evidence limit:** Renderers must display no more than `N` evidence entries (default `2`), appending `(+N more)` when additional entries are omitted.
+- **Reproducibility bundle:** Persist a manifest digest, network-security policy
+  graph, and string-index summary under `metadata.repro_bundle` for each run.
+  Detectors that diff state (e.g., correlation, split aggregation) must consume
+  this bundle rather than reparsing raw files.
 
 ## 1. Core Types
 
@@ -61,21 +71,27 @@ Read-only input passed to each detector.
 ```
 scytaledroid/StaticAnalysis/
   cli/
-    sections.py          # section renderers (uses section_utils)
-    options.py           # CLI flags (verbosity, evidence limit, filtering)
-    progress.py          # headers/footers for repo/group runs
+    menu.py             # interactive CLI menu
+    options.py          # CLI flags (profile, verbosity, evidence limits)
+    progress.py         # headers/footers for repo/group runs
   core/
-    pipeline.py          # orchestrates detector execution
-    repository.py        # repo/group rollups
+    pipeline.py         # orchestrates detector execution
+    detector_runner.py  # pipeline stage registry and orchestration helpers
+    context.py          # DetectorContext builder and shared config
+    findings.py         # DetectorResult, Finding, EvidencePointer models
+    manifest_utils.py   # manifest parsing helpers
+    models.py           # manifest/permission/component summaries
   detectors/
-    integrity.py
-    permissions.py
-    components.py
-    provider_acl.py
-    network.py
+    integrity.py        # signing + identity baseline
+    manifest.py         # manifest hygiene flags
+    permissions.py      # Androguard-backed permission analytics
+    components.py       # IPC exposure tables
+    provider_acl.py     # content provider ACL review
+    network.py          # network posture + NSC graphs
     domain_verification.py
     secrets.py
     storage.py
+    dfir.py             # DFIR evidence hints
     webview.py
     crypto.py
     dynamic.py
@@ -84,26 +100,13 @@ scytaledroid/StaticAnalysis/
     sdks.py
     native.py
     obfuscation.py
-    correlation.py       # synthesizes P0/P1 findings
+    correlation/        # diffing, scoring, detector shim
   modules/
-    string_analysis/
-      extractor.py, patterns.py, network.py, correlator.py
-  persistence/
-    reports.py           # save confirmations (no schema change)
-  cli/
-    section_utils.py     # shared formatting helpers
+    network_security/   # NSC parser + models
+    string_analysis/    # string index builder + pattern catalog
 
 scytaledroid/Reporting/
-  __init__.py
-  menu.py                # interactive report selection (optional)
-  generator.py           # orchestrates report rendering
-  formats/
-    markdown.py
-    html.py
-    json.py
-  templates/
-    markdown_template.md
-    html_template.html
+  … optional exporters (CLI renders sections directly)
 ```
 
 All report generation responsibilities live under the root-level `scytaledroid/Reporting/` package so that Static Analysis code
@@ -112,52 +115,90 @@ export or persistence workflow.
 
 ## 3. Detector Execution Order
 
-`pipeline.py` must invoke detectors in the following fixed order, forwarding each `DetectorResult` to the renderer in `cli/sections.py`:
+`detector_runner.py` must invoke detectors in the following fixed order,
+forwarding each `DetectorResult` to the renderer. Stages marked as
+`include_in_quick=False` produce `[skipped]` results when the quick profile is
+selected so report wording remains deterministic:
 
-1. `integrity.run(ctx)`
-2. `components.run(ctx)`
-3. `permissions.run(ctx)`
-4. `components.run_ipc(ctx)`
-5. `provider_acl.run(ctx)`
-6. `network.run(ctx)`
-7. `domain_verification.run(ctx)`
-8. `secrets.run(ctx)`
-9. `storage.run(ctx)`
-10. `webview.run(ctx)`
-11. `crypto.run(ctx)`
-12. `dynamic.run(ctx)`
-13. `fileio.run(ctx)`
-14. `interaction.run(ctx)`
-15. `sdks.run(ctx)`
-16. `native.run(ctx)`
-17. `obfuscation.run(ctx)`
-18. `correlation.run(ctx, prior_results=[...])`
+1. `IntegrityIdentityDetector`
+2. `ManifestBaselineDetector`
+3. `PermissionsProfileDetector`
+4. `IpcExposureDetector`
+5. `ProviderAclDetector`
+6. `NetworkSurfaceDetector`
+7. `DomainVerificationDetector`
+8. `SecretsDetector`
+9. `StorageBackupDetector`
+10. `DfirHintsDetector`
+11. `WebViewDetector` *(skipped in quick profile)*
+12. `CryptoHygieneDetector` *(skipped in quick profile)*
+13. `DynamicLoadingDetector` *(skipped in quick profile)*
+14. `FileIoSinksDetector` *(skipped in quick profile)*
+15. `UserInteractionRisksDetector` *(skipped in quick profile)*
+16. `SdkInventoryDetector` *(skipped in quick profile)*
+17. `NativeHardeningDetector` *(skipped in quick profile)*
+18. `ObfuscationDetector` *(skipped in quick profile)*
+19. `CorrelationDetector`
 
-`cli/sections.py` must mirror this order to maintain deterministic rendering.
+CLI renderers must respect this order when printing sections.
 
 ## 4. Detector Responsibilities and Contracts
 
 Each detector owns a specific concern area and returns a `DetectorResult` meeting the cross-cutting rules.
 
-- **integrity.py:** APK size, SDK targets, signing schemes (v2/v3/v4), debug certificate flag, hashes, multidex count, split awareness. Status defaults to `[OK]`; emit `[INFO]` when tooling missing.
-- **permissions.py:** Declared permissions summary (dangerous counts, signature/custom, notable combos). Status `[INFO]`.
-- **components.py:**
-  - `run(ctx)`: Manifest hygiene (flags such as debuggable, allowBackup, usesCleartextTraffic, networkSecurityConfig, sharedUserId, component counts, foreground service types, taskAffinity anomalies). Status `[INFO]`.
-  - `run_ipc(ctx)`: IPC exposure (exported activities/receivers/services, guards, intent filters). Status `[WARN]` when unguarded exports.
-- **provider_acl.py:** Exported content providers, permission guards, `grantUriPermissions`, authorities, path-permissions. Status `[FAIL]` when user-data authority lacks guards; otherwise `[INFO]`.
-- **network.py:** HTTP/HTTPS endpoint counts (string analysis), trust policy inspection, pinning detection, network security config overrides. Status `[OK]` or `[WARN]` on risky trust/pinning findings.
-- **domain_verification.py:** `autoVerify` usage, verified domains, mismatches with intent filters. Status `[INFO]`.
-- **secrets.py:** Detect secret types (Google API key, Firebase key, AWS access key, bearer token, etc.), suppress obvious test/local values, produce pointers with hashes, track filtered count. Status `[WARN]` when non-test secrets exist.
-- **storage.py:** Plaintext secrets in SharedPreferences/files/DBs, external storage usage, backup interactions. Status `[WARN]` when plaintext with `allowBackup`; otherwise `[INFO]`.
-- **webview.py:** WebView hardening (JavaScript enabled, `addJavascriptInterface`, universal file access, mixed content). Status `[OK]` or `[WARN]` based on risky combinations.
-- **crypto.py:** Cipher mode usage, AES-ECB/static IV detection, weak digests, low PBKDF2 iterations. Provide worst-case evidence pointer. Status `[WARN]` on weak constructs.
-- **dynamic.py:** Reflection hotspots, dynamic code loading (`DexClassLoader`, `PathClassLoader`), native loading, suspicious `WebView.loadUrl`, `Base64.decode` near reflection. Status `[WARN]` when combined with sensitive permissions/secrets.
-- **fileio.py:** Sensitive file writes to world-readable locations, `Android/data/<pkg>/files`, lingering temp files. Status `[WARN]` if sensitive external exposure.
-- **interaction.py:** User interaction risks (`ClipboardManager`, `SYSTEM_ALERT_WINDOW`, `AccessibilityService`, `MediaProjection`). Status escalates to `[WARN]` with dangerous permissions.
-- **sdks.py:** Identify embedded SDKs, map related permissions, optional version hints. Status `[INFO]`.
-- **native.py:** `.so` coverage, hardening flags (PIE, RELRO, NX, Canary), suspicious strings, 32/64-bit support. Status `[OK]`/`[INFO]`; `[WARN]` when missing critical hardening.
-- **obfuscation.py:** Obfuscation score (low/med/high), packer signatures, anti-debug/emulator/root/hook checks. Status `[INFO]`, `[WARN]` for aggressive tamper defenses.
-- **correlation.py:** Combine prior `DetectorResult`s into normalized P0/P1 `Finding` objects using deterministic rules:
+- **integrity.py:** APK identity (hashes, size), signing schemes, certificate
+  lineage, split awareness, and toolchain metadata. Status defaults to `[OK]`
+  unless signing data is missing or parsing fails.
+- **manifest.py:** Manifest hygiene flags (debuggable, allowBackup,
+  usesCleartextTraffic, sharedUserId, foreground service types), feature and
+  library inventory, and context notes. Status `[INFO]` with escalations when
+  risky flags are enabled.
+- **permissions.py:** Androguard-backed severity scoring, protection-level
+  histograms, runtime gate mapping, and custom-permission posture. Status
+  `[INFO]` with notes summarising token counts.
+- **components.py:** Export posture for activities, services, receivers, and
+  shared UID partners, including exported intent filters and namespace overlap
+  hints. Status `[WARN]` when unguarded exports exist.
+- **provider_acl.py:** Provider ACL matrix (read/write permissions,
+  grantUriPermissions, path permissions) and risk ratings. Status `[FAIL]` for
+  sensitive authorities without guards; otherwise `[INFO]`/`[WARN]`.
+- **network.py:** Network security policy graph normalisation, cleartext
+  viability, pinning hints, endpoint differentials, and split-aware posture.
+  Status `[WARN]` when cleartext or debug trust anchors leak into release
+  builds.
+- **domain_verification.py:** Auto-verify coverage, intent filter mismatches,
+  digital-asset links hints. Status `[INFO]` by default.
+- **secrets.py:** Contextual secret detections with hashed evidence pointers,
+  suppression metrics, and coalesced roles. Status `[WARN]` when production
+  secrets surface.
+- **storage.py:** SharedPreferences/database/file hotspots, backup interaction
+  risks, and sensitivity heatmaps. Status `[WARN]` when plaintext intersects
+  with backup or shared storage.
+- **dfir.py:** Predictive evidence hints (likely runtime file paths, logcat
+  tags, registry traces) for follow-on triage. Status `[INFO]` with `[WARN]`
+  escalations when sensitive data remains recoverable.
+- **webview.py:** In-app browser posture, JavaScript interface hardening, file
+  access, and mixed-content controls. Status `[WARN]` when powerful bridges or
+  mixed content are enabled.
+- **crypto.py:** Crypto API misuse graph (ECB, static IVs, weak digests,
+  predictable random sources) with remediation snippets. Status `[WARN]` on weak
+  constructs.
+- **dynamic.py:** Dynamic loading, reflection, and DexClassLoader usage tied to
+  dangerous permissions. Status `[WARN]` when exploitable pathways exist.
+- **fileio.py:** External/world-readable write sinks, temp-file hygiene, and
+  leftover artifact checks. Status `[WARN]` when sensitive payloads escape the
+  app sandbox.
+- **interaction.py:** Overlay/accessibility escalation surfaces, clipboard
+  leakage, and pending-intent hygiene. Status `[WARN]` when paired with
+  sensitive permissions.
+- **sdks.py:** SDK/library inventory joined with permission posture and notes on
+  outlier capabilities. Status `[INFO]`.
+- **native.py:** Native library coverage, hardening flags (PIE, RELRO, NX,
+  canary), and ABI support. `[INFO]` by default; `[WARN]` on missing hardening.
+- **obfuscation.py:** Obfuscation depth, anti-analysis fingerprints, reflective
+  spikes. `[INFO]`/`[WARN]` depending on aggressiveness.
+- **correlation/`detector.py`:** Combines prior `DetectorResult`s into
+  normalised P0/P1 `Finding` objects using deterministic rules:
   1. `P0_CLEARtext_VIABLE`: `usesCleartextTraffic` and ≥1 HTTP endpoint and `INTERNET` permission.
   2. `P0_DATA_EXFIL_IPC`: Dangerous permission (contacts/location) with unguarded exported component (activity/provider).
   3. `P0_HARDCODED_CRED_AT_RISK`: Sensitive secret type with matching endpoint family.
@@ -184,7 +225,8 @@ On detector errors, render the header followed by `[skipped]` and the reason, th
 ## 6. CLI Options (`cli/options.py`)
 
 - `--profile {quick, full}`:
-  - `quick`: runs detectors through Secrets and then Correlation (skip later sections for speed).
+  - `quick`: executes stages 1–10 and the correlation detector. Later sections
+    render as `[skipped]` with `skip_reason="skipped by quick profile"`.
   - `full`: runs the entire pipeline.
 - `--verbosity {normal, detail, debug}`:
   - `detail`: increases evidence limit (e.g., from 2 to 5).

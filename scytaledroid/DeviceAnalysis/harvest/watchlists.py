@@ -6,9 +6,13 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Sequence
+from typing import Iterable, List, Sequence, TYPE_CHECKING
 
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
+
+
+if TYPE_CHECKING:  # pragma: no cover - import for type checkers only
+    from .models import InventoryRow
 
 
 WATCHLIST_DIR = Path("data/watchlists")

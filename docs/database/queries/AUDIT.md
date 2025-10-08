@@ -58,6 +58,7 @@ The `ApkRecord` dataclass (same file) enforces the minimum payload. During a suc
 * Run-level manifests (timestamp, guard decision, etc.) live only in sidecar JSON files.
 * Guard decisions / package delta summaries are tracked in-memory and surfaced in CLI summaries, but no table records consume them today.
 * Absolute filesystem paths are no longer stored directly; reconstruct them via `harvest_storage_roots.data_root || '/' || harvest_artifact_paths.local_rel_path` when needed.
+* Static-analysis results, pipeline traces, and reproducibility bundles stay in `data/static_analysis/reports/` for now—no writer touches SQL yet. Future schema work (`static_analysis_runs`) should accept `apk_id`, `sha256`, `pipeline_trace`, and `repro_bundle` hashes captured during analysis.
 
 ## Pointers for future docs
 

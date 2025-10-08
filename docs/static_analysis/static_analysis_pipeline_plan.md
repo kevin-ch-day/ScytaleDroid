@@ -4,15 +4,41 @@
 - Deliver a modular, scalable static-analysis pipeline that progresses from quick triage to deep inspection without regressing the current CLI workflows.
 - Reuse and extend the existing manifest/permission summaries (see `scytaledroid/StaticAnalysis/core/pipeline.py`) while layering in richer, correlated findings.
 - Support both JSON portability and first-class database persistence so investigators can query history, run comparisons, and drive future UI/API consumers.
-- Maintain deterministic outputs, clear evidence pointers, and high signal-to-noise across all severity gates.
+- Maintain deterministic outputs, clear evidence pointers, reproducibility bundles, and high signal-to-noise across all severity gates.
+
+## 1.1 Implementation status (Q4 FY25 snapshot)
+
+- ✅ Detector runner and modular detectors are in place for manifest hygiene,
+  permissions (Androguard-powered scoring), IPC exposure, provider ACLs,
+  network surface (with NSC policy graphs), secrets, storage/backup, DFIR
+  hints, WebView hardening, crypto misuse, dynamic loading, file I/O sinks,
+  interaction surfaces, SDK inventory, native hardening, obfuscation, and a
+  correlation layer.
+- ✅ Pipeline runs persist pipeline traces, split-aware posture, differential
+  metadata, and a reproducibility bundle (manifest digest, NSC serialisation,
+  string-index sketch) inside the report metadata.
+- ✅ CLI menu exposes quick/full profiles, evidence limits, and renders
+  deterministic section summaries with badge/status alignment.
+- 🚧 Persistence adapters are JSON-first today; DB schema design remains open
+  pending infra alignment (see Section 7).
+- 🚧 OEM-sensitivity, signer lineage, and ML-backed endpoint classification are
+  queued for Phase 2 once the foundational detectors stabilise.
 
 ## 2. Scope
 ### In scope
-- Refactor `analyze_apk` into a detector pipeline with standardized interfaces, shared context, and correlation stages.
-- Build detectors for network surface, secrets, storage/backup, WebView, crypto, provider ACLs, SDK/trackers, native/JNI, obfuscation/anti-analysis, and supporting string intelligence.
-- Introduce a correlation engine that raises composite findings (e.g., cleartext endpoints + permissive manifest) with explainable provenance.
-- Design and document database schemas (`static_analysis_runs`, `static_analysis_findings`, optional metrics/support tables) and persistence adapters.
-- Update CLI flows to expose scan profiles and to render findings from JSON or database sources.
+- ✅ Refactor `analyze_apk` into a detector pipeline with standardized
+  interfaces, shared context, and correlation stages.
+- ✅ Build detectors for network surface, secrets, storage/backup, WebView,
+  crypto, provider ACLs, DFIR hints, dynamic behaviour, SDK/trackers,
+  native/JNI, obfuscation/anti-analysis, and supporting string intelligence.
+- ✅ Introduce a correlation engine that raises composite findings (e.g.,
+  cleartext endpoints + permissive manifest) with explainable provenance and
+  drift awareness.
+- 🚧 Design and document database schemas (`static_analysis_runs`,
+  `static_analysis_findings`, optional metrics/support tables) and persistence
+  adapters.
+- ✅ Update CLI flows to expose scan profiles, render per-stage timings, and
+  surface pipeline traces plus reproducibility bundles from saved reports.
 
 ### Out of scope (for this iteration)
 - Implementing dynamic analysis or runtime instrumentation.
@@ -29,13 +55,27 @@
 
 ## 4. Architecture Overview
 ```
-APK → Initial Context (manifest, hashes, strings index) → Detector Runner → Correlation Engine → Persistence Adapter(s) → Reporting/UI
+- APK → Initial Context (manifest, hashes, strings index, NSC policy) → Detector
+  Runner → Correlation Engine → Persistence Adapter(s) → Reporting/UI
 ```
-- **Pipeline Orchestrator:** `analyze_apk` evolves into a runner that assembles context (manifest tree, androguard handle, string index), dispatches detectors, merges results, triggers correlation rules, and hands off to persistence.
-- **Detector Packages:** Each detector lives under `scytaledroid/StaticAnalysis/detectors/` and registers itself with metadata (name, default profile, severity expectations).
-- **String Intelligence:** Dedicated subdirectory `scytaledroid/StaticAnalysis/modules/string_analysis/` with `extractor.py`, `patterns.py`, and `correlator.py` to provide reusable string insights across detectors.
-- **Correlation Engine:** Consumes normalized findings, applies declarative rules (`rules/network_cleartext.py` etc.), emits synthesized findings with provenance chain (`["manifest_cleartext", "http_endpoint", "internet_permission"]`).
-- **Persistence Layer:** Interface `PersistenceAdapter` with implementations `JsonPersistenceAdapter` (existing reports) and `DatabasePersistenceAdapter` (new tables). The orchestrator decides which adapters to invoke based on config.
+- **Pipeline Orchestrator:** `analyze_apk` assembles context (manifest tree,
+  androguard handle, string index, network-security policy), dispatches
+  detectors, merges results, triggers correlation rules, and hands off to
+  persistence while capturing pipeline traces and reproducibility bundles.
+- **Detector Packages:** Each detector lives under
+  `scytaledroid/StaticAnalysis/detectors/` and declares profile metadata so the
+  runner can emit deterministic `[skipped]` placeholders for quick scans.
+- **String Intelligence:** `scytaledroid/StaticAnalysis/modules/string_analysis/`
+  provides extractor + pattern catalog wiring secrets, network, storage, and
+  correlation detectors to a shared index.
+- **Network Security Module:** `modules/network_security/` normalises NSC XML
+  into policy graphs reused by network and correlation helpers.
+- **Correlation Engine:** The `detectors/correlation/` package handles diffing,
+  split composition, risk scoring, and final detector output with reproducible
+  provenance chains.
+- **Persistence Layer:** Interface `PersistenceAdapter` with implementations for
+  JSON reports today and placeholders for future database writers. Reports embed
+  pipeline metadata to support diff tooling even without a DB.
 
 ## 5. Detector Framework
 ### Detector Interface (conceptual)
@@ -83,7 +123,7 @@ class Detector(Protocol):
 - Outputs cached in context for detectors (secrets, network, privacy) and correlation rules.
 
 ## 7. Persistence Design
-### Database Schema
+### Database Schema (proposed)
 - `static_analysis_runs`
   - `run_id` (PK), `apk_id`, `sha256`, `scan_profile`, `tool_version`, `config_hash`, `started_at`, `finished_at`, `status`, `notes`.
 - `static_analysis_findings`
@@ -94,8 +134,10 @@ class Detector(Protocol):
   - `run_id`, `detector_id`, `metric_name`, `metric_value`, `unit`.
 
 ### Persistence Modes
-- `json_only`: maintain current behavior (writes reports to `data/static_analysis/reports/`).
-- `db_only`: insert runs/findings into DB, optionally skipping JSON output for volume-sensitive deployments.
+- `json_only` *(current default)*: writes deterministic JSON reports (including
+  `pipeline_trace` and `repro_bundle`) to `data/static_analysis/reports/`.
+- `db_only`: insert runs/findings into DB, optionally skipping JSON output for
+  volume-sensitive deployments.
 - `dual_write`: both JSON and DB for validation phase.
 
 ### Migration Strategy
@@ -104,10 +146,12 @@ class Detector(Protocol):
 
 ## 8. CLI Integration
 - Add profile selector to `StaticAnalysis/cli/menu.py` (Quick vs Full; advanced flag for custom profile via CLI args).
-- Display summary metrics post-scan: counts per severity, top detectors triggered, run ID/JSON path.
+- Display summary metrics post-scan: counts per severity, top detectors triggered, run ID/JSON path, pipeline duration, and
+  reproducibility bundle hash.
 - Modify report review flow:
-  - If DB enabled, list recent runs from `static_analysis_runs` with filtering (severity, package, profile).
-  - Legacy JSON viewer remains for `json_only` mode.
+  - If DB enabled, list recent runs from `static_analysis_runs` with filtering (severity, package, profile) and surface drift
+    summaries using the stored `repro_bundle` hashes.
+  - Legacy JSON viewer remains for `json_only` mode, exposing diff helpers for split posture and manifest drift.
 - Provide export command to dump DB run to JSON for sharing (`static-analysis export --run RUN_ID`).
 
 ## 9. Correlation Engine
@@ -141,29 +185,34 @@ class Detector(Protocol):
 - Establish deterministic container or virtual environment configuration for CI/regression runs.
 
 ## 12. Implementation Roadmap
-### Phase P0 – Infrastructure Readiness
-- Finalize detector interface, context, and finding schema.
-- Implement string-analysis extractor prototype and cache.
-- Draft persistence adapters (JSON + DB, migrations scripted but optional).
-- Update CLI stubs for profile selection.
+### Phase P0 – Infrastructure Readiness *(✅ delivered)*
+- Finalized detector interface, context, and finding schema.
+- Implemented string-analysis extractor prototype and cache.
+- Landed JSON persistence (reports with `pipeline_trace` + `repro_bundle`).
+- CLI exposes quick/full profiles and evidence controls.
 
-### Phase P1 – Core Detectors & Correlation v1
-- Implement Manifest Stage 0 refactor (non-breaking) and integrate detector runner.
-- Deliver Network Surface/TLS and Secrets/Credentials detectors.
-- Add Storage/Backup detector.
-- Seed correlation rules for cleartext, secrets, storage.
-- Enable dual-write persistence; verify determinism on seed corpus.
+### Phase P1 – Core Detectors & Correlation v1 *(✅ delivered)*
+- Manifest baseline refactor, detector runner integration, and drift-aware
+  correlation helpers shipped.
+- Network surface/TLS, secrets, storage/backup, provider ACL, and permission
+  analytics are active with deterministic evidence pointers.
+- Correlation rules cover cleartext viability, IPC exfil paths, hard-coded
+  credentials, backup exposure, crypto misuse, dynamic loading, and provider
+  grant gaps.
 
-### Phase P2 – Feature Expansion
-- Implement WebView & Crypto detectors with MASVS tagging.
-- Add Provider ACL detector and expand correlation (privacy P0 scenarios).
-- Hook string correlator into relevant detectors.
-- Enhance CLI report views with severity breakdown and run details.
+### Phase P2 – Feature Expansion *(🚧 current focus)*
+- Implement OEM sensitivity scoring, signer lineage timeline, endpoint role
+  classifier, and consent lint based on the research backlog.
+- Extend DFIR/export hints with minimal collection playbooks.
+- Prototype database persistence adapters + migrations.
+- Enhance CLI report views with severity breakdown, drift diff, and
+  reproducibility hash surface area.
 
 ### Phase P3 – Hardening & Advanced Signals
-- Add SDK/Tracker, Native/JNI, and Obfuscation/Anti-analysis detectors.
-- Optimize performance (parallel detector execution, caching).
-- Introduce override workflow and FP analytics in DB.
+- Add declarative rulepacks (Rego-lite), anomaly scoring (permission vector vs
+  cohort), and anti-analysis fingerprinting.
+- Optimize performance (parallel detector execution, caching) and add override
+  workflow + FP analytics once DB mode lands.
 - Document integration points for future UI/API consumers.
 
 ### Phase P4 – Validation & Release Prep

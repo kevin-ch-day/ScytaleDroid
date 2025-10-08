@@ -51,3 +51,6 @@ LIMIT :LIMIT_ROWS;
 ## Notes
 * Use this list to drive a “Needs categorization” view or export.
 * Consider adding filters (search by package) for large datasets.
+* Future enhancement: surface whether static-analysis coverage exists by joining
+  on `android_apk_repository` (and later `static_analysis_runs`) so triage can
+  prioritise uncategorized yet high-risk apps.

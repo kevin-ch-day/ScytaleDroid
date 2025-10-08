@@ -11,6 +11,7 @@ from ..detectors.base import BaseDetector
 from ..detectors.components import IpcExposureDetector
 from ..detectors.correlation import CorrelationDetector
 from ..detectors.crypto import CryptoHygieneDetector
+from ..detectors.dfir import DfirHintsDetector
 from ..detectors.domain_verification import DomainVerificationDetector
 from ..detectors.dynamic import DynamicLoadingDetector
 from ..detectors.fileio import FileIoSinksDetector
@@ -50,6 +51,7 @@ PIPELINE_STAGES: Tuple[PipelineStage, ...] = (
     PipelineStage(DomainVerificationDetector, "domain_verification"),
     PipelineStage(SecretsDetector, "secrets"),
     PipelineStage(StorageBackupDetector, "storage_backup"),
+    PipelineStage(DfirHintsDetector, "dfir_hints"),
     PipelineStage(WebViewDetector, "webview", include_in_quick=False),
     PipelineStage(CryptoHygieneDetector, "crypto_hygiene", include_in_quick=False),
     PipelineStage(DynamicLoadingDetector, "dynamic_loading", include_in_quick=False),
@@ -67,9 +69,18 @@ def run_detector_pipeline(context) -> Tuple[DetectorResult, ...]:
 
     results: list[DetectorResult] = []
     profile = (context.config.profile or "full").lower()
+    enabled = {detector_id.lower() for detector_id in context.config.enabled_detectors or ()}
 
     for stage in PIPELINE_STAGES:
+        context.intermediate_results = tuple(results)
         detector = stage.instantiate()
+
+        if enabled and detector.detector_id.lower() not in enabled:
+            reason = "disabled by custom selection"
+            results.append(
+                _build_skipped_result(detector, stage.section_key, reason)
+            )
+            continue
 
         if profile == "quick" and not stage.include_in_quick:
             reason = "skipped by quick profile"
@@ -119,6 +130,8 @@ def run_detector_pipeline(context) -> Tuple[DetectorResult, ...]:
             result = replace(result, **updates)
 
         results.append(result)
+
+    context.intermediate_results = tuple(results)
 
     return tuple(results)
 

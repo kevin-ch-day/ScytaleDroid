@@ -12,8 +12,6 @@ from xml.etree import ElementTree
 from scytaledroid.StaticAnalysis.core.context import DetectorContext
 from scytaledroid.StaticAnalysis.core.findings import EvidencePointer
 
-from .rules import GROUP_RULES, SENSITIVITY_WEIGHTS, SPECIAL_ACCESS_PERMISSIONS
-
 _ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
 _PERMISSION_TAGS: tuple[str, ...] = (
     "uses-permission",
@@ -37,21 +35,13 @@ class _PermissionProfile:
     name: str
     protection_label: str
     protection_tokens: tuple[str, ...]
+    permission_group: str | None
+    description: str | None
     is_runtime_dangerous: bool
     is_signature: bool
     is_privileged: bool
     is_special_access: bool
-
-
-_DEFAULT_PROFILE = _PermissionProfile(
-    name="",
-    protection_label="normal",
-    protection_tokens=("normal",),
-    is_runtime_dangerous=False,
-    is_signature=False,
-    is_privileged=False,
-    is_special_access=False,
-)
+    severity: int
 
 
 def build_permission_analysis(context: DetectorContext) -> PermissionAnalysis:
@@ -82,23 +72,31 @@ def build_permission_analysis(context: DetectorContext) -> PermissionAnalysis:
         for name, profile in protection_profiles.items()
         if profile.is_privileged
     }
-    special_access = {
-        name
-        for name, profile in protection_profiles.items()
-        if profile.is_special_access
-    }
-
     manifest_nodes = _index_manifest_permissions(context.manifest_root)
     evidence = _collect_evidence(
-        declared_names=protection_profiles.keys(),
-        dangerous=dangerous_permissions,
-        special=special_access,
+        profiles=protection_profiles,
         manifest_nodes=manifest_nodes,
         apk_path=context.apk_path,
     )
 
-    group_hits = _detect_group_hits(declared, protection_profiles)
-    notes = tuple(_format_group_notes(group_hits))
+    token_histogram = _build_token_histogram(protection_profiles)
+    group_summary = _group_permissions(protection_profiles)
+    special_permissions = {
+        name
+        for name, profile in protection_profiles.items()
+        if profile.is_special_access
+    }
+    notes = tuple(
+        note
+        for note in _build_notes(
+            total=len(declared),
+            dangerous=len(dangerous_permissions),
+            signature=len(signature_permissions),
+            privileged=len(privileged_permissions),
+            special_access=len(special_permissions),
+        )
+        if note
+    )
 
     summary = _format_summary(
         total=len(declared),
@@ -113,9 +111,11 @@ def build_permission_analysis(context: DetectorContext) -> PermissionAnalysis:
         signature=signature_permissions,
         privileged=privileged_permissions,
         custom=custom_declared,
-        special=special_access,
         level_counts=level_counts,
-        group_hits=group_hits,
+        token_histogram=token_histogram,
+        group_summary=group_summary,
+        special_permissions=special_permissions,
+        profiles=protection_profiles,
         summary=summary,
     )
 
@@ -147,15 +147,21 @@ def _build_protection_profiles(
         is_runtime = "dangerous" in tokens or name in dangerous_set
         is_signature = any(token.startswith("signature") for token in tokens)
         is_privileged = "privileged" in tokens
-        is_special = name in SPECIAL_ACCESS_PERMISSIONS
+        is_special = _is_special_access(tokens)
+        group = _extract_permission_group(detail_entry)
+        description = _extract_permission_description(detail_entry)
+        severity = _score_tokens(tokens, is_custom=_is_custom_permission(name))
         profiles[name] = _PermissionProfile(
             name=name,
             protection_label="|".join(tokens) if tokens else "unknown",
             protection_tokens=tokens,
+            permission_group=group,
+            description=description,
             is_runtime_dangerous=is_runtime,
             is_signature=is_signature,
             is_privileged=is_privileged,
             is_special_access=is_special,
+            severity=severity,
         )
     return profiles
 
@@ -188,6 +194,62 @@ def _tokenise_protection(raw: object) -> set[str]:
     return tokens
 
 
+_SPECIAL_ACCESS_TOKENS = frozenset({"appop", "preinstalled", "development"})
+_TOKEN_WEIGHTS = {
+    "dangerous": 60,
+    "signature": 80,
+    "privileged": 70,
+    "development": 40,
+    "installer": 35,
+    "appop": 45,
+    "preinstalled": 30,
+    "oem": 25,
+}
+
+
+def _is_special_access(tokens: Sequence[str]) -> bool:
+    return any(token in _SPECIAL_ACCESS_TOKENS for token in tokens)
+
+
+def _extract_permission_group(detail_entry: Sequence[object]) -> str | None:
+    for entry in detail_entry:
+        if isinstance(entry, str) and entry.startswith("android.permission-group."):
+            return entry.rsplit(".", 1)[-1]
+    return None
+
+
+def _extract_permission_description(detail_entry: Sequence[object]) -> str | None:
+    for entry in detail_entry:
+        if not isinstance(entry, str):
+            continue
+        candidate = entry.strip()
+        if not candidate:
+            continue
+        if candidate.startswith("android.permission-group."):
+            continue
+        if candidate.startswith("android.permission"):
+            continue
+        return candidate
+    return None
+
+
+def _score_tokens(tokens: Sequence[str], *, is_custom: bool) -> int:
+    score = 0
+    for token in tokens:
+        score += _TOKEN_WEIGHTS.get(token, 0)
+    if "signature" in tokens and "privileged" in tokens:
+        score += 20
+    if "dangerous" in tokens and "appop" in tokens:
+        score += 15
+    if is_custom:
+        score += 25
+    return score
+
+
+def _is_custom_permission(name: str) -> bool:
+    return not name.startswith("android.permission.")
+
+
 def _index_manifest_permissions(
     manifest_root: ElementTree.Element,
 ) -> Mapping[str, Sequence[tuple[ElementTree.Element, str, int]]]:
@@ -211,26 +273,15 @@ def _index_manifest_permissions(
 
 def _collect_evidence(
     *,
-    declared_names: Iterable[str],
-    dangerous: Iterable[str],
-    special: Iterable[str],
+    profiles: Mapping[str, _PermissionProfile],
     manifest_nodes: Mapping[str, Sequence[tuple[ElementTree.Element, str, int]]],
     apk_path: Path,
     limit: int = 2,
 ) -> tuple[EvidencePointer, ...]:
-    ranked: list[tuple[int, str]] = []
-    dangerous_set = set(dangerous)
-    special_set = set(special)
-    for name in declared_names:
-        weight = SENSITIVITY_WEIGHTS.get(name, 10)
-        if name in dangerous_set:
-            weight += 40
-        if name in special_set:
-            weight += 30
-        if weight <= 10:
-            continue
-        ranked.append((weight, name))
-
+    ranked = sorted(
+        (profile.severity, name) for name, profile in profiles.items()
+    )
+    ranked = [item for item in ranked if item[0] > 0]
     ranked.sort(key=lambda item: (-item[0], item[1]))
 
     pointers: list[EvidencePointer] = []
@@ -265,39 +316,6 @@ def _manifest_pointer(
     )
 
 
-def _detect_group_hits(
-    declared: Sequence[str],
-    profiles: Mapping[str, _PermissionProfile],
-) -> Mapping[str, Sequence[str]]:
-    declared_set = set(declared)
-    hits: MutableMapping[str, list[str]] = {}
-    for rule in GROUP_RULES:
-        matching = sorted(declared_set.intersection(rule.members))
-        if len(matching) < rule.threshold:
-            continue
-        qualifies = False
-        for name in matching:
-            profile = profiles.get(name, _DEFAULT_PROFILE)
-            if profile.is_runtime_dangerous or profile.is_special_access:
-                qualifies = True
-                break
-        if not qualifies:
-            continue
-        hits[rule.key] = matching
-    return hits
-
-
-def _format_group_notes(group_hits: Mapping[str, Sequence[str]]) -> list[str]:
-    notes: list[str] = []
-    for rule in GROUP_RULES:
-        matches = group_hits.get(rule.key)
-        if not matches:
-            continue
-        note = f"{rule.title}: {', '.join(matches)}"
-        notes.append(note)
-    return notes
-
-
 def _format_summary(*, total: int, dangerous: int, signature: int, custom: int) -> str:
     if total == 0:
         return "No manifest permissions declared"
@@ -315,16 +333,32 @@ def _build_metrics(
     signature: Iterable[str],
     privileged: Iterable[str],
     custom: Iterable[str],
-    special: Iterable[str],
     level_counts: Counter,
-    group_hits: Mapping[str, Sequence[str]],
+    token_histogram: Mapping[str, int],
+    group_summary: Mapping[str, Sequence[str]],
+    special_permissions: Iterable[str],
+    profiles: Mapping[str, _PermissionProfile],
     summary: str,
 ) -> Mapping[str, object]:
     dangerous_set = set(dangerous)
     signature_set = set(signature)
     privileged_set = set(privileged)
     custom_set = set(custom)
-    special_set = set(special)
+    special_set = set(special_permissions)
+
+    top_permissions = [
+        {
+            "name": profile.name,
+            "protection": profile.protection_label,
+            "group": profile.permission_group,
+            "severity": profile.severity,
+        }
+        for profile in sorted(
+            profiles.values(),
+            key=lambda profile: (-profile.severity, profile.name),
+        )
+        if profile.severity > 0
+    ]
 
     metrics: dict[str, object] = {
         "summary": summary,
@@ -338,18 +372,67 @@ def _build_metrics(
             level: level_counts[level]
             for level in sorted(level_counts.keys())
         },
+        "protection_tokens": {
+            token: token_histogram[token]
+            for token in sorted(token_histogram.keys())
+        },
         "dangerous_permissions": sorted(dangerous_set),
-        "special_access_permissions": sorted(special_set),
         "signature_permissions": sorted(signature_set),
         "privileged_permissions": sorted(privileged_set),
     }
-    if group_hits:
-        metrics["notable_groups"] = {
-            key: list(value) for key, value in sorted(group_hits.items())
-        }
     if custom_set:
         metrics["custom_permissions"] = sorted(custom_set)
+    if special_set:
+        metrics["special_access_permissions"] = sorted(special_set)
+    if group_summary:
+        metrics["permission_groups"] = {
+            group: sorted(names) for group, names in sorted(group_summary.items())
+        }
+    if top_permissions:
+        metrics["top_permissions"] = top_permissions
     return metrics
+
+
+def _build_token_histogram(
+    profiles: Mapping[str, _PermissionProfile]
+) -> Counter[str]:
+    tokens = Counter()
+    for profile in profiles.values():
+        tokens.update(profile.protection_tokens)
+    return tokens
+
+
+def _group_permissions(
+    profiles: Mapping[str, _PermissionProfile]
+) -> Mapping[str, list[str]]:
+    groups: MutableMapping[str, list[str]] = defaultdict(list)
+    for profile in profiles.values():
+        if not profile.permission_group:
+            continue
+        groups[profile.permission_group].append(profile.name)
+    return groups
+
+
+def _build_notes(
+    *,
+    total: int,
+    dangerous: int,
+    signature: int,
+    privileged: int,
+    special_access: int,
+) -> list[str]:
+    notes: list[str] = []
+    if total == 0:
+        return notes
+    if dangerous:
+        notes.append(f"Contains {dangerous} runtime dangerous permission(s)")
+    if signature:
+        notes.append(f"Includes {signature} signature level permission(s)")
+    if privileged:
+        notes.append(f"Declares {privileged} privileged permission(s)")
+    if special_access:
+        notes.append("Requests permissions gated by special access workflows")
+    return notes
 
 
 __all__ = ["PermissionAnalysis", "build_permission_analysis"]

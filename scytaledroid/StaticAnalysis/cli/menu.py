@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from collections import Counter
+from collections import Counter, defaultdict
+from dataclasses import dataclass, field, replace
+from datetime import datetime
 import logging
 from pathlib import Path
+import sys
 from time import perf_counter
-from typing import Any, List, Mapping, Optional
+from typing import Any, Dict, Iterable, Mapping, MutableMapping, Optional, Sequence, Tuple
 
 from scytaledroid.Config import app_config
 from scytaledroid.Utils.DisplayUtils import (
@@ -17,178 +20,594 @@ from scytaledroid.Utils.DisplayUtils import (
 )
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
-from ..core import AnalysisConfig, StaticAnalysisError, StaticAnalysisReport, analyze_apk
-from ..core.repository import ArtifactGroup, group_artifacts, list_categories, list_packages
+from ..core import (
+    AnalysisConfig,
+    StaticAnalysisError,
+    StaticAnalysisReport,
+    analyze_apk,
+)
+from ..core.findings import EvidencePointer, Finding, SeverityLevel
+from ..core.repository import (
+    ArtifactGroup,
+    RepositoryArtifact,
+    group_artifacts,
+    list_categories,
+    list_packages,
+)
 from ..persistence import ReportStorageError, save_report
-from .options import ScanDisplayOptions, resolve_display_options
-from .progress import ScanProgress
+from .sections import SECTION_DEFINITIONS, extract_integrity_profiles
 
 
-def _configure_logging_for_cli(verbosity: str) -> None:
-    root_level = logging.DEBUG if verbosity == "debug" else logging.WARNING
+_SECTION_TITLE_LOOKUP = {
+    definition.key: definition.title for definition in SECTION_DEFINITIONS
+}
+
+_SEVERITY_LABELS: Mapping[SeverityLevel, Tuple[str, str]] = {
+    SeverityLevel.P0: ("High", "H"),
+    SeverityLevel.P1: ("Med", "M"),
+    SeverityLevel.P2: ("Low", "L"),
+    SeverityLevel.NOTE: ("Info", "I"),
+}
+
+_SEVERITY_TOKEN_ORDER = ("H", "M", "L", "I")
+
+_PROFILE_LABELS: Mapping[str, str] = {
+    "metadata": "Metadata",
+    "permissions": "Permission analysis",
+    "lightweight": "Lightweight",
+    "full": "Full",
+    "split": "Split-APK composition",
+    "custom": "Custom",
+}
+
+_MICRO_TESTS: Tuple[Tuple[str, str], ...] = (
+    ("manifest", "Manifest-only"),
+    ("provider_acl", "Provider ACL only"),
+    ("nsc", "NSC only"),
+    ("webview", "WebView quick"),
+    ("secrets", "Secrets sampler"),
+)
+
+_EVIDENCE_STEPS = (1, 2, 4)
+
+
+@dataclass(frozen=True)
+class ScopeSelection:
+    """Represents the scope of a static-analysis run."""
+
+    scope: str
+    label: str
+    groups: Tuple[ArtifactGroup, ...]
+
+
+@dataclass(frozen=True)
+class RunParameters:
+    """User-facing configuration for an analysis run."""
+
+    profile: str
+    scope: str
+    scope_label: str
+    selected_tests: Tuple[str, ...] = tuple()
+    evidence_lines: int = 2
+    finding_limit: int = 25
+    secrets_entropy: float = 4.5
+    secrets_hits_per_bucket: int = 40
+    secrets_scope: str = "resources"
+    workers: str = "auto"
+    reuse_cache: bool = True
+    log_level: str = "info"
+    trace_detectors: Tuple[str, ...] = tuple()
+    dry_run: bool = False
+
+    @property
+    def profile_label(self) -> str:
+        return _PROFILE_LABELS.get(self.profile, self.profile.title())
+
+
+@dataclass
+class ArtifactOutcome:
+    """Stores report metadata for an analysed artifact."""
+
+    label: str
+    report: StaticAnalysisReport
+    severity: Counter[str]
+    duration_seconds: float
+    saved_path: Optional[str]
+    started_at: datetime
+    finished_at: datetime
+
+
+@dataclass
+class AppRunResult:
+    """Aggregated findings for a package across base + splits."""
+
+    package_name: str
+    category: str
+    artifacts: list[ArtifactOutcome] = field(default_factory=list)
+    signer: Optional[str] = None
+
+    def severity_totals(self) -> Counter[str]:
+        totals: Counter[str] = Counter()
+        for artifact in self.artifacts:
+            totals.update(artifact.severity)
+        return totals
+
+    def base_report(self) -> Optional[StaticAnalysisReport]:
+        for artifact in self.artifacts:
+            _, _, artifact_profile, _ = extract_integrity_profiles(artifact.report)
+            role = str((artifact_profile or {}).get("role") or "").lower()
+            if role == "base":
+                return artifact.report
+        return self.artifacts[0].report if self.artifacts else None
+
+
+@dataclass
+class RunOutcome:
+    """Results captured from a completed scan."""
+
+    results: list[AppRunResult]
+    started_at: datetime
+    finished_at: datetime
+    scope: ScopeSelection
+    base_dir: Path
+    warnings: list[str] = field(default_factory=list)
+    failures: list[str] = field(default_factory=list)
+
+    @property
+    def duration_seconds(self) -> float:
+        return (self.finished_at - self.started_at).total_seconds()
+
+
+def _configure_logging_for_cli(level: str) -> None:
+    level = level.strip().lower()
+    if level not in {"debug", "info"}:
+        level = "info"
+
+    root_level = logging.DEBUG if level == "debug" else logging.INFO
     logging.getLogger().setLevel(root_level)
 
-    androguard_level = logging.DEBUG if verbosity == "debug" else logging.ERROR
+    androguard_level = logging.DEBUG if level == "debug" else logging.ERROR
     for name in ("androguard", "androguard.core", "androguard.core.axml"):
         logging.getLogger(name).setLevel(androguard_level)
 
-    quiet_level = logging.DEBUG if verbosity == "debug" else logging.WARNING
+    quiet_level = logging.DEBUG if level == "debug" else logging.WARNING
     for name in ("zipfile", "urllib3"):
         logging.getLogger(name).setLevel(quiet_level)
 
 
 def static_analysis_menu() -> None:
-    """Render the static analysis menu loop."""
+    """Render the static analysis menu loop with staged configuration screens."""
+
+    option_map: Dict[str, str] = {
+        "1": "metadata",
+        "2": "permissions",
+        "3": "lightweight",
+        "4": "full",
+        "5": "split",
+        "6": "custom",
+    }
 
     while True:
         print()
-        menu_utils.print_header("Static Analysis")
-        options = {
-            "1": "Run static analysis for all repository apps",
-            "2": "Run static analysis for a category",
-            "3": "Run static analysis for a specific app",
-        }
-        menu_utils.print_menu(options, is_main=False)
-        choice = prompt_utils.get_choice(list(options.keys()) + ["0"], default="0")
-
+        menu_utils.print_header("Static Analysis (APK-only)")
+        menu_utils.print_menu(
+            {
+                "1": "Metadata scan (fast)",
+                "2": "Permission analysis",
+                "3": "Lightweight static analysis",
+                "4": "Full static analysis",
+                "5": "Split-APK composition (base + splits)",
+                "6": "Custom run (pick tests & thresholds)",
+            },
+            is_main=False,
+        )
+        choice = prompt_utils.get_choice(list(option_map.keys()) + ["0"], default="0")
         if choice == "0":
             break
-        if choice == "1":
-            _run_full_repository_scan()
-        elif choice == "2":
-            _run_category_scan()
-        elif choice == "3":
-            _run_package_scan()
+
+        profile = option_map[choice]
+        _launch_scan_flow(profile)
 
 
-def _run_full_repository_scan() -> None:
+def _launch_scan_flow(initial_profile: str) -> None:
     base_dir = (Path(app_config.DATA_DIR) / "apks").resolve()
-    groups: List[ArtifactGroup] = group_artifacts(base_dir)
+    groups = tuple(group_artifacts(base_dir))
     if not groups:
-        _print_no_groups_warning()
-        return
-
-    options = resolve_display_options()
-    _scan_groups(
-        groups,
-        base_dir=base_dir,
-        heading="Full Repository Scan",
-        description=f"{len(groups)} group(s), {sum(len(g.artifacts) for g in groups)} artifact(s)",
-        options=options,
-    )
-
-
-def _run_package_scan() -> None:
-    base_dir = (Path(app_config.DATA_DIR) / "apks").resolve()
-    groups: List[ArtifactGroup] = group_artifacts(base_dir)
-    if not groups:
-        _print_no_groups_warning()
-        return
-
-    packages = list_packages(groups)
-    if not packages:
-        _print_no_groups_warning()
-        return
-
-    print()
-    menu_utils.print_header("Package Scan", "Select an app")
-    rows = []
-    for idx, (package_name, count) in enumerate(packages, start=1):
-        rows.append([str(idx), package_name, str(count)])
-    table_utils.render_table(["#", "Package", "Groups"], rows)
-    print()
-    choice = prompt_utils.get_choice(
-        [str(idx) for idx in range(1, len(packages) + 1)] + ["0"],
-        prompt="Select package #: ",
-        default="0",
-    )
-    if choice == "0":
-        return
-
-    package_name, _ = packages[int(choice) - 1]
-    scoped_groups = [group for group in groups if group.package_name == package_name]
-    if not scoped_groups:
-        print(status_messages.status("No artifacts found for the selected package.", level="warn"))
+        print(
+            status_messages.status(
+                "No harvested APK groups found. Run Device Analysis → 7 to pull artifacts.",
+                level="warn",
+            )
+        )
         prompt_utils.press_enter_to_continue()
         return
 
-    options = resolve_display_options()
-    _scan_groups(
-        scoped_groups,
-        base_dir=base_dir,
-        heading=f"App Scan — {package_name}",
-        description=f"{len(scoped_groups)} group(s)",
-        options=options,
+    selection = _select_scope(groups)
+    profile = _prompt_profile_choice(initial_profile)
+    params = RunParameters(profile=profile, scope=selection.scope, scope_label=selection.label)
+    params = _prompt_tuning(params)
+
+    _configure_logging_for_cli(params.log_level)
+    outcome = _execute_scan(selection, params, base_dir)
+    _render_run_results(outcome, params)
+
+
+def _select_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
+    print()
+    menu_utils.print_header("Scope", "Select the analysis scope")
+    options = {"1": "App", "2": "Category", "3": "All apps"}
+    for key, label in options.items():
+        print(f" {key}) {label}")
+    choice = prompt_utils.get_choice(list(options.keys()), default="1")
+
+    if choice == "1":
+        return _select_app_scope(groups)
+    if choice == "2":
+        return _select_category_scope(groups)
+    return ScopeSelection("all", "All apps", tuple(groups))
+
+
+def _select_app_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
+    packages = list_packages(groups)
+    if not packages:
+        print(status_messages.status("No packages available for analysis.", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return ScopeSelection("all", "All apps", tuple(groups))
+
+    print()
+    menu_utils.print_header("Scope — App", "Select 1 package")
+    rows = [[str(idx), package, str(count)] for idx, (package, count) in enumerate(packages, start=1)]
+    table_utils.render_table(["#", "Package", "Groups"], rows)
+    choice = prompt_utils.get_choice(
+        [str(idx) for idx in range(1, len(packages) + 1)],
+        prompt="Select package #: ",
+        default="1",
     )
+    package_name, _ = packages[int(choice) - 1]
+    scoped = tuple(group for group in groups if group.package_name == package_name)
+    return ScopeSelection("app", package_name, scoped)
 
 
-def _run_category_scan() -> None:
-    base_dir = (Path(app_config.DATA_DIR) / "apks").resolve()
-    groups: List[ArtifactGroup] = group_artifacts(base_dir)
-    if not groups:
-        _print_no_groups_warning()
-        return
-
+def _select_category_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
     categories = list_categories(groups)
     if not categories:
         print(status_messages.status("No category data available.", level="warn"))
         prompt_utils.press_enter_to_continue()
-        return
+        return ScopeSelection("all", "All apps", tuple(groups))
 
     print()
-    menu_utils.print_header("Category Scan", "Select a category")
-    rows = []
-    for idx, (category, count) in enumerate(categories, start=1):
-        rows.append([str(idx), category, str(count)])
+    menu_utils.print_header("Scope — Category", "Select 1 category")
+    rows = [[str(idx), category, str(count)] for idx, (category, count) in enumerate(categories, start=1)]
     table_utils.render_table(["#", "Category", "Groups"], rows)
-    print()
     choice = prompt_utils.get_choice(
-        [str(idx) for idx in range(1, len(categories) + 1)] + ["0"],
+        [str(idx) for idx in range(1, len(categories) + 1)],
         prompt="Select category #: ",
-        default="0",
+        default="1",
     )
-    if choice == "0":
-        return
-
     category_name, _ = categories[int(choice) - 1]
-    scoped_groups = [group for group in groups if group.category == category_name]
-    if not scoped_groups:
-        print(status_messages.status("No artifacts found for the selected category.", level="warn"))
-        prompt_utils.press_enter_to_continue()
-        return
+    scoped = tuple(group for group in groups if group.category == category_name)
+    return ScopeSelection("category", category_name, scoped)
 
-    options = resolve_display_options()
-    _scan_groups(
-        scoped_groups,
-        base_dir=base_dir,
-        heading=f"Category Scan — {category_name}",
-        description=f"{len(scoped_groups)} group(s)",
-        options=options,
+
+def _prompt_profile_choice(initial_profile: str) -> str:
+    profiles = ["metadata", "permissions", "lightweight", "full", "split", "custom"]
+    print()
+    menu_utils.print_header("Profile", "Choose the analysis profile")
+    rows: list[list[str]] = []
+    default_index = 1
+    for idx, key in enumerate(profiles, start=1):
+        label = _PROFILE_LABELS.get(key, key.title())
+        marker = "(default)" if key == initial_profile else ""
+        if key == initial_profile:
+            default_index = idx
+        rows.append([str(idx), label, marker])
+    table_utils.render_table(["#", "Profile", ""], rows)
+    choice = prompt_utils.get_choice(
+        [str(idx) for idx in range(1, len(profiles) + 1)],
+        prompt="Profile #: ",
+        default=str(default_index),
     )
+    return profiles[int(choice) - 1]
+
+
+def _prompt_tuning(base_params: RunParameters) -> RunParameters:
+    params = base_params
+    print()
+    menu_utils.print_header("Tuning", "Adjust quick parameters")
+
+    if params.profile == "custom":
+        tests = _prompt_custom_tests(params.selected_tests)
+        params = replace(params, selected_tests=tests)
+    else:
+        params = replace(params, selected_tests=tuple())
+
+    evidence = _prompt_int("Evidence lines", params.evidence_lines, choices=_EVIDENCE_STEPS)
+    findings = _prompt_int("Max findings/test", params.finding_limit, minimum=1)
+    entropy = _prompt_float("Secrets sampler entropy ≥", params.secrets_entropy, minimum=0.0)
+    hits = _prompt_int("Secrets sampler hits/bucket", params.secrets_hits_per_bucket, minimum=1)
+    scope_choice = _prompt_choice(
+        "Secrets sampler scope",
+        {"1": "resources-only", "2": "dex-strings", "3": "both"},
+        default={"resources": "1", "dex": "2", "both": "3"}.get(params.secrets_scope, "1"),
+    )
+    secrets_scope = {"1": "resources", "2": "dex", "3": "both"}[scope_choice]
+
+    workers = prompt_utils.prompt_text(
+        "Workers",
+        default=params.workers,
+        required=False,
+        hint="Use 'auto' to match CPU count.",
+    )
+    reuse_cache = prompt_utils.prompt_yes_no(
+        "Reuse cache", default=params.reuse_cache
+    )
+    log_level = _prompt_choice("Log level", {"1": "INFO", "2": "DEBUG"}, default="1")
+    traces_raw = prompt_utils.prompt_text(
+        "Trace detectors",
+        default=",".join(params.trace_detectors) if params.trace_detectors else "",
+        required=False,
+        hint="Comma-separated detector IDs (optional).",
+    )
+    trace_detectors = tuple(
+        token.strip()
+        for token in traces_raw.split(",")
+        if token.strip()
+    )
+    dry_run = prompt_utils.prompt_yes_no("Dry-run (no persistence)", default=params.dry_run)
+
+    return replace(
+        params,
+        evidence_lines=evidence,
+        finding_limit=findings,
+        secrets_entropy=entropy,
+        secrets_hits_per_bucket=hits,
+        secrets_scope=secrets_scope,
+        workers=workers or "auto",
+        reuse_cache=reuse_cache,
+        log_level="debug" if log_level == "2" else "info",
+        trace_detectors=trace_detectors,
+        dry_run=dry_run,
+    )
+
+
+def _prompt_custom_tests(selected: Tuple[str, ...]) -> Tuple[str, ...]:
+    rows: list[list[str]] = []
+    for idx, (key, label) in enumerate(_MICRO_TESTS, start=1):
+        marker = "x" if key in selected else " "
+        rows.append([str(idx), f"[{marker}] {label}"])
+    table_utils.render_table(["#", "Test"], rows)
+    default = ",".join(str(idx) for idx, (key, _) in enumerate(_MICRO_TESTS, start=1) if key in selected)
+    response = prompt_utils.prompt_text(
+        "Select tests (comma-separated #)",
+        default=default,
+        required=False,
+    )
+    if not response.strip():
+        return selected if selected else tuple(key for key, _ in _MICRO_TESTS)
+
+    tokens = {token.strip() for token in response.split(",") if token.strip()}
+    chosen: list[str] = []
+    for token in tokens:
+        if not token.isdigit():
+            continue
+        index = int(token) - 1
+        if 0 <= index < len(_MICRO_TESTS):
+            chosen.append(_MICRO_TESTS[index][0])
+    return tuple(chosen or (key for key, _ in _MICRO_TESTS))
+
+
+def _prompt_int(label: str, default: int, *, choices: Sequence[int] | None = None, minimum: int = 1) -> int:
+    if choices:
+        print(f"{label} options: {', '.join(str(value) for value in choices)}")
+        default_index = next((idx + 1 for idx, value in enumerate(choices) if value == default), 1)
+        keys = [str(idx + 1) for idx in range(len(choices))]
+        choice = prompt_utils.get_choice(keys, default=str(default_index))
+        selected_index = int(choice) - 1
+        selected_index = max(0, min(selected_index, len(choices) - 1))
+        return choices[selected_index]
+
+    while True:
+        response = prompt_utils.prompt_text(label, default=str(default), required=False)
+        if not response.strip():
+            return max(minimum, default)
+        try:
+            value = int(response)
+            return max(minimum, value)
+        except ValueError:
+            print(status_messages.status("Please enter a whole number.", level="warn"))
+
+
+def _prompt_float(label: str, default: float, *, minimum: float = 0.0) -> float:
+    while True:
+        response = prompt_utils.prompt_text(label, default=f"{default}", required=False)
+        if not response.strip():
+            return max(minimum, default)
+        try:
+            value = float(response)
+            return max(minimum, value)
+        except ValueError:
+            print(status_messages.status("Please enter a numeric value.", level="warn"))
+
+
+def _prompt_choice(label: str, options: Mapping[str, str], *, default: str) -> str:
+    for key, option_label in options.items():
+        print(f" {key}) {option_label}")
+    return prompt_utils.get_choice(list(options.keys()), default=default)
+
+
+def _execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Path) -> RunOutcome:
+    config = _build_analysis_config(params)
+    started_at = datetime.now()
+    total_groups = len(selection.groups)
+    results: list[AppRunResult] = []
+    warnings: list[str] = []
+    failures: list[str] = []
+
+    for group_index, group in enumerate(selection.groups, start=1):
+        app_result = AppRunResult(package_name=group.package_name, category=group.category)
+        results.append(app_result)
+        artifact_total = len(group.artifacts)
+
+        for artifact_index, artifact in enumerate(group.artifacts, start=1):
+            status = (
+                f"Analyzing {group_index}/{total_groups} — {group.package_name} "
+                f"({artifact_index}/{artifact_total})"
+            )
+            _update_status_line(status)
+
+            artifact_started = perf_counter()
+            wall_clock_started = datetime.now()
+            report, saved_path, message, fatal = _generate_report(
+                artifact,
+                base_dir=base_dir,
+                config=config,
+                params=params,
+            )
+            wall_clock_finished = datetime.now()
+            duration = perf_counter() - artifact_started
+
+            if fatal or report is None:
+                failures.append(f"{artifact.display_path}: {message or 'analysis failed'}")
+                continue
+
+            if message:
+                warnings.append(f"{artifact.display_path}: {message}")
+
+            severity_counter: Counter[str] = Counter()
+            for finding in report.findings:
+                if isinstance(finding, Finding):
+                    severity_counter[_severity_token(finding.severity_gate)] += 1
+
+            app_result.artifacts.append(
+                ArtifactOutcome(
+                    label=artifact.artifact_label or artifact.display_path,
+                    report=report,
+                    severity=severity_counter,
+                    duration_seconds=duration,
+                    saved_path=None if params.dry_run else (saved_path or None),
+                    started_at=wall_clock_started,
+                    finished_at=wall_clock_finished,
+                )
+            )
+
+        base_report = app_result.base_report()
+        if base_report and base_report.signatures:
+            app_result.signer = base_report.signatures[0]
+
+    _update_status_line("")
+    print()
+
+    finished_at = datetime.now()
+    return RunOutcome(
+        results=results,
+        started_at=started_at,
+        finished_at=finished_at,
+        scope=selection,
+        base_dir=base_dir,
+        warnings=warnings,
+        failures=failures,
+    )
+
+
+def _update_status_line(text: str) -> None:
+    if not text:
+        sys.stdout.write("\r" + " " * 100 + "\r")
+        sys.stdout.flush()
+        return
+    rendered = text[:98]
+    sys.stdout.write("\r" + rendered.ljust(100))
+    sys.stdout.flush()
+
+
+def _build_analysis_config(params: RunParameters) -> AnalysisConfig:
+    profile_map = {
+        "metadata": "quick",
+        "permissions": "quick",
+        "lightweight": "quick",
+        "full": "full",
+        "split": "quick",
+        "custom": "full",
+    }
+    profile = profile_map.get(params.profile, "full")
+    enabled_detectors = _map_tests_to_detectors(params)
+    enable_string_index = params.profile not in {"metadata", "permissions"}
+    if params.profile == "custom" and "secrets" in params.selected_tests:
+        enable_string_index = True
+
+    return AnalysisConfig(
+        profile=profile,
+        verbosity=params.log_level,
+        enabled_detectors=enabled_detectors or None,
+        enable_string_index=enable_string_index,
+    )
+
+
+def _map_tests_to_detectors(params: RunParameters) -> Tuple[str, ...]:
+    if params.profile == "metadata":
+        return ("integrity_identity",)
+    if params.profile == "permissions":
+        return ("permissions_profile",)
+    if params.profile != "custom":
+        return tuple()
+
+    mapping: Mapping[str, Tuple[str, ...]] = {
+        "manifest": (
+            "integrity_identity",
+            "manifest_baseline",
+            "ipc_components",
+            "provider_acl",
+        ),
+        "provider_acl": ("provider_acl",),
+        "nsc": ("network_surface",),
+        "webview": ("webview",),
+        "secrets": ("secrets",),
+    }
+    detectors: list[str] = []
+    for test_key in params.selected_tests:
+        detectors.extend(mapping.get(test_key, ()))
+    return tuple(dict.fromkeys(detectors))
 
 
 def _generate_report(
-    apk_path: Path,
+    artifact: RepositoryArtifact,
     *,
-    metadata: Optional[Mapping[str, object]] = None,
-    storage_root: Optional[Path] = None,
-    config: Optional[AnalysisConfig] = None,
-    display_options: Optional[ScanDisplayOptions] = None,
+    base_dir: Path,
+    config: AnalysisConfig,
+    params: RunParameters,
 ) -> tuple[Optional[StaticAnalysisReport], Optional[Path], Optional[str], bool]:
+    metadata_payload: MutableMapping[str, object] = dict(artifact.metadata)
+    metadata_payload.setdefault("run_profile", params.profile)
+    metadata_payload.setdefault("run_scope", params.scope)
+    metadata_payload.setdefault("run_scope_label", params.scope_label)
+    metadata_payload.setdefault("selected_tests", list(params.selected_tests))
+    metadata_payload.setdefault(
+        "tuning",
+        {
+            "evidence_lines": params.evidence_lines,
+            "finding_limit": params.finding_limit,
+            "secrets_entropy": params.secrets_entropy,
+            "secrets_hits_per_bucket": params.secrets_hits_per_bucket,
+            "secrets_scope": params.secrets_scope,
+            "workers": params.workers,
+            "reuse_cache": params.reuse_cache,
+            "log_level": params.log_level,
+            "trace_detectors": list(params.trace_detectors),
+            "dry_run": params.dry_run,
+        },
+    )
+
     try:
-        metadata_payload = dict(metadata or {})
-        if display_options is not None:
-            metadata_payload.setdefault("run_profile", display_options.profile)
-            metadata_payload.setdefault("run_verbosity", display_options.verbosity)
-            metadata_payload.setdefault("evidence_limit", display_options.evidence_limit)
         report = analyze_apk(
-            apk_path,
+            artifact.path,
             metadata=metadata_payload,
-            storage_root=storage_root,
+            storage_root=base_dir,
             config=config,
         )
     except StaticAnalysisError as exc:
         return None, None, str(exc), True
+
+    if params.dry_run:
+        return report, None, "dry-run (not persisted)", False
 
     try:
         saved_paths = save_report(report)
@@ -198,135 +617,252 @@ def _generate_report(
         return report, None, str(exc), False
 
 
-def _scan_groups(
-    groups: List[ArtifactGroup],
-    *,
-    base_dir: Path,
-    heading: str,
-    description: str,
-    options: ScanDisplayOptions,
-) -> None:
-    print()
-    menu_utils.print_header(heading, description)
-
-    _configure_logging_for_cli(options.verbosity)
-
-    progress = ScanProgress(total_groups=len(groups), options=options)
-    progress.announce_options()
-
-    config = AnalysisConfig(profile=options.profile, verbosity=options.verbosity)
-    successes = 0
-    failures = 0
-    severity_totals: Counter[str] = Counter()
-    printed_logs: set[str] = set()
-    package_cache: dict[tuple[str, str, str], Mapping[str, Any]] = {}
-
-    scan_started = perf_counter()
-
-    for index, group in enumerate(groups, start=1):
-        progress.start_group(
-            index=index,
-            package_name=group.package_name,
-            version=group.version_display,
-            category=group.category,
-            artifact_count=len(group.artifacts),
-        )
-
-        for artifact_index, artifact in enumerate(group.artifacts, start=1):
-            label = artifact.artifact_label or artifact.display_path
-            progress.artifact_started(
-                artifact_index=artifact_index,
-                artifact_total=len(group.artifacts),
-                label=label,
-            )
-
-            wall_clock_started = progress.now()
-            artifact_started = perf_counter()
-            report, saved_path, message, fatal = _generate_report(
-                artifact.path,
-                metadata=artifact.metadata,
-                storage_root=base_dir,
-                config=config,
-                display_options=options,
-            )
-            wall_clock_finished = progress.now()
-            artifact_duration = perf_counter() - artifact_started
-
-            if fatal or report is None:
-                failures += 1
-                progress.artifact_failed(label, message or "analysis failed")
-                continue
-
-            successes += 1
-            counter = progress.artifact_completed(
-                label=label,
-                saved_path=saved_path,
-                findings=report.findings,
-                duration_seconds=artifact_duration if options.show_timings else None,
-                warning=message,
-            )
-            severity_totals.update(counter)
-
-            if not options.quiet:
-                progress.render_artifact_view(
-                    report=report,
-                    artifact_label=label,
-                    artifact_index=artifact_index,
-                    artifact_total=len(group.artifacts),
-                    category=group.category,
-                    started_at=wall_clock_started,
-                    finished_at=wall_clock_finished,
-                    runtime_seconds=artifact_duration,
-                    severity_counter=counter,
-                    package_cache=package_cache,
-                    printed_logs=printed_logs,
-                )
-
-    elapsed = perf_counter() - scan_started
-
-    summary_lines = [
-        ("Groups processed", len(groups)),
-        ("Artifacts analysed", successes + failures),
-        ("Successful reports", successes),
-        ("Failures", failures),
-    ]
-
-    if severity_totals:
-        ordered_labels = ["P0", "P1", "P2", "NOTE"]
-        summary_lines.append(
-            (
-                "Findings",
-                ", ".join(
-                    f"{label}:{severity_totals[label]}"
-                    for label in ordered_labels
-                    if severity_totals.get(label, 0)
-                )
-                or "none recorded",
-            )
-        )
-
-    summary_lines.append(("Elapsed", _format_duration(elapsed)))
+def _render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
+    totals = Counter()
+    for result in outcome.results:
+        totals.update(result.severity_totals())
 
     print()
-    table_utils.render_key_value_pairs(summary_lines)
-    print()
-    prompt_utils.press_enter_to_continue("Scan complete. Press Enter to return...")
-
-
-def _print_no_groups_warning() -> None:
-    print(
-        status_messages.status(
-            "No harvested APK groups found. Run Device Analysis → 7 to pull artifacts.",
-            level="warn",
-        )
+    scope_desc = (
+        "All apps"
+        if outcome.scope.scope == "all"
+        else f"{outcome.scope.scope.title()}={outcome.scope.label}"
     )
-    prompt_utils.press_enter_to_continue()
+    print(
+        f"Run Summary — Profile: {params.profile_label} | Scope: {scope_desc} | "
+        f"Apps: {len(outcome.results)}"
+    )
+    print(
+        "   ".join(
+            f"{label} {totals.get(token, 0)}"
+            for label, token in [
+                ("High", "H"),
+                ("Med", "M"),
+                ("Low", "L"),
+                ("Info", "I"),
+            ]
+        )
+        + f"   (duration { _format_duration(outcome.duration_seconds) })"
+    )
+
+    if outcome.warnings:
+        print(status_messages.status("Warnings captured — review logs for details.", level="info"))
+    if outcome.failures:
+        print(status_messages.status(f"Failures: {len(outcome.failures)}", level="warn"))
+
+    prompt = "Select app # to open, or q to return: "
+    while True:
+        _render_app_table(outcome.results)
+        response = input(prompt).strip().lower()
+        if response == "q":
+            break
+        if not response.isdigit():
+            print(status_messages.status("Enter an app number or q to exit.", level="warn"))
+            continue
+        index = int(response) - 1
+        if not 0 <= index < len(outcome.results):
+            print(status_messages.status("Invalid app selection.", level="warn"))
+            continue
+        _app_detail_loop(outcome, params, outcome.results[index])
+
+
+def _render_app_table(results: Sequence[AppRunResult]) -> None:
+    rows: list[list[str]] = []
+    for idx, app_result in enumerate(results, start=1):
+        totals = app_result.severity_totals()
+        base_report = app_result.base_report()
+        version = "—"
+        target_sdk = "—"
+        if base_report:
+            version_name = base_report.manifest.version_name or "—"
+            version_code = base_report.manifest.version_code
+            version = (
+                f"{version_name} ({version_code})"
+                if version_code
+                else version_name
+            )
+            target_sdk = base_report.manifest.target_sdk or "—"
+        signer = app_result.signer or "—"
+        rows.append(
+            [
+                str(idx),
+                app_result.package_name,
+                version,
+                f"targetSdk={target_sdk}",
+                signer,
+                f"H {totals.get('H', 0)}",
+                f"M {totals.get('M', 0)}",
+                f"L {totals.get('L', 0)}",
+                f"I {totals.get('I', 0)}",
+            ]
+        )
+    headers = ["#", "Package", "Version", "Target", "Signer", "High", "Med", "Low", "Info"]
+    print()
+    table_utils.render_table(headers, rows)
+
+
+def _app_detail_loop(outcome: RunOutcome, params: RunParameters, app_result: AppRunResult) -> None:
+    active_levels = set(_SEVERITY_TOKEN_ORDER)
+    evidence_lines = params.evidence_lines
+    allow_rerun = params.profile != "custom"
+
+    while True:
+        _render_app_detail(app_result, evidence_lines, active_levels, params.finding_limit)
+        print("[f] Filter severity  [e] Evidence lines  [r] Rerun micro-test  [q] Back")
+        command = input("Command: ").strip().lower()
+        if command == "q":
+            break
+        if command == "f":
+            active_levels = _prompt_severity_filter(active_levels)
+        elif command == "e":
+            evidence_lines = _cycle_evidence_lines(evidence_lines)
+        elif command == "r" and allow_rerun:
+            _run_micro_rerun(outcome, app_result, evidence_lines)
+        else:
+            print(status_messages.status("Unknown command.", level="warn"))
+
+
+def _render_app_detail(
+    app_result: AppRunResult,
+    evidence_lines: int,
+    active_levels: Iterable[str],
+    finding_limit: int,
+) -> None:
+    active = set(active_levels)
+    base_report = app_result.base_report()
+    version = target_sdk = "—"
+    if base_report:
+        version_name = base_report.manifest.version_name or "—"
+        version_code = base_report.manifest.version_code
+        version = f"{version_name} ({version_code})" if version_code else version_name
+        target_sdk = base_report.manifest.target_sdk or "—"
+
+    totals = app_result.severity_totals()
+    print()
+    print(f"{app_result.package_name} — Findings")
+    print("―" * 40)
+    print(
+        f"High {totals.get('H',0)}   Med {totals.get('M',0)}   Low {totals.get('L',0)}   Info {totals.get('I',0)}"
+    )
+    print(f"Version: {version}   targetSdk={target_sdk}   Category: {app_result.category}")
+
+    grouped = _collect_findings(app_result, evidence_lines)
+    for section_key in [definition.key for definition in SECTION_DEFINITIONS]:
+        entries = grouped.get(section_key, [])
+        filtered = [entry for entry in entries if entry["token"] in active]
+        if not filtered:
+            continue
+        title = _SECTION_TITLE_LOOKUP.get(section_key, section_key)
+        print()
+        print(f"[{title}]")
+        for entry in filtered[: finding_limit]:
+            print(
+                f"  {entry['token']} {entry['id']}  {entry['title']}"
+            )
+            if entry["evidence"]:
+                print(f"      file: {entry['evidence'][0]}")
+            if entry["snippet"]:
+                print(f"      snippet: {entry['snippet']}")
+            print(f"      rationale: {entry['rationale']}")
+            if entry["fix"]:
+                print(f"      fix: {entry['fix']}")
+
+
+def _collect_findings(app_result: AppRunResult, evidence_lines: int) -> Dict[str, list[Dict[str, str]]]:
+    grouped: Dict[str, list[Dict[str, str]]] = defaultdict(list)
+    for artifact in app_result.artifacts:
+        for result in artifact.report.detector_results:
+            section = result.section_key
+            for finding in result.findings:
+                token = _severity_token(finding.severity_gate)
+                evidence_text = _format_evidence(finding.evidence, evidence_lines)
+                snippet = finding.evidence[0].description if finding.evidence else ""
+                grouped[section].append(
+                    {
+                        "token": token,
+                        "id": finding.finding_id or finding.title,
+                        "title": finding.title,
+                        "evidence": evidence_text,
+                        "snippet": snippet,
+                        "rationale": finding.because,
+                        "fix": finding.remediate or "",
+                    }
+                )
+    return grouped
+
+
+def _format_evidence(evidence: Sequence[EvidencePointer], limit: int) -> list[str]:
+    pointers: list[str] = []
+    for pointer in evidence[: max(1, limit)]:
+        text = pointer.location
+        if pointer.description:
+            text += f" — {pointer.description}"
+        pointers.append(text)
+    return pointers
+
+
+def _prompt_severity_filter(current: Iterable[str]) -> set[str]:
+    current_set = set(current)
+    options = {token: label for label, token in zip(["High", "Med", "Low", "Info"], _SEVERITY_TOKEN_ORDER)}
+    print("Current filter: " + ", ".join(token for token in current_set))
+    response = prompt_utils.prompt_text(
+        "Filter severities (HM LI)",
+        default="".join(current_set),
+        required=False,
+        hint="Provide combination of H/M/L/I. Empty = all.",
+    )
+    if not response.strip():
+        return set(_SEVERITY_TOKEN_ORDER)
+    selected = {char.upper() for char in response if char.upper() in _SEVERITY_TOKEN_ORDER}
+    return selected or set(_SEVERITY_TOKEN_ORDER)
+
+
+def _cycle_evidence_lines(current: int) -> int:
+    try:
+        index = _EVIDENCE_STEPS.index(current)
+    except ValueError:
+        index = 0
+    index = (index + 1) % len(_EVIDENCE_STEPS)
+    return _EVIDENCE_STEPS[index]
+
+
+def _run_micro_rerun(outcome: RunOutcome, app_result: AppRunResult, evidence_lines: int) -> None:
+    rows = [[str(idx), label] for idx, (_, label) in enumerate(_MICRO_TESTS, start=1)]
+    table_utils.render_table(["#", "Micro-test"], rows)
+    choice = prompt_utils.get_choice([str(idx) for idx in range(1, len(_MICRO_TESTS) + 1)], default="1")
+    test_key = _MICRO_TESTS[int(choice) - 1][0]
+    params = RunParameters(
+        profile="custom",
+        scope="app",
+        scope_label=app_result.package_name,
+        selected_tests=(test_key,),
+        evidence_lines=evidence_lines,
+        finding_limit=25,
+    )
+    selection = ScopeSelection("app", app_result.package_name, tuple([group for group in outcome.scope.groups if group.package_name == app_result.package_name]))
+    if not selection.groups:
+        print(status_messages.status("Micro-run scope could not be resolved.", level="warn"))
+        return
+    _configure_logging_for_cli(params.log_level)
+    micro_outcome = _execute_scan(selection, params, outcome.base_dir)
+    if not micro_outcome.results:
+        print(status_messages.status("Micro-run produced no results.", level="warn"))
+        return
+    _render_app_detail(
+        micro_outcome.results[0],
+        evidence_lines,
+        set(_SEVERITY_TOKEN_ORDER),
+        params.finding_limit,
+    )
+    prompt_utils.press_enter_to_continue("Press Enter to return to previous results...")
+
+
+def _severity_token(level: SeverityLevel) -> str:
+    return _SEVERITY_LABELS.get(level, ("Info", "I"))[1]
 
 
 def _format_duration(seconds: float) -> str:
-    if seconds < 0.001:
-        return "<1 ms"
-    if seconds < 1.0:
+    if seconds < 1:
         return f"{seconds * 1000:.0f} ms"
     return f"{seconds:.2f} s"
 

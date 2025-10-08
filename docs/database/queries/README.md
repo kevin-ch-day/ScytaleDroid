@@ -13,7 +13,9 @@ markdown file covers:
 
 Start with one of the introspection commands in [`TESTING.md`](TESTING.md) to
 confirm actual table and column names in your environment before wiring these
-queries into the app.
+queries into the app. Static-analysis reports currently land on disk; as soon as
+the `static_analysis_runs` tables are provisioned, extend this folder with
+matching read models that join `android_apk_repository` by `apk_id` or `sha256`.
 
 ## PHP consumption checklist
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple
+from typing import List, Mapping, Optional, Sequence, Tuple
 
 from scytaledroid.Database.db_func import apk_repository as repo
 from scytaledroid.Utils.DisplayUtils import status_messages
@@ -17,6 +17,7 @@ from .common import (
     adb_pull,
     cleanup_duplicate,
     compute_hashes,
+    format_file_size,
     inventory_payload,
     is_system_package,
     load_options,
@@ -337,6 +338,47 @@ def _print_package_header(plan: PackagePlan, package_index: int, package_total: 
             f"→ Package {package_index}/{package_total}: {label} ({detail})",
             level="info",
         )
+    )
+
+
+def _print_package_footer(plan: PackagePlan, stats: Mapping[str, int]) -> None:
+    saved = int(stats.get("saved", 0) or 0)
+    skipped = int(stats.get("skipped", 0) or 0)
+    errors = int(stats.get("errors", 0) or 0)
+    total_bytes = int(stats.get("bytes", 0) or 0)
+
+    parts: list[str] = []
+    parts.append(
+        f"saved {saved} artifact{'s' if saved != 1 else ''}"
+    )
+    parts.append(f"skipped {skipped}")
+    parts.append(f"errors {errors}")
+    if total_bytes > 0:
+        parts.append(format_file_size(total_bytes))
+
+    summary = " • ".join(parts)
+    package_label = plan.inventory.display_name()
+
+    if errors:
+        level = "error"
+    elif skipped and not saved:
+        level = "warn"
+    else:
+        level = "success"
+
+    print(
+        status_messages.status(
+            f"    ↳ Summary: {package_label} — {summary}",
+            level=level,
+        )
+    )
+
+    log.info(
+        (
+            f"Harvest summary for {plan.inventory.package_name}: "
+            f"saved={saved}, skipped={skipped}, errors={errors}, bytes={total_bytes}"
+        ),
+        category="device",
     )
 
 

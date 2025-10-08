@@ -35,3 +35,4 @@ CREATE TABLE `harvest_artifact_paths` (
 * The CLI registers the ingest environment via `harvest_storage_roots` (host + data root) before recording artifacts.
 * Each artifact row in `android_apk_repository` gets a companion row in `harvest_artifact_paths` that references the storage root and stores both the device `source_path` and local relative path.
 * Delete cascades ensure path entries are removed automatically when an artifact row is deleted.
+* Store the relative path such that static-analysis reports can mirror the same layout when saving `repro_bundle` attachments or derivative artefacts.
