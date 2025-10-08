@@ -9,7 +9,6 @@ from scytaledroid.Config import app_config
 
 from ..core import Finding, SeverityLevel, StaticAnalysisReport
 from ..detectors.permissions import PermissionsProfileDetector
-from ..modules.permissions.rules import SENSITIVITY_WEIGHTS, SPECIAL_ACCESS_PERMISSIONS
 
 
 _DEFAULT_TIME_FORMAT = "%Y-%m-%d %H:%M"
@@ -250,30 +249,35 @@ def _collect_permission_rows(report: StaticAnalysisReport) -> list[Mapping[str, 
     special = set(metrics.get("special_access_permissions", ()))
     custom = set(metrics.get("custom_permissions", ()))
 
+    profile_map = metrics.get("permission_profiles")
+    if not isinstance(profile_map, Mapping):
+        profile_map = {}
+
     entries: list[MutableMapping[str, Any]] = []
 
     for name in declared:
         display_name, namespace = _format_permission_name(name)
-        weight = SENSITIVITY_WEIGHTS.get(name, 10)
-        if name in special:
-            weight = max(weight, 80)
-        if name in privileged:
-            weight = max(weight, 75)
-        if name in dangerous:
-            weight = max(weight, 60)
-        if name in signature:
-            weight = max(weight, 50)
-        if name in SPECIAL_ACCESS_PERMISSIONS:
-            weight = max(weight, 70)
-        band = _risk_band(weight)
+        profile = profile_map.get(name)
+        severity = _derive_permission_severity(
+            name,
+            profile,
+            custom,
+            dangerous,
+            signature,
+            privileged,
+            special,
+        )
+        band = _risk_band(severity)
+
         entries.append(
             {
                 "name": name,
                 "display_name": display_name,
                 "namespace": namespace,
                 "risk": band,
-                "weight": weight,
+                "weight": severity,
                 "is_custom": name in custom,
+                "profile": _serialise_permission_profile(profile),
             }
         )
 
@@ -286,7 +290,74 @@ def _risk_band(weight: int) -> str:
         return "High"
     if weight >= 60:
         return "Medium"
+    if weight >= 40:
+        return "Guarded"
     return "Low"
+
+
+def _derive_permission_severity(
+    name: str,
+    profile: Mapping[str, Any] | None,
+    custom: set[str],
+    dangerous: set[str],
+    signature: set[str],
+    privileged: set[str],
+    special: set[str],
+) -> int:
+    if isinstance(profile, Mapping):
+        raw_severity = profile.get("severity")
+        if isinstance(raw_severity, (int, float)):
+            severity = int(raw_severity)
+        else:
+            severity = 0
+    else:
+        severity = 0
+
+    if severity:
+        return severity
+
+    inferred = 0
+    if name in dangerous or _profile_flag(profile, "is_runtime_dangerous"):
+        inferred = max(inferred, 60)
+    if name in privileged or _profile_flag(profile, "is_privileged"):
+        inferred = max(inferred, 65)
+    if name in signature or _profile_flag(profile, "is_signature"):
+        inferred = max(inferred, 55)
+    if name in special or _profile_flag(profile, "is_special_access"):
+        inferred = max(inferred, 70)
+    if name in custom:
+        inferred = max(inferred, 35)
+    return inferred or 10
+
+
+def _profile_flag(profile: Mapping[str, Any] | None, key: str) -> bool:
+    if not isinstance(profile, Mapping):
+        return False
+    value = profile.get(key)
+    return bool(value)
+
+
+def _serialise_permission_profile(profile: Mapping[str, Any] | None) -> Mapping[str, Any]:
+    if not isinstance(profile, Mapping):
+        return {}
+
+    tokens = profile.get("tokens")
+    if isinstance(tokens, Iterable) and not isinstance(tokens, (str, bytes)):
+        serialised_tokens = tuple(sorted({str(token) for token in tokens if token}))
+    else:
+        serialised_tokens = ()
+
+    return {
+        "protection": profile.get("protection") or "unknown",
+        "tokens": serialised_tokens,
+        "group": profile.get("group"),
+        "description": profile.get("description"),
+        "is_runtime_dangerous": _profile_flag(profile, "is_runtime_dangerous"),
+        "is_signature": _profile_flag(profile, "is_signature"),
+        "is_privileged": _profile_flag(profile, "is_privileged"),
+        "is_special_access": _profile_flag(profile, "is_special_access"),
+        "severity": profile.get("severity") if isinstance(profile.get("severity"), (int, float)) else 0,
+    }
 
 
 def _build_network_payload(report: StaticAnalysisReport) -> Mapping[str, Any]:
