@@ -1,0 +1,25 @@
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["scytaledroid", "scripts", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+[tool.pyupgrade]
+py311_plus = true
+keep-runtime-typing = true
+
+[tool.mypy]
+python_version = "3.13"
+ignore_missing_imports = true
+scripts_are_modules = true
+pretty = true
+warn_unused_ignores = true
+show_error_codes = true
