@@ -390,6 +390,22 @@ def _build_metrics(
         }
     if top_permissions:
         metrics["top_permissions"] = top_permissions
+    metrics["permission_profiles"] = {
+        name: {
+            "name": profile.name,
+            "protection": profile.protection_label,
+            "tokens": profile.protection_tokens,
+            "group": profile.permission_group,
+            "description": profile.description,
+            "is_runtime_dangerous": profile.is_runtime_dangerous,
+            "is_signature": profile.is_signature,
+            "is_privileged": profile.is_privileged,
+            "is_special_access": profile.is_special_access,
+            "is_custom": _is_custom_permission(name),
+            "severity": profile.severity,
+        }
+        for name, profile in profiles.items()
+    }
     return metrics
 
 
