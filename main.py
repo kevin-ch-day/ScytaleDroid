@@ -1,9 +1,9 @@
-"""
-main.py - Entry point for ScytaleDroid CLI
-"""
+"""main.py - Entry point for ScytaleDroid CLI."""
 
 from __future__ import annotations
 
+import argparse
+import sys
 from zoneinfo import ZoneInfo
 
 from scytaledroid.Config import app_config
@@ -158,10 +158,41 @@ def handle_about() -> None:
     about_app()
 
 
-if __name__ == "__main__":
+def _run_diagnostics(json_mode: bool) -> None:
+    from scytaledroid.Diagnostics.runner import run as run_diagnostics
+
+    run_diagnostics(json_mode=json_mode)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="ScytaleDroid CLI")
+    parser.add_argument(
+        "--diag",
+        action="store_true",
+        help="Run diagnostics checks and exit",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit diagnostics in JSON format (requires --diag)",
+    )
+    args = parser.parse_args(argv)
+
+    if args.json and not args.diag:
+        parser.error("--json requires --diag")
+
+    if args.diag:
+        _run_diagnostics(json_mode=args.json)
+        return 0
+
     print_banner()
     try:
         main_menu()
     except KeyboardInterrupt:
         print("\nInterrupted by user. Exiting...")
         log.info("Application interrupted by user.", category="application")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
