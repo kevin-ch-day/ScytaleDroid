@@ -94,6 +94,7 @@ def analyze_apk(
     hashes = compute_hashes(apk_path)
     apk_sha256 = hashes.get("sha256", "")
     run_id = _derive_run_id(apk_sha256, analysis_config)
+    report_metadata.setdefault("run_id", run_id)
 
     log_path = configure_third_party_loggers(
         verbosity=analysis_config.verbosity,
@@ -107,6 +108,8 @@ def analyze_apk(
         apk = APK(str(apk_path))
     except Exception as exc:
         raise StaticAnalysisError(f"Failed to open APK: {exc}") from exc
+
+    report_metadata.setdefault("toolchain", _resolve_toolchain_versions())
 
     manifest_root = load_manifest_root(apk)
     flags = build_manifest_flags(manifest_root)
@@ -298,6 +301,19 @@ def _build_detector_context(
         string_index=string_index,
         config=config,
     )
+
+
+def _resolve_toolchain_versions() -> Mapping[str, str]:
+    versions = {"androguard": "—", "aapt2": "—", "apksigner": "—"}
+    try:  # pragma: no cover - dependency introspection
+        import androguard
+
+        version = getattr(androguard, "__version__", None)
+        if isinstance(version, str) and version.strip():
+            versions["androguard"] = version
+    except Exception:  # pragma: no cover - best-effort metadata
+        pass
+    return versions
 
 
 __all__ = [

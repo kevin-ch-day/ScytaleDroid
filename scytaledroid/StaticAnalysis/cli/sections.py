@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping, MutableMapping, Sequence
 
 from ..core import StaticAnalysisReport
-from ..core.findings import Badge, DetectorResult, EvidencePointer
+from ..core.findings import Badge, DetectorResult, EvidencePointer, Finding, SeverityLevel
 from .glyphs import GlyphSet
 from .options import ScanDisplayOptions
 
@@ -67,13 +67,28 @@ def render_sections(
 ) -> list[str]:
     """Render detector results in a deterministic section order."""
 
-    lookup = {result.section_key: result for result in report.detector_results}
-    integrity_result = lookup.get("integrity")
+    if options.verbosity == "summary":
+        return []
 
-    presentation = _extract_presentation_payload(integrity_result)
-    package_profile = presentation.get("package")
-    artifact_profile = presentation.get("artifact")
-    integrity_card = presentation.get("integrity")
+    integrity_result, package_profile, artifact_profile, integrity_card = (
+        extract_integrity_profiles(report)
+    )
+
+    role = str((artifact_profile or {}).get("role") or "").lower()
+    is_base = role == "base"
+
+    if not is_base:
+        if options.verbosity in {"detail", "debug"} and integrity_result:
+            return [
+                _render_split_summary_line(
+                    artifact_label=artifact_label,
+                    integrity_result=integrity_result,
+                    integrity_card=integrity_card,
+                    package_profile=package_profile,
+                    glyphs=glyphs,
+                )
+            ]
+        return []
 
     package_key = _package_key(report)
     if package_profile and package_key not in package_cache:
@@ -93,33 +108,29 @@ def render_sections(
         artifact_index=artifact_index,
         artifact_total=artifact_total,
     )
-    lines.extend(topology_lines)
-    lines.append("")
+    if topology_lines:
+        lines.extend(topology_lines)
+        lines.append("")
 
-    for definition in SECTION_DEFINITIONS:
-        result = lookup.get(definition.key)
-        if definition.key == "integrity":
-            section_lines = _render_integrity_card(
-                definition,
-                result,
-                glyphs,
-                options,
-                package_profile=package_profile,
-                artifact_profile=artifact_profile,
-                integrity_card=integrity_card,
-            )
-        elif definition.key == "network_surface":
-            section_lines = _render_network_card(definition, result, glyphs, options)
-        elif definition.key == "secrets":
-            section_lines = _render_secrets_card(definition, result, glyphs, options)
-        else:
-            section_lines = _render_generic_section(definition, result, glyphs, options)
-
-        if section_lines:
-            lines.extend(section_lines)
+    if integrity_result:
+        integrity_lines = _render_integrity_card(
+            SectionDefinition("integrity", "Integrity & Identity"),
+            integrity_result,
+            glyphs,
+            options,
+            package_profile=package_profile,
+            artifact_profile=artifact_profile,
+            integrity_card=integrity_card,
+        )
+        if integrity_lines:
+            lines.extend(integrity_lines)
             lines.append("")
 
-    if lines:
+    findings_lines = _render_findings_table(report.findings, glyphs)
+    if findings_lines:
+        lines.extend(findings_lines)
+
+    if lines and not lines[-1]:
         lines.pop()
     return lines
 
@@ -128,6 +139,25 @@ def render_stub_sections() -> list[str]:
     """Return placeholder lines for every analysis section."""
 
     return []
+
+
+def extract_integrity_profiles(
+    report: StaticAnalysisReport,
+) -> tuple[
+    DetectorResult | None,
+    Mapping[str, Any] | None,
+    Mapping[str, Any] | None,
+    Mapping[str, Any] | None,
+]:
+    """Return the integrity detector result and presentation profiles."""
+
+    lookup = {result.section_key: result for result in report.detector_results}
+    integrity_result = lookup.get("integrity")
+    presentation = _extract_presentation_payload(integrity_result)
+    package_profile = presentation.get("package")
+    artifact_profile = presentation.get("artifact")
+    integrity_card = presentation.get("integrity")
+    return integrity_result, package_profile, artifact_profile, integrity_card
 
 
 def _render_application_topology(
@@ -142,6 +172,12 @@ def _render_application_topology(
     artifact_index: int,
     artifact_total: int,
 ) -> list[str]:
+    if not isinstance(package_profile, Mapping):
+        return []
+
+    if package_profile.get("_topology_printed"):
+        return []
+
     manifest = report.manifest
     package_name = manifest.package_name or "—"
     version_name = manifest.version_name or "—"
@@ -195,7 +231,37 @@ def _render_application_topology(
     status = integrity_result.status if integrity_result else Badge.SKIPPED
     lines.append(f"Timing: {_format_duration(duration)}")
     lines.append(f"Status: {format_badge(status, glyphs)}")
+    if isinstance(package_profile, dict):
+        package_profile["_topology_printed"] = True
     return lines
+
+
+def _render_split_summary_line(
+    *,
+    artifact_label: str,
+    integrity_result: DetectorResult,
+    integrity_card: Mapping[str, Any] | None,
+    package_profile: Mapping[str, Any] | None,
+    glyphs: GlyphSet,
+) -> str:
+    badge = format_badge(integrity_result.status, glyphs)
+    size_bytes = _safe_int(integrity_card, "size_bytes")
+    size_mb = size_bytes / (1024 * 1024) if size_bytes else 0.0
+    hashes = integrity_card.get("hashes", {}) if isinstance(integrity_card, Mapping) else {}
+    sha256 = _format_hash(hashes.get("sha256"))
+
+    schemes = []
+    signing_profile = package_profile.get("signing") if isinstance(package_profile, Mapping) else {}
+    scheme_flags = signing_profile.get("schemes") if isinstance(signing_profile, Mapping) else {}
+    for name in ("v2", "v3", "v4"):
+        if scheme_flags.get(name):
+            schemes.append(name)
+    signer_text = ",".join(schemes) if schemes else "—"
+
+    label = artifact_label or _safe_str(integrity_card, "role_label")
+    return (
+        f"{badge} {label} | size {size_mb:.1f}MB | signer {signer_text} | sha256 {sha256}"
+    )
 
 
 def _render_integrity_card(
@@ -270,15 +336,55 @@ def _render_integrity_card(
         lines.append(f"Evidence (≤{options.evidence_limit})")
         lines.extend(evidence_lines)
 
-    if options.verbosity == "debug" and result.raw_debug:
-        lines.append("")
-        lines.append("Debug")
-        for debug_line in result.raw_debug.splitlines():
-            lines.append(f"  {debug_line}")
-
     lines.append("")
     lines.append(f"Timing: {_format_duration(result.duration_sec)}")
     lines.append(f"Status: {format_badge(result.status, glyphs)}")
+    return lines
+
+
+def _render_findings_table(
+    findings: Sequence[Finding],
+    glyphs: GlyphSet,
+) -> list[str]:
+    relevant = [
+        finding
+        for finding in findings
+        if finding.severity_gate in {SeverityLevel.P0, SeverityLevel.P1}
+    ]
+    lines = ["Findings (P0/P1)", glyphs.rule * glyphs.line_width]
+
+    if not relevant:
+        lines.append("None recorded.")
+        return lines
+
+    order = {SeverityLevel.P0: 0, SeverityLevel.P1: 1}
+    relevant.sort(key=lambda item: (order.get(item.severity_gate, 99), item.title.lower()))
+
+    for index, finding in enumerate(relevant):
+        lines.append(f"{finding.severity_gate.value} {glyphs.bullet} {finding.title}")
+        because = finding.because.strip() if finding.because else "—"
+        lines.append(f"    Because: {because}")
+
+        evidence_lines = _render_evidence_block(
+            finding.evidence,
+            glyphs=glyphs,
+            limit=2,
+        )
+        if evidence_lines:
+            lines.append("    Evidence:")
+            for entry in evidence_lines:
+                lines.append("    " + entry.lstrip())
+
+        lines.append(f"    MASVS: {finding.category_masvs.value}")
+        remediate = finding.remediate.strip() if finding.remediate else ""
+        if remediate:
+            lines.append(f"    Remediate: {remediate}")
+
+        if index != len(relevant) - 1:
+            lines.append("")
+
+    if lines and not lines[-1]:
+        lines.pop()
     return lines
 
 
@@ -493,9 +599,13 @@ def _render_signing_summary(
     sets_display = signer_sets if signer_sets not in (None, "") else "—"
     total_display = artifact_total if artifact_total not in (None, "") else "—"
 
+    detail_suffix = ""
+    if sets_display != "—" and total_display != "—":
+        detail_suffix = f" ({sets_display} signer set(s) across {total_display} artifact(s))"
+
     return [
         f"  Schemes: v2={v2}  v3={v3}  v4={v4}      Debug cert: {debug_glyph}",
-        f"  Split signer consistency: {consistency_glyph} ({sets_display} signer set(s) across {total_display} artifact(s))",
+        f"  Split signer consistency: {consistency_glyph}{detail_suffix}",
     ]
 
 
@@ -549,9 +659,20 @@ def _render_evidence_block(
     if limit <= 0:
         return []
 
-    pointers = list(evidence[:limit])
-    if not pointers:
+    seen: set[tuple[str, str | None]] = set()
+    deduped: list[EvidencePointer] = []
+    for pointer in evidence:
+        key = (pointer.location, pointer.hash_short)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(pointer)
+
+    if not deduped:
         return []
+
+    effective_limit = min(max(limit, 1), 2)
+    pointers = deduped[:effective_limit]
 
     lines: list[str] = []
     prefix = f"  {glyphs.pointer} "
@@ -575,7 +696,7 @@ def _render_evidence_block(
         lines.append(prefix + wrapped[0])
         for segment in wrapped[1:]:
             lines.append(continuation_indent + segment)
-    remaining = len(evidence) - len(pointers)
+    remaining = len(deduped) - len(pointers)
     if remaining > 0:
         lines.append(f"  (+{remaining} more)")
     return lines
@@ -707,4 +828,5 @@ __all__ = [
     "format_badge",
     "render_sections",
     "render_stub_sections",
+    "extract_integrity_profiles",
 ]

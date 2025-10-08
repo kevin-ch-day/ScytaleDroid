@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from importlib import metadata as importlib_metadata
 from importlib.metadata import PackageNotFoundError
 from shutil import which
-from typing import Mapping, Sequence, TextIO
+from typing import Mapping, MutableMapping, Sequence, TextIO
 
 from zoneinfo import ZoneInfo
 
@@ -24,7 +24,12 @@ from ..core.findings import Badge, DetectorResult, Finding
 from ..core.repository import ArtifactGroup
 from .glyphs import GlyphSet
 from .options import ScanDisplayOptions, describe_cli_flags
-from .sections import SECTION_DEFINITIONS, format_badge
+from .sections import (
+    SECTION_DEFINITIONS,
+    extract_integrity_profiles,
+    format_badge,
+    render_sections,
+)
 
 _CT = ZoneInfo("America/Chicago")
 _SECTION_NAME_LOOKUP = {definition.key: definition.title for definition in SECTION_DEFINITIONS}
@@ -53,7 +58,7 @@ class ScanProgress:
             use_color=use_color,
             line_width=width,
         )
-        self._preface_printed = False
+        self._preface_packages: set[tuple[str, str, str]] = set()
 
     def now(self) -> datetime:
         return datetime.now(_CT)
@@ -220,35 +225,115 @@ class ScanProgress:
         finished_at: datetime,
         severity_counter: Mapping[str, int],
     ) -> None:
-        findings = report.findings
-        categories_touched = sorted(
-            {
-                finding.category_masvs.value
-                for finding in findings
-                if getattr(finding, "category_masvs", None)
-            }
+        _, package_profile, artifact_profile, _ = extract_integrity_profiles(report)
+        role = str((artifact_profile or {}).get("role") or "").lower()
+        if role != "base":
+            return
+
+        metadata = report.metadata or {}
+        manifest = report.manifest
+
+        app_name = (
+            metadata.get("app_label")
+            or manifest.app_label
+            or manifest.package_name
+            or "—"
+        )
+        package_name = manifest.package_name or metadata.get("package_name") or "—"
+        version_name = manifest.version_name or metadata.get("version_name") or "—"
+        version_code = manifest.version_code or metadata.get("version_code")
+        version_segment = (
+            f"{version_name} ({version_code})" if version_code else version_name
         )
 
-        self._write("Summary")
-        self._write(self._rule_line())
-        self._write(
-            f"Severity counts:  P0={severity_counter.get('P0', 0)}   "
-            f"P1={severity_counter.get('P1', 0)}   P2={severity_counter.get('P2', 0)}"
-        )
-        categories_line = ", ".join(categories_touched) if categories_touched else "—"
-        self._write(f"Categories:       {categories_line}")
-        self._write(f"Runtime:          {format_duration(runtime_seconds)}")
-        self._write(f"Finished:         {format_timestamp(finished_at)}")
-        self._write(f"Result:           {self._result_badge(severity_counter)}")
+        hashes = report.hashes or {}
+        md5 = _short_digest(hashes.get("md5"))
+        sha1 = _short_digest(hashes.get("sha1"))
+        sha256 = hashes.get("sha256") or "—"
 
-        timing_line = _summarise_timings(report.detector_results, glyphs=self.glyphs)
-        if timing_line:
-            self._write(f"Section timing (s): {timing_line}")
-
-        interpretation = _interpret_counter(severity_counter)
-        self._write(f"Interpretation: {interpretation}")
-        self._write("Next steps:       —")
+        self._write("Base APK Summary")
+        self._write("----------------")
+        self._write(f"App name:   {app_name}")
+        self._write(f"Package:    {package_name}")
+        self._write(f"Version:    {version_segment}")
+        self._write("")
+        self._write(f"MD5:        {md5}")
+        self._write(f"SHA1:       {sha1}")
+        self._write(f"SHA256:     {sha256}")
+        self._write("")
+        result_badge = self._result_badge(severity_counter)
+        p0 = severity_counter.get("P0", 0)
+        p1 = severity_counter.get("P1", 0)
+        p2 = severity_counter.get("P2", 0)
+        self._write(f"Result:     {result_badge}   P0={p0}   P1={p1}   P2={p2}")
+        finished_text = f"{format_timestamp(finished_at)} (America/Chicago)"
+        self._write(f"Finished:   {finished_text}")
         self._write()
+
+    def render_artifact_view(
+        self,
+        *,
+        report: StaticAnalysisReport,
+        artifact_label: str,
+        artifact_index: int,
+        artifact_total: int,
+        category: str | None,
+        started_at: datetime,
+        finished_at: datetime,
+        runtime_seconds: float,
+        severity_counter: Mapping[str, int],
+        package_cache: MutableMapping[tuple[str, str, str], Mapping[str, Any]],
+        printed_logs: set[str],
+    ) -> None:
+        if self.options.quiet:
+            return
+
+        self.print_artifact_summary(
+            report=report,
+            runtime_seconds=runtime_seconds,
+            finished_at=finished_at,
+            severity_counter=severity_counter,
+        )
+
+        if self.options.verbosity == "summary":
+            return
+
+        _, _, artifact_profile, _ = extract_integrity_profiles(report)
+        role = str((artifact_profile or {}).get("role") or "").lower()
+        is_base = role == "base"
+
+        if is_base:
+            self._ensure_preface(
+                report=report,
+                started_at=started_at,
+                artifact_label=artifact_label,
+            )
+
+        section_lines = render_sections(
+            report,
+            options=self.options,
+            glyphs=self.glyphs,
+            artifact_label=artifact_label,
+            artifact_index=artifact_index,
+            artifact_total=artifact_total,
+            package_cache=package_cache,
+        )
+
+        if section_lines:
+            for line in section_lines:
+                self._write(line)
+            self._write()
+
+        if self.options.verbosity == "debug":
+            debug_lines = _render_debug_appendix(
+                report=report,
+                glyphs=self.glyphs,
+                log_registry=printed_logs,
+            )
+            if debug_lines:
+                for line in debug_lines:
+                    self._write(line)
+                self._write()
 
     # --- Internals ---------------------------------------------------------
 
@@ -267,7 +352,18 @@ class ScanProgress:
         started_at: datetime,
         artifact_label: str,
     ) -> None:
-        if self._preface_printed or self.options.quiet:
+        if self.options.quiet:
+            return
+        if self.options.verbosity not in {"detail", "debug"}:
+            return
+
+        manifest = report.manifest
+        package_key = (
+            manifest.package_name or "",
+            manifest.version_name or "",
+            manifest.version_code or "",
+        )
+        if package_key in self._preface_packages:
             return
 
         for line in _preface_lines(
@@ -279,7 +375,7 @@ class ScanProgress:
         ):
             self._write(line)
         self._write()
-        self._preface_printed = True
+        self._preface_packages.add(package_key)
 
     def _result_badge(self, counter: Mapping[str, int]) -> str:
         if counter.get("P0", 0):
@@ -344,6 +440,48 @@ def _interpret_counter(counter: Mapping[str, int]) -> str:
     if counter.get("P2", 0):
         return "Hardening opportunities identified (P2 findings)."
     return "No critical findings; baseline checks passed."
+
+
+def _render_debug_appendix(
+    *,
+    report: StaticAnalysisReport,
+    glyphs: GlyphSet,
+    log_registry: set[str],
+) -> list[str]:
+    metadata = report.metadata or {}
+    log_path = metadata.get("androguard_log_path")
+    lines: list[str] = ["Debug appendix", glyphs.rule * glyphs.line_width]
+    sections_added = False
+
+    tool_lines: list[str] = []
+    if isinstance(log_path, str) and log_path and log_path not in log_registry:
+        tool_lines.append(f"  Androguard log: {log_path}")
+        log_registry.add(log_path)
+
+    if tool_lines:
+        lines.append("Tool logs")
+        lines.extend(tool_lines)
+        sections_added = True
+
+    note_lines: list[str] = []
+    for result in report.detector_results:
+        if not result.notes:
+            continue
+        section = _SECTION_NAME_LOOKUP.get(result.section_key, result.section_key)
+        for entry in result.notes:
+            note_lines.append(f"  {section}: {entry}")
+
+    if note_lines:
+        if sections_added:
+            lines.append("")
+        lines.append("Detector notes")
+        lines.extend(note_lines)
+        sections_added = True
+
+    if not sections_added:
+        return []
+
+    return lines
 
 
 def _preface_lines(
@@ -436,6 +574,15 @@ def _extract_version_token(text: str) -> str:
         if any(char.isdigit() for char in chunk):
             return chunk
     return text.strip()
+
+
+def _short_digest(value: object | None) -> str:
+    if not value:
+        return "—"
+    text = str(value)
+    if len(text) <= 12:
+        return text
+    return f"{text[:8]}…{text[-4:]}"
 
 
 def format_timestamp(dt: datetime) -> str:

@@ -89,6 +89,16 @@ def _summarise_surface(
     if host_hashes:
         metrics["Host hashes"] = host_hashes
 
+    surface_payload: Dict[str, object] = {
+        "counts": {"http": len(http_matches), "https": len(https_matches), "ws": 0},
+        "hosts": {"http": http_hosts, "https": https_hosts},
+        "urls": {
+            "http": [match.url for match in http_matches[:10]],
+            "https": [match.url for match in https_matches[:10]],
+        },
+    }
+    metrics["surface"] = surface_payload
+
     overrides = _summarise_tls_hits(tls_hits)
     if overrides:
         metrics["TLS overrides"] = overrides
