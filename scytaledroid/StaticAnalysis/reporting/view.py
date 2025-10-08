@@ -9,7 +9,14 @@ from scytaledroid.Config import app_config
 
 from ..core import Finding, SeverityLevel, StaticAnalysisReport
 from ..detectors.permissions import PermissionsProfileDetector
-from ..modules.permissions.rules import SENSITIVITY_WEIGHTS, SPECIAL_ACCESS_PERMISSIONS
+try:
+    from ..modules.permissions.rules import (
+        SENSITIVITY_WEIGHTS,
+        SPECIAL_ACCESS_PERMISSIONS,
+    )
+except ModuleNotFoundError:  # pragma: no cover - optional dependency
+    SENSITIVITY_WEIGHTS = {}
+    SPECIAL_ACCESS_PERMISSIONS = set()
 
 
 _DEFAULT_TIME_FORMAT = "%Y-%m-%d %H:%M"
