@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Mapping, Sequence
 
-from ..core.context import DetectorContext
-from ..core.findings import Badge, Finding, MasvsCategory, SeverityLevel
+from ...core.context import DetectorContext
+from ...core.findings import Badge, Finding, MasvsCategory, SeverityLevel
 from .models import NetworkDiff, NetworkSnapshot
 
 

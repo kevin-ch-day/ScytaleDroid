@@ -5,13 +5,15 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 
 from scytaledroid.Config import app_config
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ..core import StaticAnalysisReport
-from ..reporting import build_report_view, save_html_report
+
+if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
+    from ..reporting import build_report_view, save_html_report
 
 
 REPORTS_DIR = Path(app_config.DATA_DIR) / "static_analysis" / "reports"
@@ -40,6 +42,8 @@ class SavedReportPaths:
 
 def save_report(report: StaticAnalysisReport) -> SavedReportPaths:
     """Persist *report* to disk and return the generated artefact paths."""
+
+    from ..reporting import build_report_view, save_html_report
 
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     sha256 = report.hashes.get("sha256")
