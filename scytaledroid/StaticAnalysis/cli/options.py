@@ -8,10 +8,10 @@ from dataclasses import dataclass
 from typing import Sequence
 
 _DEFAULT_PROFILE = "full"
-_DEFAULT_VERBOSITY = "normal"
+_DEFAULT_VERBOSITY = "summary"
 _DEFAULT_EVIDENCE_LIMIT = 2
 _VALID_PROFILES = ("quick", "full")
-_VALID_VERBOSITIES = ("normal", "detail", "debug")
+_VALID_VERBOSITIES = ("summary", "detail", "debug")
 
 
 def _env_flag(name: str, default: bool) -> bool:
@@ -98,12 +98,31 @@ def parse_cli_args(argv: Sequence[str] | None = None) -> ScanDisplayOptions:
         default=_DEFAULT_PROFILE,
         help="Analysis profile to run (quick skips slower detectors).",
     )
-    parser.add_argument(
-        "--verbosity",
-        choices=_VALID_VERBOSITIES,
+
+    verbosity_group = parser.add_mutually_exclusive_group()
+    verbosity_group.add_argument(
+        "--summary-only",
+        dest="verbosity",
+        action="store_const",
+        const="summary",
         default=_DEFAULT_VERBOSITY,
-        help="Verbosity for section output.",
+        help="Render only the Base APK Summary block (default).",
     )
+    verbosity_group.add_argument(
+        "--detail",
+        dest="verbosity",
+        action="store_const",
+        const="detail",
+        help="Include topology, integrity, and findings tables for the base APK.",
+    )
+    verbosity_group.add_argument(
+        "--debug",
+        dest="verbosity",
+        action="store_const",
+        const="debug",
+        help="Detail output plus debug appendix and raw logs.",
+    )
+
     parser.add_argument(
         "--max-evidence",
         type=int,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+import logging
 from pathlib import Path
 from time import perf_counter
 from typing import Any, List, Mapping, Optional
@@ -21,7 +22,19 @@ from ..core.repository import ArtifactGroup, group_artifacts, list_categories, l
 from ..persistence import ReportStorageError, save_report
 from .options import ScanDisplayOptions, resolve_display_options
 from .progress import ScanProgress
-from .sections import render_sections
+
+
+def _configure_logging_for_cli(verbosity: str) -> None:
+    root_level = logging.DEBUG if verbosity == "debug" else logging.WARNING
+    logging.getLogger().setLevel(root_level)
+
+    androguard_level = logging.DEBUG if verbosity == "debug" else logging.ERROR
+    for name in ("androguard", "androguard.core", "androguard.core.axml"):
+        logging.getLogger(name).setLevel(androguard_level)
+
+    quiet_level = logging.DEBUG if verbosity == "debug" else logging.WARNING
+    for name in ("zipfile", "urllib3"):
+        logging.getLogger(name).setLevel(quiet_level)
 
 
 def static_analysis_menu() -> None:
@@ -190,6 +203,8 @@ def _scan_groups(
     print()
     menu_utils.print_header(heading, description)
 
+    _configure_logging_for_cli(options.verbosity)
+
     progress = ScanProgress(total_groups=len(groups), options=options)
     progress.announce_options()
 
@@ -246,41 +261,19 @@ def _scan_groups(
             severity_totals.update(counter)
 
             if not options.quiet:
-                progress.print_artifact_header(
+                progress.render_artifact_view(
                     report=report,
                     artifact_label=label,
                     artifact_index=artifact_index,
                     artifact_total=len(group.artifacts),
                     category=group.category,
                     started_at=wall_clock_started,
-                )
-                section_lines = render_sections(
-                    report,
-                    options=options,
-                    glyphs=progress.glyphs,
-                    artifact_label=label,
-                    artifact_index=artifact_index,
-                    artifact_total=len(group.artifacts),
-                    package_cache=package_cache,
-                )
-                for section_line in section_lines:
-                    progress.stream.write(section_line + "\n")
-                progress.stream.write("\n")
-                progress.print_artifact_summary(
-                    report=report,
-                    runtime_seconds=artifact_duration,
                     finished_at=wall_clock_finished,
+                    runtime_seconds=artifact_duration,
                     severity_counter=counter,
+                    package_cache=package_cache,
+                    printed_logs=printed_logs,
                 )
-
-            if options.verbosity == "debug":
-                metadata_map = getattr(report, "metadata", {})
-                debug_log_path = None
-                if isinstance(metadata_map, Mapping):
-                    debug_log_path = metadata_map.get("androguard_log_path")
-                if debug_log_path and debug_log_path not in printed_logs:
-                    print(f"Raw tool log: {debug_log_path}")
-                    printed_logs.add(debug_log_path)
 
     elapsed = perf_counter() - scan_started
 

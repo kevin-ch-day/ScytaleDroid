@@ -23,7 +23,7 @@ class AnalysisConfig:
     """Configuration flags controlling a static-analysis run."""
 
     profile: str = "quick"
-    verbosity: str = "normal"
+    verbosity: str = "summary"
     persistence_mode: str = "json_only"
     analysis_version: str = "2.0.0-alpha"
     enabled_detectors: Optional[Sequence[str]] = None

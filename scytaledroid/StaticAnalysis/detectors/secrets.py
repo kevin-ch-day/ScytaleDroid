@@ -17,8 +17,11 @@ from ..core.findings import (
     SeverityLevel,
 )
 from ..core.pipeline import make_detector_result
-from ..modules.string_analysis.extractor import IndexedString
-from ..modules.string_analysis.patterns import DEFAULT_PATTERNS, StringPattern
+from ..modules.string_analysis.extractor import IndexedString, StringIndex
+from ..modules.string_analysis.patterns import (
+    DEFAULT_PATTERNS,
+    StringPattern,
+)
 from .base import BaseDetector, register_detector
 
 
@@ -34,6 +37,9 @@ _TEST_HINTS = (
     "placeholder",
     "replace",
     "your",
+    "localhost",
+    "127.0.0.1",
+    "10.0.2.2",
 )
 
 
@@ -47,18 +53,20 @@ class _SecretMatch:
     is_test_like: bool
 
 
-def _detect_matches(strings: Sequence[IndexedString]) -> Sequence[_SecretMatch]:
+def _detect_matches(index: StringIndex) -> Sequence[_SecretMatch]:
     hits: List[_SecretMatch] = []
-    for entry in strings:
-        value = entry.value
-        if not value:
-            continue
-        for pattern in DEFAULT_PATTERNS:
-            if not pattern.pattern.search(value):
-                continue
-            # Collect distinct fragments for this pattern within the string.
-            for match in pattern.pattern.finditer(value):
-                fragment = match.group(0)
+    for pattern in DEFAULT_PATTERNS:
+        candidates = index.search(
+            pattern.pattern,
+            origin_types=pattern.preferred_origins,
+            min_length=pattern.min_length,
+        )
+        for entry in candidates:
+            if pattern.context_keywords:
+                haystack = f"{entry.origin}:{entry.value}".lower()
+                if not any(keyword in haystack for keyword in pattern.context_keywords):
+                    continue
+            for fragment in pattern.iter_matches(entry.value):
                 if not _is_valid_for_pattern(pattern.name, fragment):
                     continue
                 is_test = _is_test_like(fragment, entry)
@@ -81,15 +89,19 @@ def _is_test_like(fragment: str, entry: IndexedString) -> bool:
         return True
     if lowered.startswith("sq0dev-") or lowered.startswith("sq0csp-"):
         return True
+    if lowered.startswith("xox") and "your" in lowered:
+        return True
+    if lowered.startswith(("ghp_", "gho_", "ghs_", "ghu_")) and "your" in lowered:
+        return True
     # Placeholder style strings that include the origin can be treated as test data.
     composite = f"{entry.origin}:{entry.value}".lower()
-    if "example.com" in composite or "localhost" in composite:
+    if any(host in composite for host in ("example.com", "localhost", "127.0.0.1", "10.0.2.2")):
         return True
     return False
 
 
 def _is_valid_for_pattern(pattern_name: str, fragment: str) -> bool:
-    if pattern_name == "aws_secret_key":
+    if pattern_name == "aws_secret_access_key":
         upper = sum(1 for char in fragment if char.isupper())
         lower = sum(1 for char in fragment if char.islower())
         digits = sum(1 for char in fragment if char.isdigit())
@@ -101,6 +113,11 @@ def _is_valid_for_pattern(pattern_name: str, fragment: str) -> bool:
     if pattern_name == "google_oauth_client":
         # Avoid matching guidance strings such as {client-id}.apps.googleusercontent.com
         if "{" in fragment or "}" in fragment:
+            return False
+    if pattern_name == "slack_token" and "your" in fragment.lower():
+        return False
+    if pattern_name == "private_key_block":
+        if "PRIVATE KEY" not in fragment:
             return False
     return True
 
@@ -118,14 +135,22 @@ def _group_matches(matches: Iterable[_SecretMatch]) -> Mapping[str, Sequence[_Se
 
 
 def _build_metrics(grouped: Mapping[str, Sequence[_SecretMatch]]) -> Dict[str, object]:
-    secret_types: Dict[str, Dict[str, int]] = {}
+    secret_types: Dict[str, Dict[str, object]] = {}
     for pattern_name, entries in sorted(grouped.items()):
         real = [entry for entry in entries if not entry.is_test_like]
         filtered = len(entries) - len(real)
-        secret_types[pattern_name] = {
+        pattern = entries[0].pattern if entries else None
+        entry_metrics: Dict[str, object] = {
             "found": len(real),
             "filtered": filtered,
         }
+        if pattern is not None:
+            entry_metrics["category"] = pattern.category
+            if pattern.provider:
+                entry_metrics["provider"] = pattern.provider
+            if pattern.tags:
+                entry_metrics["tags"] = pattern.tags
+        secret_types[pattern_name] = entry_metrics
 
     matched_strings = sum(len(entries) for entries in grouped.values())
     real_strings = sum(
@@ -212,7 +237,13 @@ def _build_findings(
             "hashes": supporting_hashes,
             "filtered": filtered,
             "origin_types": sorted({entry.string_entry.origin_type for entry in real_entries}),
+            "pattern": pattern.name,
+            "category": pattern.category,
         }
+        if pattern.provider:
+            metrics_payload["provider"] = pattern.provider
+        if pattern.tags:
+            metrics_payload["tags"] = pattern.tags
 
         findings.append(
             Finding(
@@ -261,7 +292,7 @@ class SecretsDetector(BaseDetector):
                 evidence=tuple(),
             )
 
-        matches = _detect_matches(index.strings)
+        matches = _detect_matches(index)
         grouped = _group_matches(matches)
         metrics = _build_metrics(grouped)
         findings = _build_findings(grouped, apk_path=context.apk_path)
