@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Optional
 from xml.etree import ElementTree
 
-from androguard.core.apk import APK
+from scytaledroid.StaticAnalysis._androguard import APK
 
 from .errors import StaticAnalysisError
 from .models import ComponentSummary, ManifestFlags

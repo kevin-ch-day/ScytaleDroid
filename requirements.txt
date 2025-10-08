@@ -1,2 +1,2 @@
-androguard>=3.4.0
+androguard>=4.1.0
 mysql-connector-python>=8.0.0

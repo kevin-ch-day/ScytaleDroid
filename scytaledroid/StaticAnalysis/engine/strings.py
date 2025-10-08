@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass
 from typing import Dict, List, Mapping, MutableMapping, Sequence
 
-from androguard.core.apk import APK
+from scytaledroid.StaticAnalysis._androguard import APK
 
 from ..modules.string_analysis import build_string_index
 

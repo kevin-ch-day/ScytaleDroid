@@ -5,11 +5,7 @@ from __future__ import annotations
 import zipfile
 from typing import Iterable, Mapping
 
-try:  # pragma: no cover - compatibility for androguard <4
-    from androguard.core.bytecodes.apk import FileNotPresent
-except ImportError:  # pragma: no cover - androguard >=4
-    from androguard.core.apk import FileNotPresent
-from androguard.core.apk import APK
+from scytaledroid.StaticAnalysis._androguard import APK, FileNotPresent
 
 from .models import IndexedString
 from .utils import looks_textual, strings_from_binary, strings_from_text

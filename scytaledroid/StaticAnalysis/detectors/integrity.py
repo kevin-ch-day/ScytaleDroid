@@ -11,7 +11,7 @@ from typing import Iterable, Optional, Sequence
 from xml.etree import ElementTree
 from zipfile import BadZipFile, ZipFile, ZipInfo
 
-from androguard.core.apk import APK
+from scytaledroid.StaticAnalysis._androguard import APK
 
 from ..core.context import DetectorContext
 from ..core.findings import Badge, DetectorResult, EvidencePointer
