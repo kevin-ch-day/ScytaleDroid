@@ -1,21 +1,14 @@
-"""
-main.py - Entry point for ScytaleDroid CLI
-"""
+"""main.py - Entry point for ScytaleDroid CLI."""
 
-from datetime import datetime
-import zoneinfo
+from __future__ import annotations
+
+import argparse
+import sys
+from zoneinfo import ZoneInfo
 
 from scytaledroid.Config import app_config
-from scytaledroid.Utils.AboutApp.about_app import about_app
-from scytaledroid.DeviceAnalysis.device_analysis_menu import device_menu
-from scytaledroid.Reporting.menu import reporting_menu
-from scytaledroid.StaticAnalysis.cli import static_analysis_menu
-from scytaledroid.DynamicAnalysis.menu import dynamic_analysis_menu
-from scytaledroid.VirusTotal.menu import virustotal_menu
-from scytaledroid.Utils.System.utils_menu import utils_menu
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
-from scytaledroid.Database.db_utils.menu import database_menu
 from scytaledroid.Utils.System.world_clock.state import ClockReference, WorldClockState, load_state
 
 
@@ -24,7 +17,7 @@ def _resolve_timezones() -> WorldClockState:
 
 
 def _format_time(tz_name: str, reference: ClockReference) -> str:
-    tz = zoneinfo.ZoneInfo(tz_name)
+    tz = ZoneInfo(tz_name)
     snapshot = reference.utc.astimezone(tz)
     time_part = snapshot.strftime("%I:%M %p").lstrip("0")
     date_part = f"{snapshot.month}-{snapshot.day}-{snapshot.year}"
@@ -118,41 +111,88 @@ def main_menu() -> None:
 
 def handle_device() -> None:
     """Launch the Device Analysis menu."""
+    from scytaledroid.DeviceAnalysis.device_analysis_menu import device_menu
+
     device_menu()
 
 
 def handle_virustotal() -> None:
+    from scytaledroid.VirusTotal.menu import virustotal_menu
+
     virustotal_menu()
 
 
 def handle_static() -> None:
+    from scytaledroid.StaticAnalysis.cli import static_analysis_menu
+
     static_analysis_menu()
 
 
 def handle_dynamic() -> None:
+    from scytaledroid.DynamicAnalysis.menu import dynamic_analysis_menu
+
     dynamic_analysis_menu()
 
 
 def handle_reporting() -> None:
+    from scytaledroid.Reporting.menu import reporting_menu
+
     reporting_menu()
 
 
 def handle_database() -> None:
+    from scytaledroid.Database.db_utils.menu import database_menu
+
     database_menu()
 
 
 def handle_utils() -> None:
+    from scytaledroid.Utils.System.utils_menu import utils_menu
+
     utils_menu()
 
 
 def handle_about() -> None:
+    from scytaledroid.Utils.AboutApp.about_app import about_app
+
     about_app()
 
 
-if __name__ == "__main__":
+def _run_diagnostics(json_mode: bool) -> None:
+    from scytaledroid.Diagnostics.runner import run as run_diagnostics
+
+    run_diagnostics(json_mode=json_mode)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="ScytaleDroid CLI")
+    parser.add_argument(
+        "--diag",
+        action="store_true",
+        help="Run diagnostics checks and exit",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit diagnostics in JSON format (requires --diag)",
+    )
+    args = parser.parse_args(argv)
+
+    if args.json and not args.diag:
+        parser.error("--json requires --diag")
+
+    if args.diag:
+        _run_diagnostics(json_mode=args.json)
+        return 0
+
     print_banner()
     try:
         main_menu()
     except KeyboardInterrupt:
         print("\nInterrupted by user. Exiting...")
         log.info("Application interrupted by user.", category="application")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
