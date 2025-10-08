@@ -18,6 +18,9 @@ from scytaledroid.Utils.DisplayUtils import (
     table_utils,
 )
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
+from scytaledroid.Utils.LoggingUtils.logging_engine import (
+    configure_third_party_loggers,
+)
 
 from ..core import (
     AnalysisConfig,
@@ -172,6 +175,13 @@ def _configure_logging_for_cli(level: str) -> None:
     level = level.strip().lower()
     if level not in {"debug", "info"}:
         level = "info"
+
+    verbosity = "debug" if level == "debug" else "normal"
+    configure_third_party_loggers(
+        verbosity=verbosity,
+        run_id="cli",
+        debug_dir=str(Path(app_config.LOGS_DIR).resolve()),
+    )
 
     root_level = logging.DEBUG if level == "debug" else logging.INFO
     logging.getLogger().setLevel(root_level)
