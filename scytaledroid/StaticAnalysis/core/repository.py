@@ -204,13 +204,31 @@ def _group_key_for_artifact(artifact: RepositoryArtifact) -> str:
     return f"path-{artifact.display_path}"
 
 
-def list_packages(groups: Sequence[ArtifactGroup]) -> List[tuple[str, int]]:
-    """Return sorted unique package names with group counts."""
+def list_packages(groups: Sequence[ArtifactGroup]) -> List[tuple[str, str, int]]:
+    """Return sorted unique package names with representative versions."""
 
-    tally: Dict[str, int] = {}
+    snapshot: Dict[str, Dict[str, object]] = {}
     for group in groups:
-        tally[group.package_name] = tally.get(group.package_name, 0) + 1
-    return sorted(tally.items(), key=lambda item: item[0].lower())
+        entry = snapshot.setdefault(group.package_name, {"count": 0, "versions": set(), "fallback": "-"})
+        entry["count"] = int(entry.get("count", 0)) + 1
+        version = (group.version_display or "-").strip() or "-"
+        if version != "-":
+            entry.setdefault("versions", set()).add(version)
+        entry["fallback"] = entry.get("fallback") or version
+
+    packages: List[tuple[str, str, int]] = []
+    for package_name, data in snapshot.items():
+        versions = data.get("versions") or set()
+        if isinstance(versions, set) and versions:
+            # Prefer a deterministic ordering so the table remains stable between runs.
+            version_label = sorted(versions, key=lambda value: value.lower())[0]
+        else:
+            fallback = data.get("fallback") or "-"
+            version_label = fallback if isinstance(fallback, str) else "-"
+        packages.append((package_name, version_label, int(data.get("count", 0))))
+
+    packages.sort(key=lambda item: item[0].lower())
+    return packages
 
 
 def list_categories(groups: Sequence[ArtifactGroup]) -> List[tuple[str, int]]:

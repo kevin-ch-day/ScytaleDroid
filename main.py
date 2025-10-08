@@ -13,7 +13,7 @@ from scytaledroid.StaticAnalysis.cli import static_analysis_menu
 from scytaledroid.DynamicAnalysis.menu import dynamic_analysis_menu
 from scytaledroid.VirusTotal.menu import virustotal_menu
 from scytaledroid.Utils.System.utils_menu import utils_menu
-from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
+from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Database.db_utils.menu import database_menu
 from scytaledroid.Utils.System.world_clock.state import ClockReference, WorldClockState, load_state
@@ -33,23 +33,6 @@ def _format_time(tz_name: str, reference: ClockReference) -> str:
     dst_active = bool(dst_delta and dst_delta.total_seconds())
     dst_label = "DST" if dst_active else "Std"
     return f"{date_part} {time_part} {tz_label} ({dst_label})"
-
-
-def _reference_banner(reference: ClockReference) -> str:
-    tz_name = reference.timezone or app_config.UI_LOCAL_TIMEZONE or "Etc/UTC"
-    try:
-        tz = zoneinfo.ZoneInfo(tz_name)
-    except Exception:
-        tz = zoneinfo.ZoneInfo("UTC")
-        tz_name = "UTC"
-
-    localized = reference.utc.astimezone(tz)
-    date_part = f"{localized.month}-{localized.day}-{localized.year}"
-    time_part = localized.strftime("%I:%M %p").lstrip("0")
-    offset_label = localized.tzname() or tz_name
-    prefix = "Custom reference" if reference.mode == "custom" else "Live reference"
-    label = reference.label or "Live (current time)"
-    return f"{prefix}: {label} — {date_part} {time_part} {offset_label}"
 
 
 def print_banner() -> None:
@@ -72,12 +55,6 @@ def print_banner() -> None:
             log.warning(f"Failed to render time for {label}: {exc}", category="application")
     if metrics:
         menu_utils.print_metrics(metrics)
-        print(
-            status_messages.status(
-                _reference_banner(state.reference),
-                level="info",
-            )
-        )
     print()
 
     log.info(
