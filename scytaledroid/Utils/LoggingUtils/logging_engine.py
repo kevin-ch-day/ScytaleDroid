@@ -157,11 +157,17 @@ def _configure_loguru(
         except Exception:  # pragma: no cover - defensive cleanup
             pass
 
+    def _toggle(names: tuple[str, ...], action: str) -> None:
+        for target in names:
+            try:
+                getattr(_loguru_logger, action)(target)
+            except Exception:  # pragma: no cover - defensive
+                pass
+
+    namespaces = ("", "androguard", "androguard.core", "androguard.core.axml")
+
     if verbosity != "debug":
-        try:
-            _loguru_logger.disable("")
-        except Exception:  # pragma: no cover - defensive
-            pass
+        _toggle(namespaces, "disable")
 
         def _sink(_: object) -> None:  # pragma: no cover - trivial sink
             return None
@@ -172,10 +178,7 @@ def _configure_loguru(
             pass
         return
 
-    try:
-        _loguru_logger.enable("")
-    except Exception:  # pragma: no cover - defensive
-        pass
+    _toggle(namespaces, "enable")
 
     if log_path is None:
         return
