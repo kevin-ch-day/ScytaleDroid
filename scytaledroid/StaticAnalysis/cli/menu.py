@@ -7,7 +7,6 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime
 import logging
 from pathlib import Path
-import sys
 from time import perf_counter
 from typing import Any, Dict, Iterable, Mapping, MutableMapping, Optional, Sequence, Tuple
 
@@ -26,6 +25,7 @@ from ..core import (
     StaticAnalysisReport,
     analyze_apk,
 )
+from ..engine.strings import analyse_strings
 from ..core.findings import EvidencePointer, Finding, SeverityLevel
 from ..core.repository import (
     ArtifactGroup,
@@ -35,6 +35,7 @@ from ..core.repository import (
     list_packages,
 )
 from ..persistence import ReportStorageError, save_report
+from .renderer import render_app_result, write_baseline_json
 from .sections import SECTION_DEFINITIONS, extract_integrity_profiles
 
 
@@ -158,6 +159,14 @@ class RunOutcome:
         return (self.finished_at - self.started_at).total_seconds()
 
 
+def _format_scope_target(selection: ScopeSelection) -> str:
+    if selection.scope == "app":
+        return f"App={selection.label}"
+    if selection.scope == "category":
+        return f"Category={selection.label}"
+    return "All apps"
+
+
 def _configure_logging_for_cli(level: str) -> None:
     level = level.strip().lower()
     if level not in {"debug", "info"}:
@@ -223,9 +232,17 @@ def _launch_scan_flow(initial_profile: str) -> None:
         return
 
     selection = _select_scope(groups)
-    profile = _prompt_profile_choice(initial_profile)
+    profile = initial_profile
     params = RunParameters(profile=profile, scope=selection.scope, scope_label=selection.label)
-    params = _prompt_tuning(params)
+    if profile == "custom":
+        params = _prompt_tuning(params)
+
+    scope_target = _format_scope_target(selection)
+    print()
+    print(f"Running — {params.profile_label} static analysis")
+    print(f"Target : {scope_target}")
+    print(f"Profile: {params.profile_label}")
+    print("-" * 41)
 
     _configure_logging_for_cli(params.log_level)
     outcome = _execute_scan(selection, params, base_dir)
@@ -256,14 +273,16 @@ def _select_app_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
 
     print()
     menu_utils.print_header("Scope — App", "Select 1 package")
-    rows = [[str(idx), package, str(count)] for idx, (package, count) in enumerate(packages, start=1)]
-    table_utils.render_table(["#", "Package", "Groups"], rows)
+    rows = []
+    for idx, (package, version, _count) in enumerate(packages, start=1):
+        rows.append([str(idx), package, version])
+    table_utils.render_table(["#", "Package", "Version"], rows)
     choice = prompt_utils.get_choice(
         [str(idx) for idx in range(1, len(packages) + 1)],
         prompt="Select package #: ",
         default="1",
     )
-    package_name, _ = packages[int(choice) - 1]
+    package_name, _, _ = packages[int(choice) - 1]
     scoped = tuple(group for group in groups if group.package_name == package_name)
     return ScopeSelection("app", package_name, scoped)
 
@@ -287,27 +306,6 @@ def _select_category_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
     category_name, _ = categories[int(choice) - 1]
     scoped = tuple(group for group in groups if group.category == category_name)
     return ScopeSelection("category", category_name, scoped)
-
-
-def _prompt_profile_choice(initial_profile: str) -> str:
-    profiles = ["metadata", "permissions", "lightweight", "full", "split", "custom"]
-    print()
-    menu_utils.print_header("Profile", "Choose the analysis profile")
-    rows: list[list[str]] = []
-    default_index = 1
-    for idx, key in enumerate(profiles, start=1):
-        label = _PROFILE_LABELS.get(key, key.title())
-        marker = "(default)" if key == initial_profile else ""
-        if key == initial_profile:
-            default_index = idx
-        rows.append([str(idx), label, marker])
-    table_utils.render_table(["#", "Profile", ""], rows)
-    choice = prompt_utils.get_choice(
-        [str(idx) for idx in range(1, len(profiles) + 1)],
-        prompt="Profile #: ",
-        default=str(default_index),
-    )
-    return profiles[int(choice) - 1]
 
 
 def _prompt_tuning(base_params: RunParameters) -> RunParameters:
@@ -449,11 +447,11 @@ def _execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pa
         artifact_total = len(group.artifacts)
 
         for artifact_index, artifact in enumerate(group.artifacts, start=1):
-            status = (
-                f"Analyzing {group_index}/{total_groups} — {group.package_name} "
-                f"({artifact_index}/{artifact_total})"
-            )
-            _update_status_line(status)
+            progress_label = f"[{group_index}/{total_groups}] {group.package_name}"
+            if artifact_total > 1:
+                progress_label += f" ({artifact_index}/{artifact_total})"
+            artifact_label = artifact.artifact_label or artifact.display_path
+            print(f"{progress_label} … analyzing {artifact_label}")
 
             artifact_started = perf_counter()
             wall_clock_started = datetime.now()
@@ -467,7 +465,9 @@ def _execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pa
             duration = perf_counter() - artifact_started
 
             if fatal or report is None:
-                failures.append(f"{artifact.display_path}: {message or 'analysis failed'}")
+                failure_reason = message or "analysis failed"
+                failures.append(f"{artifact.display_path}: {failure_reason}")
+                print(f"{progress_label} … failed ({failure_reason})")
                 continue
 
             if message:
@@ -478,9 +478,18 @@ def _execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pa
                 if isinstance(finding, Finding):
                     severity_counter[_severity_token(finding.severity_gate)] += 1
 
+            summary = "(H{H}/M{M}/L{L}/I{I})".format(
+                H=severity_counter.get("H", 0),
+                M=severity_counter.get("M", 0),
+                L=severity_counter.get("L", 0),
+                I=severity_counter.get("I", 0),
+            )
+
+            print(f"{progress_label} … done {summary} ({_format_duration(duration)})")
+
             app_result.artifacts.append(
                 ArtifactOutcome(
-                    label=artifact.artifact_label or artifact.display_path,
+                    label=artifact_label,
                     report=report,
                     severity=severity_counter,
                     duration_seconds=duration,
@@ -494,9 +503,6 @@ def _execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pa
         if base_report and base_report.signatures:
             app_result.signer = base_report.signatures[0]
 
-    _update_status_line("")
-    print()
-
     finished_at = datetime.now()
     return RunOutcome(
         results=results,
@@ -507,16 +513,6 @@ def _execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pa
         warnings=warnings,
         failures=failures,
     )
-
-
-def _update_status_line(text: str) -> None:
-    if not text:
-        sys.stdout.write("\r" + " " * 100 + "\r")
-        sys.stdout.flush()
-        return
-    rendered = text[:98]
-    sys.stdout.write("\r" + rendered.ljust(100))
-    sys.stdout.flush()
 
 
 def _build_analysis_config(params: RunParameters) -> AnalysisConfig:
@@ -618,52 +614,47 @@ def _generate_report(
 
 
 def _render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
-    totals = Counter()
-    for result in outcome.results:
-        totals.update(result.severity_totals())
-
+    print(f"Duration: {_format_duration(outcome.duration_seconds)}")
     print()
-    scope_desc = (
-        "All apps"
-        if outcome.scope.scope == "all"
-        else f"{outcome.scope.scope.title()}={outcome.scope.label}"
-    )
-    print(
-        f"Run Summary — Profile: {params.profile_label} | Scope: {scope_desc} | "
-        f"Apps: {len(outcome.results)}"
-    )
-    print(
-        "   ".join(
-            f"{label} {totals.get(token, 0)}"
-            for label, token in [
-                ("High", "H"),
-                ("Med", "M"),
-                ("Low", "L"),
-                ("Info", "I"),
-            ]
+
+    for index, app_result in enumerate(outcome.results, start=1):
+        base_report = app_result.base_report()
+        if base_report is None:
+            warning = f"No report generated for {app_result.package_name}."
+            print(status_messages.status(warning, level="warn"))
+            continue
+
+        string_data = analyse_strings(base_report.file_path)
+        total_duration = sum(artifact.duration_seconds for artifact in app_result.artifacts)
+        lines, payload, _ = render_app_result(
+            base_report,
+            signer=app_result.signer,
+            split_count=len(app_result.artifacts),
+            string_data=string_data,
+            duration_seconds=total_duration,
         )
-        + f"   (duration { _format_duration(outcome.duration_seconds) })"
-    )
+
+        for line in lines:
+            print(line)
+
+        if not params.dry_run:
+            saved_path = write_baseline_json(
+                payload,
+                package=app_result.package_name,
+                profile=params.profile,
+                scope=params.scope,
+            )
+            print(f"  Saved baseline JSON → {saved_path.name}")
+
+        if index < len(outcome.results):
+            print()
 
     if outcome.warnings:
-        print(status_messages.status("Warnings captured — review logs for details.", level="info"))
+        for message in sorted(set(outcome.warnings)):
+            print(status_messages.status(message, level="warn"))
     if outcome.failures:
-        print(status_messages.status(f"Failures: {len(outcome.failures)}", level="warn"))
-
-    prompt = "Select app # to open, or q to return: "
-    while True:
-        _render_app_table(outcome.results)
-        response = input(prompt).strip().lower()
-        if response == "q":
-            break
-        if not response.isdigit():
-            print(status_messages.status("Enter an app number or q to exit.", level="warn"))
-            continue
-        index = int(response) - 1
-        if not 0 <= index < len(outcome.results):
-            print(status_messages.status("Invalid app selection.", level="warn"))
-            continue
-        _app_detail_loop(outcome, params, outcome.results[index])
+        for message in sorted(set(outcome.failures)):
+            print(status_messages.status(message, level="error"))
 
 
 def _render_app_table(results: Sequence[AppRunResult]) -> None:
