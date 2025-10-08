@@ -6,12 +6,11 @@ from time import perf_counter
 from pathlib import Path
 from typing import Mapping, Optional, Sequence
 
-from androguard.core.apk import APK
-
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis.harvest.common import compute_hashes
 from scytaledroid.Utils.LoggingUtils.logging_engine import configure_third_party_loggers
 
+from ._androguard import APK
 from .context import AnalysisConfig, DetectorContext
 from .context_builders import (
     build_detector_context,

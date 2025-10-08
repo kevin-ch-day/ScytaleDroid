@@ -5,7 +5,7 @@ from __future__ import annotations
 from xml.etree import ElementTree as ET
 from typing import Dict, List, Sequence, Tuple
 
-from androguard.core.bytecodes.apk import APK
+from scytaledroid.StaticAnalysis._androguard import APK
 
 _ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
 

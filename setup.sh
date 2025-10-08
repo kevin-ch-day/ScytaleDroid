@@ -25,12 +25,27 @@ if ! python3 -m pip --version >/dev/null 2>&1; then
 fi
 
 # upgrade pip
+PIP_INSTALL=(python3 -m pip install)
+if [[ -z "${VIRTUAL_ENV:-}" ]]; then
+  if python3 -m pip help install 2>&1 | grep -q "--break-system-packages"; then
+    PIP_INSTALL+=(--break-system-packages)
+  fi
+fi
+
+run_pip_install() {
+  local args=("$@")
+  if ! "${PIP_INSTALL[@]}" "${args[@]}"; then
+    echo "Error: pip failed to install packages. If you see an 'externally-managed-environment' message, try running this script inside a virtual environment or rerun with elevated privileges." >&2
+    exit 1
+  fi
+}
+
 echo "[Setup] Upgrading pip to the latest version..."
-python3 -m pip install --upgrade pip
+run_pip_install --upgrade pip
 
 if [[ -f "$REQ_FILE" && -s "$REQ_FILE" ]]; then
   echo "[Setup] Installing Python requirements from $REQ_FILE..."
-  python3 -m pip install -r "$REQ_FILE"
+  run_pip_install -r "$REQ_FILE"
 else
   echo "[Setup] No requirements.txt found or file is empty. Skipping dependency installation."
 fi

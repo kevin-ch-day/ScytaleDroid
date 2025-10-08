@@ -19,7 +19,7 @@ from .models import (
 )
 
 if TYPE_CHECKING:  # pragma: no cover - typing aid without runtime import
-    from androguard.core.apk import APK  # noqa: F401
+    from scytaledroid.StaticAnalysis._androguard import APK  # noqa: F401
     from ..modules.string_analysis.extractor import StringIndex  # noqa: F401
     from ..modules.network_security.models import NetworkSecurityPolicy  # noqa: F401
 

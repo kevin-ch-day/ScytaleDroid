@@ -6,7 +6,7 @@ import hashlib
 from typing import List, Optional
 from xml.etree import ElementTree
 
-from androguard.core.apk import APK
+from scytaledroid.StaticAnalysis._androguard import APK
 
 from .models import DomainPolicy, NetworkSecurityPolicy
 

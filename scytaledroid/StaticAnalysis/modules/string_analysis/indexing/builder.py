@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from androguard.core.apk import APK
+from scytaledroid.StaticAnalysis._androguard import APK
 
 from .models import IndexedString, StringIndex
 from .sources import collect_file_strings, iterate_resource_strings

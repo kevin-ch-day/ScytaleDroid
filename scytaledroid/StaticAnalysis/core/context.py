@@ -8,7 +8,7 @@ from typing import Mapping, Optional, Sequence, TYPE_CHECKING
 from xml.etree.ElementTree import Element
 
 if TYPE_CHECKING:  # pragma: no cover - type checking imports only
-    from androguard.core.apk import APK
+    from scytaledroid.StaticAnalysis._androguard import APK
     from .findings import DetectorResult
     from .models import (
         ComponentSummary,
