@@ -38,7 +38,10 @@ from ..core.repository import (
     list_packages,
 )
 from ..persistence import ReportStorageError, save_report
-from ..modules.permissions import collect_permissions, print_permission_report
+from ..modules.permissions import (
+    collect_permissions_and_sdk,
+    print_permissions_block,
+)
 from .renderer import render_app_result, write_baseline_json
 from .sections import SECTION_DEFINITIONS, extract_integrity_profiles
 
@@ -541,20 +544,25 @@ def _execute_permission_scan(selection: ScopeSelection, params: RunParameters) -
             if artifact_total > 1:
                 progress_label += f" ({artifact_index}/{artifact_total})"
 
-            artifact_label = artifact.artifact_label or artifact.display_path
-            print(f"{progress_label} … analyzing {artifact_label}")
+            raw_label = artifact.artifact_label or artifact.display_path
+            artifact_label = str(raw_label) if raw_label else "base"
+            progress_message = f"{progress_label} … analyzing {artifact_label}"
 
             try:
-                declared, defined = collect_permissions(str(artifact.path))
+                declared, defined, sdk = collect_permissions_and_sdk(
+                    str(artifact.path)
+                )
             except Exception as exc:  # pragma: no cover - defensive path
-                print(f"{progress_label} … failed ({exc})")
+                print(f"{progress_message} … failed ({exc})")
                 continue
 
-            print_permission_report(
-                package_name=group.package_name,
-                artifact_label=artifact_label,
-                declared=declared,
-                defined=defined,
+            print(f"{progress_message} … done")
+            print_permissions_block(
+                group.package_name,
+                artifact_label,
+                declared,
+                defined,
+                sdk,
             )
 
 
