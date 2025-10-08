@@ -14,6 +14,7 @@ from .pipeline import (
     PipelineStage,
     analyze_apk,
 )
+from .pipeline_artifacts import PipelineArtifacts
 from .findings import (
     SeverityLevel,
     MasvsCategory,
@@ -34,6 +35,7 @@ __all__ = [
     "StaticAnalysisError",
     "PipelineStage",
     "PIPELINE_STAGES",
+    "PipelineArtifacts",
     "SeverityLevel",
     "MasvsCategory",
     "EvidencePointer",
