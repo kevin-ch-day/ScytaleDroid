@@ -173,11 +173,17 @@ def _generate_report(
     metadata: Optional[Mapping[str, object]] = None,
     storage_root: Optional[Path] = None,
     config: Optional[AnalysisConfig] = None,
+    display_options: Optional[ScanDisplayOptions] = None,
 ) -> tuple[Optional[StaticAnalysisReport], Optional[Path], Optional[str], bool]:
     try:
+        metadata_payload = dict(metadata or {})
+        if display_options is not None:
+            metadata_payload.setdefault("run_profile", display_options.profile)
+            metadata_payload.setdefault("run_verbosity", display_options.verbosity)
+            metadata_payload.setdefault("evidence_limit", display_options.evidence_limit)
         report = analyze_apk(
             apk_path,
-            metadata=metadata,
+            metadata=metadata_payload,
             storage_root=storage_root,
             config=config,
         )
@@ -185,8 +191,8 @@ def _generate_report(
         return None, None, str(exc), True
 
     try:
-        saved_path = save_report(report)
-        return report, saved_path, None, False
+        saved_paths = save_report(report)
+        return report, saved_paths.json_path, None, False
     except ReportStorageError as exc:
         log.error(str(exc), category="static_analysis")
         return report, None, str(exc), False
@@ -241,6 +247,7 @@ def _scan_groups(
                 metadata=artifact.metadata,
                 storage_root=base_dir,
                 config=config,
+                display_options=options,
             )
             wall_clock_finished = progress.now()
             artifact_duration = perf_counter() - artifact_started

@@ -11,6 +11,7 @@ from scytaledroid.Config import app_config
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ..core import StaticAnalysisReport
+from ..reporting import build_report_view, save_html_report
 
 
 REPORTS_DIR = Path(app_config.DATA_DIR) / "static_analysis" / "reports"
@@ -28,26 +29,48 @@ class StoredReport:
     report: StaticAnalysisReport
 
 
-def save_report(report: StaticAnalysisReport) -> Path:
-    """Persist *report* to the reports directory and return the path."""
+@dataclass(frozen=True)
+class SavedReportPaths:
+    """Represents the filesystem artefacts produced for a saved report."""
+
+    json_path: Path
+    html_path: Optional[Path]
+    view: dict[str, object]
+
+
+def save_report(report: StaticAnalysisReport) -> SavedReportPaths:
+    """Persist *report* to disk and return the generated artefact paths."""
 
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     sha256 = report.hashes.get("sha256")
     filename = f"{sha256}.json" if sha256 else f"report_{report.generated_at}.json"
     path = REPORTS_DIR / filename
 
+    view_payload = dict(build_report_view(report))
     payload = report.to_dict()
+    payload["view"] = view_payload
     try:
         with path.open("w", encoding="utf-8") as handle:
             json.dump(payload, handle, indent=2, sort_keys=True)
     except OSError as exc:  # pragma: no cover - filesystem errors
         raise ReportStorageError(f"Unable to write report to {path}: {exc}") from exc
 
-    log.info(
-        f"Static analysis report saved to {path} (sha256={sha256 or 'unknown'})",
-        category="static_analysis",
-    )
-    return path
+    html_path: Optional[Path]
+    try:
+        html_path = save_html_report(report, view_payload)
+    except OSError as exc:  # pragma: no cover - filesystem errors
+        log.warning(
+            f"Failed to render HTML report for {path.name}: {exc}",
+            category="static_analysis",
+        )
+        html_path = None
+
+    summary = f"Static analysis report saved to {path}"
+    if html_path:
+        summary += f"; HTML {html_path}"
+    summary += f" (sha256={sha256 or 'unknown'})"
+    log.info(summary, category="static_analysis")
+    return SavedReportPaths(json_path=path, html_path=html_path, view=view_payload)
 
 
 def _read_report(path: Path) -> Optional[StaticAnalysisReport]:
@@ -93,4 +116,11 @@ def load_report(path: Path) -> StaticAnalysisReport:
     return report
 
 
-__all__ = ["save_report", "list_reports", "load_report", "ReportStorageError", "StoredReport"]
+__all__ = [
+    "save_report",
+    "list_reports",
+    "load_report",
+    "ReportStorageError",
+    "StoredReport",
+    "SavedReportPaths",
+]
