@@ -96,3 +96,5 @@ ORDER BY p.new_snapshot DESC, p.package_name;
 ## Notes
 * The SQL above assumes only two snapshots are compared. Adapt if you store more history (e.g., use window functions).
 * Inventory ingestion must capture snapshot timestamps reliably (e.g., from `latest.meta.json`).
+* When static-analysis tables are introduced, join on `apk_id`/`sha256` to
+  surface correlation findings or manifest digests alongside the version drift.

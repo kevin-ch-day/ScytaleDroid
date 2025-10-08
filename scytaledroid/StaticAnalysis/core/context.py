@@ -9,12 +9,14 @@ from xml.etree.ElementTree import Element
 
 if TYPE_CHECKING:  # pragma: no cover - type checking imports only
     from androguard.core.apk import APK
+    from .findings import DetectorResult
     from .models import (
         ComponentSummary,
         ManifestFlags,
         ManifestSummary,
         PermissionSummary,
     )
+    from ..modules.network_security.models import NetworkSecurityPolicy
     from ..modules.string_analysis.extractor import StringIndex
 
 
@@ -48,6 +50,8 @@ class DetectorContext:
     metadata: Mapping[str, object]
     hashes: Mapping[str, str]
     string_index: Optional["StringIndex"] = None
+    network_security_policy: Optional["NetworkSecurityPolicy"] = None
+    intermediate_results: Sequence["DetectorResult"] = field(default_factory=tuple)
     config: AnalysisConfig = field(default_factory=AnalysisConfig)
 
 

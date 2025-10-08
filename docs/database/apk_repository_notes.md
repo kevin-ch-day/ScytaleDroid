@@ -95,6 +95,19 @@ WHERE t.is_split_member = 1 AND t.split_group_id IS NULL;
   WHERE signer_fingerprint IS NULL AND sha256 IS NOT NULL;
   ```
 
+## Static-analysis linkages
+
+Static-analysis reports now embed the `apk_id` (when available) so that
+downstream tooling can join detector output back to repository rows:
+
+* JSON reports live under `data/static_analysis/reports/<sha256>.json` and
+  include `metadata.apk_id`, `metadata.pipeline_trace`, and
+  `metadata.repro_bundle`.
+* Use the `sha256` (unique) or `apk_id` (preferred) to join repository entries
+  with static-analysis findings when you design dashboards or warehouse models.
+* For drift analysis, pair the `repro_bundle.manifest_digest` between runs to
+  detect changes even when the APK filename remains the same.
+
 ## Next steps / TODOs
 
 * Map `package_name` to `android_app_categories` (e.g. via

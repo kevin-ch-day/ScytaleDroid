@@ -44,6 +44,7 @@ class ScanDisplayOptions:
     show_findings: bool = False
     show_timings: bool = True
     finding_limit: int = 3
+    show_pipeline: bool = True
 
     def describe(self) -> str:
         parts: list[str] = []
@@ -56,6 +57,7 @@ class ScanDisplayOptions:
             f"top {self.finding_limit}" if self.show_findings else "off"
         )
         parts.append(f"findings={findings}")
+        parts.append(f"pipeline={'on' if self.show_pipeline else 'off'}")
         return ", ".join(parts)
 
     @property
@@ -73,15 +75,18 @@ def resolve_display_options() -> ScanDisplayOptions:
     quiet = _env_flag("SCYTALEDROID_STATIC_QUIET", False)
     show_findings_default = _env_flag("SCYTALEDROID_STATIC_SHOW_FINDINGS", False)
     show_timings = _env_flag("SCYTALEDROID_STATIC_SHOW_TIMINGS", True)
+    show_pipeline_default = _env_flag("SCYTALEDROID_STATIC_SHOW_PIPELINE", True)
     limit = _env_int("SCYTALEDROID_STATIC_FINDING_LIMIT", 3)
 
     show_findings = False if quiet else show_findings_default
+    show_pipeline = False if quiet else show_pipeline_default
 
     return ScanDisplayOptions(
         quiet=quiet,
         show_findings=show_findings,
         show_timings=show_timings,
         finding_limit=limit,
+        show_pipeline=show_pipeline,
     )
 
 
@@ -92,6 +97,7 @@ def parse_cli_args(argv: Sequence[str] | None = None) -> ScanDisplayOptions:
         prog="scd-static",
         description="Render static analysis results with deterministic formatting.",
     )
+    parser.set_defaults(show_pipeline=True)
     parser.add_argument(
         "--profile",
         choices=_VALID_PROFILES,
@@ -130,6 +136,13 @@ def parse_cli_args(argv: Sequence[str] | None = None) -> ScanDisplayOptions:
         help="Maximum evidence pointers to display per section (before verbosity adjustments).",
     )
 
+    parser.add_argument(
+        "--hide-pipeline",
+        dest="show_pipeline",
+        action="store_false",
+        help="Disable per-detector pipeline breakdown output.",
+    )
+
     namespace = parser.parse_args(argv)
     max_evidence = max(1, namespace.max_evidence)
 
@@ -137,6 +150,7 @@ def parse_cli_args(argv: Sequence[str] | None = None) -> ScanDisplayOptions:
         profile=namespace.profile,
         verbosity=namespace.verbosity,
         max_evidence=max_evidence,
+        show_pipeline=namespace.show_pipeline,
     )
 
 
@@ -148,6 +162,7 @@ def describe_cli_flags(options: ScanDisplayOptions) -> str:
             f"profile={options.profile}",
             f"verbosity={options.verbosity}",
             f"evidence_limit={options.evidence_limit}",
+            f"pipeline={'on' if options.show_pipeline else 'off'}",
         )
     )
 

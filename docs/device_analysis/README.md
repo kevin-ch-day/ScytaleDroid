@@ -90,7 +90,11 @@ Once the harvest loop is fully locked down, the same database-first approach
 expands to:
 
 1. **Static analysis:** manifest parsing, permission and API surfacing, tracker
-   detection, and ML-driven risk scoring.
+   detection, ML-driven risk scoring, and differential comparisons fuelled by
+   the static-analysis pipeline. Harvest runs now drop artifacts directly into
+   the repository folders that `StaticAnalysis/core/pipeline.py` consumes,
+   enabling reproducibility bundles (manifest, NSC, strings) and split-aware
+   posture diffing without additional preparation.
 2. **Dynamic analysis:** sandbox executions, behavior logging, and network
    capture ingestion.
 3. **Threat-intel enrichment:** VirusTotal lookups, signer lineage, and
@@ -109,8 +113,12 @@ expands to:
   the upcoming static/dynamic/threat-intel phases (e.g., permissions, trackers,
   string intel).
 - **Validate filenames & DB rows:** confirm harvested files match the
-  `com_package_vercode__artifact.apk` convention and that `apk_id` entries exist
-  per artifact.
+  `com_package_vercode__artifact.apk` convention, that `apk_id` entries exist
+  per artifact, and that static-analysis reports link back via the stored
+  `apk_id` metadata.
+- **Feed the static-analysis loop:** capture before/after harvests of the same
+  app so the correlation detector can highlight manifest drift, permission
+  expansion, or cleartext policy changes across versions.
 
 ## Operational checklist
 
@@ -119,6 +127,9 @@ expands to:
 3. Choose **5: Inventory & DB sync** to capture the latest snapshot.
 4. Choose **7: Pull APKs** and pick a scope (default = Play + `/data`).
 5. Review the summary for counts, skipped packages, and `apk_id` values.
+6. Optional: jump to **Static Analysis** → *Analyze repository artifact* to run
+   the detector pipeline on freshly harvested APKs and persist the accompanying
+   reproducibility bundle.
 
 ## Repository layout (Device Analysis modules)
 

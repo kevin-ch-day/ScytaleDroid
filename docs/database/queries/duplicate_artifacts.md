@@ -80,3 +80,5 @@ LIMIT :LIMIT_ROWS;
 ## Notes
 * Use this output to highlight binaries shared across carrier variants or devices.
 * Can be extended with storage size sums to show total space saved.
+* Once static-analysis runs are persisted, surface whether the shared binary has
+  a recent scan to avoid duplicate processing.

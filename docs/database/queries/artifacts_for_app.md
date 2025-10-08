@@ -90,3 +90,5 @@ ORDER BY ar.harvested_at DESC, ar.apk_id DESC;
 * Reconstruct an absolute filesystem path on demand: `CONCAT(hsr.data_root, '/', hap.local_rel_path)`.
 * Display `split_group_id` as a collapsible group in the UI to show related splits.
 * Combine with file hashes to offer “download latest” from the PHP interface.
+* Pair this query with static-analysis metadata (`data/static_analysis/reports/<sha256>.json`) so analysts can open detector
+  findings or diff reproducibility bundles per artifact.

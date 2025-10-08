@@ -72,4 +72,18 @@ Confirm that `local_rel_path` aligns with the directory structure `device_apks/<
 * Re-run the artifact count from step 3 and confirm the value did **not** change.
 * Re-enable `HARVEST_WRITE_DB` afterward.
 
+## 7. Static-analysis artefact cross-check
+Although detector output currently lives on disk, validate the join keys that
+will back future SQL tables:
+
+```bash
+ls data/static_analysis/reports | head
+jq '.metadata | {apk_id, sha256, pipeline_trace: (.pipeline_trace | length)}' \
+  data/static_analysis/reports/<sha256>.json
+```
+
+Confirm that `metadata.apk_id` matches the `apk_id` from step 5 and that each
+report carries a `pipeline_trace` plus `repro_bundle` block. Capture mismatches
+so the DB ingestion design can account for them.
+
 Document any discrepancies before wiring the PHP UI to these tables.

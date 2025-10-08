@@ -13,9 +13,13 @@ from datetime import datetime, timedelta, timezone
 from importlib import metadata as importlib_metadata
 from importlib.metadata import PackageNotFoundError
 from shutil import which
-from typing import Mapping, MutableMapping, Sequence, TextIO
+from typing import Any, Mapping, MutableMapping, Sequence, TextIO
 
-from zoneinfo import ZoneInfo
+try:  # pragma: no cover - optional timezone data
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+except Exception:  # pragma: no cover - Python < 3.9 or missing module
+    ZoneInfo = None  # type: ignore[assignment]
+    ZoneInfoNotFoundError = Exception  # type: ignore[assignment]
 
 from scytaledroid.Config.app_config import APP_VERSION
 
@@ -31,7 +35,17 @@ from .sections import (
     render_sections,
 )
 
-_CT = ZoneInfo("America/Chicago")
+_DEFAULT_TIMEZONE_LABEL = "America/Chicago"
+if ZoneInfo is not None:
+    try:
+        _LOCAL_TIMEZONE = ZoneInfo(_DEFAULT_TIMEZONE_LABEL)
+        _TIMEZONE_LABEL = _DEFAULT_TIMEZONE_LABEL
+    except ZoneInfoNotFoundError:  # pragma: no cover - environment dependent
+        _LOCAL_TIMEZONE = timezone.utc
+        _TIMEZONE_LABEL = "UTC"
+else:  # pragma: no cover - Python < 3.9 fallback
+    _LOCAL_TIMEZONE = timezone.utc
+    _TIMEZONE_LABEL = "UTC"
 _SECTION_NAME_LOOKUP = {definition.key: definition.title for definition in SECTION_DEFINITIONS}
 
 
@@ -61,7 +75,7 @@ class ScanProgress:
         self._preface_packages: set[tuple[str, str, str]] = set()
 
     def now(self) -> datetime:
-        return datetime.now(_CT)
+        return datetime.now(_LOCAL_TIMEZONE)
 
     # --- High-level banners -------------------------------------------------
 
@@ -90,7 +104,7 @@ class ScanProgress:
 
     def print_repository_summary(self, *, started: datetime, finished: datetime) -> None:
         duration = (finished - started).total_seconds()
-        ordered_labels = ("P0", "P1", "P2")
+        ordered_labels = ("P0", "P1", "P2", "NOTE")
         severity_line = "Severities: " + "   ".join(
             f"{label}={self._severity_totals.get(label, 0)}" for label in ordered_labels
         )
@@ -266,7 +280,7 @@ class ScanProgress:
         p1 = severity_counter.get("P1", 0)
         p2 = severity_counter.get("P2", 0)
         self._write(f"Result:     {result_badge}   P0={p0}   P1={p1}   P2={p2}")
-        finished_text = f"{format_timestamp(finished_at)} (America/Chicago)"
+        finished_text = f"{format_timestamp(finished_at)} ({_TIMEZONE_LABEL})"
         self._write(f"Finished:   {finished_text}")
         self._write()
 
@@ -294,6 +308,17 @@ class ScanProgress:
             finished_at=finished_at,
             severity_counter=severity_counter,
         )
+
+        metadata = report.metadata or {}
+        if self.options.show_pipeline:
+            pipeline_lines = _render_pipeline_trace(
+                metadata.get("pipeline_trace"),
+                glyphs=self.glyphs,
+            )
+            if pipeline_lines:
+                for line in pipeline_lines:
+                    self._write(line)
+                self._write()
 
         if self.options.verbosity == "summary":
             return
@@ -524,8 +549,113 @@ def _preface_lines(
 
     seed = _determinism_seed(report, artifact_label)
     lines.append(f"  Determinism seed: SHA256(pkg+ver+artifact)={seed}")
-    lines.append(f"  Started: {format_timestamp(started_at)} (America/Chicago)")
+    lines.append(f"  Started: {format_timestamp(started_at)} ({_TIMEZONE_LABEL})")
     return lines
+
+
+def _render_pipeline_trace(
+    payload: object,
+    *,
+    glyphs: GlyphSet,
+) -> list[str]:
+    if isinstance(payload, Mapping):
+        entries = [payload]
+    elif isinstance(payload, Sequence) and not isinstance(payload, (str, bytes)):
+        entries = list(payload)
+    else:
+        return []
+
+    lines: list[str] = []
+    header_printed = False
+
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            continue
+
+        if not header_printed:
+            lines.append("Pipeline Trace")
+            lines.append(glyphs.rule * glyphs.line_width)
+            header_printed = True
+
+        index = entry.get("index")
+        try:
+            index_text = f"{int(index):>2}."
+        except (TypeError, ValueError):
+            index_text = "--."
+
+        section_key = str(entry.get("section") or "")
+        section_title = _SECTION_NAME_LOOKUP.get(section_key, section_key or "—")
+        detector = str(entry.get("detector") or "—")
+        badge = format_badge(_badge_from_text(entry.get("status")), glyphs)
+
+        try:
+            duration_value = float(entry.get("duration", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            duration_value = 0.0
+        duration_text = format_duration(duration_value)
+
+        line = f"{index_text} {badge} {section_title} [{detector}] {duration_text}"
+
+        severity_payload = entry.get("severity")
+        severity_tokens: list[str] = []
+        if isinstance(severity_payload, Mapping):
+            for label in ("P0", "P1", "P2", "NOTE"):
+                value = severity_payload.get(label)
+                try:
+                    count = int(value)
+                except (TypeError, ValueError):
+                    continue
+                if count:
+                    severity_tokens.append(f"{label}={count}")
+
+        if severity_tokens:
+            line += " • " + ", ".join(severity_tokens)
+        else:
+            finding_count = entry.get("finding_count")
+            if isinstance(finding_count, int) and finding_count:
+                line += f" • findings={finding_count}"
+
+        note_tokens: list[str] = []
+        notes_payload = entry.get("notes")
+        if isinstance(notes_payload, Sequence) and not isinstance(notes_payload, (str, bytes)):
+            for note in notes_payload:
+                text = str(note).strip()
+                if text:
+                    note_tokens.append(text)
+        if note_tokens:
+            line += " — " + "; ".join(note_tokens)
+
+        lines.append(line)
+
+        metrics_payload = entry.get("metrics")
+        if isinstance(metrics_payload, Mapping):
+            metric_parts: list[str] = []
+            for key, value in metrics_payload.items():
+                if key in {"skip_reason", "error"}:
+                    continue
+                metric_parts.append(f"{key}={value}")
+            if metric_parts:
+                lines.append(f"      metrics: {', '.join(metric_parts)}")
+
+    return lines
+
+
+def _badge_from_text(value: object) -> Badge:
+    if isinstance(value, Badge):
+        return value
+    if not isinstance(value, str):
+        return Badge.INFO
+
+    text = value.strip()
+    if not text:
+        return Badge.INFO
+
+    for candidate in (text, text.upper(), text.lower(), text.capitalize()):
+        try:
+            return Badge(candidate)
+        except ValueError:
+            continue
+    return Badge.INFO
 
 
 def _determinism_seed(report: StaticAnalysisReport, artifact_label: str) -> str:
@@ -588,7 +718,7 @@ def _short_digest(value: object | None) -> str:
 def format_timestamp(dt: datetime) -> str:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
-    local = dt.astimezone(_CT)
+    local = dt.astimezone(_LOCAL_TIMEZONE)
     hour = local.hour % 12 or 12
     minute = local.minute
     am_pm = "AM" if local.hour < 12 else "PM"

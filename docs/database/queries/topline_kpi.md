@@ -49,3 +49,6 @@ SELECT
 ## Notes
 * If you maintain a dedicated devices table, join it instead of relying on `android_apk_repository`.
 * Extend with trend metrics (e.g., artifacts added in the last 7 days) as needed.
+* Reserve space for future static-analysis KPIs (e.g., `% of harvested apps with
+  a recent static scan`, `count of P0 findings in last 7 days`) once the
+  persistence tables land.

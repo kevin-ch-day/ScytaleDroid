@@ -76,3 +76,6 @@ ORDER BY coverage_percent DESC, cat.category_name;
 ## Notes
 * Treat `NULL` / “Other” categories specially in the UI (e.g., display “Uncategorized”).
 * If you need to distinguish OEM/system apps, join on `android_apk_repository.is_system` for additional breakdowns.
+* Future enhancement: join with forthcoming `static_analysis_runs` to show
+  coverage % for apps that have received a static scan in addition to being
+  harvested.

@@ -90,3 +90,5 @@ ORDER BY lp.package_name;
 ## Notes
 * Inventory snapshots are currently JSON on disk (`data/state/<serial>/inventory/…`). Ensure they are imported into SQL before running this query.
 * Adjust the grouping and ordering if you maintain per-scope snapshots.
+* Future work: left join planned `static_analysis_runs` on `apk_id` to show
+  whether the latest build also has a static scan and when it last ran.

@@ -61,3 +61,5 @@ FROM device_artifacts AS da;
 ## Notes
 * This query treats the **most recent** row per package as part of the latest harvest. If you store explicit run IDs later, replace the window logic with that column.
 * Consider enriching the payload with guard decisions (stored in sidecars today) once they are persisted in MySQL.
+* Future iteration: surface whether each package has a fresh static-analysis run by joining planned `static_analysis_runs` on
+  `apk_id`.

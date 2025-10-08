@@ -63,3 +63,4 @@ ORDER BY lp.package_name;
 ## Notes
 * If inventory snapshots are not yet in SQL, import them from `data/state/<serial>/inventory/latest.json` and `latest.meta.json` before using this query.
 * Combine with heuristics (e.g., `source_tag = 'Play'`) to prioritise high-value apps.
+* When static-analysis tables arrive, left join by `package_name`/`apk_id` to flag missing security posture coverage for these gaps.

@@ -18,7 +18,8 @@ Android devices ──harvest──▶ CLI workers ──persist──▶ MySQL 
 ```
 
 * **Harvesters** push inventory and artifact metadata into MySQL through the
-  Python tooling.
+  Python tooling and persist static-analysis reports (`data/static_analysis/`)
+  alongside reproducibility bundles per APK.
 * **MySQL** acts as the single source of truth for the PHP tier; treat the
   schema as append-only from LAMP’s perspective.
 * **PHP** renders dashboards and exports by issuing read queries only. Any
@@ -33,11 +34,24 @@ Android devices ──harvest──▶ CLI workers ──persist──▶ MySQL 
    prepared statements inside the PHP layer.
 3. **Expose artifacts via HTTP downloads** from `data/apks/device_apks/`
    (ensure Apache has read permission or proxy through PHP with access
-   controls).
+   controls). Pair each artifact link with its latest static-analysis report
+   located in `data/static_analysis/reports/<apk_sha256>.json` so analysts can
+   jump from the portal to detector output.
 4. **Cache inventory snapshots** in MySQL (import
    `data/state/<serial>/inventory/latest.json`) before driving device dashboards.
-5. **Add environment toggles** so LAMP can detect whether quick harvests skipped
+5. **Index reproducibility bundles** by `apk_id` so diff-friendly assets (manifest
+   digest, network-security graph hash, string-index summary) can be surfaced in
+   the portal for version-to-version comparisons.
+6. **Add environment toggles** so LAMP can detect whether quick harvests skipped
    DB writes (inspect `HARVEST_WRITE_DB` flag if you expose it via config).
+
+### Static-analysis artefacts in LAMP
+
+| Asset | Location | Suggested UI usage |
+| --- | --- | --- |
+| Detector report | `data/static_analysis/reports/<sha256>.json` | Render badge counts, pipeline timings, and correlation findings. |
+| Repro bundle | `metadata.repro_bundle` inside each JSON report | Provide manifest diff downloads and NSC policy graph visualisations. |
+| Pipeline trace | `metadata.pipeline_trace` | Display detector durations to surface bottlenecks. |
 
 ### Operational considerations
 
@@ -49,7 +63,9 @@ Android devices ──harvest──▶ CLI workers ──persist──▶ MySQL 
 * **Error reporting:** Surface SQL errors through a central logger so the data
   engineering team can trace failing queries back to their documentation entry.
 * **Performance budgets:** Agree on acceptable response times per dashboard and
-  monitor MySQL slow query logs for violations.
+  monitor MySQL slow query logs for violations. Large static-analysis JSON
+  payloads should be cached or streamed instead of loaded wholesale for every
+  request.
 * **Failover plan:** If the primary MySQL node is unavailable, serve a cached
   “last known good” dataset rather than attempting emergency writes.
 
