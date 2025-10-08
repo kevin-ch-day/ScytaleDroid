@@ -1,6 +1,12 @@
 """Modular helpers used by the static analysis pipeline."""
 
 from .categories import resolve_category
+from .masvs import (
+    FindingHighlight,
+    MasvsCategorySummary,
+    MasvsComplianceSummary,
+    build_masvs_compliance_summary,
+)
 from .string_analysis import (
     EndpointMatch,
     IndexedString,
@@ -12,6 +18,10 @@ from .string_analysis import (
 
 __all__ = [
     "resolve_category",
+    "build_masvs_compliance_summary",
+    "MasvsComplianceSummary",
+    "MasvsCategorySummary",
+    "FindingHighlight",
     "build_string_index",
     "IndexedString",
     "StringIndex",

@@ -97,6 +97,8 @@ def render_sections(
         package_profile = package_cache[package_key]
 
     lines: list[str] = []
+    metadata = report.metadata or {}
+
     topology_lines = _render_application_topology(
         report=report,
         integrity_result=integrity_result,
@@ -125,6 +127,11 @@ def render_sections(
         if integrity_lines:
             lines.extend(integrity_lines)
             lines.append("")
+
+    compliance_lines = _render_masvs_table(metadata.get("masvs_compliance"), glyphs)
+    if compliance_lines:
+        lines.extend(compliance_lines)
+        lines.append("")
 
     findings_lines = _render_findings_table(report.findings, glyphs)
     if findings_lines:
@@ -386,6 +393,93 @@ def _render_findings_table(
     if lines and not lines[-1]:
         lines.pop()
     return lines
+
+
+def _render_masvs_table(payload: object, glyphs: GlyphSet) -> list[str]:
+    if not isinstance(payload, Mapping):
+        return []
+
+    categories = payload.get("categories")
+    if not isinstance(categories, Sequence):
+        return []
+
+    lines: list[str] = ["MASVS Compliance Overview", glyphs.rule * glyphs.line_width]
+
+    overall_badge = format_badge(_coerce_badge(payload.get("status")), glyphs)
+    score = payload.get("score")
+    if isinstance(score, (int, float)):
+        lines.append(f"Overall: {overall_badge}  Score: {score * 100:.0f}%")
+    else:
+        lines.append(f"Overall: {overall_badge}")
+
+    header = f"{'Category':<14} {'Status':<12} {'Score':<8} Findings"
+    lines.append(header)
+    lines.append(glyphs.rule * min(len(header), glyphs.line_width))
+
+    for entry in categories:
+        if not isinstance(entry, Mapping):
+            continue
+
+        category = str(entry.get("category") or entry.get("name") or "—")
+        badge = format_badge(_coerce_badge(entry.get("status")), glyphs)
+        score_value = entry.get("score")
+        score_text = f"{score_value * 100:.0f}%" if isinstance(score_value, (int, float)) else "—"
+
+        severity_payload = entry.get("severity_counts")
+        severity_tokens: list[str] = []
+        if isinstance(severity_payload, Mapping):
+            for label in ("P0", "P1", "P2", "NOTE"):
+                value = severity_payload.get(label)
+                if isinstance(value, int) and value > 0:
+                    severity_tokens.append(f"{label}={value}")
+        findings_text = ", ".join(severity_tokens) if severity_tokens else "—"
+
+        lines.append(f"{category:<14} {badge:<12} {score_text:<8} {findings_text}")
+
+        highlight_lines = _render_masvs_highlights(entry.get("highlights"), glyphs)
+        for highlight in highlight_lines:
+            lines.append(f"  {highlight}")
+
+    return lines
+
+
+def _render_masvs_highlights(payload: object, glyphs: GlyphSet) -> list[str]:
+    if not isinstance(payload, Sequence) or isinstance(payload, (str, bytes)):
+        return []
+
+    lines: list[str] = []
+    for index, entry in enumerate(payload):
+        if index >= 2:
+            break
+        if not isinstance(entry, Mapping):
+            continue
+
+        severity = str(entry.get("severity") or entry.get("severity_gate") or "—")
+        badge = format_badge(_coerce_badge(entry.get("status")), glyphs)
+        title = str(entry.get("title") or "—")
+        lines.append(f"{severity:<3} {badge} {title}")
+
+        because = entry.get("because")
+        if isinstance(because, str):
+            text = because.strip()
+            if text:
+                lines.append(f"      Because: {text}")
+
+    return lines
+
+
+def _coerce_badge(value: object) -> Badge:
+    if isinstance(value, Badge):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if text:
+            for candidate in (text, text.upper(), text.lower(), text.capitalize()):
+                try:
+                    return Badge(candidate)
+                except ValueError:
+                    continue
+    return Badge.INFO
 
 
 def _render_network_card(

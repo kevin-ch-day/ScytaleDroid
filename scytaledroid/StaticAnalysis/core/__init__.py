@@ -1,5 +1,6 @@
 """Core pipeline components for static analysis."""
 
+from .apk_snapshot import ApkSnapshot, build_apk_snapshot
 from .context import AnalysisConfig, DetectorContext
 from .errors import StaticAnalysisError
 from .models import (
@@ -14,6 +15,7 @@ from .pipeline import (
     PipelineStage,
     analyze_apk,
 )
+from .pipeline_artifacts import PipelineArtifacts
 from .findings import (
     SeverityLevel,
     MasvsCategory,
@@ -23,8 +25,10 @@ from .findings import (
 )
 
 __all__ = [
+    "ApkSnapshot",
     "AnalysisConfig",
     "DetectorContext",
+    "build_apk_snapshot",
     "analyze_apk",
     "ComponentSummary",
     "ManifestFlags",
@@ -34,6 +38,7 @@ __all__ = [
     "StaticAnalysisError",
     "PipelineStage",
     "PIPELINE_STAGES",
+    "PipelineArtifacts",
     "SeverityLevel",
     "MasvsCategory",
     "EvidencePointer",

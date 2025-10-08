@@ -311,13 +311,21 @@ class ScanProgress:
 
         metadata = report.metadata or {}
         if self.options.show_pipeline:
+            summary_lines = _render_pipeline_summary(
+                metadata.get("pipeline_summary"),
+                glyphs=self.glyphs,
+            )
             pipeline_lines = _render_pipeline_trace(
                 metadata.get("pipeline_trace"),
                 glyphs=self.glyphs,
             )
-            if pipeline_lines:
-                for line in pipeline_lines:
-                    self._write(line)
+            groups = [group for group in (summary_lines, pipeline_lines) if group]
+            if groups:
+                for index, group in enumerate(groups):
+                    for line in group:
+                        self._write(line)
+                    if index != len(groups) - 1:
+                        self._write()
                 self._write()
 
         if self.options.verbosity == "summary":
@@ -553,6 +561,188 @@ def _preface_lines(
     return lines
 
 
+def _render_pipeline_summary(
+    payload: object,
+    *,
+    glyphs: GlyphSet,
+) -> list[str]:
+    if not isinstance(payload, Mapping):
+        return []
+
+    lines: list[str] = ["Pipeline Summary", glyphs.rule * glyphs.line_width]
+
+    total = payload.get("detector_total")
+    executed = payload.get("detector_executed")
+    skipped = payload.get("detector_skipped")
+    counts: list[str] = []
+    if isinstance(executed, int) and isinstance(total, int):
+        counts.append(f"executed {executed}/{total}")
+    if isinstance(skipped, int) and skipped:
+        counts.append(f"skipped {skipped}")
+    if counts:
+        lines.append("Detectors: " + ", ".join(counts))
+
+    total_duration = payload.get("total_duration_sec")
+    if isinstance(total_duration, (int, float)):
+        lines.append(f"Runtime: {format_duration(total_duration)} total")
+        average = payload.get("average_duration_sec")
+        if isinstance(average, (int, float)) and average > 0:
+            lines.append(f"          {average:.2f}s average per executed detector")
+
+    total_findings = payload.get("total_findings")
+    severity_payload = payload.get("severity_counts")
+    if isinstance(total_findings, int) and total_findings >= 0:
+        severity_tokens: list[str] = []
+        if isinstance(severity_payload, Mapping):
+            for label in ("P0", "P1", "P2", "NOTE"):
+                value = severity_payload.get(label)
+                if isinstance(value, int) and value > 0:
+                    severity_tokens.append(f"{label}={value}")
+        detail = f" ({', '.join(severity_tokens)})" if severity_tokens else ""
+        lines.append(f"Findings: {total_findings}{detail}")
+
+    status_payload = payload.get("status_counts")
+    if isinstance(status_payload, Mapping):
+        status_tokens: list[str] = []
+        for key in ("OK", "INFO", "WARN", "FAIL", "skipped"):
+            value = status_payload.get(key)
+            if isinstance(value, int) and value > 0:
+                status_tokens.append(f"{key}={value}")
+        if status_tokens:
+            lines.append("Statuses: " + ", ".join(status_tokens))
+
+    slowest_payload = payload.get("slowest_detectors")
+    if isinstance(slowest_payload, Sequence):
+        slow_lines: list[str] = []
+        for item in slowest_payload:
+            if not isinstance(item, Mapping):
+                continue
+            detector = str(item.get("detector") or "—")
+            section = str(item.get("section") or "—")
+            duration = item.get("duration_sec")
+            try:
+                duration_value = float(duration)
+            except (TypeError, ValueError):
+                continue
+            slow_lines.append(
+                f"  • {format_duration(duration_value)} — {section} [{detector}]"
+            )
+        if slow_lines:
+            lines.append("Slowest detectors:")
+            lines.extend(slow_lines)
+
+    skipped_payload = payload.get("skipped_detectors")
+    if isinstance(skipped_payload, Sequence):
+        skipped_lines: list[str] = []
+        for item in skipped_payload:
+            if not isinstance(item, Mapping):
+                continue
+            detector = str(item.get("detector") or "—")
+            section = str(item.get("section") or "—")
+            reason = str(item.get("reason") or "unspecified")
+            skipped_lines.append(f"  • {section} [{detector}] — {reason}")
+        if skipped_lines:
+            lines.append("Skipped detectors:")
+            lines.extend(skipped_lines)
+
+    failure_payload = payload.get("first_failure")
+    if isinstance(failure_payload, Mapping):
+        lines.append(
+            "First failure: "
+            + _format_pipeline_event(failure_payload, glyphs=glyphs)
+        )
+
+    warning_payload = payload.get("first_warning")
+    if isinstance(warning_payload, Mapping):
+        lines.append(
+            "First warning: "
+            + _format_pipeline_event(warning_payload, glyphs=glyphs)
+        )
+
+    compliance_lines = _render_masvs_overview(
+        payload.get("masvs_compliance"),
+        glyphs=glyphs,
+    )
+    if compliance_lines:
+        if lines and lines[-1]:
+            lines.append("")
+        lines.extend(compliance_lines)
+
+    return lines
+
+
+def _render_masvs_overview(payload: object, *, glyphs: GlyphSet) -> list[str]:
+    if not isinstance(payload, Mapping):
+        return []
+
+    lines: list[str] = ["MASVS Compliance", glyphs.rule * glyphs.line_width]
+
+    overall_badge = format_badge(_badge_from_text(payload.get("status")), glyphs)
+    score = payload.get("score")
+    if isinstance(score, (int, float)):
+        lines.append(f"Overall: {overall_badge} • score {score * 100:.0f}%")
+    else:
+        lines.append(f"Overall: {overall_badge}")
+
+    categories = payload.get("categories")
+    if not isinstance(categories, Sequence):
+        return lines
+
+    for entry in categories:
+        if not isinstance(entry, Mapping):
+            continue
+
+        category = str(entry.get("category") or entry.get("name") or "—")
+        badge = format_badge(_badge_from_text(entry.get("status")), glyphs)
+        score_value = entry.get("score")
+        if isinstance(score_value, (int, float)):
+            score_text = f"{score_value * 100:.0f}%"
+        else:
+            score_text = "—"
+
+        severity_payload = entry.get("severity_counts")
+        severity_tokens: list[str] = []
+        if isinstance(severity_payload, Mapping):
+            for label in ("P0", "P1", "P2", "NOTE"):
+                value = severity_payload.get(label)
+                if isinstance(value, int) and value > 0:
+                    severity_tokens.append(f"{label}={value}")
+
+        detail = f" [{', '.join(severity_tokens)}]" if severity_tokens else ""
+        lines.append(f"  {category:<12} {badge}  score {score_text}{detail}")
+
+        highlight_lines = _render_masvs_highlights(entry.get("highlights"), glyphs=glyphs)
+        for highlight in highlight_lines:
+            lines.append(f"    {highlight}")
+
+    return lines
+
+
+def _render_masvs_highlights(payload: object, *, glyphs: GlyphSet) -> list[str]:
+    if not isinstance(payload, Sequence) or isinstance(payload, (str, bytes)):
+        return []
+
+    lines: list[str] = []
+    for index, entry in enumerate(payload):
+        if index >= 2:
+            break
+        if not isinstance(entry, Mapping):
+            continue
+
+        severity = str(entry.get("severity") or entry.get("severity_gate") or "—")
+        badge = format_badge(_badge_from_text(entry.get("status")), glyphs)
+        title = str(entry.get("title") or "—")
+        lines.append(f"{severity:<3} {badge} {title}")
+
+        because = entry.get("because")
+        if isinstance(because, str):
+            text = because.strip()
+            if text:
+                lines.append(f"      Because: {text}")
+
+    return lines
+
+
 def _render_pipeline_trace(
     payload: object,
     *,
@@ -638,6 +828,27 @@ def _render_pipeline_trace(
                 lines.append(f"      metrics: {', '.join(metric_parts)}")
 
     return lines
+
+
+def _format_pipeline_event(
+    payload: Mapping[str, object],
+    *,
+    glyphs: GlyphSet,
+) -> str:
+    detector = str(payload.get("detector") or "—")
+    section = str(payload.get("section") or "—")
+    reason = str(payload.get("reason") or "unspecified")
+    duration = payload.get("duration_sec")
+    timing = ""
+    try:
+        value = float(duration)
+        if value > 0:
+            timing = f" ({format_duration(value)})"
+    except (TypeError, ValueError):
+        timing = ""
+
+    bullet = getattr(glyphs, "bullet", "•")
+    return f"{bullet} {section} [{detector}] — {reason}{timing}"
 
 
 def _badge_from_text(value: object) -> Badge:

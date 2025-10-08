@@ -1,81 +1,59 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/cleanup_tasks.sh
+source "$SCRIPT_DIR/lib/cleanup_tasks.sh"
 
-clean_bytecode() {
-  find "$ROOT_DIR" -name '__pycache__' -type d -prune -exec rm -rf {} +
-  find "$ROOT_DIR" -name '*.py[co]' -delete
-  find "$ROOT_DIR" -name '*$py.class' -delete
-}
-
-clean_tooling_artifacts() {
-  rm -rf "$ROOT_DIR/.mypy_cache" "$ROOT_DIR/.pytest_cache" "$ROOT_DIR/htmlcov"
-  find "$ROOT_DIR" -name '.coverage*' -delete
-}
-
-clean_logs_and_output() {
-  rm -rf "$ROOT_DIR/logs"/* 2>/dev/null || true
-  rm -rf "$ROOT_DIR/output"/* 2>/dev/null || true
-  rm -rf "$ROOT_DIR/data/state"/* 2>/dev/null || true
-}
-
-clean_harvest_artifacts() {
-  rm -rf "$ROOT_DIR/data/apks/device_apks"/* 2>/dev/null || true
-  rm -rf "$ROOT_DIR/data/watchlists"/* 2>/dev/null || true
-}
-
-clean_temp_files() {
-  find "$ROOT_DIR" -name '*.tmp' -delete
-  find "$ROOT_DIR" -name '*.bak' -delete
-  find "$ROOT_DIR" -name '*~' -delete
-}
-
-print_usage() {
-  cat <<USAGE
-Usage: $(basename "$0") [--bytecode] [--tools] [--logs] [--harvest] [--temp] [--all]
-  --bytecode   Remove Python bytecode and __pycache__ directories
-  --tools      Remove tooling artifacts (pytest, coverage, mypy caches)
-  --logs       Clear logs/, output/, data/state/
-  --harvest    Remove harvested APK artifacts and saved watchlists
-  --temp       Remove temporary files (*.tmp, *.bak, backup files)
-  --all        Run all cleanup routines (default if no flags supplied)
-USAGE
-}
-
-if [ "$#" -eq 0 ]; then
-  clean_bytecode
-  clean_tooling_artifacts
-  clean_logs_and_output
-  clean_harvest_artifacts
-  clean_temp_files
-else
-  run_all=false
-  for arg in "$@"; do
-    case "$arg" in
-      --bytecode) clean_bytecode ;;
-      --tools) clean_tooling_artifacts ;;
-      --logs) clean_logs_and_output ;;
-      --harvest) clean_harvest_artifacts ;;
-      --temp) clean_temp_files ;;
-      --all)
-        clean_bytecode
-        clean_tooling_artifacts
-        clean_logs_and_output
-        clean_harvest_artifacts
-        clean_temp_files
-        ;;
-      --help|-h)
-        print_usage
-        exit 0
-        ;;
-      *)
-        echo "Unknown option: $arg" >&2
-        print_usage
-        exit 1
-        ;;
-    esac
-  done
+if [[ $# -gt 0 ]]; then
+  printf 'This script does not accept command-line arguments. Please run as ./clean_project.sh\n' >&2
+  exit 1
 fi
 
-printf 'Project cleanup complete.\n'
+show_menu() {
+  if command -v clear >/dev/null 2>&1; then
+    clear
+  fi
+  print_banner
+  cat <<'MENU'
+Project maintenance menu:
+
+  1) Clean Python bytecode (__pycache__, *.pyc)
+  2) Clean tooling artifacts (pytest, coverage, mypy)
+  3) Clear logs and runtime output directories
+  4) Remove harvested APK and watchlist artifacts
+  5) Remove temporary and backup files
+  6) Run full cleanup (all of the above)
+  7) Scan project for cleanup candidates
+  8) Show project overview (size and layout)
+  9) Git status summary
+ 10) Git diff statistics
+ 11) Show recent commits
+ 12) Exit
+MENU
+}
+
+handle_choice() {
+  case "$1" in
+    1) clean_bytecode ;;
+    2) clean_tooling_artifacts ;;
+    3) clean_logs_and_output ;;
+    4) clean_harvest_artifacts ;;
+    5) clean_temp_files ;;
+    6) clean_all ;;
+    7) scan_cleanup_targets ;;
+    8) show_project_overview ;;
+    9) show_git_status ;;
+    10) show_git_diffstat ;;
+    11) show_recent_commits ;;
+    12) printf '\nExiting project maintenance utility.\n'; exit 0 ;;
+    *) printf '\n[ERROR] Invalid selection. Please choose a valid option.\n' ;;
+  esac
+}
+
+while true; do
+  show_menu
+  read -rp $'\nEnter your choice [1-12]: ' choice
+  handle_choice "$choice"
+  pause_prompt
+done
