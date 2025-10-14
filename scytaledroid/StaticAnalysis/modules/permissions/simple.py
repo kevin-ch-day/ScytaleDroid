@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from xml.etree import ElementTree as ET
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, List, Sequence, Tuple, Mapping, Optional
 
 from scytaledroid.StaticAnalysis._androguard import APK
 
@@ -82,6 +82,22 @@ def _format_permission(name: str, element_type: str) -> str:
     return name
 
 
+def _fetch_protections(names: Sequence[str]) -> Mapping[str, Optional[str]]:
+    """Best-effort DB lookup of framework protection levels for given names.
+
+    Returns a mapping of perm_name -> protection or None. On any error, returns
+    an empty mapping.
+    """
+    try:  # optional DB dependency
+        from scytaledroid.Database.db_func.detected_permissions import (
+            framework_protection_map,
+        )
+
+        return framework_protection_map(names)
+    except Exception:
+        return {}
+
+
 def print_permissions_block(
     package_name: str,
     artifact_label: str,
@@ -98,12 +114,33 @@ def print_permissions_block(
     print(f"SDKs: min={min_sdk}  target={target_sdk}")
     print("-" * 40)
 
+    # Deduplicate declared names (ignore sdk-23 suffix for risk lookup)
+    unique_declared: List[Tuple[str, str]] = []
+    seen: set[Tuple[str, str]] = set()
+    for name, element_type in declared:
+        key = (name, element_type)
+        if key not in seen:
+            seen.add(key)
+            unique_declared.append((name, element_type))
+
+    # Protective annotations from framework table when available
+    names_only = [n for n, _ in unique_declared if n.startswith("android.")]
+    protection_map = _fetch_protections(names_only)
+
     android_perms: List[str] = []
     custom_perms: List[str] = []
-    for name, element_type in declared:
+    risk_counts: Dict[str, int] = {"dangerous": 0, "signature": 0, "normal": 0, "other": 0}
+    for name, element_type in unique_declared:
         formatted = _format_permission(name, element_type)
         if name.startswith("android."):
-            android_perms.append(formatted)
+            prot = protection_map.get(name)
+            if prot:
+                tag = f" [{prot}]"
+                risk_counts[prot] = risk_counts.get(prot, 0) + 1
+            else:
+                tag = ""
+                risk_counts["other"] = risk_counts.get("other", 0) + 1
+            android_perms.append(f"{formatted}{tag}")
         else:
             custom_perms.append(formatted)
 
@@ -125,9 +162,20 @@ def print_permissions_block(
             if name:
                 print(f"  {name}  (protection={protection})")
 
-    total_declared = len(declared)
+    total_declared = len(unique_declared)
     print(
         "\nCounts: total_declared="
         f"{total_declared}  android={len(android_perms)}  custom={len(custom_perms)}  "
         f"custom_defined={len(defined)}"
     )
+    # Risk breakdown (android only)
+    if names_only:
+        summary = ", ".join(
+            f"{k}={v}" for k, v in (
+                ("dangerous", risk_counts.get("dangerous", 0)),
+                ("signature", risk_counts.get("signature", 0)),
+                ("normal", risk_counts.get("normal", 0)),
+                ("other", risk_counts.get("other", 0)),
+            )
+        )
+        print(f"Risk breakdown: {summary}")

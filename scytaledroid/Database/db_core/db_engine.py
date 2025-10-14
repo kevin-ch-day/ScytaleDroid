@@ -2,10 +2,14 @@
 db_engine.py - Database connection engine for ScytaleDroid
 """
 
+import json
+import os
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, cast
+
 import mysql.connector
 from mysql.connector import Error
 from mysql.connector.abstracts import MySQLConnectionAbstract
-from typing import Dict, Optional, Tuple, List, cast, Any
 
 from . import db_config
 
@@ -20,10 +24,57 @@ class DatabaseEngine:
         self.conn: Optional[MySQLConnectionAbstract] = None
         self._connect()
 
-    def _connect(self) -> None:
-        """Establish a database connection."""
+    def _load_overrides(self) -> Dict[str, Any]:
+        """Return config overrides from config/db.json or environment variables."""
+        cfg: Dict[str, Any] = {}
+        # File override
         try:
-            raw_conn = mysql.connector.connect(**db_config.DB_CONFIG)
+            json_path = Path("config/db.json")
+            if json_path.exists():
+                data = json.loads(json_path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    cfg.update(data)
+        except Exception:
+            pass
+        # Env overlay
+        env_keys = {
+            "host": ("SCY_DB_HOST", "DB_HOST"),
+            "port": ("SCY_DB_PORT", "DB_PORT"),
+            "user": ("SCY_DB_USER", "DB_USER"),
+            "password": ("SCY_DB_PASSWORD", "DB_PASSWORD"),
+            "database": ("SCY_DB_NAME", "DB_NAME"),
+            "charset": ("SCY_DB_CHARSET", "DB_CHARSET"),
+        }
+        for key, names in env_keys.items():
+            for name in names:
+                if name in os.environ:
+                    value: Any = os.environ[name]
+                    if key == "port":
+                        try:
+                            value = int(value)
+                        except Exception:
+                            continue
+                    cfg[key] = value
+                    break
+        return cfg
+
+    def _effective_config(self) -> Dict[str, Any]:
+        cfg = dict(db_config.DB_CONFIG)
+        overrides = self._load_overrides()
+        cfg.update(overrides)
+        # If unix_socket provided, prefer socket connection; mysql-connector will
+        # use it and ignore host/port.
+        if cfg.get("unix_socket"):
+            # Ensure port/host don't interfere; keep user/password as provided.
+            # mysql-connector tolerates host with socket, but we keep it simple.
+            cfg.setdefault("host", "localhost")
+        return cfg
+
+    def _connect(self) -> None:
+        """Establish a database connection using effective configuration."""
+        try:
+            cfg = self._effective_config()
+            raw_conn = mysql.connector.connect(**cfg)
             # Explicitly cast to the abstract type for typing purposes
             self.conn = cast(MySQLConnectionAbstract, raw_conn)
             if not self.conn.is_connected():
@@ -53,6 +104,30 @@ class DatabaseEngine:
             cursor.close()
         except Error as e:
             raise RuntimeError(f"[DB_ENGINE] Query execution failed: {e}")
+
+    # Server-level helpers (no default database) for admin operations
+    @staticmethod
+    def create_database_if_missing(db_name: str, *, charset: str = "utf8mb4") -> bool:
+        """Create database if it does not exist using effective overrides.
+
+        Connects without selecting a default database.
+        """
+        try:
+            from . import db_config as _dbc
+
+            # Build config without database to connect to server
+            cfg = dict(_dbc.DB_CONFIG)
+            cfg.update(DatabaseEngine()._load_overrides())
+            cfg.pop("database", None)
+            conn = mysql.connector.connect(**cfg)
+            cur = conn.cursor()
+            cur.execute(f"CREATE DATABASE IF NOT EXISTS `{db_name}` DEFAULT CHARACTER SET {charset};")
+            conn.commit()
+            cur.close()
+            conn.close()
+            return True
+        except Exception:
+            return False
 
     def execute_with_lastrowid(
         self, query: str, params: Optional[Tuple[Any, ...]] = None

@@ -535,6 +535,7 @@ def _execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pa
 
 def _execute_permission_scan(selection: ScopeSelection, params: RunParameters) -> None:
     total_groups = len(selection.groups)
+    processed_shas: set[str] = set()
 
     for group_index, group in enumerate(selection.groups, start=1):
         artifact_total = len(group.artifacts)
@@ -557,13 +558,49 @@ def _execute_permission_scan(selection: ScopeSelection, params: RunParameters) -
                 continue
 
             print(f"{progress_message} … done")
-            print_permissions_block(
-                group.package_name,
-                artifact_label,
-                declared,
-                defined,
-                sdk,
-            )
+            # Skip noisy empty split outputs
+            if not declared and not defined and artifact_label != "base":
+                pass
+            else:
+                print_permissions_block(
+                    group.package_name,
+                    artifact_label,
+                    declared,
+                    defined,
+                    sdk,
+                )
+            # Persist detected permissions (quick path)
+            try:
+                # Persist only for base artifact to reduce noise; avoid duplicate base processing per APK
+                if artifact_label == "base" and declared:
+                    from scytaledroid.StaticAnalysis.persistence.permissions_db import (
+                        persist_declared_permissions, _file_sha256,
+                    )
+                    sha = _file_sha256(artifact.path)
+                    if sha and sha in processed_shas:
+                        pass
+                    else:
+                        names = [name for name, _ in (declared or [])]
+                        custom_names = [d.get("name") for d in (defined or []) if d.get("name")]
+                        result = persist_declared_permissions(
+                            package_name=group.package_name,
+                            version_name=None,
+                            version_code=None,
+                            sha256=sha,
+                            artifact_label=artifact_label,
+                            declared=names,
+                            custom_declared=custom_names,
+                        )
+                        if sha:
+                            processed_shas.add(sha)
+                        from scytaledroid.Utils.DisplayUtils import status_messages as _sm
+                        total = sum(result.values()) if isinstance(result, dict) else 0
+                        print(_sm.status(
+                            f"DB detect: {total} perms (fw={result.get('framework', 0)}, vendor={result.get('vendor', 0)}, unk={result.get('unknown', 0)})",
+                            level="info",
+                        ))
+            except Exception:
+                pass
 
 
 def _build_analysis_config(params: RunParameters) -> AnalysisConfig:
@@ -658,9 +695,47 @@ def _generate_report(
 
     try:
         saved_paths = save_report(report)
+        # Best-effort DB persistence of observed permissions
+        try:
+            from scytaledroid.StaticAnalysis.persistence.permissions_db import (
+                persist_permissions_to_db,
+            )
+
+            if report is not None:
+                counts = persist_permissions_to_db(report)
+                try:
+                    from scytaledroid.Utils.DisplayUtils import status_messages as _sm
+                    total = sum(counts.values()) if isinstance(counts, dict) else 0
+                    print(_sm.status(
+                        f"DB detect: {total} perms (fw={counts.get('framework', 0)}, vendor={counts.get('vendor', 0)}, unk={counts.get('unknown', 0)})",
+                        level="info",
+                    ))
+                except Exception:
+                    pass
+        except Exception:
+            pass
         return report, saved_paths.json_path, None, False
     except ReportStorageError as exc:
         log.error(str(exc), category="static_analysis")
+        # Still attempt DB persistence even if report save failed
+        try:
+            from scytaledroid.StaticAnalysis.persistence.permissions_db import (
+                persist_permissions_to_db,
+            )
+
+            if report is not None:
+                counts = persist_permissions_to_db(report)
+                try:
+                    from scytaledroid.Utils.DisplayUtils import status_messages as _sm
+                    total = sum(counts.values()) if isinstance(counts, dict) else 0
+                    print(_sm.status(
+                        f"DB detect: {total} perms (fw={counts.get('framework', 0)}, vendor={counts.get('vendor', 0)}, unk={counts.get('unknown', 0)})",
+                        level="info",
+                    ))
+                except Exception:
+                    pass
+        except Exception:
+            pass
         return report, None, str(exc), False
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Iterable, Mapping, Optional
+from dataclasses import asdict as _asdict, is_dataclass as _is_dataclass
 
 from ..db_core import run_sql
 from ..db_queries import framework_permissions as queries
@@ -34,27 +35,81 @@ def count_rows() -> Optional[int]:
         return None
 
 
+def _safe_int(value) -> Optional[int]:
+    try:
+        if value is None or value == "":
+            return None
+        return int(value)
+    except Exception:
+        return None
+
+
+def _coerce_str(value) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, (list, tuple, set)):
+        # join sequences deterministically
+        try:
+            return "|".join(str(x) for x in value)
+        except Exception:
+            return str(value)
+    return str(value)
+
+
+def _bind_params(payload: Mapping[str, object]) -> Mapping[str, object]:
+    src = dict(payload)
+    # map name → perm_name
+    perm_name = src.get("perm_name") or src.get("name")
+    short = src.get("short")
+    protection = src.get("protection")
+    protection_raw = src.get("protection_raw")
+    added_api = _safe_int(src.get("added_api"))
+    deprecated_api = _safe_int(src.get("deprecated_api"))
+    deprecated_note = _coerce_str(src.get("deprecated_note"))
+    hard_restricted = 1 if src.get("hard_restricted") else 0
+    soft_restricted = 1 if src.get("soft_restricted") else 0
+    system_only = 1 if src.get("system_only") else 0
+    constant_value = src.get("constant_value") or perm_name
+    summary = _coerce_str(src.get("summary"))
+    doc_url = _coerce_str(src.get("doc_url"))
+    source = _coerce_str(src.get("source"))
+
+    return {
+        "perm_name": _coerce_str(perm_name),
+        "short": _coerce_str(short),
+        "protection": _coerce_str(protection),
+        "protection_raw": _coerce_str(protection_raw),
+        "added_api": added_api,
+        "deprecated_api": deprecated_api,
+        "deprecated_note": deprecated_note,
+        "hard_restricted": int(hard_restricted),
+        "soft_restricted": int(soft_restricted),
+        "system_only": int(system_only),
+        "constant_value": _coerce_str(constant_value),
+        "summary": _coerce_str(summary),
+        "doc_url": _coerce_str(doc_url),
+        "source": _coerce_str(source),
+    }
+
+
 def upsert_permission(payload: Mapping[str, object]) -> None:
-    # Adapt payload to schema (perm_name column)
-    params = dict(payload)
-    if "perm_name" not in params and "name" in params:
-        params["perm_name"] = params.get("name")
-    if params.get("constant_value") is None and params.get("perm_name"):
-        params["constant_value"] = params["perm_name"]
+    params = _bind_params(payload)
     run_sql(queries.UPSERT_PERMISSION, params)
 
 
-def upsert_permissions(items: Iterable[Mapping[str, object]], *, source: str, limit: Optional[int] = None) -> int:
+def upsert_permissions(items: Iterable[object], *, source: str, limit: Optional[int] = None) -> int:
     """Insert or update many permission rows; returns number processed."""
     processed = 0
     for index, meta in enumerate(items, start=1):
         if limit is not None and index > limit:
             break
-        payload = dict(meta)
+        if isinstance(meta, Mapping):
+            payload = dict(meta)
+        elif _is_dataclass(meta):
+            payload = _asdict(meta)
+        else:  # best-effort attribute mapping
+            payload = {k: getattr(meta, k) for k in dir(meta) if not k.startswith("_")}
         payload.setdefault("source", source)
-        payload["hard_restricted"] = 1 if payload.get("hard_restricted") else 0
-        payload["soft_restricted"] = 1 if payload.get("soft_restricted") else 0
-        payload["system_only"] = 1 if payload.get("system_only") else 0
         upsert_permission(payload)
         processed += 1
     return processed

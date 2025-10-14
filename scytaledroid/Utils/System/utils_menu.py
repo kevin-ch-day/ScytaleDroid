@@ -21,7 +21,6 @@ def utils_menu() -> None:
         "1": util_actions.clear_screen,
         "2": util_actions.show_log_locations,
         "3": configure_world_clocks,
-        "4": _open_perm_catalog_menu,
     }
     options = [
         menu_utils.MenuOption("1", "Clear the console", "Wipe the terminal output"),
@@ -30,11 +29,6 @@ def utils_menu() -> None:
             "3",
             "Configure world clocks",
             "Manage the demo banner clocks",
-        ),
-        menu_utils.MenuOption(
-            "4",
-            "Harvest Android Permissions",
-            "Fetch from developer.android.com and manage JSON cache",
         ),
     ]
 

@@ -1,0 +1,65 @@
+"""SQL for per-APK detected permissions (observations)."""
+
+CREATE_TABLE = """
+CREATE TABLE IF NOT EXISTS `android_detected_permissions` (
+  `detected_id`    BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `apk_id`         BIGINT UNSIGNED NOT NULL,
+  `package_name`   VARCHAR(191)    DEFAULT NULL,
+  `artifact_label` VARCHAR(64)     DEFAULT NULL,
+  `perm_name`      VARCHAR(191)    NOT NULL,
+  `namespace`      VARCHAR(191)    DEFAULT NULL,
+  `classification` VARCHAR(16)     DEFAULT NULL,
+  `protection`     VARCHAR(32)     DEFAULT NULL,
+  `source`         VARCHAR(32)     DEFAULT NULL,
+  `observed_at`    TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`     TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`detected_id`),
+  UNIQUE KEY `ux_detected_perm_apk` (`apk_id`, `perm_name`),
+  KEY `ix_detected_perm_pkg` (`package_name`),
+  KEY `ix_detected_perm_class` (`classification`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+"""
+
+UPSERT_DETECTED = """
+INSERT INTO android_detected_permissions
+  (apk_id, package_name, artifact_label, perm_name, namespace, classification, protection, source)
+VALUES
+  (%(apk_id)s, %(package_name)s, %(artifact_label)s, %(perm_name)s, %(namespace)s, %(classification)s, %(protection)s, %(source)s)
+ON DUPLICATE KEY UPDATE
+  namespace = VALUES(namespace),
+  classification = VALUES(classification),
+  protection = VALUES(protection),
+  source = VALUES(source),
+  updated_at = CURRENT_TIMESTAMP
+"""
+
+# Legacy upsert for deployments with the old schema (sha256-based uniqueness)
+UPSERT_DETECTED_LEGACY = """
+INSERT INTO android_detected_permissions
+  (package_name, version_name, version_code, sha256, artifact_label, perm_name, namespace, classification, protection, source)
+VALUES
+  (%(package_name)s, %(version_name)s, %(version_code)s, %(sha256)s, %(artifact_label)s, %(perm_name)s, %(namespace)s, %(classification)s, %(protection)s, %(source)s)
+ON DUPLICATE KEY UPDATE
+  namespace = VALUES(namespace),
+  classification = VALUES(classification),
+  protection = VALUES(protection),
+  source = VALUES(source),
+  updated_at = CURRENT_TIMESTAMP
+"""
+
+SELECT_FRAMEWORK_PROTECTION = """
+SELECT perm_name, protection FROM android_framework_permissions
+WHERE perm_name IN ({placeholders})
+"""
+
+TABLE_EXISTS = """
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'android_detected_permissions'
+"""
+
+__all__ = [
+    "CREATE_TABLE",
+    "UPSERT_DETECTED",
+    "UPSERT_DETECTED_LEGACY",
+    "SELECT_FRAMEWORK_PROTECTION",
+    "TABLE_EXISTS",
+]

@@ -33,6 +33,7 @@ data/state/
 data/watchlists/
 data/apks/
 data/static_analysis/reports/
+data/static_analysis/baseline/
 *.log
 *.tmp
 *.bak

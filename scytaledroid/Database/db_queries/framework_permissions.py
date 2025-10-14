@@ -3,7 +3,7 @@
 CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS `android_framework_permissions` (
   `perm_id`          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `perm_name`        VARCHAR(128)    NOT NULL,
+  `perm_name`        VARCHAR(191)    NOT NULL,
   `short`            VARCHAR(64)     DEFAULT NULL,
   `protection`       VARCHAR(32)     DEFAULT NULL,
   `protection_raw`   VARCHAR(255)    DEFAULT NULL,
@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS `android_framework_permissions` (
   `retrieved_at`     TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`       TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`perm_id`),
-  UNIQUE KEY `ux_android_framework_permissions_perm_name` (`perm_name`)
+  UNIQUE KEY `ux_android_framework_permissions_perm_name` (`perm_name`),
+  KEY `ix_android_framework_permissions_protection` (`protection`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 """
 
@@ -57,9 +58,17 @@ TABLE_EXISTS = """
 SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'android_framework_permissions'
 """
 
+PROTECTION_COUNTS = """
+SELECT COALESCE(protection, '-') AS protection, COUNT(*) AS cnt
+FROM android_framework_permissions
+GROUP BY protection
+ORDER BY cnt DESC
+"""
+
 __all__ = [
     "CREATE_TABLE",
     "UPSERT_PERMISSION",
     "COUNT_ROWS",
     "TABLE_EXISTS",
+    "PROTECTION_COUNTS",
 ]

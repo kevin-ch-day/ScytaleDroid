@@ -13,7 +13,8 @@ from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from ..core import StaticAnalysisReport
 
 if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
-    from ..reporting.view import build_report_view, save_html_report
+    # Import from package to align with runtime import and re-exports
+    from ..reporting import build_report_view, save_html_report
 
 
 REPORTS_DIR = Path(app_config.DATA_DIR) / "static_analysis" / "reports"
@@ -43,7 +44,8 @@ class SavedReportPaths:
 def save_report(report: StaticAnalysisReport) -> SavedReportPaths:
     """Persist *report* to disk and return the generated artefact paths."""
 
-    from ..reporting.view import build_report_view, save_html_report
+    # Import via package; re-exports ensure stable import path
+    from ..reporting import build_report_view, save_html_report
 
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     sha256 = report.hashes.get("sha256")

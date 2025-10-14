@@ -65,11 +65,12 @@ def main_menu() -> None:
             menu_utils.MenuOption("1", "Connect to Android Device", "Manage connected devices, inventory, and pulls"),
             menu_utils.MenuOption("2", "VirusTotal analysis", "Look up hashes and APKs against VirusTotal"),
             menu_utils.MenuOption("3", "Static analysis", "Run static checks on harvested applications"),
-            menu_utils.MenuOption("4", "Dynamic analysis", "Launch runtime instrumentation workflows"),
-            menu_utils.MenuOption("5", "Reporting", "Generate device and artifact reports"),
-            menu_utils.MenuOption("6", "Database tools", "Inspect schema, check connection, and view counts"),
-            menu_utils.MenuOption("7", "Utilities", "Console helpers and configuration"),
-            menu_utils.MenuOption("8", "About App", "Show version and licensing information"),
+            menu_utils.MenuOption("4", "Harvest Android Permissions", "Fetch from developer.android.com and manage JSON cache"),
+            menu_utils.MenuOption("5", "Dynamic analysis", "Launch runtime instrumentation workflows"),
+            menu_utils.MenuOption("6", "Reporting", "Generate device and artifact reports"),
+            menu_utils.MenuOption("7", "Database tools", "Inspect schema, check connection, and view counts"),
+            menu_utils.MenuOption("8", "Utilities", "Console helpers and configuration"),
+            menu_utils.MenuOption("9", "About App", "Show version and licensing information"),
         ]
         menu_utils.print_menu(options, is_main=True, boxed=False, default="1")
         choice = prompt_utils.get_choice(valid=[opt.key for opt in options] + ["0"], default="1")
@@ -84,18 +85,21 @@ def main_menu() -> None:
             log.info("User selected: Static analysis", category="application")
             handle_static()
         elif choice == "4":
+            log.info("User selected: Harvest Android Permissions", category="application")
+            handle_perm_catalog()
+        elif choice == "5":
             log.info("User selected: Dynamic analysis", category="application")
             handle_dynamic()
-        elif choice == "5":
+        elif choice == "6":
             log.info("User selected: Reporting", category="application")
             handle_reporting()
-        elif choice == "6":
+        elif choice == "7":
             log.info("User selected: Database tools", category="application")
             handle_database()
-        elif choice == "7":
+        elif choice == "8":
             log.info("User selected: Utils", category="application")
             handle_utils()
-        elif choice == "8":
+        elif choice == "9":
             log.info("User selected: About App", category="application")
             handle_about()
         elif choice == "0":
@@ -132,6 +136,14 @@ def handle_dynamic() -> None:
     from scytaledroid.DynamicAnalysis.menu import dynamic_analysis_menu
 
     dynamic_analysis_menu()
+
+def handle_perm_catalog() -> None:
+    # Open the Harvest Android Permissions menu directly
+    try:
+        from scytaledroid.Utils.AndroidPermCatalog.cli import perm_catalog_menu  # noqa: WPS433
+        perm_catalog_menu()
+    except Exception as exc:
+        print(f"Failed to open permission catalog: {exc}")
 
 
 def handle_reporting() -> None:
