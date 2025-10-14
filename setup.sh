@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,19 +14,20 @@ if ! command_exists python3; then
   exit 1
 fi
 
-# ensure pip
+# Ensure pip is available
 if ! python3 -m pip --version >/dev/null 2>&1; then
   echo "[Setup] pip not detected, attempting to bootstrap with ensurepip..."
-  python3 -m ensurepip --upgrade >/dev/null 2>&1 || {
+  if ! python3 -m ensurepip --upgrade >/dev/null 2>&1; then
     echo "Error: Failed to bootstrap pip. Consider installing python3-pip via 'sudo dnf install python3-pip'." >&2
     exit 1
-  }
+  fi
 fi
 
-# upgrade pip
+# Build a safe pip install command
 PIP_INSTALL=(python3 -m pip install)
 if [[ -z "${VIRTUAL_ENV:-}" ]]; then
-  if python3 -m pip help install 2>&1 | grep -q "--break-system-packages"; then
+  # Only append --break-system-packages if pip supports it (Fedora/EME-friendly)
+  if python3 -m pip help install 2>&1 | grep -q -- "--break-system-packages"; then
     PIP_INSTALL+=(--break-system-packages)
   fi
 fi
@@ -35,7 +35,7 @@ fi
 run_pip_install() {
   local args=("$@")
   if ! "${PIP_INSTALL[@]}" "${args[@]}"; then
-    echo "Error: pip failed to install packages. If you see an 'externally-managed-environment' message, try running this script inside a virtual environment or rerun with elevated privileges." >&2
+    echo "Error: pip failed to install packages. If you see an 'externally-managed-environment' message, run inside a virtual environment or rerun with elevated privileges." >&2
     exit 1
   fi
 }

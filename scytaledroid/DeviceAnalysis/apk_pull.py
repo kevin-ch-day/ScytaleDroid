@@ -466,51 +466,22 @@ def _prompt_plan_action(
 ) -> str:
     print()
     print(text_blocks.headline("Plan actions", width=70))
+    # Streamlined action set
     menu_items = [
         menu_utils.MenuOption(
             "1",
-            "Quick pull",
+            "Quick Pull",
             "Resolve paths via pm (fast, recommended)",
         ),
         menu_utils.MenuOption(
             "2",
-            "Quick pull + adb logs",
-            "Same as quick pull but streams adb output",
+            "Full Pull",
+            "Use inventory snapshot paths (slower, ordered)",
         ),
         menu_utils.MenuOption(
             "3",
-            "Snapshot pull",
-            "Use inventory paths (slower, honours snapshot order)",
-        ),
-        menu_utils.MenuOption(
-            "4",
-            "Snapshot pull + adb logs",
-            "Snapshot pull with live adb output",
-        ),
-        menu_utils.MenuOption(
-            "5",
-            "Refresh selected scope",
-            "Re-scan the current scope before pulling",
-        ),
-        menu_utils.MenuOption(
-            "6",
-            "Refresh full inventory",
-            "Rebuild device inventory (slow)",
-        ),
-        menu_utils.MenuOption(
-            "7",
-            "Preview without pulling",
-            "Dry-run to list the artifacts only",
-        ),
-        menu_utils.MenuOption(
-            "8",
-            "Use cached snapshot",
-            "Skip new pulls and exit",
-        ),
-        menu_utils.MenuOption(
-            "9",
-            "Change scope",
-            "Return to the scope selector",
+            "Test Pull",
+            "Dry-run: list artifacts only (no downloads)",
         ),
     ]
     menu_utils.print_menu(
@@ -525,21 +496,9 @@ def _prompt_plan_action(
     if choice == "1":
         return "pull_quick"
     if choice == "2":
-        return "pull_quick_verbose"
-    if choice == "3":
         return "pull_snapshot"
-    if choice == "4":
-        return "pull_snapshot_verbose"
-    if choice == "5":
-        return "refresh_subset"
-    if choice == "6":
-        return "refresh_full"
-    if choice == "7":
+    if choice == "3":
         return "dry-run"
-    if choice == "8":
-        return "use_snapshot"
-    if choice == "9":
-        return "rescope"
     return "cancel"
 
 

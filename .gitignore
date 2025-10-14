@@ -32,9 +32,14 @@ output/
 data/state/
 data/watchlists/
 data/apks/
+data/static_analysis/reports/
 *.log
 *.tmp
 *.bak
+
+# Generated permission catalog snapshots
+scytaledroid/Utils/AndroidPermCatalog/cache/*.json
+scytaledroid/Utils/AndroidPermCatalog/cache/*.csv
 
 # Misc
 .DS_Store

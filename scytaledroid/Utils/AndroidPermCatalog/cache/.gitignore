@@ -1,0 +1,4 @@
+# Runtime cache for framework permission snapshots
+*.json
+*.csv
+!.gitignore
