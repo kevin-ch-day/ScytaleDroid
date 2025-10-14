@@ -35,7 +35,13 @@ def count_rows() -> Optional[int]:
 
 
 def upsert_permission(payload: Mapping[str, object]) -> None:
-    run_sql(queries.UPSERT_PERMISSION, payload)
+    # Adapt payload to schema (perm_name column)
+    params = dict(payload)
+    if "perm_name" not in params and "name" in params:
+        params["perm_name"] = params.get("name")
+    if params.get("constant_value") is None and params.get("perm_name"):
+        params["constant_value"] = params["perm_name"]
+    run_sql(queries.UPSERT_PERMISSION, params)
 
 
 def upsert_permissions(items: Iterable[Mapping[str, object]], *, source: str, limit: Optional[int] = None) -> int:
@@ -60,4 +66,3 @@ __all__ = [
     "count_rows",
     "upsert_permissions",
 ]
-

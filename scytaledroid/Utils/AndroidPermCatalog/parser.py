@@ -4,6 +4,8 @@ import re
 from typing import Dict, Any, Iterable, List, Tuple
 
 from .normalize import PermissionMeta, normalise_protection, split_protection_tokens
+from .protection import ALLOWED_TOKENS
+from .summary_clean import dedupe_sentences as _dedupe_sentences, strip_markers as _strip_markers, purge_markers as _purge_markers
 
 
 def _clean(text: str) -> str:
@@ -14,70 +16,6 @@ def _short(name: str) -> str:
     return name.split("android.permission.", 1)[1] if name.startswith("android.permission.") else name
 
 
-def _dedupe_sentences(paragraph: str) -> str:
-    """Deduplicate repeated sentences within a paragraph while preserving order."""
-    # Remove inline Constant Value fragments preemptively
-    paragraph = re.sub(r'\bConstant\s+Value:\s*"[^"]+"', "", paragraph)
-    # Split naive sentences on period + space; keep punctuation
-    parts = re.split(r"(?<=[.!?])\s+", paragraph)
-    seen: set[str] = set()
-    ordered: list[str] = []
-    for part in parts:
-        norm = _clean(part)
-        if not norm:
-            continue
-        if norm not in seen:
-            seen.add(norm)
-            ordered.append(norm)
-    return " ".join(ordered)
-
-
-_STRIP_MARKERS = re.compile(
-    r"\b(Protection level:|Constant\s+Value:|Added in API level|Added in version)\b",
-    re.I,
-)
-
-
-def _strip_markers(text: str) -> str:
-    """Remove trailing metadata markers and their payloads from a text block."""
-    # Remove all Constant Value segments
-    text = re.sub(r'\bConstant\s+Value:\s*"[^"]+"', "", text, flags=re.I)
-    # Cut off at first protection/added markers if still present
-    m = _STRIP_MARKERS.search(text)
-    if m:
-        text = text[: m.start()].rstrip()
-    return _clean(text)
-
-
-def _purge_markers(text: str) -> str:
-    """Remove any residual marker segments anywhere in the text."""
-    # Drop any 'Protection level: <tokens>' segments entirely
-    text = re.sub(r"\bProtection\s+level:\s*[^.]*\.?", "", text, flags=re.I)
-    # Drop any 'Constant Value: "..."' segments entirely
-    text = re.sub(r'\bConstant\s+Value:\s*"[^"]+"\.?', "", text, flags=re.I)
-    # Drop any 'Added in API level ...' or 'Added in version ...'
-    text = re.sub(r"\bAdded\s+in\s+API\s+level\s*\d+\.?", "", text, flags=re.I)
-    text = re.sub(r"\bAdded\s+in\s+version\s*[0-9]+(?:\.[0-9]+)?\.?", "", text, flags=re.I)
-    return _clean(text)
-
-
-# Allowed protection tokens as published by Android docs
-_ALLOWED_PROTECTION_TOKENS = {
-    "dangerous",
-    "normal",
-    "signature",
-    "signatureorsystem",
-    "privileged",
-    "development",
-    "installer",
-    "instant",
-    "appop",
-    "system",
-    "internal",
-    "oem",
-    "preinstalled",
-    "role",
-}
 
 
 def parse_manifest_permissions(html: str, *, base_url: str) -> List[PermissionMeta]:
@@ -156,7 +94,7 @@ def parse_manifest_permissions(html: str, *, base_url: str) -> List[PermissionMe
             # Collect only allowed tokens
             for tok in re.findall(r"[A-Za-z]+", window):
                 t = tok.lower()
-                if t in _ALLOWED_PROTECTION_TOKENS and t not in prot_tokens:
+                if t in ALLOWED_TOKENS and t not in prot_tokens:
                     prot_tokens.append(t)
             if prot_tokens:
                 prot_raw = "|".join(prot_tokens)
@@ -174,9 +112,9 @@ def parse_manifest_permissions(html: str, *, base_url: str) -> List[PermissionMe
         mdep = re.search(r"\bdeprecated in API level\s+(\d+)\b", text, re.I)
         if mdep:
             dep_api = int(mdep.group(1))
-            snip = re.search(r"([^.]*deprecated[^.]*\.)", text, re.I)
-            if snip:
-                dep_note = _clean(snip.group(1))
+        sn = re.search(r"([^.]*\bdeprecated\b[^.]*\.)", text, re.I)
+        if sn:
+            dep_note = _purge_markers(_clean(sn.group(1)))
 
         # Constant Value
         const_value = None
@@ -216,6 +154,8 @@ def parse_manifest_permissions(html: str, *, base_url: str) -> List[PermissionMe
         m_rn = re.search(r"([^.]*\b(hard|soft) restricted\b[^.]*\.)", text, re.I)
         if m_rn:
             restricted_note = _purge_markers(_clean(m_rn.group(1)))
+        if hard_restricted and not restricted_note:
+            restricted_note = "Hard restricted; installer allowlist required"
         system_only_note = None
         m_sn = re.search(r"([^.]*Not for use by third[- ]party applications[^.]*\.)", text, re.I)
         if m_sn:

@@ -8,6 +8,8 @@ from typing import Iterable, Literal, Mapping, Optional
 from .loader import ONLINE_URL, load_permission_doc
 from .normalize import PermissionMeta
 from .parser import parse_manifest_permissions
+from .protection import sanitise_tokens
+from .summary_clean import purge_markers as _purge_markers, dedupe_sentences as _dedupe
 
 
 def load_catalog(source: Literal["sdk", "online", "auto"] = "auto") -> list[PermissionMeta]:
@@ -17,7 +19,14 @@ def load_catalog(source: Literal["sdk", "online", "auto"] = "auto") -> list[Perm
     return parse_manifest_permissions(html, base_url=ONLINE_URL)
 
 
-def save_catalog_json(path: Path, items: list[PermissionMeta], *, source: str = "auto", base_url: str = ONLINE_URL, write_timestamped: bool = True) -> Path:
+def save_catalog_json(
+    path: Path,
+    items: list[PermissionMeta],
+    *,
+    source: str = "auto",
+    base_url: str = ONLINE_URL,
+    write_timestamped: bool = False,
+) -> Path:
     """Persist catalog with a small metadata wrapper; returns the primary path.
 
     The JSON shape becomes {"meta": {...}, "items": [...]}. For backward
@@ -55,6 +64,14 @@ def load_catalog_json(path: Path) -> list[PermissionMeta]:
     raw_items = data.get("items") if isinstance(data, dict) else data
     items: list[PermissionMeta] = []
     for row in raw_items:
+        # Clean and normalise legacy payload quirks when present
+        raw_tokens = row.get("protection_tokens") or ()
+        clean_tokens = sanitise_tokens(raw_tokens)
+        row["protection_tokens"] = tuple(clean_tokens)
+        if clean_tokens:
+            row["protection_raw"] = "|".join(clean_tokens)
+        if row.get("summary"):
+            row["summary"] = _purge_markers(_dedupe(str(row["summary"])))
         items.append(
             PermissionMeta(
                 name=row.get("name", ""),

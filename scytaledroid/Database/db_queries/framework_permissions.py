@@ -1,9 +1,9 @@
-"""SQL statements for the framework_permissions catalog table."""
+"""SQL statements for the android_framework_permissions catalog table."""
 
 CREATE_TABLE = """
-CREATE TABLE IF NOT EXISTS `framework_permissions` (
-  `id`               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `name`             VARCHAR(128)    NOT NULL,
+CREATE TABLE IF NOT EXISTS `android_framework_permissions` (
+  `perm_id`          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `perm_name`        VARCHAR(128)    NOT NULL,
   `short`            VARCHAR(64)     DEFAULT NULL,
   `protection`       VARCHAR(32)     DEFAULT NULL,
   `protection_raw`   VARCHAR(255)    DEFAULT NULL,
@@ -19,17 +19,17 @@ CREATE TABLE IF NOT EXISTS `framework_permissions` (
   `source`           VARCHAR(32)     DEFAULT NULL,
   `retrieved_at`     TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`       TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `ux_framework_permissions_name` (`name`)
+  PRIMARY KEY (`perm_id`),
+  UNIQUE KEY `ux_android_framework_permissions_perm_name` (`perm_name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 """
 
 UPSERT_PERMISSION = """
-INSERT INTO framework_permissions (
-  name, short, protection, protection_raw, added_api, deprecated_api, deprecated_note,
+INSERT INTO android_framework_permissions (
+  perm_name, short, protection, protection_raw, added_api, deprecated_api, deprecated_note,
   hard_restricted, soft_restricted, system_only, constant_value, summary, doc_url, source
 ) VALUES (
-  %(name)s, %(short)s, %(protection)s, %(protection_raw)s, %(added_api)s, %(deprecated_api)s, %(deprecated_note)s,
+  %(perm_name)s, %(short)s, %(protection)s, %(protection_raw)s, %(added_api)s, %(deprecated_api)s, %(deprecated_note)s,
   %(hard_restricted)s, %(soft_restricted)s, %(system_only)s, %(constant_value)s, %(summary)s, %(doc_url)s, %(source)s
 )
 ON DUPLICATE KEY UPDATE
@@ -50,11 +50,11 @@ ON DUPLICATE KEY UPDATE
 """
 
 COUNT_ROWS = """
-SELECT COUNT(*) FROM framework_permissions
+SELECT COUNT(*) FROM android_framework_permissions
 """
 
 TABLE_EXISTS = """
-SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'framework_permissions'
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'android_framework_permissions'
 """
 
 __all__ = [
@@ -63,4 +63,3 @@ __all__ = [
     "COUNT_ROWS",
     "TABLE_EXISTS",
 ]
-
