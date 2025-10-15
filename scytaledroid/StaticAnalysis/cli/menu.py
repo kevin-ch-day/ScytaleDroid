@@ -42,6 +42,11 @@ from ..modules.permissions import (
     collect_permissions_and_sdk,
     print_permissions_block,
 )
+from ..modules.permissions.render_postcard import render as render_permission_postcard
+from ..modules.permissions.render_summary import render as render_after_run_summary
+from ..modules.permissions.render_matrix import (
+    render_signals as render_signal_matrix,
+)
 from .renderer import render_app_result, write_baseline_json
 from .sections import SECTION_DEFINITIONS, extract_integrity_profiles
 
@@ -536,6 +541,9 @@ def _execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pa
 def _execute_permission_scan(selection: ScopeSelection, params: RunParameters) -> None:
     total_groups = len(selection.groups)
     processed_shas: set[str] = set()
+    profiles_by_package: dict[str, dict] = {}
+    printed_postcard_for: set[str] = set()
+    printed_db_status_for: set[str] = set()
 
     for group_index, group in enumerate(selection.groups, start=1):
         artifact_total = len(group.artifacts)
@@ -557,22 +565,34 @@ def _execute_permission_scan(selection: ScopeSelection, params: RunParameters) -
                 print(f"{progress_message} … failed ({exc})")
                 continue
 
-            print(f"{progress_message} … done")
+            # Stream noise reduction: avoid per-artifact completion spam
+            # (postcards and summaries provide the useful context)
             # Skip noisy empty split outputs
-            if not declared and not defined and artifact_label != "base":
-                pass
+            if artifact_label == "base":
+                if group.package_name not in printed_postcard_for:
+                    app_label = (
+                        str(artifact.metadata.get("app_label") or "").strip()
+                        or group.package_name
+                    )
+                    # Visual spacing between apps
+                    print()
+                    profile = render_permission_postcard(
+                        group.package_name,
+                        app_label,
+                        declared,
+                        defined,
+                        index=group_index,
+                        total=total_groups,
+                    )
+                    profiles_by_package[group.package_name] = profile
+                    printed_postcard_for.add(group.package_name)
             else:
-                print_permissions_block(
-                    group.package_name,
-                    artifact_label,
-                    declared,
-                    defined,
-                    sdk,
-                )
+                # Suppress per-split verbose prints to reduce noise
+                pass
             # Persist detected permissions (quick path)
             try:
                 # Persist only for base artifact to reduce noise; avoid duplicate base processing per APK
-                if artifact_label == "base" and declared:
+                if artifact_label == "base" and declared and group.package_name not in printed_db_status_for:
                     from scytaledroid.StaticAnalysis.persistence.permissions_db import (
                         persist_declared_permissions, _file_sha256,
                     )
@@ -599,8 +619,68 @@ def _execute_permission_scan(selection: ScopeSelection, params: RunParameters) -
                             f"DB detect: {total} perms (fw={result.get('framework', 0)}, vendor={result.get('vendor', 0)}, unk={result.get('unknown', 0)})",
                             level="info",
                         ))
+                        printed_db_status_for.add(group.package_name)
             except Exception:
                 pass
+
+    # After-run summary
+    if profiles_by_package:
+        print()
+        apps_sorted = sorted(profiles_by_package.values(), key=lambda p: p.get("risk", 0.0), reverse=True)
+        # Scope handling: limit to top 10 for All apps; otherwise include all
+        if selection.scope == "all":
+            subject = apps_sorted[:10]
+            subject_label = "All apps"
+        else:
+            subject = apps_sorted
+            subject_label = selection.label
+
+        # Abbreviations block at the top (use app names for labels)
+        from ..modules.permissions.simple import _abbr_from_name as _abbr
+        print("Apps (abbrev):")
+        for item in subject:
+            abbr = _abbr(item["label"]).strip()
+            print(f"  {abbr:<5} {item['label']}")
+        print()
+
+        # Risk summary and signal matrix
+        render_after_run_summary(subject)
+        render_signal_matrix(subject)
+
+        # Matrix (compact)
+        try:
+            from ..modules.permissions.render_matrix import render_permissions as _render_perm_matrix
+            _render_perm_matrix(subject, scope_label=subject_label, show=len(subject))
+        except Exception:
+            pass
+
+        # Persist risk snapshot to DB (best-effort)
+        try:
+            from scytaledroid.Database.db_func import risk_scores as _riskdb
+            from ..modules.permissions.analysis.risk_scoring_engine import permission_risk_grade as _grade
+            from datetime import datetime as _dt
+            stamp = _dt.utcnow().strftime("%Y%m%d-%H%M%S")
+            if _riskdb.table_exists() or _riskdb.ensure_table():
+                payloads = []
+                for item in subject:
+                    score_val = float(item.get("risk", 0.0) or 0.0)
+                    grade_val = _grade(score_val)
+                    payloads.append(
+                        {
+                            "package_name": item.get("package") or item.get("package_name") or item["label"],
+                            "app_label": item["label"],
+                            "session_stamp": stamp,
+                            "scope_label": subject_label,
+                            "risk_score": score_val,
+                            "risk_grade": grade_val,
+                            "dangerous": int(item.get("D", 0) or 0),
+                            "signature": int(item.get("S", 0) or 0),
+                            "vendor": int(item.get("V", 0) or 0),
+                        }
+                    )
+                _riskdb.bulk_upsert_risks(payloads)
+        except Exception:
+            pass
 
 
 def _build_analysis_config(params: RunParameters) -> AnalysisConfig:

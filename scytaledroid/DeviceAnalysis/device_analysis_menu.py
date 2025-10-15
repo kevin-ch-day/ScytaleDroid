@@ -44,7 +44,13 @@ def device_menu() -> None:
         print()
         menu_utils.print_header("Device Analysis")
         options = build_main_menu_options(active_details)
-        menu_utils.print_menu(options, is_main=False, default="1", exit_label="Back")
+        # Default to Connect when exactly one device is present
+        default_key = "3" if len(summaries) == 1 else "1"
+        menu_utils.print_menu(options, is_main=False, default=default_key, exit_label="Back")
+        # Footer shortcuts (informational)
+        print(
+            "Shortcuts: r=Refresh  c=Connect/Switch  i=Info  s=Shell  l=Logcat  q/0=Back"
+        )
         valid_keys = [option.key for option in options]
         choice = prompt_utils.get_choice(valid_keys + ["0"], default="1")
 

@@ -9,7 +9,7 @@ separated:
   - ops.py: reusable helpers (load/export/validate/etc.)
 """
 
-from .menu import perm_catalog_menu
+from .permissions_catalog_menu import perm_catalog_menu
 
 __all__ = ["perm_catalog_menu"]
 
@@ -18,4 +18,3 @@ if __name__ == "__main__":  # pragma: no cover - manual invocation
     from .commands import main as _main
 
     _main()
-

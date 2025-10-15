@@ -183,9 +183,7 @@ def print_menu(
         badge_token = ""
         if item.badge:
             badge_token = f" {colors.apply('[' + item.badge + ']', palette.badge)}"
-        disabled_note = (
-            f" {colors.apply('(disabled)', palette.muted)}" if item.disabled else ""
-        )
+        disabled_note = ""
 
         reserved = (
             text_blocks.visible_width(key_token)

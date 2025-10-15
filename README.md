@@ -29,6 +29,14 @@ dynamic, or threat-intel analysis.
 * **Operator-centric UX.** Status banners, deterministic wording, and CLI menu
   summaries mirror across Device and Static analysis so investigators can jump
   between harvesting and review without context switching.
+* **Permission-first field view.** Abbreviation map (shown once), postcard
+  summaries, a Signal Matrix, and a Permission Matrix (`x/*/-`) with a fixed
+  capability order and subtle colouring when ANSI is available.
+* **Tunable scoring + grades.** Risk scores print to three decimals with a
+  letter grade (A–F). Weights/normalization can be tuned via a TOML file
+  without touching code.
+* **DB snapshots for trust.** Risk snapshots (per app, per run) are written to
+  the database (when configured) for longitudinal analysis and dashboards.
 
 ### Static analysis preview
 
@@ -44,6 +52,11 @@ dynamic, or threat-intel analysis.
   investigators can re-open previous runs from the menu or ingest them into
   downstream tooling. Diff views highlight permission drift, cleartext policy
   changes, and split-aware risk composition.
+- Permission analysis renders a concise, field‑friendly view:
+  - Postcards: Risk bar + Score/Grade + High‑signal + Footprint table
+  - Risk Summary: Abbr | Score | Grade | D | S | V
+  - Signal Matrix: Dangerous/Signature signals per app
+  - Permission Matrix: `x/*/-` by app x permission (top 10 in “All apps”; all in narrow scopes)
 - You can also analyse a standalone APK outside the repository by choosing the
   "Analyze APK from local path" option and pointing the CLI at the file.
 
@@ -68,7 +81,33 @@ dynamic, or threat-intel analysis.
   implementation status, and research backlog.
 * [`docs/database`](docs/database) – schema notes and read-side query
   blueprints for downstream portals.
+* [`docs/database/permission_analysis_schema.md`](docs/database/permission_analysis_schema.md) – risk
+  snapshots and proposed matrix/rationale tables.
+* [`RENAME_GUIDE.md`](RENAME_GUIDE.md) – module naming map and deprecation plan.
 
 For a detailed overview tailored to collaborators, including what is finished,
 what we are tightening now, and how others can help, start with the device and
 static analysis guides above.
+
+## Configuration (env)
+
+- `FORCE_COLOR` / `NO_COLOR` – colour control in console
+- `SCY_PERMISSION_RISK_TOML` – optional path to TOML scoring config. If unset,
+  the engine looks for `config/permission_risk.toml` or
+  `data/config/permission_risk.toml`.
+
+Example TOML:
+
+```
+[base]
+dangerous_weight = 0.35
+signature_weight = 1.25
+vendor_weight    = 0.08
+
+[bonuses]
+breadth_step = 0.2
+breadth_cap  = 2.0
+
+[normalize]
+max_score = 10.0
+```

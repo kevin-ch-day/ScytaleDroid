@@ -18,6 +18,7 @@ def prompt_inventory_decision(
     stale_level: str,
     default_choice: str = "1",
     quick_hint: Optional[str] = None,
+    changes_total: Optional[int] = None,
 ) -> str:
     """Return the preferred inventory handling strategy.
 
@@ -28,41 +29,27 @@ def prompt_inventory_decision(
     if timestamp and age_seconds is not None:
         last_synced = humanize_seconds(age_seconds)
 
+    # Title
     if last_synced:
-        print(
-            status_messages.status(
-                f"Last snapshot captured {last_synced} ago.", level="info"
-            )
-        )
+        print(status_messages.status(f"Inventory is stale (last: {last_synced}).", level="warn"))
+    else:
+        print(status_messages.status("Inventory may be stale.", level="warn"))
 
-    if state_changed:
+    # Body
+    if changes_total and changes_total > 0:
         print(
             status_messages.status(
-                "Device state differs from the last snapshot.", level="warn"
+                f"Proceeding without sync may miss updated packages ({changes_total} changes).",
+                level="info",
             )
         )
-
-    if stale_level == "soft":
-        print(
-            status_messages.status(
-                "Guard marked inventory as soft-stale (packages unchanged).", level="info"
-            )
-        )
-    elif stale_level == "hard":
-        print(
-            status_messages.status(
-                "Guard marked inventory as stale; consider refreshing before pull.",
-                level="warn",
-            )
-        )
-
-    if quick_hint:
-        print(status_messages.status(quick_hint, level="info"))
+    elif state_changed:
+        print(status_messages.status("Proceeding without sync may miss updates.", level="info"))
 
     print("How would you like to proceed?")
-    print("  1) Run inventory sync now (recommended)")
-    print("  2) Use existing snapshot (may be outdated)")
-    print("  0) Cancel APK pull")
+    print("  1) Sync now (recommended)")
+    print("  2) Use last snapshot")
+    print("  0) Cancel")
 
     if default_choice not in {"0", "1", "2"}:
         default_choice = "1"

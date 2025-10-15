@@ -153,9 +153,16 @@ Each detector owns a specific concern area and returns a `DetectorResult` meetin
   usesCleartextTraffic, sharedUserId, foreground service types), feature and
   library inventory, and context notes. Status `[INFO]` with escalations when
   risky flags are enabled.
-- **permissions.py:** Androguard-backed severity scoring, protection-level
-  histograms, runtime gate mapping, and custom-permission posture. Status
-  `[INFO]` with notes summarising token counts.
+- **permissions:** Permission‑first analytics, DB‑aware protection mapping,
+  capability grouping, and tunable risk scoring.
+  - Analysis helpers:
+    - `modules/permissions/analysis/capability_signal_classifier.py` — LOC/CAM/MIC/… signals
+    - `modules/permissions/analysis/risk_scoring_engine.py` — risk score (3 decimals) + grade (A–F)
+  - Renderers:
+    - `modules/permissions/render_postcard.py` — postcard (Risk bar, Score/Grade, High‑signal, Footprint table)
+    - `modules/permissions/render_summary.py` — Risk Summary (Abbr | Score | Grade | D | S | V)
+    - `modules/permissions/render_matrix.py` — Signal & Permission matrices
+  Status `[INFO]` with concise notes; secrets never printed.
 - **components.py:** Export posture for activities, services, receivers, and
   shared UID partners, including exported intent filters and namespace overlap
   hints. Status `[WARN]` when unguarded exports exist.

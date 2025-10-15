@@ -17,7 +17,7 @@ from .constants import (
 )
 from .metadata import get_latest_inventory_metadata
 from .prompts import prompt_inventory_decision
-from .utils import coerce_float, humanize_seconds
+from .utils import coerce_float, humanize_seconds, coarse_time_range
 
 
 RECENT_CHANGE_WINDOW_SECONDS = 3600
@@ -239,6 +239,7 @@ def ensure_recent_inventory(
                 stale_level=stale_level,
                 default_choice=default_choice,
                 quick_hint=quick_hint,
+                changes_total=total_delta if total_delta else None,
             )
         except KeyboardInterrupt:
             print()
@@ -425,21 +426,19 @@ def _build_sync_warning(
             reasons.append(f"battery is low ({level}%)")
 
     if expected_duration and expected_duration > LONG_RUNNING_SYNC_THRESHOLD:
-        reasons.append(
-            f"sync may take around {humanize_seconds(expected_duration)}"
-        )
+        reasons.append(f"estimated {coarse_time_range(expected_duration)}")
 
     if not reasons:
         return None
 
-    joined = " and ".join(reasons)
-    return f"Inventory sync {joined}."
+    joined = "; ".join(reasons)
+    return f"Estimated: {joined}."
 
 
 def _build_long_running_warning(estimate: Optional[float]) -> str:
     if estimate and estimate > 0:
-        return f"Inventory sync is expected to take {humanize_seconds(estimate)}."
-    return "Inventory sync may take longer than usual."
+        return f"Estimated: {coarse_time_range(estimate)}."
+    return "Estimated: longer than usual."
 
 
 def _parse_battery_level(raw: Optional[str]) -> Optional[int]:

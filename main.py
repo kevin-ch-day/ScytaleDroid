@@ -28,8 +28,8 @@ def _format_time(tz_name: str, reference: ClockReference) -> str:
     return f"{date_part} {time_part} {tz_label} ({dst_label})"
 
 
-def print_banner() -> None:
-    """Display welcome banner with app metadata and world clock."""
+def print_banner(*, show_clocks: bool = False) -> None:
+    """Display welcome banner with app metadata and optional world clock."""
 
     menu_utils.print_banner(
         app_config.APP_NAME,
@@ -38,17 +38,20 @@ def print_banner() -> None:
         app_config.APP_DESCRIPTION,
     )
 
-    state = _resolve_timezones()
-    tz_mapping = state.clocks
-    metrics = []
-    for label, tz_name in tz_mapping.items():
-        try:
-            metrics.append((label, _format_time(tz_name, state.reference)))
-        except Exception as exc:
-            log.warning(f"Failed to render time for {label}: {exc}", category="application")
-    if metrics:
-        menu_utils.print_metrics(metrics)
-    print()
+    if show_clocks:
+        state = _resolve_timezones()
+        tz_mapping = state.clocks
+        metrics = []
+        for label, tz_name in tz_mapping.items():
+            try:
+                metrics.append((label, _format_time(tz_name, state.reference)))
+            except Exception as exc:
+                log.warning(
+                    f"Failed to render time for {label}: {exc}", category="application"
+                )
+        if metrics:
+            menu_utils.print_metrics(metrics)
+        print()
 
     log.info(
         f"Application started - {app_config.APP_NAME} {app_config.APP_VERSION} ({app_config.APP_RELEASE})",
@@ -68,7 +71,7 @@ def main_menu() -> None:
             menu_utils.MenuOption("4", "Harvest Android Permissions", "Fetch from developer.android.com and manage JSON cache"),
             menu_utils.MenuOption("5", "Dynamic analysis", "Launch runtime instrumentation workflows"),
             menu_utils.MenuOption("6", "Reporting", "Generate device and artifact reports"),
-            menu_utils.MenuOption("7", "Database tools", "Inspect schema, check connection, and view counts"),
+            menu_utils.MenuOption("7", "Database", "Inspect schema, check connection, and view counts"),
             menu_utils.MenuOption("8", "Utilities", "Console helpers and configuration"),
             menu_utils.MenuOption("9", "About App", "Show version and licensing information"),
         ]
@@ -184,6 +187,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Run diagnostics checks and exit",
     )
     parser.add_argument(
+        "--with-clocks",
+        action="store_true",
+        help="Show multi-city clocks in the banner",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="Emit diagnostics in JSON format (requires --diag)",
@@ -197,7 +205,7 @@ def main(argv: list[str] | None = None) -> int:
         _run_diagnostics(json_mode=args.json)
         return 0
 
-    print_banner()
+    print_banner(show_clocks=args.with_clocks)
     try:
         main_menu()
     except KeyboardInterrupt:

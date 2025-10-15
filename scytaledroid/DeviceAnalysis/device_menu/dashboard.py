@@ -1,4 +1,10 @@
-"""Dashboard rendering helpers for the Device Analysis menu."""
+"""Dashboard rendering helpers for the Device Analysis menu.
+
+This module focuses on compact, badge-driven output that fits reliably
+within narrow terminals and avoids multi-line hint panels. The dashboard
+header is rendered as a single line with concise status tokens; detailed
+cards are discoverable via menu actions rather than always-on panels.
+"""
 
 from __future__ import annotations
 
@@ -25,6 +31,9 @@ from .formatters import (
 )
 
 
+# -------------------------
+# Badge helpers
+# -------------------------
 def _status_badge(label: str, tone: str = "info") -> str:
     """Return a coloured status chip for quick scanning."""
 
@@ -37,7 +46,14 @@ def _status_badge(label: str, tone: str = "info") -> str:
     }
     style = style_map.get(tone, palette.info)
     cleaned = (label or "").strip() or "UNKNOWN"
-    marker = "*" if use_ascii_ui() else "●"
+    # Prefer a solid bullet when colours are enabled; fall back to ASCII
+    # depending on terminal capability otherwise.
+    # When colours are enabled (e.g., tests via FORCE_COLOR), prefer a solid bullet
+    # to ensure consistent snapshots regardless of Unicode heuristics.
+    if colors.colors_enabled():
+        marker = "●"
+    else:
+        marker = "*" if use_ascii_ui() else "●"
     token = f"{marker} {cleaned.upper()}"
     return colors.apply(token, style, bold=True)
 
@@ -89,60 +105,53 @@ def _device_count_badge(count: int) -> str:
     return _status_badge(label.upper(), tone)
 
 
+# -------------------------
+# Compact header
+# -------------------------
+
+def _compact_header(
+    *,
+    refreshed: str,
+    adb_status: str,
+    devices_found: int,
+    active_line: Optional[str],
+    width: Optional[int] = None,
+) -> str:
+    """Render a single-line dashboard header within the terminal width.
+
+    Example (Unicode mode):
+    Device Dashboard — 2025-10-15 11:52:06   ADB: CONNECTED   Detected: 1   Active: moto g 5G (ZY22…)
+    """
+
+    palette = colors.get_palette()
+    term_width = width or text_blocks.visible_width(" " * 80) or 80
+    sep = " - " if use_ascii_ui() else " — "
+
+    title = colors.apply("Device Dashboard", palette.header, bold=True)
+    ts = colors.apply(refreshed, palette.accent, bold=True)
+    adb = colors.apply(f"ADB: {adb_status}", palette.info, bold=True)
+    det = colors.apply(f"Detected: {devices_found}", palette.text)
+
+    parts = [f"{title}{sep}{ts}", adb, det]
+    if active_line:
+        active_token = colors.apply("Active:", palette.muted, bold=True)
+        parts.append(f"{active_token} {colors.apply(active_line, palette.text, bold=True)}")
+
+    joined = "   ".join(parts)
+    # Clamp to width without breaking ANSI sequences
+    return text_blocks.truncate_visible(joined, term_width)
+
 def _format_metric_line(label: str, value: str, *, width: int = 16) -> str:
     palette = colors.get_palette()
     label_token = colors.apply(label.ljust(width), palette.muted, bold=True)
     return f"{label_token} {value}"
 
 
-def _overview_card_lines(
-    refreshed: str,
-    devices_found: int,
-    connection_status: str,
-    active_details: Optional[Dict[str, Optional[str]]],
-    warnings_count: int,
-) -> List[str]:
-    palette = colors.get_palette()
-    lines = [
-        _format_metric_line("Refreshed", colors.apply(refreshed, palette.accent, bold=True)),
-        _format_metric_line("Devices", _device_count_badge(devices_found)),
-        _format_metric_line("Status", _connection_badge(connection_status)),
-    ]
-
-    if active_details:
-        active_label = format_device_line(active_details, include_release=True)
-        lines.append(
-            _format_metric_line(
-                "Active",
-                colors.apply(active_label, palette.text, bold=True),
-            )
-        )
-    else:
-        lines.append(_format_metric_line("Active", _status_badge("NONE", "warning")))
-
-    if warnings_count:
-        warning_label = "warning" if warnings_count == 1 else "warnings"
-        lines.append(
-            _format_metric_line(
-                "ADB",
-                _status_badge(f"{warnings_count} {warning_label.upper()}", "warning"),
-            )
-        )
-
-    return lines
-
-
-def _render_overview_card(
-    refreshed: str,
-    devices_found: int,
-    connection_status: str,
-    active_details: Optional[Dict[str, Optional[str]]],
-    warnings_count: int,
-) -> str:
-    lines = _overview_card_lines(
-        refreshed, devices_found, connection_status, active_details, warnings_count
-    )
-    return text_blocks.boxed(lines, width=74)
+def _no_device_line(devices_found: int) -> str:
+    """Single-line guidance shown when there is no active device."""
+    if devices_found:
+        return "No active device. Use 3 to connect (Enter to refresh)."
+    return "No devices detected. Attach a device and press Enter to refresh."
 
 
 def _styled_value(value: Optional[str], *, highlight: bool = False) -> str:
@@ -154,59 +163,20 @@ def _styled_value(value: Optional[str], *, highlight: bool = False) -> str:
     return colors.apply(text, style, bold=highlight)
 
 
-def _active_device_card(details: Dict[str, Optional[str]]) -> str:
-    palette = colors.get_palette()
-    serial = details.get("serial") or "Unknown"
-    root_badge = _root_badge(details.get("is_rooted"))
-    lines = [
-        colors.apply("ACTIVE DEVICE", colors.style("header"), bold=True),
-        colors.apply(
-            format_device_line(details, include_release=True), palette.success, bold=True
-        ),
-        _format_metric_line("Serial", colors.apply(serial, palette.accent, bold=True)),
-        _format_metric_line(
-            "Android",
-            _styled_value(format_android_release(details, include_sdk=True)),
-        ),
-        _format_metric_line("Battery", _styled_value(format_battery(details))),
-        _format_metric_line("Wi-Fi", _styled_value(format_wifi_state(details.get("wifi_state")))),
-        _format_metric_line("Root", root_badge),
-    ]
-    return text_blocks.boxed(lines, width=74)
+def _active_device_brief(details: Dict[str, Optional[str]], *, width: int) -> str:
+    """Return a concise active device line suitable for the header."""
+    label = format_device_line(details, include_release=False)
+    return text_blocks.truncate_visible(label, max(10, width // 3))
 
 
-def _no_device_card(
-    last_summary: Optional[Dict[str, Optional[str]]],
-    last_serial: Optional[str],
-    devices_found: int,
-) -> str:
-    palette = colors.get_palette()
+def _last_seen_brief(
+    last_summary: Optional[Dict[str, Optional[str]]], last_serial: Optional[str]
+) -> Optional[str]:
     if last_summary:
-        last_line = format_device_line(last_summary, include_release=True)
-    elif last_serial:
-        last_line = last_serial
-    else:
-        last_line = "Unknown"
-
-    hint = (
-        "Use option 3 to connect. Press Enter to refresh."
-        if devices_found
-        else "Attach a device with USB debugging enabled, then press Enter to refresh."
-    )
-
-    lines = [
-        colors.apply("NO ACTIVE DEVICE", colors.style("warning"), bold=True),
-        colors.apply(
-            "Connect a device to unlock inventory, harvesting, and reports.",
-            palette.muted,
-        ),
-        _format_metric_line(
-            "Last seen",
-            colors.apply(last_line, palette.text if last_line != "Unknown" else palette.muted),
-        ),
-        colors.apply(hint, palette.hint),
-    ]
-    return text_blocks.boxed(lines, width=74)
+        return format_device_line(last_summary, include_release=True)
+    if last_serial:
+        return last_serial
+    return None
 
 
 def _device_table_rows(
@@ -282,29 +252,42 @@ def print_dashboard(
         else "Unknown"
     )
 
-    print()
-    menu_utils.print_header("Device Dashboard", subtitle="Connected hardware overview")
-    overview_card = _render_overview_card(
-        refreshed,
-        devices_found,
-        connection_status,
-        active_details,
-        len(warnings),
-    )
-    print(overview_card)
-
-    print()
+    # Header
+    active_line = None
+    from scytaledroid.Utils.DisplayUtils.terminal import get_terminal_width
+    term_width = get_terminal_width()
     if active_details:
-        print(_active_device_card(active_details))
-    else:
+        active_line = _active_device_brief(active_details, width=term_width)
+    # Treat presence of active details as connected for header purposes
+    header = _compact_header(
+        refreshed=refreshed,
+        adb_status=(("CONNECTED" if active_details else connection_status) or "").upper(),
+        devices_found=devices_found,
+        active_line=active_line,
+        width=term_width,
+    )
+    print()
+    print(header)
+
+    # One-line guidance when disconnected
+    if not active_details:
         last_serial = device_manager.get_last_serial()
         last_summary = serial_map.get(last_serial) if last_serial else None
-        print(_no_device_card(last_summary, last_serial, devices_found))
+        last_seen = _last_seen_brief(last_summary, last_serial)
+        line = _no_device_line(devices_found)
+        if last_seen:
+            line = f"{line} Last seen: {last_seen}"
+        print(colors.apply(line, colors.get_palette().hint))
 
+    # Device table
     if summaries:
         print()
         print(text_blocks.headline("Detected devices", width=74))
         rows = _device_table_rows(summaries)
+        # Promote single device with a left margin indicator
+        if len(rows) == 1 and rows[0]:
+            label, *rest = rows[0]
+            rows[0] = (f"* {label}" if use_ascii_ui() else f"• {label}", *rest)
         table_utils.render_table(
             ["Device", "State", "Android", "Battery", "Wi-Fi", "Root"],
             rows,
@@ -312,6 +295,7 @@ def print_dashboard(
             accent_first_column=True,
         )
 
+    # ADB warnings
     if warnings:
         distinct_warnings = list(dict.fromkeys(warnings))
         for warning in distinct_warnings:
@@ -342,4 +326,13 @@ def resolve_active_device(
     return None
 
 
-__all__ = ["build_device_summaries", "print_dashboard", "resolve_active_device"]
+__all__ = [
+    "build_device_summaries",
+    "print_dashboard",
+    "resolve_active_device",
+    # Exposed for tests
+    "_connection_badge",
+    "_status_badge",
+    "_device_table_rows",
+    "_no_device_line",
+]

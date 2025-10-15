@@ -38,19 +38,11 @@ def test_device_table_rows_colours_state_and_root(force_color):
     assert colors.strip(root) == "● NO"
 
 
-def test_no_device_card_includes_last_connection(force_color):
-    last = {
-        "serial": "ZY22JK89DR",
-        "model": "moto_g_5G",
-        "device": "motog",
-        "android_release": "Android 14",
-    }
-
-    card = dashboard._no_device_card(last, last["serial"], devices_found=0)
-    stripped = colors.strip(card)
-    assert "NO ACTIVE DEVICE" in stripped
-    assert "moto g" in stripped.lower()
-    assert "USB debugging" in stripped
+def test_no_device_line_when_disconnected():
+    line_with_devices = dashboard._no_device_line(devices_found=1)
+    line_without_devices = dashboard._no_device_line(devices_found=0)
+    assert "No active device" in line_with_devices
+    assert "No devices detected" in line_without_devices
 
 
 def test_status_badge_ascii(monkeypatch):

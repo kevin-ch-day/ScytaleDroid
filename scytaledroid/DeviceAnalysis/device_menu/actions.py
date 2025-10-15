@@ -91,86 +91,77 @@ def build_main_menu_options(
     inventory_status = format_inventory_status(serial)
     pull_hint = format_pull_hint(serial)
 
+    # Derive compact badges from status strings
+    inv_badge: Optional[str] = None
+    if inventory_status:
+        text = (inventory_status or "").lower()
+        if "stale" in text:
+            # Extract age token like "13h 41m" if present
+            age = None
+            for token in inventory_status.split():
+                if any(ch.isdigit() for ch in token) and any(ch in token for ch in ["h", "m", "s"]):
+                    age = token.strip(",.")
+                    break
+            inv_badge = f"stale: {age}" if age else "stale"
+        elif "synced" in text or "fresh" in text:
+            inv_badge = None
+
+    pull_badge: Optional[str] = None
+    if pull_hint:
+        t = pull_hint.lower()
+        if "stale" in t:
+            pull_badge = "stale inventory"
+
+    needs_active = None if has_device else "needs active"
+
     options: List[menu_utils.MenuOption] = [
-        menu_utils.MenuOption(
-            "1",
-            "List devices",
-            description="View all detected and recent devices",
-        ),
-        menu_utils.MenuOption(
-            "2",
-            "Refresh status",
-            description="Rescan adb and refresh dashboard information",
-        ),
-        menu_utils.MenuOption(
-            "3",
-            "Connect to a device",
-            description="Select an attached device as the active target",
-        ),
+        menu_utils.MenuOption("1", "List devices"),
+        menu_utils.MenuOption("2", "Refresh status"),
+        menu_utils.MenuOption("3", "Connect to a device"),
         menu_utils.MenuOption(
             "4",
-            "Show device info",
-            description="Display details for the active device",
+            "Device info",
             disabled=not has_device,
-            hint=None if has_device else "Requires an active device",
+            badge=needs_active,
         ),
         menu_utils.MenuOption(
             "5",
             "Inventory & database sync",
-            description=f"Status: {inventory_status}",
+            badge=inv_badge or needs_active,
         ),
         menu_utils.MenuOption(
             "6",
-            "Run detailed device report",
-            description="Gather extended telemetry and snapshots",
+            "Detailed device report",
             disabled=not has_device,
-            hint=None if has_device else "Requires an active device",
+            badge=needs_active,
         ),
         menu_utils.MenuOption(
             "7",
             "Pull APKs",
-            description=f"Hint: {pull_hint}",
             disabled=not has_device,
-            hint=None if has_device else "Requires an active device",
+            badge=pull_badge or needs_active,
         ),
         menu_utils.MenuOption(
             "8",
             "Logcat",
-            description="Stream device logs in real time",
             disabled=not has_device,
-            hint=None if has_device else "Requires an active device",
+            badge=needs_active,
         ),
         menu_utils.MenuOption(
             "9",
             "Open ADB shell",
-            description="Launch an interactive adb shell session",
             disabled=not has_device,
-            hint=None if has_device else "Requires an active device",
+            badge=needs_active,
         ),
         menu_utils.MenuOption(
             "10",
             "Disconnect device",
-            description="Clear the active device selection",
             disabled=not has_device,
-            hint=None if has_device else "No device currently connected",
+            badge=needs_active,
         ),
-        menu_utils.MenuOption(
-            "11",
-            "Export device dossier",
-            description="Produce a curated report bundle",
-            disabled=not has_device,
-            hint=None if has_device else "Requires an active device",
-        ),
-        menu_utils.MenuOption(
-            "12",
-            "Manage harvest watchlists",
-            description="Create and edit watchlists for pull scopes",
-        ),
-        menu_utils.MenuOption(
-            "13",
-            "Browse saved APKs",
-            description="Review harvested artifacts stored on disk",
-        ),
+        menu_utils.MenuOption("11", "Export device dossier", disabled=not has_device, badge=needs_active),
+        menu_utils.MenuOption("12", "Manage harvest watchlists"),
+        menu_utils.MenuOption("13", "Browse saved APKs"),
     ]
 
     return options

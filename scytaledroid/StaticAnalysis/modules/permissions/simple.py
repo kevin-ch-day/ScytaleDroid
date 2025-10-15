@@ -6,6 +6,8 @@ from xml.etree import ElementTree as ET
 from typing import Dict, List, Sequence, Tuple, Mapping, Optional
 
 from scytaledroid.StaticAnalysis._androguard import APK
+from .analysis.capability_signal_classifier import compute_group_strengths
+from .analysis.risk_scoring_engine import permission_risk_score, permission_risk_grade
 
 _ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
 
@@ -184,3 +186,360 @@ def print_permissions_block(
             )
         )
         print(f"Risk breakdown: {summary}")
+
+
+# ------------------------------
+# Permission-first renderers
+# ------------------------------
+
+_GROUP_ORDER = (
+    "LOC",  # Location
+    "CAM",  # Camera
+    "MIC",  # Microphone
+    "CNT",  # Contacts/Accounts
+    "PHN",  # Phone
+    "SMS",  # SMS
+    "STR",  # Storage/Media
+    "BT",   # Bluetooth/Nearby
+    "OVR",  # Overlay
+    "NOT",  # Notifications
+    "ADS",  # Ads/Attribution (vendor)
+)
+
+
+def _classify_permissions(
+    declared: Sequence[Tuple[str, str]],
+    protection_map: Mapping[str, Optional[str]],
+) -> Tuple[Dict[str, int], Dict[str, int], Dict[str, int], set[str], set[str]]:
+    """Return counts per class and group signals.
+
+    Returns (risk_counts, group_strength, vendor_counts)
+    - risk_counts: counts of framework protections (dangerous/signature/normal/other)
+    - group_strength: 0/1/2 intensity for each group key
+    - vendor_counts: count of vendor permissions overall and by group
+    """
+
+    risk_counts: Dict[str, int] = {"dangerous": 0, "signature": 0, "normal": 0, "other": 0}
+    group_strength, fw_ds = compute_group_strengths(declared, protection_map)
+    vendor_counts: Dict[str, int] = {"ADS": 0}
+    vendor_names: set[str] = set()
+
+    for name, _tag in declared:
+        is_framework = name.startswith("android.")
+        short = name.split(".")[-1].upper()
+        prot = protection_map.get(short)
+        if is_framework:
+            if prot in {"dangerous", "signature", "normal"}:
+                risk_counts[prot] = risk_counts.get(prot, 0) + 1
+            else:
+                risk_counts["other"] = risk_counts.get("other", 0) + 1
+        else:
+            # Vendor/custom
+            if "AD_ID" in short or "ADVERTISING" in short or "INSTALL_REFERRER" in short:
+                vendor_counts["ADS"] = vendor_counts.get("ADS", 0) + 1
+            vendor_names.add(name)
+
+    return risk_counts, group_strength, vendor_counts, fw_ds, vendor_names
+
+
+def _risk_bar(score: float, width: int = 8) -> str:
+    filled = int(round((score / 10.0) * width))
+    blocks = "▓" * max(0, min(width, filled))
+    empty = "░" * max(0, width - len(blocks))
+    return blocks + empty
+
+
+def _footprint_bar(group_strength: Mapping[str, int]) -> str:
+    parts: List[str] = []
+    for key in _GROUP_ORDER:
+        val = group_strength.get(key, 0)
+        if val >= 2:
+            cell = "▓▓"
+        elif val == 1:
+            cell = "▓░"
+        else:
+            cell = "░░"
+        parts.append(f"{key} {cell}")
+    return " | ".join(parts)
+
+
+def _footprint_multiline(groups: Mapping[str, int]) -> List[str]:
+    """Return a multi-line footprint with short descriptors per capability."""
+    descriptors = {
+        "LOC": "location (precise/bg)",
+        "CAM": "camera",
+        "MIC": "microphone",
+        "CNT": "contacts/accounts",
+        "PHN": "calls/phone state",
+        "SMS": "sms",
+        "STR": "media/storage",
+        "BT": "nearby/bluetooth",
+        "OVR": "overlay",
+        "NOT": "notifications",
+        "ADS": "ads/attribution",
+    }
+    label_map = {
+        "LOC": "Location",
+        "CAM": "Camera",
+        "MIC": "Microphone",
+        "CNT": "Contacts",
+        "PHN": "Phone",
+        "SMS": "SMS",
+        "STR": "Storage",
+        "BT": "Bluetooth",
+        "OVR": "Overlay",
+        "NOT": "Notifications",
+        "ADS": "Ads",
+    }
+    bar_width = 4
+    from scytaledroid.Utils.DisplayUtils import table_utils
+    rows: List[List[str]] = []
+    for key in _GROUP_ORDER:
+        val = groups.get(key, 0)
+        if val >= 2:
+            bar = "▓" * bar_width
+        elif val == 1:
+            bar = "▓" * (bar_width // 2) + "░" * (bar_width - bar_width // 2)
+        else:
+            bar = "░" * bar_width
+        name = label_map.get(key, key)
+        desc = descriptors.get(key, key)
+        rows.append([name, bar])
+    # Print as a tiny table for alignment
+    print("Footprint:")
+    table_utils.render_table(["Capability", "Level"], rows)
+    return []
+
+
+def _high_signal_tags(groups: Mapping[str, int]) -> List[str]:
+    tags: List[str] = []
+    mapping = {
+        "LOC": "location",
+        "CAM": "camera",
+        "MIC": "microphone",
+        "CNT": "contacts",
+        "PHN": "phone",
+        "SMS": "sms",
+        "STR": "storage",
+        "BT": "bluetooth",
+        "OVR": "overlay",
+        "NOT": "notifications",
+    }
+    for key, label in mapping.items():
+        if groups.get(key, 0) >= 2:
+            tags.append(label)
+    return tags[:5]
+
+
+def _persona(groups: Mapping[str, int]) -> str:
+    if groups.get("OVR", 0) >= 1 and groups.get("NOT", 0) >= 1:
+        return "Overlay Notifier"
+    if groups.get("CAM", 0) >= 1 and groups.get("MIC", 0) >= 1 and groups.get("CNT", 0) >= 1:
+        return "Broad Access Communicator"
+    if groups.get("STR", 0) >= 1 and groups.get("NOT", 0) >= 1 and groups.get("ADS", 0) >= 1:
+        return "Ad-Heavy Media"
+    return "General"
+
+
+def render_permission_postcard(
+    package_name: str,
+    app_label: str,
+    declared: Sequence[Tuple[str, str]],
+    defined: Sequence[Dict[str, str | None]],
+    *,
+    index: int,
+    total: int,
+) -> Dict[str, object]:
+    """Analyze and print a compact permission-first postcard.
+
+    Returns a profile dict for summary usage.
+    """
+    # Framework protections lookup
+    shorts_only = [n.split(".")[-1].upper() for n, _ in declared if n.startswith("android.")]
+    protection_map = _fetch_protections(shorts_only)
+    risk_counts, groups, vendor, fw_ds, vendor_names = _classify_permissions(declared, protection_map)
+
+    d = risk_counts.get("dangerous", 0)
+    s = risk_counts.get("signature", 0)
+    v = vendor.get("ADS", 0)
+    score = permission_risk_score(dangerous=d, signature=s, vendor=v, groups=groups)
+    bar = _risk_bar(score)
+    high_tags = _high_signal_tags(groups)
+    footprint = _footprint_bar(groups)
+    persona = _persona(groups)
+
+    grade = permission_risk_grade(score)
+    print(f"[{index}/{total}] {app_label}  {bar}  Risk {score:.3f}   (D:{d}  S:{s}  V:{v})  Grade {grade}")
+    if high_tags:
+        tags = "".join(f"[{t}]" for t in high_tags)
+        print(f"High-signal:  {tags}")
+    _footprint_multiline(groups)
+    print(f"Profile: {persona}")
+
+    return {
+        "package": package_name,
+        "label": app_label,
+        "risk": score,
+        "D": d,
+        "S": s,
+        "V": v,
+        "groups": groups,
+        "footprint": footprint,
+        "persona": persona,
+        "fw_ds": fw_ds,
+        "vendor_names": vendor_names,
+    }
+
+
+def render_barcode_line(package_name: str, label: str, profile: Mapping[str, object]) -> str:
+    return (
+        f"{label}  | "
+        + " | ".join(f"{key} {'▓▓' if profile['groups'].get(key, 0) >= 2 else ('▓░' if profile['groups'].get(key, 0) == 1 else '░░')}" for key in _GROUP_ORDER)
+    )
+
+
+def render_after_run_summary(rows: Sequence[Mapping[str, object]]) -> None:
+    from scytaledroid.Utils.DisplayUtils import table_utils
+    headers = ["Abbr", "Score", "Grade", "D", "S", "V"]
+    formatted = []
+    for item in rows:
+        label = f"{item['label']}"
+        abbr = _abbr_from_name(label).strip()
+        score = float(item.get("risk", 0.0) or 0.0)
+        grade = permission_risk_grade(score)
+        formatted.append([
+            abbr,
+            f"{score:.3f}",
+            grade,
+            str(item.get("D", 0)),
+            str(item.get("S", 0)),
+            str(item.get("V", 0)),
+        ])
+    print("Risk Summary — Top apps (by permission risk)")
+    print("-" * 75)
+    table_utils.render_table(headers, formatted)
+
+
+def render_signal_matrix(items: Sequence[Mapping[str, object]]) -> None:
+    from scytaledroid.Utils.DisplayUtils import table_utils
+    if not items:
+        return
+    # Use abbreviations in headers
+    headers = ["Signal"] + [ _abbr_from_name(item["label"]).strip() for item in items ]
+    rows = []
+    def _cell(item, key):
+        g = item["groups"].get(key, 0)
+        if key in {"OVR", "NOT"}:
+            return "S" if g >= 2 else ("D" if g == 1 else "·")
+        if key == "ADS":
+            return "A" if item.get("V", 0) > 0 else "·"
+        return "D" if g >= 1 else "·"
+    signals = [
+        ("Precise location", "LOC"),
+        ("Camera", "CAM"),
+        ("Microphone", "MIC"),
+        ("Overlay (draw over)", "OVR"),
+        ("Contacts", "CNT"),
+        ("SMS", "SMS"),
+        ("Calls", "PHN"),
+        ("Storage/Media (broad)", "STR"),
+        ("Bluetooth/Nearby", "BT"),
+        ("Notifications", "NOT"),
+        ("Ads/Attribution", "ADS"),
+    ]
+    print("\nSignal Matrix — Dangerous + Signature")
+    print("-" * 66)
+    for title, key in signals:
+        row = [title]
+        for item in items:
+            row.append(_cell(item, key))
+        rows.append(row)
+    table_utils.render_table(headers, rows)
+
+
+# ------------------------------
+# Application Permission Matrix (compact)
+# ------------------------------
+
+def _abbr_from_name(name: str) -> str:
+    base = name if "." not in name else name.split(".")[-1]
+    label = "".join(ch for ch in base if ch.isalnum())
+    if not label:
+        return "APP"
+    up = label.upper()
+    head = up[0]
+    tail = up[1:]
+    no_vowels = "".join(ch for ch in tail if ch not in "AEIOU")
+    token = (head + no_vowels)[:5]
+    return token.ljust(5, " ")
+
+
+_MATRIX_ROWS = [
+    ("Location", ["ACCESS_FINE_LOCATION", "ACCESS_BACKGROUND_LOCATION"]),
+    ("Camera & Microphone", ["CAMERA", "RECORD_AUDIO"]),
+    ("Overlay & Notifications", ["SYSTEM_ALERT_WINDOW", "POST_NOTIFICATIONS"]),
+    ("Contacts & Accounts", ["READ_CONTACTS", "GET_ACCOUNTS"]),
+    ("Phone & SMS", ["READ_CALL_LOG", "READ_PHONE_STATE", "SEND_SMS"]),
+    ("Storage & Media", ["READ_MEDIA_IMAGES", "READ_MEDIA_VIDEO", "ACCESS_MEDIA_LOCATION"]),
+    ("Bluetooth & Nearby", ["BLUETOOTH_SCAN", "BLUETOOTH_ADVERTISE", "BLUETOOTH_CONNECT"]),
+    ("Ads / Attribution", ["ACCESS_ADSERVICES_AD_ID", "com.google.android.gms.permission.AD_ID"]),
+]
+
+
+def render_permission_matrix(
+    profiles: Sequence[Mapping[str, object]],
+    *,
+    scope_label: str,
+    show: int = 4,
+) -> None:
+    from datetime import datetime
+    from scytaledroid.Utils.DisplayUtils import table_utils
+
+    if not profiles:
+        return
+
+    top = list(sorted(profiles, key=lambda p: p.get("risk", 0.0), reverse=True))[: max(1, show)]
+    abbrev = [(_abbr_from_name(p["label"]), p["label"]) for p in top]
+    now = datetime.now().strftime("%Y-%m-%d %-I:%M %p") if hasattr(datetime.now(), 'strftime') else datetime.now().strftime("%Y-%m-%d %I:%M %p")
+
+    print("\nApplication Permission Matrix")
+    print(f"Scope: {scope_label}")
+    print(f"Snapshot: {now}")
+    print(f"View: Apps 1–{len(top)}/{len(profiles)}")
+    print()
+
+    headers = ["Permission"] + [abbr.strip() for abbr, _ in abbrev]
+    rows: list[list[str]] = []
+
+    for group_title, perms in _MATRIX_ROWS:
+        rows.append([group_title] + ["" for _ in top])
+        for perm in perms:
+            display = perm
+            row = [f"  {display}"]
+            for item in top:
+                fw_ds = item.get("fw_ds", set())
+                vendor = item.get("vendor_names", set())
+                mark = "-"
+                if perm.startswith("com."):
+                    mark = "*" if perm in vendor else "-"
+                else:
+                    mark = "x" if perm in fw_ds else "-"
+                # Apply subtle coloring to marks when available
+                from scytaledroid.Utils.DisplayUtils import colors as _colors
+                _pal = _colors.get_palette() if _colors.colors_enabled() else None
+                if _pal:
+                    if mark == "x":
+                        row.append(_colors.apply(mark, _pal.accent, bold=True))
+                    elif mark == "*":
+                        row.append(_colors.apply(mark, _pal.warning, bold=True))
+                    else:
+                        row.append(_colors.apply(mark, _pal.muted))
+                else:
+                    row.append(mark)
+            rows.append(row)
+
+    table_utils.render_table(headers, rows, accent_first_column=False)
+    print("\nLegend:")
+    print("x = framework (dangerous/signature)")
+    print("* = vendor/custom/ads")
+    print("- = not requested")
