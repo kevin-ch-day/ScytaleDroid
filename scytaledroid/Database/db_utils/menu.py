@@ -66,7 +66,7 @@ def database_menu() -> None:
         valid_choices = ["0"]
         for title, options in groups:
             menu_utils.print_section(title)
-            menu_utils.print_menu(options, padding=True)
+            menu_utils.print_menu(options, padding=True, show_exit=False)
             valid_choices.extend([str(option[0]) for option in options])
 
         print("0) Back")
@@ -207,7 +207,7 @@ def _handle_write_framework_catalog() -> None:
     """Load the latest framework catalog snapshot and upsert into DB."""
     print(status_messages.status("Preparing to write framework catalog to DB…", level="info"))
     try:
-        from scytaledroid.Utils.AndroidPermCatalog.cli import DEFAULT_CACHE
+        from scytaledroid.Utils.AndroidPermCatalog.constants import DEFAULT_CACHE
         from scytaledroid.Utils.AndroidPermCatalog import api as perm_api
         from scytaledroid.Database.db_func import framework_permissions as fp
 
