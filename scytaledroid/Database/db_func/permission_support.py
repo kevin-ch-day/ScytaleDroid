@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from math import isclose
 from typing import Callable, Iterable, Mapping
 
 from ..db_core import run_sql
@@ -146,36 +147,116 @@ def ensure_all() -> dict[str, bool]:
     return results
 
 
-def seed_signal_catalog(entries: Iterable[Mapping[str, object]] | None = None) -> int:
-    """Insert or update default signal catalog rows."""
+def seed_signal_catalog(
+    entries: Iterable[Mapping[str, object]] | None = None,
+) -> dict[str, int]:
+    """Insert or update default signal catalog rows.
+
+    Returns a dictionary with ``inserted`` and ``updated`` counts so callers can
+    surface idempotent status messages to users.
+    """
 
     payloads = list(entries) if entries is not None else list(DEFAULT_SIGNALS)
     if not payloads:
-        return 0
+        return {"inserted": 0, "updated": 0}
+
+    try:
+        existing_rows = run_sql(
+            """
+            SELECT signal_key, display_name, description, default_weight
+            FROM permission_signal_catalog
+            """,
+            fetch="all",
+            dictionary=True,
+        )
+    except Exception:
+        existing_rows = []
+
+    existing = {
+        str(row["signal_key"]): row
+        for row in existing_rows or []
+        if row.get("signal_key") is not None
+    }
 
     inserted = 0
-    for payload in payloads:
+    updated = 0
+
+    for raw_payload in payloads:
+        payload = dict(raw_payload)
+        key = str(payload.get("signal_key", "")).strip()
+        if not key:
+            continue
+
+        payload.setdefault("display_name", "")
+        payload.setdefault("description", "")
+        payload.setdefault("default_weight", 0.0)
+
+        current = existing.get(key)
+        if current is None:
+            try:
+                run_sql(
+                    """
+                    INSERT INTO permission_signal_catalog
+                        (signal_key, display_name, description, default_weight)
+                    VALUES (%(signal_key)s, %(display_name)s, %(description)s, %(default_weight)s)
+                    """,
+                    payload,
+                )
+                inserted += 1
+                existing[key] = {
+                    "signal_key": key,
+                    "display_name": payload["display_name"],
+                    "description": payload["description"],
+                    "default_weight": payload["default_weight"],
+                }
+            except Exception:
+                continue
+            continue
+
+        display_changed = (current.get("display_name") or "") != payload["display_name"]
+        description_changed = (current.get("description") or "") != payload["description"]
+
+        try:
+            current_weight = float(current.get("default_weight", 0.0))
+        except (TypeError, ValueError):
+            current_weight = 0.0
+
+        try:
+            desired_weight = float(payload["default_weight"])
+        except (TypeError, ValueError):
+            desired_weight = current_weight
+
+        weight_changed = not isclose(current_weight, desired_weight, rel_tol=1e-9, abs_tol=1e-9)
+
+        if not (display_changed or description_changed or weight_changed):
+            continue
+
         try:
             run_sql(
                 """
-                INSERT INTO permission_signal_catalog
-                    (signal_key, display_name, description, default_weight)
-                VALUES (%(signal_key)s, %(display_name)s, %(description)s, %(default_weight)s)
-                ON DUPLICATE KEY UPDATE
-                    display_name = VALUES(display_name),
-                    description = VALUES(description),
-                    default_weight = VALUES(default_weight),
+                UPDATE permission_signal_catalog
+                SET display_name = %(display_name)s,
+                    description = %(description)s,
+                    default_weight = %(default_weight)s,
                     updated_at = CURRENT_TIMESTAMP
+                WHERE signal_key = %(signal_key)s
                 """,
                 payload,
             )
-            inserted += 1
+            updated += 1
+            existing[key] = {
+                "signal_key": key,
+                "display_name": payload["display_name"],
+                "description": payload["description"],
+                "default_weight": desired_weight,
+            }
         except Exception:
             continue
-    return inserted
+
+    return {"inserted": inserted, "updated": updated}
 
 
-def seed_defaults() -> dict[str, int]:
+def seed_defaults() -> dict[str, dict[str, int]]:
     """Seed baseline catalog data used by permission analytics."""
 
     return {"permission_signal_catalog": seed_signal_catalog()}

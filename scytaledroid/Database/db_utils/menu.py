@@ -195,9 +195,20 @@ def _handle_provision_permission_tables() -> None:
         print(status_messages.status(f"{table_name}: {verb}", level=level))
 
     if seeded:
-        for table_name, count in sorted(seeded.items()):
-            level = "success" if count else "info"
-            message = f"{table_name}: seeded {count} row(s)"
+        for table_name, payload in sorted(seeded.items()):
+            if isinstance(payload, dict):
+                inserted = int(payload.get("inserted", 0))
+                updated = int(payload.get("updated", 0))
+                if inserted or updated:
+                    message = f"{table_name}: inserted {inserted}, updated {updated}"
+                    level = "success"
+                else:
+                    message = f"{table_name}: already up to date"
+                    level = "info"
+            else:
+                count = int(payload) if isinstance(payload, int) else 0
+                level = "success" if count else "info"
+                message = f"{table_name}: seeded {count} row(s)"
             print(status_messages.status(message, level=level))
 
     prompt_utils.press_enter_to_continue()
