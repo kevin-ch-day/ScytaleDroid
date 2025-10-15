@@ -147,6 +147,7 @@ def print_menu(
     is_main: bool = False,
     default: Optional[str] = None,
     exit_label: Optional[str] = None,
+    show_exit: bool = True,
     show_descriptions: bool = True,
     boxed: bool = False,
     width: Optional[int] = None,
@@ -208,14 +209,15 @@ def print_menu(
 
         rendered_blocks.append(block)
 
-    exit_text = exit_label or ("Exit" if is_main else "Back")
-    exit_item = MenuOption("0", exit_text)
-    exit_is_default = default == "0"
-    exit_key_style = palette.option_default if exit_is_default else palette.option_key
-    exit_label_style = palette.accent if exit_is_default else palette.option_text
-    exit_key = colors.apply("0)", exit_key_style)
-    exit_label_coloured = colors.apply(exit_item.label, exit_label_style)
-    rendered_blocks.append([f"{exit_key} {exit_label_coloured}"])
+    if show_exit:
+        exit_text = exit_label or ("Exit" if is_main else "Back")
+        exit_item = MenuOption("0", exit_text)
+        exit_is_default = default == "0"
+        exit_key_style = palette.option_default if exit_is_default else palette.option_key
+        exit_label_style = palette.accent if exit_is_default else palette.option_text
+        exit_key = colors.apply("0)", exit_key_style)
+        exit_label_coloured = colors.apply(exit_item.label, exit_label_style)
+        rendered_blocks.append([f"{exit_key} {exit_label_coloured}"])
 
     if boxed:
         flat_lines = []

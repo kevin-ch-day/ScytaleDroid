@@ -7,7 +7,11 @@ from typing import Dict, List, Sequence, Tuple, Mapping, Optional
 
 from scytaledroid.StaticAnalysis._androguard import APK
 from .analysis.capability_signal_classifier import compute_group_strengths
-from .analysis.risk_scoring_engine import permission_risk_score, permission_risk_grade
+from .analysis.risk_scoring_engine import (
+    permission_risk_score_detail,
+    permission_risk_grade,
+)
+from .audit import PermissionAuditAccumulator
 
 _ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
 
@@ -242,6 +246,42 @@ def _classify_permissions(
     return risk_counts, group_strength, vendor_counts, fw_ds, vendor_names
 
 
+def _normalize_permission_key(name: str) -> str:
+    if name.startswith("android."):
+        return name.split(".")[-1].upper()
+    return name
+
+
+def _collect_declared_tokens(
+    declared_sources: Mapping[str, Sequence[Tuple[str, str]]],
+) -> List[str]:
+    tokens: set[str] = set()
+    for perms in declared_sources.values():
+        for perm_name, _ in perms:
+            tokens.add(_normalize_permission_key(str(perm_name)))
+    return sorted(tokens)
+
+
+def _build_declared_origins(
+    declared_sources: Mapping[str, Sequence[Tuple[str, str]]],
+    fw_ds: Sequence[str],
+    vendor_names: Sequence[str],
+) -> Dict[str, str]:
+    origins: Dict[str, str] = {}
+    fw_set = {key.upper() for key in fw_ds}
+    vendor_set = set(vendor_names)
+    for artifact_label, perms in declared_sources.items():
+        origin = "base" if artifact_label == "base" else f"split:{artifact_label}"
+        for perm_name, _ in perms:
+            key = _normalize_permission_key(str(perm_name))
+            upper_key = key.upper()
+            if upper_key in fw_set and upper_key not in origins:
+                origins[upper_key] = origin
+            if perm_name in vendor_set and perm_name not in origins:
+                origins[perm_name] = origin
+    return origins
+
+
 def _risk_bar(score: float, width: int = 8) -> str:
     filled = int(round((score / 10.0) * width))
     blocks = "▓" * max(0, min(width, filled))
@@ -362,13 +402,38 @@ def render_permission_postcard(
     d = risk_counts.get("dangerous", 0)
     s = risk_counts.get("signature", 0)
     v = vendor.get("ADS", 0)
-    score = permission_risk_score(dangerous=d, signature=s, vendor=v, groups=groups)
+    detail = dict(
+        permission_risk_score_detail(
+            dangerous=d,
+            signature=s,
+            vendor=v,
+            groups=groups,
+        )
+    )
+    score = float(detail.get("score_3dp", detail.get("score_capped", 0.0)))
+    score = round(score, 3)
+    detail["score_3dp"] = score
+    detail.setdefault("score_capped", float(detail.get("score_capped", score)))
+    detail.setdefault("score_raw", float(detail.get("score_raw", score)))
     bar = _risk_bar(score)
     high_tags = _high_signal_tags(groups)
     footprint = _footprint_bar(groups)
     persona = _persona(groups)
 
     grade = permission_risk_grade(score)
+    detail["grade"] = grade
+    detail.setdefault("combo_total", 0.0)
+    detail.setdefault("combos_fired", [])
+    detail.setdefault("surprise_total", 0.0)
+    detail.setdefault("surprises", [])
+    detail.setdefault("legacy_total", 0.0)
+    detail.setdefault("legacy_penalties", [])
+    detail.setdefault("vendor_modifier", 0.0)
+    detail.setdefault("modernization_credit", 0.0)
+    detail.setdefault("hard_gates_triggered", [])
+    detail.setdefault("expected_mask_hit", [])
+    detail.setdefault("unexpected_signals", [])
+    detail.setdefault("grade_basis", "fixed_thresholds")
     print(f"[{index}/{total}] {app_label}  {bar}  Risk {score:.3f}   (D:{d}  S:{s}  V:{v})  Grade {grade}")
     if high_tags:
         tags = "".join(f"[{t}]" for t in high_tags)
@@ -388,6 +453,8 @@ def render_permission_postcard(
         "persona": persona,
         "fw_ds": fw_ds,
         "vendor_names": vendor_names,
+        "risk_counts": risk_counts,
+        "score_detail": detail,
     }
 
 
@@ -454,6 +521,54 @@ def render_signal_matrix(items: Sequence[Mapping[str, object]]) -> None:
         for item in items:
             row.append(_cell(item, key))
         rows.append(row)
+    table_utils.render_table(headers, rows)
+
+
+def render_contribution_summary(items: Sequence[Mapping[str, object]]) -> None:
+    from scytaledroid.Utils.DisplayUtils import table_utils
+
+    if not items:
+        return
+
+    headers = [
+        "Abbr",
+        "Score",
+        "Grade",
+        "SigTotal",
+        "Combo",
+        "Surprise",
+        "Legacy",
+        "Vendor",
+        "Credit",
+        "Gates",
+    ]
+    rows: list[list[str]] = []
+    for item in items:
+        label = str(item.get("label", ""))
+        abbr = _abbr_from_name(label).strip()
+        detail = item.get("score_detail") or {}
+        try:
+            score = float(detail.get("score_3dp", item.get("risk", 0.0)))
+        except (TypeError, ValueError):
+            score = float(item.get("risk", 0.0) or 0.0)
+        grade = detail.get("grade") or permission_risk_grade(score)
+        rows.append(
+            [
+                abbr,
+                f"{score:.3f}",
+                str(grade),
+                f"{float(detail.get('signal_score_subtotal', 0.0)):.3f}",
+                f"{float(detail.get('combo_total', 0.0)):.3f}",
+                f"{float(detail.get('surprise_total', 0.0)):.3f}",
+                f"{float(detail.get('legacy_total', 0.0)):.3f}",
+                f"{float(detail.get('vendor_modifier', 0.0)):.3f}",
+                f"{float(detail.get('modernization_credit', 0.0)):.3f}",
+                str(detail.get("hard_gates_triggered", [])),
+            ]
+        )
+
+    print("\nContribution Summary (top apps)")
+    print("-" * 72)
     table_utils.render_table(headers, rows)
 
 

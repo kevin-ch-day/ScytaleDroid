@@ -12,7 +12,7 @@ Goals:
 from __future__ import annotations
 
 import argparse
-from typing import List, Tuple
+from typing import List, Sequence, Tuple
 
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_utils.db_utils import get_table_columns
@@ -154,6 +154,30 @@ def _unknown_unique_exists() -> bool:
     return _index_exists("android_unknown_permissions", "ux_android_unknown_perm")
 
 
+def _indexes_for_columns(table: str, columns: Sequence[str]) -> List[str]:
+    if not columns:
+        return []
+    placeholders = ", ".join(["%s"] * len(columns))
+    rows = core_q.run_sql(
+        (
+            "SELECT DISTINCT index_name FROM information_schema.statistics "
+            "WHERE table_schema = DATABASE() AND table_name = %s AND column_name IN ("
+            + placeholders
+            + ")"
+        ),
+        (table, *columns),
+        fetch="all",
+    )
+    names: List[str] = []
+    for row in rows or []:
+        if not row:
+            continue
+        name = str(row[0])
+        if name and name.upper() != "PRIMARY":
+            names.append(name)
+    return names
+
+
 def audit_unknown_permissions(apply_fixes: bool = False) -> Tuple[List[str], List[str]]:
     issues: List[str] = []
     fixes_applied: List[str] = []
@@ -166,16 +190,27 @@ def audit_unknown_permissions(apply_fixes: bool = False) -> Tuple[List[str], Lis
     if has_observed or has_occ or not has_unique:
         issues.append("unknown_permissions schema not aligned (drop observed/occurrences, unique perm_name)")
         if apply_fixes:
-            # Drop legacy columns safely one-by-one (handle already-dropped cases)
-            for c in ("observed_in_pkg", "observed_in_sha256", "occurrences"):
+            # Drop indexes that reference legacy columns before removing them
+            legacy_columns = [c for c in ("observed_in_pkg", "observed_in_sha256", "occurrences") if c in cols]
+            for index_name in _indexes_for_columns("android_unknown_permissions", legacy_columns):
                 try:
-                    cols = get_table_columns("android_unknown_permissions") or []
-                    if c in cols:
-                        core_q.run_sql(f"ALTER TABLE android_unknown_permissions DROP COLUMN `{c}`")
-                        fixes_applied.append(f"dropped column {c}")
+                    core_q.run_sql(
+                        "ALTER TABLE android_unknown_permissions DROP INDEX `{}`".format(index_name)
+                    )
+                    fixes_applied.append(f"dropped index {index_name}")
                 except Exception:
-                    # Ignore if column already gone
                     pass
+
+            # Drop legacy columns safely one-by-one (handle already-dropped cases)
+            for c in legacy_columns:
+                try:
+                    core_q.run_sql(f"ALTER TABLE android_unknown_permissions DROP COLUMN `{c}`")
+                    fixes_applied.append(f"dropped column {c}")
+                except Exception:
+                    pass
+
+            # Refresh column cache after mutations
+            cols = get_table_columns("android_unknown_permissions") or []
             # Add unique on perm_name if missing
             if not _index_exists("android_unknown_permissions", "ux_android_unknown_perm"):
                 core_q.run_sql(
