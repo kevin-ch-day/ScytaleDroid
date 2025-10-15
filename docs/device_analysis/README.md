@@ -32,6 +32,26 @@ naming, and all-or-nothing APK pulls. v2 replaces that with:
 Device Analysis is the first pillar of v2. It covers the pipeline from device
 inventory to curated APK harvesting and repository ingestion.
 
+### Device dashboard refresh (new)
+
+- The Device Dashboard now opens with a color-coded status card that surfaces
+  the most recent refresh time, aggregate connection state, detected device
+  count, and any adb warnings before an analyst dives into menu options.
+- When a handset is active, a compact card highlights serial, Android build,
+  battery, Wi-Fi, and root posture so operators can validate the target at a
+  glance.
+- Every detected handset is listed in a table with state badges so multi-device
+  benches are easy to scan, and the disconnected view now embeds the last seen
+  device plus clear guidance on how to reconnect.
+- The dashboard automatically adapts its palette to Fedora's dark/light themes
+  (override with `SCYTALE_UI_THEME`) and exposes a high-contrast preset, while
+  ASCII-safe glyphs engage automatically or via `ASCII_UI=1` for legacy
+  terminals.
+- Palette definitions now live under `scytaledroid/Utils/DisplayUtils/colors/`
+  so engineers can extend the registry without wading through rendering logic;
+  drop a new module that registers a `Palette` and it is instantly available to
+  the CLI theme switcher.
+
 ### Inventory (shipping today)
 
 - Runs `pm list packages`, `pm path`, and `dumpsys` to capture package metadata.
@@ -63,6 +83,11 @@ inventory to curated APK harvesting and repository ingestion.
   database rows when `HARVEST_WRITE_DB` remains enabled.
 - Inserts one repository row per artifact and prints each `apk_id` so analysts
   can immediately find the files in the database when DB writes are active.
+- Finishes each run with a condensed summary card that surfaces scope, pull
+  mode, package and artifact breakdowns (clean pulls, partial issues, blocked,
+  deduped, failed), runtime skip callouts, and guard notices. A follow-up
+  highlights section then spells out the key wins and warnings before the CLI
+  dives into the detailed skip breakdowns and per-package diagnostics.
 
 ### Database integration (foundation for all phases)
 
@@ -126,7 +151,10 @@ expands to:
 2. Run `./run.sh` and open **Device Analysis**.
 3. Choose **5: Inventory & DB sync** to capture the latest snapshot.
 4. Choose **7: Pull APKs** and pick a scope (default = Play + `/data`).
-5. Review the summary for counts, skipped packages, and `apk_id` values.
+5. Review the boxed harvest summary for scope, pull mode, package/artifact
+   breakdowns, runtime skip alerts, guard notices, and the highlight callouts.
+   Then scan the dedicated pre-flight and runtime skip sections or policy
+   notices if something looks off.
 6. Optional: jump to **Static Analysis** → *Analyze repository artifact* to run
    the detector pipeline on freshly harvested APKs and persist the accompanying
    reproducibility bundle.

@@ -233,7 +233,13 @@ def _handle_write_framework_catalog() -> None:
         if not items:
             try:
                 items = perm_api.load_catalog("auto")
-                perm_api.save_catalog_json(DEFAULT_CACHE, items, source="auto")
+                perm_api.save_catalog_json(
+                    DEFAULT_CACHE,
+                    items,
+                    source="auto",
+                    base_url=perm_api.ONLINE_URL,
+                    base_urls=[perm_api.ONLINE_URL, *perm_api.additional_doc_urls()],
+                )
             except Exception as exc:
                 print(status_messages.status(f"Failed to load framework catalog: {exc}", level="error"))
                 prompt_utils.press_enter_to_continue()

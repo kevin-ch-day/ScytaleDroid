@@ -5,12 +5,14 @@ from __future__ import annotations
 from typing import Callable, Iterable, Optional
 
 from . import colors, status_messages
+from .terminal import use_ascii_ui
 from .error_panels import print_error_panel
 
 
 def _build_prompt(default: Optional[str]) -> str:
     palette = colors.get_palette()
-    arrow = colors.apply("›", palette.option_key)
+    arrow_symbol = ">" if use_ascii_ui() else "›"
+    arrow = colors.apply(arrow_symbol, palette.option_key)
     if default is None:
         return f"{arrow} "
     hint = colors.apply(f"[{default}]", palette.muted)
@@ -91,7 +93,8 @@ def prompt_text(
     """Prompt for free-form text, optionally validating the response."""
 
     palette = colors.get_palette()
-    arrow = colors.apply("›", palette.option_key)
+    arrow_symbol = ">" if use_ascii_ui() else "›"
+    arrow = colors.apply(arrow_symbol, palette.option_key)
     label = colors.apply(prompt, palette.prompt)
     default_hint = (
         f" {colors.apply(f'[{default}]', palette.muted)}" if default is not None else ""

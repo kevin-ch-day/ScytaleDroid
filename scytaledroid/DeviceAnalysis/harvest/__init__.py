@@ -16,6 +16,7 @@ from .quick_harvest import quick_harvest
 from .runner import execute_harvest
 from .scope import build_inventory_rows, reset_last_scope, select_package_scope
 from .summary import (
+    HarvestRunMetrics,
     preview_plan,
     print_package_result,
     render_harvest_summary,
@@ -42,6 +43,7 @@ __all__ = [
     "build_inventory_rows",
     "quick_harvest",
     "execute_harvest",
+    "HarvestRunMetrics",
     "preview_plan",
     "print_package_result",
     "render_harvest_summary",

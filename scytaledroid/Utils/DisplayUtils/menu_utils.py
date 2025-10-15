@@ -1,18 +1,11 @@
-"""menu_utils.py - Shared menu framework utilities.
-
-The menu helpers now take advantage of the richer colour primitives introduced
-in :mod:`DisplayUtils.colors`.  In particular, they support optional per-option
-descriptions and automatically align multi-line entries so that guidance text is
-easier to scan.  This keeps the scope selector and future menus visually
-consistent without forcing each caller to juggle alignment logic.
-"""
-
 from __future__ import annotations
 
+import textwrap
 from dataclasses import dataclass
 from typing import Iterable, Mapping, Optional, Sequence, Tuple
 
 from . import colors, table_utils, text_blocks
+from .terminal import get_terminal_width, use_ascii_ui
 
 
 @dataclass(frozen=True)
@@ -72,15 +65,30 @@ def _normalise_options(
     return normalised
 
 
+def _wrap_text(text: str, width: int) -> list[str]:
+    if width <= 0:
+        return [text]
+    wrapped = textwrap.wrap(
+        text,
+        width=width,
+        break_long_words=True,
+        break_on_hyphens=False,
+    )
+    return wrapped or [text]
+
+
 def print_banner(app_name: str, app_version: str, app_release: str, app_description: str) -> None:
     """Print the global banner shown at startup."""
 
     palette = colors.get_palette()
+    ascii_ui = use_ascii_ui()
     title = colors.apply(app_name, palette.header, bold=True)
     description = colors.apply(app_description, palette.muted)
     version = colors.apply(f"Version {app_version} ({app_release})", palette.accent, bold=True)
 
-    divider = colors.apply("".ljust(max(len(app_name), 32), "═"), palette.divider)
+    divider_char = "=" if ascii_ui else "═"
+    divider_width = max(len(app_name), 32)
+    divider = colors.apply(divider_char * divider_width, palette.divider)
 
     print(title)
     print(divider)
@@ -93,10 +101,13 @@ def print_header(title: str, subtitle: Optional[str] = None) -> None:
     """Print a menu header with optional subtitle."""
 
     palette = colors.get_palette()
+    ascii_ui = use_ascii_ui()
+    separator = " - " if ascii_ui else " — "
+    term_width = get_terminal_width()
     if subtitle:
-        text = text_blocks.headline(f"{title} — {subtitle}", width=70)
+        text = text_blocks.headline(f"{title}{separator}{subtitle}", width=term_width)
     else:
-        text = text_blocks.headline(title, width=70)
+        text = text_blocks.headline(title, width=term_width)
     lines = text.splitlines()
     if lines:
         lines[0] = colors.apply(lines[0], palette.header)
@@ -105,11 +116,13 @@ def print_header(title: str, subtitle: Optional[str] = None) -> None:
     print("\n".join(lines))
 
 
-def print_hint(message: str, *, icon: str = "💡") -> None:
+def print_hint(message: str, *, icon: Optional[str] = None) -> None:
     """Render a muted hint or tip line."""
 
     palette = colors.get_palette()
-    icon_text = colors.apply(icon, palette.hint)
+    ascii_ui = use_ascii_ui()
+    resolved_icon = icon if icon is not None else ("i" if ascii_ui else "💡")
+    icon_text = colors.apply(resolved_icon, palette.hint)
     body = colors.apply(message, palette.muted)
     print(f"{icon_text} {body}")
 
@@ -118,10 +131,11 @@ def print_metrics(metrics: Sequence[Tuple[str, object]]) -> None:
     """Display key metrics as a short bulleted list with colouring."""
 
     palette = colors.get_palette()
+    bullet = "-" if use_ascii_ui() else "•"
     for label, value in metrics:
         label_text = colors.apply(str(label), palette.muted)
         value_text = colors.apply(str(value), palette.accent, bold=True)
-        print(f"  • {label_text}: {value_text}")
+        print(f"  {bullet} {label_text}: {value_text}")
 
 
 def print_menu(
@@ -135,17 +149,20 @@ def print_menu(
     exit_label: Optional[str] = None,
     show_descriptions: bool = True,
     boxed: bool = False,
-    width: int = 72,
+    width: Optional[int] = None,
     padding: bool = False,
 ) -> None:
     """Render a numbered menu with coloured keys and optional default."""
 
     palette = colors.get_palette()
+    term_width = width if width is not None else get_terminal_width()
     items = _normalise_options(options)
     primary_items = [item for item in items if item.key != "0"]
 
     key_width = max((len(item.key) for item in primary_items), default=1) + 1
-    indent = " " * (key_width + 1)
+    gutter_width = key_width + 1
+    indent = " " * gutter_width
+    body_width = max(10, term_width - gutter_width - 1)
 
     rendered_blocks: list[list[str]] = []
 
@@ -169,14 +186,27 @@ def print_menu(
         disabled_note = (
             f" {colors.apply('(disabled)', palette.muted)}" if item.disabled else ""
         )
+
+        reserved = (
+            text_blocks.visible_width(key_token)
+            + 1
+            + text_blocks.visible_width(badge_token)
+            + text_blocks.visible_width(disabled_note)
+        )
+        available_label = max(0, term_width - reserved)
+        label_token = text_blocks.truncate_visible(label_token, available_label)
         block.append(f"{key_token} {label_token}{badge_token}{disabled_note}")
 
         if show_descriptions and item.description:
-            description = colors.apply(item.description, palette.muted)
-            block.append(f"{indent}{description}")
+            wrapped_desc = _wrap_text(item.description, body_width)
+            for line in wrapped_desc:
+                description = colors.apply(line, palette.muted)
+                block.append(f"{indent}{description}")
         if item.hint:
-            hint_text = colors.apply(item.hint, palette.hint)
-            block.append(f"{indent}{hint_text}")
+            wrapped_hint = _wrap_text(item.hint, body_width)
+            for line in wrapped_hint:
+                hint_text = colors.apply(line, palette.hint)
+                block.append(f"{indent}{hint_text}")
 
         rendered_blocks.append(block)
 
@@ -195,7 +225,7 @@ def print_menu(
             flat_lines.extend(block)
         if padding:
             print()
-        print(text_blocks.boxed(flat_lines, width=width))
+        print(text_blocks.boxed(flat_lines, width=term_width))
         if padding:
             print()
         return
@@ -209,6 +239,8 @@ def print_menu(
 
     if padding:
         print()
+
+
 def print_table(headers: Iterable[str], rows: Iterable[Iterable[object]]) -> None:
     """Convenience wrapper around table rendering helper."""
 
@@ -219,7 +251,7 @@ def print_section(title: str) -> None:
     """Print a small section divider suitable for nested menus."""
 
     palette = colors.get_palette()
-    heading = text_blocks.headline(title, width=70)
+    heading = text_blocks.headline(title, width=get_terminal_width())
     lines = heading.splitlines()
     if lines:
         lines[0] = colors.apply(lines[0], palette.header)

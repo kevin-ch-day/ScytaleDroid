@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import textwrap
 import traceback
 from typing import Iterable, Optional
 
 from . import colors
+from .terminal import get_terminal_width, use_ascii_ui
 
 
 _TONES = ("info", "warning", "success", "error")
@@ -42,13 +44,25 @@ def _resolve_styles(tone: str) -> tuple:
     return mapping.get(tone, mapping["error"])
 
 
+def _wrap_line(text: str, width: int) -> list[str]:
+    if width <= 0:
+        return [text]
+    wrapped = textwrap.wrap(
+        text,
+        width=width,
+        break_long_words=True,
+        break_on_hyphens=False,
+    )
+    return wrapped or [text]
+
+
 def format_panel(
     title: str,
     message: str,
     *,
     details: Optional[Iterable[str]] = None,
     hint: Optional[str] = None,
-    width: int = 72,
+    width: Optional[int] = None,
     tone: str = "info",
 ) -> str:
     """Return a coloured panel containing *message* and optional extras."""
@@ -56,25 +70,45 @@ def format_panel(
     tone = tone if tone in _TONES else "info"
     border_style, title_style, message_style, hint_style = _resolve_styles(tone)
 
+    term_width = get_terminal_width()
+    if width is None:
+        panel_width = min(80, max(40, term_width - 2))
+    else:
+        panel_width = min(width, term_width)
+    panel_width = max(20, panel_width)
+    content_width = panel_width
+
+    ascii_ui = use_ascii_ui()
+    divider_char = "-" if ascii_ui else "─"
+    bullet = "- " if ascii_ui else "• "
+
     content: list[str] = []
 
     stripped_title = title.strip()
     if stripped_title:
-        content.append(colors.apply(stripped_title.upper(), title_style, bold=True))
+        title_lines = _wrap_line(stripped_title.upper(), content_width)
+        for line in title_lines:
+            content.append(colors.apply(line, title_style, bold=True))
 
-    content.append(colors.apply(message.strip(), message_style))
+    message_lines = _wrap_line(message.strip(), content_width)
+    for line in message_lines:
+        content.append(colors.apply(line, message_style))
 
     for line in details or ():
         detail = line.rstrip()
         if not detail:
             continue
-        content.append(colors.apply(f"  • {detail}", message_style))
+        wrapped_detail = _wrap_line(detail, max(10, content_width - len(bullet)))
+        for index, segment in enumerate(wrapped_detail):
+            prefix = bullet if index == 0 else "  "
+            content.append(colors.apply(f"{prefix}{segment}", message_style))
 
     if hint:
-        content.append(colors.apply(f"Hint: {hint.strip()}", hint_style))
+        hint_lines = _wrap_line(f"Hint: {hint.strip()}", content_width)
+        for line in hint_lines:
+            content.append(colors.apply(line, hint_style))
 
-    divider_length = max(32, min(width, 80))
-    divider = colors.apply("─" * divider_length, border_style)
+    divider = colors.apply(divider_char * content_width, border_style)
 
     block = [divider]
     block.extend(content)
@@ -88,7 +122,7 @@ def print_panel(
     *,
     details: Optional[Iterable[str]] = None,
     hint: Optional[str] = None,
-    width: int = 72,
+    width: Optional[int] = None,
     tone: str = "info",
 ) -> None:
     """Print a formatted panel."""
@@ -104,7 +138,7 @@ def print_exception(
     *,
     context: Optional[str] = None,
     hint: Optional[str] = None,
-    width: int = 72,
+    width: Optional[int] = None,
 ) -> None:
     """Render an exception using the standard error tone."""
 
@@ -120,7 +154,7 @@ def format_error_panel(
     *,
     details: Optional[Iterable[str]] = None,
     hint: Optional[str] = None,
-    width: int = 72,
+    width: Optional[int] = None,
 ) -> str:
     return format_panel(title, message, details=details, hint=hint, width=width, tone="error")
 
@@ -131,7 +165,7 @@ def print_error_panel(
     *,
     details: Optional[Iterable[str]] = None,
     hint: Optional[str] = None,
-    width: int = 72,
+    width: Optional[int] = None,
 ) -> None:
     print_panel(title, message, details=details, hint=hint, width=width, tone="error")
 
@@ -142,7 +176,7 @@ def print_info_panel(
     *,
     details: Optional[Iterable[str]] = None,
     hint: Optional[str] = None,
-    width: int = 72,
+    width: Optional[int] = None,
 ) -> None:
     print_panel(title, message, details=details, hint=hint, width=width, tone="info")
 
@@ -153,7 +187,7 @@ def print_warning_panel(
     *,
     details: Optional[Iterable[str]] = None,
     hint: Optional[str] = None,
-    width: int = 72,
+    width: Optional[int] = None,
 ) -> None:
     print_panel(title, message, details=details, hint=hint, width=width, tone="warning")
 
@@ -164,7 +198,7 @@ def print_success_panel(
     *,
     details: Optional[Iterable[str]] = None,
     hint: Optional[str] = None,
-    width: int = 72,
+    width: Optional[int] = None,
 ) -> None:
     print_panel(title, message, details=details, hint=hint, width=width, tone="success")
 
