@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from xml.etree import ElementTree as ET
 from typing import Dict, List, Sequence, Tuple, Mapping, Optional
+import os
 
 from scytaledroid.StaticAnalysis._androguard import APK
 from .analysis.capability_signal_classifier import compute_group_strengths
@@ -381,6 +382,62 @@ def _persona(groups: Mapping[str, int]) -> str:
     return "General"
 
 
+def _group_trigger_debug(
+    declared: Sequence[Tuple[str, str]],
+    protection_map: Mapping[str, Optional[str]],
+) -> Dict[str, Dict[str, List[str]]]:
+    """Return group -> {strong: [...], weak: [...]} for debugging footprint.
+
+    Mirrors the mapping rules in analysis/signals.py to show which permissions
+    contributed to each capability and with what strength.
+    """
+    out: Dict[str, Dict[str, List[str]]] = {k: {"strong": [], "weak": []} for k in _GROUP_ORDER}
+
+    def _tag(key: str, short: str, strong: bool) -> None:
+        bucket = "strong" if strong else "weak"
+        if short not in out[key][bucket]:
+            out[key][bucket].append(short)
+
+    for name, _tagtype in declared:
+        is_framework = name.startswith("android.")
+        short = name.split(".")[-1].upper()
+        prot = (protection_map.get(short) or "").lower()
+        is_ds = prot in {"dangerous", "signature"}
+
+        s = short
+        # Location
+        if s == "ACCESS_BACKGROUND_LOCATION":
+            _tag("LOC", s, True)
+        if s in {"ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "ACCESS_MEDIA_LOCATION"}:
+            _tag("LOC", s, is_ds)
+        # Camera / Mic
+        if s == "CAMERA":
+            _tag("CAM", s, True)
+        if s in {"RECORD_AUDIO", "CAPTURE_AUDIO_OUTPUT"}:
+            _tag("MIC", s, True)
+        # Contacts/Accounts
+        if s in {"READ_CONTACTS", "WRITE_CONTACTS", "GET_ACCOUNTS", "MANAGE_ACCOUNTS"}:
+            _tag("CNT", s, is_ds)
+        # Phone / SMS
+        if s in {"READ_CALL_LOG", "CALL_PHONE", "READ_PHONE_STATE", "READ_PHONE_NUMBERS", "ANSWER_PHONE_CALLS"}:
+            _tag("PHN", s, is_ds)
+        if s in {"SEND_SMS", "RECEIVE_SMS", "READ_SMS", "RECEIVE_MMS", "RECEIVE_WAP_PUSH"}:
+            _tag("SMS", s, is_ds)
+        # Storage/Media
+        if "READ_MEDIA_" in s or s in {"READ_EXTERNAL_STORAGE", "WRITE_EXTERNAL_STORAGE", "MANAGE_EXTERNAL_STORAGE"}:
+            _tag("STR", s, is_ds or s == "MANAGE_EXTERNAL_STORAGE")
+        # Bluetooth/Nearby
+        if s in {"BLUETOOTH_SCAN", "BLUETOOTH_ADVERTISE", "BLUETOOTH_CONNECT", "NEARBY_WIFI_DEVICES"}:
+            _tag("BT", s, is_ds)
+        # Overlay/Notifications
+        if s in {"SYSTEM_ALERT_WINDOW", "SYSTEM_OVERLAY_WINDOW"}:
+            _tag("OVR", s, True)
+        if s in {"POST_NOTIFICATIONS", "BIND_NOTIFICATION_LISTENER_SERVICE", "ACCESS_NOTIFICATION_POLICY"}:
+            _tag("NOT", s, is_ds)
+
+    return out
+
+
 def render_permission_postcard(
     package_name: str,
     app_label: str,
@@ -439,6 +496,14 @@ def render_permission_postcard(
         tags = "".join(f"[{t}]" for t in high_tags)
         print(f"High-signal:  {tags}")
     _footprint_multiline(groups)
+    # Optional debug block to explain footprint composition
+    if os.environ.get("SCY_PERM_DEBUG") == "1":
+        debug = _group_trigger_debug(declared, protection_map)
+        print("Debug — group triggers (strong/weak):")
+        for key in _GROUP_ORDER:
+            strong = ", ".join(debug[key]["strong"]) or "-"
+            weak = ", ".join(debug[key]["weak"]) or "-"
+            print(f"  {key}: strong=[{strong}] weak=[{weak}]")
     print(f"Profile: {persona}")
 
     return {

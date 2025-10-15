@@ -71,9 +71,10 @@ def main_menu() -> None:
             menu_utils.MenuOption("4", "Harvest Android Permissions", "Fetch from developer.android.com and manage JSON cache"),
             menu_utils.MenuOption("5", "Dynamic analysis", "Launch runtime instrumentation workflows"),
             menu_utils.MenuOption("6", "Reporting", "Generate device and artifact reports"),
-            menu_utils.MenuOption("7", "Database", "Inspect schema, check connection, and view counts"),
-            menu_utils.MenuOption("8", "Utilities", "Console helpers and configuration"),
-            menu_utils.MenuOption("9", "About App", "Show version and licensing information"),
+            menu_utils.MenuOption("7", "Database Utilities", "Inspect schema, check connection, and view counts"),
+            menu_utils.MenuOption("8", "Database Scripts & Tasks", "Curated scripts to maintain and analyze the database"),
+            menu_utils.MenuOption("9", "Utilities", "Console helpers and configuration"),
+            menu_utils.MenuOption("10", "About App", "Show version and licensing information"),
         ]
         menu_utils.print_menu(options, is_main=True, boxed=False, default="1")
         choice = prompt_utils.get_choice(valid=[opt.key for opt in options] + ["0"], default="1")
@@ -97,12 +98,15 @@ def main_menu() -> None:
             log.info("User selected: Reporting", category="application")
             handle_reporting()
         elif choice == "7":
-            log.info("User selected: Database tools", category="application")
+            log.info("User selected: Database Utilities", category="application")
             handle_database()
         elif choice == "8":
+            log.info("User selected: Database Scripts & Tasks", category="application")
+            handle_db_scripts()
+        elif choice == "9":
             log.info("User selected: Utils", category="application")
             handle_utils()
-        elif choice == "9":
+        elif choice == "10":
             log.info("User selected: About App", category="application")
             handle_about()
         elif choice == "0":
@@ -159,6 +163,11 @@ def handle_database() -> None:
     from scytaledroid.Database.db_utils.menu import database_menu
 
     database_menu()
+
+def handle_db_scripts() -> None:
+    from scytaledroid.Database.db_utils.scripts_menu import scripts_menu
+
+    scripts_menu()
 
 
 def handle_utils() -> None:

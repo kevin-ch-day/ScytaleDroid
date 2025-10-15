@@ -9,6 +9,7 @@ before changing any weighting configuration.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import os
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Sequence
 
@@ -406,49 +407,54 @@ class PermissionAuditAccumulator:
             app.score_detail["expected_mask_hit"] = expected
             app.score_detail["unexpected_signals"] = unexpected
 
+        write_files = os.environ.get("SCY_AUDIT_WRITE_FILES", "1") != "0"
         snapshot_dir = self.base_output_dir / self.snapshot_id
         apps_dir = snapshot_dir / "apps"
-        snapshot_dir.mkdir(parents=True, exist_ok=True)
-        apps_dir.mkdir(parents=True, exist_ok=True)
+        if write_files:
+            snapshot_dir.mkdir(parents=True, exist_ok=True)
+            apps_dir.mkdir(parents=True, exist_ok=True)
 
-        for app in self.apps:
-            record = {
-                "app": {
-                    "abbr": self._abbr(app.label),
-                    "name": app.label,
-                    "package": app.package,
-                    "cohort": app.cohort,
-                },
-                "sdk": {"min": app.sdk.get("min"), "target": app.sdk.get("target")},
-                "counts": {
-                    "dangerous": int(app.counts.get("dangerous", 0)),
-                    "signature": int(app.counts.get("signature", 0)),
-                    "vendor": int(app.counts.get("vendor", 0)),
-                },
-                "signals": dict(app.signals),
-                "origins": {"declared_in": dict(app.declared_in)},
-                "scoring": dict(app.score_detail),
-                "baselines": {
-                    "expected_mask_hit": list(app.score_detail.get("expected_mask_hit", [])),
-                    "unexpected_signals": list(app.score_detail.get("unexpected_signals", [])),
-                },
-            }
-            app_path = apps_dir / f"{app.package}.json"
-            with app_path.open("w", encoding="utf-8") as handle:
-                json.dump(record, handle, indent=2, sort_keys=True)
+        if write_files:
+            for app in self.apps:
+                record = {
+                    "app": {
+                        "abbr": self._abbr(app.label),
+                        "name": app.label,
+                        "package": app.package,
+                        "cohort": app.cohort,
+                    },
+                    "sdk": {"min": app.sdk.get("min"), "target": app.sdk.get("target")},
+                    "counts": {
+                        "dangerous": int(app.counts.get("dangerous", 0)),
+                        "signature": int(app.counts.get("signature", 0)),
+                        "vendor": int(app.counts.get("vendor", 0)),
+                    },
+                    "signals": dict(app.signals),
+                    "origins": {"declared_in": dict(app.declared_in)},
+                    "scoring": dict(app.score_detail),
+                    "baselines": {
+                        "expected_mask_hit": list(app.score_detail.get("expected_mask_hit", [])),
+                        "unexpected_signals": list(app.score_detail.get("unexpected_signals", [])),
+                    },
+                }
+                app_path = apps_dir / f"{app.package}.json"
+                with app_path.open("w", encoding="utf-8") as handle:
+                    json.dump(record, handle, indent=2, sort_keys=True)
 
         snapshot_payload = self._build_snapshot_payload(apps_in_scope)
         snapshot_path = snapshot_dir / "snapshot.json"
-        with snapshot_path.open("w", encoding="utf-8") as handle:
-            json.dump(snapshot_payload, handle, indent=2, sort_keys=True)
+        if write_files:
+            with snapshot_path.open("w", encoding="utf-8") as handle:
+                json.dump(snapshot_payload, handle, indent=2, sort_keys=True)
 
         correlation_path = snapshot_dir / "correlation.csv"
-        self._write_correlations(correlation_path)
+        if write_files:
+            self._write_correlations(correlation_path)
 
         snapshot_payload["paths"] = {
-            "snapshot": str(snapshot_path),
-            "apps_dir": str(apps_dir),
-            "correlation_csv": str(correlation_path),
+            "snapshot": str(snapshot_path) if write_files else None,
+            "apps_dir": str(apps_dir) if write_files else None,
+            "correlation_csv": str(correlation_path) if write_files else None,
         }
         return snapshot_payload
 
@@ -627,6 +633,87 @@ class PermissionAuditAccumulator:
         tail = up[1:]
         trimmed = "".join(ch for ch in tail if ch not in "AEIOU")
         return (head + trimmed)[:5]
+
+    # ------------------------------
+    # Optional DB persistence
+    # ------------------------------
+
+    def persist_to_db(self, snapshot_payload: Dict[str, Any]) -> int | None:
+        """Persist snapshot + per-app audit data into DB.
+
+        Returns inserted ``snapshot_id`` (int) or ``None`` on failure.
+        """
+        try:
+            from scytaledroid.Database.db_func import permission_support as support
+            from scytaledroid.Database.db_core import db_queries as core_q
+
+            # Ensure schema exists
+            support.ensure_all()
+
+            inventory = snapshot_payload.get("inventory", {}) if isinstance(snapshot_payload, dict) else {}
+            apps_total = int(inventory.get("apps_in_scope") or self.total_groups or 0)
+            meta_str = json.dumps(snapshot_payload)
+
+            sid = core_q.run_sql(
+                """
+                INSERT INTO permission_audit_snapshots (snapshot_key, scope_label, apps_total, metadata)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (self.snapshot_id, self.scope_label, apps_total, meta_str),
+                return_lastrowid=True,
+            )
+
+            for app in self.apps:
+                sd = dict(app.score_detail or {})
+                score_raw = float(sd.get("score_raw", sd.get("score_3dp", 0.0)) or 0.0)
+                score_capped = float(sd.get("score_capped", score_raw) or score_raw)
+                grade = str(sd.get("grade") or "")
+                details_obj = {
+                    "groups": dict(app.groups or {}),
+                    "signals": dict(app.signals or {}),
+                    "score_detail": sd,
+                    "cohort": app.cohort,
+                    "sdk": dict(app.sdk or {}),
+                    "declared_in": dict(app.declared_in or {}),
+                    "declared_permissions": list(app.declared_permissions or ()),
+                    "contributions": dict(app.contributions or {}),
+                    "combos": list(app.combos or ()),
+                }
+                details = json.dumps(details_obj)
+
+                core_q.run_sql(
+                    """
+                    INSERT INTO permission_audit_apps (
+                        snapshot_id, package_name, app_label,
+                        score_raw, score_capped, grade,
+                        dangerous_count, signature_count, vendor_count,
+                        combos_total, surprises_total, legacy_total,
+                        vendor_modifier, modernization_credit,
+                        details
+                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    """,
+                    (
+                        int(sid),
+                        app.package,
+                        app.label,
+                        score_raw,
+                        score_capped,
+                        grade,
+                        int(app.counts.get("dangerous", 0) if app.counts else 0),
+                        int(app.counts.get("signature", 0) if app.counts else 0),
+                        int(app.counts.get("vendor", 0) if app.counts else 0),
+                        float(sd.get("combo_total", 0.0) or 0.0),
+                        float(sd.get("surprise_total", 0.0) or 0.0),
+                        float(sd.get("legacy_total", 0.0) or 0.0),
+                        float(sd.get("vendor_modifier", 0.0) or 0.0),
+                        float(sd.get("modernization_credit", 0.0) or 0.0),
+                        details,
+                    ),
+                )
+
+            return int(sid)
+        except Exception:
+            return None
 
 
 __all__ = ["PermissionAuditAccumulator", "compute_signal_flags", "AppSignals"]

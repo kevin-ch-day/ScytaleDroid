@@ -17,90 +17,93 @@ _CORE_TABLES: List[str] = [
     "harvest_source_paths",
 ]
 
+_ANALYTICS_TABLES: List[str] = [
+    "permission_signal_catalog",
+    "permission_signal_mappings",
+    "permission_cohort_expectations",
+    "permission_audit_snapshots",
+    "permission_audit_apps",
+]
+
 def database_menu() -> None:
-    """Render the database utilities menu."""
+    """Render the database utilities menu (flat layout)."""
 
     while True:
         print()
         menu_utils.print_header("Database Utilities")
-        menu_utils.print_hint(
-            "Use the new provisioning helpers to prepare analytics tables before running permission audits.",
-            icon="★",
-        )
 
-        groups = [
-            (
-                "Connection & setup",
-                [
-                    ("1", "Check database connection", "Verify the current credentials and connectivity."),
-                    ("8", "Show DB config (source and values)", "Display the active connection parameters."),
-                    ("9", "Configure DB connection (write config/db.json)", "Interactively update connection settings."),
-                    ("10", "Create database if missing", "Attempt to create the configured schema on the server."),
-                ],
-            ),
-            (
-                "Schema & inventory",
-                [
-                    ("2", "Inspect table snapshots (Markdown)", "Render copy-pasteable schema summaries for each table."),
-                    ("3", "Show core table row counts", "Quick health check for harvest-related tables."),
-                    ("4", "Framework permissions: counts by protection", "Breakdown of framework permissions by protection level."),
-                    ("5", "Permission tables row counts", "Row counts for framework/vendor/unknown/detected tables."),
-                ],
-            ),
-            (
-                "Permission analytics",
-                [
-                    ("6", "Provision permission analytics tables", "Create helper tables that store signal catalogs and audit runs."),
-                    ("7", "Sync framework permission catalog", "Download and upsert the latest Android framework permission metadata."),
-                    ("12", "Detected permissions summary", "Top-level stats for detected permissions, vendors, and apps."),
-                ],
-            ),
-            (
-                "Advanced",
-                [
-                    ("11", "Run schema audit script", "Launch the experimental schema checker for deeper diagnostics."),
-                ],
-            ),
-        ]
+        # Determine current DB state to toggle setup actions
+        analytics_ready = False
+        framework_catalog_loaded = False
+        try:
+            exists = db_utils.check_required_tables(_ANALYTICS_TABLES + ["android_framework_permissions"]) or {}
+            analytics_ready = all(bool(exists.get(t)) for t in _ANALYTICS_TABLES)
+            counts = db_utils.table_counts(["android_framework_permissions"]) or {}
+            framework_catalog_loaded = bool((counts.get("android_framework_permissions") or 0) > 0)
+        except Exception:
+            pass
 
-        valid_choices = ["0"]
-        for title, options in groups:
-            menu_utils.print_section(title)
-            menu_utils.print_menu(options, padding=True, show_exit=False)
-            valid_choices.extend([str(option[0]) for option in options])
+        # Build a flat, ordered list of options
+        options: list[tuple[str, str, str]] = []
+        options.append(("1", "Check connection & show config", "Verify connectivity and display active parameters."))
+        options.append(("2", "Schema snapshot (Markdown)", "Render copy-pasteable schema summaries for each table."))
+        options.append(("3", "Quick stats (core + permission)", "Core/permission table counts and framework protection distribution."))
+        options.append(("4", "Detected permissions summary", "Top-level stats for detected permissions, vendors, and apps."))
+        options.append(("9", "Run schema audit script", "Launch the experimental schema checker for deeper diagnostics."))
 
-        print("0) Back")
-        choice = prompt_utils.get_choice(valid=valid_choices)
+        menu_utils.print_menu(options, padding=True, show_exit=True)
+        choice = prompt_utils.get_choice(valid=[opt[0] for opt in options] + ["0"]) 
 
         if choice == "1":
-            _handle_check_connection()
+            _handle_check_connection_and_config()
         elif choice == "2":
             _handle_schema_inspection()
         elif choice == "3":
-            _handle_core_counts()
+            _handle_quick_stats()
         elif choice == "4":
-            _handle_framework_protection_counts()
-        elif choice == "5":
-            _handle_permission_table_counts()
-        elif choice == "6":
-            _handle_provision_permission_tables()
-        elif choice == "7":
-            _handle_write_framework_catalog()
-        elif choice == "8":
-            _handle_show_db_config()
-        elif choice == "9":
-            _handle_configure_db_connection()
-        elif choice == "10":
-            _handle_create_database()
-        elif choice == "11":
-            _handle_run_schema_audit_script()
-        elif choice == "12":
             _handle_detected_summary()
+        elif choice == "5":
+            _handle_provision_permission_tables()  # legacy; not shown
+        elif choice == "6":
+            _handle_write_framework_catalog()  # legacy; not shown
+        elif choice == "7":
+            _handle_configure_db_connection()  # legacy; not shown
+        elif choice == "8":
+            _handle_create_database()  # legacy; not shown
+        elif choice == "9":
+            _handle_run_schema_audit_script()
+        elif choice == "10":
+            _open_scripts_submenu()  # legacy; moved to main menu
         elif choice == "0":
             break
 
+def _open_scripts_submenu() -> None:
+    try:
+        from scytaledroid.Database.db_utils.scripts_menu import scripts_menu
+        scripts_menu()
+    except Exception as exc:
+        print(status_messages.status(f"Failed to open scripts submenu: {exc}", level="error"))
+        prompt_utils.press_enter_to_continue()
 
-def _handle_check_connection() -> None:
+
+def _handle_check_connection_and_config() -> None:
+    # Show config first
+    try:
+        from scytaledroid.Database.db_core import db_config as _dbc
+        cfg = _dbc.DB_CONFIG
+        src = getattr(_dbc, "DB_CONFIG_SOURCE", "defaults")
+        socket_info = cfg.get("unix_socket")
+        extra = f" unix_socket={socket_info}" if socket_info else ""
+        print(
+            status_messages.status(
+                f"DB config source: {src}\n  host={cfg.get('host')} port={cfg.get('port')} db={cfg.get('database')} user={cfg.get('user')}{extra}",
+                level="info",
+            )
+        )
+    except Exception as exc:
+        print(status_messages.status(f"Unable to read DB config: {exc}", level="warn"))
+
+    # Then test connection
     success = db_utils.check_connection()
     if success:
         print(status_messages.status("Database connection established successfully.", level="success"))
@@ -144,6 +147,51 @@ def _handle_core_counts() -> None:
             print(status_messages.status(f"{table}: unable to query", level="error"))
         else:
             print(status_messages.status(f"{table}: {value} row(s)", level="info"))
+    prompt_utils.press_enter_to_continue()
+
+
+def _handle_quick_stats() -> None:
+    # Combine core and permission table counts and framework protection distribution.
+    from scytaledroid.Database.db_utils import db_utils as _dbu
+
+    tables_perm = [
+        "android_framework_permissions",
+        "android_vendor_permissions",
+        "android_unknown_permissions",
+        "android_detected_permissions",
+    ]
+
+    counts = _dbu.table_counts(_CORE_TABLES + tables_perm)
+
+    print()
+    menu_utils.print_section("Core table counts")
+    for table in _CORE_TABLES:
+        value = counts.get(table)
+        if value is None:
+            print(status_messages.status(f"{table}: unable to query", level="error"))
+        else:
+            print(status_messages.status(f"{table}: {value} row(s)", level="info"))
+
+    print()
+    menu_utils.print_section("Permission tables counts")
+    for table in tables_perm:
+        value = counts.get(table)
+        if value is None:
+            print(status_messages.status(f"{table}: unable to query", level="error"))
+        else:
+            print(status_messages.status(f"{table}: {value} row(s)", level="info"))
+
+    # Framework permission protection distribution (catalog)
+    print()
+    menu_utils.print_section("Framework permissions: counts by protection")
+    try:
+        from scytaledroid.Database.db_core import db_queries as core_q
+        from scytaledroid.Database.db_queries import framework_permissions as fpq
+        rows = core_q.run_sql(fpq.PROTECTION_COUNTS, fetch="all")
+    except Exception as exc:
+        print(status_messages.status(f"Query failed: {exc}", level="error"))
+        rows = []
+    menu_utils.print_table(["Protection", "Count"], rows or [])
     prompt_utils.press_enter_to_continue()
 
 

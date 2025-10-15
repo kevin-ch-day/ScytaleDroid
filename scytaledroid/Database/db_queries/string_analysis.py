@@ -1,0 +1,101 @@
+"""SQL for static string analysis persistence."""
+
+from __future__ import annotations
+
+# Summary of string buckets per package/session
+CREATE_STRING_SUMMARY = """
+CREATE TABLE IF NOT EXISTS static_string_summary (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  package_name VARCHAR(191) NOT NULL,
+  session_stamp VARCHAR(32) NOT NULL,
+  scope_label VARCHAR(191) NOT NULL,
+  endpoints INT UNSIGNED NOT NULL DEFAULT 0,
+  http_cleartext INT UNSIGNED NOT NULL DEFAULT 0,
+  api_keys INT UNSIGNED NOT NULL DEFAULT 0,
+  analytics_ids INT UNSIGNED NOT NULL DEFAULT 0,
+  cloud_refs INT UNSIGNED NOT NULL DEFAULT 0,
+  ipc INT UNSIGNED NOT NULL DEFAULT 0,
+  uris INT UNSIGNED NOT NULL DEFAULT 0,
+  flags INT UNSIGNED NOT NULL DEFAULT 0,
+  certs INT UNSIGNED NOT NULL DEFAULT 0,
+  high_entropy INT UNSIGNED NOT NULL DEFAULT 0,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY ux_string_summary (package_name, session_stamp, scope_label),
+  KEY ix_string_summary_session (session_stamp)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+"""
+
+# Top-N samples for selected buckets
+CREATE_STRING_SAMPLES = """
+CREATE TABLE IF NOT EXISTS static_string_samples (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  summary_id BIGINT UNSIGNED NOT NULL,
+  bucket VARCHAR(32) NOT NULL,
+  value_masked VARCHAR(512) NULL,
+  src VARCHAR(512) NULL,
+  tag VARCHAR(64) NULL,
+  rank INT UNSIGNED NOT NULL DEFAULT 0,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY ix_samples_summary (summary_id),
+  CONSTRAINT fk_samples_summary FOREIGN KEY (summary_id)
+    REFERENCES static_string_summary (id)
+    ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+"""
+
+INSERT_STRING_SUMMARY = """
+INSERT INTO static_string_summary (
+  package_name, session_stamp, scope_label,
+  endpoints, http_cleartext, api_keys, analytics_ids, cloud_refs, ipc, uris, flags, certs, high_entropy
+) VALUES (
+  %(package_name)s, %(session_stamp)s, %(scope_label)s,
+  %(endpoints)s, %(http_cleartext)s, %(api_keys)s, %(analytics_ids)s, %(cloud_refs)s, %(ipc)s, %(uris)s, %(flags)s, %(certs)s, %(high_entropy)s
+)
+ON DUPLICATE KEY UPDATE
+  endpoints=VALUES(endpoints),
+  http_cleartext=VALUES(http_cleartext),
+  api_keys=VALUES(api_keys),
+  analytics_ids=VALUES(analytics_ids),
+  cloud_refs=VALUES(cloud_refs),
+  ipc=VALUES(ipc),
+  uris=VALUES(uris),
+  flags=VALUES(flags),
+  certs=VALUES(certs),
+  high_entropy=VALUES(high_entropy)
+"""
+
+SELECT_SUMMARY_ID = """
+SELECT id FROM static_string_summary
+WHERE package_name=%s AND session_stamp=%s AND scope_label=%s
+"""
+
+DELETE_SAMPLES_FOR_SUMMARY = """
+DELETE FROM static_string_samples WHERE summary_id=%s
+"""
+
+INSERT_SAMPLE = """
+INSERT INTO static_string_samples (summary_id, bucket, value_masked, src, tag, rank)
+VALUES (%s, %s, %s, %s, %s, %s)
+"""
+
+TABLE_EXISTS_SUMMARY = """
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name='static_string_summary'
+"""
+
+TABLE_EXISTS_SAMPLES = """
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name='static_string_samples'
+"""
+
+__all__ = [
+    "CREATE_STRING_SUMMARY",
+    "CREATE_STRING_SAMPLES",
+    "INSERT_STRING_SUMMARY",
+    "SELECT_SUMMARY_ID",
+    "DELETE_SAMPLES_FOR_SUMMARY",
+    "INSERT_SAMPLE",
+    "TABLE_EXISTS_SUMMARY",
+    "TABLE_EXISTS_SAMPLES",
+]
+

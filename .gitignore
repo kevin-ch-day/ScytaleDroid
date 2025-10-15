@@ -34,6 +34,8 @@ data/watchlists/
 data/apks/
 data/static_analysis/reports/
 data/static_analysis/baseline/
+data/audit/
+scripts/db/
 *.log
 *.tmp
 *.bak

@@ -221,12 +221,12 @@ def static_analysis_menu() -> None:
         menu_utils.print_header("Static Analysis (APK-only)")
         menu_utils.print_menu(
             {
-                "1": "Metadata scan (fast)",
-                "2": "Permission analysis",
-                "3": "Lightweight static analysis",
-                "4": "Full static analysis",
+                "1": "Quick metadata (hashes, manifest flags)",
+                "2": "Permission risk scan (writes to DB)",
+                "3": "String analysis (DEX + resources; writes to DB)",
+                "4": "Full analysis (all detectors; writes to DB)",
                 "5": "Split-APK composition (base + splits)",
-                "6": "Custom run (pick tests & thresholds)",
+                "6": "Custom profile (pick tests & thresholds)",
             },
             is_main=False,
         )
@@ -461,6 +461,7 @@ def _execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pa
     config = _build_analysis_config(params)
     started_at = datetime.now()
     total_groups = len(selection.groups)
+    base_apk_ctx: dict[str, dict] = {}
     results: list[AppRunResult] = []
     warnings: list[str] = []
     failures: list[str] = []
@@ -475,7 +476,9 @@ def _execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pa
             if artifact_total > 1:
                 progress_label += f" ({artifact_index}/{artifact_total})"
             artifact_label = artifact.artifact_label or artifact.display_path
-            print(f"{progress_label} … analyzing {artifact_label}")
+            # Reduce noise: only print per-app for base artifact
+            if not (artifact_total > 1 and str(artifact_label) != "base"):
+                print(f"{progress_label} … analyzing {artifact_label}")
 
             artifact_started = perf_counter()
             wall_clock_started = datetime.now()
@@ -491,8 +494,9 @@ def _execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pa
             if fatal or report is None:
                 failure_reason = message or "analysis failed"
                 failures.append(f"{artifact.display_path}: {failure_reason}")
+            if not (artifact_total > 1 and str(artifact_label) != "base"):
                 print(f"{progress_label} … failed ({failure_reason})")
-                continue
+            continue
 
             if message:
                 warnings.append(f"{artifact.display_path}: {message}")
@@ -502,14 +506,17 @@ def _execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pa
                 if isinstance(finding, Finding):
                     severity_counter[_severity_token(finding.severity_gate)] += 1
 
-            summary = "(H{H}/M{M}/L{L}/I{I})".format(
-                H=severity_counter.get("H", 0),
-                M=severity_counter.get("M", 0),
-                L=severity_counter.get("L", 0),
-                I=severity_counter.get("I", 0),
+            summary = (
+                "(High {H} | Med {M} | Low {L} | Info {I})".format(
+                    H=severity_counter.get("H", 0),
+                    M=severity_counter.get("M", 0),
+                    L=severity_counter.get("L", 0),
+                    I=severity_counter.get("I", 0),
+                )
             )
 
-            print(f"{progress_label} … done {summary} ({_format_duration(duration)})")
+            if not (artifact_total > 1 and str(artifact_label) != "base"):
+                print(f"{progress_label} … done {summary} ({_format_duration(duration)})")
 
             app_result.artifacts.append(
                 ArtifactOutcome(
@@ -627,6 +634,18 @@ def _execute_permission_scan(selection: ScopeSelection, params: RunParameters) -
                             custom_declared=custom_names,
                         )
                         if sha:
+                            # Resolve apk context for risk table (apk_id/app_id/sha256)
+                            try:
+                                from scytaledroid.Database.db_func.apk_repository import get_apk_by_sha256 as _get_apk
+                                row = _get_apk(sha)
+                                if row:
+                                    base_apk_ctx[group.package_name] = {
+                                        "apk_id": int(row.get("apk_id", 0) or 0),
+                                        "app_id": int(row.get("app_id", 0) or 0) if row.get("app_id") is not None else None,
+                                        "sha256": row.get("sha256") or sha,
+                                    }
+                            except Exception:
+                                pass
                             processed_shas.add(sha)
                         from scytaledroid.Utils.DisplayUtils import status_messages as _sm
                         total = sum(result.values()) if isinstance(result, dict) else 0
@@ -675,21 +694,27 @@ def _execute_permission_scan(selection: ScopeSelection, params: RunParameters) -
         except Exception:
             pass
 
-        # Persist risk snapshot to DB (best-effort)
+        # Persist risk snapshot per-APK to DB (best-effort; single row per apk_id)
         try:
-            from scytaledroid.Database.db_func import risk_scores as _riskdb
+            from scytaledroid.Database.db_func import static_permission_risk as _spr
             from ..modules.permissions.analysis.risk_scoring_engine import permission_risk_grade as _grade
             from datetime import datetime as _dt
             stamp = _dt.utcnow().strftime("%Y%m%d-%H%M%S")
-            if _riskdb.table_exists() or _riskdb.ensure_table():
+            if _spr.table_exists() or _spr.ensure_table():
                 payloads = []
                 for item in subject:
+                    pkg = str(item.get("package") or item.get("package_name") or item["label"])  # label fallback
+                    ctx = base_apk_ctx.get(pkg)
+                    if not ctx or not ctx.get("apk_id"):
+                        continue
                     score_val = float(item.get("risk", 0.0) or 0.0)
                     grade_val = _grade(score_val)
                     payloads.append(
                         {
-                            "package_name": item.get("package") or item.get("package_name") or item["label"],
-                            "app_label": item["label"],
+                            "apk_id": int(ctx.get("apk_id") or 0),
+                            "app_id": ctx.get("app_id"),
+                            "package_name": pkg,
+                            "sha256": str(ctx.get("sha256") or ""),
                             "session_stamp": stamp,
                             "scope_label": subject_label,
                             "risk_score": score_val,
@@ -699,7 +724,8 @@ def _execute_permission_scan(selection: ScopeSelection, params: RunParameters) -
                             "vendor": int(item.get("V", 0) or 0),
                         }
                     )
-                _riskdb.bulk_upsert_risks(payloads)
+                if payloads:
+                    _spr.bulk_upsert(payloads)
         except Exception:
             pass
 
@@ -749,6 +775,16 @@ def _execute_permission_scan(selection: ScopeSelection, params: RunParameters) -
         snapshot_path = snapshot_payload.get("paths", {}).get("snapshot")
         if snapshot_path:
             print(f"\n[Audit] Snapshot saved to {snapshot_path}")
+
+        # Persist audit snapshot/apps to DB for web app consumption (best-effort)
+        try:
+            persisted_id = audit.persist_to_db(snapshot_payload)
+            if persisted_id:
+                print(f"[Audit] Snapshot persisted to DB (id={persisted_id})")
+            else:
+                print("[Audit] DB persistence skipped or failed (see logs).")
+        except Exception:
+            pass
 
 
 def _build_analysis_config(params: RunParameters) -> AnalysisConfig:
@@ -888,6 +924,8 @@ def _generate_report(
 
 
 def _render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
+    from datetime import datetime as _dt
+    stamp = _dt.utcnow().strftime("%Y%m%d-%H%M%S")
     print(f"Duration: {_format_duration(outcome.duration_seconds)}")
     print()
 
@@ -899,8 +937,24 @@ def _render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             continue
 
         string_data = analyse_strings(base_report.file_path)
+        # Persist string summary (best-effort) for web app consumption
+        try:
+            from scytaledroid.Database.db_func import string_analysis as _sadb
+            if _sadb.tables_exist() or _sadb.ensure_tables():
+                summary_id = _sadb.upsert_summary(
+                    package_name=app_result.package_name,
+                    session_stamp=stamp,
+                    scope_label=params.scope_label or ("All apps" if params.scope == "all" else params.scope),
+                    counts=string_data.get("counts", {}) if isinstance(string_data, dict) else {},
+                )
+                # Optional: store top samples (small, capped)
+                if summary_id:
+                    samples = string_data.get("samples", {}) if isinstance(string_data, dict) else {}
+                    _sadb.replace_top_samples(int(summary_id), samples, top_n=3)
+        except Exception:
+            pass
         total_duration = sum(artifact.duration_seconds for artifact in app_result.artifacts)
-        lines, payload, _ = render_app_result(
+        lines, payload, finding_totals = render_app_result(
             base_report,
             signer=app_result.signer,
             split_count=len(app_result.artifacts),
@@ -908,17 +962,49 @@ def _render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             duration_seconds=total_duration,
         )
 
+        # Persist baseline findings (summary + per finding) for DB-first consumption
+        try:
+            from scytaledroid.Database.db_func import static_findings as _sfdb
+            if _sfdb.tables_exist() or _sfdb.ensure_tables():
+                details = {}
+                try:
+                    b = payload.get("baseline", {}) if isinstance(payload, dict) else {}
+                    details = {
+                        "manifest_flags": b.get("manifest_flags"),
+                        "exports": b.get("exports"),
+                    }
+                except Exception:
+                    details = {}
+                summary_id = _sfdb.upsert_summary(
+                    package_name=app_result.package_name,
+                    session_stamp=stamp,
+                    scope_label=params.scope_label or ("All apps" if params.scope == "all" else params.scope),
+                    severity_counts=finding_totals,
+                    details=details,
+                )
+                if summary_id:
+                    findings = []
+                    try:
+                        findings = (payload.get("baseline", {}) or {}).get("findings", [])
+                    except Exception:
+                        findings = []
+                    _sfdb.replace_findings(int(summary_id), findings)
+        except Exception:
+            pass
+
         for line in lines:
             print(line)
 
         if not params.dry_run:
-            saved_path = write_baseline_json(
-                payload,
-                package=app_result.package_name,
-                profile=params.profile,
-                scope=params.scope,
-            )
-            print(f"  Saved baseline JSON → {saved_path.name}")
+            import os as _os
+            if _os.environ.get("SCY_BASELINE_WRITE_FILES", "1") != "0":
+                saved_path = write_baseline_json(
+                    payload,
+                    package=app_result.package_name,
+                    profile=params.profile,
+                    scope=params.scope,
+                )
+                print(f"  Saved baseline JSON → {saved_path.name}")
 
         if index < len(outcome.results):
             print()
