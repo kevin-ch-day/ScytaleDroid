@@ -47,6 +47,7 @@ from ..modules.permissions.render_summary import render as render_after_run_summ
 from ..modules.permissions.render_matrix import (
     render_signals as render_signal_matrix,
 )
+from ..modules.permissions.audit import PermissionAuditAccumulator
 from .renderer import render_app_result, write_baseline_json
 from .sections import SECTION_DEFINITIONS, extract_integrity_profiles
 
@@ -544,9 +545,14 @@ def _execute_permission_scan(selection: ScopeSelection, params: RunParameters) -
     profiles_by_package: dict[str, dict] = {}
     printed_postcard_for: set[str] = set()
     printed_db_status_for: set[str] = set()
+    declared_sources: dict[str, dict[str, List[Tuple[str, str]]]] = {}
+    sdk_by_package: dict[str, Dict[str, str | None]] = {}
+    label_by_package: dict[str, str] = {}
+    category_by_package: dict[str, str] = {}
 
     for group_index, group in enumerate(selection.groups, start=1):
         artifact_total = len(group.artifacts)
+        category_by_package[group.package_name] = getattr(group, "category", "Uncategorized")
 
         for artifact_index, artifact in enumerate(group.artifacts, start=1):
             progress_label = f"[{group_index}/{total_groups}] {group.package_name}"
@@ -565,6 +571,14 @@ def _execute_permission_scan(selection: ScopeSelection, params: RunParameters) -
                 print(f"{progress_message} … failed ({exc})")
                 continue
 
+            pkg_declared = declared_sources.setdefault(group.package_name, {})
+            pkg_declared[artifact_label] = list(declared)
+            sdk_payload = dict(sdk or {})
+            if artifact_label == "base":
+                sdk_by_package[group.package_name] = sdk_payload
+            else:
+                sdk_by_package.setdefault(group.package_name, sdk_payload)
+
             # Stream noise reduction: avoid per-artifact completion spam
             # (postcards and summaries provide the useful context)
             # Skip noisy empty split outputs
@@ -574,6 +588,7 @@ def _execute_permission_scan(selection: ScopeSelection, params: RunParameters) -
                         str(artifact.metadata.get("app_label") or "").strip()
                         or group.package_name
                     )
+                    label_by_package[group.package_name] = app_label
                     # Visual spacing between apps
                     print()
                     profile = render_permission_postcard(
@@ -636,7 +651,12 @@ def _execute_permission_scan(selection: ScopeSelection, params: RunParameters) -
             subject_label = selection.label
 
         # Abbreviations block at the top (use app names for labels)
-        from ..modules.permissions.simple import _abbr_from_name as _abbr
+        from ..modules.permissions.simple import (
+            _abbr_from_name as _abbr,
+            _build_declared_origins as _build_origins,
+            _collect_declared_tokens as _collect_tokens,
+            render_contribution_summary,
+        )
         print("Apps (abbrev):")
         for item in subject:
             abbr = _abbr(item["label"]).strip()
@@ -646,6 +666,7 @@ def _execute_permission_scan(selection: ScopeSelection, params: RunParameters) -
         # Risk summary and signal matrix
         render_after_run_summary(subject)
         render_signal_matrix(subject)
+        render_contribution_summary(subject)
 
         # Matrix (compact)
         try:
@@ -681,6 +702,53 @@ def _execute_permission_scan(selection: ScopeSelection, params: RunParameters) -
                 _riskdb.bulk_upsert_risks(payloads)
         except Exception:
             pass
+
+        # Persist detailed audit artefacts to disk
+        from datetime import datetime as _dt
+
+        snapshot_id = f"perm-{_dt.utcnow().strftime('%Y%m%d-%H%M%S')}"
+        audit = PermissionAuditAccumulator(
+            scope_label=subject_label,
+            scope_type=selection.scope,
+            total_groups=total_groups,
+            snapshot_id=snapshot_id,
+        )
+
+        for package, profile in profiles_by_package.items():
+            sources = declared_sources.get(package)
+            if not sources:
+                continue
+            origins = _build_origins(
+                sources,
+                profile.get("fw_ds", set()),
+                profile.get("vendor_names", set()),
+            )
+            tokens = _collect_tokens(sources)
+            label = label_by_package.get(package, profile.get("label", package))
+            detail = dict(profile.get("score_detail") or {})
+            if not detail:
+                continue
+            audit.add_app(
+                package=package,
+                label=str(label),
+                cohort=category_by_package.get(package, "Uncategorized"),
+                sdk=sdk_by_package.get(package, {}),
+                counts={
+                    "dangerous": int(profile.get("D", 0) or 0),
+                    "signature": int(profile.get("S", 0) or 0),
+                    "vendor": int(profile.get("V", 0) or 0),
+                },
+                groups=profile.get("groups", {}),
+                declared_in=origins,
+                declared_permissions=tokens,
+                score_detail=detail,
+                vendor_present=bool(profile.get("V", 0)),
+            )
+
+        snapshot_payload = audit.finalize()
+        snapshot_path = snapshot_payload.get("paths", {}).get("snapshot")
+        if snapshot_path:
+            print(f"\n[Audit] Snapshot saved to {snapshot_path}")
 
 
 def _build_analysis_config(params: RunParameters) -> AnalysisConfig:

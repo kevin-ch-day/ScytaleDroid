@@ -17,71 +17,60 @@ _CORE_TABLES: List[str] = [
     "harvest_source_paths",
 ]
 
-_EXPECTED_COLUMNS = {
-    "android_apk_repository": {
-        "apk_id",
-        "app_id",
-        "package_name",
-        "file_name",
-        "file_size",
-        "is_system",
-        "installer",
-        "version_name",
-        "version_code",
-        "md5",
-        "sha1",
-        "sha256",
-        "signer_fingerprint",
-        "device_serial",
-        "harvested_at",
-        "is_split_member",
-        "split_group_id",
-        "created_at",
-        "updated_at",
-    },
-    "harvest_storage_roots": {
-        "root_id",
-        "host_name",
-        "data_root",
-        "created_at",
-        "updated_at",
-    },
-    "harvest_artifact_paths": {
-        "apk_id",
-        "storage_root_id",
-        "local_rel_path",
-        "created_at",
-        "updated_at",
-    },
-    "harvest_source_paths": {
-        "apk_id",
-        "source_path",
-        "created_at",
-        "updated_at",
-    },
-}
-
-
 def database_menu() -> None:
     """Render the database utilities menu."""
 
     while True:
         print()
         menu_utils.print_header("Database Utilities")
-        options = {
-            "1": "Check database connection",
-            "2": "Inspect table schemas",
-            "3": "Show core table row counts",
-            "4": "Framework permissions: counts by protection",
-            "5": "Permission tables row counts",
-            "7": "Show DB config (source and values)",
-            "9": "Configure DB connection (write config/db.json)",
-            "10": "Create database if missing",
-            "11": "Run schema audit script (temporary)",
-            "12": "Detected permissions summary",
-        }
-        menu_utils.print_menu(options)
-        choice = prompt_utils.get_choice(valid=list(options.keys()) + ["0"])
+        menu_utils.print_hint(
+            "Use the new provisioning helpers to prepare analytics tables before running permission audits.",
+            icon="★",
+        )
+
+        groups = [
+            (
+                "Connection & setup",
+                [
+                    ("1", "Check database connection", "Verify the current credentials and connectivity."),
+                    ("8", "Show DB config (source and values)", "Display the active connection parameters."),
+                    ("9", "Configure DB connection (write config/db.json)", "Interactively update connection settings."),
+                    ("10", "Create database if missing", "Attempt to create the configured schema on the server."),
+                ],
+            ),
+            (
+                "Schema & inventory",
+                [
+                    ("2", "Inspect table snapshots (Markdown)", "Render copy-pasteable schema summaries for each table."),
+                    ("3", "Show core table row counts", "Quick health check for harvest-related tables."),
+                    ("4", "Framework permissions: counts by protection", "Breakdown of framework permissions by protection level."),
+                    ("5", "Permission tables row counts", "Row counts for framework/vendor/unknown/detected tables."),
+                ],
+            ),
+            (
+                "Permission analytics",
+                [
+                    ("6", "Provision permission analytics tables", "Create helper tables that store signal catalogs and audit runs."),
+                    ("7", "Sync framework permission catalog", "Download and upsert the latest Android framework permission metadata."),
+                    ("12", "Detected permissions summary", "Top-level stats for detected permissions, vendors, and apps."),
+                ],
+            ),
+            (
+                "Advanced",
+                [
+                    ("11", "Run schema audit script", "Launch the experimental schema checker for deeper diagnostics."),
+                ],
+            ),
+        ]
+
+        valid_choices = ["0"]
+        for title, options in groups:
+            menu_utils.print_section(title)
+            menu_utils.print_menu(options, padding=True, show_exit=False)
+            valid_choices.extend([str(option[0]) for option in options])
+
+        print("0) Back")
+        choice = prompt_utils.get_choice(valid=valid_choices)
 
         if choice == "1":
             _handle_check_connection()
@@ -93,7 +82,11 @@ def database_menu() -> None:
             _handle_framework_protection_counts()
         elif choice == "5":
             _handle_permission_table_counts()
+        elif choice == "6":
+            _handle_provision_permission_tables()
         elif choice == "7":
+            _handle_write_framework_catalog()
+        elif choice == "8":
             _handle_show_db_config()
         elif choice == "9":
             _handle_configure_db_connection()
@@ -123,43 +116,17 @@ def _handle_schema_inspection() -> None:
         prompt_utils.press_enter_to_continue()
         return
 
-    print(status_messages.status("Database server: {}".format(db_utils.get_server_info().get("database")), level="info"))
-    print(status_messages.status("Found {} table(s).".format(len(tables)), level="info"))
-    print()
+    info = db_utils.get_server_info()
+    database_name = info.get("database") or "<unknown>"
+    print(f"# Database snapshot — {database_name}")
+    print(f"_tables discovered: {len(tables)}_\n")
 
     for table in sorted(tables):
-        print(status_messages.status(f"Table: {table}", level="info"))
-
-        expected = _EXPECTED_COLUMNS.get(table)
-        if expected is None:
-            cols = db_utils.get_table_columns(table)
-            if cols is None:
-                print(status_messages.status(
-                    "  Unable to read column metadata (insufficient privileges?).",
-                    level="error",
-                ))
-            elif not cols:
-                print(status_messages.status(
-                    "  No column information returned. Table may be empty or a view requiring privileges.",
-                    level="warn",
-                ))
-            else:
-                print(status_messages.status(f"  Columns: {', '.join(cols)}", level="info"))
-            print()
+        snapshot = db_utils.build_table_snapshot(table)
+        if snapshot is None:
+            print(f"<!-- Unable to introspect {table} -->\n")
             continue
-
-        compare = db_utils.compare_columns(table, expected)
-        actual_cols = ", ".join(compare["actual"]) if compare["actual"] else "<no columns>"
-        print(status_messages.status(f"  Columns: {actual_cols}", level="info"))
-        if compare["unexpected"]:
-            print(status_messages.status(
-                f"  Unexpected columns: {', '.join(compare['unexpected'])}", level="warn"
-            ))
-        if compare["missing"]:
-            print(status_messages.status(
-                f"  Missing expected columns: {', '.join(compare['missing'])}", level="error"
-            ))
-        print()
+        print(snapshot.render_markdown())
 
     prompt_utils.press_enter_to_continue()
 
@@ -212,11 +179,46 @@ def _handle_permission_table_counts() -> None:
     prompt_utils.press_enter_to_continue()
 
 
+def _handle_provision_permission_tables() -> None:
+    results = db_utils.provision_permission_analysis_tables()
+    created = results.get("created") or {}
+    seeded = results.get("seeded") or {}
+
+    if not created:
+        print(status_messages.status("Unable to provision tables (see logs).", level="error"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    for table_name, ok in sorted(created.items()):
+        level = "success" if ok else "error"
+        verb = "ready" if ok else "failed"
+        print(status_messages.status(f"{table_name}: {verb}", level=level))
+
+    if seeded:
+        for table_name, payload in sorted(seeded.items()):
+            if isinstance(payload, dict):
+                inserted = int(payload.get("inserted", 0))
+                updated = int(payload.get("updated", 0))
+                if inserted or updated:
+                    message = f"{table_name}: inserted {inserted}, updated {updated}"
+                    level = "success"
+                else:
+                    message = f"{table_name}: already up to date"
+                    level = "info"
+            else:
+                count = int(payload) if isinstance(payload, int) else 0
+                level = "success" if count else "info"
+                message = f"{table_name}: seeded {count} row(s)"
+            print(status_messages.status(message, level=level))
+
+    prompt_utils.press_enter_to_continue()
+
+
 def _handle_write_framework_catalog() -> None:
     """Load the latest framework catalog snapshot and upsert into DB."""
     print(status_messages.status("Preparing to write framework catalog to DB…", level="info"))
     try:
-        from scytaledroid.Utils.AndroidPermCatalog.cli import DEFAULT_CACHE
+        from scytaledroid.Utils.AndroidPermCatalog.constants import DEFAULT_CACHE
         from scytaledroid.Utils.AndroidPermCatalog import api as perm_api
         from scytaledroid.Database.db_func import framework_permissions as fp
 
