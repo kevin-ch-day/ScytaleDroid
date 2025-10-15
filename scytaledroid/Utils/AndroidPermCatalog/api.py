@@ -3,9 +3,14 @@ from __future__ import annotations
 import json
 from dataclasses import asdict
 from pathlib import Path
-from typing import Iterable, Literal, Mapping, Optional
+from typing import Iterable, Literal, Mapping, Optional, Sequence, Tuple
 
-from .loader import ONLINE_URL, load_permission_doc
+from .loader import (
+    ONLINE_URL,
+    additional_doc_urls,
+    load_additional_permission_doc,
+    load_permission_doc,
+)
 from .normalize import PermissionMeta
 from .parser import parse_manifest_permissions
 from .protection import sanitise_tokens
@@ -13,10 +18,29 @@ from .summary_clean import purge_markers as _purge_markers, dedupe_sentences as 
 
 
 def load_catalog(source: Literal["sdk", "online", "auto"] = "auto") -> list[PermissionMeta]:
-    html, label = load_permission_doc(source)
-    if not html:
+    primary_html, _ = load_permission_doc(source)
+    if not primary_html:
         raise RuntimeError("Permission documentation could not be loaded (SDK/online unavailable)")
-    return parse_manifest_permissions(html, base_url=ONLINE_URL)
+
+    docs: list[tuple[str, str]] = [(primary_html, ONLINE_URL)]
+
+    for url in additional_doc_urls():
+        extra_html, _ = load_additional_permission_doc(url)
+        if extra_html:
+            docs.append((extra_html, url))
+
+    return build_catalog_from_docs(docs)
+
+
+def build_catalog_from_docs(docs: Sequence[Tuple[str, str]]) -> list[PermissionMeta]:
+    """Parse and merge multiple documentation payloads into a single catalog."""
+
+    merged: dict[str, PermissionMeta] = {}
+    for html, base_url in docs:
+        for entry in parse_manifest_permissions(html, base_url=base_url):
+            merged[entry.name] = entry
+
+    return sorted(merged.values(), key=lambda item: item.name)
 
 
 def save_catalog_json(
@@ -25,6 +49,7 @@ def save_catalog_json(
     *,
     source: str = "auto",
     base_url: str = ONLINE_URL,
+    base_urls: Optional[Sequence[str]] = None,
     write_timestamped: bool = False,
 ) -> Path:
     """Persist catalog with a small metadata wrapper; returns the primary path.
@@ -42,6 +67,7 @@ def save_catalog_json(
             "catalog_version": 1,
             "source": source,
             "base_url": base_url,
+            "base_urls": list(base_urls) if base_urls else [base_url],
             "fetched_at": datetime.utcnow().isoformat() + "Z",
         },
         "items": serialisable,

@@ -1,11 +1,29 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Iterable, Optional, Sequence, Tuple
 
 
 ONLINE_URL = "https://developer.android.com/reference/android/Manifest.permission"
+
+_ADDITIONAL_DOC_URLS = (
+    "https://developer.android.com/reference/android/adservices/common/AdServicesPermissions",
+)
+
+
+@dataclass(frozen=True)
+class _SdkDocCandidate:
+    """Describe a potential SDK documentation asset."""
+
+    relative_path: str
+
+
+def additional_doc_urls() -> Sequence[str]:
+    """Return extra documentation URLs that should be merged into the catalog."""
+
+    return _ADDITIONAL_DOC_URLS
 
 
 def _load_html_from_file(path: Path) -> Optional[str]:
@@ -15,13 +33,13 @@ def _load_html_from_file(path: Path) -> Optional[str]:
         return None
 
 
-def _fetch_online_html() -> Optional[str]:
+def _fetch_online_html(url: str) -> Optional[str]:
     # Prefer requests if available for better TLS/timeouts; otherwise urllib
     try:
         import requests  # type: ignore
 
         try:
-            r = requests.get(ONLINE_URL, timeout=20)
+            r = requests.get(url, timeout=20)
             r.raise_for_status()
             return r.text
         except Exception:
@@ -30,35 +48,38 @@ def _fetch_online_html() -> Optional[str]:
         try:
             from urllib.request import urlopen
 
-            with urlopen(ONLINE_URL, timeout=20) as resp:  # nosec - fixed URL
+            with urlopen(url, timeout=20) as resp:  # nosec - fixed URL
                 data = resp.read()
             return data.decode("utf-8", errors="ignore")
         except Exception:
             return None
 
 
-def _find_sdk_manifest_doc() -> Optional[Path]:
-    """Best-effort attempt to locate a local SDK Manifest.permission HTML.
-
-    We search under ANDROID_SDK_ROOT or ANDROID_HOME for a doc path that
-    resembles the reference HTML used by devsite. This is a heuristic: if we
-    cannot find it, callers should fall back to the online URL.
-    """
-
+def _sdk_roots() -> Iterable[Path]:
     roots = [
         os.environ.get("ANDROID_SDK_ROOT"),
         os.environ.get("ANDROID_HOME"),
     ]
     for root in [Path(p) for p in roots if p]:
-        # Common locations in offline docs; scan a few likely candidates
-        candidates = [
-            root / "docs" / "reference" / "android" / "Manifest.permission.html",
-            root / "docs" / "offline" / "android" / "Manifest.permission.html",
-        ]
-        for path in candidates:
+        yield root
+
+
+def _find_sdk_doc(candidates: Sequence[_SdkDocCandidate]) -> Optional[Path]:
+    """Return the first matching SDK documentation path from the provided list."""
+
+    for root in _sdk_roots():
+        for candidate in candidates:
+            path = root / candidate.relative_path
             if path.exists():
                 return path
     return None
+
+
+def _manifest_sdk_candidates() -> Tuple[_SdkDocCandidate, ...]:
+    return (
+        _SdkDocCandidate("docs/reference/android/Manifest.permission.html"),
+        _SdkDocCandidate("docs/offline/android/Manifest.permission.html"),
+    )
 
 
 def load_permission_doc(source: str = "auto", *, file_path: Optional[Path] = None) -> Tuple[Optional[str], str]:
@@ -77,14 +98,23 @@ def load_permission_doc(source: str = "auto", *, file_path: Optional[Path] = Non
         source = "auto"
 
     if source in {"sdk", "auto"}:
-        local_path = _find_sdk_manifest_doc()
+        local_path = _find_sdk_doc(_manifest_sdk_candidates())
         if local_path is not None:
             html = _load_html_from_file(local_path)
             if html:
                 return html, f"sdk:{local_path.name}"
 
     # fallback to online
-    html = _fetch_online_html()
+    html = _fetch_online_html(ONLINE_URL)
+    if html:
+        return html, "online"
+    return None, "unavailable"
+
+
+def load_additional_permission_doc(url: str) -> Tuple[Optional[str], str]:
+    """Fetch an auxiliary permission documentation page."""
+
+    html = _fetch_online_html(url)
     if html:
         return html, "online"
     return None, "unavailable"

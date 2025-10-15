@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from . import colors
+from .terminal import use_ascii_ui
 
 _STATUS_PREFIX = {
     "info": "[INFO]",
@@ -16,6 +17,13 @@ _STATUS_ICONS = {
     "warn": "⚠",
     "error": "✖",
     "success": "✔",
+}
+
+_STATUS_ICONS_ASCII = {
+    "info": "i",
+    "warn": "!",
+    "error": "x",
+    "success": "*",
 }
 
 _STATUS_STYLES = {
@@ -47,7 +55,10 @@ def status(
     prefix_text = _STATUS_PREFIX.get(level, "[INFO]")
     styles = _STATUS_STYLES.get(level, ("info", "text"))
     formatted_message = _apply(message, styles[1])
-    icon = _STATUS_ICONS.get(level) if show_icon else None
+    if show_icon:
+        icon = _STATUS_ICONS_ASCII.get(level) if use_ascii_ui() else _STATUS_ICONS.get(level)
+    else:
+        icon = None
     token_parts: list[str] = []
     if icon:
         token_parts.append(colors.apply(icon, colors.style("hint")))

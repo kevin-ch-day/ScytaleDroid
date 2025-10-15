@@ -35,7 +35,7 @@ def device_menu() -> None:
                 active_details = serial_map.get(serial)
 
         print_dashboard(
-            devices,
+            summaries,
             active_details,
             warnings,
             last_refresh_ts,

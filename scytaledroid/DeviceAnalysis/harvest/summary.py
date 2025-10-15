@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from scytaledroid.Utils.DisplayUtils import status_messages, text_blocks
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
@@ -37,6 +38,140 @@ _SKIP_LABELS = {
     "app_definition_failed": "Failed to record app definition",
     "dedupe_sha256": "Duplicate artifact (sha256 dedupe)",
 }
+
+
+@dataclass
+class HarvestRunMetrics:
+    """Aggregate statistics for a completed harvest run."""
+
+    total_packages: int
+    blocked_packages: int
+    executed_packages: int
+    planned_artifacts: int
+    artifacts_written: int
+    artifacts_failed: int
+    artifact_status_counter: Counter[str]
+    packages_with_writes: int
+    packages_with_errors: int
+    packages_failed: int
+    packages_skipped_runtime: int
+    runtime_skips: Counter[str]
+    preflight_skips: Counter[str]
+
+    @property
+    def dedupe_skips(self) -> int:
+        """Number of artifacts skipped due to deduplication."""
+
+        return self.runtime_skips.get("dedupe_sha256", 0)
+
+    @property
+    def packages_successful(self) -> int:
+        """Packages that wrote artifacts without triggering errors."""
+
+        return max(self.packages_with_writes - self.packages_with_partial_errors, 0)
+
+    @property
+    def runtime_skip_total(self) -> int:
+        """Total skips encountered during pull execution."""
+
+        return sum(self.runtime_skips.values())
+
+    @property
+    def artifact_status_excluding_written(self) -> Counter[str]:
+        """Return artifact status counts without successful writes."""
+
+        counter = Counter(self.artifact_status_counter)
+        counter.pop("written", None)
+        return counter
+
+    @property
+    def packages_with_partial_errors(self) -> int:
+        """Packages that wrote artifacts but also surfaced errors."""
+
+        return max(self.packages_with_errors - self.packages_failed, 0)
+
+    @classmethod
+    def from_run(
+        cls,
+        plan: HarvestPlan,
+        harvest_result: HarvestResult,
+        results: Sequence[PullResult],
+    ) -> "HarvestRunMetrics":
+        """Compute aggregate statistics from the executed harvest."""
+
+        total_packages = len(plan.packages)
+        preflight_skips: Counter[str] = Counter()
+        blocked_package_names = set()
+        planned_artifacts = 0
+        for package in plan.packages:
+            if package.skip_reason:
+                preflight_skips[package.skip_reason] += 1
+                blocked_package_names.add(package.inventory.package_name)
+                continue
+            planned_artifacts += len(package.artifacts)
+
+        artifact_status_counter: Counter[str] = Counter()
+        packages_with_writes = 0
+        packages_with_errors = 0
+        packages_failed = 0
+        packages_skipped_runtime = 0
+
+        for package in harvest_result.packages:
+            has_written = False
+            for artifact in package.artifacts:
+                status = artifact.status or "unknown"
+                artifact_status_counter[status] += 1
+                if status == "written":
+                    has_written = True
+
+            has_errors = bool(package.errors)
+            has_skips = bool(package.skipped_reasons)
+
+            if has_written:
+                packages_with_writes += 1
+            if has_errors:
+                packages_with_errors += 1
+                if not has_written:
+                    packages_failed += 1
+            if (
+                has_skips
+                and not has_written
+                and not has_errors
+                and package.package_name not in blocked_package_names
+            ):
+                packages_skipped_runtime += 1
+
+        runtime_skips: Counter[str] = Counter()
+        for result in results:
+            runtime_skips.update(result.skipped)
+
+        for reason, count in preflight_skips.items():
+            remaining = runtime_skips.get(reason, 0) - count
+            if remaining > 0:
+                runtime_skips[reason] = remaining
+            elif reason in runtime_skips:
+                del runtime_skips[reason]
+
+        artifacts_written = artifact_status_counter.get("written", 0)
+        artifacts_failed = sum(len(result.errors) for result in results)
+
+        executed_packages = total_packages - len(blocked_package_names)
+
+        return cls(
+            total_packages=total_packages,
+            blocked_packages=len(blocked_package_names),
+            executed_packages=executed_packages,
+            planned_artifacts=planned_artifacts,
+            artifacts_written=artifacts_written,
+            artifacts_failed=artifacts_failed,
+            artifact_status_counter=artifact_status_counter,
+            packages_with_writes=packages_with_writes,
+            packages_with_errors=packages_with_errors,
+            packages_failed=packages_failed,
+            packages_skipped_runtime=packages_skipped_runtime,
+            runtime_skips=runtime_skips,
+            preflight_skips=preflight_skips,
+        )
 
 
 def render_plan_summary(
@@ -149,39 +284,33 @@ def render_harvest_summary(
         guard_brief=guard_brief,
     )
 
-    total_packages = len(plan.packages)
-    files_written = sum(
-        1
-        for package in harvest_result.packages
-        for artifact in package.artifacts
-        if artifact.status == "written"
-    )
-    pull_errors = sum(len(package.errors) for package in harvest_result.packages)
-    skip_counter: Counter[str] = Counter()
-    for result in results:
-        skip_counter.update(result.skipped)
+    metrics = HarvestRunMetrics.from_run(plan, harvest_result, results)
+    files_written = metrics.artifacts_written
+    pull_errors = metrics.artifacts_failed
 
     print()
     print(text_blocks.headline("APK Harvest Summary", width=70))
-    print(status_messages.status(f"Scope: {selection.label}"))
-    pull_labels = {
-        "quick": "Quick pull",
-        "inventory": "Snapshot pull",
-    }
-    pull_label = pull_labels.get(pull_mode, pull_mode)
-    print(status_messages.status(f"Pull mode: {pull_label}"))
+
     metadata = selection.metadata or {}
-    guard_policy = metadata.get("inventory_policy")
-    if guard_policy:
-        policy_label = "Quick harvest" if guard_policy == "quick" else "Inventory refresh"
-        stale_level = metadata.get("inventory_stale_level")
-        if isinstance(stale_level, str) and stale_level:
-            policy_label = f"{policy_label} (stale={stale_level})"
-        print(status_messages.status(f"Inventory policy: {policy_label}"))
-    guard_brief_value = guard_brief or metadata.get("inventory_guard_brief")
-    if metadata.get("render_guard_in_summary") and guard_brief_value:
-        print(status_messages.status(guard_brief_value, level="info"))
+    summary_lines = _build_summary_card_lines(
+        selection_label=selection.label,
+        pull_mode=pull_mode,
+        metadata=metadata,
+        guard_brief=guard_brief,
+        metrics=metrics,
+        pull_errors=pull_errors,
+    )
     scope_hash_changed = metadata.get("inventory_scope_hash_changed")
+
+    print(text_blocks.boxed(summary_lines, width=70))
+
+    highlights = _harvest_highlights(metrics, pull_errors)
+    if highlights:
+        print()
+        print(text_blocks.headline("Highlights", width=70))
+        for level, message in highlights:
+            print(status_messages.status(message, level=level))
+
     if scope_hash_changed:
         print(
             status_messages.status(
@@ -189,27 +318,25 @@ def render_harvest_summary(
                 level="warn",
             )
         )
-    print(status_messages.status(f"Packages processed: {total_packages}"))
-    print(status_messages.status(f"Files written: {files_written}"))
     if pull_errors:
-        print(status_messages.status(f"Pull errors: {pull_errors}", level="warn"))
-    dedupe_skips = sum(result.skipped.count("dedupe_sha256") for result in results)
-    if dedupe_skips:
-        print(
-            status_messages.status(
-                f"Artifacts skipped (dedupe): {dedupe_skips}", level="info"
-            )
-        )
+        print(status_messages.status("Review package errors above before re-running.", level="warn"))
 
     if plan.policy_filtered:
         policy_details = _format_policy_details(plan.policy_filtered)
         print(status_messages.status(f"Filtered before pull (policy): {policy_details}", level="warn"))
-    if skip_counter:
-        skip_parts = ", ".join(
-            f"{_describe_reason(reason, _SKIP_LABELS)}={count}"
-            for reason, count in sorted(skip_counter.items())
-        )
-        print(status_messages.status(f"Skipped packages: {skip_parts}", level="warn"))
+    if metrics.preflight_skips or metrics.runtime_skips:
+        print()
+        print(text_blocks.headline("Skipped packages", width=70))
+        if metrics.preflight_skips:
+            print(status_messages.status("Pre-flight filters:", level="info"))
+            for reason, count in sorted(metrics.preflight_skips.items()):
+                label = _describe_reason(reason, _SKIP_LABELS)
+                print(status_messages.status(f"- {label}: {count}", level="info"))
+        if metrics.runtime_skips:
+            print(status_messages.status("During pull:", level="warn"))
+            for reason, count in sorted(metrics.runtime_skips.items()):
+                label = _describe_reason(reason, _SKIP_LABELS)
+                print(status_messages.status(f"- {label}: {count}", level="warn"))
 
     denied = sorted(
         {
@@ -283,9 +410,151 @@ def render_harvest_summary(
             output_root,
             metadata,
             pull_mode,
-            total_packages,
+            metrics.total_packages,
             files_written,
         )
+
+
+def _build_summary_card_lines(
+    *,
+    selection_label: str,
+    pull_mode: str,
+    metadata: Dict[str, object],
+    guard_brief: Optional[str],
+    metrics: HarvestRunMetrics,
+    pull_errors: int,
+) -> List[str]:
+    pull_label = {
+        "quick": "Quick pull",
+        "inventory": "Snapshot pull",
+    }.get(pull_mode, pull_mode)
+
+    lines = [
+        _format_card_line("Scope", selection_label),
+        _format_card_line("Pull", pull_label),
+    ]
+
+    package_pairs = _format_breakdown_pairs(
+        [
+            (metrics.packages_successful, "clean"),
+            (metrics.packages_with_partial_errors, "partial issues"),
+            (metrics.packages_failed, "failed"),
+            (metrics.packages_skipped_runtime, "runtime skipped"),
+            (metrics.blocked_packages, "blocked"),
+        ]
+    )
+    lines.append(
+        _format_card_line("Packages", f"{metrics.total_packages} total", package_pairs)
+    )
+
+    if metrics.planned_artifacts:
+        artifact_value = f"{metrics.artifacts_written}/{metrics.planned_artifacts} saved"
+    else:
+        artifact_value = f"{metrics.artifacts_written} saved"
+
+    artifact_pairs: List[tuple[int, str]] = []
+    if metrics.artifacts_failed:
+        artifact_pairs.append((metrics.artifacts_failed, "failed"))
+    if metrics.dedupe_skips:
+        artifact_pairs.append((metrics.dedupe_skips, "deduped"))
+    for status, count in metrics.artifact_status_excluding_written.items():
+        artifact_pairs.append((count, status.replace("_", " ")))
+
+    artifact_breakdown = _format_breakdown_pairs(artifact_pairs)
+    lines.append(_format_card_line("Artifacts", artifact_value, artifact_breakdown))
+
+    guard_policy = metadata.get("inventory_policy")
+    if guard_policy:
+        policy_label = "Quick harvest" if guard_policy == "quick" else "Inventory refresh"
+        stale_level = metadata.get("inventory_stale_level")
+        if isinstance(stale_level, str) and stale_level:
+            policy_label = f"{policy_label} (stale={stale_level})"
+        lines.append(f"Policy  : {policy_label}")
+
+    guard_brief_value = guard_brief or metadata.get("inventory_guard_brief")
+    if metadata.get("render_guard_in_summary") and guard_brief_value:
+        lines.append(f"Guard   : {guard_brief_value}")
+
+    if metrics.runtime_skips:
+        runtime_breakdown = _format_breakdown_pairs(
+            [
+                (
+                    count,
+                    _compact_label(_describe_reason(reason, _SKIP_LABELS)),
+                )
+                for reason, count in metrics.runtime_skips.items()
+            ],
+            limit=3,
+        )
+        lines.append(
+            _format_card_line(
+                "Runtime",
+                f"{metrics.runtime_skip_total} skip(s)",
+                runtime_breakdown,
+            )
+        )
+
+    if pull_errors:
+        lines.append(_format_card_line("Errors", f"{pull_errors} artifact(s)"))
+
+    return lines
+
+
+def _harvest_highlights(
+    metrics: HarvestRunMetrics, pull_errors: int
+) -> List[Tuple[str, str]]:
+    highlights: List[Tuple[str, str]] = []
+
+    if metrics.packages_successful:
+        highlights.append(
+            (
+                "success",
+                f"{_count_phrase(metrics.packages_successful, 'package')} harvested cleanly",
+            )
+        )
+
+    if metrics.packages_with_partial_errors:
+        highlights.append(
+            (
+                "warn",
+                (
+                    f"{_count_phrase(metrics.packages_with_partial_errors, 'package')} "
+                    "finished with partial errors"
+                ),
+            )
+        )
+
+    if metrics.packages_failed:
+        highlights.append(
+            (
+                "error",
+                f"{_count_phrase(metrics.packages_failed, 'package')} failed to save artifacts",
+            )
+        )
+
+    if metrics.runtime_skip_total:
+        top_reason = metrics.runtime_skips.most_common(1)
+        if top_reason:
+            reason_label = _describe_reason(top_reason[0][0], _SKIP_LABELS)
+            detail = f" (top: {_compact_label(reason_label)})"
+        else:
+            detail = ""
+        highlights.append(
+            (
+                "warn",
+                f"{_count_phrase(metrics.runtime_skip_total, 'runtime skip')}{detail}",
+            )
+        )
+
+    if pull_errors:
+        highlights.append(
+            (
+                "warn",
+                f"{_count_phrase(pull_errors, 'artifact error')} encountered",
+            )
+        )
+
+    return highlights
 
 
 def _print_top_packages(results: Sequence[PullResult], limit: int = 5) -> None:
@@ -315,6 +584,7 @@ def _print_top_packages(results: Sequence[PullResult], limit: int = 5) -> None:
 
 
 __all__ = [
+    "HarvestRunMetrics",
     "preview_plan",
     "print_package_result",
     "render_harvest_summary",
@@ -339,6 +609,39 @@ def _print_exclusions(excluded: object) -> None:
 
 def _describe_reason(code: str, mapping: Dict[str, str]) -> str:
     return mapping.get(code, code)
+
+
+def _compact_label(label: str) -> str:
+    if not label:
+        return label
+    return label.split(" (", 1)[0]
+
+
+def _format_card_line(label: str, value: str, breakdown: Optional[Sequence[str]] = None) -> str:
+    line = f"{label:<8}: {value}"
+    if breakdown:
+        line = f"{line} ({' • '.join(breakdown)})"
+    return line
+
+
+def _count_phrase(count: int, noun: str) -> str:
+    suffix = "" if count == 1 else "s"
+    return f"{count} {noun}{suffix}"
+
+
+def _format_breakdown_pairs(
+    pairs: Sequence[tuple[int, str]],
+    *,
+    limit: int = 4,
+) -> List[str]:
+    formatted: List[str] = []
+    for count, label in sorted(pairs, key=lambda item: (-item[0], item[1])):
+        if not count:
+            continue
+        formatted.append(f"{count} {label}")
+        if len(formatted) >= limit:
+            break
+    return formatted
 
 
 def _format_policy_details(policy_counts: Dict[str, int]) -> str:

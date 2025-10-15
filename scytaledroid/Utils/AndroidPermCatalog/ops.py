@@ -33,7 +33,14 @@ def load_cached_or_refresh(cache_path: Path, *, source: str = "auto") -> Catalog
         return Catalog(path=None, items=[])
 
     try:
-        api.save_catalog_json(cache_path, items, source=source)
+        base_urls = [api.ONLINE_URL, *api.additional_doc_urls()]
+        api.save_catalog_json(
+            cache_path,
+            items,
+            source=source,
+            base_url=api.ONLINE_URL,
+            base_urls=base_urls,
+        )
     except Exception as exc:
         log.warning(f"Unable to write catalog cache: {exc}", category="application")
     return Catalog(path=cache_path, items=items)

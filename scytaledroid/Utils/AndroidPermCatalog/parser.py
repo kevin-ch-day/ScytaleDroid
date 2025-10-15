@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Dict, Any, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from .normalize import PermissionMeta, normalise_protection, split_protection_tokens
 from .protection import ALLOWED_TOKENS
@@ -14,6 +14,71 @@ def _clean(text: str) -> str:
 
 def _short(name: str) -> str:
     return name.split("android.permission.", 1)[1] if name.startswith("android.permission.") else name
+
+
+def _add_token(tokens: list[str], token: str) -> None:
+    t = token.lower()
+    if t in ALLOWED_TOKENS and t not in tokens:
+        tokens.append(t)
+
+
+def _tokens_from_badges(node) -> list[str]:
+    tokens: list[str] = []
+    if not hasattr(node, "select"):
+        return tokens
+    selectors = [
+        ".devsite-badge",
+        ".devsite-chip",
+        "span.badge",
+        "span.chip",
+    ]
+    for selector in selectors:
+        for badge in node.select(selector):
+            for word in re.findall(r"[A-Za-z]+", _clean(badge.get_text())):
+                _add_token(tokens, word)
+    return tokens
+
+
+def _extract_protection_tokens(card, text: str) -> Tuple[list[str], Optional[str]]:
+    tokens: list[str] = []
+
+    # Strategy 1: classic "Protection level:" marker with optional pluralisation
+    match = re.search(r"\bProtection level[s]?\b[:\s]*", text, re.I)
+    if match:
+        window = text[match.end() : match.end() + 200]
+        started = False
+        for word in re.findall(r"[A-Za-z]+", window):
+            lw = word.lower()
+            if lw in ALLOWED_TOKENS:
+                _add_token(tokens, lw)
+                started = True
+                continue
+            if started:
+                break
+        if tokens:
+            return tokens, "|".join(tokens)
+
+    # Strategy 2: look for definition lists (dt/dd) pairs
+    if hasattr(card, "find_all"):
+        for dt in card.find_all("dt"):
+            label = _clean(dt.get_text())
+            if not label.lower().startswith("protection level"):
+                continue
+            dd = dt.find_next_sibling("dd")
+            if dd:
+                dd_tokens = _tokens_from_badges(dd)
+                if not dd_tokens:
+                    for word in re.findall(r"[A-Za-z]+", _clean(dd.get_text(" ", strip=True))):
+                        _add_token(dd_tokens, word)
+                if dd_tokens:
+                    return dd_tokens, "|".join(dd_tokens)
+
+    # Strategy 3: as a last resort, scan for badges anywhere inside the card
+    badge_tokens = _tokens_from_badges(card)
+    if badge_tokens:
+        return badge_tokens, "|".join(badge_tokens)
+
+    return tokens, None
 
 
 
@@ -83,21 +148,8 @@ def parse_manifest_permissions(html: str, *, base_url: str) -> List[PermissionMe
                 if mv:
                     added_version = mv.group(1)
 
-        # Protection level — robust capture of tokens (e.g., signature|privileged|development)
-        prot_raw = None
-        m = re.search(r"\bProtection level:\s*", text)
-        prot_tokens: list[str] = []
-        prot_raw = None
-        if m:
-            # Look ahead a small window for token extraction
-            window = text[m.end() : m.end() + 120]
-            # Collect only allowed tokens
-            for tok in re.findall(r"[A-Za-z]+", window):
-                t = tok.lower()
-                if t in ALLOWED_TOKENS and t not in prot_tokens:
-                    prot_tokens.append(t)
-            if prot_tokens:
-                prot_raw = "|".join(prot_tokens)
+        # Protection level — capture across modern layouts (chips, lists, inline text)
+        prot_tokens, prot_raw = _extract_protection_tokens(card, text)
         prot = normalise_protection(prot_raw)
         if not prot_tokens and prot:
             prot_tokens = [prot]
