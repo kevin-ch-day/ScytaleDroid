@@ -48,8 +48,8 @@ ON DUPLICATE KEY UPDATE
 """
 
 SELECT_FRAMEWORK_PROTECTION = """
-SELECT perm_name, protection FROM android_framework_permissions
-WHERE perm_name IN ({placeholders})
+SELECT `short`, protection FROM android_framework_permissions
+WHERE `short` IN ({placeholders})
 """
 
 TABLE_EXISTS = """

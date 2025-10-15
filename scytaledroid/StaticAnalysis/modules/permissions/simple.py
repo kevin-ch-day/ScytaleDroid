@@ -124,28 +124,33 @@ def print_permissions_block(
             unique_declared.append((name, element_type))
 
     # Protective annotations from framework table when available
-    names_only = [n for n, _ in unique_declared if n.startswith("android.")]
-    protection_map = _fetch_protections(names_only)
+    # Build short, uppercase keys for framework permissions
+    shorts_only = [n.split(".")[-1].upper() for n, _ in unique_declared if n.startswith("android.")]
+    protection_map = _fetch_protections(shorts_only)
 
     android_perms: List[str] = []
     custom_perms: List[str] = []
     risk_counts: Dict[str, int] = {"dangerous": 0, "signature": 0, "normal": 0, "other": 0}
     for name, element_type in unique_declared:
-        formatted = _format_permission(name, element_type)
         if name.startswith("android."):
-            prot = protection_map.get(name)
+            # Framework: show short, uppercase (strip android.permission.)
+            short_key = name.split(".")[-1].upper()
+            prot = protection_map.get(short_key)
+            suffix = " (uses-permission-sdk-23)" if element_type == "uses-permission-sdk-23" else ""
             if prot:
                 tag = f" [{prot}]"
                 risk_counts[prot] = risk_counts.get(prot, 0) + 1
             else:
                 tag = ""
                 risk_counts["other"] = risk_counts.get("other", 0) + 1
-            android_perms.append(f"{formatted}{tag}")
+            android_perms.append(f"{short_key}{suffix}{tag}")
         else:
+            # Vendor/custom: keep fully-qualified name, include sdk-23 note when present
+            formatted = _format_permission(name, element_type)
             custom_perms.append(formatted)
 
     if android_perms:
-        print(f"Android permissions ({len(android_perms)}):")
+        print(f"Framework permissions ({len(android_perms)}):")
         for permission in android_perms:
             print(f"  {permission}")
 
@@ -169,7 +174,7 @@ def print_permissions_block(
         f"custom_defined={len(defined)}"
     )
     # Risk breakdown (android only)
-    if names_only:
+    if shorts_only:
         summary = ", ".join(
             f"{k}={v}" for k, v in (
                 ("dangerous", risk_counts.get("dangerous", 0)),

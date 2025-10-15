@@ -40,6 +40,18 @@ def audit_detected_permissions(apply_fixes: bool = False) -> Tuple[List[str], Li
     has_sha = "sha256" in cols
     has_ver = ("version_name" in cols) or ("version_code" in cols)
     has_apk_unique = _index_exists("android_detected_permissions", "ux_detected_perm_apk")
+    # Foreign key check (best-effort)
+    def _fk_exists() -> bool:
+        row = core_q.run_sql(
+            (
+                "SELECT COUNT(*) FROM information_schema.referential_constraints "
+                "WHERE constraint_schema = DATABASE() AND table_name = 'android_detected_permissions' "
+                "AND constraint_name = 'fk_detected_apk'"
+            ),
+            fetch="one",
+        )
+        return bool(row and int(row[0]) > 0)
+    has_fk = _fk_exists()
     has_sha_unique = _index_exists("android_detected_permissions", "ux_detected_perm_sha")
 
     if not has_apk_id:
@@ -79,6 +91,16 @@ def audit_detected_permissions(apply_fixes: bool = False) -> Tuple[List[str], Li
                 "ALTER TABLE android_detected_permissions DROP INDEX ux_detected_perm_sha"
             )
             fixes_applied.append("dropped legacy unique ux_detected_perm_sha")
+
+    # Add FK to repository if not present (optional)
+    if apply_fixes and has_apk_id and not has_fk:
+        try:
+            core_q.run_sql(
+                "ALTER TABLE android_detected_permissions ADD CONSTRAINT fk_detected_apk FOREIGN KEY (apk_id) REFERENCES android_apk_repository(apk_id)"
+            )
+            fixes_applied.append("added foreign key fk_detected_apk")
+        except Exception:
+            pass
 
     # Drop legacy columns if requested
     if (has_sha or has_ver) and apply_fixes:
@@ -144,16 +166,18 @@ def audit_unknown_permissions(apply_fixes: bool = False) -> Tuple[List[str], Lis
     if has_observed or has_occ or not has_unique:
         issues.append("unknown_permissions schema not aligned (drop observed/occurrences, unique perm_name)")
         if apply_fixes:
-            # Drop legacy columns if present
-            drops = []
+            # Drop legacy columns safely one-by-one (handle already-dropped cases)
             for c in ("observed_in_pkg", "observed_in_sha256", "occurrences"):
-                if c in cols:
-                    drops.append(f"DROP COLUMN {c}")
-            if drops:
-                core_q.run_sql("ALTER TABLE android_unknown_permissions " + ", ".join(drops))
-                fixes_applied.append("dropped legacy observed/occurrences columns")
+                try:
+                    cols = get_table_columns("android_unknown_permissions") or []
+                    if c in cols:
+                        core_q.run_sql(f"ALTER TABLE android_unknown_permissions DROP COLUMN `{c}`")
+                        fixes_applied.append(f"dropped column {c}")
+                except Exception:
+                    # Ignore if column already gone
+                    pass
             # Add unique on perm_name if missing
-            if not has_unique:
+            if not _index_exists("android_unknown_permissions", "ux_android_unknown_perm"):
                 core_q.run_sql(
                     "ALTER TABLE android_unknown_permissions ADD UNIQUE KEY ux_android_unknown_perm (perm_name)"
                 )

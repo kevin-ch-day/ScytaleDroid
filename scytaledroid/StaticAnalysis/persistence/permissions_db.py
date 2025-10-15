@@ -74,10 +74,11 @@ def persist_declared_permissions(
     except Exception:
         pass
 
-    # Prefetch framework classification for declared permissions
+    # Prefetch framework protections by short name (uppercase)
     framework_map = {}
     try:
-        framework_map = _dp.framework_protection_map(declared_names)
+        short_keys = [str(n).split('.')[-1].upper() for n in declared_names if isinstance(n, str) and n.startswith('android.permission.')]
+        framework_map = _dp.framework_protection_map(short_keys)
     except Exception:
         framework_map = {}
 
@@ -86,15 +87,17 @@ def persist_declared_permissions(
         if not isinstance(name, str) or not name.strip():
             continue
         # Detected permission record with classification
-        prot = framework_map.get(name)
         is_android_prefix = name.startswith("android.permission.")
-        is_framework = is_android_prefix or (name in framework_map)
+        short_key = name.split('.')[-1].upper() if is_android_prefix else None
+        prot = framework_map.get(short_key) if short_key else None
+        is_framework = bool(is_android_prefix)
         classification = "framework" if is_framework else ("vendor" if "." in name else "unknown")
-        ns = _ns_from_perm(name)
+        ns = 'android.permission' if is_framework else _ns_from_perm(name)
         detected_payload = {
             "package_name": package_name,
             "artifact_label": artifact_label,
-            "perm_name": name,
+            # Store short (uppercase) for framework; vendor keeps full name
+            "perm_name": short_key if is_framework else name,
             "namespace": ns,
             "classification": classification,
             "protection": prot,

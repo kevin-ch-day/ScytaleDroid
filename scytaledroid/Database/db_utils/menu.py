@@ -74,9 +74,7 @@ def database_menu() -> None:
             "3": "Show core table row counts",
             "4": "Framework permissions: counts by protection",
             "5": "Permission tables row counts",
-            "6": "Write framework catalog to DB",
             "7": "Show DB config (source and values)",
-            "8": "Create config template (config/db.json.example)",
             "9": "Configure DB connection (write config/db.json)",
             "10": "Create database if missing",
             "11": "Run schema audit script (temporary)",
@@ -95,12 +93,8 @@ def database_menu() -> None:
             _handle_framework_protection_counts()
         elif choice == "5":
             _handle_permission_table_counts()
-        elif choice == "6":
-            _handle_write_framework_catalog()
         elif choice == "7":
             _handle_show_db_config()
-        elif choice == "8":
-            _handle_write_config_template()
         elif choice == "9":
             _handle_configure_db_connection()
         elif choice == "10":
@@ -397,7 +391,7 @@ def _handle_detected_summary() -> None:
         )
         # Top vendor namespaces
         ns_rows = _core_q.run_sql(
-            "SELECT COALESCE(namespace,'-') AS ns, COUNT(*) AS n FROM android_vendor_permissions GROUP BY namespace ORDER BY n DESC LIMIT 20",
+            "SELECT COALESCE(namespace,'-') AS ns, COUNT(*) AS n FROM android_detected_permissions WHERE classification='vendor' GROUP BY namespace ORDER BY n DESC LIMIT 20",
             fetch="all",
         )
         # Top apps by dangerous frameworks
