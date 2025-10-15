@@ -1,83 +1,110 @@
 #!/usr/bin/env bash
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# shellcheck source=lib/common.sh
+source "$SCRIPT_DIR/common.sh"
+
+ROOT_DIR="$SCYTALE_REPO_ROOT"
 
 ensure_repo_available() {
   if [[ ! -d "$ROOT_DIR/.git" ]]; then
-    printf '\n[WARN] No git repository detected at %s.\n' "$ROOT_DIR"
+    scytale::warn "No git repository detected at $ROOT_DIR"
     return 1
   fi
   return 0
 }
 
 clean_bytecode() {
-  printf '\n[INFO] Removing Python bytecode and __pycache__ directories...\n'
+  scytale::info "Removing Python bytecode and __pycache__ directories..."
   find "$ROOT_DIR" -name '__pycache__' -type d -prune -print -exec rm -rf {} +
   find "$ROOT_DIR" -name '*.py[co]' -print -delete
   find "$ROOT_DIR" -name '*$py.class' -print -delete
 }
 
 clean_tooling_artifacts() {
-  printf '\n[INFO] Removing tooling caches (pytest, coverage, mypy)...\n'
+  scytale::info "Removing tooling caches (pytest, coverage, mypy)..."
   rm -rf "$ROOT_DIR/.mypy_cache" "$ROOT_DIR/.pytest_cache" "$ROOT_DIR/htmlcov"
   find "$ROOT_DIR" -name '.coverage*' -print -delete
 }
 
 clean_logs_and_output() {
-  printf '\n[INFO] Clearing logs/, output/, and data/state/...\n'
+  scytale::info "Clearing logs/, output/, and data/state/..."
   rm -rf "$ROOT_DIR/logs"/* 2>/dev/null || true
   rm -rf "$ROOT_DIR/output"/* 2>/dev/null || true
   rm -rf "$ROOT_DIR/data/state"/* 2>/dev/null || true
 }
 
 clean_harvest_artifacts() {
-  printf '\n[INFO] Removing harvested APKs and watchlists...\n'
+  scytale::info "Removing harvested APKs and watchlists..."
   rm -rf "$ROOT_DIR/data/apks/device_apks"/* 2>/dev/null || true
   rm -rf "$ROOT_DIR/data/watchlists"/* 2>/dev/null || true
 }
 
 clean_temp_files() {
-  printf '\n[INFO] Removing temporary files (*.tmp, *.bak, backup files)...\n'
+  scytale::info "Removing temporary files (*.tmp, *.bak, backup files)..."
   find "$ROOT_DIR" -name '*.tmp' -print -delete
   find "$ROOT_DIR" -name '*.bak' -print -delete
   find "$ROOT_DIR" -name '*~' -print -delete
 }
 
 clean_all() {
-  clean_bytecode
-  clean_tooling_artifacts
-  clean_logs_and_output
-  clean_harvest_artifacts
-  clean_temp_files
+  scytale::info "Running full maintenance suite..."
+  scytale::run_task "Python bytecode cleanup" clean_bytecode
+  scytale::run_task "Tooling artifact cleanup" clean_tooling_artifacts
+  scytale::run_task "Logs and runtime output cleanup" clean_logs_and_output
+  scytale::run_task "Harvested APK cleanup" clean_harvest_artifacts
+  scytale::run_task "Temporary file cleanup" clean_temp_files
 }
 
 scan_cleanup_targets() {
-  printf '\n[SCAN] Listing current cleanup candidates (showing up to 20 results per category)...\n'
-  printf '\n  • __pycache__ directories:\n'
-  find "$ROOT_DIR" -name '__pycache__' -type d | head -n 20
+  scytale::info "Listing cleanup candidates (showing up to 20 results per category)..."
+  scytale::subheading "__pycache__ directories"
+  find "$ROOT_DIR" -name '__pycache__' -type d | head -n 20 | scytale::prefix_lines "    "
 
-  printf '\n  • Temporary files (*.tmp, *.bak, *~):\n'
-  find "$ROOT_DIR" \( -name '*.tmp' -o -name '*.bak' -o -name '*~' \) | head -n 20
+  scytale::subheading "Temporary files (*.tmp, *.bak, *~)"
+  find "$ROOT_DIR" \( -name '*.tmp' -o -name '*.bak' -o -name '*~' \) | head -n 20 | scytale::prefix_lines "    "
 
-  printf '\n  • Coverage and testing artifacts:\n'
-  find "$ROOT_DIR" \( -name '.coverage*' -o -name '.pytest_cache' -o -name '.mypy_cache' \) | head -n 20
+  scytale::subheading "Coverage and testing artifacts"
+  find "$ROOT_DIR" \( -name '.coverage*' -o -name '.pytest_cache' -o -name '.mypy_cache' \) | head -n 20 | scytale::prefix_lines "    "
 }
 
 show_project_overview() {
-  printf '\n[INFO] Project overview for %s\n' "$ROOT_DIR"
-  du -sh "$ROOT_DIR" 2>/dev/null | awk '{printf "  • Total size: %s\n", $1}' || true
-  printf '  • Python files: %s\n' "$(find "$ROOT_DIR" -name '*.py' | wc -l)"
-  printf '  • Shell scripts: %s\n' "$(find "$ROOT_DIR" -name '*.sh' | wc -l)"
-  printf '\nTop-level directories:\n'
-  find "$ROOT_DIR" -maxdepth 1 -type d ! -path "$ROOT_DIR" | sort
+  scytale::info "Project overview for $ROOT_DIR"
+
+  scytale::subheading "Key metrics"
+  local total_size
+  total_size=$(du -sh "$ROOT_DIR" 2>/dev/null | awk '{print $1}' || true)
+  if [[ -n "$total_size" ]]; then
+    printf '    %s %sTotal size:%s %s\n' \
+      "$(scytale::fmt_color "$SCYTALE_CLR_ACCENT" "$SCYTALE_SYMBOL_BULLET")" \
+      "$SCYTALE_FMT_BOLD" \
+      "$SCYTALE_FMT_RESET" \
+      "$total_size"
+  fi
+
+  local python_count shell_count
+  python_count=$(find "$ROOT_DIR" -name '*.py' | wc -l)
+  shell_count=$(find "$ROOT_DIR" -name '*.sh' | wc -l)
+  printf '    %s %sPython files:%s %s\n' \
+    "$(scytale::fmt_color "$SCYTALE_CLR_ACCENT" "$SCYTALE_SYMBOL_BULLET")" \
+    "$SCYTALE_FMT_BOLD" \
+    "$SCYTALE_FMT_RESET" \
+    "$python_count"
+  printf '    %s %sShell scripts:%s %s\n' \
+    "$(scytale::fmt_color "$SCYTALE_CLR_ACCENT" "$SCYTALE_SYMBOL_BULLET")" \
+    "$SCYTALE_FMT_BOLD" \
+    "$SCYTALE_FMT_RESET" \
+    "$shell_count"
+
+  scytale::subheading "Top-level directories"
+  find "$ROOT_DIR" -maxdepth 1 -type d ! -path "$ROOT_DIR" | sort | scytale::prefix_lines "    "
 }
 
 show_git_status() {
   if ! ensure_repo_available; then
     return
   fi
-  printf '\n[GIT] Status summary:\n'
+  scytale::info "Git status summary"
   git -C "$ROOT_DIR" status -sb
 }
 
@@ -85,7 +112,7 @@ show_git_diffstat() {
   if ! ensure_repo_available; then
     return
   fi
-  printf '\n[GIT] Diff statistics for working tree vs. HEAD:\n'
+  scytale::info "Diff statistics for working tree vs. HEAD"
   git -C "$ROOT_DIR" diff --stat
 }
 
@@ -93,23 +120,6 @@ show_recent_commits() {
   if ! ensure_repo_available; then
     return
   fi
-  printf '\n[GIT] Recent commits:\n'
+  scytale::info "Recent commits"
   git -C "$ROOT_DIR" log --oneline --graph -5
-}
-
-print_banner() {
-  cat <<'BANNER'
-   _____           _        _          ____            _           _   
-  / ____|         | |      | |        |  _ \          | |         | |  
- | |     ___ _ __ | |_ __ _| |___   _ | |_) | ___  ___| |__   ___ | |_ 
- | |    / _ \ '_ \| __/ _` | / / | | ||  _ < / _ \/ __| '_ \ / _ \| __|
- | |___|  __/ | | | || (_| | <| |_| || |_) |  __/ (__| | | | (_) | |_ 
-  \_____\___|_| |_|\__\__,_|_|\__, ||____/ \___|\___|_| |_|\___/ \__|
-                                __/ |                                 
-                               |___/                                  
-BANNER
-}
-
-pause_prompt() {
-  read -rp $'\nPress Enter to continue...' _
 }

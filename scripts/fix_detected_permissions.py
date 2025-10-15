@@ -11,7 +11,18 @@ Uses scytaledroid.Database.db_core.db_config.DB_CONFIG
 """
 
 import argparse
+import sys
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+LIB_DIR = SCRIPT_DIR / "lib"
+if str(LIB_DIR) not in sys.path:
+    sys.path.insert(0, str(LIB_DIR))
+
+from python_utils import ensure_repo_root_on_path  # type: ignore  # noqa: E402
+
+REPO_ROOT = ensure_repo_root_on_path(__file__, levels=1)
 
 # --- DB config from your project ---
 from scytaledroid.Database.db_core.db_config import DB_CONFIG  # hardcoded dev config
