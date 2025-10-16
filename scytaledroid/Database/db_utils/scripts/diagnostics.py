@@ -228,6 +228,68 @@ def run_diagnostics() -> None:
     except Exception as exc:
         print(status_messages.status(f"Coverage query failed: {exc}", level="error"))
 
+    # Guardrail: cleartext endpoints should be rare
+    print()
+    menu_utils.print_section("Guardrail: cleartext endpoints present (top 3)")
+    try:
+        rows = core_q.run_sql(
+            """
+            SELECT root_domain,
+                   COUNT(*) AS total,
+                   SUM(CASE WHEN scheme='http' THEN 1 ELSE 0 END) AS http_hits
+            FROM v_string_findings_enriched
+            WHERE finding_type='endpoint'
+              AND risk_tag='http_cleartext'
+            GROUP BY root_domain
+            ORDER BY total DESC
+            LIMIT 3
+            """,
+            fetch="all",
+        )
+        menu_utils.print_table(["root_domain", "total", "http_hits"], rows or [])
+        if rows:
+            hosts = ", ".join(str(row[0]) for row in rows if row and row[0])
+            print(
+                status_messages.status(
+                    f"Warning: cleartext endpoints detected for {hosts or 'unknown hosts'}.",
+                    level="warn",
+                )
+            )
+        else:
+            print(status_messages.status("OK — no non-local cleartext endpoints captured.", level="success"))
+    except Exception as exc:
+        print(status_messages.status(f"Cleartext endpoint guardrail failed: {exc}", level="error"))
+
+    # Guardrail: high-confidence API keys detected
+    print()
+    menu_utils.print_section("Guardrail: high-confidence API keys")
+    try:
+        rows = core_q.run_sql(
+            """
+            SELECT provider,
+                   COUNT(*) AS total
+            FROM v_string_findings_enriched
+            WHERE finding_type='api_key'
+              AND confidence='high'
+            GROUP BY provider
+            ORDER BY total DESC
+            """,
+            fetch="all",
+        )
+        menu_utils.print_table(["provider", "total"], rows or [])
+        if rows:
+            providers = ", ".join(str(row[0]) for row in rows if row and row[0])
+            print(
+                status_messages.status(
+                    f"Warning: high-confidence keys present for providers: {providers}.",
+                    level="warn",
+                )
+            )
+        else:
+            print(status_messages.status("OK — no high-confidence keys recorded.", level="success"))
+    except Exception as exc:
+        print(status_messages.status(f"API key guardrail failed: {exc}", level="error"))
+
 
 def show_sql_bundle() -> None:
     from scytaledroid.Utils.DisplayUtils import menu_utils, status_messages

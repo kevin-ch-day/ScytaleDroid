@@ -35,6 +35,15 @@ CREATE TABLE IF NOT EXISTS static_string_samples (
   value_masked VARCHAR(512) NULL,
   src VARCHAR(512) NULL,
   tag VARCHAR(64) NULL,
+  source_type VARCHAR(16) NULL,
+  finding_type VARCHAR(32) NULL,
+  provider VARCHAR(64) NULL,
+  risk_tag VARCHAR(32) NULL,
+  confidence VARCHAR(16) NULL,
+  sample_hash CHAR(40) NULL,
+  root_domain VARCHAR(191) NULL,
+  resource_name VARCHAR(191) NULL,
+  scheme VARCHAR(32) NULL,
   rank INT UNSIGNED NOT NULL DEFAULT 0,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
@@ -76,8 +85,43 @@ DELETE FROM static_string_samples WHERE summary_id=%s
 """
 
 INSERT_SAMPLE = """
-INSERT INTO static_string_samples (summary_id, bucket, value_masked, src, tag, rank)
-VALUES (%s, %s, %s, %s, %s, %s)
+INSERT INTO static_string_samples (
+  summary_id,
+  bucket,
+  value_masked,
+  src,
+  tag,
+  rank,
+  source_type,
+  finding_type,
+  provider,
+  risk_tag,
+  confidence,
+  sample_hash,
+  root_domain,
+  resource_name,
+  scheme
+)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+"""
+
+CREATE_STRING_FINDINGS_VIEW = """
+CREATE OR REPLACE VIEW v_string_findings_enriched AS
+SELECT
+  s.id AS apk_id,
+  s.package_name,
+  sm.finding_type,
+  sm.provider,
+  sm.risk_tag,
+  sm.confidence,
+  sm.root_domain,
+  sm.scheme,
+  sm.resource_name,
+  sm.source_type,
+  sm.src AS source_ref,
+  sm.sample_hash
+FROM static_string_samples AS sm
+JOIN static_string_summary AS s ON sm.summary_id = s.id;
 """
 
 TABLE_EXISTS_SUMMARY = """
@@ -95,6 +139,7 @@ __all__ = [
     "SELECT_SUMMARY_ID",
     "DELETE_SAMPLES_FOR_SUMMARY",
     "INSERT_SAMPLE",
+    "CREATE_STRING_FINDINGS_VIEW",
     "TABLE_EXISTS_SUMMARY",
     "TABLE_EXISTS_SAMPLES",
 ]

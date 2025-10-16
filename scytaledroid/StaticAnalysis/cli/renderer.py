@@ -374,6 +374,8 @@ def _render_hash_lines(hashes: Mapping[str, str]) -> list[str]:
 def _normalise_string_data(raw: Mapping[str, object]) -> Mapping[str, object]:
     counts_payload = raw.get("counts") if isinstance(raw, Mapping) else {}
     samples_payload = raw.get("samples") if isinstance(raw, Mapping) else {}
+    extra_counts_payload = raw.get("extra_counts") if isinstance(raw, Mapping) else {}
+    aggregates_payload = raw.get("aggregates") if isinstance(raw, Mapping) else {}
     counts = {bucket: int(counts_payload.get(bucket, 0)) for bucket in _STRING_BUCKET_ORDER}
     samples: MutableMapping[str, list[Mapping[str, object]]] = {}
     if isinstance(samples_payload, Mapping):
@@ -391,62 +393,280 @@ def _normalise_string_data(raw: Mapping[str, object]) -> Mapping[str, object]:
                             "src": entry.get("src"),
                             "tag": entry.get("tag"),
                             "sha256": entry.get("sha256"),
+                            "finding_type": entry.get("finding_type"),
+                            "provider": entry.get("provider"),
+                            "risk_tag": entry.get("risk_tag"),
+                            "confidence": entry.get("confidence"),
+                            "scheme": entry.get("scheme"),
+                            "root_domain": entry.get("root_domain"),
+                            "resource_name": entry.get("resource_name"),
+                            "source_type": entry.get("source_type"),
+                            "sample_hash": entry.get("sample_hash"),
                         }
                     )
                 if normalised:
                     samples[bucket] = normalised
-    return {"counts": counts, "samples": samples}
+    extra_counts = {}
+    if isinstance(extra_counts_payload, Mapping):
+        extra_counts = {str(k): int(extra_counts_payload.get(k, 0)) for k in extra_counts_payload}
+    aggregates = aggregates_payload if isinstance(aggregates_payload, Mapping) else {}
+    options_payload = raw.get("options") if isinstance(raw, Mapping) else {}
+    options = options_payload if isinstance(options_payload, Mapping) else {}
+    return {
+        "counts": counts,
+        "samples": samples,
+        "extra_counts": extra_counts,
+        "aggregates": aggregates,
+        "options": options,
+    }
 
 
 def _string_lines(string_payload: Mapping[str, object]) -> list[str]:
-    lines = ["String Analysis (DEX first; then resources/assets)", "  Totals"]
+    lines = ["String Analysis"]
     counts = string_payload.get("counts", {}) if isinstance(string_payload, Mapping) else {}
-    # Show only non-zero buckets, sorted by count desc, up to 6 entries
-    present = [(bucket, int(counts.get(bucket, 0))) for bucket in _STRING_BUCKET_ORDER]
-    present = [(b, c) for b, c in present if c > 0]
-    present.sort(key=lambda x: x[1], reverse=True)
-    if present:
-        head = present[:6]
-        totals = "  ".join(f"{b}={_short_number(c)}" for b, c in head)
-    else:
-        totals = "  none"
-    lines.extend(_wrap_lines(totals, indent=4, subsequent_indent=6))
+    extra = string_payload.get("extra_counts", {}) if isinstance(string_payload, Mapping) else {}
+    aggregates = string_payload.get("aggregates", {}) if isinstance(string_payload, Mapping) else {}
+    options = string_payload.get("options", {}) if isinstance(string_payload, Mapping) else {}
 
-    import os as _os
-    samples_payload = string_payload.get("samples", {}) if isinstance(string_payload, Mapping) else {}
-    if isinstance(samples_payload, Mapping):
-        for bucket in _STRING_BUCKET_ORDER:
-            if bucket not in _STRING_BUCKET_TITLES:
-                continue
-            entries = samples_payload.get(bucket)
-            if not entries:
-                continue
-            lines.append(f"  {_STRING_BUCKET_TITLES[bucket]}")
-            # Limit per-bucket samples to 2 to keep output tight (except high_entropy: suppressed unless verbose)
-            verbose_strings = _os.environ.get("SCY_STRINGS_VERBOSE", "0") == "1"
-            if bucket == "high_entropy" and not verbose_strings:
-                top_entries = []
-            else:
-                top_entries = list(entries)[: (1 if bucket == "endpoints" else 2)]
-            for sample in top_entries:
-                if not isinstance(sample, Mapping):
+    try:
+        sample_limit = max(int(options.get("max_samples", 2)), 1)
+    except Exception:
+        sample_limit = 2
+    cleartext_only = bool(options.get("cleartext_only")) if isinstance(options, Mapping) else False
+
+    def _count_value(key: str, *, source: Mapping[str, object] | None = None) -> int:
+        mapping = source if source is not None else counts
+        return int(mapping.get(key, 0)) if isinstance(mapping, Mapping) else 0
+
+    totals_line1 = "  ".join(
+        (
+            f"endpoints={_short_number(_count_value('endpoints'))}",
+            f"http_cleartext={_short_number(_count_value('http_cleartext'))}",
+            f"https={_short_number(_count_value('https', source=extra))}",
+            f"ip_private={_short_number(_count_value('ip_private', source=extra))}",
+        )
+    )
+    totals_line2 = "  ".join(
+        (
+            f"analytics_ids={_short_number(_count_value('analytics_ids'))}",
+            f"api_keys={_short_number(_count_value('api_keys'))}",
+            f"cloud_refs={_short_number(_count_value('cloud_refs'))}",
+            f"entropy_hi={_short_number(_count_value('entropy_high', source=extra) or _count_value('high_entropy'))}",
+        )
+    )
+    lines.append("  Totals")
+    lines.extend(_wrap_lines(totals_line1, indent=4, subsequent_indent=6))
+    lines.extend(_wrap_lines(totals_line2, indent=4, subsequent_indent=6))
+
+    endpoint_roots = []
+    if isinstance(aggregates, Mapping):
+        roots = aggregates.get("endpoint_roots")
+        if isinstance(roots, Sequence):
+            endpoint_roots = [item for item in roots if isinstance(item, Mapping)]
+
+    if endpoint_roots:
+        lines.append("")
+        lines.append("  Endpoints (top by host root)")
+        if cleartext_only:
+            allowed_hosts = {
+                str(entry.get("root_domain"))
+                for entry in aggregates.get("endpoint_cleartext", [])
+                if isinstance(entry, Mapping) and entry.get("root_domain")
+            }
+            filtered_roots = [
+                item
+                for item in endpoint_roots
+                if not allowed_hosts or str(item.get("root_domain")) in allowed_hosts
+            ]
+        else:
+            filtered_roots = endpoint_roots
+        top = filtered_roots[: max(3, sample_limit)]
+        for item in top:
+            root = str(item.get("root_domain") or "(unknown)")
+            total = int(item.get("total", 0))
+            schemes = item.get("schemes") if isinstance(item.get("schemes"), Mapping) else {}
+            parts = []
+            for scheme, count in sorted(schemes.items() if isinstance(schemes, Mapping) else []):
+                parts.append(f"{scheme}={int(count)}")
+            detail = f"{root} ×{total}"
+            if parts:
+                detail += "   (" + ", ".join(parts) + ")"
+            lines.extend(_wrap_lines(detail, indent=4, subsequent_indent=6))
+        remaining = len(filtered_roots) - len(top)
+        if remaining > 0:
+            lines.append(f"    (+{remaining} more)")
+
+    clear_samples = []
+    if isinstance(aggregates, Mapping):
+        clear_entries = aggregates.get("endpoint_cleartext")
+        if isinstance(clear_entries, Sequence):
+            clear_samples = [entry for entry in clear_entries if isinstance(entry, Mapping)]
+
+    if clear_samples:
+        lines.append("")
+        lines.append("  Cleartext (http://) — non-local (first 10)")
+        top_clear = clear_samples[:10]
+        for entry in top_clear:
+            url = str(entry.get("value") or "(unknown)")
+            src = str(entry.get("src") or "string")
+            preview = url if len(url) <= 70 else f"{url[:67]}…"
+            detail = f"{preview}              Src: {src}"
+            lines.extend(_wrap_lines(detail, indent=4, subsequent_indent=6))
+        remaining = len(clear_samples) - len(top_clear)
+        if remaining > 0:
+            lines.append(f"    (+{remaining} more)")
+
+    api_payload = []
+    if isinstance(aggregates, Mapping):
+        api_entries = aggregates.get("api_keys_high")
+        if isinstance(api_entries, Sequence):
+            api_payload = [entry for entry in api_entries if isinstance(entry, Mapping)]
+
+    if api_payload:
+        lines.append("")
+        lines.append("  API Keys & Tokens (high-confidence)")
+
+        def _api_label(provider: str | None, token_type: str | None) -> str:
+            provider_key = (provider or "").lower()
+            token_key = (token_type or "").lower()
+            mapping = {
+                ("google", "google_api_key"): "GoogleAPI",
+                ("aws", "aws_access_key"): "AWS AKID",
+                ("aws", "aws_secret"): "AWS Secret",
+                ("stripe", "stripe"): "Stripe",
+                ("stripe", None): "Stripe",
+                ("slack", "slack"): "Slack",
+                ("github", "github"): "GitHub",
+                ("twilio", "twilio"): "Twilio",
+            }
+            if token_key == "jwt":
+                return "JWT"
+            for (prov, token), label in mapping.items():
+                if provider_key == prov and (token is None or token_key == token):
+                    return label
+            return provider.capitalize() if provider else "Token"
+
+        for entry in api_payload[:sample_limit]:
+            provider = entry.get("provider")
+            token_type = entry.get("token_type")
+            label = _api_label(provider, token_type)
+            masked = str(entry.get("masked") or "(hidden)")
+            src = str(entry.get("src") or "string")
+            confidence = entry.get("confidence")
+            suffix = f" (confidence {confidence})" if confidence and confidence != "high" else ""
+            detail = f"{label:<10} {masked}              Src: {src}{suffix}"
+            lines.extend(_wrap_lines(detail, indent=4, subsequent_indent=6))
+        remaining = len(api_payload) - min(len(api_payload), sample_limit)
+        if remaining > 0:
+            lines.append(f"    (+{remaining} more)")
+
+    cloud_payload = []
+    if isinstance(aggregates, Mapping):
+        cloud_entries = aggregates.get("cloud_refs")
+        if isinstance(cloud_entries, Sequence):
+            cloud_payload = [entry for entry in cloud_entries if isinstance(entry, Mapping)]
+
+    if cloud_payload:
+        lines.append("")
+        lines.append("  Cloud References")
+        for entry in cloud_payload[:sample_limit]:
+            provider = str(entry.get("provider") or "cloud")
+            service = str(entry.get("service") or "").strip()
+            label = f"{provider}:{service}" if service else provider
+            resource = entry.get("resource")
+            region = entry.get("region")
+            src = str(entry.get("src") or "string")
+            parts = [label]
+            if resource:
+                parts.append(f"bucket={resource}")
+            if region:
+                parts.append(f"region={region}")
+            detail = "  ".join(parts) + f"        Src: {src}"
+            lines.extend(_wrap_lines(detail, indent=4, subsequent_indent=6))
+        remaining = len(cloud_payload) - min(len(cloud_payload), sample_limit)
+        if remaining > 0:
+            lines.append(f"    (+{remaining} more)")
+
+    analytics_payload: list[tuple[str, list[Mapping[str, object]], int]] = []
+    if isinstance(aggregates, Mapping):
+        analytics_entries = aggregates.get("analytics_ids")
+        if isinstance(analytics_entries, Mapping):
+            for vendor, entries in analytics_entries.items():
+                if not isinstance(entries, Sequence):
                     continue
-                raw_value = sample.get("value") or sample.get("value_masked") or "(value hidden)"
-                # Avoid dumping large JSON/dict-like payloads; show a compact preview instead
-                value_str = str(raw_value)
-                if isinstance(raw_value, (dict, list)) or (len(value_str) > 120 and (value_str.strip().startswith("{") or value_str.strip().startswith("["))):
-                    preview = "(large payload omitted)"
-                else:
-                    preview = value_str if len(value_str) <= 120 else (value_str[:117] + "…")
-                src = sample.get("src", "string")
-                tag = sample.get("tag")
-                detail = f"{preview}  Src: {src}"
-                if tag:
-                    detail += f"  Tag: {tag}"
-                lines.extend(_wrap_lines(detail, indent=4, subsequent_indent=6))
-            remaining = len(entries) - len(top_entries)
-            if remaining > 0:
-                lines.append(f"    (+{remaining} more)")
+                vendor_entries: list[Mapping[str, object]] = []
+                total_ids = 0
+                for entry in entries:
+                    if not isinstance(entry, Mapping):
+                        continue
+                    ids = entry.get("ids")
+                    if not isinstance(ids, Sequence):
+                        continue
+                    normalised_ids = [str(identifier) for identifier in ids if identifier]
+                    vendor_entries.append(
+                        {
+                            "ids": normalised_ids,
+                            "src": str(entry.get("src") or "string"),
+                            "count": int(entry.get("count", len(normalised_ids))),
+                        }
+                    )
+                    total_ids += len(normalised_ids)
+                if vendor_entries:
+                    analytics_payload.append((str(vendor), vendor_entries, total_ids))
+
+    if analytics_payload:
+        lines.append("")
+        lines.append("  Analytics IDs (by vendor)")
+        analytics_payload.sort(key=lambda item: (-item[2], item[0]))
+        vendor_limit = max(sample_limit, 3)
+        shown_vendors = analytics_payload[:vendor_limit]
+        for vendor, entries, _total_ids in shown_vendors:
+            all_ids = sorted({identifier for entry in entries for identifier in entry.get("ids", [])})
+            if not all_ids:
+                continue
+            display_ids = all_ids[:sample_limit]
+            primary_src = entries[0].get("src") or "string"
+            detail = f"{vendor}: {', '.join(display_ids)}       Src: {primary_src}"
+            lines.extend(_wrap_lines(detail, indent=4, subsequent_indent=6))
+            remaining_ids = len(all_ids) - len(display_ids)
+            if remaining_ids > 0:
+                lines.append(f"    (+{remaining_ids} more IDs)")
+            extra_sources = len({entry.get("src") for entry in entries if entry.get("src")}) - 1
+            if extra_sources > 0:
+                lines.append(
+                    "    (+{count} more source{suffix})".format(
+                        count=extra_sources,
+                        suffix="s" if extra_sources != 1 else "",
+                    )
+                )
+        remaining_vendors = len(analytics_payload) - len(shown_vendors)
+        if remaining_vendors > 0:
+            lines.append(f"    (+{remaining_vendors} more)")
+
+    entropy_samples = []
+    if isinstance(aggregates, Mapping):
+        entropy_entries = aggregates.get("entropy_high_samples")
+        if isinstance(entropy_entries, Sequence):
+            entropy_samples = [entry for entry in entropy_entries if isinstance(entry, Mapping)]
+
+    if entropy_samples:
+        total_entropy = _count_value("entropy_high", source=extra) or len(entropy_samples)
+        lines.append("")
+        lines.append("  High-Entropy Strings")
+        shown = min(len(entropy_samples), max(2, sample_limit))
+        try:
+            min_entropy = float(options.get("min_entropy", 5.5))
+        except Exception:
+            min_entropy = 5.5
+        lines.append(
+            f"    {shown} samples shown (entropy ≥{min_entropy:.2f}); +{max(total_entropy - shown, 0)} more total"
+        )
+        for entry in entropy_samples[:shown]:
+            masked = str(entry.get("masked") or "(hidden)")
+            src = str(entry.get("src") or "string")
+            detail = f"      {masked}                         Src: {src}"
+            lines.extend(_wrap_lines(detail, indent=6, subsequent_indent=8))
+
     return lines
 
 

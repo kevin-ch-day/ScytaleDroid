@@ -107,6 +107,10 @@ class RunParameters:
     secrets_entropy: float = 4.5
     secrets_hits_per_bucket: int = 40
     secrets_scope: str = "resources"
+    strings_mode: str = "both"
+    string_max_samples: int = 2
+    string_min_entropy: float = 4.8
+    string_cleartext_only: bool = False
     workers: str = "auto"
     reuse_cache: bool = True
     log_level: str = "info"
@@ -385,6 +389,32 @@ def _prompt_tuning(base_params: RunParameters) -> RunParameters:
     )
     secrets_scope = {"1": "resources", "2": "dex", "3": "both"}[scope_choice]
 
+    strings_mode = params.strings_mode
+    string_max_samples = params.string_max_samples
+    string_min_entropy = params.string_min_entropy
+    string_cleartext_only = params.string_cleartext_only
+    if params.profile == "strings":
+        strings_choice = _prompt_choice(
+            "Strings mode",
+            {"1": "both", "2": "dex", "3": "resources"},
+            default={"both": "1", "dex": "2", "resources": "3"}.get(params.strings_mode, "1"),
+        )
+        strings_mode = {"1": "both", "2": "dex", "3": "resources"}[strings_choice]
+        string_max_samples = _prompt_int(
+            "Max string samples (UI)",
+            params.string_max_samples,
+            minimum=1,
+        )
+        string_min_entropy = _prompt_float(
+            "Min entropy threshold",
+            params.string_min_entropy,
+            minimum=0.0,
+        )
+        string_cleartext_only = prompt_utils.prompt_yes_no(
+            "Endpoints panel: show cleartext only",
+            default=params.string_cleartext_only,
+        )
+
     workers = prompt_utils.prompt_text(
         "Workers",
         default=params.workers,
@@ -415,6 +445,10 @@ def _prompt_tuning(base_params: RunParameters) -> RunParameters:
         secrets_entropy=entropy,
         secrets_hits_per_bucket=hits,
         secrets_scope=secrets_scope,
+        strings_mode=strings_mode,
+        string_max_samples=string_max_samples,
+        string_min_entropy=string_min_entropy,
+        string_cleartext_only=string_cleartext_only,
         workers=workers or "auto",
         reuse_cache=reuse_cache,
         log_level="debug" if log_level == "2" else "info",
@@ -1003,7 +1037,13 @@ def _render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
         if params.profile in {"metadata", "permissions"}:
             string_data = {"counts": {}, "samples": {}}
         else:
-            string_data = analyse_strings(base_report.file_path)
+            string_data = analyse_strings(
+                base_report.file_path,
+                mode=params.strings_mode,
+                min_entropy=params.string_min_entropy,
+                max_samples=params.string_max_samples,
+                cleartext_only=params.string_cleartext_only,
+            )
             # Persist string summary (best-effort) for web app consumption
             try:
                 from scytaledroid.Database.db_func import string_analysis as _sadb
