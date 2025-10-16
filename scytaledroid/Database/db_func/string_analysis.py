@@ -12,6 +12,22 @@ def ensure_tables() -> bool:
     try:
         run_sql(queries.CREATE_STRING_SUMMARY)
         run_sql(queries.CREATE_STRING_SAMPLES)
+        for statement in (
+            "ALTER TABLE static_string_samples ADD COLUMN source_type VARCHAR(16) NULL",
+            "ALTER TABLE static_string_samples ADD COLUMN finding_type VARCHAR(32) NULL",
+            "ALTER TABLE static_string_samples ADD COLUMN provider VARCHAR(64) NULL",
+            "ALTER TABLE static_string_samples ADD COLUMN risk_tag VARCHAR(32) NULL",
+            "ALTER TABLE static_string_samples ADD COLUMN confidence VARCHAR(16) NULL",
+            "ALTER TABLE static_string_samples ADD COLUMN sample_hash CHAR(40) NULL",
+            "ALTER TABLE static_string_samples ADD COLUMN root_domain VARCHAR(191) NULL",
+            "ALTER TABLE static_string_samples ADD COLUMN resource_name VARCHAR(191) NULL",
+            "ALTER TABLE static_string_samples ADD COLUMN scheme VARCHAR(32) NULL",
+        ):
+            try:
+                run_sql(statement)
+            except Exception:
+                continue
+        run_sql(queries.CREATE_STRING_FINDINGS_VIEW)
         return True
     except Exception:
         return False
@@ -87,9 +103,34 @@ def replace_top_samples(
                 value_masked = sample.get("value_masked") or sample.get("value")
                 src = sample.get("src")
                 tag = sample.get("tag")
+                source_type = sample.get("source_type")
+                finding_type = sample.get("finding_type")
+                provider = sample.get("provider")
+                risk_tag = sample.get("risk_tag")
+                confidence = sample.get("confidence")
+                sample_hash = sample.get("sample_hash")
+                root_domain = sample.get("root_domain")
+                resource_name = sample.get("resource_name")
+                scheme = sample.get("scheme")
                 run_sql(
                     queries.INSERT_SAMPLE,
-                    (summary_id, bucket, str(value_masked)[:512], str(src)[:512], (str(tag) if tag is not None else None)[:64] if tag else None, rank),
+                    (
+                        summary_id,
+                        bucket,
+                        str(value_masked)[:512] if value_masked is not None else None,
+                        str(src)[:512] if src is not None else None,
+                        (str(tag)[:64] if tag is not None else None),
+                        rank,
+                        (str(source_type)[:16] if source_type else None),
+                        (str(finding_type)[:32] if finding_type else None),
+                        (str(provider)[:64] if provider else None),
+                        (str(risk_tag)[:32] if risk_tag else None),
+                        (str(confidence)[:16] if confidence else None),
+                        (str(sample_hash)[:40] if sample_hash else None),
+                        (str(root_domain)[:191] if root_domain else None),
+                        (str(resource_name)[:191] if resource_name else None),
+                        (str(scheme)[:32] if scheme else None),
+                    ),
                 )
                 inserted += 1
                 rank += 1

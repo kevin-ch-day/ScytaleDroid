@@ -35,7 +35,9 @@ data/apks/
 data/static_analysis/reports/
 data/static_analysis/baseline/
 data/audit/
-scripts/db/
+scripts/db/**
+!scripts/db/
+!scripts/db/*.sql
 *.log
 *.tmp
 *.bak
