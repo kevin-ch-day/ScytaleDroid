@@ -63,6 +63,75 @@ def discover_scripts() -> List[UserScript]:
     return entries
 
 
+def seed_default_scripts() -> int:
+    """Write default SQL guardrail scripts into scripts/db/ if missing.
+
+    Returns number of scripts created. Existing files are not overwritten.
+    """
+    base = ensure_dir()
+    seeds: List[Tuple[str, str]] = [
+        (
+            "coverage_fqn.sql",
+            """-- Coverage via FQN view: counts by mapping signal
+SELECT m.signal_key, COUNT(*) AS c
+FROM v_detected_permissions_fqn d
+JOIN permission_signal_mappings m
+  ON m.perm_name = d.detected_fqn
+GROUP BY m.signal_key
+ORDER BY c DESC;
+""",
+        ),
+        (
+            "unknown_fw_residuals.sql",
+            """-- Framework-namespace unknowns that don’t resolve to FW or vendor (should be 0)
+SELECT d.perm_name, COUNT(*) AS c
+FROM android_detected_permissions d
+LEFT JOIN android_framework_permissions f
+  ON f.perm_name = CONCAT('android.permission.', d.perm_name)
+LEFT JOIN android_vendor_permissions v
+  ON v.perm_name = d.perm_name
+WHERE d.namespace='android.permission'
+  AND (d.classification IS NULL OR d.classification='unknown')
+  AND f.perm_name IS NULL
+  AND v.perm_name IS NULL
+GROUP BY d.perm_name
+ORDER BY c DESC;
+""",
+        ),
+        (
+            "dupe_scan.sql",
+            """-- Duplicate (apk_id, perm_name) entries (should be none)
+SELECT apk_id, perm_name, COUNT(*) AS c
+FROM android_detected_permissions
+GROUP BY apk_id, perm_name
+HAVING c > 1
+ORDER BY c DESC;
+""",
+        ),
+        (
+            "orphans_detected.sql",
+            """-- Orphan detections (no matching APK) (should be 0)
+SELECT COUNT(*) AS orphans
+FROM android_detected_permissions d
+LEFT JOIN android_apk_repository a ON a.apk_id = d.apk_id
+WHERE a.apk_id IS NULL;
+""",
+        ),
+    ]
+
+    created = 0
+    for name, sql in seeds:
+        target = base / name
+        if not target.exists():
+            try:
+                target.write_text(sql, encoding="utf-8")
+                created += 1
+            except Exception:
+                continue
+    return created
+
+
+
 def _split_sql(statements: str) -> List[str]:
     """Very simple SQL splitter on ';' outside of single quotes.
 

@@ -165,9 +165,9 @@ def run_diagnostics() -> None:
         rows = core_q.run_sql(
             """
             SELECT d.perm_name, COUNT(*) AS n
-            FROM android_detected_permissions d
+            FROM v_detected_permissions_fqn d
             LEFT JOIN android_framework_permissions f
-              ON f.perm_name = CONCAT('android.permission.', d.perm_name)
+              ON f.perm_name = d.detected_fqn
             WHERE d.namespace = 'android.permission'
               AND d.perm_name NOT LIKE 'ACCESS_ADSERVICES_%'
               AND f.perm_name IS NULL

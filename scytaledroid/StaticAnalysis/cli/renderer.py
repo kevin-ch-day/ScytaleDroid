@@ -350,11 +350,25 @@ def _app_metadata(report: StaticAnalysisReport, *, signer: str | None, split_cou
 
 
 def _render_hash_lines(hashes: Mapping[str, str]) -> list[str]:
+    """Render cryptographic hashes as a compact, aligned list."""
+
     if not hashes:
         return []
-    parts = [f"{key} {value}" for key, value in hashes.items()]
-    text = "Hashes  : " + "  ".join(parts)
-    return _wrap_lines(text, indent=2, subsequent_indent=4)
+
+    label_map = {
+        "md5": "MD5",
+        "sha1": "SHA-1",
+        "sha256": "SHA-256",
+    }
+    lines = ["Hashes"]
+    for key in ("md5", "sha1", "sha256"):
+        value = hashes.get(key)
+        if not value:
+            continue
+        label = label_map.get(key, key.upper())
+        # Two-space indent; pad label to align colons
+        lines.append(f"  {label:<8}: {value}")
+    return lines
 
 
 def _normalise_string_data(raw: Mapping[str, object]) -> Mapping[str, object]:
@@ -398,6 +412,7 @@ def _string_lines(string_payload: Mapping[str, object]) -> list[str]:
         totals = "  none"
     lines.extend(_wrap_lines(totals, indent=4, subsequent_indent=6))
 
+    import os as _os
     samples_payload = string_payload.get("samples", {}) if isinstance(string_payload, Mapping) else {}
     if isinstance(samples_payload, Mapping):
         for bucket in _STRING_BUCKET_ORDER:
@@ -407,8 +422,12 @@ def _string_lines(string_payload: Mapping[str, object]) -> list[str]:
             if not entries:
                 continue
             lines.append(f"  {_STRING_BUCKET_TITLES[bucket]}")
-            # Limit per-bucket samples to 2 to keep output tight
-            top_entries = list(entries)[:2]
+            # Limit per-bucket samples to 2 to keep output tight (except high_entropy: suppressed unless verbose)
+            verbose_strings = _os.environ.get("SCY_STRINGS_VERBOSE", "0") == "1"
+            if bucket == "high_entropy" and not verbose_strings:
+                top_entries = []
+            else:
+                top_entries = list(entries)[: (1 if bucket == "endpoints" else 2)]
             for sample in top_entries:
                 if not isinstance(sample, Mapping):
                     continue
@@ -480,19 +499,23 @@ def render_app_result(
     hashes = metadata["hashes"]
 
     lines: list[str] = ["Summary"]
-    lines.append(f"  Package : {metadata['package']}")
+    # Package
+    lines.append(f"Package    : {metadata['package']}")
+    # Version (use em dash separator when present)
     version_line = metadata.get("version_name", "—")
     version_code = metadata.get("version_code")
+    if isinstance(version_line, str):
+        version_line = version_line.replace(" - ", " — ")
     if version_code:
         version_line = f"{version_line} ({version_code})"
-    lines.append(f"  Version : {version_line}")
-    sdk_line = f"min={metadata.get('min_sdk') or '—'}  target={metadata.get('target_sdk') or '—'}"
-    lines.append(f"  SDKs    : {sdk_line}")
-    signer_value = metadata.get("signer")
-    if isinstance(signer_value, str) and signer_value:
-        short = f"{signer_value[:6]}…{signer_value[-4:]}" if len(signer_value) > 10 else signer_value
-        lines.append(f"  Signer  : SHA256 {short}")
-    lines.append(f"  Splits  : {split_count}")
+    lines.append(f"Version    : {version_line}")
+
+    # SDKs (separate lines for readability)
+    lines.append(f"Min SDK   : {metadata.get('min_sdk') or '—'}")
+    lines.append(f"Target SDK: {metadata.get('target_sdk') or '—'}")
+
+    # Splits
+    lines.append(f"Splits     : {split_count}")
     lines.extend(_render_hash_lines(hashes))
 
     lines.append("")
@@ -533,6 +556,19 @@ def render_app_result(
 
     lines.extend(_severity_summary_lines(finding_totals))
 
+    # Optional extras: attach NSC + WebView summaries when present
+    webview_summary = None
+    try:
+        lookup = {res.section_key: res for res in report.detector_results}
+        web = lookup.get("webview")
+        if web and isinstance(web.metrics, Mapping) and web.metrics:
+            # compact: only nonzero metrics
+            compact = {k: v for k, v in web.metrics.items() if isinstance(v, (int, float)) and v}
+            if compact:
+                webview_summary = compact
+    except Exception:
+        webview_summary = None
+
     payload = {
         "generated_at": datetime.utcnow().isoformat() + "Z",
         "app": metadata,
@@ -547,6 +583,7 @@ def render_app_result(
             "exports": exports,
             "permissions": permissions,
             "nsc": nsc,
+            "webview": webview_summary,
             "string_analysis": string_payload,
             "findings": [
                 {

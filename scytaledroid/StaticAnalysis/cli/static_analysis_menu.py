@@ -210,12 +210,16 @@ def static_analysis_menu() -> None:
     # New ordering and labels (numeric only)
     option_map: Dict[str, str] = {
         "1": "full",          # Full static analysis (all detectors; writes to DB)
-        "2": "lightweight",   # Lightweight static analysis (fast path; writes to DB)
+        "2": "lightweight",   # Baseline static analysis (paper-aligned; writes to DB)
         "3": "metadata",      # App Metadata (hashes, manifest flags)
         "4": "permissions",   # Permission Analysis (writes to DB)
         "5": "strings",       # String analysis (DEX + resources; writes to DB)
         "6": "split",         # Split-APK composition (base + splits)
-        "7": "custom",        # Custom profile (pick tests & thresholds)
+        "7": "webview",       # WebView posture (read-only)
+        "8": "nsc",           # Network Security Config (read-only)
+        "9": "ipc",           # IPC & PendingIntent safety (read-only)
+        "10": "crypto",       # Crypto/TLS quick scan (read-only)
+        "11": "sdk",          # SDK fingerprints (read-only)
     }
 
     while True:
@@ -233,12 +237,16 @@ def static_analysis_menu() -> None:
         menu_utils.print_menu(
             [
                 ("1", "Full static analysis (all detectors; writes to DB)", "Run all detectors and persist summaries"),
-                ("2", "Lightweight static analysis (writes to DB)", "Faster path; key detectors only"),
+                ("2", "Baseline static analysis (paper-aligned; writes to DB)", "Faster path; key detectors only"),
                 ("3", "App Metadata (hashes, manifest flags)", "No DB writes; summary only"),
                 ("4", "Permission Analysis (writes to DB)", "Persist detected permissions and audit"),
                 ("5", "String analysis (DEX + resources; writes to DB)", "Persist string summary and samples"),
                 ("6", "Split-APK composition (base + splits)", "Analyze split grouping and consistency"),
-                ("7", "Custom profile (pick tests & thresholds)", "Select detectors and tuning interactively"),
+                ("7", "WebView posture (read-only)", "Check JS/mixed-content/JS bridge flags"),
+                ("8", "Network Security Config (read-only)", "Parse NSC cleartext/pins/user certs"),
+                ("9", "IPC & PendingIntent safety (read-only)", "Exported receivers/permissions; PI flags"),
+                ("10", "Crypto/TLS quick scan (read-only)", "Weak hashes/TLS refs in strings"),
+                ("11", "SDK fingerprints (read-only)", "Known analytics/ads SDK presence"),
             ],
             is_main=False,
         )
@@ -266,8 +274,6 @@ def _launch_scan_flow(initial_profile: str) -> None:
     selection = _select_scope(groups)
     profile = initial_profile
     params = RunParameters(profile=profile, scope=selection.scope, scope_label=selection.label)
-    if profile == "custom":
-        params = _prompt_tuning(params)
 
     scope_target = _format_scope_target(selection)
     print()
@@ -283,6 +289,19 @@ def _launch_scan_flow(initial_profile: str) -> None:
 
     outcome = _execute_scan(selection, params, base_dir)
     _render_run_results(outcome, params)
+
+    # For Full/Baseline profiles, render the same Permission Analysis view
+    # used by the standalone menu so output is identical and includes
+    # the audit snapshot id.
+    if params.profile in {"full", "lightweight"}:
+        try:
+            from dataclasses import replace as _replace
+            perm_params = _replace(params, profile="permissions")
+            print()
+            print("-- Re-rendering Permission Analysis snapshot for parity --")
+            _execute_permission_scan(selection, perm_params, persist_detections=False)
+        except Exception:
+            pass
 
 
 def _select_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
@@ -559,7 +578,12 @@ def _execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pa
     )
 
 
-def _execute_permission_scan(selection: ScopeSelection, params: RunParameters) -> None:
+def _execute_permission_scan(
+    selection: ScopeSelection,
+    params: RunParameters,
+    *,
+    persist_detections: bool = True,
+) -> int | None:
     total_groups = len(selection.groups)
     processed_shas: set[str] = set()
     profiles_by_package: dict[str, dict] = {}
@@ -624,51 +648,52 @@ def _execute_permission_scan(selection: ScopeSelection, params: RunParameters) -
             else:
                 # Suppress per-split verbose prints to reduce noise
                 pass
-            # Persist detected permissions (quick path)
-            try:
-                # Persist only for base artifact to reduce noise; avoid duplicate base processing per APK
-                if artifact_label == "base" and declared and group.package_name not in printed_db_status_for:
-                    from scytaledroid.StaticAnalysis.persistence.permissions_db import (
-                        persist_declared_permissions, _file_sha256,
-                    )
-                    sha = _file_sha256(artifact.path)
-                    if sha and sha in processed_shas:
-                        pass
-                    else:
-                        names = [name for name, _ in (declared or [])]
-                        custom_names = [d.get("name") for d in (defined or []) if d.get("name")]
-                        result = persist_declared_permissions(
-                            package_name=group.package_name,
-                            version_name=None,
-                            version_code=None,
-                            sha256=sha,
-                            artifact_label=artifact_label,
-                            declared=names,
-                            custom_declared=custom_names,
+            # Persist detected permissions (quick path) — only when enabled
+            if persist_detections:
+                try:
+                    # Persist only for base artifact to reduce noise; avoid duplicate base processing per APK
+                    if artifact_label == "base" and declared and group.package_name not in printed_db_status_for:
+                        from scytaledroid.StaticAnalysis.persistence.permissions_db import (
+                            persist_declared_permissions, _file_sha256,
                         )
-                        if sha:
-                            # Resolve apk context for risk table (apk_id/app_id/sha256)
-                            try:
-                                from scytaledroid.Database.db_func.apk_repository import get_apk_by_sha256 as _get_apk
-                                row = _get_apk(sha)
-                                if row:
-                                    base_apk_ctx[group.package_name] = {
-                                        "apk_id": int(row.get("apk_id", 0) or 0),
-                                        "app_id": int(row.get("app_id", 0) or 0) if row.get("app_id") is not None else None,
-                                        "sha256": row.get("sha256") or sha,
-                                    }
-                            except Exception:
-                                pass
-                            processed_shas.add(sha)
-                        from scytaledroid.Utils.DisplayUtils import status_messages as _sm
-                        total = sum(result.values()) if isinstance(result, dict) else 0
-                        print(_sm.status(
-                            f"DB detect: {total} perms (fw={result.get('framework', 0)}, vendor={result.get('vendor', 0)}, unk={result.get('unknown', 0)})",
-                            level="info",
-                        ))
-                        printed_db_status_for.add(group.package_name)
-            except Exception:
-                pass
+                        sha = _file_sha256(artifact.path)
+                        if sha and sha in processed_shas:
+                            pass
+                        else:
+                            names = [name for name, _ in (declared or [])]
+                            custom_names = [d.get("name") for d in (defined or []) if d.get("name")]
+                            result = persist_declared_permissions(
+                                package_name=group.package_name,
+                                version_name=None,
+                                version_code=None,
+                                sha256=sha,
+                                artifact_label=artifact_label,
+                                declared=names,
+                                custom_declared=custom_names,
+                            )
+                            if sha:
+                                # Resolve apk context for risk table (apk_id/app_id/sha256)
+                                try:
+                                    from scytaledroid.Database.db_func.apk_repository import get_apk_by_sha256 as _get_apk
+                                    row = _get_apk(sha)
+                                    if row:
+                                        base_apk_ctx[group.package_name] = {
+                                            "apk_id": int(row.get("apk_id", 0) or 0),
+                                            "app_id": int(row.get("app_id", 0) or 0) if row.get("app_id") is not None else None,
+                                            "sha256": row.get("sha256") or sha,
+                                        }
+                                except Exception:
+                                    pass
+                                processed_shas.add(sha)
+                            from scytaledroid.Utils.DisplayUtils import status_messages as _sm
+                            total = sum(result.values()) if isinstance(result, dict) else 0
+                            print(_sm.status(
+                                f"DB detect: {total} perms (fw={result.get('framework', 0)}, vendor={result.get('vendor', 0)}, unk={result.get('unknown', 0)})",
+                                level="info",
+                            ))
+                            printed_db_status_for.add(group.package_name)
+                except Exception:
+                    pass
 
     # After-run summary
     if profiles_by_package:
@@ -798,6 +823,7 @@ def _execute_permission_scan(selection: ScopeSelection, params: RunParameters) -
                 print("[Audit] DB persistence skipped or failed (see logs).")
         except Exception:
             pass
+        return persisted_id
 
 
 def _build_analysis_config(params: RunParameters) -> AnalysisConfig:
@@ -808,7 +834,11 @@ def _build_analysis_config(params: RunParameters) -> AnalysisConfig:
         "full": "full",
         "split": "quick",
         "strings": "quick",
-        "custom": "full",
+        "webview": "quick",
+        "nsc": "quick",
+        "ipc": "quick",
+        "crypto": "quick",
+        "sdk": "quick",
     }
     profile = profile_map.get(params.profile, "full")
     enabled_detectors = _map_tests_to_detectors(params)
@@ -832,6 +862,16 @@ def _map_tests_to_detectors(params: RunParameters) -> Tuple[str, ...]:
     if params.profile == "strings":
         # Focused string-related detectors; keep quick profile
         return ("secrets", "webview", "network_surface")
+    if params.profile == "webview":
+        return ("webview_hygiene",)
+    if params.profile == "nsc":
+        return ("network_surface",)
+    if params.profile == "ipc":
+        return ("ipc_components", "provider_acl")
+    if params.profile == "crypto":
+        return ("crypto_hygiene",)
+    if params.profile == "sdk":
+        return ("sdk_inventory",)
     if params.profile != "custom":
         return tuple()
 
@@ -908,10 +948,12 @@ def _generate_report(
                     try:
                         from scytaledroid.Utils.DisplayUtils import status_messages as _sm
                         total = sum(counts.values()) if isinstance(counts, dict) else 0
-                        print(_sm.status(
-                            f"DB detect: {total} perms (fw={counts.get('framework', 0)}, vendor={counts.get('vendor', 0)}, unk={counts.get('unknown', 0)})",
-                            level="info",
-                        ))
+                        print(
+                            _sm.status(
+                                f"Permission Analysis persisted: total={total} (fw={counts.get('framework', 0)}, vendor={counts.get('vendor', 0)}, unk={counts.get('unknown', 0)})",
+                                level="info",
+                            )
+                        )
                     except Exception:
                         pass
             except Exception:
@@ -931,10 +973,12 @@ def _generate_report(
                     try:
                         from scytaledroid.Utils.DisplayUtils import status_messages as _sm
                         total = sum(counts.values()) if isinstance(counts, dict) else 0
-                        print(_sm.status(
-                            f"DB detect: {total} perms (fw={counts.get('framework', 0)}, vendor={counts.get('vendor', 0)}, unk={counts.get('unknown', 0)})",
-                            level="info",
-                        ))
+                        print(
+                            _sm.status(
+                                f"Permission Analysis persisted: total={total} (fw={counts.get('framework', 0)}, vendor={counts.get('vendor', 0)}, unk={counts.get('unknown', 0)})",
+                                level="info",
+                            )
+                        )
                     except Exception:
                         pass
             except Exception:
@@ -985,6 +1029,33 @@ def _render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             duration_seconds=total_duration,
         )
 
+        # Merge detector findings into payload + totals for DB persistence (Full/Lightweight only)
+        if params.profile in {"full", "lightweight"}:
+            extra_findings: list[dict] = []
+            severity_map = {"P0": "High", "P1": "Medium", "P2": "Low", "NOTE": "Info"}
+            for result in (base_report.detector_results or ()):  # type: ignore[attr-defined]
+                for f in result.findings:
+                    sev = severity_map.get(f.severity_gate.value, "Info")
+                    extra_findings.append(
+                        {
+                            "id": f.finding_id or result.detector_id,
+                            "severity": sev,
+                            "title": f.title,
+                            "evidence": {"because": f.because, "tags": list(f.tags or ())},
+                            "fix": f.remediate or None,
+                        }
+                    )
+                    # bump totals
+                    finding_totals[sev] += 1
+            try:
+                base = payload.get("baseline", {}) if isinstance(payload, dict) else {}
+                cur = list(base.get("findings", []) or [])
+                cur.extend(extra_findings)
+                base["findings"] = cur
+                payload["baseline"] = base
+            except Exception:
+                pass
+
         # Persist baseline findings only for full/lightweight/custom runs
         if params.profile in {"full", "lightweight", "custom", "strings"}:
             try:
@@ -996,6 +1067,8 @@ def _render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                         details = {
                             "manifest_flags": b.get("manifest_flags"),
                             "exports": b.get("exports"),
+                            "nsc": b.get("nsc"),
+                            "webview": b.get("webview"),
                         }
                     except Exception:
                         details = {}

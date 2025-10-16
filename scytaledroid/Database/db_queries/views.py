@@ -41,3 +41,29 @@ __all__ = [
     "CREATE_VW_LATEST_PERMISSION_RISK",
 ]
 
+CREATE_VW_DETECTED_PERMISSIONS_FQN = """
+CREATE OR REPLACE VIEW v_detected_permissions_fqn AS
+SELECT d.*,
+       CASE
+         WHEN d.namespace = 'android.permission' THEN CONCAT(d.namespace, '.', d.perm_name)
+         ELSE d.perm_name
+       END AS detected_fqn
+FROM android_detected_permissions d;
+"""
+
+CREATE_VW_PERMISSION_AUDIT_LATEST = """
+CREATE OR REPLACE VIEW vw_permission_audit_latest AS
+SELECT paa.*
+FROM permission_audit_apps paa
+JOIN (
+  SELECT package_name, MAX(snapshot_id) AS max_sid
+  FROM permission_audit_apps
+  GROUP BY package_name
+) t
+  ON t.package_name = paa.package_name AND t.max_sid = paa.snapshot_id;
+"""
+
+__all__ += [
+    "CREATE_VW_DETECTED_PERMISSIONS_FQN",
+    "CREATE_VW_PERMISSION_AUDIT_LATEST",
+]

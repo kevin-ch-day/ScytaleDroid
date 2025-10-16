@@ -18,10 +18,22 @@ def ensure_views() -> bool:
     except Exception:
         return False
 
+    # Create canonical FQN view for detections
+    try:
+        run_sql(q.CREATE_VW_DETECTED_PERMISSIONS_FQN)
+    except Exception:
+        pass
+
     # Create the second view best-effort; ignore failures if the table
     # (static_permission_risk) is not present in this deployment.
     try:
         run_sql(q.CREATE_VW_LATEST_PERMISSION_RISK)
+    except Exception:
+        pass
+
+    # Convenience view for latest permission audit per package
+    try:
+        run_sql(q.CREATE_VW_PERMISSION_AUDIT_LATEST)
     except Exception:
         pass
 

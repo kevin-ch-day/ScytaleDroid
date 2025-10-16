@@ -35,7 +35,7 @@ def _task_coverage_checks() -> None:
         return
 
     print()
-    menu_utils.print_section("Coverage: framework detections mapping to catalog (FQN)")
+    menu_utils.print_section("Coverage: framework detections mapping to catalog (FQN view)")
     try:
         rows = core_q.run_sql(
             """
@@ -43,13 +43,10 @@ def _task_coverage_checks() -> None:
               SUM(CASE WHEN f.perm_name IS NOT NULL THEN 1 ELSE 0 END) AS mapped,
               COUNT(*) AS total,
               ROUND(100 * SUM(CASE WHEN f.perm_name IS NOT NULL THEN 1 ELSE 0 END) / NULLIF(COUNT(*),0), 2) AS pct
-            FROM (
-              SELECT DISTINCT dp.package_name, dp.perm_name, dp.namespace
-              FROM android_detected_permissions dp
-              WHERE dp.namespace='android.permission'
-            ) d
+            FROM v_detected_permissions_fqn d
             LEFT JOIN android_framework_permissions f
-              ON f.perm_name = CONCAT('android.permission.', d.perm_name)
+              ON f.perm_name = d.detected_fqn
+            WHERE d.namespace='android.permission'
             """,
             fetch="all",
         )
@@ -225,9 +222,49 @@ def _task_performance_check() -> None:
     # Reuse existing helper for duplicate index scan
     _task_scan_duplicate_indexes()
 
+def _task_ensure_core_indexes() -> None:
+    try:
+        from scytaledroid.Database.db_core import db_queries as core_q
+    except Exception as exc:
+        print(status_messages.status(f"Import failed: {exc}", level="error"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    created: list[str] = []
+    checks = [
+        ("idx_detected_ns", "android_detected_permissions", "namespace", "ALTER TABLE android_detected_permissions ADD INDEX idx_detected_ns (namespace)"),
+        ("idx_detected_perm", "android_detected_permissions", "perm_name", "ALTER TABLE android_detected_permissions ADD INDEX idx_detected_perm (perm_name)"),
+    ]
+    for idx_name, table, column, ddl in checks:
+        try:
+            row = core_q.run_sql(
+                """
+                SELECT COUNT(*) FROM information_schema.statistics
+                WHERE table_schema = DATABASE() AND table_name=%s AND index_name=%s AND column_name=%s
+                """,
+                (table, idx_name, column),
+                fetch="one",
+            )
+            exists = bool(row and int(row[0]) > 0)
+            if not exists:
+                core_q.run_sql(ddl)
+                created.append(idx_name)
+        except Exception as exc:
+            print(status_messages.status(f"Index {idx_name}: {exc}", level="warn"))
+    if created:
+        print(status_messages.status(f"Created index(es): {', '.join(created)}", level="success"))
+    else:
+        print(status_messages.status("Core indexes already present.", level="info"))
+    prompt_utils.press_enter_to_continue()
+
 
 def _task_user_scripts_simple() -> None:
-    from ..user_script_runner import discover_scripts, run_sql_script, run_python_script, delete_script
+    from ..user_script_runner import (
+        discover_scripts,
+        run_sql_script,
+        run_python_script,
+        delete_script,
+    )
 
     scripts = discover_scripts()
     print()
@@ -238,6 +275,7 @@ def _task_user_scripts_simple() -> None:
     menu_utils.print_table(["#", "name", "desc", "path"], rows)
 
     if not scripts:
+        print(status_messages.status("No scripts found in scripts/db (create one).", level="info"))
         prompt_utils.press_enter_to_continue()
         return
 
@@ -301,6 +339,7 @@ def scripts_menu() -> None:
             ("Scoring sanity", "Grades vs thresholds; AdServices excluded counts.", _task_scoring_sanity_quick),
             ("Create/Refresh DB views", "Define reporting views (latest APK, latest permission risk).", _task_refresh_views),
             ("Performance & index check", "Scan for redundant/missing indexes (quick).", _task_performance_check),
+            ("Ensure core indexes", "Add non-unique indexes on namespace/perm_name if missing.", _task_ensure_core_indexes),
             ("User Scripts (SQL/Python)", "Execute or delete ad-hoc scripts.", _task_user_scripts_simple),
         ]
 
