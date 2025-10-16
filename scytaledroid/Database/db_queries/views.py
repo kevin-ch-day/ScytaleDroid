@@ -67,3 +67,69 @@ __all__ += [
     "CREATE_VW_DETECTED_PERMISSIONS_FQN",
     "CREATE_VW_PERMISSION_AUDIT_LATEST",
 ]
+
+CREATE_VW_STATIC_MODULE_COVERAGE = """
+CREATE OR REPLACE VIEW vw_static_module_coverage AS
+SELECT package_name,
+       'strings' AS module_key,
+       MAX(session_stamp) AS last_session
+FROM static_string_summary
+GROUP BY package_name
+UNION
+SELECT package_name,
+       'dynload' AS module_key,
+       MAX(session_stamp) AS last_session
+FROM static_dynload_events
+GROUP BY package_name
+UNION
+SELECT package_name,
+       'storage_surface' AS module_key,
+       MAX(session_stamp) AS last_session
+FROM static_fileproviders
+GROUP BY package_name;
+"""
+
+CREATE_VW_STORAGE_SURFACE_RISK = """
+CREATE OR REPLACE VIEW vw_storage_surface_risk AS
+SELECT fp.package_name,
+       fp.session_stamp,
+       fp.scope_label,
+       fp.authority,
+       fp.provider_name,
+       fp.exported,
+       fp.grant_flags,
+       fp.path_globs,
+       fp.risk,
+       acl.read_perm,
+       acl.write_perm,
+       acl.base_perm,
+       acl.path_perms_json
+FROM static_fileproviders AS fp
+LEFT JOIN static_provider_acl AS acl
+  ON fp.package_name = acl.package_name
+ AND fp.session_stamp = acl.session_stamp
+ AND fp.authority = acl.authority;
+"""
+
+CREATE_VW_DYNLOAD_HOTSPOTS = """
+CREATE OR REPLACE VIEW vw_dynload_hotspots AS
+SELECT e.package_name,
+       e.session_stamp,
+       e.apk_id,
+       SUM(CASE WHEN e.event_type = 'classloader' THEN 1 ELSE 0 END) AS classloader_events,
+       SUM(CASE WHEN e.event_type = 'native' THEN 1 ELSE 0 END) AS native_loads,
+       COUNT(DISTINCT r.id) AS reflection_calls
+FROM static_dynload_events AS e
+LEFT JOIN static_reflection_calls AS r
+  ON e.package_name = r.package_name
+ AND e.session_stamp = r.session_stamp
+ AND (e.apk_id = r.apk_id OR (e.apk_id IS NULL AND r.apk_id IS NULL))
+GROUP BY e.package_name, e.session_stamp, e.apk_id
+HAVING classloader_events > 0 AND reflection_calls > 0;
+"""
+
+__all__ += [
+    "CREATE_VW_STATIC_MODULE_COVERAGE",
+    "CREATE_VW_STORAGE_SURFACE_RISK",
+    "CREATE_VW_DYNLOAD_HOTSPOTS",
+]
