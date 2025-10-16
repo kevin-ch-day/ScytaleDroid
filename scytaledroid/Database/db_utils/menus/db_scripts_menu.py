@@ -326,6 +326,32 @@ def scripts_menu() -> None:
             repairs.append((f"Seed legacy framework permissions ({status['legacy_seeds_missing']} missing)", "Upsert legacy/missing framework constants to reduce 'unmatched' unknowns.", fn))
         if status.get("dp_unknown_count", 0) > 0 and status.get("unknown_catalog_missing", 0) > 0:
             from ..scripts.repairs import backfill_unknowns as fn
+            repairs.append((
+                "Backfill unknown catalog from detections",
+                "Insert distinct unknown perm names into android_unknown_permissions.",
+                fn,
+            ))
+
+        # Merge and number
+        all_entries = entries + repairs
+        numbered: List[Tuple[str, str, str]] = []
+        handlers: Dict[str, Callable[[], None]] = {}
+        for idx, (label, desc, fn) in enumerate(all_entries, start=1):
+            key = str(idx)
+            numbered.append((key, label, desc))
+            handlers[key] = fn
+
+        # Render menu
+        menu_utils.print_menu(numbered, padding=True, show_exit=False, show_descriptions=True)
+        valid_keys = [k for k in handlers.keys()] + ["0"]
+        choice = prompt_utils.get_choice(valid=valid_keys, default="0")
+        if choice == "0":
+            break
+        handler = handlers.get(choice)
+        if handler is None:
+            continue
+        handler()
+
 
 def _task_scan_duplicate_indexes() -> None:
     try:
@@ -349,27 +375,6 @@ def _task_scan_duplicate_indexes() -> None:
         print(status_messages.status(f"Index query failed: {exc}", level="error"))
 
     prompt_utils.press_enter_to_continue()
-            repairs.append(("Backfill unknown catalog from detections", "Insert distinct unknown perm names into android_unknown_permissions.", fn))
-
-        # Merge and number
-        all_entries = entries + repairs
-        numbered: List[Tuple[str, str, str]] = []
-        handlers: Dict[str, Callable[[], None]] = {}
-        for idx, (label, desc, fn) in enumerate(all_entries, start=1):
-            key = str(idx)
-            numbered.append((key, label, desc))
-            handlers[key] = fn
-
-        # Render menu
-        menu_utils.print_menu(numbered, padding=True, show_exit=False, show_descriptions=True)
-        valid_keys = [k for k in handlers.keys()] + ["0"]
-        choice = prompt_utils.get_choice(valid=valid_keys, default="0")
-        if choice == "0":
-            break
-        handler = handlers.get(choice)
-        if handler is None:
-            continue
-        handler()
 
 
 __all__ = ["scripts_menu"]
