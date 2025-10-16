@@ -16,6 +16,17 @@ from scytaledroid.Config import app_config
 from ..core import StaticAnalysisReport
 
 _WIDTH = 78
+
+def _short_number(value: int) -> str:
+    try:
+        n = int(value)
+    except Exception:
+        return str(value)
+    if n >= 1_000_000:
+        return f"{n/1_000_000:.1f}m"
+    if n >= 1_000:
+        return f"{n/1_000:.1f}k"
+    return str(n)
 _HASH_ORDER = ("md5", "sha1", "sha256")
 _SEVERITY_ORDER = ("High", "Medium", "Low", "Info")
 _SEVERITY_TOKENS = {"High": "H", "Medium": "M", "Low": "L", "Info": "I"}
@@ -376,7 +387,15 @@ def _normalise_string_data(raw: Mapping[str, object]) -> Mapping[str, object]:
 def _string_lines(string_payload: Mapping[str, object]) -> list[str]:
     lines = ["String Analysis (DEX first; then resources/assets)", "  Totals"]
     counts = string_payload.get("counts", {}) if isinstance(string_payload, Mapping) else {}
-    totals = "  ".join(f"{bucket}={counts.get(bucket, 0)}" for bucket in _STRING_BUCKET_ORDER)
+    # Show only non-zero buckets, sorted by count desc, up to 6 entries
+    present = [(bucket, int(counts.get(bucket, 0))) for bucket in _STRING_BUCKET_ORDER]
+    present = [(b, c) for b, c in present if c > 0]
+    present.sort(key=lambda x: x[1], reverse=True)
+    if present:
+        head = present[:6]
+        totals = "  ".join(f"{b}={_short_number(c)}" for b, c in head)
+    else:
+        totals = "  none"
     lines.extend(_wrap_lines(totals, indent=4, subsequent_indent=6))
 
     samples_payload = string_payload.get("samples", {}) if isinstance(string_payload, Mapping) else {}
@@ -388,14 +407,21 @@ def _string_lines(string_payload: Mapping[str, object]) -> list[str]:
             if not entries:
                 continue
             lines.append(f"  {_STRING_BUCKET_TITLES[bucket]}")
-            top_entries = list(entries)[:3]
+            # Limit per-bucket samples to 2 to keep output tight
+            top_entries = list(entries)[:2]
             for sample in top_entries:
                 if not isinstance(sample, Mapping):
                     continue
-                value = sample.get("value") or sample.get("value_masked") or "(value hidden)"
+                raw_value = sample.get("value") or sample.get("value_masked") or "(value hidden)"
+                # Avoid dumping large JSON/dict-like payloads; show a compact preview instead
+                value_str = str(raw_value)
+                if isinstance(raw_value, (dict, list)) or (len(value_str) > 120 and (value_str.strip().startswith("{") or value_str.strip().startswith("["))):
+                    preview = "(large payload omitted)"
+                else:
+                    preview = value_str if len(value_str) <= 120 else (value_str[:117] + "…")
                 src = sample.get("src", "string")
                 tag = sample.get("tag")
-                detail = f"{value}  Src: {src}"
+                detail = f"{preview}  Src: {src}"
                 if tag:
                     detail += f"  Tag: {tag}"
                 lines.extend(_wrap_lines(detail, indent=4, subsequent_indent=6))
@@ -484,8 +510,16 @@ def render_app_result(
 
     lines.append("")
     lines.append("Permissions (declared)")
-    declared_text = ", ".join(permissions["declared"]) if permissions["declared"] else "—"
-    lines.extend(_wrap_lines(declared_text, indent=2, subsequent_indent=4))
+    declared = list(permissions["declared"]) if isinstance(permissions.get("declared"), Sequence) else []
+    if declared:
+        head = declared[:20]
+        declared_text = ", ".join(head)
+        lines.extend(_wrap_lines(declared_text, indent=2, subsequent_indent=4))
+        remaining = len(declared) - len(head)
+        if remaining > 0:
+            lines.append(f"    (+{remaining} more)")
+    else:
+        lines.append("  —")
     counts = permissions["counts"]
     lines.append(
         f"  Counts: dangerous={counts['dangerous']}  signature={counts['signature']}  custom={counts['custom']}"

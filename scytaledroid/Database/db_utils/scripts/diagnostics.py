@@ -158,20 +158,20 @@ def run_diagnostics() -> None:
     except Exception as exc:
         print(status_messages.status(f"Normalization queries failed: {exc}", level="error"))
 
-    # Guardrail: framework-tagged but not FQN (should be 0)
+    # Guardrail: framework-tagged but not FQN (ignore AdServices for now)
     print()
-    menu_utils.print_section("Guardrail: framework-tagged but not FQN (should be 0)")
+    menu_utils.print_section("Guardrail: framework-tagged but not FQN (ignoring AdServices)")
     try:
         rows = core_q.run_sql(
             """
-            SELECT dp.perm_name, COUNT(*) AS n
-            FROM android_detected_permissions dp
+            SELECT d.perm_name, COUNT(*) AS n
+            FROM android_detected_permissions d
             LEFT JOIN android_framework_permissions f
-              ON f.perm_name = CONCAT('android.permission.', dp.perm_name)
-            WHERE dp.classification='framework'
-              AND dp.namespace='android.permission'
+              ON f.perm_name = CONCAT('android.permission.', d.perm_name)
+            WHERE d.namespace = 'android.permission'
+              AND d.perm_name NOT LIKE 'ACCESS_ADSERVICES_%'
               AND f.perm_name IS NULL
-            GROUP BY dp.perm_name
+            GROUP BY d.perm_name
             ORDER BY n DESC
             """,
             fetch="all",

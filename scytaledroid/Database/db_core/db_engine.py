@@ -104,6 +104,13 @@ class DatabaseEngine:
             cursor.close()
         except Error as e:
             raise RuntimeError(f"[DB_ENGINE] Query execution failed: {e}")
+        finally:
+            try:
+                # Ensure no unread results remain on the connection
+                if hasattr(self.conn, "consume_results"):
+                    self.conn.consume_results()  # type: ignore[attr-defined]
+            except Exception:
+                pass
 
     # Server-level helpers (no default database) for admin operations
     @staticmethod
@@ -144,6 +151,12 @@ class DatabaseEngine:
             return int(last_row_id)
         except Error as e:
             raise RuntimeError(f"[DB_ENGINE] Query execution (with lastrowid) failed: {e}")
+        finally:
+            try:
+                if hasattr(self.conn, "consume_results"):
+                    self.conn.consume_results()  # type: ignore[attr-defined]
+            except Exception:
+                pass
 
     def fetch_one(
         self, query: str, params: Optional[Tuple[Any, ...]] = None
@@ -159,6 +172,12 @@ class DatabaseEngine:
             return cast(Optional[Tuple[Any, ...]], result)
         except Error as e:
             raise RuntimeError(f"[DB_ENGINE] Query fetch_one failed: {e}")
+        finally:
+            try:
+                if hasattr(self.conn, "consume_results"):
+                    self.conn.consume_results()  # type: ignore[attr-defined]
+            except Exception:
+                pass
 
     def fetch_all(
         self, query: str, params: Optional[Tuple[Any, ...]] = None
@@ -174,6 +193,12 @@ class DatabaseEngine:
             return cast(List[Tuple[Any, ...]], results)
         except Error as e:
             raise RuntimeError(f"[DB_ENGINE] Query fetch_all failed: {e}")
+        finally:
+            try:
+                if hasattr(self.conn, "consume_results"):
+                    self.conn.consume_results()  # type: ignore[attr-defined]
+            except Exception:
+                pass
 
     def fetch_one_dict(
         self, query: str, params: Optional[Tuple[Any, ...]] = None
@@ -189,6 +214,12 @@ class DatabaseEngine:
             return cast(Optional[Dict[str, Any]], result)
         except Error as e:
             raise RuntimeError(f"[DB_ENGINE] Query fetch_one_dict failed: {e}")
+        finally:
+            try:
+                if hasattr(self.conn, "consume_results"):
+                    self.conn.consume_results()  # type: ignore[attr-defined]
+            except Exception:
+                pass
 
     def fetch_all_dict(
         self, query: str, params: Optional[Tuple[Any, ...]] = None
@@ -204,3 +235,9 @@ class DatabaseEngine:
             return cast(List[Dict[str, Any]], results)
         except Error as e:
             raise RuntimeError(f"[DB_ENGINE] Query fetch_all_dict failed: {e}")
+        finally:
+            try:
+                if hasattr(self.conn, "consume_results"):
+                    self.conn.consume_results()  # type: ignore[attr-defined]
+            except Exception:
+                pass

@@ -207,13 +207,15 @@ def _configure_logging_for_cli(level: str) -> None:
 def static_analysis_menu() -> None:
     """Render the static analysis menu loop with staged configuration screens."""
 
+    # New ordering and labels (numeric only)
     option_map: Dict[str, str] = {
-        "1": "metadata",
-        "2": "permissions",
-        "3": "lightweight",
-        "4": "full",
-        "5": "split",
-        "6": "custom",
+        "1": "full",          # Full static analysis (all detectors; writes to DB)
+        "2": "lightweight",   # Lightweight static analysis (fast path; writes to DB)
+        "3": "metadata",      # App Metadata (hashes, manifest flags)
+        "4": "permissions",   # Permission Analysis (writes to DB)
+        "5": "strings",       # String analysis (DEX + resources; writes to DB)
+        "6": "split",         # Split-APK composition (base + splits)
+        "7": "custom",        # Custom profile (pick tests & thresholds)
     }
 
     while True:
@@ -227,16 +229,17 @@ def static_analysis_menu() -> None:
                 print()
         except Exception:
             print()
-        menu_utils.print_header("Static Analysis (APK-only)")
+        menu_utils.print_header("Android APK Static Analysis")
         menu_utils.print_menu(
-            {
-                "1": "Quick metadata (hashes, manifest flags)",
-                "2": "Permission risk scan (writes to DB)",
-                "3": "String analysis (DEX + resources; writes to DB)",
-                "4": "Full analysis (all detectors; writes to DB)",
-                "5": "Split-APK composition (base + splits)",
-                "6": "Custom profile (pick tests & thresholds)",
-            },
+            [
+                ("1", "Full static analysis (all detectors; writes to DB)", "Run all detectors and persist summaries"),
+                ("2", "Lightweight static analysis (writes to DB)", "Faster path; key detectors only"),
+                ("3", "App Metadata (hashes, manifest flags)", "No DB writes; summary only"),
+                ("4", "Permission Analysis (writes to DB)", "Persist detected permissions and audit"),
+                ("5", "String analysis (DEX + resources; writes to DB)", "Persist string summary and samples"),
+                ("6", "Split-APK composition (base + splits)", "Analyze split grouping and consistency"),
+                ("7", "Custom profile (pick tests & thresholds)", "Select detectors and tuning interactively"),
+            ],
             is_main=False,
         )
         choice = prompt_utils.get_choice(list(option_map.keys()) + ["0"], default="0")
@@ -485,9 +488,10 @@ def _execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pa
             if artifact_total > 1:
                 progress_label += f" ({artifact_index}/{artifact_total})"
             artifact_label = artifact.artifact_label or artifact.display_path
-            # Reduce noise: only print per-app for base artifact
-            if not (artifact_total > 1 and str(artifact_label) != "base"):
-                print(f"{progress_label} … analyzing {artifact_label}")
+            # Reduce noise: print progress only once per app (first artifact)
+            if artifact_index == 1:
+                label = str(artifact_label)
+                print(f"{progress_label} … analyzing {label}")
 
             artifact_started = perf_counter()
             wall_clock_started = datetime.now()
@@ -503,9 +507,9 @@ def _execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pa
             if fatal or report is None:
                 failure_reason = message or "analysis failed"
                 failures.append(f"{artifact.display_path}: {failure_reason}")
-            if not (artifact_total > 1 and str(artifact_label) != "base"):
-                print(f"{progress_label} … failed ({failure_reason})")
-            continue
+                if artifact_index == 1:
+                    print(f"{progress_label} … failed ({failure_reason})")
+                continue
 
             if message:
                 warnings.append(f"{artifact.display_path}: {message}")
@@ -524,7 +528,7 @@ def _execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pa
                 )
             )
 
-            if not (artifact_total > 1 and str(artifact_label) != "base"):
+            if artifact_index == 1:
                 print(f"{progress_label} … done {summary} ({_format_duration(duration)})")
 
             app_result.artifacts.append(
@@ -803,6 +807,7 @@ def _build_analysis_config(params: RunParameters) -> AnalysisConfig:
         "lightweight": "quick",
         "full": "full",
         "split": "quick",
+        "strings": "quick",
         "custom": "full",
     }
     profile = profile_map.get(params.profile, "full")
@@ -824,6 +829,9 @@ def _map_tests_to_detectors(params: RunParameters) -> Tuple[str, ...]:
         return ("integrity_identity",)
     if params.profile == "permissions":
         return ("permissions_profile",)
+    if params.profile == "strings":
+        # Focused string-related detectors; keep quick profile
+        return ("secrets", "webview", "network_surface")
     if params.profile != "custom":
         return tuple()
 
@@ -888,47 +896,49 @@ def _generate_report(
 
     try:
         saved_paths = save_report(report)
-        # Best-effort DB persistence of observed permissions
-        try:
-            from scytaledroid.StaticAnalysis.persistence.permissions_db import (
-                persist_permissions_to_db,
-            )
+        # Best-effort DB persistence of observed permissions only for relevant profiles
+        if params.profile in {"permissions", "full", "lightweight", "custom"}:
+            try:
+                from scytaledroid.StaticAnalysis.persistence.permissions_db import (
+                    persist_permissions_to_db,
+                )
 
-            if report is not None:
-                counts = persist_permissions_to_db(report)
-                try:
-                    from scytaledroid.Utils.DisplayUtils import status_messages as _sm
-                    total = sum(counts.values()) if isinstance(counts, dict) else 0
-                    print(_sm.status(
-                        f"DB detect: {total} perms (fw={counts.get('framework', 0)}, vendor={counts.get('vendor', 0)}, unk={counts.get('unknown', 0)})",
-                        level="info",
-                    ))
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                if report is not None:
+                    counts = persist_permissions_to_db(report)
+                    try:
+                        from scytaledroid.Utils.DisplayUtils import status_messages as _sm
+                        total = sum(counts.values()) if isinstance(counts, dict) else 0
+                        print(_sm.status(
+                            f"DB detect: {total} perms (fw={counts.get('framework', 0)}, vendor={counts.get('vendor', 0)}, unk={counts.get('unknown', 0)})",
+                            level="info",
+                        ))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
         return report, saved_paths.json_path, None, False
     except ReportStorageError as exc:
         log.error(str(exc), category="static_analysis")
         # Still attempt DB persistence even if report save failed
-        try:
-            from scytaledroid.StaticAnalysis.persistence.permissions_db import (
-                persist_permissions_to_db,
-            )
+        if params.profile in {"permissions", "full", "lightweight", "custom"}:
+            try:
+                from scytaledroid.StaticAnalysis.persistence.permissions_db import (
+                    persist_permissions_to_db,
+                )
 
-            if report is not None:
-                counts = persist_permissions_to_db(report)
-                try:
-                    from scytaledroid.Utils.DisplayUtils import status_messages as _sm
-                    total = sum(counts.values()) if isinstance(counts, dict) else 0
-                    print(_sm.status(
-                        f"DB detect: {total} perms (fw={counts.get('framework', 0)}, vendor={counts.get('vendor', 0)}, unk={counts.get('unknown', 0)})",
-                        level="info",
-                    ))
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                if report is not None:
+                    counts = persist_permissions_to_db(report)
+                    try:
+                        from scytaledroid.Utils.DisplayUtils import status_messages as _sm
+                        total = sum(counts.values()) if isinstance(counts, dict) else 0
+                        print(_sm.status(
+                            f"DB detect: {total} perms (fw={counts.get('framework', 0)}, vendor={counts.get('vendor', 0)}, unk={counts.get('unknown', 0)})",
+                            level="info",
+                        ))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
         return report, None, str(exc), False
 
 
@@ -945,23 +955,27 @@ def _render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             print(status_messages.status(warning, level="warn"))
             continue
 
-        string_data = analyse_strings(base_report.file_path)
-        # Persist string summary (best-effort) for web app consumption
-        try:
-            from scytaledroid.Database.db_func import string_analysis as _sadb
-            if _sadb.tables_exist() or _sadb.ensure_tables():
-                summary_id = _sadb.upsert_summary(
-                    package_name=app_result.package_name,
-                    session_stamp=stamp,
-                    scope_label=params.scope_label or ("All apps" if params.scope == "all" else params.scope),
-                    counts=string_data.get("counts", {}) if isinstance(string_data, dict) else {},
-                )
-                # Optional: store top samples (small, capped)
-                if summary_id:
-                    samples = string_data.get("samples", {}) if isinstance(string_data, dict) else {}
-                    _sadb.replace_top_samples(int(summary_id), samples, top_n=3)
-        except Exception:
-            pass
+        # For metadata/permissions-only runs, skip string extraction to reduce noise
+        if params.profile in {"metadata", "permissions"}:
+            string_data = {"counts": {}, "samples": {}}
+        else:
+            string_data = analyse_strings(base_report.file_path)
+            # Persist string summary (best-effort) for web app consumption
+            try:
+                from scytaledroid.Database.db_func import string_analysis as _sadb
+                if _sadb.tables_exist() or _sadb.ensure_tables():
+                    summary_id = _sadb.upsert_summary(
+                        package_name=app_result.package_name,
+                        session_stamp=stamp,
+                        scope_label=params.scope_label or ("All apps" if params.scope == "all" else params.scope),
+                        counts=string_data.get("counts", {}) if isinstance(string_data, dict) else {},
+                    )
+                    # Optional: store top samples (small, capped)
+                    if summary_id:
+                        samples = string_data.get("samples", {}) if isinstance(string_data, dict) else {}
+                        _sadb.replace_top_samples(int(summary_id), samples, top_n=3)
+            except Exception:
+                pass
         total_duration = sum(artifact.duration_seconds for artifact in app_result.artifacts)
         lines, payload, finding_totals = render_app_result(
             base_report,
@@ -971,35 +985,36 @@ def _render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             duration_seconds=total_duration,
         )
 
-        # Persist baseline findings (summary + per finding) for DB-first consumption
-        try:
-            from scytaledroid.Database.db_func import static_findings as _sfdb
-            if _sfdb.tables_exist() or _sfdb.ensure_tables():
-                details = {}
-                try:
-                    b = payload.get("baseline", {}) if isinstance(payload, dict) else {}
-                    details = {
-                        "manifest_flags": b.get("manifest_flags"),
-                        "exports": b.get("exports"),
-                    }
-                except Exception:
+        # Persist baseline findings only for full/lightweight/custom runs
+        if params.profile in {"full", "lightweight", "custom", "strings"}:
+            try:
+                from scytaledroid.Database.db_func import static_findings as _sfdb
+                if _sfdb.tables_exist() or _sfdb.ensure_tables():
                     details = {}
-                summary_id = _sfdb.upsert_summary(
-                    package_name=app_result.package_name,
-                    session_stamp=stamp,
-                    scope_label=params.scope_label or ("All apps" if params.scope == "all" else params.scope),
-                    severity_counts=finding_totals,
-                    details=details,
-                )
-                if summary_id:
-                    findings = []
                     try:
-                        findings = (payload.get("baseline", {}) or {}).get("findings", [])
+                        b = payload.get("baseline", {}) if isinstance(payload, dict) else {}
+                        details = {
+                            "manifest_flags": b.get("manifest_flags"),
+                            "exports": b.get("exports"),
+                        }
                     except Exception:
+                        details = {}
+                    summary_id = _sfdb.upsert_summary(
+                        package_name=app_result.package_name,
+                        session_stamp=stamp,
+                        scope_label=params.scope_label or ("All apps" if params.scope == "all" else params.scope),
+                        severity_counts=finding_totals,
+                        details=details,
+                    )
+                    if summary_id:
                         findings = []
-                    _sfdb.replace_findings(int(summary_id), findings)
-        except Exception:
-            pass
+                        try:
+                            findings = (payload.get("baseline", {}) or {}).get("findings", [])
+                        except Exception:
+                            findings = []
+                        _sfdb.replace_findings(int(summary_id), findings)
+            except Exception:
+                pass
 
         for line in lines:
             print(line)

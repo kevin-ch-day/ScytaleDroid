@@ -101,8 +101,10 @@ def run_sql_script(path: Path, *, print_fn, table_fn) -> None:
     for index, stmt in enumerate(stmts, start=1):
         stmt_stripped = stmt.strip()
         try:
-            if stmt_stripped.upper().startswith("SELECT") or stmt_stripped.upper().startswith("WITH"):
-                rows = core_q.run_sql(stmt_stripped, fetch="all")
+            upper = stmt_stripped.lstrip().upper()
+            if upper.startswith("SELECT") or upper.startswith("WITH") or upper.startswith("SHOW") or upper.startswith("DESCRIBE"):
+                # Force dictionary mode to avoid edge-case driver buffering issues
+                rows = core_q.run_sql(stmt_stripped, fetch="all_dict")
                 table_fn([f"col{i+1}" for i in range(len(rows[0]) if rows else 0)], rows or [])
             else:
                 core_q.run_sql(stmt_stripped)
@@ -153,4 +155,3 @@ def create_sql_script(name: str, content: str) -> Path | None:
         return None
     target.write_text(content, encoding="utf-8")
     return target
-
