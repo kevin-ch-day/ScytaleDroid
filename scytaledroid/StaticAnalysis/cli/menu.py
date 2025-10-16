@@ -217,7 +217,16 @@ def static_analysis_menu() -> None:
     }
 
     while True:
-        print()
+        # Clear screen before drawing a new menu screen (optional)
+        try:
+            from scytaledroid.Utils.DisplayUtils import ui_prefs as _ui
+            if _ui.should_clear():
+                from scytaledroid.Utils.System.util_actions import clear_screen as _clear
+                _clear()
+            else:
+                print()
+        except Exception:
+            print()
         menu_utils.print_header("Static Analysis (APK-only)")
         menu_utils.print_menu(
             {

@@ -29,7 +29,16 @@ def database_menu() -> None:
     """Render the database utilities menu (flat layout)."""
 
     while True:
-        print()
+        # Clear screen before drawing a new menu screen (optional)
+        try:
+            from scytaledroid.Utils.DisplayUtils import ui_prefs as _ui
+            if _ui.should_clear():
+                from scytaledroid.Utils.System.util_actions import clear_screen as _clear
+                _clear()
+            else:
+                print()
+        except Exception:
+            print()
         menu_utils.print_header("Database Utilities")
 
         # Determine current DB state to toggle setup actions
@@ -79,7 +88,7 @@ def database_menu() -> None:
 
 def _open_scripts_submenu() -> None:
     try:
-        from scytaledroid.Database.db_utils.scripts_menu import scripts_menu
+        from scytaledroid.Database.db_utils.menus.db_scripts_menu import scripts_menu
         scripts_menu()
     except Exception as exc:
         print(status_messages.status(f"Failed to open scripts submenu: {exc}", level="error"))

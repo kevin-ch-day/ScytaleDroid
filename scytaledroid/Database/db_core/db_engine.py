@@ -152,7 +152,7 @@ class DatabaseEngine:
         self.reconnect()
         assert self.conn is not None
         try:
-            cursor = self.conn.cursor(dictionary=False)
+            cursor = self.conn.cursor(dictionary=False, buffered=True)
             cursor.execute(query, params or ())
             result = cursor.fetchone()
             cursor.close()
@@ -167,7 +167,7 @@ class DatabaseEngine:
         self.reconnect()
         assert self.conn is not None
         try:
-            cursor = self.conn.cursor(dictionary=False)
+            cursor = self.conn.cursor(dictionary=False, buffered=True)
             cursor.execute(query, params or ())
             results = cursor.fetchall()
             cursor.close()
@@ -182,7 +182,7 @@ class DatabaseEngine:
         self.reconnect()
         assert self.conn is not None
         try:
-            cursor = self.conn.cursor(dictionary=True)
+            cursor = self.conn.cursor(dictionary=True, buffered=True)
             cursor.execute(query, params or ())
             result = cursor.fetchone()
             cursor.close()
@@ -197,7 +197,7 @@ class DatabaseEngine:
         self.reconnect()
         assert self.conn is not None
         try:
-            cursor = self.conn.cursor(dictionary=True)
+            cursor = self.conn.cursor(dictionary=True, buffered=True)
             cursor.execute(query, params or ())
             results = cursor.fetchall()
             cursor.close()

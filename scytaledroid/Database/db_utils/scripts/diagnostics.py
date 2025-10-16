@@ -158,6 +158,66 @@ def run_diagnostics() -> None:
     except Exception as exc:
         print(status_messages.status(f"Normalization queries failed: {exc}", level="error"))
 
+    # Guardrail: framework-tagged but not FQN (should be 0)
+    print()
+    menu_utils.print_section("Guardrail: framework-tagged but not FQN (should be 0)")
+    try:
+        rows = core_q.run_sql(
+            """
+            SELECT dp.perm_name, COUNT(*) AS n
+            FROM android_detected_permissions dp
+            LEFT JOIN android_framework_permissions f
+              ON f.perm_name = CONCAT('android.permission.', dp.perm_name)
+            WHERE dp.classification='framework'
+              AND dp.namespace='android.permission'
+              AND f.perm_name IS NULL
+            GROUP BY dp.perm_name
+            ORDER BY n DESC
+            """,
+            fetch="all",
+        )
+        menu_utils.print_table(["perm_name", "count"], rows or [])
+        if not rows:
+            print(status_messages.status("OK — framework-tagged detections are valid FQNs in catalog.", level="success"))
+    except Exception as exc:
+        print(status_messages.status(f"Guardrail query failed: {exc}", level="error"))
+
+    # Guardrail: Unknowns outside AdServices (should be 0 until AdServices harvested)
+    print()
+    menu_utils.print_section("Guardrail: unknowns outside AdServices (should be 0)")
+    try:
+        rows = core_q.run_sql(
+            """
+            SELECT dp.perm_name, COUNT(*) AS n
+            FROM android_detected_permissions dp
+            WHERE COALESCE(dp.classification,'unknown')='unknown'
+              AND dp.namespace='android.permission'
+              AND dp.perm_name NOT LIKE 'ACCESS_ADSERVICES_%'
+            GROUP BY dp.perm_name
+            ORDER BY n DESC
+            """,
+            fetch="all",
+        )
+        menu_utils.print_table(["perm_name", "count"], rows or [])
+        if not rows:
+            print(status_messages.status("OK — only AdServices remain unknown.", level="success"))
+    except Exception as exc:
+        print(status_messages.status(f"Guardrail query failed: {exc}", level="error"))
+
+    # Guardrail: latest APK view should select base APKs (is_split_member = 0)
+    print()
+    menu_utils.print_section("Guardrail: latest view returns base APKs")
+    try:
+        row = core_q.run_sql(
+            "SELECT COUNT(*) FROM vw_latest_apk_per_package WHERE COALESCE(is_split_member,0) <> 0",
+            fetch="one",
+        )
+        count_bad = int(row[0]) if row else 0
+        level = "success" if count_bad == 0 else "warn"
+        print(status_messages.status(f"non-base rows in view: {count_bad}", level=level))
+    except Exception as exc:
+        print(status_messages.status(f"View check failed (view missing?): {exc}", level="warn"))
+
     print()
     menu_utils.print_section("Framework coverage: AdServices presence")
     try:
@@ -194,4 +254,3 @@ def show_sql_bundle() -> None:
         print(status_messages.status(f"Could not write SQL file: {exc}", level="warn"))
 
 __all__ = ["run_diagnostics", "show_sql_bundle"]
-

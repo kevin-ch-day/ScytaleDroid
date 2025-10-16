@@ -50,7 +50,7 @@ def _wrap_line(text: str, width: int) -> list[str]:
     wrapped = textwrap.wrap(
         text,
         width=width,
-        break_long_words=True,
+        break_long_words=False,
         break_on_hyphens=False,
     )
     return wrapped or [text]

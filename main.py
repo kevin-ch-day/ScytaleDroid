@@ -165,7 +165,7 @@ def handle_database() -> None:
     database_menu()
 
 def handle_db_scripts() -> None:
-    from scytaledroid.Database.db_utils.scripts_menu import scripts_menu
+    from scytaledroid.Database.db_utils.menus.db_scripts_menu import scripts_menu
 
     scripts_menu()
 

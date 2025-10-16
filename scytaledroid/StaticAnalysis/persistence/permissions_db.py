@@ -90,9 +90,11 @@ def persist_declared_permissions(
         is_android_prefix = name.startswith("android.permission.")
         short_key = name.split('.')[-1].upper() if is_android_prefix else None
         prot = framework_map.get(short_key) if short_key else None
-        is_framework = bool(is_android_prefix)
-        classification = "framework" if is_framework else ("vendor" if "." in name else "unknown")
-        ns = 'android.permission' if is_framework else _ns_from_perm(name)
+        # Classify as framework only when present in the framework catalog
+        in_framework_catalog = bool(short_key and short_key in framework_map)
+        is_framework = bool(is_android_prefix and in_framework_catalog)
+        classification = "framework" if is_framework else ("vendor" if "." in name and not is_android_prefix else "unknown")
+        ns = 'android.permission' if is_android_prefix else _ns_from_perm(name)
         detected_payload = {
             "package_name": package_name,
             "artifact_label": artifact_label,
@@ -134,11 +136,12 @@ def persist_declared_permissions(
         if is_framework:
             continue  # framework usage tracked via detected table only
         # Unknown: no dot namespace pattern
-        if "." not in name:
+        if "." not in name or (is_android_prefix and not in_framework_catalog):
             try:
                 _up.upsert_unknown_permission(
                     {
-                        "perm_name": name,
+                        # For android.permission.* entries that aren't in catalog, persist the short token
+                        "perm_name": (short_key or name),
                         "notes": None,
                     }
                 )
@@ -146,8 +149,10 @@ def persist_declared_permissions(
                 log.warning(f"Unknown permission persist failed for {name}: {exc}", category="static_analysis")
             continue
 
-        # Vendor/custom observed
+        # Vendor/custom observed (exclude android.permission namespace — treat those as unknowns above)
         namespace = _ns_from_perm(name)
+        if namespace == 'android.permission':
+            continue
         declaring_pkg = package_name if name in custom_set else None
         try:
             _vp.upsert_vendor_permission(

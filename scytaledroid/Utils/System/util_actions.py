@@ -8,10 +8,8 @@ from scytaledroid.Utils.DisplayUtils import status_messages
 
 
 def clear_screen() -> None:
-    """Clear the terminal window."""
-
+    """Clear the terminal window without extra noise."""
     os.system("cls" if os.name == "nt" else "clear")
-    print(status_messages.status("Screen cleared.", level="info"))
 
 
 def show_log_locations() -> None:

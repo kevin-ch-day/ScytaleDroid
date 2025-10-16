@@ -71,7 +71,7 @@ def _wrap_text(text: str, width: int) -> list[str]:
     wrapped = textwrap.wrap(
         text,
         width=width,
-        break_long_words=True,
+        break_long_words=False,
         break_on_hyphens=False,
     )
     return wrapped or [text]
@@ -103,7 +103,8 @@ def print_header(title: str, subtitle: Optional[str] = None) -> None:
     palette = colors.get_palette()
     ascii_ui = use_ascii_ui()
     separator = " - " if ascii_ui else " — "
-    term_width = get_terminal_width()
+    # Cap rendering width for readability
+    term_width = min(get_terminal_width(), 100)
     if subtitle:
         text = text_blocks.headline(f"{title}{separator}{subtitle}", width=term_width)
     else:
@@ -156,7 +157,8 @@ def print_menu(
     """Render a numbered menu with coloured keys and optional default."""
 
     palette = colors.get_palette()
-    term_width = width if width is not None else get_terminal_width()
+    # Cap rendering width for readability
+    term_width = width if width is not None else min(get_terminal_width(), 100)
     items = _normalise_options(options)
     primary_items = [item for item in items if item.key != "0"]
 
