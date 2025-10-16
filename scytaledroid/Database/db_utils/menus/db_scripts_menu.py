@@ -14,13 +14,13 @@ from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_mes
 
 
 def _task_run_diagnostics() -> None:
-    from .scripts.diagnostics import run_diagnostics
+    from ..scripts.diagnostics import run_diagnostics
 
     run_diagnostics()
 
 
 def _task_schema_health() -> None:
-    from .scripts.schema_health import run_schema_health_check
+    from ..scripts.schema_health import run_schema_health_check
 
     run_schema_health_check()
 
@@ -223,13 +223,11 @@ def _task_refresh_views() -> None:
 
 def _task_performance_check() -> None:
     # Reuse existing helper for duplicate index scan
-    from .scripts_menu import _task_scan_duplicate_indexes as _scan  # type: ignore
-
-    _scan()
+    _task_scan_duplicate_indexes()
 
 
 def _task_user_scripts_simple() -> None:
-    from .user_script_runner import discover_scripts, run_sql_script, run_python_script, delete_script
+    from ..user_script_runner import discover_scripts, run_sql_script, run_python_script, delete_script
 
     scripts = discover_scripts()
     print()
@@ -291,7 +289,7 @@ def scripts_menu() -> None:
         menu_utils.print_header("Database Scripts & Tasks")
 
         # Compute status for dynamic repairs
-        from .scripts.status import compute_script_status
+        from ..scripts.status import compute_script_status
         status = compute_script_status()
 
         # Build static options
@@ -309,25 +307,48 @@ def scripts_menu() -> None:
         # Dynamic repair actions (numbered after static ones)
         repairs: List[Tuple[str, str, Callable[[], None]]] = []
         if status.get("vendor_misclassified", 0) > 0:
-            from .scripts.repairs import clean_vendor_framework_namespace as fn
+            from ..scripts.repairs import clean_vendor_framework_namespace as fn
             repairs.append((f"Clean vendor rows in android.permission namespace ({status['vendor_misclassified']})", "Delete vendor rows that are framework namespace.", fn))
         if status.get("unknown_fw_ns", 0) > 0:
-            from .scripts.repairs import promote_unknown_android_perm_to_framework as fn
+            from ..scripts.repairs import promote_unknown_android_perm_to_framework as fn
             repairs.append((f"Promote unknown (namespace=android.permission) → framework ({status['unknown_fw_ns']})", "Set classification='framework' for unknown detections declaring framework namespace.", fn))
         if status.get("unknown_vendor_match", 0) > 0:
-            from .scripts.repairs import promote_unknown_to_vendor as fn
+            from ..scripts.repairs import promote_unknown_to_vendor as fn
             repairs.append((f"Reclassify unknown → vendor via suffix match ({status['unknown_vendor_match']})", "Set classification='vendor' when suffix matches vendor (non-android namespace).", fn))
         if status.get("idx_sha256_dup", False):
-            from .scripts.repairs import drop_redundant_sha256_index as fn
+            from ..scripts.repairs import drop_redundant_sha256_index as fn
             repairs.append(("Drop redundant sha256 index on APK repository", "Remove idx_sha256 when uk_sha256 exists.", fn))
         if status.get("core_mappings_missing", 0) > 0:
-            from .scripts.repairs import seed_signal_mappings_core as fn
+            from ..scripts.repairs import seed_signal_mappings_core as fn
             repairs.append(("Seed core signal mappings", "Idempotent insert/update of key signal mappings.", fn))
         if status.get("legacy_seeds_missing", 0) > 0:
-            from .scripts.repairs import seed_legacy_framework as fn
+            from ..scripts.repairs import seed_legacy_framework as fn
             repairs.append((f"Seed legacy framework permissions ({status['legacy_seeds_missing']} missing)", "Upsert legacy/missing framework constants to reduce 'unmatched' unknowns.", fn))
         if status.get("dp_unknown_count", 0) > 0 and status.get("unknown_catalog_missing", 0) > 0:
-            from .scripts.repairs import backfill_unknowns as fn
+            from ..scripts.repairs import backfill_unknowns as fn
+
+def _task_scan_duplicate_indexes() -> None:
+    try:
+        from scytaledroid.Database.db_core import db_queries as core_q
+    except Exception as exc:
+        print(status_messages.status(f"Import failed: {exc}", level="error"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    # Focus on known hot table first; can extend later
+    print()
+    menu_utils.print_section("Index scan: android_apk_repository")
+    try:
+        rows = core_q.run_sql(
+            "SELECT index_name, non_unique, column_name FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'android_apk_repository' AND column_name='sha256' ORDER BY index_name",
+            fetch="all",
+        )
+        menu_utils.print_table(["Index", "non_unique", "column"], rows or [])
+        print(status_messages.status("If both unique and non-unique indexes exist on sha256, consider dropping the non-unique one.", level="info"))
+    except Exception as exc:
+        print(status_messages.status(f"Index query failed: {exc}", level="error"))
+
+    prompt_utils.press_enter_to_continue()
             repairs.append(("Backfill unknown catalog from detections", "Insert distinct unknown perm names into android_unknown_permissions.", fn))
 
         # Merge and number
@@ -352,4 +373,3 @@ def scripts_menu() -> None:
 
 
 __all__ = ["scripts_menu"]
-
