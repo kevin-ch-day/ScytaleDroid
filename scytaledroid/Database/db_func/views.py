@@ -37,6 +37,21 @@ def ensure_views() -> bool:
     except Exception:
         pass
 
+    try:
+        run_sql(q.CREATE_VW_STATIC_MODULE_COVERAGE)
+    except Exception:
+        pass
+
+    try:
+        run_sql(q.CREATE_VW_STORAGE_SURFACE_RISK)
+    except Exception:
+        pass
+
+    try:
+        run_sql(q.CREATE_VW_DYNLOAD_HOTSPOTS)
+    except Exception:
+        pass
+
     return True
 
 

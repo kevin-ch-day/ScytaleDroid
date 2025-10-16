@@ -1,4 +1,7 @@
-"""Lightweight baseline string analysis helpers."""
+"""File: scytaledroid/StaticAnalysis/engine/strings.py
+
+Lightweight helpers for extracting and summarising string-analysis signals.
+"""
 
 from __future__ import annotations
 
@@ -13,7 +16,12 @@ from urllib.parse import urlsplit
 
 from scytaledroid.StaticAnalysis._androguard import APK
 
-from ..modules.string_analysis import build_string_index
+from ..modules.string_analysis import (
+    BUCKET_ORDER,
+    StringHit,
+    build_bucket_overview,
+    build_string_index,
+)
 
 
 _ENDPOINT_PATTERN = re.compile(r"(?:https?|wss?)://[^\s\"'<>]+", re.IGNORECASE)
@@ -74,40 +82,6 @@ class AnalyticsMatch:
     vendor: str
     identifier: str
 
-
-@dataclass(frozen=True)
-class StringHit:
-    """Represents a categorized string hit for baseline analysis."""
-
-    bucket: str
-    value: str
-    src: str
-    tag: str | None
-    sha256: str
-    masked: str | None = None
-    finding_type: str | None = None
-    provider: str | None = None
-    risk_tag: str | None = None
-    confidence: str | None = None
-    scheme: str | None = None
-    root_domain: str | None = None
-    resource_name: str | None = None
-    source_type: str | None = None
-    sample_hash: str | None = None
-
-
-_BUCKET_ORDER: tuple[str, ...] = (
-    "endpoints",
-    "http_cleartext",
-    "api_keys",
-    "analytics_ids",
-    "cloud_refs",
-    "ipc",
-    "uris",
-    "flags",
-    "certs",
-    "high_entropy",
-)
 
 _SOURCE_TYPE_MAP = {
     "code": "dex",
@@ -432,12 +406,12 @@ def analyse_strings(
     try:
         apk = APK(apk_path)
     except Exception:
-        return {"counts": {bucket: 0 for bucket in _BUCKET_ORDER}, "samples": {}, "aggregates": {}}
+        return {"counts": {bucket: 0 for bucket in BUCKET_ORDER}, "samples": {}, "aggregates": {}}
 
     try:
         index = build_string_index(apk, include_resources=True)
     except Exception:
-        return {"counts": {bucket: 0 for bucket in _BUCKET_ORDER}, "samples": {}, "aggregates": {}}
+        return {"counts": {bucket: 0 for bucket in BUCKET_ORDER}, "samples": {}, "aggregates": {}}
 
     entries = sorted(
         index.strings,
@@ -457,7 +431,7 @@ def analyse_strings(
             if entry.origin_type in {"resource", "raw", "asset"}
         ]
 
-    counts: Dict[str, int] = {bucket: 0 for bucket in _BUCKET_ORDER}
+    counts: Dict[str, int] = {bucket: 0 for bucket in BUCKET_ORDER}
     extra_counts: Counter[str] = Counter()
     samples: Dict[str, List[StringHit]] = defaultdict(list)
 
@@ -670,8 +644,14 @@ def analyse_strings(
             counts["api_keys"] += 1
             extra_counts["jwt_candidate"] += 1
 
+    raw_samples: Dict[str, List[StringHit]] = {
+        bucket: list(samples.get(bucket, []))
+        for bucket in BUCKET_ORDER
+        if samples.get(bucket)
+    }
+
     ordered_samples: Dict[str, List[Mapping[str, object]]] = {}
-    for bucket in _BUCKET_ORDER:
+    for bucket in BUCKET_ORDER:
         hits = samples.get(bucket)
         if not hits:
             continue
@@ -699,6 +679,8 @@ def analyse_strings(
             }
             for hit in ordered
         ]
+
+    structured = build_bucket_overview(raw_samples, counts)
 
     endpoint_roots_payload = []
     for root, scheme_counts in endpoint_by_root.items():
@@ -795,6 +777,7 @@ def analyse_strings(
         "samples": ordered_samples,
         "extra_counts": dict(extra_counts),
         "aggregates": aggregates,
+        "structured": structured,
         "options": {
             "max_samples": max_samples,
             "cleartext_only": cleartext_only,

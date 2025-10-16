@@ -1,4 +1,7 @@
-"""Text renderer for baseline static-analysis output."""
+"""File: scytaledroid/StaticAnalysis/cli/renderer.py
+
+Text renderer for baseline static-analysis output.
+"""
 
 from __future__ import annotations
 
@@ -12,6 +15,11 @@ from textwrap import fill
 from typing import Mapping, MutableMapping, Sequence
 
 from scytaledroid.Config import app_config
+from scytaledroid.StaticAnalysis.modules.string_analysis import (
+    BUCKET_LABELS,
+    BUCKET_METADATA,
+    BUCKET_ORDER,
+)
 
 from ..core import StaticAnalysisReport
 
@@ -30,29 +38,7 @@ def _short_number(value: int) -> str:
 _HASH_ORDER = ("md5", "sha1", "sha256")
 _SEVERITY_ORDER = ("High", "Medium", "Low", "Info")
 _SEVERITY_TOKENS = {"High": "H", "Medium": "M", "Low": "L", "Info": "I"}
-_STRING_BUCKET_TITLES = {
-    "endpoints": "Endpoints & Hosts (top)",
-    "api_keys": "API Keys & Tokens",
-    "analytics_ids": "Analytics IDs",
-    "cloud_refs": "Cloud References",
-    "ipc": "IPC & Permissions",
-    "uris": "URIs / Paths",
-    "flags": "Feature Flags",
-    "certs": "Certs / Pinning",
-    "high_entropy": "High-Entropy Strings",
-}
-_STRING_BUCKET_ORDER = (
-    "endpoints",
-    "http_cleartext",
-    "api_keys",
-    "analytics_ids",
-    "cloud_refs",
-    "ipc",
-    "uris",
-    "flags",
-    "certs",
-    "high_entropy",
-)
+_STRING_BUCKET_TITLES = {key: meta.label for key, meta in BUCKET_METADATA.items()}
 
 
 @dataclass(frozen=True)
@@ -77,6 +63,17 @@ def _clean_bool(value: bool | None) -> str:
     if value is None:
         return "absent"
     return "true" if value else "false"
+
+
+def _bucket_label(bucket: str) -> str:
+    return BUCKET_LABELS.get(bucket, bucket.replace("_", " ").title())
+
+
+def _preview_text(value: object, *, limit: int = 70) -> str:
+    text = str(value)
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1] + "…"
 
 
 def _manifest_flag_lines(report: StaticAnalysisReport) -> list[str]:
@@ -376,10 +373,10 @@ def _normalise_string_data(raw: Mapping[str, object]) -> Mapping[str, object]:
     samples_payload = raw.get("samples") if isinstance(raw, Mapping) else {}
     extra_counts_payload = raw.get("extra_counts") if isinstance(raw, Mapping) else {}
     aggregates_payload = raw.get("aggregates") if isinstance(raw, Mapping) else {}
-    counts = {bucket: int(counts_payload.get(bucket, 0)) for bucket in _STRING_BUCKET_ORDER}
+    counts = {bucket: int(counts_payload.get(bucket, 0)) for bucket in BUCKET_ORDER}
     samples: MutableMapping[str, list[Mapping[str, object]]] = {}
     if isinstance(samples_payload, Mapping):
-        for bucket in _STRING_BUCKET_ORDER:
+        for bucket in BUCKET_ORDER:
             entries = samples_payload.get(bucket)
             if isinstance(entries, Sequence):
                 normalised: list[Mapping[str, object]] = []
@@ -410,6 +407,8 @@ def _normalise_string_data(raw: Mapping[str, object]) -> Mapping[str, object]:
     if isinstance(extra_counts_payload, Mapping):
         extra_counts = {str(k): int(extra_counts_payload.get(k, 0)) for k in extra_counts_payload}
     aggregates = aggregates_payload if isinstance(aggregates_payload, Mapping) else {}
+    structured_payload = raw.get("structured") if isinstance(raw, Mapping) else {}
+    structured = structured_payload if isinstance(structured_payload, Mapping) else {}
     options_payload = raw.get("options") if isinstance(raw, Mapping) else {}
     options = options_payload if isinstance(options_payload, Mapping) else {}
     return {
@@ -417,6 +416,7 @@ def _normalise_string_data(raw: Mapping[str, object]) -> Mapping[str, object]:
         "samples": samples,
         "extra_counts": extra_counts,
         "aggregates": aggregates,
+        "structured": structured,
         "options": options,
     }
 
@@ -426,6 +426,7 @@ def _string_lines(string_payload: Mapping[str, object]) -> list[str]:
     counts = string_payload.get("counts", {}) if isinstance(string_payload, Mapping) else {}
     extra = string_payload.get("extra_counts", {}) if isinstance(string_payload, Mapping) else {}
     aggregates = string_payload.get("aggregates", {}) if isinstance(string_payload, Mapping) else {}
+    structured = string_payload.get("structured", {}) if isinstance(string_payload, Mapping) else {}
     options = string_payload.get("options", {}) if isinstance(string_payload, Mapping) else {}
 
     try:
@@ -438,25 +439,159 @@ def _string_lines(string_payload: Mapping[str, object]) -> list[str]:
         mapping = source if source is not None else counts
         return int(mapping.get(key, 0)) if isinstance(mapping, Mapping) else 0
 
-    totals_line1 = "  ".join(
-        (
-            f"endpoints={_short_number(_count_value('endpoints'))}",
-            f"http_cleartext={_short_number(_count_value('http_cleartext'))}",
-            f"https={_short_number(_count_value('https', source=extra))}",
-            f"ip_private={_short_number(_count_value('ip_private', source=extra))}",
-        )
+    bucket_totals = [
+        (bucket, int(counts.get(bucket, 0)))
+        for bucket in BUCKET_ORDER
+        if int(counts.get(bucket, 0))
+    ]
+    bucket_totals.sort(key=lambda item: (-item[1], BUCKET_ORDER.index(item[0])))
+
+    lines.append("  Totals (by bucket)")
+    if bucket_totals:
+        total_limit = max(sample_limit, 6)
+        structured_buckets: Mapping[str, Mapping[str, object]] = {}
+        if isinstance(structured, Mapping):
+            buckets_data = structured.get("buckets")
+            if isinstance(buckets_data, Mapping):
+                structured_buckets = {
+                    key: value
+                    for key, value in buckets_data.items()
+                    if isinstance(value, Mapping)
+                }
+        for bucket, total in bucket_totals[:total_limit]:
+            label = _bucket_label(bucket)
+            summary = structured_buckets.get(bucket)
+            unique = int(summary.get("unique_values", total)) if summary else total
+            detail = f"{label:<24} {total}"
+            if summary and unique and unique != total:
+                detail += f" (unique {unique})"
+            lines.append(f"    {detail}")
+        remaining = len(bucket_totals) - min(len(bucket_totals), total_limit)
+        if remaining > 0:
+            lines.append(f"    (+{remaining} more buckets)")
+    else:
+        lines.append("    (no string buckets detected)")
+
+    extra_pairs = []
+    for key, label in (
+        ("https", "https"),
+        ("ip_private", "ip_private"),
+        ("ip_public", "ip_public"),
+        ("localhost", "localhost"),
+        ("ws", "ws"),
+        ("wss", "wss"),
+        ("entropy_high", "entropy_high"),
+    ):
+        value = _count_value(key, source=extra)
+        if value:
+            extra_pairs.append(f"{label}={_short_number(value)}")
+    if extra_pairs:
+        lines.append("")
+        lines.append("  Extra counters")
+        lines.extend(_wrap_lines("  ".join(extra_pairs), indent=4, subsequent_indent=6))
+
+    structured_buckets: Mapping[str, Mapping[str, object]] = {}
+    if isinstance(structured, Mapping):
+        buckets_data = structured.get("buckets")
+        if isinstance(buckets_data, Mapping):
+            structured_buckets = {
+                key: value
+                for key, value in buckets_data.items()
+                if isinstance(value, Mapping)
+            }
+
+    def _bucket_priority(key: str) -> int:
+        meta = BUCKET_METADATA.get(key)
+        return meta.priority if meta else 0
+
+    def _bucket_highlight(key: str) -> bool:
+        meta = BUCKET_METADATA.get(key)
+        return meta.highlight if meta else True
+
+    sorted_bucket_keys = sorted(
+        structured_buckets.keys(),
+        key=lambda key: (
+            -_bucket_priority(key),
+            -int(structured_buckets[key].get("total", 0)),
+            key,
+        ),
     )
-    totals_line2 = "  ".join(
-        (
-            f"analytics_ids={_short_number(_count_value('analytics_ids'))}",
-            f"api_keys={_short_number(_count_value('api_keys'))}",
-            f"cloud_refs={_short_number(_count_value('cloud_refs'))}",
-            f"entropy_hi={_short_number(_count_value('entropy_high', source=extra) or _count_value('high_entropy'))}",
-        )
-    )
-    lines.append("  Totals")
-    lines.extend(_wrap_lines(totals_line1, indent=4, subsequent_indent=6))
-    lines.extend(_wrap_lines(totals_line2, indent=4, subsequent_indent=6))
+
+    highlight_keys = [key for key in sorted_bucket_keys if _bucket_highlight(key)]
+    additional_keys = [key for key in sorted_bucket_keys if key not in highlight_keys]
+
+    for bucket in highlight_keys:
+        summary = structured_buckets[bucket]
+        top_values = summary.get("top_values")
+        if not isinstance(top_values, Sequence) or not top_values:
+            continue
+        total = int(summary.get("total", 0))
+        unique = int(summary.get("unique_values", 0))
+        source_types = summary.get("source_types") if isinstance(summary.get("source_types"), Mapping) else {}
+        if isinstance(source_types, Mapping):
+            source_breakdown = [
+                (str(name), int(value))
+                for name, value in source_types.items()
+                if int(value)
+            ]
+            source_breakdown.sort(key=lambda item: (-item[1], item[0]))
+        else:
+            source_breakdown = []
+        header = f"  {_bucket_label(bucket)} (total={total}, unique={unique})"
+        if source_breakdown:
+            header += "  sources: " + ", ".join(
+                f"{name}={value}" for name, value in source_breakdown[:2]
+            )
+        lines.append("")
+        lines.append(header)
+        value_limit = max(sample_limit, 3) if bucket == "endpoints" else sample_limit
+        shown_values = top_values[:value_limit]
+        for entry in shown_values:
+            example = entry.get("example") if isinstance(entry.get("example"), Mapping) else {}
+            display_value = entry.get("value")
+            if bucket in {"api_keys", "high_entropy"} and isinstance(example, Mapping):
+                masked = example.get("masked")
+                if masked:
+                    display_value = masked
+            preview = _preview_text(display_value or "(empty)")
+            count = int(entry.get("count", 0))
+            parts = [f"{preview} ×{count}"]
+            sources_list = entry.get("sources") if isinstance(entry.get("sources"), Sequence) else []
+            source_total = int(entry.get("source_total", len(sources_list))) if entry.get("source_total") is not None else len(sources_list)
+            if sources_list:
+                src_preview = ", ".join(str(src) for src in sources_list[:2])
+                extra_sources = max(source_total - len(sources_list[:2]), 0)
+                if extra_sources:
+                    src_preview += f" (+{extra_sources} more)"
+                parts.append(f"Src: {src_preview}")
+            tags_list = entry.get("tags") if isinstance(entry.get("tags"), Sequence) else []
+            if tags_list:
+                parts.append("Tags: " + ", ".join(str(tag) for tag in tags_list[:2]))
+            providers_list = entry.get("providers") if isinstance(entry.get("providers"), Sequence) else []
+            if providers_list:
+                parts.append("Providers: " + ", ".join(str(p) for p in providers_list[:2]))
+            risks_list = entry.get("risk_tags") if isinstance(entry.get("risk_tags"), Sequence) else []
+            if risks_list:
+                parts.append("Risk: " + ", ".join(str(r) for r in risks_list[:2]))
+            confidence = example.get("confidence") if isinstance(example, Mapping) else None
+            if confidence and confidence not in {"high", "High"}:
+                parts.append(f"Confidence: {confidence}")
+            detail = "  ".join(parts)
+            lines.extend(_wrap_lines(detail, indent=6, subsequent_indent=8))
+        remaining_values = len(top_values) - len(shown_values)
+        if remaining_values > 0:
+            lines.append(f"      (+{remaining_values} more values)")
+
+    if additional_keys:
+        lines.append("")
+        lines.append("  Additional buckets")
+        for bucket in additional_keys:
+            summary = structured_buckets[bucket]
+            total = int(summary.get("total", 0))
+            unique = int(summary.get("unique_values", 0))
+            lines.append(
+                f"    {_bucket_label(bucket)}: total={total}, unique={unique}"
+            )
 
     endpoint_roots = []
     if isinstance(aggregates, Mapping):
@@ -509,7 +644,7 @@ def _string_lines(string_payload: Mapping[str, object]) -> list[str]:
         for entry in top_clear:
             url = str(entry.get("value") or "(unknown)")
             src = str(entry.get("src") or "string")
-            preview = url if len(url) <= 70 else f"{url[:67]}…"
+            preview = _preview_text(url, limit=70)
             detail = f"{preview}              Src: {src}"
             lines.extend(_wrap_lines(detail, indent=4, subsequent_indent=6))
         remaining = len(clear_samples) - len(top_clear)

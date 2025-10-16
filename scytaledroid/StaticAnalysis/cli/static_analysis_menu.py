@@ -38,6 +38,7 @@ from ..core.repository import (
     list_packages,
 )
 from ..persistence import ReportStorageError, save_report
+from ..modules.module_api import AppModuleContext
 from ..modules.permissions import (
     collect_permissions_and_sdk,
     print_permissions_block,
@@ -48,6 +49,8 @@ from ..modules.permissions.render_matrix import (
     render_signals as render_signal_matrix,
 )
 from ..modules.permissions.audit import PermissionAuditAccumulator
+from ..modules.dynamic_loading import DynamicLoadModule
+from ..modules.storage_surface import StorageSurfaceModule
 from .renderer import render_app_result, write_baseline_json
 from .sections import SECTION_DEFINITIONS, extract_integrity_profiles
 
@@ -73,6 +76,19 @@ _PROFILE_LABELS: Mapping[str, str] = {
     "split": "Split-APK composition",
     "custom": "Custom",
 }
+
+PROFILE_BASELINE: tuple[str, ...] = ("permissions", "strings")
+PROFILE_FULL: tuple[str, ...] = (
+    "permissions",
+    "strings",
+    "webview",
+    "nsc",
+    "ipc",
+    "crypto",
+    "sdk",
+    "dynload",
+    "storage_surface",
+)
 
 _MICRO_TESTS: Tuple[Tuple[str, str], ...] = (
     ("manifest", "Manifest-only"),
@@ -133,6 +149,7 @@ class ArtifactOutcome:
     saved_path: Optional[str]
     started_at: datetime
     finished_at: datetime
+    metadata: Mapping[str, object] | None = None
 
 
 @dataclass
@@ -150,13 +167,17 @@ class AppRunResult:
             totals.update(artifact.severity)
         return totals
 
-    def base_report(self) -> Optional[StaticAnalysisReport]:
+    def base_artifact_outcome(self) -> Optional[ArtifactOutcome]:
         for artifact in self.artifacts:
             _, _, artifact_profile, _ = extract_integrity_profiles(artifact.report)
             role = str((artifact_profile or {}).get("role") or "").lower()
             if role == "base":
-                return artifact.report
-        return self.artifacts[0].report if self.artifacts else None
+                return artifact
+        return self.artifacts[0] if self.artifacts else None
+
+    def base_report(self) -> Optional[StaticAnalysisReport]:
+        base_artifact = self.base_artifact_outcome()
+        return base_artifact.report if base_artifact else None
 
 
 @dataclass
@@ -593,6 +614,7 @@ def _execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pa
                     saved_path=None if params.dry_run else (saved_path or None),
                     started_at=wall_clock_started,
                     finished_at=wall_clock_finished,
+                    metadata=dict(artifact.metadata),
                 )
             )
 
@@ -1060,6 +1082,36 @@ def _render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                         _sadb.replace_top_samples(int(summary_id), samples, top_n=3)
             except Exception:
                 pass
+        module_summaries: dict[str, Mapping[str, int]] = {}
+        if params.profile == "full":
+            base_artifact = app_result.base_artifact_outcome()
+            if base_artifact is not None:
+                metadata = base_artifact.metadata or {}
+                context = AppModuleContext(
+                    report=base_report,
+                    package_name=app_result.package_name,
+                    apk_path=Path(base_report.file_path),
+                    metadata=metadata,
+                    session_stamp=stamp,
+                    scope_label=params.scope_label
+                    or ("All apps" if params.scope == "all" else params.scope),
+                )
+                try:
+                    dyn_module = DynamicLoadModule()
+                    dyn_result = dyn_module.run(context)
+                    dyn_module.persist(dyn_result)
+                    module_summaries["dynload"] = dyn_module.summarize(dyn_result)
+                except Exception:
+                    module_summaries.setdefault("dynload", {})
+                try:
+                    storage_module = StorageSurfaceModule()
+                    storage_result = storage_module.run(context)
+                    storage_module.persist(storage_result)
+                    module_summaries["storage_surface"] = storage_module.summarize(
+                        storage_result
+                    )
+                except Exception:
+                    module_summaries.setdefault("storage_surface", {})
         total_duration = sum(artifact.duration_seconds for artifact in app_result.artifacts)
         lines, payload, finding_totals = render_app_result(
             base_report,
@@ -1129,6 +1181,25 @@ def _render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             except Exception:
                 pass
 
+        if module_summaries:
+            dyn_summary = module_summaries.get("dynload", {})
+            storage_summary = module_summaries.get("storage_surface", {})
+            lines.append("")
+            lines.append(
+                "DynLoad: classloaders={cls}, native={native}, reflection_calls={ref}".format(
+                    cls=int(dyn_summary.get("classloaders", 0)),
+                    native=int(dyn_summary.get("native", 0)),
+                    ref=int(dyn_summary.get("reflection_calls", 0)),
+                )
+            )
+            lines.append(
+                "StorageSurface: fileproviders={fp} ({broad} broad), exported_providers={exp}".format(
+                    fp=int(storage_summary.get("fileproviders", 0)),
+                    broad=int(storage_summary.get("broad", 0)),
+                    exp=int(storage_summary.get("exported_providers", 0)),
+                )
+            )
+
         for line in lines:
             print(line)
 
@@ -1152,6 +1223,13 @@ def _render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
     if outcome.failures:
         for message in sorted(set(outcome.failures)):
             print(status_messages.status(message, level="error"))
+
+    if params.profile == "full":
+        print()
+        print(f"Modules run: {', '.join(PROFILE_FULL)}")
+    elif params.profile == "lightweight":
+        print()
+        print(f"Modules run: {', '.join(PROFILE_BASELINE)}")
 
 
 def _render_app_table(results: Sequence[AppRunResult]) -> None:
