@@ -7,8 +7,8 @@ from datetime import datetime
 from functools import lru_cache
 from typing import Dict, Iterable, List, Optional, Sequence, Union
 
-from ..db_core import run_sql
-from ..db_queries import apk_repository as queries
+from ...db_core import database_session, run_sql
+from ...db_queries.harvest import apk_repository as queries
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
@@ -70,8 +70,9 @@ class ApkRecord:
 def upsert_apk_record(record: ApkRecord) -> int:
     """Insert or update an APK row and return the apk_id."""
     params = record.to_parameters()
-    run_sql(queries.UPSERT_APK, params)
-    row = run_sql(queries.SELECT_APK_ID_BY_SHA256, (record.sha256,), fetch="one")
+    with database_session():
+        run_sql(queries.UPSERT_APK, params)
+        row = run_sql(queries.SELECT_APK_ID_BY_SHA256, (record.sha256,), fetch="one")
     if not row:
         raise RuntimeError("Failed to resolve apk_id after upsert")
     return int(row[0])
@@ -84,13 +85,16 @@ def get_apk_by_sha256(sha256: str) -> Optional[Dict[str, object]]:
 
 def ensure_split_group(package_name: str) -> int:
     """Get or create a split group id for the given package."""
-    row = run_sql(queries.SELECT_SPLIT_GROUP_BY_PACKAGE, (package_name,), fetch="one")
-    if row:
-        return int(row[0])
-    group_id = run_sql(queries.INSERT_SPLIT_GROUP, (package_name,), return_lastrowid=True)
-    if group_id:
-        return int(group_id)
-    row = run_sql(queries.SELECT_SPLIT_GROUP_BY_PACKAGE, (package_name,), fetch="one")
+    with database_session():
+        row = run_sql(queries.SELECT_SPLIT_GROUP_BY_PACKAGE, (package_name,), fetch="one")
+        if row:
+            return int(row[0])
+        group_id = run_sql(
+            queries.INSERT_SPLIT_GROUP, (package_name,), return_lastrowid=True
+        )
+        if group_id:
+            return int(group_id)
+        row = run_sql(queries.SELECT_SPLIT_GROUP_BY_PACKAGE, (package_name,), fetch="one")
     if not row:
         raise RuntimeError("Failed to create split group")
     return int(row[0])
@@ -140,44 +144,45 @@ def ensure_app_definition(
     else:
         label = None
 
-    run_sql(queries.UPSERT_APP_DEFINITION, (cleaned_package, label))
-    row = run_sql(queries.SELECT_APP_ID_BY_PACKAGE, (cleaned_package,), fetch="one")
-    if not row:
-        raise RuntimeError(f"Failed to resolve app_id for package {package_name}")
-    app_id = int(row[0])
+    with database_session():
+        run_sql(queries.UPSERT_APP_DEFINITION, (cleaned_package, label))
+        row = run_sql(queries.SELECT_APP_ID_BY_PACKAGE, (cleaned_package,), fetch="one")
+        if not row:
+            raise RuntimeError(f"Failed to resolve app_id for package {package_name}")
+        app_id = int(row[0])
 
-    update_fields: List[str] = []
-    update_params: List[object] = []
+        update_fields: List[str] = []
+        update_params: List[object] = []
 
-    column_flags = _get_definition_profile_columns()
-    if category_name and category_name.strip():
-        category_id = get_category_id(category_name.strip())
-        update_fields.append("category_id = %s")
-        update_params.append(category_id)
+        column_flags = _get_definition_profile_columns()
+        if category_name and category_name.strip():
+            category_id = get_category_id(category_name.strip())
+            update_fields.append("category_id = %s")
+            update_params.append(category_id)
 
-    if profile_id and str(profile_id).strip():
-        if column_flags["profile_id"]:
-            update_fields.append("profile_id = %s")
-            update_params.append(str(profile_id).strip())
-        else:
-            _warn_missing_profile_columns()
+        if profile_id and str(profile_id).strip():
+            if column_flags["profile_id"]:
+                update_fields.append("profile_id = %s")
+                update_params.append(str(profile_id).strip())
+            else:
+                _warn_missing_profile_columns()
 
-    if profile_name and profile_name.strip():
-        if column_flags["profile_name"]:
-            update_fields.append("profile_name = %s")
-            update_params.append(profile_name.strip())
-        else:
-            _warn_missing_profile_columns()
+        if profile_name and profile_name.strip():
+            if column_flags["profile_name"]:
+                update_fields.append("profile_name = %s")
+                update_params.append(profile_name.strip())
+            else:
+                _warn_missing_profile_columns()
 
-    if update_fields:
-        set_clause = ", ".join(update_fields + ["updated_at = CURRENT_TIMESTAMP"])
-        update_params.append(cleaned_package)
-        run_sql(
-            f"""UPDATE android_app_definitions
-            SET {set_clause}
-            WHERE package_name = %s""",
-            tuple(update_params),
-        )
+        if update_fields:
+            set_clause = ", ".join(update_fields + ["updated_at = CURRENT_TIMESTAMP"])
+            update_params.append(cleaned_package)
+            run_sql(
+                f"""UPDATE android_app_definitions
+                SET {set_clause}
+                WHERE package_name = %s""",
+                tuple(update_params),
+            )
 
     return app_id
 

@@ -15,7 +15,7 @@ import argparse
 from typing import List, Sequence, Tuple
 
 from scytaledroid.Database.db_core import db_queries as core_q
-from scytaledroid.Database.db_utils.db_utils import get_table_columns
+from scytaledroid.Database.db_utils.diagnostics import get_table_columns
 from scytaledroid.Utils.DisplayUtils import status_messages as sm
 
 

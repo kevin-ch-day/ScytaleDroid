@@ -22,12 +22,12 @@ back to a concrete database record.
 
 | Table | Purpose | Primary keys & relationships | Populated by |
 | --- | --- | --- | --- |
-| `static_findings_summary` | One row per scan session (`package_name`, `session_stamp`, `scope_label`). Stores severity counts, manifest flag snapshot, and string-summary foreign keys. | PK `id`; unique index on `(package_name, session_stamp, scope_label)`. Referenced by `static_findings` and `static_string_samples`. | `db_queries/static_findings.py` (`INSERT_FINDINGS_SUMMARY`). |
-| `static_findings` | Individual findings from detectors/correlation (title, severity, evidence JSON). | PK `id`; FK `summary_id` → `static_findings_summary.id`. | `db_queries/static_findings.py` (`INSERT_FINDING`). |
-| `static_string_summary` | Aggregated counts for string buckets (endpoints, cleartext, cloud references, etc.). | PK `id`; unique index on `(package_name, session_stamp, scope_label)`. | `db_queries/string_analysis.py` (`INSERT_STRING_SUMMARY`). |
-| `static_string_samples` | Top-N string samples per bucket with masking, provenance, and tag metadata. | PK `id`; FK `summary_id` → `static_string_summary.id`. | `db_queries/string_analysis.py` (`INSERT_SAMPLE`). |
-| `risk_scores` / `static_permission_risk` | Roll-up risk metrics for permissions and overall scoring. | `risk_scores` keyed by `(package_name, session_stamp, scope_label)`; `static_permission_risk` keyed by `apk_id`. | `db_queries/risk_scores.py` and `db_queries/static_permission_risk.py`. |
-| `static_fileproviders`, `static_provider_acl` | Provider posture (authority, exported flag, ACLs). | PK `id`; optional `apk_id` / `session_stamp` for joins. | `db_queries/storage_surface.py`. |
+| `static_findings_summary` | One row per scan session (`package_name`, `session_stamp`, `scope_label`). Stores severity counts, manifest flag snapshot, and string-summary foreign keys. | PK `id`; unique index on `(package_name, session_stamp, scope_label)`. Referenced by `static_findings` and `static_string_samples`. | `db_queries/static_analysis/static_findings.py` (`INSERT_FINDINGS_SUMMARY`). |
+| `static_findings` | Individual findings from detectors/correlation (title, severity, evidence JSON). | PK `id`; FK `summary_id` → `static_findings_summary.id`. | `db_queries/static_analysis/static_findings.py` (`INSERT_FINDING`). |
+| `static_string_summary` | Aggregated counts for string buckets (endpoints, cleartext, cloud references, etc.). | PK `id`; unique index on `(package_name, session_stamp, scope_label)`. | `db_queries/static_analysis/string_analysis.py` (`INSERT_STRING_SUMMARY`). |
+| `static_string_samples` | Top-N string samples per bucket with masking, provenance, and tag metadata. | PK `id`; FK `summary_id` → `static_string_summary.id`. | `db_queries/static_analysis/string_analysis.py` (`INSERT_SAMPLE`). |
+| `risk_scores` / `static_permission_risk` | Roll-up risk metrics for permissions and overall scoring. | `risk_scores` keyed by `(package_name, session_stamp, scope_label)`; `static_permission_risk` keyed by `apk_id`. | `db_queries/static_analysis/risk_scores.py` and `db_queries/static_analysis/static_permission_risk.py`. |
+| `static_fileproviders`, `static_provider_acl` | Provider posture (authority, exported flag, ACLs). | PK `id`; optional `apk_id` / `session_stamp` for joins. | `db_queries/harvest/storage_surface.py`. |
 
 All tables share the `session_stamp` convention so they can be joined with the
 latest APK metadata from `android_apk_repository` or with `permission_audit`
@@ -51,19 +51,20 @@ If your schema snapshot still reflects the previous column set
 script provided in `db_utils`:
 
 ```bash
-python -m scytaledroid.Database.db_utils.diagnostics --apply string_analysis_upgrade
+python -c "from scytaledroid.Database.db_func.static_analysis import string_analysis; string_analysis.ensure_tables()"
 ```
 
-The command creates/updates the table definitions using
+The helper creates/updates the table definitions using
 `CREATE_STRING_SUMMARY` and `CREATE_STRING_SAMPLES` from
-`db_queries/string_analysis.py`.
+`db_queries/static_analysis/string_analysis.py`.
 
 ## 4. Query helpers & diagnostics
 
-* **Creation scripts** – `db_queries/*` files hold the canonical `CREATE TABLE`
-  statements. They are sourced by setup scripts and migrations.
-* **Diagnostics menu** – `python -m scytaledroid.Database.db_utils.diagnostics`
-  exposes the menu shown in the schema snapshot (options 1–4, 9). Option **2**
+* **Creation scripts** – Namespaced modules under
+  `db_queries/static_analysis/` and `db_queries/harvest/` hold the canonical
+  `CREATE TABLE` statements sourced by setup scripts and migrations.
+* **Diagnostics menu** – `python -m scytaledroid.Database.db_utils.menu`
+  launches the Database Utilities interface (options 1–4, 9). Option **2**
   emits the Markdown schema summary used above; option **3** cross-checks row
   counts for `static_findings`, `static_string_summary`, and related tables.
 * **String intel snapshot** – After a run, use the exploratory renderer

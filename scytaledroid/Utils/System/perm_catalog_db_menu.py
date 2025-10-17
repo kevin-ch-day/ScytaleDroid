@@ -7,8 +7,8 @@ from typing import List
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
-from scytaledroid.Database.db_utils import db_utils
-from scytaledroid.Database.db_func import framework_permissions as fp
+from scytaledroid.Database.db_utils import diagnostics
+from scytaledroid.Database.db_func.permissions import framework_permissions as fp
 
 from scytaledroid.Utils.AndroidPermCatalog.loader import load_permission_doc, ONLINE_URL
 from scytaledroid.Utils.AndroidPermCatalog.parser import parse_manifest_permissions
@@ -79,7 +79,7 @@ def perm_catalog_db_menu() -> None:
             break
 
         if choice == "1":
-            ok = db_utils.check_connection()
+            ok = diagnostics.check_connection()
             table_ok = _ensure_table() if ok else False
             if ok and table_ok:
                 count = fp.count_rows()

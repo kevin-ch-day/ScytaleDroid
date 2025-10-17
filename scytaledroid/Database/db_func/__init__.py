@@ -1,29 +1,44 @@
-"""High-level database functions exposed to application layers."""
+"""High-level database functions grouped by feature area."""
 
-from .apk_repository import (
-    ApkRecord,
-    upsert_apk_record,
-    get_apk_by_sha256,
-    ensure_split_group,
-    mark_split_members,
-    fetch_split_members,
-    fetch_duplicate_hashes,
-    get_category_id,
-    list_categories,
-    assign_split_members,
-    ensure_app_definition,
+from __future__ import annotations
+
+from .harvest import apk_repository, dynamic_loading, storage_surface
+from .permissions import (
+    detected_permissions,
+    framework_permissions,
+    permission_support,
+    unknown_permissions,
+    vendor_permissions,
+)
+from .static_analysis import (
+    risk_scores,
+    static_findings,
+    static_permission_risk,
+    string_analysis,
 )
 
+# Re-export dataclass payloads for convenience
+ApkRecord = apk_repository.ApkRecord
+RiskScoreRecord = risk_scores.RiskScoreRecord
+StringSummaryRecord = string_analysis.StringSummaryRecord
+StringSample = string_analysis.StringSample
+
 __all__ = [
+    "apk_repository",
+    "dynamic_loading",
+    "storage_surface",
+    "detected_permissions",
+    "framework_permissions",
+    "permission_support",
+    "unknown_permissions",
+    "vendor_permissions",
+    "risk_scores",
+    "static_findings",
+    "static_permission_risk",
+    "string_analysis",
     "ApkRecord",
-    "upsert_apk_record",
-    "get_apk_by_sha256",
-    "ensure_split_group",
-    "mark_split_members",
-    "fetch_split_members",
-    "fetch_duplicate_hashes",
-    "get_category_id",
-    "list_categories",
-    "assign_split_members",
-    "ensure_app_definition",
+    "RiskScoreRecord",
+    "StringSummaryRecord",
+    "StringSample",
 ]
+

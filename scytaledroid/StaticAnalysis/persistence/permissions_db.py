@@ -52,7 +52,7 @@ def persist_declared_permissions(
     - Unknown: malformed/odd permissions (no namespace dot) observed in uses.
     """
     try:
-        from scytaledroid.Database.db_func import (
+        from scytaledroid.Database.db_func.permissions import (
             vendor_permissions as _vp,
             unknown_permissions as _up,
             detected_permissions as _dp,
@@ -109,7 +109,7 @@ def persist_declared_permissions(
         apk_id: int | None = None
         if first_seen:
             try:
-                from scytaledroid.Database.db_func.apk_repository import get_apk_by_sha256
+                from scytaledroid.Database.db_func.harvest.apk_repository import get_apk_by_sha256
 
                 row = get_apk_by_sha256(first_seen)
                 if row and isinstance(row, dict) and row.get("apk_id"):

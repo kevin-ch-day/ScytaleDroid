@@ -8,7 +8,8 @@ import sys
 from functools import lru_cache
 from typing import Iterable, Tuple
 
-from .palette import Palette, get_palette
+from .models import Palette
+from .palette import get_palette
 
 RESET = "\033[0m"
 _ANSI_PATTERN = re.compile(r"\033\[[0-9;]*m")

@@ -644,7 +644,7 @@ class PermissionAuditAccumulator:
         Returns inserted ``snapshot_id`` (int) or ``None`` on failure.
         """
         try:
-            from scytaledroid.Database.db_func import permission_support as support
+            from scytaledroid.Database.db_func.permissions import permission_support as support
             from scytaledroid.Database.db_core import db_queries as core_q
 
             # Ensure schema exists

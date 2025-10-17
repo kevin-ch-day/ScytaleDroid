@@ -1,8 +1,7 @@
 """Simplified Database Scripts & Tasks menu (numeric keys only).
 
-This menu focuses on running curated diagnostics and DB maintenance tasks
-with clear numeric options. The User Scripts entry allows executing or
-deleting scripts without extra submenus.
+This menu focuses on curated diagnostics and maintenance tasks with
+clear numeric options.
 """
 
 from __future__ import annotations
@@ -209,115 +208,6 @@ def _task_scoring_sanity_quick() -> None:
     prompt_utils.press_enter_to_continue()
 
 
-def _task_refresh_views() -> None:
-    from scytaledroid.Database.db_func.views import ensure_views
-
-    ok = ensure_views()
-    level = "success" if ok else "error"
-    print(status_messages.status("Views created/refreshed." if ok else "Failed to create views.", level=level))
-    prompt_utils.press_enter_to_continue()
-
-
-def _task_performance_check() -> None:
-    # Reuse existing helper for duplicate index scan
-    _task_scan_duplicate_indexes()
-
-def _task_ensure_core_indexes() -> None:
-    try:
-        from scytaledroid.Database.db_core import db_queries as core_q
-    except Exception as exc:
-        print(status_messages.status(f"Import failed: {exc}", level="error"))
-        prompt_utils.press_enter_to_continue()
-        return
-
-    created: list[str] = []
-    checks = [
-        ("idx_detected_ns", "android_detected_permissions", "namespace", "ALTER TABLE android_detected_permissions ADD INDEX idx_detected_ns (namespace)"),
-        ("idx_detected_perm", "android_detected_permissions", "perm_name", "ALTER TABLE android_detected_permissions ADD INDEX idx_detected_perm (perm_name)"),
-    ]
-    for idx_name, table, column, ddl in checks:
-        try:
-            row = core_q.run_sql(
-                """
-                SELECT COUNT(*) FROM information_schema.statistics
-                WHERE table_schema = DATABASE() AND table_name=%s AND index_name=%s AND column_name=%s
-                """,
-                (table, idx_name, column),
-                fetch="one",
-            )
-            exists = bool(row and int(row[0]) > 0)
-            if not exists:
-                core_q.run_sql(ddl)
-                created.append(idx_name)
-        except Exception as exc:
-            print(status_messages.status(f"Index {idx_name}: {exc}", level="warn"))
-    if created:
-        print(status_messages.status(f"Created index(es): {', '.join(created)}", level="success"))
-    else:
-        print(status_messages.status("Core indexes already present.", level="info"))
-    prompt_utils.press_enter_to_continue()
-
-
-def _task_user_scripts_simple() -> None:
-    from ..user_script_runner import (
-        discover_scripts,
-        run_sql_script,
-        run_python_script,
-        delete_script,
-    )
-
-    scripts = discover_scripts()
-    print()
-    menu_utils.print_section("User Scripts (SQL/Python)")
-    rows: List[List[str]] = []
-    for idx, s in enumerate(scripts, start=1):
-        rows.append([str(idx), s.name, s.desc, str(s.path)])
-    menu_utils.print_table(["#", "name", "desc", "path"], rows)
-
-    if not scripts:
-        print(status_messages.status("No scripts found in scripts/db (create one).", level="info"))
-        prompt_utils.press_enter_to_continue()
-        return
-
-    max_index = len(scripts)
-    sel = prompt_utils.get_choice([str(i) for i in range(0, max_index + 1)], default="0", prompt="Enter script number (0 to cancel)")
-    if sel == "0":
-        return
-    try:
-        index = int(sel)
-    except Exception:
-        return
-    if index < 1 or index > max_index:
-        return
-    target = scripts[index - 1]
-
-    action = prompt_utils.get_choice(["e", "d"], default="e", prompt="Action: (e)xecute or (d)elete?")
-    if action == "d":
-        ok = delete_script(target.path)
-        level = "success" if ok else "error"
-        print(status_messages.status(f"Deleted: {target.name}" if ok else f"Delete failed: {target.name}", level=level))
-        prompt_utils.press_enter_to_continue()
-        return
-
-    # Execute
-    print(status_messages.status(f"Running {target.name}…", level="info"))
-    if target.kind == "sql":
-        def _print_fn(msg: str) -> None:
-            print(msg)
-
-        from scytaledroid.Utils.DisplayUtils import table_utils
-
-        def _table_fn(headers, rows) -> None:
-            table_utils.render_table(headers, rows)
-
-        run_sql_script(target.path, print_fn=_print_fn, table_fn=_table_fn)
-    else:
-        def _print_fn(msg: str) -> None:
-            print(msg)
-
-        run_python_script(target.path, print_fn=_print_fn)
-    prompt_utils.press_enter_to_continue()
-
 
 def scripts_menu() -> None:
     """Render the Database Scripts menu (numeric options only)."""
@@ -332,15 +222,11 @@ def scripts_menu() -> None:
 
         # Build static options
         entries: List[Tuple[str, str, Callable[[], None]]] = [
-            ("Run diagnostics (SQL) and analyze", "Execute curated SQL and show results.", _task_run_diagnostics),
+            ("Database diagnostics (analyze SQL)", "Execute diagnostic SQL and show results.", _task_run_diagnostics),
             ("Schema health check (read-only)", "Run non-destructive checks for schema/index consistency.", _task_schema_health),
             ("Coverage checks (FQN + mappings)", "Canonicalization coverage, mapping drift, cardinality.", _task_coverage_checks),
             ("Inventory sanity (APKs)", "Latest view correctness, orphans, split/base hygiene.", _task_inventory_sanity_quick),
             ("Scoring sanity", "Grades vs thresholds; AdServices excluded counts.", _task_scoring_sanity_quick),
-            ("Create/Refresh DB views", "Define reporting views (latest APK, latest permission risk).", _task_refresh_views),
-            ("Performance & index check", "Scan for redundant/missing indexes (quick).", _task_performance_check),
-            ("Ensure core indexes", "Add non-unique indexes on namespace/perm_name if missing.", _task_ensure_core_indexes),
-            ("User Scripts (SQL/Python)", "Execute or delete ad-hoc scripts.", _task_user_scripts_simple),
         ]
 
         # Dynamic repair actions (numbered after static ones)
@@ -348,9 +234,6 @@ def scripts_menu() -> None:
         if status.get("vendor_misclassified", 0) > 0:
             from ..scripts.repairs import clean_vendor_framework_namespace as fn
             repairs.append((f"Clean vendor rows in android.permission namespace ({status['vendor_misclassified']})", "Delete vendor rows that are framework namespace.", fn))
-        if status.get("unknown_fw_ns", 0) > 0:
-            from ..scripts.repairs import promote_unknown_android_perm_to_framework as fn
-            repairs.append((f"Promote unknown (namespace=android.permission) → framework ({status['unknown_fw_ns']})", "Set classification='framework' for unknown detections declaring framework namespace.", fn))
         if status.get("unknown_vendor_match", 0) > 0:
             from ..scripts.repairs import promote_unknown_to_vendor as fn
             repairs.append((f"Reclassify unknown → vendor via suffix match ({status['unknown_vendor_match']})", "Set classification='vendor' when suffix matches vendor (non-android namespace).", fn))
@@ -381,7 +264,7 @@ def scripts_menu() -> None:
             handlers[key] = fn
 
         # Render menu
-        menu_utils.print_menu(numbered, padding=True, show_exit=False, show_descriptions=True)
+        menu_utils.print_menu(numbered, padding=True, show_exit=True, show_descriptions=True)
         valid_keys = [k for k in handlers.keys()] + ["0"]
         choice = prompt_utils.get_choice(valid=valid_keys, default="0")
         if choice == "0":
@@ -390,30 +273,5 @@ def scripts_menu() -> None:
         if handler is None:
             continue
         handler()
-
-
-def _task_scan_duplicate_indexes() -> None:
-    try:
-        from scytaledroid.Database.db_core import db_queries as core_q
-    except Exception as exc:
-        print(status_messages.status(f"Import failed: {exc}", level="error"))
-        prompt_utils.press_enter_to_continue()
-        return
-
-    # Focus on known hot table first; can extend later
-    print()
-    menu_utils.print_section("Index scan: android_apk_repository")
-    try:
-        rows = core_q.run_sql(
-            "SELECT index_name, non_unique, column_name FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'android_apk_repository' AND column_name='sha256' ORDER BY index_name",
-            fetch="all",
-        )
-        menu_utils.print_table(["Index", "non_unique", "column"], rows or [])
-        print(status_messages.status("If both unique and non-unique indexes exist on sha256, consider dropping the non-unique one.", level="info"))
-    except Exception as exc:
-        print(status_messages.status(f"Index query failed: {exc}", level="error"))
-
-    prompt_utils.press_enter_to_continue()
-
 
 __all__ = ["scripts_menu"]

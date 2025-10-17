@@ -49,7 +49,9 @@ CREATE TABLE IF NOT EXISTS `risk_scores` (
 ```
 
 Writes are **best‑effort** from the Permission analysis CLI (no hard failure if
-the DB is unavailable). See `scytaledroid/Database/db_func/risk_scores.py`.
+the DB is unavailable). See
+`scytaledroid/Database/db_func/static_analysis/risk_scores.py` for the
+``RiskScoreRecord`` payload definition mirrored in code.
 
 Proposed: Rationale & Matrix export
 -----------------------------------

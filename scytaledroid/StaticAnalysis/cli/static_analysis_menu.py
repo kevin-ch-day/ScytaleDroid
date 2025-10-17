@@ -730,7 +730,7 @@ def _execute_permission_scan(
                             if sha:
                                 # Resolve apk context for risk table (apk_id/app_id/sha256)
                                 try:
-                                    from scytaledroid.Database.db_func.apk_repository import get_apk_by_sha256 as _get_apk
+                                    from scytaledroid.Database.db_func.harvest.apk_repository import get_apk_by_sha256 as _get_apk
                                     row = _get_apk(sha)
                                     if row:
                                         base_apk_ctx[group.package_name] = {
@@ -790,7 +790,7 @@ def _execute_permission_scan(
 
         # Persist risk snapshot per-APK to DB (best-effort; single row per apk_id)
         try:
-            from scytaledroid.Database.db_func import static_permission_risk as _spr
+            from scytaledroid.Database.db_func.static_analysis import static_permission_risk as _spr
             from ..modules.permissions.analysis.risk_scoring_engine import permission_risk_grade as _grade
             from datetime import datetime as _dt
             stamp = _dt.utcnow().strftime("%Y%m%d-%H%M%S")
@@ -1068,13 +1068,15 @@ def _render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             )
             # Persist string summary (best-effort) for web app consumption
             try:
-                from scytaledroid.Database.db_func import string_analysis as _sadb
+                from scytaledroid.Database.db_func.static_analysis import string_analysis as _sadb
                 if _sadb.tables_exist() or _sadb.ensure_tables():
                     summary_id = _sadb.upsert_summary(
-                        package_name=app_result.package_name,
-                        session_stamp=stamp,
-                        scope_label=params.scope_label or ("All apps" if params.scope == "all" else params.scope),
-                        counts=string_data.get("counts", {}) if isinstance(string_data, dict) else {},
+                        _sadb.StringSummaryRecord(
+                            package_name=app_result.package_name,
+                            session_stamp=stamp,
+                            scope_label=params.scope_label or ("All apps" if params.scope == "all" else params.scope),
+                            counts=string_data.get("counts", {}) if isinstance(string_data, dict) else {},
+                        )
                     )
                     # Optional: store top samples (small, capped)
                     if summary_id:
@@ -1151,7 +1153,7 @@ def _render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
         # Persist baseline findings only for full/lightweight/custom runs
         if params.profile in {"full", "lightweight", "custom", "strings"}:
             try:
-                from scytaledroid.Database.db_func import static_findings as _sfdb
+                from scytaledroid.Database.db_func.static_analysis import static_findings as _sfdb
                 if _sfdb.tables_exist() or _sfdb.ensure_tables():
                     details = {}
                     try:

@@ -5,8 +5,8 @@ from __future__ import annotations
 from math import isclose
 from typing import Callable, Iterable, Mapping
 
-from ..db_core import run_sql
-from ..db_queries import permission_support as queries
+from ...db_core import run_sql
+from ...db_queries.permissions import permission_support as queries
 
 DEFAULT_SIGNALS: tuple[Mapping[str, object], ...] = (
     {

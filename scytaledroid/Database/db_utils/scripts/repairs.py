@@ -38,29 +38,6 @@ def promote_unknown_to_vendor() -> None:
         print(status_messages.status(f"Vendor reclassification failed: {exc}", level="error"))
 
 
-def promote_unknown_android_perm_to_framework() -> None:
-    try:
-        from scytaledroid.Database.db_core import db_queries as core_q
-        row = core_q.run_sql(
-            "SELECT COUNT(*) FROM android_detected_permissions WHERE COALESCE(classification,'unknown')='unknown' AND namespace='android.permission'",
-            fetch="one",
-        )
-        n = int(row[0]) if row else 0
-        print(status_messages.status(f"Will promote {n} row(s) to framework.", level=("success" if n else "info")))
-        core_q.run_sql(
-            """
-            UPDATE android_detected_permissions
-            SET classification='framework',
-                updated_at=CURRENT_TIMESTAMP
-            WHERE COALESCE(classification,'unknown')='unknown'
-              AND namespace='android.permission'
-            """
-        )
-        print(status_messages.status("Promotion to framework complete.", level="success"))
-    except Exception as exc:
-        print(status_messages.status(f"Framework promotion failed: {exc}", level="error"))
-
-
 def drop_redundant_sha256_index() -> None:
     try:
         from scytaledroid.Database.db_core import db_queries as core_q
@@ -88,7 +65,7 @@ def drop_redundant_sha256_index() -> None:
 
 def seed_signal_mappings_core() -> None:
     try:
-        from scytaledroid.Database.db_func import permission_support as support
+        from scytaledroid.Database.db_func.permissions import permission_support as support
         from scytaledroid.Database.db_core import db_queries as core_q
     except Exception as exc:
         print(status_messages.status(f"Module import failed: {exc}", level="error"))
@@ -204,7 +181,7 @@ def backfill_unknowns() -> None:
 
 def seed_legacy_framework() -> None:
     try:
-        from scytaledroid.Database.db_func import framework_permissions as _fp
+        from scytaledroid.Database.db_func.permissions import framework_permissions as _fp
     except Exception as exc:
         print(status_messages.status(f"Import failed: {exc}", level="error"))
         return
