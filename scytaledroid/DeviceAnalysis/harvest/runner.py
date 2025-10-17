@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Mapping, Optional, Sequence, Tuple
 
-from scytaledroid.Database.db_func import apk_repository as repo
+from scytaledroid.Database.db_func.harvest import apk_repository as repo
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Iterable, Mapping, Optional, Sequence, Union
 
 from .db_engine import DatabaseEngine
+from .session import database_session, get_current_engine
 
 ParamsType = Optional[Union[Sequence[Any], Mapping[str, Any]]]
 
@@ -43,11 +44,15 @@ def run_sql(
     """
     normalised_params = _normalise_params(params)
     fetch_mode = fetch.lower()
-    if dictionary and not fetch_mode.endswith("_dict"):
-        fetch_mode = f"{fetch_mode}_dict" if fetch_mode != "none" else "none_dict"
+    if dictionary:
+        if fetch_mode == "none":
+            raise ValueError("dictionary results require fetch='one' or 'all'")
+        if not fetch_mode.endswith("_dict"):
+            fetch_mode = f"{fetch_mode}_dict"
 
-    db = DatabaseEngine()
-    try:
+    engine = get_current_engine()
+
+    def _execute(db: DatabaseEngine) -> Any:
         if fetch_mode in {"one", "one_tuple"}:
             return db.fetch_one(query, normalised_params)  # type: ignore[arg-type]
         if fetch_mode in {"one_dict"}:
@@ -57,13 +62,16 @@ def run_sql(
         if fetch_mode in {"all_dict"}:
             return db.fetch_all_dict(query, normalised_params)  # type: ignore[arg-type]
 
-        # default: execute without fetching
         if return_lastrowid:
             return db.execute_with_lastrowid(query, normalised_params)  # type: ignore[arg-type]
         db.execute(query, normalised_params)  # type: ignore[arg-type]
         return None
-    finally:
-        db.close()
+
+    if engine is not None:
+        return _execute(engine)
+
+    with database_session() as session:
+        return _execute(session)
 
 
 __all__ = ["run_sql"]

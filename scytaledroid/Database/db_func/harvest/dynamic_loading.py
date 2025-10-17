@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Iterable, Mapping
 
-from ..db_core import run_sql
-from ..db_queries import dynamic_loading as q
+from ...db_core import run_sql
+from ...db_queries.harvest import dynamic_loading as q
 
 
 def ensure_tables() -> bool:

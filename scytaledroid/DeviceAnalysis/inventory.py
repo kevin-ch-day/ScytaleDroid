@@ -25,7 +25,7 @@ from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from . import adb_utils, inventory_meta, package_profiles
 from scytaledroid.Database.db_core import run_sql
-from scytaledroid.Database.db_func import ensure_app_definition
+from scytaledroid.Database.db_func.harvest.apk_repository import ensure_app_definition
 
 
 class InventorySyncAborted(RuntimeError):

@@ -1,6 +1,6 @@
 """Utility helpers for ad-hoc database diagnostics."""
 
-from .db_utils import (
+from .diagnostics import (
     check_connection,
     get_server_info,
     check_required_tables,
@@ -9,8 +9,8 @@ from .db_utils import (
     compare_columns,
     get_table_columns,
     build_table_snapshot,
-    provision_permission_analysis_tables,
 )
+from .maintenance import provision_permission_analysis_tables
 from .menu import database_menu
 
 __all__ = [

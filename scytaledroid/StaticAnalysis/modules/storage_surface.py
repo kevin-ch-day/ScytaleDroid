@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Iterable, Mapping
 from xml.etree import ElementTree
 
-from scytaledroid.Database.db_func import storage_surface as storage_db
+from scytaledroid.Database.db_func.harvest import storage_surface as storage_db
 from scytaledroid.StaticAnalysis._androguard import APK
 
 from .module_api import AppModuleContext, ModuleResult, StaticModule

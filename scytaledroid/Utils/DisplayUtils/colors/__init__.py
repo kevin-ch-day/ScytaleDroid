@@ -10,9 +10,11 @@ from .palette import (
     detect_palette_name,
     get_palette,
     palette_context,
+    register_palette,
     reset_palette,
     set_palette,
     set_palette_by_name,
+    unregister_palette,
 )
 
 __all__ = [
@@ -26,9 +28,11 @@ __all__ = [
     "get_palette",
     "highlight",
     "palette_context",
+    "register_palette",
     "reset_palette",
     "set_palette",
     "set_palette_by_name",
+    "unregister_palette",
     "strip",
     "style",
 ]

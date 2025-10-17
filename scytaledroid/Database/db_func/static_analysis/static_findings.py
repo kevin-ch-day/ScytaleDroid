@@ -5,14 +5,15 @@ from __future__ import annotations
 import json
 from typing import Mapping, Sequence
 
-from ..db_core import run_sql
-from ..db_queries import static_findings as queries
+from ...db_core import database_session, run_sql
+from ...db_queries.static_analysis import static_findings as queries
 
 
 def ensure_tables() -> bool:
     try:
-        run_sql(queries.CREATE_FINDINGS_SUMMARY)
-        run_sql(queries.CREATE_FINDINGS)
+        with database_session():
+            run_sql(queries.CREATE_FINDINGS_SUMMARY)
+            run_sql(queries.CREATE_FINDINGS)
         return True
     except Exception:
         return False
@@ -46,12 +47,13 @@ def upsert_summary(
         "details": json.dumps(details or {}),
     }
     try:
-        run_sql(queries.UPSERT_FINDINGS_SUMMARY, payload)
-        row = run_sql(
-            queries.SELECT_FINDINGS_SUMMARY_ID,
-            (package_name, session_stamp, scope_label),
-            fetch="one",
-        )
+        with database_session():
+            run_sql(queries.UPSERT_FINDINGS_SUMMARY, payload)
+            row = run_sql(
+                queries.SELECT_FINDINGS_SUMMARY_ID,
+                (package_name, session_stamp, scope_label),
+                fetch="one",
+            )
         return int(row[0]) if row else None
     except Exception:
         return None
@@ -63,23 +65,24 @@ def replace_findings(
 ) -> tuple[int, int]:
     deleted = 0
     inserted = 0
-    try:
-        run_sql(queries.DELETE_FINDINGS_FOR_SUMMARY, (summary_id,))
-        deleted = 1
-    except Exception:
-        pass
-    for f in findings or ():
+    with database_session():
         try:
-            finding_id = (f.get("id") if isinstance(f, dict) else None) or None
-            severity = str(f.get("severity") or "Info")
-            title = str(f.get("title") or "")[:512]
-            evidence = f.get("evidence") if isinstance(f, dict) else None
-            fix = f.get("fix") if isinstance(f, dict) else None
-            ev_json = json.dumps(evidence or {})
-            run_sql(queries.INSERT_FINDING, (summary_id, finding_id, severity, title, ev_json, fix))
-            inserted += 1
+            run_sql(queries.DELETE_FINDINGS_FOR_SUMMARY, (summary_id,))
+            deleted = 1
         except Exception:
-            continue
+            pass
+        for f in findings or ():
+            try:
+                finding_id = (f.get("id") if isinstance(f, dict) else None) or None
+                severity = str(f.get("severity") or "Info")
+                title = str(f.get("title") or "")[:512]
+                evidence = f.get("evidence") if isinstance(f, dict) else None
+                fix = f.get("fix") if isinstance(f, dict) else None
+                ev_json = json.dumps(evidence or {})
+                run_sql(queries.INSERT_FINDING, (summary_id, finding_id, severity, title, ev_json, fix))
+                inserted += 1
+            except Exception:
+                continue
     return deleted, inserted
 
 

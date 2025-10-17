@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 from scytaledroid.Utils.DisplayUtils import colors
 
 
@@ -23,5 +25,24 @@ def test_palette_switch_via_environment(monkeypatch):
         assert colors.get_palette().text == ("38;5;236",)
     finally:
         monkeypatch.delenv("SCYTALE_UI_THEME", raising=False)
+        colors.reset_palette()
+        assert colors.current_palette_name() == original_name
+
+
+def test_register_custom_palette_and_alias(monkeypatch):
+    original_name = colors.current_palette_name()
+    original_palette = colors.get_palette()
+    custom_palette = replace(original_palette, accent=("38;5;200",))
+
+    colors.register_palette("test-theme", custom_palette, aliases=["tt"])
+    try:
+        colors.set_palette_by_name("test-theme")
+        assert colors.current_palette_name() == "test-theme"
+        assert colors.get_palette().accent == ("38;5;200",)
+
+        colors.set_palette_by_name("tt")
+        assert colors.current_palette_name() == "test-theme"
+    finally:
+        colors.unregister_palette("test-theme")
         colors.reset_palette()
         assert colors.current_palette_name() == original_name

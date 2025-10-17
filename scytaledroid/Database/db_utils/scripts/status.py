@@ -5,7 +5,6 @@ from __future__ import annotations
 def compute_script_status() -> dict:
     status: dict = {
         "vendor_misclassified": 0,
-        "unknown_fw_ns": 0,
         "unknown_vendor_match": 0,
         "idx_sha256_dup": False,
         "core_mappings_missing": 0,
@@ -18,9 +17,6 @@ def compute_script_status() -> dict:
         # Vendor misclassified
         row = q.run_sql("SELECT COUNT(*) FROM android_vendor_permissions WHERE namespace='android.permission'", fetch="one")
         status["vendor_misclassified"] = int(row[0]) if row else 0
-        # Unknown detections in framework namespace
-        row = q.run_sql("SELECT COUNT(*) FROM android_detected_permissions WHERE COALESCE(classification,'unknown')='unknown' AND namespace='android.permission'", fetch="one")
-        status["unknown_fw_ns"] = int(row[0]) if row else 0
         # Unknown → vendor suffix matches
         row = q.run_sql(
             """

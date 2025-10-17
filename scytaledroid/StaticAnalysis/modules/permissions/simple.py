@@ -96,7 +96,7 @@ def _fetch_protections(names: Sequence[str]) -> Mapping[str, Optional[str]]:
     an empty mapping.
     """
     try:  # optional DB dependency
-        from scytaledroid.Database.db_func.detected_permissions import (
+        from scytaledroid.Database.db_func.permissions.detected_permissions import (
             framework_protection_map,
         )
 

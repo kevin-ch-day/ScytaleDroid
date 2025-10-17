@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass
 from typing import Mapping
 
-from scytaledroid.Database.db_func import dynamic_loading as dyn_db
+from scytaledroid.Database.db_func.harvest import dynamic_loading as dyn_db
 from scytaledroid.StaticAnalysis._androguard import APK
 
 from .module_api import AppModuleContext, ModuleResult, StaticModule

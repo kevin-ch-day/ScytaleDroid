@@ -37,7 +37,7 @@ def perm_catalog_menu() -> None:
         # DB status hint (concise)
         try:
             from scytaledroid.Database.db_core import db_config as _dbc
-            from scytaledroid.Database.db_func import framework_permissions as _fp
+            from scytaledroid.Database.db_func.permissions import framework_permissions as _fp
             row_count = _fp.count_rows()
             cfg = _dbc.DB_CONFIG
             db_name = cfg.get('database')
@@ -78,7 +78,7 @@ def perm_catalog_menu() -> None:
                 level="success",
             ))
             _validate_and_report(catalog.items)
-            from scytaledroid.Database.db_func import framework_permissions as fp
+            from scytaledroid.Database.db_func.permissions import framework_permissions as fp
             if not fp.table_exists() and not fp.ensure_table():
                 print(status_messages.status("Unable to prepare android_framework_permissions table.", level="error"))
                 continue
@@ -91,7 +91,7 @@ def perm_catalog_menu() -> None:
             # Verify DB counts
             try:
                 from scytaledroid.Database.db_core import db_queries as _core_q
-                from scytaledroid.Database.db_queries import framework_permissions as _fpq
+                from scytaledroid.Database.db_queries.permissions import framework_permissions as _fpq
                 rows = _core_q.run_sql(_fpq.PROTECTION_COUNTS, fetch="all")
                 print()
                 menu_utils.print_section("DB: Counts by protection")
@@ -134,7 +134,7 @@ def perm_catalog_menu() -> None:
 
         # Write to DB
         if choice == "4":
-            from scytaledroid.Database.db_func import framework_permissions as fp
+            from scytaledroid.Database.db_func.permissions import framework_permissions as fp
             if not fp.table_exists() and not fp.ensure_table():
                 print(status_messages.status("Unable to prepare android_framework_permissions table.", level="error"))
                 continue
@@ -150,7 +150,7 @@ def perm_catalog_menu() -> None:
             # DB counts summary
             try:
                 from scytaledroid.Database.db_core import db_queries as _core_q
-                from scytaledroid.Database.db_queries import framework_permissions as _fpq
+                from scytaledroid.Database.db_queries.permissions import framework_permissions as _fpq
                 rows = _core_q.run_sql(_fpq.PROTECTION_COUNTS, fetch="all")
                 print()
                 menu_utils.print_section("DB: Counts by protection")
@@ -163,7 +163,7 @@ def perm_catalog_menu() -> None:
         if choice == "5":
             try:
                 from scytaledroid.Database.db_core import db_queries as _core_q
-                from scytaledroid.Database.db_queries import framework_permissions as _fpq
+                from scytaledroid.Database.db_queries.permissions import framework_permissions as _fpq
                 rows = _core_q.run_sql(_fpq.PROTECTION_COUNTS, fetch="all")
                 print()
                 menu_utils.print_section("DB: Counts by protection")
@@ -176,7 +176,7 @@ def perm_catalog_menu() -> None:
         if choice == "6":
             # Quick connection check first for clearer feedback
             try:
-                from scytaledroid.Database.db_utils import db_utils as _dbu
+                from scytaledroid.Database.db_utils import diagnostics as _dbu
                 if not _dbu.check_connection():
                     print(status_messages.status("Database connection failed. Check Database tools → Check database connection, or config/db.json.", level="error"))
                     continue
@@ -184,10 +184,10 @@ def perm_catalog_menu() -> None:
                 pass
             ok_fw = ok_v = ok_u = ok_d = False
             try:
-                from scytaledroid.Database.db_func import framework_permissions as _fw
-                from scytaledroid.Database.db_func import vendor_permissions as _vp
-                from scytaledroid.Database.db_func import unknown_permissions as _up
-                from scytaledroid.Database.db_func import detected_permissions as _dp
+                from scytaledroid.Database.db_func.permissions import framework_permissions as _fw
+                from scytaledroid.Database.db_func.permissions import vendor_permissions as _vp
+                from scytaledroid.Database.db_func.permissions import unknown_permissions as _up
+                from scytaledroid.Database.db_func.permissions import detected_permissions as _dp
                 ok_fw = _fw.ensure_table()
                 ok_v = _vp.ensure_table()
                 ok_u = _up.ensure_table()

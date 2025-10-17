@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import Iterable, Mapping, Optional
 from dataclasses import asdict as _asdict, is_dataclass as _is_dataclass
 
-from ..db_core import run_sql
-from ..db_queries import framework_permissions as queries
+from ...db_core import run_sql
+from ...db_queries.permissions import framework_permissions as queries
 
 
 def ensure_table() -> bool:

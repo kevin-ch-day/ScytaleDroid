@@ -1,11 +1,11 @@
-"""DB helpers for persisting permission risk scores (per run)."""
+"""DB helpers for per-APK permission risk persistence."""
 
 from __future__ import annotations
 
 from typing import Iterable, Mapping
 
-from ..db_core import run_sql
-from ..db_queries import risk_scores as queries
+from ...db_core import run_sql
+from ...db_queries.static_analysis import static_permission_risk as queries
 
 
 def ensure_table() -> bool:
@@ -24,20 +24,20 @@ def table_exists() -> bool:
         return False
 
 
-def upsert_risk(payload: Mapping[str, object]) -> None:
+def upsert(payload: Mapping[str, object]) -> None:
     run_sql(queries.UPSERT_RISK, payload)
 
 
-def bulk_upsert_risks(rows: Iterable[Mapping[str, object]]) -> int:
+def bulk_upsert(rows: Iterable[Mapping[str, object]]) -> int:
     count = 0
     for row in rows:
         try:
-            upsert_risk(row)
+            upsert(row)
             count += 1
         except Exception:
             continue
     return count
 
 
-__all__ = ["ensure_table", "table_exists", "upsert_risk", "bulk_upsert_risks"]
+__all__ = ["ensure_table", "table_exists", "upsert", "bulk_upsert"]
 

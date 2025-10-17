@@ -1,135 +1,141 @@
-"""
-db_utils.py - Helper utilities for database
+"""Database diagnostics helpers shared across CLI tools.
+
+The functions in this module wrap low-level :mod:`db_core` primitives so
+operational commands (menus, scripts, or ad-hoc tooling) can introspect the
+current MySQL schema without reimplementing connection lifecycle management.
+
+They intentionally mirror the documentation in
+``docs/database/permission_analysis_schema.md`` and
+``docs/static_analysis/static_analysis_data_model.md`` so analysts can jump
+between the docs and code when validating deployments.
 """
 
-from mysql.connector import Error
-from typing import Dict, Any, List, Optional, Sequence, Set
+from __future__ import annotations
 
-from ..db_core.db_engine import DatabaseEngine
+from contextlib import contextmanager
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
+
+from scytaledroid.Database.db_core import DatabaseEngine, database_session
+
 from .table_snapshot import ColumnInfo, IndexInfo, TableSnapshot
 
 
+@contextmanager
+def _connected_engine(*, reuse_connection: bool = False) -> Iterable[DatabaseEngine]:
+    """Yield a :class:`DatabaseEngine` bound to a managed session."""
+
+    with database_session(reuse_connection=reuse_connection) as engine:
+        yield engine
+
+
 def check_connection() -> bool:
-    """
-    Test whether the database connection can be established.
-    Returns True if connected, False otherwise.
-    """
+    """Return ``True`` if a database connection can be established."""
+
     try:
-        db = DatabaseEngine()
-        db.close()
+        with _connected_engine(reuse_connection=False) as engine:
+            engine.fetch_one("SELECT 1")
         return True
-    except Exception as e:
-        print(f"[DB_UTILS] Connection check failed: {e}")
+    except Exception as exc:  # pragma: no cover - relies on external MySQL
+        print(f"[DB_UTILS] Connection check failed: {exc}")
         return False
 
 
 def get_server_info() -> Dict[str, Any]:
-    """
-    Return basic server information such as:
-      - database name
-      - server version
-      - current user
-    """
+    """Return a mapping with ``database``, ``version``, and ``user`` details."""
+
     info: Dict[str, Any] = {}
     try:
-        db = DatabaseEngine()
-        result = db.fetch_one("SELECT DATABASE();")
-        info["database"] = result[0] if result else None
+        with _connected_engine() as engine:
+            result = engine.fetch_one("SELECT DATABASE();")
+            info["database"] = result[0] if result else None
 
-        result = db.fetch_one("SELECT VERSION();")
-        info["version"] = result[0] if result else None
+            result = engine.fetch_one("SELECT VERSION();")
+            info["version"] = result[0] if result else None
 
-        result = db.fetch_one("SELECT USER();")
-        info["user"] = result[0] if result else None
-
-        db.close()
-    except Error as e:
-        print(f"[DB_UTILS] Failed to get server info: {e}")
+            result = engine.fetch_one("SELECT USER();")
+            info["user"] = result[0] if result else None
+    except Exception as exc:  # pragma: no cover - relies on external MySQL
+        print(f"[DB_UTILS] Failed to get server info: {exc}")
     return info
 
 
 def check_required_tables(required_tables: list[str]) -> Dict[str, bool]:
-    """
-    Check if the required tables exist in the current database.
-    Returns a dictionary mapping table name -> True/False.
-    """
+    """Return a mapping of table name → existence flag for *required_tables*."""
+
     status: Dict[str, bool] = {}
     try:
-        db = DatabaseEngine()
+        with _connected_engine() as engine:
+            for table in required_tables:
+                result = engine.fetch_one(
+                    "SELECT COUNT(*) FROM information_schema.tables "
+                    "WHERE table_schema = DATABASE() AND table_name = %s;",
+                    (table,),
+                )
+                status[table] = bool(result and int(result[0]) > 0)
+    except Exception as exc:  # pragma: no cover - relies on external MySQL
+        print(f"[DB_UTILS] Failed to check tables: {exc}")
         for table in required_tables:
-            result = db.fetch_one(
-                "SELECT COUNT(*) FROM information_schema.tables "
-                "WHERE table_schema = DATABASE() AND table_name = %s;",
-                (table,),
-            )
-            status[table] = result[0] > 0 if result else False
-        db.close()
-    except Error as e:
-        print(f"[DB_UTILS] Failed to check tables: {e}")
-        for table in required_tables:
-            status[table] = False
+            status.setdefault(table, False)
     return status
 
 
 def list_tables() -> List[str]:
-    """Return a list of table names in the active database."""
+    """Return a sorted list of table names for the active schema."""
 
     try:
-        db = DatabaseEngine()
-        rows = db.fetch_all("SHOW TABLES;")
-        db.close()
-    except Error as e:
-        print(f"[DB_UTILS] Failed to list tables: {e}")
+        with _connected_engine() as engine:
+            rows = engine.fetch_all("SHOW TABLES;")
+    except Exception as exc:  # pragma: no cover - relies on external MySQL
+        print(f"[DB_UTILS] Failed to list tables: {exc}")
         return []
 
     tables: List[str] = []
     for row in rows or []:
         if isinstance(row, (list, tuple)) and row:
             tables.append(str(row[0]))
-    return tables
+    return sorted(tables)
 
 
 def table_counts(table_names: list[str]) -> Dict[str, Optional[int]]:
-    """Return row counts for the given table names."""
+    """Return a mapping of table name → row count (or ``None`` on failure)."""
 
     counts: Dict[str, Optional[int]] = {}
     try:
-        db = DatabaseEngine()
-        for table in table_names:
-            try:
-                row = db.fetch_one(f"SELECT COUNT(*) FROM `{table}`;")
-                counts[table] = int(row[0]) if row else 0
-            except Error as inner_error:
-                print(f"[DB_UTILS] Failed to count rows for {table}: {inner_error}")
-                counts[table] = None
-        db.close()
-    except Error as e:
-        print(f"[DB_UTILS] Unable to compute table counts: {e}")
+        with _connected_engine() as engine:
+            for table in table_names:
+                try:
+                    row = engine.fetch_one(f"SELECT COUNT(*) FROM `{table}`;")
+                    counts[table] = int(row[0]) if row else 0
+                except Exception as inner_error:
+                    print(f"[DB_UTILS] Failed to count rows for {table}: {inner_error}")
+                    counts[table] = None
+    except Exception as exc:  # pragma: no cover - relies on external MySQL
+        print(f"[DB_UTILS] Unable to compute table counts: {exc}")
         for table in table_names:
             counts.setdefault(table, None)
     return counts
 
 
 def get_table_columns(table_name: str) -> List[str] | None:
-    """Return column names for *table_name* or ``None`` if the query fails."""
+    """Return column names for *table_name* or ``None`` if inspection fails."""
 
     try:
-        db = DatabaseEngine()
-        rows = db.fetch_all(
-            "SELECT COLUMN_NAME FROM information_schema.columns "
-            "WHERE table_schema = DATABASE() AND table_name = %s ORDER BY ORDINAL_POSITION;",
-            (table_name,),
-        )
-        db.close()
-    except Error as e:
-        print(f"[DB_UTILS] Failed to inspect table {table_name}: {e}")
+        with _connected_engine() as engine:
+            rows = engine.fetch_all(
+                "SELECT COLUMN_NAME FROM information_schema.columns "
+                "WHERE table_schema = DATABASE() AND table_name = %s "
+                "ORDER BY ORDINAL_POSITION;",
+                (table_name,),
+            )
+    except Exception as exc:  # pragma: no cover - relies on external MySQL
+        print(f"[DB_UTILS] Failed to inspect table {table_name}: {exc}")
         return None
 
     return [str(row[0]) for row in rows] if rows else []
 
 
 def compare_columns(table_name: str, expected: Set[str]) -> Dict[str, List[str]]:
-    """Compare actual columns with an expected set and report differences."""
+    """Compare actual vs *expected* columns for *table_name*."""
 
     actual = get_table_columns(table_name)
     if actual is None:
@@ -142,56 +148,28 @@ def compare_columns(table_name: str, expected: Set[str]) -> Dict[str, List[str]]
 
 
 def build_table_snapshot(table_name: str) -> Optional[TableSnapshot]:
-    """Collect metadata, row samples, and index information for *table_name*."""
+    """Collect metadata, example rows, and index info for *table_name*."""
 
     safe_name = _quote_identifier(table_name)
     try:
-        db = DatabaseEngine()
-    except Exception as exc:  # pragma: no cover - connection failure path
-        print(f"[DB_UTILS] Failed to connect for snapshot: {exc}")
+        with _connected_engine() as engine:
+            columns = _fetch_columns(engine, table_name)
+            row_count = _fetch_row_count(engine, safe_name)
+            indexes = _fetch_indexes(engine, safe_name)
+            order_column = _select_order_column(columns)
+            rows = _fetch_example_rows(engine, safe_name, order_column)
+    except Exception as exc:  # pragma: no cover - relies on external MySQL
+        print(f"[DB_UTILS] Failed to build snapshot for {table_name}: {exc}")
         return None
 
-    try:
-        columns = _fetch_columns(db, table_name)
-        row_count = _fetch_row_count(db, safe_name)
-        indexes = _fetch_indexes(db, safe_name)
-        order_column = _select_order_column(columns)
-        rows = _fetch_example_rows(db, safe_name, order_column)
-        return TableSnapshot(
-            name=table_name,
-            row_count=row_count,
-            columns=columns,
-            example_rows=rows,
-            indexes=indexes,
-            order_column=order_column,
-        )
-    finally:
-        db.close()
-
-
-def provision_permission_analysis_tables(*, seed_defaults: bool = True) -> dict[str, dict[str, object]]:
-    """Ensure helper tables for permission analytics are present.
-
-    Returns a dictionary with two nested dictionaries:
-
-    ``{"created": {...}, "seeded": {...}}``
-    """
-
-    try:
-        from scytaledroid.Database.db_func import permission_support as support
-    except Exception:
-        return {"created": {}, "seeded": {}}
-
-    created = support.ensure_all()
-    seeded: dict[str, object]
-    if seed_defaults:
-        try:
-            seeded = support.seed_defaults()
-        except Exception:
-            seeded = {}
-    else:
-        seeded = {}
-    return {"created": created, "seeded": seeded}
+    return TableSnapshot(
+        name=table_name,
+        row_count=row_count,
+        columns=columns,
+        example_rows=rows,
+        indexes=indexes,
+        order_column=order_column,
+    )
 
 
 def _fetch_columns(db: DatabaseEngine, table_name: str) -> List[ColumnInfo]:
@@ -224,7 +202,7 @@ def _fetch_columns(db: DatabaseEngine, table_name: str) -> List[ColumnInfo]:
 
 
 def _combine_notes(extra: Any, comment: Any) -> Optional[str]:
-    parts = []
+    parts: List[str] = []
     if extra:
         parts.append(str(extra))
     if comment:
@@ -237,7 +215,7 @@ def _combine_notes(extra: Any, comment: Any) -> Optional[str]:
 def _fetch_row_count(db: DatabaseEngine, safe_name: str) -> Optional[int]:
     try:
         row = db.fetch_one(f"SELECT COUNT(*) FROM {safe_name};")
-    except Exception as exc:  # pragma: no cover - relies on external DB
+    except Exception as exc:  # pragma: no cover - relies on external MySQL
         print(f"[DB_UTILS] Failed to count rows for {safe_name}: {exc}")
         return None
     if not row:
@@ -251,7 +229,7 @@ def _fetch_row_count(db: DatabaseEngine, safe_name: str) -> Optional[int]:
 def _fetch_indexes(db: DatabaseEngine, safe_name: str) -> List[IndexInfo]:
     try:
         rows = db.fetch_all_dict(f"SHOW INDEX FROM {safe_name};")
-    except Exception as exc:  # pragma: no cover - relies on external DB
+    except Exception as exc:  # pragma: no cover - relies on external MySQL
         print(f"[DB_UTILS] Failed to read indexes for {safe_name}: {exc}")
         return []
 
@@ -290,7 +268,6 @@ def _select_order_column(columns: Sequence[ColumnInfo]) -> Optional[str]:
         if candidate in available:
             return candidate
 
-    # Fall back to a single primary key column if present.
     primary_columns = [col.name for col in columns if col.is_primary]
     if len(primary_columns) == 1:
         return primary_columns[0]
@@ -309,7 +286,7 @@ def _fetch_example_rows(
 
     try:
         rows = db.fetch_all_dict(query)
-    except Exception as exc:  # pragma: no cover - relies on external DB
+    except Exception as exc:  # pragma: no cover - relies on external MySQL
         print(f"[DB_UTILS] Failed to fetch sample rows for {safe_name}: {exc}")
         return []
     sanitized: List[dict[str, Any]] = []
@@ -321,3 +298,16 @@ def _fetch_example_rows(
 def _quote_identifier(identifier: str) -> str:
     safe = identifier.replace("`", "``")
     return f"`{safe}`"
+
+
+__all__ = [
+    "check_connection",
+    "get_server_info",
+    "check_required_tables",
+    "list_tables",
+    "table_counts",
+    "get_table_columns",
+    "compare_columns",
+    "build_table_snapshot",
+]
+
