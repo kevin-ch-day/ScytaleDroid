@@ -3,9 +3,33 @@
 from __future__ import annotations
 
 import re
-from typing import Iterable, Pattern
+from dataclasses import dataclass
+from typing import Iterable, Pattern, Tuple
 
-_PRINTABLE_FRAGMENT = re.compile(r"[\x20-\x7e]{4,}")
+_PRINTABLE_FRAGMENT = re.compile(rb"[\x09\x0a\x0d\x20-\x7e]{4,}")
+_WHITESPACE = frozenset(b" \t\r\n")
+
+
+@dataclass(frozen=True)
+class StringFragment:
+    """Represents a decoded string fragment and its byte span."""
+
+    value: str
+    start: int
+    end: int
+
+    def context(self, blob: bytes, *, radius: int = 20) -> str:
+        """Return a decoded context window around this fragment."""
+
+        head = max(self.start - radius, 0)
+        tail = min(self.end + radius, len(blob))
+        window = blob[head:tail]
+        text = window.decode("utf-8", errors="ignore")
+        if head > 0:
+            text = "…" + text
+        if tail < len(blob):
+            text = text + "…"
+        return text
 
 
 def ensure_pattern(pattern: Pattern[str] | str) -> Pattern[str]:
@@ -27,86 +51,51 @@ def looks_textual(blob: bytes, *, sample_size: int = 4096) -> bool:
     return ratio >= 0.55
 
 
-def strings_from_text(blob: bytes) -> tuple[str, ...]:
-    """Return candidate UTF-8 strings from a textual *blob*."""
+def strings_from_text(blob: bytes) -> tuple[StringFragment, ...]:
+    """Return candidate string fragments from a textual *blob*."""
 
-    text = blob.decode("utf-8", errors="ignore")
-    if not text:
-        return tuple()
-
-    seen: set[str] = set()
-    results: list[str] = []
-
-    for match in _PRINTABLE_FRAGMENT.finditer(text):
-        candidate = match.group(0).strip()
-        if len(candidate) < 4:
-            continue
-        if len(candidate) > 2048:
-            results.extend(_dedupe_chunks(_split_long_fragment(candidate), seen))
-            continue
-        if candidate not in seen:
-            seen.add(candidate)
-            results.append(candidate)
-
-    return tuple(results)
+    return _extract_fragments(blob, minimum=4)
 
 
-def strings_from_binary(blob: bytes) -> tuple[str, ...]:
-    """Return printable ASCII fragments from a binary *blob*."""
+def strings_from_binary(blob: bytes) -> tuple[StringFragment, ...]:
+    """Return printable fragments from a binary *blob*."""
 
+    return _extract_fragments(blob, minimum=6)
+
+
+def _extract_fragments(blob: bytes, *, minimum: int) -> tuple[StringFragment, ...]:
     if not blob:
         return tuple()
 
-    try:
-        text = blob.decode("utf-8", errors="ignore")
-    except Exception:  # pragma: no cover - defensive
-        return tuple()
+    results: list[StringFragment] = []
+    seen: set[Tuple[int, int]] = set()
 
-    seen: set[str] = set()
-    results: list[str] = []
-
-    for match in _PRINTABLE_FRAGMENT.finditer(text):
-        candidate = match.group(0).strip()
-        if len(candidate) < 6:
+    for match in _PRINTABLE_FRAGMENT.finditer(blob):
+        start, end = match.span()
+        segment = bytearray(match.group(0))
+        left = 0
+        right = len(segment)
+        while left < right and segment[left] in _WHITESPACE:
+            left += 1
+        while right > left and segment[right - 1] in _WHITESPACE:
+            right -= 1
+        if right - left < minimum:
             continue
-        if candidate not in seen:
-            seen.add(candidate)
-            results.append(candidate)
+        trimmed_start = start + left
+        trimmed_end = start + right
+        if (trimmed_start, trimmed_end) in seen:
+            continue
+        seen.add((trimmed_start, trimmed_end))
+        fragment = segment[left:right]
+        if len(fragment) > 4096:
+            fragment = fragment[:4096]
+            trimmed_end = trimmed_start + len(fragment)
+        text = fragment.decode("utf-8", errors="ignore")
+        if not text.strip():
+            continue
+        results.append(StringFragment(value=text, start=trimmed_start, end=trimmed_end))
 
     return tuple(results)
-
-
-def _dedupe_chunks(chunks: Iterable[str], seen: set[str]) -> Iterable[str]:
-    for chunk in chunks:
-        if chunk not in seen:
-            seen.add(chunk)
-            yield chunk
-
-
-def _split_long_fragment(value: str) -> Iterable[str]:
-    chunks: list[str] = []
-    for piece in value.splitlines():
-        piece = piece.strip()
-        if not piece:
-            continue
-        if len(piece) > 2048:
-            chunks.extend(_split_even_chunks(piece, 2048))
-        else:
-            chunks.append(piece)
-    if not chunks:
-        if len(value) > 2048:
-            chunks.extend(_split_even_chunks(value, 2048))
-        else:
-            chunks.append(value)
-    return tuple(chunks)
-
-
-def _split_even_chunks(value: str, size: int) -> Iterable[str]:
-    return tuple(
-        value[i : i + size]
-        for i in range(0, len(value), size)
-        if value[i : i + size]
-    )
 
 
 __all__ = [
@@ -114,4 +103,5 @@ __all__ = [
     "looks_textual",
     "strings_from_text",
     "strings_from_binary",
+    "StringFragment",
 ]

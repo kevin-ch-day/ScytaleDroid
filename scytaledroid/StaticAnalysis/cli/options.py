@@ -45,6 +45,7 @@ class ScanDisplayOptions:
     show_timings: bool = True
     finding_limit: int = 3
     show_pipeline: bool = True
+    explore: bool = False
 
     def describe(self) -> str:
         parts: list[str] = []
@@ -143,6 +144,12 @@ def parse_cli_args(argv: Sequence[str] | None = None) -> ScanDisplayOptions:
         help="Disable per-detector pipeline breakdown output.",
     )
 
+    parser.add_argument(
+        "--explore",
+        action="store_true",
+        help="Print exploratory string-intelligence summary metrics.",
+    )
+
     namespace = parser.parse_args(argv)
     max_evidence = max(1, namespace.max_evidence)
 
@@ -151,6 +158,7 @@ def parse_cli_args(argv: Sequence[str] | None = None) -> ScanDisplayOptions:
         verbosity=namespace.verbosity,
         max_evidence=max_evidence,
         show_pipeline=namespace.show_pipeline,
+        explore=namespace.explore,
     )
 
 
@@ -163,6 +171,7 @@ def describe_cli_flags(options: ScanDisplayOptions) -> str:
             f"verbosity={options.verbosity}",
             f"evidence_limit={options.evidence_limit}",
             f"pipeline={'on' if options.show_pipeline else 'off'}",
+            f"explore={'on' if options.explore else 'off'}",
         )
     )
 

@@ -1,0 +1,88 @@
+{
+  "tests": {
+    "SNI-N001": {
+      "name": "Non-local cleartext endpoint",
+      "category": "network",
+      "base": 6.0,
+      "description": "Public http/ws endpoints"
+    },
+    "SNI-N002": {
+      "name": "IP literal endpoint",
+      "category": "network",
+      "base": 4.0,
+      "description": "Endpoints using IP literals"
+    },
+    "SNI-N003": {
+      "name": "GraphQL or gRPC exposure",
+      "category": "network",
+      "base": 2.0,
+      "description": "GraphQL or HTTP/2 authority hints"
+    },
+    "SNI-N004": {
+      "name": "Redirector endpoint",
+      "category": "network",
+      "base": 3.0,
+      "description": "Short-link/redirector usage"
+    },
+    "SNI-S101": {
+      "name": "AWS credential pair",
+      "category": "secrets",
+      "base": 8.0,
+      "description": "AKID + Secret within proximity"
+    },
+    "SNI-S102": {
+      "name": "Authorization token",
+      "category": "secrets",
+      "base": 6.0,
+      "description": "JWT or API token near Authorization context"
+    },
+    "SNI-S103": {
+      "name": "Encoded secret",
+      "category": "secrets",
+      "base": 5.0,
+      "description": "Base64 payloads decoding into URLs/keys"
+    },
+    "SNI-C201": {
+      "name": "Cloud storage surface",
+      "category": "cloud",
+      "base": 3.0,
+      "description": "S3/GCS bucket references"
+    },
+    "SNI-C202": {
+      "name": "Firebase surface",
+      "category": "cloud",
+      "base": 3.0,
+      "description": "Firebase project or storage bucket"
+    },
+    "SNI-C203": {
+      "name": "Feature flag with remote URL",
+      "category": "cloud",
+      "base": 4.0,
+      "description": "Feature flag or toggle referencing external endpoints"
+    },
+    "SNI-E301": {
+      "name": "Entropy spike near auth language",
+      "category": "signals",
+      "base": 4.0,
+      "description": "High-entropy strings near auth/crypto terms"
+    }
+  },
+  "categories": {
+    "network": {
+      "label": "Network posture",
+      "aggregation": "max"
+    },
+    "secrets": {
+      "label": "Secrets & tokens",
+      "aggregation": "max"
+    },
+    "cloud": {
+      "label": "Cloud & remote control",
+      "aggregation": "mean"
+    },
+    "signals": {
+      "label": "Entropy & signals",
+      "aggregation": "max"
+    }
+  }
+}

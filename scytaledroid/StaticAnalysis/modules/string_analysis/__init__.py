@@ -6,8 +6,18 @@ from __future__ import annotations
 
 from .bucket_meta import BUCKET_LABELS, BUCKET_METADATA, BUCKET_ORDER, BucketMetadata
 from .bucket_overview import build_bucket_overview
-from .extractor import IndexedString, StringIndex, build_string_index
+from .extractor import (
+    CollectionMetrics,
+    CollectionSummary,
+    ExploratoryIssue,
+    IndexedString,
+    NormalizedString,
+    StringIndex,
+    build_string_index,
+    normalise_index,
+)
 from .hit_record import StringHit
+from .post import NoisePolicy, load_noise_policy, summarise
 from .matcher import (
     DEFAULT_SECRET_FILTERS,
     MatchBatch,
@@ -17,6 +27,16 @@ from .matcher import (
     StringMatcher,
 )
 from .network import EndpointMatch, detect_tls_keywords, extract_endpoints
+from .schema import (
+    CategoryRollup,
+    EvidenceRef,
+    FinalAssessment,
+    Observation,
+    Scorecard,
+    SniSummary,
+    TestResult,
+)
+from .scoring import ProfileCatalog, TestCatalog, evaluate_tests, load_profiles, load_test_catalog
 
 __all__ = [
     "BucketMetadata",
@@ -25,10 +45,25 @@ __all__ = [
     "BUCKET_ORDER",
     "IndexedString",
     "StringIndex",
+    "NormalizedString",
+    "ExploratoryIssue",
+    "CollectionSummary",
+    "CollectionMetrics",
     "StringHit",
+    "NoisePolicy",
+    "Observation",
+    "EvidenceRef",
+    "SniSummary",
+    "Scorecard",
+    "CategoryRollup",
+    "FinalAssessment",
+    "TestResult",
+    "load_noise_policy",
+    "summarise",
     "EndpointMatch",
     "build_bucket_overview",
     "build_string_index",
+    "normalise_index",
     "DEFAULT_SECRET_FILTERS",
     "extract_endpoints",
     "detect_tls_keywords",
@@ -37,4 +72,9 @@ __all__ = [
     "MatchRecord",
     "MatchStatus",
     "StringMatcher",
+    "TestCatalog",
+    "ProfileCatalog",
+    "load_test_catalog",
+    "load_profiles",
+    "evaluate_tests",
 ]

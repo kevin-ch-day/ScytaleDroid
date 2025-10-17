@@ -2,13 +2,24 @@
 
 from __future__ import annotations
 
+import hashlib
 import zipfile
+import os
+import re
 from typing import Iterable, Mapping
 
 from scytaledroid.StaticAnalysis._androguard import APK, FileNotPresent
 
 from .models import IndexedString
-from .utils import looks_textual, strings_from_binary, strings_from_text
+from .utils import (
+    StringFragment,
+    looks_textual,
+    strings_from_binary,
+    strings_from_text,
+)
+
+_DEX_ID_PATTERN = re.compile(r"classes(?P<index>\d+)?\.dex", re.IGNORECASE)
+_LOCALE_PATTERN = re.compile(r"res/(?:values|xml|raw|layout)(?:-([\w-]+))?/")
 
 
 def iterate_resource_strings(resources: object) -> Iterable[str]:
@@ -41,6 +52,77 @@ def iterate_resource_strings(resources: object) -> Iterable[str]:
                     yield string_value
 
 
+def _apk_sha256(apk: APK) -> str | None:
+    """Best-effort APK hash helper."""
+
+    for attr in ("get_sha256", "sha256", "file_sha256"):
+        getter = getattr(apk, attr, None)
+        if callable(getter):
+            try:
+                value = getter()
+            except Exception:  # pragma: no cover - defensive against wrappers
+                continue
+        else:
+            value = getter
+        if isinstance(value, str) and value:
+            return value
+    try:
+        data = apk.get_buff()
+    except Exception:  # pragma: no cover - fallback path
+        return None
+    if not isinstance(data, (bytes, bytearray)):
+        return None
+    return hashlib.sha256(data).hexdigest()
+
+
+def _infer_split_id(apk: APK) -> str:
+    candidate = getattr(apk, "split_name", None) or getattr(apk, "split_id", None)
+    if isinstance(candidate, str) and candidate:
+        return candidate
+    filename = getattr(apk, "filename", None)
+    if isinstance(filename, str) and "split_config" in filename:
+        stem = os.path.basename(filename)
+        return stem.split(".apk", 1)[0]
+    return "base"
+
+
+def _dex_id_from_name(path: str) -> int | None:
+    match = _DEX_ID_PATTERN.search(path)
+    if not match:
+        return None
+    index = match.group("index")
+    if not index:
+        return 1
+    try:
+        return int(index)
+    except ValueError:
+        return None
+
+
+def _locale_from_path(path: str) -> str | None:
+    match = _LOCALE_PATTERN.search(path)
+    if not match:
+        return None
+    qualifier = match.group(1)
+    return qualifier or None
+
+
+def _is_probable_protobuf(blob: bytes) -> bool:
+    if len(blob) < 32:
+        return False
+    sample = blob[:512]
+    markers = sum(1 for byte in sample if byte in {0x0A, 0x12, 0x1A, 0x22, 0x2A})
+    return markers / len(sample) > 0.08
+
+
+def _should_scan_binary(origin_type: str, blob: bytes) -> bool:
+    if origin_type == "native":
+        return True
+    if looks_textual(blob):
+        return False
+    return _is_probable_protobuf(blob)
+
+
 def collect_file_strings(apk: APK) -> tuple[IndexedString, ...]:
     """Extract UTF-8 string fragments from APK file entries."""
 
@@ -50,6 +132,9 @@ def collect_file_strings(apk: APK) -> tuple[IndexedString, ...]:
         return tuple()
 
     collected: list[IndexedString] = []
+
+    apk_hash = _apk_sha256(apk)
+    split_id = _infer_split_id(apk)
 
     for name in file_names:
         origin_type = classify_origin_type(name)
@@ -65,22 +150,43 @@ def collect_file_strings(apk: APK) -> tuple[IndexedString, ...]:
         if not blob:
             continue
 
+        blob_hash = hashlib.sha256(blob).hexdigest()
+        sha_short = blob_hash[:8]
+
+        fragments: tuple[StringFragment, ...]
+        confidence = "normal"
         if origin_type == "native":
             fragments = strings_from_binary(blob)
             confidence = "low"
         else:
-            if not looks_textual(blob):
+            if looks_textual(blob):
+                fragments = strings_from_text(blob)
+            elif _should_scan_binary(origin_type, blob):
+                fragments = strings_from_binary(blob)
+                confidence = "low"
+            else:
                 continue
-            fragments = strings_from_text(blob)
-            confidence = "normal"
 
         for fragment in fragments:
+            locale_qualifier = _locale_from_path(name)
+            dex_id = _dex_id_from_name(name) if origin_type == "dex" else None
             collected.append(
                 IndexedString(
-                    value=fragment,
+                    value=fragment.value,
                     origin=name,
                     origin_type=origin_type,
                     confidence=confidence,
+                    byte_offset=fragment.start,
+                    source_sha256=blob_hash,
+                    source_sha_short=sha_short,
+                    context=fragment.context(blob),
+                    apk_sha256=apk_hash,
+                    split_id=split_id,
+                    apk_offset_kind="byte_offset" if fragment.start is not None else "unknown",
+                    dex_id=dex_id,
+                    locale_qualifier=locale_qualifier,
+                    synthetic=False,
+                    derived_from=None,
                 )
             )
 
@@ -94,13 +200,15 @@ def classify_origin_type(path: str) -> str | None:
     if lowered.startswith("assets/"):
         return "asset"
     if lowered.startswith("res/raw"):
-        return "raw"
+        return "res"
     if lowered.startswith("lib/") and lowered.endswith(".so"):
         return "native"
     if lowered.endswith(".so"):
         return "native"
+    if lowered.endswith(".dex"):
+        return "dex"
     if lowered == "resources.arsc":
-        return "resource"
+        return "res"
     return None
 
 
