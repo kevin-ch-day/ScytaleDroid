@@ -10,7 +10,6 @@ from .diagnostics import (
     get_table_columns,
     build_table_snapshot,
 )
-from .maintenance import provision_permission_analysis_tables
 from .menu import database_menu
 
 __all__ = [
@@ -22,6 +21,5 @@ __all__ = [
     "compare_columns",
     "get_table_columns",
     "build_table_snapshot",
-    "provision_permission_analysis_tables",
     "database_menu",
 ]
