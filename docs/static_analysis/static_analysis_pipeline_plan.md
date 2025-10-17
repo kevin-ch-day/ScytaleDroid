@@ -68,6 +68,10 @@
 - **String Intelligence:** `scytaledroid/StaticAnalysis/modules/string_analysis/`
   provides extractor + pattern catalog wiring secrets, network, storage, and
   correlation detectors to a shared index.
+  - See `string_intelligence_explore.md` for exploratory metrics, issue flags,
+    and CLI guidance when triaging raw string collections.
+  - See `static_analysis_data_model.md` to understand how the collected strings
+    and detector findings are persisted alongside other static-analysis tables.
 - **Network Security Module:** `modules/network_security/` normalises NSC XML
   into policy graphs reused by network and correlation helpers.
 - **Correlation Engine:** The `detectors/correlation/` package handles diffing,
@@ -117,6 +121,15 @@ class Detector(Protocol):
 - **patterns.py:**
   - Provider-specific regexes (Google API key, AWS, Firebase, etc.).
   - Entropy-based heuristics, test-key suppression, whitelist handling.
+- **detectors/** (new modular package):
+  - `patterns.py` retains shared regexes/keyword sets for reuse across detectors.
+  - `common.py` provides fragment helpers (context windows, evidence builders,
+    entropy calculators) plus origin bucketing logic.
+  - `fragment.py` houses per-fragment detectors (endpoints, secrets, cloud,
+    feature flags, encoded payloads, entropy spikes).
+  - `pairing.py` captures cross-fragment logic such as AWS key pairing.
+  - `__init__.py` exposes registry helpers consumed by `post.py` so the
+    orchestration layer stays concise and composable.
 - **correlator.py:**
   - Link string hits to permissions, endpoints, components.
   - Produce hints like `overlay_permission + phishing_keyword`.

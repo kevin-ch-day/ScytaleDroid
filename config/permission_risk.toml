@@ -1,0 +1,15 @@
+[weights]
+critical = 1.0
+high = 0.75
+medium = 0.5
+low = 0.25
+
+[bonuses]
+profiled = 0.1
+contextual = 0.2
+
+[grades]
+low = { min = 0, max = 2 }
+medium = { min = 2, max = 5 }
+high = { min = 5, max = 8 }
+critical = { min = 8, max = 10 }

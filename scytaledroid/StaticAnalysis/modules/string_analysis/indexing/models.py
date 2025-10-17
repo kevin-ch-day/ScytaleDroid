@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, field
-from typing import Callable, Collection, Mapping, MutableMapping, Optional, Pattern, Sequence
+from typing import Callable, Collection, Mapping, MutableMapping, Optional, Pattern, Sequence, Tuple
 
 from .utils import ensure_pattern
 
@@ -17,10 +17,66 @@ class IndexedString:
     origin: str = "unknown"
     origin_type: str = "unknown"
     confidence: str = "normal"
+    byte_offset: int | None = None
+    source_sha256: str | None = None
+    source_sha_short: str | None = None
+    context: str | None = None
+    apk_sha256: str | None = None
+    split_id: str = "base"
+    apk_offset_kind: str = "byte_offset"
+    dex_id: int | None = None
+    locale_qualifier: str | None = None
+    synthetic: bool = False
+    derived_from: Tuple[str, ...] | None = None
     sha256: str = field(init=False)
 
     def __post_init__(self) -> None:  # pragma: no cover - simple hashing
         object.__setattr__(self, "sha256", hashlib.sha256(self.value.encode("utf-8")).hexdigest())
+        if self.source_sha256 and not self.source_sha_short:
+            object.__setattr__(self, "source_sha_short", self.source_sha256[:8])
+
+    @property
+    def sha_short(self) -> str:
+        """Short hash identifier for provenance reporting."""
+
+        if self.source_sha_short:
+            return self.source_sha_short
+        return self.sha256[:8]
+
+    @property
+    def pointer(self) -> str:
+        """Return an evidence pointer ``path@offset``."""
+
+        offset = "na" if self.byte_offset is None else str(self.byte_offset)
+        return f"{self.origin}@{offset}"
+
+    def clone_with_value(
+        self,
+        value: str,
+        *,
+        byte_offset: int | None = None,
+        context: str | None = None,
+        derived_from: Tuple[str, ...] | None = None,
+    ) -> "IndexedString":
+        """Return a new :class:`IndexedString` sharing provenance but a new value."""
+
+        return IndexedString(
+            value=value,
+            origin=self.origin,
+            origin_type=self.origin_type,
+            confidence=self.confidence,
+            byte_offset=self.byte_offset if byte_offset is None else byte_offset,
+            source_sha256=self.source_sha256,
+            source_sha_short=self.source_sha_short,
+            context=context if context is not None else self.context,
+            apk_sha256=self.apk_sha256,
+            split_id=self.split_id,
+            apk_offset_kind=self.apk_offset_kind,
+            dex_id=self.dex_id,
+            locale_qualifier=self.locale_qualifier,
+            synthetic=True,
+            derived_from=derived_from or (self.sha256,),
+        )
 
 
 @dataclass(frozen=True)

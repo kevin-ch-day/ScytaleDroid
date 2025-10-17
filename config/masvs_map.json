@@ -1,0 +1,14 @@
+{
+  "NET-CLR-HTTP": {
+    "masvs": ["MASVS-NETWORK-1"],
+    "cvss_v4": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:H/SI:L/SA:N"
+  },
+  "PRIV-CONTACTS": {
+    "masvs": ["MASVS-PRIV-2"],
+    "cvss_v4": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:L/VA:N/SC:M/SI:N/SA:N"
+  },
+  "STO-LEGACY-SECRET": {
+    "masvs": ["MASVS-STORAGE-2"],
+    "cvss_v4": "CVSS:4.0/AV:L/AC:L/AT:N/PR:N/UI:N/VC:L/VI:N/VA:L/SC:L/SI:N/SA:N"
+  }
+}

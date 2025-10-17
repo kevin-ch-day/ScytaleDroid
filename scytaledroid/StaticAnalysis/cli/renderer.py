@@ -19,6 +19,8 @@ from scytaledroid.StaticAnalysis.modules.string_analysis import (
     BUCKET_LABELS,
     BUCKET_METADATA,
     BUCKET_ORDER,
+    CollectionSummary,
+    NormalizedString,
 )
 
 from ..core import StaticAnalysisReport
@@ -39,6 +41,177 @@ _HASH_ORDER = ("md5", "sha1", "sha256")
 _SEVERITY_ORDER = ("High", "Medium", "Low", "Info")
 _SEVERITY_TOKENS = {"High": "H", "Medium": "M", "Low": "L", "Info": "I"}
 _STRING_BUCKET_TITLES = {key: meta.label for key, meta in BUCKET_METADATA.items()}
+_CONFIDENCE_PRIORITY = {"high": 2, "medium": 1, "low": 0}
+
+
+def render_exploratory_summary(
+    package_name: str,
+    version: str | None,
+    summary: CollectionSummary,
+    *,
+    sample_limit: int = 3,
+) -> str:
+    """Return a human-readable exploratory summary for collected strings."""
+
+    metrics = summary.metrics
+    version_text = version or "unknown"
+    apk_hash = _first_apk_hash(summary)
+    splits_count = len(metrics.splits_present) or 1
+    source_parts = " ".join(
+        f"{key}={value}" for key, value in sorted(metrics.strings_by_source.items())
+    )
+    decoded_ratio = _format_ratio(
+        metrics.decoded_yield_rate, metrics.decoded_blobs_total, metrics.base64_candidates
+    )
+    lines = [
+        f"Exploratory SNI  {package_name} {version_text}",
+        (
+            f"apk={apk_hash} splits={splits_count} "
+            f"strings: total={metrics.strings_total} ({source_parts})"
+        ),
+        (
+            f"doc_noise_ratio={metrics.doc_noise_ratio:.2f} "
+            f"decoded_yield_rate={decoded_ratio} "
+            f"obfuscation_hint={'true' if metrics.obfuscation_hint else 'false'}"
+        ),
+    ]
+
+    lines.append(
+        "Endpoints (non-doc): "
+        f"http_nonlocal={metrics.endpoints_nonlocal_http} "
+        f"ws_cleartext={metrics.ws_cleartext} "
+        f"ip_literals_public={metrics.ip_literals_public} "
+        f"graphql={metrics.graphql_markers} "
+        f"grpc={metrics.grpc_markers}"
+    )
+    lines.append(
+        "Secrets: "
+        f"aws_pairs={metrics.aws_pairs} "
+        f"jwt_near_auth={metrics.jwt_near_auth} "
+        f"base64_candidates={metrics.base64_candidates} "
+        f"decoded={metrics.decoded_blobs_total} "
+        f"decode_fail={metrics.base64_decode_failures}"
+    )
+    lines.append(
+        "Cloud: "
+        f"s3_buckets={metrics.s3_buckets} "
+        f"firebase_projects={metrics.firebase_projects} "
+        f"unknown_kind={metrics.unknown_kind_count} "
+        f"unknown_ratio={metrics.unknown_kind_ratio:.2f}"
+    )
+
+    if metrics.strings_by_split and len(metrics.strings_by_split) > 1:
+        lines.append(
+            "Splits: "
+            + _format_counts(metrics.strings_by_split, limit=6)
+        )
+    if metrics.strings_by_locale:
+        lines.append(
+            "Locales: " + _format_counts(metrics.strings_by_locale, limit=6)
+        )
+
+    top_tags = _top_tag_counts(summary)
+    if top_tags:
+        formatted_tags = ", ".join(f"{tag}={count}" for tag, count in top_tags)
+        lines.append(f"Top tags: {formatted_tags}")
+
+    issues = _exploratory_issues(summary)
+    if issues:
+        lines.append("Potential issues:")
+        for issue in issues:
+            lines.append(f"  - {issue}")
+
+    samples = _select_exploratory_samples(summary, limit=sample_limit)
+    if samples:
+        lines.append("Samples (evidence):")
+        for record in samples:
+            pointer = (
+                f"{record.source_path}@"
+                f"{record.byte_offset if record.byte_offset is not None else 'na'}"
+            )
+            preview = record.value_preview
+            lines.append(f"  {preview}  {pointer}")
+
+    return "\n".join(lines)
+
+
+def _first_apk_hash(summary: CollectionSummary) -> str:
+    for record in summary.strings:
+        if record.apk_sha256:
+            return record.apk_sha256[:16]
+    return "unknown"
+
+
+def _format_ratio(ratio: float, numerator: int, denominator: int) -> str:
+    if denominator:
+        return f"{ratio:.2f} ({numerator}/{denominator})"
+    return "0.00 (0/0)"
+
+
+def _select_exploratory_samples(
+    summary: CollectionSummary, *, limit: int = 3
+) -> list[NormalizedString]:
+    records = [record for record in summary.strings if not record.is_allowlisted]
+    records.sort(
+        key=lambda record: (
+            len(record.tags),
+            _CONFIDENCE_PRIORITY.get(record.confidence, 0),
+            -1 if record.derived else 0,
+        ),
+        reverse=True,
+    )
+    return records[:limit]
+
+
+def _format_counts(values: Mapping[str, int], *, limit: int = 5) -> str:
+    ordered = sorted(values.items(), key=lambda item: (-item[1], item[0]))
+    display = [f"{key}={value}" for key, value in ordered[:limit]]
+    if len(ordered) > limit:
+        remainder = sum(value for _, value in ordered[limit:])
+        display.append(f"other={remainder}")
+    return ", ".join(display)
+
+
+def _top_tag_counts(summary: CollectionSummary, *, limit: int = 5) -> list[tuple[str, int]]:
+    counter: Counter[str] = Counter()
+    for record in summary.strings:
+        if record.is_allowlisted:
+            continue
+        counter.update(record.tags)
+    return counter.most_common(limit)
+
+
+def _exploratory_issues(summary: CollectionSummary) -> list[str]:
+    metrics = summary.metrics
+    issues: list[str] = [
+        f"[{issue.severity.upper()}] {issue.message}"
+        for issue in metrics.issue_flags
+    ]
+
+    sensitive_splits = sorted(
+        {record.split_id for record in summary.strings if not record.is_allowlisted and record.split_id != "base"}
+    )
+    if sensitive_splits:
+        issues.append(
+            "[INFO] Sensitive hits located in non-base splits: "
+            + ", ".join(sensitive_splits)
+        )
+
+    locale_sensitive = sorted(
+        {
+            record.locale_qualifier
+            for record in summary.strings
+            if not record.is_allowlisted
+            and record.locale_qualifier
+        }
+    )
+    if locale_sensitive:
+        issues.append(
+            "[INFO] Sensitive hits constrained to locale qualifiers: "
+            + ", ".join(locale_sensitive)
+        )
+
+    return issues
 
 
 @dataclass(frozen=True)
@@ -979,4 +1152,4 @@ def write_baseline_json(
     return path
 
 
-__all__ = ["render_app_result", "write_baseline_json"]
+__all__ = ["render_app_result", "render_exploratory_summary", "write_baseline_json"]
