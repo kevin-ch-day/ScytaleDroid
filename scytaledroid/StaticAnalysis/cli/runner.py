@@ -7,7 +7,7 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
-from typing import Iterable, Mapping, MutableMapping, Optional, Sequence
+from typing import Iterable, Mapping, MutableMapping, Optional, Sequence, Tuple
 
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
@@ -25,7 +25,9 @@ from ..modules.permissions.audit import PermissionAuditAccumulator
 from ..modules.dynamic_loading import DynamicLoadModule
 from ..modules.storage_surface import StorageSurfaceModule
 
+from .detail import render_app_table, app_detail_loop, render_app_detail, SEVERITY_TOKEN_ORDER
 from .masvs_menu import render_scoring_explainer_menu  # convenience export
+from .masvs_summary import fetch_db_masvs_summary
 from .models import AppRunResult, ArtifactOutcome, RunOutcome, RunParameters, ScopeSelection
 from .db_persist import persist_run_summary
 from .prompts import prompt_tuning
@@ -213,14 +215,69 @@ def generate_report(artifact, base_dir: Path, params: RunParameters):
 
 
 def build_analysis_config(params: RunParameters) -> AnalysisConfig:
-    tests = tuple(run_modules_for_profile(params.profile)) if params.profile != "custom" else params.selected_tests
+    profile_map = {
+        "metadata": "quick",
+        "permissions": "quick",
+        "lightweight": "quick",
+        "full": "full",
+        "split": "quick",
+        "strings": "quick",
+        "webview": "quick",
+        "nsc": "quick",
+        "ipc": "quick",
+        "crypto": "quick",
+        "sdk": "quick",
+    }
+    profile = profile_map.get(params.profile, "full")
+    enabled_detectors = _map_tests_to_detectors(params)
+    enable_string_index = params.profile not in {"metadata", "permissions"}
+    if params.profile == "custom" and any(test in params.selected_tests for test in ("secrets", "strings")):
+        enable_string_index = True
+
     return AnalysisConfig(
-        profile=params.profile,
-        selected_tests=tests,
-        workers=params.workers,
-        reuse_cache=params.reuse_cache,
-        trace_detectors=params.trace_detectors,
+        profile=profile,
+        verbosity=params.log_level,
+        enabled_detectors=enabled_detectors or None,
+        enable_string_index=enable_string_index,
     )
+
+
+def _map_tests_to_detectors(params: RunParameters) -> Tuple[str, ...]:
+    if params.profile == "metadata":
+        return ("integrity_identity",)
+    if params.profile == "permissions":
+        return ("permissions_profile",)
+    if params.profile == "strings":
+        return ("secrets", "webview", "network_surface")
+    if params.profile == "webview":
+        return ("webview_hygiene",)
+    if params.profile == "nsc":
+        return ("network_surface",)
+    if params.profile == "ipc":
+        return ("ipc_components", "provider_acl")
+    if params.profile == "crypto":
+        return ("crypto_hygiene",)
+    if params.profile == "sdk":
+        return ("sdk_inventory",)
+    if params.profile != "custom":
+        return tuple()
+
+    mapping = {
+        "manifest": ("integrity_identity", "manifest_baseline", "ipc_components", "provider_acl"),
+        "provider_acl": ("provider_acl",),
+        "nsc": ("network_surface",),
+        "webview": ("webview",),
+        "secrets": ("secrets",),
+    }
+    detectors: list[str] = []
+    for test_key in params.selected_tests:
+        value = mapping.get(test_key)
+        if value:
+            if isinstance(value, tuple):
+                detectors.extend(value)
+            else:
+                detectors.append(value)
+    return tuple(dict.fromkeys(detectors))
 
 
 def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
@@ -271,6 +328,30 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
         if index < len(outcome.results):
             print()
 
+    if outcome.results:
+        render_app_table(outcome.results)
+        while True:
+            resp = prompt_utils.prompt_text(
+                "View details for app # (Enter to skip)", default="", required=False
+            ).strip()
+            if not resp:
+                break
+            if not resp.isdigit():
+                print(status_messages.status("Invalid selection.", level="warn"))
+                continue
+            idx = int(resp)
+            if idx < 1 or idx > len(outcome.results):
+                print(status_messages.status("Selection out of range.", level="warn"))
+                continue
+            selected = outcome.results[idx - 1]
+            app_detail_loop(
+                selected,
+                params.evidence_lines,
+                set(SEVERITY_TOKEN_ORDER),
+                params.finding_limit,
+                render_app_detail,
+            )
+
     if outcome.warnings:
         for message in sorted(set(outcome.warnings)):
             print(status_messages.status(message, level="warn"))
@@ -280,27 +361,21 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
 
     # Source-of-truth MASVS summary (DB-backed)
     try:
-        from scytaledroid.Database.db_core import db_queries as _q
-
-        rows = _q.run_sql(
-            "SELECT masvs, MAX(cvss) AS worst, SUM(CASE WHEN severity IN ('High','Medium') THEN 1 ELSE 0 END) AS sev_ge_med,"  # noqa: E501
-            " SUM(CASE WHEN severity='Low' THEN 1 ELSE 0 END) AS low, SUM(CASE WHEN severity='Info' THEN 1 ELSE 0 END) AS info"
-            " FROM findings WHERE run_id=(SELECT MAX(run_id) FROM runs) GROUP BY masvs",
-            fetch="all",
-        ) or []
-        if rows:
-            by_area = {str(r[0] or "").upper(): r for r in rows}
+        summary = fetch_db_masvs_summary()
+        if summary:
+            run_id, rows = summary
             print()
-            print("DB MASVS Summary")
+            print(f"DB MASVS Summary (run_id={run_id})")
             print("Area       High  Med   Low   Info  Status  Worst CVSS")
             for area in ("NETWORK", "PLATFORM", "PRIVACY", "STORAGE"):
-                r = by_area.get(area, (None, None, 0, 0, 0))
-                sev_ge_med = int(r[2] or 0)
-                low = int(r[3] or 0)
-                info = int(r[4] or 0)
-                status = "PASS" if sev_ge_med == 0 else "FAIL"
-                worst = r[1] or "—"
-                print(f"{area.title():<9}  {0:<4}  {sev_ge_med:<4}  {low:<4}  {info:<4}  {status:<5}  {worst}")
+                entry = next((row for row in rows if row["area"] == area), None)
+                if entry is None:
+                    print(f"{area.title():<9}  0     0     0     0     PASS   —")
+                else:
+                    status = "PASS" if entry["sev_ge_med"] == 0 else "FAIL"
+                    print(
+                        f"{area.title():<9}  0     {entry['sev_ge_med']:<5}{entry['low']:<5}{entry['info']:<6}{status:<6} {entry['worst']}"
+                    )
     except Exception:
         pass
 

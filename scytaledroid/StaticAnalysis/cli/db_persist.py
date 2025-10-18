@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
+from functools import lru_cache
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, Optional
 
 from scytaledroid.Persistence import db_writer as _dw
 from scytaledroid.StaticAnalysis.modules.permissions.simple import (
@@ -14,6 +16,33 @@ from scytaledroid.StaticAnalysis.modules.permissions.analysis.scoring import (
     permission_risk_score_detail as _perm_detail,
     permission_points_0_20 as _perm_pts,
 )
+
+
+@lru_cache(maxsize=1)
+def _load_cvss_map() -> Mapping[str, Mapping[str, Optional[str]]]:
+    path = Path("config/masvs_map.json")
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text("utf-8"))
+    except Exception:
+        return {}
+    mapping = {}
+    for finding_id, payload in data.items():
+        if not isinstance(payload, dict):
+            continue
+        codes = payload.get("masvs") or []
+        area = None
+        if isinstance(codes, list) and codes:
+            code = str(codes[0])
+            parts = code.split("-")
+            if len(parts) >= 2:
+                area = parts[1].upper()
+        mapping[str(finding_id)] = {
+            "masvs": area,
+            "cvss": payload.get("cvss_v4"),
+        }
+    return mapping
 
 
 def persist_run_summary(base_report, string_data: Mapping[str, object], run_package: str) -> None:
@@ -113,21 +142,23 @@ def persist_run_summary(base_report, string_data: Mapping[str, object], run_pack
         },
     )
 
-    # Persist a small finding sample and contributors (explainability)
+    # Persist a small finding sample (for DB-backed MASVS summary)
     try:
         rows_findings = []
         severity_map = {"P0": "High", "P1": "Medium", "P2": "Low", "NOTE": "Info"}
+        cvss_map = _load_cvss_map()
         for result in (br.detector_results or ()):  # type: ignore[attr-defined]
             for f in result.findings:
                 sev = severity_map.get(f.severity_gate.value, "Info")
-                masvs = f.category_masvs.value
-                cvss = None  # TODO: map finding_id to CVSS v4 from config
+                mapping = cvss_map.get(f.finding_id)
+                masvs_area = (mapping.get("masvs") if mapping else None) or f.category_masvs.value
+                cvss = mapping.get("cvss") if mapping else ""
                 kind = result.detector_id
                 ev = "; ".join(p.location for p in (f.evidence or ())) if f.evidence else f.because
-                rows_findings.append((sev, masvs, cvss or "", kind, ev[:480]))
-                if len(rows_findings) >= 20:
+                rows_findings.append((sev, masvs_area, cvss or "", kind, ev[:480]))
+                if len(rows_findings) >= 50:
                     break
-            if len(rows_findings) >= 20:
+            if len(rows_findings) >= 50:
                 break
         if rows_findings:
             _dw.write_findings(int(run_id), rows_findings)
@@ -135,23 +166,61 @@ def persist_run_summary(base_report, string_data: Mapping[str, object], run_pack
         pass
 
     try:
-        contrib = [
-            ("permissions", perm_points, "Permission risk (0–20)", 1),
-            ("network", net_points, "Network hygiene (0–20)", 2),
-            ("components", comp_points, "Exported/unguarded components (0–15)", 3),
-            ("storage", sto_points, "Storage hygiene (0–10)", 4),
-            ("secrets", secrets_points, "Validated secrets (≤25) + entropy-only (≤5)", 5),
-            ("webssl", webssl_points, "WebView/SSL config (0–10)", 6),
-            ("correlations", corr_points, "Composite signals (cap +5)", 7),
-        ]
-        contrib_sorted = sorted(contrib, key=lambda r: r[1], reverse=True)
+        contributors = []
+
+        sig_components = d_detail.get("signal_components", {})
+        breadth = float(d_detail.get("breadth", {}).get("applied", 0.0) or 0.0)
+        modernization = float(d_detail.get("modernization_credit", 0.0) or 0.0)
+
+        def _points(value: float) -> float:
+            return round(float(value) * 2.0, 2)
+
+        if sig_components:
+            dangerous_pts = _points(sig_components.get("dangerous", 0.0))
+            signature_pts = _points(sig_components.get("signature", 0.0))
+            vendor_pts = _points(sig_components.get("vendor", 0.0))
+            if dangerous_pts:
+                contributors.append(("permissions_dangerous", dangerous_pts, f"Dangerous permissions footprint (+{dangerous_pts})", 0))
+            if signature_pts:
+                contributors.append(("permissions_signature", signature_pts, f"Signature-level capabilities (+{signature_pts})", 0))
+            if vendor_pts:
+                contributors.append(("permissions_vendor", vendor_pts, f"Vendor/ads permissions (+{vendor_pts})", 0))
+        breadth_pts = _points(breadth)
+        if breadth_pts:
+            contributors.append(("permissions_breadth", breadth_pts, f"Capability breadth bonus (+{breadth_pts})", 0))
+        modernization_pts = _points(modernization)
+        if modernization_pts:
+            contributors.append(("permissions_modernization", -modernization_pts, f"Modernization credit (targetSdk/flags) (−{modernization_pts})", 0))
+        if net_points:
+            if uses_ct and has_code_http:
+                reason = "usesCleartextTraffic with code-path HTTP endpoints"
+            elif has_code_http:
+                reason = "HTTP endpoints observed in code paths"
+            else:
+                reason = "Network hygiene signal"
+            contributors.append(("network", net_points, f"{reason} (+{net_points})", 0))
+        if comp_points:
+            contributors.append(("components", comp_points, f"Exported components without guards (+{comp_points})", 0))
+        if sto_points:
+            contributors.append(("storage", sto_points, f"Legacy storage flag/requestLegacyExternalStorage (+{sto_points})", 0))
+        if secrets_points:
+            contributors.append(("secrets", secrets_points, f"Validated secrets & entropy findings (+{secrets_points})", 0))
+        if webssl_points:
+            contributors.append(("webssl", webssl_points, f"WebView/SSL configuration signals (+{webssl_points})", 0))
+        if corr_points:
+            contributors.append(("correlations", corr_points, f"Composite risk correlations (+{corr_points})", 0))
+
+        # Sort by absolute contribution descending and assign rank
+        contrib_sorted = sorted(contributors, key=lambda row: abs(row[1]), reverse=True)
         contrib_ranked = [
-            (name, pts, expl, idx + 1) for idx, (name, pts, expl, _r) in enumerate(contrib_sorted)
+            (name, round(points, 2), explanation, idx + 1)
+            for idx, (name, points, explanation, _rank) in enumerate(contrib_sorted)
+            if points or "modernization" in name
         ]
-        _dw.write_contributors(int(run_id), contrib_ranked)
+        if contrib_ranked:
+            _dw.write_contributors(int(run_id), contrib_ranked)
     except Exception:
         pass
 
 
 __all__ = ["persist_run_summary"]
-

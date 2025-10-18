@@ -1,13 +1,17 @@
 {
-  "NET-CLR-HTTP": {
+  "BASE-002": {
+    "masvs": ["MASVS-PLATFORM-2"],
+    "cvss_v4": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:H/SI:N/SA:N"
+  },
+  "BASE-004": {
     "masvs": ["MASVS-NETWORK-1"],
     "cvss_v4": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:H/SI:L/SA:N"
   },
-  "PRIV-CONTACTS": {
+  "BASE-005": {
     "masvs": ["MASVS-PRIV-2"],
     "cvss_v4": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:L/VA:N/SC:M/SI:N/SA:N"
   },
-  "STO-LEGACY-SECRET": {
+  "BASE-006": {
     "masvs": ["MASVS-STORAGE-2"],
     "cvss_v4": "CVSS:4.0/AV:L/AC:L/AT:N/PR:N/UI:N/VC:L/VI:N/VA:L/SC:L/SI:N/SA:N"
   }
