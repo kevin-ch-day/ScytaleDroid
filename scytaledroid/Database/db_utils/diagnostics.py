@@ -13,6 +13,7 @@ between the docs and code when validating deployments.
 from __future__ import annotations
 
 from contextlib import contextmanager
+from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
 
 from scytaledroid.Database.db_core import DatabaseEngine, database_session
@@ -153,10 +154,15 @@ def build_table_snapshot(table_name: str) -> Optional[TableSnapshot]:
     safe_name = _quote_identifier(table_name)
     try:
         with _connected_engine() as engine:
+            table_type = _fetch_table_type(engine, table_name)
             columns = _fetch_columns(engine, table_name)
             row_count = _fetch_row_count(engine, safe_name)
             indexes = _fetch_indexes(engine, safe_name)
             order_column = _select_order_column(columns)
+            timestamp_column = _select_timestamp_column(columns)
+            max_timestamp = (
+                _fetch_max_timestamp(engine, safe_name, timestamp_column) if timestamp_column else None
+            )
             rows = _fetch_example_rows(engine, safe_name, order_column)
     except Exception as exc:  # pragma: no cover - relies on external MySQL
         print(f"[DB_UTILS] Failed to build snapshot for {table_name}: {exc}")
@@ -164,7 +170,10 @@ def build_table_snapshot(table_name: str) -> Optional[TableSnapshot]:
 
     return TableSnapshot(
         name=table_name,
+        table_type=table_type,
         row_count=row_count,
+        max_timestamp=max_timestamp,
+        timestamp_column=timestamp_column,
         columns=columns,
         example_rows=rows,
         indexes=indexes,
@@ -275,6 +284,46 @@ def _select_order_column(columns: Sequence[ColumnInfo]) -> Optional[str]:
     return None
 
 
+def _select_timestamp_column(columns: Sequence[ColumnInfo]) -> Optional[str]:
+    for column in columns:
+        if column.name.lower() == "updated_at":
+            return column.name
+    return None
+
+
+def _fetch_max_timestamp(db: DatabaseEngine, safe_name: str, column_name: str) -> Optional[str]:
+    try:
+        column_expr = _quote_identifier(column_name)
+        row = db.fetch_one(f"SELECT MAX({column_expr}) FROM {safe_name};")
+    except Exception as exc:  # pragma: no cover - relies on external MySQL
+        print(f"[DB_UTILS] Failed to compute MAX({column_name}) for {safe_name}: {exc}")
+        return None
+    if not row:
+        return None
+    value = row[0]
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat(sep=" ")
+    return str(value)
+
+
+def _fetch_table_type(db: DatabaseEngine, table_name: str) -> Optional[str]:
+    try:
+        row = db.fetch_one(
+            "SELECT TABLE_TYPE FROM information_schema.tables "
+            "WHERE table_schema = DATABASE() AND table_name = %s;",
+            (table_name,),
+        )
+    except Exception as exc:  # pragma: no cover - relies on external MySQL
+        print(f"[DB_UTILS] Failed to fetch table type for {table_name}: {exc}")
+        return None
+    if not row:
+        return None
+    value = row[0]
+    return str(value) if value is not None else None
+
+
 def _fetch_example_rows(
     db: DatabaseEngine, safe_name: str, order_column: Optional[str]
 ) -> List[dict[str, Any]]:
@@ -310,4 +359,3 @@ __all__ = [
     "compare_columns",
     "build_table_snapshot",
 ]
-

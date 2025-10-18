@@ -32,7 +32,10 @@ class TableSnapshot:
     """Container for a rendered snapshot of a database table."""
 
     name: str
+    table_type: Optional[str]
     row_count: Optional[int]
+    max_timestamp: Optional[str]
+    timestamp_column: Optional[str]
     columns: Sequence[ColumnInfo]
     example_rows: Sequence[dict[str, Any]]
     indexes: Sequence[IndexInfo]
@@ -45,7 +48,20 @@ class TableSnapshot:
         parts.append(f"## table: {self.name}\n")
 
         row_count_text = str(self.row_count) if self.row_count is not None else "unknown"
-        parts.append(f"**row_count:** {row_count_text}\n")
+        type_label = (self.table_type or "").lower()
+        if type_label in {"base table", "table"}:
+            type_display = "table"
+        elif type_label == "view":
+            type_display = "view"
+        else:
+            type_display = self.table_type
+
+        meta_line = f"**row_count:** {row_count_text}"
+        if type_display:
+            meta_line += f" | **type:** {type_display}"
+        if self.max_timestamp and self.timestamp_column:
+            meta_line += f" | **max_{self.timestamp_column}:** {self.max_timestamp}"
+        parts.append(meta_line + "\n")
 
         parts.append("### schema")
         parts.append(self._render_schema_table())
@@ -146,4 +162,3 @@ def _format_cell(value: Any) -> str:
     if len(text) > 80:
         return text[:77] + "…"
     return _escape_pipe(text)
-

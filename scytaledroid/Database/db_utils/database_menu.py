@@ -1,80 +1,49 @@
-"""Interactive menu for database utilities."""
+"""Top-level Database Utilities menu."""
 
 from __future__ import annotations
 
-from typing import List
+from typing import List, Tuple
 
 from scytaledroid.Database.db_utils import diagnostics
+from scytaledroid.Database.db_utils.menus import health_checks, runs_dashboard, schema_browser
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 
-_CORE_TABLES: List[str] = [
-    "android_app_definitions",
-    "android_apk_repository",
-    "harvest_storage_roots",
-    "harvest_artifact_paths",
-    "harvest_source_paths",
-]
-
-_ANALYTICS_TABLES: List[str] = [
-    "permission_signal_catalog",
-    "permission_signal_mappings",
-    "permission_cohort_expectations",
-    "permission_audit_snapshots",
-    "permission_audit_apps",
-]
 
 def database_menu() -> None:
-    """Render the database utilities menu (flat layout)."""
+    """Render the database utilities menu and dispatch to sub-menus."""
 
     while True:
-        # Clear screen before drawing a new menu screen (optional)
-        try:
-            from scytaledroid.Utils.DisplayUtils import ui_prefs as _ui
-            if _ui.should_clear():
-                from scytaledroid.Utils.System.util_actions import clear_screen as _clear
-                _clear()
-            else:
-                print()
-        except Exception:
-            print()
+        _maybe_clear_screen()
         menu_utils.print_header("Database Utilities")
 
-        # Determine current DB state to toggle setup actions
-        analytics_ready = False
-        framework_catalog_loaded = False
-        try:
-            exists = diagnostics.check_required_tables(_ANALYTICS_TABLES + ["android_framework_permissions"]) or {}
-            analytics_ready = all(bool(exists.get(t)) for t in _ANALYTICS_TABLES)
-            counts = diagnostics.table_counts(["android_framework_permissions"]) or {}
-            framework_catalog_loaded = bool((counts.get("android_framework_permissions") or 0) > 0)
-        except Exception:
-            pass
-
-        # Build a flat, ordered list of options
-        options: list[tuple[str, str, str]] = []
-        options.append(("1", "Check connection & show config", "Verify connectivity and display active parameters."))
-        options.append(("2", "Schema snapshot (Markdown)", "Render copy-pasteable schema summaries for each table."))
-        # Option 3 repurposed for schema audit (Quick stats removed)
-        options.append(("3", "Run schema audit script", "Launch the experimental schema checker for deeper diagnostics."))
-
-        menu_utils.print_menu(options, padding=True, show_exit=True)
-        choice = prompt_utils.get_choice(valid=[opt[0] for opt in options] + ["0"]) 
+        options: List[Tuple[str, str, str]] = [
+            ("1", "Check connection & show config", "Verify connectivity and display active parameters."),
+            ("2", "Schema snapshot / browser", "Explore schema groups with indexes and sample rows."),
+            ("3", "Data health checks (ingestion & scoring)", "Run deterministic ingestion & scoring checks."),
+            ("4", "Recent runs dashboard", "Summarise the latest runs and key metrics."),
+            ("5", "Back", "Return to the previous menu."),
+        ]
+        menu_utils.print_menu(options, padding=True, show_exit=False)
+        choice = prompt_utils.get_choice(valid=[opt[0] for opt in options] + ["0"])
 
         if choice == "1":
             _handle_check_connection_and_config()
         elif choice == "2":
-            _handle_schema_inspection()
+            schema_browser.show_schema_browser()
         elif choice == "3":
-            _handle_run_schema_audit_script()
-        elif choice == "0":
+            health_checks.run_health_checks()
+        elif choice == "4":
+            runs_dashboard.show_recent_runs_dashboard()
+        elif choice in {"5", "0"}:
             break
 
-def _handle_check_connection_and_config() -> None:
-    """Display DB configuration and test the connection (plain, underlined style)."""
 
-    # Read hardcoded configuration only (no venv/env/file overrides)
+def _handle_check_connection_and_config() -> None:
+    """Display DB configuration and test the connection."""
+
     try:
         from scytaledroid.Database.db_core import db_config as _dbc
+
         cfg = _dbc.DB_CONFIG
         host = str(cfg.get("host", "<unknown>"))
         port_display = str(cfg.get("port", "<unknown>"))
@@ -84,7 +53,6 @@ def _handle_check_connection_and_config() -> None:
         host = port_display = database = user = "<unknown>"
         print(status_messages.status(f"Unable to read DB config: {exc}", level="warn"))
 
-    # Render configuration in plain, underlined sections
     def _section(title: str) -> None:
         print(title)
         print("-" * len(title))
@@ -105,47 +73,20 @@ def _handle_check_connection_and_config() -> None:
     prompt_utils.press_enter_to_continue()
 
 
-def _handle_schema_inspection() -> None:
-    tables = diagnostics.list_tables()
-    if not tables:
-        print(status_messages.status("Unable to list tables (connection failed).", level="error"))
-        prompt_utils.press_enter_to_continue()
-        return
-
-    info = diagnostics.get_server_info()
-    database_name = info.get("database") or "<unknown>"
-    print(f"# Database snapshot — {database_name}")
-    print(f"_tables discovered: {len(tables)}_\n")
-
-    for table in sorted(tables):
-        snapshot = diagnostics.build_table_snapshot(table)
-        if snapshot is None:
-            print(f"<!-- Unable to introspect {table} -->\n")
-            continue
-        print(snapshot.render_markdown())
-
-    prompt_utils.press_enter_to_continue()
-
-
-    
-
-
-def _handle_run_schema_audit_script() -> None:
-    # Plain underlined section header for consistency
-    def _section(title: str) -> None:
-        print(title)
-        print("-" * len(title))
-
-    _section("Schema Audit")
-    print(status_messages.status("Launching schema audit script…", level="info"))
+def _maybe_clear_screen() -> None:
     try:
-        from scytaledroid.Database.tools.schema_audit import run_interactive
+        from scytaledroid.Utils.DisplayUtils import ui_prefs as _ui
 
-        run_interactive()
-    except Exception as exc:
-        print(status_messages.status(f"Schema audit failed to run: {exc}", level="error"))
-    prompt_utils.press_enter_to_continue()
+        if _ui.should_clear():
+            from scytaledroid.Utils.System.util_actions import clear_screen as _clear
+
+            _clear()
+        else:
+            print()
+    except Exception:
+        print()
 
 
-if __name__ == "__main__":  # pragma: no cover - manual invocation helper
+if __name__ == "__main__":  # pragma: no cover
     database_menu()
+
