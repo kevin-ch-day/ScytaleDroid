@@ -156,7 +156,7 @@ def handle_reporting() -> None:
 
 
 def handle_database() -> None:
-    from scytaledroid.Database.db_utils.menu import database_menu
+    from scytaledroid.Database.db_utils.database_menu import database_menu
 
     database_menu()
 

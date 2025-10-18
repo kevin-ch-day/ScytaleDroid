@@ -54,8 +54,8 @@ def database_menu() -> None:
         options: list[tuple[str, str, str]] = []
         options.append(("1", "Check connection & show config", "Verify connectivity and display active parameters."))
         options.append(("2", "Schema snapshot (Markdown)", "Render copy-pasteable schema summaries for each table."))
-        options.append(("3", "Quick stats (core + permission)", "Core/permission table counts and framework protection distribution."))
-        options.append(("9", "Run schema audit script", "Launch the experimental schema checker for deeper diagnostics."))
+        # Option 3 repurposed for schema audit (Quick stats removed)
+        options.append(("3", "Run schema audit script", "Launch the experimental schema checker for deeper diagnostics."))
 
         menu_utils.print_menu(options, padding=True, show_exit=True)
         choice = prompt_utils.get_choice(valid=[opt[0] for opt in options] + ["0"]) 
@@ -65,35 +65,43 @@ def database_menu() -> None:
         elif choice == "2":
             _handle_schema_inspection()
         elif choice == "3":
-            _handle_quick_stats()
-        elif choice == "9":
             _handle_run_schema_audit_script()
         elif choice == "0":
             break
 
 def _handle_check_connection_and_config() -> None:
-    # Show config first
+    """Display DB configuration and test the connection (plain, underlined style)."""
+
+    # Read hardcoded configuration only (no venv/env/file overrides)
     try:
         from scytaledroid.Database.db_core import db_config as _dbc
         cfg = _dbc.DB_CONFIG
-        src = getattr(_dbc, "DB_CONFIG_SOURCE", "defaults")
-        socket_info = cfg.get("unix_socket")
-        extra = f" unix_socket={socket_info}" if socket_info else ""
-        print(
-            status_messages.status(
-                f"DB config source: {src}\n  host={cfg.get('host')} port={cfg.get('port')} db={cfg.get('database')} user={cfg.get('user')}{extra}",
-                level="info",
-            )
-        )
+        host = str(cfg.get("host", "<unknown>"))
+        port_display = str(cfg.get("port", "<unknown>"))
+        database = str(cfg.get("database", "<unknown>"))
+        user = str(cfg.get("user", "<unknown>"))
     except Exception as exc:
+        host = port_display = database = user = "<unknown>"
         print(status_messages.status(f"Unable to read DB config: {exc}", level="warn"))
 
-    # Then test connection
+    # Render configuration in plain, underlined sections
+    def _section(title: str) -> None:
+        print(title)
+        print("-" * len(title))
+
+    _section("Database Configuration")
+    print(f"    Host:       {host}")
+    print(f"    Port:       {port_display}")
+    print(f"    Database:   {database}")
+    print(f"    Username:   {user}")
+    print()
+
+    _section("Test Database Connection")
     success = diagnostics.check_connection()
     if success:
-        print(status_messages.status("Database connection established successfully.", level="success"))
+        print("    Connection established successfully")
     else:
-        print(status_messages.status("Database connection failed. Check logs for details.", level="error"))
+        print("    Connection failed. Check logs for details.")
     prompt_utils.press_enter_to_continue()
 
 

@@ -16,7 +16,7 @@ back to a concrete database record.
    the static-analysis tables. These helpers are wrapped by
    `scytaledroid/Database/db_utils/diagnostics.py` and the CLI diagnostics menu.
 4. Analysts can verify schema health through **Database Utilities → Schema
-   snapshot** and cross-check counts via **Quick stats**.
+   snapshot** and the **Schema audit** tool.
 
 ## 2. Core tables
 
@@ -63,10 +63,10 @@ The helper creates/updates the table definitions using
 * **Creation scripts** – Namespaced modules under
   `db_queries/static_analysis/` and `db_queries/harvest/` hold the canonical
   `CREATE TABLE` statements sourced by setup scripts and migrations.
-* **Diagnostics menu** – `python -m scytaledroid.Database.db_utils.menu`
-  launches the Database Utilities interface (options 1–4, 9). Option **2**
-  emits the Markdown schema summary used above; option **3** cross-checks row
-  counts for `static_findings`, `static_string_summary`, and related tables.
+* **Diagnostics menu** – `python -m scytaledroid.Database.db_utils.database_menu`
+  launches the Database Utilities interface (options 1, 2, 3). Option **2**
+  emits the Markdown schema summary used above; option **3** runs the schema
+  audit for deeper diagnostics.
 * **String intel snapshot** – After a run, use the exploratory renderer
   (`--explore`) to compare JSON metrics against `static_string_summary`
   aggregates. The `summary_id` from the JSON payload should match the FK stored

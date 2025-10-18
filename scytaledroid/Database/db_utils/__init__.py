@@ -10,7 +10,7 @@ from .diagnostics import (
     get_table_columns,
     build_table_snapshot,
 )
-from .menu import database_menu
+from .database_menu import database_menu
 
 __all__ = [
     "check_connection",

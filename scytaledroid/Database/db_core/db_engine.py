@@ -2,9 +2,7 @@
 db_engine.py - Database connection engine for ScytaleDroid
 """
 
-import json
-import os
-from pathlib import Path
+from pathlib import Path  # noqa: F401 (kept for future admin helpers)
 from typing import Any, Dict, List, Optional, Tuple, cast
 
 import mysql.connector
@@ -25,49 +23,17 @@ class DatabaseEngine:
         self._connect()
 
     def _load_overrides(self) -> Dict[str, Any]:
-        """Return config overrides from config/db.json or environment variables."""
-        cfg: Dict[str, Any] = {}
-        # File override
-        try:
-            json_path = Path("config/db.json")
-            if json_path.exists():
-                data = json.loads(json_path.read_text(encoding="utf-8"))
-                if isinstance(data, dict):
-                    cfg.update(data)
-        except Exception:
-            pass
-        # Env overlay
-        env_keys = {
-            "host": ("SCY_DB_HOST", "DB_HOST"),
-            "port": ("SCY_DB_PORT", "DB_PORT"),
-            "user": ("SCY_DB_USER", "DB_USER"),
-            "password": ("SCY_DB_PASSWORD", "DB_PASSWORD"),
-            "database": ("SCY_DB_NAME", "DB_NAME"),
-            "charset": ("SCY_DB_CHARSET", "DB_CHARSET"),
-        }
-        for key, names in env_keys.items():
-            for name in names:
-                if name in os.environ:
-                    value: Any = os.environ[name]
-                    if key == "port":
-                        try:
-                            value = int(value)
-                        except Exception:
-                            continue
-                    cfg[key] = value
-                    break
-        return cfg
+        """Overrides disabled: use only hardcoded DB_CONFIG values.
+
+        This app is configured to rely on the static values defined in
+        scytaledroid.Database.db_core.db_config. We intentionally ignore any
+        environment variables or config/db.json file to keep deployment simple.
+        """
+        return {}
 
     def _effective_config(self) -> Dict[str, Any]:
         cfg = dict(db_config.DB_CONFIG)
-        overrides = self._load_overrides()
-        cfg.update(overrides)
-        # If unix_socket provided, prefer socket connection; mysql-connector will
-        # use it and ignore host/port.
-        if cfg.get("unix_socket"):
-            # Ensure port/host don't interfere; keep user/password as provided.
-            # mysql-connector tolerates host with socket, but we keep it simple.
-            cfg.setdefault("host", "localhost")
+        # Overrides deliberately disabled; rely on hardcoded DB_CONFIG only.
         return cfg
 
     def _connect(self) -> None:
@@ -124,7 +90,6 @@ class DatabaseEngine:
 
             # Build config without database to connect to server
             cfg = dict(_dbc.DB_CONFIG)
-            cfg.update(DatabaseEngine()._load_overrides())
             cfg.pop("database", None)
             conn = mysql.connector.connect(**cfg)
             cur = conn.cursor()
