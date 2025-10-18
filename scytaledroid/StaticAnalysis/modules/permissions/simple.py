@@ -80,7 +80,31 @@ def collect_permissions_and_sdk(
     except Exception:
         target_sdk = None
 
-    return declared, defined, {"min": min_sdk, "target": target_sdk}
+    # Extract key flags for modernization credit
+    allow_backup = None
+    legacy_ext = None
+    try:
+        axml = apk.get_android_manifest_axml()
+        if axml is not None:
+            root = ET.fromstring(axml.get_xml())
+            app_nodes = root.findall("application")
+            for app in app_nodes:
+                ab = app.get(f"{_ANDROID_NS}allowBackup") or app.get("allowBackup")
+                if ab is not None:
+                    allow_backup = True if str(ab).lower() in {"1", "true", "yes"} else False
+                rles = app.get(f"{_ANDROID_NS}requestLegacyExternalStorage") or app.get("requestLegacyExternalStorage")
+                if rles is not None:
+                    legacy_ext = True if str(rles).lower() in {"1", "true", "yes"} else False
+                break
+    except Exception:
+        pass
+
+    return declared, defined, {
+        "min": min_sdk,
+        "target": target_sdk,
+        "allow_backup": allow_backup,
+        "legacy_external_storage": legacy_ext,
+    }
 
 
 def _format_permission(name: str, element_type: str) -> str:
@@ -443,6 +467,7 @@ def render_permission_postcard(
     app_label: str,
     declared: Sequence[Tuple[str, str]],
     defined: Sequence[Dict[str, str | None]],
+    sdk: Dict[str, str | None] | None = None,
     *,
     index: int,
     total: int,
@@ -459,12 +484,28 @@ def render_permission_postcard(
     d = risk_counts.get("dangerous", 0)
     s = risk_counts.get("signature", 0)
     v = vendor.get("ADS", 0)
+    target_sdk_val = None
+    allow_backup_flag = None
+    legacy_ext_flag = None
+    if isinstance(sdk, dict):
+        try:
+            target_sdk_val = int(sdk.get("target")) if sdk.get("target") is not None else None
+        except Exception:
+            target_sdk_val = None
+        ab = sdk.get("allow_backup")
+        allow_backup_flag = bool(ab) if ab is not None else None
+        le = sdk.get("legacy_external_storage")
+        legacy_ext_flag = bool(le) if le is not None else None
+
     detail = dict(
         permission_risk_score_detail(
             dangerous=d,
             signature=s,
             vendor=v,
             groups=groups,
+            target_sdk=target_sdk_val,
+            allow_backup=allow_backup_flag,
+            legacy_external_storage=legacy_ext_flag,
         )
     )
     score = float(detail.get("score_3dp", detail.get("score_capped", 0.0)))
@@ -635,6 +676,28 @@ def render_contribution_summary(items: Sequence[Mapping[str, object]]) -> None:
     print("\nContribution Summary (top apps)")
     print("-" * 72)
     table_utils.render_table(headers, rows)
+
+
+def render_scoring_legend() -> None:
+    """Print the scoring model weights and grade thresholds for clarity."""
+    try:
+        from .analysis.scoring import get_scoring_params  # type: ignore
+        p = get_scoring_params()
+        dw = p.dangerous_weight
+        sw = p.signature_weight
+        vw = p.vendor_weight
+        step = p.breadth_step
+        cap = p.breadth_cap
+    except Exception:
+        dw = sw = vw = step = cap = 0.0
+
+    print("\nScoring Model — Weights & Thresholds")
+    print("-" * 38)
+    print(f"Weights: dangerous={dw:.2f}, signature={sw:.2f}, vendor={vw:.2f}")
+    print(f"Breadth bonus: step={step:.2f}, cap={cap:.2f}")
+    print("Modernization credit (max 0.8): +0.3 if targetSdk≥34; +0.3 if requestLegacyExternalStorage is absent; +0.2 if allowBackup=false")
+    print("Grades: A≤2.0  B≤4.0  C≤6.5  D≤8.0  F>8.0")
+    print("Notes: vendor reflects ads/attribution; breadth counts distinct capability groups requested.")
 
 
 # ------------------------------

@@ -1,5 +1,18 @@
 [hosts]
-doc = ["www.w3.org", "ns.adobe.com", "www.apache.org", "bouncycastle.org"]
+doc = [
+  "www.w3.org",
+  "ns.adobe.com",
+  "www.apache.org",
+  "bouncycastle.org",
+  "www.slf4j.org",
+  "schemas.android.com",
+  "khronos.org",
+  "fonts.googleapis.com",
+  "www.bohemiancoding.com"
+]
 
 [sources]
-doc = ["assets/legal.html", "res/raw/filter_resources.smf"]
+doc = [
+  "assets/legal.html",
+  "res/raw/filter_resources.smf"
+]

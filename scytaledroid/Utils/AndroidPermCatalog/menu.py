@@ -178,7 +178,7 @@ def perm_catalog_menu() -> None:
             try:
                 from scytaledroid.Database.db_utils import diagnostics as _dbu
                 if not _dbu.check_connection():
-                    print(status_messages.status("Database connection failed. Check Database tools → Check database connection, or config/db.json.", level="error"))
+                    print(status_messages.status("Database connection failed. Use Database Utilities → Check connection to troubleshoot.", level="error"))
                     continue
             except Exception:
                 pass

@@ -214,13 +214,13 @@ def _summarise_tls_hits(
     return summary
 
 
-def _assess_policy(policy: Optional[NetworkSecurityPolicy]) -> tuple[Finding, ...]:
+def _assess_policy(policy: Optional[NetworkSecurityPolicy], *, has_code_http: bool) -> tuple[Finding, ...]:
     if policy is None or policy.source_path is None:
         return tuple()
 
     findings: list[Finding] = []
 
-    if policy.base_cleartext:
+    if policy.base_cleartext and has_code_http:
         findings.append(
             Finding(
                 finding_id="network_nsc_base_cleartext",
@@ -233,7 +233,7 @@ def _assess_policy(policy: Optional[NetworkSecurityPolicy]) -> tuple[Finding, ..
             )
         )
 
-    if policy.debug_overrides_cleartext:
+    if policy.debug_overrides_cleartext and has_code_http:
         findings.append(
             Finding(
                 finding_id="network_nsc_debug_cleartext",
@@ -251,7 +251,7 @@ def _assess_policy(policy: Optional[NetworkSecurityPolicy]) -> tuple[Finding, ..
         for policy_entry in policy.domain_policies
         if policy_entry.cleartext_permitted
     ]
-    if risky_domains:
+    if risky_domains and has_code_http:
         domain_list = ", ".join(
             ", ".join(domain.domains)
             for domain in risky_domains[:3]
@@ -389,7 +389,11 @@ class NetworkSurfaceDetector(BaseDetector):
             _build_evidence_pointers(evidence_candidates, apk_path=context.apk_path)
         )
 
-        policy_findings = _assess_policy(context.network_security_policy)
+        # Determine if any HTTP endpoints come from code paths (dex/native)
+        has_code_http = any(
+            (m.string_entry.origin_type in {"code", "dex", "native"}) for m in http_matches
+        )
+        policy_findings = _assess_policy(context.network_security_policy, has_code_http=has_code_http)
         findings = tuple(policy_findings)
         evidence.extend(
             _policy_evidence(context.network_security_policy, context.apk_path)

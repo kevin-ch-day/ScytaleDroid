@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Mapping, Any
+from dataclasses import dataclass
 from pathlib import Path
 import os
 import sys
@@ -14,14 +15,18 @@ except Exception:  # pragma: no cover - very defensive
 
 
 _DEFAULT_WEIGHTS: dict[str, Any] = {
+    # Calibrated to reduce saturation at the top end and provide
+    # a clearer spread for Play-distributed apps.
     "base": {
-        "dangerous_weight": 0.35,
-        "signature_weight": 1.25,
-        "vendor_weight": 0.08,
+        "dangerous_weight": 0.28,
+        "signature_weight": 0.90,
+        "vendor_weight": 0.04,
     },
     "bonuses": {
-        "breadth_step": 0.2,
-        "breadth_cap": 2.0,
+        # Breadth now contributes more gently and caps lower
+        # so multi-capability apps do not immediately max out.
+        "breadth_step": 0.12,
+        "breadth_cap": 1.20,
     },
     "normalize": {"max_score": 10.0},
 }
@@ -41,19 +46,56 @@ def _load_weights() -> dict[str, Any]:
     candidates.append(Path("config/permission_risk.toml"))
     candidates.append(Path("data/config/permission_risk.toml"))
 
+    merged = {
+        "base": dict(_DEFAULT_WEIGHTS["base"]),
+        "bonuses": dict(_DEFAULT_WEIGHTS["bonuses"]),
+        "normalize": dict(_DEFAULT_WEIGHTS["normalize"]),
+    }
     for path in candidates:
         try:
             if path.exists() and _toml is not None:
                 with path.open("rb") as fh:
                     data = _toml.load(fh)
+                # Only merge known keys if present
                 if isinstance(data, dict) and data:
-                    _LOADED_WEIGHTS = data  # type: ignore[assignment]
+                    if isinstance(data.get("base"), dict):
+                        merged["base"].update(data.get("base") or {})
+                    if isinstance(data.get("bonuses"), dict):
+                        merged["bonuses"].update(data.get("bonuses") or {})
+                    if isinstance(data.get("normalize"), dict):
+                        merged["normalize"].update(data.get("normalize") or {})
+                    _LOADED_WEIGHTS = merged  # type: ignore[assignment]
                     return _LOADED_WEIGHTS
         except Exception:
             continue
 
-    _LOADED_WEIGHTS = _DEFAULT_WEIGHTS
+    _LOADED_WEIGHTS = merged
     return _LOADED_WEIGHTS
+
+
+@dataclass(frozen=True)
+class ScoringParams:
+    dangerous_weight: float
+    signature_weight: float
+    vendor_weight: float
+    breadth_step: float
+    breadth_cap: float
+    max_score: float
+
+
+def get_scoring_params() -> ScoringParams:
+    w = _load_weights()
+    base = w.get("base", {}) if isinstance(w, dict) else {}
+    bonuses = w.get("bonuses", {}) if isinstance(w, dict) else {}
+    normalize = w.get("normalize", {}) if isinstance(w, dict) else {}
+    return ScoringParams(
+        dangerous_weight=float(base.get("dangerous_weight", 0.0)),
+        signature_weight=float(base.get("signature_weight", 0.0)),
+        vendor_weight=float(base.get("vendor_weight", 0.0)),
+        breadth_step=float(bonuses.get("breadth_step", 0.0)),
+        breadth_cap=float(bonuses.get("breadth_cap", 0.0)),
+        max_score=float(normalize.get("max_score", 10.0)),
+    )
 
 
 def permission_risk_score(
@@ -62,10 +104,24 @@ def permission_risk_score(
     signature: int,
     vendor: int,
     groups: Mapping[str, int] | None = None,
+    target_sdk: int | None = None,
+    allow_backup: bool | None = None,
+    legacy_external_storage: bool | None = None,
 ) -> float:
-    """Return a 0–10 risk score weighted for D/S and breadth."""
+    """Return a 0–10 risk score weighted for D/S and breadth.
 
-    score, _ = _compute_score_detail(dangerous=dangerous, signature=signature, vendor=vendor, groups=groups)
+    Modernization credit is applied when context is provided.
+    """
+
+    score, _ = _compute_score_detail(
+        dangerous=dangerous,
+        signature=signature,
+        vendor=vendor,
+        groups=groups,
+        target_sdk=target_sdk,
+        allow_backup=allow_backup,
+        legacy_external_storage=legacy_external_storage,
+    )
     return score
 
 
@@ -75,10 +131,21 @@ def permission_risk_score_detail(
     signature: int,
     vendor: int,
     groups: Mapping[str, int] | None = None,
+    target_sdk: int | None = None,
+    allow_backup: bool | None = None,
+    legacy_external_storage: bool | None = None,
 ) -> Mapping[str, Any]:
     """Return the breakdown contributing to the permission risk score."""
 
-    _, detail = _compute_score_detail(dangerous=dangerous, signature=signature, vendor=vendor, groups=groups)
+    _, detail = _compute_score_detail(
+        dangerous=dangerous,
+        signature=signature,
+        vendor=vendor,
+        groups=groups,
+        target_sdk=target_sdk,
+        allow_backup=allow_backup,
+        legacy_external_storage=legacy_external_storage,
+    )
     return detail
 
 
@@ -88,6 +155,9 @@ def _compute_score_detail(
     signature: int,
     vendor: int,
     groups: Mapping[str, int] | None = None,
+    target_sdk: int | None = None,
+    allow_backup: bool | None = None,
+    legacy_external_storage: bool | None = None,
 ) -> tuple[float, dict[str, Any]]:
     weights = _load_weights()
     base_w = weights.get("base", {}) if isinstance(weights, dict) else {}
@@ -103,7 +173,8 @@ def _compute_score_detail(
     vendor_weight = float(base_w.get("vendor_weight", 0.08))
 
     vendor_component_raw = v * vendor_weight
-    vendor_component = min(1.5, vendor_component_raw)
+    # Keep vendor/ads modest and capped low to avoid dominating the score.
+    vendor_component = min(1.0, vendor_component_raw)
     base_components = {
         "dangerous": d * dangerous_weight,
         "signature": s * signature_weight,
@@ -119,7 +190,21 @@ def _compute_score_detail(
         groups_present = sum(1 for val in groups.values() if val >= 1)
         breadth = min(breadth_cap, groups_present * breadth_step)
 
-    raw_score = base_total + breadth
+    # Modernization credit (max 0.8):
+    # +0.3 if targetSdk>=34; +0.3 if legacy external storage is absent; +0.2 if allowBackup is false
+    modernization_credit = 0.0
+    try:
+        if target_sdk is not None and int(target_sdk) >= 34:
+            modernization_credit += 0.3
+    except Exception:
+        pass
+    if legacy_external_storage is False:
+        modernization_credit += 0.3
+    if allow_backup is False:
+        modernization_credit += 0.2
+    modernization_credit = min(0.8, max(0.0, modernization_credit))
+
+    raw_score = base_total + breadth - modernization_credit
     max_score = float(normalize.get("max_score", 10.0)) if isinstance(normalize, dict) else 10.0
     clamped = float(max(0.0, min(max_score, raw_score)))
     rounded = round(clamped, 3)
@@ -146,9 +231,20 @@ def _compute_score_detail(
         "dangerous_count": d,
         "signature_count": s,
         "vendor_count": v,
+        "modernization_credit": modernization_credit,
     }
 
     return rounded, detail
+
+
+def permission_points_0_20(score_0_10: float) -> float:
+    """Map a 0–10 permission score to 0–20 points bucket."""
+    try:
+        s = float(score_0_10)
+    except Exception:
+        s = 0.0
+    s = max(0.0, min(10.0, s))
+    return round(s * 2.0, 2)
 
 
 def permission_risk_grade(score: float) -> str:
@@ -158,15 +254,23 @@ def permission_risk_grade(score: float) -> str:
         s = float(score)
     except (TypeError, ValueError):
         return "?"
-    if s <= 3.0:
+    # Shift thresholds to widen distribution across A–D and reduce Fs.
+    if s <= 2.0:
         return "A"
-    if s <= 5.0:
+    if s <= 4.0:
         return "B"
-    if s <= 7.0:
+    if s <= 6.5:
         return "C"
-    if s <= 8.5:
+    if s <= 8.0:
         return "D"
     return "F"
 
 
-__all__ = ["permission_risk_score", "permission_risk_score_detail", "permission_risk_grade"]
+__all__ = [
+    "permission_risk_score",
+    "permission_risk_score_detail",
+    "permission_risk_grade",
+    "permission_points_0_20",
+    "ScoringParams",
+    "get_scoring_params",
+]

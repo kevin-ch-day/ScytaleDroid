@@ -343,7 +343,19 @@ def _baseline_findings(
             "Review backup policy or disable allowBackup.",
             {"file": "AndroidManifest.xml", "detail": "android:allowBackup"},
         )
-    if flags.uses_cleartext_traffic:
+    # Gated cleartext: require manifest flag + code-path HTTP endpoint
+    def _code_http_present() -> bool:
+        try:
+            samples = string_data.get("samples", {}) if isinstance(string_data, Mapping) else {}
+            http_samples = (samples.get("http_cleartext") or []) + (samples.get("endpoints") or [])
+            for s in http_samples:
+                st = str(s.get("source_type") or "").lower()
+                if st in {"code", "dex", "native"}:
+                    return True
+            return False
+        except Exception:
+            return False
+    if flags.uses_cleartext_traffic and _code_http_present():
         add(
             "Medium",
             "BASE-004",
@@ -427,17 +439,27 @@ def _baseline_findings(
             {"dex_sid": pointer, "detail": detail},
         )
     if string_counts.get("endpoints"):
-        sample = (samples_payload.get("endpoints") or [{}])[0]
-        pointer = sample.get("src", "dex strings")
-        detail = sample.get("value") or sample.get("value_masked") or "endpoint"
-        add(
-            "Low",
-            "BASE-005",
-            "Endpoint literals present",
-            pointer,
-            "Validate endpoints and prefer configuration-driven hosts.",
-            {"dex_sid": pointer, "detail": detail},
-        )
+        # Only raise when we have code-path evidence or explicit cleartext
+        endpoint_samples = samples_payload.get("endpoints") or []
+        has_code_path = False
+        for s in endpoint_samples:
+            source_type = str(s.get("source_type") or "").lower()
+            if source_type in {"code", "dex", "native"}:
+                has_code_path = True
+                break
+        has_cleartext = bool(string_counts.get("http_cleartext"))
+        if has_code_path or has_cleartext:
+            sample = (endpoint_samples or [{}])[0]
+            pointer = sample.get("src", "dex strings")
+            detail = sample.get("value") or sample.get("value_masked") or "endpoint"
+            add(
+                "Low",
+                "BASE-005",
+                "Endpoint literals present",
+                pointer,
+                "Validate endpoints and prefer configuration-driven hosts.",
+                {"dex_sid": pointer, "detail": detail},
+            )
     if string_counts.get("high_entropy"):
         sample = (samples_payload.get("high_entropy") or [{}])[0]
         pointer = sample.get("src", "dex strings")
@@ -690,7 +712,12 @@ def _string_lines(string_payload: Mapping[str, object]) -> list[str]:
         ),
     )
 
-    highlight_keys = [key for key in sorted_bucket_keys if _bucket_highlight(key)]
+    # Avoid duplicate rendering for buckets that have dedicated sections below
+    # (endpoints roots, cleartext list, high-entropy samples, analytics IDs).
+    _skip_detailed_buckets = {"endpoints", "http_cleartext", "high_entropy", "analytics_ids"}
+    highlight_keys = [
+        key for key in sorted_bucket_keys if _bucket_highlight(key) and key not in _skip_detailed_buckets
+    ]
     additional_keys = [key for key in sorted_bucket_keys if key not in highlight_keys]
 
     for bucket in highlight_keys:
@@ -759,6 +786,9 @@ def _string_lines(string_payload: Mapping[str, object]) -> list[str]:
         lines.append("")
         lines.append("  Additional buckets")
         for bucket in additional_keys:
+            if bucket in _skip_detailed_buckets:
+                # Already rendered via dedicated sections below; show compact summary only
+                pass
             summary = structured_buckets[bucket]
             total = int(summary.get("total", 0))
             unique = int(summary.get("unique_values", 0))
@@ -788,6 +818,16 @@ def _string_lines(string_payload: Mapping[str, object]) -> list[str]:
             ]
         else:
             filtered_roots = endpoint_roots
+        # Suppress boilerplate/documentary domains using string noise policy
+        try:
+            from scytaledroid.StaticAnalysis.modules.string_analysis.allowlist import load_noise_policy as _load_policy
+            policy = _load_policy("config/string_noise.toml")
+            doc_hosts = policy.hosts_documentary
+            filtered_roots = [
+                item for item in filtered_roots if str(item.get("root_domain") or "").lower() not in doc_hosts
+            ]
+        except Exception:
+            pass
         top = filtered_roots[: max(3, sample_limit)]
         for item in top:
             root = str(item.get("root_domain") or "(unknown)")
@@ -1062,25 +1102,70 @@ def render_app_result(
     lines.append("")
     lines.append("Permissions (declared)")
     declared = list(permissions["declared"]) if isinstance(permissions.get("declared"), Sequence) else []
-    if declared:
-        head = declared[:20]
-        declared_text = ", ".join(head)
-        lines.extend(_wrap_lines(declared_text, indent=2, subsequent_indent=4))
-        remaining = len(declared) - len(head)
-        if remaining > 0:
-            lines.append(f"    (+{remaining} more)")
-    else:
-        lines.append("  —")
     counts = permissions["counts"]
     lines.append(
         f"  Counts: dangerous={counts['dangerous']}  signature={counts['signature']}  custom={counts['custom']}"
     )
+    # Compact high-signal preview; full list only when verbose mode is set
+    try:
+        from scytaledroid.Utils.System import output_prefs as _op
+        verbose = _op.get().verbose
+    except Exception:
+        verbose = False
+    if declared:
+        # Extract high-signal subset
+        high_keys = {
+            "android.permission.CAMERA",
+            "android.permission.RECORD_AUDIO",
+            "android.permission.READ_CONTACTS",
+            "android.permission.ACCESS_FINE_LOCATION",
+            "android.permission.SYSTEM_ALERT_WINDOW",
+            "android.permission.READ_PHONE_STATE",
+            "android.permission.READ_MEDIA_IMAGES",
+            "android.permission.READ_MEDIA_VIDEO",
+        }
+        top = [name.split(".")[-1] for name in declared if name in high_keys]
+        if top:
+            top_line = ", ".join(sorted(set(top)))
+            lines.append("  High-signal: " + top_line)
+        if verbose:
+            full = ", ".join(declared)
+            lines.extend(_wrap_lines("  " + full, indent=0, subsequent_indent=2))
 
     lines.append("")
     lines.extend(_string_lines(string_payload))
 
     lines.append("")
     lines.extend(_finding_lines(findings, finding_totals))
+
+    # Inline MASVS summary derived from detector results
+    try:
+        from scytaledroid.StaticAnalysis.core.findings import MasvsCategory
+        masvs_areas = (MasvsCategory.NETWORK, MasvsCategory.PLATFORM, MasvsCategory.PRIVACY, MasvsCategory.STORAGE)
+        counts = {area.value: {"High": 0, "Medium": 0, "Low": 0, "Info": 0} for area in masvs_areas}
+        worst_cvss = {area.value: "—" for area in masvs_areas}
+        for result in report.detector_results:
+            for f in result.findings:
+                area = f.category_masvs.value
+                sev = {"P0": "High", "P1": "Medium", "P2": "Low", "NOTE": "Info"}.get(f.severity_gate.value, "Info")
+                if area in counts:
+                    counts[area][sev] = counts[area].get(sev, 0) + 1
+        lines.append("")
+        lines.append("MASVS Summary")
+        headers = ["Area", "High", "Med", "Low", "Info", "Status", "Worst CVSS"]
+        table_rows: list[str] = []
+        for area in ("NETWORK", "PLATFORM", "PRIVACY", "STORAGE"):
+            c = counts.get(area) or {"High": 0, "Medium": 0, "Low": 0, "Info": 0}
+            status = "PASS" if (c["High"] + c["Medium"]) == 0 else "FAIL"
+            cvss = worst_cvss.get(area, "—")
+            row = f"{area.title():<9}  {c['High']:<4}  {c['Medium']:<4}  {c['Low']:<4}  {c['Info']:<4}  {status:<5}  {cvss}"
+            table_rows.append(row)
+        # Render as simple lines to keep formatting consistent
+        for h in ["Area       High  Med   Low   Info  Status  Worst CVSS"]:
+            lines.append(h)
+        lines.extend(table_rows)
+    except Exception:
+        pass
 
     lines.extend(_severity_summary_lines(finding_totals))
 

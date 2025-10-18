@@ -21,6 +21,7 @@ def utils_menu() -> None:
         "1": util_actions.clear_screen,
         "2": util_actions.show_log_locations,
         "3": configure_world_clocks,
+        "4": _open_output_prefs_menu,
     }
     options = [
         menu_utils.MenuOption("1", "Clear the console", "Wipe the terminal output"),
@@ -29,6 +30,11 @@ def utils_menu() -> None:
             "3",
             "Configure world clocks",
             "Manage the demo banner clocks",
+        ),
+        menu_utils.MenuOption(
+            "4",
+            "Output preferences",
+            "Set verbosity, analytics detail, and sample limits",
         ),
     ]
 
@@ -65,5 +71,18 @@ def _open_perm_catalog_menu() -> None:
         print(
             status_messages.status(
                 f"Permission catalog not available: {exc}", level="warn"
+        )
+        )
+
+
+def _open_output_prefs_menu() -> None:
+    try:
+        from .output_prefs_menu import output_prefs_menu  # noqa: WPS433
+
+        output_prefs_menu()
+    except Exception as exc:
+        print(
+            status_messages.status(
+                f"Output preferences not available: {exc}", level="warn"
             )
         )

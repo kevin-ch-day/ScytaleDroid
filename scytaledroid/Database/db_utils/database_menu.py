@@ -127,68 +127,16 @@ def _handle_schema_inspection() -> None:
     prompt_utils.press_enter_to_continue()
 
 
-def _handle_core_counts() -> None:
-    counts = diagnostics.table_counts(_CORE_TABLES)
-    if not counts:
-        print(status_messages.status("Unable to query table counts.", level="error"))
-        prompt_utils.press_enter_to_continue()
-        return
-
-    for table in _CORE_TABLES:
-        value = counts.get(table)
-        if value is None:
-            print(status_messages.status(f"{table}: unable to query", level="error"))
-        else:
-            print(status_messages.status(f"{table}: {value} row(s)", level="info"))
-    prompt_utils.press_enter_to_continue()
-
-
-def _handle_quick_stats() -> None:
-    # Combine core and permission table counts and framework protection distribution.
-    from scytaledroid.Database.db_utils import diagnostics as _dbu
-
-    tables_perm = [
-        "android_framework_permissions",
-        "android_vendor_permissions",
-        "android_unknown_permissions",
-        "android_detected_permissions",
-    ]
-
-    counts = _dbu.table_counts(_CORE_TABLES + tables_perm)
-
-    print()
-    menu_utils.print_section("Core table counts")
-    for table in _CORE_TABLES:
-        value = counts.get(table)
-        if value is None:
-            print(status_messages.status(f"{table}: unable to query", level="error"))
-        else:
-            print(status_messages.status(f"{table}: {value} row(s)", level="info"))
-
-    print()
-    menu_utils.print_section("Permission tables counts")
-    for table in tables_perm:
-        value = counts.get(table)
-        if value is None:
-            print(status_messages.status(f"{table}: unable to query", level="error"))
-        else:
-            print(status_messages.status(f"{table}: {value} row(s)", level="info"))
-
-    # Framework permission protection distribution (catalog)
-    print()
-    menu_utils.print_section("Framework permissions: counts by protection")
-    try:
-        from scytaledroid.Database.db_core import db_queries as core_q
-        from scytaledroid.Database.db_queries.permissions import framework_permissions as fpq
-        rows = core_q.run_sql(fpq.PROTECTION_COUNTS, fetch="all")
-    except Exception as exc:
-        print(status_messages.status(f"Query failed: {exc}", level="error"))
-        rows = []
-    menu_utils.print_table(["Protection", "Count"], rows or [])
-    prompt_utils.press_enter_to_continue()
+    
 
 
 def _handle_run_schema_audit_script() -> None:
+    # Plain underlined section header for consistency
+    def _section(title: str) -> None:
+        print(title)
+        print("-" * len(title))
+
+    _section("Schema Audit")
     print(status_messages.status("Launching schema audit script…", level="info"))
     try:
         from scytaledroid.Database.tools.schema_audit import run_interactive
