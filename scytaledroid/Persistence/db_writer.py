@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Mapping, Optional, Sequence
 
 from scytaledroid.Database.db_core import db_queries as core_q
+from scytaledroid.Database.db_queries import views as _views
 
 
 _DDL = [
@@ -21,10 +22,12 @@ _DDL = [
       target_sdk    INT             NULL,
       schema_version VARCHAR(32)    NULL,
       ts            TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      session_stamp VARCHAR(32)     NULL,
       prefs_hash    VARCHAR(64)     NULL,
       installer     VARCHAR(191)    NULL,
       confidence    VARCHAR(32)     NULL,
-      PRIMARY KEY (run_id)
+      PRIMARY KEY (run_id),
+      KEY ix_runs_session (session_stamp)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
     """
@@ -85,6 +88,9 @@ def ensure_schema() -> bool:
     try:
         for stmt in _DDL:
             core_q.run_sql(stmt)
+        _ensure_runs_session_column()
+        _ensure_buckets_foreign_key()
+        _ensure_views()
         return True
     except Exception:
         return False
@@ -100,15 +106,26 @@ def create_run(
     prefs_hash: Optional[str] = None,
     installer: Optional[str] = None,
     confidence: Optional[str] = None,
+    session_stamp: Optional[str] = None,
 ) -> Optional[int]:
     try:
         ensure_schema()
         run_id = core_q.run_sql(
             (
-                "INSERT INTO runs (package, version_code, version_name, target_sdk, schema_version, prefs_hash, installer, confidence) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)"
+                "INSERT INTO runs (package, version_code, version_name, target_sdk, schema_version, ts, session_stamp, prefs_hash, installer, confidence) "
+                "VALUES (%s,%s,%s,%s,%s,CURRENT_TIMESTAMP,%s,%s,%s,%s)"
             ),
-            (package, version_code, version_name, target_sdk, schema_version, prefs_hash, installer, confidence),
+            (
+                package,
+                version_code,
+                version_name,
+                target_sdk,
+                schema_version,
+                session_stamp,
+                prefs_hash,
+                installer,
+                confidence,
+            ),
             return_lastrowid=True,
         )
         return int(run_id) if run_id else None
@@ -185,4 +202,56 @@ __all__ = [
     "write_findings",
     "write_contributors",
 ]
+
+
+def _ensure_runs_session_column() -> None:
+    try:
+        column = core_q.run_sql(
+            "SHOW COLUMNS FROM runs LIKE 'session_stamp';",
+            fetch="one",
+        )
+        if not column:
+            core_q.run_sql(
+                "ALTER TABLE runs ADD COLUMN session_stamp VARCHAR(32) NULL AFTER ts;",
+            )
+    except Exception:
+        pass
+
+    try:
+        core_q.run_sql("ALTER TABLE runs ADD INDEX ix_runs_session (session_stamp);")
+    except Exception:
+        pass
+
+
+def _ensure_buckets_foreign_key() -> None:
+    try:
+        fk_exists = core_q.run_sql(
+            """
+            SELECT CONSTRAINT_NAME
+            FROM information_schema.KEY_COLUMN_USAGE
+            WHERE table_schema = DATABASE()
+              AND table_name = 'buckets'
+              AND referenced_table_name = 'runs'
+              AND referenced_column_name = 'run_id';
+            """,
+            fetch="one",
+        )
+        if not fk_exists:
+            core_q.run_sql(
+                """
+                ALTER TABLE buckets
+                ADD CONSTRAINT fk_buckets_run
+                    FOREIGN KEY (run_id) REFERENCES runs(run_id)
+                    ON DELETE CASCADE;
+                """
+            )
+    except Exception:
+        pass
+
+
+def _ensure_views() -> None:
+    try:
+        core_q.run_sql(_views.CREATE_V_RUN_OVERVIEW)
+    except Exception:
+        pass
 

@@ -2,26 +2,20 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Dict, Optional
 
 from scytaledroid.Database.db_core import run_sql
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
+
+from .sql_helpers import coerce_datetime, format_session_stamp, view_exists
 
 
 def show_recent_runs_dashboard(limit: int = 5) -> None:
     print()
     menu_utils.print_header("Recent Runs Dashboard")
 
-    try:
-        runs = run_sql(
-            "SELECT run_id, package, version_name, target_sdk, ts FROM runs ORDER BY run_id DESC LIMIT %s",
-            (limit,),
-            fetch="all",
-            dictionary=True,
-        )
-    except Exception as exc:
-        print(status_messages.status(f"Unable to query runs: {exc}", level="error"))
+    runs = _fetch_recent_runs(limit)
+    if runs is None:
         prompt_utils.press_enter_to_continue()
         return
 
@@ -36,50 +30,87 @@ def show_recent_runs_dashboard(limit: int = 5) -> None:
     prompt_utils.press_enter_to_continue()
 
 
+def _fetch_recent_runs(limit: int) -> Optional[list[Dict[str, Any]]]:
+    if view_exists("v_run_overview"):
+        try:
+            return run_sql(
+                "SELECT run_id, package, version_name, version_code, target_sdk, ts, session_stamp, total_points, total_cap "
+                "FROM v_run_overview ORDER BY run_id DESC LIMIT %s",
+                (limit,),
+                fetch="all",
+                dictionary=True,
+            )
+        except Exception as exc:
+            print(status_messages.status(f"Unable to query v_run_overview: {exc}", level="error"))
+            return None
+
+    try:
+        return run_sql(
+            "SELECT run_id, package, version_name, version_code, target_sdk, ts, session_stamp FROM runs ORDER BY run_id DESC LIMIT %s",
+            (limit,),
+            fetch="all",
+            dictionary=True,
+        )
+    except Exception as exc:  # pragma: no cover - relies on external DB
+        print(status_messages.status(f"Unable to query runs: {exc}", level="error"))
+        return None
+
+
 def _render_run_entry(run: Dict[str, Any]) -> None:
     run_id = int(run.get("run_id") or 0)
     package = run.get("package") or "<unknown>"
     version_name = run.get("version_name") or "—"
     target_sdk = run.get("target_sdk")
     ts_value = run.get("ts")
-    ts_dt = _coerce_datetime(ts_value)
-    session_stamp = _format_session_stamp(ts_dt) if ts_dt else None
+    ts_dt = coerce_datetime(ts_value)
+    session_stamp = run.get("session_stamp") or (format_session_stamp(ts_dt) if ts_dt else None)
 
-    header_line = f"Run #{run_id}  {package}  v{version_name}  target={target_sdk or '—'}  {ts_dt or ts_value}"
-    print(header_line)
+    header = (
+        f"Run #{run_id}  {package}  v{version_name}  "
+        f"target={target_sdk or '—'}  {ts_dt or ts_value}"
+    )
+    print(header)
 
-    bucket_rows = run_sql(
-        "SELECT bucket, points FROM buckets WHERE run_id = %s ORDER BY bucket",
+    total_points = run.get("total_points")
+    total_cap = run.get("total_cap")
+    if total_points is not None and total_cap is not None:
+        print(f"  total points: {total_points}/{total_cap}")
+
+    buckets = run_sql(
+        "SELECT bucket, points, cap FROM buckets WHERE run_id = %s ORDER BY bucket",
         (run_id,),
         fetch="all",
         dictionary=True,
     ) or []
-    if bucket_rows:
-        bucket_detail = ", ".join(f"{row['bucket']}:{row['points']}" for row in bucket_rows)
+    if buckets:
+        bucket_detail = ", ".join(
+            f"{row['bucket']}:{row['points']}" for row in buckets
+        )
         print(f"  buckets: {bucket_detail}")
     else:
         print("  buckets: (none)")
 
     if session_stamp:
-        _render_findings_summary(package, session_stamp)
-        _render_string_summary(package, session_stamp)
+        _render_findings_summary(session_stamp, package)
+        _render_string_summary(session_stamp, package)
     else:
-        print("  findings: (session_stamp unavailable)")
-        print("  strings : (session_stamp unavailable)")
+        print("  findings: (session stamp unavailable)")
+        print("  strings : (session stamp unavailable)")
 
     _render_permission_snapshot(package)
     print()
 
 
-def _render_findings_summary(package: str, session_stamp: str) -> None:
+def _render_findings_summary(session_stamp: str, package: str) -> None:
     findings = run_sql(
         """
-        SELECT high, med, low, info
+        SELECT package_name, high, med, low, info
         FROM static_findings_summary
-        WHERE package_name = %s AND session_stamp = %s
+        WHERE session_stamp = %s AND package_name = %s
+        ORDER BY created_at DESC
         LIMIT 1
         """,
-        (package, session_stamp),
+        (session_stamp, package),
         fetch="one",
         dictionary=True,
     )
@@ -92,15 +123,16 @@ def _render_findings_summary(package: str, session_stamp: str) -> None:
         print("  findings: (no summary)")
 
 
-def _render_string_summary(package: str, session_stamp: str) -> None:
+def _render_string_summary(session_stamp: str, package: str) -> None:
     strings = run_sql(
         """
-        SELECT endpoints, http_cleartext, high_entropy
+        SELECT package_name, endpoints, http_cleartext, high_entropy
         FROM static_string_summary
-        WHERE package_name = %s AND session_stamp = %s
+        WHERE session_stamp = %s AND package_name = %s
+        ORDER BY created_at DESC
         LIMIT 1
         """,
-        (package, session_stamp),
+        (session_stamp, package),
         fetch="one",
         dictionary=True,
     )
@@ -116,7 +148,7 @@ def _render_string_summary(package: str, session_stamp: str) -> None:
 
 
 def _render_permission_snapshot(package: str) -> None:
-    permission_row = run_sql(
+    row = run_sql(
         """
         SELECT score_capped, grade, dangerous_count, signature_count, vendor_count
         FROM permission_audit_apps
@@ -128,38 +160,17 @@ def _render_permission_snapshot(package: str) -> None:
         fetch="one",
         dictionary=True,
     )
-    if permission_row:
+    if row:
         print(
             "  perm-audit (latest): "
-            f"score={permission_row.get('score_capped')}, "
-            f"grade={permission_row.get('grade') or '—'} "
-            f"(dangerous={permission_row.get('dangerous_count', 0)}, "
-            f"signature={permission_row.get('signature_count', 0)}, "
-            f"vendor={permission_row.get('vendor_count', 0)})"
+            f"score={row.get('score_capped')}, "
+            f"grade={row.get('grade') or '—'} "
+            f"(dangerous={row.get('dangerous_count', 0)}, "
+            f"signature={row.get('signature_count', 0)}, "
+            f"vendor={row.get('vendor_count', 0)})"
         )
     else:
         print("  perm-audit (latest): (no snapshot)")
-
-
-def _coerce_datetime(value: Any) -> Optional[datetime]:
-    if isinstance(value, datetime):
-        return value
-    if isinstance(value, str):
-        candidate = value.strip()
-        if not candidate:
-            return None
-        try:
-            return datetime.fromisoformat(candidate.replace("Z", "+00:00"))
-        except Exception:
-            try:
-                return datetime.strptime(candidate, "%Y-%m-%d %H:%M:%S")
-            except Exception:
-                return None
-    return None
-
-
-def _format_session_stamp(ts: datetime) -> str:
-    return ts.strftime("%Y%m%d-%H%M%S")
 
 
 __all__ = ["show_recent_runs_dashboard"]

@@ -52,11 +52,21 @@ def persist_run_summary(base_report, string_data: Mapping[str, object], run_pack
         target_sdk = int(br.manifest.target_sdk) if br.manifest.target_sdk else None
     except Exception:
         target_sdk = None
+    session_stamp = None
+    try:
+        meta = getattr(br, "metadata", {}) or {}
+        value = meta.get("session_stamp")
+        if isinstance(value, str) and value.strip():
+            session_stamp = value.strip()
+    except Exception:
+        session_stamp = None
+
     run_id = _dw.create_run(
         package=br.manifest.package_name or run_package,
         version_code=int(br.manifest.version_code) if br.manifest.version_code else None,
         version_name=br.manifest.version_name,
         target_sdk=target_sdk,
+        session_stamp=session_stamp,
     )
     if not run_id:
         return

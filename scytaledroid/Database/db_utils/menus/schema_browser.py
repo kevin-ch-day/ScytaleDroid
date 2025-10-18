@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Iterable, List, Sequence
+from typing import Dict, Iterable, List, Sequence
 
 from scytaledroid.Database.db_utils import diagnostics
 from scytaledroid.Database.db_utils.table_snapshot import TableSnapshot
@@ -71,10 +71,12 @@ def show_schema_browser() -> None:
 
         if choice == "1":
             tables = diagnostics.list_tables()
-            _render_schema_for_tables(tables, include_indexes=True, include_samples=True)
+            options = _prompt_render_options(default_include_indexes=True)
+            _render_schema_for_tables(tables, **options)
         elif choice == "2":
             tables = diagnostics.list_tables()
-            _render_schema_for_tables(tables, include_indexes=False, include_samples=True)
+            options = _prompt_render_options(default_include_indexes=False)
+            _render_schema_for_tables(tables, **options)
         elif choice in {"3", "4", "5", "6", "7"}:
             group_key = {
                 "3": "static_analysis",
@@ -84,16 +86,51 @@ def show_schema_browser() -> None:
                 "7": "scoring",
             }[choice]
             tables = _filter_existing_tables(_SCHEMA_GROUPS[group_key])
-            _render_schema_for_tables(tables, include_indexes=True, include_samples=True, show_missing=True)
+            options = _prompt_render_options(default_include_indexes=True)
+            _render_schema_for_tables(tables, show_missing=True, **options)
         elif choice in {"8", "0"}:
             break
+
+
+def _prompt_render_options(*, default_include_indexes: bool) -> Dict[str, object]:
+    include_indexes = prompt_utils.prompt_yes_no(
+        "Show indexes?",
+        default=default_include_indexes,
+    )
+
+    sample_input = prompt_utils.prompt_text(
+        "Rows to sample [default 3]",
+        default="3",
+        required=False,
+    ).strip()
+    try:
+        sample_limit = max(0, int(sample_input)) if sample_input else 3
+    except ValueError:
+        sample_limit = 3
+
+    clip_input = prompt_utils.prompt_text(
+        "Clip width for sample rows [default 100]",
+        default="100",
+        required=False,
+    ).strip()
+    try:
+        clip_width = max(20, int(clip_input)) if clip_input else 100
+    except ValueError:
+        clip_width = 100
+
+    return {
+        "include_indexes": include_indexes,
+        "sample_limit": sample_limit,
+        "clip_width": clip_width,
+    }
 
 
 def _render_schema_for_tables(
     table_names: Sequence[str],
     *,
     include_indexes: bool,
-    include_samples: bool,
+    sample_limit: int,
+    clip_width: int,
     show_missing: bool = False,
 ) -> None:
     if not table_names:
@@ -110,12 +147,22 @@ def _render_schema_for_tables(
             continue
         if rendered:
             print()
-        _render_table_snapshot(snapshot, include_indexes=include_indexes, include_samples=include_samples)
+        _render_table_snapshot(
+            snapshot,
+            include_indexes=include_indexes,
+            sample_limit=sample_limit,
+            clip_width=clip_width,
+        )
         rendered += 1
 
     if rendered == 0:
         level = "warn" if show_missing else "error"
-        print(status_messages.status("No tables could be introspected. Check connection or permissions.", level=level))
+        print(
+            status_messages.status(
+                "No tables could be introspected. Check connection or permissions.",
+                level=level,
+            )
+        )
     prompt_utils.press_enter_to_continue()
 
 
@@ -123,16 +170,18 @@ def _render_table_snapshot(
     snapshot: TableSnapshot,
     *,
     include_indexes: bool,
-    include_samples: bool,
+    sample_limit: int,
+    clip_width: int,
 ) -> None:
     type_token = _format_table_type(snapshot.table_type)
     row_count = "unknown" if snapshot.row_count is None else str(snapshot.row_count)
     header = f"table: {snapshot.name}"
     if type_token:
         header += f"   [{type_token}]"
-    header += f"   rows={row_count}"
+    meta_bits: List[str] = [f"rows={row_count}"]
     if snapshot.max_timestamp and snapshot.timestamp_column:
-        header += f"   max({snapshot.timestamp_column})={snapshot.max_timestamp}"
+        meta_bits.append(f"max({snapshot.timestamp_column})={snapshot.max_timestamp}")
+    header += "   " + " · ".join(meta_bits)
     print(header)
 
     print("columns")
@@ -141,7 +190,10 @@ def _render_table_snapshot(
         null_text = "NULL" if column.is_nullable else "NOT NULL"
         pk_text = " PK" if column.is_primary else ""
         notes_text = f" | notes: {column.notes}" if column.notes else ""
-        line = f"  {column.name} ({column.data_type}){pk_text} | {null_text} | default: {default_text}{notes_text}"
+        line = (
+            f"  {column.name} ({column.data_type}){pk_text} | {null_text} | "
+            f"default: {default_text}{notes_text}"
+        )
         print(line)
     if not snapshot.columns:
         print("  (none)")
@@ -156,11 +208,14 @@ def _render_table_snapshot(
         else:
             print("  (none)")
 
-    if include_samples:
-        print("sample rows (3)")
-        if snapshot.example_rows:
-            for row in snapshot.example_rows:
-                print(f"  {_format_sample_row(row)}")
+    print(f"sample rows ({sample_limit})")
+    if sample_limit <= 0:
+        print("  (skipped)")
+    else:
+        rows = list(snapshot.example_rows or [])[:sample_limit]
+        if rows:
+            for row in rows:
+                print(f"  {_format_sample_row(row, max_length=clip_width)}")
         else:
             print("  (none)")
 
@@ -190,10 +245,13 @@ def _format_table_type(table_type: str | None) -> str:
 def _format_default(value: str | None) -> str:
     if value is None or value == "":
         return "—"
-    return str(value)
+    text = str(value)
+    if len(text) > 60:
+        return text[:57] + "..."
+    return text
 
 
-def _format_sample_row(row: dict, *, max_length: int = 100) -> str:
+def _format_sample_row(row: dict, *, max_length: int) -> str:
     try:
         payload = json.dumps(row, default=str, ensure_ascii=False)
     except Exception:
@@ -204,4 +262,3 @@ def _format_sample_row(row: dict, *, max_length: int = 100) -> str:
 
 
 __all__ = ["show_schema_browser"]
-

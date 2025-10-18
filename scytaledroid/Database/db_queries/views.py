@@ -68,6 +68,25 @@ __all__ += [
     "CREATE_VW_PERMISSION_AUDIT_LATEST",
 ]
 
+CREATE_V_RUN_OVERVIEW = """
+CREATE OR REPLACE VIEW v_run_overview AS
+SELECT
+  r.run_id,
+  r.package,
+  r.version_name,
+  r.version_code,
+  r.target_sdk,
+  r.ts,
+  r.session_stamp,
+  SUM(b.points) AS total_points,
+  SUM(b.cap)    AS total_cap
+FROM runs AS r
+LEFT JOIN buckets AS b ON b.run_id = r.run_id
+GROUP BY r.run_id, r.package, r.version_name, r.version_code, r.target_sdk, r.ts, r.session_stamp;
+"""
+
+__all__ += ["CREATE_V_RUN_OVERVIEW"]
+
 CREATE_VW_STATIC_MODULE_COVERAGE = """
 CREATE OR REPLACE VIEW vw_static_module_coverage AS
 SELECT package_name,
