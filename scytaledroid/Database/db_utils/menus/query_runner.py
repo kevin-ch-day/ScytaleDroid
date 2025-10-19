@@ -19,25 +19,25 @@ def run_query_menu() -> None:
             ("1", "Latest session snapshot", "Show most recent session stamp and table counts."),
             ("2", "Session table counts", "Enter a session stamp to validate static tables."),
             ("3", "Runs and buckets by package", "List runs for a package with bucket totals."),
-            ("4", "Harvest artefacts by package", "Show harvested APK records for a package."),
+            ("4", "Harvest artifacts by package", "Show harvested APK records for a package."),
             ("0", "Back", "Return to Database Utilities."),
         )
         menu_utils.print_menu(options, padding=True, show_exit=False)
         choice = prompt_utils.get_choice([opt[0] for opt in options])
 
         if choice == "1":
-            _show_latest_session()
+            show_latest_session()
         elif choice == "2":
-            _show_session_counts()
+            prompt_session_counts()
         elif choice == "3":
-            _show_runs_for_package()
+            prompt_runs_for_package()
         elif choice == "4":
-            _show_harvest_for_package()
+            prompt_harvest_for_package()
         elif choice == "0":
             break
 
 
-def _show_latest_session() -> None:
+def show_latest_session() -> None:
     print()
     menu_utils.print_section("Latest session snapshot")
     session = run_sql(
@@ -67,7 +67,7 @@ def _show_latest_session() -> None:
     prompt_utils.press_enter_to_continue()
 
 
-def _show_session_counts() -> None:
+def prompt_session_counts() -> None:
     session_stamp = prompt_utils.prompt_text(
         "Session stamp (leave blank for latest)",
         required=False,
@@ -85,7 +85,7 @@ def _show_session_counts() -> None:
     prompt_utils.press_enter_to_continue()
 
 
-def _show_runs_for_package() -> None:
+def prompt_runs_for_package() -> None:
     package = prompt_utils.prompt_text("Package name", required=False).strip()
     if not package:
         print(status_messages.status("Package name is required.", level="warn"))
@@ -138,7 +138,7 @@ def _show_runs_for_package() -> None:
     prompt_utils.press_enter_to_continue()
 
 
-def _show_harvest_for_package() -> None:
+def prompt_harvest_for_package() -> None:
     package = prompt_utils.prompt_text("Package name", required=False).strip()
     if not package:
         print(status_messages.status("Package name is required.", level="warn"))
@@ -166,7 +166,7 @@ def _show_harvest_for_package() -> None:
     print()
     menu_utils.print_section(f"Harvested APKs for {package}")
     if not rows:
-        print(status_messages.status("No harvested artefacts found for package.", level="warn"))
+        print(status_messages.status("No harvested artifacts found for package.", level="warn"))
         prompt_utils.press_enter_to_continue()
         return
 
@@ -230,4 +230,10 @@ def _latest_session_stamp() -> Optional[str]:
     return row.get("session_stamp")
 
 
-__all__ = ["run_query_menu"]
+__all__ = [
+    "run_query_menu",
+    "show_latest_session",
+    "prompt_session_counts",
+    "prompt_runs_for_package",
+    "prompt_harvest_for_package",
+]

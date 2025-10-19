@@ -173,7 +173,7 @@ def write_findings(run_id: int, rows: Sequence[tuple[str, str, str, str, str]]) 
     try:
         for severity, masvs, cvss, kind, evidence in rows:
             core_q.run_sql(
-                "INSERT INTO findings (run_id, severity, masvs, cvss, kind, evidence, module_id) VALUES (%s,%s,%s,%s,%s,%s)",
+                "INSERT INTO findings (run_id, severity, masvs, cvss, kind, evidence, module_id) VALUES (%s,%s,%s,%s,%s,%s,%s)",
                 (run_id, severity, masvs, cvss, kind, evidence, None),
             )
         return True
@@ -254,4 +254,3 @@ def _ensure_views() -> None:
         core_q.run_sql(_views.CREATE_V_RUN_OVERVIEW)
     except Exception:
         pass
-

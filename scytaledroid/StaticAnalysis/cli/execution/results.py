@@ -114,6 +114,10 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             render_app_table(outcome.results)
         if session_stamp and not params.dry_run:
             _render_persistence_footer(session_stamp, had_errors=bool(persistence_errors))
+            if persistence_errors:
+                print(status_messages.status("Persistence issues detected:", level="error"))
+                for message in persistence_errors:
+                    print(f"  - {message}")
         _interactive_detail_loop(outcome, params)
 
     if outcome.warnings:

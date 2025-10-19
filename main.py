@@ -7,7 +7,7 @@ import sys
 from zoneinfo import ZoneInfo
 
 from scytaledroid.Config import app_config
-from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils
+from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.System.world_clock.state import ClockReference, WorldClockState, load_state
 
@@ -64,19 +64,61 @@ def main_menu() -> None:
     while True:
         print()
         menu_utils.print_header("Main Menu")
-        options = [
-            menu_utils.MenuOption("1", "Connect to Android Device", "Manage connected devices, inventory, and pulls"),
-            menu_utils.MenuOption("2", "VirusTotal analysis", "Look up hashes and APKs against VirusTotal"),
-            menu_utils.MenuOption("3", "Static analysis", "Run static checks on harvested applications"),
-            menu_utils.MenuOption("4", "Harvest Android Permissions", "Fetch from developer.android.com and manage JSON cache"),
-            menu_utils.MenuOption("5", "Dynamic analysis", "Launch runtime instrumentation workflows"),
-            menu_utils.MenuOption("6", "Reporting", "Generate device and artifact reports"),
-            menu_utils.MenuOption("7", "Database Utilities", "Inspect schema, check connection, and view counts"),
-            menu_utils.MenuOption("8", "Utilities", "Console helpers and configuration"),
-            menu_utils.MenuOption("9", "About App", "Show version and licensing information"),
+        print(status_messages.status("Select a workflow, or drill into Database Tasks to prepare schemas before analysis.", level="info"))
+        print(status_messages.status("Tip: Option 1 walks you through connecting a device and harvesting APKs.", level="info"))
+
+        sections = [
+            (
+                "Device & Collection",
+                [
+                    menu_utils.MenuOption("1", "Connect to Android Device", "Pair with a device, review inventory, and pull APK artifacts"),
+                    menu_utils.MenuOption("4", "Harvest Android Permissions", "Sync the official permission catalog for offline lookups"),
+                ],
+            ),
+            (
+                "Analysis & Research",
+                [
+                    menu_utils.MenuOption("2", "VirusTotal analysis", "Query VirusTotal for APK/file intelligence"),
+                    menu_utils.MenuOption("3", "Static analysis", "Run static detectors across harvested APKs"),
+                    menu_utils.MenuOption("5", "Dynamic analysis", "Launch runtime instrumentation and behavioural captures"),
+                    menu_utils.MenuOption("6", "Reporting", "Generate Markdown/PDF exports and shareable summaries"),
+                ],
+            ),
+            (
+                "Data & Schema",
+                [
+                    menu_utils.MenuOption("7", "Database Utilities", "Inspect schema, run health checks, and browse recent runs"),
+                    menu_utils.MenuOption("8", "Database Tasks", "Provision or seed tables; run maintenance SQL helpers"),
+                ],
+            ),
+            (
+                "Tools & Info",
+                [
+                    menu_utils.MenuOption("9", "Workspace Utilities", "CLI helpers, formatters, and cleanup scripts"),
+                    menu_utils.MenuOption("10", "About App", "Version, licensing, and project metadata"),
+                ],
+            ),
         ]
-        menu_utils.print_menu(options, is_main=True, boxed=False, default="1")
-        choice = prompt_utils.get_choice(valid=[opt.key for opt in options] + ["0"], default="1")
+
+        valid_keys = ["0"]
+        for idx, (title, opts) in enumerate(sections):
+            print()
+            menu_utils.print_section(title)
+            default_key = "1" if idx == 0 else None
+            menu_utils.print_menu(opts, padding=False, show_exit=False, default=default_key)
+            valid_keys.extend(option.key for option in opts)
+
+        print()
+        menu_utils.print_menu([menu_utils.MenuOption("0", "Exit", "Return to the shell")], padding=False, show_exit=False)
+
+        seen_keys: set[str] = set()
+        ordered_keys: list[str] = []
+        for key in valid_keys:
+            if key not in seen_keys:
+                ordered_keys.append(key)
+                seen_keys.add(key)
+
+        choice = prompt_utils.get_choice(valid=ordered_keys, default="1")
 
         if choice == "1":
             log.info("User selected: Connect to Android Device", category="application")
@@ -100,9 +142,12 @@ def main_menu() -> None:
             log.info("User selected: Database Utilities", category="application")
             handle_database()
         elif choice == "8":
-            log.info("User selected: Utils", category="application")
-            handle_utils()
+            log.info("User selected: Database Tasks", category="application")
+            handle_database_tasks()
         elif choice == "9":
+            log.info("User selected: Workspace utilities", category="application")
+            handle_utils()
+        elif choice == "10":
             log.info("User selected: About App", category="application")
             handle_about()
         elif choice == "0":
@@ -159,6 +204,15 @@ def handle_database() -> None:
     from scytaledroid.Database.db_utils.database_menu import database_menu
 
     database_menu()
+
+def handle_database_tasks() -> None:
+    try:
+        from scytaledroid.Database import tasks_menu
+
+        tasks_menu.show_database_tasks_menu()
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log.error(f"Failed to open Database Tasks menu: {exc}", category="application")
+        print("Unable to open Database Tasks menu. Check logs for details.")
 
 def handle_utils() -> None:
     from scytaledroid.Utils.System.utils_menu import utils_menu

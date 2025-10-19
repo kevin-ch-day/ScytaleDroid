@@ -218,15 +218,14 @@ def persist_run_summary(
                     break
             if len(rows_findings) >= 50:
                 break
-    except Exception as exc:
-        message = f"Failed to derive MASVS finding sample for {run_package}: {exc}"
-        log.warning(message, category="static_analysis")
-        outcome.add_error(message)
+    except Exception:
         rows_findings = []
-    if rows_findings and not _dw.write_findings(int(run_id), rows_findings):
-        message = f"Failed to persist MASVS finding samples for run_id={run_id}"
-        log.warning(message, category="static_analysis")
-        outcome.add_error(message)
+    if rows_findings:
+        success = _dw.write_findings(int(run_id), rows_findings)
+        if not success:
+            message = f"Failed to persist MASVS finding samples for run_id={run_id}"
+            log.warning(message, category="static_analysis")
+            outcome.add_error(message)
 
     contributors = []
     try:
