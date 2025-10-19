@@ -37,7 +37,7 @@ def _make_stub_report() -> SimpleNamespace:
         severity_gate=severity_gate,
         category_masvs=SimpleNamespace(value="PLATFORM"),
         finding_id="TEST-001",
-        because="Test rationale",
+        because="Receiver is exported but does not declare a permission.",
         evidence=[SimpleNamespace(location="AndroidManifest.xml", description=None, hash_short=None)],
         title="Exported component",
         remediate="Fix",
@@ -112,6 +112,8 @@ def baseline_payload() -> dict[str, object]:
                 "uses_cleartext_traffic": True,
                 "request_legacy_external_storage": False,
             },
+            "threat": {"profile": "Active"},
+            "environment": {"profile": "enterprise"},
             "exports": {
                 "activities": 1,
                 "services": 0,
@@ -188,7 +190,10 @@ def test_persist_run_summary_tracks_session(monkeypatch, stub_string_data, basel
         return True
 
     def fake_persist_controls(run_id, package, coverage):
-        calls["control_coverage"] = (run_id, package, coverage)
+        calls["control_coverage"] = {
+            control_id: (entry.status if hasattr(entry, "status") else entry.get("status"))
+            for control_id, entry in coverage.items()
+        }
 
     summary_calls: dict[str, object] = {}
 
@@ -220,6 +225,16 @@ def test_persist_run_summary_tracks_session(monkeypatch, stub_string_data, basel
     monkeypatch.setattr(db_persist._sa, "ensure_tables", lambda: True)
     monkeypatch.setattr(db_persist._sa, "upsert_summary", fake_sa_upsert)
     monkeypatch.setattr(db_persist._sa, "replace_top_samples", lambda summary_id, samples, top_n=3: (0, 0))
+    monkeypatch.setattr(
+        db_persist.core_q,
+        "run_sql",
+        lambda query, params=None, fetch="none", dictionary=False: {
+            "threat_profile": "Active",
+            "env_profile": "enterprise",
+        }
+        if "SELECT threat_profile" in query
+        else None,
+    )
 
     outcome = db_persist.persist_run_summary(
         report,
@@ -236,7 +251,76 @@ def test_persist_run_summary_tracks_session(monkeypatch, stub_string_data, basel
     assert outcome.run_id == 101
 
     assert calls["create_run"]["session_stamp"] == session_stamp
+    assert calls["create_run"]["threat_profile"] == "Active"
+    assert calls["create_run"]["env_profile"] == "enterprise"
     assert summary_calls["session_stamp"] == session_stamp
     assert string_summary_args["session_stamp"] == session_stamp
     assert calls["write_buckets"][0] == 101
-    assert "network.code_http_hosts" in calls["write_metrics"][1]
+    metrics_payload = calls["write_metrics"][1]
+    assert "network.code_http_hosts" in metrics_payload
+    assert "findings.preview_coverage_pct" in metrics_payload
+    assert "findings.path_coverage_pct" in metrics_payload
+    rows = calls["findings_rows"]
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["rule_id"] == "BASE-IPC-COMP-NO-ACL"
+    assert row["evidence_path"] == "AndroidManifest.xml"
+    assert row["evidence_preview"] == "Receiver is exported but does not declare a permission."
+    assert row["cvss_v40_b_vector"]
+    assert row["cvss_v40_b_score"]
+    assert row["cvss_v40_bte_vector"]
+    assert row["cvss_v40_bte_score"]
+
+    assert calls["control_coverage"] == {"PLATFORM-IPC-1": "FAIL"}
+
+
+def test_persist_run_summary_dry_run_skips_writes(monkeypatch, stub_string_data, baseline_payload):
+    report = _make_stub_report()
+    session_stamp = "20250102-020202"
+    scope_label = "App=com.example.app"
+    finding_totals = Counter({"Medium": 1, "High": 0, "Low": 0, "Info": 0})
+
+    monkeypatch.setattr(
+        db_persist._dw,
+        "create_run",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("create_run should not be called")),
+    )
+    monkeypatch.setattr(
+        db_persist._dw,
+        "write_buckets",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("write_buckets")),
+    )
+    monkeypatch.setattr(
+        db_persist._dw,
+        "write_metrics",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("write_metrics")),
+    )
+    monkeypatch.setattr(
+        db_persist._dw,
+        "write_contributors",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("write_contributors")),
+    )
+    monkeypatch.setattr(
+        db_persist,
+        "_persist_findings",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("persist_findings")),
+    )
+    monkeypatch.setattr(
+        db_persist,
+        "_persist_masvs_controls",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("persist_controls")),
+    )
+
+    outcome = db_persist.persist_run_summary(
+        report,
+        stub_string_data,
+        run_package="com.example.app",
+        session_stamp=session_stamp,
+        scope_label=scope_label,
+        finding_totals=finding_totals,
+        baseline_payload=baseline_payload,
+        dry_run=True,
+    )
+
+    assert outcome.run_id is None
+    assert outcome.success is True
