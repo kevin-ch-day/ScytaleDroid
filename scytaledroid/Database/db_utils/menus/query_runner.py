@@ -429,7 +429,9 @@ def _print_session_counts(session_stamp: str) -> None:
             return 0
         if isinstance(value, dict):
             value = next(iter(value.values()), 0)
-        if not value:
+        elif isinstance(value, (list, tuple)):
+            value = value[0] if value else 0
+        if value in (None, ""):
             return 0
         try:
             return int(value)

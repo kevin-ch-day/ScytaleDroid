@@ -375,6 +375,38 @@ def _persist_masvs_controls(run_id: int, package: str, coverage: Mapping[str, An
             continue
 
 
+def _persist_storage_surface_data(report, session_stamp: str, scope_label: str) -> None:
+    try:
+        from scytaledroid.StaticAnalysis.modules.storage_surface import (
+            AppModuleContext,
+            StorageSurfaceModule,
+        )
+    except Exception:
+        return
+
+    apk_path = getattr(report, "file_path", None)
+    package_name = getattr(report.manifest, "package_name", None) or report.metadata.get("package")
+    if not apk_path or not package_name:
+        return
+
+    metadata = dict(report.metadata or {})
+    context = AppModuleContext(
+        report=report,
+        package_name=str(package_name),
+        apk_path=Path(apk_path),
+        metadata=metadata,
+        session_stamp=session_stamp,
+        scope_label=scope_label,
+    )
+
+    module = StorageSurfaceModule()
+    try:
+        module_result = module.run(context)
+        module.persist(module_result)
+    except Exception:
+        return
+
+
 
 @dataclass(slots=True)
 class PersistenceOutcome:
@@ -677,6 +709,7 @@ def persist_run_summary(
                 br.manifest.package_name or run_package,
                 control_summary,
             )
+            _persist_storage_surface_data(br, session_stamp, scope_label)
 
     metrics_payload = {
         "network.code_http_hosts": (float(code_http_hosts), None),

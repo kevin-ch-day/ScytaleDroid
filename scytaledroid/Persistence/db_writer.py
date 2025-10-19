@@ -110,6 +110,7 @@ def ensure_schema() -> bool:
             core_q.run_sql(stmt)
         _ensure_runs_session_column()
         _ensure_run_profiles_columns()
+        _ensure_findings_extended_columns()
         _ensure_metrics_unique_key()
         _ensure_buckets_foreign_key()
         _ensure_views()
@@ -289,7 +290,7 @@ def _ensure_run_profiles_columns() -> None:
     for column_name, ddl in (
         (
             "threat_profile",
-            "ALTER TABLE runs ADD COLUMN threat_profile VARCHAR(32) NOT NULL DEFAULT 'Unknown' AFTER confidence;",
+            "ALTER TABLE runs ADD COLUMN threat_profile VARCHAR(32) NOT NULL DEFAULT 'Unknown' AFTER session_stamp;",
         ),
         (
             "env_profile",
@@ -306,6 +307,122 @@ def _ensure_run_profiles_columns() -> None:
                 core_q.run_sql(ddl)
         except Exception:
             pass
+
+    try:
+        core_q.run_sql("ALTER TABLE runs ADD INDEX ix_runs_session (session_stamp);")
+    except Exception:
+        pass
+
+
+def _ensure_findings_extended_columns() -> None:
+    try:
+        columns = core_q.run_sql(
+            """
+            SELECT COLUMN_NAME
+            FROM information_schema.COLUMNS
+            WHERE table_schema = DATABASE()
+              AND table_name = 'findings'
+            """,
+            fetch="all",
+        ) or []
+    except Exception:
+        columns = []
+    existing = {row[0] for row in columns if isinstance(row, (list, tuple)) and row}
+
+    def _safe(sql: str) -> None:
+        try:
+            core_q.run_sql(sql)
+        except Exception:
+            pass
+
+    if "analyst_tag" not in existing:
+        _safe(
+            "ALTER TABLE findings ADD COLUMN analyst_tag ENUM('FALSE_POSITIVE','ACCEPTED_RISK','NEEDS_REVIEW') NULL AFTER module_id;"
+        )
+    if "evidence_path" not in existing:
+        _safe("ALTER TABLE findings ADD COLUMN evidence_path VARCHAR(512) NULL AFTER analyst_tag;")
+    if "evidence_offset" not in existing:
+        _safe("ALTER TABLE findings ADD COLUMN evidence_offset VARCHAR(64) NULL AFTER evidence_path;")
+    if "evidence_preview" not in existing:
+        _safe("ALTER TABLE findings ADD COLUMN evidence_preview VARCHAR(256) NULL AFTER evidence_offset;")
+    if "rule_id" not in existing:
+        _safe("ALTER TABLE findings ADD COLUMN rule_id VARCHAR(64) NULL AFTER evidence_preview;")
+
+    cvss_cols = (
+        ("cvss_v40_b_score", "ALTER TABLE findings ADD COLUMN cvss_v40_b_score DECIMAL(3,1) NULL AFTER rule_id;"),
+        (
+            "cvss_v40_bt_score",
+            "ALTER TABLE findings ADD COLUMN cvss_v40_bt_score DECIMAL(3,1) NULL AFTER cvss_v40_b_score;",
+        ),
+        (
+            "cvss_v40_be_score",
+            "ALTER TABLE findings ADD COLUMN cvss_v40_be_score DECIMAL(3,1) NULL AFTER cvss_v40_bt_score;",
+        ),
+        (
+            "cvss_v40_bte_score",
+            "ALTER TABLE findings ADD COLUMN cvss_v40_bte_score DECIMAL(3,1) NULL AFTER cvss_v40_be_score;",
+        ),
+        (
+            "cvss_v40_b_vector",
+            "ALTER TABLE findings ADD COLUMN cvss_v40_b_vector VARCHAR(255) NULL AFTER cvss_v40_bte_score;",
+        ),
+        (
+            "cvss_v40_bt_vector",
+            "ALTER TABLE findings ADD COLUMN cvss_v40_bt_vector VARCHAR(255) NULL AFTER cvss_v40_b_vector;",
+        ),
+        (
+            "cvss_v40_be_vector",
+            "ALTER TABLE findings ADD COLUMN cvss_v40_be_vector VARCHAR(255) NULL AFTER cvss_v40_bt_vector;",
+        ),
+        (
+            "cvss_v40_bte_vector",
+            "ALTER TABLE findings ADD COLUMN cvss_v40_bte_vector VARCHAR(255) NULL AFTER cvss_v40_be_vector;",
+        ),
+        ("cvss_v40_meta", "ALTER TABLE findings ADD COLUMN cvss_v40_meta LONGTEXT NULL AFTER cvss_v40_bte_vector;"),
+    )
+    for column_name, ddl in cvss_cols:
+        if column_name not in existing:
+            _safe(ddl)
+
+    try:
+        idx = core_q.run_sql("SHOW KEYS FROM findings WHERE Key_name='ix_findings_run';", fetch="one")
+        if not idx:
+            core_q.run_sql("ALTER TABLE findings ADD INDEX ix_findings_run (run_id);")
+    except Exception:
+        pass
+
+    try:
+        idx = core_q.run_sql("SHOW KEYS FROM findings WHERE Key_name='ix_findings_rule';", fetch="one")
+        if not idx:
+            core_q.run_sql("ALTER TABLE findings ADD INDEX ix_findings_rule (rule_id);")
+    except Exception:
+        pass
+
+    try:
+        idx = core_q.run_sql("SHOW KEYS FROM findings WHERE Key_name='ix_findings_masvs';", fetch="one")
+        if not idx:
+            core_q.run_sql("ALTER TABLE findings ADD INDEX ix_findings_masvs (masvs);")
+    except Exception:
+        pass
+
+    try:
+        fk = core_q.run_sql(
+            """
+            SELECT CONSTRAINT_NAME
+            FROM information_schema.KEY_COLUMN_USAGE
+            WHERE table_schema = DATABASE()
+              AND table_name = 'findings'
+              AND CONSTRAINT_NAME = 'fk_findings_run'
+            """,
+            fetch="one",
+        )
+        if not fk:
+            core_q.run_sql(
+                "ALTER TABLE findings ADD CONSTRAINT fk_findings_run FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE;"
+            )
+    except Exception:
+        pass
+
 
 
 def _ensure_metrics_unique_key() -> None:

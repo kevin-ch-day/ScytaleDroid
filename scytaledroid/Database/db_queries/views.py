@@ -116,13 +116,16 @@ SELECT fp.package_name,
        fp.authority,
        fp.provider_name,
        fp.exported,
-       fp.grant_flags,
+       fp.read_perm,
+       fp.write_perm,
+       fp.grant_uri_permissions,
        fp.path_globs,
        fp.risk,
-       acl.read_perm,
-       acl.write_perm,
-       acl.base_perm,
-       acl.path_perms_json
+       acl.path,
+       acl.path_type,
+       acl.read_perm AS acl_read_perm,
+       acl.write_perm AS acl_write_perm,
+       acl.base_perm
 FROM static_fileproviders AS fp
 LEFT JOIN static_provider_acl AS acl
   ON fp.package_name = acl.package_name

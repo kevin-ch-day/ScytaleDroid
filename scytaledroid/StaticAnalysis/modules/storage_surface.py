@@ -45,41 +45,79 @@ class StorageSurfaceModule(StaticModule):
     name = "storage_surface"
     writes_to_db = True
 
+    @staticmethod
+    def _run_key(context: AppModuleContext) -> str:
+        value = context.metadata.get("run_id")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if context.session_stamp:
+            return f"{context.session_stamp}:{context.package_name}"
+        return context.package_name
+
     def run(self, context: AppModuleContext) -> ModuleResult:
         apk = APK(str(context.apk_path))
+        if not context.session_stamp:
+            return ModuleResult(module=self.name)
         manifest = apk.get_android_manifest_xml()
         providers = _collect_providers(manifest)
         resource_cache = _load_resource_cache(context.apk_path)
 
         fileprovider_rows = []
         provider_acl_rows = []
+        run_key = self._run_key(context)
 
         for record in providers:
             paths = _resolve_fileprovider_paths(record, resource_cache)
             risk = _assess_risk(record, paths)
-            grant_flags = "uri" if record.grant_uri_permissions else "none"
+            read_perm = record.read_permission or record.base_permission or ""
+            write_perm = record.write_permission or record.base_permission or ""
             for authority in record.authorities or (record.name,):
                 fileprovider_rows.append(
                     {
+                        "run_key": run_key,
                         "authority": authority,
                         "provider_name": record.name,
                         "exported": int(record.exported),
-                        "grant_flags": grant_flags,
+                        "grant_uri_permissions": int(record.grant_uri_permissions),
+                        "read_perm": read_perm,
+                        "write_perm": write_perm,
+                        "base_perm": record.base_permission,
                         "path_globs": json.dumps(paths),
                         "risk": risk,
                     }
                 )
+                # Base-level ACL row
                 provider_acl_rows.append(
                     {
+                        "run_key": run_key,
                         "authority": authority,
                         "provider_name": record.name,
-                        "read_perm": record.read_permission,
-                        "write_perm": record.write_permission,
+                        "path": "*",
+                        "path_type": "base",
+                        "read_perm": read_perm,
+                        "write_perm": write_perm,
                         "base_perm": record.base_permission,
                         "exported": int(record.exported),
-                        "path_perms_json": json.dumps(record.path_permissions),
                     }
                 )
+                for entry in record.path_permissions:
+                    for attr in ("path", "pathPrefix", "pathPattern"):
+                        value = entry.get(attr)
+                        if not value:
+                            continue
+                        provider_acl_rows.append(
+                            {
+                                "run_key": run_key,
+                                "authority": authority,
+                                "provider_name": record.name,
+                                "path": value,
+                                "path_type": attr,
+                                "read_perm": entry.get("readPermission") or "",
+                                "write_perm": entry.get("writePermission") or "",
+                                "base_perm": record.base_permission,
+                                "exported": int(record.exported),
+                            }
+                        )
 
         summary = {
             "fileproviders": sum(1 for row in fileprovider_rows if _is_fileprovider(row["provider_name"])),
@@ -95,6 +133,7 @@ class StorageSurfaceModule(StaticModule):
                 "app_id": context.app_id,
                 "apk_id": context.apk_id,
                 "sha256": context.sha256,
+                "run_key": run_key,
             },
             "fileproviders": fileprovider_rows,
             "provider_acl": provider_acl_rows,
@@ -254,4 +293,3 @@ def _is_fileprovider(provider_name: str | None) -> bool:
 
 
 __all__ = ["StorageSurfaceModule"]
-
