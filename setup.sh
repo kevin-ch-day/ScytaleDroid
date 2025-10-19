@@ -28,12 +28,23 @@ if ! python3 -m pip --version >/dev/null 2>&1; then
 fi
 
 # Build a safe pip install command
-PIP_INSTALL=(python3 -m pip install)
+PIP_INSTALL=(python3 -m pip install --disable-pip-version-check)
 if [[ -z "${VIRTUAL_ENV:-}" ]]; then
+  # Prefer user installs to avoid noisy "Defaulting to user" messages.
+  if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+    PIP_INSTALL+=(--user)
+  fi
   # Only append --break-system-packages if pip supports it (Fedora/EME-friendly)
   if python3 -m pip help install 2>&1 | grep -q -- "--break-system-packages"; then
     PIP_INSTALL+=(--break-system-packages)
   fi
+fi
+
+# Silence pip unless there is actionable output.
+PIP_INSTALL+=(--quiet)
+
+if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
+  export PIP_ROOT_USER_ACTION=ignore
 fi
 
 run_pip_install() {
@@ -45,14 +56,17 @@ run_pip_install() {
 }
 
 echo "[Setup] Upgrading pip to the latest version..."
-run_pip_install --upgrade pip
+run_pip_install --upgrade pip >/dev/null
+echo "[Setup] pip is up to date."
 
 echo "[Setup] Upgrading build helpers (setuptools, wheel)..."
-run_pip_install --upgrade setuptools wheel
+run_pip_install --upgrade setuptools wheel >/dev/null
+echo "[Setup] Build helpers are up to date."
 
 if [[ -f "$REQ_FILE" && -s "$REQ_FILE" ]]; then
   echo "[Setup] Installing Python requirements from $REQ_FILE..."
   run_pip_install -r "$REQ_FILE"
+  echo "[Setup] Python requirements are up to date."
 else
   echo "[Setup] No requirements.txt found or file is empty. Skipping dependency installation."
 fi
