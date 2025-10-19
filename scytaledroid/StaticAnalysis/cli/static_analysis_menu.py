@@ -71,15 +71,10 @@ def static_analysis_menu() -> None:
         )
 
         while True:
-            print()
-            menu_utils.print_section("Run controls")
-            print("  R) Run with defaults")
-            print("  A) Advanced options")
-            print("  0) Back")
-            choice = prompt_utils.get_choice(["R", "A", "0"], default="R")
-            if choice == "0":
+            action = ask_run_controls()
+            if action == "back":
                 break
-            if choice == "A":
+            if action == "advanced":
                 params = prompt_advanced_options(params)
                 continue
             launch_scan_flow(selection, params, base_dir)
@@ -98,4 +93,30 @@ def _menu_entries(
     return entries
 
 
-__all__ = ["static_analysis_menu"]
+def ask_run_controls() -> str:
+    while True:
+        print()
+        menu_utils.print_section("Run controls")
+        print("  R) Run with defaults")
+        print("  A) Advanced options")
+        print("  0) Back")
+
+        response = prompt_utils.prompt_text(
+            "",
+            default="R",
+            required=False,
+            error_message="Invalid choice. Please try again.",
+        )
+        choice = (response or "R").strip().lower()
+
+        if choice in {"", "r", "run", "1"}:
+            return "run"
+        if choice in {"a", "adv", "advanced", "2"}:
+            return "advanced"
+        if choice in {"0", "back", "b"}:
+            return "back"
+
+        print(status_messages.status("Invalid choice. Please try again.", level="warn"))
+
+
+__all__ = ["static_analysis_menu", "ask_run_controls"]

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 import os
 from pathlib import Path
 import shutil
+from dataclasses import replace
+from datetime import datetime, timedelta
 
 from scytaledroid.Config import app_config
 from scytaledroid.Utils.DisplayUtils import menu_utils
@@ -27,8 +28,12 @@ from .scope import format_scope_target
 def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir: Path) -> None:
     """Primary entry point for running static analysis flows from the CLI."""
 
-    session_stamp = params.session_stamp or datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-    params.session_stamp = session_stamp
+    previous_stamp = params.session_stamp or ""
+    now = datetime.now()
+    session_stamp = now.strftime("%Y%m%d-%H%M%S")
+    if session_stamp == previous_stamp:
+        session_stamp = (now + timedelta(seconds=1)).strftime("%Y%m%d-%H%M%S")
+    params = replace(params, session_stamp=session_stamp)
 
     workers = _resolve_workers(params.workers)
     if not params.reuse_cache:
@@ -41,7 +46,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
     menu_utils.print_section("Run Overview")
     print(f"Scope      : {scope_target}")
     print(f"Profile    : {params.profile_label}")
-    print(f"Session    : {session_stamp}")
+    print(f"Session    : {params.session_stamp}")
     workers_label = f"auto ({workers})" if isinstance(params.workers, str) else str(workers)
     print(f"Workers    : {workers_label}")
     print(f"Cache      : {'purge' if not params.reuse_cache else 'reuse'}")

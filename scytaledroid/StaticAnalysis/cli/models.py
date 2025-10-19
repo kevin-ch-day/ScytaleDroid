@@ -21,6 +21,10 @@ class ScopeSelection:
     groups: Tuple[ArtifactGroup, ...]
 
 
+def _make_session_stamp() -> str:
+    return datetime.now().strftime("%Y%m%d-%H%M%S")
+
+
 @dataclass(frozen=True)
 class RunParameters:
     """User-facing configuration for an analysis run."""
@@ -43,7 +47,7 @@ class RunParameters:
     log_level: str = "info"
     trace_detectors: Tuple[str, ...] = tuple()
     dry_run: bool = False
-    session_stamp: str | None = None
+    session_stamp: str | None = field(default_factory=_make_session_stamp)
 
     @property
     def profile_label(self) -> str:
