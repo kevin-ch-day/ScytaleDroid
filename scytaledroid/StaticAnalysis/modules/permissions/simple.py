@@ -113,7 +113,10 @@ def _format_permission(name: str, element_type: str) -> str:
     return name
 
 
-def _fetch_protections(names: Sequence[str]) -> Mapping[str, Optional[str]]:
+def _fetch_protections(
+    names: Sequence[str],
+    target_sdk: Optional[int] = None,
+) -> Mapping[str, Optional[str]]:
     """Best-effort DB lookup of framework protection levels for given names.
 
     Returns a mapping of perm_name -> protection or None. On any error, returns
@@ -124,7 +127,7 @@ def _fetch_protections(names: Sequence[str]) -> Mapping[str, Optional[str]]:
             framework_protection_map,
         )
 
-        return framework_protection_map(names)
+        return framework_protection_map(names, target_sdk=target_sdk)
     except Exception:
         return {}
 
@@ -145,6 +148,13 @@ def print_permissions_block(
     print(f"SDKs: min={min_sdk}  target={target_sdk}")
     print("-" * 40)
 
+    try:
+        target_sdk_val = int(target_sdk) if target_sdk not in (None, "-") else None
+    except Exception:
+        target_sdk_val = None
+    allow_backup_flag = None if sdk.get("allow_backup") is None else bool(sdk.get("allow_backup"))
+    legacy_ext_flag = None if sdk.get("legacy_external_storage") is None else bool(sdk.get("legacy_external_storage"))
+
     # Deduplicate declared names (ignore sdk-23 suffix for risk lookup)
     unique_declared: List[Tuple[str, str]] = []
     seen: set[Tuple[str, str]] = set()
@@ -157,7 +167,7 @@ def print_permissions_block(
     # Protective annotations from framework table when available
     # Build short, uppercase keys for framework permissions
     shorts_only = [n.split(".")[-1].upper() for n, _ in unique_declared if n.startswith("android.")]
-    protection_map = _fetch_protections(shorts_only)
+    protection_map = _fetch_protections(shorts_only, target_sdk=target_sdk_val)
 
     android_perms: List[str] = []
     custom_perms: List[str] = []
@@ -478,12 +488,6 @@ def render_permission_postcard(
     """
     # Framework protections lookup
     shorts_only = [n.split(".")[-1].upper() for n, _ in declared if n.startswith("android.")]
-    protection_map = _fetch_protections(shorts_only)
-    risk_counts, groups, vendor, fw_ds, vendor_names = _classify_permissions(declared, protection_map)
-
-    d = risk_counts.get("dangerous", 0)
-    s = risk_counts.get("signature", 0)
-    v = vendor.get("ADS", 0)
     target_sdk_val = None
     allow_backup_flag = None
     legacy_ext_flag = None
@@ -496,6 +500,13 @@ def render_permission_postcard(
         allow_backup_flag = bool(ab) if ab is not None else None
         le = sdk.get("legacy_external_storage")
         legacy_ext_flag = bool(le) if le is not None else None
+
+    protection_map = _fetch_protections(shorts_only, target_sdk=target_sdk_val)
+    risk_counts, groups, vendor, fw_ds, vendor_names = _classify_permissions(declared, protection_map)
+
+    d = risk_counts.get("dangerous", 0)
+    s = risk_counts.get("signature", 0)
+    v = vendor.get("ADS", 0)
 
     detail = dict(
         permission_risk_score_detail(

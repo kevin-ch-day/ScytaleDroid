@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import List, Tuple
 
 from scytaledroid.Database.db_utils import diagnostics
+from scytaledroid.Database.db_utils import permission_catalog
 from scytaledroid.Database.db_utils.menus import health_checks, query_runner, runs_dashboard, schema_browser
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 
@@ -22,7 +23,8 @@ def database_menu() -> None:
             ("3", "Data health checks (ingestion & scoring)", "Run deterministic ingestion & scoring checks."),
             ("4", "Recent runs dashboard", "Summarise the latest runs and key metrics."),
             ("5", "Run database queries", "Quick checks to validate static-analysis persistence."),
-            ("6", "Reset static analysis data", "Truncate derived static-analysis tables (destructive)."),
+            ("6", "Refresh framework permission catalog", "Load/update android_framework_permissions from config."),
+            ("7", "Reset static analysis data", "Truncate derived static-analysis tables (destructive)."),
             ("0", "Back", "Return to the previous menu."),
         ]
         menu_utils.print_menu(options, padding=True, show_exit=False)
@@ -39,6 +41,9 @@ def database_menu() -> None:
         elif choice == "5":
             query_runner.run_query_menu()
         elif choice == "6":
+            permission_catalog.refresh_framework_catalog()
+            prompt_utils.press_enter_to_continue()
+        elif choice == "7":
             health_checks.prompt_reset_static_data()
         elif choice == "0":
             break

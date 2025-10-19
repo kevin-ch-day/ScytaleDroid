@@ -48,7 +48,8 @@ ON DUPLICATE KEY UPDATE
 """
 
 SELECT_FRAMEWORK_PROTECTION = """
-SELECT `short`, protection FROM android_framework_permissions
+SELECT `short`, protection, added_api, deprecated_api
+FROM android_framework_permissions
 WHERE `short` IN ({placeholders})
 """
 

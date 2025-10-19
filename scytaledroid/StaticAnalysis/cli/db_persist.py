@@ -502,7 +502,7 @@ def persist_run_summary(
 
     declared = list(br.permissions.declared or ())
     shorts_only = [n.split(".")[-1].upper() for n in declared if n.startswith("android.")]
-    pmap = _prot_map(shorts_only)
+    pmap = _prot_map(shorts_only, target_sdk)
     rc, groups, vc, _fw_ds, _vn = _classify([(n, "uses-permission") for n in declared], pmap)
     d = rc.get("dangerous", 0)
     s = rc.get("signature", 0)
