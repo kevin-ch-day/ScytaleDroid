@@ -967,7 +967,7 @@ def _print_sync_summary(
 
 
 def _render_inventory_table(rows: List[Dict[str, object]]) -> None:
-    """Render a concise inventory table to the console."""
+    """Render a compact, readable list of inventory entries."""
     if not rows:
         print("No inventory data available.")
         return
@@ -980,54 +980,30 @@ def _render_inventory_table(rows: List[Dict[str, object]]) -> None:
         ),
     )
 
-    headers = [
-        "#",
-        "Package",
-        "App",
-        "Version",
-        "Category",
-        "Source",
-        "Profile",
-        "Split",
-        "Primary Path",
-    ]
+    max_preview = 25
+    preview_rows = sorted_rows[:max_preview]
+    width = 70
 
-    table_rows: List[List[str]] = []
-    for index, entry in enumerate(sorted_rows, start=1):
+    for index, entry in enumerate(preview_rows, start=1):
         package_name = str(entry.get("package_name") or "?")
         label = str(entry.get("app_label") or package_name)
-        version = str(
-            entry.get("version_name")
-            or entry.get("version_code")
-            or "?"
-        )
+        version = str(entry.get("version_name") or entry.get("version_code") or "?")
         category = _get_canonical_category(entry) or "Unknown"
         source = str(entry.get("source") or category)
-        split_count = _split_count(entry)
-        split_display = "Single" if split_count <= 1 else f"{split_count} parts"
-        primary_path = str(entry.get("primary_path") or "?")
         profile_name = str(entry.get("profile_name") or "-")
+        split_count = _split_count(entry)
+        split_display = "No" if split_count <= 1 else f"Yes ({split_count})"
+        primary_path = str(entry.get("primary_path") or "?")
 
-        table_rows.append(
-            [
-                str(index),
-                package_name,
-                label,
-                version,
-                category,
-                source,
-                profile_name,
-                split_display,
-                primary_path,
-            ]
-        )
+        header = f"{index:>3}. {package_name}"
+        print(header)
+        meta_line = f"     {label}  |  Version: {version}  |  Source: {source}  |  Profile: {profile_name}  |  Split APK: {split_display}"
+        print(textwrap.fill(meta_line, width=width, subsequent_indent="     "))
+        print(textwrap.fill(f"     Path: {primary_path}", width=width, subsequent_indent="           "))
+        print()
 
-    max_preview = 25
-    sliced_rows = table_rows[:max_preview]
-    table_utils.render_table(headers, sliced_rows)
-
-    if len(table_rows) > max_preview:
-        remaining = len(table_rows) - max_preview
+    if len(sorted_rows) > max_preview:
+        remaining = len(sorted_rows) - max_preview
         print(status_messages.status(f"+ {remaining} more entries saved to report.", level="info"))
 
 
