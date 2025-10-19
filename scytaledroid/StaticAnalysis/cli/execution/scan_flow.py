@@ -9,6 +9,7 @@ from typing import Iterable, Mapping, MutableMapping, Optional, Sequence, Tuple
 
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
+from scytaledroid.Utils.System import output_prefs
 
 from ...core import (
     AnalysisConfig,
@@ -34,8 +35,15 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
         app_result = AppRunResult(group.package_name, getattr(group, "category", "Uncategorized"))
         results.append(app_result)
 
-        for artifact_index, artifact in enumerate(group.artifacts, start=1):
-            progress_label = _progress_label(group_index, len(selection.groups), artifact_index, len(group.artifacts), group.package_name)
+        artifacts = _dedupe_artifacts(group.artifacts)
+        for artifact_index, artifact in enumerate(artifacts, start=1):
+            progress_label = _progress_label(
+                group_index,
+                len(selection.groups),
+                artifact_index,
+                len(artifacts),
+                group.package_name,
+            )
 
             report, summary, timings = _execute_single_artifact(
                 progress_label,
@@ -67,11 +75,14 @@ def _execute_single_artifact(progress_label: str, artifact, params: RunParameter
         return None, None, tuple()
 
     duration = report.metadata.get("duration_seconds", 0.0) if isinstance(report.metadata, Mapping) else 0.0
-    summary = _summarize_artifact(artifact, report, json_path, duration)
     timings = tuple(
         (result.detector_id or "detector", float(getattr(result, "duration_sec", 0.0) or 0.0))
         for result in getattr(report, "detector_results", [])
     )
+    total_detector_time = sum(value for _, value in timings)
+    if (duration or 0.0) <= 0.0 and total_detector_time > 0.0:
+        duration = total_detector_time
+    summary = _summarize_artifact(artifact, report, json_path, duration)
     print(f"{progress_label} • finished {artifact.artifact_label or 'base'} ({format_duration(duration)})")
     return report, summary, timings
 
@@ -80,7 +91,10 @@ def _print_artifact_progress(label: str, summary: ArtifactOutcome, timings: Iter
     detector_timings = [(name, dur) for name, dur in timings if dur > 0]
     if not detector_timings:
         return
-    print(f"    detectors={len(detector_timings)} total={format_duration(summary.duration_seconds)}")
+    total_seconds = sum(duration for _, duration in detector_timings)
+    print(f"    detectors={len(detector_timings)} total={format_duration(total_seconds)}")
+    if not output_prefs.get().verbose:
+        return
     for name, duration in detector_timings:
         print(f"      - {name:<18} {format_duration(duration)}")
 
@@ -109,15 +123,65 @@ def _summarize_artifact(artifact, report: StaticAnalysisReport, json_path: Optio
         metadata=artifact.metadata,
     )
 
+def _dedupe_artifacts(artifacts: Sequence) -> list:
+    """Return artifacts de-duplicated by digest + split label, preferring newest."""
+
+    preferred: dict[tuple[str, str], tuple[object, float, int]] = {}
+    for index, artifact in enumerate(artifacts):
+        try:
+            sha = getattr(artifact, "sha256", None)
+        except Exception:
+            sha = None
+        try:
+            split_label = getattr(artifact, "artifact_label", None) or getattr(artifact, "display_path", "")
+        except Exception:
+            split_label = ""
+        key = (_normalise_digest(sha, artifact), split_label or "")
+        mtime = _artifact_mtime(artifact)
+        existing = preferred.get(key)
+        if existing is None or mtime > existing[1]:
+            preferred[key] = (artifact, mtime, index)
+    ordered = sorted(preferred.values(), key=lambda item: item[2])
+    return [item[0] for item in ordered]
+
+
+def _normalise_digest(sha: Optional[str], artifact) -> str:
+    if isinstance(sha, str) and sha.strip():
+        return sha.strip().lower()
+    alt = None
+    try:
+        alt = getattr(artifact, "apk_id", None)
+    except Exception:
+        alt = None
+    if isinstance(alt, str) and alt.strip():
+        return f"apk:{alt.strip().lower()}"
+    try:
+        path = getattr(artifact, "path", None)
+        if path:
+            return f"path:{Path(path).resolve()}"
+    except Exception:
+        pass
+    return f"uid:{id(artifact)}"
+
+
+def _artifact_mtime(artifact) -> float:
+    try:
+        path = getattr(artifact, "path", None)
+        if path and Path(path).exists():
+            return float(Path(path).stat().st_mtime)
+    except Exception:
+        return 0.0
+    return 0.0
+
 
 def generate_report(artifact, base_dir: Path, params: RunParameters):
     metadata_payload: MutableMapping[str, object] = dict(artifact.metadata)
-    metadata_payload.setdefault("run_profile", params.profile)
-    metadata_payload.setdefault("run_scope", params.scope)
-    metadata_payload.setdefault("run_scope_label", params.scope_label)
-    metadata_payload.setdefault("selected_tests", list(params.selected_tests))
+    metadata_payload["run_profile"] = params.profile
+    metadata_payload["run_scope"] = params.scope
+    metadata_payload["run_scope_label"] = params.scope_label
+    metadata_payload["selected_tests"] = list(params.selected_tests)
     if params.session_stamp:
-        metadata_payload.setdefault("session_stamp", params.session_stamp)
+        metadata_payload["session_stamp"] = params.session_stamp
 
     try:
         report = analyze_apk(
@@ -214,8 +278,11 @@ def _map_tests_to_detectors(params: RunParameters) -> Tuple[str, ...]:
 
 
 def format_duration(seconds: float) -> str:
+    if seconds <= 0:
+        return "0 ms"
     if seconds < 1:
-        return f"{seconds * 1000:.0f} ms"
+        millis = max(1, int(round(seconds * 1000)))
+        return f"{millis} ms"
     return f"{seconds:.2f} s"
 
 

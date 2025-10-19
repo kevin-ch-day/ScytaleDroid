@@ -90,6 +90,7 @@ def prompt_advanced_options(base_params: RunParameters) -> RunParameters:
         hint="Comma-separated detector IDs (optional).",
     )
     trace_detectors = tuple(token.strip() for token in traces_raw.split(",") if token.strip())
+    verbose_output = prompt_utils.prompt_yes_no("Verbose output", default=params.verbose_output)
     dry_run = prompt_utils.prompt_yes_no("Dry-run (no persistence)", default=params.dry_run)
 
     return replace(
@@ -109,6 +110,7 @@ def prompt_advanced_options(base_params: RunParameters) -> RunParameters:
         log_level="debug" if log_level == "2" else "info",
         trace_detectors=trace_detectors,
         dry_run=dry_run,
+        verbose_output=verbose_output,
     )
 
 
@@ -141,6 +143,7 @@ def _summarise_params(params: RunParameters) -> Tuple[tuple[str, object], ...]:
             ("Workers", params.workers),
             ("Reuse cache", _format_bool(params.reuse_cache)),
             ("Log level", params.log_level.upper()),
+            ("Verbose output", _format_bool(params.verbose_output)),
             (
                 "Trace detectors",
                 ", ".join(params.trace_detectors) if params.trace_detectors else "—",

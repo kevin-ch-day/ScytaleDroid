@@ -1059,35 +1059,40 @@ def _render_inventory_summary(rows: List[Dict[str, object]]) -> None:
 
     print()
     print(text_blocks.headline("Inventory summary", width=70))
-    summary_pairs: List[tuple[str, str]] = [
-        ("Total packages", str(total)),
-        ("User apps (/data)", str(category_counts.get("User", 0))),
-        ("OEM overlays (/product)", str(category_counts.get("OEM", 0))),
-        ("System core (/system*)", str(category_counts.get("System", 0))),
-        ("Google mainline (/apex)", str(category_counts.get("Mainline", 0))),
-        ("Vendor partitions", str(category_counts.get("Vendor", 0))),
-        ("Split APK packages", str(split_packages)),
-        ("Play Store installs", str(source_counts.get("Play Store", 0))),
-        ("Sideload/unknown", str(source_counts.get("Sideload", 0))),
+    summary_rows: List[List[str]] = [
+        ["Total packages", str(total)],
+        ["User apps (/data)", str(category_counts.get("User", 0))],
+        ["OEM overlays (/product)", str(category_counts.get("OEM", 0))],
+        ["System core (/system*)", str(category_counts.get("System", 0))],
+        ["Google mainline (/apex)", str(category_counts.get("Mainline", 0))],
+        ["Vendor partitions", str(category_counts.get("Vendor", 0))],
+        ["Split APK packages", str(split_packages)],
+        ["Play Store installs", str(source_counts.get("Play Store", 0))],
+        ["Sideload / unknown", str(source_counts.get("Sideload", 0))],
     ]
 
-    partition_counts = _partition_breakdown(rows)
-    summary_pairs.extend(partition_counts)
+    for label, value in _partition_breakdown(rows):
+        summary_rows.append([label, value])
+
     review_flags = sum(1 for entry in rows if entry.get("review_needed"))
     if review_flags:
-        summary_pairs.append(("Needs review", str(review_flags)))
+        summary_rows.append(["Needs review", str(review_flags)])
 
-    table_utils.render_key_value_pairs([pair for pair in summary_pairs if not pair[1].startswith("0")])
+    table_utils.render_table(["Metric", "Count"], summary_rows)
 
     notable_profiles = [
-        (name, str(count))
+        (name, count)
         for name, count in profile_counts.items()
         if name != "Unclassified" and count > 0
     ]
     if notable_profiles:
         print()
         print(text_blocks.headline("Category matches", width=70))
-        table_utils.render_key_value_pairs(notable_profiles)
+        category_rows = [
+            [name, str(count)]
+            for name, count in sorted(notable_profiles, key=lambda item: (-item[1], item[0]))
+        ]
+        table_utils.render_table(["Profile", "Packages"], category_rows)
 
 
 def _partition_breakdown(rows: List[Dict[str, object]]) -> List[tuple[str, str]]:

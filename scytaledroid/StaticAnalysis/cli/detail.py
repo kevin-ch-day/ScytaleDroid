@@ -41,13 +41,13 @@ def render_app_table(results: Sequence[AppRunResult]) -> None:
                 version,
                 f"targetSdk={target_sdk}",
                 signer,
-                f"H {totals.get('H', 0)}",
-                f"M {totals.get('M', 0)}",
-                f"L {totals.get('L', 0)}",
-                f"I {totals.get('I', 0)}",
+                str(totals.get('H', 0)),
+                str(totals.get('M', 0)),
+                str(totals.get('L', 0)),
+                str(totals.get('I', 0)),
             ]
         )
-    headers = ["#", "Package", "Version", "Target", "Signer", "High", "Med", "Low", "Info"]
+    headers = ["#", "Package", "Version", "Target", "Signer", "High", "Medium", "Low", "Information"]
     print()
     table_utils.render_table(headers, rows)
 
@@ -63,14 +63,16 @@ def app_detail_loop(
     current_evidence = evidence_lines
     while True:
         detail_renderer(app_result, current_evidence, active, finding_limit)
-        print("[f] Filter severity  [e] Evidence lines  [q] Back")
+        print("[f] Filter severity  [e] Evidence lines  [?] Help  [Enter/q] Back")
         command = input("Command: ").strip().lower()
-        if command == "q":
+        if command in {"", "q"}:
             break
         if command == "f":
             active = prompt_severity_filter(active)
         elif command == "e":
             current_evidence = cycle_evidence_lines(current_evidence)
+        elif command == "?":
+            _print_detail_help()
         else:
             print(status_messages.status("Unknown command.", level="warn"))
 
@@ -92,7 +94,7 @@ def render_app_detail(
     print()
     print(f"Package: {app_result.package_name}")
     print(
-        f"High {totals.get('H',0)}   Med {totals.get('M',0)}   Low {totals.get('L',0)}   Info {totals.get('I',0)}"
+        f"High {totals.get('H',0)}   Medium {totals.get('M',0)}   Low {totals.get('L',0)}   Information {totals.get('I',0)}"
     )
     print(f"Version: {version}   targetSdk={target_sdk}   Category: {app_result.category}")
 
@@ -118,10 +120,17 @@ def render_app_detail(
 
 def collect_findings(app_result: AppRunResult, evidence_lines: int) -> Dict[str, list[Dict[str, str]]]:
     grouped: Dict[str, list[Dict[str, str]]] = defaultdict(list)
+    seen: set[tuple[str, str, str]] = set()
     for artifact in app_result.artifacts:
         for result in artifact.report.detector_results:
             section = result.section_key
             for finding in result.findings:
+                pointer = finding.evidence[0].location if finding.evidence else finding.because or ""
+                finding_id = finding.finding_id or finding.title or ""
+                dedupe_key = (result.section_key or "", finding_id, pointer)
+                if dedupe_key in seen:
+                    continue
+                seen.add(dedupe_key)
                 token = severity_token(finding.severity_gate)
                 evidence_text = format_evidence(finding.evidence, evidence_lines)
                 snippet = finding.evidence[0].description if finding.evidence else ""
@@ -179,6 +188,14 @@ def severity_token(level: SeverityLevel) -> str:
     return _SEVERITY_LABELS.get(level, ("Info", "I"))[1]
 
 
+def _print_detail_help() -> None:
+    print("Commands:")
+    print("  Enter/q  → Return to previous menu")
+    print("  f        → Toggle severity filter (use HMLI tokens)")
+    print("  e        → Cycle evidence preview lengths")
+    print("  ?        → Show this help prompt")
+
+
 __all__ = [
     "render_app_table",
     "app_detail_loop",
@@ -190,4 +207,3 @@ __all__ = [
     "severity_token",
     "SEVERITY_TOKEN_ORDER",
 ]
-

@@ -8,6 +8,7 @@ from typing import Any, Iterable, Mapping, MutableMapping, Sequence
 from scytaledroid.Config import app_config
 
 from ..core import Finding, SeverityLevel, StaticAnalysisReport
+from ..detectors.permissions import PermissionsProfileDetector
 from ..risk import compute_risk_assessment
 
 
@@ -531,4 +532,3 @@ def _safe_int(mapping: Mapping[str, Any] | None, key: str) -> int:
 
 
 __all__ = ["build_report_view"]
-

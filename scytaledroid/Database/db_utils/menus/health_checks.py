@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import textwrap
 from typing import Any, Dict, List, Optional, Sequence
 
 from scytaledroid.Database.db_core import run_sql
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
+from scytaledroid.Utils.DisplayUtils.terminal import get_terminal_width
 
 from .sql_helpers import coerce_datetime, scalar, view_exists
+from ..reset_static import (
+    HARVEST_TABLES,
+    PROTECTED_TABLES,
+    STATIC_ANALYSIS_TABLES,
+    reset_static_analysis_data,
+)
 
 
 def run_health_checks() -> None:
@@ -413,4 +421,87 @@ def _print_status_line(level: str, label: str, *, detail: Optional[str] = None) 
     print(line)
 
 
-__all__ = ["run_health_checks"]
+def prompt_reset_static_data() -> None:
+    print()
+    menu_utils.print_header("Reset Static Analysis Data")
+
+    menu_utils.print_section("Overview")
+    print("Use this tool to purge derived static-analysis data before a verification run.")
+    print(status_messages.status("Protected catalog tables are always retained.", level="info"))
+    print()
+
+    _print_table_list("Protected catalog tables", PROTECTED_TABLES)
+    _print_table_list("Static-analysis tables scheduled", STATIC_ANALYSIS_TABLES)
+
+    include_harvest = prompt_utils.prompt_yes_no(
+        "Also clear harvested APK inventory (requires re-pull)?",
+        default=False,
+    )
+    if include_harvest:
+        _print_table_list("Harvest tables scheduled", HARVEST_TABLES)
+
+    print(status_messages.status("Type 'RESET' to proceed or press Enter to cancel.", level="warn"))
+
+    while True:
+        confirmation = prompt_utils.prompt_text(
+            "Confirm reset keyword",
+            required=False,
+        )
+        normalised = confirmation.strip().upper()
+        if not normalised:
+            print(status_messages.status("Reset cancelled.", level="warn"))
+            prompt_utils.press_enter_to_continue()
+            return
+        if normalised == "RESET":
+            break
+        print(status_messages.status("Input not recognised. Type 'RESET' to confirm or press Enter to cancel.", level="warn"))
+
+    outcome = reset_static_analysis_data(include_harvest=include_harvest)
+
+    menu_utils.print_section("Reset summary")
+    width = min(get_terminal_width(), 96)
+
+    if outcome.truncated:
+        print(status_messages.status(f"Truncated {len(outcome.truncated)} table(s).", level="success"))
+        _print_wrapped_table_block(outcome.truncated, width)
+    else:
+        print(status_messages.status("No tables were truncated.", level="warn"))
+
+    if outcome.skipped_protected:
+        print(status_messages.status(f"Skipped {len(outcome.skipped_protected)} protected table(s).", level="info"))
+        _print_wrapped_table_block(outcome.skipped_protected, width)
+
+    if outcome.skipped_missing:
+        print(status_messages.status(f"{len(outcome.skipped_missing)} table(s) not found in this database.", level="warn"))
+        _print_wrapped_table_block(outcome.skipped_missing, width)
+
+    if outcome.failed:
+        print(status_messages.status(f"Failed to truncate {len(outcome.failed)} table(s).", level="error"))
+        for table, reason in outcome.failed:
+            print(f"  • {table}")
+            wrapped = textwrap.wrap(reason, width=width - 6) or [reason]
+            for line in wrapped:
+                print(f"      {line}")
+
+    print()
+    prompt_utils.press_enter_to_continue()
+
+
+__all__ = ["run_health_checks", "prompt_reset_static_data"]
+
+
+def _print_table_list(title: str, tables: Sequence[str]) -> None:
+    if not tables:
+        return
+    menu_utils.print_section(title)
+    _print_wrapped_table_block(list(tables))
+
+
+def _print_wrapped_table_block(tables: Sequence[str], width: int | None = None) -> None:
+    if not tables:
+        return
+    effective_width = width or min(get_terminal_width(), 96)
+    joined = ", ".join(tables)
+    wrapped = textwrap.wrap(joined, width=effective_width - 2) or [joined]
+    for line in wrapped:
+        print(f"  {line}")

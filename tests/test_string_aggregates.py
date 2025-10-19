@@ -103,6 +103,7 @@ def test_summarise_entropy_limits_output_size() -> None:
 def test_build_aggregates_collects_all_sections() -> None:
     endpoint_totals = Counter({"api.example.com": 3})
     endpoint_by_root = {"api.example.com": Counter({"https": 2, "http": 1})}
+    domain_sources = {"api.example.com": {"dex"}}
     endpoint_cleartext = [_hit()]
     api_key_hits = [_hit(bucket="api_keys", tag="github", provider="github", masked="ghp_…1234")]
     cloud_hits = [(_hit(bucket="cloud", tag="s3", provider="aws", resource_name="bucket"), "us-east-1")]
@@ -113,6 +114,7 @@ def test_build_aggregates_collects_all_sections() -> None:
     aggregates = build_aggregates(
         endpoint_totals=endpoint_totals,
         endpoint_by_root=endpoint_by_root,
+        domain_sources=domain_sources,
         endpoint_cleartext=endpoint_cleartext,
         api_key_hits=api_key_hits,
         cloud_hits=cloud_hits,

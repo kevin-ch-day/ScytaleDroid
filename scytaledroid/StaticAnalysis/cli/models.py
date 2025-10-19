@@ -48,6 +48,7 @@ class RunParameters:
     trace_detectors: Tuple[str, ...] = tuple()
     dry_run: bool = False
     session_stamp: str | None = field(default_factory=_make_session_stamp)
+    verbose_output: bool = False
 
     @property
     def profile_label(self) -> str:

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
-from typing import Mapping, Optional
+from typing import Mapping, MutableMapping, Optional, Sequence
 
 from scytaledroid.Persistence import db_writer as _dw
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.StaticAnalysis.modules.permissions.simple import (
     _classify_permissions as _classify,
     _fetch_protections as _prot_map,
@@ -15,6 +17,10 @@ from scytaledroid.StaticAnalysis.modules.permissions.simple import (
 from scytaledroid.StaticAnalysis.modules.permissions.analysis.scoring import (
     permission_risk_score_detail as _perm_detail,
     permission_points_0_20 as _perm_pts,
+)
+from scytaledroid.Database.db_func.static_analysis import (
+    static_findings as _sf,
+    string_analysis as _sa,
 )
 
 
@@ -45,21 +51,55 @@ def _load_cvss_map() -> Mapping[str, Mapping[str, Optional[str]]]:
     return mapping
 
 
-def persist_run_summary(base_report, string_data: Mapping[str, object], run_package: str) -> None:
+@dataclass(slots=True)
+class PersistenceOutcome:
+    run_id: int | None = None
+    errors: list[str] = field(default_factory=list)
+
+    @property
+    def success(self) -> bool:
+        return not self.errors
+
+    def add_error(self, message: str) -> None:
+        self.errors.append(message)
+
+
+def persist_run_summary(
+    base_report,
+    string_data: Mapping[str, object],
+    run_package: str,
+    *,
+    session_stamp: str | None,
+    scope_label: str,
+    finding_totals: Mapping[str, int],
+    baseline_payload: Mapping[str, object],
+    dry_run: bool = False,
+) -> PersistenceOutcome:
+    outcome = PersistenceOutcome()
+    if dry_run:
+        log.info("Dry-run enabled; skipping persistence for %s", run_package, category="static_analysis")
+        return outcome
+
+    if not session_stamp:
+        message = f"Missing session stamp for {run_package}; static persistence will be skipped."
+        log.warning(message, category="static_analysis")
+        outcome.add_error(message)
+        return outcome
+
     br = base_report
     target_sdk = None
     try:
         target_sdk = int(br.manifest.target_sdk) if br.manifest.target_sdk else None
     except Exception:
         target_sdk = None
-    session_stamp = None
-    try:
-        meta = getattr(br, "metadata", {}) or {}
-        value = meta.get("session_stamp")
-        if isinstance(value, str) and value.strip():
-            session_stamp = value.strip()
-    except Exception:
-        session_stamp = None
+    if not session_stamp:
+        try:
+            meta = getattr(br, "metadata", {}) or {}
+            value = meta.get("session_stamp")
+            if isinstance(value, str) and value.strip():
+                session_stamp = value.strip()
+        except Exception:
+            pass
 
     run_id = _dw.create_run(
         package=br.manifest.package_name or run_package,
@@ -69,7 +109,12 @@ def persist_run_summary(base_report, string_data: Mapping[str, object], run_pack
         session_stamp=session_stamp,
     )
     if not run_id:
-        return
+        message = f"Failed to create run record for {run_package}"
+        log.warning(message, category="static_analysis")
+        outcome.add_error(message)
+        return outcome
+
+    outcome.run_id = int(run_id)
 
     declared = list(br.permissions.declared or ())
     shorts_only = [n.split(".")[-1].upper() for n in declared if n.startswith("android.")]
@@ -131,32 +176,35 @@ def persist_run_summary(base_report, string_data: Mapping[str, object], run_pack
         corr_points += 1.0
     corr_points = min(5.0, corr_points)
 
-    _dw.write_buckets(
-        int(run_id),
-        {
-            "permissions": (perm_points, 20.0),
-            "network": (net_points, 20.0),
-            "storage": (sto_points, 10.0),
-            "components": (comp_points, 15.0),
-            "secrets": (secrets_points, 25.0),
-            "webssl": (webssl_points, 10.0),
-            "correlations": (corr_points, 5.0),
-        },
-    )
-    _dw.write_metrics(
-        int(run_id),
-        {
-            "network.code_http_hosts": (float(code_http_hosts), None),
-            "network.asset_http_hosts": (float(asset_http_hosts), None),
-            "exports.total": (float(exp_total), None),
-        },
-    )
+    buckets_payload = {
+        "permissions": (perm_points, 20.0),
+        "network": (net_points, 20.0),
+        "storage": (sto_points, 10.0),
+        "components": (comp_points, 15.0),
+        "secrets": (secrets_points, 25.0),
+        "webssl": (webssl_points, 10.0),
+        "correlations": (corr_points, 5.0),
+    }
+    if not _dw.write_buckets(int(run_id), buckets_payload):
+        message = f"Failed to persist scoring buckets for run_id={run_id}"
+        log.warning(message, category="static_analysis")
+        outcome.add_error(message)
+
+    metrics_payload = {
+        "network.code_http_hosts": (float(code_http_hosts), None),
+        "network.asset_http_hosts": (float(asset_http_hosts), None),
+        "exports.total": (float(exp_total), None),
+    }
+    if not _dw.write_metrics(int(run_id), metrics_payload):
+        message = f"Failed to persist metrics for run_id={run_id}"
+        log.warning(message, category="static_analysis")
+        outcome.add_error(message)
 
     # Persist a small finding sample (for DB-backed MASVS summary)
+    severity_map = {"P0": "High", "P1": "Medium", "P2": "Low", "NOTE": "Info"}
+    cvss_map = _load_cvss_map()
+    rows_findings = []
     try:
-        rows_findings = []
-        severity_map = {"P0": "High", "P1": "Medium", "P2": "Low", "NOTE": "Info"}
-        cvss_map = _load_cvss_map()
         for result in (br.detector_results or ()):  # type: ignore[attr-defined]
             for f in result.findings:
                 sev = severity_map.get(f.severity_gate.value, "Info")
@@ -170,14 +218,18 @@ def persist_run_summary(base_report, string_data: Mapping[str, object], run_pack
                     break
             if len(rows_findings) >= 50:
                 break
-        if rows_findings:
-            _dw.write_findings(int(run_id), rows_findings)
-    except Exception:
-        pass
+    except Exception as exc:
+        message = f"Failed to derive MASVS finding sample for {run_package}: {exc}"
+        log.warning(message, category="static_analysis")
+        outcome.add_error(message)
+        rows_findings = []
+    if rows_findings and not _dw.write_findings(int(run_id), rows_findings):
+        message = f"Failed to persist MASVS finding samples for run_id={run_id}"
+        log.warning(message, category="static_analysis")
+        outcome.add_error(message)
 
+    contributors = []
     try:
-        contributors = []
-
         sig_components = d_detail.get("signal_components", {})
         breadth = float(d_detail.get("breadth", {}).get("applied", 0.0) or 0.0)
         modernization = float(d_detail.get("modernization_credit", 0.0) or 0.0)
@@ -219,18 +271,138 @@ def persist_run_summary(base_report, string_data: Mapping[str, object], run_pack
             contributors.append(("webssl", webssl_points, f"WebView/SSL configuration signals (+{webssl_points})", 0))
         if corr_points:
             contributors.append(("correlations", corr_points, f"Composite risk correlations (+{corr_points})", 0))
+    except Exception as exc:
+        message = f"Failed to derive contributor weights for {run_package}: {exc}"
+        log.warning(message, category="static_analysis")
+        outcome.add_error(message)
+        contributors = []
 
-        # Sort by absolute contribution descending and assign rank
+    if contributors:
         contrib_sorted = sorted(contributors, key=lambda row: abs(row[1]), reverse=True)
         contrib_ranked = [
             (name, round(points, 2), explanation, idx + 1)
             for idx, (name, points, explanation, _rank) in enumerate(contrib_sorted)
             if points or "modernization" in name
         ]
-        if contrib_ranked:
-            _dw.write_contributors(int(run_id), contrib_ranked)
-    except Exception:
-        pass
+        if contrib_ranked and not _dw.write_contributors(int(run_id), contrib_ranked):
+            message = f"Failed to persist contributor breakdown for run_id={run_id}"
+            log.warning(message, category="static_analysis")
+            outcome.add_error(message)
+
+    baseline_section = baseline_payload.get("baseline") if isinstance(baseline_payload, Mapping) else {}
+    string_payload = baseline_section.get("string_analysis") if isinstance(baseline_section, Mapping) else {}
+    static_errors = _persist_static_tables(
+        package_name=br.manifest.package_name or run_package,
+        session_stamp=session_stamp,
+        scope_label=scope_label,
+        finding_totals=finding_totals,
+        baseline_section=baseline_section if isinstance(baseline_section, Mapping) else {},
+        string_payload=string_payload if isinstance(string_payload, Mapping) else {},
+    )
+    for err in static_errors:
+        outcome.add_error(err)
+
+    return outcome
 
 
-__all__ = ["persist_run_summary"]
+def _persist_static_tables(
+    *,
+    package_name: str,
+    session_stamp: str,
+    scope_label: str,
+    finding_totals: Mapping[str, int],
+    baseline_section: Mapping[str, object],
+    string_payload: Mapping[str, object],
+) -> list[str]:
+    errors: list[str] = []
+
+    severity_counts = _coerce_severity_counts(finding_totals)
+    details = {
+        "manifest_flags": baseline_section.get("manifest_flags"),
+        "exports": baseline_section.get("exports"),
+        "permissions": baseline_section.get("permissions"),
+        "nsc": baseline_section.get("nsc"),
+        "string_counts": (string_payload.get("counts") if isinstance(string_payload.get("counts"), Mapping) else {}),
+    }
+
+    try:
+        if not _sf.ensure_tables():
+            raise RuntimeError("static_findings tables unavailable")
+        summary_id = _sf.upsert_summary(
+            package_name=package_name,
+            session_stamp=session_stamp,
+            scope_label=scope_label,
+            severity_counts=severity_counts,
+            details=details,
+        )
+        if summary_id is None:
+            raise RuntimeError("upsert_summary returned None")
+        findings = baseline_section.get("findings")
+        if isinstance(findings, Sequence) and findings:
+            _sf.replace_findings(summary_id, tuple(findings))
+    except Exception as exc:
+        message = f"Failed to persist static findings summary for {package_name}: {exc}"
+        log.warning(message, category="static_analysis")
+        errors.append(message)
+
+    try:
+        if not _sa.ensure_tables():
+            raise RuntimeError("static_string tables unavailable")
+        counts = _normalise_string_counts(string_payload.get("counts"))
+        summary_record = _sa.StringSummaryRecord(
+            package_name=package_name,
+            session_stamp=session_stamp,
+            scope_label=scope_label,
+            counts=counts,
+        )
+        summary_id = _sa.upsert_summary(summary_record)
+        if summary_id is None:
+            raise RuntimeError("upsert_summary returned None")
+        samples_payload = string_payload.get("samples")
+        samples = samples_payload if isinstance(samples_payload, Mapping) else {}
+        _sa.replace_top_samples(summary_id, samples, top_n=3)
+    except Exception as exc:
+        message = f"Failed to persist string analysis summary for {package_name}: {exc}"
+        log.warning(message, category="static_analysis")
+        errors.append(message)
+
+    return errors
+
+
+def _coerce_severity_counts(totals: Mapping[str, int]) -> Mapping[str, int]:
+    def _value(*keys: str) -> int:
+        for key in keys:
+            value = totals.get(key)
+            if value is not None:
+                try:
+                    return int(value)
+                except (TypeError, ValueError):
+                    continue
+        return 0
+
+    return {
+        "High": _value("High", "H"),
+        "Medium": _value("Medium", "Med", "M"),
+        "Low": _value("Low", "L"),
+        "Info": _value("Info", "Information", "I"),
+    }
+
+
+def _normalise_string_counts(raw: object) -> Mapping[str, int]:
+    source = raw if isinstance(raw, Mapping) else {}
+    keys = (
+        "endpoints",
+        "http_cleartext",
+        "api_keys",
+        "analytics_ids",
+        "cloud_refs",
+        "ipc",
+        "uris",
+        "flags",
+        "certs",
+        "high_entropy",
+    )
+    return {key: int(source.get(key, 0) or 0) for key in keys}
+
+
+__all__ = ["persist_run_summary", "PersistenceOutcome"]

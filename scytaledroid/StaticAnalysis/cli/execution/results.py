@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages, table_utils
 
 from ...engine.strings import analyse_strings
@@ -24,6 +26,8 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
     print(f"Duration: {format_duration(outcome.duration_seconds)}")
     print()
 
+    persistence_errors: list[str] = []
+
     for index, app_result in enumerate(outcome.results, start=1):
         base_report = app_result.base_report()
         if base_report is None:
@@ -39,22 +43,42 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             cleartext_only=params.string_cleartext_only,
         )
 
-        try:
-            persist_run_summary(base_report, string_data, app_result.package_name)
-        except Exception as exc:
-            warning = (
-                f"Failed to persist run summary for {app_result.package_name}: {exc}"
-            )
-            print(status_messages.status(warning, level="warn"))
-
         total_duration = sum(artifact.duration_seconds for artifact in app_result.artifacts)
-        lines, payload, _ = render_app_result(
+        lines, payload, finding_totals = render_app_result(
             base_report,
             signer=app_result.signer,
             split_count=len(app_result.artifacts),
             string_data=string_data,
             duration_seconds=total_duration,
         )
+
+        try:
+            outcome_status = persist_run_summary(
+                base_report,
+                string_data,
+                app_result.package_name,
+                session_stamp=params.session_stamp,
+                scope_label=params.scope_label,
+                finding_totals=finding_totals,
+                baseline_payload=payload,
+                dry_run=params.dry_run,
+            )
+            if outcome_status and not outcome_status.success:
+                persistence_errors.extend(outcome_status.errors)
+        except Exception as exc:
+            warning = (
+                f"Failed to persist run summary for {app_result.package_name}: {exc}"
+            )
+            print(status_messages.status(warning, level="warn"))
+            persistence_errors.append(str(exc))
+
+        report_reference = None
+        base_artifact = app_result.base_artifact_outcome()
+        if base_artifact and base_artifact.saved_path:
+            try:
+                report_reference = f"report://{Path(base_artifact.saved_path).name}"
+            except Exception:
+                report_reference = None
 
         for line in lines:
             print(line)
@@ -73,6 +97,9 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             )
             print(status_messages.status(warning, level="warn"))
 
+        if report_reference:
+            print(f"  Report reference    → {report_reference}")
+
         if index < len(outcome.results):
             print()
 
@@ -86,7 +113,7 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
 
             render_app_table(outcome.results)
         if session_stamp and not params.dry_run:
-            _render_persistence_footer(session_stamp)
+            _render_persistence_footer(session_stamp, had_errors=bool(persistence_errors))
         _interactive_detail_loop(outcome, params)
 
     if outcome.warnings:
@@ -188,13 +215,13 @@ def _render_db_severity_table(session_stamp: str) -> bool:
 
     print()
     table_utils.render_table(
-        ["#", "Package", "targetSdk", "High", "Med", "Low", "Info"],
+        ["#", "Package", "targetSdk", "High", "Medium", "Low", "Information"],
         table_rows,
     )
     return True
 
 
-def _render_persistence_footer(session_stamp: str) -> None:
+def _render_persistence_footer(session_stamp: str, *, had_errors: bool = False) -> None:
     try:
         run_rows = core_q.run_sql(
             "SELECT run_id FROM runs WHERE session_stamp = %s",
@@ -219,10 +246,24 @@ def _render_persistence_footer(session_stamp: str) -> None:
         except (TypeError, ValueError):
             return 0
 
+    def _count_total(sql: str) -> int:
+        try:
+            row = core_q.run_sql(sql, fetch="one")
+        except Exception:
+            return 0
+        if not row:
+            return 0
+        value = row[0] if not isinstance(row, dict) else next(iter(row.values()), 0)
+        try:
+            return int(value or 0)
+        except (TypeError, ValueError):
+            return 0
+
     findings_summary = _count(
         "SELECT COUNT(*) FROM static_findings_summary WHERE session_stamp = %s",
         (session_stamp,),
     )
+    findings_summary_total = _count_total("SELECT COUNT(*) FROM static_findings_summary")
     findings_detail = _count(
         """
         SELECT COUNT(*)
@@ -232,10 +273,12 @@ def _render_persistence_footer(session_stamp: str) -> None:
         """,
         (session_stamp,),
     )
+    findings_detail_total = _count_total("SELECT COUNT(*) FROM static_findings")
     strings_summary = _count(
         "SELECT COUNT(*) FROM static_string_summary WHERE session_stamp = %s",
         (session_stamp,),
     )
+    strings_summary_total = _count_total("SELECT COUNT(*) FROM static_string_summary")
     string_samples = _count(
         """
         SELECT COUNT(*)
@@ -245,14 +288,17 @@ def _render_persistence_footer(session_stamp: str) -> None:
         """,
         (session_stamp,),
     )
+    string_samples_total = _count_total("SELECT COUNT(*) FROM static_string_samples")
     fileproviders = _count(
         "SELECT COUNT(*) FROM static_fileproviders WHERE session_stamp = %s",
         (session_stamp,),
     )
+    fileproviders_total = _count_total("SELECT COUNT(*) FROM static_fileproviders")
     provider_acl = _count(
         "SELECT COUNT(*) FROM static_provider_acl WHERE session_stamp = %s",
         (session_stamp,),
     )
+    provider_acl_total = _count_total("SELECT COUNT(*) FROM static_provider_acl")
 
     buckets = metrics = findings = contributors = 0
     if run_ids:
@@ -275,20 +321,30 @@ def _render_persistence_footer(session_stamp: str) -> None:
             params,
         )
 
+    runs_total = _count_total("SELECT COUNT(*) FROM runs")
+    buckets_total = _count_total("SELECT COUNT(*) FROM buckets")
+    metrics_total = _count_total("SELECT COUNT(*) FROM metrics")
+    findings_total = _count_total("SELECT COUNT(*) FROM findings")
+    contributors_total = _count_total("SELECT COUNT(*) FROM contributors")
+
     print()
     print("Persisted")
     print("==========")
     lines = [
-        ("runs", str(len(run_ids))),
-        ("static_findings_summary", f"{findings_summary} ({findings_detail})"),
-        ("static_string_summary", f"{strings_summary} ({string_samples})"),
-        ("static_fileproviders", str(fileproviders)),
-        ("static_provider_acl", str(provider_acl)),
-        ("buckets", str(buckets)),
-        ("metrics", str(metrics)),
-        ("findings", str(findings)),
-        ("contributors", str(contributors)),
+        ("runs", f"{len(run_ids)} (total={runs_total})"),
+        ("static_findings_summary", f"{findings_summary} (total={findings_summary_total})"),
+        ("static_findings", f"{findings_detail} (total={findings_detail_total})"),
+        ("static_string_summary", f"{strings_summary} (total={strings_summary_total})"),
+        ("static_string_samples", f"{string_samples} (total={string_samples_total})"),
+        ("static_fileproviders", f"{fileproviders} (total={fileproviders_total})"),
+        ("static_provider_acl", f"{provider_acl} (total={provider_acl_total})"),
+        ("buckets", f"{buckets} (total={buckets_total})"),
+        ("metrics", f"{metrics} (total={metrics_total})"),
+        ("findings", f"{findings} (total={findings_total})"),
+        ("contributors", f"{contributors} (total={contributors_total})"),
     ]
     width = max(len(name) for name, _ in lines) if lines else 0
     for name, detail in lines:
         print(f"  {name.ljust(width)} : {detail}")
+    if had_errors:
+        print(f"  {'status'.ljust(width)} : ERROR (see logs)")

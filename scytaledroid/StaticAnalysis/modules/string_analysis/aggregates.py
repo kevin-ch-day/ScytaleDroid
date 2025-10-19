@@ -16,7 +16,8 @@ def _masked_value(hit: StringHit) -> str:
 
 
 def summarise_endpoint_roots(
-    endpoint_by_root: Mapping[str, Counter[str]]
+    endpoint_by_root: Mapping[str, Counter[str]],
+    domain_sources: Mapping[str, set[str]] | None = None,
 ) -> list[dict[str, object]]:
     payload: list[dict[str, object]] = []
     for root, scheme_counts in endpoint_by_root.items():
@@ -26,6 +27,7 @@ def summarise_endpoint_roots(
                 "root_domain": root,
                 "total": total,
                 "schemes": dict(sorted(scheme_counts.items())),
+                "source_types": sorted(domain_sources.get(root, set())) if domain_sources else [],
             }
         )
     payload.sort(key=lambda item: item["total"], reverse=True)
@@ -129,6 +131,7 @@ def build_aggregates(
     *,
     endpoint_totals: Counter[str],
     endpoint_by_root: Mapping[str, Counter[str]],
+    domain_sources: Mapping[str, set[str]],
     endpoint_cleartext: Sequence[StringHit],
     api_key_hits: Sequence[StringHit],
     cloud_hits: Sequence[tuple[StringHit, str | None]],
@@ -137,7 +140,7 @@ def build_aggregates(
 ) -> Mapping[str, object]:
     return {
         "endpoint_totals": dict(endpoint_totals),
-        "endpoint_roots": summarise_endpoint_roots(endpoint_by_root),
+        "endpoint_roots": summarise_endpoint_roots(endpoint_by_root, domain_sources),
         "endpoint_cleartext": summarise_cleartext_hits(endpoint_cleartext),
         "api_keys_high": summarise_api_keys(api_key_hits),
         "cloud_refs": summarise_cloud_refs(cloud_hits),
@@ -155,4 +158,3 @@ __all__ = [
     "summarise_endpoint_roots",
     "summarise_entropy",
 ]
-

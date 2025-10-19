@@ -456,10 +456,10 @@ def analyse_strings(
                     sample_hash=sample_hash,
                 )
                 samples["http_cleartext"].append(clear_hit)
+                counts["http_cleartext"] += 1
+                endpoint_cleartext.append(clear_hit)
                 if confidence != "low":
-                    counts["http_cleartext"] += 1
                     extra_counts["http_cleartext"] += 1
-                    endpoint_cleartext.append(clear_hit)
             if endpoint.scheme == "https":
                 extra_counts["https"] += 1
             if "ip_private" in endpoint.categories:
@@ -649,6 +649,7 @@ def analyse_strings(
     aggregates = build_aggregates(
         endpoint_totals=endpoint_totals,
         endpoint_by_root=endpoint_by_root,
+        domain_sources=domain_sources,
         endpoint_cleartext=endpoint_cleartext,
         api_key_hits=api_key_hits,
         cloud_hits=cloud_hits,

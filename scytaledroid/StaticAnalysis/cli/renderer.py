@@ -22,6 +22,7 @@ from scytaledroid.StaticAnalysis.modules.string_analysis import (
     CollectionSummary,
     NormalizedString,
 )
+from scytaledroid.Utils.System import output_prefs
 
 from ..core import StaticAnalysisReport
 
@@ -603,9 +604,31 @@ def _normalise_string_data(raw: Mapping[str, object]) -> Mapping[str, object]:
         extra_counts = {str(k): int(extra_counts_payload.get(k, 0)) for k in extra_counts_payload}
     aggregates = aggregates_payload if isinstance(aggregates_payload, Mapping) else {}
     structured_payload = raw.get("structured") if isinstance(raw, Mapping) else {}
-    structured = structured_payload if isinstance(structured_payload, Mapping) else {}
+    structured = dict(structured_payload) if isinstance(structured_payload, Mapping) else {}
     options_payload = raw.get("options") if isinstance(raw, Mapping) else {}
     options = options_payload if isinstance(options_payload, Mapping) else {}
+
+    buckets_struct = structured.get("buckets")
+    if isinstance(buckets_struct, Mapping):
+        normalised_buckets: MutableMapping[str, Mapping[str, object]] = {}
+        for key, value in buckets_struct.items():
+            normalised_buckets[key] = dict(value) if isinstance(value, Mapping) else {}
+        structured["buckets"] = normalised_buckets
+        http_struct = normalised_buckets.get("http_cleartext")
+        if isinstance(http_struct, MutableMapping):
+            total = int(counts.get("http_cleartext", http_struct.get("total", 0)))
+            unique = int(http_struct.get("unique_values", 0))
+            if total <= 0:
+                unique = 0
+                total = 0
+            else:
+                if __debug__:
+                    assert unique <= total
+                unique = min(unique, total)
+            http_struct["total"] = total
+            http_struct["unique_values"] = unique
+            counts["http_cleartext"] = total
+
     return {
         "counts": counts,
         "samples": samples,
@@ -628,6 +651,12 @@ def _string_lines(string_payload: Mapping[str, object]) -> list[str]:
         sample_limit = max(int(options.get("max_samples", 2)), 1)
     except Exception:
         sample_limit = 2
+    try:
+        verbose_output = output_prefs.get().verbose
+    except Exception:
+        verbose_output = False
+    if not verbose_output:
+        sample_limit = min(sample_limit, 5)
     cleartext_only = bool(options.get("cleartext_only")) if isinstance(options, Mapping) else False
 
     def _count_value(key: str, *, source: Mapping[str, object] | None = None) -> int:
@@ -824,7 +853,16 @@ def _string_lines(string_payload: Mapping[str, object]) -> list[str]:
             policy = _load_policy("config/string_noise.toml")
             doc_hosts = policy.hosts_documentary
             filtered_roots = [
-                item for item in filtered_roots if str(item.get("root_domain") or "").lower() not in doc_hosts
+                item
+                for item in filtered_roots
+                if (
+                    str(item.get("root_domain") or "").lower() not in doc_hosts
+                    or any(
+                        source in {"dex", "code", "native"}
+                        for source in item.get("source_types", [])
+                        if isinstance(source, str)
+                    )
+                )
             ]
         except Exception:
             pass
@@ -870,6 +908,11 @@ def _string_lines(string_payload: Mapping[str, object]) -> list[str]:
         if isinstance(api_entries, Sequence):
             api_payload = [entry for entry in api_entries if isinstance(entry, Mapping)]
 
+    if api_payload:
+        if not verbose_output:
+            api_payload = [entry for entry in api_payload if str(entry.get("confidence") or "").lower() == "high"]
+        if not api_payload:
+            pass
     if api_payload:
         lines.append("")
         lines.append("  API Keys & Tokens (high-confidence)")
@@ -1024,7 +1067,13 @@ def _finding_lines(findings: Sequence[BaselineFinding], totals: Counter[str]) ->
         lines.append("  (none)")
         return lines
 
+    seen: set[tuple[str, str, str]] = set()
     for finding in findings:
+        pointer = finding.pointer
+        dedupe_key = (finding.finding_id, finding.severity, pointer)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
         token = _SEVERITY_TOKENS.get(finding.severity, "I")
         lines.append(f"  {token} {finding.finding_id}  {finding.title}")
         pointer_lines = _wrap_lines(finding.pointer, indent=4, subsequent_indent=6)
@@ -1108,8 +1157,7 @@ def render_app_result(
     )
     # Compact high-signal preview; full list only when verbose mode is set
     try:
-        from scytaledroid.Utils.System import output_prefs as _op
-        verbose = _op.get().verbose
+        verbose = output_prefs.get().verbose
     except Exception:
         verbose = False
     if declared:

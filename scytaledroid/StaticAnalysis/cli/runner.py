@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 
 from scytaledroid.Config import app_config
 from scytaledroid.Utils.DisplayUtils import menu_utils
+from scytaledroid.Utils.System import output_prefs
 
 from .execution import (
     build_analysis_config,
@@ -34,6 +35,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
     if session_stamp == previous_stamp:
         session_stamp = (now + timedelta(seconds=1)).strftime("%Y%m%d-%H%M%S")
     params = replace(params, session_stamp=session_stamp)
+    output_prefs.set_verbose(bool(params.verbose_output))
 
     workers = _resolve_workers(params.workers)
     if not params.reuse_cache:
