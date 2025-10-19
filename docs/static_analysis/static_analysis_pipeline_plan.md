@@ -12,8 +12,8 @@
   permissions (Androguard-powered scoring), IPC exposure, provider ACLs,
   network surface (with NSC policy graphs), secrets, storage/backup, DFIR
   hints, WebView hardening, crypto misuse, dynamic loading, file I/O sinks,
-  interaction surfaces, SDK inventory, native hardening, obfuscation, and a
-  correlation layer.
+  interaction surfaces, SDK inventory, native hardening, obfuscation, the
+  correlation layer, and the dedicated `StaticAnalysis/risk` package.
 - ✅ Pipeline runs persist pipeline traces, split-aware posture, differential
   metadata, and a reproducibility bundle (manifest digest, NSC serialisation,
   string-index sketch) inside the report metadata.
@@ -75,8 +75,9 @@
 - **Network Security Module:** `modules/network_security/` normalises NSC XML
   into policy graphs reused by network and correlation helpers.
 - **Correlation Engine:** The `detectors/correlation/` package handles diffing,
-  split composition, risk scoring, and final detector output with reproducible
-  provenance chains.
+  split composition, and final detector output with reproducible provenance
+  chains, while `StaticAnalysis/risk/` owns composite score calculation and
+  banding.
 - **Persistence Layer:** Interface `PersistenceAdapter` with implementations for
   JSON reports today and placeholders for future database writers. Reports embed
   pipeline metadata to support diff tooling even without a DB.
@@ -118,21 +119,16 @@ class Detector(Protocol):
   - Harvest string literals from DEX (class/method references) and resources/assets.
   - Deduplicate and tag origins (`code:com.example.Class#method`, `res:values/strings.xml`).
   - Support streaming to handle large APKs.
-- **patterns.py:**
+- **constants.py:**
   - Provider-specific regexes (Google API key, AWS, Firebase, etc.).
-  - Entropy-based heuristics, test-key suppression, whitelist handling.
-- **detectors/** (new modular package):
-  - `patterns.py` retains shared regexes/keyword sets for reuse across detectors.
-  - `common.py` provides fragment helpers (context windows, evidence builders,
-    entropy calculators) plus origin bucketing logic.
-  - `fragment.py` houses per-fragment detectors (endpoints, secrets, cloud,
-    feature flags, encoded payloads, entropy spikes).
-  - `pairing.py` captures cross-fragment logic such as AWS key pairing.
-  - `__init__.py` exposes registry helpers consumed by `post.py` so the
-    orchestration layer stays concise and composable.
-- **correlator.py:**
-  - Link string hits to permissions, endpoints, components.
-  - Produce hints like `overlay_permission + phishing_keyword`.
+  - Entropy heuristics, analytics vendor catalogs, and allow-lists centralised
+    for reuse by the extractor and matcher.
+- **aggregates.py / bucket_overview.py:**
+  - Build the structured rollups consumed by the CLI (endpoint roots, API keys,
+    entropy samples) while deduplicating hits and preserving evidence pointers.
+- **matcher.py / network.py:**
+  - Offer shared token classifiers, secret filters, and endpoint extraction
+    helpers so tuning happens in one place and all consumers stay in sync.
 - Outputs cached in context for detectors (secrets, network, privacy) and correlation rules.
 
 ## 7. Persistence Design
@@ -158,6 +154,7 @@ class Detector(Protocol):
 - Version run schema changes via semantic versioning stored in `static_analysis_runs.tool_version`.
 
 ## 8. CLI Integration
+- Default run path launches immediately with tuned defaults (auto workers, INFO logging, cache purge) while an "Advanced options" branch exposes overrides for analysts who need to adjust thresholds or detector subsets.
 - Add profile selector to `StaticAnalysis/cli/menu.py` (Quick vs Full; advanced flag for custom profile via CLI args).
 - Display summary metrics post-scan: counts per severity, top detectors triggered, run ID/JSON path, pipeline duration, and
   reproducibility bundle hash.
@@ -166,6 +163,8 @@ class Detector(Protocol):
     summaries using the stored `repro_bundle` hashes.
   - Legacy JSON viewer remains for `json_only` mode, exposing diff helpers for split posture and manifest drift.
 - Provide export command to dump DB run to JSON for sharing (`static-analysis export --run RUN_ID`).
+- Expose a Utilities → Housekeep action that prunes JSON/HTML artefacts beyond a 30-day retention window and resets cache/tmp
+  directories ahead of repeat runs.
 
 ## 9. Correlation Engine
 - Represent rules declaratively (e.g., YAML/JSON) to ease updates:

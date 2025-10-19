@@ -7,10 +7,8 @@ from dataclasses import dataclass
 from typing import Iterable, Mapping, MutableMapping, Sequence
 from urllib.parse import urlsplit
 
+from .constants import HTTP_URL_PATTERN
 from .extractor import IndexedString, StringIndex
-
-
-_ENDPOINT_REGEX = re.compile(r"https?://[^\s'\"<>]+")
 
 _TRUST_MANAGER_KEYWORDS = (
     "x509trustmanager",
@@ -58,7 +56,7 @@ def extract_endpoints(index: StringIndex) -> Sequence[EndpointMatch]:
         value = entry.value
         if not value or ("http" not in value and "HTTP" not in value):
             continue
-        for match in _ENDPOINT_REGEX.finditer(value):
+        for match in HTTP_URL_PATTERN.finditer(value):
             candidate = match.group(0)
             parsed = urlsplit(candidate)
             if parsed.scheme not in {"http", "https"}:

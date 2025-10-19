@@ -4,6 +4,15 @@ Shared utilities and re-exported helpers for the string-analysis pipeline."""
 
 from __future__ import annotations
 
+from .aggregates import (
+    build_aggregates,
+    summarise_analytics,
+    summarise_api_keys,
+    summarise_cleartext_hits,
+    summarise_cloud_refs,
+    summarise_endpoint_roots,
+    summarise_entropy,
+)
 from .bucket_meta import BUCKET_LABELS, BUCKET_METADATA, BUCKET_ORDER, BucketMetadata
 from .bucket_overview import build_bucket_overview
 from .extractor import (
@@ -17,7 +26,7 @@ from .extractor import (
     normalise_index,
 )
 from .hit_record import StringHit
-from .post import NoisePolicy, load_noise_policy, summarise
+from .allowlist import NoisePolicy, load_noise_policy
 from .matcher import (
     DEFAULT_SECRET_FILTERS,
     MatchBatch,
@@ -27,22 +36,13 @@ from .matcher import (
     StringMatcher,
 )
 from .network import EndpointMatch, detect_tls_keywords, extract_endpoints
-from .schema import (
-    CategoryRollup,
-    EvidenceRef,
-    FinalAssessment,
-    Observation,
-    Scorecard,
-    SniSummary,
-    TestResult,
-)
-from .scoring import ProfileCatalog, TestCatalog, evaluate_tests, load_profiles, load_test_catalog
 
 __all__ = [
     "BucketMetadata",
     "BUCKET_LABELS",
     "BUCKET_METADATA",
     "BUCKET_ORDER",
+    "build_aggregates",
     "IndexedString",
     "StringIndex",
     "NormalizedString",
@@ -51,15 +51,7 @@ __all__ = [
     "CollectionMetrics",
     "StringHit",
     "NoisePolicy",
-    "Observation",
-    "EvidenceRef",
-    "SniSummary",
-    "Scorecard",
-    "CategoryRollup",
-    "FinalAssessment",
-    "TestResult",
     "load_noise_policy",
-    "summarise",
     "EndpointMatch",
     "build_bucket_overview",
     "build_string_index",
@@ -72,9 +64,10 @@ __all__ = [
     "MatchRecord",
     "MatchStatus",
     "StringMatcher",
-    "TestCatalog",
-    "ProfileCatalog",
-    "load_test_catalog",
-    "load_profiles",
-    "evaluate_tests",
+    "summarise_analytics",
+    "summarise_api_keys",
+    "summarise_cleartext_hits",
+    "summarise_cloud_refs",
+    "summarise_endpoint_roots",
+    "summarise_entropy",
 ]

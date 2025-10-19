@@ -12,6 +12,7 @@ GITHUB_REPO = "https://github.com/kevin-ch-day/ScytaleDroid"
 DATA_DIR   = "data"
 OUTPUT_DIR = "output"
 LOGS_DIR   = "logs"
+STATIC_ANALYSIS_RETENTION_DAYS = 30
 
 # Device module paths
 DEVICE_STATE_DIR = "state"

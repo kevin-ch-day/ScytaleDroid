@@ -31,18 +31,19 @@ class RunParameters:
     selected_tests: Tuple[str, ...] = tuple()
     evidence_lines: int = 2
     finding_limit: int = 25
-    secrets_entropy: float = 4.5
+    secrets_entropy: float = 4.8
     secrets_hits_per_bucket: int = 40
-    secrets_scope: str = "resources"
+    secrets_scope: str = "both"
     strings_mode: str = "both"
     string_max_samples: int = 2
     string_min_entropy: float = 4.8
     string_cleartext_only: bool = False
     workers: str = "auto"
-    reuse_cache: bool = True
+    reuse_cache: bool = False
     log_level: str = "info"
     trace_detectors: Tuple[str, ...] = tuple()
     dry_run: bool = False
+    session_stamp: str | None = None
 
     @property
     def profile_label(self) -> str:
@@ -54,6 +55,26 @@ class RunParameters:
             "split": "Split-APK composition",
             "custom": "Custom",
         }.get(self.profile, self.profile.title())
+
+    @property
+    def secrets_scope_canonical(self) -> str:
+        mapping = {
+            "resources": "resources-only",
+            "resources-only": "resources-only",
+            "dex": "dex-only",
+            "dex-only": "dex-only",
+            "both": "both",
+        }
+        return mapping.get((self.secrets_scope or "").lower(), "both")
+
+    @property
+    def secrets_scope_label(self) -> str:
+        token = self.secrets_scope_canonical
+        return {
+            "resources-only": "Resources only",
+            "dex-only": "DEX only",
+            "both": "Resources + DEX",
+        }.get(token, "Resources + DEX")
 
 
 @dataclass

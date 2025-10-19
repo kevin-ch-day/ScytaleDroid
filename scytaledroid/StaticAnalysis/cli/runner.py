@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+import os
 from pathlib import Path
+import shutil
+
+from scytaledroid.Config import app_config
+from scytaledroid.Utils.DisplayUtils import menu_utils
 
 from .execution import (
     build_analysis_config,
@@ -14,19 +20,37 @@ from .execution import (
     render_run_results,
 )
 from .models import RunParameters, ScopeSelection
-from .prompts import prompt_tuning
+from .profiles import run_modules_for_profile
 from .scope import format_scope_target
 
 
 def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir: Path) -> None:
     """Primary entry point for running static analysis flows from the CLI."""
 
+    session_stamp = params.session_stamp or datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    params.session_stamp = session_stamp
+
+    workers = _resolve_workers(params.workers)
+    if not params.reuse_cache:
+        _purge_run_cache()
+
+    modules = _modules_for_run(params)
     scope_target = format_scope_target(selection)
+
     print()
-    print(f"Running — {params.profile_label} static analysis")
-    print(f"Target : {scope_target}")
-    print(f"Profile: {params.profile_label}")
-    print("-" * 41)
+    menu_utils.print_section("Run Overview")
+    print(f"Scope      : {scope_target}")
+    print(f"Profile    : {params.profile_label}")
+    print(f"Session    : {session_stamp}")
+    workers_label = f"auto ({workers})" if isinstance(params.workers, str) else str(workers)
+    print(f"Workers    : {workers_label}")
+    print(f"Cache      : {'purge' if not params.reuse_cache else 'reuse'}")
+    print(f"Log Level  : {params.log_level.upper()}")
+    if modules:
+        print(f"Detectors  : {', '.join(modules)}")
+    if params.trace_detectors:
+        print(f"Trace IDs  : {', '.join(params.trace_detectors)}")
+    print()
 
     configure_logging_for_cli(params.log_level)
 
@@ -39,12 +63,39 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
 
     if params.profile in {"full", "lightweight"}:
         try:
-            perm_params = prompt_tuning(params)
             print()
             print("-- Re-rendering Permission Analysis snapshot for parity --")
-            execute_permission_scan(selection, perm_params, persist_detections=False)
+            execute_permission_scan(selection, params, persist_detections=False)
         except Exception:
             pass
+
+
+def _modules_for_run(params: RunParameters) -> tuple[str, ...]:
+    if params.profile == "custom" and params.selected_tests:
+        return params.selected_tests
+    return run_modules_for_profile(params.profile)
+
+
+def _resolve_workers(value: str | int) -> int:
+    if isinstance(value, int):
+        return max(1, value)
+    text = (value or "").strip().lower()
+    if text.isdigit():
+        return max(1, int(text))
+    return max(1, os.cpu_count() or 1)
+
+
+def _purge_run_cache() -> None:
+    cache_roots = [
+        Path(app_config.DATA_DIR) / "static_analysis" / "cache",
+        Path(app_config.DATA_DIR) / "static_analysis" / "tmp",
+    ]
+    for root in cache_roots:
+        try:
+            if root.exists():
+                shutil.rmtree(root)
+        except OSError:
+            continue
 
 
 __all__ = [

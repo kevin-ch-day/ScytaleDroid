@@ -8,7 +8,7 @@ from typing import Any, Iterable, Mapping, MutableMapping, Sequence
 from scytaledroid.Config import app_config
 
 from ..core import Finding, SeverityLevel, StaticAnalysisReport
-from ..detectors.permissions import PermissionsProfileDetector
+from ..risk import compute_risk_assessment
 
 
 _DEFAULT_TIME_FORMAT = "%Y-%m-%d %H:%M"
@@ -62,12 +62,12 @@ def build_report_view(report: StaticAnalysisReport) -> Mapping[str, Any]:
 
     secrets_payload = _collect_secret_rows(report)
 
-    risk_payload = _compute_risk_model(
-        permission_entries,
-        secrets_payload,
-        network_payload,
-        report,
-    )
+    risk_payload = compute_risk_assessment(
+        permissions=permission_entries,
+        secrets=secrets_payload,
+        network=network_payload,
+        report=report,
+    ).to_dict()
 
     timestamp_utc = _format_generated_timestamp(report.generated_at)
     toolchain = _normalise_toolchain(metadata.get("toolchain"))
@@ -463,57 +463,6 @@ def _collect_secret_rows(report: StaticAnalysisReport) -> list[Mapping[str, Any]
 
     entries.sort(key=lambda entry: (entry["severity"], entry["type"]))
     return entries
-
-
-def _compute_risk_model(
-    permissions: Sequence[Mapping[str, Any]],
-    secrets: Sequence[Mapping[str, Any]],
-    network: Mapping[str, Any],
-    report: StaticAnalysisReport,
-) -> Mapping[str, Any]:
-    score = 0
-    factors: list[str] = []
-
-    p0_secret_count = sum(1 for entry in secrets if entry.get("severity") == SeverityLevel.P0.value)
-    p1_secret_count = sum(1 for entry in secrets if entry.get("severity") == SeverityLevel.P1.value)
-    secret_score = min(75, p0_secret_count * 45 + p1_secret_count * 25)
-    if secret_score:
-        score += secret_score
-        if p0_secret_count:
-            factors.append("P0 secrets")
-        elif p1_secret_count:
-            factors.append("P1 secrets")
-
-    uses_cleartext = report.manifest_flags.uses_cleartext_traffic is True
-    http_count = network.get("http_count") or 0
-    if uses_cleartext and http_count:
-        declared = set(report.permissions.declared)
-        if "android.permission.INTERNET" in declared:
-            score += 20
-            factors.append("cleartext traffic")
-
-    high_risk_permissions = sum(1 for entry in permissions if entry.get("risk") == "High")
-    if high_risk_permissions:
-        perm_score = min(20, high_risk_permissions * 5)
-        score += perm_score
-        factors.append("high-risk permissions")
-
-    score = min(score, 100)
-
-    if score >= 70:
-        band = "High"
-    elif score >= 40:
-        band = "Medium"
-    else:
-        band = "Low"
-
-    return {
-        "score": score,
-        "band": band,
-        "top_factors": factors[:5],
-    }
-
-
 def _format_generated_timestamp(timestamp: str | None) -> str:
     if not timestamp:
         return datetime.now(timezone.utc).strftime(_DEFAULT_TIME_FORMAT)

@@ -1,6 +1,6 @@
 """Core pipeline components for static analysis."""
 
-from .context import AnalysisConfig, DetectorContext
+from .context import AnalysisConfig, DetectorContext, SecretsSamplerConfig
 from .errors import StaticAnalysisError
 from .models import (
     ComponentSummary,
@@ -26,6 +26,7 @@ from .findings import (
 __all__ = [
     "AnalysisConfig",
     "DetectorContext",
+    "SecretsSamplerConfig",
     "analyze_apk",
     "ComponentSummary",
     "ManifestFlags",

@@ -211,7 +211,7 @@ def configure_third_party_loggers(
     *,
     verbosity: str,
     run_id: Optional[str],
-    debug_dir: str,
+    debug_dir: Optional[str] = None,
 ) -> Optional[Path]:
     """Configure androguard logging based on the requested verbosity.
 
@@ -259,7 +259,14 @@ def configure_third_party_loggers(
         logger.propagate = True
         logger.setLevel(logging.DEBUG)
 
-    target_dir = Path(debug_dir).expanduser().resolve()
+    resolved_debug_dir = debug_dir
+    if not resolved_debug_dir:
+        from os import path as _os_path
+
+        default_root = Path(_os_path.expanduser("~")) / ".scytaledroid" / "logs"
+        resolved_debug_dir = str(default_root)
+
+    target_dir = Path(resolved_debug_dir).expanduser().resolve()
     target_dir.mkdir(parents=True, exist_ok=True)
 
     identifier = run_id or "session"

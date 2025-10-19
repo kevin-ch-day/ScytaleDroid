@@ -12,8 +12,7 @@ from ..core.repository import group_artifacts
 from .commands import COMMANDS, get_command, iter_commands
 from .commands.models import Command
 from .models import RunParameters
-from .profiles import run_modules_for_profile
-from .prompts import prompt_tuning
+from .prompts import default_custom_tests, prompt_advanced_options
 from .runner import launch_scan_flow
 from .scope import select_scope
 
@@ -62,20 +61,29 @@ def static_analysis_menu() -> None:
             continue
 
         selection = select_scope(groups)
-        params = RunParameters(profile=command.profile, scope=selection.scope, scope_label=selection.label)
-        params = prompt_tuning(params)
-
-        modules = (
-            params.selected_tests
-            if params.profile == "custom" and params.selected_tests
-            else run_modules_for_profile(params.profile)
+        params = RunParameters(
+            profile=command.profile,
+            scope=selection.scope,
+            scope_label=selection.label,
+            selected_tests=(
+                default_custom_tests() if command.profile == "custom" else tuple()
+            ),
         )
-        print()
-        menu_utils.print_section("Run Overview")
-        for module in modules:
-            print(f"  - {module}")
 
-        launch_scan_flow(selection, params, base_dir)
+        while True:
+            print()
+            menu_utils.print_section("Run controls")
+            print("  R) Run with defaults")
+            print("  A) Advanced options")
+            print("  0) Back")
+            choice = prompt_utils.get_choice(["R", "A", "0"], default="R")
+            if choice == "0":
+                break
+            if choice == "A":
+                params = prompt_advanced_options(params)
+                continue
+            launch_scan_flow(selection, params, base_dir)
+            break
 
 
 def _menu_entries(

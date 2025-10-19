@@ -5,13 +5,14 @@ from __future__ import annotations
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
-from typing import Mapping, MutableMapping, Optional, Sequence, Tuple
+from typing import Iterable, Mapping, MutableMapping, Optional, Sequence, Tuple
 
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ...core import (
     AnalysisConfig,
+    SecretsSamplerConfig,
     StaticAnalysisError,
     StaticAnalysisReport,
     analyze_apk,
@@ -34,35 +35,61 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
         results.append(app_result)
 
         for artifact_index, artifact in enumerate(group.artifacts, start=1):
-            progress_label = f"[{group_index}/{len(selection.groups)}] {group.package_name}"
-            if len(group.artifacts) > 1:
-                progress_label += f" ({artifact_index}/{len(group.artifacts)})"
+            progress_label = _progress_label(group_index, len(selection.groups), artifact_index, len(group.artifacts), group.package_name)
 
-            _, summary = _execute_single_artifact(progress_label, artifact, params, selection, base_dir)
+            report, summary, timings = _execute_single_artifact(
+                progress_label,
+                artifact,
+                params,
+                selection,
+                base_dir,
+            )
             if summary is None:
                 failures.append(f"No report generated for {artifact.display_path}")
                 continue
 
             app_result.artifacts.append(summary)
+            if report is not None:
+                _print_artifact_progress(progress_label, summary, timings)
 
     finished_at = datetime.utcnow()
     return RunOutcome(results, started_at, finished_at, selection, base_dir, warnings, failures)
 
 
 def _execute_single_artifact(progress_label: str, artifact, params: RunParameters, selection: ScopeSelection, base_dir: Path):
-    print(f"{progress_label} … analyzing {artifact.artifact_label or 'base'}")
+    print(f"{progress_label} • starting {artifact.artifact_label or 'base'}")
     report, json_path, error, skipped = generate_report(artifact, base_dir, params)
     if skipped:
-        return None, None
+        return None, None, tuple()
 
     if error:
         print(status_messages.status(error, level="error"))
-        return error, None
+        return None, None, tuple()
 
     duration = report.metadata.get("duration_seconds", 0.0) if isinstance(report.metadata, Mapping) else 0.0
     summary = _summarize_artifact(artifact, report, json_path, duration)
-    print(f"{progress_label} … done ({format_duration(duration)})")
-    return report, summary
+    timings = tuple(
+        (result.detector_id or "detector", float(getattr(result, "duration_sec", 0.0) or 0.0))
+        for result in getattr(report, "detector_results", [])
+    )
+    print(f"{progress_label} • finished {artifact.artifact_label or 'base'} ({format_duration(duration)})")
+    return report, summary, timings
+
+
+def _print_artifact_progress(label: str, summary: ArtifactOutcome, timings: Iterable[tuple[str, float]]) -> None:
+    detector_timings = [(name, dur) for name, dur in timings if dur > 0]
+    if not detector_timings:
+        return
+    print(f"    detectors={len(detector_timings)} total={format_duration(summary.duration_seconds)}")
+    for name, duration in detector_timings:
+        print(f"      - {name:<18} {format_duration(duration)}")
+
+
+def _progress_label(group_index: int, group_total: int, artifact_index: int, artifact_total: int, package_name: str) -> str:
+    label = f"[{group_index}/{group_total}] {package_name}"
+    if artifact_total > 1:
+        label += f" ({artifact_index}/{artifact_total})"
+    return label
 
 
 def _summarize_artifact(artifact, report: StaticAnalysisReport, json_path: Optional[Path], duration: float) -> ArtifactOutcome:
@@ -89,6 +116,8 @@ def generate_report(artifact, base_dir: Path, params: RunParameters):
     metadata_payload.setdefault("run_scope", params.scope)
     metadata_payload.setdefault("run_scope_label", params.scope_label)
     metadata_payload.setdefault("selected_tests", list(params.selected_tests))
+    if params.session_stamp:
+        metadata_payload.setdefault("session_stamp", params.session_stamp)
 
     try:
         report = analyze_apk(
@@ -131,11 +160,18 @@ def build_analysis_config(params: RunParameters) -> AnalysisConfig:
     if params.profile == "custom" and any(test in params.selected_tests for test in ("secrets", "strings")):
         enable_string_index = True
 
+    sampler = SecretsSamplerConfig(
+        entropy_threshold=max(0.0, float(params.secrets_entropy)),
+        hits_per_bucket=max(1, int(params.secrets_hits_per_bucket or 1)),
+        scope=params.secrets_scope_canonical,
+    )
+
     return AnalysisConfig(
         profile=profile,
         verbosity=params.log_level,
         enabled_detectors=enabled_detectors or None,
         enable_string_index=enable_string_index,
+        secrets_sampler=sampler,
     )
 
 

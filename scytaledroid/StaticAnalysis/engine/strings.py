@@ -19,35 +19,32 @@ from scytaledroid.StaticAnalysis._androguard import APK
 from ..modules.string_analysis import (
     BUCKET_ORDER,
     StringHit,
+    build_aggregates,
     build_bucket_overview,
     build_string_index,
 )
-
-
-_ENDPOINT_PATTERN = re.compile(r"(?:https?|wss?)://[^\s\"'<>]+", re.IGNORECASE)
-_CONTENT_URI_PATTERN = re.compile(r"content://[^\s\"'<>]+", re.IGNORECASE)
-_FILE_URI_PATTERN = re.compile(r"file://[^\s\"'<>]+", re.IGNORECASE)
-_JWT_PATTERN = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
-
-_S3_VIRTUAL_HOST_REGION = re.compile(
-    r"(?P<bucket>[a-z0-9.-]+)\.s3[.-](?P<region>[a-z0-9-]+)\.amazonaws\.com"
+from ..modules.string_analysis.constants import (
+    ANALYTICS_PATTERNS,
+    API_KEY_PATTERNS,
+    AZURE_BLOB_PATTERN,
+    CLOUDFRONT_HOST_PATTERN,
+    CONTENT_URI_PATTERN,
+    DOCUMENTARY_ROOTS,
+    ENDPOINT_PATTERN,
+    FILE_URI_PATTERN,
+    FIREBASE_DB_PATTERN,
+    FIREBASE_STORAGE_PATTERN,
+    GCS_HOST_PATTERN,
+    GCS_URI_PATTERN,
+    INTERNAL_HOST_SUFFIXES,
+    JWT_FULLMATCH_PATTERN,
+    MULTI_LEVEL_SUFFIXES,
+    S3_PATH_GLOBAL,
+    S3_PATH_REGION,
+    S3_URI_PATTERN,
+    S3_VIRTUAL_HOST_GLOBAL,
+    S3_VIRTUAL_HOST_REGION,
 )
-_S3_VIRTUAL_HOST_GLOBAL = re.compile(r"(?P<bucket>[a-z0-9.-]+)\.s3\.amazonaws\.com")
-_S3_PATH_REGION = re.compile(
-    r"s3[.-](?P<region>[a-z0-9-]+)\.amazonaws\.com/(?P<bucket>[a-z0-9._-]+)/?"
-)
-_S3_PATH_GLOBAL = re.compile(r"s3\.amazonaws\.com/(?P<bucket>[a-z0-9._-]+)/?")
-_S3_URI = re.compile(r"s3://(?P<bucket>[a-z0-9._-]+)/?")
-_GCS_HOST = re.compile(r"storage.googleapis.com/(?P<bucket>[a-z0-9._-]+)/?")
-_GCS_URI = re.compile(r"gs://(?P<bucket>[a-z0-9._-]+)/?")
-_AZURE_BLOB = re.compile(
-    r"(?P<account>[a-z0-9-]+)\.blob.core.windows.net/(?P<container>[a-z0-9-]+)/?"
-)
-_FIREBASE_DB = re.compile(r"(?P<project>[a-z0-9-]+)\.firebaseio.com")
-_FIREBASE_STORAGE = re.compile(
-    r"firebasestorage.googleapis.com/v0/b/(?P<bucket>[a-z0-9._-]+)/?"
-)
-_CLOUDFRONT_HOST = re.compile(r"(?P<host>[a-z0-9.-]+\.cloudfront\.net)")
 
 
 @dataclass(frozen=True)
@@ -91,53 +88,6 @@ _SOURCE_TYPE_MAP = {
     "native": "asset",
 }
 
-_INTERNAL_HOST_SUFFIXES = {
-    "corp",
-    "internal",
-    "lan",
-    "local",
-    "intra",
-}
-
-_MULTI_LEVEL_SUFFIXES = {
-    "co.uk",
-    "ac.uk",
-    "gov.uk",
-    "com.au",
-    "net.au",
-    "org.au",
-    "com.br",
-    "com.cn",
-    "com.tr",
-    "com.mx",
-    "com.sg",
-    "com.hk",
-    "com.tw",
-    "co.in",
-    "co.jp",
-    "ne.jp",
-}
-
-_ANALYTICS_PATTERNS: Mapping[str, tuple[str, re.Pattern[str]]] = {
-    "ga": ("google_analytics", re.compile(r"UA-\d{4,}-\d+", re.IGNORECASE)),
-    "gtag": ("gtag", re.compile(r"G-[A-Z0-9]{6,}", re.IGNORECASE)),
-    "firebase": ("firebase", re.compile(r"1:[0-9]{8,}:[a-z0-9]{10,}", re.IGNORECASE)),
-    "admob": ("admob", re.compile(r"ca-app-pub-[0-9]{16}/[0-9]{10}", re.IGNORECASE)),
-    "adjust": ("adjust", re.compile(r"[0-9a-f]{8}[0-9a-z]{8}", re.IGNORECASE)),
-    "appsflyer": ("appsflyer", re.compile(r"[0-9a-f]{32}af", re.IGNORECASE)),
-    "segment": ("segment", re.compile(r"[A-Za-z0-9]{32}\.[A-Za-z0-9]{32}", re.IGNORECASE)),
-    "mixpanel": ("mixpanel", re.compile(r"[0-9a-f]{24}", re.IGNORECASE)),
-}
-
-_API_KEY_PATTERNS: Mapping[str, re.Pattern[str]] = {
-    "aws_access_key": re.compile(r"A(?:KI|SI)A[0-9A-Z]{16}"),
-    "aws_secret": re.compile(r"(?<![A-Z0-9])[A-Za-z0-9/+=]{40}(?![A-Za-z0-9/+=])"),
-    "google_api_key": re.compile(r"AIza[0-9A-Za-z\-_]{35}"),
-    "stripe": re.compile(r"s[kpr]_(?:live|test)_[0-9a-zA-Z]{16,}"),
-    "slack": re.compile(r"xox(?:p|b|o|a|s|r)-[0-9A-Za-z-]{10,}"),
-    "github": re.compile(r"gh[opsuhr]_[0-9A-Za-z]{36}"),
-    "twilio": re.compile(r"(?:AC|SK)[0-9a-fA-F]{32}"),
-}
 
 
 def _short_hash(value: str) -> str:
@@ -182,7 +132,7 @@ def _registrable_root(host: str | None) -> str | None:
         return lowered
     suffix_two = ".".join(parts[-2:])
     suffix_three = ".".join(parts[-3:])
-    if suffix_three in _MULTI_LEVEL_SUFFIXES:
+    if suffix_three in MULTI_LEVEL_SUFFIXES:
         return suffix_three
     return suffix_two
 
@@ -193,7 +143,7 @@ def _host_risk_tag(host: str | None) -> str | None:
     lowered = host.lower()
     if lowered in {"localhost", "127.0.0.1", "::1"}:
         return "internal_domain"
-    for suffix in _INTERNAL_HOST_SUFFIXES:
+    for suffix in INTERNAL_HOST_SUFFIXES:
         if lowered.endswith(f".{suffix}") or lowered == suffix:
             return "internal_domain"
     return "prod_domain"
@@ -216,7 +166,7 @@ def _ip_categories(host: str | None) -> tuple[str, ...]:
 
 
 def _detect_endpoints(value: str) -> Iterable[EndpointInfo]:
-    for raw in _ENDPOINT_PATTERN.findall(value):
+    for raw in ENDPOINT_PATTERN.findall(value):
         parsed = urlsplit(raw)
         scheme = (parsed.scheme or "").lower()
         host = parsed.hostname
@@ -263,7 +213,7 @@ def _detect_cloud_refs(value: str) -> Iterable[CloudReference]:
             raw=value,
         )
 
-    for match in _S3_VIRTUAL_HOST_REGION.finditer(lowered):
+    for match in S3_VIRTUAL_HOST_REGION.finditer(lowered):
         ref = _emit(
             "aws",
             "s3",
@@ -273,12 +223,12 @@ def _detect_cloud_refs(value: str) -> Iterable[CloudReference]:
         if ref:
             yield ref
 
-    for match in _S3_VIRTUAL_HOST_GLOBAL.finditer(lowered):
+    for match in S3_VIRTUAL_HOST_GLOBAL.finditer(lowered):
         ref = _emit("aws", "s3", match.group("bucket"), None)
         if ref:
             yield ref
 
-    for match in _S3_PATH_REGION.finditer(lowered):
+    for match in S3_PATH_REGION.finditer(lowered):
         ref = _emit(
             "aws",
             "s3",
@@ -288,27 +238,27 @@ def _detect_cloud_refs(value: str) -> Iterable[CloudReference]:
         if ref:
             yield ref
 
-    for match in _S3_PATH_GLOBAL.finditer(lowered):
+    for match in S3_PATH_GLOBAL.finditer(lowered):
         ref = _emit("aws", "s3", match.group("bucket"), None)
         if ref:
             yield ref
 
-    for match in _S3_URI.finditer(lowered):
+    for match in S3_URI_PATTERN.finditer(lowered):
         ref = _emit("aws", "s3", match.group("bucket"), None)
         if ref:
             yield ref
 
-    for match in _GCS_HOST.finditer(lowered):
+    for match in GCS_HOST_PATTERN.finditer(lowered):
         ref = _emit("gcp", "gcs", match.group("bucket"), None)
         if ref:
             yield ref
 
-    for match in _GCS_URI.finditer(lowered):
+    for match in GCS_URI_PATTERN.finditer(lowered):
         ref = _emit("gcp", "gcs", match.group("bucket"), None)
         if ref:
             yield ref
 
-    for match in _AZURE_BLOB.finditer(lowered):
+    for match in AZURE_BLOB_PATTERN.finditer(lowered):
         account = match.group("account")
         container = match.group("container")
         resource = f"{account}/{container}" if account and container else account or container
@@ -316,17 +266,17 @@ def _detect_cloud_refs(value: str) -> Iterable[CloudReference]:
         if ref:
             yield ref
 
-    for match in _FIREBASE_DB.finditer(lowered):
+    for match in FIREBASE_DB_PATTERN.finditer(lowered):
         ref = _emit("firebase", None, match.group("project"), None)
         if ref:
             yield ref
 
-    for match in _FIREBASE_STORAGE.finditer(lowered):
+    for match in FIREBASE_STORAGE_PATTERN.finditer(lowered):
         ref = _emit("firebase", "storage", match.group("bucket"), None)
         if ref:
             yield ref
 
-    for match in _CLOUDFRONT_HOST.finditer(lowered):
+    for match in CLOUDFRONT_HOST_PATTERN.finditer(lowered):
         ref = _emit("aws", "cloudfront", match.group("host"), None)
         if ref:
             yield ref
@@ -343,7 +293,7 @@ def _looks_dummy(text: str) -> bool:
 
 
 def _classify_token(value: str) -> Iterable[TokenMatch]:
-    for key, pattern in _API_KEY_PATTERNS.items():
+    for key, pattern in API_KEY_PATTERNS.items():
         for match in pattern.findall(value):
             if _looks_dummy(match):
                 continue
@@ -363,7 +313,7 @@ def _classify_token(value: str) -> Iterable[TokenMatch]:
 
 
 def _classify_analytics(value: str) -> Iterable[AnalyticsMatch]:
-    for _, (vendor, pattern) in _ANALYTICS_PATTERNS.items():
+    for _, (vendor, pattern) in ANALYTICS_PATTERNS.items():
         for match in pattern.findall(value):
             if not match or _looks_dummy(match):
                 continue
@@ -390,7 +340,7 @@ def _entropy_bucket(value: str, *, minimum: float) -> tuple[str | None, float]:
 
 
 def _detect_jwt(value: str) -> bool:
-    return bool(_JWT_PATTERN.match(value.strip()))
+    return bool(JWT_FULLMATCH_PATTERN.match(value.strip()))
 
 
 def analyse_strings(
@@ -438,6 +388,7 @@ def analyse_strings(
     endpoint_totals: Counter[str] = Counter()
     endpoint_by_root: MutableMapping[str, Counter[str]] = defaultdict(Counter)
     endpoint_cleartext: list[StringHit] = []
+    domain_sources: MutableMapping[str, set[str]] = defaultdict(set)
     analytics_vendor_ids: MutableMapping[str, MutableMapping[str, set[str]]] = defaultdict(
         lambda: defaultdict(set)
     )
@@ -452,6 +403,8 @@ def analyse_strings(
 
         for endpoint in _detect_endpoints(value):
             sample_hash = _short_hash(endpoint.url)
+            if endpoint.root_domain:
+                domain_sources[endpoint.root_domain].add(source_type or "unknown")
             hit = StringHit(
                 bucket="endpoints",
                 value=endpoint.url,
@@ -475,6 +428,16 @@ def analyse_strings(
             if endpoint.root_domain:
                 endpoint_by_root[endpoint.root_domain].update({endpoint.scheme or "other": 1})
             if "http_cleartext" in endpoint.categories and endpoint.risk_tag == "http_cleartext":
+                if (
+                    endpoint.root_domain
+                    and endpoint.root_domain.lower() in DOCUMENTARY_ROOTS
+                ):
+                    continue
+                confidence = "high"
+                if endpoint.root_domain:
+                    sources = domain_sources.get(endpoint.root_domain, set())
+                    if "dex" not in sources:
+                        confidence = "low"
                 clear_hit = StringHit(
                     bucket="http_cleartext",
                     value=endpoint.url,
@@ -485,7 +448,7 @@ def analyse_strings(
                     finding_type="endpoint",
                     provider=None,
                     risk_tag=endpoint.risk_tag,
-                    confidence="high",
+                    confidence=confidence,
                     scheme=endpoint.scheme,
                     root_domain=endpoint.root_domain,
                     resource_name=None,
@@ -493,9 +456,10 @@ def analyse_strings(
                     sample_hash=sample_hash,
                 )
                 samples["http_cleartext"].append(clear_hit)
-                counts["http_cleartext"] += 1
-                extra_counts["http_cleartext"] += 1
-                endpoint_cleartext.append(hit)
+                if confidence != "low":
+                    counts["http_cleartext"] += 1
+                    extra_counts["http_cleartext"] += 1
+                    endpoint_cleartext.append(clear_hit)
             if endpoint.scheme == "https":
                 extra_counts["https"] += 1
             if "ip_private" in endpoint.categories:
@@ -507,7 +471,7 @@ def analyse_strings(
             if endpoint.scheme in {"ws", "wss"}:
                 extra_counts[endpoint.scheme] += 1
 
-        if _CONTENT_URI_PATTERN.search(value) or _FILE_URI_PATTERN.search(value):
+        if CONTENT_URI_PATTERN.search(value) or FILE_URI_PATTERN.search(value):
             tag = "content" if value.lower().startswith("content://") else "file"
             hit = StringHit(
                 bucket="uris",
@@ -682,95 +646,15 @@ def analyse_strings(
 
     structured = build_bucket_overview(raw_samples, counts)
 
-    endpoint_roots_payload = []
-    for root, scheme_counts in endpoint_by_root.items():
-        total = sum(scheme_counts.values())
-        endpoint_roots_payload.append(
-            {
-                "root_domain": root,
-                "total": total,
-                "schemes": dict(sorted(scheme_counts.items())),
-            }
-        )
-    endpoint_roots_payload.sort(key=lambda item: item["total"], reverse=True)
-
-    cleartext_payload = []
-    seen_clear: set[tuple[str, str]] = set()
-    for hit in endpoint_cleartext:
-        key = (hit.value, hit.src or "")
-        if key in seen_clear:
-            continue
-        seen_clear.add(key)
-        cleartext_payload.append(
-            {
-                "value": hit.value,
-                "src": hit.src,
-                "root_domain": hit.root_domain,
-                "scheme": hit.scheme,
-                "risk_tag": hit.risk_tag,
-            }
-        )
-
-    api_keys_payload = [
-        {
-            "provider": hit.provider,
-            "masked": hit.masked or _mask_value(hit.value),
-            "src": hit.src,
-            "confidence": hit.confidence,
-            "finding_type": hit.finding_type,
-            "token_type": hit.tag,
-        }
-        for hit in api_key_hits
-        if hit.confidence != "low"
-    ]
-
-    cloud_payload = [
-        {
-            "provider": hit.provider,
-            "service": hit.tag,
-            "resource": hit.resource_name,
-            "region": region,
-            "src": hit.src,
-        }
-        for hit, region in cloud_hits
-    ]
-
-    analytics_payload: Dict[str, List[Mapping[str, object]]] = {}
-    for vendor, src_map in analytics_vendor_ids.items():
-        vendor_entries: List[Mapping[str, object]] = []
-        for src_label, identifiers in src_map.items():
-            vendor_entries.append(
-                {
-                    "src": src_label,
-                    "ids": sorted(identifiers),
-                    "count": len(identifiers),
-                }
-            )
-        vendor_entries.sort(
-            key=lambda item: (
-                -int(item.get("count", 0) or 0),
-                str(item.get("src") or ""),
-            )
-        )
-        analytics_payload[vendor] = vendor_entries
-
-    entropy_payload = [
-        {
-            "masked": hit.masked or _mask_value(hit.value),
-            "src": hit.src,
-        }
-        for hit in entropy_high_samples[:10]
-    ]
-
-    aggregates = {
-        "endpoint_totals": dict(endpoint_totals),
-        "endpoint_roots": endpoint_roots_payload,
-        "endpoint_cleartext": cleartext_payload,
-        "api_keys_high": api_keys_payload,
-        "cloud_refs": cloud_payload,
-        "analytics_ids": analytics_payload,
-        "entropy_high_samples": entropy_payload,
-    }
+    aggregates = build_aggregates(
+        endpoint_totals=endpoint_totals,
+        endpoint_by_root=endpoint_by_root,
+        endpoint_cleartext=endpoint_cleartext,
+        api_key_hits=api_key_hits,
+        cloud_hits=cloud_hits,
+        analytics_vendor_ids=analytics_vendor_ids,
+        entropy_high_samples=entropy_high_samples,
+    )
 
     return {
         "counts": counts,

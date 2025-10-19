@@ -6,41 +6,32 @@ import base64
 import binascii
 import hashlib
 import ipaddress
-import re
 from dataclasses import dataclass
 from typing import Iterable, Mapping, MutableMapping, Sequence
 from urllib.parse import urlsplit
 
 from .allowlist import NoisePolicy
+from .constants import (
+    AUTH_KEYWORDS,
+    AWS_ACCESS_KEY_PATTERN,
+    AWS_SECRET_KEY_PATTERN,
+    BASE64_ALPHABET,
+    BASE64_URLSAFE_ALPHABET,
+    CLOUD_PATTERNS,
+    CONTEXT_TOKENIZER,
+    ENDPOINT_PATTERN,
+    FEATURE_KEYWORDS,
+    GOOGLE_API_KEY_PATTERN,
+    GRAPHQL_HINT,
+    GRPC_HINT,
+    HOST_COMPONENT_PATTERN,
+    HOST_PATTERN,
+    INTERNAL_HOST_SUFFIXES,
+    JWT_PATTERN,
+    REDIRECTOR_HOSTS,
+    SCHEME_PREFIXES,
+)
 from .indexing import IndexedString, StringIndex, build_string_index
-
-_URL_PATTERN = re.compile(r"(?P<url>(?:https?|wss?)://[^\s\"'<>]+)")
-_HOST_PATTERN = re.compile(r"^(?=.{4,255}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$")
-_JWT_PATTERN = re.compile(r"([A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})")
-_AWS_ACCESS_KEY = re.compile(r"A(?:KI|SI)A[0-9A-Z]{16}")
-_AWS_SECRET_KEY = re.compile(r"(?<![A-Z0-9])[A-Za-z0-9/+=]{40,64}(?![A-Za-z0-9/+=])")
-_GOOGLE_API_KEY = re.compile(r"AIza[0-9A-Za-z\-_]{35}")
-_SCHEME_PARTS = {"http://", "https://", "ws://", "wss://"}
-_HOST_COMPONENT = re.compile(r"^[A-Za-z0-9_-]+(?:\.|$)")
-_BASE64_ALPHABET = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=")
-_BASE64_URLSAFE = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_=")
-_GRAPHQL_HINT = re.compile(r"(?:/graphql|\"query\"\s*:\s*\")", re.IGNORECASE)
-_GRPC_HINT = re.compile(r"\":authority\"|\":path\"", re.IGNORECASE)
-_FEATURE_KEYWORDS = ("feature", "flag", "toggle", "remote_config")
-_AUTH_KEYWORDS = {"auth", "oauth", "token", "bearer", "secret", "hmac"}
-_REDIRECTOR_HOSTS = {"t.co", "bit.ly", "goo.gl", "tinyurl.com", "lnkd.in"}
-_CONTEXT_TOKENIZER = re.compile(r"[A-Za-z0-9_]+")
-
-_INTERNAL_SUFFIXES = {"lan", "local", "corp", "internal"}
-
-_CLOUD_PATTERNS: Mapping[str, re.Pattern[str]] = {
-    "aws_s3_host": re.compile(r"(?P<bucket>[a-z0-9.-]+)\.s3(?:[.-][a-z0-9-]+)?\.amazonaws\.com"),
-    "aws_s3_uri": re.compile(r"s3://(?P<bucket>[a-z0-9._-]+)/?"),
-    "gcs_host": re.compile(r"storage.googleapis.com/(?P<bucket>[a-z0-9._-]+)/?"),
-    "gcs_uri": re.compile(r"gs://(?P<bucket>[a-z0-9._-]+)/?"),
-    "firebase_project": re.compile(r"(?P<project>[a-z0-9-]+)\.firebase(?:io|app)\.com"),
-    "firebase_storage": re.compile(r"firebasestorage.googleapis.com/v0/b/(?P<bucket>[a-z0-9._-]+)/?"),
-}
 
 
 @dataclass(frozen=True)
@@ -251,7 +242,7 @@ def _is_component_piece(value: str) -> bool:
     if not stripped:
         return False
     lowered = stripped.lower()
-    if lowered in _SCHEME_PARTS:
+    if lowered in SCHEME_PREFIXES:
         return True
     if lowered.startswith("/") or lowered.endswith("/"):
         return False
@@ -268,9 +259,9 @@ def _is_candidate_string(value: str) -> bool:
     stripped = value.strip()
     if not stripped:
         return False
-    if _URL_PATTERN.match(stripped):
+    if ENDPOINT_PATTERN.match(stripped):
         return True
-    return bool(_HOST_PATTERN.match(stripped.lower()))
+    return bool(HOST_PATTERN.match(stripped.lower()))
 
 
 def _reconstruct_constant_hosts(entries: Sequence[IndexedString]) -> tuple[IndexedString, ...]:
@@ -369,7 +360,7 @@ def _normalise_entry(
         else:
             decoded_kind = "junk"
 
-    url_match = _URL_PATTERN.search(value)
+    url_match = ENDPOINT_PATTERN.search(value)
     if url_match:
         url = url_match.group("url")
         parsed = urlsplit(url)
@@ -390,7 +381,7 @@ def _normalise_entry(
                 counter.graphql_markers += 1
             if "grpc" in tags:
                 counter.grpc_markers += 1
-    elif _HOST_PATTERN.match(stripped):
+    elif HOST_PATTERN.match(stripped):
         host = stripped.lower()
         kind = "host"
         confidence = "medium"
@@ -408,28 +399,28 @@ def _normalise_entry(
 
     lowered = value.lower()
 
-    if _GRAPHQL_HINT.search(value) and "graphql" not in tags:
+    if GRAPHQL_HINT.search(value) and "graphql" not in tags:
         tags.append("graphql")
         if not is_allowlisted:
             counter.graphql_markers += 1
-    if _GRPC_HINT.search(value) and "grpc" not in tags:
+    if GRPC_HINT.search(value) and "grpc" not in tags:
         tags.append("grpc")
         if not is_allowlisted:
             counter.grpc_markers += 1
 
-    if _AWS_ACCESS_KEY.search(value) and _AWS_SECRET_KEY.search(value):
+    if AWS_ACCESS_KEY_PATTERN.search(value) and AWS_SECRET_KEY_PATTERN.search(value):
         tags.extend(["aws-pair", "auth-adjacent"])
         confidence = "high"
         kind = "token"
         if not is_allowlisted:
             counter.aws_pairs += 1
 
-    if _GOOGLE_API_KEY.search(value):
+    if GOOGLE_API_KEY_PATTERN.search(value):
         tags.append("google-api-key")
         kind = "token"
         confidence = _raise_confidence(confidence, "medium")
 
-    token_match = _JWT_PATTERN.search(value)
+    token_match = JWT_PATTERN.search(value)
     if token_match and ("authorization" in lowered or "bearer" in lowered):
         tags.extend(["auth-token", "jwt-format"])
         if "bearer" in lowered:
@@ -439,7 +430,7 @@ def _normalise_entry(
         if not is_allowlisted:
             counter.jwt_near_auth += 1
 
-    for pattern_name, pattern in _CLOUD_PATTERNS.items():
+    for pattern_name, pattern in CLOUD_PATTERNS.items():
         match = pattern.search(value)
         if not match:
             continue
@@ -453,7 +444,7 @@ def _normalise_entry(
                 counter.s3_buckets += 1
         break
 
-    if any(keyword in lowered for keyword in _FEATURE_KEYWORDS) and url_match:
+    if any(keyword in lowered for keyword in FEATURE_KEYWORDS) and url_match:
         tags.append("feature-flag")
         tags.append("remote-control")
 
@@ -525,7 +516,7 @@ def _context_for_entry(entry: IndexedString, *, limit: int = 160) -> str:
 
 
 def _tokenize_context(context: str) -> tuple[str, ...]:
-    tokens = _CONTEXT_TOKENIZER.findall(context.lower())
+    tokens = CONTEXT_TOKENIZER.findall(context.lower())
     return tuple(dict.fromkeys(tokens))
 
 
@@ -539,7 +530,7 @@ def _is_base64_candidate(value: str) -> bool:
     length = len(value)
     if length < 32 or length > 256 or length % 4:
         return False
-    alphabet = _BASE64_URLSAFE if {"-", "_"} & set(value) else _BASE64_ALPHABET
+    alphabet = BASE64_URLSAFE_ALPHABET if {"-", "_"} & set(value) else BASE64_ALPHABET
     if not all(char in alphabet for char in value):
         return False
     padding = len(value) - len(value.rstrip("="))
@@ -682,32 +673,32 @@ def _derive_issue_flags(
 def _classify_decoded(text: str) -> str:
     if not text.strip():
         return "junk"
-    if _URL_PATTERN.search(text):
+    if ENDPOINT_PATTERN.search(text):
         return "url"
-    if _AWS_ACCESS_KEY.search(text) and _AWS_SECRET_KEY.search(text):
+    if AWS_ACCESS_KEY_PATTERN.search(text) and AWS_SECRET_KEY_PATTERN.search(text):
         return "key"
-    if _JWT_PATTERN.search(text):
+    if JWT_PATTERN.search(text):
         return "token"
-    if _GOOGLE_API_KEY.search(text):
+    if GOOGLE_API_KEY_PATTERN.search(text):
         return "key"
     lowered = text.lower()
-    if any(keyword in lowered for keyword in _AUTH_KEYWORDS):
+    if any(keyword in lowered for keyword in AUTH_KEYWORDS):
         return "text"
     return "junk"
 
 
 def _tags_from_decoded(text: str) -> list[str]:
     tags: list[str] = []
-    match = _URL_PATTERN.search(text)
+    match = ENDPOINT_PATTERN.search(text)
     if match:
         url = match.group("url")
         parsed = urlsplit(url)
         tags.extend(_tags_for_url(url, host=parsed.hostname, context=text))
-    if _AWS_ACCESS_KEY.search(text) and _AWS_SECRET_KEY.search(text):
+    if AWS_ACCESS_KEY_PATTERN.search(text) and AWS_SECRET_KEY_PATTERN.search(text):
         tags.extend(["aws-pair", "auth-adjacent"])
-    if _JWT_PATTERN.search(text):
+    if JWT_PATTERN.search(text):
         tags.append("jwt-format")
-    if _GOOGLE_API_KEY.search(text):
+    if GOOGLE_API_KEY_PATTERN.search(text):
         tags.append("google-api-key")
     return list(dict.fromkeys(tags))
 
@@ -779,18 +770,18 @@ def _tags_for_url(url: str, *, host: str | None, context: str) -> list[str]:
         tags.append("cleartext")
     if scheme in {"ws", "wss"}:
         tags.append("websocket")
-    if host and host.lower() in _REDIRECTOR_HOSTS:
+    if host and host.lower() in REDIRECTOR_HOSTS:
         tags.append("redirector")
     if host and _is_public_host(host):
         tags.append("prod-domain")
     if host and _is_ip_literal(host):
         tags.append("ip-literal")
     lowered_context = context.lower()
-    if any(keyword in lowered_context for keyword in _AUTH_KEYWORDS):
+    if any(keyword in lowered_context for keyword in AUTH_KEYWORDS):
         tags.append("auth-adjacent")
-    if _GRAPHQL_HINT.search(url) or _GRAPHQL_HINT.search(context):
+    if GRAPHQL_HINT.search(url) or GRAPHQL_HINT.search(context):
         tags.append("graphql")
-    if _GRPC_HINT.search(context):
+    if GRPC_HINT.search(context):
         tags.append("grpc")
     return tags
 
@@ -803,7 +794,7 @@ def _is_public_host(host: str) -> bool:
         return False
     if lowered == "localhost":
         return False
-    if any(lowered.endswith(f".{suffix}") for suffix in _INTERNAL_SUFFIXES):
+    if any(lowered.endswith(f".{suffix}") for suffix in INTERNAL_HOST_SUFFIXES):
         return False
     return True
 
