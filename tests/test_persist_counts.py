@@ -179,13 +179,16 @@ def test_persist_run_summary_tracks_session(monkeypatch, stub_string_data, basel
         calls["write_metrics"] = (run_id, payload)
         return True
 
-    def fake_write_findings(run_id, rows):
-        calls.setdefault("findings_rows", rows)
-        return True
-
     def fake_write_contributors(run_id, rows):
         calls.setdefault("contributors_rows", rows)
         return True
+
+    def fake_persist_findings(run_id, rows):
+        calls.setdefault("findings_rows", rows)
+        return True
+
+    def fake_persist_controls(run_id, package, coverage):
+        calls["control_coverage"] = (run_id, package, coverage)
 
     summary_calls: dict[str, object] = {}
 
@@ -206,8 +209,9 @@ def test_persist_run_summary_tracks_session(monkeypatch, stub_string_data, basel
     monkeypatch.setattr(db_persist._dw, "create_run", fake_create_run)
     monkeypatch.setattr(db_persist._dw, "write_buckets", fake_write_buckets)
     monkeypatch.setattr(db_persist._dw, "write_metrics", fake_write_metrics)
-    monkeypatch.setattr(db_persist._dw, "write_findings", fake_write_findings)
     monkeypatch.setattr(db_persist._dw, "write_contributors", fake_write_contributors)
+    monkeypatch.setattr(db_persist, "_persist_findings", fake_persist_findings)
+    monkeypatch.setattr(db_persist, "_persist_masvs_controls", fake_persist_controls)
 
     monkeypatch.setattr(db_persist._sf, "ensure_tables", lambda: True)
     monkeypatch.setattr(db_persist._sf, "upsert_summary", fake_sf_upsert_summary)

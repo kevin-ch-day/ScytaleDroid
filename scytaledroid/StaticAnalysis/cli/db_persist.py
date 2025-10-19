@@ -6,7 +6,13 @@ import json
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
-from typing import Mapping, MutableMapping, Optional, Sequence
+import re
+from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Optional, Sequence, Tuple
+
+try:
+    import yaml
+except Exception:  # pragma: no cover - optional dependency
+    yaml = None
 
 from scytaledroid.Persistence import db_writer as _dw
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
@@ -22,6 +28,378 @@ from scytaledroid.Database.db_func.static_analysis import (
     static_findings as _sf,
     string_analysis as _sa,
 )
+from scytaledroid.Database.db_core import db_queries as core_q
+
+
+_CVSS_BASE_ORDER = ("AV", "AC", "AT", "PR", "UI", "VC", "VI", "VA", "SC", "SI", "SA")
+
+_RULE_REGEXES: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"usesCleartextTraffic\s*=\s*true", re.IGNORECASE), "BASE-CLR-001"),
+    (re.compile(r"\bcleartext\b", re.IGNORECASE), "BASE-CLR-001"),
+    (re.compile(r"requestLegacyExternalStorage\s*=\s*true", re.IGNORECASE), "BASE-STO-LEGACY"),
+    (
+        re.compile(r"\b(Activity|Service|Receiver|Activity Alias|Provider)\b.*exported.*relies on.*\bpermission", re.IGNORECASE),
+        "BASE-IPC-EXPORTED-WITH-PERM",
+    ),
+    (re.compile(r"\bexported\b.*\brelies on\b.*\bpermission", re.IGNORECASE), "BASE-IPC-EXPORTED-WITH-PERM"),
+    (re.compile(r"ContentProvider.*(without|no)\s+permission", re.IGNORECASE), "BASE-IPC-PROVIDER-NO-ACL"),
+    (
+        re.compile(
+            r"\b(Activity|Service|Receiver|Activity Alias|Provider)\b.*exported.*(does not d|does not decla|without)\s+permission",
+            re.IGNORECASE,
+        ),
+        "BASE-IPC-COMP-NO-ACL",
+    ),
+)
+
+_RULE_FORCE_PHRASES: tuple[tuple[str, str], ...] = (
+    ("exported receiver relies on permission", "BASE-IPC-EXPORTED-WITH-PERM"),
+    ("exported service relies on permission", "BASE-IPC-EXPORTED-WITH-PERM"),
+    ("exported activity relies on permission", "BASE-IPC-EXPORTED-WITH-PERM"),
+    ("exported provider relies on permission", "BASE-IPC-EXPORTED-WITH-PERM"),
+    ("is exported but does not", "BASE-IPC-COMP-NO-ACL"),
+)
+
+_RULE_TO_MASVS: Dict[str, Tuple[str, str]] = {
+    "BASE-IPC-COMP-NO-ACL": ("PLATFORM-IPC-1", "FAIL"),
+    "BASE-IPC-PROVIDER-NO-ACL": ("PLATFORM-IPC-1", "FAIL"),
+    "BASE-IPC-EXPORTED-WITH-PERM": ("PLATFORM-IPC-1", "PASS"),
+    "BASE-CLR-001": ("NETWORK-1", "FAIL"),
+    "BASE-STO-LEGACY": ("STORAGE-2", "FAIL"),
+    "STR-SECRET-AWS-HC": ("STORAGE-2", "INCONCLUSIVE"),
+}
+
+_STATUS_RANK = {"FAIL": 3, "INCONCLUSIVE": 2, "PASS": 1}
+
+_FALLBACK_RULE_CVSS: Dict[str, Dict[str, object]] = {
+    "BASE-IPC-COMP-NO-ACL": {
+        "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:L/VA:L/SC:N/SI:N/SA:N",
+        "score": 8.0,
+        "rationale": "Exported component without permission allows external apps to trigger privileged code paths.",
+    },
+    "BASE-IPC-EXPORTED-WITH-PERM": {
+        "vector": "CVSS:4.0/AV:A/AC:L/AT:N/PR:L/UI:N/VC:N/VI:N/VA:N/SC:N/SI:N/SA:N",
+        "score": 2.5,
+        "rationale": "Exported component guarded by a permission; residual risk depends on permission strength and grant path.",
+    },
+    "BASE-CLR-001": {
+        "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:R/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N",
+        "score": 4.5,
+        "rationale": "Cleartext allowed; exploitation often needs user navigation in WebView contexts.",
+    },
+    "BASE-STO-LEGACY": {
+        "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:N/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N",
+        "score": 3.9,
+        "rationale": "Legacy external storage broadens read/write surface for other apps.",
+    },
+}
+
+
+@lru_cache(maxsize=1)
+def _load_cvss_v4_config() -> Optional[Dict[str, Any]]:
+    path = Path("config/cvss_v4_map.yaml")
+    if not path.exists() or yaml is None:
+        return None
+    try:
+        data = yaml.safe_load(path.read_text("utf-8"))
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    defaults = data.get("defaults") or {}
+    rule_entries = {}
+    for entry in data.get("rules", []):
+        if not isinstance(entry, dict):
+            continue
+        rid = entry.get("detector_id")
+        if not rid:
+            continue
+        rule_entries[str(rid)] = entry
+    return {"defaults": defaults, "rules": rule_entries}
+
+
+def _build_cvss_vector(metrics: Mapping[str, str]) -> Optional[str]:
+    entries = []
+    for key in _CVSS_BASE_ORDER:
+        value = metrics.get(key)
+        if value:
+            entries.append(f"{key}:{value}")
+    if not entries:
+        return None
+    return "CVSS:4.0/" + "/".join(entries)
+
+
+def _compute_cvss_base(rule_id: Optional[str]) -> Tuple[Optional[str], Optional[float], Dict[str, Any]]:
+    if not rule_id:
+        return None, None, {}
+    config = _load_cvss_v4_config()
+    defaults = (config or {}).get("defaults", {})
+    base_defaults = defaults.get("base") or {}
+    rule_cfg = (config or {}).get("rules", {}).get(rule_id)
+
+    if not rule_cfg and rule_id in _FALLBACK_RULE_CVSS:
+        spec = _FALLBACK_RULE_CVSS[rule_id]
+        meta = {"base": {"rationale": spec.get("rationale"), "rule_id": rule_id, "source": "fallback"}}
+        vector = spec.get("vector")
+        score = spec.get("score")
+        return vector, float(score) if isinstance(score, (int, float)) else None, meta
+
+    if not rule_cfg:
+        return None, None, {}
+
+    base_metrics = dict(base_defaults)
+    base_metrics.update(rule_cfg.get("base") or {})
+    vector = _build_cvss_vector(base_metrics)
+    score = None
+    fallback = _FALLBACK_RULE_CVSS.get(rule_id)
+    if fallback and isinstance(fallback.get("score"), (int, float)):
+        score = float(fallback["score"])
+    meta: Dict[str, Any] = {
+        "base": {
+            "metrics": base_metrics,
+            "rationale": rule_cfg.get("rationale") or (fallback and fallback.get("rationale")),
+            "rule_id": rule_id,
+            "source": "cvss_v4_map",
+        }
+    }
+    supplemental = rule_cfg.get("supplemental")
+    if supplemental:
+        meta["supplemental"] = supplemental
+    return vector, score, meta
+
+
+def _resolve_threat_code(threat_profile: Optional[str]) -> str:
+    profile = (threat_profile or "Unknown").strip()
+    return {
+        "Unknown": "U",
+        "Unreported": "U",
+        "ProofOfConcept": "P",
+        "PoC": "P",
+        "Active": "A",
+        "Attacked": "A",
+        "Weaponized": "W",
+    }.get(profile, "U")
+
+
+def _resolve_env_metrics(env_profile: Optional[str]) -> Dict[str, str]:
+    profile = (env_profile or "consumer").strip().lower()
+    mapping = {
+        "consumer": {"CR": "M", "IR": "M", "AR": "M"},
+        "enterprise": {"CR": "H", "IR": "H", "AR": "H"},
+    }
+    return mapping.get(profile, mapping["consumer"])
+
+
+def _append_metric(vector: Optional[str], key: str, value: str) -> Optional[str]:
+    if not vector:
+        return None
+    parts = [segment for segment in vector.split("/") if not segment.startswith(f"{key}:")]
+    parts.append(f"{key}:{value}")
+    return "/".join(parts)
+
+
+def _apply_cvss_profiles(
+    base_vector: Optional[str],
+    base_score: Optional[float],
+    threat_profile: Optional[str],
+    env_profile: Optional[str],
+) -> Tuple[Optional[str], Optional[float], Optional[str], Optional[float], Optional[str], Optional[float], Dict[str, Any]]:
+    if not base_vector:
+        return None, None, None, None, None, None, {}
+    threat_code = _resolve_threat_code(threat_profile)
+    env_metrics = _resolve_env_metrics(env_profile)
+
+    bt_vector = _append_metric(base_vector, "E", threat_code)
+    be_vector = base_vector
+    for key, value in env_metrics.items():
+        be_vector = _append_metric(be_vector, key, value)
+    bte_vector = bt_vector
+    for key, value in env_metrics.items():
+        bte_vector = _append_metric(bte_vector, key, value)
+
+    meta = {
+        "threat": {"profile": threat_profile or "Unknown", "E": threat_code},
+        "env": {"profile": env_profile or "consumer", **env_metrics},
+    }
+
+    # Until a full CVSS 4.0 calculator is integrated, reuse the base score for derived variants.
+    return (
+        bt_vector,
+        base_score,
+        be_vector,
+        base_score,
+        bte_vector,
+        base_score,
+        meta,
+    )
+
+
+def _truncate(value: Optional[str], limit: int) -> Optional[str]:
+    if value is None:
+        return None
+    value = str(value)
+    if len(value) <= limit:
+        return value
+    return value[: limit - 3] + "..."
+
+
+def _coerce_mapping(obj: Any) -> Dict[str, Any]:
+    if obj is None:
+        return {}
+    if isinstance(obj, dict):
+        return {k: v for k, v in obj.items()}
+    data: Dict[str, Any] = {}
+    for attr in dir(obj):
+        if attr.startswith("_"):
+            continue
+        try:
+            value = getattr(obj, attr)
+        except Exception:  # pragma: no cover - defensive
+            continue
+        if callable(value):
+            continue
+        data[attr] = value
+    return data
+
+
+def _extract_evidence_details(
+    evidence: Any, fallback: Optional[str]
+) -> Tuple[Optional[str], Optional[str], Optional[str], str]:
+    entries: List[Dict[str, Any]] = []
+    if isinstance(evidence, (list, tuple)):
+        iter_evidence: Iterable[Any] = evidence
+    elif evidence:
+        iter_evidence = [evidence]
+    else:
+        iter_evidence = []
+
+    chosen_path: Optional[str] = None
+    chosen_offset: Optional[str] = None
+    chosen_preview: Optional[str] = None
+
+    for item in iter_evidence:
+        data = _coerce_mapping(item)
+        cleaned: Dict[str, Any] = {}
+        for key in ("path", "file", "location", "resource"):
+            value = data.get(key)
+            if chosen_path is None and isinstance(value, str) and value.strip():
+                chosen_path = value.strip()
+        for key in ("offset", "line", "column", "index"):
+            value = data.get(key)
+            if chosen_offset is None and value not in (None, ""):
+                chosen_offset = str(value)
+        for key in ("detail", "message", "preview", "summary", "because"):
+            value = data.get(key)
+            if chosen_preview is None and isinstance(value, str) and value.strip():
+                chosen_preview = value.strip()
+        for key, value in data.items():
+            if isinstance(value, (str, int, float, bool)) and key not in cleaned:
+                cleaned[key] = value
+        if cleaned:
+            entries.append(cleaned)
+
+    if chosen_preview is None and isinstance(fallback, str):
+        chosen_preview = fallback.strip()
+
+    payload = {
+        "path": chosen_path,
+        "offset": chosen_offset,
+        "detail": chosen_preview,
+        "entries": entries,
+    }
+    payload_str = json.dumps(payload, ensure_ascii=False) if payload else ""
+    return chosen_path, chosen_offset, chosen_preview, payload_str
+
+
+def _derive_rule_id(
+    detector_id: Optional[str],
+    module_id: Optional[str],
+    evidence_path: Optional[str],
+    evidence_preview: Optional[str],
+) -> Optional[str]:
+    tokens = " ".join(filter(None, [detector_id, module_id, evidence_path, evidence_preview])).strip()
+    if not tokens:
+        return None
+    for pattern, rid in _RULE_REGEXES:
+        if pattern.search(tokens):
+            return rid
+    lower_tokens = tokens.lower()
+    for phrase, rid in _RULE_FORCE_PHRASES:
+        if phrase in lower_tokens:
+            return rid
+    return None
+
+
+def _persist_findings(run_id: int, rows: Sequence[Dict[str, Any]]) -> bool:
+    try:
+        core_q.run_sql("DELETE FROM findings WHERE run_id=%s", (run_id,))
+    except Exception:
+        pass
+    try:
+        for row in rows:
+            core_q.run_sql(
+                """
+                INSERT INTO findings (
+                    run_id, severity, masvs, cvss, kind, evidence, module_id,
+                    cvss_v40_b_score, cvss_v40_bt_score, cvss_v40_be_score, cvss_v40_bte_score,
+                    cvss_v40_b_vector, cvss_v40_bt_vector, cvss_v40_be_vector, cvss_v40_bte_vector,
+                    cvss_v40_meta, analyst_tag, evidence_path, evidence_offset, evidence_preview, rule_id
+                ) VALUES (
+                    %s,%s,%s,%s,%s,%s,%s,
+                    %s,%s,%s,%s,
+                    %s,%s,%s,%s,
+                    %s,%s,%s,%s,%s,%s
+                )
+                """,
+                (
+                    run_id,
+                    row.get("severity"),
+                    row.get("masvs"),
+                    _truncate(row.get("legacy_cvss"), 128),
+                    row.get("kind"),
+                    _truncate(row.get("evidence"), 512),
+                    row.get("module_id"),
+                    row.get("cvss_v40_b_score"),
+                    row.get("cvss_v40_bt_score"),
+                    row.get("cvss_v40_be_score"),
+                    row.get("cvss_v40_bte_score"),
+                    row.get("cvss_v40_b_vector"),
+                    row.get("cvss_v40_bt_vector"),
+                    row.get("cvss_v40_be_vector"),
+                    row.get("cvss_v40_bte_vector"),
+                    row.get("cvss_v40_meta"),
+                    None,
+                    _truncate(row.get("evidence_path"), 512),
+                    _truncate(row.get("evidence_offset"), 64),
+                    _truncate(row.get("evidence_preview"), 256),
+                    row.get("rule_id"),
+                ),
+            )
+        return True
+    except Exception:
+        return False
+
+
+def _persist_masvs_controls(run_id: int, package: str, coverage: Dict[str, Dict[str, Any]]) -> None:
+    try:
+        core_q.run_sql("DELETE FROM masvs_control_coverage WHERE run_id=%s", (run_id,))
+    except Exception:
+        pass
+    for control_id, payload in coverage.items():
+        try:
+            evidence = json.dumps(payload.get("evidence") or [], ensure_ascii=False)
+            rubric = json.dumps(payload.get("rubric") or {}, ensure_ascii=False)
+            core_q.run_sql(
+                """
+                INSERT INTO masvs_control_coverage (run_id, package, control_id, status, evidence, rubric)
+                VALUES (%s,%s,%s,%s,%s,%s)
+                ON DUPLICATE KEY UPDATE status=VALUES(status), evidence=VALUES(evidence), rubric=VALUES(rubric)
+                """,
+                (run_id, package, control_id, payload.get("status"), evidence, rubric),
+            )
+        except Exception:
+            continue
+
 
 
 @lru_cache(maxsize=1)
@@ -190,42 +568,130 @@ def persist_run_summary(
         log.warning(message, category="static_analysis")
         outcome.add_error(message)
 
+    severity_map = {"P0": "High", "P1": "Medium", "P2": "Low", "NOTE": "Info"}
+    cvss_map = _load_cvss_map()
+    cvss_v4_config = _load_cvss_v4_config()
+    run_profile = core_q.run_sql(
+        "SELECT threat_profile, env_profile FROM runs WHERE run_id=%s",
+        (run_id,),
+        fetch="one",
+        dictionary=True,
+    )
+    threat_profile = (run_profile or {}).get("threat_profile") or "Unknown"
+    env_profile = (run_profile or {}).get("env_profile") or "consumer"
+
+    finding_rows: List[Dict[str, Any]] = []
+    control_coverage: Dict[str, Dict[str, Any]] = {}
+    total_findings = 0
+    rule_assigned = 0
+    base_vector_count = 0
+    bte_vector_count = 0
+
+    try:
+        for result in (br.detector_results or ()):  # type: ignore[attr-defined]
+            detector_id = str(getattr(result, "detector_id", getattr(result, "section_key", None)) or "unknown")
+            module_id_val = getattr(result, "module_id", None)
+            module_id = str(module_id_val) if module_id_val not in (None, "") else None
+            for f in result.findings:
+                total_findings += 1
+                sev = severity_map.get(f.severity_gate.value, "Info")
+                mapping = cvss_map.get(f.finding_id)
+                masvs_area = (mapping.get("masvs") if mapping else None) or f.category_masvs.value
+                cvss = mapping.get("cvss") if mapping else ""
+                evidence_path, evidence_offset, evidence_preview, evidence_payload = _extract_evidence_details(
+                    f.evidence, f.because
+                )
+                rule_id = _derive_rule_id(detector_id, module_id, evidence_path, evidence_preview)
+                if rule_id:
+                    rule_assigned += 1
+                base_vector, base_score, base_meta = _compute_cvss_base(rule_id)
+                if base_vector:
+                    base_vector_count += 1
+                bt_vector, bt_score, be_vector, be_score, bte_vector, bte_score, profile_meta = _apply_cvss_profiles(
+                    base_vector, base_score, threat_profile, env_profile
+                )
+                if bte_vector:
+                    bte_vector_count += 1
+                meta_combined: Dict[str, Any] = {}
+                if base_meta:
+                    meta_combined.update(base_meta)
+                if profile_meta:
+                    meta_combined.update(profile_meta)
+                finding_rows.append(
+                    {
+                        "severity": sev,
+                        "masvs": masvs_area,
+                        "legacy_cvss": cvss or (base_vector or ""),
+                        "kind": detector_id,
+                        "module_id": module_id,
+                        "evidence": evidence_payload,
+                        "evidence_path": evidence_path,
+                        "evidence_offset": evidence_offset,
+                        "evidence_preview": evidence_preview,
+                        "rule_id": rule_id,
+                        "cvss_v40_b_vector": base_vector,
+                        "cvss_v40_b_score": base_score,
+                        "cvss_v40_bt_vector": bt_vector,
+                        "cvss_v40_bt_score": bt_score,
+                        "cvss_v40_be_vector": be_vector,
+                        "cvss_v40_be_score": be_score,
+                        "cvss_v40_bte_vector": bte_vector,
+                        "cvss_v40_bte_score": bte_score,
+                        "cvss_v40_meta": json.dumps(meta_combined, ensure_ascii=False) if meta_combined else None,
+                    }
+                )
+
+                coverage = _RULE_TO_MASVS.get(rule_id)
+                if coverage:
+                    ctrl_id, status = coverage
+                    evidence_note = evidence_preview or rule_id or detector_id
+                    payload = {
+                        "status": status,
+                        "evidence": [
+                            {
+                                "kind": detector_id,
+                                "path": evidence_path,
+                                "note": evidence_note,
+                                "rule": rule_id,
+                            }
+                        ],
+                        "rubric": {"rule_id": rule_id, "source": "detector"},
+                    }
+                    existing = control_coverage.get(ctrl_id)
+                    if existing is None or _STATUS_RANK[status] > _STATUS_RANK[existing["status"]]:
+                        control_coverage[ctrl_id] = payload
+                    elif _STATUS_RANK[status] == _STATUS_RANK[existing["status"]]:
+                        existing.setdefault("evidence", []).extend(payload["evidence"])
+    except Exception as exc:
+        message = f"Failed to collate findings for {run_package}: {exc}"
+        log.warning(message, category="static_analysis")
+        outcome.add_error(message)
+
+    if finding_rows:
+        if not _persist_findings(int(run_id), finding_rows):
+            message = f"Failed to persist findings for run_id={run_id}"
+            log.warning(message, category="static_analysis")
+            outcome.add_error(message)
+        else:
+            _persist_masvs_controls(int(run_id), br.manifest.package_name or run_package, control_coverage)
+
     metrics_payload = {
         "network.code_http_hosts": (float(code_http_hosts), None),
         "network.asset_http_hosts": (float(asset_http_hosts), None),
         "exports.total": (float(exp_total), None),
     }
+    metrics_payload["findings.total"] = (float(total_findings), None)
+    rule_cov_pct = (float(rule_assigned) / float(total_findings) * 100.0) if total_findings else 0.0
+    base_cov_pct = (float(base_vector_count) / float(total_findings) * 100.0) if total_findings else 0.0
+    bte_cov_pct = (float(bte_vector_count) / float(total_findings) * 100.0) if total_findings else 0.0
+    metrics_payload["findings.ruleid_coverage_pct"] = (rule_cov_pct, None)
+    metrics_payload["cvss.base_vector_coverage_pct"] = (base_cov_pct, None)
+    metrics_payload["cvss.bte_vector_coverage_pct"] = (bte_cov_pct, None)
+
     if not _dw.write_metrics(int(run_id), metrics_payload):
         message = f"Failed to persist metrics for run_id={run_id}"
         log.warning(message, category="static_analysis")
         outcome.add_error(message)
-
-    # Persist a small finding sample (for DB-backed MASVS summary)
-    severity_map = {"P0": "High", "P1": "Medium", "P2": "Low", "NOTE": "Info"}
-    cvss_map = _load_cvss_map()
-    rows_findings = []
-    try:
-        for result in (br.detector_results or ()):  # type: ignore[attr-defined]
-            for f in result.findings:
-                sev = severity_map.get(f.severity_gate.value, "Info")
-                mapping = cvss_map.get(f.finding_id)
-                masvs_area = (mapping.get("masvs") if mapping else None) or f.category_masvs.value
-                cvss = mapping.get("cvss") if mapping else ""
-                kind = result.detector_id
-                ev = "; ".join(p.location for p in (f.evidence or ())) if f.evidence else f.because
-                rows_findings.append((sev, masvs_area, cvss or "", kind, ev[:480]))
-                if len(rows_findings) >= 50:
-                    break
-            if len(rows_findings) >= 50:
-                break
-    except Exception:
-        rows_findings = []
-    if rows_findings:
-        success = _dw.write_findings(int(run_id), rows_findings)
-        if not success:
-            message = f"Failed to persist MASVS finding samples for run_id={run_id}"
-            log.warning(message, category="static_analysis")
-            outcome.add_error(message)
 
     contributors = []
     try:
