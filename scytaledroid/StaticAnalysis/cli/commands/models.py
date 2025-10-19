@@ -18,7 +18,12 @@ class Command:
     kind: str  # "scan" or "readonly"
     profile: Optional[str] = None
     handler: Optional[CommandHandler] = None
+    section: str = "workflow"
+    persist: bool = True
+    dry_run: bool = False
+    auto_verify: bool = False
+    prompt_reset: bool = False
+    force_app_scope: bool = False
 
 
 __all__ = ["Command", "CommandHandler"]
-

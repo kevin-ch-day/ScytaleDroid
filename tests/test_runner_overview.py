@@ -25,11 +25,10 @@ def test_run_overview_outputs_expected_lines(monkeypatch, capsys):
     runner.launch_scan_flow(selection, params, Path("/tmp"))
     output = capsys.readouterr().out
 
-    assert "Run Overview" in output
-    assert f"Scope      : App={selection.label}" in output
+    assert f"Scope    : App={selection.label}" in output
     match = SESSION_LINE_PATTERN.search(output)
     assert match, "Session line missing timestamp"
     assert re.fullmatch(r"\d{8}-\d{6}", match.group(1))
-    assert "Workers    : auto (" in output
-    assert "Cache      : reuse" in output
-    assert "Detectors  : alpha, beta" in output
+    assert "Workers  : auto (" in output
+    assert "Cache    : reuse" in output
+    assert "Detectors: alpha, beta" in output

@@ -9,7 +9,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 
 from scytaledroid.Config import app_config
-from scytaledroid.Utils.DisplayUtils import menu_utils
+from scytaledroid.Utils.DisplayUtils import menu_utils, text_blocks
 from scytaledroid.Utils.System import output_prefs
 
 from .execution import (
@@ -21,12 +21,12 @@ from .execution import (
     generate_report,
     render_run_results,
 )
-from .models import RunParameters, ScopeSelection
+from .models import RunParameters, RunOutcome, ScopeSelection
 from .profiles import run_modules_for_profile
 from .scope import format_scope_target
 
 
-def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir: Path) -> None:
+def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir: Path) -> RunOutcome | None:
     """Primary entry point for running static analysis flows from the CLI."""
 
     previous_stamp = params.session_stamp or ""
@@ -44,37 +44,45 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
     modules = _modules_for_run(params)
     scope_target = format_scope_target(selection)
 
-    print()
-    menu_utils.print_section("Run Overview")
-    print(f"Scope      : {scope_target}")
-    print(f"Profile    : {params.profile_label}")
-    print(f"Session    : {params.session_stamp}")
+    summary_lines = [
+        f"Scope    : {scope_target}",
+        f"Profile  : {params.profile_label}",
+        f"Session  : {params.session_stamp}",
+    ]
     workers_label = f"auto ({workers})" if isinstance(params.workers, str) else str(workers)
-    print(f"Workers    : {workers_label}")
-    print(f"Cache      : {'purge' if not params.reuse_cache else 'reuse'}")
-    print(f"Log Level  : {params.log_level.upper()}")
+    summary_lines.append(f"Workers  : {workers_label}")
+    summary_lines.append(f"Cache    : {'purge' if not params.reuse_cache else 'reuse'}")
+    summary_lines.append(f"Log level: {params.log_level.upper()}")
     if modules:
-        print(f"Detectors  : {', '.join(modules)}")
+        summary_lines.append(f"Detectors: {', '.join(modules)}")
     if params.trace_detectors:
-        print(f"Trace IDs  : {', '.join(params.trace_detectors)}")
+        summary_lines.append(f"Trace IDs: {', '.join(params.trace_detectors)}")
+
+    print(text_blocks.boxed(summary_lines, width=80))
     print()
 
     configure_logging_for_cli(params.log_level)
 
     if params.profile == "permissions":
         execute_permission_scan(selection, params)
-        return
+        return None
 
     outcome = execute_scan(selection, params, base_dir)
+    try:
+        setattr(outcome, "session_stamp", params.session_stamp)
+    except Exception:
+        pass
     render_run_results(outcome, params)
 
-    if params.profile in {"full", "lightweight"}:
+    if params.profile in {"full", "lightweight"} and not params.dry_run:
         try:
             print()
             print("-- Re-rendering Permission Analysis snapshot for parity --")
             execute_permission_scan(selection, params, persist_detections=False)
         except Exception:
             pass
+
+    return outcome
 
 
 def _modules_for_run(params: RunParameters) -> tuple[str, ...]:

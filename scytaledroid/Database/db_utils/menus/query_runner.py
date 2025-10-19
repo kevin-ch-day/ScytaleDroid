@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from scytaledroid.Database.db_core import run_sql
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
+from scytaledroid.StaticAnalysis.cli.masvs_summary import fetch_masvs_matrix
 
 from .sql_helpers import coerce_datetime
 
@@ -18,7 +19,7 @@ def run_query_menu() -> None:
         options: Sequence[Tuple[str, str, str]] = (
             ("1", "Latest session snapshot", "Show most recent session stamp and table counts."),
             ("2", "Session table counts", "Enter a session stamp to validate static tables."),
-            ("3", "Runs and buckets by package", "List runs for a package with bucket totals."),
+            ("3", "Runs and buckets by package", "List run metadata and scoring buckets."),
             ("4", "Harvest artifacts by package", "Show harvested APK records for a package."),
             ("0", "Back", "Return to Database Utilities."),
         )
@@ -187,6 +188,239 @@ def prompt_harvest_for_package() -> None:
     prompt_utils.press_enter_to_continue()
 
 
+def prompt_masvs_by_package() -> None:
+    print()
+    menu_utils.print_section("Verify MASVS persistence")
+    try:
+        latest_runs = run_sql(
+            """
+            SELECT package, MAX(run_id) AS run_id
+            FROM runs
+            GROUP BY package
+            ORDER BY MAX(run_id) DESC
+            LIMIT 10
+            """,
+            fetch="all",
+            dictionary=True,
+        ) or []
+    except Exception:
+        latest_runs = []
+
+    default_package = latest_runs[0]["package"] if latest_runs else ""
+    if latest_runs:
+        print("Recent packages:")
+        for entry in latest_runs:
+            print(f"  - {entry['package']} (run_id={entry['run_id']})")
+        print()
+
+    package = prompt_utils.prompt_text(
+        "Package name (blank for latest)",
+        default=default_package,
+        required=False,
+    ).strip()
+    if not package:
+        package = default_package
+    if not package:
+        print(status_messages.status("No package provided and no runs found.", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    try:
+        run_row = run_sql(
+            """
+            SELECT run_id, session_stamp
+            FROM runs
+            WHERE package = %s
+            ORDER BY run_id DESC
+            LIMIT 1
+            """,
+            (package,),
+            fetch="one",
+            dictionary=True,
+        )
+    except Exception:
+        run_row = None
+    if not run_row:
+        print(status_messages.status(f"No runs recorded for package '{package}'.", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    run_id = int(run_row.get("run_id") or 0)
+
+    try:
+        rows = run_sql(
+            """
+            SELECT masvs,
+                   SUM(CASE WHEN severity='High' THEN 1 ELSE 0 END) AS high,
+                   SUM(CASE WHEN severity='Medium' THEN 1 ELSE 0 END) AS medium,
+                   SUM(CASE WHEN severity='Low' THEN 1 ELSE 0 END) AS low,
+                   SUM(CASE WHEN severity='Info' THEN 1 ELSE 0 END) AS info
+            FROM findings
+            WHERE run_id = %s
+            GROUP BY masvs
+            """,
+            (run_id,),
+            fetch="all",
+            dictionary=True,
+        ) or []
+    except Exception:
+        rows = []
+
+    if not rows:
+        print(status_messages.status(f"No MASVS-tagged findings for package '{package}' (run_id={run_id}).", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    table_rows: list[list[str]] = []
+    total_controls = 0
+    for row in rows:
+        area = (row.get("masvs") or "").upper() or "UNKNOWN"
+        high = int(row.get("high") or 0)
+        medium = int(row.get("medium") or 0)
+        low = int(row.get("low") or 0)
+        info = int(row.get("info") or 0)
+        if high > 0:
+            status = "FAIL"
+        elif medium > 0:
+            status = "WARN"
+        else:
+            status = "PASS"
+        total_controls += high + medium + low + info
+        table_rows.append(
+            [
+                area.title(),
+                str(high),
+                str(medium),
+                str(low),
+                str(info),
+                status,
+            ]
+        )
+
+    headers = ["Area", "High", "Medium", "Low", "Info", "Status"]
+    print()
+    print(f"Package   : {package}")
+    print(f"Run ID    : {run_id}")
+    print(f"Session   : {run_row.get('session_stamp') or '—'}")
+    print(f"Controls  : {total_controls}")
+    table_utils.render_table(headers, sorted(table_rows, key=lambda item: item[0]))
+    prompt_utils.press_enter_to_continue()
+
+
+def prompt_masvs_overview() -> None:
+    print()
+    menu_utils.print_section("MASVS coverage overview")
+    matrix = fetch_masvs_matrix()
+    if not matrix:
+        print(status_messages.status("No MASVS records available. Run a static analysis first.", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    areas = ("NETWORK", "PLATFORM", "PRIVACY", "STORAGE")
+    summary_rows: list[list[str]] = []
+    top_notes: list[str] = []
+
+    for area in areas:
+        fail = warn = passed = 0
+        total_high = total_medium = 0
+        top_package = None
+        top_counts = (0, 0)
+        for package, data in matrix.items():
+            status = data["status"].get(area, "PASS")
+            counts = data["counts"].get(area, {"high": 0, "medium": 0})
+            high = counts.get("high", 0)
+            medium = counts.get("medium", 0)
+            total_high += high
+            total_medium += medium
+            if status == "FAIL":
+                fail += 1
+            elif status == "WARN":
+                warn += 1
+            else:
+                passed += 1
+            key_counts = (high, medium)
+            if key_counts > top_counts:
+                top_counts = key_counts
+                top_package = package
+
+        summary_rows.append(
+            [
+                area.title(),
+                str(fail),
+                str(warn),
+                str(passed),
+                str(total_high),
+                str(total_medium),
+            ]
+        )
+        if top_package and top_counts != (0, 0):
+            top_notes.append(
+                f"{area.title():<9} top package: {top_package} (high={top_counts[0]}, medium={top_counts[1]})"
+            )
+
+    headers = ["Area", "Fail", "Warn", "Pass", "High total", "Medium total"]
+    table_utils.render_table(headers, summary_rows)
+    if top_notes:
+        print()
+        print("Top offenders per area:")
+        for line in top_notes:
+            print(f"  {line}")
+    prompt_utils.press_enter_to_continue()
+
+
+def prompt_persistence_audit() -> None:
+    print()
+    menu_utils.print_section("Runs missing findings summaries")
+    rows = run_sql(
+        """
+        SELECT r.run_id,
+               r.package,
+               r.session_stamp,
+               r.ts
+        FROM runs r
+        LEFT JOIN static_findings_summary s
+          ON s.package_name = r.package
+         AND s.session_stamp = r.session_stamp
+        WHERE s.id IS NULL
+        ORDER BY r.run_id DESC
+        LIMIT 25
+        """,
+        fetch="all",
+        dictionary=True,
+    ) or []
+
+    if not rows:
+        print(status_messages.status("All recorded runs have matching static findings summaries.", level="success"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    table_rows = []
+    for row in rows:
+        table_rows.append(
+            [
+                str(row.get("run_id") or "—"),
+                row.get("package") or "—",
+                row.get("session_stamp") or "—",
+                str(coerce_datetime(row.get("ts")) or row.get("ts") or "—"),
+            ]
+        )
+    headers = ["Run ID", "Package", "Session", "Created"]
+    table_utils.render_table(headers, table_rows)
+    prompt_utils.press_enter_to_continue()
+
+
+def render_session_digest(session_stamp: str | None, *, header: str | None = None) -> None:
+    resolved = session_stamp or _latest_session_stamp()
+    if not resolved:
+        print(status_messages.status("No sessions found in static_findings_summary.", level="warn"))
+        return
+
+    title = header or f"Verification digest — {resolved}"
+    print()
+    menu_utils.print_section(title)
+    _print_session_counts(resolved)
+
+
 def _print_session_counts(session_stamp: str) -> None:
     def _scalar(sql: str, params: Tuple[Any, ...]) -> int:
         try:
@@ -204,14 +438,35 @@ def _print_session_counts(session_stamp: str) -> None:
 
     counts = [
         ("static_findings_summary", _scalar("SELECT COUNT(*) FROM static_findings_summary WHERE session_stamp=%s", (session_stamp,))),
-        ("static_findings", _scalar("SELECT COUNT(*) FROM static_findings f JOIN static_findings_summary s ON s.id=f.summary_id WHERE s.session_stamp=%s", (session_stamp,))),
+        ("static_findings", _scalar("""
+            SELECT COUNT(*)
+            FROM static_findings f
+            JOIN static_findings_summary s ON s.id=f.summary_id
+            WHERE s.session_stamp=%s
+        """, (session_stamp,))),
         ("static_string_summary", _scalar("SELECT COUNT(*) FROM static_string_summary WHERE session_stamp=%s", (session_stamp,))),
-        ("static_string_samples", _scalar("SELECT COUNT(*) FROM static_string_samples x JOIN static_findings_summary s ON s.id=x.summary_id WHERE s.session_stamp=%s", (session_stamp,))),
+        ("static_string_samples", _scalar("""
+            SELECT COUNT(*)
+            FROM static_string_samples x
+            JOIN static_findings_summary s ON s.id=x.summary_id
+            WHERE s.session_stamp=%s
+        """, (session_stamp,))),
         ("static_provider_acl", _scalar("SELECT COUNT(*) FROM static_provider_acl WHERE session_stamp=%s", (session_stamp,))),
         ("static_fileproviders", _scalar("SELECT COUNT(*) FROM static_fileproviders WHERE session_stamp=%s", (session_stamp,))),
         ("runs", _scalar("SELECT COUNT(*) FROM runs WHERE session_stamp=%s", (session_stamp,))),
-        ("buckets", _scalar("SELECT COUNT(*) FROM buckets b JOIN runs r ON r.run_id=b.run_id WHERE r.session_stamp=%s", (session_stamp,))),
-        ("metrics", _scalar("SELECT COUNT(*) FROM metrics m JOIN runs r ON r.run_id=m.run_id WHERE r.session_stamp=%s", (session_stamp,))),
+        ("buckets", _scalar("""
+            SELECT COUNT(*)
+            FROM buckets b
+            JOIN runs r ON r.run_id=b.run_id
+            WHERE r.session_stamp=%s
+        """, (session_stamp,))),
+        ("metrics", _scalar("""
+            SELECT COUNT(*)
+            FROM metrics m
+            JOIN runs r ON r.run_id=m.run_id
+            WHERE r.session_stamp=%s
+        """, (session_stamp,))),
+        ("findings", _scalar("SELECT COUNT(*) FROM findings WHERE run_id IN (SELECT run_id FROM runs WHERE session_stamp=%s)", (session_stamp,))),
     ]
 
     headers = ["Table", "Rows"]
@@ -236,4 +491,8 @@ __all__ = [
     "prompt_session_counts",
     "prompt_runs_for_package",
     "prompt_harvest_for_package",
+    "prompt_masvs_by_package",
+    "prompt_masvs_overview",
+    "prompt_persistence_audit",
+    "render_session_digest",
 ]

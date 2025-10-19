@@ -27,6 +27,7 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
     print()
 
     persistence_errors: list[str] = []
+    persist_enabled = not params.dry_run
 
     for index, app_result in enumerate(outcome.results, start=1):
         base_report = app_result.base_report()
@@ -52,25 +53,26 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             duration_seconds=total_duration,
         )
 
-        try:
-            outcome_status = persist_run_summary(
-                base_report,
-                string_data,
-                app_result.package_name,
-                session_stamp=params.session_stamp,
-                scope_label=params.scope_label,
-                finding_totals=finding_totals,
-                baseline_payload=payload,
-                dry_run=params.dry_run,
-            )
-            if outcome_status and not outcome_status.success:
-                persistence_errors.extend(outcome_status.errors)
-        except Exception as exc:
-            warning = (
-                f"Failed to persist run summary for {app_result.package_name}: {exc}"
-            )
-            print(status_messages.status(warning, level="warn"))
-            persistence_errors.append(str(exc))
+        if persist_enabled:
+            try:
+                outcome_status = persist_run_summary(
+                    base_report,
+                    string_data,
+                    app_result.package_name,
+                    session_stamp=params.session_stamp,
+                    scope_label=params.scope_label,
+                    finding_totals=finding_totals,
+                    baseline_payload=payload,
+                    dry_run=params.dry_run,
+                )
+                if outcome_status and not outcome_status.success:
+                    persistence_errors.extend(outcome_status.errors)
+            except Exception as exc:
+                warning = (
+                    f"Failed to persist run summary for {app_result.package_name}: {exc}"
+                )
+                print(status_messages.status(warning, level="warn"))
+                persistence_errors.append(str(exc))
 
         report_reference = None
         base_artifact = app_result.base_artifact_outcome()
@@ -83,19 +85,20 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
         for line in lines:
             print(line)
 
-        try:
-            saved_path = write_baseline_json(
-                payload,
-                package=app_result.package_name,
-                profile=params.profile,
-                scope=params.scope,
-            )
-            print(f"  Saved baseline JSON → {saved_path.name}")
-        except Exception as exc:
-            warning = (
-                f"Failed to write baseline JSON for {app_result.package_name}: {exc}"
-            )
-            print(status_messages.status(warning, level="warn"))
+        if persist_enabled:
+            try:
+                saved_path = write_baseline_json(
+                    payload,
+                    package=app_result.package_name,
+                    profile=params.profile,
+                    scope=params.scope,
+                )
+                print(f"  Saved baseline JSON → {saved_path.name}")
+            except Exception as exc:
+                warning = (
+                    f"Failed to write baseline JSON for {app_result.package_name}: {exc}"
+                )
+                print(status_messages.status(warning, level="warn"))
 
         if report_reference:
             print(f"  Report reference    → {report_reference}")
@@ -106,13 +109,13 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
     session_stamp = params.session_stamp
     if outcome.results:
         printed_db_table = False
-        if session_stamp:
+        if session_stamp and persist_enabled:
             printed_db_table = _render_db_severity_table(session_stamp)
         if not printed_db_table:
             from ..detail import render_app_table  # local import to avoid cycle
 
             render_app_table(outcome.results)
-        if session_stamp and not params.dry_run:
+        if session_stamp and persist_enabled:
             _render_persistence_footer(session_stamp, had_errors=bool(persistence_errors))
             if persistence_errors:
                 print(status_messages.status("Persistence issues detected:", level="error"))
@@ -127,7 +130,8 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
         for message in sorted(set(outcome.failures)):
             print(status_messages.status(message, level="error"))
 
-    _render_db_masvs_summary()
+    if persist_enabled:
+        _render_db_masvs_summary()
 
 
 def _interactive_detail_loop(outcome: RunOutcome, params: RunParameters) -> None:
@@ -168,9 +172,16 @@ def _render_db_masvs_summary() -> None:
             if entry is None:
                 print(f"{area.title():<9}  0     0     0     0     PASS   —")
             else:
-                status = "PASS" if entry["sev_ge_med"] == 0 else "FAIL"
+                high = entry.get("high", 0)
+                medium = entry.get("medium", 0)
+                if high:
+                    status = "FAIL"
+                elif medium:
+                    status = "WARN"
+                else:
+                    status = "PASS"
                 print(
-                    f"{area.title():<9}  0     {entry['sev_ge_med']:<5}{entry['low']:<5}{entry['info']:<6}"
+                    f"{area.title():<9}  {high:<5} {medium:<5} {entry['low']:<5} {entry['info']:<6}"
                     f"{status:<6} {entry['worst']}"
                 )
     except Exception:

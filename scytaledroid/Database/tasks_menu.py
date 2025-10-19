@@ -9,6 +9,7 @@ from scytaledroid.Database.db_func.permissions import detected_permissions, perm
 from scytaledroid.Database.db_func.static_analysis import static_findings, string_analysis
 from scytaledroid.Database.db_utils.menus import query_runner
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
+from scytaledroid.Persistence import db_writer
 
 
 def show_database_tasks_menu() -> None:
@@ -28,6 +29,9 @@ def show_database_tasks_menu() -> None:
             menu_utils.MenuOption("6", "Session table counts", "Validate counts for a specific session stamp"),
             menu_utils.MenuOption("7", "Runs and buckets by package", "List run metadata and scoring buckets"),
             menu_utils.MenuOption("8", "Harvest artifacts by package", "View harvested APK entries for a package"),
+            menu_utils.MenuOption("9", "Verify MASVS persistence", "Check latest MASVS counts for a package"),
+            menu_utils.MenuOption("10", "MASVS coverage overview", "Aggregate PASS/WARN/FAIL across latest package runs"),
+            menu_utils.MenuOption("11", "Audit run persistence gaps", "List runs missing static findings summaries"),
         ]
 
         valid_keys = ["0"]
@@ -72,6 +76,12 @@ def show_database_tasks_menu() -> None:
             query_runner.prompt_runs_for_package()
         elif choice == "8":
             query_runner.prompt_harvest_for_package()
+        elif choice == "9":
+            query_runner.prompt_masvs_by_package()
+        elif choice == "10":
+            query_runner.prompt_masvs_overview()
+        elif choice == "11":
+            query_runner.prompt_persistence_audit()
         else:
             print(status_messages.status("Option not implemented yet.", level="warn"))
 
@@ -88,6 +98,7 @@ def _render_results(title: str, results: Dict[str, bool]) -> None:
 
 def _provision_static_tables() -> None:
     results = {
+        "runs / buckets / metrics / findings": db_writer.ensure_schema(),
         "static_findings_summary / static_findings": static_findings.ensure_tables(),
         "static_string_summary / static_string_samples": string_analysis.ensure_tables(),
     }
