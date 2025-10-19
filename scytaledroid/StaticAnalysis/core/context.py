@@ -21,6 +21,15 @@ if TYPE_CHECKING:  # pragma: no cover - type checking imports only
 
 
 @dataclass(frozen=True)
+class SecretsSamplerConfig:
+    """Tuning knobs for the secrets detector sampler."""
+
+    entropy_threshold: float = 4.8
+    hits_per_bucket: int = 40
+    scope: str = "both"
+
+
+@dataclass(frozen=True)
 class AnalysisConfig:
     """Configuration flags controlling a static-analysis run."""
 
@@ -30,6 +39,7 @@ class AnalysisConfig:
     analysis_version: str = "2.0.0-alpha"
     enabled_detectors: Optional[Sequence[str]] = None
     enable_string_index: bool = True
+    secrets_sampler: Optional[SecretsSamplerConfig] = None
 
 
 @dataclass
@@ -55,4 +65,4 @@ class DetectorContext:
     config: AnalysisConfig = field(default_factory=AnalysisConfig)
 
 
-__all__ = ["AnalysisConfig", "DetectorContext"]
+__all__ = ["AnalysisConfig", "DetectorContext", "SecretsSamplerConfig"]

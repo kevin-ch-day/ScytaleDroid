@@ -20,27 +20,42 @@ MICRO_TESTS: Tuple[Tuple[str, str], ...] = (
 EVIDENCE_STEPS = (1, 2, 4)
 
 
-def prompt_tuning(base_params: RunParameters) -> RunParameters:
+def default_custom_tests() -> Tuple[str, ...]:
+    return tuple(key for key, _ in MICRO_TESTS)
+
+
+def prompt_advanced_options(base_params: RunParameters) -> RunParameters:
+    """Collect advanced overrides for a run."""
+
     params = base_params
     print()
-    menu_utils.print_header("Tuning", "Adjust quick parameters")
+    menu_utils.print_header("Advanced options", "Override defaults for this run")
 
+    table_utils.render_key_value_pairs(_summarise_params(params))
+    if not prompt_utils.prompt_yes_no("Modify advanced options?", default=False):
+        return params
+
+    selected_tests = params.selected_tests or (
+        default_custom_tests() if params.profile == "custom" else tuple()
+    )
     if params.profile == "custom":
-        tests = prompt_custom_tests(params.selected_tests)
-        params = replace(params, selected_tests=tests)
-    else:
-        params = replace(params, selected_tests=tuple())
+        selected_tests = prompt_custom_tests(selected_tests)
 
     evidence = prompt_int("Evidence lines", params.evidence_lines, choices=EVIDENCE_STEPS)
     findings = prompt_int("Max findings/test", params.finding_limit, minimum=1)
     entropy = prompt_float("Secrets sampler entropy ≥", params.secrets_entropy, minimum=0.0)
     hits = prompt_int("Secrets sampler hits/bucket", params.secrets_hits_per_bucket, minimum=1)
+    scope_options = {"1": "resources-only", "2": "dex-only", "3": "both"}
     scope_choice = prompt_choice(
         "Secrets sampler scope",
-        {"1": "resources-only", "2": "dex-strings", "3": "both"},
-        default={"resources": "1", "dex": "2", "both": "3"}.get(params.secrets_scope, "1"),
+        scope_options,
+        default={
+            "resources-only": "1",
+            "dex-only": "2",
+            "both": "3",
+        }.get(params.secrets_scope_canonical, "3"),
     )
-    secrets_scope = {"1": "resources", "2": "dex", "3": "both"}[scope_choice]
+    secrets_scope = scope_options[scope_choice]
 
     strings_mode = params.strings_mode
     string_max_samples = params.string_max_samples
@@ -50,14 +65,14 @@ def prompt_tuning(base_params: RunParameters) -> RunParameters:
         strings_choice = prompt_choice(
             "Strings mode",
             {"1": "both", "2": "dex", "3": "resources"},
-            default={"both": "1", "dex": "2", "resources": "3"}.get(params.strings_mode, "1"),
+            default={"both": "1", "dex": "2", "resources": "3"}.get(strings_mode, "1"),
         )
         strings_mode = {"1": "both", "2": "dex", "3": "resources"}[strings_choice]
-        string_max_samples = prompt_int("Max string samples (UI)", params.string_max_samples, minimum=1)
-        string_min_entropy = prompt_float("Min entropy threshold", params.string_min_entropy, minimum=0.0)
+        string_max_samples = prompt_int("Max string samples (UI)", string_max_samples, minimum=1)
+        string_min_entropy = prompt_float("Min entropy threshold", string_min_entropy, minimum=0.0)
         string_cleartext_only = prompt_utils.prompt_yes_no(
             "Endpoints panel: show cleartext only",
-            default=params.string_cleartext_only,
+            default=string_cleartext_only,
         )
 
     workers = prompt_utils.prompt_text(
@@ -66,7 +81,7 @@ def prompt_tuning(base_params: RunParameters) -> RunParameters:
         required=False,
         hint="Use 'auto' to match CPU count.",
     )
-    reuse_cache = prompt_utils.prompt_yes_no("Reuse cache", default=params.reuse_cache)
+    reuse_cache = prompt_utils.prompt_yes_no("Reuse disk cache", default=params.reuse_cache)
     log_level = prompt_choice("Log level", {"1": "INFO", "2": "DEBUG"}, default="1")
     traces_raw = prompt_utils.prompt_text(
         "Trace detectors",
@@ -79,6 +94,7 @@ def prompt_tuning(base_params: RunParameters) -> RunParameters:
 
     return replace(
         params,
+        selected_tests=selected_tests,
         evidence_lines=evidence,
         finding_limit=findings,
         secrets_entropy=entropy,
@@ -94,6 +110,58 @@ def prompt_tuning(base_params: RunParameters) -> RunParameters:
         trace_detectors=trace_detectors,
         dry_run=dry_run,
     )
+
+
+def _summarise_params(params: RunParameters) -> Tuple[tuple[str, object], ...]:
+    pairs: list[tuple[str, object]] = [
+        ("Profile", params.profile_label),
+        ("Scope", params.scope_label),
+        ("Evidence lines", params.evidence_lines),
+        ("Max findings/test", params.finding_limit),
+        ("Secrets entropy", params.secrets_entropy),
+        ("Secrets hits/bucket", params.secrets_hits_per_bucket),
+        ("Secrets scope", params.secrets_scope_label),
+    ]
+
+    if params.profile == "custom":
+        pairs.append(("Custom tests", _describe_custom_tests(params.selected_tests)))
+
+    if params.profile == "strings":
+        pairs.extend(
+            (
+                ("Strings mode", params.strings_mode),
+                ("String max samples", params.string_max_samples),
+                ("String min entropy", params.string_min_entropy),
+                ("Cleartext only", _format_bool(params.string_cleartext_only)),
+            )
+        )
+
+    pairs.extend(
+        (
+            ("Workers", params.workers),
+            ("Reuse cache", _format_bool(params.reuse_cache)),
+            ("Log level", params.log_level.upper()),
+            (
+                "Trace detectors",
+                ", ".join(params.trace_detectors) if params.trace_detectors else "—",
+            ),
+            ("Dry-run", _format_bool(params.dry_run)),
+        )
+    )
+
+    return tuple(pairs)
+
+
+def _format_bool(value: bool) -> str:
+    return "Yes" if value else "No"
+
+
+def _describe_custom_tests(selected: Tuple[str, ...]) -> str:
+    if not selected:
+        return "All micro-tests"
+    labels = {key: label for key, label in MICRO_TESTS}
+    ordered = [labels.get(key, key) for key in selected]
+    return ", ".join(ordered)
 
 
 def prompt_custom_tests(selected: Tuple[str, ...]) -> Tuple[str, ...]:
@@ -154,7 +222,7 @@ def prompt_float(label: str, default: float, *, minimum: float = 0.0) -> float:
 
 
 def prompt_choice(label: str, options: Dict[str, str], *, default: str) -> str:
-    print(f"{label}:" )
+    print(f"{label}:")
     for key, text in options.items():
         print(f"  {key}) {text}")
     return prompt_utils.get_choice(list(options.keys()), default=default)
@@ -163,7 +231,8 @@ def prompt_choice(label: str, options: Dict[str, str], *, default: str) -> str:
 __all__ = [
     "MICRO_TESTS",
     "EVIDENCE_STEPS",
-    "prompt_tuning",
+    "default_custom_tests",
+    "prompt_advanced_options",
     "prompt_custom_tests",
     "prompt_int",
     "prompt_float",

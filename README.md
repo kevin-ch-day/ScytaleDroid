@@ -32,11 +32,15 @@ dynamic, or threat-intel analysis.
 * **Permission-first field view.** Abbreviation map (shown once), postcard
   summaries, a Signal Matrix, and a Permission Matrix (`x/*/-`) with a fixed
   capability order and subtle colouring when ANSI is available.
-* **Tunable scoring + grades.** Risk scores print to three decimals with a
-  letter grade (A–F). Weights/normalization can be tuned via a TOML file
-  without touching code.
+* **Composite risk scoring.** The static risk engine in
+  `scytaledroid/StaticAnalysis/risk/` centralises weighting, factor caps, and
+  banding so CLI output and downstream consumers share the same numeric score
+  and grade model.
 * **DB snapshots for trust.** Risk snapshots (per app, per run) are written to
   the database (when configured) for longitudinal analysis and dashboards.
+* **Housekeeping shortcuts.** The Utilities menu exposes a static-analysis
+  housekeeping action that prunes JSON/HTML exports older than 30 days and
+  resets cache/temp directories so local runs stay lean.
 
 ### Static analysis preview
 
@@ -44,6 +48,9 @@ dynamic, or threat-intel analysis.
   leaving the CLI. Each run executes the detector pipeline, records per-stage
   timings, and persists a reproducibility bundle with manifest, network
   security, and string-index snapshots.
+- Default runs launch immediately using sane defaults (auto workers, INFO log
+  level, cache purge). Advanced overrides remain available from the CLI for
+  analysts who need to tweak thresholds or detector subsets.
 - Section renderers surface deterministic tables for component exposure,
   provider ACLs, secrets, storage risk, crypto posture, DFIR evidence hints,
   and correlation-backed findings. Evidence is capped per section with
@@ -79,6 +86,8 @@ dynamic, or threat-intel analysis.
   detector contracts, pipeline order, and rendering requirements.
 * [`docs/static_analysis/static_analysis_pipeline_plan.md`](docs/static_analysis/static_analysis_pipeline_plan.md) – roadmap,
   implementation status, and research backlog.
+* [`docs/maintenance/housekeeping.md`](docs/maintenance/housekeeping.md) – log
+  locations, housekeeping behaviour, and retention policy controls.
 * [`docs/database`](docs/database) – schema notes and read-side query
   blueprints for downstream portals.
 * [`docs/database/permission_analysis_schema.md`](docs/database/permission_analysis_schema.md) – risk

@@ -4,11 +4,12 @@ The string intelligence pipeline now exposes an **exploratory mode** so analysts
 validate collection quality, inspect ranges, and spot anomalous runs before
 sifting through scored findings.
 
-> **Note:** Detector logic now lives in
-> `scytaledroid/StaticAnalysis/modules/string_analysis/detectors/`. The
-> exploratory summaries reflect signals emitted by those modular detectors,
-> making it easier to review or extend specific detection paths without
-> touching the CLI renderer.
+> **Note:** Exploratory summaries now lean on the normalised string index plus
+> the aggregate helpers in
+> `scytaledroid/StaticAnalysis/modules/string_analysis/`. Regex catalogs and
+> signal tags are centralised under `constants.py` / `matcher.py`, so tuning a
+> provider or keyword automatically surfaces here without touching the CLI
+> renderer.
 
 ```
 python -m scytaledroid.StaticAnalysis.cli.renderer --explore --profile full <apk-report.json>

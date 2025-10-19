@@ -6,7 +6,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Dict, Mapping, Sequence
 
-from ..core.context import DetectorContext
+from ..core.context import DetectorContext, SecretsSamplerConfig
 from ..core.findings import (
     Badge,
     DetectorResult,
@@ -204,11 +204,35 @@ class SecretsDetector(BaseDetector):
                 evidence=tuple(),
             )
 
+        sampler_config = context.config.secrets_sampler
+        allowed_types: tuple[str, ...] | None = None
+        hits_limit: int | None = None
+        min_entropy: float | None = None
+        evidence_limit = 2
+
+        if isinstance(sampler_config, SecretsSamplerConfig):
+            scope = (sampler_config.scope or "").lower()
+            if scope == "dex-only":
+                allowed_types = ("code",)
+            elif scope == "resources-only":
+                allowed_types = ("resource", "raw", "asset")
+            hits_limit = sampler_config.hits_per_bucket if sampler_config.hits_per_bucket > 0 else None
+            min_entropy = sampler_config.entropy_threshold if sampler_config.entropy_threshold > 0 else None
+            evidence_limit = min(max(1, sampler_config.hits_per_bucket), 10)
+
         matcher = StringMatcher(index, filters=DEFAULT_SECRET_FILTERS)
-        batch = matcher.match()
+        batch = matcher.match(
+            allowed_origin_types=allowed_types,
+            max_hits_per_pattern=hits_limit,
+            min_entropy=min_entropy,
+        )
         metrics = _build_metrics(batch)
         findings = _build_findings(batch.groups, apk_path=context.apk_path)
-        evidence = _collect_result_evidence(batch.groups, apk_path=context.apk_path)
+        evidence = _collect_result_evidence(
+            batch.groups,
+            apk_path=context.apk_path,
+            limit=evidence_limit,
+        )
 
         if findings:
             metrics_status = "warn"

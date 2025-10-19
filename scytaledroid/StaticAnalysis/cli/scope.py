@@ -49,12 +49,12 @@ def select_app_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
     menu_utils.print_header("Scope — App", "Select 1 package")
     rows = [[str(idx), package, version] for idx, (package, version, _count) in enumerate(packages, start=1)]
     table_utils.render_table(["#", "Package", "Version"], rows)
-    choice = prompt_utils.get_choice(
-        [str(idx) for idx in range(1, len(packages) + 1)],
-        prompt="Select package #: ",
-        default="1",
+
+    index = _resolve_index(
+        "Select package # or name",
+        [package for package, _version, _count in packages],
     )
-    package_name, _, _ = packages[int(choice) - 1]
+    package_name, _, _ = packages[index]
     scoped = tuple(group for group in groups if group.package_name == package_name)
     return ScopeSelection("app", package_name, scoped)
 
@@ -70,14 +70,56 @@ def select_category_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
     menu_utils.print_header("Scope — Category", "Select category")
     rows = [[str(idx), category, str(count)] for idx, (category, count) in enumerate(categories, start=1)]
     table_utils.render_table(["#", "Category", "Apps"], rows)
-    choice = prompt_utils.get_choice(
-        [str(idx) for idx in range(1, len(categories) + 1)],
-        prompt="Select category #: ",
-        default="1",
-    )
-    category_name, _ = categories[int(choice) - 1]
+
+    index = _resolve_index("Select category # or name", [category for category, _ in categories])
+    category_name, _ = categories[index]
     scoped = tuple(group for group in groups if getattr(group, "category", None) == category_name)
     return ScopeSelection("category", category_name, scoped)
+
+
+def _resolve_index(prompt: str, labels: Sequence[str]) -> int:
+    valid_range = f"1..{len(labels)}"
+    while True:
+        response = prompt_utils.prompt_text(
+            prompt,
+            default="1",
+            required=False,
+        ).strip()
+        if not response:
+            response = "1"
+
+        if response.isdigit():
+            idx = int(response)
+            if 1 <= idx <= len(labels):
+                return idx - 1
+            print(
+                status_messages.status(
+                    f"Choice {response} is out of range ({valid_range}).",
+                    level="warn",
+                )
+            )
+            continue
+
+        lowered = response.lower()
+        matches = [i for i, label in enumerate(labels) if lowered in label.lower()]
+        if len(matches) == 1:
+            return matches[0]
+        if not matches:
+            print(
+                status_messages.status(
+                    f"No match for '{response}'. Enter a number within {valid_range} or a matching name.",
+                    level="warn",
+                )
+            )
+            continue
+
+        hint = ", ".join(f"{i + 1}:{labels[i]}" for i in matches[:5])
+        print(
+            status_messages.status(
+                f"Ambiguous input. Matches: {hint}.",
+                level="warn",
+            )
+        )
 
 
 __all__ = [
@@ -86,4 +128,5 @@ __all__ = [
     "select_app_scope",
     "select_category_scope",
 ]
+
 

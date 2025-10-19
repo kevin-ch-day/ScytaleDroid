@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Callable, Dict
 
+from scytaledroid.Config import app_config
 from scytaledroid.Utils.DisplayUtils import (
     menu_utils,
     prompt_utils,
@@ -22,6 +23,7 @@ def utils_menu() -> None:
         "2": util_actions.show_log_locations,
         "3": configure_world_clocks,
         "4": _open_output_prefs_menu,
+        "5": util_actions.clean_static_analysis_artifacts,
     }
     options = [
         menu_utils.MenuOption("1", "Clear the console", "Wipe the terminal output"),
@@ -35,6 +37,15 @@ def utils_menu() -> None:
             "4",
             "Output preferences",
             "Set verbosity, analytics detail, and sample limits",
+        ),
+        menu_utils.MenuOption(
+            "5",
+            "Housekeep static-analysis artefacts",
+            (
+                "Prune stale JSON/HTML reports ("
+                f"{app_config.STATIC_ANALYSIS_RETENTION_DAYS}-day retention)"
+                " and reset cache directories"
+            ),
         ),
     ]
 
@@ -59,20 +70,6 @@ def utils_menu() -> None:
         # The world clock configurator manages its own loop.
         if choice != "3":
             prompt_utils.press_enter_to_continue()
-
-
-def _open_perm_catalog_menu() -> None:
-    # Import lazily to avoid pulling optional parsing deps at module import time
-    try:
-        from scytaledroid.Utils.AndroidPermCatalog.cli import perm_catalog_menu  # noqa: WPS433
-
-        perm_catalog_menu()
-    except Exception as exc:  # pragma: no cover - friendly fallback
-        print(
-            status_messages.status(
-                f"Permission catalog not available: {exc}", level="warn"
-        )
-        )
 
 
 def _open_output_prefs_menu() -> None:

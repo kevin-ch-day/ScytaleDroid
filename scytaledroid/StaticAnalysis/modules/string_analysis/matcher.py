@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass, field
+import math
 from enum import Enum
-from typing import Callable, Iterable, Mapping, MutableMapping, Sequence, Tuple
+from typing import Callable, Collection, Iterable, Mapping, MutableMapping, Sequence, Tuple
 from typing import Literal
 
 from .extractor import IndexedString, StringIndex
@@ -85,6 +87,16 @@ class MatchBatch:
         return len(self.evaluated)
 
 
+def entropy(text: str) -> float:
+    if not text:
+        return 0.0
+    frequency: MutableMapping[str, int] = {}
+    for char in text:
+        frequency[char] = frequency.get(char, 0) + 1
+    length = len(text)
+    return -sum((count / length) * math.log2(count / length) for count in frequency.values())
+
+
 class StringMatcher:
     """Coordinator that applies patterns and filters to a string index."""
 
@@ -99,8 +111,20 @@ class StringMatcher:
         self._patterns = tuple(patterns or DEFAULT_PATTERNS)
         self._filters = tuple(filters or ())
 
-    def match(self) -> MatchBatch:
+    def match(
+        self,
+        *,
+        allowed_origin_types: Collection[str] | None = None,
+        max_hits_per_pattern: int | None = None,
+        min_entropy: float | None = None,
+    ) -> MatchBatch:
         evaluated = self._evaluate_matches()
+        evaluated = _apply_sampler_policy(
+            evaluated,
+            allowed_origin_types=allowed_origin_types,
+            max_hits_per_pattern=max_hits_per_pattern,
+            min_entropy=min_entropy,
+        )
         groups = _group_by_pattern(evaluated)
         return MatchBatch(evaluated=evaluated, groups=groups)
 
@@ -199,6 +223,65 @@ def _is_fragment_valid(pattern_name: str, fragment: str) -> bool:
         if "PRIVATE KEY" not in fragment:
             return False
     return True
+
+
+def _apply_sampler_policy(
+    matches: Sequence[EvaluatedMatch],
+    *,
+    allowed_origin_types: Collection[str] | None,
+    max_hits_per_pattern: int | None,
+    min_entropy: float | None,
+) -> Tuple[EvaluatedMatch, ...]:
+    if not matches:
+        return tuple()
+
+    allowed_set = None
+    if allowed_origin_types is not None:
+        allowed_set = {value.lower() for value in allowed_origin_types}
+
+    limit = max_hits_per_pattern if max_hits_per_pattern and max_hits_per_pattern > 0 else None
+    threshold = min_entropy if min_entropy and min_entropy > 0 else None
+
+    accepted_counts: MutableMapping[str, int] = defaultdict(int)
+    adjusted: list[EvaluatedMatch] = []
+
+    for match in matches:
+        status = match.status
+        reasons = list(match.reasons)
+        pattern_name = match.record.pattern.name
+        entry = match.record.string_entry
+        origin_type = (entry.origin_type or "").lower()
+
+        if allowed_set is not None and origin_type not in allowed_set:
+            status = MatchStatus.FILTERED
+            if "origin_scope" not in reasons:
+                reasons.append("origin_scope")
+
+        if status is MatchStatus.ACCEPTED and threshold is not None:
+            if entropy(match.record.fragment) < threshold:
+                status = MatchStatus.FILTERED
+                if "entropy_below_threshold" not in reasons:
+                    reasons.append("entropy_below_threshold")
+
+        if status is MatchStatus.ACCEPTED:
+            if limit is not None and accepted_counts[pattern_name] >= limit:
+                status = MatchStatus.FILTERED
+                if "hits_limit" not in reasons:
+                    reasons.append("hits_limit")
+            else:
+                accepted_counts[pattern_name] += 1
+
+        new_match = match
+        updated_reasons = tuple(reasons)
+        if status is not match.status or updated_reasons != match.reasons:
+            new_match = EvaluatedMatch(
+                record=match.record,
+                status=status,
+                reasons=updated_reasons,
+            )
+        adjusted.append(new_match)
+
+    return tuple(adjusted)
 
 
 _TEST_HINTS: tuple[str, ...] = (
