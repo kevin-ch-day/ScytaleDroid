@@ -152,3 +152,23 @@ __all__ += [
     "CREATE_VW_STORAGE_SURFACE_RISK",
     "CREATE_VW_DYNLOAD_HOTSPOTS",
 ]
+
+CREATE_V_MASVS_MATRIX = """
+CREATE OR REPLACE VIEW v_masvs_matrix AS
+SELECT
+  r.run_id,
+  r.package,
+  MAX(CASE WHEN m.control_id LIKE 'NETWORK-%'  AND m.status = 'FAIL' THEN 1 ELSE 0 END) AS network_fail,
+  MAX(CASE WHEN m.control_id LIKE 'PLATFORM-%' AND m.status = 'FAIL' THEN 1 ELSE 0 END) AS platform_fail,
+  MAX(CASE WHEN m.control_id LIKE 'STORAGE-%'  AND m.status = 'FAIL' THEN 1 ELSE 0 END) AS storage_fail,
+  MAX(CASE WHEN m.control_id LIKE 'PRIVACY-%'  AND m.status = 'FAIL' THEN 1 ELSE 0 END) AS privacy_fail,
+  MAX(CASE WHEN m.control_id LIKE 'NETWORK-%'  AND m.status = 'INCONCLUSIVE' THEN 1 ELSE 0 END) AS network_inconclusive,
+  MAX(CASE WHEN m.control_id LIKE 'PLATFORM-%' AND m.status = 'INCONCLUSIVE' THEN 1 ELSE 0 END) AS platform_inconclusive,
+  MAX(CASE WHEN m.control_id LIKE 'STORAGE-%'  AND m.status = 'INCONCLUSIVE' THEN 1 ELSE 0 END) AS storage_inconclusive,
+  MAX(CASE WHEN m.control_id LIKE 'PRIVACY-%'  AND m.status = 'INCONCLUSIVE' THEN 1 ELSE 0 END) AS privacy_inconclusive
+FROM runs AS r
+LEFT JOIN masvs_control_coverage AS m ON m.run_id = r.run_id
+GROUP BY r.run_id, r.package;
+"""
+
+__all__ += ["CREATE_V_MASVS_MATRIX"]

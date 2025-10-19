@@ -6,7 +6,6 @@ import json
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
-import re
 from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Optional, Sequence, Tuple
 
 try:
@@ -29,47 +28,145 @@ from scytaledroid.Database.db_func.static_analysis import (
     string_analysis as _sa,
 )
 from scytaledroid.Database.db_core import db_queries as core_q
+from .cvss_v4 import apply_profiles, score_vector
+from .evidence import normalize_evidence
+from .masvs_mapper import summarise_controls, rule_to_area
+from .rule_mapping import derive_rule_id
 
 
 _CVSS_BASE_ORDER = ("AV", "AC", "AT", "PR", "UI", "VC", "VI", "VA", "SC", "SI", "SA")
 
-_RULE_REGEXES: tuple[tuple[re.Pattern[str], str], ...] = (
-    (re.compile(r"usesCleartextTraffic\s*=\s*true", re.IGNORECASE), "BASE-CLR-001"),
-    (re.compile(r"\bcleartext\b", re.IGNORECASE), "BASE-CLR-001"),
-    (re.compile(r"requestLegacyExternalStorage\s*=\s*true", re.IGNORECASE), "BASE-STO-LEGACY"),
-    (
-        re.compile(r"\b(Activity|Service|Receiver|Activity Alias|Provider)\b.*exported.*relies on.*\bpermission", re.IGNORECASE),
-        "BASE-IPC-EXPORTED-WITH-PERM",
-    ),
-    (re.compile(r"\bexported\b.*\brelies on\b.*\bpermission", re.IGNORECASE), "BASE-IPC-EXPORTED-WITH-PERM"),
-    (re.compile(r"ContentProvider.*(without|no)\s+permission", re.IGNORECASE), "BASE-IPC-PROVIDER-NO-ACL"),
-    (
-        re.compile(
-            r"\b(Activity|Service|Receiver|Activity Alias|Provider)\b.*exported.*(does not d|does not decla|without)\s+permission",
-            re.IGNORECASE,
+
+def _first_non_empty_str(*values: object) -> Optional[str]:
+    for value in values:
+        if isinstance(value, str):
+            candidate = value.strip()
+        elif value is None:
+            candidate = ""
+        else:
+            candidate = str(value).strip()
+        if candidate:
+            return candidate
+    return None
+
+
+def _extract_from_sources(
+    sources: Sequence[Mapping[str, Any]],
+    paths: Sequence[Sequence[str]],
+) -> Optional[str]:
+    for source in sources:
+        if not isinstance(source, Mapping):
+            continue
+        for path in paths:
+            current: Any = source
+            for key in path:
+                if not isinstance(current, Mapping):
+                    break
+                current = current.get(key)
+            else:
+                candidate = _first_non_empty_str(current)
+                if candidate:
+                    return candidate
+    return None
+
+
+def _extract_run_profiles(
+    report: Any,
+    baseline_payload: Mapping[str, object],
+) -> tuple[str, str]:
+    metadata = getattr(report, "metadata", None)
+    metadata_map: Mapping[str, Any] = metadata if isinstance(metadata, Mapping) else {}
+    baseline_map: Mapping[str, Any] = baseline_payload if isinstance(baseline_payload, Mapping) else {}
+    baseline_section_raw = (
+        baseline_map.get("baseline") if isinstance(baseline_map.get("baseline"), Mapping) else {}
+    )
+    baseline_section: Mapping[str, Any] = (
+        baseline_section_raw if isinstance(baseline_section_raw, Mapping) else {}
+    )
+
+    sources: Sequence[Mapping[str, Any]] = (
+        metadata_map,
+        baseline_map,
+        baseline_section,
+    )
+
+    threat_candidate = _extract_from_sources(
+        sources,
+        (
+            ("threat_profile",),
+            ("threatProfile",),
+            ("threat_profile_code",),
+            ("profiles", "threat", "profile"),
+            ("profiles", "threat", "code"),
+            ("threat", "profile"),
+            ("threat", "code"),
+            ("risk", "threat_profile"),
+            ("risk", "threat", "profile"),
         ),
-        "BASE-IPC-COMP-NO-ACL",
-    ),
-)
+    )
+    env_candidate = _extract_from_sources(
+        sources,
+        (
+            ("env_profile",),
+            ("environment_profile",),
+            ("envProfile",),
+            ("environmentProfile",),
+            ("profiles", "env", "profile"),
+            ("profiles", "environment", "profile"),
+            ("env", "profile"),
+            ("environment", "profile"),
+        ),
+    )
 
-_RULE_FORCE_PHRASES: tuple[tuple[str, str], ...] = (
-    ("exported receiver relies on permission", "BASE-IPC-EXPORTED-WITH-PERM"),
-    ("exported service relies on permission", "BASE-IPC-EXPORTED-WITH-PERM"),
-    ("exported activity relies on permission", "BASE-IPC-EXPORTED-WITH-PERM"),
-    ("exported provider relies on permission", "BASE-IPC-EXPORTED-WITH-PERM"),
-    ("is exported but does not", "BASE-IPC-COMP-NO-ACL"),
-)
+    threat_profile = threat_candidate or "Unknown"
+    env_profile = env_candidate or "consumer"
+    return threat_profile, env_profile
 
-_RULE_TO_MASVS: Dict[str, Tuple[str, str]] = {
-    "BASE-IPC-COMP-NO-ACL": ("PLATFORM-IPC-1", "FAIL"),
-    "BASE-IPC-PROVIDER-NO-ACL": ("PLATFORM-IPC-1", "FAIL"),
-    "BASE-IPC-EXPORTED-WITH-PERM": ("PLATFORM-IPC-1", "PASS"),
-    "BASE-CLR-001": ("NETWORK-1", "FAIL"),
-    "BASE-STO-LEGACY": ("STORAGE-2", "FAIL"),
-    "STR-SECRET-AWS-HC": ("STORAGE-2", "INCONCLUSIVE"),
-}
 
-_STATUS_RANK = {"FAIL": 3, "INCONCLUSIVE": 2, "PASS": 1}
+def _extract_rule_hint(finding: Any) -> Optional[str]:
+    for attr in ("rule_id_hint", "rule_id", "rule"):
+        value = getattr(finding, attr, None)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    extra = getattr(finding, "extra", None)
+    if isinstance(extra, Mapping):
+        candidate = extra.get("rule_id")
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    return None
+
+
+def _normalise_masvs_value(value: object) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, Mapping):
+        value = value.get("value")
+    if hasattr(value, "value"):
+        try:
+            value = getattr(value, "value")
+        except Exception:  # pragma: no cover - defensive
+            return None
+    text = str(value or "").strip()
+    if not text:
+        return None
+    text = text.replace("MASVS-", "")
+    parts = [segment for segment in text.replace("_", "-").split("-") if segment]
+    if not parts:
+        return None
+    return parts[0].upper()
+
+
+def _derive_masvs_tag(finding: Any, rule_id: Optional[str]) -> Optional[str]:
+    for attr in ("category_masvs", "masvs", "category", "masvs_category"):
+        candidate = _normalise_masvs_value(getattr(finding, attr, None))
+        if candidate:
+            return candidate
+    if rule_id:
+        area = rule_to_area(rule_id)
+        if area:
+            return area
+    return None
+
 
 _FALLBACK_RULE_CVSS: Dict[str, Dict[str, object]] = {
     "BASE-IPC-COMP-NO-ACL": {
@@ -154,6 +251,8 @@ def _compute_cvss_base(rule_id: Optional[str]) -> Tuple[Optional[str], Optional[
     fallback = _FALLBACK_RULE_CVSS.get(rule_id)
     if fallback and isinstance(fallback.get("score"), (int, float)):
         score = float(fallback["score"])
+    if vector and score is None:
+        score = score_vector(vector)
     meta: Dict[str, Any] = {
         "base": {
             "metrics": base_metrics,
@@ -167,71 +266,6 @@ def _compute_cvss_base(rule_id: Optional[str]) -> Tuple[Optional[str], Optional[
         meta["supplemental"] = supplemental
     return vector, score, meta
 
-
-def _resolve_threat_code(threat_profile: Optional[str]) -> str:
-    profile = (threat_profile or "Unknown").strip()
-    return {
-        "Unknown": "U",
-        "Unreported": "U",
-        "ProofOfConcept": "P",
-        "PoC": "P",
-        "Active": "A",
-        "Attacked": "A",
-        "Weaponized": "W",
-    }.get(profile, "U")
-
-
-def _resolve_env_metrics(env_profile: Optional[str]) -> Dict[str, str]:
-    profile = (env_profile or "consumer").strip().lower()
-    mapping = {
-        "consumer": {"CR": "M", "IR": "M", "AR": "M"},
-        "enterprise": {"CR": "H", "IR": "H", "AR": "H"},
-    }
-    return mapping.get(profile, mapping["consumer"])
-
-
-def _append_metric(vector: Optional[str], key: str, value: str) -> Optional[str]:
-    if not vector:
-        return None
-    parts = [segment for segment in vector.split("/") if not segment.startswith(f"{key}:")]
-    parts.append(f"{key}:{value}")
-    return "/".join(parts)
-
-
-def _apply_cvss_profiles(
-    base_vector: Optional[str],
-    base_score: Optional[float],
-    threat_profile: Optional[str],
-    env_profile: Optional[str],
-) -> Tuple[Optional[str], Optional[float], Optional[str], Optional[float], Optional[str], Optional[float], Dict[str, Any]]:
-    if not base_vector:
-        return None, None, None, None, None, None, {}
-    threat_code = _resolve_threat_code(threat_profile)
-    env_metrics = _resolve_env_metrics(env_profile)
-
-    bt_vector = _append_metric(base_vector, "E", threat_code)
-    be_vector = base_vector
-    for key, value in env_metrics.items():
-        be_vector = _append_metric(be_vector, key, value)
-    bte_vector = bt_vector
-    for key, value in env_metrics.items():
-        bte_vector = _append_metric(bte_vector, key, value)
-
-    meta = {
-        "threat": {"profile": threat_profile or "Unknown", "E": threat_code},
-        "env": {"profile": env_profile or "consumer", **env_metrics},
-    }
-
-    # Until a full CVSS 4.0 calculator is integrated, reuse the base score for derived variants.
-    return (
-        bt_vector,
-        base_score,
-        be_vector,
-        base_score,
-        bte_vector,
-        base_score,
-        meta,
-    )
 
 
 def _truncate(value: Optional[str], limit: int) -> Optional[str]:
@@ -262,73 +296,6 @@ def _coerce_mapping(obj: Any) -> Dict[str, Any]:
     return data
 
 
-def _extract_evidence_details(
-    evidence: Any, fallback: Optional[str]
-) -> Tuple[Optional[str], Optional[str], Optional[str], str]:
-    entries: List[Dict[str, Any]] = []
-    if isinstance(evidence, (list, tuple)):
-        iter_evidence: Iterable[Any] = evidence
-    elif evidence:
-        iter_evidence = [evidence]
-    else:
-        iter_evidence = []
-
-    chosen_path: Optional[str] = None
-    chosen_offset: Optional[str] = None
-    chosen_preview: Optional[str] = None
-
-    for item in iter_evidence:
-        data = _coerce_mapping(item)
-        cleaned: Dict[str, Any] = {}
-        for key in ("path", "file", "location", "resource"):
-            value = data.get(key)
-            if chosen_path is None and isinstance(value, str) and value.strip():
-                chosen_path = value.strip()
-        for key in ("offset", "line", "column", "index"):
-            value = data.get(key)
-            if chosen_offset is None and value not in (None, ""):
-                chosen_offset = str(value)
-        for key in ("detail", "message", "preview", "summary", "because"):
-            value = data.get(key)
-            if chosen_preview is None and isinstance(value, str) and value.strip():
-                chosen_preview = value.strip()
-        for key, value in data.items():
-            if isinstance(value, (str, int, float, bool)) and key not in cleaned:
-                cleaned[key] = value
-        if cleaned:
-            entries.append(cleaned)
-
-    if chosen_preview is None and isinstance(fallback, str):
-        chosen_preview = fallback.strip()
-
-    payload = {
-        "path": chosen_path,
-        "offset": chosen_offset,
-        "detail": chosen_preview,
-        "entries": entries,
-    }
-    payload_str = json.dumps(payload, ensure_ascii=False) if payload else ""
-    return chosen_path, chosen_offset, chosen_preview, payload_str
-
-
-def _derive_rule_id(
-    detector_id: Optional[str],
-    module_id: Optional[str],
-    evidence_path: Optional[str],
-    evidence_preview: Optional[str],
-) -> Optional[str]:
-    tokens = " ".join(filter(None, [detector_id, module_id, evidence_path, evidence_preview])).strip()
-    if not tokens:
-        return None
-    for pattern, rid in _RULE_REGEXES:
-        if pattern.search(tokens):
-            return rid
-    lower_tokens = tokens.lower()
-    for phrase, rid in _RULE_FORCE_PHRASES:
-        if phrase in lower_tokens:
-            return rid
-    return None
-
 
 def _persist_findings(run_id: int, rows: Sequence[Dict[str, Any]]) -> bool:
     try:
@@ -355,7 +322,7 @@ def _persist_findings(run_id: int, rows: Sequence[Dict[str, Any]]) -> bool:
                     run_id,
                     row.get("severity"),
                     row.get("masvs"),
-                    _truncate(row.get("legacy_cvss"), 128),
+                    _truncate(row.get("cvss"), 128),
                     row.get("kind"),
                     _truncate(row.get("evidence"), 512),
                     row.get("module_id"),
@@ -380,53 +347,33 @@ def _persist_findings(run_id: int, rows: Sequence[Dict[str, Any]]) -> bool:
         return False
 
 
-def _persist_masvs_controls(run_id: int, package: str, coverage: Dict[str, Dict[str, Any]]) -> None:
+def _persist_masvs_controls(run_id: int, package: str, coverage: Mapping[str, Any]) -> None:
     try:
         core_q.run_sql("DELETE FROM masvs_control_coverage WHERE run_id=%s", (run_id,))
     except Exception:
         pass
-    for control_id, payload in coverage.items():
+    for control_id, entry in coverage.items():
         try:
-            evidence = json.dumps(payload.get("evidence") or [], ensure_ascii=False)
-            rubric = json.dumps(payload.get("rubric") or {}, ensure_ascii=False)
+            payload_attr = getattr(entry, "payload", None)
+            if callable(payload_attr):
+                payload_map = payload_attr()
+            elif isinstance(entry, Mapping):
+                payload_map = entry
+            else:
+                continue
+            evidence = json.dumps(payload_map.get("evidence") or [], ensure_ascii=False)
+            rubric = json.dumps(payload_map.get("rubric") or {}, ensure_ascii=False)
             core_q.run_sql(
                 """
                 INSERT INTO masvs_control_coverage (run_id, package, control_id, status, evidence, rubric)
                 VALUES (%s,%s,%s,%s,%s,%s)
                 ON DUPLICATE KEY UPDATE status=VALUES(status), evidence=VALUES(evidence), rubric=VALUES(rubric)
                 """,
-                (run_id, package, control_id, payload.get("status"), evidence, rubric),
+                (run_id, package, control_id, payload_map.get("status"), evidence, rubric),
             )
         except Exception:
             continue
 
-
-
-@lru_cache(maxsize=1)
-def _load_cvss_map() -> Mapping[str, Mapping[str, Optional[str]]]:
-    path = Path("config/masvs_map.json")
-    if not path.exists():
-        return {}
-    try:
-        data = json.loads(path.read_text("utf-8"))
-    except Exception:
-        return {}
-    mapping = {}
-    for finding_id, payload in data.items():
-        if not isinstance(payload, dict):
-            continue
-        codes = payload.get("masvs") or []
-        area = None
-        if isinstance(codes, list) and codes:
-            code = str(codes[0])
-            parts = code.split("-")
-            if len(parts) >= 2:
-                area = parts[1].upper()
-        mapping[str(finding_id)] = {
-            "masvs": area,
-            "cvss": payload.get("cvss_v4"),
-        }
-    return mapping
 
 
 @dataclass(slots=True)
@@ -454,22 +401,13 @@ def persist_run_summary(
     dry_run: bool = False,
 ) -> PersistenceOutcome:
     outcome = PersistenceOutcome()
-    if dry_run:
-        log.info("Dry-run enabled; skipping persistence for %s", run_package, category="static_analysis")
-        return outcome
-
-    if not session_stamp:
-        message = f"Missing session stamp for {run_package}; static persistence will be skipped."
-        log.warning(message, category="static_analysis")
-        outcome.add_error(message)
-        return outcome
-
     br = base_report
-    target_sdk = None
-    try:
-        target_sdk = int(br.manifest.target_sdk) if br.manifest.target_sdk else None
-    except Exception:
-        target_sdk = None
+    if dry_run:
+        log.info(
+            f"Dry-run enabled; persistence for {run_package} will be simulated",
+            category="static_analysis",
+        )
+
     if not session_stamp:
         try:
             meta = getattr(br, "metadata", {}) or {}
@@ -479,20 +417,56 @@ def persist_run_summary(
         except Exception:
             pass
 
-    run_id = _dw.create_run(
-        package=br.manifest.package_name or run_package,
-        version_code=int(br.manifest.version_code) if br.manifest.version_code else None,
-        version_name=br.manifest.version_name,
-        target_sdk=target_sdk,
-        session_stamp=session_stamp,
-    )
-    if not run_id:
-        message = f"Failed to create run record for {run_package}"
+    if not session_stamp:
+        message = f"Missing session stamp for {run_package}; static persistence will be skipped."
         log.warning(message, category="static_analysis")
         outcome.add_error(message)
         return outcome
 
-    outcome.run_id = int(run_id)
+    target_sdk = None
+    try:
+        target_sdk = int(br.manifest.target_sdk) if br.manifest.target_sdk else None
+    except Exception:
+        target_sdk = None
+
+    threat_profile_value, env_profile_value = _extract_run_profiles(br, baseline_payload)
+    run_id: Optional[int] = None
+    if not dry_run:
+        run_id = _dw.create_run(
+            package=br.manifest.package_name or run_package,
+            version_code=int(br.manifest.version_code) if br.manifest.version_code else None,
+            version_name=br.manifest.version_name,
+            target_sdk=target_sdk,
+            session_stamp=session_stamp,
+            threat_profile=threat_profile_value,
+            env_profile=env_profile_value,
+        )
+        if not run_id:
+            message = f"Failed to create run record for {run_package}"
+            log.warning(message, category="static_analysis")
+            outcome.add_error(message)
+            return outcome
+        outcome.run_id = int(run_id)
+
+    threat_profile = threat_profile_value
+    env_profile = env_profile_value
+    if run_id is not None:
+        run_profile_row: Optional[Mapping[str, Any]] = None
+        try:
+            row = core_q.run_sql(
+                "SELECT threat_profile, env_profile FROM runs WHERE run_id=%s",
+                (run_id,),
+                fetch="one",
+                dictionary=True,
+            )
+            if isinstance(row, Mapping):
+                run_profile_row = row
+        except Exception:
+            run_profile_row = None
+
+        if run_profile_row:
+            threat_profile = _first_non_empty_str(run_profile_row.get("threat_profile"), threat_profile) or "Unknown"
+            env_profile = _first_non_empty_str(run_profile_row.get("env_profile"), env_profile) or "consumer"
 
     declared = list(br.permissions.declared or ())
     shorts_only = [n.split(".")[-1].upper() for n in declared if n.startswith("android.")]
@@ -563,29 +537,23 @@ def persist_run_summary(
         "webssl": (webssl_points, 10.0),
         "correlations": (corr_points, 5.0),
     }
-    if not _dw.write_buckets(int(run_id), buckets_payload):
+    if run_id is not None and not _dw.write_buckets(int(run_id), buckets_payload):
         message = f"Failed to persist scoring buckets for run_id={run_id}"
         log.warning(message, category="static_analysis")
         outcome.add_error(message)
 
     severity_map = {"P0": "High", "P1": "Medium", "P2": "Low", "NOTE": "Info"}
-    cvss_map = _load_cvss_map()
     cvss_v4_config = _load_cvss_v4_config()
-    run_profile = core_q.run_sql(
-        "SELECT threat_profile, env_profile FROM runs WHERE run_id=%s",
-        (run_id,),
-        fetch="one",
-        dictionary=True,
-    )
-    threat_profile = (run_profile or {}).get("threat_profile") or "Unknown"
-    env_profile = (run_profile or {}).get("env_profile") or "consumer"
+    # threat_profile and env_profile determined above
 
     finding_rows: List[Dict[str, Any]] = []
-    control_coverage: Dict[str, Dict[str, Any]] = {}
+    control_entries: List[Tuple[str, Mapping[str, Any]]] = []
     total_findings = 0
     rule_assigned = 0
     base_vector_count = 0
     bte_vector_count = 0
+    preview_assigned = 0
+    path_assigned = 0
 
     try:
         for result in (br.detector_results or ()):  # type: ignore[attr-defined]
@@ -595,21 +563,45 @@ def persist_run_summary(
             for f in result.findings:
                 total_findings += 1
                 sev = severity_map.get(f.severity_gate.value, "Info")
-                mapping = cvss_map.get(f.finding_id)
-                masvs_area = (mapping.get("masvs") if mapping else None) or f.category_masvs.value
-                cvss = mapping.get("cvss") if mapping else ""
-                evidence_path, evidence_offset, evidence_preview, evidence_payload = _extract_evidence_details(
-                    f.evidence, f.because
+                evidence = normalize_evidence(
+                    f.evidence,
+                    detail_hint=getattr(f, "detail", None)
+                    or getattr(f, "headline", None)
+                    or getattr(f, "summary", None)
+                    or getattr(f, "because", None),
+                    path_hint=getattr(f, "path", None),
+                    offset_hint=getattr(f, "offset", None),
                 )
-                rule_id = _derive_rule_id(detector_id, module_id, evidence_path, evidence_preview)
+                evidence_payload = json.dumps(evidence.as_payload(), ensure_ascii=False)
+                evidence_path = evidence.path
+                evidence_offset = evidence.offset
+                evidence_preview = evidence.detail
+                if evidence_preview:
+                    preview_assigned += 1
+                if evidence_path:
+                    path_assigned += 1
+                rule_id = derive_rule_id(
+                    detector_id,
+                    module_id,
+                    evidence_path,
+                    evidence_preview,
+                    rule_id_hint=_extract_rule_hint(f),
+                )
                 if rule_id:
                     rule_assigned += 1
+                masvs_area = _derive_masvs_tag(f, rule_id)
                 base_vector, base_score, base_meta = _compute_cvss_base(rule_id)
                 if base_vector:
                     base_vector_count += 1
-                bt_vector, bt_score, be_vector, be_score, bte_vector, bte_score, profile_meta = _apply_cvss_profiles(
-                    base_vector, base_score, threat_profile, env_profile
-                )
+                (
+                    bt_vector,
+                    bt_score,
+                    be_vector,
+                    be_score,
+                    bte_vector,
+                    bte_score,
+                    profile_meta,
+                ) = apply_profiles(base_vector, threat_profile, env_profile)
                 if bte_vector:
                     bte_vector_count += 1
                 meta_combined: Dict[str, Any] = {}
@@ -621,7 +613,7 @@ def persist_run_summary(
                     {
                         "severity": sev,
                         "masvs": masvs_area,
-                        "legacy_cvss": cvss or (base_vector or ""),
+                        "cvss": base_vector,
                         "kind": detector_id,
                         "module_id": module_id,
                         "evidence": evidence_payload,
@@ -641,39 +633,50 @@ def persist_run_summary(
                     }
                 )
 
-                coverage = _RULE_TO_MASVS.get(rule_id)
-                if coverage:
-                    ctrl_id, status = coverage
-                    evidence_note = evidence_preview or rule_id or detector_id
-                    payload = {
-                        "status": status,
-                        "evidence": [
+                if rule_id:
+                    control_entries.append(
+                        (
+                            rule_id,
                             {
                                 "kind": detector_id,
                                 "path": evidence_path,
-                                "note": evidence_note,
+                                "note": evidence_preview or rule_id or detector_id,
                                 "rule": rule_id,
-                            }
-                        ],
-                        "rubric": {"rule_id": rule_id, "source": "detector"},
-                    }
-                    existing = control_coverage.get(ctrl_id)
-                    if existing is None or _STATUS_RANK[status] > _STATUS_RANK[existing["status"]]:
-                        control_coverage[ctrl_id] = payload
-                    elif _STATUS_RANK[status] == _STATUS_RANK[existing["status"]]:
-                        existing.setdefault("evidence", []).extend(payload["evidence"])
+                            },
+                        )
+                    )
     except Exception as exc:
         message = f"Failed to collate findings for {run_package}: {exc}"
         log.warning(message, category="static_analysis")
         outcome.add_error(message)
 
+    control_summary = summarise_controls(control_entries)
+
     if finding_rows:
-        if not _persist_findings(int(run_id), finding_rows):
+        if run_id is None:
+            sample = finding_rows[0] if finding_rows else {}
+            sample_view = {
+                key: sample.get(key)
+                for key in ("rule_id", "evidence_path", "evidence_preview", "severity")
+            }
+            log.info(
+                (
+                    f"Dry-run persistence payload for {run_package}: "
+                    f"findings={total_findings} "
+                    f"sample={json.dumps(sample_view, ensure_ascii=False)}"
+                ),
+                category="static_analysis",
+            )
+        elif not _persist_findings(int(run_id), finding_rows):
             message = f"Failed to persist findings for run_id={run_id}"
             log.warning(message, category="static_analysis")
             outcome.add_error(message)
         else:
-            _persist_masvs_controls(int(run_id), br.manifest.package_name or run_package, control_coverage)
+            _persist_masvs_controls(
+                int(run_id),
+                br.manifest.package_name or run_package,
+                control_summary,
+            )
 
     metrics_payload = {
         "network.code_http_hosts": (float(code_http_hosts), None),
@@ -684,14 +687,31 @@ def persist_run_summary(
     rule_cov_pct = (float(rule_assigned) / float(total_findings) * 100.0) if total_findings else 0.0
     base_cov_pct = (float(base_vector_count) / float(total_findings) * 100.0) if total_findings else 0.0
     bte_cov_pct = (float(bte_vector_count) / float(total_findings) * 100.0) if total_findings else 0.0
+    preview_cov_pct = (float(preview_assigned) / float(total_findings) * 100.0) if total_findings else 0.0
+    path_cov_pct = (float(path_assigned) / float(total_findings) * 100.0) if total_findings else 0.0
     metrics_payload["findings.ruleid_coverage_pct"] = (rule_cov_pct, None)
+    metrics_payload["findings.preview_coverage_pct"] = (preview_cov_pct, None)
+    metrics_payload["findings.path_coverage_pct"] = (path_cov_pct, None)
     metrics_payload["cvss.base_vector_coverage_pct"] = (base_cov_pct, None)
     metrics_payload["cvss.bte_vector_coverage_pct"] = (bte_cov_pct, None)
 
-    if not _dw.write_metrics(int(run_id), metrics_payload):
+    if run_id is not None and not _dw.write_metrics(int(run_id), metrics_payload):
         message = f"Failed to persist metrics for run_id={run_id}"
         log.warning(message, category="static_analysis")
         outcome.add_error(message)
+
+    summary_run_id = run_id if run_id is not None else "dry-run"
+    log.info(
+        (
+            f"Persistence summary for {run_package} (run_id={summary_run_id}): "
+            f"findings={total_findings} "
+            f"rule_id={rule_cov_pct:.1f}% "
+            f"preview={preview_cov_pct:.1f}% "
+            f"path={path_cov_pct:.1f}% "
+            f"bte={bte_cov_pct:.1f}%"
+        ),
+        category="static_analysis",
+    )
 
     contributors = []
     try:
@@ -749,23 +769,24 @@ def persist_run_summary(
             for idx, (name, points, explanation, _rank) in enumerate(contrib_sorted)
             if points or "modernization" in name
         ]
-        if contrib_ranked and not _dw.write_contributors(int(run_id), contrib_ranked):
+        if run_id is not None and contrib_ranked and not _dw.write_contributors(int(run_id), contrib_ranked):
             message = f"Failed to persist contributor breakdown for run_id={run_id}"
             log.warning(message, category="static_analysis")
             outcome.add_error(message)
 
-    baseline_section = baseline_payload.get("baseline") if isinstance(baseline_payload, Mapping) else {}
-    string_payload = baseline_section.get("string_analysis") if isinstance(baseline_section, Mapping) else {}
-    static_errors = _persist_static_tables(
-        package_name=br.manifest.package_name or run_package,
-        session_stamp=session_stamp,
-        scope_label=scope_label,
-        finding_totals=finding_totals,
-        baseline_section=baseline_section if isinstance(baseline_section, Mapping) else {},
-        string_payload=string_payload if isinstance(string_payload, Mapping) else {},
-    )
-    for err in static_errors:
-        outcome.add_error(err)
+    if run_id is not None:
+        baseline_section = baseline_payload.get("baseline") if isinstance(baseline_payload, Mapping) else {}
+        string_payload = baseline_section.get("string_analysis") if isinstance(baseline_section, Mapping) else {}
+        static_errors = _persist_static_tables(
+            package_name=br.manifest.package_name or run_package,
+            session_stamp=session_stamp,
+            scope_label=scope_label,
+            finding_totals=finding_totals,
+            baseline_section=baseline_section if isinstance(baseline_section, Mapping) else {},
+            string_payload=string_payload if isinstance(string_payload, Mapping) else {},
+        )
+        for err in static_errors:
+            outcome.add_error(err)
 
     return outcome
 
