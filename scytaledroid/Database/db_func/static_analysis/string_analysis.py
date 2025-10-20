@@ -7,7 +7,8 @@ This module mirrors the schema documented in
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping, MutableMapping, Sequence, Union
+from pathlib import Path
+from typing import Iterable, Mapping, MutableMapping, Sequence, Union
 
 from ...db_core import database_session, run_sql
 from ...db_queries.static_analysis import string_analysis as queries
@@ -68,6 +69,7 @@ def ensure_tables() -> bool:
         with database_session():
             run_sql(queries.CREATE_STRING_SUMMARY)
             run_sql(queries.CREATE_STRING_SAMPLES)
+            run_sql(queries.CREATE_DOC_HOSTS_TABLE)
             for statement in (
                 "ALTER TABLE static_string_samples ADD COLUMN source_type VARCHAR(16) NULL",
                 "ALTER TABLE static_string_samples ADD COLUMN finding_type VARCHAR(32) NULL",
@@ -83,7 +85,25 @@ def ensure_tables() -> bool:
                     run_sql(statement)
                 except Exception:
                     continue
-            run_sql(queries.CREATE_STRING_FINDINGS_VIEW)
+            for host in _default_doc_hosts():
+                try:
+                    run_sql(queries.INSERT_DOC_HOST, (host,))
+                except Exception:
+                    continue
+            try:
+                run_sql(queries.CREATE_STRINGS_ROOT_BUCKET_INDEX)
+            except Exception:
+                pass
+            for statement in (
+                queries.CREATE_STRINGS_NORMALIZED_VIEW,
+                queries.CREATE_DOC_POLICY_DRIFT_VIEW,
+                queries.CREATE_STRINGS_EFFECTIVE_VIEW,
+                queries.CREATE_STRING_FINDINGS_VIEW,
+            ):
+                try:
+                    run_sql(statement)
+                except Exception:
+                    continue
         return True
     except Exception:
         return False
@@ -216,12 +236,83 @@ def _sample_to_mapping(sample: SampleRow) -> MutableMapping[str, object]:
     return dict(sample)
 
 
+def seed_doc_hosts(hosts: Iterable[str]) -> int:
+    """Insert the provided hosts into the documentary allow-list table."""
+
+    unique = sorted({host.strip().lower() for host in hosts if host and host.strip()})
+    if not unique:
+        return 0
+    inserted = 0
+    try:
+        with database_session():
+            for host in unique:
+                try:
+                    run_sql(queries.INSERT_DOC_HOST, (host,))
+                except Exception:
+                    continue
+                inserted += 1
+    except Exception:
+        return 0
+    return inserted
+
+
+def seed_doc_hosts_from_config(path: str | Path | None = None) -> int:
+    """Seed documentary hosts from the string-noise configuration file."""
+
+    if path is None:
+        try:
+            from scytaledroid.StaticAnalysis.modules.string_analysis.allowlist import (  # noqa: WPS433
+                DEFAULT_POLICY_ROOT,
+            )
+
+            path = DEFAULT_POLICY_ROOT
+        except Exception:
+            path = None
+    hosts = _default_doc_hosts(path)
+    if not hosts:
+        return 0
+    return seed_doc_hosts(hosts)
+
+
+def _default_doc_hosts(path: str | Path | None = None) -> tuple[str, ...]:
+    if path is None:
+        try:
+            from scytaledroid.StaticAnalysis.modules.string_analysis.allowlist import (  # noqa: WPS433
+                DEFAULT_POLICY_ROOT,
+            )
+
+            path = DEFAULT_POLICY_ROOT
+        except Exception:
+            return tuple()
+    try:
+        from scytaledroid.StaticAnalysis.modules.string_analysis.allowlist import (  # noqa: WPS433
+            load_noise_policy,
+        )
+    except Exception:
+        return tuple()
+    try:
+        policy = load_noise_policy(path)
+    except Exception:
+        return tuple()
+    defaults = set()
+    defaults.update(getattr(policy, "doc_host_defaults_full", frozenset()))
+    defaults.update(getattr(policy, "doc_host_defaults_registrable", frozenset()))
+    if not defaults:
+        defaults.update(policy.hosts_documentary)
+    hosts = {host.strip().lower() for host in defaults if host and host.strip()}
+    return tuple(sorted(hosts))
+
+
 __all__ = [
     "StringSummaryRecord",
     "StringSample",
+    "SummaryRow",
+    "SampleRow",
     "ensure_tables",
     "tables_exist",
     "upsert_summary",
     "replace_top_samples",
+    "seed_doc_hosts",
+    "seed_doc_hosts_from_config",
 ]
 

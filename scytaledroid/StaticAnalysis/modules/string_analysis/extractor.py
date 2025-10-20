@@ -75,6 +75,12 @@ class NormalizedString:
     obfuscation_hint: bool = False
     derived_from: tuple[str, ...] | None = None
     derived: bool = False
+    policy_action: str | None = None
+    policy_rule: str | None = None
+    policy_reason: str | None = None
+    policy_tag: str | None = None
+    policy_note: str | None = None
+    policy_severity: str | None = None
 
 
 @dataclass(frozen=True)
@@ -361,10 +367,20 @@ def _normalise_entry(
             decoded_kind = "junk"
 
     url_match = ENDPOINT_PATTERN.search(value)
+    policy_action: str | None = None
+    policy_rule: str | None = None
+    policy_reason: str | None = None
+    policy_tag: str | None = None
+    policy_note: str | None = None
+    policy_severity: str | None = None
+
+    scheme_lower: str | None = None
+
     if url_match:
         url = url_match.group("url")
         parsed = urlsplit(url)
         host = parsed.hostname
+        scheme_lower = parsed.scheme.lower()
         host_allowlisted = policy.is_documentary_host(host)
         is_allowlisted = is_allowlisted or host_allowlisted
         tags.extend(_tags_for_url(url, host=host, context=context))
@@ -457,6 +473,32 @@ def _normalise_entry(
 
     tags = list(dict.fromkeys(tags))
 
+    buckets: set[str] = set()
+    if host:
+        buckets.add("endpoints")
+    if scheme_lower == "http":
+        buckets.add("http_cleartext")
+
+    decision = policy.evaluate(
+        value=value,
+        source=entry.origin,
+        host=host,
+        scheme=scheme_lower,
+        buckets=tuple(buckets),
+    )
+    if decision:
+        policy_action = decision.action
+        policy_rule = decision.rule
+        policy_reason = decision.reason
+        policy_tag = decision.tag
+        policy_note = decision.note
+        policy_severity = decision.severity
+        if decision.tag and decision.tag not in tags:
+            tags.append(decision.tag)
+        if decision.action == "suppress":
+            is_allowlisted = True
+        elif decision.action == "downgrade":
+            is_allowlisted = is_allowlisted
     if is_allowlisted:
         kind = "doc_namespace"
         counter.doc_noise_count += 1
@@ -502,6 +544,12 @@ def _normalise_entry(
         obfuscation_hint=obfuscation_hint,
         derived_from=entry.derived_from,
         derived=derived,
+        policy_action=policy_action,
+        policy_rule=policy_rule,
+        policy_reason=policy_reason,
+        policy_tag=policy_tag,
+        policy_note=policy_note,
+        policy_severity=policy_severity,
     )
 
 

@@ -105,6 +105,62 @@ INSERT INTO static_string_samples (
 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 """
 
+CREATE_DOC_HOSTS_TABLE = """
+CREATE TABLE IF NOT EXISTS doc_hosts (
+  host VARCHAR(191) NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (host)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+"""
+
+INSERT_DOC_HOST = """
+INSERT INTO doc_hosts (host)
+VALUES (%s)
+ON DUPLICATE KEY UPDATE host=VALUES(host)
+"""
+
+CREATE_STRINGS_NORMALIZED_VIEW = """
+CREATE OR REPLACE VIEW v_strings_normalized AS
+SELECT
+  sm.*,
+  COALESCE(
+    sm.root_domain,
+    SUBSTRING_INDEX(SUBSTRING_INDEX(sm.value_masked,'/',3),'//',-1)
+  ) AS host_normalized
+FROM static_string_samples AS sm;
+"""
+
+CREATE_DOC_POLICY_DRIFT_VIEW = """
+CREATE OR REPLACE VIEW v_doc_policy_drift AS
+SELECT
+  s.package_name,
+  sn.summary_id,
+  sn.bucket,
+  sn.scheme,
+  sn.host_normalized AS host,
+  sn.value_masked AS url,
+  sn.src AS source_artifact
+FROM v_strings_normalized AS sn
+JOIN static_string_summary AS s ON sn.summary_id = s.id
+JOIN doc_hosts AS dh ON sn.host_normalized = dh.host
+WHERE sn.bucket IN ('endpoints','http_cleartext');
+"""
+
+CREATE_STRINGS_EFFECTIVE_VIEW = """
+CREATE OR REPLACE VIEW v_strings_effective AS
+SELECT sn.*
+FROM v_strings_normalized AS sn
+LEFT JOIN doc_hosts AS dh ON sn.host_normalized = dh.host
+WHERE
+  sn.bucket IN ('endpoints','http_cleartext')
+  AND dh.host IS NULL;
+"""
+
+CREATE_STRINGS_ROOT_BUCKET_INDEX = """
+CREATE INDEX idx_static_string_samples_root_bucket
+ON static_string_samples (root_domain, bucket)
+"""
+
 CREATE_STRING_FINDINGS_VIEW = """
 CREATE OR REPLACE VIEW v_string_findings_enriched AS
 SELECT
@@ -139,6 +195,12 @@ __all__ = [
     "SELECT_SUMMARY_ID",
     "DELETE_SAMPLES_FOR_SUMMARY",
     "INSERT_SAMPLE",
+    "CREATE_DOC_HOSTS_TABLE",
+    "INSERT_DOC_HOST",
+    "CREATE_STRINGS_NORMALIZED_VIEW",
+    "CREATE_DOC_POLICY_DRIFT_VIEW",
+    "CREATE_STRINGS_EFFECTIVE_VIEW",
+    "CREATE_STRINGS_ROOT_BUCKET_INDEX",
     "CREATE_STRING_FINDINGS_VIEW",
     "TABLE_EXISTS_SUMMARY",
     "TABLE_EXISTS_SAMPLES",

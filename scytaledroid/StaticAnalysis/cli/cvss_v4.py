@@ -6,6 +6,7 @@ from typing import Dict, Mapping, Optional
 __all__ = [
     "parse_vector",
     "score_vector",
+    "severity_band",
     "apply_profiles",
     "resolve_threat_code",
     "resolve_env_metrics",
@@ -81,6 +82,31 @@ def score_vector(vector: Optional[str]) -> Optional[float]:
 
     total = min(impact + exploitability, 10.0)
     return _round_up(total)
+
+
+def severity_band(score: Optional[float]) -> Optional[str]:
+    """Return the CVSS 4.0 qualitative band for ``score``.
+
+    The band mapping follows the CVSS v4.0 guidance:
+
+    - Critical: 9.0 – 10.0
+    - High:     7.0 – 8.9
+    - Medium:   4.0 – 6.9
+    - Low:      0.1 – 3.9
+    - None:     0.0
+    """
+
+    if score is None:
+        return None
+    if score >= 9.0:
+        return "Critical"
+    if score >= 7.0:
+        return "High"
+    if score >= 4.0:
+        return "Medium"
+    if score > 0.0:
+        return "Low"
+    return "None"
 
 
 def resolve_threat_code(threat_profile: Optional[str]) -> str:

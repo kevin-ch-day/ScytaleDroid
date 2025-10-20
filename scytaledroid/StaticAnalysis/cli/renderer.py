@@ -12,9 +12,12 @@ import json
 import re
 from pathlib import Path
 from textwrap import fill
-from typing import Mapping, MutableMapping, Sequence
+from typing import Mapping, MutableMapping, Optional, Sequence
 
 from scytaledroid.Config import app_config
+from scytaledroid.StaticAnalysis.analytics.masvs_quality import (
+    compute_quality_metrics,
+)
 from scytaledroid.StaticAnalysis.modules.string_analysis import (
     BUCKET_LABELS,
     BUCKET_METADATA,
@@ -25,6 +28,7 @@ from scytaledroid.StaticAnalysis.modules.string_analysis import (
 from scytaledroid.Utils.System import output_prefs
 
 from ..core import ManifestFlags, StaticAnalysisReport
+from .cvss_v4 import score_vector, severity_band
 
 _WIDTH = 78
 
@@ -38,6 +42,140 @@ def _short_number(value: int) -> str:
     if n >= 1_000:
         return f"{n/1_000:.1f}k"
     return str(n)
+
+
+def _extract_cvss_from_metrics(metrics: Mapping[str, object]) -> tuple[Optional[str], Optional[float]]:
+    """Return (vector, score) pair extracted from a finding's metrics mapping."""
+
+    if not isinstance(metrics, Mapping):
+        return None, None
+
+    vector: Optional[str] = None
+    score: Optional[float] = None
+
+    vector_candidates = (
+        metrics.get("cvss_v40_b_vector"),
+        metrics.get("cvss_vector"),
+        metrics.get("cvss"),
+    )
+    for candidate in vector_candidates:
+        if isinstance(candidate, str) and candidate.startswith("CVSS:4.0/"):
+            vector = candidate
+            break
+
+    score_candidates = (
+        metrics.get("cvss_v40_b_score"),
+        metrics.get("cvss_score"),
+        metrics.get("cvss"),
+    )
+    for candidate in score_candidates:
+        if isinstance(candidate, (int, float)):
+            score = float(candidate)
+            break
+        if isinstance(candidate, str):
+            try:
+                score = float(candidate)
+                break
+            except ValueError:
+                continue
+
+    if score is None and vector:
+        computed = score_vector(vector)
+        if computed is not None:
+            score = computed
+
+    return vector, score
+
+
+def _summarise_masvs_inline(report: StaticAnalysisReport) -> Mapping[str, Mapping[str, object]]:
+    areas = ("NETWORK", "PLATFORM", "PRIVACY", "STORAGE")
+    summary: dict[str, dict[str, object]] = {}
+    severity_map = {
+        "P0": "High",
+        "P1": "Medium",
+        "P2": "Low",
+        "NOTE": "Info",
+    }
+
+    for area in areas:
+        summary[area] = {
+            "counts": Counter({"High": 0, "Medium": 0, "Low": 0, "Info": 0}),
+            "scores": [],
+            "score_sum": 0.0,
+            "bands": Counter(),
+            "missing": 0,
+        }
+
+    for result in getattr(report, "detector_results", ()):  # type: ignore[attr-defined]
+        findings = getattr(result, "findings", ())
+        for finding in findings:
+            area = getattr(finding, "category_masvs", None)
+            area_name = area.value if hasattr(area, "value") else str(area or "")
+            if area_name not in summary:
+                continue
+            severity = getattr(finding, "severity_gate", None)
+            severity_name = severity.value if hasattr(severity, "value") else str(severity or "")
+            sev_bucket = severity_map.get(severity_name, "Info")
+            summary[area_name]["counts"][sev_bucket] += 1
+
+            metrics = getattr(finding, "metrics", {})
+            vector, score = _extract_cvss_from_metrics(metrics if isinstance(metrics, Mapping) else {})
+            identifier = getattr(finding, "finding_id", None) or getattr(finding, "title", "")
+            if score is not None:
+                summary[area_name]["scores"].append((score, vector, identifier))
+                summary[area_name]["score_sum"] += score
+                band = severity_band(score) or "Unknown"
+                summary[area_name]["bands"][band] += 1
+            elif isinstance(metrics, Mapping) and any(
+                key in metrics for key in ("cvss", "cvss_v40_b_vector", "cvss_v40_b_score")
+            ):
+                summary[area_name]["missing"] += 1
+
+    for area in areas:
+        data = summary[area]
+        scores = data["scores"]
+        if scores:
+            worst_score, worst_vector, worst_identifier = max(scores, key=lambda item: item[0])
+            data["worst"] = {
+                "score": worst_score,
+                "vector": worst_vector,
+                "identifier": worst_identifier,
+                "band": severity_band(worst_score),
+            }
+            count = len(scores)
+            data["average"] = round(data["score_sum"] / count, 2)
+        else:
+            data["worst"] = None
+            data["average"] = None
+        data["total"] = len(scores) + data["missing"]
+
+        counts = data["counts"]
+        high = int(counts.get("High", 0))
+        medium = int(counts.get("Medium", 0))
+        low = int(counts.get("Low", 0))
+        info = int(counts.get("Info", 0))
+        control_count = high + medium + low + info
+        worst_meta = data["worst"] or {}
+        cvss_meta = {
+            "worst_score": worst_meta.get("score"),
+            "worst_vector": worst_meta.get("vector"),
+            "worst_identifier": worst_meta.get("identifier"),
+            "worst_severity": worst_meta.get("band"),
+            "average_score": data.get("average"),
+            "band_counts": dict(data.get("bands", {})),
+            "scored_count": len(scores),
+            "missing": data.get("missing", 0),
+            "total": data.get("total", 0),
+        }
+        data["high"] = high
+        data["medium"] = medium
+        data["low"] = low
+        data["info"] = info
+        data["control_count"] = control_count
+        data["cvss"] = cvss_meta
+        data["quality"] = compute_quality_metrics(data)
+
+    return summary
 _HASH_ORDER = ("md5", "sha1", "sha256")
 _SEVERITY_ORDER = ("High", "Medium", "Low", "Info")
 _SEVERITY_TOKENS = {"High": "H", "Medium": "M", "Low": "L", "Info": "I"}
@@ -893,8 +1031,12 @@ def _string_lines(string_payload: Mapping[str, object]) -> list[str]:
             filtered_roots = endpoint_roots
         # Suppress boilerplate/documentary domains using string noise policy
         try:
-            from scytaledroid.StaticAnalysis.modules.string_analysis.allowlist import load_noise_policy as _load_policy
-            policy = _load_policy("config/string_noise.toml")
+            from scytaledroid.StaticAnalysis.modules.string_analysis.allowlist import (
+                DEFAULT_POLICY_ROOT as _POLICY_ROOT,
+                load_noise_policy as _load_policy,
+            )
+
+            policy = _load_policy(_POLICY_ROOT)
             doc_hosts = policy.hosts_documentary
             filtered_roots = [
                 item
@@ -1243,29 +1385,83 @@ def render_app_result(
 
     # Inline MASVS summary derived from detector results
     try:
-        from scytaledroid.StaticAnalysis.core.findings import MasvsCategory
-        masvs_areas = (MasvsCategory.NETWORK, MasvsCategory.PLATFORM, MasvsCategory.PRIVACY, MasvsCategory.STORAGE)
-        counts = {area.value: {"High": 0, "Medium": 0, "Low": 0, "Info": 0} for area in masvs_areas}
-        worst_cvss = {area.value: "—" for area in masvs_areas}
-        for result in report.detector_results:
-            for f in result.findings:
-                area = f.category_masvs.value
-                sev = {"P0": "High", "P1": "Medium", "P2": "Low", "NOTE": "Info"}.get(f.severity_gate.value, "Info")
-                if area in counts:
-                    counts[area][sev] = counts[area].get(sev, 0) + 1
+        summary = _summarise_masvs_inline(report)
         lines.append("")
         lines.append("MASVS Summary")
-        headers = ["Area", "High", "Med", "Low", "Info", "Status", "Worst CVSS"]
+        headers = [
+            "Area",
+            "High",
+            "Med",
+            "Low",
+            "Info",
+            "Status",
+            "Risk",
+            "CVSS%",
+            "Worst CVSS",
+            "Avg",
+            "Bands",
+        ]
         table_rows: list[str] = []
         for area in ("NETWORK", "PLATFORM", "PRIVACY", "STORAGE"):
-            c = counts.get(area) or {"High": 0, "Medium": 0, "Low": 0, "Info": 0}
-            status = "PASS" if (c["High"] + c["Medium"]) == 0 else "FAIL"
-            cvss = worst_cvss.get(area, "—")
-            row = f"{area.title():<9}  {c['High']:<4}  {c['Medium']:<4}  {c['Low']:<4}  {c['Info']:<4}  {status:<5}  {cvss}"
+            data = summary.get(area) or {}
+            counts_map = data.get("counts") if isinstance(data.get("counts"), Mapping) else {}
+            high = counts_map.get("High", 0)
+            medium = counts_map.get("Medium", 0)
+            low = counts_map.get("Low", 0)
+            info = counts_map.get("Info", 0)
+            status = "PASS"
+            if high:
+                status = "FAIL"
+            elif medium:
+                status = "WARN"
+            worst = data.get("worst") if isinstance(data.get("worst"), Mapping) else None
+            if worst:
+                worst_display = (
+                    f"{worst.get('score', 0):.1f}/"
+                    f"{worst.get('band') or '?'} {worst.get('identifier') or ''}"
+                ).strip()
+            else:
+                worst_display = "—"
+            avg = data.get("average")
+            avg_display = f"{avg:.1f}" if isinstance(avg, (int, float)) else "—"
+            bands_map = data.get("bands") if isinstance(data.get("bands"), Counter) else {}
+            order = ("Critical", "High", "Medium", "Low", "None")
+            band_parts = [
+                f"{label[0]}:{int(bands_map[label])}"
+                for label in order
+                if bands_map.get(label)
+            ]
+            band_display = ", ".join(band_parts) if band_parts else "—"
+            quality = data.get("quality") if isinstance(data.get("quality"), Mapping) else {}
+            risk_value = quality.get("risk_index") if isinstance(quality, Mapping) else None
+            if isinstance(risk_value, (int, float)):
+                risk_display = f"{risk_value:>5.1f}"
+            else:
+                risk_display = "  —  "
+            coverage = quality.get("cvss_coverage") if isinstance(quality, Mapping) else None
+            if isinstance(coverage, (int, float)):
+                coverage_display = f"{coverage * 100:>5.0f}%"
+            else:
+                coverage_display = "  —  "
+            basis_display = "   —   "
+            components = quality.get("risk_components") if isinstance(quality, Mapping) else None
+            if isinstance(components, Mapping):
+                inputs = components.get("inputs") if isinstance(components.get("inputs"), Mapping) else None
+                if isinstance(inputs, Mapping):
+                    sev = inputs.get("severity_density_norm")
+                    band_val = inputs.get("cvss_band_score")
+                    intensity = inputs.get("cvss_intensity")
+                    if all(isinstance(val, (int, float)) for val in (sev, band_val, intensity)):
+                        basis_display = f"S{sev:.2f}/B{band_val:.2f}/I{intensity:.2f}"
+            row = (
+                f"{area.title():<9}  {high:<4}  {medium:<4}  {low:<4}  {info:<4}  {status:<5}  "
+                f"{risk_display:<6} {basis_display:<15} {coverage_display:<7} {worst_display:<18} {avg_display:<4} {band_display}"
+            )
             table_rows.append(row)
-        # Render as simple lines to keep formatting consistent
-        for h in ["Area       High  Med   Low   Info  Status  Worst CVSS"]:
-            lines.append(h)
+        for header in [
+            "Area       High  Med   Low   Info  Status  Risk   Basis           CVSS%  Worst CVSS         Avg  Bands"
+        ]:
+            lines.append(header)
         lines.extend(table_rows)
     except Exception:
         pass

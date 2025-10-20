@@ -35,6 +35,49 @@ The module also emits entropy-based indicators:
   taxonomy.
 - `novelty_index` blends the above metrics to flag atypical runs.
 
+## MASVS + CVSS synthesis
+
+The MASVS summary pipeline now fuses severity tallies with CVSS v4.0 scoring to
+help reviewers reason about real risk rather than raw finding counts. For each
+MASVS area we persist:
+
+- `worst_score`, `worst_vector`, and `worst_identifier` – identify the highest
+  scoring control breach and its originating rule. Each area also exposes a
+  `worst_basis` payload detailing the tie-break inputs (scope rank, impact
+  counts, vector length) so analysts can explain why one vector outranked
+  another when scores match.
+- `average_score`, `scored_count`, and `missing` – quantify how many findings
+  in the area provide CVSS data and where gaps remain.
+- `band_counts` – Critical/High/Medium/Low tallies derived via
+  `cvss_v4.severity_band` so analysts can quickly gauge exposure intensity.
+- `quality` – derived metrics that combine severity weighting with CVSS
+  coverage to express:
+  - `risk_index` – a 0–100 score blending severity density, CVSS band strength,
+    and worst-score intensity. The `risk_components` structure breaks this score
+    down into its weighted inputs and per-factor contributions to aid
+    remediation planning.
+  - `cvss_coverage` – proportion of findings in the area that include CVSS
+    vectors.
+  - `severity_pressure` and `cvss_band_score` – intermediate measures that
+    highlight overloaded controls and stacked high-band findings.
+
+The CLI surfaces these metrics in both the run-summary footer and the read-only
+MASVS menu, alongside severity counts and pass/fail status. These additions make
+it easy to spot situations where, for example, a single Critical CVSS issue is
+hiding amongst Low severities.
+
+### Known gaps
+
+- Findings without CVSS vectors currently contribute to the `missing` counter
+  but are otherwise invisible in risk roll-ups. Hooking rule metadata into the
+  CVSS loader should be prioritised so every MASVS breach can be scored.
+- MASVS area status still treats any High as a FAIL and any Medium as WARN; we
+  do not yet downgrade Medium findings that score Low on CVSS. Future work can
+  consider blending severity and CVSS banding when deriving PASS/WARN/FAIL.
+- The CVSS aggregation is base-score only. Once dynamic threat intelligence or
+  environment profiles are available they should be folded into the view so the
+  dashboard highlights threat-adjusted risk rather than theoretical impact.
+
 ## Workload profiling
 `scytaledroid.StaticAnalysis.analytics.workload` analyses detector runtimes to
 produce:

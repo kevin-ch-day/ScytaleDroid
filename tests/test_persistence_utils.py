@@ -55,3 +55,16 @@ def test_cvss_v4_scoring_matches_fallback_vectors():
     assert "E:A" in bte_vector.split("/")
     assert bte_score is not None
     assert meta["threat"]["E"] == "A"
+
+
+def test_cvss_v4_severity_band_mapping():
+    assert cvss_v4.severity_band(10.0) == "Critical"
+    assert cvss_v4.severity_band(9.0) == "Critical"
+    assert cvss_v4.severity_band(8.9) == "High"
+    assert cvss_v4.severity_band(7.0) == "High"
+    assert cvss_v4.severity_band(6.9) == "Medium"
+    assert cvss_v4.severity_band(4.0) == "Medium"
+    assert cvss_v4.severity_band(3.9) == "Low"
+    assert cvss_v4.severity_band(0.1) == "Low"
+    assert cvss_v4.severity_band(0.0) == "None"
+    assert cvss_v4.severity_band(None) is None

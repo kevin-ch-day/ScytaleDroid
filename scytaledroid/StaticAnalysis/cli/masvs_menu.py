@@ -11,6 +11,26 @@ from scytaledroid.Database.db_core import db_queries as core_q
 from .masvs_summary import fetch_db_masvs_summary, fetch_masvs_matrix
 
 
+def _format_cvss(entry: Dict[str, object]) -> tuple[str, str, str]:
+    cvss = entry.get("cvss") if isinstance(entry, dict) else None
+    if not isinstance(cvss, dict):
+        return "—", "—", "—"
+    worst_score = cvss.get("worst_score")
+    worst_band = cvss.get("worst_severity") or ""
+    worst_identifier = cvss.get("worst_identifier") or ""
+    if isinstance(worst_score, (int, float)):
+        worst = f"{worst_score:.1f}/{worst_band or '?'} {worst_identifier}".strip()
+    else:
+        worst = "—"
+    avg_score = cvss.get("average_score")
+    avg = f"{avg_score:.1f}" if isinstance(avg_score, (int, float)) else "—"
+    counts = cvss.get("band_counts") or {}
+    order = ("Critical", "High", "Medium", "Low", "None")
+    parts = [f"{label[0]}:{int(counts[label])}" for label in order if counts.get(label)]
+    bands = ", ".join(parts) if parts else "—"
+    return worst, avg, bands
+
+
 def render_masvs_summary_menu() -> None:
     run_id = _select_run_id()
     if run_id is None:
@@ -27,18 +47,45 @@ def render_masvs_summary_menu() -> None:
     run_id, rows = result
     print()
     menu_utils.print_header("MASVS Summary", f"run_id={run_id}")
-    headers = ["Area", "High", "Med", "Low", "Info", "Status", "Worst CVSS", "Controls"]
+    headers = [
+        "Area",
+        "High",
+        "Med",
+        "Low",
+        "Info",
+        "Status",
+        "Risk",
+        "Basis",
+        "CVSS%",
+        "Worst CVSS",
+        "Avg",
+        "Bands",
+        "Controls",
+    ]
     table: list[list[str]] = []
     passes = 0
     for area in ("NETWORK", "PLATFORM", "PRIVACY", "STORAGE"):
         entry = next((row for row in rows if row["area"] == area), None)
         if entry is None:
-            table.append([area.title(), "0", "0", "0", "0", "PASS", "—", "0/0"])
+            table.append([
+                area.title(),
+                "0",
+                "0",
+                "0",
+                "0",
+                "PASS",
+                "—",
+                "—",
+                "—",
+                "—",
+                "—",
+                "—",
+                "0/0",
+            ])
             passes += 1
             continue
         high = entry.get("high", 0)
         medium = entry.get("medium", 0)
-        sev_ge_med = int(high) + int(medium)
         low = entry["low"]
         info = entry["info"]
         if high > 0:
@@ -51,6 +98,27 @@ def render_masvs_summary_menu() -> None:
             passes += 1
         total_controls = int(entry.get("control_count") or high + medium + low + info)
         affected = high + medium
+        worst_cvss, avg_cvss, band_cvss = _format_cvss(entry)
+        quality = entry.get("quality") if isinstance(entry, dict) else None
+        basis_display = "—"
+        if isinstance(quality, dict):
+            risk_index = quality.get("risk_index")
+            coverage = quality.get("cvss_coverage")
+            components = quality.get("risk_components") if isinstance(quality.get("risk_components"), dict) else {}
+            inputs = components.get("inputs") if isinstance(components, dict) else {}
+            if isinstance(inputs, dict):
+                sev = inputs.get("severity_density_norm")
+                band = inputs.get("cvss_band_score")
+                intensity = inputs.get("cvss_intensity")
+                if all(isinstance(val, (int, float)) for val in (sev, band, intensity)):
+                    basis_display = f"S{sev:.2f}/B{band:.2f}/I{intensity:.2f}"
+        else:
+            risk_index = None
+            coverage = None
+        risk_display = f"{risk_index:.1f}" if isinstance(risk_index, (int, float)) else "—"
+        coverage_display = (
+            f"{coverage * 100:.0f}%" if isinstance(coverage, (int, float)) else "—"
+        )
         table.append([
             area.title(),
             str(high),
@@ -58,7 +126,12 @@ def render_masvs_summary_menu() -> None:
             str(low),
             str(info),
             status,
-            entry["worst"],
+            risk_display,
+            basis_display,
+            coverage_display,
+            worst_cvss,
+            avg_cvss,
+            band_cvss,
             f"{affected}/{total_controls}" if total_controls else "0/0",
         ])
     table_utils.render_table(headers, table)
