@@ -26,7 +26,7 @@ from .extractor import (
     normalise_index,
 )
 from .hit_record import StringHit
-from .allowlist import NoisePolicy, load_noise_policy
+from .allowlist import DEFAULT_POLICY_ROOT, NoisePolicy, load_noise_policy
 from .matcher import (
     DEFAULT_SECRET_FILTERS,
     MatchBatch,
@@ -51,6 +51,7 @@ __all__ = [
     "CollectionMetrics",
     "StringHit",
     "NoisePolicy",
+    "DEFAULT_POLICY_ROOT",
     "load_noise_policy",
     "EndpointMatch",
     "build_bucket_overview",

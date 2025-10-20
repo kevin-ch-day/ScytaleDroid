@@ -117,8 +117,40 @@ def run_health_checks() -> None:
         if samples_total is not None:
             _print_status_line(
                 "ok" if samples_total else "warn",
-                "static_string_samples",
+                "static_string_samples (raw)",
                 detail=str(samples_total or 0),
+            )
+
+        effective_total = scalar(
+            """
+            SELECT COUNT(*)
+            FROM v_strings_effective x
+            JOIN static_string_summary s ON s.id = x.summary_id
+            WHERE s.session_stamp = %s
+            """,
+            (session_stamp,),
+        )
+        if effective_total is not None:
+            _print_status_line(
+                "ok" if effective_total else "warn",
+                "v_strings_effective",
+                detail=str(effective_total or 0),
+            )
+
+        suppressed_total = scalar(
+            """
+            SELECT COUNT(*)
+            FROM v_doc_policy_drift d
+            JOIN static_string_summary s ON s.id = d.summary_id
+            WHERE s.session_stamp = %s
+            """,
+            (session_stamp,),
+        )
+        if suppressed_total is not None:
+            _print_status_line(
+                "ok",
+                "v_doc_policy_drift",
+                detail=str(suppressed_total or 0),
             )
     else:
         _print_status_line(

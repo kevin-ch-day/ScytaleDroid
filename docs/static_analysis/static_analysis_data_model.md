@@ -59,8 +59,10 @@ the requested session.
   run the manual helper snippet (see runbook) to ensure schema/view readiness
   and promote provider exposures.
 * **String intel snapshot** – The exploratory renderer (`--explore`) mirrors the
-  canonical string view; evidence counts in the CLI match
-  `v_session_string_samples` when the ensure step has been run.
+  canonical string view; evidence counts in the CLI now read from
+  `v_strings_effective` (clean endpoints/HTTP evidence) and surface the
+  suppressed appendix from `v_doc_policy_drift` once the ensure step has been
+  run.
 
 ## 5. Joining with APK metadata
 
@@ -87,8 +89,8 @@ WHERE av.package_name = 'com.example.app'
 ```
 
 When you need legacy `static_string_samples` context, join through
-`v_session_string_samples`, which already normalises package/session
-relationships for you.
+`v_strings_normalized`, which already normalises package/session
+relationships and exposes the derived `host_normalized` column.
 
 ## 6. Related documentation
 

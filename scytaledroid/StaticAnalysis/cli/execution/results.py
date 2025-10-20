@@ -429,11 +429,11 @@ def _render_db_masvs_summary() -> None:
         run_id, rows = summary
         print()
         print(f"DB MASVS Summary (run_id={run_id})")
-        print("Area       High  Med   Low   Info  Status  Worst CVSS")
+        print("Area       High  Med   Low   Info  Status  Worst CVSS                Avg  Bands")
         for area in ("NETWORK", "PLATFORM", "PRIVACY", "STORAGE"):
             entry = next((row for row in rows if row["area"] == area), None)
             if entry is None:
-                print(f"{area.title():<9}  0     0     0     0     PASS   —")
+                print(f"{area.title():<9}  0     0     0     0     PASS   —                        —    —")
             else:
                 high = entry.get("high", 0)
                 medium = entry.get("medium", 0)
@@ -443,9 +443,27 @@ def _render_db_masvs_summary() -> None:
                     status = "WARN"
                 else:
                     status = "PASS"
+                cvss = entry.get("cvss") or {}
+                worst_score = cvss.get("worst_score")
+                worst_band = cvss.get("worst_severity") or ""
+                worst_identifier = cvss.get("worst_identifier") or ""
+                if worst_score is None:
+                    worst_display = "—"
+                else:
+                    worst_display = f"{worst_score:.1f} {worst_band} ({worst_identifier})"
+                avg_score = cvss.get("average_score")
+                avg_display = f"{avg_score:.1f}" if isinstance(avg_score, (int, float)) else "—"
+                band_counts = cvss.get("band_counts") or {}
+                order = ("Critical", "High", "Medium", "Low", "None")
+                band_display_parts = [
+                    f"{label[0]}:{int(band_counts[label])}"
+                    for label in order
+                    if band_counts.get(label)
+                ]
+                band_display = ", ".join(band_display_parts) if band_display_parts else "—"
                 print(
                     f"{area.title():<9}  {high:<5} {medium:<5} {entry['low']:<5} {entry['info']:<6}"
-                    f"{status:<6} {entry['worst']}"
+                    f"{status:<6} {worst_display:<24} {avg_display:<4} {band_display}"
                 )
     except Exception:
         pass
@@ -1098,7 +1116,7 @@ def _render_persistence_footer(session_stamp: str, *, had_errors: bool = False) 
         (session_stamp,),
     )
     strings_summary_total = _count_total("SELECT COUNT(*) FROM static_string_summary")
-    string_samples = _count(
+    string_samples_raw = _count(
         """
         SELECT COUNT(*)
         FROM static_string_samples x
@@ -1107,7 +1125,27 @@ def _render_persistence_footer(session_stamp: str, *, had_errors: bool = False) 
         """,
         (session_stamp,),
     )
-    string_samples_total = _count_total("SELECT COUNT(*) FROM static_string_samples")
+    string_samples_raw_total = _count_total("SELECT COUNT(*) FROM static_string_samples")
+    string_samples_effective = _count(
+        """
+        SELECT COUNT(*)
+        FROM v_strings_effective x
+        JOIN static_string_summary s ON s.id = x.summary_id
+        WHERE s.session_stamp = %s
+        """,
+        (session_stamp,),
+    )
+    string_samples_effective_total = _count_total("SELECT COUNT(*) FROM v_strings_effective")
+    string_samples_suppressed = _count(
+        """
+        SELECT COUNT(*)
+        FROM v_doc_policy_drift d
+        JOIN static_string_summary s ON s.id = d.summary_id
+        WHERE s.session_stamp = %s
+        """,
+        (session_stamp,),
+    )
+    string_samples_suppressed_total = _count_total("SELECT COUNT(*) FROM v_doc_policy_drift")
     fileproviders = _count(
         "SELECT COUNT(*) FROM static_fileproviders WHERE session_stamp = %s",
         (session_stamp,),
@@ -1154,7 +1192,18 @@ def _render_persistence_footer(session_stamp: str, *, had_errors: bool = False) 
         ("static_findings_summary", f"{findings_summary} (total={findings_summary_total})"),
         ("static_findings", f"{findings_detail} (total={findings_detail_total})"),
         ("static_string_summary", f"{strings_summary} (total={strings_summary_total})"),
-        ("static_string_samples", f"{string_samples} (total={string_samples_total})"),
+        (
+            "static_string_samples (raw)",
+            f"{string_samples_raw} (total={string_samples_raw_total})",
+        ),
+        (
+            "v_strings_effective",
+            f"{string_samples_effective} (total={string_samples_effective_total})",
+        ),
+        (
+            "v_doc_policy_drift",
+            f"{string_samples_suppressed} (total={string_samples_suppressed_total})",
+        ),
         ("static_fileproviders", f"{fileproviders} (total={fileproviders_total})"),
         ("static_provider_acl", f"{provider_acl} (total={provider_acl_total})"),
         ("buckets", f"{buckets} (total={buckets_total})"),

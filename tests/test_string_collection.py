@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from scytaledroid.StaticAnalysis.cli.renderer import render_exploratory_summary
-from scytaledroid.StaticAnalysis.modules.string_analysis.allowlist import NoisePolicy
+from scytaledroid.StaticAnalysis.modules.string_analysis.allowlist import (
+    DEFAULT_POLICY_ROOT,
+    NoisePolicy,
+    load_noise_policy,
+)
 from scytaledroid.StaticAnalysis.modules.string_analysis.extractor import (
     CollectionSummary,
     normalise_index,
@@ -49,6 +54,14 @@ def test_collect_file_strings_records_offsets() -> None:
     assert record.locale_qualifier is None
 
 
+def test_noise_policy_matches_registrable_root() -> None:
+    policy = NoisePolicy(frozenset({"adobe.com"}), frozenset())
+    assert policy.is_documentary_host("adobe.com") is True
+    assert policy.is_documentary_host("ns.adobe.com") is True
+    assert policy.is_documentary_host("files.adobe.com") is True
+    assert policy.is_documentary_host("example.com") is False
+
+
 def test_normalise_index_produces_metrics() -> None:
     index = StringIndex(
         strings=(
@@ -77,7 +90,7 @@ def test_normalise_index_produces_metrics() -> None:
             ),
         )
     )
-    policy = NoisePolicy(frozenset({"ns.adobe.com"}), frozenset())
+    policy = NoisePolicy(frozenset({"adobe.com"}), frozenset())
     summary: CollectionSummary = normalise_index(index, noise_policy=policy)
 
     assert isinstance(summary, CollectionSummary)
@@ -119,6 +132,118 @@ def test_normalise_index_produces_metrics() -> None:
     assert metrics.obfuscation_hint is False
     assert metrics.issue_flags
     assert any(issue.slug == "cleartext_endpoints" for issue in metrics.issue_flags)
+
+
+def test_policy_rules_from_config_apply() -> None:
+    policy = load_noise_policy(DEFAULT_POLICY_ROOT)
+    index = StringIndex(
+        strings=(
+            IndexedString(
+                value="http://schemas.android.com/tools",
+                origin="res/raw/app_keep.xml",
+                origin_type="res",
+                source_sha256="d" * 64,
+                context="http://schemas.android.com/tools",
+            ),
+        )
+    )
+
+    summary = normalise_index(index, noise_policy=policy)
+    assert len(summary.strings) == 1
+    record = summary.strings[0]
+    assert record.is_allowlisted is True
+    assert record.policy_action == "suppress"
+    assert record.policy_rule == "suppress-doc-hosts"
+    assert record.policy_reason == "policy_drift:doc_reference_host"
+
+
+def test_policy_downgrades_placeholder_hosts() -> None:
+    policy = load_noise_policy(DEFAULT_POLICY_ROOT)
+    index = StringIndex(
+        strings=(
+            IndexedString(
+                value="http://localhost/internal",
+                origin="assets/config.json",
+                origin_type="asset",
+                source_sha256="e" * 64,
+                context="http://localhost/internal",
+            ),
+        )
+    )
+
+    summary = normalise_index(index, noise_policy=policy)
+    record = summary.strings[0]
+    assert record.policy_action == "downgrade"
+    assert record.policy_tag == "dev_placeholder_host"
+    assert record.policy_severity == "info"
+    assert record.is_allowlisted is False
+
+
+def test_policy_respects_host_key_for_full_host(tmp_path: Path) -> None:
+    config_file = tmp_path / "policy.toml"
+    config_file.write_text(
+        """
+[hosts.allow_cdn_doc]
+list = ["fonts.googleapis.com"]
+
+[[rules]]
+name = "suppress-fonts"
+when.buckets_any = ["endpoints"]
+when.host_in_group = "hosts.allow_cdn_doc"
+when.host_key = "full_host"
+then.action = "suppress"
+""".strip()
+    )
+
+    policy = load_noise_policy(config_file)
+    index = StringIndex(
+        strings=(
+            IndexedString(
+                value="http://fonts.googleapis.com/css?family=Roboto",
+                origin="assets/compose.css",
+                origin_type="asset",
+                source_sha256="f" * 64,
+                context="http://fonts.googleapis.com/css?family=Roboto",
+            ),
+            IndexedString(
+                value="http://api.googleapis.com/service",
+                origin="assets/config.json",
+                origin_type="asset",
+                source_sha256="a" * 64,
+                context="http://api.googleapis.com/service",
+            ),
+        )
+    )
+
+    summary = normalise_index(index, noise_policy=policy)
+    assert len(summary.strings) == 2
+    actions = {record.value: record.policy_action for record in summary.strings}
+    assert actions["http://fonts.googleapis.com/css?family=Roboto"] == "suppress"
+    assert actions["http://api.googleapis.com/service"] is None
+
+
+def test_policy_loads_from_directory(tmp_path: Path) -> None:
+    doc_cfg = tmp_path / "01-doc.toml"
+    doc_cfg.write_text(
+        """
+[hosts.allow_doc]
+list = ["docs.example.com"]
+""".strip()
+    )
+    placeholder_cfg = tmp_path / "02-placeholders.toml"
+    placeholder_cfg.write_text(
+        """
+[placeholders.hosts_exact]
+list = ["dev.local"]
+""".strip()
+    )
+
+    policy = load_noise_policy(tmp_path)
+    assert policy.is_documentary_host("docs.example.com")
+    assert policy.is_documentary_host("api.docs.example.com")
+    group = policy.host_groups.get("placeholders.hosts_exact")
+    assert group is not None
+    assert "dev.local" in group.full_hosts
 
 
 def test_render_exploratory_summary_outputs_samples() -> None:

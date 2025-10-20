@@ -1,0 +1,172 @@
+# config/strings/noise.toml
+# Purpose: Suppress or downgrade static string evidence that is not exploitable by itself
+# (docs/spec URIs, metadata namespaces, license links, shader blog URLs, etc.)
+# while keeping an auditable record of what was suppressed and why.
+
+[meta]
+version = "1.1"
+description = "Noise suppression config for static string evidence (endpoints/http_cleartext)"
+notes = [
+  "Host matching is by eTLD+1 (registrable domain) unless rule says 'full_host'.",
+  "Actions: suppress = drop from effective risk; downgrade = keep as Info; annotate = keep with tag.",
+]
+
+[defaults]
+# How the loader should interpret host matches if not specified in a rule:
+host_key = "etld_plus_one"     # options: etld_plus_one | full_host
+buckets  = ["endpoints", "http_cleartext"]  # only apply to these buckets by default
+
+# -----------------------------
+# Canonical host allow-lists
+# -----------------------------
+
+[hosts.allow_doc]  # Documentation/spec/reference sites (safe to appear in assets)
+list = [
+  "w3.org",
+  "adobe.com",           # EXIF, Photoshop, TIFF namespaces
+  "apache.org",          # ASF license text
+  "android.com",         # includes schemas.android.com
+  "khronos.org",         # graphics specs
+  "bouncycastle.org",    # crypto docs
+  "slf4j.org",           # logging docs
+  "googlesource.com",    # source references
+  "lolengine.net",       # shader blog used in comments/examples
+  "purl.org",            # metadata namespaces
+  "microsoft.com",       # DRM/protocol docs (eg, 2007/03 protocols)
+  "bohemiancoding.com"   # Sketch metadata links
+]
+
+[hosts.allow_cdn_doc]  # CDNs used strictly in doc/metadata contexts (not runtime telemetry)
+list = [
+  "fonts.googleapis.com",
+  "gstatic.com"
+]
+
+# -----------------------------
+# Known placeholder/dev literals
+# -----------------------------
+
+[placeholders.hosts_exact]      # Treat as development literals; not production endpoints
+list = [
+  "localhost",
+  "0.0.0.0",
+  "0.1",
+  "example.com",
+  "webaddress.elided"
+]
+
+[placeholders.hosts_contains]   # Substrings (avoid too-greedy patterns)
+list = [
+  "%s",      # sprintf-style format fragments in composed URLs
+  "{",       # templated fragments (e.g., {id}); kept broad but used with strict path filters below
+  "}"
+]
+
+# -----------------------------
+# Source/path context buckets
+# -----------------------------
+
+[sources.doc_like_paths.prefix]  # common asset locations that carry doc/metadata strings
+list = [
+  "assets/filters/",                            # EXIF/metadata PNGs
+  "assets/compose.css",                         # Gmail compose css
+  "assets/pure_java_gpu_database-android_processed_manifest/",
+  "assets/shaders/",                            # GLSL shaders citing blog posts/specs
+  "res/raw/firebase_common_keep.xml",
+  "res/raw/firebase_crashlytics_keep.xml",
+  "res/raw/app_keep.xml",
+  "res/raw/keep.xml",
+  "res/raw/keep_cronet_api.xml",
+  "res/raw/places_keep.xml",
+  "res/raw/filter_resources.smf",               # seen in X/Twitter builds
+  "res/raw/cache_intl_",                        # compiled message catalogs with stray links
+  "res/raw/images_",                            # SVG/PNG assets with metadata namespaces
+  "assets/legal.html"
+]
+
+# Optional: exact filenames that are known to embed namespaces/links but are not used for networking
+[sources.doc_like_paths.exact]
+list = [
+  "assets/pure_java_gpu_database-android_processed_manifest/AndroidManifest.xml"
+]
+
+# -----------------------------
+# Rules
+# Each [[rules]] block defines WHEN conditions and THEN actions.
+# Conditions are ANDed within a rule. Rules are evaluated top→bottom.
+# Actions:
+#   - suppress: exclude from effective risk but keep in 'policy drift' evidence
+#   - downgrade: keep in findings as 'Info' (tagged), not counted to MASVS Network fails
+#   - annotate: keep as-is but add tag for dashboards
+# -----------------------------
+
+# 1) Hard suppress doc/reference hosts in the relevant buckets
+[[rules]]
+name   = "suppress-doc-hosts"
+when.buckets_any      = ["endpoints","http_cleartext"]
+when.host_in_group    = "hosts.allow_doc"
+then.action           = "suppress"
+then.reason           = "policy_drift:doc_reference_host"
+
+# 2) Same for doc CDNs, but only if they appear inside doc-like sources (extra safety)
+[[rules]]
+name   = "suppress-doc-cdn-in-doc-paths"
+when.buckets_any      = ["endpoints","http_cleartext"]
+when.host_in_group    = "hosts.allow_cdn_doc"
+when.host_key         = "full_host"
+when.source_prefix_in = "sources.doc_like_paths.prefix"
+then.action           = "suppress"
+then.reason           = "policy_drift:doc_cdn_in_asset"
+
+# 3) Downgrade placeholders/dev literals to Info (keep visible for hygiene, not risk)
+[[rules]]
+name   = "downgrade-placeholders"
+when.buckets_any      = ["endpoints","http_cleartext"]
+when.host_in_group    = "placeholders.hosts_exact"
+then.action           = "downgrade"
+then.severity         = "info"
+then.tag              = "dev_placeholder_host"
+
+# 4) If a string contains known placeholder fragments AND comes from doc-like paths → suppress
+[[rules]]
+name   = "suppress-inline-placeholders-in-doc-assets"
+when.buckets_any          = ["endpoints","http_cleartext"]
+when.value_contains_group = "placeholders.hosts_contains"
+when.source_prefix_in     = "sources.doc_like_paths.prefix"
+then.action               = "suppress"
+then.reason               = "policy_drift:templated_doc_asset"
+
+# 5) Permit HTTP for doc/reference hosts only when the source is doc-like (prevents blanket allowance)
+[[rules]]
+name          = "allow-http-on-doc-hosts-in-doc-paths"
+when.scheme   = "http"
+when.host_in_group    = "hosts.allow_doc"
+when.source_prefix_in = "sources.doc_like_paths.prefix"
+then.action   = "suppress"
+then.reason   = "policy_drift:http_in_metadata"
+
+# 6) Anything on allow_cdn_doc hosts over HTTP inside doc paths is also suppressed
+[[rules]]
+name          = "allow-http-on-doc-cdn-in-doc-paths"
+when.scheme   = "http"
+when.host_in_group    = "hosts.allow_cdn_doc"
+when.host_key         = "full_host"
+when.source_prefix_in = "sources.doc_like_paths.prefix"
+then.action   = "suppress"
+then.reason   = "policy_drift:http_doc_cdn"
+
+# 7) Annotate suspicious formatted hosts (e.g., '%s', single-letter) that slip outside doc paths
+[[rules]]
+name                 = "annotate-format-fragments-outside-doc"
+when.buckets_any     = ["endpoints","http_cleartext"]
+when.value_contains_group = "placeholders.hosts_contains"
+when.source_prefix_not_in = "sources.doc_like_paths.prefix"
+then.action          = "annotate"
+then.tag             = "format_fragment_host"
+then.note            = "Verify this is not used to assemble runtime endpoints"
+
+# 8) Safety net: never suppress full hosts if explicitly marked as override
+[hosts.block_overrides]      # If any of these hosts appear, ignore all suppression rules above.
+list = [
+  # Example: "example-doc-host.com"
+]

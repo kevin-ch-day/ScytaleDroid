@@ -32,6 +32,24 @@ FROM v_masvs_matrix
 ORDER BY run_id DESC
 LIMIT 20;
 
+-- Effective vs suppressed network evidence snapshot
+SELECT 'effective' AS evidence_set,
+       COUNT(*) AS rows_total
+  FROM v_strings_effective
+UNION ALL
+SELECT 'policy_drift' AS evidence_set,
+       COUNT(*) AS rows_total
+  FROM v_doc_policy_drift;
+
+-- Top suppressed documentary hosts (audit appendix)
+SELECT package_name,
+       host,
+       COUNT(*) AS hits
+  FROM v_doc_policy_drift
+ GROUP BY package_name, host
+ ORDER BY hits DESC
+ LIMIT 20;
+
 -- Control level evidence for the most recent run
 SELECT c.run_id,
        c.package,

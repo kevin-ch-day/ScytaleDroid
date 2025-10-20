@@ -447,10 +447,22 @@ def _print_session_counts(session_stamp: str) -> None:
             WHERE s.session_stamp=%s
         """, (session_stamp,))),
         ("static_string_summary", _scalar("SELECT COUNT(*) FROM static_string_summary WHERE session_stamp=%s", (session_stamp,))),
-        ("static_string_samples", _scalar("""
+        ("static_string_samples (raw)", _scalar("""
             SELECT COUNT(*)
             FROM static_string_samples x
             JOIN static_findings_summary s ON s.id=x.summary_id
+            WHERE s.session_stamp=%s
+        """, (session_stamp,))),
+        ("v_strings_effective", _scalar("""
+            SELECT COUNT(*)
+            FROM v_strings_effective x
+            JOIN static_string_summary s ON s.id=x.summary_id
+            WHERE s.session_stamp=%s
+        """, (session_stamp,))),
+        ("v_doc_policy_drift", _scalar("""
+            SELECT COUNT(*)
+            FROM v_doc_policy_drift d
+            JOIN static_string_summary s ON s.id=d.summary_id
             WHERE s.session_stamp=%s
         """, (session_stamp,))),
         ("static_provider_acl", _scalar("SELECT COUNT(*) FROM static_provider_acl WHERE session_stamp=%s", (session_stamp,))),
