@@ -1,0 +1,15 @@
+- name: android.permission.INTERNET
+  protection: normal
+  source: aosp-34
+- name: android.permission.READ_CONTACTS
+  protection: dangerous
+  source: aosp-34
+- name: android.permission.WRITE_SETTINGS
+  protection: signature|privileged
+  source: aosp-34
+- name: android.permission.READ_CALL_LOG
+  protection: dangerous
+  source: aosp-34
+- name: android.permission.QUERY_ALL_PACKAGES
+  protection: signature|privileged
+  source: aosp-34

@@ -22,6 +22,7 @@ from .errors import StaticAnalysisError
 from .findings import Badge, DetectorResult, EvidencePointer, Finding
 from .manifest_utils import (
     build_manifest_flags,
+    collect_custom_permission_definitions,
     collect_exported_components,
     extract_compile_sdk,
     load_manifest_root,
@@ -35,6 +36,7 @@ from .models import (
 )
 from .pipeline_artifacts import assemble_pipeline_artifacts
 from ..modules import build_string_index
+from ..modules.permissions import load_permission_catalog
 from ..modules.network_security import extract_network_security_policy
 
 
@@ -136,11 +138,42 @@ def analyze_apk(
         permission_details = {}
     dangerous = collect_dangerous_permissions(permission_details)
     custom_permissions = tuple(sorted(apk.get_declared_permissions()))
+    custom_definitions = collect_custom_permission_definitions(manifest_root)
+    permission_catalog = load_permission_catalog()
+
+    protection_levels: dict[str, tuple[str, ...]] = {}
+    for name, detail in (permission_details or {}).items():
+        if not detail:
+            continue
+        level_raw = detail[0]
+        if not isinstance(level_raw, str):
+            continue
+        parts = tuple(
+            part.strip().lower()
+            for part in level_raw.split("|")
+            if part.strip()
+        )
+        if parts:
+            protection_levels[name] = parts
+
+    for name, definition in custom_definitions.items():
+        levels = tuple(
+            str(part).lower()
+            for part in definition.get("protection_levels", ())
+            if part
+        )
+        if levels:
+            protection_levels[name] = levels
+
+    catalog_snapshot = permission_catalog.to_snapshot(declared_permissions)
 
     permissions = PermissionSummary(
         declared=declared_permissions,
         dangerous=dangerous,
         custom=custom_permissions,
+        protection_levels=protection_levels,
+        custom_definitions=custom_definitions,
+        catalog_snapshot=catalog_snapshot,
     )
 
     components = ComponentSummary(
@@ -183,6 +216,7 @@ def analyze_apk(
         config=analysis_config,
         string_index=string_index,
         network_security_policy=network_security_policy,
+        permission_catalog=permission_catalog,
     )
 
     detector_results = run_detector_pipeline(context)
@@ -195,6 +229,12 @@ def analyze_apk(
         report_metadata["pipeline_summary"] = artifacts.summary
     if artifacts.reproducibility_bundle:
         report_metadata["repro_bundle"] = artifacts.reproducibility_bundle
+    if artifacts.matrices:
+        report_metadata["analysis_matrices"] = artifacts.matrices
+    if artifacts.indicators:
+        report_metadata["analysis_indicators"] = artifacts.indicators
+    if artifacts.workload:
+        report_metadata["workload_profile"] = artifacts.workload
 
     findings = tuple(
         finding for result in artifacts.results for finding in result.findings
@@ -221,6 +261,9 @@ def analyze_apk(
         findings=findings,
         detector_metrics=detector_metrics,
         detector_results=detector_results,
+        analysis_matrices=artifacts.matrices,
+        analysis_indicators=artifacts.indicators,
+        workload_profile=artifacts.workload,
     )
 
 

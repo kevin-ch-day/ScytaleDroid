@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Mapping, MutableMapping, Optional, Sequence, Tuple
 
-from scytaledroid.Utils.DisplayUtils import status_messages
+from scytaledroid.Utils.DisplayUtils import severity, status_messages, summary_cards
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.System import output_prefs
 
@@ -65,7 +65,12 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
 
 
 def _execute_single_artifact(progress_label: str, artifact, params: RunParameters, selection: ScopeSelection, base_dir: Path):
-    print(f"{progress_label} • starting {artifact.artifact_label or 'base'}")
+    print(
+        status_messages.step(
+            f"Starting {artifact.artifact_label or 'base'}",
+            label=progress_label,
+        )
+    )
     report, json_path, error, skipped = generate_report(artifact, base_dir, params)
     if skipped:
         return None, None, tuple()
@@ -83,20 +88,74 @@ def _execute_single_artifact(progress_label: str, artifact, params: RunParameter
     if (duration or 0.0) <= 0.0 and total_detector_time > 0.0:
         duration = total_detector_time
     summary = _summarize_artifact(artifact, report, json_path, duration)
-    print(f"{progress_label} • finished {artifact.artifact_label or 'base'} ({format_duration(duration)})")
+    print(
+        status_messages.step(
+            f"Finished {artifact.artifact_label or 'base'} ({format_duration(duration)})",
+            label=progress_label,
+            state="success",
+        )
+    )
     return report, summary, timings
 
 
 def _print_artifact_progress(label: str, summary: ArtifactOutcome, timings: Iterable[tuple[str, float]]) -> None:
     detector_timings = [(name, dur) for name, dur in timings if dur > 0]
-    if not detector_timings:
-        return
-    total_seconds = sum(duration for _, duration in detector_timings)
-    print(f"    detectors={len(detector_timings)} total={format_duration(total_seconds)}")
-    if not output_prefs.get().verbose:
-        return
-    for name, duration in detector_timings:
-        print(f"      - {name:<18} {format_duration(duration)}")
+    severity_counts = getattr(summary, "severity", None)
+    totals: dict[str, int] = {}
+    if severity_counts:
+        totals = severity.normalise_counts(severity_counts.items())
+
+    card_items: list[summary_cards.SummaryCardItem] = []
+    if summary.duration_seconds:
+        card_items.append(
+            summary_cards.summary_item(
+                "Duration",
+                format_duration(summary.duration_seconds),
+                value_style="emphasis",
+            )
+        )
+    if detector_timings:
+        total_seconds = sum(duration for _, duration in detector_timings)
+        card_items.append(
+            summary_cards.summary_item("Detectors", len(detector_timings))
+        )
+        card_items.append(
+            summary_cards.summary_item(
+                "Detector time",
+                format_duration(total_seconds),
+            )
+        )
+    total_findings = sum(totals.values())
+    if total_findings:
+        style = "severity_high" if totals.get("high") else "emphasis"
+        card_items.append(
+            summary_cards.summary_item("Findings", total_findings, value_style=style)
+        )
+    if totals:
+        card_items.extend(severity.severity_summary_items(totals, include_zero=False))
+
+    if card_items:
+        artifact_label = getattr(summary, "label", None) or label
+        card_title = f"Artifact snapshot — {artifact_label}"
+        print(
+            summary_cards.format_summary_card(
+                card_title,
+                card_items,
+                subtitle=label,
+                width=82,
+            )
+        )
+
+    if detector_timings and output_prefs.get().verbose:
+        for name, duration in detector_timings:
+            print(
+                status_messages.step(
+                    f"{name:<18} {format_duration(duration)}",
+                    state="info",
+                    indent=4,
+                    show_icon=False,
+                )
+            )
 
 
 def _progress_label(group_index: int, group_total: int, artifact_index: int, artifact_total: int, package_name: str) -> str:

@@ -19,13 +19,56 @@ def load_previous_report(context: DetectorContext) -> Optional[StoredReport]:
         return None
 
     current_sha = context.hashes.get("sha256")
+    target_version_name = context.manifest_summary.version_name or ""
+    try:
+        target_version_code = int(context.manifest_summary.version_code)
+    except (TypeError, ValueError):
+        target_version_code = None
+
+    same_version: list[StoredReport] = []
+    older_versions: list[tuple[int, StoredReport]] = []
+    candidates: list[StoredReport] = []
+
     for stored in list_reports():
         report = stored.report
         if report.manifest.package_name != package:
             continue
         if report.hashes.get("sha256") == current_sha:
             continue
-        return stored
+
+        stored_name = report.manifest.version_name or ""
+        try:
+            stored_code = int(report.manifest.version_code) if report.manifest.version_code else None
+        except (TypeError, ValueError):
+            stored_code = None
+
+        if (
+            stored_code is not None
+            and target_version_code is not None
+            and stored_code == target_version_code
+            and stored_name == target_version_name
+        ):
+            same_version.append(stored)
+            continue
+        if (
+            stored_code is not None
+            and target_version_code is not None
+            and stored_code < target_version_code
+        ):
+            older_versions.append((stored_code, stored))
+            continue
+        if stored_name and stored_name == target_version_name:
+            same_version.append(stored)
+            continue
+        candidates.append(stored)
+
+    if same_version:
+        return same_version[0]
+    if older_versions:
+        older_versions.sort(key=lambda item: item[0], reverse=True)
+        return older_versions[0][1]
+    if candidates:
+        return candidates[0]
     return None
 
 

@@ -6,7 +6,7 @@ import hashlib
 import json
 from pathlib import Path
 from time import perf_counter
-from typing import Dict, Mapping, Optional, Sequence
+from typing import Dict, Mapping, Optional, Sequence, Tuple
 
 from ..core.context import DetectorContext
 from ..core.findings import (
@@ -26,6 +26,69 @@ from ..modules import (
 )
 from ..modules.network_security import DomainPolicy, NetworkSecurityPolicy
 from .base import BaseDetector, register_detector
+
+
+_ALLOWLIST_HOST_SUFFIXES = (
+    "schemas.android.com",
+    "developer.android.com",
+    "w3.org",
+    "example.com",
+)
+
+
+def _is_allowlisted_host(host: str) -> bool:
+    host = host.lower()
+    return any(host.endswith(suffix) for suffix in _ALLOWLIST_HOST_SUFFIXES)
+
+
+def _nsc_allows_cleartext(policy: Optional[NetworkSecurityPolicy], host: str) -> bool:
+    if policy is None:
+        return True
+    if policy.base_cleartext is False:
+        default_allowed = False
+    elif policy.base_cleartext is True:
+        default_allowed = True
+    else:
+        default_allowed = True
+
+    host = host.lower()
+    decision = None
+    for domain_policy in policy.domain_policies:
+        for domain in domain_policy.domains:
+            domain = domain.lower()
+            matches = host == domain or (domain_policy.include_subdomains and host.endswith(f".{domain}"))
+            if not matches:
+                continue
+            if domain_policy.cleartext_permitted is True:
+                return True
+            if domain_policy.cleartext_permitted is False:
+                decision = False
+            else:
+                decision = default_allowed
+    if decision is not None:
+        return decision
+    return default_allowed
+
+
+def _filter_http_matches(
+    matches: Sequence[EndpointMatch],
+    policy: Optional[NetworkSecurityPolicy],
+) -> tuple[Sequence[EndpointMatch], Tuple[str, ...], Tuple[str, ...]]:
+    allowed: list[EndpointMatch] = []
+    suppressed: set[str] = set()
+    allowlisted: set[str] = set()
+
+    for match in matches:
+        host = match.host.lower()
+        if _is_allowlisted_host(host):
+            allowlisted.add(host)
+            continue
+        if not _nsc_allows_cleartext(policy, host):
+            suppressed.add(host)
+            continue
+        allowed.append(match)
+
+    return tuple(allowed), tuple(sorted(suppressed)), tuple(sorted(allowlisted))
 
 
 def _hash_host(host: str) -> str:
@@ -71,6 +134,9 @@ def _summarise_surface(
     https_matches: Sequence[EndpointMatch],
     tls_hits: Mapping[str, Sequence[IndexedString]],
     manifest_flags,
+    *,
+    suppressed_hosts: Sequence[str] = (),
+    allowlisted_hosts: Sequence[str] = (),
 ) -> tuple[Dict[str, object], str]:
     endpoints_line = f"http={len(http_matches)}  https={len(https_matches)}"
 
@@ -106,7 +172,16 @@ def _summarise_surface(
             "https": [match.url for match in https_matches[:10]],
         },
     }
+    if suppressed_hosts:
+        surface_payload["suppressed_http_hosts"] = sorted(set(suppressed_hosts))
+    if allowlisted_hosts:
+        surface_payload["allowlisted_http_hosts"] = sorted(set(allowlisted_hosts))
     metrics["surface"] = surface_payload
+
+    if suppressed_hosts:
+        metrics["Suppressed"] = {"http_hosts": sorted(set(suppressed_hosts))}
+    if allowlisted_hosts:
+        metrics["Allowlisted"] = {"http_hosts": sorted(set(allowlisted_hosts))}
 
     overrides = _summarise_tls_hits(tls_hits)
     if overrides:
@@ -371,13 +446,19 @@ class NetworkSurfaceDetector(BaseDetector):
 
         endpoints = extract_endpoints(index)
         tls_hits = detect_tls_keywords(index)
-        http_matches = tuple(match for match in endpoints if match.scheme == "http")
+        http_candidates = tuple(match for match in endpoints if match.scheme == "http")
+        http_matches, suppressed_hosts, allowlisted_hosts = _filter_http_matches(
+            http_candidates,
+            context.network_security_policy,
+        )
         https_matches = tuple(match for match in endpoints if match.scheme == "https")
         metrics, status_key = _summarise_surface(
             http_matches,
             https_matches,
             tls_hits,
             context.manifest_flags,
+            suppressed_hosts=suppressed_hosts,
+            allowlisted_hosts=allowlisted_hosts,
         )
 
         evidence_pool: list[EndpointMatch] = list(http_matches)

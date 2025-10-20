@@ -20,15 +20,22 @@ dynamic, or threat-intel analysis.
   manifest hygiene, IPC exposure, provider ACLs, network posture, secrets,
   storage/backup hygiene, WebView hardening, crypto misuse, DFIR hints, and a
   correlation layer that synthesizes P0/P1 risk stories from the detector
-  output. Permissions are grouped and scored using the Androguard
-  protection-level metadata—no hard-coded lists.
+  output. Permissions are grouped and scored using a refreshed Android
+  permission catalog—no hard-coded lists.
+* **Canonical persistence & analytics.** Every run lands in the relational
+  schema (`static_analysis_runs`, `static_analysis_findings`, provider ACL
+  tables) with severity/category matrices, novelty indicators, workload
+  profiles, and reproducibility bundles so analysts can mine cross-run trends
+  without parsing JSON artefacts.
 * **Differential awareness.** Static-analysis runs persist a pipeline trace,
-  split-aware posture snapshot, network security policy graph, and a
-  reproducibility bundle (manifest + NSC + strings digest). The correlation
-  engine compares current results with prior runs to highlight drift.
-* **Operator-centric UX.** Status banners, deterministic wording, and CLI menu
-  summaries mirror across Device and Static analysis so investigators can jump
-  between harvesting and review without context switching.
+  split-aware posture snapshot, network security policy graph, lineage-aware
+  diff basis, and a reproducibility bundle (manifest + NSC + strings digest).
+  The correlation engine prefers prior scans from the same version line and
+  highlights detector, SDK, and secret-surface drift automatically.
+* **Operator-centric UX.** Hero banners, highlight ribbons, severity-aware
+  summary cards, and menu panels mirror across Device and Static analysis so
+  investigators can jump between harvesting and review without context
+  switching.
 * **Permission-first field view.** Abbreviation map (shown once), postcard
   summaries, a Signal Matrix, and a Permission Matrix (`x/*/-`) with a fixed
   capability order and subtle colouring when ANSI is available.
@@ -54,11 +61,13 @@ dynamic, or threat-intel analysis.
 - Section renderers surface deterministic tables for component exposure,
   provider ACLs, secrets, storage risk, crypto posture, DFIR evidence hints,
   and correlation-backed findings. Evidence is capped per section with
-  hash-derived pointers so secrets never print to screen.
-- Analyses are saved as JSON reports under `data/static_analysis/reports/` so
-  investigators can re-open previous runs from the menu or ingest them into
-  downstream tooling. Diff views highlight permission drift, cleartext policy
-  changes, and split-aware risk composition.
+  hash-derived pointers so secrets never print to screen. Highlight ribbons
+  call out suppressed secrets, NSC-enforced cleartext blocking, and unguarded
+  providers the moment a run finishes.
+- Analyses are saved as JSON reports under `data/static_analysis/reports/` and
+  simultaneously promoted into the canonical database. Diff views highlight
+  permission drift, network-security changes, SDK/native deltas, and
+  string-cluster shifts with lineage-aware baselines.
 - Permission analysis renders a concise, field‑friendly view:
   - Postcards: Risk bar + Score/Grade + High‑signal + Footprint table
   - Risk Summary: Abbr | Score | Grade | D | S | V
@@ -92,6 +101,10 @@ dynamic, or threat-intel analysis.
   blueprints for downstream portals.
 * [`docs/database/permission_analysis_schema.md`](docs/database/permission_analysis_schema.md) – risk
   snapshots and proposed matrix/rationale tables.
+* [`docs/static_analysis_analytics.md`](docs/static_analysis_analytics.md) –
+  severity/category matrices, workload profiling, and novelty indicators.
+* [`docs/static_analysis_improvement_plan.md`](docs/static_analysis_improvement_plan.md) –
+  current milestone recap and next tightening steps.
 * [`RENAME_GUIDE.md`](RENAME_GUIDE.md) – module naming map and deprecation plan.
 
 For a detailed overview tailored to collaborators, including what is finished,

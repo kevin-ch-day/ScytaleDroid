@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from time import perf_counter
 from typing import List, Mapping, Optional, Sequence
@@ -18,6 +19,7 @@ from ..core.findings import (
 )
 from ..core.pipeline import make_detector_result
 from .base import BaseDetector, register_detector
+from ..modules.permissions import classify_permission, load_permission_catalog
 
 _ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
 
@@ -34,6 +36,46 @@ class ProviderRecord:
     grant_uri_permissions: bool
     authorities: tuple[str, ...]
     path_permissions: tuple[Mapping[str, str], ...]
+
+
+_GUARD_PRIORITY = {
+    "none": 0,
+    "unknown": 1,
+    "weak": 1,
+    "dangerous": 2,
+    "custom": 2,
+    "signature": 3,
+}
+
+
+def _resolve_strength(
+    permission: Optional[str],
+    *,
+    protection_levels: Mapping[str, Sequence[str]],
+    catalog,
+) -> tuple[str, tuple[str, ...]]:
+    if not permission:
+        return "none", tuple()
+    strength, levels = classify_permission(
+        permission,
+        manifest_levels=protection_levels,
+        catalog=catalog,
+    )
+    if strength == "none":
+        return "none", tuple(levels)
+    return strength, tuple(levels)
+
+
+def _select_worst_guard(*guards: Optional[str]) -> str:
+    selected = "none"
+    selected_rank = 99
+    for guard in guards:
+        candidate = guard or "none"
+        rank = _GUARD_PRIORITY.get(candidate, 1)
+        if rank < selected_rank:
+            selected = candidate
+            selected_rank = rank
+    return selected
 
 
 def _collect_providers(manifest_root: ElementTree.Element) -> Sequence[ProviderRecord]:
@@ -115,7 +157,12 @@ def _build_provider_evidence(provider: ProviderRecord, *, apk_path) -> EvidenceP
     return EvidencePointer(location=location, description=description, extra=extra)
 
 
-def _classify_provider(provider: ProviderRecord) -> Optional[Finding]:
+def _classify_provider(
+    provider: ProviderRecord,
+    *,
+    protection_levels: Mapping[str, Sequence[str]],
+    catalog,
+) -> Optional[Finding]:
     if not provider.exported:
         return None
 
@@ -181,13 +228,99 @@ def _classify_provider(provider: ProviderRecord) -> Optional[Finding]:
     return None
 
 
-def _build_metrics(providers: Sequence[ProviderRecord]) -> Mapping[str, object]:
+def _build_provider_snapshot(
+    provider: ProviderRecord,
+    *,
+    protection_levels: Mapping[str, Sequence[str]],
+    catalog,
+) -> Mapping[str, object]:
+    base_guard, base_levels = _resolve_strength(
+        provider.general_permission,
+        protection_levels=protection_levels,
+        catalog=catalog,
+    )
+    read_guard, read_levels = _resolve_strength(
+        provider.read_permission,
+        protection_levels=protection_levels,
+        catalog=catalog,
+    )
+    write_guard, write_levels = _resolve_strength(
+        provider.write_permission,
+        protection_levels=protection_levels,
+        catalog=catalog,
+    )
+    effective = _select_worst_guard(base_guard, read_guard, write_guard)
+
+    path_details: list[Mapping[str, object]] = []
+    for entry in provider.path_permissions:
+        read_perm = entry.get("readPermission") or None
+        write_perm = entry.get("writePermission") or None
+        read_strength, read_tokens = _resolve_strength(
+            read_perm,
+            protection_levels=protection_levels,
+            catalog=catalog,
+        )
+        write_strength, write_tokens = _resolve_strength(
+            write_perm,
+            protection_levels=protection_levels,
+            catalog=catalog,
+        )
+        path_details.append(
+            {
+                "path": entry.get("path"),
+                "pathPrefix": entry.get("pathPrefix"),
+                "pathPattern": entry.get("pathPattern"),
+                "read_permission": read_perm,
+                "write_permission": write_perm,
+                "read_guard": read_strength,
+                "write_guard": write_strength,
+                "read_levels": read_tokens,
+                "write_levels": write_tokens,
+            }
+        )
+
+    return {
+        "name": provider.name,
+        "exported": provider.exported,
+        "authorities": provider.authorities,
+        "grant_uri_permissions": provider.grant_uri_permissions,
+        "base_permission": provider.general_permission,
+        "base_guard": base_guard,
+        "base_levels": base_levels,
+        "read_permission": provider.read_permission,
+        "read_guard": read_guard,
+        "read_levels": read_levels,
+        "write_permission": provider.write_permission,
+        "write_guard": write_guard,
+        "write_levels": write_levels,
+        "effective_guard": effective,
+        "path_permissions": tuple(path_details),
+    }
+
+
+def _build_metrics(
+    providers: Sequence[ProviderRecord],
+    *,
+    protection_levels: Mapping[str, Sequence[str]],
+    catalog,
+) -> Mapping[str, object]:
     exported = [provider for provider in providers if provider.exported]
     insecure = [
         provider
         for provider in exported
         if not provider.read_permission and not provider.write_permission
     ]
+
+    guard_histogram: Counter[str] = Counter()
+    acl_snapshot = []
+    for provider in providers:
+        snapshot = _build_provider_snapshot(
+            provider,
+            protection_levels=protection_levels,
+            catalog=catalog,
+        )
+        guard_histogram[snapshot["effective_guard"]] += 1
+        acl_snapshot.append(snapshot)
 
     return {
         "total_providers": len(providers),
@@ -196,6 +329,8 @@ def _build_metrics(providers: Sequence[ProviderRecord]) -> Mapping[str, object]:
         "grant_uri_permissions": sum(
             1 for provider in exported if provider.grant_uri_permissions
         ),
+        "guard_strength_histogram": dict(guard_histogram),
+        "acl_snapshot": tuple(acl_snapshot),
     }
 
 
@@ -213,15 +348,25 @@ class ProviderAclDetector(BaseDetector):
         providers = _collect_providers(context.manifest_root)
         findings: List[Finding] = []
         evidence: List[EvidencePointer] = []
+        catalog = getattr(context, "permission_catalog", None) or load_permission_catalog()
+        protection_levels = getattr(context.permissions, "protection_levels", {})
 
         for provider in providers:
-            finding = _classify_provider(provider)
+            finding = _classify_provider(
+                provider,
+                protection_levels=protection_levels,
+                catalog=catalog,
+            )
             if finding is None:
                 continue
             findings.append(finding)
             evidence.append(_build_provider_evidence(provider, apk_path=context.apk_path))
 
-        metrics = _build_metrics(providers)
+        metrics = _build_metrics(
+            providers,
+            protection_levels=protection_levels,
+            catalog=catalog,
+        )
 
         badge = Badge.OK
         if any(f.status is Badge.FAIL for f in findings):

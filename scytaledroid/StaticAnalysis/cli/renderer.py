@@ -250,6 +250,50 @@ def _preview_text(value: object, *, limit: int = 70) -> str:
     return text[: limit - 1] + "…"
 
 
+def _analytics_summary_lines(report: StaticAnalysisReport) -> list[str]:
+    indicators = getattr(report, "analysis_indicators", {}) or {}
+    workload = getattr(report, "workload_profile", {}) or {}
+    if not indicators and not workload:
+        return []
+
+    label_map = {
+        "novelty_index": "Novelty index",
+        "severity_entropy": "Severity entropy",
+        "category_entropy": "Category entropy",
+        "masvs_coverage_ratio": "MASVS coverage",
+    }
+
+    lines = ["Analytics Highlights"]
+    for key in ("novelty_index", "severity_entropy", "category_entropy", "masvs_coverage_ratio"):
+        if key in indicators:
+            value = indicators[key]
+            lines.append(f"  {label_map.get(key, key.replace('_', ' ').title())}: {value}")
+
+    summary = workload.get("summary") if isinstance(workload, Mapping) else {}
+    if isinstance(summary, Mapping):
+        throughput = summary.get("findings_per_second")
+        if throughput:
+            lines.append(f"  Findings/sec: {throughput}")
+        p90 = summary.get("p90_duration_sec")
+        if p90:
+            lines.append(f"  P90 detector runtime: {p90}s")
+    return lines
+
+
+def _build_analytics_payload(report: StaticAnalysisReport) -> Mapping[str, object]:
+    payload: dict[str, object] = {}
+    matrices = getattr(report, "analysis_matrices", {})
+    if isinstance(matrices, Mapping) and matrices:
+        payload["matrices"] = matrices
+    indicators = getattr(report, "analysis_indicators", {})
+    if isinstance(indicators, Mapping) and indicators:
+        payload["indicators"] = indicators
+    workload = getattr(report, "workload_profile", {})
+    if isinstance(workload, Mapping) and workload:
+        payload["workload"] = workload
+    return payload
+
+
 def _manifest_flag_lines(report: StaticAnalysisReport) -> list[str]:
     flags = report.manifest_flags
     lines = [
@@ -1186,6 +1230,11 @@ def render_app_result(
     lines.append("")
     lines.extend(_finding_lines(findings, finding_totals))
 
+    analytics_lines = _analytics_summary_lines(report)
+    if analytics_lines:
+        lines.append("")
+        lines.extend(analytics_lines)
+
     # Inline MASVS summary derived from detector results
     try:
         from scytaledroid.StaticAnalysis.core.findings import MasvsCategory
@@ -1259,6 +1308,10 @@ def render_app_result(
         },
         "duration_seconds": round(duration_seconds, 2),
     }
+
+    analytics_payload = _build_analytics_payload(report)
+    if analytics_payload:
+        payload["analytics"] = analytics_payload
 
     return lines, payload, finding_totals
 

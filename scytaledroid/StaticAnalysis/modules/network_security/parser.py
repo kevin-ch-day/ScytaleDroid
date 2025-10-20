@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from typing import List, Optional
+from typing import List, Mapping, Optional, Sequence
 from xml.etree import ElementTree
 
 from scytaledroid.StaticAnalysis._androguard import APK
@@ -61,6 +61,7 @@ def extract_network_security_policy(
 
     base_cleartext = _coerce_bool(root.get(f"{_ANDROID_NS}cleartextTrafficPermitted"))
     trust_user_certificates = False
+    base_trust_anchors: tuple[str, ...] = tuple()
 
     domain_configs: List[DomainPolicy] = []
 
@@ -70,7 +71,8 @@ def extract_network_security_policy(
             base_config.get(f"{_ANDROID_NS}cleartextTrafficPermitted"),
             default=base_cleartext,
         )
-        trust_user_certificates = _has_user_certificates(base_config)
+        base_trust_anchors = _collect_trust_anchors(base_config)
+        trust_user_certificates = _anchors_allow_user(base_trust_anchors)
 
     debug_overrides = root.find("debug-overrides")
     debug_cleartext = None
@@ -80,20 +82,32 @@ def extract_network_security_policy(
         )
         if debug_cleartext is None:
             debug_cleartext = base_cleartext
-        trust_user_certificates = trust_user_certificates or _has_user_certificates(
-            debug_overrides
-        )
+        debug_anchors = _collect_trust_anchors(debug_overrides)
+        if _anchors_allow_user(debug_anchors):
+            trust_user_certificates = True
 
     for element in root.findall("domain-config"):
-        domain_configs.extend(_parse_domain_config(element, base_cleartext))
+        domain_configs.extend(
+            _parse_domain_config(
+                element,
+                base_cleartext,
+                base_trust_anchors,
+            )
+        )
 
     xml_hash = hashlib.sha256(raw_bytes).hexdigest()
+
+    if not trust_user_certificates:
+        trust_user_certificates = any(
+            domain.user_certificates_allowed for domain in domain_configs
+        )
 
     return NetworkSecurityPolicy(
         source_path=resolved_path,
         base_cleartext=base_cleartext,
         debug_overrides_cleartext=debug_cleartext,
         trust_user_certificates=trust_user_certificates,
+        base_trust_anchors=base_trust_anchors,
         domain_policies=tuple(domain_configs),
         raw_xml_hash=xml_hash,
     )
@@ -131,30 +145,39 @@ def _coerce_bool(value: Optional[str], *, default: Optional[bool] = None) -> Opt
     return default
 
 
-def _has_user_certificates(element: ElementTree.Element) -> bool:
+def _collect_trust_anchors(element: ElementTree.Element) -> tuple[str, ...]:
+    anchors: list[str] = []
     for anchor in element.findall("trust-anchors"):
         for child in anchor:
             tag = child.tag.rsplit("}", 1)[-1] if "}" in child.tag else child.tag
             if tag == "certificates":
-                src = child.get(f"{_ANDROID_NS}src") or ""
-                if src.endswith("user"):
-                    return True
+                src = (child.get(f"{_ANDROID_NS}src") or "").strip()
+                if src:
+                    anchors.append(src)
+    return tuple(anchors)
+
+
+def _anchors_allow_user(anchors: Sequence[str]) -> bool:
+    for anchor in anchors:
+        if anchor.endswith("user"):
+            return True
     return False
 
 
 def _parse_domain_config(
     element: ElementTree.Element,
     base_cleartext: Optional[bool],
+    inherited_anchors: Sequence[str],
 ) -> List[DomainPolicy]:
     cleartext = _coerce_bool(
         element.get(f"{_ANDROID_NS}cleartextTrafficPermitted"),
         default=base_cleartext,
     )
-    user_certificates = _has_user_certificates(element)
-    pin_sets: List[str] = []
-    for pin_set in element.findall("pin-set"):
-        set_name = pin_set.get(f"{_ANDROID_NS}expiration") or "pin"
-        pin_sets.append(set_name)
+    anchors = _collect_trust_anchors(element)
+    if not anchors:
+        anchors = tuple(inherited_anchors)
+    user_certificates = _anchors_allow_user(anchors)
+    pin_sets = _collect_pin_sets(element)
 
     domains: List[str] = []
     include_subdomains = False
@@ -176,13 +199,35 @@ def _parse_domain_config(
                 cleartext_permitted=cleartext,
                 user_certificates_allowed=user_certificates,
                 pinned_certificates=tuple(pin_sets),
+                trust_anchors=tuple(anchors),
             )
         )
 
     for child in element.findall("domain-config"):
-        policies.extend(_parse_domain_config(child, cleartext))
+        policies.extend(_parse_domain_config(child, cleartext, anchors))
 
     return policies
+
+
+def _collect_pin_sets(element: ElementTree.Element) -> List[Mapping[str, object]]:
+    pin_sets: List[Mapping[str, object]] = []
+    for pin_set in element.findall("pin-set"):
+        entry: dict[str, object] = {}
+        expiration = (pin_set.get(f"{_ANDROID_NS}expiration") or "").strip()
+        if expiration:
+            entry["expiration"] = expiration
+        pins: list[Mapping[str, str]] = []
+        for pin in pin_set.findall("pin"):
+            digest = (pin.get(f"{_ANDROID_NS}digest") or "").strip()
+            value = (pin.text or "").strip()
+            if not digest or not value:
+                continue
+            pins.append({"digest": digest, "value": value})
+        if pins:
+            entry["pins"] = pins
+        if entry:
+            pin_sets.append(entry)
+    return pin_sets
 
 
 __all__ = ["extract_network_security_policy"]

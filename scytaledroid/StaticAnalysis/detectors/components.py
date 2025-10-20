@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from time import perf_counter
 from typing import Iterable, List, Mapping, Optional, Sequence
@@ -18,6 +19,7 @@ from ..core.findings import (
 )
 from ..core.pipeline import make_detector_result
 from .base import BaseDetector, register_detector
+from ..modules.permissions import classify_permission, load_permission_catalog
 
 _ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
 _COMPONENT_TAGS = {
@@ -39,9 +41,12 @@ class ComponentRecord:
     permission: Optional[str]
     authorities: tuple[str, ...] = ()
     grant_uri_permissions: bool = False
+    process: Optional[str] = None
 
 
-def _iter_components(manifest_root: ElementTree.Element) -> Iterable[ComponentRecord]:
+def iter_manifest_components(
+    manifest_root: ElementTree.Element,
+) -> Iterable[ComponentRecord]:
     application = manifest_root.find("application")
     if application is None:
         return tuple()
@@ -82,6 +87,8 @@ def _iter_components(manifest_root: ElementTree.Element) -> Iterable[ComponentRe
             element.get(f"{_ANDROID_NS}grantUriPermissions") or ""
         ).strip().lower() in {"true", "1"}
 
+        process_name = element.get(f"{_ANDROID_NS}process")
+
         records.append(
             ComponentRecord(
                 component_type=tag,
@@ -90,6 +97,7 @@ def _iter_components(manifest_root: ElementTree.Element) -> Iterable[ComponentRe
                 permission=permission,
                 authorities=tuple(authorities),
                 grant_uri_permissions=grant_uri,
+                process=process_name,
             )
         )
 
@@ -104,6 +112,7 @@ def _build_evidence(component: ComponentRecord, *, apk_path) -> EvidencePointer:
         "permission": component.permission,
         "authorities": component.authorities,
         "grant_uri_permissions": component.grant_uri_permissions,
+        "process": component.process,
     }
     return EvidencePointer(
         location=location,
@@ -112,7 +121,28 @@ def _build_evidence(component: ComponentRecord, *, apk_path) -> EvidencePointer:
     )
 
 
-def _classify_component(component: ComponentRecord) -> Optional[Finding]:
+def _permission_strength(
+    permission: str,
+    *,
+    protection_levels: Mapping[str, Sequence[str]],
+    catalog,
+) -> tuple[str, tuple[str, ...]]:
+    strength, levels = classify_permission(
+        permission,
+        manifest_levels=protection_levels,
+        catalog=catalog,
+    )
+    if strength == "none":
+        return "none", levels
+    return strength, tuple(levels)
+
+
+def _classify_component(
+    component: ComponentRecord,
+    *,
+    protection_levels: Mapping[str, Sequence[str]],
+    catalog,
+) -> Optional[Finding]:
     if not component.exported:
         return None
 
@@ -137,10 +167,14 @@ def _classify_component(component: ComponentRecord) -> Optional[Finding]:
                     " as private (exported=false)."
                 ),
             )
-        if permission.endswith(".permission.READ") or permission.endswith(
-            ".permission.WRITE"
-        ):
-            # Normalised custom permission reference.
+
+        strength, levels = _permission_strength(
+            permission,
+            protection_levels=protection_levels,
+            catalog=catalog,
+        )
+        level_display = "/".join(levels) if levels else "unspecified"
+        if strength == "strong":
             return Finding(
                 finding_id=f"ipc_provider_permission_{base_id}",
                 title=f"Exported provider gated by {permission}",
@@ -148,15 +182,49 @@ def _classify_component(component: ComponentRecord) -> Optional[Finding]:
                 category_masvs=MasvsCategory.PLATFORM,
                 status=Badge.INFO,
                 because=(
-                    f"Provider {component.name} is exported and guarded by {permission}."
-                    " Review protectionLevel for the custom permission."
+                    f"Provider {component.name} is exported and guarded by {permission}"
+                    f" (protectionLevel={level_display})."
                 ),
                 remediate=(
-                    "Ensure custom permissions guarding providers are marked"
-                    " protectionLevel=signature or signatureOrSystem."
+                    "Keep custom provider permissions scoped to signature-level callers"
+                    " and document expected consumers."
                 ),
+                metrics={"protection_level": level_display},
             )
-        return None
+        if strength == "weak":
+            return Finding(
+                finding_id=f"ipc_provider_permission_weak_{base_id}",
+                title=f"Weak guard on exported provider — {component.name}",
+                severity_gate=SeverityLevel.P0,
+                category_masvs=MasvsCategory.PLATFORM,
+                status=Badge.FAIL,
+                because=(
+                    f"Provider {component.name} is exported but guarded by {permission}"
+                    f" with protectionLevel={level_display}, allowing broad callers."
+                ),
+                remediate=(
+                    "Switch the provider permission to signature or signatureOrSystem"
+                    " or make the component private."
+                ),
+                metrics={"protection_level": level_display},
+            )
+        return Finding(
+            finding_id=f"ipc_provider_permission_custom_{base_id}",
+            title=f"Exported provider guarded by {permission}",
+            severity_gate=SeverityLevel.P2,
+            category_masvs=MasvsCategory.PLATFORM,
+            status=Badge.WARN,
+            because=(
+                f"Provider {component.name} relies on {permission}"
+                f" (protectionLevel={level_display}). Review that only trusted callers"
+                " can obtain the permission."
+            ),
+            remediate=(
+                "Confirm the custom permission is distributed only to trusted"
+                " packages and consider signature-level enforcement."
+            ),
+            metrics={"protection_level": level_display},
+        )
 
     if not permission:
         return Finding(
@@ -175,20 +243,65 @@ def _classify_component(component: ComponentRecord) -> Optional[Finding]:
             ),
         )
 
+    strength, levels = _permission_strength(
+        permission,
+        protection_levels=protection_levels,
+        catalog=catalog,
+    )
+    level_display = "/".join(levels) if levels else "unspecified"
+
+    if strength == "strong":
+        return Finding(
+            finding_id=f"ipc_{component.component_type}_permission_{base_id}",
+            title=f"Exported {component_label} gated by {permission}",
+            severity_gate=SeverityLevel.P2,
+            category_masvs=MasvsCategory.PLATFORM,
+            status=Badge.INFO,
+            because=(
+                f"Exported {component_label} relies on {permission}"
+                f" (protectionLevel={level_display})."
+            ),
+            remediate=(
+                "Document the permission contract and monitor for unexpected"
+                " callers."
+            ),
+            metrics={"protection_level": level_display},
+        )
+
+    if strength == "weak":
+        return Finding(
+            finding_id=f"ipc_{component.component_type}_weak_permission_{base_id}",
+            title=f"Weak permission guard on exported {component_label}",
+            severity_gate=SeverityLevel.P1,
+            category_masvs=MasvsCategory.PLATFORM,
+            status=Badge.WARN,
+            because=(
+                f"{component_label.title()} {component.name} uses {permission}"
+                f" (protectionLevel={level_display}), which is insufficient for"
+                " exported components."
+            ),
+            remediate=(
+                "Protect the component with a signature-level permission or mark"
+                " it non-exported."
+            ),
+            metrics={"protection_level": level_display},
+        )
+
     return Finding(
         finding_id=f"ipc_{component.component_type}_permission_{base_id}",
-        title=f"Exported {component_label} gated by {permission}",
+        title=f"Exported {component_label} guarded by {permission}",
         severity_gate=SeverityLevel.P2,
         category_masvs=MasvsCategory.PLATFORM,
         status=Badge.INFO,
         because=(
-            f"Exported {component_label} relies on permission {permission}. Confirm its"
-            " protection level is appropriate."
+            f"Exported {component_label} relies on {permission}"
+            f" (protectionLevel={level_display}). Verify distribution controls."
         ),
         remediate=(
-            "Verify the guarding permission uses signature or signatureOrSystem"
-            " protection level and document the expected caller set."
+            "Confirm only trusted callers can obtain the guarding permission"
+            " and prefer signature-level protection."
         ),
+        metrics={"protection_level": level_display},
     )
 
 
@@ -227,12 +340,18 @@ class IpcExposureDetector(BaseDetector):
 
     def run(self, context: DetectorContext) -> DetectorResult:
         started = perf_counter()
-        components = _iter_components(context.manifest_root)
+        components = iter_manifest_components(context.manifest_root)
         findings: List[Finding] = []
         evidence: List[EvidencePointer] = []
+        protection_levels = getattr(context.permissions, "protection_levels", {})
+        catalog = getattr(context, "permission_catalog", None) or load_permission_catalog()
 
         for component in components:
-            finding = _classify_component(component)
+            finding = _classify_component(
+                component,
+                protection_levels=protection_levels,
+                catalog=catalog,
+            )
             if finding is None:
                 continue
             findings.append(finding)
@@ -249,7 +368,12 @@ class IpcExposureDetector(BaseDetector):
                 _shared_uid_finding(manifest_shared_uid, permissions=permissions)
             )
 
-        metrics = _build_metrics(components, manifest_shared_uid)
+        metrics = _build_metrics(
+            components,
+            manifest_shared_uid,
+            protection_levels=protection_levels,
+            catalog=catalog,
+        )
 
         badge = Badge.OK
         if any(f.status in {Badge.FAIL, Badge.WARN} for f in findings):
@@ -267,20 +391,60 @@ class IpcExposureDetector(BaseDetector):
 
 
 def _build_metrics(
-    components: Sequence[ComponentRecord], shared_user_id: Optional[str]
+    components: Sequence[ComponentRecord],
+    shared_user_id: Optional[str],
+    *,
+    protection_levels: Mapping[str, Sequence[str]],
+    catalog,
 ) -> Mapping[str, object]:
     total = len(components)
     exported = sum(1 for comp in components if comp.exported)
     permissioned = sum(1 for comp in components if comp.permission)
+    exported_with_permission = sum(
+        1 for comp in components if comp.exported and comp.permission
+    )
+    exported_without_permission = sum(
+        1 for comp in components if comp.exported and not comp.permission
+    )
     providers = [comp for comp in components if comp.component_type == "provider"]
+    guard_strengths: Counter[str] = Counter()
+    for component in components:
+        if not component.permission:
+            continue
+        strength, _ = _permission_strength(
+            component.permission,
+            protection_levels=protection_levels,
+            catalog=catalog,
+        )
+        guard_strengths[strength] += 1
+
+    type_map: dict[str, Counter[str]] = {}
+    for component in components:
+        if not component.permission:
+            continue
+        bucket, _ = _permission_strength(
+            component.permission,
+            protection_levels=protection_levels,
+            catalog=catalog,
+        )
+        counter = type_map.setdefault(component.component_type, Counter())
+        counter[bucket] += 1
+    by_type = {
+        component_type: dict(counter)
+        for component_type, counter in type_map.items()
+    }
 
     return {
         "components_total": total,
         "components_exported": exported,
         "permission_enforced": permissioned,
+        "exported_with_permission": exported_with_permission,
+        "exported_without_permission": exported_without_permission,
         "providers": len(providers),
         "shared_user_id": shared_user_id,
+        "permission_guard_strength": dict(guard_strengths),
+        "permission_guard_strength_by_type": by_type,
     }
 
 
-__all__ = ["IpcExposureDetector"]
+__all__ = ["IpcExposureDetector", "ComponentRecord", "iter_manifest_components"]

@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from scytaledroid.StaticAnalysis.cli.execution.scan_flow import _print_artifact_progress
+from scytaledroid.Utils.DisplayUtils import colors
 from scytaledroid.Utils.System import output_prefs
 
 
@@ -18,5 +19,6 @@ def test_print_artifact_progress_sums_timings(capsys):
     ]
 
     _print_artifact_progress("label", summary, timings)
-    captured = capsys.readouterr().out
-    assert "detectors=3 total=35 ms" in captured
+    captured = colors.strip(capsys.readouterr().out)
+    assert "Detectors: 3" in captured
+    assert "Detector time: 35 ms" in captured

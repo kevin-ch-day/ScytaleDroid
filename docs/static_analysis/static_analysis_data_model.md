@@ -10,95 +10,92 @@ back to a concrete database record.
 
 1. The pipeline ingests an APK and produces detector outputs plus
    string-intelligence observations.
-2. The renderer exports a JSON artefact and (when configured) invokes the
-   database persistence adapters.
-3. Persistence helpers in `scytaledroid/Database/db_queries/` create or update
-   the static-analysis tables. These helpers are wrapped by
-   `scytaledroid/Database/db_utils/diagnostics.py` and the CLI diagnostics menu.
-4. Analysts can verify schema health through **Database Utilities → Schema
-   snapshot** and the **Schema audit** tool.
+2. The renderer exports a JSON artefact and invokes the canonical persistence
+   adapter (`ingest_baseline_payload`) even when database writes are optional.
+3. Persistence helpers in `scytaledroid/StaticAnalysis/persistence/ingest.py`
+   call the idempotent DDL from
+   `scytaledroid/Database/db_queries/canonical/schema.py`, promote provider
+   exposures, and materialise the session string view as needed.
+4. Analysts can verify schema health through the CLI database utilities
+   (**Database Utilities → Schema snapshot**) or by running the canonical helper
+   snippet shown in the persistence runbook.
 
-## 2. Core tables
+## 2. Canonical static-analysis tables
 
-| Table | Purpose | Primary keys & relationships | Populated by |
+| Table | Purpose | Keys & relationships | Populated by |
 | --- | --- | --- | --- |
-| `static_findings_summary` | One row per scan session (`package_name`, `session_stamp`, `scope_label`). Stores severity counts, manifest flag snapshot, and string-summary foreign keys. | PK `id`; unique index on `(package_name, session_stamp, scope_label)`. Referenced by `static_findings` and `static_string_samples`. | `db_queries/static_analysis/static_findings.py` (`INSERT_FINDINGS_SUMMARY`). |
-| `static_findings` | Individual findings from detectors/correlation (title, severity, evidence JSON). | PK `id`; FK `summary_id` → `static_findings_summary.id`. | `db_queries/static_analysis/static_findings.py` (`INSERT_FINDING`). |
-| `static_string_summary` | Aggregated counts for string buckets (endpoints, cleartext, cloud references, etc.). | PK `id`; unique index on `(package_name, session_stamp, scope_label)`. | `db_queries/static_analysis/string_analysis.py` (`INSERT_STRING_SUMMARY`). |
-| `static_string_samples` | Top-N string samples per bucket with masking, provenance, and tag metadata. | PK `id`; FK `summary_id` → `static_string_summary.id`. | `db_queries/static_analysis/string_analysis.py` (`INSERT_SAMPLE`). |
-| `risk_scores` / `static_permission_risk` | Roll-up risk metrics for permissions and overall scoring. | `risk_scores` keyed by `(package_name, session_stamp, scope_label)`; `static_permission_risk` keyed by `apk_id`. | `db_queries/static_analysis/risk_scores.py` and `db_queries/static_analysis/static_permission_risk.py`. |
-| `static_fileproviders`, `static_provider_acl` | Provider posture (authority, exported flag, ACLs). | PK `id`; optional `apk_id` / `session_stamp` for joins. | `db_queries/harvest/storage_surface.py`. |
+| `apps` / `app_versions` | Normalised package + version metadata used by every downstream table. | `apps.package_name` unique; `app_versions` unique on `(app_id, version_name, version_code)` with FK → `apps`. | Canonical ingest (`_ensure_schema_ready`). |
+| `static_analysis_runs` | One row per scan with SHA-256, session/scope, lineage metadata, detector metrics, reproducibility bundle, matrices, indicators, and workload profile. | PK `id`; FK `app_version_id` → `app_versions`. Indexed on `session_stamp`, `sha256`, `app_version_id`. | `ingest_baseline_payload`. |
+| `static_analysis_findings` | Normalised findings (rule, severity, status, tags, CVSS, MASVS control, detector/module attribution, evidence JSON). | PK `id`; FK `run_id` → `static_analysis_runs`. Indexed on `(run_id, rule_id)` and `(rule_id, severity, run_id)`. | `ingest_baseline_payload` and provider promotion helpers. |
+| `static_fileproviders` | Exported ContentProvider posture with authorities, guard strength, grant flags, and component metrics. | PK `id`; FK `run_id` → `static_analysis_runs`. Indexed on `component_name`, `effective_guard`. | `ingest_baseline_payload`. |
+| `static_provider_acl` | Path-permission breakdowns for providers (path/prefix/pattern + guard levels). | PK `id`; FK `provider_id` → `static_fileproviders`. Indexed on provider + path columns. | `ingest_baseline_payload`. |
+| `v_base002_candidates` | View exposing unguarded/weak providers sourced from canonical tables. | Materialised via schema helper (DROP/CREATE VIEW). | Queried by `upsert_base002_for_session`. |
+| `v_provider_exposure` | Analyst-facing view summarising guard strength, grant flags, and evidence payloads. | Materialised via schema helper. | Referenced in validation SQL. |
+| `v_session_string_samples` | Session-aware view joining string samples even when `session_stamp` is missing; falls back to `(package_name, created_at)` windows. | Materialised via schema helper. | Queried by CLI + manual helper snippet. |
 
-All tables share the `session_stamp` convention so they can be joined with the
-latest APK metadata from `android_apk_repository` or with `permission_audit`
-records when building cross-signal reports.
+Legacy `static_findings_summary`, `static_findings`, and string tables remain for
+backward compatibility, but all new analytics flows should rely on the canonical
+tables above. Canonical ingest updates both worlds when legacy writes are
+enabled, ensuring existing dashboards continue to function.
 
-## 3. Extended columns for string evidence
+## 3. Session string samples
 
-Recent iterations expanded `static_string_samples` to capture richer provenance.
-When migrations are applied, each row includes:
-
-* `source_type` – `dex`, `res`, `asset`, or `native`.
-* `finding_type` – Logical classification (e.g., `endpoint`, `aws_pair`).
-* `provider` / `risk_tag` – Normalised tags aligned with the SNI catalog.
-* `confidence` – Low/medium/high confidence value echoed from the detectors.
-* `sample_hash` – SHA-1 of the masked string payload for deduplication.
-* `root_domain`, `scheme`, `resource_name` – Normalised URL fragments where
-  applicable.
-
-If your schema snapshot still reflects the previous column set
-(`bucket`, `value_masked`, `src`, `tag`, `rank`), run the database migration
-script provided in `db_utils`:
-
-```bash
-python -c "from scytaledroid.Database.db_func.static_analysis import string_analysis; string_analysis.ensure_tables()"
-```
-
-The helper creates/updates the table definitions using
-`CREATE_STRING_SUMMARY` and `CREATE_STRING_SAMPLES` from
-`db_queries/static_analysis/string_analysis.py`.
+Canonical ingest relies on `v_session_string_samples` to work even when legacy
+`static_string_samples` rows are missing a `session_stamp`. The view correlates
+samples by `(package_name, created_at)` windows so detector evidence remains
+queryable for BASE-002 and secrets workflows. Running the manual helper snippet
+with a chosen session stamp ensures the view exists and returns a row count for
+the requested session.
 
 ## 4. Query helpers & diagnostics
 
-* **Creation scripts** – Namespaced modules under
-  `db_queries/static_analysis/` and `db_queries/harvest/` hold the canonical
-  `CREATE TABLE` statements sourced by setup scripts and migrations.
+* **Creation scripts** – Canonical DDL lives under
+  `Database/db_queries/canonical/schema.py` and is invoked automatically via
+  `ensure_provider_plumbing()`.
+* **Provider promotion** – `upsert_base002_for_session()` materialises BASE-002
+  findings into `static_analysis_findings` with structured evidence payloads.
 * **Diagnostics menu** – `python -m scytaledroid.Database.db_utils.database_menu`
-  launches the Database Utilities interface (options 1, 2, 3). Option **2**
-  emits the Markdown schema summary used above; option **3** runs the schema
-  audit for deeper diagnostics.
-* **String intel snapshot** – After a run, use the exploratory renderer
-  (`--explore`) to compare JSON metrics against `static_string_summary`
-  aggregates. The `summary_id` from the JSON payload should match the FK stored
-  in `static_string_samples` once persistence is enabled.
+  still exposes schema snapshots. For standalone validation without the CLI,
+  run the manual helper snippet (see runbook) to ensure schema/view readiness
+  and promote provider exposures.
+* **String intel snapshot** – The exploratory renderer (`--explore`) mirrors the
+  canonical string view; evidence counts in the CLI match
+  `v_session_string_samples` when the ensure step has been run.
 
 ## 5. Joining with APK metadata
 
-Static-analysis tables intentionally avoid duplicating APK metadata. To enrich a
-report:
+Canonical tables already reference `app_versions`, so enriching reports usually
+requires a single join:
 
 ```sql
-SELECT sfs.package_name,
-       latest.version_name,
-       sfs.high,
-       sss.endpoints,
-       sss.http_cleartext
-FROM static_findings_summary AS sfs
-JOIN static_string_summary AS sss
-  ON sfs.package_name = sss.package_name
- AND sfs.session_stamp = sss.session_stamp
-JOIN vw_latest_apk_per_package AS latest
-  ON latest.package_name = sfs.package_name;
+SELECT av.version_name,
+       av.version_code,
+       sar.session_stamp,
+       sar.scope_label,
+       sar.analysis_version,
+       saf.rule_id,
+       saf.severity,
+       saf.title,
+       saf.evidence
+FROM static_analysis_runs AS sar
+JOIN app_versions AS av
+  ON sar.app_version_id = av.id
+JOIN static_analysis_findings AS saf
+  ON saf.run_id = sar.id
+WHERE av.package_name = 'com.example.app'
+  AND sar.session_stamp = '20241019-163000';
 ```
 
-When you need split-specific metadata, join via `android_apk_repository` using
-`package_name` and `split_group_id` to align with the `split_id` recorded by the
-string-intelligence extractor.
+When you need legacy `static_string_samples` context, join through
+`v_session_string_samples`, which already normalises package/session
+relationships for you.
 
 ## 6. Related documentation
 
 * [Static analysis pipeline plan](static_analysis_pipeline_plan.md) – detector
   architecture and execution flow.
+* [Static analysis analytics extensions](../static_analysis_analytics.md) –
+  matrices, novelty indicators, and workload payloads.
 * [String intelligence exploratory guide](string_intelligence_explore.md) – how
   to interpret collection metrics, issue flags, and evidence samples.
 
