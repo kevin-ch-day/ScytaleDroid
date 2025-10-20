@@ -9,8 +9,9 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 
 from scytaledroid.Config import app_config
-from scytaledroid.Utils.DisplayUtils import menu_utils, text_blocks
+from scytaledroid.Utils.DisplayUtils import summary_cards, status_messages
 from scytaledroid.Utils.System import output_prefs
+from scytaledroid.StaticAnalysis.persistence import ingest as canonical_ingest
 
 from .execution import (
     build_analysis_config,
@@ -37,6 +38,13 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
     params = replace(params, session_stamp=session_stamp)
     output_prefs.set_verbose(bool(params.verbose_output))
 
+    try:
+        canonical_ingest.ensure_provider_plumbing()
+        if params.session_stamp:
+            canonical_ingest.build_session_string_view(params.session_stamp)
+    except Exception:
+        pass
+
     workers = _resolve_workers(params.workers)
     if not params.reuse_cache:
         _purge_run_cache()
@@ -44,29 +52,39 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
     modules = _modules_for_run(params)
     scope_target = format_scope_target(selection)
 
-    summary_lines = [
-        f"Scope    : {scope_target}",
-        f"Profile  : {params.profile_label}",
-        f"Session  : {params.session_stamp}",
-    ]
     workers_label = f"auto ({workers})" if isinstance(params.workers, str) else str(workers)
-    summary_lines.append(f"Workers  : {workers_label}")
-    summary_lines.append(f"Cache    : {'purge' if not params.reuse_cache else 'reuse'}")
-    summary_lines.append(f"Log level: {params.log_level.upper()}")
+    summary_items: list[tuple[str, object]] = [
+        ("Scope", scope_target),
+        ("Profile", params.profile_label),
+        ("Session", params.session_stamp),
+        ("Workers", workers_label),
+        ("Cache", "purge" if not params.reuse_cache else "reuse"),
+        ("Log level", params.log_level.upper()),
+    ]
     if modules:
-        summary_lines.append(f"Detectors: {', '.join(modules)}")
+        summary_items.append(("Detectors", ", ".join(modules)))
     if params.trace_detectors:
-        summary_lines.append(f"Trace IDs: {', '.join(params.trace_detectors)}")
+        summary_items.append(("Trace IDs", ", ".join(params.trace_detectors)))
 
-    print(text_blocks.boxed(summary_lines, width=80))
+    print(
+        summary_cards.format_summary_card(
+            "Static Analysis Run",
+            summary_items,
+            subtitle=f"Target: {scope_target}",
+            footer="Run executes immediately after this summary.",
+            width=90,
+        )
+    )
     print()
 
     configure_logging_for_cli(params.log_level)
 
     if params.profile == "permissions":
+        print(status_messages.step("Starting permission analysis workflow", label="Static Analysis"))
         execute_permission_scan(selection, params)
         return None
 
+    print(status_messages.step("Starting detector pipeline", label="Static Analysis"))
     outcome = execute_scan(selection, params, base_dir)
     try:
         setattr(outcome, "session_stamp", params.session_stamp)
@@ -74,10 +92,22 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
         pass
     render_run_results(outcome, params)
 
+    if params.session_stamp:
+        try:
+            canonical_ingest.upsert_base002_for_session(params.session_stamp)
+            canonical_ingest.build_session_string_view(params.session_stamp)
+        except Exception:
+            pass
+
     if params.profile in {"full", "lightweight"} and not params.dry_run:
         try:
             print()
-            print("-- Re-rendering Permission Analysis snapshot for parity --")
+            print(
+                status_messages.step(
+                    "Re-rendering permission snapshot for parity",
+                    label="Static Analysis",
+                )
+            )
             execute_permission_scan(selection, params, persist_detections=False)
         except Exception:
             pass

@@ -51,9 +51,32 @@ class PermissionSummary:
     declared: tuple[str, ...] = ()
     dangerous: tuple[str, ...] = ()
     custom: tuple[str, ...] = ()
+    protection_levels: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    custom_definitions: Mapping[str, Mapping[str, object]] = field(
+        default_factory=dict
+    )
+    catalog_snapshot: Mapping[str, Mapping[str, object]] = field(
+        default_factory=dict
+    )
 
-    def to_dict(self) -> MutableMapping[str, Iterable[str]]:
-        return asdict(self)
+    def to_dict(self) -> MutableMapping[str, object]:
+        return {
+            "declared": tuple(self.declared),
+            "dangerous": tuple(self.dangerous),
+            "custom": tuple(self.custom),
+            "protection_levels": {
+                str(name): tuple(levels)
+                for name, levels in self.protection_levels.items()
+            },
+            "custom_definitions": {
+                str(name): dict(definition)
+                for name, definition in self.custom_definitions.items()
+            },
+            "catalog_snapshot": {
+                str(name): dict(metadata)
+                for name, metadata in self.catalog_snapshot.items()
+            },
+        }
 
 
 @dataclass(frozen=True)
@@ -96,6 +119,9 @@ class StaticAnalysisReport:
     detector_results: tuple[DetectorResult, ...] = field(
         default_factory=tuple, repr=False, compare=False
     )
+    analysis_matrices: Mapping[str, object] = field(default_factory=dict)
+    analysis_indicators: Mapping[str, float] = field(default_factory=dict)
+    workload_profile: Mapping[str, object] = field(default_factory=dict)
     generated_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
@@ -125,6 +151,9 @@ class StaticAnalysisReport:
             "detector_results": [
                 result.to_dict() for result in self.detector_results
             ],
+            "analysis_matrices": dict(self.analysis_matrices),
+            "analysis_indicators": dict(self.analysis_indicators),
+            "workload_profile": dict(self.workload_profile),
             "generated_at": self.generated_at,
         }
         return payload
@@ -135,11 +164,47 @@ class StaticAnalysisReport:
 
         manifest = ManifestSummary(**subset(payload.get("manifest", {}), ManifestSummary))
         flags = ManifestFlags(**subset(payload.get("manifest_flags", {}), ManifestFlags))
+        permissions_payload = payload.get("permissions", {})
+        protection_levels_payload = (
+            permissions_payload.get("protection_levels")
+            if isinstance(permissions_payload, Mapping)
+            else {}
+        )
+        custom_defs_payload = (
+            permissions_payload.get("custom_definitions")
+            if isinstance(permissions_payload, Mapping)
+            else {}
+        )
+        catalog_snapshot_payload = (
+            permissions_payload.get("catalog_snapshot")
+            if isinstance(permissions_payload, Mapping)
+            else {}
+        )
         permissions = PermissionSummary(
             **{
-                "declared": tuple(payload.get("permissions", {}).get("declared", ())),
-                "dangerous": tuple(payload.get("permissions", {}).get("dangerous", ())),
-                "custom": tuple(payload.get("permissions", {}).get("custom", ())),
+                "declared": tuple(permissions_payload.get("declared", ())),
+                "dangerous": tuple(permissions_payload.get("dangerous", ())),
+                "custom": tuple(permissions_payload.get("custom", ())),
+                "protection_levels": {
+                    str(name): tuple(levels)
+                    for name, levels in dict(protection_levels_payload).items()
+                }
+                if isinstance(protection_levels_payload, Mapping)
+                else {},
+                "custom_definitions": {
+                    str(name): dict(definition)
+                    for name, definition in dict(custom_defs_payload).items()
+                    if isinstance(definition, Mapping)
+                }
+                if isinstance(custom_defs_payload, Mapping)
+                else {},
+                "catalog_snapshot": {
+                    str(name): dict(metadata)
+                    for name, metadata in dict(catalog_snapshot_payload).items()
+                    if isinstance(metadata, Mapping)
+                }
+                if isinstance(catalog_snapshot_payload, Mapping)
+                else {},
             }
         )
         components = ComponentSummary(
@@ -203,6 +268,30 @@ class StaticAnalysisReport:
         else:
             detector_results = tuple()
 
+        matrices_payload = payload.get("analysis_matrices")
+        if isinstance(matrices_payload, Mapping):
+            analysis_matrices = {
+                str(name): value for name, value in matrices_payload.items()
+            }
+        else:
+            analysis_matrices = {}
+
+        indicators_payload = payload.get("analysis_indicators")
+        if isinstance(indicators_payload, Mapping):
+            analysis_indicators = {
+                str(name): float(value)
+                for name, value in indicators_payload.items()
+                if isinstance(value, (int, float))
+            }
+        else:
+            analysis_indicators = {}
+
+        workload_payload = payload.get("workload_profile")
+        if isinstance(workload_payload, Mapping):
+            workload_profile = dict(workload_payload)
+        else:
+            workload_profile = {}
+
         return cls(
             file_path=str(payload.get("file_path") or ""),
             relative_path=payload.get("relative_path") or None,
@@ -223,6 +312,9 @@ class StaticAnalysisReport:
             findings=findings,
             detector_metrics=detector_metrics,
             detector_results=detector_results,
+            analysis_matrices=analysis_matrices,
+            analysis_indicators=analysis_indicators,
+            workload_profile=workload_profile,
             generated_at=str(
                 payload.get("generated_at") or datetime.now(timezone.utc).isoformat()
             ),

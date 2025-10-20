@@ -10,6 +10,7 @@ _STATUS_PREFIX = {
     "warn": "[WARN]",
     "error": "[ERROR]",
     "success": "[OK]",
+    "progress": "[RUN]",
 }
 
 _STATUS_ICONS = {
@@ -17,6 +18,7 @@ _STATUS_ICONS = {
     "warn": "⚠",
     "error": "✖",
     "success": "✔",
+    "progress": "▶",
 }
 
 _STATUS_ICONS_ASCII = {
@@ -24,6 +26,7 @@ _STATUS_ICONS_ASCII = {
     "warn": "!",
     "error": "x",
     "success": "*",
+    "progress": ">",
 }
 
 _STATUS_STYLES = {
@@ -31,6 +34,7 @@ _STATUS_STYLES = {
     "warn": ("warning", "warning"),
     "error": ("error", "error"),
     "success": ("success", "success"),
+    "progress": ("progress", "text"),
 }
 
 
@@ -74,4 +78,40 @@ def print_status(message: str, level: str = "info") -> None:
     print(status(message, level=level))
 
 
-__all__ = ["print_status", "status"]
+def highlight(message: str, *, show_icon: bool = False) -> str:
+    """Return a highlighted ribbon message."""
+
+    styled = colors.apply(message, colors.style("highlight"), bold=True)
+    if show_icon:
+        icon = "★" if not use_ascii_ui() else "*"
+        icon_token = colors.apply(icon, colors.style("highlight"), bold=True)
+        return f"{icon_token} {styled}"
+    return styled
+
+
+def step(
+    message: str,
+    *,
+    label: str | None = None,
+    state: str = "progress",
+    indent: int = 0,
+    progress: tuple[int, int] | None = None,
+    show_icon: bool = True,
+) -> str:
+    """Render a progress-style status line with optional label and counter."""
+
+    prefix_tokens: list[str] = []
+    if progress:
+        current, total = progress
+        prefix_tokens.append(_apply(f"[{current}/{total}]", "progress", bold=True))
+    if label:
+        prefix_tokens.append(_apply(label, "emphasis", bold=True))
+
+    body = status(message, level=state, show_prefix=False, show_icon=show_icon)
+    text = " ".join(token for token in (*prefix_tokens, body) if token)
+    if indent > 0:
+        text = f"{' ' * indent}{text}"
+    return text
+
+
+__all__ = ["print_status", "status", "step", "highlight"]

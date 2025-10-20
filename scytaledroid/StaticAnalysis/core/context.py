@@ -17,6 +17,7 @@ if TYPE_CHECKING:  # pragma: no cover - type checking imports only
         PermissionSummary,
     )
     from ..modules.network_security.models import NetworkSecurityPolicy
+    from ..modules.permissions import PermissionCatalog
     from ..modules.string_analysis.extractor import StringIndex
 
 
@@ -61,6 +62,7 @@ class DetectorContext:
     hashes: Mapping[str, str]
     string_index: Optional["StringIndex"] = None
     network_security_policy: Optional["NetworkSecurityPolicy"] = None
+    permission_catalog: Optional["PermissionCatalog"] = None
     intermediate_results: Sequence["DetectorResult"] = field(default_factory=tuple)
     config: AnalysisConfig = field(default_factory=AnalysisConfig)
 

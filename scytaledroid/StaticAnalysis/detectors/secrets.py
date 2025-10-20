@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import base64
+import json
 from pathlib import Path
 from time import perf_counter
-from typing import Dict, Mapping, Sequence
+from typing import Callable, Dict, Mapping, MutableMapping, Sequence
 
 from ..core.context import DetectorContext, SecretsSamplerConfig
 from ..core.findings import (
@@ -18,6 +20,7 @@ from ..core.findings import (
 from ..core.pipeline import make_detector_result
 from ..modules.string_analysis.matcher import (
     DEFAULT_SECRET_FILTERS,
+    EvaluatedMatch,
     MatchBatch,
     MatchGroup,
     MatchRecord,
@@ -48,36 +51,194 @@ def _string_pointer(
 
 
 def _collect_result_evidence(
-    groups: Mapping[str, MatchGroup],
+    prepared: Mapping[str, Mapping[str, object]],
     *,
     apk_path: Path,
     limit: int = 2,
 ) -> Sequence[EvidencePointer]:
     pointers: list[EvidencePointer] = []
-    for _, group in sorted(groups.items()):
-        if not group.accepted:
-            continue
-        for evaluated in group.accepted:
+    for pattern_name in sorted(prepared.keys()):
+        matches = prepared[pattern_name]["matches"]
+        for evaluated in matches:
             pointers.append(_string_pointer(evaluated.record, apk_path=apk_path))
             if len(pointers) >= limit:
                 return tuple(pointers)
     return tuple(pointers)
 
 
+def _collect_filter_reasons(group: MatchGroup) -> Sequence[str]:
+    reasons = {
+        reason
+        for match in group.filtered
+        for reason in match.reasons
+        if reason
+    }
+    return tuple(sorted(reasons))
+
+
+def _decode_segment(segment: str) -> str:
+    padded = segment + "=" * (-len(segment) % 4)
+    return base64.urlsafe_b64decode(padded.encode("utf-8")).decode("utf-8")
+
+
+def _looks_like_jwt(fragment: str) -> bool:
+    parts = fragment.split(".")
+    if len(parts) != 3:
+        return False
+    try:
+        header = json.loads(_decode_segment(parts[0]))
+        payload = json.loads(_decode_segment(parts[1]))
+    except Exception:
+        return False
+    return isinstance(header, dict) and isinstance(payload, dict)
+
+
+def _looks_like_real_aws_key(fragment: str) -> bool:
+    upper = fragment.upper()
+    if upper.endswith("EXAMPLE") or "TEST" in upper:
+        return False
+    return upper.startswith("AKIA") or upper.startswith("ASIA")
+
+
+def _looks_like_secret_value(fragment: str) -> bool:
+    upper = fragment.upper()
+    if "EXAMPLE" in upper or "TEST" in upper or "DEMO" in upper:
+        return False
+    return len(fragment.strip()) >= 32
+
+
+_SECRET_VALIDATORS: Mapping[str, Callable[[str], bool]] = {
+    "jwt_token": _looks_like_jwt,
+    "aws_access_key": _looks_like_real_aws_key,
+    "aws_secret_access_key": _looks_like_secret_value,
+}
+
+_VALIDATOR_LABELS: Mapping[str, str] = {
+    "jwt_token": "jwt_shape",
+    "aws_access_key": "aws_key_prefix",
+    "aws_secret_access_key": "aws_secret_entropy",
+}
+
+_PLACEHOLDER_TOKENS = (
+    "example",
+    "sample",
+    "changeme",
+    "dummy",
+    "test",
+    "placeholder",
+    "fake",
+    "demo",
+    "localhost",
+)
+
+_DEBUG_TOKENS = (
+    "debug",
+    "qa",
+    "staging",
+    "dev",
+)
+
+
+def _placeholder_reasons(match: MatchRecord) -> tuple[str, ...]:
+    reasons: set[str] = set()
+    fragment = match.fragment.lower()
+    if any(token in fragment for token in _PLACEHOLDER_TOKENS):
+        reasons.add("placeholder")
+
+    entry = match.string_entry
+    origin = (entry.origin or "").lower()
+    context = (entry.context or "").lower()
+
+    if any(token in origin for token in _DEBUG_TOKENS):
+        reasons.add("debug_origin")
+    if any(token in context for token in _DEBUG_TOKENS):
+        reasons.add("debug_context")
+    if any(token in origin for token in ("test", "sample")):
+        reasons.add("test_namespace")
+    return tuple(sorted(reasons))
+
+
+def _evaluate_match(match: MatchRecord) -> tuple[bool, tuple[str, ...], tuple[str, ...]]:
+    validator = _SECRET_VALIDATORS.get(match.pattern.name)
+    hits: set[str] = set()
+    reasons: list[str] = list(_placeholder_reasons(match))
+
+    if validator is not None:
+        try:
+            if validator(match.fragment):
+                hits.add(_VALIDATOR_LABELS.get(match.pattern.name, match.pattern.name))
+            else:
+                reasons.append("validator_failed")
+        except Exception:
+            reasons.append("validator_error")
+
+    keep = not reasons
+    return keep, tuple(sorted(hits)), tuple(sorted(set(reasons)))
+
+
+def _is_usage_correlated(matches: Sequence[EvaluatedMatch]) -> bool:
+    if len({m.record.string_entry.origin for m in matches}) > 1:
+        return True
+    for evaluated in matches:
+        context = (evaluated.record.string_entry.context or "").lower()
+        if any(token in context for token in ("auth", "token", "header", "secret")):
+            return True
+        if evaluated.record.string_entry.origin_type in {"network", "http", "request"}:
+            return True
+    return False
+
+
+def _prepare_group_insights(
+    groups: Mapping[str, MatchGroup]
+) -> MutableMapping[str, Mapping[str, object]]:
+    prepared: MutableMapping[str, Mapping[str, object]] = {}
+    for pattern_name, group in groups.items():
+        if not group.accepted:
+            continue
+        validated: list[EvaluatedMatch] = []
+        validator_hits: set[str] = set()
+        suppressed: list[str] = []
+        for candidate in group.accepted:
+            keep, hits, reasons = _evaluate_match(candidate.record)
+            if keep:
+                validated.append(candidate)
+                validator_hits.update(hits)
+            else:
+                suppressed.extend(reasons)
+        if not validated:
+            continue
+        info: Dict[str, object] = {
+            "group": group,
+            "matches": tuple(validated),
+            "validator_dropped": group.accepted_count - len(validated),
+            "usage_correlated": _is_usage_correlated(validated),
+            "validator_hits": tuple(sorted(validator_hits)),
+            "suppressed_reasons": tuple(sorted(set(suppressed))),
+        }
+        hits_present = bool(validator_hits)
+        correlated = bool(info["usage_correlated"])
+        confidence = "high" if hits_present and correlated else "medium" if hits_present or correlated else "low"
+        info["confidence"] = confidence
+        prepared[pattern_name] = info
+    return prepared
+
+
 def _build_findings(
-    groups: Mapping[str, MatchGroup],
+    prepared: Mapping[str, Mapping[str, object]],
     *,
     apk_path: Path,
 ) -> Sequence[Finding]:
     findings: list[Finding] = []
 
-    for pattern_name, group in sorted(groups.items()):
-        if not group.accepted:
+    for pattern_name, info in sorted(prepared.items()):
+        group = info["group"]
+        matches: Sequence[EvaluatedMatch] = info["matches"]
+        if not matches:
             continue
 
         pattern = group.pattern
-        sample_record = group.accepted[0].record
-        count = group.accepted_count
+        sample_record = matches[0].record
+        count = len(matches)
 
         summary = (
             f"Detected {count} potential secret{'' if count == 1 else 's'} matching "
@@ -85,24 +246,24 @@ def _build_findings(
         )
 
         supporting_hashes = [
-            match.record.string_entry.sha256 for match in group.accepted[:10]
+            match.record.string_entry.sha256 for match in matches[:10]
         ]
         pointer = _string_pointer(sample_record, apk_path=apk_path)
 
         origin_types = sorted(
             {
                 match.record.string_entry.origin_type
-                for match in group.accepted
+                for match in matches
             }
         )
-        filter_reasons = sorted(
-            {
-                reason
-                for match in group.filtered
-                for reason in match.reasons
-                if reason
-            }
-        )
+
+        filter_reasons = _collect_filter_reasons(group)
+
+        validator_hits = info.get("validator_hits", ())
+        suppressed_reasons = info.get("suppressed_reasons", ())
+        confidence = info.get("confidence", "low")
+        if confidence == "low":
+            continue
 
         metrics_payload: Dict[str, object] = {
             "hashes": supporting_hashes,
@@ -112,6 +273,15 @@ def _build_findings(
             "category": pattern.category,
         }
 
+        if info.get("validator_dropped"):
+            metrics_payload["validator_dropped"] = info["validator_dropped"]
+        metrics_payload["usage_correlated"] = bool(info.get("usage_correlated"))
+        metrics_payload["confidence"] = confidence
+        if validator_hits:
+            metrics_payload["validator_hits"] = validator_hits
+        if suppressed_reasons:
+            metrics_payload["suppressed_reasons"] = suppressed_reasons
+
         if filter_reasons:
             metrics_payload["filtered_reasons"] = filter_reasons
 
@@ -120,13 +290,15 @@ def _build_findings(
         if pattern.tags:
             metrics_payload["tags"] = pattern.tags
 
+        status = Badge.WARN if confidence == "high" else Badge.INFO
+
         findings.append(
             Finding(
                 finding_id=f"secret_{pattern_name}",
                 title=pattern.description,
                 severity_gate=SeverityLevel.P1,
                 category_masvs=MasvsCategory.PRIVACY,
-                status=Badge.WARN,
+                status=status,
                 because=summary,
                 evidence=(pointer,),
                 remediate="Rotate the credential and remove hardcoded secrets from the artifact.",
@@ -138,11 +310,19 @@ def _build_findings(
     return tuple(findings)
 
 
-def _build_metrics(batch: MatchBatch) -> Dict[str, object]:
+def _build_metrics(
+    batch: MatchBatch,
+    prepared: Mapping[str, Mapping[str, object]],
+) -> Dict[str, object]:
     secret_types: Dict[str, Dict[str, object]] = {}
+    validated_total = 0
 
     for pattern_name, group in sorted(batch.groups.items()):
         pattern = group.pattern
+        info = prepared.get(pattern_name)
+        accepted_after_validation = len(info["matches"]) if info else 0
+        validated_total += accepted_after_validation
+        validator_dropped = info.get("validator_dropped") if info else group.accepted_count
         filter_reasons = sorted(
             {
                 reason
@@ -155,6 +335,8 @@ def _build_metrics(batch: MatchBatch) -> Dict[str, object]:
         entry_metrics: Dict[str, object] = {
             "found": group.accepted_count,
             "filtered": group.filtered_count,
+            "accepted_after_validation": accepted_after_validation,
+            "validator_dropped": int(validator_dropped or 0),
             "category": pattern.category,
         }
 
@@ -162,6 +344,13 @@ def _build_metrics(batch: MatchBatch) -> Dict[str, object]:
             entry_metrics["provider"] = pattern.provider
         if pattern.tags:
             entry_metrics["tags"] = pattern.tags
+        if info is not None:
+            entry_metrics["usage_correlated"] = bool(info.get("usage_correlated"))
+            entry_metrics["confidence"] = info.get("confidence", "low")
+            if info.get("validator_hits"):
+                entry_metrics["validator_hits"] = info["validator_hits"]
+            if info.get("suppressed_reasons"):
+                entry_metrics["suppressed_reasons"] = info["suppressed_reasons"]
         if filter_reasons:
             entry_metrics["filtered_reasons"] = filter_reasons
 
@@ -172,6 +361,7 @@ def _build_metrics(batch: MatchBatch) -> Dict[str, object]:
         "matched_strings": batch.matched_total,
         "real_strings": batch.accepted_total,
         "filtered_strings": batch.filtered_total,
+        "validated_strings": validated_total,
     }
 
 
@@ -226,17 +416,20 @@ class SecretsDetector(BaseDetector):
             max_hits_per_pattern=hits_limit,
             min_entropy=min_entropy,
         )
-        metrics = _build_metrics(batch)
-        findings = _build_findings(batch.groups, apk_path=context.apk_path)
+        prepared = _prepare_group_insights(batch.groups)
+        metrics = _build_metrics(batch, prepared)
+        findings = _build_findings(prepared, apk_path=context.apk_path)
         evidence = _collect_result_evidence(
-            batch.groups,
+            prepared,
             apk_path=context.apk_path,
             limit=evidence_limit,
         )
 
         if findings:
             metrics_status = "warn"
-        elif batch.filtered_total:
+        elif batch.filtered_total or (
+            metrics.get("validated_strings", 0) == 0 and batch.accepted_total
+        ):
             metrics_status = "filtered"
         else:
             metrics_status = "ok"

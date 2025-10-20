@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Tuple
 
 
@@ -43,6 +43,15 @@ class Palette:
     success_panel_title: Tuple[str, ...]
     success_panel_message: Tuple[str, ...]
     success_panel_hint: Tuple[str, ...]
+    banner_primary: Tuple[str, ...] = field(default_factory=tuple)
+    banner_secondary: Tuple[str, ...] = field(default_factory=tuple)
+    progress: Tuple[str, ...] = field(default_factory=tuple)
+    emphasis: Tuple[str, ...] = field(default_factory=tuple)
+    severity_critical: Tuple[str, ...] = field(default_factory=tuple)
+    severity_high: Tuple[str, ...] = field(default_factory=tuple)
+    severity_medium: Tuple[str, ...] = field(default_factory=tuple)
+    severity_low: Tuple[str, ...] = field(default_factory=tuple)
+    severity_info: Tuple[str, ...] = field(default_factory=tuple)
 
 
 __all__ = ["Palette"]

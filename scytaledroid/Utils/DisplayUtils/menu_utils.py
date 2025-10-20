@@ -4,7 +4,7 @@ import textwrap
 from dataclasses import dataclass
 from typing import Iterable, Mapping, Optional, Sequence, Tuple
 
-from . import colors, table_utils, text_blocks
+from . import colors, summary_cards, table_utils, text_blocks
 from .terminal import get_terminal_width, use_ascii_ui
 
 
@@ -80,21 +80,53 @@ def _wrap_text(text: str, width: int) -> list[str]:
 def print_banner(app_name: str, app_version: str, app_release: str, app_description: str) -> None:
     """Print the global banner shown at startup."""
 
-    palette = colors.get_palette()
-    ascii_ui = use_ascii_ui()
-    title = colors.apply(app_name, palette.header, bold=True)
-    description = colors.apply(app_description, palette.muted)
-    version = colors.apply(f"Version {app_version} ({app_release})", palette.accent, bold=True)
-
-    divider_char = "=" if ascii_ui else "═"
-    divider_width = max(len(app_name), 32)
-    divider = colors.apply(divider_char * divider_width, palette.divider)
-
-    print(title)
-    print(divider)
-    print(description)
-    print(version)
+    card = summary_cards.format_summary_card(
+        app_name,
+        [("Version", f"{app_version} ({app_release})")],
+        subtitle=app_description,
+    )
+    print(card)
     print()
+
+
+def print_main_banner(
+    app_name: str,
+    app_version: str,
+    app_release: str,
+    app_description: str,
+    *,
+    menu_title: str | None = None,
+    menu_subtitle: str | None = None,
+    metrics: Sequence[Tuple[str, object]] = (),
+    hint: str | None = None,
+    hero_lines: Sequence[str] = (),
+    width: int | None = None,
+) -> None:
+    """Render the decorated banner used at the top of the main menu."""
+
+    items: list[Tuple[str, object]] = [("Version", f"{app_version} ({app_release})")]
+    items.extend(metrics)
+    card = summary_cards.format_summary_card(
+        app_name,
+        items,
+        subtitle=app_description,
+        footer=hint,
+        width=width,
+    )
+    print(card)
+    if hero_lines:
+        palette = colors.get_palette()
+        icon = "*" if use_ascii_ui() else "✶"
+        accent_icon = colors.apply(icon, palette.banner_primary, bold=True)
+        for raw_line in hero_lines:
+            line = raw_line.strip()
+            if not line:
+                continue
+            text = colors.apply(line, palette.emphasis, bold=True)
+            print(f"{accent_icon} {text}")
+    if menu_title:
+        print()
+        print_header(menu_title, subtitle=menu_subtitle)
 
 
 def print_header(title: str, subtitle: Optional[str] = None) -> None:
@@ -243,6 +275,126 @@ def print_menu(
         print()
 
 
+def format_menu_panel(
+    title: str,
+    options: Mapping[str, str]
+    | Sequence[Tuple[str, str]
+              | Tuple[str, str, str]
+              | MenuOption],
+    *,
+    width: Optional[int] = None,
+    default_keys: Sequence[str] = (),
+) -> str:
+    """Return a boxed summary panel showcasing the provided menu *options*."""
+
+    resolved_width = width or min(get_terminal_width(), 96)
+    resolved_width = max(34, min(resolved_width, 96))
+    body_width = max(18, resolved_width - 4)
+    palette = colors.get_palette()
+    default_set = {str(key) for key in default_keys if key is not None}
+
+    lines: list[str] = []
+    header_text = colors.apply(title, palette.banner_primary, bold=True)
+    lines.append(header_text)
+
+    for option in _normalise_options(options):
+        if option.disabled:
+            key_style = palette.disabled
+            label_style = palette.disabled
+        elif option.key in default_set:
+            key_style = palette.option_default
+            label_style = palette.accent
+        else:
+            key_style = palette.option_key
+            label_style = palette.option_text
+
+        key_token = colors.apply(f"{option.key})", key_style, bold=True)
+        label_token = colors.apply(option.label, label_style, bold=True)
+        badge_token = ""
+        if option.badge:
+            badge_token = f" {colors.apply('[' + option.badge + ']', palette.badge)}"
+        header_line = text_blocks.truncate_visible(
+            f"{key_token} {label_token}{badge_token}",
+            body_width,
+        )
+        lines.append(header_line)
+
+        def _append_wrapped(text: Optional[str], style) -> None:
+            if not text:
+                return
+            for entry in _wrap_text(text, body_width):
+                styled = colors.apply(entry, style)
+                lines.append(styled)
+
+        _append_wrapped(option.description, palette.muted)
+        _append_wrapped(option.hint, palette.hint)
+        if option.disabled:
+            lines.append(colors.apply("Temporarily unavailable", palette.disabled))
+        lines.append("")
+
+    if lines and not lines[-1]:
+        lines.pop()
+
+    return text_blocks.boxed(lines, width=resolved_width, padding=1)
+
+
+def print_menu_panels(
+    sections: Sequence[
+        Tuple[
+            str,
+            Mapping[str, str]
+            | Sequence[Tuple[str, str] | Tuple[str, str, str] | MenuOption],
+        ]
+    ],
+    *,
+    columns: int = 2,
+    width: Optional[int] = None,
+    default_keys: Sequence[str] = (),
+    gap: int = 4,
+) -> None:
+    """Render menu *sections* as a responsive grid of summary panels."""
+
+    if not sections:
+        return
+
+    total_width = width or min(get_terminal_width(), 120)
+    column_count = max(1, columns)
+    spacer = " " * max(2, gap)
+    column_width = max(
+        34,
+        min((total_width - (column_count - 1) * len(spacer)) // column_count, 96),
+    )
+
+    rendered: list[tuple[list[str], int]] = []
+    for title, options in sections:
+        panel_text = format_menu_panel(
+            title,
+            options,
+            width=column_width,
+            default_keys=default_keys,
+        )
+        panel_lines = panel_text.splitlines()
+        visible_width = max((text_blocks.visible_width(line) for line in panel_lines), default=0)
+        rendered.append((panel_lines, visible_width))
+
+    for offset in range(0, len(rendered), column_count):
+        chunk = rendered[offset : offset + column_count]
+        row_height = max(len(lines) for lines, _ in chunk)
+        for line_index in range(row_height):
+            parts: list[str] = []
+            for lines, panel_width in chunk:
+                if line_index < len(lines):
+                    segment = lines[line_index]
+                else:
+                    segment = ""
+                padding = panel_width - text_blocks.visible_width(segment)
+                if padding > 0:
+                    segment = f"{segment}{' ' * padding}"
+                parts.append(segment)
+            print(spacer.join(parts).rstrip())
+        print()
+
+
 def print_table(headers: Iterable[str], rows: Iterable[Iterable[object]]) -> None:
     """Convenience wrapper around table rendering helper."""
 
@@ -271,4 +423,6 @@ __all__ = [
     "print_menu",
     "print_metrics",
     "print_table",
+    "format_menu_panel",
+    "print_menu_panels",
 ]

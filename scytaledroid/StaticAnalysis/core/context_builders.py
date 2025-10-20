@@ -22,6 +22,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing aid without runtime import
     from scytaledroid.StaticAnalysis._androguard import APK  # noqa: F401
     from ..modules.string_analysis.extractor import StringIndex  # noqa: F401
     from ..modules.network_security.models import NetworkSecurityPolicy  # noqa: F401
+    from ..modules.permissions import PermissionCatalog  # noqa: F401
 
 
 _DEF_SEVERITY_TOKEN = "dangerous"
@@ -105,6 +106,7 @@ def build_detector_context(
     config: AnalysisConfig,
     string_index: Optional["StringIndex"],
     network_security_policy: Optional["NetworkSecurityPolicy"],
+    permission_catalog: Optional["PermissionCatalog"],
 ) -> DetectorContext:
     """Build a detector context shared across all pipeline stages."""
 
@@ -124,6 +126,7 @@ def build_detector_context(
         hashes=hashes,
         string_index=string_index,
         network_security_policy=network_security_policy,
+        permission_catalog=permission_catalog,
         config=config,
     )
 

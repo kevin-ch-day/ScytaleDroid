@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from hashlib import sha256
 from typing import Mapping, Sequence, TYPE_CHECKING
+from urllib.parse import urlsplit
 
+from ..analytics import build_finding_matrices, build_workload_profile
 from .findings import Badge, DetectorResult
 
 if TYPE_CHECKING:  # pragma: no cover - typing imports only
@@ -23,6 +25,11 @@ class PipelineArtifacts:
     metrics: Mapping[str, Mapping[str, object]]
     summary: Mapping[str, object]
     reproducibility_bundle: Mapping[str, object]
+    matrices: Mapping[str, Mapping[str, Mapping[str, int]]] = field(
+        default_factory=dict
+    )
+    indicators: Mapping[str, float] = field(default_factory=dict)
+    workload: Mapping[str, object] = field(default_factory=dict)
 
 
 def build_pipeline_trace(
@@ -203,10 +210,13 @@ def build_reproducibility_bundle(
     string_index = getattr(context, "string_index", None)
     if string_index is not None and hasattr(string_index, "is_empty"):
         if not string_index.is_empty():
-            bundle["string_index"] = {
-                "total_strings": len(string_index),
-                "by_origin_type": string_index.counts_by_origin_type(),
-            }
+            bundle["string_index"] = _summarise_string_index(string_index)
+
+    metrics_map = collect_detector_metrics(getattr(context, "intermediate_results", tuple()))
+    if metrics_map:
+        bundle["detector_metrics"] = {
+            key: _serialise_metrics(value) for key, value in metrics_map.items()
+        }
 
     diff_basis = build_diff_basis(context)
     bundle["diff_basis"] = diff_basis
@@ -232,6 +242,29 @@ def build_diff_basis(context: "DetectorContext") -> Mapping[str, object]:
             for key, values in context.exported_components.to_dict().items()
         },
     }
+
+    summary = context.manifest_summary
+    basis["manifest"] = {
+        "version_name": summary.version_name,
+        "version_code": summary.version_code,
+        "min_sdk": summary.min_sdk,
+        "target_sdk": summary.target_sdk,
+        "compile_sdk": summary.compile_sdk,
+    }
+
+    custom_definitions = getattr(context.permissions, "custom_definitions", {})
+    if custom_definitions:
+        basis["custom_permissions"] = {
+            name: {
+                "protection_levels": tuple(
+                    str(value)
+                    for value in definition.get("protection_levels", ())
+                    if value
+                ),
+                "group": definition.get("group"),
+            }
+            for name, definition in custom_definitions.items()
+        }
 
     metrics_map = {
         result.detector_id: dict(result.metrics)
@@ -284,6 +317,21 @@ def build_diff_basis(context: "DetectorContext") -> Mapping[str, object]:
             if isinstance(value, (int, float))
         }
 
+    if metrics_map:
+        basis["detector_metrics"] = {
+            key: _serialise_metrics(value) for key, value in metrics_map.items()
+        }
+
+    string_index = getattr(context, "string_index", None)
+    if string_index is not None and hasattr(string_index, "is_empty"):
+        if not string_index.is_empty():
+            summary_payload = _summarise_string_index(string_index)
+            basis["string_index"] = {
+                "by_origin_type": summary_payload.get("by_origin_type", {}),
+                "top_http_hosts": summary_payload.get("top_http_hosts", ()),
+                "secret_keyword_hits": summary_payload.get("secret_keyword_hits", 0),
+            }
+
     return basis
 
 
@@ -296,13 +344,29 @@ def assemble_pipeline_artifacts(
     trace = build_pipeline_trace(results)
     metrics = collect_detector_metrics(results)
     summary = build_pipeline_summary(results)
+    matrices, indicators = build_finding_matrices(results)
+    workload = build_workload_profile(results)
     reproducibility_bundle = build_reproducibility_bundle(context)
+    extras: dict[str, object] = {}
+    if matrices:
+        extras["analysis_matrices"] = matrices
+    if indicators:
+        extras["analysis_indicators"] = indicators
+    if workload:
+        extras["workload_profile"] = workload
+    if extras:
+        bundle_copy = dict(reproducibility_bundle)
+        bundle_copy.update(extras)
+        reproducibility_bundle = bundle_copy
     return PipelineArtifacts(
         results=results,
         trace=trace,
         metrics=metrics,
         summary=summary,
         reproducibility_bundle=reproducibility_bundle,
+        matrices=matrices,
+        indicators=indicators,
+        workload=workload,
     )
 
 
@@ -337,6 +401,39 @@ def _first_non_empty(*values: object | None) -> str | None:
             if text:
                 return text
     return None
+
+
+def _summarise_string_index(string_index) -> Mapping[str, object]:
+    """Return a compact summary of collected strings."""
+
+    origin_counts = string_index.counts_by_origin_type()
+    host_counter: Counter[str] = Counter()
+    origin_counter: Counter[str] = Counter()
+    secret_like = 0
+    sample_hashes: list[str] = []
+
+    for entry in getattr(string_index, "strings", tuple()):
+        if entry.origin:
+            origin_counter[entry.origin] += 1
+        value = (entry.value or "").strip()
+        if value.lower().startswith(("http://", "https://")):
+            parsed = urlsplit(value)
+            host = parsed.netloc.lower()
+            if host:
+                host_counter[host] += 1
+        if any(token in value.lower() for token in ("api_key", "secret", "token", "authorization")):
+            secret_like += 1
+        if len(sample_hashes) < 10:
+            sample_hashes.append(entry.sha256[:12])
+
+    return {
+        "total_strings": len(string_index),
+        "by_origin_type": origin_counts,
+        "top_http_hosts": host_counter.most_common(10),
+        "top_origins": origin_counter.most_common(5),
+        "secret_keyword_hits": secret_like,
+        "sample_hashes": sample_hashes,
+    }
 
 
 __all__ = [

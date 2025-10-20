@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Mapping, Optional
 from xml.etree import ElementTree
 
 from scytaledroid.StaticAnalysis._androguard import APK
@@ -115,9 +115,39 @@ def _element_has_intent_filter(element: ElementTree.Element) -> bool:
     return False
 
 
+def collect_custom_permission_definitions(
+    manifest_root: ElementTree.Element,
+) -> Mapping[str, Mapping[str, object]]:
+    """Return custom permission definitions declared in the manifest."""
+
+    definitions: dict[str, dict[str, object]] = {}
+    for element in manifest_root.findall("permission"):
+        name = element.get(f"{_ANDROID_NS}name")
+        if not name:
+            continue
+        raw_level = (element.get(f"{_ANDROID_NS}protectionLevel") or "").strip()
+        level_parts = tuple(
+            part.strip().lower()
+            for part in raw_level.split("|")
+            if part.strip()
+        )
+        description = element.get(f"{_ANDROID_NS}description")
+        permission_group = element.get(f"{_ANDROID_NS}permissionGroup")
+        definitions[name] = {
+            "protection_levels": level_parts,
+            "raw_protection_level": raw_level or None,
+            "description": description or None,
+            "group": permission_group or None,
+        }
+
+    # Normalise to immutable mapping for downstream consumers.
+    return {key: dict(value) for key, value in definitions.items()}
+
+
 __all__ = [
     "load_manifest_root",
     "build_manifest_flags",
     "extract_compile_sdk",
     "collect_exported_components",
+    "collect_custom_permission_definitions",
 ]

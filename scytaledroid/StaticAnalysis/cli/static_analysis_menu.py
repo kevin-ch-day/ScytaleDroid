@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
-from typing import Iterable, Sequence
 
 from scytaledroid.Config import app_config
 from scytaledroid.Database.db_utils.reset_static import reset_static_analysis_data
@@ -37,18 +36,52 @@ def static_analysis_menu() -> None:
     tool_commands = tuple(cmd for cmd in iter_commands("scan") if cmd.section == "tools")
     insight_commands = tuple(cmd for cmd in iter_commands("readonly"))
     selectable_ids = [cmd.id for cmd in COMMANDS]
+    default_key = workflow_commands[0].id if workflow_commands else None
 
     while True:
         print()
-        menu_utils.print_header("Android APK Static Analysis")
-        print(status_messages.status("Choose a workflow to analyse APKs or open insight tooling.", level="info"))
+        menu_utils.print_header(
+            "Android APK Static Analysis",
+            subtitle="Detector workflows & tooling",
+        )
+        menu_utils.print_hint("Choose a workflow to analyse APKs or open insight tooling.")
 
-        _print_command_section("Automated workflows", workflow_commands)
-        _print_command_section("Interactive analysis tools", tool_commands)
-        _print_command_section("Insight & reporting", insight_commands)
+        section_entries: list[tuple[str, list[menu_utils.MenuOption]]] = []
+        if workflow_commands:
+            section_entries.append(
+                (
+                    "🚀 Automated workflows",
+                    [_command_option(cmd) for cmd in workflow_commands],
+                )
+            )
+        if tool_commands:
+            section_entries.append(
+                (
+                    "🧰 Interactive analysis tools",
+                    [_command_option(cmd) for cmd in tool_commands],
+                )
+            )
+        if insight_commands:
+            section_entries.append(
+                (
+                    "📊 Insight & reporting",
+                    [_command_option(cmd) for cmd in insight_commands],
+                )
+            )
 
-        print()
-        menu_utils.print_menu([( "0", "Back", "Return to previous menu" )], padding=False, show_exit=False)
+        if section_entries:
+            menu_utils.print_menu_panels(
+                section_entries,
+                columns=2,
+                default_keys=(default_key,) if default_key else (),
+            )
+        menu_utils.print_menu_panels(
+            [("Navigation", [menu_utils.MenuOption("0", "Back", "Return to previous menu")])],
+            columns=1,
+            default_keys=("0",),
+            width=60,
+            gap=2,
+        )
         choice = prompt_utils.get_choice(selectable_ids + ["0"], default="1")
 
         if choice == "0":
@@ -110,17 +143,6 @@ def static_analysis_menu() -> None:
                     query_runner.render_session_digest(session_key)
                 prompt_utils.press_enter_to_continue("Press Enter to continue…")
             break
-
-
-def _print_command_section(title: str, commands: Sequence[Command]) -> None:
-    if not commands:
-        return
-    entries: list[tuple[str, str, str]] = [
-        (cmd.id, cmd.title, cmd.description) for cmd in commands
-    ]
-    print()
-    menu_utils.print_section(title)
-    menu_utils.print_menu(entries, padding=False, show_exit=False)
 
 
 def _apply_command_overrides(params: RunParameters, command: Command) -> RunParameters:
@@ -199,6 +221,26 @@ def ask_run_controls() -> str:
             return "back"
 
         print(status_messages.status("Invalid choice. Please try again.", level="warn"))
+
+
+def _command_option(command: Command) -> menu_utils.MenuOption:
+    badge = (command.profile or "").upper() if command.profile else None
+    hints: list[str] = []
+    if command.force_app_scope:
+        hints.append("Requires single-app scope")
+    if command.auto_verify:
+        hints.append("Auto-verifies persistence")
+    if command.dry_run or not command.persist:
+        hints.append("Dry run")
+    hint_text = " • ".join(hints) if hints else None
+    return menu_utils.MenuOption(
+        command.id,
+        command.title,
+        command.description,
+        badge=badge,
+        hint=hint_text,
+    )
+
 
 
 __all__ = ["static_analysis_menu", "ask_run_controls"]
