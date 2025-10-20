@@ -6,16 +6,17 @@ from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_mes
 
 
 def dynamic_analysis_menu() -> None:
+    options = [
+        menu_utils.MenuOption("1", "Launch sandbox run"),
+        menu_utils.MenuOption("2", "View recent dynamic sessions"),
+        menu_utils.MenuOption("3", "Configure instrumentation"),
+    ]
+
     while True:
         print()
         menu_utils.print_header("Dynamic Analysis")
-        options = {
-            "1": "Launch sandbox run",
-            "2": "View recent dynamic sessions",
-            "3": "Configure instrumentation",
-        }
-        menu_utils.print_menu(options, is_main=False)
-        choice = prompt_utils.get_choice(list(options.keys()) + ["0"])
+        menu_utils.print_menu(options, is_main=False, show_exit=True, exit_label="Back")
+        choice = prompt_utils.get_choice([option.key for option in options] + ["0"])
 
         if choice == "0":
             break

@@ -6,16 +6,17 @@ from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_mes
 
 
 def virustotal_menu() -> None:
+    options = [
+        menu_utils.MenuOption("1", "Submit hash for quick lookup"),
+        menu_utils.MenuOption("2", "Submit file for analysis"),
+        menu_utils.MenuOption("3", "View recent submissions"),
+    ]
+
     while True:
         print()
         menu_utils.print_header("VirusTotal Analysis")
-        options = {
-            "1": "Submit hash for quick lookup",
-            "2": "Submit file for analysis",
-            "3": "View recent submissions",
-        }
-        menu_utils.print_menu(options, is_main=False)
-        choice = prompt_utils.get_choice(list(options.keys()) + ["0"])
+        menu_utils.print_menu(options, is_main=False, show_exit=True, exit_label="Back")
+        choice = prompt_utils.get_choice([option.key for option in options] + ["0"])
 
         if choice == "0":
             break
