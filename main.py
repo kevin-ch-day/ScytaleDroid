@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import argparse
 import sys
-from zoneinfo import ZoneInfo
 
 from scytaledroid.Config import app_config
-from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils
+from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
+from scytaledroid.Utils.System.world_clock.display import (
+    ClockSnapshot,
+    describe_timezone,
+    format_display_time,
+    format_dst_status_text,
+    snapshot_clocks,
+)
 from scytaledroid.Utils.System.world_clock.state import ClockReference, WorldClockState, load_state
 
 
@@ -16,42 +23,56 @@ def _resolve_timezones() -> WorldClockState:
     return load_state()
 
 
-def _format_time(tz_name: str, reference: ClockReference) -> str:
-    tz = ZoneInfo(tz_name)
-    snapshot = reference.utc.astimezone(tz)
-    time_part = snapshot.strftime("%I:%M %p").lstrip("0")
-    date_part = f"{snapshot.month}-{snapshot.day}-{snapshot.year}"
-    tz_label = snapshot.tzname() or tz_name
-    dst_delta = tz.dst(snapshot)
-    dst_active = bool(dst_delta and dst_delta.total_seconds())
-    dst_label = "DST" if dst_active else "Std"
-    return f"{date_part} {time_part} {tz_label} ({dst_label})"
+def _describe_snapshot(snapshot: ClockSnapshot) -> tuple[str, str]:
+    timestamp = format_display_time(snapshot.local_time)
+    tz_label = describe_timezone(snapshot.timezone, snapshot.local_time)
+    dst_text = format_dst_status_text(snapshot.dst_status, None, None)
+    details = f"{timestamp} {tz_label} ({dst_text})"
+    return snapshot.label, details
+
+
+def _build_metrics(state: WorldClockState) -> list[tuple[str, str]]:
+    try:
+        snapshots = snapshot_clocks(
+            state.clocks,
+            primary=state.primary,
+            category="configured",
+            reference=state.reference,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log.warning(
+            f"Failed to load world clock snapshots: {exc}",
+            category="application",
+        )
+        return []
+
+    metrics: list[tuple[str, str]] = []
+    for snapshot in snapshots:
+        try:
+            metrics.append(_describe_snapshot(snapshot))
+        except Exception as exc:  # pragma: no cover - defensive logging
+            log.warning(
+                f"Failed to format clock metric for {snapshot.label}: {exc}",
+                category="application",
+            )
+    return metrics
 
 
 def print_banner(*, show_clocks: bool = False) -> None:
     """Display welcome banner with app metadata and optional world clock."""
 
-    menu_utils.print_banner(
+    metrics: list[tuple[str, str]] = []
+    if show_clocks:
+        state = _resolve_timezones()
+        metrics = _build_metrics(state)
+
+    menu_utils.print_main_banner(
         app_config.APP_NAME,
         app_config.APP_VERSION,
         app_config.APP_RELEASE,
         app_config.APP_DESCRIPTION,
+        metrics=metrics,
     )
-
-    if show_clocks:
-        state = _resolve_timezones()
-        tz_mapping = state.clocks
-        metrics = []
-        for label, tz_name in tz_mapping.items():
-            try:
-                metrics.append((label, _format_time(tz_name, state.reference)))
-            except Exception as exc:
-                log.warning(
-                    f"Failed to render time for {label}: {exc}", category="application"
-                )
-        if metrics:
-            menu_utils.print_metrics(metrics)
-        print()
 
     log.info(
         f"Application started - {app_config.APP_NAME} {app_config.APP_VERSION} ({app_config.APP_RELEASE})",
@@ -62,50 +83,26 @@ def print_banner(*, show_clocks: bool = False) -> None:
 def main_menu() -> None:
     """Render the main menu loop using the shared menu framework."""
 
-    menu_entries = [
-        menu_utils.MenuOption(
-            "1",
-            "Connect to Android Device",
-        ),
-        menu_utils.MenuOption(
-            "2",
-            "VirusTotal analysis",
-        ),
-        menu_utils.MenuOption(
-            "3",
-            "Static analysis",
-        ),
-        menu_utils.MenuOption(
-            "4",
-            "Harvest Android Permissions",
-        ),
-        menu_utils.MenuOption(
-            "5",
-            "Dynamic analysis",
-        ),
-        menu_utils.MenuOption(
-            "6",
-            "Reporting",
-        ),
-        menu_utils.MenuOption(
-            "7",
-            "Database Utilities",
-        ),
-        menu_utils.MenuOption(
-            "8",
-            "Database Tasks",
-        ),
-        menu_utils.MenuOption(
-            "9",
-            "Workspace Utilities",
-        ),
-        menu_utils.MenuOption(
-            "10",
-            "About App",
-        ),
+    menu_actions: list[tuple[str, str, Callable[[], None]]] = [
+        ("1", "Connect to Android Device", handle_device),
+        ("2", "VirusTotal analysis", handle_virustotal),
+        ("3", "Static analysis", handle_static),
+        ("4", "Harvest Android Permissions", handle_perm_catalog),
+        ("5", "Dynamic analysis", handle_dynamic),
+        ("6", "Reporting", handle_reporting),
+        ("7", "Database Utilities", handle_database),
+        ("8", "Database Tasks", handle_database_tasks),
+        ("9", "Workspace Utilities", handle_utils),
+        ("10", "About App", handle_about),
     ]
 
-    valid_choices = [entry.key for entry in menu_entries]
+    menu_entries = [
+        menu_utils.MenuOption(key, label)
+        for key, label, _ in menu_actions
+    ]
+
+    handlers = {key: (label, callback) for key, label, callback in menu_actions}
+    valid_choices = list(handlers)
     default_choice = "1"
     while True:
         print()
@@ -115,6 +112,8 @@ def main_menu() -> None:
             is_main=True,
             default=default_choice,
             show_descriptions=False,
+            show_exit=True,
+            exit_label="Exit",
         )
 
         choice = prompt_utils.get_choice(
@@ -122,43 +121,20 @@ def main_menu() -> None:
             default=default_choice,
         )
 
-        if choice == "1":
-            log.info("User selected: Connect to Android Device", category="application")
-            handle_device()
-        elif choice == "2":
-            log.info("User selected: VirusTotal analysis", category="application")
-            handle_virustotal()
-        elif choice == "3":
-            log.info("User selected: Static analysis", category="application")
-            handle_static()
-        elif choice == "4":
-            log.info("User selected: Harvest Android Permissions", category="application")
-            handle_perm_catalog()
-        elif choice == "5":
-            log.info("User selected: Dynamic analysis", category="application")
-            handle_dynamic()
-        elif choice == "6":
-            log.info("User selected: Reporting", category="application")
-            handle_reporting()
-        elif choice == "7":
-            log.info("User selected: Database Utilities", category="application")
-            handle_database()
-        elif choice == "8":
-            log.info("User selected: Database Tasks", category="application")
-            handle_database_tasks()
-        elif choice == "9":
-            log.info("User selected: Workspace utilities", category="application")
-            handle_utils()
-        elif choice == "10":
-            log.info("User selected: About App", category="application")
-            handle_about()
-        elif choice == "0":
+        if choice == "0":
             log.info("Application shutting down", category="application")
-            print("Goodbye!")
+            status_messages.print_status("Goodbye!", level="info")
             break
-        else:
+
+        selected = handlers.get(choice)
+        if not selected:
             log.warning(f"Invalid menu choice: {choice}", category="application")
-            print("Invalid choice. Please try again.")
+            status_messages.print_status("Invalid choice. Please try again.", level="warn")
+            continue
+
+        label, callback = selected
+        log.info(f"User selected: {label}", category="application")
+        callback()
 
 
 # --- Handlers for each menu option ---
@@ -193,7 +169,14 @@ def handle_perm_catalog() -> None:
         from scytaledroid.Utils.AndroidPermCatalog.cli import perm_catalog_menu  # noqa: WPS433
         perm_catalog_menu()
     except Exception as exc:
-        print(f"Failed to open permission catalog: {exc}")
+        log.error(
+            f"Failed to open permission catalog: {exc}",
+            category="application",
+        )
+        status_messages.print_status(
+            "Unable to open permission catalog. Check logs for details.",
+            level="error",
+        )
 
 
 def handle_reporting() -> None:
@@ -213,8 +196,14 @@ def handle_database_tasks() -> None:
 
         tasks_menu.show_database_tasks_menu()
     except Exception as exc:  # pragma: no cover - defensive logging
-        log.error(f"Failed to open Database Tasks menu: {exc}", category="application")
-        print("Unable to open Database Tasks menu. Check logs for details.")
+        log.error(
+            f"Failed to open Database Tasks menu: {exc}",
+            category="application",
+        )
+        status_messages.print_status(
+            "Unable to open Database Tasks menu. Check logs for details.",
+            level="error",
+        )
 
 def handle_utils() -> None:
     from scytaledroid.Utils.System.utils_menu import utils_menu
@@ -264,7 +253,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         main_menu()
     except KeyboardInterrupt:
-        print("\nInterrupted by user. Exiting...")
+        print()
+        status_messages.print_status("Interrupted by user. Exiting…", level="warn")
         log.info("Application interrupted by user.", category="application")
     return 0
 
