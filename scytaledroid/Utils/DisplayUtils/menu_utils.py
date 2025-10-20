@@ -407,6 +407,7 @@ def print_section(title: str) -> None:
 __all__ = [
     "MenuOption",
     "print_banner",
+    "print_main_banner",
     "print_header",
     "print_hint",
     "print_section",
