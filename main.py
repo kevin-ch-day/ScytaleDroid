@@ -62,133 +62,65 @@ def print_banner(*, show_clocks: bool = False) -> None:
 def main_menu() -> None:
     """Render the main menu loop using the shared menu framework."""
 
-    workspace_metrics = (
-        ("Data", app_config.DATA_DIR),
-        ("Output", app_config.OUTPUT_DIR),
-        ("Logs", app_config.LOGS_DIR),
-    )
-    banner_hint = "Use the number keys to choose a workflow. Press 0 to exit."
-    hero_lines = (
-        "Curated workflows for device triage, analysis, and reporting.",
-        "Prep database tasks before scanning to unlock richer persistence.",
-    )
+    menu_entries = [
+        menu_utils.MenuOption(
+            "1",
+            "Connect to Android Device",
+        ),
+        menu_utils.MenuOption(
+            "2",
+            "VirusTotal analysis",
+        ),
+        menu_utils.MenuOption(
+            "3",
+            "Static analysis",
+        ),
+        menu_utils.MenuOption(
+            "4",
+            "Harvest Android Permissions",
+        ),
+        menu_utils.MenuOption(
+            "5",
+            "Dynamic analysis",
+        ),
+        menu_utils.MenuOption(
+            "6",
+            "Reporting",
+        ),
+        menu_utils.MenuOption(
+            "7",
+            "Database Utilities",
+        ),
+        menu_utils.MenuOption(
+            "8",
+            "Database Tasks",
+        ),
+        menu_utils.MenuOption(
+            "9",
+            "Workspace Utilities",
+        ),
+        menu_utils.MenuOption(
+            "10",
+            "About App",
+        ),
+    ]
+
+    valid_choices = [entry.key for entry in menu_entries]
+    default_choice = "1"
     while True:
         print()
-        menu_utils.print_main_banner(
-            app_config.APP_NAME,
-            app_config.APP_VERSION,
-            app_config.APP_RELEASE,
-            app_config.APP_DESCRIPTION,
-            menu_title="Main Menu",
-            metrics=workspace_metrics,
-            hint=banner_hint,
-            hero_lines=hero_lines,
-        )
-        menu_utils.print_hint(
-            "Select a workflow or open Database Tasks to prepare schemas before analysis.",
-        )
-        menu_utils.print_hint(
-            "Tip: Option 1 walks you through connecting a device and harvesting APKs.",
+        menu_utils.print_header("Main Menu")
+        menu_utils.print_menu(
+            menu_entries,
+            is_main=True,
+            default=default_choice,
+            show_descriptions=False,
         )
 
-        sections = [
-            (
-                "📱 Device & Collection",
-                [
-                    menu_utils.MenuOption(
-                        "1",
-                        "Connect to Android Device",
-                        "Pair with a device, review inventory, and pull APK artifacts",
-                    ),
-                    menu_utils.MenuOption(
-                        "4",
-                        "Harvest Android Permissions",
-                        "Sync the official permission catalog for offline lookups",
-                    ),
-                ],
-            ),
-            (
-                "🧪 Analysis & Research",
-                [
-                    menu_utils.MenuOption(
-                        "2",
-                        "VirusTotal analysis",
-                        "Query VirusTotal for APK/file intelligence",
-                    ),
-                    menu_utils.MenuOption(
-                        "3",
-                        "Static analysis",
-                        "Run static detectors across harvested APKs",
-                    ),
-                    menu_utils.MenuOption(
-                        "5",
-                        "Dynamic analysis",
-                        "Launch runtime instrumentation and behavioural captures",
-                    ),
-                    menu_utils.MenuOption(
-                        "6",
-                        "Reporting",
-                        "Generate Markdown/PDF exports and shareable summaries",
-                    ),
-                ],
-            ),
-            (
-                "🗄 Data & Schema",
-                [
-                    menu_utils.MenuOption(
-                        "7",
-                        "Database Utilities",
-                        "Inspect schema, run health checks, and browse recent runs",
-                    ),
-                    menu_utils.MenuOption(
-                        "8",
-                        "Database Tasks",
-                        "Provision or seed tables; run maintenance SQL helpers",
-                    ),
-                ],
-            ),
-            (
-                "🔧 Tools & Info",
-                [
-                    menu_utils.MenuOption(
-                        "9",
-                        "Workspace Utilities",
-                        "CLI helpers, formatters, and cleanup scripts",
-                    ),
-                    menu_utils.MenuOption(
-                        "10",
-                        "About App",
-                        "Version, licensing, and project metadata",
-                    ),
-                ],
-            ),
-        ]
-
-        menu_utils.print_menu_panels(sections, columns=2, default_keys=("1",))
-        menu_utils.print_menu_panels(
-            [("Session", [menu_utils.MenuOption("0", "Exit", "Return to the shell")])],
-            columns=1,
-            default_keys=("0",),
-            width=60,
-            gap=2,
+        choice = prompt_utils.get_choice(
+            valid=valid_choices + ["0"],
+            default=default_choice,
         )
-
-        key_sequence: list[str] = []
-        for _title, opts in sections:
-            for option in opts:
-                if option.key not in key_sequence:
-                    key_sequence.append(option.key)
-        if "0" not in key_sequence:
-            key_sequence.append("0")
-
-        seen_keys: set[str] = set()
-        ordered_keys: list[str] = []
-        for key in key_sequence:
-            if key not in seen_keys:
-                ordered_keys.append(key)
-                seen_keys.add(key)
-
-        choice = prompt_utils.get_choice(valid=ordered_keys, default="1")
 
         if choice == "1":
             log.info("User selected: Connect to Android Device", category="application")

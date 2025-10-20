@@ -4,8 +4,8 @@ import textwrap
 from dataclasses import dataclass
 from typing import Iterable, Mapping, Optional, Sequence, Tuple
 
-from . import colors, summary_cards, table_utils, text_blocks
-from .terminal import get_terminal_width, use_ascii_ui
+from . import colors, table_utils, text_blocks
+from .terminal import get_terminal_width
 
 
 @dataclass(frozen=True)
@@ -80,12 +80,17 @@ def _wrap_text(text: str, width: int) -> list[str]:
 def print_banner(app_name: str, app_version: str, app_release: str, app_description: str) -> None:
     """Print the global banner shown at startup."""
 
-    card = summary_cards.format_summary_card(
-        app_name,
-        [("Version", f"{app_version} ({app_release})")],
-        subtitle=app_description,
-    )
-    print(card)
+    palette = colors.get_palette()
+    title = colors.apply(app_name, palette.header, bold=True)
+    underline = colors.apply("=" * len(app_name), palette.divider)
+    version_line = colors.apply(f"Version: {app_version} ({app_release})", palette.accent)
+
+    print(title)
+    print(underline)
+    print(version_line)
+    if app_description:
+        description = colors.apply(app_description, palette.muted)
+        print(description)
     print()
 
 
@@ -102,73 +107,78 @@ def print_main_banner(
     hero_lines: Sequence[str] = (),
     width: int | None = None,
 ) -> None:
-    """Render the decorated banner used at the top of the main menu."""
+    """Render a simplified banner used at the top of the main menu."""
 
-    items: list[Tuple[str, object]] = [("Version", f"{app_version} ({app_release})")]
-    items.extend(metrics)
-    card = summary_cards.format_summary_card(
-        app_name,
-        items,
-        subtitle=app_description,
-        footer=hint,
-        width=width,
-    )
-    print(card)
-    if hero_lines:
-        palette = colors.get_palette()
-        icon = "*" if use_ascii_ui() else "✶"
-        accent_icon = colors.apply(icon, palette.banner_primary, bold=True)
-        for raw_line in hero_lines:
-            line = raw_line.strip()
-            if not line:
-                continue
-            text = colors.apply(line, palette.emphasis, bold=True)
-            print(f"{accent_icon} {text}")
+    # ``width`` is kept for API compatibility with previous implementations.
+    _ = width
+
+    palette = colors.get_palette()
+    title = colors.apply(app_name, palette.header, bold=True)
+    underline = colors.apply("=" * len(app_name), palette.divider)
+    version_line = colors.apply(f"Version: {app_version} ({app_release})", palette.accent)
+
+    print(title)
+    print(underline)
+    print(version_line)
+    if app_description:
+        description = colors.apply(app_description, palette.muted)
+        print(description)
+
+    if metrics:
+        print()
+        for label, value in metrics:
+            label_text = colors.apply(f"{label}:", palette.muted)
+            value_text = colors.apply(str(value), palette.accent, bold=True)
+            print(f"{label_text} {value_text}")
+
+    if hint:
+        print()
+        hint_text = colors.apply(hint, palette.hint)
+        print(hint_text)
+
+    hero_messages = [line.strip() for line in hero_lines if line.strip()]
+    if hero_messages:
+        print()
+        for message in hero_messages:
+            print(f"* {message}")
+
     if menu_title:
         print()
         print_header(menu_title, subtitle=menu_subtitle)
 
 
 def print_header(title: str, subtitle: Optional[str] = None) -> None:
-    """Print a menu header with optional subtitle."""
+    """Print a simple menu header suitable for plain terminals."""
 
-    palette = colors.get_palette()
-    ascii_ui = use_ascii_ui()
-    separator = " - " if ascii_ui else " — "
-    # Cap rendering width for readability
-    term_width = min(get_terminal_width(), 100)
+    heading = title.strip()
+    if not heading:
+        return
+
+    underline = "=" * len(heading)
+    print(heading)
+    print(underline)
     if subtitle:
-        text = text_blocks.headline(f"{title}{separator}{subtitle}", width=term_width)
-    else:
-        text = text_blocks.headline(title, width=term_width)
-    lines = text.splitlines()
-    if lines:
-        lines[0] = colors.apply(lines[0], palette.header)
-    if len(lines) > 1:
-        lines[1] = colors.apply(lines[1], palette.divider)
-    print("\n".join(lines))
+        subheading = subtitle.strip()
+        if subheading:
+            print(subheading)
 
 
 def print_hint(message: str, *, icon: Optional[str] = None) -> None:
-    """Render a muted hint or tip line."""
+    """Render a hint line without relying on complex glyphs."""
 
-    palette = colors.get_palette()
-    ascii_ui = use_ascii_ui()
-    resolved_icon = icon if icon is not None else ("i" if ascii_ui else "💡")
-    icon_text = colors.apply(resolved_icon, palette.hint)
-    body = colors.apply(message, palette.muted)
-    print(f"{icon_text} {body}")
+    text = message.strip()
+    if not text:
+        return
+
+    prefix = icon.strip() if icon else "-"
+    print(f"{prefix} {text}")
 
 
 def print_metrics(metrics: Sequence[Tuple[str, object]]) -> None:
-    """Display key metrics as a short bulleted list with colouring."""
+    """Display key metrics as a short bulleted list."""
 
-    palette = colors.get_palette()
-    bullet = "-" if use_ascii_ui() else "•"
     for label, value in metrics:
-        label_text = colors.apply(str(label), palette.muted)
-        value_text = colors.apply(str(value), palette.accent, bold=True)
-        print(f"  {bullet} {label_text}: {value_text}")
+        print(f"- {label}: {value}")
 
 
 def print_menu(
@@ -188,73 +198,54 @@ def print_menu(
 ) -> None:
     """Render a numbered menu with coloured keys and optional default."""
 
-    palette = colors.get_palette()
     # Cap rendering width for readability
     term_width = width if width is not None else min(get_terminal_width(), 100)
     items = _normalise_options(options)
     primary_items = [item for item in items if item.key != "0"]
 
-    key_width = max((len(item.key) for item in primary_items), default=1) + 1
-    gutter_width = key_width + 1
-    indent = " " * gutter_width
-    body_width = max(10, term_width - gutter_width - 1)
+    indent = "    "
+    body_width = max(20, term_width - len(indent) - 4)
 
     rendered_blocks: list[list[str]] = []
 
     for item in primary_items:
-        if item.disabled:
-            key_style = palette.disabled
-            label_style = palette.disabled
-        elif item.key == default:
-            key_style = palette.option_default
-            label_style = palette.accent
-        else:
-            key_style = palette.option_key
-            label_style = palette.option_text
-
         block: list[str] = []
-        key_token = colors.apply(f"{item.key})", key_style)
-        label_token = colors.apply(item.label, label_style)
-        badge_token = ""
+        label_line = [f"{item.key}) {item.label}"]
+        notes: list[str] = []
         if item.badge:
-            badge_token = f" {colors.apply('[' + item.badge + ']', palette.badge)}"
-        disabled_note = ""
-
-        reserved = (
-            text_blocks.visible_width(key_token)
-            + 1
-            + text_blocks.visible_width(badge_token)
-            + text_blocks.visible_width(disabled_note)
-        )
-        available_label = max(0, term_width - reserved)
-        label_token = text_blocks.truncate_visible(label_token, available_label)
-        block.append(f"{key_token} {label_token}{badge_token}{disabled_note}")
+            notes.append(f"[{item.badge}]")
+        if item.disabled:
+            notes.append("(disabled)")
+        elif default and item.key == default:
+            notes.append("(default)")
+        if item.hint and not show_descriptions:
+            notes.append(f"({item.hint})")
+        if notes:
+            notes_text = " ".join(notes)
+            label_line.append(f" {notes_text}")
+        block.append("".join(label_line))
 
         if show_descriptions and item.description:
             wrapped_desc = _wrap_text(item.description, body_width)
             for line in wrapped_desc:
-                description = colors.apply(line, palette.muted)
-                block.append(f"{indent}{description}")
-        if item.hint:
+                block.append(f"{indent}{line}")
+        if show_descriptions and item.hint:
             wrapped_hint = _wrap_text(item.hint, body_width)
             for line in wrapped_hint:
-                hint_text = colors.apply(line, palette.hint)
-                block.append(f"{indent}{hint_text}")
+                block.append(f"{indent}Hint: {line}")
 
         rendered_blocks.append(block)
 
     if show_exit:
         exit_text = exit_label or ("Exit" if is_main else "Back")
         exit_item = MenuOption("0", exit_text)
-        exit_is_default = default == "0"
-        exit_key_style = palette.option_default if exit_is_default else palette.option_key
-        exit_label_style = palette.accent if exit_is_default else palette.option_text
-        exit_key = colors.apply("0)", exit_key_style)
-        exit_label_coloured = colors.apply(exit_item.label, exit_label_style)
-        rendered_blocks.append([f"{exit_key} {exit_label_coloured}"])
+        exit_label_line = f"0) {exit_item.label}"
+        if default == "0":
+            exit_label_line += " (default)"
+        rendered_blocks.append([exit_label_line])
 
     if boxed:
-        flat_lines = []
+        flat_lines: list[str] = []
         for block in rendered_blocks:
             flat_lines.extend(block)
         if padding:
@@ -404,14 +395,13 @@ def print_table(headers: Iterable[str], rows: Iterable[Iterable[object]]) -> Non
 def print_section(title: str) -> None:
     """Print a small section divider suitable for nested menus."""
 
-    palette = colors.get_palette()
-    heading = text_blocks.headline(title, width=get_terminal_width())
-    lines = heading.splitlines()
-    if lines:
-        lines[0] = colors.apply(lines[0], palette.header)
-    if len(lines) > 1:
-        lines[1] = colors.apply(lines[1], palette.divider)
-    print("\n".join(lines))
+    heading = title.strip()
+    if not heading:
+        return
+
+    underline = "-" * len(heading)
+    print(heading)
+    print(underline)
 
 
 __all__ = [

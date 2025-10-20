@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 from pathlib import Path
 
 from scytaledroid.Config import app_config
@@ -17,6 +16,13 @@ from .prompts import default_custom_tests, prompt_advanced_options
 from .runner import launch_scan_flow
 from .scope import select_scope
 from scytaledroid.Database.db_utils.menus import query_runner
+from .menu_actions import (
+    apply_command_overrides,
+    ask_run_controls,
+    confirm_reset,
+    prompt_session_label,
+    render_reset_outcome,
+)
 
 
 def static_analysis_menu() -> None:
@@ -46,42 +52,30 @@ def static_analysis_menu() -> None:
         )
         menu_utils.print_hint("Choose a workflow to analyse APKs or open insight tooling.")
 
-        section_entries: list[tuple[str, list[menu_utils.MenuOption]]] = []
+        sections: list[tuple[str, tuple[Command, ...]]] = []
         if workflow_commands:
-            section_entries.append(
-                (
-                    "🚀 Automated workflows",
-                    [_command_option(cmd) for cmd in workflow_commands],
-                )
-            )
+            sections.append(("Automated workflows", workflow_commands))
         if tool_commands:
-            section_entries.append(
-                (
-                    "🧰 Interactive analysis tools",
-                    [_command_option(cmd) for cmd in tool_commands],
-                )
-            )
+            sections.append(("Interactive analysis tools", tool_commands))
         if insight_commands:
-            section_entries.append(
-                (
-                    "📊 Insight & reporting",
-                    [_command_option(cmd) for cmd in insight_commands],
-                )
-            )
+            sections.append(("Insight & reporting", insight_commands))
 
-        if section_entries:
-            menu_utils.print_menu_panels(
-                section_entries,
-                columns=2,
-                default_keys=(default_key,) if default_key else (),
+        rendered_section = False
+        for title, commands in sections:
+            if rendered_section:
+                print()
+            menu_utils.print_section(title)
+            default = default_key if default_key in {cmd.id for cmd in commands} else None
+            menu_utils.print_menu(
+                [_command_option(cmd) for cmd in commands],
+                show_exit=False,
+                default=default,
             )
-        menu_utils.print_menu_panels(
-            [("Navigation", [menu_utils.MenuOption("0", "Back", "Return to previous menu")])],
-            columns=1,
-            default_keys=("0",),
-            width=60,
-            gap=2,
-        )
+            rendered_section = True
+
+        if rendered_section:
+            print()
+        menu_utils.print_menu([], show_exit=True, exit_label="Back", show_descriptions=False)
         choice = prompt_utils.get_choice(selectable_ids + ["0"], default="1")
 
         if choice == "0":
@@ -125,13 +119,13 @@ def static_analysis_menu() -> None:
                 params = prompt_advanced_options(params)
                 continue
 
-            effective_params = _apply_command_overrides(params, command)
+            effective_params = apply_command_overrides(params, command)
 
-            if command.prompt_reset and _confirm_reset():
-                _render_reset_outcome(reset_static_analysis_data(include_harvest=False))
+            if command.prompt_reset and confirm_reset():
+                render_reset_outcome(reset_static_analysis_data(include_harvest=False))
 
             if command.persist and not effective_params.dry_run:
-                effective_params = _prompt_session_label(effective_params)
+                effective_params = prompt_session_label(effective_params)
 
             outcome = launch_scan_flow(selection, effective_params, base_dir)
 
@@ -143,84 +137,6 @@ def static_analysis_menu() -> None:
                     query_runner.render_session_digest(session_key)
                 prompt_utils.press_enter_to_continue("Press Enter to continue…")
             break
-
-
-def _apply_command_overrides(params: RunParameters, command: Command) -> RunParameters:
-    effective = params
-    if command.dry_run or not command.persist:
-        effective = replace(effective, dry_run=True)
-    if command.force_app_scope:
-        effective = replace(effective, verbose_output=True)
-    return effective
-
-
-def _confirm_reset() -> bool:
-    return prompt_utils.prompt_yes_no(
-        "Reset static-analysis tables before running?",
-        default=False,
-    )
-
-
-def _render_reset_outcome(outcome) -> None:
-    print()
-    menu_utils.print_section("Reset summary")
-    if outcome.truncated:
-        print(status_messages.status(f"Truncated tables: {', '.join(outcome.truncated)}", level="success"))
-    if outcome.failed:
-        msg = ", ".join(f"{table} ({reason})" for table, reason in outcome.failed)
-        print(status_messages.status(f"Failures: {msg}", level="error"))
-    if outcome.skipped_protected:
-        print(status_messages.status(
-            f"Protected tables skipped: {', '.join(outcome.skipped_protected)}",
-            level="info",
-        ))
-    if outcome.skipped_missing:
-        print(status_messages.status(
-            f"Missing tables skipped: {', '.join(outcome.skipped_missing)}",
-            level="warn",
-        ))
-    if not (outcome.truncated or outcome.failed or outcome.skipped_missing):
-        print(status_messages.status("No tables were modified.", level="info"))
-
-
-def _prompt_session_label(params: RunParameters) -> RunParameters:
-    current = params.session_stamp or ""
-    label = prompt_utils.prompt_text(
-        "Session label (press Enter to keep auto-generated)",
-        default=current,
-        required=False,
-    ).strip()
-    if not label:
-        return params
-    if label == current:
-        return params
-    return replace(params, session_stamp=label)
-
-
-def ask_run_controls() -> str:
-    while True:
-        print()
-        menu_utils.print_section("Run controls")
-        print("  R) Run with defaults")
-        print("  A) Advanced options")
-        print("  0) Back")
-
-        response = prompt_utils.prompt_text(
-            "",
-            default="R",
-            required=False,
-            error_message="Invalid choice. Please try again.",
-        )
-        choice = (response or "R").strip().lower()
-
-        if choice in {"", "r", "run", "1"}:
-            return "run"
-        if choice in {"a", "adv", "advanced", "2"}:
-            return "advanced"
-        if choice in {"0", "back", "b"}:
-            return "back"
-
-        print(status_messages.status("Invalid choice. Please try again.", level="warn"))
 
 
 def _command_option(command: Command) -> menu_utils.MenuOption:
@@ -243,4 +159,4 @@ def _command_option(command: Command) -> menu_utils.MenuOption:
 
 
 
-__all__ = ["static_analysis_menu", "ask_run_controls"]
+__all__ = ["static_analysis_menu"]
