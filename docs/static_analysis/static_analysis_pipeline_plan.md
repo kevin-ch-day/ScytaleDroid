@@ -6,21 +6,25 @@
 - Support both JSON portability and first-class database persistence so investigators can query history, run comparisons, and drive future UI/API consumers.
 - Maintain deterministic outputs, clear evidence pointers, reproducibility bundles, and high signal-to-noise across all severity gates.
 
-## 1.1 Implementation status (Q4 FY25 snapshot)
+## 1.1 Implementation status (FY26 tightening pass)
 
 - ✅ Detector runner and modular detectors are in place for manifest hygiene,
-  permissions (Androguard-powered scoring), IPC exposure, provider ACLs,
-  network surface (with NSC policy graphs), secrets, storage/backup, DFIR
-  hints, WebView hardening, crypto misuse, dynamic loading, file I/O sinks,
-  interaction surfaces, SDK inventory, native hardening, obfuscation, the
-  correlation layer, and the dedicated `StaticAnalysis/risk` package.
+  permissions (catalog-backed protection levels), IPC exposure, provider ACLs,
+  network surface (with NSC policy graphs), secrets (validator-backed),
+  storage/backup, DFIR hints, WebView hardening, crypto misuse, dynamic
+  loading, file I/O sinks, interaction surfaces, SDK inventory, native
+  hardening, obfuscation, the correlation layer, and the dedicated
+  `StaticAnalysis/risk` package.
 - ✅ Pipeline runs persist pipeline traces, split-aware posture, differential
-  metadata, and a reproducibility bundle (manifest digest, NSC serialisation,
+  metadata, severity/category matrices, novelty indicators, workload profiles,
+  and a reproducibility bundle (manifest digest, NSC serialisation,
   string-index sketch) inside the report metadata.
-- ✅ CLI menu exposes quick/full profiles, evidence limits, and renders
-  deterministic section summaries with badge/status alignment.
-- 🚧 Persistence adapters are JSON-first today; DB schema design remains open
-  pending infra alignment (see Section 7).
+- ✅ CLI menu exposes quick/full profiles, hero banners, severity-aware summary
+  cards, evidence limits, highlight ribbons, and deterministic section
+  summaries with badge/status alignment.
+- ✅ Canonical persistence ships with idempotent schema helpers, automatic
+  promotion of provider exposures (BASE-002), lineage-aware diff baselines, and
+  cross-run analytics views.
 - 🚧 OEM-sensitivity, signer lineage, and ML-backed endpoint classification are
   queued for Phase 2 once the foundational detectors stabilise.
 
@@ -37,8 +41,9 @@
 - 🚧 Design and document database schemas (`static_analysis_runs`,
   `static_analysis_findings`, optional metrics/support tables) and persistence
   adapters.
-- ✅ Update CLI flows to expose scan profiles, render per-stage timings, and
-  surface pipeline traces plus reproducibility bundles from saved reports.
+- ✅ Update CLI flows to expose scan profiles, render per-stage timings, surface
+  pipeline traces plus reproducibility bundles from saved reports, and surface
+  analytics matrices/novelty indicators inline.
 
 ### Out of scope (for this iteration)
 - Implementing dynamic analysis or runtime instrumentation.
@@ -78,9 +83,12 @@
   split composition, and final detector output with reproducible provenance
   chains, while `StaticAnalysis/risk/` owns composite score calculation and
   banding.
-- **Persistence Layer:** Interface `PersistenceAdapter` with implementations for
-  JSON reports today and placeholders for future database writers. Reports embed
-  pipeline metadata to support diff tooling even without a DB.
+- **Persistence Layer:** Dual-write adapters feed deterministic JSON reports and
+  the canonical database. `scytaledroid/StaticAnalysis/persistence/ingest.py`
+  hosts the canonical writer (`ingest_baseline_payload`) along with
+  idempotent helpers (`ensure_provider_plumbing`, `upsert_base002_for_session`,
+  `build_session_string_view`). Reports embed pipeline metadata to support diff
+  tooling even without a DB.
 
 ## 5. Detector Framework
 ### Detector Interface (conceptual)
@@ -132,26 +140,22 @@ class Detector(Protocol):
 - Outputs cached in context for detectors (secrets, network, privacy) and correlation rules.
 
 ## 7. Persistence Design
-### Database Schema (proposed)
-- `static_analysis_runs`
-  - `run_id` (PK), `apk_id`, `sha256`, `scan_profile`, `tool_version`, `config_hash`, `started_at`, `finished_at`, `status`, `notes`.
-- `static_analysis_findings`
-  - `finding_id` (PK), `run_id` (FK), `detector_id`, `severity_gate`, `masvs_category`, `title`, `rationale`, `correlation_chain` (JSON array), `evidence_pointer` (JSON), `remediation_hint`, `created_at`.
-- `static_analysis_supporting_artifacts` (optional)
-  - `artifact_id`, `finding_id`, `artifact_type`, `artifact_hash`, `payload` (JSON, small), `created_at`.
-- `static_analysis_metrics`
-  - `run_id`, `detector_id`, `metric_name`, `metric_value`, `unit`.
+### Canonical schema (current)
+- `apps` / `app_versions` – package + version metadata (name/code, SDK levels).
+- `static_analysis_runs` – one row per scan with session, scope, SHA-256, profile,
+  detector metrics, reproducibility bundle, analytics matrices, indicators, and
+  workload payloads.
+- `static_analysis_findings` – normalized findings with rule IDs, detector/module
+  attribution, CVSS, MASVS control, evidence JSON, and evidence references.
+- `static_fileproviders` / `static_provider_acl` – provider guard summaries and
+  path-permission breakdowns for BASE-002 analytics.
+- `endpoints`, `libraries`, `sdk_inventory`, etc. – canonical observations reused
+  by the correlation/diff layers.
 
-### Persistence Modes
-- `json_only` *(current default)*: writes deterministic JSON reports (including
-  `pipeline_trace` and `repro_bundle`) to `data/static_analysis/reports/`.
-- `db_only`: insert runs/findings into DB, optionally skipping JSON output for
-  volume-sensitive deployments.
-- `dual_write`: both JSON and DB for validation phase.
-
-### Migration Strategy
-- Define migrations aligned with existing database tooling (confirm whether Alembic or custom migrations are standard).
-- Version run schema changes via semantic versioning stored in `static_analysis_runs.tool_version`.
+Canonical helpers expose idempotent migrations (`ensure_provider_plumbing`),
+BASE-002 promotion (`upsert_base002_for_session`), and the flexible
+`v_session_string_samples` view builder (`build_session_string_view`) so the
+standalone runner can self-heal before ingesting runs.
 
 ## 8. CLI Integration
 - Default run path launches immediately with tuned defaults (auto workers, INFO logging, cache purge) while an "Advanced options" branch exposes overrides for analysts who need to adjust thresholds or detector subsets.
