@@ -24,7 +24,7 @@ from scytaledroid.StaticAnalysis.modules.string_analysis import (
 )
 from scytaledroid.Utils.System import output_prefs
 
-from ..core import StaticAnalysisReport
+from ..core import ManifestFlags, StaticAnalysisReport
 
 _WIDTH = 78
 
@@ -1235,6 +1235,12 @@ def render_app_result(
         lines.append("")
         lines.extend(analytics_lines)
 
+    modernization_lines = _build_modernization_guidance(report, string_payload)
+    if modernization_lines:
+        lines.append("")
+        lines.append("Modernization Recommendations")
+        lines.extend(modernization_lines)
+
     # Inline MASVS summary derived from detector results
     try:
         from scytaledroid.StaticAnalysis.core.findings import MasvsCategory
@@ -1314,6 +1320,78 @@ def render_app_result(
         payload["analytics"] = analytics_payload
 
     return lines, payload, finding_totals
+
+
+def _build_modernization_guidance(
+    report: StaticAnalysisReport,
+    string_payload: Mapping[str, object],
+) -> list[str]:
+    """Return modernization recommendations for manifest/network settings."""
+
+    flags = getattr(report, "manifest_flags", ManifestFlags())
+    guidance: list[str] = []
+
+    aggregates = string_payload.get("aggregates") if isinstance(string_payload, Mapping) else {}
+
+    if getattr(flags, "request_legacy_external_storage", False):
+        guidance.append("  - Migrate file access to scoped storage APIs (MediaStore, SAF) or app-private directories.")
+        guidance.append("    Once migration is complete remove `android:requestLegacyExternalStorage=\"true\"` from <application>.")
+
+    uses_cleartext = getattr(flags, "uses_cleartext_traffic", False)
+    network_config_present = bool(getattr(flags, "network_security_config", None))
+
+    if uses_cleartext:
+        http_hosts: list[tuple[str, int]] = []
+        if isinstance(aggregates, Mapping):
+            roots = aggregates.get("endpoint_roots")
+            if isinstance(roots, Sequence):
+                for entry in roots:
+                    if not isinstance(entry, Mapping):
+                        continue
+                    schemes = entry.get("schemes") if isinstance(entry.get("schemes"), Mapping) else {}
+                    http_count = int(schemes.get("http", 0) or 0)
+                    if http_count <= 0:
+                        continue
+                    root = str(entry.get("root_domain") or "").strip()
+                    if not root:
+                        continue
+                    http_hosts.append((root, http_count))
+            if not http_hosts:
+                clear_entries = aggregates.get("endpoint_cleartext")
+                if isinstance(clear_entries, Sequence):
+                    seen: set[str] = set()
+                    for entry in clear_entries:
+                        if not isinstance(entry, Mapping):
+                            continue
+                        root = str(entry.get("root_domain") or "").strip()
+                        if not root or root in seen:
+                            continue
+                        seen.add(root)
+                        http_hosts.append((root, 1))
+
+        http_hosts.sort(key=lambda item: (-item[1], item[0]))
+        host_names = [host for host, _ in http_hosts[:3]]
+
+        if not http_hosts:
+            guidance.append("  - Remove `android:usesCleartextTraffic=\"true\"`; no HTTP endpoints were detected.")
+        else:
+            guidance.append("  - Provide a network security config that blocks cleartext by default and explicitly")
+            guidance.append("    allows only the required HTTP domains while migrating remaining traffic to HTTPS.")
+            guidance.append("    res/xml/network_security_config.xml:")
+            guidance.append("      <network-security-config>")
+            guidance.append("          <base-config cleartextTrafficPermitted=\"false\" />")
+            for host in host_names:
+                guidance.append("          <domain-config cleartextTrafficPermitted=\"true\">")
+                guidance.append(f"              <domain includeSubdomains=\"true\">{host}</domain>")
+                guidance.append("          </domain-config>")
+            if not host_names:
+                guidance.append("          <!-- add <domain> entries for the domains that must remain on HTTP -->")
+            guidance.append("      </network-security-config>")
+            guidance.append("    Reference the config from <application android:networkSecurityConfig=\"@xml/network_security_config\"/>.")
+            if not network_config_present:
+                guidance.append("    (No existing networkSecurityConfig was detected in the manifest.)")
+
+    return guidance
 
 
 def write_baseline_json(

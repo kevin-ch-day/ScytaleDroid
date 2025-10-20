@@ -106,45 +106,91 @@ def _print_artifact_progress(label: str, summary: ArtifactOutcome, timings: Iter
         totals = severity.normalise_counts(severity_counts.items())
 
     card_items: list[summary_cards.SummaryCardItem] = []
-    if summary.duration_seconds:
-        card_items.append(
-            summary_cards.summary_item(
-                "Duration",
-                format_duration(summary.duration_seconds),
-                value_style="emphasis",
-            )
-        )
     if detector_timings:
         total_seconds = sum(duration for _, duration in detector_timings)
-        card_items.append(
-            summary_cards.summary_item("Detectors", len(detector_timings))
-        )
-        card_items.append(
-            summary_cards.summary_item(
-                "Detector time",
-                format_duration(total_seconds),
+        card_items.append(summary_cards.summary_item("Detectors", len(detector_timings)))
+        duration_seconds = float(getattr(summary, "duration_seconds", 0.0) or 0.0)
+        if duration_seconds <= 0 or abs(duration_seconds - total_seconds) > 0.001:
+            card_items.append(
+                summary_cards.summary_item(
+                    "Detector time",
+                    format_duration(total_seconds),
+                )
             )
-        )
     total_findings = sum(totals.values())
     if total_findings:
         style = "severity_high" if totals.get("high") else "emphasis"
-        card_items.append(
-            summary_cards.summary_item("Findings", total_findings, value_style=style)
-        )
+        card_items.append(summary_cards.summary_item("Findings", total_findings, value_style=style))
+
+    report = getattr(summary, "report", None)
+    permission_summary = getattr(report, "permissions", None)
+    if permission_summary:
+        declared_set = set(permission_summary.declared or ())
+        dangerous_set = set(permission_summary.dangerous or ())
+        custom_set = set(permission_summary.custom or ())
+        signature_set = declared_set - dangerous_set - custom_set
+        if declared_set:
+            perm_value = f"D:{len(dangerous_set)} S:{len(signature_set)} C:{len(custom_set)}"
+            value_style = "severity_high" if dangerous_set else "emphasis"
+            card_items.append(
+                summary_cards.summary_item(
+                    "Permissions",
+                    perm_value,
+                    value_style=value_style,
+                )
+            )
     if totals:
         card_items.extend(severity.severity_summary_items(totals, include_zero=False))
 
+    metadata = getattr(summary, "metadata", None)
+    package_name: Optional[str] = None
+    filename: Optional[str] = getattr(summary, "label", None)
+    if isinstance(metadata, Mapping):
+        package_value = metadata.get("package_name")
+        if isinstance(package_value, str) and package_value.strip():
+            package_name = package_value.strip()
+        artifact_hint = metadata.get("artifact")
+        if isinstance(artifact_hint, str) and artifact_hint.strip():
+            filename = artifact_hint.strip()
+        else:
+            display_hint = metadata.get("display_path")
+            if isinstance(display_hint, str) and display_hint.strip():
+                filename = display_hint.strip()
+    if not package_name:
+        after_bracket = label.split("]", 1)[-1].strip()
+        if after_bracket:
+            package_name = after_bracket
+            if " (" in after_bracket and after_bracket.endswith(")"):
+                package_name = after_bracket.rsplit("(", 1)[0].strip()
+    if not filename:
+        filename = label
+
+    print()
+    print(f"Package: {package_name or '<unknown>'}")
+    print(f"Filename: {filename}")
+    if summary.duration_seconds:
+        print(f"Duration: {format_duration(summary.duration_seconds)}")
+
     if card_items:
-        artifact_label = getattr(summary, "label", None) or label
-        card_title = f"Artifact snapshot — {artifact_label}"
+        bullet_items = [
+            summary_cards.SummaryCardItem(
+                item.label,
+                item.value,
+                label_style=item.label_style,
+                value_style=item.value_style,
+                bullet="• ",
+            )
+            for item in card_items
+        ]
+        print()
         print(
             summary_cards.format_summary_card(
-                card_title,
-                card_items,
-                subtitle=label,
-                width=82,
+                "Summary",
+                bullet_items,
+                width=48,
             )
         )
+        print()
 
     if detector_timings and output_prefs.get().verbose:
         for name, duration in detector_timings:

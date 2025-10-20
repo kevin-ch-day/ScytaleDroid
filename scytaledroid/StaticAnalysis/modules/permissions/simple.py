@@ -753,7 +753,14 @@ def render_permission_matrix(
         return
 
     top = list(sorted(profiles, key=lambda p: p.get("risk", 0.0), reverse=True))[: max(1, show)]
-    abbrev = [(_abbr_from_name(p["label"]), p["label"]) for p in top]
+    display_labels = []
+    for profile in top:
+        label = str(profile.get("label") or "").strip()
+        if not label:
+            label = str(profile.get("package") or "")
+        if not label:
+            label = _abbr_from_name(profile.get("label") or "APP").strip()
+        display_labels.append(label)
     now = datetime.now().strftime("%Y-%m-%d %-I:%M %p") if hasattr(datetime.now(), 'strftime') else datetime.now().strftime("%Y-%m-%d %I:%M %p")
 
     print("\nApplication Permission Matrix")
@@ -762,7 +769,7 @@ def render_permission_matrix(
     print(f"View: Apps 1–{len(top)}/{len(profiles)}")
     print()
 
-    headers = ["Permission"] + [abbr.strip() for abbr, _ in abbrev]
+    headers = ["Permission"] + display_labels
     rows: list[list[str]] = []
 
     for group_title, perms in _MATRIX_ROWS:
@@ -771,18 +778,18 @@ def render_permission_matrix(
             display = perm
             row = [f"  {display}"]
             for item in top:
-                fw_ds = item.get("fw_ds", set())
-                vendor = item.get("vendor_names", set())
+                fw_ds = {key.upper() for key in item.get("fw_ds", set())}
+                vendor = set(item.get("vendor_names", set()))
                 mark = "-"
                 if perm.startswith("com."):
                     mark = "*" if perm in vendor else "-"
                 else:
-                    mark = "x" if perm in fw_ds else "-"
+                    mark = "X" if perm.upper() in fw_ds else "-"
                 # Apply subtle coloring to marks when available
                 from scytaledroid.Utils.DisplayUtils import colors as _colors
                 _pal = _colors.get_palette() if _colors.colors_enabled() else None
                 if _pal:
-                    if mark == "x":
+                    if mark == "X":
                         row.append(_colors.apply(mark, _pal.accent, bold=True))
                     elif mark == "*":
                         row.append(_colors.apply(mark, _pal.warning, bold=True))
@@ -794,6 +801,6 @@ def render_permission_matrix(
 
     table_utils.render_table(headers, rows, accent_first_column=False)
     print("\nLegend:")
-    print("x = framework (dangerous/signature)")
+    print("X = framework (dangerous/signature)")
     print("* = vendor/custom/ads")
     print("- = not requested")

@@ -28,16 +28,19 @@ def render_app_table(results: Sequence[AppRunResult]) -> None:
         base_report = app_result.base_report()
         version = "—"
         target_sdk = "—"
+        display_name = app_result.package_name
         if base_report:
             version_name = base_report.manifest.version_name or "—"
             version_code = base_report.manifest.version_code
             version = f"{version_name} ({version_code})" if version_code else version_name
             target_sdk = base_report.manifest.target_sdk or "—"
+            if base_report.manifest.app_label:
+                display_name = base_report.manifest.app_label
         signer = app_result.signer or "—"
         rows.append(
             [
                 str(idx),
-                app_result.package_name,
+                display_name,
                 version,
                 f"targetSdk={target_sdk}",
                 signer,
@@ -47,7 +50,7 @@ def render_app_table(results: Sequence[AppRunResult]) -> None:
                 str(totals.get('I', 0)),
             ]
         )
-    headers = ["#", "Package", "Version", "Target", "Signer", "High", "Medium", "Low", "Information"]
+    headers = ["#", "App", "Version", "Target", "Signer", "High", "Medium", "Low", "Information"]
     print()
     table_utils.render_table(headers, rows)
 

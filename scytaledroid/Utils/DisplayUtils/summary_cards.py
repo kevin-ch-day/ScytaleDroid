@@ -9,7 +9,7 @@ from typing import Sequence, Tuple
 
 from . import colors
 from .terminal import get_terminal_width, use_ascii_ui
-from .text_blocks import boxed
+from .text_blocks import divider
 
 
 @dataclass(frozen=True)
@@ -131,13 +131,62 @@ def format_summary_card(
     value_style = _style("progress", "accent")
     footer_style = _style("hint", "muted")
 
+    def _style_matches(value: Sequence[str] | str | None, target: str) -> bool:
+        if not value:
+            return False
+        if isinstance(value, str):
+            return value == target
+        if isinstance(value, tuple):
+            return any(token == target for token in value)
+        if isinstance(value, SequenceABC):
+            return any(str(token) == target for token in value)
+        return False
+
+    def _coerce_numeric(value: object) -> float:
+        if isinstance(value, (int, float)):
+            return float(value)
+        text = str(value).strip()
+        if not text:
+            return 0.0
+        try:
+            return float(text)
+        except ValueError:
+            return 0.0
+
+    coerced_items = _coerce_items(items)
+    highest_alert: str | None = None
+    for entry in coerced_items:
+        label_token = entry.label.strip().lower()
+        numeric_value = _coerce_numeric(entry.value)
+        if numeric_value <= 0:
+            continue
+        if _style_matches(entry.value_style, "severity_critical") or label_token.startswith("critical"):
+            highest_alert = "critical"
+            break
+        if _style_matches(entry.value_style, "severity_high") or label_token.startswith("high"):
+            highest_alert = highest_alert or "high"
+
     lines: list[str] = []
     title_text = colors.apply(title.strip(), primary_style, bold=True)
     lines.append(title_text)
     if subtitle:
         lines.append(colors.apply(subtitle.strip(), secondary_style))
 
-    for entry in _coerce_items(items):
+    if coerced_items:
+        lines.append(divider(width=max_width, style="divider"))
+
+    if highest_alert:
+        indicator = "!!" if ascii_ui else "‼"
+        alert_style = _style(
+            "severity_critical" if highest_alert == "critical" else "severity_high",
+            "progress",
+        )
+        alert_label = "Critical findings detected" if highest_alert == "critical" else "High findings detected"
+        lines.append(colors.apply(f"{indicator} {alert_label}", alert_style, bold=True))
+        if coerced_items:
+            lines.append("")
+
+    for entry in coerced_items:
         label_tokens = _resolve_style(entry.label_style, secondary_style)
         inferred_value_style = _auto_value_style(entry.label)
         value_tokens = _resolve_style(
@@ -153,7 +202,7 @@ def format_summary_card(
     if footer:
         lines.append(colors.apply(footer, footer_style))
 
-    return boxed(lines, width=max_width, padding=1)
+    return "\n".join(lines)
 
 
 def print_summary_card(
