@@ -1,6 +1,6 @@
 # ScytaleDroid
 
-ScytaleDroid v2 is a menu-driven toolkit for harvesting, cataloging, and
+ScytaleDroid is a menu-driven toolkit for harvesting, cataloging, and
 analyzing Android application packages (APKs) from real devices. The project
 emphasizes a "database-first" design so every artifact is traced by an
 `apk_id`, paired with predictable filenames, and ready for follow-on static,
@@ -8,44 +8,44 @@ dynamic, or threat-intel analysis.
 
 ## Feature highlights
 
-* **Quick start.** `./run.sh` launches the CLI. Use *Device Analysis → 5* to
-  capture an inventory, then *Device Analysis → 7* to harvest scoped APKs. When
+- **Quick start.** `./run.sh` launches the CLI. Use _Device Analysis → 5_ to
+  capture an inventory, then _Device Analysis → 7_ to harvest scoped APKs. When
   inventories are only soft-stale the pull step defaults to the quick-harvest
   path, which resolves APK locations live with `pm path` so you can grab fresh
   artifacts without taking a full filesystem snapshot.
-* **Database-first harvesting.** Durable tables, strict filename conventions,
+- **Database-first harvesting.** Durable tables, strict filename conventions,
   and scoped pulls replace the JSON/CSV-heavy v1 tooling. Hash-aware dedupe and
   optional DB writes keep collections lean while maintaining provenance.
-* **Research-grade static analysis.** A modular detector pipeline surfaces
+- **Research-grade static analysis.** A modular detector pipeline surfaces
   manifest hygiene, IPC exposure, provider ACLs, network posture, secrets,
   storage/backup hygiene, WebView hardening, crypto misuse, DFIR hints, and a
   correlation layer that synthesizes P0/P1 risk stories from the detector
   output. Permissions are grouped and scored using a refreshed Android
   permission catalog—no hard-coded lists.
-* **Canonical persistence & analytics.** Every run lands in the relational
+- **Canonical persistence & analytics.** Every run lands in the relational
   schema (`static_analysis_runs`, `static_analysis_findings`, provider ACL
   tables) with severity/category matrices, novelty indicators, workload
   profiles, and reproducibility bundles so analysts can mine cross-run trends
   without parsing JSON artefacts.
-* **Differential awareness.** Static-analysis runs persist a pipeline trace,
+- **Differential awareness.** Static-analysis runs persist a pipeline trace,
   split-aware posture snapshot, network security policy graph, lineage-aware
   diff basis, and a reproducibility bundle (manifest + NSC + strings digest).
   The correlation engine prefers prior scans from the same version line and
   highlights detector, SDK, and secret-surface drift automatically.
-* **Operator-centric UX.** Hero banners, highlight ribbons, severity-aware
+- **Operator-centric UX.** Hero banners, highlight ribbons, severity-aware
   summary cards, and menu panels mirror across Device and Static analysis so
   investigators can jump between harvesting and review without context
   switching.
-* **Permission-first field view.** Abbreviation map (shown once), postcard
+- **Permission-first field view.** Abbreviation map (shown once), postcard
   summaries, a Signal Matrix, and a Permission Matrix (`x/*/-`) with a fixed
   capability order and subtle colouring when ANSI is available.
-* **Composite risk scoring.** The static risk engine in
+- **Composite risk scoring.** The static risk engine in
   `scytaledroid/StaticAnalysis/risk/` centralises weighting, factor caps, and
   banding so CLI output and downstream consumers share the same numeric score
   and grade model.
-* **DB snapshots for trust.** Risk snapshots (per app, per run) are written to
+- **DB snapshots for trust.** Risk snapshots (per app, per run) are written to
   the database (when configured) for longitudinal analysis and dashboards.
-* **Housekeeping shortcuts.** The Utilities menu exposes a static-analysis
+- **Housekeeping shortcuts.** The Utilities menu exposes a static-analysis
   housekeeping action that prunes JSON/HTML exports older than 30 days and
   resets cache/temp directories so local runs stay lean.
 
@@ -89,23 +89,23 @@ dynamic, or threat-intel analysis.
 
 ## Documentation map
 
-* [`docs/device_analysis/README.md`](docs/device_analysis/README.md) – current
+- [`docs/device_analysis/README.md`](docs/device_analysis/README.md) – current
   harvesting workflow, scope controls, and repository layout.
-* [`docs/static_analysis_contract.md`](docs/static_analysis_contract.md) –
+- [`docs/static_analysis_contract.md`](docs/static_analysis_contract.md) –
   detector contracts, pipeline order, and rendering requirements.
-* [`docs/static_analysis/static_analysis_pipeline_plan.md`](docs/static_analysis/static_analysis_pipeline_plan.md) – roadmap,
+- [`docs/static_analysis/static_analysis_pipeline_plan.md`](docs/static_analysis/static_analysis_pipeline_plan.md) – roadmap,
   implementation status, and research backlog.
-* [`docs/maintenance/housekeeping.md`](docs/maintenance/housekeeping.md) – log
+- [`docs/maintenance/housekeeping.md`](docs/maintenance/housekeeping.md) – log
   locations, housekeeping behaviour, and retention policy controls.
-* [`docs/database`](docs/database) – schema notes and read-side query
+- [`docs/database`](docs/database) – schema notes and read-side query
   blueprints for downstream portals.
-* [`docs/database/permission_analysis_schema.md`](docs/database/permission_analysis_schema.md) – risk
+- [`docs/database/permission_analysis_schema.md`](docs/database/permission_analysis_schema.md) – risk
   snapshots and proposed matrix/rationale tables.
-* [`docs/static_analysis_analytics.md`](docs/static_analysis_analytics.md) –
+- [`docs/static_analysis_analytics.md`](docs/static_analysis_analytics.md) –
   severity/category matrices, workload profiling, and novelty indicators.
-* [`docs/static_analysis_improvement_plan.md`](docs/static_analysis_improvement_plan.md) –
+- [`docs/static_analysis_improvement_plan.md`](docs/static_analysis_improvement_plan.md) –
   current milestone recap and next tightening steps.
-* [`RENAME_GUIDE.md`](RENAME_GUIDE.md) – module naming map and deprecation plan.
+- [`RENAME_GUIDE.md`](RENAME_GUIDE.md) – module naming map and deprecation plan.
 
 For a detailed overview tailored to collaborators, including what is finished,
 what we are tightening now, and how others can help, start with the device and

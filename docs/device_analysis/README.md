@@ -1,12 +1,12 @@
-# ScytaleDroid v2 – Device Analysis Overview
+# ScytaleDroid – Device Analysis Overview
 
-This guide summarizes what ScytaleDroid v2 delivers today, what gaps we are
+This guide summarizes what ScytaleDroid delivers today, what gaps we are
 closing in the Device Analysis workflow, and the exact ways collaborators can
 help move the project forward.
 
-## What ScytaleDroid v2 is
+## What ScytaleDroid is
 
-ScytaleDroid v2 is a menu-driven CLI that connects to live Android devices and
+ScytaleDroid is a menu-driven CLI that connects to live Android devices and
 pulls APK artifacts into a structured repository. The toolchain favors a
 "database-first" architecture:
 
@@ -16,16 +16,6 @@ pulls APK artifacts into a structured repository. The toolchain favors a
   which becomes the anchor for static, dynamic, and threat-intel analysis.
 - Helper metadata such as user-friendly labels live in `android_app_definitions`
   and stay synchronized automatically during inventory runs.
-
-## Why v2 exists
-
-Version 1 of ScytaleDroid relied on ad-hoc JSON and CSV exports, fragile file
-naming, and all-or-nothing APK pulls. v2 replaces that with:
-
-- Durable, normalized database tables that deduplicate artifacts by hash.
-- Predictable directory layout under `data/apks/device_apks/<serial>/<package>/<timestamp>/`.
-- Scoped harvesting that targets just the apps investigators care about instead
-  of blindly pulling every system package.
 
 ## Device Analysis status (Phase 1)
 
@@ -155,7 +145,7 @@ expands to:
    breakdowns, runtime skip alerts, guard notices, and the highlight callouts.
    Then scan the dedicated pre-flight and runtime skip sections or policy
    notices if something looks off.
-6. Optional: jump to **Static Analysis** → *Analyze repository artifact* to run
+6. Optional: jump to **Static Analysis** → _Analyze repository artifact_ to run
    the detector pipeline on freshly harvested APKs and persist the accompanying
    reproducibility bundle.
 
