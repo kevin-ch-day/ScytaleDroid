@@ -9,13 +9,22 @@ credentials for the canonical database target.
 
 1. **Bootstrap dependencies** – `./setup.sh` (or install the packages listed in
    `requirements.txt`).
-2. **Ensure schema + views** – run the standalone helper once per shell session:
+2. **Ensure schema + views** – prime the canonical helpers once per shell
+   session (idempotent):
    ```bash
-   python run_script.py --session $(date +%Y%m%d-%H%M%S)
+   python - <<'PY'
+   from datetime import datetime
+   from scytaledroid.StaticAnalysis.persistence import ingest as canonical_ingest
+
+   session = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+   canonical_ingest.ensure_provider_plumbing()
+   canonical_ingest.upsert_base002_for_session(session)
+   canonical_ingest.build_session_string_view(session)
+   print(f"Canonical helpers ready for session {session}")
+   PY
    ```
-   This call is idempotent. It creates/updates canonical tables, refreshes
-   `v_provider_exposure`, promotes any pending BASE-002 candidates, and ensures
-   `v_session_string_samples` is materialised for the supplied session stamp.
+   The CLI also performs these steps automatically when a run starts; use the
+   snippet above if you need to prep a session before launching the menu.
 3. **Collect APKs** – harvest devices with the Device Analysis menu as usual, or
    drop standalone APKs into the working directory.
 
@@ -38,10 +47,13 @@ Persistence happens automatically at the end of each run:
   `static_analysis_findings`, `static_fileproviders`, and `static_provider_acl`.
 - Analytics payloads (severity/category matrices, novelty indicators, workload
   profiles) are stored alongside detector metrics in the run row.
-- Provider exposures are normalised into BASE-002 findings. You can re-run the
-  promotion step manually if needed:
+- Provider exposures are normalised into BASE-002 findings. To re-run the
+  promotion step manually execute:
   ```bash
-  python run_script.py --session <existing-session>
+  python - <<'PY'
+  from scytaledroid.StaticAnalysis.persistence import ingest as canonical_ingest
+  canonical_ingest.upsert_base002_for_session("<existing-session>")
+  PY
   ```
 
 To simulate a run without touching the database use the CLI dry-run flag:
@@ -101,15 +113,26 @@ client.
 
 | Symptom | Likely cause | Next steps |
 | --- | --- | --- |
-| `python run_script.py` reports `Failed to ensure canonical schema` | DB credentials missing or insufficient privileges | Confirm environment variables / DSN and re-run once grants are fixed. |
-| `v_session_string_samples` returns 0 despite active findings | Legacy string samples missing timestamps | Re-run `python run_script.py --session <stamp>` to rebuild the view with fallback matching. |
-| BASE-002 findings missing from `static_analysis_findings` | Promotion step skipped (dry-run) or schema not ensured | Re-run `python run_script.py --session <stamp>` or check application logs for INSERT errors. |
+| Manual ensure script reports `Failed to ensure canonical schema` | DB credentials missing or insufficient privileges | Confirm environment variables / DSN and re-run once grants are fixed. |
+| `v_session_string_samples` returns 0 despite active findings | Legacy string samples missing timestamps | Re-run the manual ensure snippet with the desired session stamp to rebuild the view with fallback matching. |
+| BASE-002 findings missing from `static_analysis_findings` | Promotion step skipped (dry-run) or schema not ensured | Re-run the manual promotion snippet or check application logs for INSERT errors. |
 | Secrets still show placeholder examples | Validators suppressed them; confidence is `"low"` | Use `validator_hits` in the evidence JSON to confirm suppression rationale. |
 | Diff views compare unrelated versions | Older runs lack version metadata | Ensure the APK metadata tables are populated; rerun analysis so `app_versions` captures versionName/versionCode for lineage-aware diffing. |
 
 ## 6. Useful commands
 
-* Re-run canonical migrations & promotions: `python run_script.py --session $(date +%Y%m%d-%H%M%S)`
+* Re-run canonical migrations & promotions:
+  ```bash
+  python - <<'PY'
+  from datetime import datetime
+  from scytaledroid.StaticAnalysis.persistence import ingest as canonical_ingest
+
+  session = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+  canonical_ingest.ensure_provider_plumbing()
+  canonical_ingest.upsert_base002_for_session(session)
+  canonical_ingest.build_session_string_view(session)
+  PY
+  ```
 * Inspect latest run summaries: `SELECT * FROM static_analysis_runs ORDER BY id DESC LIMIT 5;`
 * Run persistence tests: `pytest tests/test_static_ingest.py`
 

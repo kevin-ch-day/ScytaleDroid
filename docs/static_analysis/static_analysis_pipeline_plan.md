@@ -154,8 +154,8 @@ class Detector(Protocol):
 
 Canonical helpers expose idempotent migrations (`ensure_provider_plumbing`),
 BASE-002 promotion (`upsert_base002_for_session`), and the flexible
-`v_session_string_samples` view builder (`build_session_string_view`) so the
-standalone runner can self-heal before ingesting runs.
+`v_session_string_samples` view builder (`build_session_string_view`) so the CLI
+and manual helper snippets can self-heal before ingesting runs.
 
 ## 8. CLI Integration
 - Default run path launches immediately with tuned defaults (auto workers, INFO logging, cache purge) while an "Advanced options" branch exposes overrides for analysts who need to adjust thresholds or detector subsets.
