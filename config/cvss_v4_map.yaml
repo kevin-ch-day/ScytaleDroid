@@ -1,220 +1,282 @@
 version: "4.0"
 
-# ---------- GLOBAL DEFAULTS ----------
+# ─────────────────────────────────────────────────────────────
+# GLOBAL DEFAULTS
+# ─────────────────────────────────────────────────────────────
 defaults:
   base:
-    AV: N
-    AC: L
-    AT: N
-    PR: N
-    UI: N
-    VC: L
-    VI: L
-    VA: L
-    SC: N
-    SI: N
-    SA: N
+    AV: N   # Attack Vector (Network)
+    AC: L   # Attack Complexity (Low)
+    AT: N   # Attack Requirements (None)
+    PR: N   # Privileges Required (None)
+    UI: N   # User Interaction (None)
+    VC: L   # Vulnerable Confidentiality (Low)
+    VI: L   # Vulnerable Integrity (Low)
+    VA: L   # Vulnerable Availability (Low)
+    SC: N   # Subsequent Confidentiality (None)
+    SI: N   # Subsequent Integrity (None)
+    SA: N   # Subsequent Availability (None)
   threat:
-    E: U   # Unknown
+    E: U    # Exploit Maturity: Unknown
   environmental_profiles:
     consumer:   { CR: M, IR: M, AR: M }
     enterprise: { CR: H, IR: H, AR: H }
+    regulated:  { CR: H, IR: H, AR: H }   # useful for finance/health
   supplemental:
-    safety: N
-    automatable: N
-    value_density: N
+    safety: N           # Human safety impact
+    automatable: N      # Can be reliably automated
+    value_density: N    # Concentration of valuable data/assets
+    recovery: M         # Average recovery difficulty (qual)
+  # Severity band cutoffs for UX (calculator can use these for bands & coloring)
+  bands:
+    critical: ">=9.0"
+    high:     ">=7.0,<9.0"
+    medium:   ">=4.0,<7.0"
+    low:      ">=0.1,<4.0"
+    none:     "=0.0"
 
-# ---------- MERGE & PRECEDENCE ----------
-# How the calculator should combine defaults + rule-specific values:
-# 1) Start with defaults.base/threat/env/supplemental
-# 2) Apply rule.base (override keys present)
-# 3) If rule.overrides.* present, enforce post-processing (e.g., severity_cap)
-# 4) Build B; add Threat E for BT; add Env CR/IR/AR for BE; add both for BTE
-# 5) Round to 1 decimal
+# ─────────────────────────────────────────────────────────────
+# MERGE & PRECEDENCE
+# ─────────────────────────────────────────────────────────────
 merge:
+  # 1) Start with defaults.base/threat/environmental/supplemental
+  # 2) Apply rule.base
+  # 3) Apply rule.threat/environmental/supplemental (overrides)
+  # 4) Apply rule.overrides (caps/bumps/guards)
+  # 5) Build B → BT → BE → BTE vectors; round to 1 decimal
   severity_caps:
-    # If set on a rule, cap the *reported* severity tier used by non-CVSS rollups (does not change CVSS)
     allowed: ["Info","Low","Medium","High","Critical"]
+  bump_rules:
+    # Optional interpreted hints. If your calculator doesn’t implement, it can ignore safely.
+    keys: ["raise_to_min_band","bump_if","drop_if"]
+  guards:
+    keys: ["require_dynamic_confirmation","suppress_if_doc_policy"]
 
-# ---------- RULES ----------
+# ─────────────────────────────────────────────────────────────
+# RULES
+# ─────────────────────────────────────────────────────────────
 rules:
 
   # ===== Manifest / Network posture =====
-  - detector_id: BASE-CLR-001                   # usesCleartextTraffic=true
+  - detector_id: BASE-CLR-001                    # usesCleartextTraffic=true
+    area: NETWORK
     base: { AV: N, AC: L, AT: N, PR: N, UI: N, VC: L, VI: L, VA: N, SC: N, SI: N, SA: N }
     rationale: >
-      Cleartext traffic allowed by manifest. If exercised by runtime HTTP libs,
-      attacker-in-the-middle can inspect or modify unpinned traffic.
-    evidence_hints:
-      - "AndroidManifest.xml: usesCleartextTraffic"
+      Cleartext traffic allowed by manifest. If combined with non-local HTTP endpoints,
+      enables on-path inspection/modification.
+    evidence_hints: ["AndroidManifest.xml: usesCleartextTraffic"]
+    overrides:
+      # If paired with real HTTP endpoints (see STRING-ENDPOINT-HTTP-NONLOCAL), ensure at least High.
+      raise_to_min_band: { band: "High", when_detector_present: ["STRING-ENDPOINT-HTTP-NONLOCAL"] }
 
   - detector_id: NSC-USERCA-ALLOWED             # user-added CAs accepted
+    area: NETWORK
     base: { AV: N, AC: L, AT: N, PR: N, UI: N, VC: L, VI: L, VA: N }
     rationale: >
-      Network Security Config allows user-added CAs; enables local interception on rooted/user-modified trust stores.
-    evidence_hints:
-      - "res/xml/network_security_config*.xml"
-      - "trust-anchors: certificates='user'"
+      Network Security Config trusts user-added CAs; enables local interception on modified trust stores.
+    evidence_hints: ["res/xml/network_security_config*.xml", "trust-anchors: certificates='user'"]
 
-  - detector_id: NSC-PINNING-ABSENT              # no pinning where high-value hosts exist
+  - detector_id: NSC-CLEARTEXT-DOMAINS           # NSC permits cleartext to specific domains
+    area: NETWORK
     base: { AV: N, AC: L, AT: N, PR: N, UI: N, VC: L, VI: L, VA: N }
     rationale: >
-      No certificate pinning for high-value endpoints; increases MITM surface if trust store is compromised.
-    evidence_hints:
-      - "networkSecurityConfig present but no pins for in-scope hosts"
+      Network Security Config allows cleartext for specific hosts. If those are non-local,
+      treat as concrete cleartext risk.
+    evidence_hints: ["<domain-config cleartextTrafficPermitted='true'>"]
+    overrides:
+      raise_to_min_band: { band: "High" }
+
+  - detector_id: NSC-PINNING-ABSENT              # no TLS pinning while high-value hosts exist
+    area: NETWORK
+    base: { AV: N, AC: L, AT: N, PR: N, UI: N, VC: L, VI: L, VA: N }
+    rationale: >
+      No certificate pinning for production endpoints; increases MITM surface if CA trust is abused.
+    evidence_hints: ["networkSecurityConfig present but pins absent for prod hosts"]
 
   # ===== Storage posture =====
-  - detector_id: BASE-STO-LEGACY                # requestLegacyExternalStorage=true
+  - detector_id: BASE-STO-LEGACY                 # requestLegacyExternalStorage=true
+    area: STORAGE
     base: { AV: L, AC: L, AT: N, PR: N, UI: N, VC: L, VI: N, VA: N }
     rationale: >
-      Legacy external storage widens data exposure via world-readable paths.
-    evidence_hints:
-      - "AndroidManifest.xml: requestLegacyExternalStorage"
+      Legacy external storage widens exposure via shared world-readable paths.
+    evidence_hints: ["AndroidManifest.xml: requestLegacyExternalStorage"]
 
-  - detector_id: FILEPROVIDER-WEAK-ACL          # FileProvider grants overly-broad URI perms
+  - detector_id: FILEPROVIDER-WEAK-ACL
+    area: STORAGE
     base: { AV: A, AC: L, AT: N, PR: N, UI: R, VC: L, VI: N, VA: N }
     rationale: >
-      Weak FileProvider modes (grantUriPermissions without strict pathStrategy) may leak content via exported receivers.
-    evidence_hints:
-      - "AndroidManifest.xml: <provider ... android:name=FileProvider>"
-      - "res/xml/file_paths.xml"
+      FileProvider grants overly broad URI permissions or missing strict paths; may leak content.
+    evidence_hints: ["<provider ... FileProvider>", "res/xml/file_paths.xml"]
 
   # ===== IPC / Exported components =====
   - detector_id: BASE-IPC-PROVIDER-NO-ACL
+    area: PLATFORM
     base: { AV: A, AC: L, AT: N, PR: N, UI: N, VC: L, VI: L, VA: N }
     rationale: >
-      Exported ContentProvider without permission guard allows unauthorized data access or mutation.
-    evidence_hints:
-      - "<provider ... exported=true>"
-      - "Missing android:readPermission and android:writePermission"
+      Exported ContentProvider without permission guard allows unauthorized reads/writes.
 
   - detector_id: BASE-IPC-EXPORTED-WITH-PERM
+    area: PLATFORM
     base: { AV: A, AC: L, AT: N, PR: L, UI: N, VC: N, VI: N, VA: N }
     rationale: >
-      Component is exported but guarded by a permission; residual risk limited.
+      Component exported but guarded by a permission; residual risk limited.
     overrides: { severity_cap: Info }
 
-  - detector_id: IPC-RECEIVER-IMPLICIT-EXPORTED # exported receiver with broad filter, no perm
+  - detector_id: IPC-RECEIVER-IMPLICIT-EXPORTED
+    area: PLATFORM
     base: { AV: A, AC: L, AT: N, PR: N, UI: N, VC: N, VI: L, VA: N }
     rationale: >
-      BroadcastReceiver exported without permission or signature-level guard; external apps can trigger behaviors.
+      Exported BroadcastReceiver without a permission or with broad intent-filters; can be triggered by other apps.
 
-  - detector_id: IPC-ACTIVITY-TASKINJECTION     # exported activity taskAffinity/singleTask misuse
+  - detector_id: IPC-SERVICE-EXPORTED-NO-PERM
+    area: PLATFORM
     base: { AV: A, AC: L, AT: N, PR: N, UI: N, VC: N, VI: L, VA: N }
     rationale: >
-      Exported activity with risky task flags can enable UI hijacking or deep-link abuse.
+      Exported Service without permission guard; may expose privileged operations.
+
+  - detector_id: IPC-ACTIVITY-TASKINJECTION
+    area: PLATFORM
+    base: { AV: A, AC: L, AT: N, PR: N, UI: N, VC: N, VI: L, VA: N }
+    rationale: >
+      Risky task flags/affinities can enable task hijacking or deep-link abuse.
 
   # ===== WebView posture =====
   - detector_id: WV-MIXED-CONTENT
+    area: PLATFORM
     base: { AV: N, AC: L, AT: N, PR: N, UI: R, VC: L, VI: N, VA: N }
     rationale: >
-      WebView allows mixed content; user navigation required to trigger downgrade.
+      WebView allows mixed content; downgrade protection may be bypassed on HTTP subresources.
 
-  - detector_id: WV-JS-ENABLED-UNBRIDGED        # JS enabled but no JS interface
+  - detector_id: WV-JS-ENABLED-UNBRIDGED
+    area: PLATFORM
     base: { AV: N, AC: L, AT: N, PR: N, UI: R, VC: N, VI: N, VA: N }
     rationale: >
-      JavaScript enabled; risk increases if combined with file:// or addJavascriptInterface.
+      JavaScript enabled; risk rises with file:// or addJavascriptInterface usage.
 
-  - detector_id: WV-JS-BRIDGE-EXPOSED           # addJavascriptInterface() to non-@JavascriptInterface or broad
+  - detector_id: WV-JS-BRIDGE-EXPOSED
+    area: PLATFORM
     base: { AV: N, AC: L, AT: N, PR: N, UI: R, VC: L, VI: L, VA: N }
     rationale: >
-      JS bridge exposes native surface to web content; with XSS or hostile pages, can lead to code execution.
+      JS bridge exposes native surface; with XSS/hostile page can lead to code exec.
+
+  - detector_id: WV-FILE-ACCESS-ENABLED
+    area: PLATFORM
+    base: { AV: N, AC: L, AT: N, PR: N, UI: R, VC: N, VI: L, VA: N }
+    rationale: >
+      WebView file access enabled; combined with JS & local files may leak content.
 
   # ===== Strings / endpoints =====
-  - detector_id: STRING-ENDPOINT-HTTP-NONLOCAL  # http:// non-local endpoint literal
+  - detector_id: STRING-ENDPOINT-HTTP-NONLOCAL
+    area: NETWORK
     base: { AV: N, AC: L, AT: N, PR: N, UI: N, VC: L, VI: N, VA: N }
     rationale: >
-      Hard-coded cleartext HTTP endpoint; enables eavesdropping if used at runtime.
-    evidence_hints:
-      - "classes*.dex@..."
-      - "res/raw/... keep.xml (noise—apply allowlist)"
+      Hard-coded cleartext HTTP endpoint to non-local host.
+    evidence_hints: ["classes*.dex@...", "res/raw/*keep*.xml (may be noise)"]
+    overrides:
+      bump_if:
+        - when_detector_present: ["BASE-CLR-001","NSC-CLEARTEXT-DOMAINS"]
+          to_band: "High"
 
-  - detector_id: STRING-ENDPOINT-LOCALHOST      # http://localhost or 127.0.0.1
+  - detector_id: STRING-ENDPOINT-LOCALHOST
+    area: NETWORK
     base: { AV: L, AC: L, AT: N, PR: N, UI: N, VC: N, VI: N, VA: N }
     rationale: >
-      Localhost endpoints generally non-exploitable in release builds; treat as low informational unless corroborated.
-    overrides: { severity_cap: Info }
+      Localhost endpoints are usually non-exploitable in release builds; treat as Info unless dynamic use confirms.
+    overrides:
+      severity_cap: Info
+      require_dynamic_confirmation: true
 
-  - detector_id: STR-SECRET-AWS-HC              # high-confidence cloud secret
+  # ===== Secrets / tokens =====
+  - detector_id: STR-SECRET-AWS-HC
+    area: PLATFORM
+    base: { AV: N, AC: L, AT: N, PR: N, UI: N, VC: L, VI: L, VA: N, SC: L, SI: L, SA: N }
+    threat: { E: P }   # Proof of use likely if live
+    rationale: >
+      High-confidence AWS credential in code/assets; may enable unauthorized API access.
+    evidence_hints: ["AKIA...", "aws_secret", "dex@..."]
+
+  - detector_id: STR-SECRET-GCP-HC
+    area: PLATFORM
     base: { AV: N, AC: L, AT: N, PR: N, UI: N, VC: L, VI: L, VA: N, SC: L, SI: L, SA: N }
     threat: { E: P }
     rationale: >
-      High-confidence cloud credential in code/assets. If active, enables unauthorized API calls; may impact downstream systems.
-    evidence_hints:
-      - "classes*.dex@..."
-      - "assets/... (Tags: aws_secret)"
+      High-confidence GCP key/service account found.
 
-  - detector_id: STR-SECRET-GCP-HC              # gcp key/service acct
-    base: { AV: N, AC: L, AT: N, PR: N, UI: N, VC: L, VI: L, VA: N, SC: L, SI: L, SA: N }
-    threat: { E: P }
-    rationale: >
-      GCP credential/key discovered; potential access to buckets/APIs if live.
-
-  - detector_id: STR-SECRET-GAPI-MAPS           # Google Maps API key
+  - detector_id: STR-SECRET-GAPI-MAPS
+    area: PLATFORM
     base: { AV: N, AC: L, AT: N, PR: N, UI: N, VC: L, VI: N, VA: N }
     rationale: >
-      Google API key discovered; risk depends on key restrictions. Treat as Low unless unrestricted confirmed.
+      Google Maps/Places key; risk depends on restrictions.
     overrides: { severity_cap: Low }
 
   - detector_id: STR-JWT-TOKEN-CANDIDATE
+    area: PLATFORM
     base: { AV: N, AC: L, AT: N, PR: N, UI: N, VC: L, VI: L, VA: N }
     rationale: >
-      JWT-like token candidate; validate issuer/audience/expiry when feasible to raise confidence.
+      JWT-like token candidate; validate issuer/audience/expiry for confidence uplift.
 
   - detector_id: STR-ENTROPY-ASSET
+    area: PLATFORM
     base: { AV: N, AC: H, AT: R, PR: N, UI: N, VC: N, VI: N, VA: N }
     rationale: >
       High-entropy blob in non-executable asset; treat as noise unless corroborated.
-    overrides: { severity_cap: Info }
+    overrides: { severity_cap: Info, suppress_if_doc_policy: true }
 
   # ===== Crypto / TLS =====
   - detector_id: CRYPTO-MD5
+    area: PLATFORM
     base: { AV: N, AC: L, AT: N, PR: N, UI: N, VC: N, VI: L, VA: N }
-    rationale: >
-      MD5 used for security-sensitive purpose; collisions feasible.
+    rationale: "MD5 used in security context; collisions feasible."
 
   - detector_id: CRYPTO-SHA1
+    area: PLATFORM
     base: { AV: N, AC: L, AT: N, PR: N, UI: N, VC: N, VI: L, VA: N }
-    rationale: >
-      SHA-1 used in security context; consider stronger hash.
+    rationale: "SHA-1 used in security context; consider stronger hash."
 
   - detector_id: TLS-SSLV3-REF
+    area: NETWORK
     base: { AV: N, AC: L, AT: N, PR: N, UI: N, VC: L, VI: N, VA: N }
-    rationale: >
-      Reference to SSLv3/obsolete cipher; if reachable at runtime, risks downgrade/weak crypto.
+    rationale: "Reference to obsolete protocol/cipher; if reachable, enables downgrade."
 
   # ===== Dynamic loading / code exec =====
   - detector_id: DYNLOAD-DEXCLASSLOADER
+    area: PLATFORM
     base: { AV: N, AC: L, AT: R, PR: N, UI: N, VC: N, VI: L, VA: N }
     rationale: >
-      DexClassLoader/PathClassLoader used; risk depends on source (network/tmp). Raise if combined with cleartext.
+      Dex/PathClassLoader used; raise if combined with cleartext or world-writable sources.
+    overrides:
+      bump_if:
+        - when_detector_present: ["BASE-CLR-001","STRING-ENDPOINT-HTTP-NONLOCAL"]
+          to_band: "High"
 
-  - detector_id: DYNLOAD-SYSTEM-LOADLIB         # System.loadLibrary/System.load with external path
+  - detector_id: DYNLOAD-SYSTEM-LOADLIB
+    area: PLATFORM
     base: { AV: N, AC: L, AT: R, PR: N, UI: N, VC: N, VI: L, VA: N }
     rationale: >
-      Native library load from non-app-private dir may allow DLL hijack if writeable by attacker.
+      System.load/Library from non-private dir may allow DLL hijack.
 
   # ===== Permissions / Privacy =====
-  - detector_id: PERM-HIGH-SIGNAL-UNJUSTIFIED   # CAMERA/RECORD_AUDIO/CONTACTS etc. w/o justification
+  - detector_id: PERM-HIGH-SIGNAL-UNJUSTIFIED
+    area: PRIVACY
     base: { AV: N, AC: L, AT: N, PR: N, UI: N, VC: L, VI: N, VA: N }
     rationale: >
-      High-signal permission declared without matching capability artifacts; increases privacy risk.
+      High-signal permissions (CAMERA/MIC/CONTACTS) declared without observed capability; privacy risk.
 
   - detector_id: PRIV-TRACKING-SDK-COUNT>=2
+    area: PRIVACY
     base: { AV: N, AC: L, AT: N, PR: N, UI: N, VC: L, VI: N, VA: N }
-    rationale: >
-      Multiple tracking SDKs detected; increases re-identification risk.
     supplemental: { value_density: Y }
+    rationale: "Multiple tracking SDKs increase re-identification risk."
 
-  - detector_id: PRIV-PRIVACY-UX-MISSING        # no consent strings/links detected (static-only proxy)
+  - detector_id: PRIV-PRIVACY-UX-MISSING
+    area: PRIVACY
     base: { AV: N, AC: L, AT: N, PR: N, UI: N, VC: N, VI: N, VA: N }
-    rationale: >
-      No privacy/consent artifacts found in static resources; inconclusive but noteworthy.
     overrides: { severity_cap: Info }
+    rationale: "No consent/notice strings found; static-only proxy."
 
   # ===== Misc platform flags =====
   - detector_id: BASE-ALLOWBACKUP-ENABLED
+    area: PLATFORM
     base: { AV: L, AC: L, AT: N, PR: N, UI: N, VC: L, VI: N, VA: N }
-    rationale: >
-      android:allowBackup=true; increases data extraction surface via ADB backup if not restricted.
     overrides: { severity_cap: Low }
+    rationale: "android:allowBackup=true can increase data extraction surface."

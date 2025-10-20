@@ -1,15 +1,82 @@
+[meta]
+version = "1.2"
+notes = [
+  "Risk is computed per permission then aggregated by app.",
+  "Weights reflect intrinsic sensitivity; modifiers tune based on evidence and environment."
+]
+
 [weights]
-critical = 1.0
-high = 0.75
-medium = 0.5
-low = 0.25
+critical = 1.00
+high     = 0.75
+medium   = 0.50
+low      = 0.25
+none     = 0.00
+
+[group_multipliers]
+camera           = 1.10
+microphone       = 1.20
+location         = 1.30
+contacts         = 1.10
+calendar         = 0.90
+sms_mms          = 1.15
+call_logs        = 1.15
+storage_legacy   = 1.10
+sensors_activity = 1.00
+notifications    = 0.80
+bluetooth        = 0.95
+nearby_devices   = 0.90
+
+[permission_overrides]
+# "android.permission.SOME_VENDOR_SECRET" = { weight = 1.0 }
+
+[modifiers]
+telemetry_present          = 0.20
+runtime_usage_observed     = 0.25
+third_party_sdk_controls   = 0.15
+unrestricted_external_io   = 0.20
+weak_guardrails            = 0.15
+user_consent_flows         = -0.15
+purpose_limitation_copy    = -0.10
+strict_runtime_gates       = -0.15
+sandbox_storage_only       = -0.15
+unused_in_release          = -0.25
+justification_missing      = 0.20
+justification_present      = -0.10
 
 [bonuses]
-profiled = 0.1
-contextual = 0.2
+profiled   = 0.10
+contextual = 0.20
+
+[environment_scales]
+consumer   = 1.00
+enterprise = 1.15
+regulated  = 1.30
+
+[aggregation]
+method = "weighted_sum"
+max_per_permission = 1.50
+app_cap = 10.0
+min_to_flag = 0.75
+tail_damping.enabled = true
+tail_damping.threshold = 6
+tail_damping.factor = 0.5
 
 [grades]
-low = { min = 0, max = 2 }
-medium = { min = 2, max = 5 }
-high = { min = 5, max = 8 }
-critical = { min = 8, max = 10 }
+low      = { min = 0.0, max = 2.0 }
+medium   = { min = 2.0, max = 5.0 }
+high     = { min = 5.0, max = 8.0 }
+critical = { min = 8.0, max = 10.0 }
+
+[group_default_band]
+camera           = "high"
+microphone       = "critical"
+location         = "critical"
+contacts         = "high"
+calendar         = "medium"
+sms_mms          = "high"
+call_logs        = "high"
+storage_legacy   = "high"
+sensors_activity = "medium"
+notifications    = "low"
+bluetooth        = "medium"
+nearby_devices   = "medium"
