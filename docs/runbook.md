@@ -121,6 +121,12 @@ client.
 
 ## 6. Useful commands
 
+* Quick canonical inventory snapshot (counts + samples):
+  ```bash
+  python scripts/db_inventory.py --limit 5 --width 120
+  ```
+  Use `--only static_analysis_findings static_analysis_runs` to focus on a
+  subset when hunting for redundant tables.
 * Re-run canonical migrations & promotions:
   ```bash
   python - <<'PY'
