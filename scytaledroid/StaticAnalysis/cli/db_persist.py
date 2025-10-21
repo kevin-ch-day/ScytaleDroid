@@ -960,6 +960,7 @@ def _persist_static_tables(
             package_name=package_name,
             session_stamp=session_stamp,
             scope_label=scope_label,
+            run_id=run_id,
             counts=counts,
         )
         summary_id = _sa.upsert_summary(summary_record)
