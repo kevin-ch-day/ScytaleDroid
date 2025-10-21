@@ -10,6 +10,18 @@ from xml.etree import ElementTree
 
 import yaml
 
+
+def _normalise_tokens(raw: object) -> tuple[str, ...]:
+    if isinstance(raw, str):
+        return tuple(
+            token.strip().lower()
+            for token in raw.split("|")
+            if token and token.strip()
+        )
+    if isinstance(raw, Sequence):
+        return tuple(str(token).strip().lower() for token in raw if token)
+    return tuple()
+
 _ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
 
 
@@ -96,16 +108,7 @@ def _load_yaml_catalog(path: Path) -> Mapping[str, PermissionDescriptor]:
         if not name:
             continue
         protection_raw = item.get("protection") or item.get("protection_raw") or ""
-        if isinstance(protection_raw, str):
-            tokens = tuple(
-                token.strip().lower()
-                for token in protection_raw.split("|")
-                if token and token.strip()
-            )
-        elif isinstance(protection_raw, Sequence):
-            tokens = tuple(str(token).strip().lower() for token in protection_raw if token)
-        else:
-            tokens = tuple()
+        tokens = _normalise_tokens(protection_raw)
         entries[name] = PermissionDescriptor(
             name=name,
             protection=tokens,
@@ -114,6 +117,39 @@ def _load_yaml_catalog(path: Path) -> Mapping[str, PermissionDescriptor]:
             deprecated_api=_coerce_int(item.get("deprecated_api")),
         )
     return entries
+
+
+def _load_db_catalog() -> tuple[Mapping[str, PermissionDescriptor], str]:
+    try:  # optional DB dependency
+        from scytaledroid.Database.db_func.permissions import framework_permissions as fp
+    except Exception:
+        return {}, "0"
+
+    try:
+        rows = fp.fetch_catalog_entries()
+    except Exception:
+        rows = []
+    if not rows:
+        return {}, "0"
+
+    entries: MutableMapping[str, PermissionDescriptor] = {}
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        name = str(row.get("perm_name") or row.get("name") or "").strip()
+        if not name:
+            continue
+        tokens = _normalise_tokens(row.get("protection_raw") or row.get("protection") or "")
+        entries[name] = PermissionDescriptor(
+            name=name,
+            protection=tokens,
+            source=str(row.get("source") or "db"),
+            added_api=_coerce_int(row.get("added_api")),
+            deprecated_api=_coerce_int(row.get("deprecated_api")),
+        )
+
+    version = fp.catalog_fingerprint()
+    return entries, version
 
 
 def _coerce_int(value: object) -> Optional[int]:
@@ -138,8 +174,11 @@ def _default_catalog_paths() -> tuple[Path, ...]:
 
 @lru_cache(maxsize=1)
 def load_permission_catalog() -> PermissionCatalog:
-    """Load the framework permission catalog from YAML sources."""
+    """Load the framework permission catalog from DB or packaged YAML."""
 
+    entries, version = _load_db_catalog()
+    if entries:
+        return PermissionCatalog(entries=entries, version=version)
     for path in _default_catalog_paths():
         try:
             entries = _load_yaml_catalog(path)

@@ -18,6 +18,7 @@ _DDL = [
     CREATE TABLE IF NOT EXISTS runs (
       run_id        BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
       package       VARCHAR(191)    NOT NULL,
+      app_label     VARCHAR(191)    NULL,
       version_code  BIGINT          NULL,
       version_name  VARCHAR(191)    NULL,
       target_sdk    INT             NULL,
@@ -122,6 +123,7 @@ def ensure_schema() -> bool:
 def create_run(
     *,
     package: str,
+    app_label: Optional[str],
     version_code: Optional[int],
     version_name: Optional[str],
     target_sdk: Optional[int],
@@ -137,11 +139,12 @@ def create_run(
         ensure_schema()
         run_id = core_q.run_sql(
             (
-                "INSERT INTO runs (package, version_code, version_name, target_sdk, schema_version, ts, session_stamp, prefs_hash, installer, confidence, threat_profile, env_profile) "
-                "VALUES (%s,%s,%s,%s,%s,CURRENT_TIMESTAMP,%s,%s,%s,%s,%s,%s)"
+                "INSERT INTO runs (package, app_label, version_code, version_name, target_sdk, schema_version, ts, session_stamp, prefs_hash, installer, confidence, threat_profile, env_profile) "
+                "VALUES (%s,%s,%s,%s,%s,%s,CURRENT_TIMESTAMP,%s,%s,%s,%s,%s,%s)"
             ),
             (
                 package,
+                app_label,
                 version_code,
                 version_name,
                 target_sdk,
@@ -288,6 +291,10 @@ def _ensure_runs_session_column() -> None:
 
 def _ensure_run_profiles_columns() -> None:
     for column_name, ddl in (
+        (
+            "app_label",
+            "ALTER TABLE runs ADD COLUMN app_label VARCHAR(191) NULL AFTER package;",
+        ),
         (
             "threat_profile",
             "ALTER TABLE runs ADD COLUMN threat_profile VARCHAR(32) NOT NULL DEFAULT 'Unknown' AFTER session_stamp;",

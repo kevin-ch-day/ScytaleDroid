@@ -59,6 +59,10 @@ _STATIC_VIEWS: tuple[str, ...] = (
 )
 
 _PERMISSION_TABLES: tuple[str, ...] = (
+    "perm_groups",
+    "android_perm_map",
+    "android_perm_override",
+    "android_framework_permissions",
     "permission_signal_catalog",
     "permission_signal_mappings",
     "permission_cohort_expectations",

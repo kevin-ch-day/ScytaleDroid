@@ -4,31 +4,30 @@ from __future__ import annotations
 
 CREATE_SIGNAL_CATALOG = """
 CREATE TABLE IF NOT EXISTS permission_signal_catalog (
-    signal_id INT UNSIGNED NOT NULL AUTO_INCREMENT,
-    signal_key VARCHAR(64) NOT NULL,
-    display_name VARCHAR(128) NOT NULL,
+    signal_key VARCHAR(128) NOT NULL,
+    display_name VARCHAR(191) NOT NULL,
     description TEXT NULL,
     default_weight DECIMAL(8,3) NOT NULL DEFAULT 0.000,
+    default_band VARCHAR(16) NULL,
+    stage ENUM('declared','runtime','policy') NOT NULL DEFAULT 'declared',
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (signal_id),
-    UNIQUE KEY ux_permission_signal_catalog_key (signal_key)
+    PRIMARY KEY (signal_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 """
 
 CREATE_SIGNAL_MAPPINGS = """
 CREATE TABLE IF NOT EXISTS permission_signal_mappings (
-    mapping_id INT UNSIGNED NOT NULL AUTO_INCREMENT,
-    signal_key VARCHAR(64) NOT NULL,
     perm_name VARCHAR(191) NOT NULL,
-    namespace VARCHAR(64) NULL,
+    signal_key VARCHAR(128) NOT NULL,
+    stage ENUM('declared','runtime','policy') NULL,
     confidence ENUM('low','medium','high') NOT NULL DEFAULT 'high',
-    notes VARCHAR(255) NULL,
+    notes TEXT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (mapping_id),
-    UNIQUE KEY ux_permission_signal_mappings_pair (signal_key, perm_name, namespace),
+    PRIMARY KEY (perm_name, signal_key),
     KEY ix_permission_signal_mappings_perm (perm_name),
+    KEY ix_permission_signal_mappings_signal (signal_key),
     CONSTRAINT fk_permission_signal_mappings_signal
         FOREIGN KEY (signal_key)
         REFERENCES permission_signal_catalog (signal_key)
@@ -38,19 +37,14 @@ CREATE TABLE IF NOT EXISTS permission_signal_mappings (
 
 CREATE_COHORT_EXPECTATIONS = """
 CREATE TABLE IF NOT EXISTS permission_cohort_expectations (
-    expectation_id INT UNSIGNED NOT NULL AUTO_INCREMENT,
-    cohort VARCHAR(64) NOT NULL,
-    signal_key VARCHAR(64) NOT NULL,
-    expected TINYINT(1) NOT NULL DEFAULT 0,
-    notes VARCHAR(255) NULL,
+    profile_key VARCHAR(64) NOT NULL,
+    subject_kind ENUM('permission','group','signal') NOT NULL DEFAULT 'permission',
+    subject_key VARCHAR(191) NOT NULL,
+    expectation ENUM('forbid','allow','justify','warn') NOT NULL,
+    reason TEXT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (expectation_id),
-    UNIQUE KEY ux_permission_cohort_expectations (cohort, signal_key),
-    CONSTRAINT fk_permission_cohort_expectations_signal
-        FOREIGN KEY (signal_key)
-        REFERENCES permission_signal_catalog (signal_key)
-        ON DELETE CASCADE
+    PRIMARY KEY (profile_key, subject_kind, subject_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 """
 
