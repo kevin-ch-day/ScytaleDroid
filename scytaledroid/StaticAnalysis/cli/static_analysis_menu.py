@@ -2,30 +2,64 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from scytaledroid.Config import app_config
-from scytaledroid.Database.db_utils.reset_static import reset_static_analysis_data
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 
-from ..core.repository import group_artifacts
-from .commands import COMMANDS, get_command, iter_commands
-from .commands.models import Command
-from .models import RunParameters
-from .prompts import default_custom_tests, prompt_advanced_options
-from .runner import launch_scan_flow
-from .scope import select_scope
-from scytaledroid.Database.db_utils.menus import query_runner
-from .menu_actions import (
-    apply_command_overrides,
-    ask_run_controls,
-    confirm_reset,
-    prompt_session_label,
-    render_reset_outcome,
-)
+if TYPE_CHECKING:
+    from .commands.models import Command
+    from .models import RunParameters
+
+
+@lru_cache(maxsize=1)
+def _load_menu_actions():  # pragma: no cover - simple cache wrapper
+    from . import menu_actions
+
+    return menu_actions
+
+
+def apply_command_overrides(
+    params: "RunParameters",
+    command: "Command",
+) -> "RunParameters":
+    actions = _load_menu_actions()
+    return actions.apply_command_overrides(params, command)
+
+
+def ask_run_controls() -> str:
+    actions = _load_menu_actions()
+    return actions.ask_run_controls()
+
+
+def confirm_reset() -> bool:
+    actions = _load_menu_actions()
+    return actions.confirm_reset()
+
+
+def prompt_session_label(params: "RunParameters") -> "RunParameters":
+    actions = _load_menu_actions()
+    return actions.prompt_session_label(params)
+
+
+def render_reset_outcome(outcome: object) -> None:
+    actions = _load_menu_actions()
+    actions.render_reset_outcome(outcome)
 
 
 def static_analysis_menu() -> None:
+    from scytaledroid.Database.db_utils.menus import query_runner
+    from scytaledroid.Database.db_utils.reset_static import reset_static_analysis_data
+
+    from ..core.repository import group_artifacts
+    from .commands import COMMANDS, get_command, iter_commands
+    from .models import RunParameters
+    from .prompts import default_custom_tests, prompt_advanced_options
+    from .runner import launch_scan_flow
+    from .scope import select_scope
+
     base_dir = Path(app_config.DATA_DIR) / "apks"
     groups = tuple(group_artifacts(base_dir))
     if not groups:
@@ -42,7 +76,14 @@ def static_analysis_menu() -> None:
     tool_commands = tuple(cmd for cmd in iter_commands("scan") if cmd.section == "tools")
     insight_commands = tuple(cmd for cmd in iter_commands("readonly"))
     selectable_ids = [cmd.id for cmd in COMMANDS]
+
+    if not selectable_ids:
+        print(status_messages.status("No static analysis commands are registered.", level="error"))
+        prompt_utils.press_enter_to_continue()
+        return
+
     default_key = workflow_commands[0].id if workflow_commands else None
+    default_choice = default_key or selectable_ids[0]
 
     while True:
         print()
@@ -76,7 +117,7 @@ def static_analysis_menu() -> None:
         if rendered_section:
             print()
         menu_utils.print_menu([], show_exit=True, exit_label="Back", show_descriptions=False)
-        choice = prompt_utils.get_choice(selectable_ids + ["0"], default="1")
+        choice = prompt_utils.get_choice(selectable_ids + ["0"], default=default_choice)
 
         if choice == "0":
             break

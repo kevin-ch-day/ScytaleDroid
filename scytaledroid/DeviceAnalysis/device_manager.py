@@ -20,17 +20,28 @@ _LAST_SERIAL: Optional[str] = None
 
 
 def _load_state() -> None:
+    global _ACTIVE_SERIAL
     global _LAST_SERIAL
     if not _STATE_FILE.exists():
         return
     try:
         data = json.loads(_STATE_FILE.read_text(encoding="utf-8"))
-        serial = data.get("active_serial")
-        if not serial:
-            serial = data.get("last_serial")
-        if isinstance(serial, str) and serial:
-            _LAST_SERIAL = serial
+        active_serial = data.get("active_serial")
+        last_serial = data.get("last_serial")
+
+        if isinstance(active_serial, str) and active_serial:
+            _ACTIVE_SERIAL = active_serial
+        else:
+            _ACTIVE_SERIAL = None
+
+        if isinstance(last_serial, str) and last_serial:
+            _LAST_SERIAL = last_serial
+        elif _ACTIVE_SERIAL:
+            _LAST_SERIAL = _ACTIVE_SERIAL
+        else:
+            _LAST_SERIAL = None
     except Exception:
+        _ACTIVE_SERIAL = None
         _LAST_SERIAL = None
 
 

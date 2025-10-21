@@ -1,10 +1,29 @@
 # ScytaleDroid
 
-ScytaleDroid is a menu-driven toolkit for harvesting, cataloging, and
-analyzing Android application packages (APKs) from real devices. The project
-emphasizes a "database-first" design so every artifact is traced by an
-`apk_id`, paired with predictable filenames, and ready for follow-on static,
-dynamic, or threat-intel analysis.
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![CLI](https://img.shields.io/badge/interface-menu--driven-orange.svg)](./run.sh)
+
+ScytaleDroid is a menu-driven toolkit for harvesting, cataloging, and analyzing Android
+application packages (APKs) from real devices. The project emphasizes a
+"database-first" design so every artifact is traced by an `apk_id`, paired with
+predictable filenames, and ready for follow-on static, dynamic, or threat-intel
+analysis.
+
+- [Feature highlights](#feature-highlights)
+- [Quick start](#quick-start)
+  - [Prerequisites](#prerequisites)
+  - [Environment setup](#environment-setup)
+  - [Verify connectivity](#verify-connectivity)
+- [Usage](#usage)
+  - [Launch the menu](#launch-the-menu)
+  - [Harvest devices](#harvest-devices)
+  - [Run static analysis](#run-static-analysis)
+  - [Work with standalone APKs](#work-with-standalone-apks)
+- [Project layout & docs](#project-layout--docs)
+- [Configuration](#configuration)
+- [Contributing](#contributing)
+- [License](#license)
 
 ## Feature highlights
 
@@ -49,45 +68,107 @@ dynamic, or threat-intel analysis.
   housekeeping action that prunes JSON/HTML exports older than 30 days and
   resets cache/temp directories so local runs stay lean.
 
-### Static analysis preview
+## Quick start
 
-- Use the main menu option **Static analysis** to review harvested APKs without
-  leaving the CLI. Each run executes the detector pipeline, records per-stage
-  timings, and persists a reproducibility bundle with manifest, network
-  security, and string-index snapshots.
-- Default runs launch immediately using sane defaults (auto workers, INFO log
-  level, cache purge). Advanced overrides remain available from the CLI for
-  analysts who need to tweak thresholds or detector subsets.
-- Section renderers surface deterministic tables for component exposure,
-  provider ACLs, secrets, storage risk, crypto posture, DFIR evidence hints,
-  and correlation-backed findings. Evidence is capped per section with
-  hash-derived pointers so secrets never print to screen. Highlight ribbons
-  call out suppressed secrets, NSC-enforced cleartext blocking, and unguarded
-  providers the moment a run finishes.
-- Analyses are saved as JSON reports under `data/static_analysis/reports/` and
-  simultaneously promoted into the canonical database. Diff views highlight
-  permission drift, network-security changes, SDK/native deltas, and
-  string-cluster shifts with lineage-aware baselines.
-- Permission analysis renders a concise, field‑friendly view:
-  - Postcards: Risk bar + Score/Grade + High‑signal + Footprint table
-  - Risk Summary: Abbr | Score | Grade | D | S | V
-  - Signal Matrix: Dangerous/Signature signals per app
-  - Permission Matrix: `x/*/-` by app x permission (top 10 in “All apps”; all in narrow scopes)
-- You can also analyse a standalone APK outside the repository by choosing the
-  "Analyze APK from local path" option and pointing the CLI at the file.
+### Prerequisites
 
-### Harvest configuration highlights
+ScytaleDroid targets modern Linux hosts. Before running the toolkit make sure you have:
 
-- `HARVEST_DEDUP_SHA256` / `HARVEST_KEEP_LAST` control hash-based dedupe. Keep
-  quick re-pulls light by skipping identical artifacts or force the latest copy
-  when needed.
-- `HARVEST_WRITE_DB` toggles repository writes so test runs can avoid touching
-  the database while still producing on-disk artifacts and metadata.
-- `HARVEST_META_FIELDS` accepts a comma-delimited list of metadata keys so the
-  sidecar `*.meta.json` files stay focused on the attributes your workflow
-  expects.
+- **Python 3.11 or newer.** The project is linted and typed against Python 3.13; a 3.11+
+  interpreter is required for the CLI and utilities.
+- **ADB** with access to the devices you plan to inventory. Confirm `adb devices`
+  returns the hardware you want to target.
+- **SQLite 3.35+** (ships with modern distros) for the local persistence layer. If you
+  point the CLI at a remote database, provision credentials with read/write access.
+- **Virtual environment (recommended).** Use `python -m venv .venv && source .venv/bin/activate`
+  to keep dependencies isolated.
 
-## Documentation map
+### Environment setup
+
+1. Clone the repository and enter it:
+   ```bash
+   git clone https://github.com/<your-org>/ScytaleDroid.git
+   cd ScytaleDroid
+   ```
+2. Install dependencies using the helper script:
+   ```bash
+   ./setup.sh
+   ```
+   The script validates Python availability, upgrades `pip`, and installs the packages
+   declared in `requirements.txt`.
+3. (Optional) Install developer tooling:
+   ```bash
+   python -m pip install --upgrade ruff pytest
+   ```
+   The repository includes Ruff and Pytest configuration so the commands above
+   align with our linting and test expectations.
+
+### Verify connectivity
+
+ScytaleDroid talks to devices and (optionally) a backing database. Useful smoke checks:
+
+```bash
+adb devices              # Ensure your device is listed and authorized
+python -m scytaledroid --help  # Confirm the package imports cleanly
+```
+
+If you are targeting a remote database, export the DSN variables your environment requires
+before launching the CLI.
+
+## Usage
+
+### Launch the menu
+
+The CLI wraps common collection and analysis workflows behind a curses-style menu. The
+fastest way to explore it is:
+
+```bash
+./run.sh
+```
+
+Passing `--help` reveals every sub-command:
+
+```bash
+./run.sh --help
+```
+
+### Harvest devices
+
+1. Connect one or more Android devices with USB debugging enabled.
+2. Launch the CLI and choose **Device analysis** → **5. Capture inventory** to snapshot
+   the installed packages.
+3. Choose **Device analysis** → **7. Harvest scoped APKs** to download the APKs for the
+   scope you defined. When inventories are only soft-stale, the quick-harvest path uses
+   `pm path` for fresh pulls without full filesystem snapshots.
+4. Review harvested artifacts under `data/device_analysis/` or in the configured database
+   tables.
+
+### Run static analysis
+
+Static analysis pipelines run directly from the menu or via the module entry point:
+
+```bash
+./run.sh static --profile full --scope QA --session "$(date +%Y%m%d-%H%M%S)"
+```
+
+During a run the CLI prints severity-aware progress and highlight ribbons for items like
+suppressed secrets, NSC enforcement, and unguarded providers. Results are persisted to the
+canonical tables and exported under `data/static_analysis/reports/`.
+
+To simulate a run without touching the database use a dry-run:
+
+```bash
+python -m scytaledroid.StaticAnalysis.cli.run --profile full --dry-run
+```
+
+### Work with standalone APKs
+
+The **Analyze APK from local path** option lets you point the CLI at an individual APK file.
+This is useful for regression testing or reviewing artifacts harvested outside ScytaleDroid.
+
+## Project layout & docs
+
+ScytaleDroid keeps detailed operator documentation under `docs/`:
 
 - [`docs/device_analysis/README.md`](docs/device_analysis/README.md) – current
   harvesting workflow, scope controls, and repository layout.
@@ -105,15 +186,14 @@ dynamic, or threat-intel analysis.
   severity/category matrices, workload profiling, and novelty indicators.
 - [`docs/static_analysis_improvement_plan.md`](docs/static_analysis_improvement_plan.md) –
   current milestone recap and next tightening steps.
+- [`docs/runbook.md`](docs/runbook.md) – step-by-step static analysis and persistence runbook.
 - [`RENAME_GUIDE.md`](RENAME_GUIDE.md) – module naming map and deprecation plan.
 
-For a detailed overview tailored to collaborators, including what is finished,
-what we are tightening now, and how others can help, start with the device and
-static analysis guides above.
+## Configuration
 
-## Configuration (env)
+Environment variables control CLI behaviour:
 
-- `FORCE_COLOR` / `NO_COLOR` – colour control in console
+- `FORCE_COLOR` / `NO_COLOR` – colour control in console.
 - `SCY_PERMISSION_RISK_TOML` – optional path to TOML scoring config. If unset,
   the engine looks for `config/permission_risk.toml` or
   `data/config/permission_risk.toml`.
@@ -133,3 +213,30 @@ breadth_cap  = 2.0
 [normalize]
 max_score = 10.0
 ```
+
+Additional configuration for persistence, database promotion, and analytics can be found in
+[`docs/runbook.md`](docs/runbook.md).
+
+## Contributing
+
+We welcome bug reports, feature requests, and pull requests. Please review the
+[contribution guidelines](CONTRIBUTING.md) for details on our development workflow, coding
+style, and testing expectations. Adherence to the [Code of Conduct](CODE_OF_CONDUCT.md) is
+required for all community interactions.
+
+To run the test suite locally:
+
+```bash
+pytest
+```
+
+Linting is handled by Ruff:
+
+```bash
+ruff check .
+ruff format --check .
+```
+
+## License
+
+ScytaleDroid is distributed under the terms of the [MIT License](LICENSE).

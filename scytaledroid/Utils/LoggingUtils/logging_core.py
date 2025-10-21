@@ -11,7 +11,13 @@ from scytaledroid.Config import app_config
 
 # Base log directory
 LOG_DIR = Path("logs")
-LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _ensure_log_dir() -> None:
+    """Create the log directory lazily the first time a logger is configured."""
+
+    if not LOG_DIR.exists():
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # Standard formatter
@@ -44,6 +50,8 @@ def setup_logger(
 
     if logger.handlers:
         return logger  # Already configured
+
+    _ensure_log_dir()
 
     # File handler (rotating)
     file_path = LOG_DIR / log_file
