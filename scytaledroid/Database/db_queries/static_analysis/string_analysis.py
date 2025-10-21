@@ -67,6 +67,17 @@ CREATE TABLE IF NOT EXISTS static_string_samples (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 """
 
+CREATE_STRING_MATCH_CACHE = """
+CREATE TABLE IF NOT EXISTS string_match_cache (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  fingerprint CHAR(64) NOT NULL,
+  tag VARCHAR(64) NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_string_match_cache_fingerprint_tag (fingerprint, tag)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+"""
+
 INSERT_STRING_SUMMARY = """
 INSERT INTO static_string_summary (
   package_name, session_stamp, scope_label, run_id,
@@ -227,6 +238,7 @@ SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() A
 __all__ = [
     "CREATE_STRING_SUMMARY",
     "CREATE_STRING_SAMPLES",
+    "CREATE_STRING_MATCH_CACHE",
     "INSERT_STRING_SUMMARY",
     "SELECT_SUMMARY_ID",
     "DELETE_SAMPLES_FOR_SUMMARY",

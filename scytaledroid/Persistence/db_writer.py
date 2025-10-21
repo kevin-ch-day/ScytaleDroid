@@ -111,6 +111,7 @@ def ensure_schema(*, raise_on_error: bool = False) -> bool:
         for stmt in _DDL:
             core_q.run_sql(stmt)
         _ensure_runs_session_column()
+        _ensure_runs_timestamp_index()
         _ensure_run_profiles_columns()
         _ensure_findings_extended_columns()
         _ensure_metrics_unique_key()
@@ -302,6 +303,13 @@ def _ensure_runs_session_column() -> None:
 
     try:
         core_q.run_sql("ALTER TABLE runs ADD INDEX ix_runs_session (session_stamp);")
+    except Exception:
+        pass
+
+
+def _ensure_runs_timestamp_index() -> None:
+    try:
+        core_q.run_sql("ALTER TABLE runs ADD INDEX ix_runs_ts (ts);")
     except Exception:
         pass
 

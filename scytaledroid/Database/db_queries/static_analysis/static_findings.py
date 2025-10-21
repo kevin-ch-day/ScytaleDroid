@@ -16,7 +16,8 @@ CREATE TABLE IF NOT EXISTS static_findings_summary (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY ux_findings_summary (package_name, session_stamp, scope_label),
-  KEY ix_findings_session (session_stamp)
+  KEY ix_findings_session (session_stamp),
+  KEY ix_findings_session_pkg (session_stamp, package_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 """
 
@@ -32,6 +33,7 @@ CREATE TABLE IF NOT EXISTS static_findings (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   KEY ix_findings_summary (summary_id),
+  KEY ix_findings_severity_summary (severity, summary_id),
   CONSTRAINT fk_findings_summary FOREIGN KEY (summary_id)
     REFERENCES static_findings_summary (id)
     ON DELETE CASCADE

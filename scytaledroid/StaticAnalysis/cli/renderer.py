@@ -377,6 +377,71 @@ class BaselineFinding:
     evidence: Mapping[str, str]
 
 
+_SEVERITY_NORMALISER = {
+    "critical": "High",
+    "high": "High",
+    "p0": "High",
+    "medium": "Medium",
+    "med": "Medium",
+    "p1": "Medium",
+    "low": "Low",
+    "p2": "Low",
+    "info": "Info",
+    "information": "Info",
+    "note": "Info",
+    "p3": "Low",
+    "p4": "Info",
+}
+
+
+def _normalise_baseline_severity(value: object) -> str:
+    token = str(value).strip().lower()
+    if not token:
+        return "Info"
+    mapped = _SEVERITY_NORMALISER.get(token)
+    if mapped:
+        return mapped
+    if token and token[0] in _SEVERITY_NORMALISER:
+        return _SEVERITY_NORMALISER[token[0]] or "Info"
+    return token.title()
+
+
+def _detector_severity_map(report: StaticAnalysisReport) -> Mapping[str, str]:
+    lookup: MutableMapping[str, str] = {}
+    try:
+        results = getattr(report, "detector_results", None) or ()
+    except Exception:
+        results = ()
+    for result in results:
+        findings = getattr(result, "findings", None) or ()
+        for finding in findings:
+            finding_id = getattr(finding, "finding_id", None) or getattr(finding, "id", None)
+            if not finding_id:
+                continue
+            severity = None
+            severity = severity or _SEVERITY_NORMALISER.get(
+                str(getattr(finding, "severity", "")).strip().lower()
+            )
+            severity = severity or _SEVERITY_NORMALISER.get(
+                str(getattr(finding, "severity_label", "")).strip().lower()
+            )
+            metrics = getattr(finding, "metrics", None)
+            if isinstance(metrics, Mapping):
+                severity = severity or _SEVERITY_NORMALISER.get(
+                    str(metrics.get("severity", "")).strip().lower()
+                )
+                severity = severity or _SEVERITY_NORMALISER.get(
+                    str(metrics.get("severity_level", "")).strip().lower()
+                )
+            if not severity:
+                gate = getattr(getattr(finding, "severity_gate", None), "value", None)
+                if gate is not None:
+                    severity = _SEVERITY_NORMALISER.get(str(gate).strip().lower())
+            if severity:
+                lookup.setdefault(str(finding_id), severity)
+    return lookup
+
+
 def _wrap_lines(text: str, *, indent: int = 2, subsequent_indent: int | None = None) -> list[str]:
     initial = " " * indent
     subsequent = " " * (subsequent_indent if subsequent_indent is not None else indent)
@@ -498,6 +563,7 @@ def _baseline_findings(
 ) -> tuple[list[BaselineFinding], Counter[str]]:
     findings: list[BaselineFinding] = []
     totals: Counter[str] = Counter()
+    severity_lookup = _detector_severity_map(report)
 
     def add(
         severity: str,
@@ -507,11 +573,12 @@ def _baseline_findings(
         fix: str,
         evidence: Mapping[str, str],
     ) -> None:
-        totals[severity] += 1
+        effective_severity = severity_lookup.get(str(finding_id)) or _normalise_baseline_severity(severity)
+        totals[effective_severity] += 1
         findings.append(
             BaselineFinding(
                 finding_id=finding_id,
-                severity=severity,
+                severity=effective_severity,
                 title=title,
                 pointer=pointer,
                 fix=fix,

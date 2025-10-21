@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
@@ -89,6 +90,46 @@ def _coerce_mapping(obj: Any) -> Dict[str, Any]:
             continue
         data[attr] = value
     return data
+
+
+_SEVERITY_CANONICAL = {
+    "critical": "High",
+    "high": "High",
+    "p0": "High",
+    "medium": "Medium",
+    "med": "Medium",
+    "p1": "Medium",
+    "low": "Low",
+    "p2": "Low",
+    "info": "Info",
+    "information": "Info",
+    "note": "Info",
+    "p3": "Low",
+    "p4": "Info",
+}
+
+
+def _normalise_severity_token(value: object | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if not text:
+        return None
+    mapped = _SEVERITY_CANONICAL.get(text)
+    if mapped:
+        return mapped
+    if text and text[0] in _SEVERITY_CANONICAL:
+        return _SEVERITY_CANONICAL.get(text[0])
+    return None
+
+
+def _canonical_severity_counts(counter: Counter[str]) -> Dict[str, int]:
+    return {
+        "High": int(counter.get("High", 0)),
+        "Medium": int(counter.get("Medium", 0)),
+        "Low": int(counter.get("Low", 0)),
+        "Info": int(counter.get("Info", 0)),
+    }
 
 
 def _persist_storage_surface_data(report, session_stamp: str, scope_label: str) -> None:
@@ -304,7 +345,9 @@ def persist_run_summary(
             log.warning(message, category="static_analysis")
             outcome.add_error(message)
 
-    severity_map = {"P0": "High", "P1": "Medium", "P2": "Low", "NOTE": "Info"}
+    baseline_counts = coerce_severity_counts(finding_totals)
+    severity_counter: Counter[str] = Counter()
+    downgraded_high = 0
 
     finding_rows: list[Dict[str, Any]] = []
     control_entries: list[Tuple[str, Mapping[str, Any]]] = []
@@ -322,8 +365,23 @@ def persist_run_summary(
             module_id = str(module_id_val) if module_id_val not in (None, "") else None
             for f in result.findings:
                 total_findings += 1
+                detector_sev = _normalise_severity_token(getattr(f, "severity", None))
+                if detector_sev is None:
+                    detector_sev = _normalise_severity_token(getattr(f, "severity_label", None))
+                metrics_map = getattr(f, "metrics", None)
+                if isinstance(metrics_map, Mapping):
+                    detector_sev = detector_sev or _normalise_severity_token(
+                        metrics_map.get("severity")
+                    )
+                    detector_sev = detector_sev or _normalise_severity_token(
+                        metrics_map.get("severity_level")
+                    )
                 gate_value = getattr(getattr(f, "severity_gate", None), "value", None)
-                sev = severity_map.get(str(gate_value), "Info") if gate_value else "Info"
+                gate_sev = _normalise_severity_token(gate_value)
+                sev = detector_sev or gate_sev or "Info"
+                if detector_sev == "High" and sev != "High":
+                    downgraded_high += 1
+                severity_counter[sev] += 1
                 evidence = normalize_evidence(
                     f.evidence,
                     detail_hint=getattr(f, "detail", None)
@@ -401,6 +459,25 @@ def persist_run_summary(
 
     control_summary = summarise_controls(control_entries)
 
+    if severity_counter:
+        severity_counts = _canonical_severity_counts(severity_counter)
+        persisted_totals = Counter(severity_counts)
+        mismatch = {
+            key: severity_counts[key] - baseline_counts.get(key, 0)
+            for key in severity_counts
+            if severity_counts[key] != baseline_counts.get(key, 0)
+        }
+        if mismatch:
+            log.info(
+                "Adjusted severity totals for %s based on detector output: %s",
+                run_package,
+                mismatch,
+                category="static_analysis",
+            )
+    else:
+        severity_counts = baseline_counts
+        persisted_totals = Counter(severity_counts)
+
     if finding_rows:
         if run_id is None:
             sample = finding_rows[0] if finding_rows else {}
@@ -444,6 +521,8 @@ def persist_run_summary(
         "exports.total": (float(getattr(getattr(br, "exported_components", None), "total", lambda: 0)()), None),
     }
     metrics_payload["findings.total"] = (float(total_findings), None)
+    if downgraded_high:
+        metrics_payload["findings.high_downgraded"] = (float(downgraded_high), None)
     rule_cov_pct = (float(rule_assigned) / float(total_findings) * 100.0) if total_findings else 0.0
     base_cov_pct = (float(base_vector_count) / float(total_findings) * 100.0) if total_findings else 0.0
     bte_cov_pct = (float(bte_vector_count) / float(total_findings) * 100.0) if total_findings else 0.0
@@ -487,7 +566,7 @@ def persist_run_summary(
             package_name=br.manifest.package_name or run_package,
             session_stamp=session_stamp,
             scope_label=scope_label,
-            finding_totals=finding_totals,
+            finding_totals=persisted_totals,
             baseline_section=baseline_section if isinstance(baseline_section, Mapping) else {},
             string_payload=string_payload if isinstance(string_payload, Mapping) else {},
             manifest=br.manifest,

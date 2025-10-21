@@ -6,12 +6,12 @@ import os
 from pathlib import Path
 import shutil
 from dataclasses import replace
-from datetime import datetime, timedelta
 
 from scytaledroid.Config import app_config
 from scytaledroid.Utils.DisplayUtils import summary_cards, status_messages
 from scytaledroid.Utils.System import output_prefs
 from scytaledroid.StaticAnalysis.persistence import ingest as canonical_ingest
+from scytaledroid.StaticAnalysis.session import make_session_stamp
 
 from .execution import (
     build_analysis_config,
@@ -30,11 +30,10 @@ from .scope import format_scope_target
 def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir: Path) -> RunOutcome | None:
     """Primary entry point for running static analysis flows from the CLI."""
 
-    previous_stamp = params.session_stamp or ""
-    now = datetime.now()
-    session_stamp = now.strftime("%Y%m%d-%H%M%S")
-    if session_stamp == previous_stamp:
-        session_stamp = (now + timedelta(seconds=1)).strftime("%Y%m%d-%H%M%S")
+    previous_stamp = (params.session_stamp or "").strip()
+    session_stamp = make_session_stamp()
+    if previous_stamp and session_stamp == previous_stamp:
+        session_stamp = make_session_stamp()
     params = replace(params, session_stamp=session_stamp)
     output_prefs.set_verbose(bool(params.verbose_output))
 
