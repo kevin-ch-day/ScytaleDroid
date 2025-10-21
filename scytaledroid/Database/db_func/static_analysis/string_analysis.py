@@ -78,6 +78,7 @@ def ensure_tables() -> bool:
         with database_session():
             run_sql(queries.CREATE_STRING_SUMMARY)
             run_sql(queries.CREATE_STRING_SAMPLES)
+            run_sql(queries.CREATE_STRING_MATCH_CACHE)
             run_sql(queries.CREATE_DOC_HOSTS_TABLE)
             for statement in (
                 "ALTER TABLE static_string_summary ADD COLUMN run_id BIGINT UNSIGNED NULL AFTER scope_label",

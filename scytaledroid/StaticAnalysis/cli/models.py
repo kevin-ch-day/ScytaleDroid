@@ -11,6 +11,7 @@ from typing import Mapping, Optional, Tuple
 
 from ..core import StaticAnalysisReport
 from ..core.repository import ArtifactGroup
+from ..session import make_session_stamp
 
 
 @dataclass(frozen=True)
@@ -20,10 +21,6 @@ class ScopeSelection:
     scope: str
     label: str
     groups: Tuple[ArtifactGroup, ...]
-
-
-def _make_session_stamp() -> str:
-    return datetime.now().strftime("%Y%m%d-%H%M%S")
 
 
 def _env_flag(name: str, default: bool) -> bool:
@@ -61,7 +58,7 @@ class RunParameters:
     log_level: str = "info"
     trace_detectors: Tuple[str, ...] = tuple()
     dry_run: bool = False
-    session_stamp: str | None = field(default_factory=_make_session_stamp)
+    session_stamp: str | None = field(default_factory=make_session_stamp)
     verbose_output: bool = False
 
     @property

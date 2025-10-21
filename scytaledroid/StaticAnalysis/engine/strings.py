@@ -46,6 +46,7 @@ from ..modules.string_analysis.constants import (
     S3_VIRTUAL_HOST_REGION,
 )
 from ..modules.string_analysis.parsing.host_normalizer import registrable_domain
+from ..modules.string_analysis.parsing.punctuation import strip_wrap_punct
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,7 @@ class EndpointInfo:
     root_domain: str | None
     risk_tag: str | None
     categories: tuple[str, ...]
+    trimmed: bool = False
 
 
 @dataclass(frozen=True)
@@ -148,9 +150,26 @@ def _ip_categories(host: str | None) -> tuple[str, ...]:
     return tuple()
 
 
+_TRAILING_ENDPOINT_CHARS = ")]}>.,;:'\"’”"
+
+
+def _sanitize_endpoint_value(value: str) -> tuple[str, bool]:
+    if not value:
+        return value, False
+    stripped = strip_wrap_punct(value)
+    sanitized = stripped.strip()
+    if sanitized.endswith("]") and "[" in sanitized and sanitized.count("[") == sanitized.count("]"):
+        return sanitized, sanitized != value
+    trimmed = sanitized.rstrip(_TRAILING_ENDPOINT_CHARS).strip()
+    if trimmed != sanitized:
+        return trimmed, True
+    return sanitized, sanitized != value
+
+
 def _detect_endpoints(value: str) -> Iterable[EndpointInfo]:
     for raw in ENDPOINT_PATTERN.findall(value):
-        parsed = urlsplit(raw)
+        sanitized, trimmed = _sanitize_endpoint_value(raw)
+        parsed = urlsplit(sanitized)
         scheme = (parsed.scheme or "").lower()
         host = parsed.hostname
         categories: list[str] = ["endpoints"]
@@ -170,12 +189,13 @@ def _detect_endpoints(value: str) -> Iterable[EndpointInfo]:
         if risk_tag is None:
             risk_tag = _host_risk_tag(host)
         yield EndpointInfo(
-            url=raw,
+            url=sanitized,
             scheme=scheme or None,
             host=host,
             root_domain=root_domain,
             risk_tag=risk_tag,
             categories=tuple(dict.fromkeys(categories)),
+            trimmed=trimmed,
         )
 
 
@@ -379,6 +399,7 @@ def analyse_strings(
         )
 
     counts: Dict[str, int] = {bucket: 0 for bucket in BUCKET_ORDER}
+    counts.setdefault("trailing_punct_trimmed", 0)
     extra_counts: Counter[str] = Counter()
     samples: Dict[str, List[StringHit]] = defaultdict(list)
 
@@ -402,6 +423,8 @@ def analyse_strings(
             sample_hash = _short_hash(endpoint.url)
             if endpoint.root_domain:
                 domain_sources[endpoint.root_domain].add(source_type or "unknown")
+            if endpoint.trimmed:
+                extra_counts["trailing_punct_trimmed"] += 1
             hit = StringHit(
                 bucket="endpoints",
                 value=endpoint.url,
@@ -653,6 +676,8 @@ def analyse_strings(
         analytics_vendor_ids=analytics_vendor_ids,
         entropy_high_samples=entropy_high_samples,
     )
+
+    counts["trailing_punct_trimmed"] = extra_counts.get("trailing_punct_trimmed", 0)
 
     return {
         "counts": counts,

@@ -42,7 +42,6 @@ are needed:
 | Device analysis | `device_analysis.log`   |
 | Static analysis | `static_analysis.log`   |
 | Dynamic analysis| `dynamic_analysis.log`  |
-| VirusTotal      | `virus_total.log`       |
 | Error funnel    | `error.log`             |
 
 The same helper also reminds operators where device state and static-analysis

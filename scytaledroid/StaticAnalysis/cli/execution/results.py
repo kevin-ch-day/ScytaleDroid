@@ -21,6 +21,7 @@ from scytaledroid.Utils.DisplayUtils import (
 from ...core import StaticAnalysisReport
 from ...engine.strings import analyse_strings
 from ..db_persist import persist_run_summary
+from ...persistence.snapshots import SNAPSHOT_PREFIX, write_permission_snapshot
 from ..detail import (
     SEVERITY_TOKEN_ORDER,
     app_detail_loop,
@@ -327,6 +328,12 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                 persistence_errors.append(failure_message)
         printed_db_table = False
         if session_stamp and persist_enabled:
+            try:
+                write_permission_snapshot(session_stamp, scope_label=params.scope_label)
+            except Exception as exc:
+                warning = f"Failed to write permission snapshot: {exc}"
+                print(status_messages.status(warning, level="warn"))
+                persistence_errors.append(str(exc))
             printed_db_table = _render_db_severity_table(session_stamp)
         if not printed_db_table:
             from ..detail import render_app_table  # local import to avoid cycle
@@ -1142,6 +1149,19 @@ def _render_persistence_footer(session_stamp: str, *, had_errors: bool = False) 
         except (TypeError, ValueError):
             return 0
 
+    print()
+    header = f"Diagnostics for session {session_stamp}"
+    print(header)
+    print("=" * len(header))
+
+    snapshot_key = f"{SNAPSHOT_PREFIX}{session_stamp}"
+    snapshot_row = core_q.run_sql(
+        "SELECT snapshot_id FROM permission_audit_snapshots WHERE snapshot_key=%s",
+        (snapshot_key,),
+        fetch="one",
+    )
+    snapshot_id = int(snapshot_row[0]) if snapshot_row and snapshot_row[0] is not None else None
+
     findings_summary = _count(
         "SELECT COUNT(*) FROM static_findings_summary WHERE session_stamp = %s",
         (session_stamp,),
@@ -1230,11 +1250,31 @@ def _render_persistence_footer(session_stamp: str, *, had_errors: bool = False) 
     findings_total = _count_total("SELECT COUNT(*) FROM findings")
     contributors_total = _count_total("SELECT COUNT(*) FROM contributors")
 
-    print()
+    snapshot_count = _count(
+        "SELECT COUNT(*) FROM permission_audit_snapshots WHERE snapshot_key = %s",
+        (snapshot_key,),
+    )
+    snapshot_total = _count_total("SELECT COUNT(*) FROM permission_audit_snapshots")
+    snapshot_apps_total = _count_total("SELECT COUNT(*) FROM permission_audit_apps")
+    snapshot_apps = 0
+    if snapshot_id is not None:
+        snapshot_apps = _count(
+            "SELECT COUNT(*) FROM permission_audit_apps WHERE snapshot_id = %s",
+            (snapshot_id,),
+        )
+
     print("Persisted")
-    print("==========")
+    print("----------")
     lines = [
         ("runs", f"{len(run_ids)} (total={runs_total})"),
+        (
+            "permission_audit_snapshots",
+            f"{snapshot_count} (total={snapshot_total})",
+        ),
+        (
+            "permission_audit_apps",
+            f"{snapshot_apps} (total={snapshot_apps_total})",
+        ),
         ("static_findings_summary", f"{findings_summary} (total={findings_summary_total})"),
         ("static_findings", f"{findings_detail} (total={findings_detail_total})"),
         ("static_string_summary", f"{strings_summary} (total={strings_summary_total})"),
@@ -1262,6 +1302,18 @@ def _render_persistence_footer(session_stamp: str, *, had_errors: bool = False) 
         print(f"  {name.ljust(width)} : {detail}")
     if had_errors:
         print(f"  {'status'.ljust(width)} : ERROR (see logs)")
+
+    high_downgraded = 0
+    if run_ids:
+        placeholders = ",".join(["%s"] * len(run_ids))
+        params = tuple(run_ids)
+        query = (
+            f"SELECT COALESCE(SUM(value_num),0) FROM metrics "
+            f"WHERE feature_key='findings.high_downgraded' AND run_id IN ({placeholders})"
+        )
+        high_downgraded = _count(query, params)
+    if high_downgraded:
+        print(f"  {'metrics.high_downgraded'.ljust(width)} : {high_downgraded}")
 
 
 __all__ = ["render_run_results"]

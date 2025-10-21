@@ -85,7 +85,6 @@ def main_menu() -> None:
 
     menu_actions: list[tuple[str, str, Callable[[], None]]] = [
         ("1", "Connect to Android Device", handle_device),
-        ("2", "VirusTotal analysis", handle_virustotal),
         ("3", "Static analysis", handle_static),
         ("4", "Harvest Android Permissions", handle_perm_catalog),
         ("5", "Dynamic analysis", handle_dynamic),
@@ -144,12 +143,6 @@ def handle_device() -> None:
     from scytaledroid.DeviceAnalysis.device_analysis_menu import device_menu
 
     device_menu()
-
-
-def handle_virustotal() -> None:
-    from scytaledroid.VirusTotal.menu import virustotal_menu
-
-    virustotal_menu()
 
 
 def handle_static() -> None:

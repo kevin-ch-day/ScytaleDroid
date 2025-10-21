@@ -14,6 +14,14 @@ def ensure_tables() -> bool:
         with database_session():
             run_sql(queries.CREATE_FINDINGS_SUMMARY)
             run_sql(queries.CREATE_FINDINGS)
+            for statement in (
+                "ALTER TABLE static_findings_summary ADD KEY ix_findings_session_pkg (session_stamp, package_name)",
+                "ALTER TABLE static_findings ADD KEY ix_findings_severity_summary (severity, summary_id)",
+            ):
+                try:
+                    run_sql(statement)
+                except Exception:
+                    continue
         return True
     except Exception:
         return False
