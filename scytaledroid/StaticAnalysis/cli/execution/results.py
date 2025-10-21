@@ -191,6 +191,7 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             min_entropy=params.string_min_entropy,
             max_samples=params.string_max_samples,
             cleartext_only=params.string_cleartext_only,
+            include_https_risk=params.string_include_https_risk,
         )
         manifest = base_report.manifest
 
@@ -626,11 +627,15 @@ def _code_http_counts(string_data: Mapping[str, object]) -> tuple[int, int]:
         http_samples = (samples.get("http_cleartext") or []) + (samples.get("endpoints") or [])
         code_hosts: set[str] = set()
         asset_hosts: set[str] = set()
+        options = string_data.get("options") if isinstance(string_data, Mapping) else {}
+        include_https = False
+        if isinstance(options, Mapping):
+            include_https = bool(options.get("https_in_risk"))
         for sample in http_samples:
             st = str(sample.get("source_type") or "").lower()
             scheme = str(sample.get("scheme") or "").lower()
             root = str(sample.get("root_domain") or "")
-            if scheme != "http":
+            if scheme not in {"http"} and not (include_https and scheme == "https"):
                 continue
             if st in {"code", "dex", "native"}:
                 if root:

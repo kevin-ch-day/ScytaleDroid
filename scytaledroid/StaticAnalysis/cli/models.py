@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass, field
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Mapping, Optional, Tuple
@@ -25,6 +26,18 @@ def _make_session_stamp() -> str:
     return datetime.now().strftime("%Y%m%d-%H%M%S")
 
 
+def _env_flag(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    value = value.strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def _default_https_risk() -> bool:
+    return _env_flag("SCYTALEDROID_STRINGS_INCLUDE_HTTPS_RISK", False)
+
+
 @dataclass(frozen=True)
 class RunParameters:
     """User-facing configuration for an analysis run."""
@@ -42,6 +55,7 @@ class RunParameters:
     string_max_samples: int = 2
     string_min_entropy: float = 4.8
     string_cleartext_only: bool = False
+    string_include_https_risk: bool = field(default_factory=_default_https_risk)
     workers: str = "auto"
     reuse_cache: bool = False
     log_level: str = "info"

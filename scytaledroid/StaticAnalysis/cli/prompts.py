@@ -61,6 +61,7 @@ def prompt_advanced_options(base_params: RunParameters) -> RunParameters:
     string_max_samples = params.string_max_samples
     string_min_entropy = params.string_min_entropy
     string_cleartext_only = params.string_cleartext_only
+    string_include_https_risk = params.string_include_https_risk
     if params.profile == "strings":
         strings_choice = prompt_choice(
             "Strings mode",
@@ -73,6 +74,10 @@ def prompt_advanced_options(base_params: RunParameters) -> RunParameters:
         string_cleartext_only = prompt_utils.prompt_yes_no(
             "Endpoints panel: show cleartext only",
             default=string_cleartext_only,
+        )
+        string_include_https_risk = prompt_utils.prompt_yes_no(
+            "Count HTTPS endpoints towards network risk",
+            default=string_include_https_risk,
         )
 
     workers = prompt_utils.prompt_text(
@@ -105,6 +110,7 @@ def prompt_advanced_options(base_params: RunParameters) -> RunParameters:
         string_max_samples=string_max_samples,
         string_min_entropy=string_min_entropy,
         string_cleartext_only=string_cleartext_only,
+        string_include_https_risk=string_include_https_risk,
         workers=workers or "auto",
         reuse_cache=reuse_cache,
         log_level="debug" if log_level == "2" else "info",
@@ -135,6 +141,10 @@ def _summarise_params(params: RunParameters) -> Tuple[tuple[str, object], ...]:
                 ("String max samples", params.string_max_samples),
                 ("String min entropy", params.string_min_entropy),
                 ("Cleartext only", _format_bool(params.string_cleartext_only)),
+                (
+                    "HTTPS counts toward risk",
+                    _format_bool(params.string_include_https_risk),
+                ),
             )
         )
 

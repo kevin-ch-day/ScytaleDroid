@@ -70,7 +70,7 @@ Downstream tooling can serialise these metrics via
 Exploratory SNI  com.example.app 1.0.0
 apk=3edff3b9c41d4a6d splits=2 strings: total=18742 (asset=544 dex=9201 res=8997)
 doc_noise_ratio=0.27 decoded_yield_rate=0.32 (21/66) obfuscation_hint=false
-Endpoints (non-doc): http_nonlocal=3 ws_cleartext=1 ip_literals_public=1 graphql=2 grpc=1
+Endpoints (non-doc): effective_http=3 effective_https=0 placeholders_dropped=0 doc_suppressed=0 doc_host_suppr=0 doc_cdn_suppr=0 doc_http_suppr=0 downgraded_placeholder=0 annotated_fragment=0 ws_cleartext=1 ws_seen=1 wss_seen=0 https_seen=2 ipv6_seen=1 ip_literals_public=1 graphql=2 grpc=1
 Secrets: aws_pairs=1 jwt_near_auth=0 base64_candidates=66 decoded=21 decode_fail=45
 Cloud: s3_buckets=1 firebase_projects=1 unknown_kind=14 unknown_ratio=0.07
 Splits: base=18012 feature.video=730
