@@ -132,6 +132,17 @@ def test_normalise_index_produces_metrics() -> None:
     assert metrics.obfuscation_hint is False
     assert metrics.issue_flags
     assert any(issue.slug == "cleartext_endpoints" for issue in metrics.issue_flags)
+    assert metrics.effective_http == 1
+    assert metrics.effective_https == 0
+    assert metrics.placeholders_dropped == 0
+    assert metrics.suppressed_doc_host == 0
+    assert metrics.suppressed_doc_cdn == 0
+    assert metrics.downgraded_placeholder == 0
+    assert metrics.annotated_fragment == 0
+    assert metrics.ipv6_seen == 0
+    assert metrics.ws_seen == 0
+    assert metrics.wss_seen == 0
+    assert metrics.https_seen == 0
 
 
 def test_policy_rules_from_config_apply() -> None:
@@ -177,6 +188,8 @@ def test_policy_downgrades_placeholder_hosts() -> None:
     assert record.policy_tag == "dev_placeholder_host"
     assert record.policy_severity == "info"
     assert record.is_allowlisted is False
+    assert summary.metrics.downgraded_placeholder == 1
+    assert summary.metrics.placeholders_dropped == 1
 
 
 def test_policy_respects_host_key_for_full_host(tmp_path: Path) -> None:
@@ -192,6 +205,7 @@ when.buckets_any = ["endpoints"]
 when.host_in_group = "hosts.allow_cdn_doc"
 when.host_key = "full_host"
 then.action = "suppress"
+then.reason = "policy_drift:doc_cdn_in_asset"
 """.strip()
     )
 
@@ -220,6 +234,40 @@ then.action = "suppress"
     actions = {record.value: record.policy_action for record in summary.strings}
     assert actions["http://fonts.googleapis.com/css?family=Roboto"] == "suppress"
     assert actions["http://api.googleapis.com/service"] is None
+    assert summary.metrics.suppressed_doc_cdn == 1
+    assert summary.metrics.suppressed_doc_host == 0
+
+
+def test_doc_cdn_source_path_normalization() -> None:
+    policy = load_noise_policy(DEFAULT_POLICY_ROOT)
+    index = StringIndex(
+        strings=(
+            IndexedString(
+                value="https://fonts.googleapis.com/css?family=Roboto",
+                origin="assets\\legal.html",
+                origin_type="asset",
+                source_sha256="1" * 64,
+                context="https://fonts.googleapis.com/css?family=Roboto",
+            ),
+            IndexedString(
+                value="https://fonts.googleapis.com/css?family=Roboto",
+                origin="assets/readme.txt",
+                origin_type="asset",
+                source_sha256="2" * 64,
+                context="https://fonts.googleapis.com/css?family=Roboto",
+            ),
+        )
+    )
+
+    summary = normalise_index(index, noise_policy=policy)
+    records = {record.source_path: record for record in summary.strings}
+    doc_record = records["assets\\legal.html"]
+    assert doc_record.is_allowlisted
+    assert doc_record.policy_action == "suppress"
+    non_doc = records["assets/readme.txt"]
+    assert not non_doc.is_allowlisted
+    assert summary.metrics.suppressed_doc_cdn == 1
+    assert summary.metrics.suppressed_doc_http == 0
 
 
 def test_policy_loads_from_directory(tmp_path: Path) -> None:
@@ -278,7 +326,8 @@ def test_render_exploratory_summary_outputs_samples() -> None:
     summary = normalise_index(index, noise_policy=NoisePolicy(frozenset(), frozenset()))
     text = render_exploratory_summary("com.example.app", "1.0.0", summary)
     assert "Exploratory SNI  com.example.app 1.0.0" in text
-    assert "http_nonlocal=1" in text
+    assert "effective_http=1" in text
+    assert "doc_host_suppr=" in text
     assert "aws_pairs=" in text
     assert "decode_fail=0" in text
     assert "unknown_ratio=" in text
@@ -287,6 +336,35 @@ def test_render_exploratory_summary_outputs_samples() -> None:
     assert "[HIGH] Non-local cleartext endpoints observed" in text
     assert "Samples (evidence):" in text
     assert "classes.dex@12" in text
+
+
+def test_http_only_risk_switch() -> None:
+    policy = NoisePolicy(frozenset(), frozenset())
+    index = StringIndex(
+        strings=(
+            IndexedString(
+                value="https://secure.example.com/api",
+                origin="classes.dex",
+                origin_type="dex",
+                byte_offset=12,
+                source_sha256="f" * 64,
+                context="https://secure.example.com/api",
+            ),
+        )
+    )
+    summary_default = normalise_index(index, noise_policy=policy)
+    assert summary_default.metrics.endpoints_nonlocal_http == 0
+    assert summary_default.metrics.effective_https == 1
+    assert summary_default.metrics.https_seen == 1
+
+    summary_https = normalise_index(
+        index,
+        noise_policy=policy,
+        include_https_for_risk=True,
+    )
+    assert summary_https.metrics.endpoints_nonlocal_http == 1
+    assert summary_https.metrics.effective_https == 1
+    assert summary_https.metrics.https_seen == 1
 
 
 def _dex_piece(value: str, offset: int) -> IndexedString:
@@ -355,6 +433,43 @@ def test_base64_failure_metrics_and_flags() -> None:
         assert obs.decoded_kind == "junk"
         assert "encoded" in obs.tags
 
+
+def test_protocol_counters_capture_ipv6_and_websockets() -> None:
+    policy = NoisePolicy(frozenset(), frozenset())
+    index = StringIndex(
+        strings=(
+            IndexedString(
+                value="http://[2001:db8::1]:8080/api",
+                origin="classes.dex",
+                origin_type="dex",
+                byte_offset=4,
+                source_sha256="f" * 64,
+                context="http://[2001:db8::1]:8080/api",
+            ),
+            IndexedString(
+                value="ws://socket.example.com",
+                origin="classes.dex",
+                origin_type="dex",
+                byte_offset=8,
+                source_sha256="1" * 64,
+                context="ws://socket.example.com",
+            ),
+            IndexedString(
+                value="wss://socket.example.com",
+                origin="classes.dex",
+                origin_type="dex",
+                byte_offset=12,
+                source_sha256="2" * 64,
+                context="wss://socket.example.com",
+            ),
+        )
+    )
+    summary = normalise_index(index, noise_policy=policy)
+    metrics = summary.metrics
+    assert metrics.ipv6_seen == 1
+    assert metrics.ws_seen == 1
+    assert metrics.wss_seen == 1
+    assert metrics.ws_cleartext >= 1
 
 def test_auth_proximity_records_metrics_and_issue() -> None:
     entries = (

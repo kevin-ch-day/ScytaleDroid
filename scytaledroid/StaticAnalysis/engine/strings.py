@@ -12,6 +12,7 @@ import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Mapping, MutableMapping
+import os
 from urllib.parse import urlsplit
 
 from scytaledroid.StaticAnalysis._androguard import APK
@@ -38,13 +39,13 @@ from ..modules.string_analysis.constants import (
     GCS_URI_PATTERN,
     INTERNAL_HOST_SUFFIXES,
     JWT_FULLMATCH_PATTERN,
-    MULTI_LEVEL_SUFFIXES,
     S3_PATH_GLOBAL,
     S3_PATH_REGION,
     S3_URI_PATTERN,
     S3_VIRTUAL_HOST_GLOBAL,
     S3_VIRTUAL_HOST_REGION,
 )
+from ..modules.string_analysis.parsing.host_normalizer import registrable_domain
 
 
 @dataclass(frozen=True)
@@ -119,24 +120,6 @@ def _source_type_for(entry_origin_type: str) -> str | None:
     return _SOURCE_TYPE_MAP.get(entry_origin_type)
 
 
-def _registrable_root(host: str | None) -> str | None:
-    if not host:
-        return None
-    lowered = host.strip(".").lower()
-    if not lowered:
-        return None
-    if lowered in {"localhost"}:
-        return "localhost"
-    parts = lowered.split(".")
-    if len(parts) <= 2:
-        return lowered
-    suffix_two = ".".join(parts[-2:])
-    suffix_three = ".".join(parts[-3:])
-    if suffix_three in MULTI_LEVEL_SUFFIXES:
-        return suffix_three
-    return suffix_two
-
-
 def _host_risk_tag(host: str | None) -> str | None:
     if not host:
         return None
@@ -183,7 +166,7 @@ def _detect_endpoints(value: str) -> Iterable[EndpointInfo]:
             categories.append("ws")
         elif scheme == "wss":
             categories.append("wss")
-        root_domain = _registrable_root(host)
+        root_domain = registrable_domain(host)
         if risk_tag is None:
             risk_tag = _host_risk_tag(host)
         yield EndpointInfo(
@@ -343,6 +326,14 @@ def _detect_jwt(value: str) -> bool:
     return bool(JWT_FULLMATCH_PATTERN.match(value.strip()))
 
 
+def _env_flag(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    value = value.strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
 def analyse_strings(
     apk_path: str,
     *,
@@ -350,6 +341,7 @@ def analyse_strings(
     min_entropy: float = 4.8,
     max_samples: int | None = None,
     cleartext_only: bool = False,
+    include_https_risk: bool | None = None,
 ) -> Mapping[str, object]:
     """Return baseline string buckets for the APK at *apk_path*."""
 
@@ -380,6 +372,11 @@ def analyse_strings(
             for entry in entries
             if entry.origin_type in {"resource", "raw", "asset"}
         ]
+
+    if include_https_risk is None:
+        include_https_risk = _env_flag(
+            "SCYTALEDROID_STRINGS_INCLUDE_HTTPS_RISK", False
+        )
 
     counts: Dict[str, int] = {bucket: 0 for bucket in BUCKET_ORDER}
     extra_counts: Counter[str] = Counter()
@@ -668,6 +665,7 @@ def analyse_strings(
             "cleartext_only": cleartext_only,
             "min_entropy": min_entropy,
             "mode": mode,
+            "https_in_risk": include_https_risk,
         },
     }
 

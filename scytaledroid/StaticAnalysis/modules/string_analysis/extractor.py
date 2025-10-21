@@ -6,11 +6,14 @@ import base64
 import binascii
 import hashlib
 import ipaddress
+import logging
+import os
 from dataclasses import dataclass
 from typing import Iterable, Mapping, MutableMapping, Sequence
 from urllib.parse import urlsplit
 
 from .allowlist import NoisePolicy
+from .bucketing.classifier import BucketDecision, classify
 from .constants import (
     AUTH_KEYWORDS,
     AWS_ACCESS_KEY_PATTERN,
@@ -31,7 +34,23 @@ from .constants import (
     REDIRECTOR_HOSTS,
     SCHEME_PREFIXES,
 )
+from .parsing.host_normalizer import NormalizedHost, normalize_host
+from .parsing.punctuation import strip_wrap_punct
+from .parsing.url_tokenizer import Candidate, extract_candidates
+from .parsing.validators import is_private_ip
+from .policy.evaluator import evaluate as evaluate_policy
 from .indexing import IndexedString, StringIndex, build_string_index
+
+
+logger = logging.getLogger(__name__)
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    value = value.strip().lower()
+    return value in {"1", "true", "yes", "on"}
 
 
 @dataclass(frozen=True)
@@ -113,6 +132,19 @@ class CollectionMetrics:
     obfuscation_hint: bool
     auth_close_hits: int
     issue_flags: tuple[ExploratoryIssue, ...]
+    effective_http: int
+    effective_https: int
+    placeholders_dropped: int
+    doc_suppressed: int
+    suppressed_doc_host: int
+    suppressed_doc_cdn: int
+    suppressed_doc_http: int
+    downgraded_placeholder: int
+    annotated_fragment: int
+    ipv6_seen: int
+    ws_seen: int
+    wss_seen: int
+    https_seen: int
 
 
 @dataclass(frozen=True)
@@ -135,11 +167,12 @@ _CONFIDENCE_ORDER = {"low": 0, "medium": 1, "high": 2}
 
 
 class _MetricsCounter:
-    def __init__(self) -> None:
+    def __init__(self, *, include_https_for_risk: bool = False) -> None:
         self.strings_by_source: MutableMapping[str, int] = {}
         self.strings_by_split: MutableMapping[str, int] = {}
         self.strings_by_locale: MutableMapping[str, int] = {}
         self.endpoints_nonlocal_http = 0
+        self.http_effective = 0
         self.ws_cleartext = 0
         self.ip_literals_public = 0
         self.graphql_markers = 0
@@ -155,6 +188,19 @@ class _MetricsCounter:
         self.unknown_kind_count = 0
         self.obfuscation_hits = 0
         self.auth_close_hits = 0
+        self.include_https_for_risk = include_https_for_risk
+        self.effective_https = 0
+        self.placeholders_dropped = 0
+        self.doc_suppressed = 0
+        self.suppressed_doc_host = 0
+        self.suppressed_doc_cdn = 0
+        self.suppressed_doc_http = 0
+        self.downgraded_placeholder = 0
+        self.annotated_fragment = 0
+        self.ipv6_seen = 0
+        self.ws_seen = 0
+        self.wss_seen = 0
+        self.https_seen = 0
 
     def bump_source(self, source: str) -> None:
         self.strings_by_source[source] = self.strings_by_source.get(source, 0) + 1
@@ -218,14 +264,40 @@ class _MetricsCounter:
             obfuscation_hint=self.obfuscation_hits > 0,
             auth_close_hits=self.auth_close_hits,
             issue_flags=issues,
+            effective_http=self.http_effective,
+            effective_https=self.effective_https,
+            placeholders_dropped=self.placeholders_dropped,
+            doc_suppressed=self.doc_suppressed,
+            suppressed_doc_host=self.suppressed_doc_host,
+            suppressed_doc_cdn=self.suppressed_doc_cdn,
+            suppressed_doc_http=self.suppressed_doc_http,
+            downgraded_placeholder=self.downgraded_placeholder,
+            annotated_fragment=self.annotated_fragment,
+            ipv6_seen=self.ipv6_seen,
+            ws_seen=self.ws_seen,
+            wss_seen=self.wss_seen,
+            https_seen=self.https_seen,
         )
 
 
-def normalise_index(index: StringIndex, *, noise_policy: NoisePolicy | None = None) -> CollectionSummary:
+def normalise_index(
+    index: StringIndex,
+    *,
+    noise_policy: NoisePolicy | None = None,
+    include_https_for_risk: bool | None = None,
+    debug: bool | None = None,
+) -> CollectionSummary:
     """Enrich *index* entries with tags and compute run metrics."""
 
+    if include_https_for_risk is None:
+        include_https_for_risk = _env_flag(
+            "SCYTALEDROID_STRINGS_INCLUDE_HTTPS_RISK", False
+        )
+    if debug is None:
+        debug = _env_flag("SCYTALEDROID_STRINGS_DEBUG", False)
+
     policy = noise_policy or NoisePolicy(frozenset(), frozenset())
-    counter = _MetricsCounter()
+    counter = _MetricsCounter(include_https_for_risk=include_https_for_risk)
     records: list[NormalizedString] = []
 
     base_entries = list(index.strings)
@@ -236,10 +308,30 @@ def normalise_index(index: StringIndex, *, noise_policy: NoisePolicy | None = No
         counter.bump_source(entry.origin_type or "unknown")
         counter.bump_split(entry.split_id or "base")
         counter.bump_locale(entry.locale_qualifier)
-        normalized = _normalise_entry(entry, policy, counter, derived=entry.synthetic)
+        normalized = _normalise_entry(
+            entry,
+            policy,
+            counter,
+            derived=entry.synthetic,
+            debug=bool(debug),
+        )
         records.append(normalized)
 
     metrics = counter.to_metrics(len(records))
+    if debug:
+        logger.debug(
+            (
+                "[strings] summary effective_http=%s effective_https=%s placeholders=%s "
+                "doc_suppressed=%s doc_host=%s doc_cdn=%s doc_http=%s"
+            ),
+            metrics.effective_http,
+            metrics.effective_https,
+            metrics.placeholders_dropped,
+            metrics.doc_suppressed,
+            metrics.suppressed_doc_host,
+            metrics.suppressed_doc_cdn,
+            metrics.suppressed_doc_http,
+        )
     return CollectionSummary(strings=tuple(records), metrics=metrics)
 
 
@@ -262,12 +354,17 @@ def _is_component_piece(value: str) -> bool:
 
 
 def _is_candidate_string(value: str) -> bool:
-    stripped = value.strip()
+    stripped = strip_wrap_punct(value.strip())
     if not stripped:
         return False
-    if ENDPOINT_PATTERN.match(stripped):
-        return True
-    return bool(HOST_PATTERN.match(stripped.lower()))
+    for candidate in extract_candidates(stripped):
+        normalized = normalize_host(candidate.host or candidate.raw)
+        decision = classify(candidate, normalized)
+        if decision.placeholder:
+            continue
+        if normalized.full_host or candidate.host:
+            return True
+    return False
 
 
 def _reconstruct_constant_hosts(entries: Sequence[IndexedString]) -> tuple[IndexedString, ...]:
@@ -329,6 +426,7 @@ def _normalise_entry(
     counter: _MetricsCounter,
     *,
     derived: bool = False,
+    debug: bool = False,
 ) -> NormalizedString:
     value = entry.value
     context = _context_for_entry(entry)
@@ -366,7 +464,6 @@ def _normalise_entry(
         else:
             decoded_kind = "junk"
 
-    url_match = ENDPOINT_PATTERN.search(value)
     policy_action: str | None = None
     policy_rule: str | None = None
     policy_reason: str | None = None
@@ -375,43 +472,129 @@ def _normalise_entry(
     policy_severity: str | None = None
 
     scheme_lower: str | None = None
+    normalized_host = None
+    bucket_decision = None
 
-    if url_match:
-        url = url_match.group("url")
-        parsed = urlsplit(url)
-        host = parsed.hostname
-        scheme_lower = parsed.scheme.lower()
-        host_allowlisted = policy.is_documentary_host(host)
-        is_allowlisted = is_allowlisted or host_allowlisted
-        tags.extend(_tags_for_url(url, host=host, context=context))
-        kind = "url"
-        confidence = "high"
-        if not is_allowlisted:
-            if host and _is_public_host(host) and parsed.scheme.lower() in {"http", "ws"}:
-                counter.endpoints_nonlocal_http += 1
-            if "websocket" in tags and "cleartext" in tags:
-                counter.ws_cleartext += 1
-            if "ip-literal" in tags and host and not _is_private_ip(host):
-                counter.ip_literals_public += 1
-            if "graphql" in tags:
-                counter.graphql_markers += 1
-            if "grpc" in tags:
-                counter.grpc_markers += 1
-    elif HOST_PATTERN.match(stripped):
-        host = stripped.lower()
-        kind = "host"
-        confidence = "medium"
-        if _is_public_host(host):
-            tags.append("prod-domain")
-    else:
-        maybe_ip = _maybe_ip_literal(stripped)
-        if maybe_ip:
-            host = maybe_ip
+    stripped_for_candidates = strip_wrap_punct(value)
+    selected_candidate: Candidate | None = None
+    placeholder_candidate: tuple[Candidate, NormalizedHost, BucketDecision] | None = None
+    for candidate in extract_candidates(stripped_for_candidates):
+        normalized_candidate = normalize_host(candidate.host or candidate.raw)
+        decision = classify(candidate, normalized_candidate)
+        for tag in decision.tags:
+            if tag not in tags:
+                tags.append(tag)
+        if decision.placeholder:
+            if "placeholder" not in tags:
+                tags.append("placeholder")
+            counter.placeholders_dropped += 1
+            if placeholder_candidate is None:
+                placeholder_candidate = (candidate, normalized_candidate, decision)
+            continue
+        host_candidate = (
+            normalized_candidate.full_host or candidate.host or candidate.raw
+        )
+        if not host_candidate:
+            continue
+        if selected_candidate is None:
+            selected_candidate = candidate
+            normalized_host = normalized_candidate
+            host = host_candidate
+            scheme_lower = candidate.scheme.lower() if candidate.scheme else None
+            bucket_decision = decision
+            if candidate.scheme:
+                tags.extend(
+                    _tags_for_url(candidate.raw, host=host_candidate, context=context)
+                )
+            break
+
+    if selected_candidate is None and placeholder_candidate is not None:
+        candidate, normalized_candidate, decision = placeholder_candidate
+        selected_candidate = candidate
+        normalized_host = normalized_candidate
+        host = (
+            normalized_candidate.full_host or candidate.host or candidate.raw
+        )
+        scheme_lower = candidate.scheme.lower() if candidate.scheme else None
+        bucket_decision = decision
+        if candidate.scheme:
+            tags.extend(
+                _tags_for_url(candidate.raw, host=host or candidate.host, context=context)
+            )
+
+    if selected_candidate:
+        if selected_candidate.scheme:
+            kind = "url"
+            confidence = "high"
+        elif normalized_host and normalized_host.is_ip:
             kind = "ip"
             confidence = "medium"
-            if not _is_private_ip(maybe_ip):
-                tags.append("ip-literal")
-                counter.ip_literals_public += 1
+        else:
+            kind = "host"
+            confidence = _raise_confidence(confidence, "medium")
+        is_allowlisted = is_allowlisted or policy.is_documentary_host(host)
+        if bucket_decision and not bucket_decision.buckets and host:
+            bucket_decision = BucketDecision(
+                buckets=("endpoints",),
+                tags=bucket_decision.tags,
+                placeholder=bucket_decision.placeholder,
+            )
+        if scheme_lower == "https":
+            counter.https_seen += 1
+        elif scheme_lower == "ws":
+            counter.ws_seen += 1
+        elif scheme_lower == "wss":
+            counter.wss_seen += 1
+        if (
+            normalized_host
+            and normalized_host.is_ip
+            and ":" in (normalized_host.full_host or "")
+        ):
+            counter.ipv6_seen += 1
+        host_public = bool(
+            normalized_host
+            and (
+                not normalized_host.is_ip
+                or (host and not is_private_ip(host))
+            )
+        )
+        if (
+            not is_allowlisted
+            and bucket_decision
+            and host_public
+            and not bucket_decision.placeholder
+        ):
+            if "http_cleartext" in bucket_decision.buckets:
+                counter.endpoints_nonlocal_http += 1
+                counter.http_effective += 1
+            elif (
+                selected_candidate.scheme
+                and selected_candidate.scheme.lower() == "ws"
+            ):
+                counter.endpoints_nonlocal_http += 1
+            elif (
+                selected_candidate.scheme
+                and selected_candidate.scheme.lower() == "https"
+            ):
+                counter.effective_https += 1
+                if counter.include_https_for_risk:
+                    counter.endpoints_nonlocal_http += 1
+        if (
+            not is_allowlisted
+            and (not bucket_decision or not bucket_decision.placeholder)
+            and "websocket" in tags
+            and "cleartext" in tags
+        ):
+            counter.ws_cleartext += 1
+        if (
+            not is_allowlisted
+            and normalized_host
+            and normalized_host.is_ip
+            and not is_private_ip(host)
+        ):
+            counter.ip_literals_public += 1
+    else:
+        host = None
 
     lowered = value.lower()
 
@@ -460,7 +643,8 @@ def _normalise_entry(
                 counter.s3_buckets += 1
         break
 
-    if any(keyword in lowered for keyword in FEATURE_KEYWORDS) and url_match:
+    has_url_candidate = bool(selected_candidate and selected_candidate.scheme)
+    if any(keyword in lowered for keyword in FEATURE_KEYWORDS) and has_url_candidate:
         tags.append("feature-flag")
         tags.append("remote-control")
 
@@ -473,32 +657,48 @@ def _normalise_entry(
 
     tags = list(dict.fromkeys(tags))
 
-    buckets: set[str] = set()
-    if host:
-        buckets.add("endpoints")
-    if scheme_lower == "http":
-        buckets.add("http_cleartext")
-
-    decision = policy.evaluate(
+    outcome = evaluate_policy(
+        policy,
+        bucket_decision,
+        normalized_host,
+        source_path=entry.origin,
         value=value,
-        source=entry.origin,
-        host=host,
         scheme=scheme_lower,
-        buckets=tuple(buckets),
     )
-    if decision:
-        policy_action = decision.action
-        policy_rule = decision.rule
-        policy_reason = decision.reason
-        policy_tag = decision.tag
-        policy_note = decision.note
-        policy_severity = decision.severity
-        if decision.tag and decision.tag not in tags:
-            tags.append(decision.tag)
-        if decision.action == "suppress":
+    if outcome.is_actionable:
+        policy_action = outcome.action
+        policy_rule = outcome.rule
+        policy_reason = outcome.reason
+        policy_tag = outcome.tag
+        policy_note = outcome.note
+        policy_severity = outcome.severity
+        if outcome.tag and outcome.tag not in tags:
+            tags.append(outcome.tag)
+        if outcome.action == "suppress":
             is_allowlisted = True
-        elif decision.action == "downgrade":
-            is_allowlisted = is_allowlisted
+            reason_text = outcome.reason or ""
+            if reason_text:
+                if reason_text.startswith("policy_drift:doc_reference"):
+                    counter.suppressed_doc_host += 1
+                    counter.doc_suppressed += 1
+                elif reason_text.startswith("policy_drift:doc_cdn"):
+                    counter.suppressed_doc_cdn += 1
+                    counter.doc_suppressed += 1
+                elif reason_text.startswith("policy_drift:http_doc_cdn"):
+                    counter.suppressed_doc_cdn += 1
+                    counter.suppressed_doc_http += 1
+                    counter.doc_suppressed += 1
+                elif reason_text.startswith("policy_drift:http_in_metadata"):
+                    counter.suppressed_doc_http += 1
+                    counter.doc_suppressed += 1
+                elif reason_text.startswith("policy_drift:templated_doc_asset"):
+                    counter.doc_suppressed += 1
+            else:
+                counter.doc_suppressed += 1
+        elif outcome.action == "downgrade" and outcome.tag == "dev_placeholder_host":
+            counter.downgraded_placeholder += 1
+        elif outcome.action == "annotate" and outcome.tag == "format_fragment_host":
+            counter.annotated_fragment += 1
     if is_allowlisted:
         kind = "doc_namespace"
         counter.doc_noise_count += 1
@@ -514,6 +714,24 @@ def _normalise_entry(
         counter.auth_close_hits += 1
 
     tags_tuple = tuple(tags)
+
+    if debug and selected_candidate:
+        policy_descriptor = (
+            f"{policy_action}:{policy_reason}" if policy_action else "none"
+        )
+        bucket_descriptor = (
+            ",".join(bucket_decision.buckets) if bucket_decision else ""
+        )
+        logger.debug(
+            "[strings] raw=%s stripped=%s host=%s etld1=%s buckets=%s policy=%s src=%s",
+            value,
+            stripped_for_candidates,
+            host,
+            normalized_host.etld_plus_one if normalized_host else None,
+            bucket_descriptor,
+            policy_descriptor,
+            entry.origin,
+        )
 
     return NormalizedString(
         value=value,

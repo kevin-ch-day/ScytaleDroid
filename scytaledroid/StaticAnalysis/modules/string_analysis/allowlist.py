@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Iterable, Mapping, MutableMapping, Sequence
 from urllib.parse import urlsplit
 
-from .constants import MULTI_LEVEL_SUFFIXES
+from .parsing.host_normalizer import registrable_domain
 
 try:  # Python 3.11+
     import tomllib
@@ -191,14 +191,14 @@ class NoisePolicy:
     def is_documentary_source(self, source: str | None) -> bool:
         if not source:
             return False
-        lowered = source.lower()
-        if lowered in self.sources_documentary:
+        normalised = source.replace("\\", "/").lower()
+        if normalised in self.sources_documentary:
             return True
         for exacts in self.source_exact_groups.values():
-            if lowered in exacts:
+            if normalised in exacts:
                 return True
         for prefixes in self.source_prefix_groups.values():
-            if any(lowered.startswith(prefix) for prefix in prefixes):
+            if any(normalised.startswith(prefix) for prefix in prefixes):
                 return True
         return False
 
@@ -320,9 +320,24 @@ def load_noise_policy(path: str | Path | None) -> NoisePolicy:
             block_overrides_full.update(group.full_hosts)
             block_overrides_registrable.update(group.registrable_hosts)
             continue
-        doc_hosts.update(group.full_hosts)
-        doc_hosts.update(group.registrable_hosts)
+        is_full_only = group_name.endswith("_full")
+        is_cdn_group = "cdn" in group_name
+        if not is_full_only:
+            doc_hosts.update(group.full_hosts)
+            if not is_cdn_group:
+                doc_hosts.update(group.registrable_hosts)
+        else:
+            if not is_cdn_group:
+                doc_hosts.update(group.full_hosts)
         if group_name == "allow_doc":
+            doc_host_defaults_full.update(group.full_hosts)
+            doc_host_defaults_registrable.update(group.registrable_hosts)
+        elif is_full_only:
+            if not is_cdn_group:
+                doc_host_defaults_full.update(group.full_hosts)
+        elif is_cdn_group:
+            doc_host_defaults_registrable.update(group.registrable_hosts)
+        else:
             doc_host_defaults_full.update(group.full_hosts)
             doc_host_defaults_registrable.update(group.registrable_hosts)
 
@@ -429,11 +444,16 @@ def _build_host_group(entries: Iterable[str]) -> HostGroup:
     full_hosts: set[str] = set()
     registrable_hosts: set[str] = set()
     for entry in entries:
-        full, registrable = _host_components(entry)
+        text = str(entry)
+        had_path = "/" in text
+        full, registrable = _host_components(text)
         if full:
             full_hosts.add(full)
         if registrable:
-            registrable_hosts.add(registrable)
+            if had_path and full:
+                registrable_hosts.add(full)
+            else:
+                registrable_hosts.add(registrable)
     return HostGroup(
         full_hosts=frozenset(full_hosts),
         registrable_hosts=frozenset(registrable_hosts),
@@ -489,24 +509,8 @@ def _host_components(host: str | None) -> tuple[str | None, str | None]:
         candidate = candidate.split("/", 1)[0].strip(".")
     if not candidate:
         return None, None
-    registrable = _registrable_root(candidate)
+    registrable = registrable_domain(candidate)
     return candidate or None, registrable or candidate or None
-
-
-def _registrable_root(host: str | None) -> str | None:
-    if not host:
-        return None
-    lowered = host.strip(".").lower()
-    if not lowered:
-        return None
-    parts = lowered.split(".")
-    if len(parts) <= 2:
-        return lowered
-    suffix_two = ".".join(parts[-2:])
-    suffix_three = ".".join(parts[-3:])
-    if suffix_three in MULTI_LEVEL_SUFFIXES:
-        return suffix_three
-    return suffix_two
 
 
 __all__ = [
