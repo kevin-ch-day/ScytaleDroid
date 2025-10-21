@@ -1,48 +1,63 @@
 """Utilities for trimming punctuation artifacts around extracted tokens."""
-
+# punctuation.py
 from __future__ import annotations
 
 import re
 
-_LEADING = set("(\"'[{<")
-_TRAILING = set(")\"'}]>.,;:.")
-_IPV6_CANDIDATE = re.compile(r"\[[0-9A-Fa-f:.%-]+\]")
+# Leading wrappers we commonly see around string literals or tokens.
+_LEADING = set('("\'{[<“”‘’')
 
+# Trailing punctuation that often clings to tokens in text.
+# (No functional duplicates; order doesn't matter in a set.)
+_TRAILING = set(')"}]>.,;:’”')
+
+# Bracketed IPv6 literal matcher (RFC 3986 style), allowing zone IDs (RFC 6874).
+# Examples: [2001:db8::1], [fe80::1%eth0], [::ffff:192.0.2.128]
+_IPV6_CANDIDATE = re.compile(r"\[[0-9A-Fa-f:.%+-]+\]")
 
 def _looks_like_ipv6_suffix(value: str) -> bool:
-    """Return ``True`` when *value* ends with a bracketed IPv6 literal."""
-
-    if "]" not in value or "[" not in value:
+    """Return True when *value* ends with a bracketed IPv6 literal."""
+    if not value:
         return False
-    close_index = value.rfind("]")
-    if close_index != len(value) - 1:
+    # Must end with a closing bracket
+    if not value.endswith("]"):
         return False
-    open_index = value.rfind("[", 0, close_index)
+    # Find the matching opening bracket to the last closing bracket
+    open_index = value.rfind("[", 0, len(value) - 1)
     if open_index == -1:
         return False
-    candidate = value[open_index : close_index + 1]
+    candidate = value[open_index:]
     return bool(_IPV6_CANDIDATE.fullmatch(candidate))
 
-
 def strip_wrap_punct(text: str) -> str:
-    """Remove leading/trailing wrapper punctuation from *text* without harming IPv6."""
+    """
+    Remove leading/trailing wrapper punctuation from *text* without harming IPv6.
 
+    This is intentionally dumb-but-safe: trim obvious wrappers and clingy punctuation
+    that surround tokens extracted from prose or decompiled sources. If the string
+    ends with a bracketed IPv6 literal, we preserve the closing bracket.
+    """
     if not text:
         return text
 
-    stripped = text.strip()
+    s = text.strip()
+    if not s:
+        return s
 
-    # Remove leading punctuation wrappers greedily.
-    while stripped and stripped[0] in _LEADING:
-        stripped = stripped[1:]
+    # Remove leading punctuation wrappers greedily (quotes, parens, etc.).
+    while s and s[0] in _LEADING:
+        s = s[1:].lstrip()
 
-    # Remove trailing punctuation but keep IPv6 brackets intact.
-    while stripped and stripped[-1] in _TRAILING:
-        if stripped[-1] == "]" and _looks_like_ipv6_suffix(stripped):
+    if not s:
+        return s
+
+    # Remove trailing punctuation greedily, but do not strip a closing bracket
+    # that completes a bracketed IPv6 literal at the end of the string.
+    while s and s[-1] in _TRAILING:
+        if s[-1] == "]" and _looks_like_ipv6_suffix(s):
             break
-        stripped = stripped[:-1].rstrip()
+        s = s[:-1].rstrip()
 
-    return stripped
-
+    return s
 
 __all__ = ["strip_wrap_punct"]
