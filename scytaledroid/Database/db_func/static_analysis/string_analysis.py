@@ -22,13 +22,15 @@ class StringSummaryRecord:
     session_stamp: str
     scope_label: str
     counts: Mapping[str, int]
+    run_id: int | None = None
 
-    def to_parameters(self) -> dict[str, int | str]:
+    def to_parameters(self) -> dict[str, object]:
         counts = self.counts
         return {
             "package_name": self.package_name,
             "session_stamp": self.session_stamp,
             "scope_label": self.scope_label,
+            "run_id": (int(self.run_id) if self.run_id is not None else None),
             "endpoints": int(counts.get("endpoints", 0)),
             "http_cleartext": int(counts.get("http_cleartext", 0)),
             "api_keys": int(counts.get("api_keys", 0)),
@@ -70,6 +72,15 @@ def ensure_tables() -> bool:
             run_sql(queries.CREATE_STRING_SUMMARY)
             run_sql(queries.CREATE_STRING_SAMPLES)
             run_sql(queries.CREATE_DOC_HOSTS_TABLE)
+            for statement in (
+                "ALTER TABLE static_string_summary ADD COLUMN run_id BIGINT UNSIGNED NULL AFTER scope_label",
+                "ALTER TABLE static_string_summary ADD KEY ix_string_summary_run (run_id)",
+                "ALTER TABLE static_string_summary ADD CONSTRAINT fk_string_summary_run FOREIGN KEY (run_id) REFERENCES runs (run_id) ON DELETE SET NULL",
+            ):
+                try:
+                    run_sql(statement)
+                except Exception:
+                    continue
             for statement in (
                 "ALTER TABLE static_string_samples ADD COLUMN source_type VARCHAR(16) NULL",
                 "ALTER TABLE static_string_samples ADD COLUMN finding_type VARCHAR(32) NULL",
@@ -138,6 +149,11 @@ def _summary_params(summary: SummaryRow) -> MutableMapping[str, object]:
             "certs": int(base.get("certs", 0)),
             "high_entropy": int(base.get("high_entropy", 0)),
         },
+        run_id=(
+            int(base["run_id"])
+            if base.get("run_id") is not None and str(base.get("run_id")).strip() != ""
+            else None
+        ),
     ).to_parameters()
 
 

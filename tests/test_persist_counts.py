@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections import Counter
 from types import SimpleNamespace
 
@@ -15,6 +16,7 @@ def _make_stub_report() -> SimpleNamespace:
         version_code=123,
         target_sdk=33,
         min_sdk=21,
+        app_label="Example App",
     )
     manifest_flags = SimpleNamespace(
         allow_backup=False,
@@ -107,6 +109,14 @@ def stub_string_data() -> dict[str, object]:
 @pytest.fixture
 def baseline_payload() -> dict[str, object]:
     return {
+        "app": {
+            "package": "com.example.app",
+            "label": "Example App",
+            "version_name": "1.2.3",
+            "version_code": 123,
+            "target_sdk": 33,
+            "min_sdk": 21,
+        },
         "baseline": {
             "manifest_flags": {
                 "uses_cleartext_traffic": True,
@@ -157,7 +167,7 @@ def baseline_payload() -> dict[str, object]:
                     "fix": "Add permission",
                 }
             ],
-        }
+        },
     }
 
 
@@ -250,10 +260,24 @@ def test_persist_run_summary_tracks_session(monkeypatch, stub_string_data, basel
     assert outcome.success is True
     assert outcome.run_id == 101
 
+    assert calls["create_run"]["package"] == "com.example.app"
+    assert calls["create_run"]["app_label"] == "Example App"
     assert calls["create_run"]["session_stamp"] == session_stamp
     assert calls["create_run"]["threat_profile"] == "Active"
     assert calls["create_run"]["env_profile"] == "enterprise"
     assert summary_calls["session_stamp"] == session_stamp
+    details_raw = summary_calls["details"]
+    if isinstance(details_raw, str):
+        summary_details = json.loads(details_raw)
+    else:
+        summary_details = details_raw
+    app_details = summary_details["app"]
+    assert app_details["label"] == "Example App"
+    assert app_details["package"] == "com.example.app"
+    assert app_details["version_name"] == "1.2.3"
+    assert app_details["version_code"] == 123
+    assert app_details["target_sdk"] == 33
+    assert string_summary_args["run_id"] == 101
     assert string_summary_args["session_stamp"] == session_stamp
     assert calls["write_buckets"][0] == 101
     metrics_payload = calls["write_metrics"][1]

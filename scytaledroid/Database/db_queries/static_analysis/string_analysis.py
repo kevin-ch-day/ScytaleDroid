@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS static_string_summary (
   package_name VARCHAR(191) NOT NULL,
   session_stamp VARCHAR(32) NOT NULL,
   scope_label VARCHAR(191) NOT NULL,
+  run_id BIGINT UNSIGNED NULL,
   endpoints INT UNSIGNED NOT NULL DEFAULT 0,
   http_cleartext INT UNSIGNED NOT NULL DEFAULT 0,
   api_keys INT UNSIGNED NOT NULL DEFAULT 0,
@@ -22,7 +23,11 @@ CREATE TABLE IF NOT EXISTS static_string_summary (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY ux_string_summary (package_name, session_stamp, scope_label),
-  KEY ix_string_summary_session (session_stamp)
+  KEY ix_string_summary_session (session_stamp),
+  KEY ix_string_summary_run (run_id),
+  CONSTRAINT fk_string_summary_run FOREIGN KEY (run_id)
+    REFERENCES runs (run_id)
+    ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 """
 
@@ -56,13 +61,14 @@ CREATE TABLE IF NOT EXISTS static_string_samples (
 
 INSERT_STRING_SUMMARY = """
 INSERT INTO static_string_summary (
-  package_name, session_stamp, scope_label,
+  package_name, session_stamp, scope_label, run_id,
   endpoints, http_cleartext, api_keys, analytics_ids, cloud_refs, ipc, uris, flags, certs, high_entropy
 ) VALUES (
-  %(package_name)s, %(session_stamp)s, %(scope_label)s,
+  %(package_name)s, %(session_stamp)s, %(scope_label)s, %(run_id)s,
   %(endpoints)s, %(http_cleartext)s, %(api_keys)s, %(analytics_ids)s, %(cloud_refs)s, %(ipc)s, %(uris)s, %(flags)s, %(certs)s, %(high_entropy)s
 )
 ON DUPLICATE KEY UPDATE
+  run_id=VALUES(run_id),
   endpoints=VALUES(endpoints),
   http_cleartext=VALUES(http_cleartext),
   api_keys=VALUES(api_keys),
@@ -123,17 +129,23 @@ CREATE_STRINGS_NORMALIZED_VIEW = """
 CREATE OR REPLACE VIEW v_strings_normalized AS
 SELECT
   sm.*,
+  s.package_name,
+  s.session_stamp,
+  s.scope_label,
+  s.run_id,
   COALESCE(
     sm.root_domain,
     SUBSTRING_INDEX(SUBSTRING_INDEX(sm.value_masked,'/',3),'//',-1)
   ) AS host_normalized
-FROM static_string_samples AS sm;
+FROM static_string_samples AS sm
+JOIN static_string_summary AS s ON sm.summary_id = s.id;
 """
 
 CREATE_DOC_POLICY_DRIFT_VIEW = """
 CREATE OR REPLACE VIEW v_doc_policy_drift AS
 SELECT
-  s.package_name,
+  sn.package_name,
+  sn.run_id,
   sn.summary_id,
   sn.bucket,
   sn.scheme,
@@ -141,7 +153,6 @@ SELECT
   sn.value_masked AS url,
   sn.src AS source_artifact
 FROM v_strings_normalized AS sn
-JOIN static_string_summary AS s ON sn.summary_id = s.id
 JOIN doc_hosts AS dh ON sn.host_normalized = dh.host
 WHERE sn.bucket IN ('endpoints','http_cleartext');
 """
@@ -166,6 +177,7 @@ CREATE OR REPLACE VIEW v_string_findings_enriched AS
 SELECT
   s.id AS apk_id,
   s.package_name,
+  s.run_id,
   sm.finding_type,
   sm.provider,
   sm.risk_tag,

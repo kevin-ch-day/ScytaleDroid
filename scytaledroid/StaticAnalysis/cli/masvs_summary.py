@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections import Counter
 from typing import Dict, Iterable, List, Mapping, Optional, Tuple
 
@@ -455,6 +456,115 @@ def fetch_masvs_matrix() -> Dict[str, Dict[str, object]]:
             "top": {area: {"high": None, "medium": None} for area in areas},
             "pass_rate": 100,
         }
+
+    run_ids = [int(data.get("run_id") or 0) for data in matrix.values() if data.get("run_id")]
+    metadata_map: Dict[int, Mapping[str, object]] = {}
+    if run_ids:
+        placeholders = ",".join(["%s"] * len(run_ids))
+        try:
+            meta_rows = core_q.run_sql(
+                f"""
+                SELECT r.run_id, r.package, r.app_label, r.version_name, r.version_code, r.target_sdk,
+                       r.session_stamp, s.details, s.scope_label, s.created_at
+                FROM runs r
+                LEFT JOIN static_findings_summary s
+                  ON s.package_name = r.package
+                 AND s.session_stamp = r.session_stamp
+                WHERE r.run_id IN ({placeholders})
+                ORDER BY r.run_id DESC, s.created_at DESC
+                """,
+                tuple(run_ids),
+                fetch="all",
+                dictionary=True,
+            ) or []
+        except Exception:
+            meta_rows = []
+
+        for row in meta_rows:
+            try:
+                run_id = int(row.get("run_id") or 0)
+            except (TypeError, ValueError):
+                continue
+            if run_id in metadata_map:
+                continue
+            metadata_map[run_id] = row
+
+    def _first_text(*values: object | None) -> str | None:
+        for value in values:
+            if value is None:
+                continue
+            try:
+                text = str(value).strip()
+            except Exception:
+                continue
+            if text:
+                return text
+        return None
+
+    def _maybe_int(value: object | None) -> int | None:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    for package, data in matrix.items():
+        run_id = int(data.get("run_id") or 0)
+        meta = metadata_map.get(run_id)
+        label = None
+        version_name = None
+        version_code: int | None = None
+        target_sdk: int | None = None
+        scope_label = None
+        session_stamp = None
+        if isinstance(meta, Mapping):
+            label = _first_text(meta.get("app_label"), label)
+            scope_label = _first_text(meta.get("scope_label"))
+            version_name = _first_text(meta.get("version_name"))
+            version_code = _maybe_int(meta.get("version_code"))
+            target_sdk = _maybe_int(meta.get("target_sdk"))
+            session_stamp = _first_text(meta.get("session_stamp"))
+            details_raw = meta.get("details")
+            details_obj: Mapping[str, object] | None
+            if isinstance(details_raw, Mapping):
+                details_obj = details_raw
+            else:
+                details_obj = None
+                if isinstance(details_raw, str) and details_raw.strip():
+                    try:
+                        loaded = json.loads(details_raw)
+                        if isinstance(loaded, Mapping):
+                            details_obj = loaded
+                    except json.JSONDecodeError:
+                        details_obj = None
+            if isinstance(details_obj, Mapping):
+                app_info = details_obj.get("app")
+                if isinstance(app_info, Mapping):
+                    label = _first_text(app_info.get("label"))
+                    if not version_name:
+                        version_name = _first_text(app_info.get("version_name"))
+                    if version_code is None:
+                        version_code = _maybe_int(app_info.get("version_code"))
+                    if target_sdk is None:
+                        target_sdk = _maybe_int(app_info.get("target_sdk"))
+                    if not scope_label:
+                        scope_label = _first_text(app_info.get("scope_label"))
+                    if not session_stamp:
+                        session_stamp = _first_text(app_info.get("session_stamp"))
+
+        data["package"] = package
+        data["label"] = label or package
+        if version_name:
+            data["version_name"] = version_name
+        if version_code is not None:
+            data["version_code"] = version_code
+        if target_sdk is not None:
+            data["target_sdk"] = target_sdk
+        if scope_label:
+            data["scope_label"] = scope_label
+        if session_stamp:
+            data["session_stamp"] = session_stamp
 
     return matrix
 

@@ -7,6 +7,7 @@ from .permissions import (
     detected_permissions,
     framework_permissions,
     permission_support,
+    taxonomy,
     unknown_permissions,
     vendor_permissions,
 )
@@ -30,6 +31,7 @@ __all__ = [
     "detected_permissions",
     "framework_permissions",
     "permission_support",
+    "taxonomy",
     "unknown_permissions",
     "vendor_permissions",
     "risk_scores",

@@ -455,6 +455,21 @@ def persist_run_summary(
         outcome.add_error(message)
         return outcome
 
+    baseline_app: Mapping[str, object]
+    if isinstance(baseline_payload, Mapping):
+        app_section = baseline_payload.get("app")
+        baseline_app = app_section if isinstance(app_section, Mapping) else {}
+    else:
+        baseline_app = {}
+
+    app_label = _first_non_empty_str(
+        getattr(br.manifest, "app_label", None) if getattr(br, "manifest", None) else None,
+        baseline_app.get("label"),
+        baseline_app.get("display_name"),
+        baseline_app.get("app_label"),
+        run_package,
+    )
+
     target_sdk = None
     try:
         target_sdk = int(br.manifest.target_sdk) if br.manifest.target_sdk else None
@@ -466,6 +481,7 @@ def persist_run_summary(
     if not dry_run:
         run_id = _dw.create_run(
             package=br.manifest.package_name or run_package,
+            app_label=app_label,
             version_code=int(br.manifest.version_code) if br.manifest.version_code else None,
             version_name=br.manifest.version_name,
             target_sdk=target_sdk,
@@ -817,6 +833,9 @@ def persist_run_summary(
             finding_totals=finding_totals,
             baseline_section=baseline_section if isinstance(baseline_section, Mapping) else {},
             string_payload=string_payload if isinstance(string_payload, Mapping) else {},
+            manifest=br.manifest,
+            app_metadata=baseline_payload.get("app") if isinstance(baseline_payload, Mapping) else {},
+            run_id=int(run_id) if run_id is not None else None,
         )
         for err in static_errors:
             outcome.add_error(err)
@@ -832,16 +851,87 @@ def _persist_static_tables(
     finding_totals: Mapping[str, int],
     baseline_section: Mapping[str, object],
     string_payload: Mapping[str, object],
+    manifest: object | None,
+    app_metadata: Mapping[str, object] | object,
+    run_id: int | None,
 ) -> list[str]:
     errors: list[str] = []
 
     severity_counts = _coerce_severity_counts(finding_totals)
+    metadata_map: Mapping[str, object] = (
+        dict(app_metadata)
+        if isinstance(app_metadata, Mapping)
+        else {}
+    )
+
+    def _first_text(*values: object | None) -> str | None:
+        for value in values:
+            if value is None:
+                continue
+            try:
+                text = str(value).strip()
+            except Exception:
+                continue
+            if text:
+                return text
+        return None
+
+    def _maybe_int(value: object | None) -> int | None:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    manifest_obj = manifest
+    app_label = _first_text(
+        getattr(manifest_obj, "app_label", None) if manifest_obj else None,
+        metadata_map.get("label"),
+        metadata_map.get("app_label"),
+        metadata_map.get("display_name"),
+    ) or package_name
+    version_name = _first_text(
+        getattr(manifest_obj, "version_name", None) if manifest_obj else None,
+        metadata_map.get("version_name"),
+    )
+    version_code = _maybe_int(
+        getattr(manifest_obj, "version_code", None) if manifest_obj else None
+        or metadata_map.get("version_code")
+    )
+    target_sdk = _maybe_int(
+        getattr(manifest_obj, "target_sdk", None) if manifest_obj else None
+        or metadata_map.get("target_sdk")
+    )
+    min_sdk = _maybe_int(
+        getattr(manifest_obj, "min_sdk", None) if manifest_obj else None
+        or metadata_map.get("min_sdk")
+    )
+
     details = {
         "manifest_flags": baseline_section.get("manifest_flags"),
         "exports": baseline_section.get("exports"),
         "permissions": baseline_section.get("permissions"),
         "nsc": baseline_section.get("nsc"),
         "string_counts": (string_payload.get("counts") if isinstance(string_payload.get("counts"), Mapping) else {}),
+        "app": {
+            "label": app_label,
+            "package": package_name,
+            "session_stamp": session_stamp,
+            "scope_label": scope_label,
+            **(
+                {
+                    key: value
+                    for key, value in {
+                        "version_name": version_name,
+                        "version_code": version_code,
+                        "target_sdk": target_sdk,
+                        "min_sdk": min_sdk,
+                    }.items()
+                    if value is not None and value != ""
+                }
+            ),
+        },
     }
 
     try:
@@ -872,6 +962,7 @@ def _persist_static_tables(
             package_name=package_name,
             session_stamp=session_stamp,
             scope_label=scope_label,
+            run_id=run_id,
             counts=counts,
         )
         summary_id = _sa.upsert_summary(summary_record)

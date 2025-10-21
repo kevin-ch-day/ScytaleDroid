@@ -174,7 +174,9 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
     print()
 
     persistence_errors: list[str] = []
+    canonical_failures: list[str] = []
     persist_enabled = not params.dry_run
+    compact_mode = not params.verbose_output and len(outcome.results) > 1
 
     for index, app_result in enumerate(outcome.results, start=1):
         base_report = app_result.base_report()
@@ -190,6 +192,8 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             max_samples=params.string_max_samples,
             cleartext_only=params.string_cleartext_only,
         )
+        manifest = base_report.manifest
+
         permission_profile = _build_permission_profile(base_report, app_result)
         if permission_profile:
             permission_profiles.append(permission_profile)
@@ -200,7 +204,6 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
         secret_profiles.append(_collect_secret_stats(string_data, base_report))
         masvs_profile = _collect_masvs_profile(base_report)
         if masvs_profile:
-            manifest = base_report.manifest
             app_label = manifest.app_label if manifest and manifest.app_label else app_result.package_name
             masvs_profile["label"] = app_label
             masvs_profile["package"] = manifest.package_name if manifest and manifest.package_name else app_result.package_name
@@ -218,6 +221,20 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
         trend_delta = _compute_trend_delta(app_result.package_name, params.session_stamp, finding_totals)
         if trend_delta:
             trend_deltas.append(trend_delta)
+
+        if compact_mode:
+            if manifest and manifest.app_label:
+                display_name = manifest.app_label
+            elif manifest and manifest.package_name:
+                display_name = manifest.package_name
+            else:
+                display_name = app_result.package_name
+            compact_line = (
+                f"• {display_name}: H{finding_totals.get('High', 0)} "
+                f"M{finding_totals.get('Medium', 0)} L{finding_totals.get('Low', 0)} "
+                f"I{finding_totals.get('Info', 0)} (runtime {format_duration(total_duration)})"
+            )
+            print(compact_line)
 
         if persist_enabled:
             try:
@@ -243,11 +260,12 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             try:
                 ingest_payload = _build_ingest_payload(payload, base_report, params)
                 if not ingest_baseline_payload(ingest_payload):
-                    warning = (
-                        f"Failed to record canonical snapshot for {app_result.package_name}."
-                    )
-                    print(status_messages.status(warning, level="warn"))
-                    persistence_errors.append(warning)
+                    canonical_failures.append(app_result.package_name)
+                    if params.verbose_output:
+                        warning = (
+                            f"Failed to record canonical snapshot for {app_result.package_name}."
+                        )
+                        print(status_messages.status(warning, level="warn"))
             except Exception as exc:
                 warning = (
                     f"Failed to ingest baseline snapshot for {app_result.package_name}: {exc}"
@@ -263,9 +281,11 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             except Exception:
                 report_reference = None
 
-        for line in lines:
-            print(line)
+        if not compact_mode:
+            for line in lines:
+                print(line)
 
+        saved_path = None
         if persist_enabled:
             try:
                 saved_path = write_baseline_json(
@@ -274,21 +294,36 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                     profile=params.profile,
                     scope=params.scope,
                 )
-                print(f"  Saved baseline JSON → {saved_path.name}")
             except Exception as exc:
                 warning = (
                     f"Failed to write baseline JSON for {app_result.package_name}: {exc}"
                 )
                 print(status_messages.status(warning, level="warn"))
+        if saved_path and not compact_mode:
+            print(f"  Saved baseline JSON → {saved_path.name}")
 
-        if report_reference:
+        if report_reference and not compact_mode:
             print(f"  Report reference    → {report_reference}")
 
-        if index < len(outcome.results):
+        if index < len(outcome.results) and not compact_mode:
             print()
 
     session_stamp = params.session_stamp
     if outcome.results:
+        if canonical_failures:
+            unique_failures = sorted(set(canonical_failures))
+            preview_limit = 5
+            preview = ", ".join(unique_failures[:preview_limit])
+            remaining = len(unique_failures) - preview_limit
+            if remaining > 0:
+                preview += f", +{remaining} more"
+            failure_message = (
+                "Failed to record canonical snapshot for "
+                f"{len(unique_failures)} package{'s' if len(unique_failures) != 1 else ''}: "
+                + preview
+            )
+            if failure_message not in persistence_errors:
+                persistence_errors.append(failure_message)
         printed_db_table = False
         if session_stamp and persist_enabled:
             printed_db_table = _render_db_severity_table(session_stamp)
@@ -296,6 +331,13 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             from ..detail import render_app_table  # local import to avoid cycle
 
             render_app_table(outcome.results)
+        if compact_mode:
+            print(
+                status_messages.status(
+                    "Per-app details hidden. Re-run with --verbose-output for full reports.",
+                    level="info",
+                )
+            )
         if session_stamp and persist_enabled:
             _render_persistence_footer(session_stamp, had_errors=bool(persistence_errors))
             if persistence_errors:
@@ -815,19 +857,16 @@ def _render_masvs_matrix_local(
         return False
     areas = ("NETWORK", "PLATFORM", "PRIVACY", "STORAGE")
 
-    def _score(entry: Mapping[str, object]) -> tuple[int, int, int]:
-        counts = entry.get("counts") if isinstance(entry, Mapping) else {}
-        if not isinstance(counts, Mapping):
-            counts = {}
-        total_high = sum((counts.get(area, {}) or {}).get("High", 0) for area in areas)
-        total_medium = sum((counts.get(area, {}) or {}).get("Medium", 0) for area in areas)
-        total_low = sum((counts.get(area, {}) or {}).get("Low", 0) for area in areas)
-        return (total_high, total_medium, total_low)
+    prepared: list[tuple[str, Mapping[str, object] | object]] = []
+    for _, entry in matrix.items():
+        label = str((entry.get("label") if isinstance(entry, Mapping) else "") or "")
+        package = str((entry.get("package") if isinstance(entry, Mapping) else "") or "")
+        display = label or package or "—"
+        prepared.append((display, entry))
 
     ordered = sorted(
-        matrix.items(),
-        key=lambda item: _score(item[1]),
-        reverse=True,
+        prepared,
+        key=lambda item: item[0].lower(),
     )[:limit]
     if not ordered:
         return False
@@ -835,12 +874,11 @@ def _render_masvs_matrix_local(
     print("\nMASVS Matrix — Current run snapshot")
     headers = ["App", "Network", "Platform", "Privacy", "Storage", "Totals"]
     table_payload: list[list[str]] = []
-    for _, entry in ordered:
+    for display, entry in ordered:
         counts = entry.get("counts") if isinstance(entry, Mapping) else {}
         if not isinstance(counts, Mapping):
             counts = {}
-        label = str(entry.get("label") or entry.get("package") or "—")
-        row = [label]
+        row = [display]
         total_high = total_medium = total_low = total_info = 0
         for area in areas:
             area_counts = counts.get(area, {"High": 0, "Medium": 0, "Low": 0, "Info": 0}) if isinstance(counts, Mapping) else {}
@@ -859,21 +897,24 @@ def _render_masvs_matrix_local(
                 totals_text = colors.apply(totals_text, colors.style("warning"), bold=True)
         row.append(totals_text)
         table_payload.append(row)
-    table_utils.render_table(headers, table_payload, accent_first_column=False)
+    table_utils.render_table(headers, table_payload)
     return True
 
 
 def _render_static_risk_table(rows: Sequence[dict[str, object]], *, limit: int = 15) -> bool:
     if not rows:
         return False
-    ordered = sorted(rows, key=lambda item: item.get("total", 0.0), reverse=True)[:limit]
+    ordered = sorted(
+        rows,
+        key=lambda item: str(item.get("label") or item.get("package") or "").lower(),
+    )[:limit]
     if not ordered:
         return False
     print("\nStatic Risk Scores — Composite buckets")
     headers = [
+        "App",
         "Grade",
         "Total",
-        "App",
         "Perm",
         "Network",
         "Storage",
@@ -887,9 +928,9 @@ def _render_static_risk_table(rows: Sequence[dict[str, object]], *, limit: int =
         label = str(entry.get("label") or entry.get("package") or "—")
         table_rows.append(
             [
+                label,
                 str(entry.get("grade") or "N/A"),
                 f"{float(entry.get('total', 0.0)):.1f}",
-                label,
                 f"{float(entry.get('permission', 0.0)):.1f}",
                 f"{float(entry.get('network', 0.0)):.1f}",
                 f"{float(entry.get('storage', 0.0)):.1f}",
@@ -899,7 +940,7 @@ def _render_static_risk_table(rows: Sequence[dict[str, object]], *, limit: int =
                 f"{float(entry.get('correlation', 0.0)):.1f}",
             ]
         )
-    table_utils.render_table(headers, table_rows, accent_first_column=False)
+    table_utils.render_table(headers, table_rows)
     return True
 
 
