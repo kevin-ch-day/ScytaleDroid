@@ -42,13 +42,21 @@ def get_choice(
     if not value_map:
         raise ValueError("No selectable menu entries provided")
 
-    rendered_prompt = prompt if prompt != "> " else _build_prompt(default)
+    effective_default: Optional[str] = None
+    if default is not None:
+        default_key = default.lower() if casefold else default
+        effective_default = value_map.get(default_key)
+        if effective_default is None:
+            # Fall back to the first available option so Enter still works.
+            effective_default = next(iter(value_map.values()))
+
+    rendered_prompt = prompt if prompt != "> " else _build_prompt(effective_default)
 
     while True:
         response = input(rendered_prompt).strip()
         if not response:
-            if default is not None:
-                return default
+            if effective_default is not None:
+                return effective_default
         else:
             key = response.lower() if casefold else response
             if key in value_map:

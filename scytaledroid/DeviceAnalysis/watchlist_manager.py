@@ -10,6 +10,9 @@ from scytaledroid.DeviceAnalysis import harvest
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, text_blocks
 
 
+_APP_NAME_CACHE: Dict[str, str] = {}
+
+
 def manage_watchlists(serial: Optional[str] = None) -> None:
     """Entry point for the watchlist management console."""
 
@@ -37,8 +40,27 @@ def manage_watchlists(serial: Optional[str] = None) -> None:
             _delete_watchlist(watchlists)
         elif choice == "3":
             harvest.reset_watchlist_cache()
+            _APP_NAME_CACHE.clear()
         else:
             print(status_messages.status("Selection not available.", level="warn"))
+
+
+def _format_watchlist_location(path: Path) -> str:
+    """Return a user-friendly path for display in the watchlist table."""
+
+    candidate = Path(path).expanduser()
+    try:
+        resolved = candidate.resolve(strict=False)
+    except Exception:
+        return str(candidate)
+
+    try:
+        base = Path.cwd().resolve()
+        relative = resolved.relative_to(base)
+    except ValueError:
+        return str(resolved)
+    else:
+        return str(relative)
 
 
 def _render_watchlist_table(watchlists: Iterable[harvest.Watchlist]) -> None:
@@ -50,7 +72,7 @@ def _render_watchlist_table(watchlists: Iterable[harvest.Watchlist]) -> None:
                 watchlist.slug,
                 watchlist.name,
                 str(len(watchlist.packages)),
-                str(Path(watchlist.path).relative_to(Path.cwd())),
+                _format_watchlist_location(Path(watchlist.path)),
             ]
         )
     if rows:
@@ -89,6 +111,7 @@ def _delete_watchlist(watchlists: Iterable[harvest.Watchlist]) -> None:
     try:
         Path(watchlist.path).unlink()
         harvest.reset_watchlist_cache()
+        _APP_NAME_CACHE.clear()
         print(status_messages.status("Watchlist deleted.", level="success"))
     except FileNotFoundError:
         print(status_messages.status("Watchlist file already removed.", level="warn"))
@@ -122,23 +145,36 @@ def _prompt_watchlist_choice(
 
 
 def _resolve_app_names(packages: Iterable[str]) -> Dict[str, str]:
-    package_list = [pkg for pkg in packages]
+    package_list = []
+    seen = set()
+    for package in packages:
+        normalised = str(package or "").strip()
+        if not normalised or normalised in seen:
+            continue
+        package_list.append(normalised)
+        seen.add(normalised)
+
     if not package_list:
         return {}
-    placeholders = ", ".join(["%s"] * len(package_list))
-    query = (
-        "SELECT package_name, COALESCE(app_name, package_name) AS label "
-        "FROM android_app_definitions "
-        f"WHERE package_name IN ({placeholders})"
-    )
-    rows = db_queries.run_sql(query, tuple(package_list), fetch="all", dictionary=True)
-    mapping = {}
-    if rows:
-        for row in rows:
-            pkg = str(row.get("package_name") or "")
-            if pkg:
-                mapping[pkg] = str(row.get("label") or pkg)
-    return mapping
+
+    missing = [pkg for pkg in package_list if pkg not in _APP_NAME_CACHE]
+    if missing:
+        placeholders = ", ".join(["%s"] * len(missing))
+        query = (
+            "SELECT package_name, COALESCE(app_name, package_name) AS label "
+            "FROM android_app_definitions "
+            f"WHERE package_name IN ({placeholders})"
+        )
+        rows = db_queries.run_sql(query, tuple(missing), fetch="all", dictionary=True)
+        if rows:
+            for row in rows:
+                pkg = str(row.get("package_name") or "").strip()
+                if pkg:
+                    _APP_NAME_CACHE[pkg] = str(row.get("label") or pkg)
+        for pkg in missing:
+            _APP_NAME_CACHE.setdefault(pkg, pkg)
+
+    return {pkg: _APP_NAME_CACHE[pkg] for pkg in package_list}
 
 
 __all__ = ["manage_watchlists"]

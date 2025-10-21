@@ -85,14 +85,14 @@ def main_menu() -> None:
 
     menu_actions: list[tuple[str, str, Callable[[], None]]] = [
         ("1", "Connect to Android Device", handle_device),
-        ("3", "Static analysis", handle_static),
-        ("4", "Harvest Android Permissions", handle_perm_catalog),
-        ("5", "Dynamic analysis", handle_dynamic),
-        ("6", "Reporting", handle_reporting),
-        ("7", "Database Utilities", handle_database),
-        ("8", "Database Tasks", handle_database_tasks),
-        ("9", "Workspace Utilities", handle_utils),
-        ("10", "About App", handle_about),
+        ("2", "Static analysis", handle_static),
+        ("3", "Harvest Android Permissions", handle_perm_catalog),
+        ("4", "Dynamic analysis", handle_dynamic),
+        ("5", "Reporting", handle_reporting),
+        ("6", "Database Utilities", handle_database),
+        ("7", "Database Tasks", handle_database_tasks),
+        ("8", "Workspace Utilities", handle_utils),
+        ("9", "About App", handle_about),
     ]
 
     menu_entries = [
