@@ -835,7 +835,6 @@ def persist_run_summary(
             string_payload=string_payload if isinstance(string_payload, Mapping) else {},
             manifest=br.manifest,
             app_metadata=baseline_payload.get("app") if isinstance(baseline_payload, Mapping) else {},
-            run_id=int(run_id) if run_id is not None else None,
         )
         for err in static_errors:
             outcome.add_error(err)
@@ -853,7 +852,6 @@ def _persist_static_tables(
     string_payload: Mapping[str, object],
     manifest: object | None,
     app_metadata: Mapping[str, object] | object,
-    run_id: int | None,
 ) -> list[str]:
     errors: list[str] = []
 

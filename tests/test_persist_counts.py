@@ -277,7 +277,6 @@ def test_persist_run_summary_tracks_session(monkeypatch, stub_string_data, basel
     assert app_details["version_name"] == "1.2.3"
     assert app_details["version_code"] == 123
     assert app_details["target_sdk"] == 33
-    assert string_summary_args["run_id"] == 101
     assert string_summary_args["session_stamp"] == session_stamp
     assert calls["write_buckets"][0] == 101
     metrics_payload = calls["write_metrics"][1]
