@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from collections import Counter
 from types import SimpleNamespace
 
@@ -52,6 +51,7 @@ def _make_stub_report() -> SimpleNamespace:
         findings=[finding],
         metrics={},
         duration_sec=0.15,
+        masvs_coverage=[("BASE-IPC-COMP-NO-ACL", {"location": "AndroidManifest.xml"})],
     )
 
     return SimpleNamespace(
@@ -179,9 +179,16 @@ def test_persist_run_summary_tracks_session(monkeypatch, stub_string_data, basel
 
     calls: dict[str, object] = {}
 
-    def fake_create_run(**kwargs):
-        calls["create_run"] = kwargs
-        return 101
+    def fake_prepare_run_envelope(**kwargs):
+        calls["prepare_run_envelope"] = kwargs
+        envelope = SimpleNamespace(
+            run_id=101,
+            app_label="Example App",
+            target_sdk=33,
+            threat_profile="Active",
+            env_profile="enterprise",
+        )
+        return envelope, []
 
     def fake_write_buckets(run_id, payload):
         calls["write_buckets"] = (run_id, payload)
@@ -205,47 +212,24 @@ def test_persist_run_summary_tracks_session(monkeypatch, stub_string_data, basel
             for control_id, entry in coverage.items()
         }
 
-    summary_calls: dict[str, object] = {}
+    static_calls: dict[str, object] = {}
 
-    def fake_sf_upsert_summary(**kwargs):
-        summary_calls.update(kwargs)
-        return 11
+    def fake_persist_static_findings(**kwargs):
+        static_calls.setdefault("static_findings", kwargs)
+        return []
 
-    def fake_sf_replace(summary_id, findings):
-        calls["sf_replace"] = (summary_id, tuple(findings))
-        return (1, len(tuple(findings)))
+    def fake_persist_string_summary(**kwargs):
+        static_calls.setdefault("string_summary", kwargs)
+        return []
 
-    string_summary_args: dict[str, object] = {}
-
-    def fake_sa_upsert(summary_record):
-        string_summary_args.update(summary_record.to_parameters())
-        return 12
-
-    monkeypatch.setattr(db_persist._dw, "create_run", fake_create_run)
-    monkeypatch.setattr(db_persist._dw, "write_buckets", fake_write_buckets)
-    monkeypatch.setattr(db_persist._dw, "write_metrics", fake_write_metrics)
-    monkeypatch.setattr(db_persist._dw, "write_contributors", fake_write_contributors)
-    monkeypatch.setattr(db_persist, "_persist_findings", fake_persist_findings)
-    monkeypatch.setattr(db_persist, "_persist_masvs_controls", fake_persist_controls)
-
-    monkeypatch.setattr(db_persist._sf, "ensure_tables", lambda: True)
-    monkeypatch.setattr(db_persist._sf, "upsert_summary", fake_sf_upsert_summary)
-    monkeypatch.setattr(db_persist._sf, "replace_findings", fake_sf_replace)
-
-    monkeypatch.setattr(db_persist._sa, "ensure_tables", lambda: True)
-    monkeypatch.setattr(db_persist._sa, "upsert_summary", fake_sa_upsert)
-    monkeypatch.setattr(db_persist._sa, "replace_top_samples", lambda summary_id, samples, top_n=3: (0, 0))
-    monkeypatch.setattr(
-        db_persist.core_q,
-        "run_sql",
-        lambda query, params=None, fetch="none", dictionary=False: {
-            "threat_profile": "Active",
-            "env_profile": "enterprise",
-        }
-        if "SELECT threat_profile" in query
-        else None,
-    )
-
+    monkeypatch.setattr(db_persist, "prepare_run_envelope", fake_prepare_run_envelope)
+    monkeypatch.setattr(db_persist, "write_buckets", fake_write_buckets)
+    monkeypatch.setattr(db_persist, "write_metrics", fake_write_metrics)
+    monkeypatch.setattr(db_persist, "write_contributors", fake_write_contributors)
+    monkeypatch.setattr(db_persist, "persist_findings", fake_persist_findings)
+    monkeypatch.setattr(db_persist, "persist_masvs_controls", fake_persist_controls)
+    monkeypatch.setattr(db_persist, "persist_static_findings", fake_persist_static_findings)
+    monkeypatch.setattr(db_persist, "persist_string_summary", fake_persist_string_summary)
     outcome = db_persist.persist_run_summary(
         report,
         stub_string_data,
@@ -260,24 +244,9 @@ def test_persist_run_summary_tracks_session(monkeypatch, stub_string_data, basel
     assert outcome.success is True
     assert outcome.run_id == 101
 
-    assert calls["create_run"]["package"] == "com.example.app"
-    assert calls["create_run"]["app_label"] == "Example App"
-    assert calls["create_run"]["session_stamp"] == session_stamp
-    assert calls["create_run"]["threat_profile"] == "Active"
-    assert calls["create_run"]["env_profile"] == "enterprise"
-    assert summary_calls["session_stamp"] == session_stamp
-    details_raw = summary_calls["details"]
-    if isinstance(details_raw, str):
-        summary_details = json.loads(details_raw)
-    else:
-        summary_details = details_raw
-    app_details = summary_details["app"]
-    assert app_details["label"] == "Example App"
-    assert app_details["package"] == "com.example.app"
-    assert app_details["version_name"] == "1.2.3"
-    assert app_details["version_code"] == 123
-    assert app_details["target_sdk"] == 33
-    assert string_summary_args["session_stamp"] == session_stamp
+    envelope_call = calls["prepare_run_envelope"]
+    assert envelope_call["session_stamp"] == session_stamp
+    assert envelope_call["run_package"] == "com.example.app"
     assert calls["write_buckets"][0] == 101
     metrics_payload = calls["write_metrics"][1]
     assert "network.code_http_hosts" in metrics_payload
@@ -295,6 +264,8 @@ def test_persist_run_summary_tracks_session(monkeypatch, stub_string_data, basel
     assert row["cvss_v40_bte_score"]
 
     assert calls["control_coverage"] == {"PLATFORM-IPC-1": "FAIL"}
+    assert static_calls["static_findings"]["session_stamp"] == session_stamp
+    assert static_calls["string_summary"]["session_stamp"] == session_stamp
 
 
 def test_persist_run_summary_dry_run_skips_writes(monkeypatch, stub_string_data, baseline_payload):
@@ -304,34 +275,44 @@ def test_persist_run_summary_dry_run_skips_writes(monkeypatch, stub_string_data,
     finding_totals = Counter({"Medium": 1, "High": 0, "Low": 0, "Info": 0})
 
     monkeypatch.setattr(
-        db_persist._dw,
-        "create_run",
-        lambda **kwargs: (_ for _ in ()).throw(AssertionError("create_run should not be called")),
+        db_persist,
+        "prepare_run_envelope",
+        lambda **kwargs: (SimpleNamespace(run_id=None, threat_profile="T", env_profile="E"), []),
     )
     monkeypatch.setattr(
-        db_persist._dw,
+        db_persist,
         "write_buckets",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("write_buckets")),
     )
     monkeypatch.setattr(
-        db_persist._dw,
+        db_persist,
         "write_metrics",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("write_metrics")),
     )
     monkeypatch.setattr(
-        db_persist._dw,
+        db_persist,
         "write_contributors",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("write_contributors")),
     )
     monkeypatch.setattr(
         db_persist,
-        "_persist_findings",
+        "persist_findings",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("persist_findings")),
     )
     monkeypatch.setattr(
         db_persist,
-        "_persist_masvs_controls",
+        "persist_masvs_controls",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("persist_controls")),
+    )
+    monkeypatch.setattr(
+        db_persist,
+        "persist_static_findings",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("persist_static")),
+    )
+    monkeypatch.setattr(
+        db_persist,
+        "persist_string_summary",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("persist_strings")),
     )
 
     outcome = db_persist.persist_run_summary(

@@ -9,11 +9,35 @@ _LEADING = set('("\'{[<“”‘’')
 
 # Trailing punctuation that often clings to tokens in text.
 # (No functional duplicates; order doesn't matter in a set.)
-_TRAILING = set(')"}]>.,;:’”')
+_TRAILING = {
+    ")",
+    '"',
+    "'",
+    "}",
+    "]",
+    ">",
+    ".",
+    ",",
+    ";",
+    ":",
+    "’",
+    "”",
+}
 
 # Bracketed IPv6 literal matcher (RFC 3986 style), allowing zone IDs (RFC 6874).
 # Examples: [2001:db8::1], [fe80::1%eth0], [::ffff:192.0.2.128]
 _IPV6_CANDIDATE = re.compile(r"\[[0-9A-Fa-f:.%+-]+\]")
+
+
+def _starts_with_ipv6_literal(value: str) -> bool:
+    """Return True when *value* begins with a bracketed IPv6 literal."""
+
+    if not value or value[0] != "[":
+        return False
+
+    match = _IPV6_CANDIDATE.match(value)
+    return bool(match)
+
 
 def _looks_like_ipv6_suffix(value: str) -> bool:
     """Return True when *value* ends with a bracketed IPv6 literal."""
@@ -46,6 +70,8 @@ def strip_wrap_punct(text: str) -> str:
 
     # Remove leading punctuation wrappers greedily (quotes, parens, etc.).
     while s and s[0] in _LEADING:
+        if s[0] == "[" and _starts_with_ipv6_literal(s):
+            break
         s = s[1:].lstrip()
 
     if not s:
