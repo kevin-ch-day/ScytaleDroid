@@ -11,6 +11,7 @@ from typing import Any, Mapping, Optional, Sequence, Union
 
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_queries import views as _views
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
 _DDL = [
@@ -105,7 +106,7 @@ _DDL = [
 ]
 
 
-def ensure_schema() -> bool:
+def ensure_schema(*, raise_on_error: bool = False) -> bool:
     try:
         for stmt in _DDL:
             core_q.run_sql(stmt)
@@ -116,7 +117,14 @@ def ensure_schema() -> bool:
         _ensure_buckets_foreign_key()
         _ensure_views()
         return True
-    except Exception:
+    except Exception as exc:
+        message = (
+            "Failed to provision static-analysis persistence schema: "
+            f"{exc.__class__.__name__}: {exc}"
+        )
+        log.error(message, category="static_analysis")
+        if raise_on_error:
+            raise RuntimeError(message) from exc
         return False
 
 
@@ -136,7 +144,7 @@ def create_run(
     env_profile: str = "consumer",
 ) -> Optional[int]:
     try:
-        ensure_schema()
+        ensure_schema(raise_on_error=True)
         run_id = core_q.run_sql(
             (
                 "INSERT INTO runs (package, app_label, version_code, version_name, target_sdk, schema_version, ts, session_stamp, prefs_hash, installer, confidence, threat_profile, env_profile) "
@@ -158,9 +166,18 @@ def create_run(
             ),
             return_lastrowid=True,
         )
-        return int(run_id) if run_id else None
-    except Exception:
-        return None
+        if not run_id:
+            raise RuntimeError(
+                "INSERT INTO runs returned no identifier; check database permissions or constraints."
+            )
+        return int(run_id)
+    except Exception as exc:
+        message = (
+            "Failed to create run row for package "
+            f"{package}: {exc.__class__.__name__}: {exc}"
+        )
+        log.error(message, category="static_analysis")
+        raise RuntimeError(message) from exc
 
 
 def write_metrics(run_id: int, entries: Mapping[str, tuple[Optional[float], Optional[str]]], module_id: Optional[str] = None) -> bool:

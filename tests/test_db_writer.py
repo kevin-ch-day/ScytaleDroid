@@ -1,12 +1,14 @@
 import json
 
+import pytest
+
 from scytaledroid.Persistence import db_writer
 
 
 def test_create_run_includes_profiles(monkeypatch):
     captured: dict[str, object] = {}
 
-    monkeypatch.setattr(db_writer, "ensure_schema", lambda: True)
+    monkeypatch.setattr(db_writer, "ensure_schema", lambda **_: True)
 
     def fake_run_sql(query, params=None, **kwargs):
         captured["query"] = query
@@ -62,6 +64,29 @@ def test_write_findings_accepts_mapping(monkeypatch):
     assert evidence_json["detail"] == "Receiver exported"
     assert evidence_json["path"] == "AndroidManifest.xml"
     assert params[-1] == "manifest"
+
+
+def test_create_run_surfaces_sql_failure(monkeypatch):
+    monkeypatch.setattr(db_writer, "ensure_schema", lambda **_: True)
+
+    def fake_run_sql(*args, **kwargs):
+        raise RuntimeError("IntegrityError: duplicate key")
+
+    monkeypatch.setattr(db_writer.core_q, "run_sql", fake_run_sql)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        db_writer.create_run(
+            package="com.example.app",
+            app_label="Example App",
+            version_code=1,
+            version_name="1.0",
+            target_sdk=33,
+            session_stamp="20240101-010101",
+        )
+
+    message = str(excinfo.value)
+    assert "Failed to create run row" in message
+    assert "IntegrityError" in message
 
 
 def test_ensure_metrics_unique_key_deduplicates(monkeypatch):

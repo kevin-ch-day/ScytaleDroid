@@ -50,6 +50,19 @@ def _strip_brackets_and_port(raw: str) -> tuple[str, bool]:
     # Non-bracketed host: strip ":<digits>" if present at end
     # (Avoid breaking non-port colons inside tokens like "h:foo" by requiring digits)
     if ":" in s:
+        looks_like_ipv6 = s.count(":") > 1 or "::" in s or "%" in s
+        if looks_like_ipv6:
+            try:
+                ipaddress.ip_address(s)
+                return s, False
+            except ValueError:
+                if "%" in s:
+                    base, _, _ = s.partition("%")
+                    try:
+                        ipaddress.ip_address(base)
+                        return s, False
+                    except ValueError:
+                        pass
         host, _, maybe_port = s.rpartition(":")
         if host and maybe_port.isdigit():
             return host, False

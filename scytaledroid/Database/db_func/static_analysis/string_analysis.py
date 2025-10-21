@@ -41,6 +41,13 @@ class StringSummaryRecord:
             "flags": int(counts.get("flags", 0)),
             "certs": int(counts.get("certs", 0)),
             "high_entropy": int(counts.get("high_entropy", 0)),
+            "placeholders_downgraded": int(counts.get("placeholders_downgraded", 0)),
+            "placeholders_suppressed": int(counts.get("placeholders_suppressed", 0)),
+            "doc_hosts_suppressed": int(counts.get("doc_hosts_suppressed", 0)),
+            "doc_cdns_suppressed": int(counts.get("doc_cdns_suppressed", 0)),
+            "trailing_punct_trimmed": int(counts.get("trailing_punct_trimmed", 0)),
+            "ws_wss_seen": int(counts.get("ws_wss_seen", 0)),
+            "ipv6_seen": int(counts.get("ipv6_seen", 0)),
         }
 
 
@@ -74,8 +81,16 @@ def ensure_tables() -> bool:
             run_sql(queries.CREATE_DOC_HOSTS_TABLE)
             for statement in (
                 "ALTER TABLE static_string_summary ADD COLUMN run_id BIGINT UNSIGNED NULL AFTER scope_label",
+                "ALTER TABLE static_string_summary ADD COLUMN placeholders_downgraded INT UNSIGNED NOT NULL DEFAULT 0 AFTER high_entropy",
+                "ALTER TABLE static_string_summary ADD COLUMN placeholders_suppressed INT UNSIGNED NOT NULL DEFAULT 0 AFTER placeholders_downgraded",
+                "ALTER TABLE static_string_summary ADD COLUMN doc_hosts_suppressed INT UNSIGNED NOT NULL DEFAULT 0 AFTER placeholders_suppressed",
+                "ALTER TABLE static_string_summary ADD COLUMN doc_cdns_suppressed INT UNSIGNED NOT NULL DEFAULT 0 AFTER doc_hosts_suppressed",
+                "ALTER TABLE static_string_summary ADD COLUMN trailing_punct_trimmed INT UNSIGNED NOT NULL DEFAULT 0 AFTER doc_cdns_suppressed",
+                "ALTER TABLE static_string_summary ADD COLUMN ws_wss_seen INT UNSIGNED NOT NULL DEFAULT 0 AFTER trailing_punct_trimmed",
+                "ALTER TABLE static_string_summary ADD COLUMN ipv6_seen INT UNSIGNED NOT NULL DEFAULT 0 AFTER ws_wss_seen",
                 "ALTER TABLE static_string_summary ADD KEY ix_string_summary_run (run_id)",
                 "ALTER TABLE static_string_summary ADD CONSTRAINT fk_string_summary_run FOREIGN KEY (run_id) REFERENCES runs (run_id) ON DELETE SET NULL",
+                "ALTER TABLE static_string_summary ADD UNIQUE KEY ux_string_summary_run_scope (run_id, scope_label)",
             ):
                 try:
                     run_sql(statement)
@@ -148,6 +163,13 @@ def _summary_params(summary: SummaryRow) -> MutableMapping[str, object]:
             "flags": int(base.get("flags", 0)),
             "certs": int(base.get("certs", 0)),
             "high_entropy": int(base.get("high_entropy", 0)),
+            "placeholders_downgraded": int(base.get("placeholders_downgraded", 0)),
+            "placeholders_suppressed": int(base.get("placeholders_suppressed", 0)),
+            "doc_hosts_suppressed": int(base.get("doc_hosts_suppressed", 0)),
+            "doc_cdns_suppressed": int(base.get("doc_cdns_suppressed", 0)),
+            "trailing_punct_trimmed": int(base.get("trailing_punct_trimmed", 0)),
+            "ws_wss_seen": int(base.get("ws_wss_seen", 0)),
+            "ipv6_seen": int(base.get("ipv6_seen", 0)),
         },
         run_id=(
             int(base["run_id"])
@@ -162,12 +184,21 @@ def upsert_summary(summary: SummaryRow) -> int | None:
     try:
         with database_session():
             run_sql(queries.INSERT_STRING_SUMMARY, payload)
-            row = run_sql(
-                queries.SELECT_SUMMARY_ID,
-                (payload["package_name"], payload["session_stamp"], payload["scope_label"]),
-                fetch="one",
-            )
-        return int(row[0]) if row else None
+            row = None
+            run_id = payload.get("run_id")
+            if run_id is not None:
+                row = run_sql(
+                    queries.SELECT_SUMMARY_ID_BY_RUN,
+                    (run_id, payload["scope_label"]),
+                    fetch="one",
+                )
+            if not row:
+                row = run_sql(
+                    queries.SELECT_SUMMARY_ID,
+                    (payload["package_name"], payload["session_stamp"], payload["scope_label"]),
+                    fetch="one",
+                )
+            return int(row[0]) if row else None
     except Exception:
         return None
 

@@ -30,6 +30,10 @@ def test_punctuation_strip():
     assert (
         strip_wrap_punct("http://[2001:db8::1])") == "http://[2001:db8::1]"
     )
+    assert strip_wrap_punct("'(api.example.co.uk,)") == "api.example.co.uk"
+    assert strip_wrap_punct("'h'") == "h"
+    assert strip_wrap_punct("[2001:db8::1])") == "[2001:db8::1]"
+    assert strip_wrap_punct("[2001:db8::1]:443)") == "[2001:db8::1]:443"
 
 
 def test_placeholder_rejection():
@@ -59,6 +63,13 @@ def test_host_normalization_multilevel_suffix():
     normalized = normalize_host("api.service.co.uk")
     assert normalized.full_host == "api.service.co.uk"
     assert normalized.etld_plus_one == "service.co.uk"
+
+
+def test_host_normalization_ipv6_literal():
+    normalized = normalize_host("[2001:db8::1]:443")
+    assert normalized.full_host == "2001:db8::1"
+    assert normalized.etld_plus_one is None
+    assert normalized.is_ip
 
 
 def test_bucket_classification_http():

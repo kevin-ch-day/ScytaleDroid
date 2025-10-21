@@ -20,9 +20,17 @@ CREATE TABLE IF NOT EXISTS static_string_summary (
   flags INT UNSIGNED NOT NULL DEFAULT 0,
   certs INT UNSIGNED NOT NULL DEFAULT 0,
   high_entropy INT UNSIGNED NOT NULL DEFAULT 0,
+  placeholders_downgraded INT UNSIGNED NOT NULL DEFAULT 0,
+  placeholders_suppressed INT UNSIGNED NOT NULL DEFAULT 0,
+  doc_hosts_suppressed INT UNSIGNED NOT NULL DEFAULT 0,
+  doc_cdns_suppressed INT UNSIGNED NOT NULL DEFAULT 0,
+  trailing_punct_trimmed INT UNSIGNED NOT NULL DEFAULT 0,
+  ws_wss_seen INT UNSIGNED NOT NULL DEFAULT 0,
+  ipv6_seen INT UNSIGNED NOT NULL DEFAULT 0,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY ux_string_summary (package_name, session_stamp, scope_label),
+  UNIQUE KEY ux_string_summary_run_scope (run_id, scope_label),
   KEY ix_string_summary_session (session_stamp),
   KEY ix_string_summary_run (run_id),
   CONSTRAINT fk_string_summary_run FOREIGN KEY (run_id)
@@ -62,10 +70,14 @@ CREATE TABLE IF NOT EXISTS static_string_samples (
 INSERT_STRING_SUMMARY = """
 INSERT INTO static_string_summary (
   package_name, session_stamp, scope_label, run_id,
-  endpoints, http_cleartext, api_keys, analytics_ids, cloud_refs, ipc, uris, flags, certs, high_entropy
+  endpoints, http_cleartext, api_keys, analytics_ids, cloud_refs, ipc, uris, flags, certs, high_entropy,
+  placeholders_downgraded, placeholders_suppressed, doc_hosts_suppressed, doc_cdns_suppressed,
+  trailing_punct_trimmed, ws_wss_seen, ipv6_seen
 ) VALUES (
   %(package_name)s, %(session_stamp)s, %(scope_label)s, %(run_id)s,
-  %(endpoints)s, %(http_cleartext)s, %(api_keys)s, %(analytics_ids)s, %(cloud_refs)s, %(ipc)s, %(uris)s, %(flags)s, %(certs)s, %(high_entropy)s
+  %(endpoints)s, %(http_cleartext)s, %(api_keys)s, %(analytics_ids)s, %(cloud_refs)s, %(ipc)s, %(uris)s, %(flags)s, %(certs)s, %(high_entropy)s,
+  %(placeholders_downgraded)s, %(placeholders_suppressed)s, %(doc_hosts_suppressed)s, %(doc_cdns_suppressed)s,
+  %(trailing_punct_trimmed)s, %(ws_wss_seen)s, %(ipv6_seen)s
 )
 ON DUPLICATE KEY UPDATE
   run_id=VALUES(run_id),
@@ -78,12 +90,24 @@ ON DUPLICATE KEY UPDATE
   uris=VALUES(uris),
   flags=VALUES(flags),
   certs=VALUES(certs),
-  high_entropy=VALUES(high_entropy)
+  high_entropy=VALUES(high_entropy),
+  placeholders_downgraded=VALUES(placeholders_downgraded),
+  placeholders_suppressed=VALUES(placeholders_suppressed),
+  doc_hosts_suppressed=VALUES(doc_hosts_suppressed),
+  doc_cdns_suppressed=VALUES(doc_cdns_suppressed),
+  trailing_punct_trimmed=VALUES(trailing_punct_trimmed),
+  ws_wss_seen=VALUES(ws_wss_seen),
+  ipv6_seen=VALUES(ipv6_seen)
 """
 
 SELECT_SUMMARY_ID = """
 SELECT id FROM static_string_summary
 WHERE package_name=%s AND session_stamp=%s AND scope_label=%s
+"""
+
+SELECT_SUMMARY_ID_BY_RUN = """
+SELECT id FROM static_string_summary
+WHERE run_id=%s AND scope_label=%s
 """
 
 DELETE_SAMPLES_FOR_SUMMARY = """
