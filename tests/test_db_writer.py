@@ -17,6 +17,7 @@ def test_create_run_includes_profiles(monkeypatch):
 
     run_id = db_writer.create_run(
         package="com.example.app",
+        app_label="Example App",
         version_code=1,
         version_name="1.0",
         target_sdk=33,
@@ -28,6 +29,7 @@ def test_create_run_includes_profiles(monkeypatch):
     assert run_id == 7
     assert "threat_profile" in captured["query"]
     assert captured["params"][-2:] == ("Active", "enterprise")
+    assert captured["params"][1] == "Example App"
 
 
 def test_write_findings_accepts_mapping(monkeypatch):

@@ -2,13 +2,45 @@
 
 from __future__ import annotations
 
+import re
 from statistics import median
-from typing import Optional, Dict
+from typing import Optional, Dict, Mapping
 
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils, colors
 from scytaledroid.Database.db_core import db_queries as core_q
 
 from .masvs_summary import fetch_db_masvs_summary, fetch_masvs_matrix
+
+
+def _humanize_descriptor(raw: object | None) -> str:
+    if raw is None:
+        return ""
+    try:
+        text = str(raw)
+    except Exception:
+        return ""
+    cleaned = re.sub(r"[_\-]+", " ", text)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    if not cleaned:
+        return ""
+    if cleaned.isupper():
+        return cleaned
+    return cleaned.title()
+
+
+def _format_descriptor(entry: Mapping[str, object] | None, severity: str) -> str:
+    if not isinstance(entry, Mapping):
+        return ""
+    descriptor = _humanize_descriptor(entry.get("descriptor"))
+    if not descriptor:
+        descriptor = f"{severity.title()} finding"
+    try:
+        occurrences = int(entry.get("occurrences") or 0)
+    except Exception:
+        occurrences = 0
+    if occurrences > 1:
+        descriptor += f" ×{occurrences}"
+    return descriptor
 
 
 def _format_cvss(entry: Dict[str, object]) -> tuple[str, str, str]:
@@ -183,7 +215,7 @@ def render_masvs_matrix_menu() -> None:
     print()
     menu_utils.print_header("MASVS Matrix", "Latest runs per package")
 
-    headers = ["Package", "Network", "Platform", "Privacy", "Storage", "Pass %", "Score"]
+    headers = ["App", "Network", "Platform", "Privacy", "Storage", "Pass %", "Score"]
     areas = ("NETWORK", "PLATFORM", "PRIVACY", "STORAGE")
     rows: list[list[str]] = []
     total_packages = len(matrix)
@@ -194,12 +226,23 @@ def render_masvs_matrix_menu() -> None:
     area_pass_totals: Dict[str, int] = {area: 0 for area in areas}
     score_values: list[float] = []
 
-    def _clip(text: str, limit: int = 36) -> str:
+    def _clip(text: str, limit: int = 44) -> str:
         if len(text) <= limit:
             return text
         return text[: limit - 3] + "..."
 
-    for package, data in matrix.items():
+    ordered_items = sorted(
+        matrix.items(),
+        key=lambda item: (str(item[1].get("label") or item[0]).lower(), item[0].lower()),
+    )
+
+    display_lookup: Dict[str, str] = {}
+    alias_lookup: Dict[str, str] = {}
+
+    for package, data in ordered_items:
+        display_name = str(data.get("label") or package)
+        display_lookup[package] = display_name
+        alias_lookup.setdefault(display_name.lower(), package)
         statuses: Dict[str, str] = data["status"]
         counts: Dict[str, Dict[str, int]] = data["counts"]
         pass_rate = data["pass_rate"]
@@ -208,29 +251,22 @@ def render_masvs_matrix_menu() -> None:
         def _fmt(area: str) -> str:
             status = statuses.get(area, "–")
             area_counts = counts.get(area, {"high": 0, "medium": 0, "low": 0, "info": 0})
-            top_entry = top_lookup.get(area, {})
-            suffix = ""
+            top_entry = top_lookup.get(area, {}) if isinstance(top_lookup, dict) else {}
             if status == "FAIL":
                 high = area_counts.get("high", 0)
-                top_high = top_entry.get("high") if isinstance(top_entry, dict) else None
-                if top_high:
-                    descriptor = _clip(str(top_high.get("descriptor", "")) or "High finding")
-                    occurrences = int(top_high.get("occurrences") or 0)
-                    suffix = f" – {descriptor}"
-                    if occurrences > 1:
-                        suffix += f"x{occurrences}"
-                text = f"FAIL (H{high}){suffix}"
+                descriptor = _format_descriptor(top_entry.get("high"), "High")
+                parts = [f"FAIL H{high}"]
+                if descriptor:
+                    parts.append(descriptor)
+                text = _clip(" ".join(parts), 50)
                 return colors.apply(text, colors.style("error"), bold=True)
             if status == "WARN":
                 medium = area_counts.get("medium", 0)
-                top_medium = top_entry.get("medium") if isinstance(top_entry, dict) else None
-                if top_medium:
-                    descriptor = _clip(str(top_medium.get("descriptor", "")) or "Medium finding")
-                    occurrences = int(top_medium.get("occurrences") or 0)
-                    suffix = f" – {descriptor}"
-                    if occurrences > 1:
-                        suffix += f"x{occurrences}"
-                text = f"WARN (M{medium}){suffix}"
+                descriptor = _format_descriptor(top_entry.get("medium"), "Medium")
+                parts = [f"WARN M{medium}"]
+                if descriptor:
+                    parts.append(descriptor)
+                text = _clip(" ".join(parts), 50)
                 return colors.apply(text, colors.style("warning"), bold=True)
             if status == "PASS":
                 total_controls = (
@@ -239,11 +275,12 @@ def render_masvs_matrix_menu() -> None:
                     + area_counts.get("low", 0)
                     + area_counts.get("info", 0)
                 )
-                if total_controls:
-                    suffix = f" ({total_controls} ctrl{'s' if total_controls != 1 else ''})"
-                else:
-                    suffix = ""
-                text = f"PASS{suffix}"
+                descriptor = (
+                    f"{total_controls} control{'s' if total_controls != 1 else ''}"
+                    if total_controls
+                    else "No findings"
+                )
+                text = _clip(f"PASS {descriptor}", 50)
                 return colors.apply(text, colors.style("success"), bold=True)
             return status
 
@@ -264,9 +301,21 @@ def render_masvs_matrix_menu() -> None:
             elif status == "WARN":
                 score += 0.5
         score_values.append(score)
+        version_display = ""
+        version_name = data.get("version_name")
+        if isinstance(version_name, str) and version_name.strip():
+            version_display = f" (v{version_name.strip()})"
+        target_sdk = data.get("target_sdk")
+        if isinstance(target_sdk, int):
+            version_display += f" • T{target_sdk}"
+        if display_name.lower() != package.lower():
+            app_cell = _clip(f"{display_name}{version_display} [{package}]", 64)
+        else:
+            app_cell = _clip(f"{display_name}{version_display}", 64)
+
         rows.append(
             [
-                package,
+                app_cell,
                 _fmt("NETWORK"),
                 _fmt("PLATFORM"),
                 _fmt("PRIVACY"),
@@ -296,18 +345,18 @@ def render_masvs_matrix_menu() -> None:
             label = area.title()
             print(status_messages.status(f"{label:9} pass coverage: {count}/{total_packages} ({pct:.0f}%)", level="info"))
     print()
+    menu_utils.print_hint("Data source: MASVS findings persisted in the database (runs/findings tables).", icon="ℹ")
+    print()
     print("Legend:")
     print(f"  {colors.apply('PASS', colors.style('success'), bold=True)}  No medium/high findings - contributes 1.0 to score")
     print(f"  {colors.apply('WARN', colors.style('warning'), bold=True)}  Medium findings present - contributes 0.5 to score")
     print(f"  {colors.apply('FAIL', colors.style('error'), bold=True)}  High findings present - contributes 0.0 to score")
 
-    actionable_packages = sorted(
-        {
-            package
-            for package, data in matrix.items()
-            if any(data["status"].get(area) in {"FAIL", "WARN"} for area in areas)
-        }
-    )
+    actionable_packages = [
+        (package, display_lookup.get(package, package))
+        for package, data in ordered_items
+        if any(data["status"].get(area) in {"FAIL", "WARN"} for area in areas)
+    ]
     if actionable_packages:
         print()
         menu_utils.print_hint(
@@ -319,7 +368,8 @@ def render_masvs_matrix_menu() -> None:
             if not data:
                 print(status_messages.status(f"Package '{target}' not found in latest runs.", level="warn"))
                 return
-            menu_utils.print_section(f"Matrices - {target}")
+            display_name = display_lookup.get(target, target)
+            menu_utils.print_section(f"Matrices - {display_name} ({target})")
             status_map = data["status"]
             count_map = data["counts"]
             top_map = data.get("top") or {}
@@ -340,27 +390,24 @@ def render_masvs_matrix_menu() -> None:
                 top_entry = top_map.get(area, {})
                 descriptor = ""
                 if status == "FAIL":
-                    top_high = top_entry.get("high") if isinstance(top_entry, dict) else None
-                    if top_high:
-                        desc = _clip(str(top_high.get("descriptor") or "High finding"), limit=48)
-                        occ = int(top_high.get("occurrences") or 0)
-                        descriptor = f"High - {desc}"
-                        if occ > 1:
-                            descriptor += f" (x{occ})"
+                    descriptor = _format_descriptor(top_entry.get("high"), "High")
+                    if descriptor:
+                        descriptor = f"High — {descriptor}"
                     else:
                         descriptor = "High finding present"
                 elif status == "WARN":
-                    top_medium = top_entry.get("medium") if isinstance(top_entry, dict) else None
-                    if top_medium:
-                        desc = _clip(str(top_medium.get("descriptor") or "Medium finding"), limit=48)
-                        occ = int(top_medium.get("occurrences") or 0)
-                        descriptor = f"Medium - {desc}"
-                        if occ > 1:
-                            descriptor += f" (x{occ})"
+                    descriptor = _format_descriptor(top_entry.get("medium"), "Medium")
+                    if descriptor:
+                        descriptor = f"Medium — {descriptor}"
                     else:
                         descriptor = "Medium finding present"
                 else:
-                    total_ctrls = counts.get("high", 0) + counts.get("medium", 0) + counts.get("low", 0) + counts.get("info", 0)
+                    total_ctrls = (
+                        counts.get("high", 0)
+                        + counts.get("medium", 0)
+                        + counts.get("low", 0)
+                        + counts.get("info", 0)
+                    )
                     descriptor = f"{total_ctrls} control{'s' if total_ctrls != 1 else ''} assessed"
                 detail_rows.append(
                     [
@@ -377,6 +424,24 @@ def render_masvs_matrix_menu() -> None:
                 ["Area", "Status", "High", "Med", "Low", "Info", "Context"],
                 detail_rows,
             )
+            meta_bits: list[str] = []
+            version_name = data.get("version_name")
+            if isinstance(version_name, str) and version_name.strip():
+                meta_bits.append(f"Version: {version_name.strip()}")
+            version_code = data.get("version_code")
+            if isinstance(version_code, int):
+                meta_bits.append(f"Code: {version_code}")
+            target_sdk = data.get("target_sdk")
+            if isinstance(target_sdk, int):
+                meta_bits.append(f"Target SDK: {target_sdk}")
+            scope_label = data.get("scope_label")
+            if isinstance(scope_label, str) and scope_label.strip():
+                meta_bits.append(f"Scope: {scope_label.strip()}")
+            session_stamp = data.get("session_stamp")
+            if isinstance(session_stamp, str) and session_stamp.strip():
+                meta_bits.append(f"Session: {session_stamp.strip()}")
+            if meta_bits:
+                print(status_messages.status(" | ".join(meta_bits), level="info"))
             package_score = sum(
                 1.0 if status_map.get(area, "PASS") == "PASS" else 0.5 if status_map.get(area) == "WARN" else 0.0
                 for area in areas
@@ -392,18 +457,24 @@ def render_masvs_matrix_menu() -> None:
 
         seen_any = False
         while True:
-            hint = ", ".join(actionable_packages[:6])
+            preview = ", ".join(
+                (
+                    display if display.lower() == package.lower() else f"{display} ({package})"
+                )
+                for package, display in actionable_packages[:6]
+            )
             choice = prompt_utils.prompt_text(
                 "Package to inspect",
                 required=False,
-                hint=f"Available: {hint}" if actionable_packages else None,
+                hint=f"Available: {preview}" if actionable_packages else None,
             ).strip()
             if not choice:
                 break
-            if choice not in matrix:
+            target_pkg = choice if choice in matrix else alias_lookup.get(choice.lower())
+            if not target_pkg:
                 print(status_messages.status("Package not recognised. Try again.", level="warn"))
                 continue
-            _render_package_detail(choice)
+            _render_package_detail(target_pkg)
             seen_any = True
             if not prompt_utils.prompt_yes_no("Inspect another package?", default=False):
                 break

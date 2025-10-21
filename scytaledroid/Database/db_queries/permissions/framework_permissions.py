@@ -65,10 +65,31 @@ GROUP BY protection
 ORDER BY cnt DESC
 """
 
+SELECT_CATALOG = """
+SELECT
+  perm_name,
+  short,
+  protection,
+  protection_raw,
+  added_api,
+  deprecated_api,
+  source,
+  updated_at
+FROM android_framework_permissions
+ORDER BY perm_name
+"""
+
+SELECT_UPDATED_FINGERPRINT = """
+SELECT UNIX_TIMESTAMP(MAX(updated_at))
+FROM android_framework_permissions
+"""
+
 __all__ = [
     "CREATE_TABLE",
     "UPSERT_PERMISSION",
     "COUNT_ROWS",
     "TABLE_EXISTS",
     "PROTECTION_COUNTS",
+    "SELECT_CATALOG",
+    "SELECT_UPDATED_FINGERPRINT",
 ]

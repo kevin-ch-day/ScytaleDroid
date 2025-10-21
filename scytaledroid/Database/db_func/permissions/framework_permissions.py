@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Iterable, Mapping, Optional
 from dataclasses import asdict as _asdict, is_dataclass as _is_dataclass
+from typing import Iterable, Mapping, Optional
 
 from ...db_core import run_sql
 from ...db_queries.permissions import framework_permissions as queries
@@ -33,6 +33,22 @@ def count_rows() -> Optional[int]:
         return int(row[0]) if row else 0
     except Exception:
         return None
+
+
+def catalog_fingerprint() -> str:
+    """Return a stable fingerprint for the current catalog state."""
+
+    try:
+        row = run_sql(queries.SELECT_UPDATED_FINGERPRINT, fetch="one")
+    except Exception:
+        row = None
+    if row and row[0]:
+        try:
+            return str(int(row[0]))
+        except Exception:
+            return str(row[0])
+    total = count_rows() or 0
+    return f"rows:{total}"
 
 
 def _safe_int(value) -> Optional[int]:
@@ -115,9 +131,23 @@ def upsert_permissions(items: Iterable[object], *, source: str, limit: Optional[
     return processed
 
 
+def fetch_catalog_entries() -> list[Mapping[str, object]]:
+    """Return framework catalog rows as dictionaries."""
+
+    try:
+        rows = run_sql(queries.SELECT_CATALOG, fetch="all", dictionary=True)
+    except Exception:
+        return []
+    if not rows:
+        return []
+    return [dict(row) for row in rows if isinstance(row, Mapping)]
+
+
 __all__ = [
     "ensure_table",
     "table_exists",
     "count_rows",
+    "catalog_fingerprint",
     "upsert_permissions",
+    "fetch_catalog_entries",
 ]

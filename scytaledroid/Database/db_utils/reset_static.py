@@ -12,6 +12,9 @@ PROTECTED_TABLES: Sequence[str] = (
     "android_app_categories",
     "android_app_definitions",
     "android_framework_permissions",
+    "android_perm_map",
+    "android_perm_override",
+    "perm_groups",
     "android_unknown_permissions",
     "android_vendor_permissions",
 )

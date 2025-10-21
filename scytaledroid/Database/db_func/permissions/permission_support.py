@@ -7,6 +7,11 @@ from typing import Callable, Iterable, Mapping
 
 from ...db_core import run_sql
 from ...db_queries.permissions import permission_support as queries
+from . import framework_permissions, taxonomy
+
+_ALLOWED_BANDS = {"critical", "high", "medium", "low", "none"}
+_ALLOWED_STAGES = {"declared", "runtime", "policy"}
+
 
 DEFAULT_SIGNALS: tuple[Mapping[str, object], ...] = (
     {
@@ -14,68 +19,93 @@ DEFAULT_SIGNALS: tuple[Mapping[str, object], ...] = (
         "display_name": "Camera access",
         "description": "Apps requesting camera capture capabilities.",
         "default_weight": 1.000,
+        "default_band": "high",
     },
     {
         "signal_key": "microphone",
         "display_name": "Microphone access",
         "description": "Apps requesting audio recording permissions.",
         "default_weight": 1.000,
+        "default_band": "critical",
     },
     {
         "signal_key": "precise_location",
         "display_name": "Precise location",
         "description": "ACCESS_FINE_LOCATION or equivalent high-precision signals.",
         "default_weight": 1.250,
+        "default_band": "critical",
     },
     {
         "signal_key": "background_location",
         "display_name": "Background location",
         "description": "ACCESS_BACKGROUND_LOCATION or similar always-on tracking.",
         "default_weight": 1.500,
+        "default_band": "critical",
     },
     {
         "signal_key": "overlay",
         "display_name": "Overlay / draw-over",
         "description": "SYSTEM_ALERT_WINDOW style overlays.",
         "default_weight": 1.100,
+        "default_band": "high",
     },
     {
         "signal_key": "contacts",
         "display_name": "Contacts access",
         "description": "Contact/address book permissions.",
         "default_weight": 0.900,
+        "default_band": "high",
     },
     {
         "signal_key": "calls",
         "display_name": "Call logs & phone state",
         "description": "Phone state and call log access signals.",
         "default_weight": 0.850,
+        "default_band": "high",
     },
     {
         "signal_key": "sms",
         "display_name": "SMS access",
         "description": "Outbound or inbound SMS permissions.",
         "default_weight": 0.950,
+        "default_band": "high",
     },
     {
         "signal_key": "storage_broad",
         "display_name": "Legacy storage",
         "description": "Legacy wide storage permissions (READ/WRITE_EXTERNAL_STORAGE).",
         "default_weight": 1.200,
+        "default_band": "high",
     },
     {
         "signal_key": "bt_triad",
         "display_name": "Bluetooth stack",
         "description": "Bluetooth scan/advertise/connect access.",
         "default_weight": 0.700,
+        "default_band": "medium",
     },
     {
         "signal_key": "notifications",
         "display_name": "Notifications",
         "description": "POST_NOTIFICATIONS or listener-style access.",
         "default_weight": 0.400,
+        "default_band": "low",
     },
 )
+
+
+def _normalize_band(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    return text if text in _ALLOWED_BANDS else None
+
+
+def _normalize_stage(value: object) -> str:
+    if value is None:
+        return "declared"
+    text = str(value).strip().lower()
+    return text if text in _ALLOWED_STAGES else "declared"
 
 
 def ensure_signal_catalog() -> bool:
@@ -132,6 +162,8 @@ def ensure_all() -> dict[str, bool]:
     """Ensure the complete permission analytics schema is present."""
 
     operations: tuple[tuple[str, Callable[[], bool]], ...] = (
+        ("perm_groups / android_perm_map / android_perm_override", taxonomy.ensure_tables),
+        ("android_framework_permissions", framework_permissions.ensure_table),
         ("permission_signal_catalog", ensure_signal_catalog),
         ("permission_signal_mappings", ensure_signal_mappings),
         ("permission_cohort_expectations", ensure_cohort_expectations),
@@ -163,7 +195,7 @@ def seed_signal_catalog(
     try:
         existing_rows = run_sql(
             """
-            SELECT signal_key, display_name, description, default_weight
+            SELECT signal_key, display_name, description, default_weight, default_band, stage
             FROM permission_signal_catalog
             """,
             fetch="all",
@@ -190,6 +222,8 @@ def seed_signal_catalog(
         payload.setdefault("display_name", "")
         payload.setdefault("description", "")
         payload.setdefault("default_weight", 0.0)
+        payload["default_band"] = _normalize_band(payload.get("default_band"))
+        payload["stage"] = _normalize_stage(payload.get("stage"))
 
         current = existing.get(key)
         if current is None:
@@ -197,8 +231,8 @@ def seed_signal_catalog(
                 run_sql(
                     """
                     INSERT INTO permission_signal_catalog
-                        (signal_key, display_name, description, default_weight)
-                    VALUES (%(signal_key)s, %(display_name)s, %(description)s, %(default_weight)s)
+                        (signal_key, display_name, description, default_weight, default_band, stage)
+                    VALUES (%(signal_key)s, %(display_name)s, %(description)s, %(default_weight)s, %(default_band)s, %(stage)s)
                     """,
                     payload,
                 )
@@ -208,6 +242,8 @@ def seed_signal_catalog(
                     "display_name": payload["display_name"],
                     "description": payload["description"],
                     "default_weight": payload["default_weight"],
+                    "default_band": payload["default_band"],
+                    "stage": payload["stage"],
                 }
             except Exception:
                 continue
@@ -227,8 +263,10 @@ def seed_signal_catalog(
             desired_weight = current_weight
 
         weight_changed = not isclose(current_weight, desired_weight, rel_tol=1e-9, abs_tol=1e-9)
+        band_changed = (current.get("default_band") or None) != payload["default_band"]
+        stage_changed = (current.get("stage") or "declared") != payload["stage"]
 
-        if not (display_changed or description_changed or weight_changed):
+        if not (display_changed or description_changed or weight_changed or band_changed or stage_changed):
             continue
 
         try:
@@ -238,6 +276,8 @@ def seed_signal_catalog(
                 SET display_name = %(display_name)s,
                     description = %(description)s,
                     default_weight = %(default_weight)s,
+                    default_band = %(default_band)s,
+                    stage = %(stage)s,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE signal_key = %(signal_key)s
                 """,
@@ -249,6 +289,8 @@ def seed_signal_catalog(
                 "display_name": payload["display_name"],
                 "description": payload["description"],
                 "default_weight": desired_weight,
+                "default_band": payload["default_band"],
+                "stage": payload["stage"],
             }
         except Exception:
             continue
