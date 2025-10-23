@@ -52,15 +52,20 @@ def _safe_join(parts: Iterable[object]) -> str:
 def derive_run_id(apk_sha256: str, config: AnalysisConfig) -> str:
     """Return a deterministic identifier for debug log artefacts."""
 
-    detector_list = ",".join(sorted(config.enabled_detectors or ()))
+    detector_tokens = tuple(
+        str(detector)
+        for detector in (config.enabled_detectors or ())
+        if detector is not None
+    )
+    detector_list = ",".join(sorted(detector_tokens))
     seed = _safe_join(
         (
-            apk_sha256 or "unknown",
-            config.profile,
-            config.verbosity,
-            config.persistence_mode,
-            config.analysis_version,
-            detector_list,
+            apk_sha256 or "unknown",  # APK content identity if available
+            config.profile,  # analysis profile name
+            config.verbosity,  # logging verbosity level (often int)
+            config.persistence_mode,  # e.g. "db"/"file" or boolean flag
+            config.analysis_version,  # pipeline version identifier
+            detector_list,  # deterministically ordered detector list
         )
     )
     return sha256(seed.encode("utf-8")).hexdigest()[:12]
