@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from hashlib import sha256
 from pathlib import Path
-from typing import Mapping, Optional, Sequence, TYPE_CHECKING
+from typing import Iterable, Mapping, Optional, Sequence, TYPE_CHECKING
 from xml.etree import ElementTree
 
 from scytaledroid.Config import app_config
@@ -28,11 +28,32 @@ if TYPE_CHECKING:  # pragma: no cover - typing aid without runtime import
 _DEF_SEVERITY_TOKEN = "dangerous"
 
 
+def _safe_str(value: object) -> str:
+    """Return a string representation safe for join operations."""
+
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, bytes):
+        try:
+            return value.decode("utf-8")
+        except UnicodeDecodeError:
+            return value.hex()
+    return str(value)
+
+
+def _safe_join(parts: Iterable[object]) -> str:
+    """Join *parts* ensuring each component is represented as a string."""
+
+    return "|".join(_safe_str(part) for part in parts)
+
+
 def derive_run_id(apk_sha256: str, config: AnalysisConfig) -> str:
     """Return a deterministic identifier for debug log artefacts."""
 
     detector_list = ",".join(sorted(config.enabled_detectors or ()))
-    seed = "|".join(
+    seed = _safe_join(
         (
             apk_sha256 or "unknown",
             config.profile,
@@ -42,7 +63,7 @@ def derive_run_id(apk_sha256: str, config: AnalysisConfig) -> str:
             detector_list,
         )
     )
-    return sha256(seed.encode("utf-8")).hexdigest()[:16]
+    return sha256(seed.encode("utf-8")).hexdigest()[:12]
 
 
 def resolve_relative_path(apk_path: Path, storage_root: Optional[Path]) -> Optional[str]:
