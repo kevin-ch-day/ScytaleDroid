@@ -1,10 +1,14 @@
-"""Core helpers for running static analysis on APK artifacts."""
+"""Core helpers for running static analysis on APK artifacts (hardened)."""
 
 from __future__ import annotations
 
 from time import perf_counter
 from pathlib import Path
 from typing import Mapping, Optional, Sequence
+
+import shlex
+import shutil
+import subprocess
 
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis.harvest.common import compute_hashes
@@ -39,6 +43,95 @@ from ..modules import build_string_index
 from ..modules.permissions import load_permission_catalog
 from ..modules.network_security import extract_network_security_policy
 
+# -----------------------
+# Small, focused helpers
+# -----------------------
+
+def _safe_get_app_label(apk: APK, pkg_name: str, meta: dict) -> str:
+    """
+    Try Androguard first; if ARSC parsing explodes, try `aapt2 dump badging`;
+    finally fall back to package name. Record fallbacks in metadata.
+    """
+    try:
+        label = apk.get_app_name()
+        if isinstance(label, str) and label.strip():
+            return label
+    except Exception as e:
+        meta["parse_error_resources"] = True
+        meta["label_error"] = str(e)
+
+    # aapt2 fallback (best-effort, short timeout)
+    aapt2 = shutil.which("aapt2")
+    if aapt2:
+        try:
+            out = subprocess.check_output(
+                shlex.split(f"{aapt2} dump badging {apk.filename}"),
+                stderr=subprocess.STDOUT,
+                timeout=6,
+            ).decode(errors="ignore")
+            # Prefer generic label; if not present, accept first localized line
+            for line in out.splitlines():
+                if line.startswith("application-label:"):
+                    meta["label_fallback"] = "aapt2"
+                    return line.split(":", 1)[1].strip().strip("'\"")
+            for line in out.splitlines():
+                if line.startswith("application-label-"):
+                    meta["label_fallback"] = "aapt2-localized"
+                    return line.split(":", 1)[1].strip().strip("'\"")
+        except Exception as e:
+            meta["label_fallback_attempt_error"] = str(e)
+
+    meta["label_fallback"] = "package_name"
+    return pkg_name
+
+
+def _safe_get_main_activity(apk: APK, meta: dict) -> Optional[str]:
+    try:
+        return apk.get_main_activity()
+    except Exception as e:
+        meta["main_activity_fallback"] = True
+        meta["main_activity_error"] = str(e)
+        return None
+
+
+def _safe_tuple(callable_, meta: dict, meta_key: str) -> tuple[str, ...]:
+    try:
+        data = callable_()  # may return list/tuple/None
+        if not data:
+            return ()
+        return tuple(sorted(data))
+    except Exception as e:
+        meta[meta_key] = str(e)
+        return ()
+
+
+def _safe_permission_details(apk: APK, meta: dict) -> Mapping[str, Sequence[str]]:
+    try:
+        return apk.get_details_permissions() or {}
+    except Exception as e:
+        meta["permissions_fallback"] = True
+        meta["permissions_error"] = str(e)
+        return {}
+
+
+def _resolve_toolchain_versions() -> Mapping[str, str]:
+    versions = {"androguard": "—", "aapt2": "—", "apksigner": "—"}
+    try:  # pragma: no cover - dependency introspection
+        import androguard  # type: ignore
+        version = getattr(androguard, "__version__", None)
+        if isinstance(version, str) and version.strip():
+            versions["androguard"] = version
+    except Exception:  # pragma: no cover
+        pass
+    aapt2 = shutil.which("aapt2")
+    if aapt2:
+        versions["aapt2"] = "present"
+    return versions
+
+
+# -----------------------
+# Public helpers
+# -----------------------
 
 def make_detector_result(
     *,
@@ -54,17 +147,12 @@ def make_detector_result(
     raw_debug: Optional[str] = None,
 ) -> DetectorResult:
     """Build a deterministic :class:`DetectorResult` instance."""
-
     duration = max(0.0, round(perf_counter() - started_at, 1))
     metrics_payload = dict(metrics or {})
     evidence_payload = tuple(evidence or ())
     notes_payload = tuple(note for note in notes or () if note)
     findings_payload = tuple(findings or ())
-    if subitems:
-        subitems_payload = tuple(dict(item) for item in subitems)
-    else:
-        subitems_payload = None
-
+    subitems_payload = tuple(dict(item) for item in subitems) if subitems else None
     return DetectorResult(
         detector_id=detector_id,
         section_key=section_key,
@@ -89,7 +177,7 @@ def analyze_apk(
     storage_root: Optional[Path] = None,
     config: Optional[AnalysisConfig] = None,
 ) -> StaticAnalysisReport:
-    """Run lightweight static analysis on *apk_path* and return a report."""
+    """Run resilient static analysis on *apk_path* and return a report."""
 
     if not apk_path.exists():
         raise StaticAnalysisError(f"APK not found: {apk_path}")
@@ -113,31 +201,37 @@ def analyze_apk(
     try:
         apk = APK(str(apk_path))
     except Exception as exc:
+        # Hard-open failure (corrupt zip, etc.)
         raise StaticAnalysisError(f"Failed to open APK: {exc}") from exc
 
     report_metadata.setdefault("toolchain", _resolve_toolchain_versions())
 
-    manifest_root = load_manifest_root(apk)
+    # Manifest & flags (best-effort)
+    manifest_root = load_manifest_root(apk)  # internal code handles its own exceptions
     flags = build_manifest_flags(manifest_root)
     compile_sdk = extract_compile_sdk(manifest_root)
+
+    # Stable identifiers & resilient app metadata
+    package_name = apk.get_package() or apk_path.stem
+    app_label = _safe_get_app_label(apk, package_name, report_metadata)
+    main_activity = _safe_get_main_activity(apk, report_metadata)
+
     manifest = ManifestSummary(
-        package_name=apk.get_package(),
+        package_name=package_name,
         version_name=apk.get_androidversion_name(),
         version_code=apk.get_androidversion_code(),
         min_sdk=apk.get_min_sdk_version(),
         target_sdk=apk.get_target_sdk_version(),
         compile_sdk=compile_sdk,
-        app_label=apk.get_app_name(),
-        main_activity=apk.get_main_activity(),
+        app_label=app_label,
+        main_activity=main_activity,
     )
 
-    declared_permissions = tuple(sorted(apk.get_permissions()))
-    try:
-        permission_details = apk.get_details_permissions()
-    except KeyError:
-        permission_details = {}
+    # Permissions (resilient)
+    declared_permissions = tuple(sorted(apk.get_permissions() or ()))
+    permission_details = _safe_permission_details(apk, report_metadata)
     dangerous = collect_dangerous_permissions(permission_details)
-    custom_permissions = tuple(sorted(apk.get_declared_permissions()))
+    custom_permissions = tuple(sorted(apk.get_declared_permissions() or ()))
     custom_definitions = collect_custom_permission_definitions(manifest_root)
     permission_catalog = load_permission_catalog()
 
@@ -146,16 +240,12 @@ def analyze_apk(
         if not detail:
             continue
         level_raw = detail[0]
-        if not isinstance(level_raw, str):
-            continue
-        parts = tuple(
-            part.strip().lower()
-            for part in level_raw.split("|")
-            if part.strip()
-        )
-        if parts:
-            protection_levels[name] = parts
-
+        if isinstance(level_raw, str):
+            parts = tuple(
+                part.strip().lower() for part in level_raw.split("|") if part.strip()
+            )
+            if parts:
+                protection_levels[name] = parts
     for name, definition in custom_definitions.items():
         levels = tuple(
             str(part).lower()
@@ -176,29 +266,47 @@ def analyze_apk(
         catalog_snapshot=catalog_snapshot,
     )
 
+    # Components (resilient)
+    activities = _safe_tuple(apk.get_activities, report_metadata, "activities_error")
+    services = _safe_tuple(apk.get_services, report_metadata, "services_error")
+    receivers = _safe_tuple(apk.get_receivers, report_metadata, "receivers_error")
+    providers = _safe_tuple(apk.get_providers, report_metadata, "providers_error")
+
     components = ComponentSummary(
-        activities=tuple(sorted(apk.get_activities())),
-        services=tuple(sorted(apk.get_services())),
-        receivers=tuple(sorted(apk.get_receivers())),
-        providers=tuple(sorted(apk.get_providers())),
+        activities=activities,
+        services=services,
+        receivers=receivers,
+        providers=providers,
     )
     exported = collect_exported_components(manifest_root)
 
-    features = tuple(sorted(apk.get_features()))
-    libraries = tuple(sorted(apk.get_libraries()))
-    signatures = tuple(sorted(apk.get_signature_names()))
+    # Other metadata (resilient)
+    features = _safe_tuple(apk.get_features, report_metadata, "features_error")
+    libraries = _safe_tuple(apk.get_libraries, report_metadata, "libraries_error")
+    signatures = _safe_tuple(apk.get_signature_names, report_metadata, "signatures_error")
 
     relative = resolve_relative_path(apk_path, storage_root)
     file_size = apk_path.stat().st_size
-    network_security_policy = extract_network_security_policy(
-        apk,
-        manifest_reference=flags.network_security_config,
-    )
 
-    string_index = (
-        build_string_index(apk) if analysis_config.enable_string_index else None
-    )
+    # Network Security Config (resilient)
+    try:
+        network_security_policy = extract_network_security_policy(
+            apk,
+            manifest_reference=flags.network_security_config,
+        )
+    except Exception as e:
+        report_metadata["network_security_policy_error"] = str(e)
+        network_security_policy = None
 
+    # String index (optional & resilient)
+    string_index = None
+    if analysis_config.enable_string_index:
+        try:
+            string_index = build_string_index(apk)
+        except Exception as e:
+            report_metadata["string_index_error"] = str(e)
+
+    # Build detector context
     context = build_detector_context(
         apk_path=apk_path,
         apk=apk,
@@ -219,10 +327,12 @@ def analyze_apk(
         permission_catalog=permission_catalog,
     )
 
+    # Run detectors (pipeline itself should be robust, but keep trace)
     detector_results = run_detector_pipeline(context)
     context.intermediate_results = tuple(detector_results)
     artifacts = assemble_pipeline_artifacts(context)
 
+    # Enrich metadata with pipeline artifacts (best-effort)
     if artifacts.trace:
         report_metadata["pipeline_trace"] = artifacts.trace
     if artifacts.summary:
@@ -265,19 +375,6 @@ def analyze_apk(
         analysis_indicators=artifacts.indicators,
         workload_profile=artifacts.workload,
     )
-
-
-def _resolve_toolchain_versions() -> Mapping[str, str]:
-    versions = {"androguard": "—", "aapt2": "—", "apksigner": "—"}
-    try:  # pragma: no cover - dependency introspection
-        import androguard
-
-        version = getattr(androguard, "__version__", None)
-        if isinstance(version, str) and version.strip():
-            versions["androguard"] = version
-    except Exception:  # pragma: no cover - best-effort metadata
-        pass
-    return versions
 
 
 __all__ = [
