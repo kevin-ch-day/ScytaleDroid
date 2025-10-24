@@ -6,11 +6,11 @@ This note captures the current database write surface used during APK harvests. 
 
 | Location | Function | Purpose |
 | --- | --- | --- |
-| `scytaledroid/Database/db_func/harvest/apk_repository.py` | `ensure_app_definition(package_name, app_name, ...)` | Upserts a row in `android_app_definitions` and optionally updates `category_id`, `profile_id`, `profile_name`. Requires `package_name`. |
-| `scytaledroid/Database/db_func/harvest/apk_repository.py` | `upsert_apk_record(ApkRecord)` | Inserts or updates a row in `android_apk_repository` for each harvested artifact, keyed by `sha256`. |
-| `scytaledroid/Database/db_func/harvest/apk_repository.py` | `ensure_split_group(package_name)` / `mark_split_members(group_id, apk_ids)` | Create and maintain `apk_split_groups` records when a package has multiple split APKs. |
-| `scytaledroid/Database/db_func/harvest/apk_repository.py` | `ensure_storage_root(host_name, data_root)` | Registers the ingest host and data root in `harvest_storage_roots` (unique per host/path). |
-| `scytaledroid/Database/db_func/harvest/apk_repository.py` | `upsert_artifact_path(apk_id, storage_root_id, ...)` | Stores device + local path metadata for each artifact in `harvest_artifact_paths`. |
+| `scytaledroid/Database/db_func/harvest/apk_repository.py` | `ensure_app_definition(package_name, app_name, ..., context=None)` | Upserts a row in `android_app_definitions` and optionally updates `category_id`, `profile_id`, `profile_name`. Requires `package_name`. |
+| `scytaledroid/Database/db_func/harvest/apk_repository.py` | `upsert_apk_record(ApkRecord, context=None)` | Inserts or updates a row in `android_apk_repository` for each harvested artifact, keyed by `sha256`. |
+| `scytaledroid/Database/db_func/harvest/apk_repository.py` | `ensure_split_group(package_name, context=None)` / `mark_split_members(group_id, apk_ids)` | Create and maintain `apk_split_groups` records when a package has multiple split APKs. |
+| `scytaledroid/Database/db_func/harvest/apk_repository.py` | `ensure_storage_root(host_name, data_root, context=None)` | Registers the ingest host and data root in `harvest_storage_roots` (unique per host/path). |
+| `scytaledroid/Database/db_func/harvest/apk_repository.py` | `upsert_artifact_path(apk_id, storage_root_id, ..., context=None)` | Stores device + local path metadata for each artifact in `harvest_artifact_paths`. |
 | `scytaledroid/DeviceAnalysis/harvest/runner.py` | `_execute_package_plan(...)` | Calls the helpers above for the legacy/standard harvest path (default). |
 | `scytaledroid/DeviceAnalysis/harvest/quick_harvest.py` | `quick_harvest(...)` | Mirrors the legacy path but honours `HARVEST_WRITE_DB` (can disable DB writes for quick pulls). |
 

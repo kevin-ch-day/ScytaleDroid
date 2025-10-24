@@ -307,27 +307,48 @@ def pull_apks(serial: Optional[str]) -> None:
     dest_root = Path(app_config.DATA_DIR) / "apks" / "device_apks" / serial
     dest_root.mkdir(parents=True, exist_ok=True)
 
-    if pull_mode == "quick":
-        results = harvest.quick_harvest(
-            active_plan.packages,
-            adb_path=adb_path,
-            dest_root=dest_root,
-            session_stamp=session_stamp,
-            config=app_config,
-            serial=serial,
-            verbose=verbose,
-        )
-    else:
-        results = harvest.execute_harvest(
-            serial=serial,
-            adb_path=adb_path,
-            dest_root=dest_root,
-            session_stamp=session_stamp,
-            plans=active_plan.packages,
-            config=app_config,
-            verbose=verbose,
-            pull_mode=pull_mode,
-        )
+    run_id = f"{serial or 'device'}-{session_stamp}"
+    harvest_logger = log.harvest_adapter(
+        run_id,
+        started_at=datetime.utcnow(),
+        context={
+            "device_serial": serial,
+            "session_stamp": session_stamp,
+            "scope_label": active_selection.label,
+            "pull_mode": pull_mode,
+        },
+    )
+
+    try:
+        if pull_mode == "quick":
+            results = harvest.quick_harvest(
+                active_plan.packages,
+                adb_path=adb_path,
+                dest_root=dest_root,
+                session_stamp=session_stamp,
+                config=app_config,
+                serial=serial,
+                verbose=verbose,
+                run_id=run_id,
+                harvest_logger=harvest_logger,
+            )
+        else:
+            results = harvest.execute_harvest(
+                serial=serial,
+                adb_path=adb_path,
+                dest_root=dest_root,
+                session_stamp=session_stamp,
+                plans=active_plan.packages,
+                config=app_config,
+                verbose=verbose,
+                pull_mode=pull_mode,
+                run_id=run_id,
+                harvest_logger=harvest_logger,
+                scope_label=active_selection.label,
+            )
+    except Exception:
+        log.close_harvest_adapter(run_id)
+        raise
 
     if verbose:
         for result in results:
@@ -344,8 +365,11 @@ def pull_apks(serial: Optional[str]) -> None:
         serial=serial,
         run_timestamp=session_stamp,
         guard_brief=active_selection.metadata.get("inventory_guard_brief"),
+        run_id=run_id,
+        harvest_logger=harvest_logger,
     )
     _maybe_save_watchlist(active_selection)
+    log.close_harvest_adapter(run_id)
     prompt_utils.press_enter_to_continue()
 
 

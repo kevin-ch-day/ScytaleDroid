@@ -11,8 +11,20 @@ ParamsType = Optional[Union[Sequence[Any], Mapping[str, Any]]]
 ParamRow = Tuple[Any, ...]
 
 
+def _prepare_params(
+    params: Union[Tuple[Any, ...], Mapping[str, Any]]
+) -> Optional[Union[Tuple[Any, ...], Mapping[str, Any]]]:
+    """Return None when the parameter payload is empty; otherwise the original."""
+
+    if isinstance(params, tuple) and not params:
+        return None
+    if isinstance(params, Mapping) and not params:
+        return None
+    return params
+
+
 def _normalise_params(params: ParamsType) -> Union[Tuple[Any, ...], Mapping[str, Any]]:
-    """Coerce params to a tuple or mapping suitable for mysql.connector."""
+    """Coerce params to a tuple or mapping suitable for the database engine."""
     if params is None:
         return ()
     if isinstance(params, Mapping):
@@ -43,6 +55,8 @@ def run_sql(
     fetch: str = "none",
     dictionary: bool = False,
     return_lastrowid: bool = False,
+    query_name: Optional[str] = None,
+    context: Optional[Mapping[str, Any]] = None,
 ) -> Any:
     """Execute SQL and return results based on the requested fetch mode.
 
@@ -74,10 +88,26 @@ def run_sql(
     # If we received a context manager from database_session(), enter/exit it here.
     if hasattr(eng_or_ctx, "__enter__") and hasattr(eng_or_ctx, "__exit__"):
         with eng_or_ctx as db:  # type: ignore[assignment]
-            return _dispatch_single(db, query, normalised_params, base, return_lastrowid)
+            return _dispatch_single(
+                db,
+                query,
+                normalised_params,
+                base,
+                return_lastrowid,
+                query_name=query_name,
+                context=context,
+            )
     else:
         db = eng_or_ctx  # type: ignore[assignment]
-        return _dispatch_single(db, query, normalised_params, base, return_lastrowid)
+        return _dispatch_single(
+            db,
+            query,
+            normalised_params,
+            base,
+            return_lastrowid,
+            query_name=query_name,
+            context=context,
+        )
 
 
 def _dispatch_single(
@@ -86,27 +116,37 @@ def _dispatch_single(
     params: Union[Tuple[Any, ...], Mapping[str, Any]],
     fetch_mode: str,
     return_lastrowid: bool,
+    *,
+    query_name: Optional[str],
+    context: Optional[Mapping[str, Any]],
 ) -> Any:
     """Route to the appropriate DatabaseEngine method for single-statement exec."""
+    exec_params = _prepare_params(params)
+
+    effective_name = query_name or f"run_sql.{fetch_mode}"
+
     if fetch_mode in {"one", "one_tuple"}:
-        return db.fetch_one(query, params if isinstance(params, tuple) else None)  # type: ignore[arg-type]
+        return db.fetch_one(query, exec_params, query_name=effective_name, context=context)
     if fetch_mode == "one_dict":
-        return db.fetch_one_dict(query, params if isinstance(params, tuple) else None)  # type: ignore[arg-type]
+        return db.fetch_one_dict(query, exec_params, query_name=effective_name, context=context)
     if fetch_mode in {"all", "all_tuple"}:
-        return db.fetch_all(query, params if isinstance(params, tuple) else None)  # type: ignore[arg-type]
+        return db.fetch_all(query, exec_params, query_name=effective_name, context=context)
     if fetch_mode == "all_dict":
-        return db.fetch_all_dict(query, params if isinstance(params, tuple) else None)  # type: ignore[arg-type]
+        return db.fetch_all_dict(query, exec_params, query_name=effective_name, context=context)
 
     # fetch_mode == "none"
     if return_lastrowid:
-        return db.execute_with_lastrowid(query, params if isinstance(params, tuple) else None)  # type: ignore[arg-type]
-    db.execute(query, params if isinstance(params, tuple) else None)  # type: ignore[arg-type]
+        return db.execute_with_lastrowid(query, exec_params, query_name=effective_name, context=context)
+    db.execute(query, exec_params, query_name=effective_name, context=context)
     return None
 
 
 def run_sql_many(
     query: str,
     param_rows: Iterable[ParamRow],
+    *,
+    query_name: Optional[str] = None,
+    context: Optional[Mapping[str, Any]] = None,
 ) -> None:
     """Execute a batched DML statement with many parameter rows.
 
@@ -128,10 +168,10 @@ def run_sql_many(
     eng_or_ctx = _resolve_engine()
     if hasattr(eng_or_ctx, "__enter__") and hasattr(eng_or_ctx, "__exit__"):
         with eng_or_ctx as db:  # type: ignore[assignment]
-            db.execute_many(query, rows)
+            db.execute_many(query, rows, query_name=query_name, context=context)
     else:
         db = eng_or_ctx  # type: ignore[assignment]
-        db.execute_many(query, rows)
+        db.execute_many(query, rows, query_name=query_name, context=context)
 
 
 __all__ = ["run_sql", "run_sql_many"]

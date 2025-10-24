@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,6 +9,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from scytaledroid.Utils.DisplayUtils import status_messages, text_blocks
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
+from scytaledroid.Utils.LoggingUtils import logging_engine
 
 from .common import normalise_local_path
 from .models import (
@@ -271,6 +271,8 @@ def render_harvest_summary(
     serial: Optional[str] = None,
     run_timestamp: Optional[str] = None,
     guard_brief: Optional[str] = None,
+    run_id: Optional[str] = None,
+    harvest_logger: Optional[logging_engine.ContextAdapter] = None,
     log_summary: bool = True,
 ) -> None:
     """Render the end-of-run summary with diagnostics."""
@@ -412,6 +414,8 @@ def render_harvest_summary(
             pull_mode,
             metrics.total_packages,
             files_written,
+            harvest_logger=harvest_logger,
+            run_id=run_id,
         )
 
 
@@ -785,9 +789,11 @@ def _log_harvest_summary(
     pull_mode: str,
     total_packages: int,
     files_written: int,
+    *,
+    harvest_logger: Optional[logging_engine.ContextAdapter] = None,
+    run_id: Optional[str] = None,
 ) -> None:
     payload = {
-        "event": "apk_harvest_summary",
         "serial": harvest_result.serial,
         "run_timestamp": harvest_result.run_timestamp,
         "scope": harvest_result.scope_name,
@@ -806,5 +812,12 @@ def _log_harvest_summary(
             for package, reason in no_new
         ],
     }
+    if run_id:
+        payload.setdefault("run_id", run_id)
+    payload["event"] = "harvest.summary.report"
 
-    log.info(json.dumps(payload, default=str), category="device_analysis")
+    extra = logging_engine.ensure_trace(payload)
+    if harvest_logger is not None:
+        harvest_logger.info("harvest.summary.report", extra=extra)
+    else:
+        log.info("Harvest summary", category="device_analysis", extra=extra)

@@ -112,8 +112,8 @@ expands to:
    posture diffing without additional preparation.
 2. **Dynamic analysis:** sandbox executions, behavior logging, and network
    capture ingestion.
-3. **Threat-intel enrichment:** VirusTotal lookups, signer lineage, and
-   reputation scores.
+3. **Threat-intel enrichment:** signer lineage analysis and reputation
+   scoring sourced from internal datasets.
 4. **Web UI:** searchable catalogs, version diffs across devices, and per-app
    dossiers built from the `apk_id` records.
 

@@ -1,31 +1,65 @@
-"""Utility helpers for configuring project loggers."""
+"""Utility helpers for configuring project loggers.
+
+The module now offers richer facilities for structured logging and contextual
+information propagation.  Each category logger writes both a human readable log
+file and a JSONL companion file.  A ``ContextAdapter`` wrapper makes it easy to
+bind run level metadata (``run_id``, ``device_serial`` and similar) to each log
+record without having to repeat the values for every call.
+"""
 
 from __future__ import annotations
 
 import logging
+import platform
+import re
+import sys
+import uuid
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Dict, Mapping, Optional
 
-from .logging_core import setup_logger
+from .logging_core import LOG_DIR, JsonFormatter, setup_logger
 
 try:  # pragma: no cover - optional dependency
     from loguru import logger as _loguru_logger
 except Exception:  # pragma: no cover - optional dependency
     _loguru_logger = None
 
-# Define log file mapping
-LOG_FILES = {
-    "application": "application.log",
-    "database": "database.log",
-    "device": "device_analysis.log",
-    "static": "static_analysis.log",
-    "dynamic": "dynamic_analysis.log",
-    "virustotal": "virus_total.log",
-    "error": "error.log",
+@dataclass(frozen=True)
+class _LoggerConfig:
+    text_file: Optional[str]
+    json_file: Optional[str]
+    level: int = logging.INFO
+    subdir: Optional[str] = None
+    max_bytes: int = 10 * 1024 * 1024
+    backup_count: int = 14
+
+
+LOG_CONFIGS: Dict[str, _LoggerConfig] = {
+    "application": _LoggerConfig(text_file="app.log", json_file="app.jsonl", level=logging.INFO),
+    "database": _LoggerConfig(text_file=None, json_file="db.jsonl", level=logging.DEBUG),
+    "device": _LoggerConfig(text_file="device_analysis.log", json_file="device_analysis.jsonl"),
+    "static": _LoggerConfig(text_file="static_analysis.log", json_file="static_analysis.jsonl"),
+    "dynamic": _LoggerConfig(text_file="dynamic_analysis.log", json_file="dynamic_analysis.jsonl"),
+    "error": _LoggerConfig(text_file="error.log", json_file=None, level=logging.ERROR),
+    "metrics": _LoggerConfig(text_file=None, json_file="metrics.jsonl"),
+    "audit": _LoggerConfig(text_file="audit.log", json_file="audit.jsonl"),
 }
 
-# Cache loggers so we don’t recreate them
+
+@dataclass(frozen=True)
+class LogTarget:
+    """Resolved log file destinations for a logging category."""
+
+    text_path: Optional[Path]
+    json_path: Optional[Path]
+
+
 _LOGGERS: dict[str, logging.Logger] = {}
+_HARVEST_LOGGERS: dict[str, "ContextAdapter"] = {}
+
+_HARVEST_SUBDIR = "harvest"
 
 _FILTER_ATTR = "_scd_androguard_filter"
 _LOGURU_FILTER_ATTR = "_scd_loguru_filter"
@@ -45,15 +79,22 @@ class _AndroguardNoiseFilter(logging.Filter):
 
 
 def get_logger(category: str) -> logging.Logger:
-    """
-    Get a logger for a given category.
-    Valid categories: application, database, device, static, dynamic, virustotal, error
-    """
-    if category not in LOG_FILES:
+    """Return the configured logger for *category*."""
+
+    config = LOG_CONFIGS.get(category)
+    if config is None:
         raise ValueError(f"Unknown log category: {category}")
 
     if category not in _LOGGERS:
-        _LOGGERS[category] = setup_logger(category, LOG_FILES[category])
+        _LOGGERS[category] = setup_logger(
+            category,
+            text_file=config.text_file,
+            json_file=config.json_file,
+            subdir=config.subdir,
+            level=config.level,
+            max_bytes=config.max_bytes,
+            backup_count=config.backup_count,
+        )
 
     return _LOGGERS[category]
 
@@ -79,12 +120,77 @@ def get_dynamic_logger() -> logging.Logger:
     return get_logger("dynamic")
 
 
-def get_vt_logger() -> logging.Logger:
-    return get_logger("virustotal")
-
-
 def get_error_logger() -> logging.Logger:
     return get_logger("error")
+
+
+def get_metrics_logger() -> logging.Logger:
+    return get_logger("metrics")
+
+
+def get_audit_logger() -> logging.Logger:
+    return get_logger("audit")
+
+
+def list_log_files() -> dict[str, LogTarget]:
+    """Return resolved log file destinations for all logging categories."""
+
+    files: dict[str, LogTarget] = {}
+    base_dir = LOG_DIR.expanduser()
+
+    for category, config in LOG_CONFIGS.items():
+        root = base_dir
+        if config.subdir:
+            root = (base_dir / config.subdir).expanduser()
+        text_path = (root / config.text_file).resolve() if config.text_file else None
+        json_path = (root / config.json_file).resolve() if config.json_file else None
+        files[category] = LogTarget(text_path=text_path, json_path=json_path)
+
+    harvest_dir = (base_dir / _HARVEST_SUBDIR).expanduser().resolve()
+    files["harvest_runs"] = LogTarget(text_path=None, json_path=harvest_dir)
+
+    return files
+
+
+class ContextAdapter(logging.LoggerAdapter):
+    """Logger adapter that merges ``extra`` payloads recursively."""
+
+    def process(self, msg, kwargs):  # pragma: no cover - thin wrapper
+        incoming = kwargs.get("extra") or {}
+        merged = {**self.extra, **incoming}
+        kwargs["extra"] = merged
+        return msg, kwargs
+
+
+def bind_logger(category: str, **context: object) -> ContextAdapter:
+    """Return a logger adapter for ``category`` carrying persistent context."""
+
+    base_logger = get_logger(category)
+    return ContextAdapter(base_logger, {k: v for k, v in context.items() if v is not None})
+
+
+def ensure_trace(extra: Optional[Mapping[str, object]] = None) -> Dict[str, object]:
+    """Return a mutable copy of ``extra`` containing a ``trace_id`` field."""
+
+    payload = dict(extra or {})
+    payload.setdefault("trace_id", uuid.uuid4().hex[:8])
+    return payload
+
+
+def emit_environment_snapshot(logger: Optional[logging.Logger] = None) -> None:
+    """Log runtime environment metadata to aid debugging."""
+
+    target = logger or get_app_logger()
+    details = ensure_trace(
+        {
+            "event": "app.env",
+            "python_version": platform.python_version(),
+            "platform": platform.platform(),
+            "implementation": platform.python_implementation(),
+            "executable": sys.executable,
+        }
+    )
+    target.info("Application environment", extra=details)
 
 
 def _clear_handlers(logger: logging.Logger) -> None:
@@ -134,6 +240,76 @@ def _iter_androguard_loggers() -> tuple[logging.Logger, list[logging.Logger]]:
     ordered = list(discovered.values())
     descendants = [logger for logger in ordered if logger is not base_logger]
     return base_logger, descendants
+
+
+def _slugify(identifier: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9_.-]+", "-", identifier.strip())
+    slug = slug.strip("-")
+    return slug or "run"
+
+
+def create_harvest_run_logger(
+    run_id: str,
+    *,
+    started_at: Optional[datetime] = None,
+    context: Optional[Mapping[str, object]] = None,
+) -> ContextAdapter:
+    """Create a dedicated JSONL logger for the given harvest run."""
+
+    if not run_id:
+        raise ValueError("run_id must be provided for harvest logging")
+
+    started = started_at or datetime.now(timezone.utc)
+    timestamp = started.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    slug = _slugify(run_id)
+    filename = f"{timestamp}_run-{slug}.jsonl"
+    log_path = (LOG_DIR / _HARVEST_SUBDIR / filename).expanduser()
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    logger_name = f"harvest.{slug}"
+    logger = logging.getLogger(logger_name)
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+        try:
+            handler.close()
+        except Exception:  # pragma: no cover - defensive cleanup
+            pass
+
+    handler = logging.FileHandler(log_path, encoding="utf-8")
+    handler.setLevel(logging.DEBUG)
+    handler.setFormatter(JsonFormatter())
+
+    logger.setLevel(logging.DEBUG)
+    logger.propagate = False
+    logger.addHandler(handler)
+
+    base_extra: Dict[str, object] = {
+        "run_id": run_id,
+        "log_path": str(log_path),
+        "run_started": started.isoformat(),
+    }
+    if context:
+        base_extra.update({k: v for k, v in context.items() if v is not None})
+
+    adapter = ContextAdapter(logger, base_extra)
+    _HARVEST_LOGGERS[run_id] = adapter
+    return adapter
+
+
+def close_harvest_run_logger(run_id: str) -> None:
+    """Close and dispose the harvest logger associated with *run_id*."""
+
+    adapter = _HARVEST_LOGGERS.pop(run_id, None)
+    if adapter is None:
+        return
+
+    logger = adapter.logger
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+        try:
+            handler.close()
+        except Exception:  # pragma: no cover - defensive cleanup
+            pass
 
 
 def _configure_loguru(
@@ -288,13 +464,22 @@ def configure_third_party_loggers(
 
 
 __all__ = [
+    "close_harvest_run_logger",
+    "LogTarget",
+    "ContextAdapter",
+    "bind_logger",
     "configure_third_party_loggers",
+    "emit_environment_snapshot",
+    "ensure_trace",
     "get_app_logger",
+    "get_audit_logger",
     "get_db_logger",
     "get_device_logger",
     "get_dynamic_logger",
     "get_error_logger",
     "get_logger",
+    "get_metrics_logger",
     "get_static_logger",
-    "get_vt_logger",
+    "list_log_files",
+    "create_harvest_run_logger",
 ]

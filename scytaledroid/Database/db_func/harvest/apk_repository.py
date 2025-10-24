@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from functools import lru_cache
-from typing import Dict, Iterable, List, Optional, Sequence, Union
+from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Union
 
 from ...db_core import database_session, run_sql
 from ...db_queries.harvest import apk_repository as queries
@@ -67,12 +67,32 @@ class ApkRecord:
         }
 
 
-def upsert_apk_record(record: ApkRecord) -> int:
+def upsert_apk_record(
+    record: ApkRecord,
+    *,
+    context: Optional[Mapping[str, object]] = None,
+) -> int:
     """Insert or update an APK row and return the apk_id."""
+
     params = record.to_parameters()
+    query_context = dict(context or {})
+    query_context.setdefault("package_name", record.package_name)
+    query_context.setdefault("sha256", record.sha256)
+
     with database_session():
-        run_sql(queries.UPSERT_APK, params)
-        row = run_sql(queries.SELECT_APK_ID_BY_SHA256, (record.sha256,), fetch="one")
+        run_sql(
+            queries.UPSERT_APK,
+            params,
+            query_name="harvest.apk.upsert",
+            context=query_context,
+        )
+        row = run_sql(
+            queries.SELECT_APK_ID_BY_SHA256,
+            (record.sha256,),
+            fetch="one",
+            query_name="harvest.apk.lookup_sha",
+            context=query_context,
+        )
     if not row:
         raise RuntimeError("Failed to resolve apk_id after upsert")
     return int(row[0])
@@ -83,18 +103,42 @@ def get_apk_by_sha256(sha256: str) -> Optional[Dict[str, object]]:
     return run_sql(queries.SELECT_APK_BY_SHA256, (sha256,), fetch="one", dictionary=True)
 
 
-def ensure_split_group(package_name: str) -> int:
+def ensure_split_group(
+    package_name: str,
+    *,
+    context: Optional[Mapping[str, object]] = None,
+) -> int:
     """Get or create a split group id for the given package."""
+
+    query_context = dict(context or {})
+    query_context.setdefault("package_name", package_name)
+
     with database_session():
-        row = run_sql(queries.SELECT_SPLIT_GROUP_BY_PACKAGE, (package_name,), fetch="one")
+        row = run_sql(
+            queries.SELECT_SPLIT_GROUP_BY_PACKAGE,
+            (package_name,),
+            fetch="one",
+            query_name="harvest.split_group.lookup",
+            context=query_context,
+        )
         if row:
             return int(row[0])
         group_id = run_sql(
-            queries.INSERT_SPLIT_GROUP, (package_name,), return_lastrowid=True
+            queries.INSERT_SPLIT_GROUP,
+            (package_name,),
+            return_lastrowid=True,
+            query_name="harvest.split_group.insert",
+            context=query_context,
         )
         if group_id:
             return int(group_id)
-        row = run_sql(queries.SELECT_SPLIT_GROUP_BY_PACKAGE, (package_name,), fetch="one")
+        row = run_sql(
+            queries.SELECT_SPLIT_GROUP_BY_PACKAGE,
+            (package_name,),
+            fetch="one",
+            query_name="harvest.split_group.lookup",
+            context=query_context,
+        )
     if not row:
         raise RuntimeError("Failed to create split group")
     return int(row[0])
@@ -108,7 +152,11 @@ def mark_split_members(group_id: int, apk_ids: Sequence[int]) -> None:
     query = queries.UPDATE_APK_SPLIT_GROUP_TEMPLATE.format(placeholders=placeholders)
     params: List[int] = [group_id]
     params.extend(int(apk_id) for apk_id in apk_ids)
-    run_sql(query, tuple(params))
+    run_sql(
+        query,
+        tuple(params),
+        query_name="harvest.split_group.mark_members",
+    )
 
 
 def fetch_split_members(group_id: int) -> List[Dict[str, object]]:
@@ -128,6 +176,7 @@ def ensure_app_definition(
     category_name: Optional[str] = None,
     profile_id: Optional[str] = None,
     profile_name: Optional[str] = None,
+    context: Optional[Mapping[str, object]] = None,
 ) -> int:
     """Upsert a canonical app definition row and return app_id."""
     cleaned_package = package_name.strip().lower()
@@ -144,9 +193,23 @@ def ensure_app_definition(
     else:
         label = None
 
+    query_context = dict(context or {})
+    query_context.setdefault("package_name", cleaned_package)
+
     with database_session():
-        run_sql(queries.UPSERT_APP_DEFINITION, (cleaned_package, label))
-        row = run_sql(queries.SELECT_APP_ID_BY_PACKAGE, (cleaned_package,), fetch="one")
+        run_sql(
+            queries.UPSERT_APP_DEFINITION,
+            (cleaned_package, label),
+            query_name="harvest.app_definition.upsert",
+            context=query_context,
+        )
+        row = run_sql(
+            queries.SELECT_APP_ID_BY_PACKAGE,
+            (cleaned_package,),
+            fetch="one",
+            query_name="harvest.app_definition.lookup",
+            context=query_context,
+        )
         if not row:
             raise RuntimeError(f"Failed to resolve app_id for package {package_name}")
         app_id = int(row[0])
@@ -182,6 +245,8 @@ def ensure_app_definition(
                 SET {set_clause}
                 WHERE package_name = %s""",
                 tuple(update_params),
+                query_name="harvest.app_definition.update",
+                context=query_context,
             )
 
     return app_id
@@ -266,14 +331,30 @@ def assign_split_members(package_name: str, apk_ids: Iterable[int]) -> int:
     return group_id
 
 
-def ensure_storage_root(host_name: str, data_root: str) -> int:
+def ensure_storage_root(
+    host_name: str,
+    data_root: str,
+    *,
+    context: Optional[Mapping[str, object]] = None,
+) -> int:
     """Insert or update a storage root entry and return its identifier."""
 
-    run_sql(queries.UPSERT_STORAGE_ROOT, (host_name, data_root))
+    query_context = dict(context or {})
+    query_context.setdefault("host_name", host_name)
+    query_context.setdefault("data_root", data_root)
+
+    run_sql(
+        queries.UPSERT_STORAGE_ROOT,
+        (host_name, data_root),
+        query_name="harvest.storage_root.upsert",
+        context=query_context,
+    )
     row = run_sql(
         queries.SELECT_STORAGE_ROOT_ID,
         (host_name, data_root),
         fetch="one",
+        query_name="harvest.storage_root.lookup",
+        context=query_context,
     )
     if not row:
         raise RuntimeError("Failed to resolve storage root id")
@@ -285,8 +366,12 @@ def upsert_artifact_path(
     *,
     storage_root_id: int,
     local_rel_path: Optional[str],
+    context: Optional[Mapping[str, object]] = None,
 ) -> None:
     """Persist or update path metadata for the given artifact."""
+
+    query_context = dict(context or {})
+    query_context.setdefault("apk_id", apk_id)
 
     run_sql(
         queries.UPSERT_ARTIFACT_PATH,
@@ -295,14 +380,25 @@ def upsert_artifact_path(
             storage_root_id,
             local_rel_path,
         ),
+        query_name="harvest.artifact_path.upsert",
+        context=query_context,
     )
 
 
-def upsert_source_path(apk_id: int, source_path: Optional[str]) -> None:
+def upsert_source_path(
+    apk_id: int,
+    source_path: Optional[str],
+    *,
+    context: Optional[Mapping[str, object]] = None,
+) -> None:
     """Persist the source path metadata for an artifact."""
 
     if not source_path:
         return
+
+    query_context = dict(context or {})
+    query_context.setdefault("apk_id", apk_id)
+    query_context.setdefault("artifact_path", source_path)
 
     run_sql(
         queries.UPSERT_SOURCE_PATH,
@@ -310,6 +406,8 @@ def upsert_source_path(apk_id: int, source_path: Optional[str]) -> None:
             apk_id,
             source_path,
         ),
+        query_name="harvest.source_path.upsert",
+        context=query_context,
     )
 
 
