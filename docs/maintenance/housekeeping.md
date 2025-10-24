@@ -32,17 +32,23 @@ older than a week.
 ## Where logs live
 
 `Utils → Show log directories` prints the resolved paths for each subsystem. By
-default logs live under `./logs/` and the following files are created as they
-are needed:
+default logs live under `./logs/` with paired human-readable and JSONL streams
+so you can tail text locally or feed structured events to tooling:
 
-| Category        | File name               |
-|-----------------|-------------------------|
-| Application     | `application.log`       |
-| Database        | `database.log`          |
-| Device analysis | `device_analysis.log`   |
-| Static analysis | `static_analysis.log`   |
-| Dynamic analysis| `dynamic_analysis.log`  |
-| Error funnel    | `error.log`             |
+| Category         | Human readable          | Structured JSONL               |
+|------------------|-------------------------|--------------------------------|
+| Application      | `app.log`               | `app.jsonl`                    |
+| Database         | —                       | `db.jsonl`                     |
+| Device analysis  | `device_analysis.log`   | `device_analysis.jsonl`        |
+| Static analysis  | `static_analysis.log`   | `static_analysis.jsonl`        |
+| Dynamic analysis | `dynamic_analysis.log`  | `dynamic_analysis.jsonl`       |
+| Metrics          | —                       | `metrics.jsonl`                |
+| Error funnel     | `error.log`             | —                              |
+| Audit trail      | `audit.log`             | `audit.jsonl`                  |
+
+Harvest runs also emit dedicated JSONL files under
+`logs/harvest/<timestamp>_run-<id>.jsonl` so you can review a single device
+session without combing through global logs.
 
 The same helper also reminds operators where device state and static-analysis
 report directories live so they can inspect or archive them manually when

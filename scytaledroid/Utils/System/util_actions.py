@@ -11,7 +11,7 @@ from typing import Iterable, Optional
 
 from scytaledroid.Config import app_config
 from scytaledroid.Utils.DisplayUtils import status_messages
-from scytaledroid.Utils.LoggingUtils.logging_engine import LOG_FILES
+from scytaledroid.Utils.LoggingUtils.logging_engine import list_log_files
 
 _RETENTION_ENV_VAR = "SCYTALEDROID_STATIC_RETENTION_DAYS"
 
@@ -43,12 +43,23 @@ def show_log_locations() -> None:
         )
     )
 
-    for category, filename in sorted(LOG_FILES.items()):
+    log_targets = list_log_files()
+    for category, target in sorted(log_targets.items()):
         friendly = category.replace("_", " ").title()
-        log_path = logs_root / filename
+        details: list[str] = []
+        if target.text_path is not None:
+            details.append(f"human → {target.text_path}")
+        if target.json_path is not None:
+            suffix = "structured →"
+            if category == "harvest_runs":
+                details.append(f"{suffix} {target.json_path}/<run>.jsonl")
+            else:
+                details.append(f"{suffix} {target.json_path}")
+        if not details:
+            continue
         print(
             status_messages.status(
-                f"  {friendly}: {log_path}", level="info"
+                f"  {friendly}: {', '.join(details)}", level="info"
             )
         )
 

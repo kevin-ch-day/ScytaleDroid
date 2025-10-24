@@ -115,7 +115,7 @@ client.
 | --- | --- | --- |
 | Manual ensure script reports `Failed to ensure canonical schema` | DB credentials missing or insufficient privileges | Confirm environment variables / DSN and re-run once grants are fixed. |
 | `v_session_string_samples` returns 0 despite active findings | Legacy string samples missing timestamps | Re-run the manual ensure snippet with the desired session stamp to rebuild the view with fallback matching. |
-| BASE-002 findings missing from `static_analysis_findings` | Promotion step skipped (dry-run) or schema not ensured | Re-run the manual promotion snippet or check application logs for INSERT errors. |
+| BASE-002 findings missing from `static_analysis_findings` | Promotion step skipped (dry-run) or schema not ensured | Re-run the manual promotion snippet or check the application logs (`logs/app.log` or `logs/app.jsonl`) for INSERT errors. |
 | Secrets still show placeholder examples | Validators suppressed them; confidence is `"low"` | Use `validator_hits` in the evidence JSON to confirm suppression rationale. |
 | Diff views compare unrelated versions | Older runs lack version metadata | Ensure the APK metadata tables are populated; rerun analysis so `app_versions` captures versionName/versionCode for lineage-aware diffing. |
 
