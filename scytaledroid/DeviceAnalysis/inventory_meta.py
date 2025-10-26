@@ -31,6 +31,7 @@ class InventoryMeta:
     scope_hash: Optional[str] = None
     scope_size: Optional[int] = None
     scope_hashes: Optional[Dict[str, str]] = None
+    snapshot_id: Optional[int] = None
 
     def to_payload(self) -> dict:
         payload = asdict(self)
@@ -110,6 +111,14 @@ class InventoryMeta:
         else:
             scope_size = None
 
+        snapshot_identifier = payload.get("snapshot_id")
+        if isinstance(snapshot_identifier, (int, float)):
+            snapshot_id = int(snapshot_identifier)
+        elif isinstance(snapshot_identifier, str) and snapshot_identifier.isdigit():
+            snapshot_id = int(snapshot_identifier)
+        else:
+            snapshot_id = None
+
         return InventoryMeta(
             serial=serial,
             captured_at=captured_at,
@@ -122,6 +131,7 @@ class InventoryMeta:
             scope_hash=scope_hash,
             scope_size=scope_size,
             scope_hashes=scope_hashes,
+            snapshot_id=snapshot_id,
         )
 
     def write_files(self, timestamp: str, *, suffix: Optional[str] = None) -> None:

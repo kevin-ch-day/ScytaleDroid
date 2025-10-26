@@ -47,16 +47,26 @@ def select_app_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
 
     print()
     menu_utils.print_header("Scope — App", "Select 1 package")
-    rows = [[str(idx), package, version] for idx, (package, version, _count) in enumerate(packages, start=1)]
-    table_utils.render_table(["#", "Package", "Version"], rows)
+    rows = []
+    lookup_labels: list[str] = []
+    for idx, (package, version, _count, app_label) in enumerate(packages, start=1):
+        display_app = app_label or package
+        rows.append([str(idx), display_app, package, version])
+        if app_label:
+            lookup_labels.append(f"{app_label} {package}")
+        else:
+            lookup_labels.append(package)
+
+    table_utils.render_table(["#", "App", "Package", "Version"], rows)
 
     index = _resolve_index(
         "Select package # or name",
-        [package for package, _version, _count in packages],
+        lookup_labels,
     )
-    package_name, _, _ = packages[index]
+    package_name, _, _, app_label = packages[index]
+    selection_label = f"{app_label} ({package_name})" if app_label else package_name
     scoped = tuple(group for group in groups if group.package_name == package_name)
-    return ScopeSelection("app", package_name, scoped)
+    return ScopeSelection("app", selection_label, scoped)
 
 
 def select_category_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
@@ -128,5 +138,3 @@ __all__ = [
     "select_app_scope",
     "select_category_scope",
 ]
-
-

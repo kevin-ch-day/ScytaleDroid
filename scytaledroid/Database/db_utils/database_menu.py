@@ -7,14 +7,12 @@ from typing import Callable, Dict, List
 from scytaledroid.Database.db_utils.menus import (
     health_checks,
     query_runner,
-    runs_dashboard,
     schema_browser,
 )
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils
 
 from .menu_actions import (
     maybe_clear_screen,
-    refresh_permission_catalog,
     show_connection_and_config,
 )
 
@@ -25,11 +23,8 @@ def database_menu() -> None:
     actions: Dict[str, Callable[[], None]] = {
         "1": show_connection_and_config,
         "2": schema_browser.show_schema_browser,
-        "3": health_checks.run_health_checks,
-        "4": runs_dashboard.show_recent_runs_dashboard,
-        "5": query_runner.run_query_menu,
-        "6": refresh_permission_catalog,
-        "7": health_checks.prompt_reset_static_data,
+        "3": query_runner.run_query_menu,
+        "4": health_checks.prompt_reset_static_data,
     }
 
     options: List[menu_utils.MenuOption] = [
@@ -45,26 +40,11 @@ def database_menu() -> None:
         ),
         menu_utils.MenuOption(
             "3",
-            "Data health checks (ingestion & scoring)",
-            "Run deterministic ingestion & scoring checks.",
-        ),
-        menu_utils.MenuOption(
-            "4",
-            "Recent runs dashboard",
-            "Summarise the latest runs and key metrics.",
-        ),
-        menu_utils.MenuOption(
-            "5",
             "Run database queries",
             "Quick checks to validate static-analysis persistence.",
         ),
         menu_utils.MenuOption(
-            "6",
-            "Refresh framework permission catalog",
-            "Load/update android_framework_permissions from config.",
-        ),
-        menu_utils.MenuOption(
-            "7",
+            "4",
             "Reset static analysis data",
             "Truncate derived static-analysis tables (destructive).",
         ),

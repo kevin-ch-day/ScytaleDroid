@@ -163,6 +163,13 @@ WHERE package_name = %s
 LIMIT 1
 """
 
+SELECT_APP_DEFINITION_DETAILS = """
+SELECT app_name, category_id, profile_id, profile_name
+FROM android_app_definitions
+WHERE app_id = %s
+LIMIT 1
+"""
+
 SELECT_CATEGORY_ID = """
 SELECT category_id
 FROM android_app_categories

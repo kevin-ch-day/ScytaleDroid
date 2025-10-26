@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Dict, Optional, Sequence, Tuple
+from typing import Callable, Dict, Mapping, Optional, Sequence, Set, Tuple
 
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis import adb_utils, harvest, inventory
@@ -24,6 +24,75 @@ from scytaledroid.Utils.DisplayUtils import (
     text_blocks,
 )
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
+
+
+def _extract_delta_summary(
+    selection_metadata: Mapping[str, object],
+    guard_metadata: Optional[Mapping[str, object]],
+) -> Optional[Mapping[str, object]]:
+    """Return the most relevant delta summary available for the current scope."""
+
+    for container in (selection_metadata, guard_metadata or {}):
+        summary = container.get("package_delta_summary") if isinstance(container, Mapping) else None
+        if isinstance(summary, Mapping) and summary.get("total_changed"):
+            return summary
+        alternate = container.get("package_delta") if isinstance(container, Mapping) else None
+        if isinstance(alternate, Mapping) and alternate.get("total_changed"):
+            return alternate
+    return None
+
+
+def _collect_delta_package_names(summary: Mapping[str, object]) -> Set[str]:
+    """Extract the set of package names that should be harvested based on a delta summary."""
+
+    names: Set[str] = set()
+    added = summary.get("added_full") or summary.get("added")
+    if isinstance(added, Sequence):
+        for entry in added:
+            if isinstance(entry, str) and entry:
+                names.add(entry)
+
+    updated = summary.get("updated_full") or summary.get("updated")
+    if isinstance(updated, Sequence):
+        for entry in updated:
+            if isinstance(entry, Mapping):
+                candidate = entry.get("package")
+                if isinstance(candidate, str) and candidate:
+                    names.add(candidate)
+
+    # Explicitly ignore removed packages (nothing to harvest)
+    return names
+
+
+def _apply_delta_filter(
+    selection: harvest.ScopeSelection,
+    guard_metadata: Optional[Mapping[str, object]],
+) -> Tuple[bool, int]:
+    """Filter the selection packages down to delta-only scope when appropriate.
+
+    Returns a tuple indicating whether a delta filter was applied, and how many packages remain.
+    """
+
+    summary = _extract_delta_summary(selection.metadata, guard_metadata)
+    if not summary:
+        return (False, len(selection.packages))
+
+    delta_packages = _collect_delta_package_names(summary)
+    if not delta_packages:
+        return (False, len(selection.packages))
+
+    filtered = [row for row in selection.packages if row.package_name in delta_packages]
+    selection.metadata["delta_filter_applied"] = True
+    selection.metadata["delta_filter_total"] = len(delta_packages)
+    selection.metadata["delta_filter_matched"] = len(filtered)
+    selection.metadata["delta_filter_packages"] = sorted(delta_packages)
+
+    if not filtered:
+        selection.packages.clear()
+        return (True, 0)
+
+    selection.packages = filtered
+    return (True, len(filtered))
 
 
 def pull_apks(serial: Optional[str]) -> None:
@@ -143,6 +212,24 @@ def pull_apks(serial: Optional[str]) -> None:
             delta_brief_value = guard_decision.get("package_delta_brief")
             if delta_brief_value:
                 selection.metadata["package_delta_brief"] = delta_brief_value
+
+        delta_applied, delta_count = _apply_delta_filter(selection, guard_metadata)
+        if delta_applied:
+            if delta_count == 0:
+                print(
+                    status_messages.status(
+                        "Inventory delta shows no packages requiring harvest.",
+                        level="info",
+                    )
+                )
+                prompt_utils.press_enter_to_continue()
+                continue
+            print(
+                status_messages.status(
+                    f"Δ harvest scope: {delta_count} package(s) scheduled.",
+                    level="info",
+                )
+            )
 
         include_system_partitions = (
             selection.kind in {"families", "everything"} and is_rooted

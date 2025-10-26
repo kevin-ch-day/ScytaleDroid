@@ -417,7 +417,10 @@ def _summarise_string_index(string_index) -> Mapping[str, object]:
             origin_counter[entry.origin] += 1
         value = (entry.value or "").strip()
         if value.lower().startswith(("http://", "https://")):
-            parsed = urlsplit(value)
+            try:
+                parsed = urlsplit(value)
+            except ValueError:
+                continue
             host = parsed.netloc.lower()
             if host:
                 host_counter[host] += 1

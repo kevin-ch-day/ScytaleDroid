@@ -24,6 +24,29 @@ def _maybe_str(value: object) -> Optional[str]:
 
 _LAST_SCOPE: Optional[ScopeSelection] = None
 
+_APP_NAME_CACHE: Dict[str, str] = {}
+
+
+def _load_app_names(package_names: Sequence[str]) -> Dict[str, str]:
+    missing = [name for name in package_names if name not in _APP_NAME_CACHE]
+    if missing:
+        placeholders = ", ".join(["%s"] * len(missing))
+        query = (
+            "SELECT package_name, app_name "
+            "FROM android_app_definitions "
+            f"WHERE package_name IN ({placeholders})"
+        )
+        try:
+            rows = db_queries.run_sql(query, tuple(missing), fetch="all", dictionary=True)
+        except Exception:
+            rows = []
+        for row in rows or []:
+            pkg = _maybe_str(row.get("package_name"))
+            label = _maybe_str(row.get("app_name"))
+            if pkg and label:
+                _APP_NAME_CACHE[pkg] = label
+    return {name: _APP_NAME_CACHE.get(name) for name in package_names if name in _APP_NAME_CACHE}
+
 
 def _append_non_root_note(label: str) -> str:
     return label
@@ -33,6 +56,14 @@ def build_inventory_rows(packages: Sequence[Dict[str, object]]) -> List[Inventor
     """Normalise raw inventory package dictionaries into ``InventoryRow`` entries."""
 
     rows: List[InventoryRow] = []
+    package_names: List[str] = []
+    for pkg in packages:
+        package_name = str(pkg.get("package_name") or "").strip()
+        if not package_name:
+            continue
+        package_names.append(package_name)
+    app_names = _load_app_names(package_names)
+
     for pkg in packages:
         package_name = str(pkg.get("package_name") or "").strip()
         if not package_name:
@@ -43,11 +74,12 @@ def build_inventory_rows(packages: Sequence[Dict[str, object]]) -> List[Inventor
             if str(path).strip()
         ]
         split_count = int(pkg.get("split_count") or len(apk_paths) or 0)
+        app_label = _maybe_str(pkg.get("app_label")) or app_names.get(package_name)
         rows.append(
             InventoryRow(
                 raw=dict(pkg),
                 package_name=package_name,
-                app_label=_maybe_str(pkg.get("app_label")),
+                app_label=app_label,
                 installer=_maybe_str(pkg.get("installer")),
                 category=_maybe_str(pkg.get("category")),
                 primary_path=_maybe_str(pkg.get("primary_path")),

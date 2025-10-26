@@ -63,7 +63,7 @@ def _build_package_delta_summary(
     snapshot_packages: Sequence[Dict[str, object]] | None,
     current_signatures: Sequence[Tuple[str, Optional[str], Optional[str]]],
     *,
-    limit: int = 5,
+    limit: Optional[int] = 5,
 ) -> Optional[Dict[str, object]]:
     if not snapshot_packages:
         return None
@@ -131,12 +131,17 @@ def _build_package_delta_summary(
         "total_changed": total_changed,
     }
 
-    if added:
-        summary["added"] = added[:limit]
-    if removed:
-        summary["removed"] = removed[:limit]
-    if updated:
-        summary["updated"] = updated[:limit]
+    summary["added_full"] = added
+    summary["removed_full"] = removed
+    summary["updated_full"] = updated
+
+    if limit is not None:
+        if added:
+            summary["added"] = added[:limit]
+        if removed:
+            summary["removed"] = removed[:limit]
+        if updated:
+            summary["updated"] = updated[:limit]
 
     return summary
 

@@ -97,6 +97,10 @@ def prompt_advanced_options(base_params: RunParameters) -> RunParameters:
     trace_detectors = tuple(token.strip() for token in traces_raw.split(",") if token.strip())
     verbose_output = prompt_utils.prompt_yes_no("Verbose output", default=params.verbose_output)
     dry_run = prompt_utils.prompt_yes_no("Dry-run (no persistence)", default=params.dry_run)
+    permission_refresh = prompt_utils.prompt_yes_no(
+        "Refresh permission snapshot after detector run",
+        default=params.permission_snapshot_refresh,
+    )
 
     return replace(
         params,
@@ -117,6 +121,7 @@ def prompt_advanced_options(base_params: RunParameters) -> RunParameters:
         trace_detectors=trace_detectors,
         dry_run=dry_run,
         verbose_output=verbose_output,
+        permission_snapshot_refresh=permission_refresh,
     )
 
 
@@ -154,6 +159,10 @@ def _summarise_params(params: RunParameters) -> Tuple[tuple[str, object], ...]:
             ("Reuse cache", _format_bool(params.reuse_cache)),
             ("Log level", params.log_level.upper()),
             ("Verbose output", _format_bool(params.verbose_output)),
+            (
+                "Post-run permission refresh",
+                _format_bool(params.permission_snapshot_refresh),
+            ),
             (
                 "Trace detectors",
                 ", ".join(params.trace_detectors) if params.trace_detectors else "—",

@@ -62,6 +62,16 @@ python -m scytaledroid.StaticAnalysis.cli.run --profile full --dry-run
 ```
 This still exercises detector output and summary cards but skips all INSERTs.
 
+> Tip: The CLI no longer re-runs the permission-only detector pass after a full
+> analysis by default. Set `SCYTALEDROID_STATIC_REFRESH_PERMISSION_SNAPSHOT=1`
+> before launching the menu if you need the legacy behaviour.
+
+Device inventory snapshots captured via the **Device analysis → Inventory & database sync** menu
+are now persisted to the relational tables `device_inventory_snapshots` (snapshot headers) and
+`device_inventory` (per-package rows) in addition to the JSON copies under
+`data/state/<serial>/inventory/`. Use these tables for dashboards and joins instead of
+parsing the filesystem artefacts.
+
 ## 4. Validate the ingestion
 
 After each session run the SQL below (adjust `:session` as needed):

@@ -90,9 +90,8 @@ def main_menu() -> None:
         ("4", "Dynamic analysis", handle_dynamic),
         ("5", "Reporting", handle_reporting),
         ("6", "Database Utilities", handle_database),
-        ("7", "Database Tasks", handle_database_tasks),
-        ("8", "Workspace Utilities", handle_utils),
-        ("9", "About App", handle_about),
+        ("7", "Workspace Utilities", handle_utils),
+        ("8", "About App", handle_about),
     ]
 
     menu_entries = [
@@ -182,21 +181,6 @@ def handle_database() -> None:
     from scytaledroid.Database.db_utils.database_menu import database_menu
 
     database_menu()
-
-def handle_database_tasks() -> None:
-    try:
-        from scytaledroid.Database import tasks_menu
-
-        tasks_menu.show_database_tasks_menu()
-    except Exception as exc:  # pragma: no cover - defensive logging
-        log.error(
-            f"Failed to open Database Tasks menu: {exc}",
-            category="application",
-        )
-        status_messages.print_status(
-            "Unable to open Database Tasks menu. Check logs for details.",
-            level="error",
-        )
 
 def handle_utils() -> None:
     from scytaledroid.Utils.System.utils_menu import utils_menu

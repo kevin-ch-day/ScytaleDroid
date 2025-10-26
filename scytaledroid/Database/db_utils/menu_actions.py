@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from scytaledroid.Database.db_utils import diagnostics, permission_catalog
+from scytaledroid.Database.db_utils import diagnostics
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
 
 
@@ -57,15 +57,7 @@ def maybe_clear_screen() -> None:
         print()
 
 
-def refresh_permission_catalog() -> None:
-    """Refresh the Android framework permission catalogue."""
-
-    permission_catalog.refresh_framework_catalog()
-    prompt_utils.press_enter_to_continue()
-
-
 __all__ = [
     "maybe_clear_screen",
-    "refresh_permission_catalog",
     "show_connection_and_config",
 ]

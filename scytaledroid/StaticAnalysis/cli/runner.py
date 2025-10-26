@@ -59,6 +59,10 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
         ("Workers", workers_label),
         ("Cache", "purge" if not params.reuse_cache else "reuse"),
         ("Log level", params.log_level.upper()),
+        (
+            "Permission refresh",
+            "on" if params.permission_snapshot_refresh else "off",
+        ),
     ]
     if modules:
         summary_items.append(("Detectors", ", ".join(modules)))
@@ -98,7 +102,11 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
         except Exception:
             pass
 
-    if params.profile in {"full", "lightweight"} and not params.dry_run:
+    if (
+        params.permission_snapshot_refresh
+        and params.profile in {"full", "lightweight"}
+        and not params.dry_run
+    ):
         try:
             print()
             print(
@@ -110,6 +118,14 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
             execute_permission_scan(selection, params, persist_detections=False)
         except Exception:
             pass
+    elif params.profile in {"full", "lightweight"} and not params.dry_run:
+        print()
+        print(
+            status_messages.status(
+                "Post-run permission refresh skipped (toggle in advanced options).",
+                level="info",
+            )
+        )
 
     return outcome
 

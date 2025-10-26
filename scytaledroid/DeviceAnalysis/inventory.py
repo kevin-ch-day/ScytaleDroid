@@ -25,6 +25,7 @@ from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from . import adb_utils, inventory_meta, package_profiles
 from scytaledroid.Database.db_core import run_sql
+from scytaledroid.Database.db_func.harvest import device_inventory as inventory_repo
 from scytaledroid.Database.db_func.harvest.apk_repository import ensure_app_definition
 
 
@@ -229,8 +230,8 @@ def run_inventory_sync(
     run_start = time.time()
 
     adb_utils.clear_package_caches(serial)
-    package_names = adb_utils.list_packages(serial)
-    if not package_names:
+    packages_with_versions = adb_utils.list_packages_with_versions(serial)
+    if not packages_with_versions:
         error_panels.print_error_panel(
             "Inventory",
             "adb did not return any packages.",
@@ -239,7 +240,46 @@ def run_inventory_sync(
         prompt_utils.press_enter_to_continue()
         return
 
+    package_names = [entry[0] for entry in packages_with_versions if entry[0]]
     total = len(package_names)
+
+    current_name_hash = inventory_meta.compute_name_hash(package_names)
+    current_signature_hash = inventory_meta.compute_signature_hash(packages_with_versions)
+
+    if (
+        filter_fn is None
+        and previous_meta
+        and current_signature_hash
+        and previous_meta.package_signature_hash
+        and current_signature_hash == previous_meta.package_signature_hash
+    ):
+        _emit_progress(
+            progress_callback,
+            {
+                "phase": "start",
+                "total": total,
+                "estimated_total_seconds": expected_total_seconds,
+            },
+        )
+        _emit_progress(
+            progress_callback,
+            {
+                "phase": "complete",
+                "total": total,
+                "elapsed_seconds": 0.0,
+            },
+        )
+        if interactive:
+            print()
+            print(
+                status_messages.status(
+                    "Inventory unchanged; package signature matches the previous snapshot.",
+                    level="info",
+                )
+            )
+            prompt_utils.press_enter_to_continue()
+        return
+
     _emit_progress(
         progress_callback,
         {
@@ -324,7 +364,7 @@ def run_inventory_sync(
         print()
 
     package_hash = _hash_rows(metadata_rows)
-    package_list_hash = inventory_meta.compute_name_hash(package_names)
+    package_list_hash = current_name_hash or inventory_meta.compute_name_hash(package_names)
     package_signature_hash = inventory_meta.compute_signature_hash(
         inventory_meta.snapshot_signatures(metadata_rows)
     )
@@ -379,6 +419,16 @@ def run_inventory_sync(
         entry = entries_by_package.get(pkg)
         inferred_category = bool(entry.get("inferred_category")) if entry else False
         inferred_profile = bool(entry.get("inferred_profile")) if entry else False
+
+        if (
+            previous_packages is not None
+            and pkg in previous_packages
+            and entry
+            and not entry.get("review_needed")
+            and not inferred_category
+            and not inferred_profile
+        ):
+            continue
 
         category_name = _get_canonical_category(entry) if entry else None
         profile_id = entry.get("profile_id") if entry else None
@@ -801,13 +851,14 @@ def _persist_inventory(
     scope_hash: Optional[str] = None,
     filename_suffix: Optional[str] = None,
 ) -> Path:
-    """Persist inventory information under the state directory."""
-    timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    """Persist inventory information under the state directory and database."""
+    captured_at = datetime.utcnow().replace(tzinfo=timezone.utc)
+    timestamp = captured_at.strftime("%Y%m%d-%H%M%S")
     device_dir = _STATE_ROOT / serial / "inventory"
     device_dir.mkdir(parents=True, exist_ok=True)
 
     payload: Dict[str, object] = {
-        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "generated_at": captured_at.isoformat().replace("+00:00", "Z"),
         "device_serial": serial,
         "package_count": len(rows),
         "packages": rows,
@@ -839,6 +890,7 @@ def _persist_inventory(
     latest_file = device_dir / "latest.json"
     latest_file.write_text(payload_text, encoding="utf-8")
 
+    latest_suffix_file: Optional[Path] = None
     if filename_suffix:
         latest_suffix_file = device_dir / f"latest{suffix_segment}.json"
         latest_suffix_file.write_text(payload_text, encoding="utf-8")
@@ -849,11 +901,49 @@ def _persist_inventory(
     except ValueError:
         display_path = resolved_path
 
+    snapshot_id: Optional[int] = None
+    try:
+        snapshot_id = inventory_repo.create_snapshot(
+            serial,
+            captured_at=captured_at,
+            package_count=len(rows),
+            duration_seconds=duration_seconds,
+            package_hash=package_hash,
+            package_list_hash=package_list_hash,
+            package_signature_hash=package_signature_hash,
+            build_fingerprint=build_fingerprint,
+            scope_hash=scope_hash,
+            snapshot_type=snapshot_type,
+            scope_variant=filename_suffix,
+            scope_size=len(rows),
+            extras={
+                "snapshot_path": str(display_path),
+            },
+        )
+        if snapshot_id:
+            persisted = inventory_repo.replace_packages(snapshot_id, serial, rows)
+            payload["snapshot_id"] = snapshot_id
+            refreshed_payload = json.dumps(payload, indent=2, sort_keys=True)
+            target_file.write_text(refreshed_payload, encoding="utf-8")
+            latest_file.write_text(refreshed_payload, encoding="utf-8")
+            if latest_suffix_file is not None:
+                latest_suffix_file.write_text(refreshed_payload, encoding="utf-8")
+            log.info(
+                f"Inventory snapshot {snapshot_id} stored ({persisted} packages)",
+                category="device",
+                extra={"snapshot_id": snapshot_id, "device_serial": serial},
+            )
+    except Exception as exc:  # pragma: no cover - defensive
+        snapshot_id = None
+        log.warning(
+            f"Failed to persist inventory snapshot to database: {exc}",
+            category="database",
+        )
+
     log.info(
         f"Inventory written to {display_path}",
         category="device",
     )
-    captured_at = datetime.utcnow().replace(tzinfo=timezone.utc)
     meta = inventory_meta.InventoryMeta(
         serial=serial,
         captured_at=captured_at,
@@ -865,6 +955,7 @@ def _persist_inventory(
         snapshot_type=snapshot_type,
         scope_hash=scope_hash,
         scope_size=len(rows),
+        snapshot_id=snapshot_id,
     )
     meta.write_files(timestamp, suffix=filename_suffix)
 

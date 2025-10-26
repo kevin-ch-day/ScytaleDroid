@@ -35,6 +35,10 @@ def _default_https_risk() -> bool:
     return _env_flag("SCYTALEDROID_STRINGS_INCLUDE_HTTPS_RISK", False)
 
 
+def _default_permission_refresh() -> bool:
+    return _env_flag("SCYTALEDROID_STATIC_REFRESH_PERMISSION_SNAPSHOT", False)
+
+
 @dataclass(frozen=True)
 class RunParameters:
     """User-facing configuration for an analysis run."""
@@ -60,6 +64,7 @@ class RunParameters:
     dry_run: bool = False
     session_stamp: str | None = field(default_factory=make_session_stamp)
     verbose_output: bool = False
+    permission_snapshot_refresh: bool = field(default_factory=_default_permission_refresh)
 
     @property
     def profile_label(self) -> str:

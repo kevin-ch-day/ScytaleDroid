@@ -1,0 +1,159 @@
+"""Automatic device connect/survey utilities for the Device Analysis menu."""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
+
+from scytaledroid.Utils.DisplayUtils import status_messages
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
+
+from .. import device_manager, inventory, inventory_meta
+from .dashboard import resolve_active_device
+from .inventory_guard.constants import INVENTORY_STALE_SECONDS
+from .inventory_guard.utils import humanize_seconds
+
+
+def ensure_active_device(
+    devices: Sequence[Dict[str, Optional[str]]],
+    active_device: Optional[Dict[str, Optional[str]]],
+) -> Tuple[Optional[Dict[str, Optional[str]]], List[str]]:
+    """Auto-select a single connected device when no active device is set."""
+
+    messages: List[str] = []
+    if active_device or len(devices) != 1:
+        return active_device, messages
+
+    candidate_serial = devices[0].get("serial")
+    if not candidate_serial:
+        return active_device, messages
+
+    if device_manager.set_active_device(candidate_serial):
+        updated = resolve_active_device(devices)
+        if updated:
+            messages.append(
+                status_messages.status(
+                    f"Auto-connected to {candidate_serial}", level="info"
+                )
+            )
+        else:
+            log.warning(
+                f"Auto-connect to {candidate_serial} did not yield an active device.",
+                category="device",
+            )
+            messages.append(
+                status_messages.status(
+                    "Automatically selected device disappeared before confirmation. Please select a device manually.",
+                    level="warn",
+                )
+            )
+        return updated, messages
+
+    return active_device, messages
+
+
+def ensure_inventory_survey(
+    serial: Optional[str],
+    *,
+    metadata: Optional[Dict[str, object]],
+    surveyed_serials: set[str],
+    emit: Optional[Callable[[str], None]] = None,
+) -> None:
+    """Run a silent inventory survey once per session when the snapshot is fresh."""
+
+    if not serial or serial in surveyed_serials:
+        return
+
+    snapshot_meta = inventory_meta.load_latest(serial)
+    snapshot_present = metadata is not None or snapshot_meta is not None
+    if not snapshot_present:
+        surveyed_serials.add(serial)
+        message = status_messages.status(
+            "No inventory snapshot found yet; run Inventory & database sync (option 5) to capture a baseline.",
+            level="warn",
+        )
+        if emit:
+            emit(message)
+        return
+
+    # Normalise metadata into primitives we can reason about.
+    metadata = metadata or {}
+    timestamp: Optional[datetime] = None
+    if isinstance(metadata, dict) and isinstance(metadata.get("timestamp"), datetime):
+        timestamp = metadata.get("timestamp")  # type: ignore[assignment]
+    elif snapshot_meta is not None:
+        timestamp = snapshot_meta.captured_at
+
+    age_seconds: Optional[float] = None
+    if timestamp is not None:
+        age_seconds = max((datetime.now(timezone.utc) - timestamp).total_seconds(), 0.0)
+
+    packages_changed = bool(metadata.get("packages_changed"))
+    scope_changed = bool(metadata.get("scope_changed"))
+    state_changed = bool(metadata.get("state_changed"))
+    fingerprint_changed = bool(metadata.get("build_fingerprint_changed"))
+
+    too_old = age_seconds is None or age_seconds > INVENTORY_STALE_SECONDS
+    has_changes = packages_changed or scope_changed or state_changed or fingerprint_changed
+
+    if too_old or has_changes:
+        surveyed_serials.add(serial)
+        reason: Optional[str] = None
+        if age_seconds is None:
+            reason = "Inventory snapshot age unknown; run Inventory & database sync (option 5)."
+        elif too_old:
+            reason = (
+                f"Inventory snapshot is {humanize_seconds(age_seconds)} old; run Inventory & database sync (option 5)."
+            )
+        elif has_changes:
+            reason = (
+                "Device state changed since the last inventory. Run Inventory & database sync (option 5) before pulling APKs."
+            )
+        if reason and emit:
+            emit(status_messages.status(reason, level="warn"))
+        return
+
+    start_message = status_messages.status(
+        f"Auto-refreshing inventory for {serial}…", level="info"
+    )
+    if emit:
+        emit(start_message)
+
+    try:
+        inventory.run_inventory_sync(serial, interactive=False)
+    except inventory.InventorySyncAborted:
+        log.warning(
+            f"Inventory survey aborted for {serial}",
+            category="device",
+        )
+        if emit:
+            emit(
+                status_messages.status(
+                    "Inventory survey interrupted; existing snapshot kept.",
+                    level="warn",
+                )
+            )
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning(
+            f"Automatic inventory survey failed for {serial}: {exc}",
+            category="device",
+        )
+        if emit:
+            emit(
+                status_messages.status(
+                    "Automatic inventory refresh failed; use option 5 to inspect logs and rerun manually.",
+                    level="error",
+                )
+            )
+    else:
+        if emit:
+            emit(
+                status_messages.status(
+                    "Inventory refreshed automatically.", level="info"
+                )
+            )
+    finally:
+        surveyed_serials.add(serial)
+
+
+__all__ = ["ensure_active_device", "ensure_inventory_survey"]

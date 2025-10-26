@@ -10,6 +10,11 @@ from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, 
 from scytaledroid.Config import app_config
 from ..modules import resolve_category
 
+try:  # optional dependency (CLI can run without DB)
+    from scytaledroid.Database.db_core import run_sql
+except Exception:  # pragma: no cover - database module may be absent
+    run_sql = None
+
 
 @dataclass(frozen=True)
 class RepositoryArtifact:
@@ -24,7 +29,18 @@ class RepositoryArtifact:
         meta_value = self.metadata.get("package_name")
         if isinstance(meta_value, str) and meta_value.strip():
             return meta_value
-        return self.path.stem
+        try:
+            package_dir = self.path.parent.parent.name
+            if package_dir:
+                return package_dir
+        except Exception:  # pragma: no cover - defensive
+            pass
+        stem = self.path.stem
+        if "__" in stem:
+            candidate = stem.split("__", 1)[0]
+            if candidate:
+                return candidate.replace("_", ".")
+        return stem
 
     @property
     def version_display(self) -> str:
@@ -204,19 +220,66 @@ def _group_key_for_artifact(artifact: RepositoryArtifact) -> str:
     return f"path-{artifact.display_path}"
 
 
-def list_packages(groups: Sequence[ArtifactGroup]) -> List[tuple[str, str, int]]:
-    """Return sorted unique package names with representative versions."""
+def _extract_app_label(group: ArtifactGroup) -> Optional[str]:
+    for artifact in group.artifacts:
+        label = artifact.metadata.get("app_label")
+        if isinstance(label, str) and label.strip():
+            return label.strip()
+    base = group.base_artifact
+    if base:
+        label = base.metadata.get("app_name")
+        if isinstance(label, str) and label.strip():
+            return label.strip()
+    return None
+
+
+def _hydrate_app_labels(packages: Dict[str, Dict[str, object]]) -> None:
+    if run_sql is None:
+        return
+    missing = [name for name, data in packages.items() if not data.get("app_label")]
+    if not missing:
+        return
+    placeholders = ", ".join(["%s"] * len(missing))
+    query = (
+        "SELECT package_name, app_name "
+        "FROM android_app_definitions "
+        f"WHERE package_name IN ({placeholders})"
+    )
+    try:
+        rows = run_sql(query, tuple(missing), fetch="all", dictionary=True) or []
+    except Exception:
+        return
+    for row in rows:
+        package = row.get("package_name")
+        label = row.get("app_name")
+        if not isinstance(package, str) or package not in packages:
+            continue
+        if isinstance(label, str) and label.strip():
+            packages[package]["app_label"] = label.strip()
+
+
+def list_packages(groups: Sequence[ArtifactGroup]) -> List[tuple[str, str, int, Optional[str]]]:
+    """Return sorted unique package names with representative versions and labels."""
 
     snapshot: Dict[str, Dict[str, object]] = {}
     for group in groups:
-        entry = snapshot.setdefault(group.package_name, {"count": 0, "versions": set(), "fallback": "-"})
+        entry = snapshot.setdefault(
+            group.package_name,
+            {"count": 0, "versions": set(), "fallback": "-", "app_label": None},
+        )
         entry["count"] = int(entry.get("count", 0)) + 1
         version = (group.version_display or "-").strip() or "-"
         if version != "-":
             entry.setdefault("versions", set()).add(version)
         entry["fallback"] = entry.get("fallback") or version
+        if not entry.get("app_label"):
+            label = _extract_app_label(group)
+            if label:
+                entry["app_label"] = label
 
-    packages: List[tuple[str, str, int]] = []
+    _hydrate_app_labels(snapshot)
+
+    packages: List[tuple[str, str, int, Optional[str]]] = []
     for package_name, data in snapshot.items():
         versions = data.get("versions") or set()
         if isinstance(versions, set) and versions:
@@ -225,9 +288,14 @@ def list_packages(groups: Sequence[ArtifactGroup]) -> List[tuple[str, str, int]]
         else:
             fallback = data.get("fallback") or "-"
             version_label = fallback if isinstance(fallback, str) else "-"
-        packages.append((package_name, version_label, int(data.get("count", 0))))
+        app_label = data.get("app_label")
+        if isinstance(app_label, str) and app_label.strip():
+            label_value: Optional[str] = app_label.strip()
+        else:
+            label_value = None
+        packages.append((package_name, version_label, int(data.get("count", 0)), label_value))
 
-    packages.sort(key=lambda item: item[0].lower())
+    packages.sort(key=lambda item: (item[3] or item[0]).lower())
     return packages
 
 
