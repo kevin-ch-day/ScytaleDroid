@@ -144,6 +144,20 @@ _DDL_STATEMENTS: list[str] = [
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
     """
+    ALTER TABLE static_fileproviders
+      ADD COLUMN IF NOT EXISTS run_id BIGINT UNSIGNED DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS component_name VARCHAR(191) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS authorities JSON DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS base_permission VARCHAR(191) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS read_permission VARCHAR(191) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS write_permission VARCHAR(191) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS base_guard VARCHAR(32) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS read_guard VARCHAR(32) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS write_guard VARCHAR(32) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS effective_guard VARCHAR(32) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS metrics JSON DEFAULT NULL;
+    """,
+    """
     CREATE TABLE IF NOT EXISTS static_provider_acl (
       id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
       provider_id     BIGINT UNSIGNED NOT NULL,
@@ -164,6 +178,16 @@ _DDL_STATEMENTS: list[str] = [
         REFERENCES static_fileproviders (id)
         ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
+    """
+    ALTER TABLE static_provider_acl
+      ADD COLUMN IF NOT EXISTS provider_id BIGINT UNSIGNED DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS path VARCHAR(191) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS path_prefix VARCHAR(191) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS path_pattern VARCHAR(191) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS read_guard VARCHAR(32) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS write_guard VARCHAR(32) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS metadata JSON DEFAULT NULL;
     """,
     # Ingest/Audit
     """
@@ -359,4 +383,3 @@ def ensure_all() -> bool:
 
 
 __all__ = ["ensure_all"]
-

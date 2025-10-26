@@ -217,7 +217,41 @@ def _group_key_for_artifact(artifact: RepositoryArtifact) -> str:
         return f"apk-{artifact.apk_id}"
     if artifact.sha256:
         return f"sha256-{artifact.sha256}"
+    path_group = _path_prefix_group_key(artifact)
+    if path_group:
+        return path_group
     return f"path-{artifact.display_path}"
+
+
+def _path_prefix_group_key(artifact: RepositoryArtifact) -> Optional[str]:
+    """Best-effort grouping based on common filename prefixes (base + splits)."""
+
+    def _coerce_prefix(token: str) -> Optional[str]:
+        normalised = token.replace("\\", "/")
+        parent, _, name = normalised.rpartition("/")
+        if not name or "__" not in name:
+            return None
+        prefix = name.split("__", 1)[0]
+        if not prefix:
+            return None
+        return f"{parent}/{prefix}" if parent else prefix
+
+    display_path = getattr(artifact, "display_path", None)
+    if isinstance(display_path, str) and display_path:
+        prefix = _coerce_prefix(display_path)
+        if prefix:
+            return f"pathgroup-{prefix}"
+
+    try:
+        path_str = artifact.path.as_posix()
+    except Exception:
+        path_str = ""
+    if path_str:
+        prefix = _coerce_prefix(path_str)
+        if prefix:
+            return f"pathgroup-{prefix}"
+
+    return None
 
 
 def _extract_app_label(group: ArtifactGroup) -> Optional[str]:

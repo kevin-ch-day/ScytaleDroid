@@ -469,9 +469,7 @@ def persist_run_summary(
         }
         if mismatch:
             log.info(
-                "Adjusted severity totals for %s based on detector output: %s",
-                run_package,
-                mismatch,
+                f"Adjusted severity totals for {run_package} based on detector output: {mismatch}",
                 category="static_analysis",
             )
     else:

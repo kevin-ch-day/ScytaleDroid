@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Sequence, Tuple
 
 from scytaledroid.Utils.DisplayUtils import (
@@ -47,17 +48,18 @@ def select_app_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
 
     print()
     menu_utils.print_header("Scope — App", "Select 1 package")
-    rows = []
+    rows: list[list[str]] = []
     lookup_labels: list[str] = []
     for idx, (package, version, _count, app_label) in enumerate(packages, start=1):
         display_app = app_label or package
-        rows.append([str(idx), display_app, package, version])
+        combined_label = f"{display_app} ({package})" if app_label else package
+        rows.append([str(idx), combined_label])
         if app_label:
             lookup_labels.append(f"{app_label} {package}")
         else:
             lookup_labels.append(package)
 
-    table_utils.render_table(["#", "App", "Package", "Version"], rows)
+    table_utils.render_table(["#", "App / Package"], rows, padding=1)
 
     index = _resolve_index(
         "Select package # or name",
@@ -65,7 +67,17 @@ def select_app_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
     )
     package_name, _, _, app_label = packages[index]
     selection_label = f"{app_label} ({package_name})" if app_label else package_name
-    scoped = tuple(group for group in groups if group.package_name == package_name)
+    matching_groups = tuple(group for group in groups if group.package_name == package_name)
+    scoped = _select_latest_groups(matching_groups)
+    skipped = len(matching_groups) - len(scoped)
+    if skipped > 0:
+        newest = scoped[0]
+        stamp = newest.session_stamp or "undated"
+        message = (
+            f"Selected newest artifact set for {package_name} (session {stamp}); "
+            f"skipped {skipped} older capture{'s' if skipped != 1 else ''}."
+        )
+        print(status_messages.status(message, level="info"))
     return ScopeSelection("app", selection_label, scoped)
 
 
@@ -130,6 +142,48 @@ def _resolve_index(prompt: str, labels: Sequence[str]) -> int:
                 level="warn",
             )
         )
+
+
+def _select_latest_groups(groups: Sequence[ArtifactGroup]) -> Tuple[ArtifactGroup, ...]:
+    if not groups:
+        return tuple()
+    if len(groups) == 1:
+        return (groups[0],)
+
+    best_group = max(groups, key=_group_recency_key)
+    if best_group.session_stamp:
+        contemporaries = [group for group in groups if group.session_stamp == best_group.session_stamp]
+        if contemporaries:
+            return tuple(contemporaries)
+
+    best_mtime = _group_latest_mtime(best_group)
+    contemporaries = [
+        group for group in groups if abs(_group_latest_mtime(group) - best_mtime) < 0.0001
+    ]
+    return tuple(contemporaries) if contemporaries else (best_group,)
+
+
+def _group_recency_key(group: ArtifactGroup) -> tuple[int, str, float]:
+    stamp = group.session_stamp or ""
+    return (1 if stamp else 0, stamp, _group_latest_mtime(group))
+
+
+def _group_latest_mtime(group: ArtifactGroup) -> float:
+    return max((_artifact_mtime(artifact) for artifact in group.artifacts), default=0.0)
+
+
+def _artifact_mtime(artifact) -> float:
+    path_obj = getattr(artifact, "path", None)
+    if isinstance(path_obj, Path):
+        target = path_obj
+    elif isinstance(path_obj, str):
+        target = Path(path_obj)
+    else:
+        return 0.0
+    try:
+        return float(target.stat().st_mtime)
+    except (OSError, ValueError):
+        return 0.0
 
 
 __all__ = [
