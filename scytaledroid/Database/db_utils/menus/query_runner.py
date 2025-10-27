@@ -439,48 +439,113 @@ def _print_session_counts(session_stamp: str) -> None:
             return 0
 
     counts = [
-        ("static_findings_summary", _scalar("SELECT COUNT(*) FROM static_findings_summary WHERE session_stamp=%s", (session_stamp,))),
-        ("static_findings", _scalar("""
-            SELECT COUNT(*)
-            FROM static_findings f
-            JOIN static_findings_summary s ON s.id=f.summary_id
-            WHERE s.session_stamp=%s
-        """, (session_stamp,))),
-        ("static_string_summary", _scalar("SELECT COUNT(*) FROM static_string_summary WHERE session_stamp=%s", (session_stamp,))),
-        ("static_string_samples (raw)", _scalar("""
-            SELECT COUNT(*)
-            FROM static_string_samples x
-            JOIN static_findings_summary s ON s.id=x.summary_id
-            WHERE s.session_stamp=%s
-        """, (session_stamp,))),
-        ("v_strings_effective", _scalar("""
-            SELECT COUNT(*)
-            FROM v_strings_effective x
-            JOIN static_string_summary s ON s.id=x.summary_id
-            WHERE s.session_stamp=%s
-        """, (session_stamp,))),
-        ("v_doc_policy_drift", _scalar("""
-            SELECT COUNT(*)
-            FROM v_doc_policy_drift d
-            JOIN static_string_summary s ON s.id=d.summary_id
-            WHERE s.session_stamp=%s
-        """, (session_stamp,))),
-        ("static_provider_acl", _scalar("SELECT COUNT(*) FROM static_provider_acl WHERE session_stamp=%s", (session_stamp,))),
-        ("static_fileproviders", _scalar("SELECT COUNT(*) FROM static_fileproviders WHERE session_stamp=%s", (session_stamp,))),
-        ("runs", _scalar("SELECT COUNT(*) FROM runs WHERE session_stamp=%s", (session_stamp,))),
-        ("buckets", _scalar("""
-            SELECT COUNT(*)
-            FROM buckets b
-            JOIN runs r ON r.run_id=b.run_id
-            WHERE r.session_stamp=%s
-        """, (session_stamp,))),
-        ("metrics", _scalar("""
-            SELECT COUNT(*)
-            FROM metrics m
-            JOIN runs r ON r.run_id=m.run_id
-            WHERE r.session_stamp=%s
-        """, (session_stamp,))),
-        ("findings", _scalar("SELECT COUNT(*) FROM findings WHERE run_id IN (SELECT run_id FROM runs WHERE session_stamp=%s)", (session_stamp,))),
+        (
+            "static_findings (baseline)",
+            _scalar("SELECT COUNT(*) FROM static_findings_summary WHERE session_stamp=%s", (session_stamp,)),
+        ),
+        (
+            "findings (normalized)",
+            _scalar(
+                """
+                SELECT COUNT(*)
+                FROM static_analysis_findings f
+                JOIN static_analysis_runs r ON r.id = f.run_id
+                WHERE r.session_stamp = %s
+                """,
+                (session_stamp,),
+            ),
+        ),
+        (
+            "String summary rows",
+            _scalar("SELECT COUNT(*) FROM static_string_summary WHERE session_stamp=%s", (session_stamp,)),
+        ),
+        (
+            "String samples (raw)",
+            _scalar(
+                """
+                SELECT COUNT(*)
+                FROM static_string_samples x
+                JOIN static_findings_summary s ON s.id = x.summary_id
+                WHERE s.session_stamp = %s
+                """,
+                (session_stamp,),
+            ),
+        ),
+        (
+            "v_strings_effective",
+            _scalar(
+                """
+                SELECT COUNT(*)
+                FROM v_strings_effective x
+                JOIN static_string_summary s ON s.id = x.summary_id
+                WHERE s.session_stamp = %s
+                """,
+                (session_stamp,),
+            ),
+        ),
+        (
+            "v_doc_policy_drift",
+            _scalar(
+                """
+                SELECT COUNT(*)
+                FROM v_doc_policy_drift d
+                JOIN static_string_summary s ON s.id = d.summary_id
+                WHERE s.session_stamp = %s
+                """,
+                (session_stamp,),
+            ),
+        ),
+        (
+            "Static analysis runs",
+            _scalar("SELECT COUNT(*) FROM static_analysis_runs WHERE session_stamp=%s", (session_stamp,)),
+        ),
+        (
+            "Permission audit snapshots",
+            _scalar("SELECT COUNT(*) FROM permission_audit_snapshots WHERE session_stamp=%s", (session_stamp,)),
+        ),
+        (
+            "Permission audit apps",
+            _scalar("SELECT COUNT(*) FROM permission_audit_apps WHERE session_stamp=%s", (session_stamp,)),
+        ),
+        (
+            "Risk buckets",
+            _scalar(
+                """
+                SELECT COUNT(*)
+                FROM buckets b
+                JOIN static_analysis_runs r ON r.id = b.run_id
+                WHERE r.session_stamp = %s
+                """,
+                (session_stamp,),
+            ),
+        ),
+        (
+            "Metrics",
+            _scalar(
+                """
+                SELECT COUNT(*)
+                FROM metrics m
+                JOIN static_analysis_runs r ON r.id = m.run_id
+                WHERE r.session_stamp = %s
+                """,
+                (session_stamp,),
+            ),
+        ),
+        (
+            "findings (legacy table)",
+            _scalar(
+                "SELECT COUNT(*) FROM findings WHERE run_id IN (SELECT run_id FROM runs WHERE session_stamp=%s)",
+                (session_stamp,),
+            ),
+        ),
+        (
+            "static_provider_acl (legacy)",
+            _scalar("SELECT COUNT(*) FROM static_provider_acl WHERE session_stamp=%s", (session_stamp,)),
+        ),
+        (
+            "static_fileproviders (legacy)",
+            _scalar("SELECT COUNT(*) FROM static_fileproviders WHERE session_stamp=%s", (session_stamp,)),
+        ),
     ]
 
     headers = ["Table", "Rows"]

@@ -6,10 +6,9 @@ import json
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Mapping
+from typing import Mapping, Sequence
 from xml.etree import ElementTree
 
-from scytaledroid.Database.db_func.harvest import storage_surface as storage_db
 from scytaledroid.StaticAnalysis._androguard import APK
 
 from .module_api import AppModuleContext, ModuleResult, StaticModule
@@ -142,18 +141,8 @@ class StorageSurfaceModule(StaticModule):
         return ModuleResult(module=self.name, data=data, summary=summary)
 
     def persist(self, result: ModuleResult) -> None:
-        if not result.data:
-            return
-        try:
-            storage_db.ensure_tables()
-            storage_db.replace_fileproviders(
-                result.data.get("context", {}), result.data.get("fileproviders", ())
-            )
-            storage_db.replace_provider_acl(
-                result.data.get("context", {}), result.data.get("provider_acl", ())
-            )
-        except Exception:
-            return
+        """Legacy persistence disabled; canonical pipeline handles provider data."""
+        return
 
     def summarize(self, result: ModuleResult) -> Mapping[str, int]:
         payload = result.summary or {}

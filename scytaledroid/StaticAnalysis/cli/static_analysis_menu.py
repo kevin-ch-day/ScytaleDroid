@@ -87,35 +87,12 @@ def static_analysis_menu() -> None:
 
     while True:
         print()
-        menu_utils.print_header(
-            "Android APK Static Analysis",
-            subtitle="Detector workflows & tooling",
+        menu_utils.print_header("Android APK Static Analysis")
+        menu_utils.print_menu(
+            [_command_option(cmd) for cmd in workflow_commands],
+            show_exit=False,
+            default=default_key if default_key in {cmd.id for cmd in workflow_commands} else None,
         )
-        menu_utils.print_hint("Choose a workflow to analyse APKs or open insight tooling.")
-
-        sections: list[tuple[str, tuple[Command, ...]]] = []
-        if workflow_commands:
-            sections.append(("Automated workflows", workflow_commands))
-        if tool_commands:
-            sections.append(("Interactive analysis tools", tool_commands))
-        if insight_commands:
-            sections.append(("Insight & reporting", insight_commands))
-
-        rendered_section = False
-        for title, commands in sections:
-            if rendered_section:
-                print()
-            menu_utils.print_section(title)
-            default = default_key if default_key in {cmd.id for cmd in commands} else None
-            menu_utils.print_menu(
-                [_command_option(cmd) for cmd in commands],
-                show_exit=False,
-                default=default,
-            )
-            rendered_section = True
-
-        if rendered_section:
-            print()
         menu_utils.print_menu([], show_exit=True, exit_label="Back", show_descriptions=False)
         choice = prompt_utils.get_choice(selectable_ids + ["0"], default=default_choice)
 

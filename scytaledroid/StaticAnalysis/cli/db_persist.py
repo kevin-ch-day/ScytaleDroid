@@ -35,6 +35,10 @@ from .persistence import (
 @dataclass(slots=True)
 class PersistenceOutcome:
     run_id: int | None = None
+    runtime_findings: int = 0
+    persisted_findings: int = 0
+    baseline_written: bool = False
+    string_samples_persisted: int = 0
     errors: list[str] = field(default_factory=list)
 
     @property
@@ -175,8 +179,9 @@ def _persist_static_sections(
     manifest: object | None,
     app_metadata: Mapping[str, object] | object,
     run_id: int | None,
-) -> list[str]:
+) -> tuple[list[str], bool, int]:
     errors: list[str] = []
+    baseline_written = False
     metadata_map: Mapping[str, object] = (
         dict(app_metadata)
         if isinstance(app_metadata, Mapping)
@@ -260,32 +265,39 @@ def _persist_static_sections(
 
     findings = baseline_section.get("findings")
     findings_seq: Sequence[object] | None = findings if isinstance(findings, Sequence) else None
-    errors.extend(
-        persist_static_findings(
-            package_name=package_name,
-            session_stamp=session_stamp,
-            scope_label=scope_label,
-            severity_counts=severity_counts,
-            details=details,
-            findings=findings_seq,
-        )
+    baseline_errors = persist_static_findings(
+        package_name=package_name,
+        session_stamp=session_stamp,
+        scope_label=scope_label,
+        severity_counts=severity_counts,
+        details=details,
+        findings=findings_seq,
     )
+    if baseline_errors:
+        errors.extend(baseline_errors)
+    else:
+        baseline_written = True
 
     counts = normalise_string_counts(string_payload.get("counts"))
     samples_payload = string_payload.get("samples")
     samples = samples_payload if isinstance(samples_payload, Mapping) else {}
-    errors.extend(
-        persist_string_summary(
-            package_name=package_name,
-            session_stamp=session_stamp,
-            scope_label=scope_label,
-            counts=counts,
-            samples=samples,
-            run_id=run_id,
-        )
+    sample_total = 0
+    for values in samples.values():
+        if isinstance(values, Sequence):
+            sample_total += len(values)
+    string_errors = persist_string_summary(
+        package_name=package_name,
+        session_stamp=session_stamp,
+        scope_label=scope_label,
+        counts=counts,
+        samples=samples,
+        run_id=run_id,
     )
+    if string_errors:
+        errors.extend(string_errors)
+        sample_total = 0
 
-    return errors
+    return errors, baseline_written, sample_total
 
 
 def persist_run_summary(
@@ -458,6 +470,8 @@ def persist_run_summary(
         outcome.add_error(message)
 
     control_summary = summarise_controls(control_entries)
+    outcome.runtime_findings = int(total_findings)
+    outcome.persisted_findings = len(finding_rows)
 
     if severity_counter:
         severity_counts = _canonical_severity_counts(severity_counter)
@@ -560,7 +574,7 @@ def persist_run_summary(
     if run_id is not None:
         baseline_section = baseline_payload.get("baseline") if isinstance(baseline_payload, Mapping) else {}
         string_payload = baseline_section.get("string_analysis") if isinstance(baseline_section, Mapping) else {}
-        static_errors = _persist_static_sections(
+        static_errors, baseline_written, sample_total = _persist_static_sections(
             package_name=br.manifest.package_name or run_package,
             session_stamp=session_stamp,
             scope_label=scope_label,
@@ -571,6 +585,9 @@ def persist_run_summary(
             app_metadata=baseline_payload.get("app") if isinstance(baseline_payload, Mapping) else {},
             run_id=run_id,
         )
+        if baseline_written:
+            outcome.baseline_written = True
+        outcome.string_samples_persisted = sample_total
         for err in static_errors:
             outcome.add_error(err)
 

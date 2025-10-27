@@ -94,6 +94,29 @@ def _derive_highlight_stats(outcome: RunOutcome) -> dict[str, int]:
     return stats
 
 
+def _dedupe_profile_entries(entries: Sequence[dict[str, object]]) -> list[dict[str, object]]:
+    seen: set[str] = set()
+    deduped: list[dict[str, object]] = []
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            deduped.append(entry)
+            continue
+        key_token = (
+            entry.get("package")
+            or entry.get("label")
+            or entry.get("package_name")
+        )
+        label = str(key_token or "").strip()
+        if not label:
+            deduped.append(entry)
+            continue
+        if label in seen:
+            continue
+        seen.add(label)
+        deduped.append(entry)
+    return deduped
+
+
 def _format_highlight_tokens(
     stats: Mapping[str, int], totals: Mapping[str, int], app_count: int
 ) -> list[str]:
@@ -140,14 +163,28 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
         aggregated.update(app_result.severity_totals())
         artifact_count += len(app_result.artifacts)
 
+    permission_profiles = _dedupe_profile_entries(permission_profiles)
+    component_profiles = _dedupe_profile_entries(component_profiles)
+    secret_profiles = _dedupe_profile_entries(secret_profiles)
+    finding_profiles = _dedupe_profile_entries(finding_profiles)
+    trend_deltas = _dedupe_profile_entries(trend_deltas)
+    static_risk_rows = _dedupe_profile_entries(static_risk_rows)
+
     totals = severity.normalise_counts(aggregated)
     highlight_stats = _derive_highlight_stats(outcome)
-    total_findings = sum(totals.values())
+    runtime_findings_total = sum(totals.values())
+    normalized_findings_total = 0
+    baseline_summary_total = 0
+    string_samples_persisted_total = 0
     overview_items = [
         summary_cards.summary_item("Duration", format_duration(outcome.duration_seconds), value_style="emphasis"),
         summary_cards.summary_item("Applications", len(outcome.results)),
         summary_cards.summary_item("Artifacts", artifact_count),
-        summary_cards.summary_item("Findings", total_findings, value_style="severity_high" if totals.get("high") or totals.get("critical") else "emphasis"),
+        summary_cards.summary_item(
+            "Findings (runtime)",
+            runtime_findings_total,
+            value_style="severity_high" if totals.get("high") or totals.get("critical") else "emphasis",
+        ),
     ]
     overview_items.extend(severity.severity_summary_items(totals))
     subtitle_parts = [params.profile_label]
@@ -250,6 +287,11 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                     baseline_payload=payload,
                     dry_run=params.dry_run,
                 )
+                if outcome_status:
+                    normalized_findings_total += int(outcome_status.persisted_findings)
+                    if outcome_status.baseline_written:
+                        baseline_summary_total += 1
+                    string_samples_persisted_total += int(outcome_status.string_samples_persisted)
                 if outcome_status and not outcome_status.success:
                     persistence_errors.extend(outcome_status.errors)
             except Exception as exc:
@@ -309,6 +351,38 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
 
         if index < len(outcome.results) and not compact_mode:
             print()
+
+    if persist_enabled:
+        print(
+            status_messages.status(
+                f"findings (normalized): {normalized_findings_total}",
+                level="info",
+            )
+        )
+        print(
+            status_messages.status(
+                f"static_findings (baseline): {baseline_summary_total}",
+                level="info",
+            )
+        )
+        print(
+            status_messages.status(
+                (
+                    "String samples persisted: "
+                    f"{string_samples_persisted_total} "
+                    f"(cap={params.string_max_samples} per bucket; entropy ≥ {params.string_min_entropy:.2f})"
+                ),
+                level="info",
+            )
+        )
+    else:
+        print(
+            status_messages.status(
+                "findings (normalized) not persisted during dry run.",
+                level="info",
+            )
+        )
+    print()
 
     session_stamp = params.session_stamp
     if outcome.results:

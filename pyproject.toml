@@ -23,3 +23,8 @@ scripts_are_modules = true
 pretty = true
 warn_unused_ignores = true
 show_error_codes = true
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: marks tests that exercise database integrations (deselect with '-m \"not integration\"')",
+]

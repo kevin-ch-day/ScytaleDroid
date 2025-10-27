@@ -95,7 +95,32 @@ def select_category_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
 
     index = _resolve_index("Select category # or name", [category for category, _ in categories])
     category_name, _ = categories[index]
-    scoped = tuple(group for group in groups if getattr(group, "category", None) == category_name)
+    scoped_all = tuple(group for group in groups if getattr(group, "category", None) == category_name)
+    grouped: dict[str, list[ArtifactGroup]] = {}
+    order: list[str] = []
+    for group in scoped_all:
+        package = group.package_name
+        if package not in grouped:
+            grouped[package] = []
+            order.append(package)
+        grouped[package].append(group)
+
+    collapsed: list[ArtifactGroup] = []
+    for package in order:
+        package_groups = tuple(grouped[package])
+        selected = _select_latest_groups(package_groups)
+        collapsed.extend(selected)
+        skipped = len(package_groups) - len(selected)
+        if skipped > 0:
+            newest = selected[0]
+            stamp = newest.session_stamp or "undated"
+            message = (
+                f"Selected newest artifact set for {package} (session {stamp}); "
+                f"skipped {skipped} older capture{'s' if skipped != 1 else ''}."
+            )
+            print(status_messages.status(message, level="info"))
+
+    scoped = tuple(collapsed)
     return ScopeSelection("category", category_name, scoped)
 
 

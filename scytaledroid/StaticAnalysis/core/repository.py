@@ -334,13 +334,14 @@ def list_packages(groups: Sequence[ArtifactGroup]) -> List[tuple[str, str, int, 
 
 
 def list_categories(groups: Sequence[ArtifactGroup]) -> List[tuple[str, int]]:
-    """Return sorted unique categories with group counts."""
+    """Return sorted unique categories with unique package counts."""
 
-    tally: Dict[str, int] = {}
+    tally: Dict[str, set[str]] = {}
     for group in groups:
         label = group.category or "Uncategorized"
-        tally[label] = tally.get(label, 0) + 1
-    return sorted(tally.items(), key=lambda item: item[0].lower())
+        bucket = tally.setdefault(label, set())
+        bucket.add(group.package_name)
+    return sorted(((category, len(packages)) for category, packages in tally.items()), key=lambda item: item[0].lower())
 
 
 __all__ = [

@@ -43,12 +43,16 @@ Key prompts:
 ## 3. Persistence behaviour
 
 Persistence happens automatically at the end of each run:
-- `ingest_baseline_payload` writes the run to `static_analysis_runs`,
-  `static_analysis_findings`, `static_fileproviders`, and `static_provider_acl`.
+- canonical tables receive the full payload: `static_analysis_runs`,
+  `static_analysis_findings`, `static_findings_summary`, `static_string_summary`,
+  `static_string_samples`, `metrics`, `buckets`, `contributors`, and the
+  permission audit tables. These are the sources that dashboards should
+  consume—no need to parse the JSON artefacts under `output/`.
 - Analytics payloads (severity/category matrices, novelty indicators, workload
   profiles) are stored alongside detector metrics in the run row.
-- Provider exposures are normalised into BASE-002 findings. To re-run the
-  promotion step manually execute:
+- Provider exposures are normalised into BASE-002 findings. The dedicated
+  storage-surface tables are now left untouched; the canonical findings contain
+  the authoritative data set. To re-run the promotion step manually execute:
   ```bash
   python - <<'PY'
   from scytaledroid.StaticAnalysis.persistence import ingest as canonical_ingest
@@ -61,6 +65,20 @@ To simulate a run without touching the database use the CLI dry-run flag:
 python -m scytaledroid.StaticAnalysis.cli.run --profile full --dry-run
 ```
 This still exercises detector output and summary cards but skips all INSERTs.
+
+Each completed run prints a short reconciliation footer so you can confirm the
+canonical counts without opening a SQL client, for example:
+
+```
+ℹ findings (normalized): 911
+ℹ static_findings (baseline): 8
+ℹ String samples persisted: 27398 (cap=2 per bucket; entropy ≥ 4.80)
+```
+
+The same terminology now appears in the verification digest so operators see a
+consistent vocabulary (`Findings (runtime)`, `findings (normalized)`,
+`static_findings (baseline)`), and the string disclosure reminds you of the
+sampling cap that the CLI applies per bucket.
 
 > Tip: The CLI no longer re-runs the permission-only detector pass after a full
 > analysis by default. Set `SCYTALEDROID_STATIC_REFRESH_PERMISSION_SNAPSHOT=1`
@@ -137,6 +155,18 @@ client.
   ```
   Use `--only static_analysis_findings static_analysis_runs` to focus on a
   subset when hunting for redundant tables.
+* **Smoke test (scan → persist → digest)**
+  ```bash
+  SESSION=$(date +%Y%m%d-%H%M%S)
+  ./run.sh static --profile lightweight --scope "Smoke" --session "$SESSION"
+  python - <<'PY'
+  from scytaledroid.Database.db_utils.menus import query_runner
+  query_runner.render_session_digest("$SESSION")
+  PY
+  ```
+  This runs the lightweight detector set against the current workspace, then
+  prints the verification digest with the same labels used in the CLI summary
+  (`findings (normalized)`, `static_findings (baseline)`, string sample totals).
 * Re-run canonical migrations & promotions:
   ```bash
   python - <<'PY'
