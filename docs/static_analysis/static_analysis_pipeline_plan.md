@@ -25,6 +25,9 @@
 - ✅ Canonical persistence ships with idempotent schema helpers, automatic
   promotion of provider exposures (BASE-002), lineage-aware diff baselines, and
   cross-run analytics views.
+- ✅ Permission scoring is centralised under ``scytaledroid.StaticAnalysis.risk``
+  with consolidated weights, penalty/bonus handling, and shared helpers for
+  CLI rendering, persistence, and downstream analysis.
 - 🚧 OEM-sensitivity, signer lineage, and ML-backed endpoint classification are
   queued for Phase 2 once the foundational detectors stabilise.
 

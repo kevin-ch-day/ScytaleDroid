@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, MutableMapping, Sequence
 
 from scytaledroid.Persistence import db_writer as _dw
-from scytaledroid.StaticAnalysis.modules.permissions.analysis.scoring import (
+from scytaledroid.StaticAnalysis.risk.permission import (
     permission_points_0_20 as _perm_pts,
     permission_risk_grade as _perm_grade,
     permission_risk_score_detail as _perm_detail,
@@ -176,6 +176,8 @@ def compute_metrics_bundle(report: Any, string_data: Mapping[str, object]) -> Me
     detail.setdefault("vendor_count", int(vendor))
     detail.setdefault("flagged_normal_count", flagged_normals)
     detail.setdefault("weak_guard_count", int(weak_guard_count))
+    if flagged_normals_set and "flagged_permissions" not in detail:
+        detail["flagged_permissions"] = sorted(flagged_normals_set)
     perm_points = _perm_pts(permission_score)
 
     code_http_hosts, asset_http_hosts = _effective_http_counts(string_data)

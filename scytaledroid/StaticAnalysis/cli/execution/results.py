@@ -38,7 +38,7 @@ from scytaledroid.StaticAnalysis.modules.permissions.simple import (
     _classify_permissions as _perm_classify,
     _fetch_protections as _perm_fetch_protections,
 )
-from scytaledroid.StaticAnalysis.modules.permissions.analysis.scoring import (
+from scytaledroid.StaticAnalysis.risk.permission import (
     permission_risk_score_detail,
     permission_risk_grade,
     permission_points_0_20,
