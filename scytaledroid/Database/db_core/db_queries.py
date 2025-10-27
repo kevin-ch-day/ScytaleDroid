@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Iterable, Mapping, Optional, Sequence, Tuple, Union
 
 from .db_engine import DatabaseEngine
@@ -9,6 +10,8 @@ from .session import database_session, get_current_engine
 
 ParamsType = Optional[Union[Sequence[Any], Mapping[str, Any]]]
 ParamRow = Tuple[Any, ...]
+
+_PLACEHOLDER_SCAN_RE = re.compile("%")
 
 
 def _prepare_params(
@@ -35,6 +38,63 @@ def _normalise_params(params: ParamsType) -> Union[Tuple[Any, ...], Mapping[str,
         return tuple(params)
     # Single scalar positional
     return (params,)
+
+
+def _detect_placeholder_style(query: str) -> str:
+    """Return 'named', 'positional', 'mixed', or 'none' for *query*."""
+
+    named = False
+    positional = False
+
+    index = 0
+    length = len(query)
+    while index < length:
+        match = _PLACEHOLDER_SCAN_RE.search(query, index)
+        if not match:
+            break
+        pos = match.start()
+        if pos + 1 >= length:
+            break
+        next_char = query[pos + 1]
+        if next_char == "%":
+            index = pos + 2
+            continue
+        if next_char == "(":
+            named = True
+        else:
+            positional = True
+        if named and positional:
+            return "mixed"
+        index = pos + 1
+
+    if named:
+        return "named"
+    if positional:
+        return "positional"
+    return "none"
+
+
+def _validate_placeholder_style(query: str, params: Union[Tuple[Any, ...], Mapping[str, Any]]) -> None:
+    """Ensure SQL placeholders and provided params are compatible."""
+
+    style = _detect_placeholder_style(query)
+    if style == "none":
+        return
+    if style == "mixed":
+        raise ValueError("SQL query mixes named and positional placeholders; use a single style.")
+
+    if style == "named":
+        if not isinstance(params, Mapping):
+            raise ValueError(
+                "SQL query uses named placeholders but parameters were not provided as a mapping."
+            )
+        return
+
+    # style == "positional"
+    if isinstance(params, Mapping):
+        raise ValueError(
+            "SQL query uses positional placeholders but parameters were provided as a mapping."
+        )
 
 
 def _resolve_engine() -> DatabaseEngine:
@@ -71,6 +131,7 @@ def run_sql(
         Query result depending on fetch mode, or lastrowid/None for writes.
     """
     normalised_params = _normalise_params(params)
+    _validate_placeholder_style(query, normalised_params)
 
     # Normalize/validate fetch mode
     base = (fetch or "none").strip().lower()
@@ -164,6 +225,12 @@ def run_sql_many(
     rows = list(param_rows)
     if not rows:
         return
+
+    style = _detect_placeholder_style(query)
+    if style == "named":
+        raise ValueError("run_sql_many requires positional placeholders when params are sequences.")
+    if style == "mixed":
+        raise ValueError("SQL query mixes named and positional placeholders; use a single style.")
 
     eng_or_ctx = _resolve_engine()
     if hasattr(eng_or_ctx, "__enter__") and hasattr(eng_or_ctx, "__exit__"):
