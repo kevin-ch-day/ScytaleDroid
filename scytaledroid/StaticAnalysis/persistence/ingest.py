@@ -9,6 +9,7 @@ errors where appropriate.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, MutableMapping, Optional, Sequence
 
 from scytaledroid.Database.db_core import db_queries as core_q
@@ -247,6 +248,45 @@ __all__ = [
 ]
 
 
+@dataclass(frozen=True)
+class _RunProviderContext:
+    package_name: Optional[str]
+    session_stamp: Optional[str]
+    scope_label: Optional[str]
+    sha256: Optional[str]
+
+
+_PROVIDER_SCHEMA: Optional[str] = None
+_PROVIDER_CONTEXT_CACHE: dict[int, _RunProviderContext] = {}
+_PROVIDER_PARENT_CACHE: dict[int, dict[str, Optional[str]]] = {}
+_TABLE_COLUMN_CACHE: dict[str, set[str]] = {}
+
+
+def _table_has_column(table: str, column: str) -> bool:
+    cols = _TABLE_COLUMN_CACHE.get(table)
+    if cols is None:
+        try:
+            rows = core_q.run_sql(
+                f"SHOW COLUMNS FROM {table}",
+                fetch="all",
+            )
+        except Exception:
+            cols = set()
+        else:
+            try:
+                cols = {row[0] for row in rows}
+            except Exception:
+                cols = set()
+        _TABLE_COLUMN_CACHE[table] = cols
+    return column in cols
+
+
+def _prune_missing_columns(table: str, row: dict[str, Optional[object]]) -> None:
+    for column in list(row.keys()):
+        if not _table_has_column(table, column):
+            row.pop(column, None)
+
+
 def _persist_analysis_snapshot(app_version_id: int, payload: Mapping[str, object]) -> None:
     findings: Sequence[Mapping[str, object]] = _extract_findings(payload)
 
@@ -448,6 +488,7 @@ def _persist_provider_acl(
     run_id: int,
     detector_metrics: Mapping[str, object] | None,
 ) -> None:
+    _PROVIDER_PARENT_CACHE.clear()
     if not detector_metrics:
         return
     provider_metrics = detector_metrics.get("provider_acl")
@@ -469,6 +510,54 @@ def _persist_provider_acl(
                     _create_provider_acl_row(provider_id, rule)
 
 
+def _provider_schema_mode() -> str:
+    global _PROVIDER_SCHEMA
+    if _PROVIDER_SCHEMA is not None:
+        return _PROVIDER_SCHEMA
+    has_pkg = _table_has_column("static_fileproviders", "package_name")
+    has_pkg_acl = _table_has_column("static_provider_acl", "package_name")
+    _PROVIDER_SCHEMA = "legacy" if has_pkg or has_pkg_acl else "canonical"
+    return _PROVIDER_SCHEMA
+
+
+def _provider_run_context(run_id: int) -> _RunProviderContext:
+    context = _PROVIDER_CONTEXT_CACHE.get(run_id)
+    if context is not None:
+        return context
+    try:
+        row = core_q.run_sql(
+            (
+                "SELECT r.session_stamp, r.scope_label, r.sha256, a.package_name "
+                "FROM static_analysis_runs r "
+                "JOIN app_versions av ON av.id = r.app_version_id "
+                "JOIN apps a ON a.id = av.app_id "
+                "WHERE r.id = %s"
+            ),
+            (run_id,),
+            fetch="one",
+        )
+    except Exception:
+        row = None
+    context = _RunProviderContext(
+        package_name=_normalise_optional_str(row[3]) if row else None,
+        session_stamp=_normalise_optional_str(row[0]) if row else None,
+        scope_label=_normalise_optional_str(row[1]) if row else None,
+        sha256=_normalise_optional_str(row[2]) if row else None,
+    )
+    _PROVIDER_CONTEXT_CACHE[run_id] = context
+    return context
+
+
+def _authority_from_entry(entry: Mapping[str, object]) -> Optional[str]:
+    authorities = entry.get("authorities")
+    if isinstance(authorities, Sequence) and not isinstance(authorities, (str, bytes)):
+        for candidate in authorities:
+            text = _normalise_optional_str(candidate)
+            if text:
+                return text
+    return _normalise_optional_str(authorities)
+
+
 def _create_provider_row(run_id: int, entry: Mapping[str, object]) -> Optional[int]:
     try:
         metrics_payload = {
@@ -476,66 +565,149 @@ def _create_provider_row(run_id: int, entry: Mapping[str, object]) -> Optional[i
             for key, value in entry.items()
             if key in {"base_levels", "read_levels", "write_levels"}
         }
+        component_name = _normalise_optional_str(entry.get("name"))
+        authority = _authority_from_entry(entry) or component_name or f"provider_{run_id}"
+        context = _provider_run_context(run_id)
+        schema_mode = _provider_schema_mode()
+
+        row_data: dict[str, Optional[object]] = {
+            "run_id": run_id,
+            "component_name": component_name,
+            "provider_name": component_name,
+            "authority": authority,
+            "authorities": _serialise_json(entry.get("authorities")),
+            "exported": 1 if entry.get("exported") else 0,
+            "base_permission": _normalise_optional_str(entry.get("base_permission")),
+            "read_permission": _normalise_optional_str(entry.get("read_permission")),
+            "write_permission": _normalise_optional_str(entry.get("write_permission")),
+            "base_guard": _normalise_optional_str(entry.get("base_guard")),
+            "read_guard": _normalise_optional_str(entry.get("read_guard")),
+            "write_guard": _normalise_optional_str(entry.get("write_guard")),
+            "effective_guard": _normalise_optional_str(entry.get("effective_guard")),
+            "grant_uri_permissions": 1 if entry.get("grant_uri_permissions") else 0,
+            "metrics": _serialise_json(metrics_payload),
+        }
+
+        # Duplicate fields for legacy schema compatibility.
+        if _table_has_column("static_fileproviders", "base_perm"):
+            row_data["base_perm"] = row_data["base_permission"]
+        if _table_has_column("static_fileproviders", "read_perm"):
+            row_data["read_perm"] = row_data["read_permission"]
+        if _table_has_column("static_fileproviders", "write_perm"):
+            row_data["write_perm"] = row_data["write_permission"]
+
+        if schema_mode == "legacy" or context.package_name:
+            # Populate legacy columns when present.
+            row_data.update(
+                {
+                    "package_name": context.package_name,
+                    "session_stamp": context.session_stamp,
+                    "scope_label": context.scope_label,
+                    "sha256": context.sha256,
+                    "run_key": _normalise_optional_str(
+                        f"{context.session_stamp or 'run'}:{context.package_name or authority}"
+                    ),
+                }
+            )
+
+        _prune_missing_columns("static_fileproviders", row_data)
+
+        columns = list(row_data.keys())
+        placeholders = ", ".join(["%s"] * len(columns))
+        sql = f"INSERT INTO static_fileproviders ({', '.join(columns)}) VALUES ({placeholders})"
         provider_id = core_q.run_sql(
-            (
-                "INSERT INTO static_fileproviders (run_id, component_name, authorities, exported, base_permission, read_permission, "
-                "write_permission, base_guard, read_guard, write_guard, effective_guard, grant_uri_permissions, metrics) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
-            ),
-            (
-                run_id,
-                _normalise_optional_str(entry.get("name")),
-                _serialise_json(entry.get("authorities")),
-                1 if entry.get("exported") else 0,
-                _normalise_optional_str(entry.get("base_permission")),
-                _normalise_optional_str(entry.get("read_permission")),
-                _normalise_optional_str(entry.get("write_permission")),
-                _normalise_optional_str(entry.get("base_guard")),
-                _normalise_optional_str(entry.get("read_guard")),
-                _normalise_optional_str(entry.get("write_guard")),
-                _normalise_optional_str(entry.get("effective_guard")),
-                1 if entry.get("grant_uri_permissions") else 0,
-                _serialise_json(metrics_payload),
-            ),
+            sql,
+            tuple(row_data[column] for column in columns),
             return_lastrowid=True,
         )
-        return int(provider_id) if provider_id else None
+        provider_id_int = int(provider_id) if provider_id else None
+        if provider_id_int:
+            _PROVIDER_PARENT_CACHE[provider_id_int] = {
+                "authority": authority,
+                "provider_name": component_name,
+                "package_name": context.package_name,
+                "session_stamp": context.session_stamp,
+                "scope_label": context.scope_label,
+                "run_key": row_data.get("run_key"),
+                "sha256": context.sha256,
+                "exported": row_data.get("exported"),
+            }
+        return provider_id_int
     except Exception:
         return None
 
 
 def _create_provider_acl_row(provider_id: int, entry: Mapping[str, object]) -> None:
     try:
-        core_q.run_sql(
-            (
-                "INSERT INTO static_provider_acl (provider_id, path, path_prefix, path_pattern, read_permission, write_permission, "
-                "read_guard, write_guard, metadata) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"
-            ),
-            (
-                provider_id,
-                _normalise_optional_str(entry.get("path")),
-                _normalise_optional_str(entry.get("pathPrefix")),
-                _normalise_optional_str(entry.get("pathPattern")),
-                _normalise_optional_str(entry.get("read_permission")),
-                _normalise_optional_str(entry.get("write_permission")),
-                _normalise_optional_str(entry.get("read_guard")),
-                _normalise_optional_str(entry.get("write_guard")),
-                _serialise_json(
-                    {
-                        key: value
-                        for key, value in entry.items()
-                        if key not in {
-                            "path",
-                            "pathPrefix",
-                            "pathPattern",
-                            "read_permission",
-                            "write_permission",
-                            "read_guard",
-                            "write_guard",
-                        }
+        parent = _PROVIDER_PARENT_CACHE.get(provider_id, {})
+        context = _RunProviderContext(
+            package_name=parent.get("package_name"),
+            session_stamp=parent.get("session_stamp"),
+            scope_label=parent.get("scope_label"),
+            sha256=parent.get("sha256"),
+        )
+        path_value = _normalise_optional_str(entry.get("path")) or "*"
+        path_type = _normalise_optional_str(entry.get("pathType")) or "base"
+
+        row_data: dict[str, Optional[object]] = {
+            "provider_id": provider_id,
+            "path": path_value,
+            "path_prefix": _normalise_optional_str(entry.get("pathPrefix")),
+            "path_pattern": _normalise_optional_str(entry.get("pathPattern")),
+            "read_permission": _normalise_optional_str(entry.get("read_permission")),
+            "write_permission": _normalise_optional_str(entry.get("write_permission")),
+            "read_guard": _normalise_optional_str(entry.get("read_guard")),
+            "write_guard": _normalise_optional_str(entry.get("write_guard")),
+            "metadata": _serialise_json(
+                {
+                    key: value
+                    for key, value in entry.items()
+                    if key
+                    not in {
+                        "path",
+                        "pathPrefix",
+                        "pathPattern",
+                        "read_permission",
+                        "write_permission",
+                        "read_guard",
+                        "write_guard",
+                        "pathType",
                     }
-                ),
+                }
             ),
+        }
+        base_perm_value = _normalise_optional_str(entry.get("base_permission"))
+        if _table_has_column("static_provider_acl", "base_permission"):
+            row_data["base_permission"] = base_perm_value
+        if _table_has_column("static_provider_acl", "base_perm"):
+            row_data["base_perm"] = base_perm_value
+        if _table_has_column("static_provider_acl", "read_perm"):
+            row_data["read_perm"] = row_data["read_permission"]
+        if _table_has_column("static_provider_acl", "write_perm"):
+            row_data["write_perm"] = row_data["write_permission"]
+        row_data["path_type"] = path_type
+
+        if _provider_schema_mode() == "legacy" or context.package_name:
+            row_data.update(
+                {
+                    "package_name": context.package_name,
+                    "session_stamp": context.session_stamp,
+                    "scope_label": context.scope_label,
+                    "sha256": context.sha256,
+                    "run_key": parent.get("run_key"),
+                    "authority": parent.get("authority") or f"provider_{provider_id}",
+                    "provider_name": parent.get("provider_name"),
+                    "exported": parent.get("exported", 0),
+                }
+            )
+
+        _prune_missing_columns("static_provider_acl", row_data)
+        columns = list(row_data.keys())
+        placeholders = ", ".join(["%s"] * len(columns))
+        sql = f"INSERT INTO static_provider_acl ({', '.join(columns)}) VALUES ({placeholders})"
+        core_q.run_sql(
+            sql,
+            tuple(row_data[column] for column in columns),
         )
     except Exception:
         return
@@ -693,4 +865,3 @@ def build_session_string_view(session_stamp: Optional[str]) -> int:
         return 0
     count = row[0]
     return int(count or 0)
-

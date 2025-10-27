@@ -10,11 +10,56 @@ from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 SNAPSHOT_PREFIX = "perm-audit:app:"
 
-_SNAPSHOT_FIXES: tuple[str, ...] = (
-    "ALTER TABLE permission_audit_snapshots ADD UNIQUE KEY ux_permission_audit_snapshots_key (snapshot_key)",
-    "ALTER TABLE permission_audit_apps ADD UNIQUE KEY ux_permission_audit_apps_snapshot_pkg (snapshot_id, package_name)",
-    "ALTER TABLE permission_audit_apps ADD INDEX ix_permission_audit_apps_score (snapshot_id, score_capped)",
+_INDEX_DEFINITIONS: tuple[tuple[str, str, str], ...] = (
+    (
+        "permission_audit_snapshots",
+        "ux_permission_audit_snapshots_key",
+        "ALTER TABLE permission_audit_snapshots "
+        "ADD UNIQUE KEY ux_permission_audit_snapshots_key (snapshot_key)",
+    ),
+    (
+        "permission_audit_apps",
+        "ux_permission_audit_apps_snapshot_pkg",
+        "ALTER TABLE permission_audit_apps "
+        "ADD UNIQUE KEY ux_permission_audit_apps_snapshot_pkg (snapshot_id, package_name)",
+    ),
+    (
+        "permission_audit_apps",
+        "ix_permission_audit_apps_score",
+        "ALTER TABLE permission_audit_apps "
+        "ADD INDEX ix_permission_audit_apps_score (snapshot_id, score_capped)",
+    ),
 )
+
+
+def _ensure_index(table: str, index: str, statement: str) -> None:
+    try:
+        row = core_q.run_sql(
+            """
+            SELECT COUNT(*)
+            FROM information_schema.statistics
+            WHERE table_schema = DATABASE()
+              AND table_name = %s
+              AND index_name = %s
+            """,
+            (table, index),
+            fetch="one",
+        )
+        exists = bool(row and int(row[0]) > 0)
+    except Exception:
+        exists = False
+    if exists:
+        return
+    try:
+        core_q.run_sql(statement)
+    except Exception as exc:  # pragma: no cover - defensive
+        log.debug(
+            "Failed to create index %s on %s: %s",
+            index,
+            table,
+            exc,
+            category="static_analysis",
+        )
 
 
 def _ensure_snapshot_schema() -> None:
@@ -25,11 +70,8 @@ def _ensure_snapshot_schema() -> None:
         log.warning(
             "Failed to ensure permission audit tables: %s", exc, category="static_analysis"
         )
-    for statement in _SNAPSHOT_FIXES:
-        try:
-            core_q.run_sql(statement)
-        except Exception:
-            continue
+    for table, index, statement in _INDEX_DEFINITIONS:
+        _ensure_index(table, index, statement)
 
 
 def write_permission_snapshot(session_stamp: str, *, scope_label: Optional[str] = None) -> Optional[int]:

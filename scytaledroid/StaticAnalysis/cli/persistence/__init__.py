@@ -17,6 +17,9 @@ from .findings_writer import (
     persist_findings,
     persist_masvs_controls,
 )
+from .permission_risk import persist_permission_risk
+from .static_sections import persist_static_sections, persist_storage_surface_data
+from .run_summary import persist_run_summary, PersistenceOutcome
 
 __all__ = [
     "RunEnvelope",
@@ -37,4 +40,9 @@ __all__ = [
     "write_buckets",
     "write_contributors",
     "write_metrics",
+    "persist_permission_risk",
+    "persist_static_sections",
+    "persist_storage_surface_data",
+    "persist_run_summary",
+    "PersistenceOutcome",
 ]

@@ -8,6 +8,7 @@ from typing import Any, Iterable, Mapping, MutableMapping, Sequence
 from scytaledroid.Persistence import db_writer as _dw
 from scytaledroid.StaticAnalysis.modules.permissions.analysis.scoring import (
     permission_points_0_20 as _perm_pts,
+    permission_risk_grade as _perm_grade,
     permission_risk_score_detail as _perm_detail,
 )
 from scytaledroid.StaticAnalysis.modules.permissions.simple import (
@@ -34,6 +35,12 @@ class MetricsBundle:
     code_http_hosts: int
     asset_http_hosts: int
     uses_cleartext: bool
+    dangerous_permissions: int
+    signature_permissions: int
+    vendor_permissions: int
+    permission_score: float
+    permission_grade: str
+    permission_detail: Mapping[str, Any]
 
 
 def _safe_int(value: Any) -> int | None:
@@ -116,7 +123,7 @@ def compute_metrics_bundle(report: Any, string_data: Mapping[str, object]) -> Me
         "request_legacy_external_storage": False,
         "uses_cleartext_traffic": False,
     })()
-    detail = _perm_detail(
+    raw_detail = _perm_detail(
         dangerous=dangerous,
         signature=signature,
         vendor=vendor,
@@ -125,7 +132,18 @@ def compute_metrics_bundle(report: Any, string_data: Mapping[str, object]) -> Me
         allow_backup=getattr(flags, "allow_backup", False),
         legacy_external_storage=getattr(flags, "request_legacy_external_storage", False),
     )
-    perm_points = _perm_pts(float(detail.get("score_3dp", 0.0)))
+    detail: MutableMapping[str, Any] = dict(raw_detail) if isinstance(raw_detail, Mapping) else {}
+    permission_score = float(detail.get("score_3dp", detail.get("score_capped", detail.get("score_raw", 0.0)) or 0.0) or 0.0)
+    permission_score = round(permission_score, 3)
+    permission_grade = _perm_grade(permission_score)
+    detail["score_3dp"] = permission_score
+    detail.setdefault("score_capped", float(detail.get("score_capped", permission_score)))
+    detail.setdefault("score_raw", float(detail.get("score_raw", permission_score)))
+    detail.setdefault("grade", permission_grade)
+    detail.setdefault("dangerous_count", int(dangerous))
+    detail.setdefault("signature_count", int(signature))
+    detail.setdefault("vendor_count", int(vendor))
+    perm_points = _perm_pts(permission_score)
 
     code_http_hosts, asset_http_hosts = _effective_http_counts(string_data)
     has_code_http = code_http_hosts > 0
@@ -278,6 +296,12 @@ def compute_metrics_bundle(report: Any, string_data: Mapping[str, object]) -> Me
         code_http_hosts=code_http_hosts,
         asset_http_hosts=asset_http_hosts,
         uses_cleartext=uses_cleartext,
+        dangerous_permissions=int(detail.get("dangerous_count", dangerous)),
+        signature_permissions=int(detail.get("signature_count", signature)),
+        vendor_permissions=int(detail.get("vendor_count", vendor)),
+        permission_score=permission_score,
+        permission_grade=permission_grade,
+        permission_detail=dict(detail),
     )
 
 

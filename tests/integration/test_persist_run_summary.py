@@ -7,6 +7,7 @@ import pytest
 
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.StaticAnalysis.cli.db_persist import persist_run_summary
+from scytaledroid.StaticAnalysis.persistence import ingest
 from scytaledroid.StaticAnalysis.persistence.snapshots import write_permission_snapshot
 
 
@@ -83,7 +84,7 @@ class _DetectorResult:
 
 
 class _Report:
-    def __init__(self, manifest: _Manifest) -> None:
+    def __init__(self, manifest: _Manifest, *, metadata: Mapping[str, Any] | None = None) -> None:
         self.manifest = manifest
         self.manifest_flags = _Flags()
         self.exported_components = _ExportedComponents(
@@ -94,11 +95,14 @@ class _Report:
         )
         self.permissions = _Permissions()
         self.detector_results = [_DetectorResult()]
-        self.metadata = {
+        base_metadata: Dict[str, Any] = {
             "run_profile": "full",
             "run_scope_label": "Integration Test",
             "session_stamp": "",
         }
+        if metadata:
+            base_metadata.update(metadata)
+        self.metadata = base_metadata
 
 
 def _scalar(sql: str, params: tuple[Any, ...]) -> int:
@@ -124,7 +128,14 @@ def test_persist_run_summary_populates_canonical_tables():
         target_sdk=33,
         min_sdk=24,
     )
-    report = _Report(manifest)
+    report = _Report(
+        manifest,
+        metadata={
+            "session_stamp": session_stamp,
+            "apk_id": 987654321,
+            "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        },
+    )
 
     string_data = {
         "counts": {"high_entropy": 1, "api_keys": 1},
@@ -230,3 +241,105 @@ def test_persist_run_summary_populates_canonical_tables():
     assert _scalar("SELECT COUNT(*) FROM contributors WHERE run_id=%s", (run_id,)) >= 0
     assert _scalar("SELECT COUNT(*) FROM permission_audit_snapshots WHERE snapshot_id=%s", (snapshot_id,)) == 1
     assert _scalar("SELECT COUNT(*) FROM permission_audit_apps WHERE snapshot_id=%s", (snapshot_id,)) > 0
+
+    spr_row = core_q.run_sql(
+        """
+        SELECT risk_score, risk_grade, dangerous, signature, vendor
+        FROM static_permission_risk
+        WHERE session_stamp=%s AND package_name=%s
+        """,
+        (session_stamp, package),
+        fetch="one",
+    )
+    assert spr_row is not None
+    risk_score, risk_grade, dangerous_count, signature_count, vendor_count = spr_row
+    assert float(risk_score) >= 0.0
+    assert isinstance(risk_grade, str) and risk_grade
+    assert dangerous_count >= 0
+    assert signature_count >= 0
+    assert vendor_count >= 0
+
+    audit_row = core_q.run_sql(
+        """
+        SELECT dangerous_count, signature_count, vendor_count
+        FROM permission_audit_apps
+        WHERE snapshot_id=%s AND package_name=%s
+        """,
+        (snapshot_id, package),
+        fetch="one",
+    )
+    assert audit_row is not None
+    assert audit_row == (dangerous_count, signature_count, vendor_count)
+
+
+@pytest.mark.integration
+def test_ingest_baseline_populates_provider_tables():
+    session_stamp = "20251030-000123"
+    scope_label = "Integration Providers"
+    package = "com.example.providers"
+
+    payload = {
+        "app": {
+            "package": package,
+            "label": "Provider App",
+            "version_name": "1.0.0",
+            "version_code": 42,
+            "min_sdk": 24,
+            "target_sdk": 33,
+        },
+        "hashes": {"sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},
+        "metadata": {
+            "session_stamp": session_stamp,
+            "run_scope_label": scope_label,
+            "detector_metrics": {
+                "provider_acl": {
+                    "acl_snapshot": [
+                        {
+                            "name": "com.example.LegacyProvider",
+                            "authorities": ["com.example.providers.legacy"],
+                            "exported": True,
+                            "grant_uri_permissions": True,
+                            "base_permission": None,
+                            "read_permission": "com.example.permission.READ",
+                            "write_permission": "com.example.permission.WRITE",
+                            "base_guard": "none",
+                            "read_guard": "weak",
+                            "write_guard": "weak",
+                            "effective_guard": "weak",
+                            "path_permissions": [
+                                {
+                                    "path": "/data",
+                                    "read_permission": "com.example.permission.READ",
+                                    "write_permission": "com.example.permission.WRITE",
+                                    "read_guard": "weak",
+                                    "write_guard": "weak",
+                                    "pathType": "literal",
+                                }
+                            ],
+                        }
+                    ]
+                }
+            },
+        },
+        "findings": [],
+    }
+
+    assert ingest.ingest_baseline_payload(payload)
+
+    provider_row = core_q.run_sql(
+        "SELECT package_name, authority, session_stamp FROM static_fileproviders WHERE package_name=%s",
+        (package,),
+        fetch="one",
+    )
+    assert provider_row is not None
+    assert provider_row[0] == package
+    assert provider_row[2] == session_stamp
+
+    acl_row = core_q.run_sql(
+        "SELECT package_name, authority, path, path_type FROM static_provider_acl WHERE package_name=%s",
+        (package,),
+        fetch="one",
+    )
+    assert acl_row is not None
+    assert acl_row[0] == package
+    assert acl_row[1] == "com.example.providers.legacy"
