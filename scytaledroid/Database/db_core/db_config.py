@@ -18,4 +18,21 @@ DB_CONFIG: Dict[str, Union[str, int]] = {
 # For display purposes in menus/tools
 DB_CONFIG_SOURCE: str = "hardcoded"
 
-__all__ = ["DB_CONFIG", "DB_CONFIG_SOURCE"]
+_DEFAULT_DATABASE = DB_CONFIG["database"]
+
+
+def override_database(database: str | None) -> None:
+    """Temporarily override the target database schema.
+
+    Passing ``None`` restores the default development schema.  This is primarily
+    used by integration tests to isolate work in the shared MariaDB instance.
+    """
+
+    global DB_CONFIG
+    if database:
+        DB_CONFIG["database"] = database
+    else:
+        DB_CONFIG["database"] = _DEFAULT_DATABASE
+
+
+__all__ = ["DB_CONFIG", "DB_CONFIG_SOURCE", "override_database"]

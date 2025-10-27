@@ -27,4 +27,5 @@ show_error_codes = true
 [tool.pytest.ini_options]
 markers = [
     "integration: marks tests that exercise database integrations (deselect with '-m \"not integration\"')",
+    "unit: marks hermetic unit tests",
 ]

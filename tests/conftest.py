@@ -1,48 +1,44 @@
 import os
+import pathlib
+import sys
 from typing import Iterator
 
 import pymysql
 import pytest
 
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-def _parse_env_url() -> dict[str, str | int]:
-    from urllib.parse import urlparse, unquote
-
-    url = os.environ.get("SCYTALEDROID_DB_URL")
-    if not url:
-        raise RuntimeError("SCYTALEDROID_DB_URL must be set for integration tests.")
-    parsed = urlparse(url)
-    if not parsed.path or parsed.path == "/":
-        raise RuntimeError("SCYTALEDROID_DB_URL must include a database name.")
-    return {
-        "host": parsed.hostname or "localhost",
-        "port": parsed.port or 3306,
-        "user": unquote(parsed.username) if parsed.username else "",
-        "password": unquote(parsed.password) if parsed.password else "",
-        "database": parsed.path.lstrip("/"),
-        "charset": "utf8mb4",
-    }
+from scytaledroid.Database.db_core import db_config
 
 
 @pytest.fixture(autouse=True)
-def truncate_database(request: pytest.FixtureRequest) -> Iterator[None]:
+def isolate_integration_db(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Point integration tests at the dedicated test schema and truncate it."""
+
     if "integration" not in request.keywords:
         yield
         return
 
-    if "SCYTALEDROID_DB_URL" not in os.environ:
-        pytest.skip("SCYTALEDROID_DB_URL not set; integration tests skipped.")
+    test_db = os.environ.get("SCYTALEDROID_TEST_DB", "scytaledroid_droid_intel_db_test")
+    original_db = db_config.DB_CONFIG["database"]
+    db_config.override_database(test_db)
 
-    config = _parse_env_url()
-    connection = pymysql.connect(
-        host=config["host"],
-        port=int(config["port"]),
-        user=config["user"],
-        password=config["password"],
-        database=config["database"],
-        charset=config.get("charset", "utf8mb4"),
-        autocommit=True,
-    )
+    config = db_config.DB_CONFIG
+    try:
+        connection = pymysql.connect(
+            host=config["host"],
+            port=int(config["port"]),
+            user=config["user"],
+            password=config["password"],
+            database=config["database"],
+            charset=config.get("charset", "utf8mb4"),
+            autocommit=True,
+        )
+    except pymysql.err.OperationalError as exc:
+        db_config.override_database(original_db)
+        pytest.skip(f"Cannot connect to test database '{test_db}': {exc}")
     try:
         with connection.cursor() as cursor:
             cursor.execute("SET FOREIGN_KEY_CHECKS=0")
@@ -53,4 +49,8 @@ def truncate_database(request: pytest.FixtureRequest) -> Iterator[None]:
             cursor.execute("SET FOREIGN_KEY_CHECKS=1")
     finally:
         connection.close()
-    yield
+
+    try:
+        yield
+    finally:
+        db_config.override_database(original_db)
