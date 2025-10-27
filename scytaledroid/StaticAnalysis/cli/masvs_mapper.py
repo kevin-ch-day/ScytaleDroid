@@ -16,9 +16,18 @@ RULE_TO_CONTROL: Dict[str, Tuple[str, str]] = {
     "BASE-IPC-COMP-NO-ACL": ("PLATFORM-IPC-1", "FAIL"),
     "BASE-IPC-PROVIDER-NO-ACL": ("PLATFORM-IPC-1", "FAIL"),
     "BASE-IPC-EXPORTED-WITH-PERM": ("PLATFORM-IPC-1", "PASS"),
+    "BASE-002": ("PLATFORM-IPC-1", "FAIL"),
     "BASE-CLR-001": ("NETWORK-1", "FAIL"),
     "BASE-STO-LEGACY": ("STORAGE-2", "FAIL"),
     "STR-SECRET-AWS-HC": ("STORAGE-2", "INCONCLUSIVE"),
+    "diff_exported_activities": ("PLATFORM-IPC-1", "FAIL"),
+    "diff_exported_services": ("PLATFORM-IPC-1", "FAIL"),
+    "diff_exported_receivers": ("PLATFORM-IPC-1", "FAIL"),
+    "diff_exported_providers": ("PLATFORM-IPC-1", "FAIL"),
+    "diff_new_permissions": ("PRIVACY-1", "FAIL"),
+    "diff_cleartext_enabled": ("NETWORK-1", "FAIL"),
+    "diff_flag_usesCleartextTraffic": ("NETWORK-1", "FAIL"),
+    "diff_flag_requestLegacyExternalStorage": ("STORAGE-2", "FAIL"),
 }
 
 STATUS_PRECEDENCE = {"FAIL": 3, "INCONCLUSIVE": 2, "PASS": 1}

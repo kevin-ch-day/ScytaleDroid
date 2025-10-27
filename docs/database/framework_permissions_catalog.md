@@ -21,6 +21,13 @@ and `MODIFY_PHONE_STATE` now carry their `signature|privileged` metadata in the
 catalog and no longer surface as “framework with NULL protection” during
 detector enrichment.
 
+> **CLI fallback:** the static-analysis CLI now ships a minimal catalog at
+> `config/framework_permissions.yaml`. When the database-backed catalog has not
+> been seeded yet (fresh installs, air-gapped runs, unit tests), the permission
+> classifier falls back to this file so dangerous/signature protections are
+> still recognised. Once the canonical table is hydrated the fallback is
+> bypassed automatically.
+
 When you snapshot the catalog, the JSON metadata captures every upstream URL so
 future diffs can trace which source introduced a new permission or token
 change. Downstream enrichment jobs should continue to treat catalog membership

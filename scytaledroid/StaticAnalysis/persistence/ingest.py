@@ -14,6 +14,7 @@ from typing import Any, Iterable, Mapping, MutableMapping, Optional, Sequence
 
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_queries.canonical import schema as canonical_schema
+from scytaledroid.StaticAnalysis.cli.persistence.utils import first_text
 
 
 def _ensure_schema_ready() -> bool:
@@ -82,14 +83,6 @@ def _prepare_evidence(value: object) -> Optional[Mapping[str, Any]]:
     return None
 
 
-def _first_non_empty_str(*values: object) -> Optional[str]:
-    for value in values:
-        text = _normalise_optional_str(value)
-        if text:
-            return text
-    return None
-
-
 def _extract_findings(payload: Mapping[str, object]) -> Sequence[Mapping[str, object]]:
     findings_payload = payload.get("findings")
     if isinstance(findings_payload, Sequence) and not isinstance(
@@ -132,7 +125,7 @@ def _build_finding_context(
         for entry in findings:
             if not isinstance(entry, Mapping):
                 continue
-            finding_id = _first_non_empty_str(
+            finding_id = first_text(
                 entry.get("finding_id"),
                 entry.get("id"),
             )
@@ -215,10 +208,10 @@ def ingest_baseline_payload(payload: Mapping[str, object]) -> bool:
 
         app_section = payload.get("app")
         app = app_section if isinstance(app_section, Mapping) else {}
-        package = _first_non_empty_str(app.get("package"), app.get("package_name")) or ""
+        package = first_text(app.get("package"), app.get("package_name")) or ""
         if not package:
             return False
-        display_name = _first_non_empty_str(app.get("label"), app.get("app_label")) or package
+        display_name = first_text(app.get("label"), app.get("app_label")) or package
         app_id = _get_or_create_app(package, display_name)
         if not app_id:
             return False
@@ -292,23 +285,23 @@ def _persist_analysis_snapshot(app_version_id: int, payload: Mapping[str, object
 
     hashes_raw = payload.get("hashes")
     hashes_payload = hashes_raw if isinstance(hashes_raw, Mapping) else {}
-    sha256 = _first_non_empty_str(hashes_payload.get("sha256"))
-    analysis_version = _first_non_empty_str(
+    sha256 = first_text(hashes_payload.get("sha256"))
+    analysis_version = first_text(
         payload.get("analysis_version"),
         hashes_payload.get("analysis_version"),
     )
     metadata_raw = payload.get("metadata")
     metadata = metadata_raw if isinstance(metadata_raw, Mapping) else {}
-    profile = _first_non_empty_str(
+    profile = first_text(
         payload.get("scan_profile"),
         metadata.get("scan_profile"),
         metadata.get("run_profile"),
     )
-    session_stamp = _first_non_empty_str(
+    session_stamp = first_text(
         metadata.get("session_stamp"),
         payload.get("session_stamp"),
     )
-    scope_label = _first_non_empty_str(
+    scope_label = first_text(
         metadata.get("run_scope_label"),
         metadata.get("scope_label"),
         payload.get("run_scope_label"),
@@ -368,7 +361,7 @@ def _persist_analysis_snapshot(app_version_id: int, payload: Mapping[str, object
 
     context_map = _build_finding_context(payload)
     for finding in findings:
-        finding_id = _first_non_empty_str(
+        finding_id = first_text(
             finding.get("finding_id"),
             finding.get("id"),
         )
@@ -428,27 +421,27 @@ def _create_finding_row(
     context: Mapping[str, object] | None = None,
 ) -> None:
     try:
-        finding_id = _first_non_empty_str(
+        finding_id = first_text(
             finding.get("finding_id"),
             finding.get("id"),
         )
-        status = _first_non_empty_str(finding.get("status"), finding.get("state"))
-        severity = _first_non_empty_str(
+        status = first_text(finding.get("status"), finding.get("state"))
+        severity = first_text(
             finding.get("severity_gate"),
             finding.get("severity"),
             finding.get("level"),
         ) or "Info"
-        category = _first_non_empty_str(
+        category = first_text(
             finding.get("category_masvs"),
             finding.get("category"),
         )
-        title = _first_non_empty_str(finding.get("title"), finding.get("message"))
+        title = first_text(finding.get("title"), finding.get("message"))
         if title:
             title = title[:512]
-        fix_text = _first_non_empty_str(finding.get("fix"))
+        fix_text = first_text(finding.get("fix"))
         if fix_text:
             fix_text = fix_text[:2048]
-        rule_id = _first_non_empty_str(finding.get("rule_id"))
+        rule_id = first_text(finding.get("rule_id"))
         tags_payload = _prepare_tags(finding.get("tags"))
         evidence_payload = _prepare_evidence(finding.get("evidence"))
         context_payload = context or {}

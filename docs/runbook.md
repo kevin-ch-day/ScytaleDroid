@@ -48,6 +48,10 @@ Persistence happens automatically at the end of each run:
   `static_string_samples`, `metrics`, `buckets`, `contributors`, and the
   permission audit tables. These are the sources that dashboards should
   consume—no need to parse the JSON artefacts under `output/`.
+- The CLI pipeline backing these inserts now lives under
+  `scytaledroid/StaticAnalysis/cli/persistence/`; see `docs/persistence.md` for
+  a breakdown of the new modules if you are reviewing code or debugging a
+  run.
 - Analytics payloads (severity/category matrices, novelty indicators, workload
   profiles) are stored alongside detector metrics in the run row.
 - Provider exposures are normalised into BASE-002 findings. The dedicated

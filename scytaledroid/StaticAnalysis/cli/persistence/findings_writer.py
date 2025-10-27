@@ -125,6 +125,11 @@ _FALLBACK_RULE_CVSS: Dict[str, Dict[str, object]] = {
         "score": 8.0,
         "rationale": "Exported component without permission allows external apps to trigger privileged code paths.",
     },
+    "BASE-002": {
+        "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:L/VA:L/SC:N/SI:N/SA:N",
+        "score": 8.0,
+        "rationale": "Unprotected content provider exposes IPC surface to arbitrary callers.",
+    },
     "BASE-IPC-EXPORTED-WITH-PERM": {
         "vector": "CVSS:4.0/AV:A/AC:L/AT:N/PR:L/UI:N/VC:N/VI:N/VA:N/SC:N/SI:N/SA:N",
         "score": 2.5,
@@ -139,6 +144,46 @@ _FALLBACK_RULE_CVSS: Dict[str, Dict[str, object]] = {
         "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:N/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N",
         "score": 3.9,
         "rationale": "Legacy external storage broadens read/write surface for other apps.",
+    },
+    "diff_exported_activities": {
+        "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:L/VA:L/SC:N/SI:N/SA:N",
+        "score": 8.0,
+        "rationale": "New exported activities introduced relative to baseline increase attack surface.",
+    },
+    "diff_exported_services": {
+        "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:L/VA:L/SC:N/SI:N/SA:N",
+        "score": 8.0,
+        "rationale": "New exported services introduced relative to baseline increase attack surface.",
+    },
+    "diff_exported_receivers": {
+        "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:L/VA:L/SC:N/SI:N/SA:N",
+        "score": 8.0,
+        "rationale": "New exported broadcast receivers introduced relative to baseline increase attack surface.",
+    },
+    "diff_exported_providers": {
+        "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:L/VA:L/SC:N/SI:N/SA:N",
+        "score": 8.0,
+        "rationale": "New exported content providers introduced relative to baseline increase attack surface.",
+    },
+    "diff_new_permissions": {
+        "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N",
+        "score": 5.0,
+        "rationale": "New dangerous permissions were added relative to baseline; impact depends on downstream use of granted capabilities.",
+    },
+    "diff_cleartext_enabled": {
+        "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:R/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N",
+        "score": 4.5,
+        "rationale": "Cleartext traffic newly enabled relative to baseline enables downgrade of network protections.",
+    },
+    "diff_flag_usesCleartextTraffic": {
+        "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:R/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N",
+        "score": 4.5,
+        "rationale": "Manifest flag toggled to permit cleartext network traffic compared to baseline.",
+    },
+    "diff_flag_requestLegacyExternalStorage": {
+        "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:N/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N",
+        "score": 3.9,
+        "rationale": "Manifest flag toggled to request legacy external storage relative to baseline.",
     },
 }
 

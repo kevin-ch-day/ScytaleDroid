@@ -152,6 +152,19 @@ class Detector(Protocol):
 - `endpoints`, `libraries`, `sdk_inventory`, etc. – canonical observations reused
   by the correlation/diff layers.
 
+### CLI persistence modules (FY26 refactor)
+- `StaticAnalysis/cli/persistence/run_summary.py` orchestrates the persistence
+  pipeline and delegates to focused helpers (`metrics_writer`,
+  `static_sections`, `permission_risk`).
+- `StaticAnalysis/cli/db_persist.py` now re-exports the run summary entry point
+  so existing imports continue to work.
+- New unit coverage lives in `tests/persistence/` to protect helper behaviour
+  (permission risk upserts, static string/baseline persistence).
+- MASVS mapping (`masvs_mapper.py`) now covers provider exposures, diff signals
+  (new exported components, newly added dangerous permissions, toggled
+  cleartext/storage flags), which improves coverage of `PLATFORM-IPC-1`,
+  `NETWORK-1`, and `PRIVACY-1` controls during CLI summaries and reporting.
+
 Canonical helpers expose idempotent migrations (`ensure_provider_plumbing`),
 BASE-002 promotion (`upsert_base002_for_session`), and the flexible
 `v_session_string_samples` view builder (`build_session_string_view`) so the CLI
