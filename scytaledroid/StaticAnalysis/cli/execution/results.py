@@ -615,6 +615,35 @@ def _build_permission_profile(report, app_result) -> Optional[dict[str, object]]
     except Exception:
         risk_counts, groups, vendor_counts, fw_ds, vendor_names = ({}, {}, {}, set(), set())
 
+    detector_metrics = getattr(report, "detector_metrics", None)
+    permissions_metrics: Mapping[str, object] | None = None
+    if isinstance(detector_metrics, Mapping):
+        permissions_metrics = detector_metrics.get("permissions_profile")
+
+    profiles_section = {}
+    if isinstance(permissions_metrics, Mapping):
+        raw_profiles = permissions_metrics.get("permission_profiles")
+        if isinstance(raw_profiles, Mapping):
+            profiles_section = raw_profiles
+
+    flagged_normals_set: set[str] = set()
+    weak_guard_count = 0
+    if profiles_section:
+        for perm_name, data in profiles_section.items():
+            if not isinstance(data, Mapping):
+                continue
+            if data.get("is_flagged_normal"):
+                flagged_normals_set.add(str(perm_name))
+            guard_strength = str(data.get("guard_strength") or "").lower()
+            if guard_strength in {"weak", "unknown"} and data.get("is_runtime_dangerous"):
+                weak_guard_count += 1
+    elif isinstance(permissions_metrics, Mapping):
+        flagged_list = permissions_metrics.get("flagged_normal_permissions")
+        if isinstance(flagged_list, (list, tuple, set)):
+            flagged_normals_set.update(str(item) for item in flagged_list)
+
+    flagged_normals = len(flagged_normals_set)
+
     flags = getattr(report, "manifest_flags", None)
     allow_backup = bool(getattr(flags, "allow_backup", False)) if flags else False
     legacy_storage = bool(getattr(flags, "request_legacy_external_storage", False)) if flags else False
@@ -632,6 +661,8 @@ def _build_permission_profile(report, app_result) -> Optional[dict[str, object]]
             target_sdk=target_sdk,
             allow_backup=allow_backup,
             legacy_external_storage=legacy_storage,
+            flagged_normals=flagged_normals,
+            weak_guards=weak_guard_count,
         )
     except Exception:
         detail = {
@@ -664,6 +695,9 @@ def _build_permission_profile(report, app_result) -> Optional[dict[str, object]]
         "vendor_names": set(vendor_names),
         "risk_counts": risk_counts,
         "score_detail": detail,
+        "flagged_normals": flagged_normals,
+        "weak_guard_count": weak_guard_count,
+        "flagged_permissions": sorted(flagged_normals_set),
     }
 
 

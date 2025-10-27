@@ -40,6 +40,20 @@ Key prompts:
   out suppressed secrets, NSC guards, or unguarded providers while the scan runs.
 - You can cancel at any prompt; completed apps are already persisted.
 
+> **Permission refresh defaults to ON.** The CLI now enables the post-run
+> permission snapshot refresh automatically so `permission_audit_*` tables and
+> the `static_permission_matrix` table stay in sync with each scan. Disable it
+> only when you explicitly need a matrix-free run (set
+> `SCYTALEDROID_STATIC_REFRESH_PERMISSION_SNAPSHOT=0` before launching or toggle
+> the option in Advanced).
+
+Useful helpers:
+
+- `python scripts/ensure_permission_matrix.py` – ensures the matrix table exists
+  and prints the latest run + row count (also hints if the refresh was skipped).
+- `python scripts/get_latest_run.py` – quick summary of the most recent run for
+  downstream SQL lookups.
+
 ## 3. Persistence behaviour
 
 Persistence happens automatically at the end of each run:

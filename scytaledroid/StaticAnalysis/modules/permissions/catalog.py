@@ -95,7 +95,7 @@ class PermissionCatalog:
         return snapshot
 
 
-def _load_yaml_catalog(path: Path) -> Mapping[str, PermissionDescriptor]:
+def _load_yaml_catalog(path: Path, *, origin: Optional[str] = None) -> Mapping[str, PermissionDescriptor]:
     data = yaml.safe_load(path.read_text())
     if not isinstance(data, list):
         raise ValueError("framework_permissions.yaml must be a list")
@@ -112,7 +112,7 @@ def _load_yaml_catalog(path: Path) -> Mapping[str, PermissionDescriptor]:
         entries[name] = PermissionDescriptor(
             name=name,
             protection=tokens,
-            source=str(item.get("source") or "catalog"),
+            source=str(item.get("source") or origin or "catalog"),
             added_api=_coerce_int(item.get("added_api")),
             deprecated_api=_coerce_int(item.get("deprecated_api")),
         )
@@ -161,14 +161,31 @@ def _coerce_int(value: object) -> Optional[int]:
         return None
 
 
+def _iter_yaml_files(directory: Path) -> Iterable[Path]:
+    if not directory.exists() or not directory.is_dir():
+        return ()
+    files = []
+    for pattern in ("*.yaml", "*.yml"):
+        files.extend(sorted(directory.glob(pattern)))
+    return tuple(files)
+
+
 def _default_catalog_paths() -> tuple[Path, ...]:
-    local = Path("config/framework_permissions.yaml")
     packaged = Path(__file__).parent.joinpath("data", "framework_permissions.yaml")
-    candidates = []
+    config_file = Path("config/framework_permissions.yaml")
+    config_dir = Path("config/permissions.d")
+    data_file = Path("data/config/framework_permissions.yaml")
+    data_dir = Path("data/config/permissions.d")
+
+    candidates: list[Path] = []
     if packaged.exists():
         candidates.append(packaged)
-    if local.exists():
-        candidates.append(local)
+    if config_file.exists():
+        candidates.append(config_file)
+    candidates.extend(_iter_yaml_files(config_dir))
+    if data_file.exists():
+        candidates.append(data_file)
+    candidates.extend(_iter_yaml_files(data_dir))
     return tuple(candidates)
 
 
@@ -181,7 +198,8 @@ def load_permission_catalog() -> PermissionCatalog:
         return PermissionCatalog(entries=entries, version=version)
     for path in _default_catalog_paths():
         try:
-            entries = _load_yaml_catalog(path)
+            origin = path.stem
+            entries = _load_yaml_catalog(path, origin=origin)
         except Exception:
             continue
         if entries:
@@ -189,6 +207,11 @@ def load_permission_catalog() -> PermissionCatalog:
             return PermissionCatalog(entries=entries, version=str(version))
     # Fallback to empty catalog so lookups still succeed deterministically.
     return PermissionCatalog(entries={}, version="0")
+
+
+def discover_catalog_paths() -> tuple[Path, ...]:
+    """Expose catalog search paths for tooling/refresh helpers."""
+    return _default_catalog_paths()
 
 
 def build_catalog_from_permissions_xml(xml_path: Path) -> PermissionCatalog:
@@ -250,5 +273,5 @@ __all__ = [
     "build_catalog_from_permissions_xml",
     "classify_permission",
     "load_permission_catalog",
+    "discover_catalog_paths",
 ]
-

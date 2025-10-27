@@ -122,7 +122,10 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
         print()
         print(
             status_messages.status(
-                "Post-run permission refresh skipped (toggle in advanced options).",
+                (
+                    "Post-run permission refresh skipped. Enable it in Advanced options "
+                    "or set SCYTALEDROID_STATIC_REFRESH_PERMISSION_SNAPSHOT=1."
+                ),
                 level="info",
             )
         )

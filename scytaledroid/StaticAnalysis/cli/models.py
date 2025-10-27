@@ -36,7 +36,8 @@ def _default_https_risk() -> bool:
 
 
 def _default_permission_refresh() -> bool:
-    return _env_flag("SCYTALEDROID_STATIC_REFRESH_PERMISSION_SNAPSHOT", False)
+    # Default to enabled so permission audits and matrices populate automatically.
+    return _env_flag("SCYTALEDROID_STATIC_REFRESH_PERMISSION_SNAPSHOT", True)
 
 
 @dataclass(frozen=True)

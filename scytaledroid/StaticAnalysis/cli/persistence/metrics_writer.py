@@ -113,6 +113,35 @@ def compute_metrics_bundle(report: Any, string_data: Mapping[str, object]) -> Me
         for name in declared
         if isinstance(name, str) and name.startswith("android.")
     ]
+    detector_metrics = getattr(report, "detector_metrics", None)
+    permissions_metrics: Mapping[str, Any] | None = None
+    if isinstance(detector_metrics, Mapping):
+        permissions_metrics = detector_metrics.get("permissions_profile")
+
+    profiles_section = {}
+    if isinstance(permissions_metrics, Mapping):
+        raw_profiles = permissions_metrics.get("permission_profiles")
+        if isinstance(raw_profiles, Mapping):
+            profiles_section = raw_profiles
+
+    flagged_normals_set: set[str] = set()
+    weak_guard_count = 0
+    if profiles_section:
+        for perm_name, data in profiles_section.items():
+            if not isinstance(data, Mapping):
+                continue
+            if data.get("is_flagged_normal"):
+                flagged_normals_set.add(str(perm_name))
+            guard_strength = str(data.get("guard_strength") or "").lower()
+            if guard_strength in {"weak", "unknown"} and data.get("is_runtime_dangerous"):
+                weak_guard_count += 1
+    elif isinstance(permissions_metrics, Mapping):
+        flagged_list = permissions_metrics.get("flagged_normal_permissions")
+        if isinstance(flagged_list, (list, tuple, set)):
+            flagged_normals_set.update(str(item) for item in flagged_list)
+
+    flagged_normals = len(flagged_normals_set)
+
     pmap = _prot_map(shorts_only, target_sdk)
     rc, groups, vc, _fw_ds, _vn = _classify([(n, "uses-permission") for n in declared], pmap)
     dangerous = rc.get("dangerous", 0)
@@ -131,6 +160,8 @@ def compute_metrics_bundle(report: Any, string_data: Mapping[str, object]) -> Me
         target_sdk=target_sdk,
         allow_backup=getattr(flags, "allow_backup", False),
         legacy_external_storage=getattr(flags, "request_legacy_external_storage", False),
+        flagged_normals=flagged_normals,
+        weak_guards=weak_guard_count,
     )
     detail: MutableMapping[str, Any] = dict(raw_detail) if isinstance(raw_detail, Mapping) else {}
     permission_score = float(detail.get("score_3dp", detail.get("score_capped", detail.get("score_raw", 0.0)) or 0.0) or 0.0)
@@ -143,6 +174,8 @@ def compute_metrics_bundle(report: Any, string_data: Mapping[str, object]) -> Me
     detail.setdefault("dangerous_count", int(dangerous))
     detail.setdefault("signature_count", int(signature))
     detail.setdefault("vendor_count", int(vendor))
+    detail.setdefault("flagged_normal_count", flagged_normals)
+    detail.setdefault("weak_guard_count", int(weak_guard_count))
     perm_points = _perm_pts(permission_score)
 
     code_http_hosts, asset_http_hosts = _effective_http_counts(string_data)
@@ -216,6 +249,32 @@ def compute_metrics_bundle(report: Any, string_data: Mapping[str, object]) -> Me
                     f"Vendor/ads permissions (+{vendor_pts})",
                     0,
                 ))
+        penalty_components = detail.get("penalty_components", {}) if isinstance(detail, Mapping) else {}
+        flagged_component = penalty_components.get("flagged_normal", detail.get("flagged_normal_component", 0.0))
+        weak_guard_component = penalty_components.get("weak_guard", detail.get("weak_guard_component", 0.0))
+
+        flagged_pts = _points(flagged_component)
+        if flagged_pts:
+            contributors.append(
+                (
+                    "permissions_flagged_normals",
+                    flagged_pts,
+                    f"Flagged normal permissions (+{flagged_pts})",
+                    0,
+                )
+            )
+
+        weak_guard_pts = _points(weak_guard_component)
+        if weak_guard_pts:
+            contributors.append(
+                (
+                    "permissions_weak_guard",
+                    weak_guard_pts,
+                    f"Weak guard strength on runtime-dangerous permissions (+{weak_guard_pts})",
+                    0,
+                )
+            )
+
         breadth_pts = _points(breadth)
         if breadth_pts:
             contributors.append((

@@ -42,6 +42,15 @@ class _PermissionProfile(PermissionProfile):  # Back-compat alias
     pass
 
 
+def _infer_permission_source(permission: str) -> str:
+    if permission.startswith("android."):
+        return "framework"
+    if permission.startswith("com.google.android.gms."):
+        return "play_services"
+    namespace = permission.split(".", 1)[0] if "." in permission else permission
+    return namespace or "custom"
+
+
 def build_permission_analysis(context: DetectorContext) -> PermissionAnalysis:
     declared = tuple(sorted(context.permissions.declared))
     custom_declared = set(context.permissions.custom)
@@ -74,6 +83,11 @@ def build_permission_analysis(context: DetectorContext) -> PermissionAnalysis:
         if profile.is_privileged
     }
     manifest_nodes = index_manifest_permissions(context.manifest_root)
+    declared_tags = {
+        name: entries[0][1]
+        for name, entries in manifest_nodes.items()
+        if entries
+    }
     evidence = collect_evidence(
         profile_severities={k: v.severity for k, v in protection_profiles.items()},
         manifest_nodes=manifest_nodes,
@@ -118,6 +132,10 @@ def build_permission_analysis(context: DetectorContext) -> PermissionAnalysis:
         special_permissions=special_permissions,
         profiles=protection_profiles,
         summary=summary,
+        catalog_snapshot=context.permissions.catalog_snapshot,
+        protection_levels=context.permissions.protection_levels,
+        declared_map=declared_tags,
+        permission_catalog=context.permission_catalog,
     )
 
     return PermissionAnalysis(
@@ -232,12 +250,20 @@ def _build_metrics(
     special_permissions: Iterable[str],
     profiles: Mapping[str, _PermissionProfile],
     summary: str,
+    catalog_snapshot: Mapping[str, Mapping[str, object]],
+    protection_levels: Mapping[str, Sequence[str]],
+    declared_map: Mapping[str, str],
+    permission_catalog,
 ) -> Mapping[str, object]:
     dangerous_set = set(dangerous)
     signature_set = set(signature)
     privileged_set = set(privileged)
     custom_set = set(custom)
     special_set = set(special_permissions)
+    catalog_snapshot = catalog_snapshot or {}
+    protection_levels = protection_levels or {}
+    declared_map = declared_map or {}
+    flagged_normals: set[str] = set()
 
     top_permissions = [
         {
@@ -283,8 +309,36 @@ def _build_metrics(
         }
     if top_permissions:
         metrics["top_permissions"] = top_permissions
-    metrics["permission_profiles"] = {
-        name: {
+    profile_payload: dict[str, dict[str, object]] = {}
+    for name, profile in profiles.items():
+        catalog_meta = catalog_snapshot.get(name, {})
+        guard_strength = None
+        catalog_source = None
+        if isinstance(catalog_meta, Mapping):
+            guard_strength = catalog_meta.get("guard_strength")
+            catalog_source = catalog_meta.get("source")
+        if guard_strength is None and permission_catalog:
+            try:
+                guard_strength = permission_catalog.guard_strength(name)
+            except Exception:
+                guard_strength = None
+
+        protection_entry = protection_levels.get(name)
+        if isinstance(protection_entry, (list, tuple)):
+            protection_listing = [token for token in protection_entry if token]
+        elif protection_entry:
+            protection_listing = [protection_entry]
+        else:
+            protection_listing = []
+
+        declared_in = declared_map.get(name)
+        source = _infer_permission_source(name)
+        is_custom = _is_custom_permission(name)
+        is_flagged_normal = bool(not profile.is_runtime_dangerous and profile.severity > 0)
+        if is_flagged_normal:
+            flagged_normals.add(name)
+
+        profile_payload[name] = {
             "name": profile.name,
             "protection": profile.protection_label,
             "tokens": profile.protection_tokens,
@@ -294,11 +348,20 @@ def _build_metrics(
             "is_signature": profile.is_signature,
             "is_privileged": profile.is_privileged,
             "is_special_access": profile.is_special_access,
-            "is_custom": _is_custom_permission(name),
+            "is_custom": is_custom,
             "severity": profile.severity,
+            "guard_strength": guard_strength,
+            "catalog_source": catalog_source,
+            "protection_levels": protection_listing,
+            "declared_in": declared_in,
+            "source": source,
+            "is_flagged_normal": is_flagged_normal,
         }
-        for name, profile in profiles.items()
-    }
+
+    metrics["permission_profiles"] = profile_payload
+    metrics["flagged_normal_total"] = len(flagged_normals)
+    if flagged_normals:
+        metrics["flagged_normal_permissions"] = sorted(flagged_normals)
     return metrics
 
 

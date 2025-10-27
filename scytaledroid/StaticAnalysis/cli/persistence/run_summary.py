@@ -23,6 +23,7 @@ from .findings_writer import (
 )
 from .run_envelope import prepare_run_envelope
 from .permission_risk import persist_permission_risk
+from .permission_matrix import persist_permission_matrix
 from .static_sections import (
     coerce_severity_counts,
     normalise_string_counts,
@@ -94,6 +95,10 @@ def persist_run_summary(
 ) -> PersistenceOutcome:
     outcome = PersistenceOutcome()
     br = base_report
+    try:
+        metadata_map: Mapping[str, object] = getattr(br, "metadata", {}) or {}
+    except Exception:
+        metadata_map = {}
     manifest_obj = getattr(br, "manifest", None)
     package_for_run = getattr(manifest_obj, "package_name", None) or run_package
 
@@ -103,14 +108,10 @@ def persist_run_summary(
             category="static_analysis",
         )
 
-    if not session_stamp:
-        try:
-            meta = getattr(br, "metadata", {}) or {}
-            value = meta.get("session_stamp")
-            if isinstance(value, str) and value.strip():
-                session_stamp = value.strip()
-        except Exception:
-            pass
+    if not session_stamp and metadata_map:
+        value = metadata_map.get("session_stamp")
+        if isinstance(value, str) and value.strip():
+            session_stamp = value.strip()
 
     if not session_stamp:
         message = f"Missing session stamp for {run_package}; static persistence will be skipped."
@@ -310,6 +311,29 @@ def persist_run_summary(
                 category="static_analysis",
             )
         persist_storage_surface_data(br, session_stamp, scope_label)
+        apk_identifier = safe_int(metadata_map.get("apk_id")) if metadata_map else None
+        if apk_identifier is None and metadata_map:
+            apk_identifier = safe_int(metadata_map.get("apkId"))
+        if apk_identifier is None:
+            apk_identifier = safe_int(metadata_map.get("android_apk_id"))
+        if apk_identifier is None:
+            apk_identifier = int(run_id)
+
+        permission_profiles_map: Mapping[str, Mapping[str, object]] | None = None
+        detector_metrics = getattr(br, "detector_metrics", None)
+        if isinstance(detector_metrics, Mapping):
+            permission_metrics = detector_metrics.get("permissions_profile")
+            if isinstance(permission_metrics, Mapping):
+                profiles = permission_metrics.get("permission_profiles")
+                if isinstance(profiles, Mapping):
+                    permission_profiles_map = profiles
+
+        persist_permission_matrix(
+            run_id=int(run_id),
+            package_name=package_for_run,
+            apk_id=apk_identifier,
+            permission_profiles=permission_profiles_map,
+        )
         persist_permission_risk(
             run_id=int(run_id),
             report=br,
@@ -320,6 +344,14 @@ def persist_run_summary(
             baseline_payload=baseline_payload,
         )
 
+    perm_detail_map: Mapping[str, object] = (
+        metrics_bundle.permission_detail
+        if isinstance(metrics_bundle.permission_detail, Mapping)
+        else {}
+    )
+    flagged_normal_metric = float(perm_detail_map.get("flagged_normal_count", 0) or 0)
+    weak_guard_metric = float(perm_detail_map.get("weak_guard_count", 0) or 0)
+
     metrics_payload = {
         "network.code_http_hosts": (float(code_http_hosts), None),
         "network.asset_http_hosts": (float(asset_http_hosts), None),
@@ -327,6 +359,8 @@ def persist_run_summary(
         "permissions.dangerous_count": (float(getattr(metrics_bundle, "dangerous_permissions", 0)), None),
         "permissions.signature_count": (float(getattr(metrics_bundle, "signature_permissions", 0)), None),
         "permissions.vendor_count": (float(getattr(metrics_bundle, "vendor_permissions", 0)), None),
+        "permissions.flagged_normal_count": (flagged_normal_metric, None),
+        "permissions.weak_guard_count": (weak_guard_metric, None),
         "permissions.risk_score": (float(getattr(metrics_bundle, "permission_score", 0.0)), None),
         "permissions.risk_grade": (None, getattr(metrics_bundle, "permission_grade", "")),
     }
