@@ -14,6 +14,9 @@ from dataclasses import dataclass
 class _UIPrefs:
     clear_on_nav: bool = False  # default off to avoid surprising clears
     max_width: int = 100        # soft cap used by some menus
+    compact_mode: bool = False
+    use_color: bool = True
+    use_unicode: bool = True
 
 
 _PREFS = _UIPrefs()
@@ -45,6 +48,35 @@ def set_max_width(width: int) -> int:
     return _PREFS.max_width
 
 
+def is_compact() -> bool:
+    return bool(_PREFS.compact_mode)
+
+
+def set_compact(enabled: bool) -> None:
+    _PREFS.compact_mode = bool(enabled)
+
+
+def toggle_compact() -> bool:
+    _PREFS.compact_mode = not _PREFS.compact_mode
+    return _PREFS.compact_mode
+
+
+def use_color() -> bool:
+    return bool(_PREFS.use_color)
+
+
+def set_use_color(enabled: bool) -> None:
+    _PREFS.use_color = bool(enabled)
+
+
+def use_unicode() -> bool:
+    return bool(_PREFS.use_unicode)
+
+
+def set_use_unicode(enabled: bool) -> None:
+    _PREFS.use_unicode = bool(enabled)
+
+
 __all__ = [
     "should_clear",
     "set_clear",
@@ -52,4 +84,3 @@ __all__ = [
     "get_max_width",
     "set_max_width",
 ]
-

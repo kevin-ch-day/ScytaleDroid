@@ -85,14 +85,14 @@ def main_menu() -> None:
     """Render the main menu loop using the shared menu framework."""
 
     menu_actions: list[tuple[str, str, Callable[[], None]]] = [
-        ("1", "Connect to Android Device", handle_device),
+        ("1", "Android devices", handle_device),
         ("2", "Static analysis", handle_static),
         ("3", "Harvest Android Permissions", handle_perm_catalog),
         ("4", "Dynamic analysis", handle_dynamic),
         ("5", "Reporting", handle_reporting),
-        ("6", "Database Utilities", handle_database),
-        ("7", "Workspace Utilities", handle_utils),
-        ("8", "Browse saved APKs", handle_browse_apks),
+        ("6", "Database utilities", handle_database),
+        ("7", "Workspace maintenance & cleanup", handle_workspace),
+        ("8", "APK library & archives", handle_browse_apks),
         ("9", "About App", handle_about),
     ]
 
@@ -135,10 +135,10 @@ def main_menu() -> None:
 # --- Handlers for each menu option ---
 
 def handle_device() -> None:
-    """Launch the Device Analysis menu."""
-    from scytaledroid.DeviceAnalysis.device_analysis_menu import device_menu
+    """Launch the Android Devices hub."""
+    from scytaledroid.DeviceAnalysis.device_hub_menu import devices_hub
 
-    device_menu()
+    devices_hub()
 
 
 def handle_static() -> None:
@@ -186,15 +186,22 @@ def handle_utils() -> None:
     utils_menu()
 
 
+def handle_workspace() -> None:
+    from scytaledroid.Utils.System.workspace_maintenance_menu import workspace_menu
+
+    workspace_menu()
+
+
 def handle_browse_apks() -> None:
-    # Jump straight to the saved APK library browser
+    """Jump straight to the APK library browser."""
     try:
-        from scytaledroid.DeviceAnalysis.device_menu.device_library import browse_saved_apk_library
-        browse_saved_apk_library()
+        from scytaledroid.DeviceAnalysis.apk_library_menu import apk_library_menu
+
+        apk_library_menu()
     except Exception as exc:
         log.error(f"Failed to open APK library: {exc}", category="application")
         status_messages.print_status(
-            "Unable to open saved APK library. Check logs for details.",
+            "Unable to open APK library. Check logs for details.",
             level="error",
         )
 

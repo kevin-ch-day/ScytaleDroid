@@ -9,12 +9,12 @@ from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_mes
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from . import adb_utils
+from scytaledroid.DeviceAnalysis.services import device_service
 from .device_menu import (
     build_device_summaries,
     build_main_menu_options,
     handle_choice,
     print_dashboard,
-    resolve_active_device,
 )
 from .device_menu.auto_ops import (
     ensure_active_device as auto_connect_device,
@@ -30,17 +30,15 @@ def device_menu() -> None:
     surveyed_serials: set[str] = set()
 
     while True:
-        devices, warnings = adb_utils.scan_devices()
+        devices, warnings, summaries, serial_map = device_service.scan_devices()
         last_refresh_ts = time.time()
-        active_device = resolve_active_device(devices)
+        active_device = device_service.resolve_active_device(devices)
         active_device, auto_messages = auto_connect_device(devices, active_device)
-
-        summaries, serial_map = build_device_summaries(devices, summary_cache)
 
         active_serial = active_device.get("serial") if active_device else None
         active_details = serial_map.get(active_serial) if active_serial else None
         inventory_metadata = (
-            get_latest_inventory_metadata(active_serial) if active_serial else None
+            device_service.fetch_inventory_metadata(active_serial) if active_serial else None
         )
 
         # If no active device but devices are present, offer an immediate connect prompt
@@ -61,8 +59,15 @@ def device_menu() -> None:
             warnings,
             last_refresh_ts,
             serial_map,
+            show_device_table=False,
             inventory_metadata=inventory_metadata,
+            context=f"Device dashboard ({active_details.get('serial') if active_details else 'none'})",
         )
+
+        if warnings and not devices:
+            # No devices / adb unavailable; prompt and continue loop
+            prompt_utils.press_enter_to_continue()
+            continue
 
         for message in auto_messages:
             print(message, flush=True)

@@ -257,27 +257,43 @@ def _build_delta_items(delta: object, *, limit: int = 5) -> list[str]:
     return messages
 
 
-def _render_inventory_status(metadata: Dict[str, object]) -> None:
+def _render_inventory_status(metadata: object) -> None:
     """Render a compact inventory status block with delta hints."""
 
-    ts = metadata.get("timestamp")
-    timestamp_display = "Unknown"
-    age_text = None
+    # Accept both legacy dict metadata and InventoryStatus dataclass
+    ts = None
+    package_count = None
     stale = False
+    age_text = None
+    delta = {}
+    if isinstance(metadata, dict):
+        ts = metadata.get("timestamp")
+        package_count = metadata.get("package_count")
+        delta = metadata.get("package_delta_summary") or {}
+    else:
+        # InventoryStatus dataclass support
+        ts = getattr(metadata, "last_run_ts", None)
+        package_count = getattr(metadata, "package_count", None)
+        stale = bool(getattr(metadata, "is_stale", False))
+        age_text = getattr(metadata, "age_display", None)
+
+    timestamp_display = "Unknown"
     if isinstance(ts, datetime):
         ts_utc = ts.astimezone(timezone.utc)
         timestamp_display = ts_utc.strftime("%Y-%m-%d %H:%M:%S %Z")
-        age_seconds = max(0, (datetime.now(timezone.utc) - ts_utc).total_seconds())
-        age_text = humanize_seconds(age_seconds)
-        stale = age_seconds > INVENTORY_STALE_SECONDS
+        if age_text is None:
+            age_seconds = max(0, (datetime.now(timezone.utc) - ts_utc).total_seconds())
+            age_text = humanize_seconds(age_seconds)
+            stale = stale or age_seconds > INVENTORY_STALE_SECONDS
 
-    package_count = metadata.get("package_count")
     count_text = f"{package_count} packages" if isinstance(package_count, int) else None
 
-    delta = metadata.get("package_delta_summary") or {}
-    added = delta.get("total_added", 0) if isinstance(delta, dict) else 0
-    removed = delta.get("total_removed", 0) if isinstance(delta, dict) else 0
-    updated = delta.get("total_updated", 0) if isinstance(delta, dict) else 0
+    if isinstance(delta, dict):
+        added = delta.get("total_added", 0)
+        removed = delta.get("total_removed", 0)
+        updated = delta.get("total_updated", 0)
+    else:
+        added = removed = updated = 0
     has_changes = any(val for val in (added, removed, updated))
 
     palette = colors.get_palette()
@@ -358,7 +374,9 @@ def print_dashboard(
     last_refresh_ts: Optional[float],
     serial_map: Dict[str, Dict[str, Optional[str]]],
     *,
+    show_device_table: bool = True,
     inventory_metadata: Optional[Dict[str, object]] = None,
+    context: Optional[str] = None,
 ) -> None:
     devices_found = len(summaries)
     connection_status = device_manager.get_connection_status() or "Unknown"
@@ -385,6 +403,8 @@ def print_dashboard(
     )
     print()
     print(header)
+    if context:
+        print(colors.apply(f"Context: {context}", colors.get_palette().hint))
 
     # One-line guidance when disconnected
     if not active_details:
@@ -397,7 +417,7 @@ def print_dashboard(
         print(colors.apply(line, colors.get_palette().hint))
 
     # Device table
-    if summaries:
+    if show_device_table and summaries:
         print()
         print(text_blocks.headline("Detected devices", width=74))
         rows = _device_table_rows(summaries)

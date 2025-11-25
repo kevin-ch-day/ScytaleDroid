@@ -15,7 +15,6 @@ from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from scytaledroid.DeviceAnalysis import adb_utils, device_manager
 from scytaledroid.DeviceAnalysis.inventory import inventory_sync_menu
-from .device_library import browse_saved_apk_library
 from .formatters import (
     format_android_release,
     format_build_tags,
@@ -31,6 +30,7 @@ from .inventory_guard import (
     format_inventory_status,
     format_pull_hint,
 )
+from scytaledroid.DeviceAnalysis.services import apk_library_service
 
 
 _HELPER_ROUTES = {
@@ -68,7 +68,7 @@ def handle_choice(
     elif choice == "10":
         _disconnect_device()
     elif choice == "13":
-        browse_saved_apk_library()
+        _open_apk_library_filtered(active_device)
     elif choice in {"8", "9", "11", "12"}:
         _forward_to_helper(choice, active_device)
     else:
@@ -161,7 +161,7 @@ def build_main_menu_options(
         ),
         menu_utils.MenuOption("11", "Export device dossier", disabled=not has_device, badge=needs_active),
         menu_utils.MenuOption("12", "Manage harvest watchlists"),
-        menu_utils.MenuOption("13", "Browse saved APKs"),
+        menu_utils.MenuOption("13", "Open APK library (filtered)"),
     ]
 
     return options
@@ -247,7 +247,9 @@ def _connect_to_device(
         prompt_utils.press_enter_to_continue()
         return
 
-    if device_manager.set_active_device(serial):
+    from scytaledroid.DeviceAnalysis.services import device_service
+
+    if device_service.set_active_serial(serial):
         label = format_device_line(summary, include_release=True)
         print(f"\nActive device set to {label}.")
         log.info(f"Active device set to {serial}.", category="device")
@@ -329,6 +331,23 @@ def _disconnect_device() -> None:
         print("\nNo active device to disconnect.")
         log.info("Disconnect request received but no active device was set.", category="device")
     prompt_utils.press_enter_to_continue()
+
+
+def _open_apk_library_filtered(active_device: Optional[Dict[str, Optional[str]]]) -> None:
+    serial = active_device.get("serial") if active_device else device_manager.get_active_serial()
+    if not serial:
+        print(status_messages.status("No active device. Select a device first.", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    try:
+        from scytaledroid.DeviceAnalysis.apk_library_menu import apk_library_menu
+
+        apk_library_menu(device_filter=serial)
+    except Exception as exc:
+        log.error(f"Failed to open APK library for {serial}: {exc}", category="application")
+        print(status_messages.status("Unable to open APK library. Check logs for details.", level="error"))
+        prompt_utils.press_enter_to_continue()
 
 
 def _forward_to_helper(option: str, active_device: Optional[Dict[str, Optional[str]]]) -> None:

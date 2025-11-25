@@ -76,22 +76,35 @@ def ensure_inventory_survey(
             emit(message)
         return
 
-    # Normalise metadata into primitives we can reason about.
+    # Normalise metadata into primitives we can reason about (support dict or InventoryStatus).
     metadata = metadata or {}
     timestamp: Optional[datetime] = None
-    if isinstance(metadata, dict) and isinstance(metadata.get("timestamp"), datetime):
-        timestamp = metadata.get("timestamp")  # type: ignore[assignment]
-    elif snapshot_meta is not None:
+    packages_changed = False
+    scope_changed = False
+    state_changed = False
+    fingerprint_changed = False
+
+    if isinstance(metadata, dict):
+        timestamp = metadata.get("timestamp") if isinstance(metadata.get("timestamp"), datetime) else None
+        packages_changed = bool(metadata.get("packages_changed"))
+        scope_changed = bool(metadata.get("scope_changed"))
+        state_changed = bool(metadata.get("state_changed"))
+        fingerprint_changed = bool(metadata.get("build_fingerprint_changed"))
+    else:
+        # InventoryStatus dataclass case
+        timestamp = getattr(metadata, "last_run_ts", None)
+        # These flags may not exist on InventoryStatus; default to False
+        packages_changed = bool(getattr(metadata, "packages_changed", False))
+        scope_changed = bool(getattr(metadata, "scope_changed", False))
+        state_changed = bool(getattr(metadata, "state_changed", False))
+        fingerprint_changed = bool(getattr(metadata, "build_fingerprint_changed", False))
+
+    if timestamp is None and snapshot_meta is not None:
         timestamp = snapshot_meta.captured_at
 
     age_seconds: Optional[float] = None
     if timestamp is not None:
         age_seconds = max((datetime.now(timezone.utc) - timestamp).total_seconds(), 0.0)
-
-    packages_changed = bool(metadata.get("packages_changed"))
-    scope_changed = bool(metadata.get("scope_changed"))
-    state_changed = bool(metadata.get("state_changed"))
-    fingerprint_changed = bool(metadata.get("build_fingerprint_changed"))
 
     too_old = age_seconds is None or age_seconds > INVENTORY_STALE_SECONDS
     has_changes = packages_changed or scope_changed or state_changed or fingerprint_changed

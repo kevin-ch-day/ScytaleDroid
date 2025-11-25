@@ -55,6 +55,21 @@ run_pip_install() {
   fi
 }
 
+# Light-weight probe to skip reinstalling when already present
+missing_modules=()
+python3 - <<'PY' 2>/dev/null || missing_modules+=(pymysql)
+import importlib
+importlib.import_module("pymysql")
+PY
+python3 - <<'PY' 2>/dev/null || missing_modules+=(androguard)
+import importlib
+importlib.import_module("androguard")
+PY
+python3 - <<'PY' 2>/dev/null || missing_modules+=(yaml)
+import importlib
+importlib.import_module("yaml")
+PY
+
 echo "[Setup] Upgrading pip to the latest version..."
 run_pip_install --upgrade pip >/dev/null
 echo "[Setup] pip is up to date."
@@ -64,15 +79,20 @@ run_pip_install --upgrade setuptools wheel >/dev/null
 echo "[Setup] Build helpers are up to date."
 
 if [[ -f "$REQ_FILE" && -s "$REQ_FILE" ]]; then
-  echo "[Setup] Installing Python requirements from $REQ_FILE..."
-  run_pip_install -r "$REQ_FILE"
-  echo "[Setup] Python requirements are up to date."
+  if (( ${#missing_modules[@]} > 0 )); then
+    echo "[Setup] Installing Python requirements from $REQ_FILE (missing: ${missing_modules[*]})..."
+    run_pip_install -r "$REQ_FILE"
+    echo "[Setup] Python requirements are up to date."
+  else
+    echo "[Setup] Python requirements already satisfied."
+  fi
 else
   echo "[Setup] No requirements.txt found or file is empty. Skipping dependency installation."
 fi
 
 if command_exists dnf; then
-  FEDORA_DEPS=(python3-devel gcc libffi-devel openssl-devel)
+  # Use actual RPM names (case-sensitive) so the presence check is accurate.
+  FEDORA_DEPS=(python3-devel gcc libffi-devel openssl-devel python3-PyMySQL)
   missing=()
   for pkg in "${FEDORA_DEPS[@]}"; do
     if ! rpm_installed "$pkg"; then

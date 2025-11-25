@@ -58,8 +58,8 @@ def static_analysis_menu() -> None:
     from .commands import COMMANDS, get_command, iter_commands
     from .models import RunParameters
     from .prompts import default_custom_tests, prompt_advanced_options
-    from .runner import launch_scan_flow
     from .scope import select_scope
+    from scytaledroid.StaticAnalysis.services import static_service
 
     base_dir = Path(app_config.DATA_DIR) / "apks"
     groups = tuple(group_artifacts(base_dir))
@@ -153,7 +153,13 @@ def static_analysis_menu() -> None:
             if command.persist and not effective_params.dry_run:
                 effective_params = prompt_session_label(effective_params)
 
-            outcome = launch_scan_flow(selection, effective_params, base_dir)
+            try:
+                outcome = static_service.run_scan(selection, effective_params, base_dir)
+            except static_service.StaticServiceError as exc:
+                print(status_messages.status(f"Static analysis failed: {exc}", level="error"))
+                log.error(f"Static analysis run failed: {exc}", category="static")
+                prompt_utils.press_enter_to_continue()
+                break
 
             if command.auto_verify and not effective_params.dry_run:
                 session_key = getattr(outcome, "session_stamp", None) if outcome else None
