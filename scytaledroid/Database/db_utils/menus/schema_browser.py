@@ -64,9 +64,14 @@ def show_schema_browser() -> None:
             ("5", "App data & categories"),
             ("6", "Android permissions"),
             ("7", "Scoring & buckets"),
-            ("8", "Back"),
         ]
-        menu_utils.print_menu(menu_options, padding=True, show_exit=False)
+        spec = menu_utils.MenuSpec(
+            items=menu_options,
+            show_exit=True,
+            exit_label="Back",
+            padding=True,
+        )
+        menu_utils.render_menu(spec)
         choice = prompt_utils.get_choice(valid=[opt[0] for opt in menu_options] + ["0"])
 
         if choice == "1":

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from scytaledroid.Config import app_config
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
+from scytaledroid.Utils.DisplayUtils.menu_utils import MenuItemSpec, MenuSpec
 
 if TYPE_CHECKING:
     from .commands.models import Command
@@ -88,12 +89,19 @@ def static_analysis_menu() -> None:
     while True:
         print()
         menu_utils.print_header("Android APK Static Analysis")
-        menu_utils.print_menu(
-            [_command_option(cmd) for cmd in workflow_commands],
+        workflow_spec = MenuSpec(
+            items=[_command_option(cmd) for cmd in workflow_commands],
             show_exit=False,
             default=default_key if default_key in {cmd.id for cmd in workflow_commands} else None,
         )
-        menu_utils.print_menu([], show_exit=True, exit_label="Back", show_descriptions=False)
+        menu_utils.render_menu(workflow_spec)
+        back_spec = MenuSpec(
+            items=[],
+            exit_label="Back",
+            show_exit=True,
+            show_descriptions=False,
+        )
+        menu_utils.render_menu(back_spec)
         choice = prompt_utils.get_choice(selectable_ids + ["0"], default=default_choice)
 
         if choice == "0":
@@ -167,10 +175,10 @@ def _command_option(command: Command) -> menu_utils.MenuOption:
     if command.dry_run or not command.persist:
         hints.append("Dry run")
     hint_text = " • ".join(hints) if hints else None
-    return menu_utils.MenuOption(
-        command.id,
-        command.title,
-        command.description,
+    return MenuItemSpec(
+        key=command.id,
+        label=command.title,
+        description=command.description,
         badge=badge,
         hint=hint_text,
     )

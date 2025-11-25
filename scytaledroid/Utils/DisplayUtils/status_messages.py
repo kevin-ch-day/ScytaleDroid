@@ -35,6 +35,10 @@ _STATUS_STYLES = {
     "error": ("error", "error"),
     "success": ("success", "success"),
     "progress": ("progress", "text"),
+    "delta_new": ("success", "success"),
+    "delta_removed": ("error", "error"),
+    "delta_updated": ("warning", "warning"),
+    "evidence": ("accent", "highlight"),
 }
 
 
@@ -112,6 +116,22 @@ def step(
     if indent > 0:
         text = f"{' ' * indent}{text}"
     return text
+
+
+def status_delta(kind: str, value: object) -> str:
+    """Return a delta-styled status ribbon (NEW/REMOVED/UPDATED)."""
+
+    normalised = kind.lower().strip()
+    level = f"delta_{normalised}"
+    if level not in _STATUS_STYLES:
+        level = "info"
+    return status(str(value), level=level, show_icon=False)
+
+
+def status_evidence(message: str) -> str:
+    """Return an evidence-styled status ribbon."""
+
+    return status(message, level="evidence", show_icon=False)
 
 
 __all__ = ["print_status", "status", "step", "highlight"]

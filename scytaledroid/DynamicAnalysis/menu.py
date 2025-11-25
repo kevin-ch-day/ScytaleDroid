@@ -3,19 +3,21 @@
 from __future__ import annotations
 
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
+from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
 
 
 def dynamic_analysis_menu() -> None:
     options = [
-        menu_utils.MenuOption("1", "Launch sandbox run"),
-        menu_utils.MenuOption("2", "View recent dynamic sessions"),
-        menu_utils.MenuOption("3", "Configure instrumentation"),
+        MenuOption("1", "Launch sandbox run"),
+        MenuOption("2", "View recent dynamic sessions"),
+        MenuOption("3", "Configure instrumentation"),
     ]
 
     while True:
         print()
         menu_utils.print_header("Dynamic Analysis")
-        menu_utils.print_menu(options, is_main=False, show_exit=True, exit_label="Back")
+        spec = MenuSpec(items=options, exit_label="Back", show_exit=True)
+        menu_utils.render_menu(spec)
         choice = prompt_utils.get_choice([option.key for option in options] + ["0"])
 
         if choice == "0":

@@ -8,6 +8,7 @@ import sys
 
 from scytaledroid.Config import app_config
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
+from scytaledroid.Utils.DisplayUtils.menu_utils import MenuSpec
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.System.world_clock.display import (
     ClockSnapshot,
@@ -91,12 +92,8 @@ def main_menu() -> None:
         ("5", "Reporting", handle_reporting),
         ("6", "Database Utilities", handle_database),
         ("7", "Workspace Utilities", handle_utils),
-        ("8", "About App", handle_about),
-    ]
-
-    menu_entries = [
-        menu_utils.MenuOption(key, label)
-        for key, label, _ in menu_actions
+        ("8", "Browse saved APKs", handle_browse_apks),
+        ("9", "About App", handle_about),
     ]
 
     handlers = {key: (label, callback) for key, label, callback in menu_actions}
@@ -105,14 +102,14 @@ def main_menu() -> None:
     while True:
         print()
         menu_utils.print_header("Main Menu")
-        menu_utils.print_menu(
-            menu_entries,
-            is_main=True,
+        spec = MenuSpec(
+            items=[menu_utils.MenuOption(key, label) for key, label, _ in menu_actions],
             default=default_choice,
-            show_descriptions=False,
-            show_exit=True,
             exit_label="Exit",
+            show_exit=True,
+            show_descriptions=False,
         )
+        menu_utils.render_menu(spec)
 
         choice = prompt_utils.get_choice(
             valid=valid_choices + ["0"],
@@ -155,6 +152,7 @@ def handle_dynamic() -> None:
 
     dynamic_analysis_menu()
 
+
 def handle_perm_catalog() -> None:
     # Open the Harvest Android Permissions menu directly
     try:
@@ -186,6 +184,19 @@ def handle_utils() -> None:
     from scytaledroid.Utils.System.utils_menu import utils_menu
 
     utils_menu()
+
+
+def handle_browse_apks() -> None:
+    # Jump straight to the saved APK library browser
+    try:
+        from scytaledroid.DeviceAnalysis.device_menu.device_library import browse_saved_apk_library
+        browse_saved_apk_library()
+    except Exception as exc:
+        log.error(f"Failed to open APK library: {exc}", category="application")
+        status_messages.print_status(
+            "Unable to open saved APK library. Check logs for details.",
+            level="error",
+        )
 
 
 def handle_about() -> None:

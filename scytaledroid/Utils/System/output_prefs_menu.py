@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
+from scytaledroid.Utils.DisplayUtils.menu_utils import MenuSpec
 from . import output_prefs as prefs
 
 
@@ -23,7 +24,8 @@ def output_prefs_menu() -> None:
             ("3", "Set max string samples", None),
             ("4", "Toggle cleartext-only endpoints", None),
         ]
-        menu_utils.print_menu(options, is_main=False, show_exit=True)
+        spec = MenuSpec(items=options, show_exit=True)
+        menu_utils.render_menu(spec)
         choice = prompt_utils.get_choice([opt[0] for opt in options] + ["0"], default="0")
         if choice == "0":
             break
@@ -40,4 +42,3 @@ def output_prefs_menu() -> None:
         elif choice == "4":
             value = prefs.toggle_cleartext_only()
             print(status_messages.status(f"Endpoints panel cleartext-only is now {'on' if value else 'off'}", level="info"))
-

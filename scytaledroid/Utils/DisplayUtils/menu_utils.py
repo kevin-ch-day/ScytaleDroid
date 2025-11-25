@@ -20,6 +20,33 @@ class MenuOption:
     hint: Optional[str] = None
 
 
+@dataclass(frozen=True)
+class MenuItemSpec:
+    """Declarative menu item definition used by :func:`render_menu`."""
+
+    key: str
+    label: str
+    description: Optional[str] = None
+    badge: Optional[str] = None
+    disabled: bool = False
+    hint: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class MenuSpec:
+    """Declarative menu definition for data-driven rendering."""
+
+    items: Sequence[MenuItemSpec | MenuOption | Tuple[str, str] | Tuple[str, str, str]]  # noqa: WPS110
+    default: Optional[str] = None
+    exit_label: Optional[str] = None
+    show_exit: bool = True
+    show_descriptions: bool = True
+    boxed: bool = False
+    width: Optional[int] = None
+    padding: bool = False
+    compact: bool = False
+
+
 def _coerce_option(
     key: object,
     label: object,
@@ -40,7 +67,14 @@ def _coerce_option(
 
 
 def _normalise_options(
-    options: Mapping[str, str] | Sequence[Tuple[str, str] | Tuple[str, str, str] | MenuOption]
+    options: Mapping[str, str]
+    | Sequence[
+        Tuple[str, str]
+        | Tuple[str, str, str]
+        | MenuOption
+        | MenuItemSpec
+        | Tuple[str, str, str, str]
+    ]
 ) -> list[MenuOption]:
     if isinstance(options, Mapping):
         return [_coerce_option(key, value, None) for key, value in options.items()]
@@ -49,6 +83,17 @@ def _normalise_options(
     for entry in options:
         if isinstance(entry, MenuOption):
             normalised.append(entry)
+        elif isinstance(entry, MenuItemSpec):
+            normalised.append(
+                MenuOption(
+                    key=entry.key,
+                    label=entry.label,
+                    description=entry.description,
+                    badge=entry.badge,
+                    disabled=entry.disabled,
+                    hint=entry.hint,
+                )
+            )
         elif isinstance(entry, tuple):
             if len(entry) == 2:
                 normalised.append(_coerce_option(entry[0], entry[1], None))
@@ -185,7 +230,8 @@ def print_menu(
     options: Mapping[str, str]
     | Sequence[Tuple[str, str]
               | Tuple[str, str, str]
-              | MenuOption],
+              | MenuOption
+              | MenuItemSpec],
     *,
     is_main: bool = False,
     default: Optional[str] = None,
@@ -195,6 +241,7 @@ def print_menu(
     boxed: bool = False,
     width: Optional[int] = None,
     padding: bool = False,
+    compact: bool = False,
 ) -> None:
     """Render a numbered menu with coloured keys and optional default."""
 
@@ -203,8 +250,8 @@ def print_menu(
     items = _normalise_options(options)
     primary_items = [item for item in items if item.key != "0"]
 
-    indent = "    "
-    body_width = max(20, term_width - len(indent) - 4)
+    indent = "  " if compact else "    "
+    body_width = max(12 if compact else 20, term_width - len(indent) - 4)
 
     rendered_blocks: list[list[str]] = []
 
@@ -255,14 +302,14 @@ def print_menu(
             print()
         return
 
-    if padding:
+    if padding and not compact:
         print()
 
     for block in rendered_blocks:
         for line in block:
             print(line)
 
-    if padding:
+    if padding and not compact:
         print()
 
 
@@ -271,16 +318,18 @@ def format_menu_panel(
     options: Mapping[str, str]
     | Sequence[Tuple[str, str]
               | Tuple[str, str, str]
-              | MenuOption],
+              | MenuOption
+              | MenuItemSpec],
     *,
     width: Optional[int] = None,
     default_keys: Sequence[str] = (),
+    compact: bool = False,
 ) -> str:
     """Return a boxed summary panel showcasing the provided menu *options*."""
 
     resolved_width = width or min(get_terminal_width(), 96)
-    resolved_width = max(34, min(resolved_width, 96))
-    body_width = max(18, resolved_width - 4)
+    resolved_width = max(24 if compact else 34, min(resolved_width, 96))
+    body_width = max(12 if compact else 18, resolved_width - 4)
     palette = colors.get_palette()
     default_set = {str(key) for key in default_keys if key is not None}
 
@@ -342,6 +391,7 @@ def print_menu_panels(
     width: Optional[int] = None,
     default_keys: Sequence[str] = (),
     gap: int = 4,
+    compact: bool = False,
 ) -> None:
     """Render menu *sections* as a responsive grid of summary panels."""
 
@@ -350,9 +400,9 @@ def print_menu_panels(
 
     total_width = width or min(get_terminal_width(), 120)
     column_count = max(1, columns)
-    spacer = " " * max(2, gap)
+    spacer = " " * max(1 if compact else 2, gap)
     column_width = max(
-        34,
+        24 if compact else 34,
         min((total_width - (column_count - 1) * len(spacer)) // column_count, 96),
     )
 
@@ -363,6 +413,7 @@ def print_menu_panels(
             options,
             width=column_width,
             default_keys=default_keys,
+            compact=compact,
         )
         panel_lines = panel_text.splitlines()
         visible_width = max((text_blocks.visible_width(line) for line in panel_lines), default=0)
@@ -392,6 +443,23 @@ def print_table(headers: Iterable[str], rows: Iterable[Iterable[object]]) -> Non
     table_utils.render_table(list(headers), list(rows))
 
 
+def render_menu(spec: MenuSpec) -> None:
+    """Render a menu using a declarative :class:`MenuSpec`."""
+
+    print_menu(
+        spec.items,
+        is_main=False,
+        default=spec.default,
+        exit_label=spec.exit_label,
+        show_exit=spec.show_exit,
+        show_descriptions=spec.show_descriptions,
+        boxed=spec.boxed,
+        width=spec.width,
+        padding=spec.padding,
+        compact=spec.compact,
+    )
+
+
 def print_section(title: str) -> None:
     """Print a small section divider suitable for nested menus."""
 
@@ -406,12 +474,15 @@ def print_section(title: str) -> None:
 
 __all__ = [
     "MenuOption",
+    "MenuItemSpec",
+    "MenuSpec",
     "print_banner",
     "print_main_banner",
     "print_header",
     "print_hint",
     "print_section",
     "print_menu",
+    "render_menu",
     "print_metrics",
     "print_table",
     "format_menu_panel",

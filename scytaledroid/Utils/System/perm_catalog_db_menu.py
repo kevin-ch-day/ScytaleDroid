@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import List
 
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
+from scytaledroid.Utils.DisplayUtils.menu_utils import MenuSpec, MenuOption
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from scytaledroid.Database.db_utils import diagnostics
@@ -68,11 +69,12 @@ def perm_catalog_db_menu() -> None:
         print()
         menu_utils.print_header("Android permissions catalog (DB)", "Harvest and persist")
         options = [
-            menu_utils.MenuOption("1", "Check database", "Connection + table presence"),
-            menu_utils.MenuOption("2", "Harvest permissions (full)", "Parse docs and write to DB"),
-            menu_utils.MenuOption("3", "Test run (20 permissions)", "Write a small sample to DB"),
+            MenuOption("1", "Check database", "Connection + table presence"),
+            MenuOption("2", "Harvest permissions (full)", "Parse docs and write to DB"),
+            MenuOption("3", "Test run (20 permissions)", "Write a small sample to DB"),
         ]
-        menu_utils.print_menu(options, is_main=False, default="1")
+        spec = MenuSpec(items=options, default="1", show_exit=True)
+        menu_utils.render_menu(spec)
         choice = prompt_utils.get_choice([opt.key for opt in options] + ["0"], default="0")
 
         if choice == "0":
@@ -98,4 +100,3 @@ def perm_catalog_db_menu() -> None:
         if choice == "3":
             _harvest_and_write(limit=20)
             continue
-

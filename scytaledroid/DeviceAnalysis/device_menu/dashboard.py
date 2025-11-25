@@ -9,7 +9,7 @@ cards are discoverable via menu actions rather than always-on panels.
 from __future__ import annotations
 
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
 from scytaledroid.Utils.DisplayUtils import (
@@ -23,6 +23,10 @@ from scytaledroid.Utils.DisplayUtils.terminal import use_ascii_ui
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from scytaledroid.DeviceAnalysis import adb_utils, device_manager
+from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.constants import (
+    INVENTORY_STALE_SECONDS,
+)
+from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.utils import humanize_seconds
 from .formatters import (
     format_android_release,
     format_battery,
@@ -194,6 +198,117 @@ def _device_table_rows(
     return rows
 
 
+def _build_delta_items(delta: object, *, limit: int = 5) -> list[str]:
+    """Format top-N added/removed/updated packages for display."""
+
+    if not isinstance(delta, dict):
+        return []
+
+    palette = colors.get_palette()
+    messages: list[str] = []
+
+    added_list = delta.get("added") if isinstance(delta.get("added"), list) else []
+    removed_list = delta.get("removed") if isinstance(delta.get("removed"), list) else []
+    updated_list = delta.get("updated") if isinstance(delta.get("updated"), list) else []
+
+    def _join_names(names: list[str]) -> str:
+        if not names:
+            return ""
+        if len(names) > limit:
+            names = names[:limit] + ["…"]
+        return ", ".join(names)
+
+    added_names = [name for name in added_list if isinstance(name, str) and name]
+    if added_names:
+        messages.append(
+            colors.apply("Added: ", palette.success, bold=True)
+            + _join_names(added_names)
+        )
+
+    removed_names = [name for name in removed_list if isinstance(name, str) and name]
+    if removed_names:
+        messages.append(
+            colors.apply("Removed: ", palette.error, bold=True)
+            + _join_names(removed_names)
+        )
+
+    if updated_list:
+        formatted_updates: list[str] = []
+        for entry in updated_list[:limit]:
+            if not isinstance(entry, dict):
+                continue
+            pkg = entry.get("package") if isinstance(entry.get("package"), str) else None
+            before = entry.get("before") if isinstance(entry.get("before"), str) else None
+            after = entry.get("after") if isinstance(entry.get("after"), str) else None
+            if not pkg:
+                continue
+            token = pkg
+            if before or after:
+                token = f"{pkg} ({before or '?'} → {after or '?'})"
+            formatted_updates.append(token)
+        if formatted_updates:
+            if len(updated_list) > limit:
+                formatted_updates.append("…")
+            messages.append(
+                colors.apply("Updated: ", palette.warning, bold=True)
+                + ", ".join(formatted_updates)
+            )
+
+    return messages
+
+
+def _render_inventory_status(metadata: Dict[str, object]) -> None:
+    """Render a compact inventory status block with delta hints."""
+
+    ts = metadata.get("timestamp")
+    timestamp_display = "Unknown"
+    age_text = None
+    stale = False
+    if isinstance(ts, datetime):
+        ts_utc = ts.astimezone(timezone.utc)
+        timestamp_display = ts_utc.strftime("%Y-%m-%d %H:%M:%S %Z")
+        age_seconds = max(0, (datetime.now(timezone.utc) - ts_utc).total_seconds())
+        age_text = humanize_seconds(age_seconds)
+        stale = age_seconds > INVENTORY_STALE_SECONDS
+
+    package_count = metadata.get("package_count")
+    count_text = f"{package_count} packages" if isinstance(package_count, int) else None
+
+    delta = metadata.get("package_delta_summary") or {}
+    added = delta.get("total_added", 0) if isinstance(delta, dict) else 0
+    removed = delta.get("total_removed", 0) if isinstance(delta, dict) else 0
+    updated = delta.get("total_updated", 0) if isinstance(delta, dict) else 0
+    has_changes = any(val for val in (added, removed, updated))
+
+    palette = colors.get_palette()
+    status_chip = _status_badge("STALE" if stale else "FRESH", "warning" if stale else "success")
+    lines: List[str] = []
+    lines.append(
+        f"{status_chip} Last run: {timestamp_display}"
+        + (f" ({age_text} ago)" if age_text else "")
+    )
+    if count_text:
+        lines.append(colors.apply(f"Packages: {count_text}", palette.text, bold=True))
+    if has_changes:
+        changes = []
+        if added:
+            changes.append(colors.apply(f"+{added}", palette.success, bold=True))
+        if removed:
+            changes.append(colors.apply(f"-{removed}", palette.error, bold=True))
+        if updated:
+            changes.append(colors.apply(f"Δ{updated}", palette.warning, bold=True))
+        lines.append(f"Changes since last inventory: {' / '.join(changes)}")
+        lines.extend(_build_delta_items(delta))
+
+    if not lines:
+        return
+
+    print()
+    print(text_blocks.headline("Inventory status", width=74))
+    for line in lines:
+        print(line)
+
+
 def build_device_summaries(
     devices: List[Dict[str, Optional[str]]],
     summary_cache: Dict[str, Dict[str, Optional[str]]],
@@ -242,6 +357,8 @@ def print_dashboard(
     warnings: List[str],
     last_refresh_ts: Optional[float],
     serial_map: Dict[str, Dict[str, Optional[str]]],
+    *,
+    inventory_metadata: Optional[Dict[str, object]] = None,
 ) -> None:
     devices_found = len(summaries)
     connection_status = device_manager.get_connection_status() or "Unknown"
@@ -294,6 +411,10 @@ def print_dashboard(
             padding=3,
             accent_first_column=True,
         )
+
+    # Inventory status / deltas for the active device
+    if active_details and inventory_metadata:
+        _render_inventory_status(inventory_metadata)
 
     # ADB warnings
     if warnings:

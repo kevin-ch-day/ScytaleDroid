@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
+from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
 
 from .menu_actions import (
     handle_device_report,
@@ -21,17 +22,17 @@ def reporting_menu() -> None:
     }
 
     options = [
-        menu_utils.MenuOption(
+        MenuOption(
             "1",
             "Generate device summary report",
             description="Use the active device or select another connected target",
         ),
-        menu_utils.MenuOption(
+        MenuOption(
             "2",
             "Generate static analysis report",
             description="Convert a stored static analysis JSON artefact to markdown",
         ),
-        menu_utils.MenuOption(
+        MenuOption(
             "3",
             "View saved reports",
             description="Browse previously generated markdown reports",
@@ -41,7 +42,8 @@ def reporting_menu() -> None:
     while True:
         print()
         menu_utils.print_header("Reporting")
-        menu_utils.print_menu(options, is_main=False, default="1")
+        spec = MenuSpec(items=options, default="1")
+        menu_utils.render_menu(spec)
         choice = prompt_utils.get_choice([option.key for option in options] + ["0"], default="0")
 
         if choice == "0":

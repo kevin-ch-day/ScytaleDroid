@@ -47,6 +47,8 @@ def render_table(
     header_separator: str = "-",
     use_color: bool | None = None,
     accent_first_column: bool = True,
+    compact: bool = False,
+    column_styles: Sequence[str] | None = None,
 ) -> None:
     """Render a simple left-aligned ASCII table."""
 
@@ -63,7 +65,7 @@ def render_table(
     term_width = get_terminal_width()
     widths = _shrink_widths(widths, term_width, padding)
 
-    pad = " " * padding
+    pad = " " * (1 if compact else padding)
     header_cells = [
         _pad_visible(text_blocks.truncate_visible(str(header), widths[idx]), widths[idx])
         for idx, header in enumerate(headers)
@@ -92,7 +94,12 @@ def render_table(
             raw = _stringify(cell)
             coloured = raw
             if use_color and palette and "\033[" not in raw:
-                if idx == 0 and accent_first_column and raw.strip():
+                style_name = None
+                if column_styles and idx < len(column_styles):
+                    style_name = column_styles[idx]
+                if style_name:
+                    coloured = colors.apply(raw, colors.style(style_name))
+                elif idx == 0 and accent_first_column and raw.strip():
                     coloured = colors.apply(raw, palette.accent, bold=True)
                 else:
                     coloured = colors.apply(raw, palette.text)

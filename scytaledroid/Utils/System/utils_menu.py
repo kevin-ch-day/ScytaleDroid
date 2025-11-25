@@ -10,6 +10,7 @@ from scytaledroid.Utils.DisplayUtils import (
     prompt_utils,
     status_messages,
 )
+from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
 
 from . import util_actions
 from .world_clock.configurator import configure_world_clocks
@@ -26,19 +27,19 @@ def utils_menu() -> None:
         "5": util_actions.clean_static_analysis_artifacts,
     }
     options = [
-        menu_utils.MenuOption("1", "Clear the console", "Wipe the terminal output"),
-        menu_utils.MenuOption("2", "Show log directories", "Quick reminders on where logs live"),
-        menu_utils.MenuOption(
+        MenuOption("1", "Clear the console", "Wipe the terminal output"),
+        MenuOption("2", "Show log directories", "Quick reminders on where logs live"),
+        MenuOption(
             "3",
             "Configure world clocks",
             "Manage the demo banner clocks",
         ),
-        menu_utils.MenuOption(
+        MenuOption(
             "4",
             "Output preferences",
             "Set verbosity, analytics detail, and sample limits",
         ),
-        menu_utils.MenuOption(
+        MenuOption(
             "5",
             "Housekeep static-analysis artefacts",
             (
@@ -52,7 +53,12 @@ def utils_menu() -> None:
     while True:
         print()
         menu_utils.print_header("Utilities")
-        menu_utils.print_menu(options, is_main=False, boxed=False)
+        spec = MenuSpec(
+            items=options,
+            show_exit=True,
+            exit_label="Back",
+        )
+        menu_utils.render_menu(spec)
 
         valid_keys = [item.key for item in options]
         choice = prompt_utils.get_choice(valid_keys + ["0"])

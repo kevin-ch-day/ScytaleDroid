@@ -21,10 +21,15 @@ def run_query_menu() -> None:
             ("2", "Session table counts", "Enter a session stamp to validate static tables."),
             ("3", "Runs and buckets by package", "List run metadata and scoring buckets."),
             ("4", "Harvest artifacts by package", "Show harvested APK records for a package."),
-            ("0", "Back", "Return to Database Utilities."),
         )
-        menu_utils.print_menu(options, padding=True, show_exit=False)
-        choice = prompt_utils.get_choice([opt[0] for opt in options])
+        spec = menu_utils.MenuSpec(
+            items=options,
+            show_exit=True,
+            exit_label="Back",
+            padding=True,
+        )
+        menu_utils.render_menu(spec)
+        choice = prompt_utils.get_choice([opt[0] for opt in options] + ["0"])
 
         if choice == "1":
             show_latest_session()

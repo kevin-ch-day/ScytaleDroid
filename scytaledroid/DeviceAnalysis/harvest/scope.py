@@ -9,7 +9,7 @@ from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set, Tupl
 
 from scytaledroid.Database.db_core import db_queries
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
-from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption
+from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
 
 from .models import InventoryRow, ScopeSelection
 from . import rules
@@ -288,13 +288,14 @@ def select_package_scope(
             }
         )
 
-        menu_utils.print_menu(
-            menu_items,
-            is_main=False,
+        spec = MenuSpec(
+            items=menu_items,
             default="1",
             exit_label="Cancel",
+            show_exit=True,
             show_descriptions=False,
         )
+        menu_utils.render_menu(spec)
         choice = prompt_utils.get_choice(
             [item.key for item in menu_items] + ["0"],
             default="1",

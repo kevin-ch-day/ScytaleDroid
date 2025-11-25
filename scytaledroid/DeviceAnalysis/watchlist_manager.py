@@ -8,6 +8,7 @@ from typing import Dict, Iterable, List, Optional
 from scytaledroid.Database.db_core import db_queries
 from scytaledroid.DeviceAnalysis import harvest
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, text_blocks
+from scytaledroid.Utils.DisplayUtils.menu_utils import MenuSpec
 
 
 _APP_NAME_CACHE: Dict[str, str] = {}
@@ -131,7 +132,8 @@ def _prompt_watchlist_choice(
     print()
     menu_utils.print_header("Select watchlist")
     options = {str(index): wl.slug for index, wl in enumerate(watchlists, start=1)}
-    menu_utils.print_menu({key: slug_map[slug].name for key, slug in options.items()}, is_main=False)
+    spec = MenuSpec(items={key: slug_map[slug].name for key, slug in options.items()}, show_exit=False)
+    menu_utils.render_menu(spec)
     menu_utils.print_hint("You can also type a watchlist slug directly.")
     choice = prompt_utils.prompt_text(
         "Selection",
@@ -178,4 +180,3 @@ def _resolve_app_names(packages: Iterable[str]) -> Dict[str, str]:
 
 
 __all__ = ["manage_watchlists"]
-

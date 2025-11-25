@@ -20,6 +20,7 @@ from .device_menu.auto_ops import (
     ensure_active_device as auto_connect_device,
     ensure_inventory_survey,
 )
+from .device_menu.actions import _connect_to_device  # reuse existing picker UI
 from .device_menu.inventory_guard.metadata import get_latest_inventory_metadata
 
 
@@ -42,12 +43,25 @@ def device_menu() -> None:
             get_latest_inventory_metadata(active_serial) if active_serial else None
         )
 
+        # If no active device but devices are present, offer an immediate connect prompt
+        if not active_device and devices:
+            should_connect = prompt_utils.prompt_yes_no(
+                "Select a device now?",
+                default=len(devices) == 1,
+            )
+            if should_connect:
+                _connect_to_device(devices, summaries)
+                # Restart loop to refresh dashboard with the chosen device
+                summary_cache.clear()
+                continue
+
         print_dashboard(
             summaries,
             active_details,
             warnings,
             last_refresh_ts,
             serial_map,
+            inventory_metadata=inventory_metadata,
         )
 
         for message in auto_messages:
@@ -65,9 +79,16 @@ def device_menu() -> None:
         print()
         menu_utils.print_header("Device Analysis")
         options = build_main_menu_options(active_details)
-        # Default to Connect when exactly one device is present
-        default_key = "3" if len(summaries) == 1 else "1"
-        menu_utils.print_menu(options, is_main=False, default=default_key, exit_label="Back")
+        # Default to List devices to give a quick view before deeper actions
+        default_key = "1"
+        spec = menu_utils.MenuSpec(
+            items=options,
+            default=default_key,
+            exit_label="Back",
+            show_exit=True,
+            show_descriptions=True,
+        )
+        menu_utils.render_menu(spec)
         # Footer shortcuts (informational)
         print(
             "Shortcuts: r=Refresh  c=Connect/Switch  i=Info  s=Shell  l=Logcat  q/0=Back"

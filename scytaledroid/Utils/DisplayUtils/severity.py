@@ -146,4 +146,27 @@ def format_severity_strip(
     return " ".join(tokens)
 
 
+# Delta-specific helpers (new/removed/updated) for reuse across dashboards
+DELTA_STYLES = {
+    "new": "severity_success",
+    "added": "severity_success",
+    "removed": "severity_error",
+    "deleted": "severity_error",
+    "updated": "severity_warning",
+    "changed": "severity_warning",
+}
+
+
+def format_delta_token(kind: str, value: object) -> str:
+    """Return a colourised inline token for change deltas."""
+
+    canonical = kind.lower().strip()
+    style_name = DELTA_STYLES.get(canonical, "muted")
+    numeric = str(value).strip()
+    palette_style = colors.style(style_name)
+    label = canonical.upper()
+    return colors.apply(f"{label}:{numeric}", palette_style, bold=True)
+
+
+
 __all__ = ["format_severity_strip", "normalise_counts", "severity_summary_items"]
