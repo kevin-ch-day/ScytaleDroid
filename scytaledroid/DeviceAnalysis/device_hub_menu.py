@@ -150,7 +150,9 @@ def devices_hub() -> None:
         log.info(f"User selected active device {serial}", category="device")
         from scytaledroid.DeviceAnalysis.device_analysis_menu import device_menu
 
-        device_menu()
+        result = device_menu(return_to="main")
+        if str(result).lower() == "main":
+            return
         # loop back to hub to allow switching
 
 

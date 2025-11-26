@@ -18,7 +18,8 @@ from scytaledroid.Utils.DisplayUtils import (
 )
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
-from . import adb_utils, inventory, package_profiles
+from . import adb_utils, package_profiles
+from scytaledroid.DeviceAnalysis.services import device_service
 
 
 def generate_device_report(serial: Optional[str]) -> None:
@@ -43,13 +44,13 @@ def generate_device_report(serial: Optional[str]) -> None:
         return
 
     summary = adb_utils.build_device_summary(device_entry)
-    inventory_payload = inventory.load_latest_inventory(serial)
+    inventory_payload = device_service.fetch_raw_inventory(serial)
     if not inventory_payload:
         if prompt_utils.prompt_yes_no(
             "No inventory data found. Run a new inventory sync now?", default=True
         ):
-            inventory.run_inventory_sync(serial)
-            inventory_payload = inventory.load_latest_inventory(serial)
+            device_service.sync_inventory(serial)
+            inventory_payload = device_service.fetch_raw_inventory(serial)
         else:
             inventory_payload = {"packages": [], "package_count": 0}
 

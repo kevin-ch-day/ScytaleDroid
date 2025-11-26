@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from scytaledroid.DeviceAnalysis import adb_utils
+from scytaledroid.DeviceAnalysis.services import device_service
 from scytaledroid.DeviceAnalysis import inventory as inventory_module
 from scytaledroid.DeviceAnalysis import inventory_meta
 from .constants import INVENTORY_STALE_SECONDS
@@ -428,34 +429,27 @@ def get_latest_inventory_metadata(
 def format_inventory_status(serial: Optional[str]) -> str:
     if not serial:
         return "connect device"
-    metadata = get_latest_inventory_metadata(serial)
-    if not metadata or not metadata.get("timestamp"):
+    status = device_service.fetch_inventory_metadata(serial)
+    if not status:
         return "not yet run"
-    age_seconds = (datetime.now(timezone.utc) - metadata["timestamp"]).total_seconds()
-    if age_seconds < 0:
-        age_seconds = 0
-    status = f"synced {humanize_seconds(age_seconds)} ago"
-    if age_seconds > INVENTORY_STALE_SECONDS:
-        status = f"{status} (stale)"
-    return status
+    if status.last_run_ts is None:
+        return "not yet run"
+    label = status.status_label.lower()
+    age = status.age_display
+    text = f"{label} {age} ago" if age and age != "unknown" else label
+    if status.is_stale:
+        text = f"{text} (stale)"
+    return text
 
 
 def format_pull_hint(serial: Optional[str]) -> str:
     if not serial:
         return "requires device"
-    metadata = get_latest_inventory_metadata(serial)
-    if not metadata or not metadata.get("timestamp"):
+    status = device_service.fetch_inventory_metadata(serial)
+    if not status or status.last_run_ts is None:
         return "needs inventory sync"
-    age_seconds = (
-        datetime.now(timezone.utc) - metadata["timestamp"]
-    ).total_seconds()
-    if age_seconds < 0:
-        age_seconds = 0
-    count = metadata.get("package_count")
-    stale = age_seconds > INVENTORY_STALE_SECONDS
-    prefix = "inventory stale" if stale else "inventory ready"
+    count = status.package_count
+    prefix = "inventory stale" if status.is_stale else "inventory ready"
     if isinstance(count, int):
         return f"{prefix} ({count} packages)"
-    if isinstance(count, str) and count.isdigit():
-        return f"{prefix} ({int(count)} packages)"
     return prefix

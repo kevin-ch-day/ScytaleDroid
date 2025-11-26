@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Optional
+from dataclasses import dataclass
 
 from scytaledroid.StaticAnalysis.cli.runner import launch_scan_flow
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
@@ -13,9 +14,27 @@ class StaticServiceError(RuntimeError):
     """Raised when a static analysis run cannot be completed."""
 
 
-def run_scan(selection: Any, params: Any, base_dir: Path, *, study_tag: Optional[str] = None) -> Any:
+@dataclass(frozen=True)
+class RunResult:
+    outcome: Any
+    pipeline_version: Optional[str]
+    catalog_versions: Optional[str]
+    config_hash: Optional[str]
+    study_tag: Optional[str]
+
+
+def run_scan(
+    selection: Any,
+    params: Any,
+    base_dir: Path,
+    *,
+    study_tag: Optional[str] = None,
+    pipeline_version: Optional[str] = None,
+    catalog_versions: Optional[str] = None,
+    config_hash: Optional[str] = None,
+) -> RunResult:
     """
-    Run the static analysis scan flow and return the outcome.
+    Run the static analysis scan flow and return the outcome with metadata.
 
     Parameters
     ----------
@@ -27,6 +46,12 @@ def run_scan(selection: Any, params: Any, base_dir: Path, *, study_tag: Optional
         Root directory containing harvested APKs.
     study_tag : str | None
         Optional tag to label the run for research/reproducibility.
+    pipeline_version : str | None
+        Pipeline version identifier.
+    catalog_versions : str | None
+        Permission/catalog version identifiers.
+    config_hash : str | None
+        Hash of static analysis configuration for reproducibility.
     """
     # Attach study tag to params when supported.
     if study_tag and hasattr(params, "study_tag"):
@@ -34,11 +59,23 @@ def run_scan(selection: Any, params: Any, base_dir: Path, *, study_tag: Optional
             setattr(params, "study_tag", study_tag)
         except Exception:
             pass
+    if pipeline_version and hasattr(params, "analysis_version"):
+        try:
+            setattr(params, "analysis_version", pipeline_version)
+        except Exception:
+            pass
     try:
-        return launch_scan_flow(selection, params, base_dir)
+        outcome = launch_scan_flow(selection, params, base_dir)
+        return RunResult(
+            outcome=outcome,
+            pipeline_version=getattr(params, "analysis_version", pipeline_version),
+            catalog_versions=catalog_versions,
+            config_hash=config_hash,
+            study_tag=study_tag,
+        )
     except Exception as exc:
         log.error(f"Static analysis failed: {exc}", category="static")
         raise StaticServiceError(str(exc)) from exc
 
 
-__all__ = ["run_scan", "StaticServiceError"]
+__all__ = ["run_scan", "StaticServiceError", "RunResult"]

@@ -5,7 +5,10 @@ from __future__ import annotations
 import time
 from typing import Dict, Optional
 
+from datetime import datetime
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
+from scytaledroid.Utils.DisplayUtils import text_blocks, table_utils, colors
+from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.constants import INVENTORY_STALE_SECONDS
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from . import adb_utils
@@ -24,7 +27,11 @@ from .device_menu.actions import _connect_to_device  # reuse existing picker UI
 from .device_menu.inventory_guard.metadata import get_latest_inventory_metadata
 
 
-def device_menu() -> None:
+EXIT_TO_MAIN = "main"
+EXIT_TO_HUB = "hub"
+
+
+def device_menu(return_to: str = EXIT_TO_MAIN) -> str:
     """Render the Device Analysis menu until the user chooses to go back."""
     summary_cache: Dict[str, Dict[str, Optional[str]]] = {}
     surveyed_serials: set[str] = set()
@@ -53,16 +60,7 @@ def device_menu() -> None:
                 summary_cache.clear()
                 continue
 
-        print_dashboard(
-            summaries,
-            active_details,
-            warnings,
-            last_refresh_ts,
-            serial_map,
-            show_device_table=False,
-            inventory_metadata=inventory_metadata,
-            context=f"Device dashboard ({active_details.get('serial') if active_details else 'none'})",
-        )
+        _render_status_panel(active_details, inventory_metadata)
 
         if warnings and not devices:
             # No devices / adb unavailable; prompt and continue loop
@@ -109,7 +107,7 @@ def device_menu() -> None:
         choice = prompt_utils.get_choice(valid_keys + ["0"], default="1")
 
         if choice == "0":
-            return
+            return return_to
 
         refresh_requested = handle_choice(
             choice,
@@ -132,3 +130,57 @@ def device_menu() -> None:
         for serial in list(summary_cache.keys()):
             if serial not in present_serials:
                 summary_cache.pop(serial, None)
+
+
+def _render_status_panel(
+    active_details: Optional[Dict[str, Optional[str]]],
+    inventory_metadata: Optional[object],
+) -> None:
+    print()
+    # Header context
+    serial = active_details.get("serial") if active_details else None
+    label = None
+    if active_details:
+        label = active_details.get("model") or active_details.get("device")
+    heading = "Device dashboard"
+    if label and serial:
+        heading = f"Device dashboard — {label} ({serial})"
+    menu_utils.print_header(heading)
+
+    if not active_details:
+        print(status_messages.status("No active device. Use Connect to select one.", level="warn"))
+        return
+
+    # Inventory status panel
+    status = inventory_metadata
+    if status is None:
+        print(status_messages.status("Inventory: not yet run. Use option 5 to sync.", level="warn"))
+        return
+
+    # Normalize InventoryStatus fields
+    status_label = getattr(status, "status_label", None) or "unknown"
+    age = getattr(status, "age_display", "unknown")
+    pkg_count = getattr(status, "package_count", None)
+    is_stale = bool(getattr(status, "is_stale", False))
+    last_ts = getattr(status, "last_run_ts", None)
+
+    print("Inventory status")
+    print("================")
+    from scytaledroid.Utils.DisplayUtils.terminal import use_ascii_ui
+
+    palette = colors.get_palette()
+    bullet = "●" if not use_ascii_ui() else "*"
+    label_style = palette.success if status_label.upper() == "FRESH" and not is_stale else palette.warning
+    status_line = f"{bullet} {status_label.upper()}  • Age: {age}  • Packages: {pkg_count or '—'}"
+    print(colors.apply(status_line, label_style, bold=True) if colors.colors_enabled() else status_line)
+    if isinstance(last_ts, datetime):
+        print(f"Last sync: {last_ts.strftime('%Y-%m-%d %H:%M:%S %Z') or last_ts.isoformat()}")
+    print(f"Threshold: {INVENTORY_STALE_SECONDS // 60}m (inventory considered stale)")
+    if is_stale:
+        print(
+            status_messages.status(
+                "Recommendation: run Inventory & database sync before pulling APKs.",
+                level="warn",
+            )
+        )
+    print()

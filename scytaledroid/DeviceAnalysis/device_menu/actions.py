@@ -14,7 +14,7 @@ from scytaledroid.Utils.DisplayUtils import (
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from scytaledroid.DeviceAnalysis import adb_utils, device_manager
-from scytaledroid.DeviceAnalysis.inventory import inventory_sync_menu
+from scytaledroid.DeviceAnalysis.inventory import inventory_sync_menu  # type: ignore  # imported at runtime to avoid circular import
 from .formatters import (
     format_android_release,
     format_build_tags,
@@ -30,7 +30,8 @@ from .inventory_guard import (
     format_inventory_status,
     format_pull_hint,
 )
-from scytaledroid.DeviceAnalysis.services import apk_library_service
+from scytaledroid.DeviceAnalysis.services import apk_library_service, device_service
+from scytaledroid.DeviceAnalysis.services import info_service
 
 
 _HELPER_ROUTES = {
@@ -88,29 +89,19 @@ def build_main_menu_options(
     serial = active_details.get("serial") if active_details else device_manager.get_active_serial()
     has_device = bool(serial)
 
+    inv_status_obj = device_service.fetch_inventory_metadata(serial) if serial else None
     inventory_status = format_inventory_status(serial)
     pull_hint = format_pull_hint(serial)
 
     # Derive compact badges from status strings
     inv_badge: Optional[str] = None
-    if inventory_status:
-        text = (inventory_status or "").lower()
-        if "stale" in text:
-            # Extract age token like "13h 41m" if present
-            age = None
-            for token in inventory_status.split():
-                if any(ch.isdigit() for ch in token) and any(ch in token for ch in ["h", "m", "s"]):
-                    age = token.strip(",.")
-                    break
-            inv_badge = f"stale: {age}" if age else "stale"
-        elif "synced" in text or "fresh" in text:
-            inv_badge = None
+    if inv_status_obj:
+        if inv_status_obj.is_stale:
+            inv_badge = "recommended"
+        elif inv_status_obj.status_label == "NONE":
+            inv_badge = "not run"
 
     pull_badge: Optional[str] = None
-    if pull_hint:
-        t = pull_hint.lower()
-        if "stale" in t:
-            pull_badge = "stale inventory"
 
     needs_active = None if has_device else "needs active"
 
@@ -128,6 +119,7 @@ def build_main_menu_options(
             "5",
             "Inventory & database sync",
             badge=inv_badge or needs_active,
+            hint="Refresh packages and DB entries",
         ),
         menu_utils.MenuOption(
             "6",
@@ -140,6 +132,7 @@ def build_main_menu_options(
             "Pull APKs",
             disabled=not has_device,
             badge=pull_badge or needs_active,
+            hint="Fetch APKs to data/apks for static analysis",
         ),
         menu_utils.MenuOption(
             "8",
@@ -267,7 +260,8 @@ def _show_device_info(
     active_device: Optional[Dict[str, Optional[str]]],
     active_details: Optional[Dict[str, Optional[str]]],
 ) -> None:
-    if not active_device:
+    info_rows = info_service.fetch_device_info(active_details)
+    if not info_rows:
         error_panels.print_error_panel(
             "Device Info",
             "No active device. Use option 3 to connect first.",
@@ -275,50 +269,8 @@ def _show_device_info(
         prompt_utils.press_enter_to_continue()
         return
 
-    serial = active_device.get("serial")
-    if not serial:
-        error_panels.print_error_panel(
-            "Device Info",
-            "Unable to determine the serial for the active device.",
-        )
-        prompt_utils.press_enter_to_continue()
-        return
-
-    properties = active_details or adb_utils.get_basic_properties(serial)
-    if not properties:
-        error_panels.print_error_panel(
-            "Device Info",
-            "No additional properties could be retrieved.",
-            hint="Ensure the device is unlocked and responsive.",
-        )
-    else:
-        print("\nDevice information:")
-        info_rows = [
-            ("Serial", serial),
-            ("Device Type", properties.get("device_type", "Unknown")),
-            (
-                "Manufacturer",
-                prettify_manufacturer(
-                    properties.get("manufacturer") or properties.get("brand")
-                ),
-            ),
-            ("Model", prettify_model(properties.get("model") or properties.get("device"))),
-            (
-                "Android Version",
-                format_android_release(properties, include_sdk=True) or "Unknown",
-            ),
-            ("SDK Level", properties.get("sdk_level") or "Unknown"),
-            ("Hardware", properties.get("hardware") or "Unknown"),
-            ("Product", properties.get("product") or "Unknown"),
-            ("Build ID", properties.get("build_id") or "Unknown"),
-            ("Build Tags", format_build_tags(properties.get("build_tags"))),
-            ("Chipset", properties.get("chipset") or "Unknown"),
-            ("Battery", format_battery(properties)),
-            ("Wi-Fi", format_wifi_state(properties.get("wifi_state"))),
-            ("Root Access", properties.get("is_rooted") or "Unknown"),
-            ("Emulator", format_emulator_flag(properties.get("is_emulator_flag"))),
-        ]
-        table_utils.render_table(["Field", "Value"], [[field, value] for field, value in info_rows])
+    print("\nDevice information:")
+    table_utils.render_table(["Field", "Value"], [[field, value] for field, value in info_rows.items()])
     prompt_utils.press_enter_to_continue()
 
 
@@ -394,6 +346,38 @@ def _run_apk_pull(active_device: Optional[Dict[str, Optional[str]]]) -> None:
         )
         prompt_utils.press_enter_to_continue()
         return
+
+    status = device_service.fetch_inventory_metadata(serial)
+    if status and status.is_stale:
+        print("\nPull APKs")
+        print("=========")
+        print(
+            status_messages.status(
+                f"Current inventory: {status.status_label} ({status.age_display}) • {status.package_count or 'unknown'} packages",
+                level="warn",
+            )
+        )
+        print(
+            status_messages.status(
+                "Pulling APKs on stale inventory may miss recent app changes.",
+                level="warn",
+            )
+        )
+        options = {
+            "1": "Run inventory & database sync first (recommended)",
+            "2": "Proceed with stale inventory",
+            "0": "Cancel",
+        }
+        menu_utils.print_menu(options, show_exit=False, show_descriptions=False)
+        choice = prompt_utils.get_choice(list(options) + ["0"], default="0")
+        if choice == "0":
+            return
+        if choice == "1":
+            from scytaledroid.DeviceAnalysis.inventory import inventory_sync_menu
+            inventory_sync_menu(serial)
+            # refresh status after sync
+            status = device_service.fetch_inventory_metadata(serial)
+        # fall through to pull if choice == "2" or after sync
 
     if not ensure_recent_inventory(serial, device_context=active_device):
         return

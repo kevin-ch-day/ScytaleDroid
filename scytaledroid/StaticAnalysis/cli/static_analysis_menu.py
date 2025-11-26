@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING
 from scytaledroid.Config import app_config
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuItemSpec, MenuSpec
+from scytaledroid.DeviceAnalysis.services.static_scope_service import static_scope_service
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 if TYPE_CHECKING:
     from .commands.models import Command
@@ -50,6 +52,55 @@ def render_reset_outcome(outcome: object) -> None:
     actions.render_reset_outcome(outcome)
 
 
+def _library_scope_selection(groups):
+    """Build a ScopeSelection from the APK library selection, if any."""
+    from scytaledroid.StaticAnalysis.cli.models import ScopeSelection
+
+    selected_paths = set(static_scope_service.get_selected())
+    if not selected_paths:
+        return None
+
+    selected_groups = []
+    for group in groups:
+        if any(str(artifact.path) in selected_paths for artifact in group.artifacts):
+            selected_groups.append(group)
+
+    if not selected_groups:
+        return None
+
+    scope_label = f"Library selection ({len(selected_groups)} app{'s' if len(selected_groups) != 1 else ''})"
+    scope_type = "app" if len(selected_groups) == 1 else "library-selection"
+    return ScopeSelection(scope_type, scope_label, tuple(selected_groups))
+
+
+def _choose_scope(groups):
+    """Prompt for scope, preferring library selection when available."""
+    from .scope import select_scope
+    from scytaledroid.StaticAnalysis.cli.models import ScopeSelection
+
+    library_scope = _library_scope_selection(groups)
+    if library_scope:
+        print()
+        menu_utils.print_header("Static Analysis Scope")
+        print(
+            status_messages.status(
+                f"APK library selection is active: {len(library_scope.groups)} group(s), {static_scope_service.count()} APKs.",
+                level="info",
+            )
+        )
+        choice = prompt_utils.get_choice(
+            ["1", "2", "0"],
+            default="1",
+            prompt="1=Use selection  2=Choose different scope  0=Back ",
+        )
+        if choice == "0":
+            return None
+        if choice == "1":
+            return library_scope
+
+    return select_scope(groups)
+
+
 def static_analysis_menu() -> None:
     from scytaledroid.Database.db_utils.menus import query_runner
     from scytaledroid.Database.db_utils.reset_static import reset_static_analysis_data
@@ -89,6 +140,14 @@ def static_analysis_menu() -> None:
     while True:
         print()
         menu_utils.print_header("Android APK Static Analysis")
+        selected_apks = static_scope_service.count()
+        if selected_apks:
+            print(
+                status_messages.status(
+                    f"Library selection: {selected_apks} APKs marked. You can run scans on this selection.",
+                    level="info",
+                )
+            )
         workflow_spec = MenuSpec(
             items=[_command_option(cmd) for cmd in workflow_commands],
             show_exit=False,
@@ -123,7 +182,9 @@ def static_analysis_menu() -> None:
             print(status_messages.status("Command missing run profile.", level="error"))
             continue
 
-        selection = select_scope(groups)
+        selection = _choose_scope(groups)
+        if selection is None:
+            continue
         if command.force_app_scope and selection.scope != "app":
             print(status_messages.status("This workflow requires choosing a single app.", level="warn"))
             continue
@@ -154,7 +215,16 @@ def static_analysis_menu() -> None:
                 effective_params = prompt_session_label(effective_params)
 
             try:
-                outcome = static_service.run_scan(selection, effective_params, base_dir)
+                result = static_service.run_scan(
+                    selection,
+                    effective_params,
+                    base_dir,
+                    study_tag=getattr(effective_params, "study_tag", None),
+                    pipeline_version=getattr(effective_params, "analysis_version", None),
+                    catalog_versions=None,
+                    config_hash=None,
+                )
+                outcome = result.outcome
             except static_service.StaticServiceError as exc:
                 print(status_messages.status(f"Static analysis failed: {exc}", level="error"))
                 log.error(f"Static analysis run failed: {exc}", category="static")

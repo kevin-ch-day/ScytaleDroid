@@ -24,6 +24,11 @@ from scytaledroid.Utils.DisplayUtils import (
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from . import adb_utils, inventory_meta, package_profiles
+from .services import device_service
+try:
+    from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.constants import INVENTORY_STALE_SECONDS
+except Exception:  # pragma: no cover - defensive fallback
+    INVENTORY_STALE_SECONDS = 1800
 from scytaledroid.Database.db_core import run_sql
 from scytaledroid.Database.db_func.harvest import device_inventory as inventory_repo
 from scytaledroid.Database.db_func.harvest.apk_repository import ensure_app_definition
@@ -492,6 +497,20 @@ def inventory_sync_menu(serial: Optional[str]) -> None:
     while True:
         print()
         menu_utils.print_header("Inventory & Sync")
+        status = device_service.fetch_inventory_metadata(serial)
+        if status and status.last_run_ts:
+            freshness = f"{status.status_label} ({status.age_display})"
+            if status.is_stale:
+                print(status_messages.status(f"Current inventory: {freshness}", level="warn"))
+                print(
+                    status_messages.status(
+                        "Recommendation: run a full sync to refresh packages and DB entries.",
+                        level="info",
+                    )
+                )
+            else:
+                print(status_messages.status(f"Current inventory: {freshness}", level="info"))
+        print(f"Threshold: {INVENTORY_STALE_SECONDS // 60}m (inventory considered stale)")
         options = {
             "1": "Sync all packages",
             "2": "Sync user-installed apps",
@@ -506,10 +525,10 @@ def inventory_sync_menu(serial: Optional[str]) -> None:
         if choice == "0":
             break
         if choice == "1":
-            run_inventory_sync(serial)
+            device_service.sync_inventory(serial)
             return
         elif choice == "2":
-            run_inventory_sync(
+            device_service.sync_inventory(
                 serial,
                 filter_name="User-installed apps",
                 filter_fn=lambda entry: (
@@ -518,7 +537,7 @@ def inventory_sync_menu(serial: Optional[str]) -> None:
             )
             return
         elif choice == "3":
-            run_inventory_sync(
+            device_service.sync_inventory(
                 serial,
                 filter_name="System & OEM modules",
                 filter_fn=lambda entry: (
@@ -529,7 +548,7 @@ def inventory_sync_menu(serial: Optional[str]) -> None:
             return
         elif choice == "4":
             profiles = {"Social", "Messaging"}
-            run_inventory_sync(
+            device_service.sync_inventory(
                 serial,
                 filter_name="Social & Messaging apps",
                 filter_fn=lambda entry: str(entry.get("profile_name")) in profiles,
@@ -537,7 +556,7 @@ def inventory_sync_menu(serial: Optional[str]) -> None:
             return
         elif choice == "5":
             profiles = {"Finance", "Shopping"}
-            run_inventory_sync(
+            device_service.sync_inventory(
                 serial,
                 filter_name="Finance & Shopping apps",
                 filter_fn=lambda entry: str(entry.get("profile_name")) in profiles,

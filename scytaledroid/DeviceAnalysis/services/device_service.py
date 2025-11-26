@@ -7,7 +7,7 @@ can stay focused on rendering and prompting.
 from __future__ import annotations
 
 from typing import Dict, List, Optional, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 
 from scytaledroid.DeviceAnalysis import adb_utils, device_manager
 from scytaledroid.DeviceAnalysis.device_menu.dashboard import build_device_summaries
@@ -19,6 +19,9 @@ from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.constants import (
     INVENTORY_STALE_SECONDS,
 )
 from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.utils import humanize_seconds
+from scytaledroid.DeviceAnalysis import inventory_meta
+from scytaledroid.DeviceAnalysis.inventory import run_inventory_sync
+from scytaledroid.DeviceAnalysis.inventory import load_latest_inventory
 
 
 def scan_devices(
@@ -70,6 +73,68 @@ def resolve_active_device(devices: List[Dict[str, Optional[str]]]) -> Optional[D
     return None
 
 
+def _compute_inventory_status(
+    meta: Optional[dict],
+    snapshot_meta: Optional[inventory_meta.InventoryMeta],
+) -> InventoryStatus:
+    """Compute a unified InventoryStatus from metadata or snapshot."""
+
+    ts = None
+    pkg_count = None
+    pkg_changed = False
+    scope_changed = False
+    state_changed = False
+    fp_changed = False
+
+    if isinstance(meta, dict):
+        ts = meta.get("timestamp")
+        pkg_count = meta.get("package_count") if isinstance(meta.get("package_count"), int) else None
+        pkg_changed = bool(meta.get("packages_changed"))
+        scope_changed = bool(meta.get("scope_changed"))
+        state_changed = bool(meta.get("state_changed"))
+        fp_changed = bool(meta.get("build_fingerprint_changed"))
+    if ts is None and snapshot_meta is not None:
+        ts = snapshot_meta.captured_at
+        pkg_count = snapshot_meta.package_count
+
+    age_seconds: Optional[int] = None
+    if isinstance(ts, datetime):
+        try:
+            if ts.tzinfo is None:
+                ts_utc = ts
+                now_utc = datetime.utcnow()
+            else:
+                ts_utc = ts.astimezone(timezone.utc)
+                now_utc = datetime.now(timezone.utc)
+            age_seconds = max(0, int((now_utc - ts_utc).total_seconds()))
+        except Exception:
+            age_seconds = None
+
+    is_stale = bool(age_seconds is not None and age_seconds >= INVENTORY_STALE_SECONDS)
+    status_label = "NONE"
+    if ts is None:
+        status_label = "NONE"
+    elif is_stale:
+        status_label = "STALE"
+    else:
+        status_label = "FRESH"
+
+    age_display = humanize_seconds(age_seconds) if age_seconds is not None else "unknown"
+
+    return InventoryStatus(
+        last_run_ts=ts if isinstance(ts, datetime) else None,
+        package_count=pkg_count,
+        age_seconds=age_seconds,
+        is_stale=is_stale,
+        status_label=status_label,
+        age_display=age_display,
+        packages_changed=pkg_changed,
+        scope_changed=scope_changed,
+        state_changed=state_changed,
+        fingerprint_changed=fp_changed,
+    )
+
+
 def fetch_inventory_metadata(
     serial: Optional[str],
     *,
@@ -84,29 +149,41 @@ def fetch_inventory_metadata(
         scope_packages=scope_packages,
         scope_id=scope_id,
     )
-    if not meta:
-        return None
-    ts = meta.get("timestamp")
-    pkg_count = meta.get("package_count") if isinstance(meta.get("package_count"), int) else None
-    age_seconds = None
-    is_stale = False
-    if ts:
-        # Ensure ts is naive UTC
-        try:
-            age_seconds = max(0, int((datetime.utcnow() - ts.replace(tzinfo=None)).total_seconds()))
-            is_stale = age_seconds > INVENTORY_STALE_SECONDS
-        except Exception:
-            age_seconds = None
-    status_label = "FRESH" if not is_stale else "STALE"
-    age_display = humanize_seconds(age_seconds) if age_seconds is not None else "unknown"
-    return InventoryStatus(
-        last_run_ts=ts,
-        package_count=pkg_count,
-        age_seconds=age_seconds,
-        is_stale=is_stale,
-        status_label=status_label,
-        age_display=age_display,
+    snapshot_meta = None
+    if serial:
+        snapshot_meta = inventory_meta.load_latest(serial)
+    return _compute_inventory_status(meta, snapshot_meta)
+
+
+def sync_inventory(
+    serial: str,
+    *,
+    filter_name: Optional[str] = None,
+    filter_fn: Optional[callable] = None,
+) -> InventoryStatus:
+    """
+    Run an inventory sync for the given device serial and return updated status.
+
+    filter_name/filter_fn are passed through to the existing sync helper for scoped syncs.
+    """
+    run_inventory_sync(serial, filter_name=filter_name, filter_fn=filter_fn)
+    # Refresh metadata after sync
+    status = fetch_inventory_metadata(serial, with_current_state=True)
+    return status or InventoryStatus(
+        last_run_ts=None,
+        package_count=None,
+        age_seconds=None,
+        is_stale=False,
+        status_label="NONE",
+        age_display="unknown",
     )
+
+
+def fetch_raw_inventory(serial: Optional[str]) -> Optional[dict]:
+    """Return the latest inventory payload from disk."""
+    if not serial:
+        return None
+    return load_latest_inventory(serial)
 
 
 __all__ = [
