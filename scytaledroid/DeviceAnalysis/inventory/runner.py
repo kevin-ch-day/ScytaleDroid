@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional, Protocol
+from typing import Callable, Dict, Optional, Protocol
 
 from scytaledroid.DeviceAnalysis.inventory import snapshot_io
 from scytaledroid.DeviceAnalysis.inventory import package_collection
@@ -36,6 +36,7 @@ class InventorySyncStats:
 class InventoryResult:
     serial: str
     snapshot_path: Path
+    rows: list
     stats: InventorySyncStats
     previous_total: Optional[int]
     previous_split: Optional[int]
@@ -45,68 +46,74 @@ class InventoryResult:
 
 def run_full_sync(
     serial: str,
-    filter_fn: Optional[Callable[[package_collection.PackageRow], bool]] = None,
+    filter_fn: Optional[Callable[[Dict[str, object]], bool]] = None,
     progress_cb: Optional[ProgressCallback] = None,
 ) -> InventoryResult:
     """
     Run a full inventory sync for *serial* and return a UI-free result.
     """
-    # Legacy-compatible path: delegate to the existing run_inventory_sync but
-    # suppress interactive UI. Then derive stats from the latest snapshot.
     prev_meta = snapshot_io.load_latest_snapshot_meta(serial)
+    prev_snapshot = snapshot_io.load_latest_inventory(serial)
     prev_packages: set[str] = set()
-    prev_split: Optional[int] = None
-    if prev_meta:
-        latest_prev = snapshot_io.load_latest_inventory(serial)
-        if latest_prev:
-            pkgs = latest_prev.get("packages") or []
-            if isinstance(pkgs, list):
-                for item in pkgs:
-                    if isinstance(item, dict) and isinstance(item.get("package_name"), str):
-                        prev_packages.add(item["package_name"])
-                prev_split = sum(1 for item in pkgs if isinstance(item, dict) and int(item.get("split_count") or 1) > 1)
+    prev_split = 0
+    if prev_snapshot:
+        pkgs = prev_snapshot.get("packages") or []
+        if isinstance(pkgs, list):
+            for item in pkgs:
+                if isinstance(item, dict):
+                    name = item.get("package_name")
+                    if isinstance(name, str):
+                        prev_packages.add(name)
+                    if int(item.get("split_count") or 1) > 1:
+                        prev_split += 1
 
-    # Call legacy sync (non-interactive) to perform the actual work.
-    from scytaledroid.DeviceAnalysis import inventory as legacy_inventory
-
-    legacy_inventory.run_inventory_sync(
-        serial,
+    rows, coll_stats = package_collection.collect_inventory(
+        serial=serial,
         filter_fn=filter_fn,
-        interactive=False,
-        progress_callback=progress_cb,
+        progress_cb=progress_cb,
     )
 
-    latest_meta = snapshot_io.load_latest_snapshot_meta(serial)
-    latest_payload = snapshot_io.load_latest_inventory(serial) or {}
-    pkgs = latest_payload.get("packages") or []
-    pkg_names: set[str] = set()
-    split_count = 0
-    if isinstance(pkgs, list):
-        for item in pkgs:
-            if isinstance(item, dict):
-                name = item.get("package_name")
-                if isinstance(name, str):
-                    pkg_names.add(name)
-                if int(item.get("split_count") or 1) > 1:
-                    split_count += 1
+    snapshot_path = snapshot_io.persist_snapshot(
+        serial=serial,
+        rows=rows,  # type: ignore[arg-type]
+        package_hash=coll_stats.package_hash,
+        package_list_hash=coll_stats.package_list_hash,
+        package_signature_hash=coll_stats.package_signature_hash,
+        build_fingerprint=coll_stats.build_fingerprint,
+        duration_seconds=coll_stats.elapsed_seconds,
+        snapshot_type="full",
+    )
 
-    new_pkgs = len(pkg_names - prev_packages) if prev_packages else len(pkg_names)
-    removed_pkgs = len(prev_packages - pkg_names) if prev_packages else 0
+    synced_defs = db_sync.sync_app_definitions(rows)
+
+    current_pkg_names: set[str] = set()
+    split_count = 0
+    for item in rows:
+        if isinstance(item, dict):
+            name = item.get("package_name")
+            if isinstance(name, str):
+                current_pkg_names.add(name)
+            if int(item.get("split_count") or 1) > 1:
+                split_count += 1
+
+    new_pkgs = len(current_pkg_names - prev_packages) if prev_packages else len(current_pkg_names)
+    removed_pkgs = len(prev_packages - current_pkg_names) if prev_packages else 0
 
     stats = InventorySyncStats(
-        total_packages=len(pkg_names),
+        total_packages=len(current_pkg_names),
         split_packages=split_count,
         new_packages=new_pkgs,
         removed_packages=removed_pkgs,
-        elapsed_seconds=float(getattr(latest_meta, "duration_seconds", 0.0) or 0.0),
+        elapsed_seconds=coll_stats.elapsed_seconds,
     )
 
     return InventoryResult(
         serial=serial,
-        snapshot_path=Path(latest_payload.get("snapshot_path") or ""),
+        snapshot_path=snapshot_path,
+        rows=rows,
         stats=stats,
         previous_total=(prev_meta.package_count if prev_meta else None),
-        previous_split=prev_split,
-        synced_app_definitions=0,
-        elapsed_seconds=stats.elapsed_seconds,
+        previous_split=prev_split if prev_split else None,
+        synced_app_definitions=synced_defs,
+        elapsed_seconds=coll_stats.elapsed_seconds,
     )

@@ -68,8 +68,17 @@ def handle_choice(
             )
             prompt_utils.press_enter_to_continue()
             return False
-        from scytaledroid.DeviceAnalysis.inventory import run_inventory_sync  # local import to avoid circular
-        run_inventory_sync(serial, interactive=True)
+        # Use service façade for sync (CLI path)
+        from scytaledroid.DeviceAnalysis.services import inventory_service
+
+        try:
+            inventory_service.run_full_sync(serial, ui_prefs=None, progress_sink="cli")
+        except inventory_service.InventoryServiceError as exc:
+            error_panels.print_error_panel(
+                "Inventory & database sync",
+                str(exc),
+            )
+            prompt_utils.press_enter_to_continue()
     elif choice == "6":
         _forward_to_helper(choice, active_device)
     elif choice == "7":

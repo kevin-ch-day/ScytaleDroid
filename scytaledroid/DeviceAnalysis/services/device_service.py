@@ -20,8 +20,8 @@ from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.constants import (
 )
 from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.utils import humanize_seconds
 from scytaledroid.DeviceAnalysis import inventory_meta
-from scytaledroid.DeviceAnalysis.inventory import run_inventory_sync
 from scytaledroid.DeviceAnalysis.inventory import load_latest_inventory
+from scytaledroid.DeviceAnalysis.inventory import runner as inventory_runner
 
 
 def scan_devices(
@@ -166,7 +166,7 @@ def sync_inventory(
 
     filter_name/filter_fn are passed through to the existing sync helper for scoped syncs.
     """
-    run_inventory_sync(serial, filter_name=filter_name, filter_fn=filter_fn)
+    inventory_runner.run_full_sync(serial=serial, filter_fn=filter_fn, progress_cb=None)
     # Refresh metadata after sync
     status = fetch_inventory_metadata(serial, with_current_state=True)
     return status or InventoryStatus(
