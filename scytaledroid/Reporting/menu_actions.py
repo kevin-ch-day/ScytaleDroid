@@ -13,6 +13,7 @@ from scytaledroid.Reporting.generator import export_static_analysis_markdown
 from scytaledroid.StaticAnalysis.persistence import list_reports
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
+from scytaledroid.Database.db_core import db_queries as core_q
 
 
 def handle_device_report() -> None:
@@ -249,11 +250,67 @@ def _select_device_serial() -> Optional[str]:
     return devices[int(choice) - 1].get("serial")
 
 
+def handle_recent_static_runs() -> None:
+    """List recent static-analysis runs with metadata for quick review."""
+
+    try:
+        rows = core_q.run_sql(
+            (
+                "SELECT id, COALESCE(run_started_utc, DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s')) AS started_utc, "
+                "scope_label, findings_total, pipeline_version, catalog_versions, config_hash, study_tag "
+                "FROM static_analysis_runs "
+                "ORDER BY created_at DESC LIMIT 20"
+            ),
+            fetch="all",
+        )
+    except Exception as exc:  # pragma: no cover - DB connectivity guard
+        print(status_messages.status(f"Unable to query static analysis runs: {exc}", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    if not rows:
+        print(status_messages.status("No static-analysis runs found in the database.", level="info"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    headers = ["ID", "Started (UTC)", "Scope", "Findings", "Pipeline", "Catalogs", "Config", "Study"]
+    table_rows: List[List[str]] = []
+    for row in rows:
+        (
+            run_id,
+            started,
+            scope_label,
+            findings_total,
+            pipeline_version,
+            catalog_versions,
+            config_hash,
+            study_tag,
+        ) = row
+        table_rows.append(
+            [
+                str(run_id),
+                str(started or "—"),
+                str(scope_label or "—"),
+                str(findings_total or 0),
+                str(pipeline_version or "—"),
+                str(catalog_versions or "—"),
+                str(config_hash or "—"),
+                str(study_tag or "—"),
+            ]
+        )
+
+    print()
+    menu_utils.print_header("Recent static analysis runs", subtitle=f"Showing {len(table_rows)} most recent")
+    table_utils.render_table(headers, table_rows)
+    prompt_utils.press_enter_to_continue()
+
+
 __all__ = [
     "classify_report",
     "format_timestamp",
     "handle_device_report",
     "handle_static_report",
+    "handle_recent_static_runs",
     "preview_report_file",
     "relative_path",
     "summarise_severity",

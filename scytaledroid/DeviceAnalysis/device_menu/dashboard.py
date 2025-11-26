@@ -440,12 +440,24 @@ def print_dashboard(
     print()
     menu_utils.print_header("Device Analysis")
     options = [
-        menu_utils.MenuOption("1", "List devices"),
+        menu_utils.MenuOption(
+            "1",
+            "Open devices hub",
+            description="List/switch devices in the Android devices hub",
+        ),
         menu_utils.MenuOption("2", "Connect to a device"),
         menu_utils.MenuOption("3", "Device info"),
-        menu_utils.MenuOption("4", "Inventory & database sync (full)"),
+        menu_utils.MenuOption(
+            "4",
+            "Inventory & database sync (full)",
+            hint="Refresh all packages and DB entries",
+        ),
         menu_utils.MenuOption("5", "Detailed device report"),
-        menu_utils.MenuOption("6", "Pull APKs", hint="Fetch APKs to data/apks for static analysis"),
+        menu_utils.MenuOption(
+            "6",
+            "Pull APKs",
+            hint="Fetch APKs to data/apks for static analysis",
+        ),
         menu_utils.MenuOption("7", "Logcat"),
         menu_utils.MenuOption("8", "Open ADB shell"),
         menu_utils.MenuOption("9", "Disconnect device"),

@@ -290,6 +290,28 @@ def _persist_analysis_snapshot(app_version_id: int, payload: Mapping[str, object
         payload.get("analysis_version"),
         hashes_payload.get("analysis_version"),
     )
+    pipeline_version = first_text(
+        metadata.get("pipeline_version"),
+        payload.get("pipeline_version"),
+        analysis_version,
+    )
+    catalog_versions = first_text(
+        metadata.get("catalog_versions"),
+        payload.get("catalog_versions"),
+    )
+    config_hash = first_text(
+        metadata.get("config_hash"),
+        payload.get("config_hash"),
+    )
+    study_tag_value = first_text(
+        metadata.get("study_tag"),
+        payload.get("study_tag"),
+    )
+    run_started_utc = first_text(
+        metadata.get("run_started_utc"),
+        payload.get("run_started_utc"),
+        payload.get("generated_at"),
+    )
     metadata_raw = payload.get("metadata")
     metadata = metadata_raw if isinstance(metadata_raw, Mapping) else {}
     profile = first_text(
@@ -345,6 +367,11 @@ def _persist_analysis_snapshot(app_version_id: int, payload: Mapping[str, object
         app_version_id,
         sha256=sha256,
         analysis_version=analysis_version,
+        pipeline_version=pipeline_version,
+        catalog_versions=catalog_versions,
+        config_hash=config_hash,
+        study_tag=study_tag_value,
+        run_started_utc=run_started_utc,
         profile=profile,
         session_stamp=session_stamp,
         scope_label=scope_label,
@@ -376,6 +403,11 @@ def _create_run_row(
     *,
     sha256: object,
     analysis_version: object,
+    pipeline_version: object,
+    catalog_versions: object,
+    config_hash: object,
+    study_tag: object,
+    run_started_utc: object,
     profile: object,
     session_stamp: object,
     scope_label: object,
@@ -389,9 +421,9 @@ def _create_run_row(
     try:
         run_id = core_q.run_sql(
             (
-                "INSERT INTO static_analysis_runs (app_version_id, session_stamp, scope_label, sha256, analysis_version, "
-                "profile, findings_total, detector_metrics, repro_bundle, analysis_matrices, analysis_indicators, workload_profile) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                "INSERT INTO static_analysis_runs (app_version_id, session_stamp, scope_label, sha256, analysis_version, pipeline_version, "
+                "catalog_versions, config_hash, study_tag, run_started_utc, profile, findings_total, detector_metrics, repro_bundle, analysis_matrices, analysis_indicators, workload_profile) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
             ),
             (
                 app_version_id,
@@ -399,6 +431,11 @@ def _create_run_row(
                 _normalise_optional_str(scope_label),
                 _normalise_optional_str(sha256),
                 _normalise_optional_str(analysis_version),
+                _normalise_optional_str(pipeline_version),
+                _normalise_optional_str(catalog_versions),
+                _normalise_optional_str(config_hash),
+                _normalise_optional_str(study_tag),
+                _normalise_optional_str(run_started_utc),
                 _normalise_optional_str(profile),
                 findings_total,
                 _serialise_json(detector_metrics),

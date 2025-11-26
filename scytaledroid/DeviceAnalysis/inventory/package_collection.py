@@ -10,6 +10,8 @@ from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from .. import adb_utils, package_profiles
 from .. import inventory_meta
 from . import snapshot_io
+from . import adb_bulk
+import os
 
 class ProgressCallback(Protocol):
     def __call__(
@@ -54,7 +56,25 @@ def collect_inventory(
     run_start = time.time()
 
     adb_utils.clear_package_caches(serial)
-    packages_with_versions = adb_utils.list_packages_with_versions(serial)
+
+    mode = os.getenv("SCYTALEDROID_INVENTORY_MODE", "baseline").strip().lower()
+    use_bulk = mode in {"baseline", "user_only", "incremental"}
+
+    packages_with_versions: List[Tuple[str, Optional[str], Optional[str]]] = []
+    bulk_entries: List[adb_bulk.BulkPackageEntry] = []
+
+    if use_bulk:
+        bulk_entries = adb_bulk.list_packages_bulk(serial)
+        if bulk_entries:
+            # Populate package_names and fake version info (pm list -f -U does not include version).
+            package_names = [entry.package_name for entry in bulk_entries]
+            packages_with_versions = [(entry.package_name, None, None) for entry in bulk_entries]
+        else:
+            log.warning("Bulk package listing returned no entries; falling back to legacy per-package listing.", category="inventory")
+
+    if not packages_with_versions:
+        packages_with_versions = adb_utils.list_packages_with_versions(serial)
+
     if not packages_with_versions:
         raise RuntimeError("adb did not return any packages.")
 
@@ -75,8 +95,28 @@ def collect_inventory(
     split_processed = 0
 
     for index, package_name in enumerate(package_names, start=1):
-        paths = adb_utils.get_package_paths(serial, package_name)
-        metadata = adb_utils.get_package_metadata(serial, package_name)
+        if bulk_entries:
+            # Try to reuse paths from bulk output; fall back to pm path if missing.
+            bulk_entry = next((e for e in bulk_entries if e.package_name == package_name), None)
+            paths = [bulk_entry.apk_path] if bulk_entry and bulk_entry.apk_path else []
+        else:
+            bulk_entry = None
+            paths = []
+
+        if not paths:
+            paths = adb_utils.get_package_paths(serial, package_name)
+
+        if bulk_entry:
+            metadata = {
+                "installer": None,  # pm list -f -U does not expose installer
+                "app_label": None,
+                "version_name": None,
+                "version_code": None,
+                "first_install": None,
+                "last_update": None,
+            }
+        else:
+            metadata = adb_utils.get_package_metadata(serial, package_name)
         package_key = package_name.lower()
         canonical_entry = canonical_metadata.get(package_key)
         entry = _compose_inventory_entry(package_name, paths, metadata, canonical_entry)

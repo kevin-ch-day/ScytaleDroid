@@ -8,6 +8,7 @@ from typing import Optional
 
 from scytaledroid.DeviceAnalysis import device_manager
 from scytaledroid.DeviceAnalysis.inventory import runner, snapshot_io, progress, summary
+from scytaledroid.Utils.DisplayUtils import status_messages
 
 
 @dataclass
@@ -65,6 +66,11 @@ def run_full_sync(
     if progress_sink == "cli":
         summary.render_sync_summary_box(result)
         summary.render_inventory_summary(result)
+        print(
+            status_messages.status(
+                'Next steps: choose "Pull APKs" from Device Analysis to harvest artifacts for static analysis.',
+                level="info",
+            )
+        )
 
     return result
-

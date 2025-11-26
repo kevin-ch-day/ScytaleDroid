@@ -9,13 +9,17 @@ from scytaledroid.Utils.DisplayUtils import status_messages, table_utils, text_b
 
 def _format_duration(seconds: float | None) -> str:
     if seconds is None or seconds < 0:
-        return "--:--"
+        return "--"
     total_seconds = int(round(seconds))
     minutes, secs = divmod(total_seconds, 60)
     hours, minutes = divmod(minutes, 60)
+    parts = []
     if hours:
-        return f"{hours:d}:{minutes:02d}:{secs:02d}"
-    return f"{minutes:02d}:{secs:02d}"
+        parts.append(f"{hours}h")
+    if minutes or hours:
+        parts.append(f"{minutes:02d}m")
+    parts.append(f"{secs:02d}s")
+    return " ".join(parts)
 
 
 def _format_delta_text(current: int, previous: int | None) -> str:
@@ -23,9 +27,9 @@ def _format_delta_text(current: int, previous: int | None) -> str:
         return "(first snapshot)"
     delta = current - previous
     if delta == 0:
-        return "(no change vs last snapshot)"
+        return "(no change vs previous snapshot)"
     sign = "+" if delta > 0 else "-"
-    return f"(Δ {sign}{abs(delta)} vs last snapshot)"
+    return f"(Δ {sign}{abs(delta)} vs previous snapshot)"
 
 
 def render_sync_summary_box(result) -> None:

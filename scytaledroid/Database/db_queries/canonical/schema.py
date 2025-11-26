@@ -44,6 +44,11 @@ _DDL_STATEMENTS: list[str] = [
       scope_label      VARCHAR(191)   DEFAULT NULL,
       sha256           CHAR(64)       DEFAULT NULL,
       analysis_version VARCHAR(32)    DEFAULT NULL,
+      pipeline_version VARCHAR(32)    DEFAULT NULL,
+      catalog_versions VARCHAR(128)   DEFAULT NULL,
+      config_hash      VARCHAR(128)   DEFAULT NULL,
+      study_tag        VARCHAR(128)   DEFAULT NULL,
+      run_started_utc  VARCHAR(64)    DEFAULT NULL,
       profile          VARCHAR(32)    DEFAULT NULL,
       findings_total   INT UNSIGNED   NOT NULL DEFAULT 0,
       detector_metrics JSON           DEFAULT NULL,
@@ -72,6 +77,14 @@ _DDL_STATEMENTS: list[str] = [
     """
     ALTER TABLE static_analysis_runs
       ADD COLUMN IF NOT EXISTS workload_profile JSON DEFAULT NULL;
+    """,
+    """
+    ALTER TABLE static_analysis_runs
+      ADD COLUMN IF NOT EXISTS pipeline_version VARCHAR(32) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS catalog_versions VARCHAR(128) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS config_hash VARCHAR(128) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS study_tag VARCHAR(128) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS run_started_utc VARCHAR(64) DEFAULT NULL;
     """,
     """
     CREATE INDEX IF NOT EXISTS ix_static_runs_session_version

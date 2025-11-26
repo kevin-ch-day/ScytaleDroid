@@ -116,12 +116,12 @@ def ensure_inventory_survey(
         reason: Optional[str] = None
         if age_seconds is None:
             reason = "Inventory snapshot age unknown; run Inventory & database sync (option 5)."
-        elif has_changes:
-            reason = (
-                "Device state changed since the last inventory. Run Inventory & database sync (option 5) before pulling APKs."
-            )
         elif too_old:
-            # Stale age is already surfaced in the dashboard panel; avoid duplicating the warning.
+            reason = (
+                "Inventory snapshot exceeds the freshness threshold—run Inventory & database sync (option 4) before pulling APKs."
+            )
+        else:
+            # Fresh by age but changed: do not emit a footer warning; gating will handle this.
             reason = None
         if reason and emit:
             emit(status_messages.status(reason, level="warn"))

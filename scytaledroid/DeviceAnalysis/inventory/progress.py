@@ -12,15 +12,12 @@ from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.utils import humani
 
 
 def _format_duration(seconds: Optional[float]) -> str:
-    if seconds is None or seconds < 0:
-        return "--:--"
-
-    total_seconds = int(round(seconds))
-    minutes, secs = divmod(total_seconds, 60)
-    hours, minutes = divmod(minutes, 60)
-    if hours:
-        return f"{hours:d}:{minutes:02d}:{secs:02d}"
-    return f"{minutes:02d}:{secs:02d}"
+    """Return a compact duration like 1h 12m, 3m 05s, 45s."""
+    if seconds is None:
+        return "calculating…"
+    if seconds < 0:
+        return "--"
+    return humanize_seconds(seconds)
 
 
 def _format_progress_line(
@@ -30,6 +27,7 @@ def _format_progress_line(
     elapsed_seconds: float,
     eta_seconds: Optional[float],
     split_processed: int,
+    phase_label: Optional[str] = None,
 ) -> str:
     percentage = (processed / total) * 100 if total else 0.0
     eta_text = _format_duration(eta_seconds)
@@ -41,13 +39,17 @@ def _format_progress_line(
     fill_char = "█" if not terminal.use_ascii_ui() else "#"
     empty_char = "░" if not terminal.use_ascii_ui() else "."
     bar = f"{fill_char * filled}{empty_char * empty}"
-    message = (
-        f"[{bar}] {processed} / {total} ({percentage:.1f}%) "
-        f"• Elapsed {elapsed_text}"
-    )
-    if eta_text:
+    message = f"[{bar}] {processed} / {total} ({percentage:.1f}%)"
+    message += f" • Elapsed {elapsed_text}"
+    if processed >= total and total > 0:
+        message += " • ETA --:--"
+    elif eta_text and eta_text not in ("--", "calculating…"):
         message += f" • ETA {eta_text}"
+    elif eta_text == "calculating…":
+        message += " • ETA calculating…"
     message += f" • Split APKs: {split_processed}"
+    if phase_label:
+        return f"{phase_label}: {message}"
     return message
 
 
@@ -62,17 +64,25 @@ def make_cli_progress_printer(ui_prefs=None):
     """Return a progress callback that renders a single updating line."""
 
     last_length = 0
+    current_phase_label: Optional[str] = None
+    last_elapsed: float = 0.0
 
     def _printer(event: Dict[str, object]) -> bool | None:
-        nonlocal last_length
+        nonlocal last_length, current_phase_label, last_elapsed
         phase = event.get("phase")
+        if phase == "start":
+            current_phase_label = event.get("phase_label") or "Collecting packages"
+            print()  # visual separation after snapshot block
+            return True
         if phase == "progress":
+            last_elapsed = float(event.get("elapsed_seconds", 0.0) or 0.0)
             line = _format_progress_line(
                 processed=int(event.get("processed", 0) or 0),
                 total=int(event.get("total", 0) or 0),
-                elapsed_seconds=float(event.get("elapsed_seconds", 0.0) or 0.0),
+                elapsed_seconds=last_elapsed,
                 eta_seconds=event.get("eta_seconds"),
                 split_processed=int(event.get("split_processed", 0) or 0),
+                phase_label=current_phase_label,
             )
             visible = _visible_length(line)
             padding = " " * max(0, last_length - visible)
@@ -81,6 +91,9 @@ def make_cli_progress_printer(ui_prefs=None):
         elif phase == "complete":
             if last_length:
                 print()
+            label = event.get("phase_label") or current_phase_label or "Sync"
+            done_line = f'Phase complete. Rendering summary…'
+            print(done_line)
         return True
 
     return _printer
@@ -99,7 +112,7 @@ def render_snapshot_block(previous_meta, ui_prefs=None) -> None:
             (datetime.now(timezone.utc) - previous_meta.captured_at).total_seconds(), 0.0
         )
         is_stale = age_seconds >= INVENTORY_STALE_SECONDS
-        bullet = "● " if not terminal.use_ascii_ui() else ""
+        bullet = "● " if not terminal.use_ascii_ui() else "* "
         status_text = "STALE" if is_stale else "FRESH"
         status_line = f"Status   : {bullet}{status_text}"
         age_line = f"Age      : {humanize_seconds(age_seconds)}"
@@ -110,6 +123,7 @@ def render_snapshot_block(previous_meta, ui_prefs=None) -> None:
     print(f"  {age_line}")
     print(f"  {pkg_line}")
     print(f"  {threshold_line}")
+    print()
 
 
 __all__ = ["make_cli_progress_printer", "render_snapshot_block"]

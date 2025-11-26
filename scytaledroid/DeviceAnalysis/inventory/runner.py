@@ -5,10 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, Optional, Protocol
+import time
+import os
 
 from scytaledroid.DeviceAnalysis.inventory import snapshot_io
 from scytaledroid.DeviceAnalysis.inventory import package_collection
 from scytaledroid.DeviceAnalysis.inventory import db_sync
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
 class ProgressCallback(Protocol):
@@ -74,6 +77,7 @@ def run_full_sync(
             progress_cb(
                 {
                     "phase": "progress",
+                    "phase_label": "Collecting packages",
                     "processed": processed,
                     "total": total,
                     "elapsed_seconds": elapsed_seconds,
@@ -83,14 +87,26 @@ def run_full_sync(
             )
 
     if progress_cb:
-        progress_cb({"phase": "start", "total": None})
+        progress_cb({"phase": "start", "total": None, "phase_label": "Collecting packages"})
 
+    # Support a simple mode flag for faster paths (env only for now).
+    mode = os.getenv("SCYTALEDROID_INVENTORY_MODE", "baseline").lower().strip()
+    effective_filter = filter_fn
+    if mode == "user_only":
+        def _user_only(entry: Dict[str, object]) -> bool:
+            primary_path = str(entry.get("primary_path") or "")
+            return primary_path.startswith("/data/")
+        effective_filter = _user_only if filter_fn is None else lambda entry: filter_fn(entry) and _user_only(entry)
+
+    collect_start = time.time()
     rows, coll_stats = package_collection.collect_inventory(
         serial=serial,
-        filter_fn=filter_fn,
+        filter_fn=effective_filter,
         progress_cb=_progress_adapter if progress_cb else None,
     )
+    collect_elapsed = time.time() - collect_start
 
+    persist_start = time.time()
     snapshot_path = snapshot_io.persist_snapshot(
         serial=serial,
         rows=rows,  # type: ignore[arg-type]
@@ -101,8 +117,11 @@ def run_full_sync(
         duration_seconds=coll_stats.elapsed_seconds,
         snapshot_type="full",
     )
+    persist_elapsed = time.time() - persist_start
 
+    db_start = time.time()
     synced_defs = db_sync.sync_app_definitions(rows)
+    db_elapsed = time.time() - db_start
 
     current_pkg_names: set[str] = set()
     split_count = 0
@@ -137,6 +156,28 @@ def run_full_sync(
     )
 
     if progress_cb:
-        progress_cb({"phase": "complete", "total": stats.total_packages, "elapsed_seconds": stats.elapsed_seconds})
+        progress_cb(
+            {
+                "phase": "complete",
+                "phase_label": "Collecting packages",
+                "total": stats.total_packages,
+                "elapsed_seconds": stats.elapsed_seconds,
+            }
+        )
+
+    overall_elapsed = collect_elapsed + persist_elapsed + db_elapsed
+    try:
+        per_pkg = overall_elapsed / max(1, stats.total_packages)
+        log.info(
+            (
+                f"Inventory timing for {serial}: {stats.total_packages} packages in "
+                f"{overall_elapsed:.2f}s (collect={collect_elapsed:.2f}s, "
+                f"snapshot={persist_elapsed:.2f}s, db_sync={db_elapsed:.2f}s, "
+                f"~{per_pkg:.2f}s/pkg, mode={mode})"
+            ),
+            category="inventory",
+        )
+    except Exception:
+        pass
 
     return result

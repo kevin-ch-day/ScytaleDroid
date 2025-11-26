@@ -6,14 +6,16 @@ from typing import Optional, Tuple
 
 
 def humanize_seconds(seconds: float) -> str:
+    """Render durations as Hh Mm Ss with consistent spacing/padding."""
+
     seconds = int(seconds)
     if seconds < 60:
         return f"{seconds}s"
     minutes, sec = divmod(seconds, 60)
     if minutes < 60:
-        return f"{minutes}m {sec}s"
+        return f"{minutes}m {sec:02d}s"
     hours, minutes = divmod(minutes, 60)
-    return f"{hours}h {minutes}m"
+    return f"{hours}h {minutes:02d}m"
 
 
 def coarse_time_range(seconds: float) -> str:

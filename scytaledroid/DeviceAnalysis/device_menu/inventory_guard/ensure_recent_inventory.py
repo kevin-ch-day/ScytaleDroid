@@ -128,7 +128,7 @@ def ensure_recent_inventory(
         age_stale = age_seconds is not None and age_seconds >= INVENTORY_STALE_SECONDS
         if packages_changed or scope_changed or scope_hash_changed:
             refresh_reason = (
-                "Device packages changed since the last inventory—sync recommended before pull."
+                "Inventory is fresh by age, but device packages changed since the last snapshot—sync recommended before pull."
             )
             if delta_brief:
                 refresh_reason = f"{refresh_reason} Recent changes: {delta_brief}."
@@ -169,7 +169,9 @@ def ensure_recent_inventory(
         package_delta_brief=delta_brief,
     )
 
-    if refresh_reason:
+    # Only emit warnings here for missing/age-stale snapshots; defer change-only messaging to gating dialogs.
+    age_stale = age_seconds is not None and age_seconds >= INVENTORY_STALE_SECONDS if timestamp else False
+    if refresh_reason and (not timestamp or age_stale):
         print(status_messages.status(refresh_reason, level="info"))
 
     battery_context = _resolve_battery_context(serial, device_context)

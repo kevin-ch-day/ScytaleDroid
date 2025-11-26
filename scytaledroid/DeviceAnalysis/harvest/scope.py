@@ -671,7 +671,7 @@ def _build_scope_context(rows: Sequence[InventoryRow], allow: Set[str]) -> Dict[
     category_map = _fetch_category_map([row.package_name for row in rows])
     category_groups: Dict[str, List[InventoryRow]] = {}
     for row in rows:
-        category_name = category_map.get(row.package_name)
+        category_name = category_map.get(row.package_name) or row.profile
         if category_name:
             category_groups.setdefault(category_name, []).append(row)
 

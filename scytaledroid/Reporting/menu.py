@@ -8,6 +8,7 @@ from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
 from .menu_actions import (
     handle_device_report,
     handle_static_report,
+    handle_recent_static_runs,
     view_saved_reports,
 )
 
@@ -19,6 +20,7 @@ def reporting_menu() -> None:
         "1": handle_device_report,
         "2": handle_static_report,
         "3": view_saved_reports,
+        "4": handle_recent_static_runs,
     }
 
     options = [
@@ -36,6 +38,11 @@ def reporting_menu() -> None:
             "3",
             "View saved reports",
             description="Browse previously generated markdown reports",
+        ),
+        MenuOption(
+            "4",
+            "Recent static analysis runs",
+            description="Show latest static runs with pipeline/catalog/config/study tags",
         ),
     ]
 

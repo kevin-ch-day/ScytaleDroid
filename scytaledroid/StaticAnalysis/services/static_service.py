@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+import os
 
 from scytaledroid.StaticAnalysis.cli.runner import launch_scan_flow
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
@@ -21,6 +23,9 @@ class RunResult:
     catalog_versions: Optional[str]
     config_hash: Optional[str]
     study_tag: Optional[str]
+    run_started_utc: datetime = field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
 
 
 def run_scan(
@@ -64,14 +69,20 @@ def run_scan(
             setattr(params, "analysis_version", pipeline_version)
         except Exception:
             pass
+    # Default metadata fallbacks (env vars allow overrides)
+    effective_study_tag = study_tag or os.getenv("SCYTALEDROID_STUDY_TAG")
+    effective_pipeline_version = pipeline_version or os.getenv("SCYTALEDROID_PIPELINE_VERSION")
+    effective_catalog_versions = catalog_versions or os.getenv("SCYTALEDROID_CATALOG_VERSIONS")
+    effective_config_hash = config_hash or os.getenv("SCYTALEDROID_CONFIG_HASH")
+
     try:
         outcome = launch_scan_flow(selection, params, base_dir)
         return RunResult(
             outcome=outcome,
-            pipeline_version=getattr(params, "analysis_version", pipeline_version),
-            catalog_versions=catalog_versions,
-            config_hash=config_hash,
-            study_tag=study_tag,
+            pipeline_version=getattr(params, "analysis_version", effective_pipeline_version),
+            catalog_versions=effective_catalog_versions,
+            config_hash=effective_config_hash,
+            study_tag=effective_study_tag,
         )
     except Exception as exc:
         log.error(f"Static analysis failed: {exc}", category="static")

@@ -53,7 +53,10 @@ def handle_choice(
     active_details: Optional[Dict[str, Optional[str]]],
 ) -> bool:
     if choice == "1":
-        _list_devices(summaries)
+        # Jump to the full devices hub for consistent list/switch UX.
+        from scytaledroid.DeviceAnalysis.device_hub_menu import devices_hub
+
+        devices_hub()
     elif choice == "2":
         _connect_to_device(devices, summaries)
     elif choice == "3":
@@ -126,7 +129,7 @@ def build_main_menu_options(
     needs_active = None if has_device else "needs active"
 
     options: List[menu_utils.MenuOption] = [
-        menu_utils.MenuOption("1", "List devices"),
+        menu_utils.MenuOption("1", "Open devices hub"),
         menu_utils.MenuOption("2", "Connect to a device"),
         menu_utils.MenuOption(
             "3",

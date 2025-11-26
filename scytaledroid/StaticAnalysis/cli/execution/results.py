@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 
 from collections import Counter, defaultdict
 import math
@@ -503,6 +504,17 @@ def _build_ingest_payload(
         metadata_map["run_scope_label"] = params.scope_label
     if params.scope and not metadata_map.get("run_scope"):
         metadata_map["run_scope"] = params.scope
+    # Enrich metadata with reproducibility tags when available.
+    if not metadata_map.get("pipeline_version"):
+        metadata_map["pipeline_version"] = getattr(params, "analysis_version", None) or os.getenv("SCYTALEDROID_PIPELINE_VERSION")
+    if not metadata_map.get("catalog_versions"):
+        metadata_map["catalog_versions"] = os.getenv("SCYTALEDROID_CATALOG_VERSIONS")
+    if not metadata_map.get("config_hash"):
+        metadata_map["config_hash"] = os.getenv("SCYTALEDROID_CONFIG_HASH")
+    if not metadata_map.get("study_tag"):
+        metadata_map["study_tag"] = getattr(params, "study_tag", None) or os.getenv("SCYTALEDROID_STUDY_TAG")
+    if payload.get("generated_at") and not metadata_map.get("run_started_utc"):
+        metadata_map["run_started_utc"] = payload.get("generated_at")
 
     ingest_payload: MutableMapping[str, object] = {}
     ingest_payload["generated_at"] = payload.get("generated_at")
