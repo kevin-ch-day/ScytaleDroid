@@ -45,7 +45,7 @@ def device_menu(return_to: str = EXIT_TO_MAIN) -> str:
         active_serial = active_device.get("serial") if active_device else None
         active_details = serial_map.get(active_serial) if active_serial else None
         inventory_metadata = (
-            device_service.fetch_inventory_metadata(active_serial) if active_serial else None
+            device_service.fetch_inventory_metadata(active_serial, with_current_state=True) if active_serial else None
         )
 
         # If no active device but devices are present, offer an immediate connect prompt
@@ -104,10 +104,27 @@ def device_menu(return_to: str = EXIT_TO_MAIN) -> str:
             emit=lambda msg: print(msg, flush=True),
         )
         valid_keys = [option.key for option in options]
-        choice = prompt_utils.get_choice(valid_keys + ["0"], default="1")
+        # Support shortcuts: r=refresh (redraw), q=back, c=connect, i=info, s=shell, l=logcat
+        choice = prompt_utils.get_choice(valid_keys + ["0", "r", "q", "c", "i", "s", "l"], default="1")
 
-        if choice == "0":
+        if choice in {"0", "q"}:
             return return_to
+        if choice == "r":
+            # Redraw dashboard without triggering sync
+            continue
+        if choice == "c":
+            _connect_to_device(devices, summaries)
+            summary_cache.clear()
+            continue
+        if choice == "i":
+            _show_device_info(active_device, active_details)
+            continue
+        if choice == "s":
+            handle_choice("8", devices, summaries, active_device, active_details)
+            continue
+        if choice == "l":
+            handle_choice("7", devices, summaries, active_device, active_details)
+            continue
 
         refresh_requested = handle_choice(
             choice,
@@ -146,15 +163,22 @@ def _render_status_panel(
     # Inventory status panel
     status = inventory_metadata
     if status is None:
-        print(status_messages.status("Inventory: not yet run. Use option 5 to sync.", level="warn"))
+        print(status_messages.status("Inventory: not yet run. Use option 4 to sync.", level="warn"))
         return
 
-    # Normalize InventoryStatus fields
+    # Normalize InventoryStatus fields and optional delta info
     status_label = getattr(status, "status_label", None) or "unknown"
     age = getattr(status, "age_display", "unknown")
     pkg_count = getattr(status, "package_count", None)
     is_stale = bool(getattr(status, "is_stale", False))
     last_ts = getattr(status, "last_run_ts", None)
+    delta = {}
+    if isinstance(status, dict):
+        delta = status.get("package_delta_summary") or {}
+        if not last_ts:
+            ts_val = status.get("timestamp")
+            if isinstance(ts_val, datetime):
+                last_ts = ts_val
 
     print("Inventory status")
     print("================")
@@ -173,6 +197,23 @@ def _render_status_panel(
         print(status_messages.status("No inventory snapshot found. Run a full sync to capture the current app state.", level="warn"))
         return
     print(f"Staleness threshold: {threshold_label}")
+
+    # Last inventory result
+    added = int(delta.get("total_added", 0) or 0) if isinstance(delta, dict) else 0
+    removed = int(delta.get("total_removed", 0) or 0) if isinstance(delta, dict) else 0
+    updated = int(delta.get("total_updated", 0) or 0) if isinstance(delta, dict) else 0
+    if added or removed or updated:
+        change_tokens = []
+        if added:
+            change_tokens.append(f"+{added}")
+        if removed:
+            change_tokens.append(f"-{removed}")
+        if updated:
+            change_tokens.append(f"Δ{updated}")
+        print(f"Last inventory result: {' / '.join(change_tokens)} (since prior snapshot)")
+    else:
+        print("Last inventory result: no changes vs prior snapshot (baseline confirmed).")
+
     if is_stale:
         print(
             status_messages.status(

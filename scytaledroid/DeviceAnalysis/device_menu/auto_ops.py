@@ -107,10 +107,12 @@ def ensure_inventory_survey(
         age_seconds = max((datetime.now(timezone.utc) - timestamp).total_seconds(), 0.0)
 
     too_old = age_seconds is None or age_seconds > INVENTORY_STALE_SECONDS
-    has_changes = packages_changed or scope_changed or state_changed or fingerprint_changed
+    # Only flag changes when current-state deltas are actually reported.
+    has_changes = packages_changed or scope_changed or fingerprint_changed
+
+    surveyed_serials.add(serial)
 
     if too_old or has_changes:
-        surveyed_serials.add(serial)
         reason: Optional[str] = None
         if age_seconds is None:
             reason = "Inventory snapshot age unknown; run Inventory & database sync (option 5)."
@@ -125,47 +127,8 @@ def ensure_inventory_survey(
             emit(status_messages.status(reason, level="warn"))
         return
 
-    start_message = status_messages.status(
-        f"Auto-refreshing inventory for {serial}…", level="info"
-    )
-    if emit:
-        emit(start_message)
-
-    try:
-        inventory.run_inventory_sync(serial, interactive=False)
-    except inventory.InventorySyncAborted:
-        log.warning(
-            f"Inventory survey aborted for {serial}",
-            category="device",
-        )
-        if emit:
-            emit(
-                status_messages.status(
-                    "Inventory survey interrupted; existing snapshot kept.",
-                    level="warn",
-                )
-            )
-    except Exception as exc:  # pragma: no cover - defensive
-        log.warning(
-            f"Automatic inventory survey failed for {serial}: {exc}",
-            category="device",
-        )
-        if emit:
-            emit(
-                status_messages.status(
-                    "Automatic inventory refresh failed; use option 5 to inspect logs and rerun manually.",
-                    level="error",
-                )
-            )
-    else:
-        if emit:
-            emit(
-                status_messages.status(
-                    "Inventory refreshed automatically.", level="info"
-                )
-            )
-    finally:
-        surveyed_serials.add(serial)
+    # If we reach here, inventory is fresh and unchanged. Do not auto-refresh;
+    # the operator can trigger a manual sync if desired.
 
 
 __all__ = ["ensure_active_device", "ensure_inventory_survey"]

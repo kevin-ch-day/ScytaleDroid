@@ -123,8 +123,14 @@ def pull_apks(serial: Optional[str]) -> None:
             hint="Run an inventory sync before attempting to harvest APKs.",
         )
         if prompt_utils.prompt_yes_no("Run an inventory sync now?", default=True):
-            inventory.run_inventory_sync(serial)
-            snapshot = inventory.load_latest_inventory(serial)
+            from scytaledroid.DeviceAnalysis.services import inventory_service
+            try:
+                inventory_service.run_full_sync(serial=serial, ui_prefs=text_blocks.UI_PREFS)
+                snapshot = inventory.load_latest_inventory(serial)
+            except Exception as exc:
+                error_panels.print_error_panel("APK Pull", f"Inventory sync failed: {exc}")
+                prompt_utils.press_enter_to_continue()
+                return
         else:
             prompt_utils.press_enter_to_continue()
             return
@@ -315,16 +321,17 @@ def pull_apks(serial: Optional[str]) -> None:
                 break
             if action == "refresh_full":
                 progress = _make_progress_callback("Refreshing full inventory")
+                from scytaledroid.DeviceAnalysis.services import inventory_service
                 try:
-                    inventory.run_inventory_sync(
-                        serial,
-                        interactive=False,
-                        progress_callback=progress,
+                    inventory_service.run_full_sync(
+                        serial=serial,
+                        ui_prefs=text_blocks.UI_PREFS,
+                        progress_sink="cli",
                     )
-                except inventory.InventorySyncAborted:
+                except Exception as exc:
                     print(
                         status_messages.status(
-                            "Inventory sync cancelled before completion.",
+                            f"Inventory sync cancelled or failed: {exc}",
                             level="warn",
                         )
                     )

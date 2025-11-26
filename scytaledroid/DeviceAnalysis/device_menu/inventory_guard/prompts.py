@@ -8,6 +8,7 @@ from typing import Optional
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
 
 from .utils import humanize_seconds
+from .constants import INVENTORY_STALE_SECONDS
 
 
 def prompt_inventory_decision(
@@ -25,13 +26,16 @@ def prompt_inventory_decision(
     Returns one of ``"sync"``, ``"use_snapshot"``, or ``"cancel"``.
     """
 
-    last_synced = None
-    if timestamp and age_seconds is not None:
-        last_synced = humanize_seconds(age_seconds)
+    last_synced = humanize_seconds(age_seconds) if timestamp and age_seconds is not None else None
+    age_stale = bool(age_seconds is not None and age_seconds >= INVENTORY_STALE_SECONDS)
 
     # Title
-    if last_synced:
-        print(status_messages.status(f"Inventory is stale (last: {last_synced}).", level="warn"))
+    if age_stale and last_synced:
+        print(status_messages.status(f"Inventory is stale by age (last: {last_synced}).", level="warn"))
+    elif state_changed and last_synced:
+        print(status_messages.status(f"Inventory is fresh by age (last: {last_synced}) but packages changed since last snapshot.", level="warn"))
+    elif state_changed:
+        print(status_messages.status("Inventory is fresh by age, but packages changed since last snapshot.", level="warn"))
     else:
         print(status_messages.status("Inventory may be stale.", level="warn"))
 

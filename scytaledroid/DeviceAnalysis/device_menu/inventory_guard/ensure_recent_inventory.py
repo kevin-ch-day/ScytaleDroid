@@ -125,50 +125,26 @@ def ensure_recent_inventory(
             "No inventory snapshot found—inventory sync required before pull."
         )
     else:
-        age_stale = age_seconds is not None and age_seconds > INVENTORY_STALE_SECONDS
-        if packages_changed or scope_changed:
-            if scope_changed and not packages_changed:
-                refresh_reason = (
-                    "Package versions for the selected scope differ from the last inventory. "
-                    "Run a sync to capture the updated data or proceed with caution."
-                )
-            else:
-                refresh_reason = (
-                    "Device packages differ from the last inventory—sync recommended before pull. "
-                    "You can reuse the previous snapshot if you understand the risks."
-                )
-                if delta_brief:
-                    refresh_reason = f"{refresh_reason} Recent changes: {delta_brief}."
-        elif scope_hash_changed:
+        age_stale = age_seconds is not None and age_seconds >= INVENTORY_STALE_SECONDS
+        if packages_changed or scope_changed or scope_hash_changed:
             refresh_reason = (
-                "Selected inventory scope differs from the last recorded scope. "
-                "Run a sync to capture the updated data or proceed with caution."
+                "Device packages changed since the last inventory—sync recommended before pull."
             )
+            if delta_brief:
+                refresh_reason = f"{refresh_reason} Recent changes: {delta_brief}."
+            stale_level = "hard"
         elif age_stale:
             refresh_reason = (
                 "Inventory snapshot exceeds the freshness threshold—sync recommended before pull."
             )
+            stale_level = "hard"
         elif fingerprint_changed:
             stale_level = "soft"
             refresh_reason = (
                 "Build fingerprint changed since the last inventory. Packages appear unchanged, so a quick harvest is recommended."
             )
-
-        if packages_changed or scope_changed or scope_hash_changed or age_stale:
-            stale_level = "hard"
-        elif not (packages_changed or scope_changed or age_stale):
-            stale_level = "soft" if fingerprint_changed else "fresh"
-
-        if (
-            packages_changed
-            and not scope_changed
-            and not scope_hash_changed
-            and not fingerprint_changed
-            and age_seconds is not None
-            and age_seconds <= RECENT_CHANGE_WINDOW_SECONDS
-            and 0 < total_delta <= RECENT_CHANGE_SOFT_LIMIT
-        ):
-            stale_level = "soft"
+        else:
+            stale_level = "fresh"
 
     if stale_level == "fresh" and timestamp:
         _set_guard_context(
@@ -193,7 +169,8 @@ def ensure_recent_inventory(
         package_delta_brief=delta_brief,
     )
 
-    print(status_messages.status(refresh_reason, level="info"))
+    if refresh_reason:
+        print(status_messages.status(refresh_reason, level="info"))
 
     battery_context = _resolve_battery_context(serial, device_context)
     battery_level = battery_context.get("level")
@@ -252,18 +229,12 @@ def ensure_recent_inventory(
             return False
 
         if decision == "use_snapshot":
-            snapshot_age_text = None
-            if age_seconds is not None:
-                snapshot_age_text = humanize_seconds(age_seconds)
-            if snapshot_age_text:
-                warning = (
-                    "Proceeding with existing inventory snapshot "
-                    f"captured {snapshot_age_text} ago; results may be outdated."
-                )
-            else:
-                warning = (
-                    "Proceeding with existing inventory snapshot; results may be outdated."
-                )
+            snapshot_age_text = humanize_seconds(age_seconds) if age_seconds is not None else None
+            warning = (
+                f"Proceeding with existing inventory snapshot captured {snapshot_age_text} ago; results may be outdated."
+                if snapshot_age_text
+                else "Proceeding with existing inventory snapshot; results may be outdated."
+            )
             print(status_messages.status(warning, level="warn"))
             _record_guard_policy("quick")
             return True
@@ -374,13 +345,13 @@ def ensure_recent_inventory(
             return True
 
         try:
-            inventory_module.run_inventory_sync(
-                serial,
-                interactive=False,
-                progress_callback=_handle_progress,
-                expected_total_seconds=expected_duration,
+            from scytaledroid.DeviceAnalysis.services import inventory_service
+            inventory_service.run_full_sync(
+                serial=serial,
+                ui_prefs=None,
+                progress_sink="cli",
             )
-        except inventory_module.InventorySyncAborted:
+        except Exception:
             if not aborted:
                 raise
         return aborted, latest_estimate

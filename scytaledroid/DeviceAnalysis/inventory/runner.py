@@ -12,14 +12,9 @@ from scytaledroid.DeviceAnalysis.inventory import db_sync
 
 
 class ProgressCallback(Protocol):
-    def __call__(
-        self,
-        processed: int,
-        total: int,
-        elapsed_seconds: float,
-        eta_seconds: Optional[float],
-        split_apks: int,
-    ) -> None:
+    """Receives progress events as dicts (phase/progress/complete)."""
+
+    def __call__(self, event: Dict[str, object]) -> None:
         ...
 
 
@@ -67,10 +62,33 @@ def run_full_sync(
                     if int(item.get("split_count") or 1) > 1:
                         prev_split += 1
 
+    # Adapt the collector's numeric progress callback to dict-based callbacks expected by CLI.
+    def _progress_adapter(
+        processed: int,
+        total: int,
+        elapsed_seconds: float,
+        eta_seconds: Optional[float],
+        split_apks: int,
+    ) -> None:
+        if progress_cb:
+            progress_cb(
+                {
+                    "phase": "progress",
+                    "processed": processed,
+                    "total": total,
+                    "elapsed_seconds": elapsed_seconds,
+                    "eta_seconds": eta_seconds,
+                    "split_processed": split_apks,
+                }
+            )
+
+    if progress_cb:
+        progress_cb({"phase": "start", "total": None})
+
     rows, coll_stats = package_collection.collect_inventory(
         serial=serial,
         filter_fn=filter_fn,
-        progress_cb=progress_cb,
+        progress_cb=_progress_adapter if progress_cb else None,
     )
 
     snapshot_path = snapshot_io.persist_snapshot(
@@ -107,7 +125,7 @@ def run_full_sync(
         elapsed_seconds=coll_stats.elapsed_seconds,
     )
 
-    return InventoryResult(
+    result = InventoryResult(
         serial=serial,
         snapshot_path=snapshot_path,
         rows=rows,
@@ -117,3 +135,8 @@ def run_full_sync(
         synced_app_definitions=synced_defs,
         elapsed_seconds=coll_stats.elapsed_seconds,
     )
+
+    if progress_cb:
+        progress_cb({"phase": "complete", "total": stats.total_packages, "elapsed_seconds": stats.elapsed_seconds})
+
+    return result

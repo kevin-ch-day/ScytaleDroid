@@ -436,6 +436,33 @@ def print_dashboard(
     if active_details and inventory_metadata:
         _render_inventory_status(inventory_metadata)
 
+    # Device Analysis menu (sequential, no gaps)
+    print()
+    menu_utils.print_header("Device Analysis")
+    options = [
+        menu_utils.MenuOption("1", "List devices"),
+        menu_utils.MenuOption("2", "Connect to a device"),
+        menu_utils.MenuOption("3", "Device info"),
+        menu_utils.MenuOption("4", "Inventory & database sync (full)"),
+        menu_utils.MenuOption("5", "Detailed device report"),
+        menu_utils.MenuOption("6", "Pull APKs", hint="Fetch APKs to data/apks for static analysis"),
+        menu_utils.MenuOption("7", "Logcat"),
+        menu_utils.MenuOption("8", "Open ADB shell"),
+        menu_utils.MenuOption("9", "Disconnect device"),
+        menu_utils.MenuOption("10", "Export device dossier"),
+        menu_utils.MenuOption("11", "Manage harvest watchlists"),
+        menu_utils.MenuOption("12", "Open APK library (filtered)"),
+    ]
+    spec = menu_utils.MenuSpec(
+        items=options,
+        default="1",
+        exit_label="Back",
+        show_exit=True,
+        show_descriptions=True,
+    )
+    menu_utils.render_menu(spec)
+    print("Shortcuts: r=Refresh  c=Connect/Switch  i=Info  s=Shell  l=Logcat  q/0=Back to main")
+
     # ADB warnings
     if warnings:
         distinct_warnings = list(dict.fromkeys(warnings))
