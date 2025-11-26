@@ -9,12 +9,12 @@ from scytaledroid.Utils.DisplayUtils import (
     error_panels,
     menu_utils,
     prompt_utils,
+    status_messages,
     table_utils,
 )
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from scytaledroid.DeviceAnalysis import adb_utils, device_manager
-from scytaledroid.DeviceAnalysis.inventory import inventory_sync_menu  # type: ignore  # imported at runtime to avoid circular import
 from .formatters import (
     format_android_release,
     format_build_tags,
@@ -61,7 +61,15 @@ def handle_choice(
         _show_device_info(active_device, active_details)
     elif choice == "5":
         serial = active_device.get("serial") if active_device else device_manager.get_active_serial()
-        inventory_sync_menu(serial)
+        if not serial:
+            error_panels.print_error_panel(
+                "Inventory & database sync",
+                "No active device. Connect first to sync.",
+            )
+            prompt_utils.press_enter_to_continue()
+            return False
+        from scytaledroid.DeviceAnalysis.inventory import run_inventory_sync  # local import to avoid circular
+        run_inventory_sync(serial, interactive=True)
     elif choice == "6":
         _forward_to_helper(choice, active_device)
     elif choice == "7":
@@ -107,7 +115,6 @@ def build_main_menu_options(
 
     options: List[menu_utils.MenuOption] = [
         menu_utils.MenuOption("1", "List devices"),
-        menu_utils.MenuOption("2", "Refresh status"),
         menu_utils.MenuOption("3", "Connect to a device"),
         menu_utils.MenuOption(
             "4",
@@ -117,9 +124,9 @@ def build_main_menu_options(
         ),
         menu_utils.MenuOption(
             "5",
-            "Inventory & database sync",
+            "Inventory & database sync (full)",
             badge=inv_badge or needs_active,
-            hint="Refresh packages and DB entries",
+            hint="Refresh all packages and DB entries",
         ),
         menu_utils.MenuOption(
             "6",
@@ -161,46 +168,10 @@ def build_main_menu_options(
 
 
 def _list_devices(summaries: List[Dict[str, Optional[str]]]) -> None:
-    if not summaries:
-        error_panels.print_error_panel(
-            "Device List",
-            "No Android devices detected.",
-            hint="Ensure USB debugging is enabled and the device is connected.",
-        )
-    else:
-        print("\nConnected devices:")
-        headers = ["#", "Serial", "Model", "Android", "Type", "Battery", "Wi-Fi", "Root", "State"]
-        rows: List[List[str]] = []
-        for index, summary in enumerate(summaries, start=1):
-            serial = summary.get("serial") or "—"
-            model = prettify_model(summary.get("model") or summary.get("device"))
-            android_version = format_android_release(summary)
-            device_type = summary.get("device_type") or "Unknown"
-            battery = summary.get("battery_level") or "—"
-            if summary.get("battery_status"):
-                battery = (
-                    f"{battery} ({summary['battery_status']})"
-                    if battery != "—"
-                    else summary["battery_status"]
-                )
-            wifi_state = format_wifi_state(summary.get("wifi_state"))
-            root_state = summary.get("is_rooted") or "Unknown"
-            state = summary.get("state") or "Unknown"
-            rows.append(
-                [
-                    str(index),
-                    serial,
-                    model,
-                    android_version,
-                    device_type,
-                    battery,
-                    wifi_state,
-                    root_state,
-                    state,
-                ]
-            )
-        table_utils.render_table(headers, rows)
-    prompt_utils.press_enter_to_continue()
+    # Instead of an inline list + extra prompt, jump to the full devices hub.
+    from scytaledroid.DeviceAnalysis.device_hub_menu import devices_hub
+
+    devices_hub()
 
 
 def _connect_to_device(
@@ -348,7 +319,16 @@ def _run_apk_pull(active_device: Optional[Dict[str, Optional[str]]]) -> None:
         return
 
     status = device_service.fetch_inventory_metadata(serial)
-    if status and status.is_stale:
+    if status is None or status.status_label.upper() == "NONE":
+        print("\nPull APKs")
+        print("=========")
+        print(status_messages.status("No inventory snapshot found. Run a full inventory & DB sync first.", level="warn"))
+        from scytaledroid.DeviceAnalysis.inventory import run_inventory_sync  # legacy path for now
+        run_inventory_sync(serial, interactive=True)
+        return
+    # Detect change vs snapshot (if metadata carries change flags) or age-based staleness
+    changed = bool(getattr(status, "packages_changed", False) or getattr(status, "scope_changed", False))
+    if status.is_stale:
         print("\nPull APKs")
         print("=========")
         print(
@@ -359,7 +339,7 @@ def _run_apk_pull(active_device: Optional[Dict[str, Optional[str]]]) -> None:
         )
         print(
             status_messages.status(
-                "Pulling APKs on stale inventory may miss recent app changes.",
+                "Pulling APKs now may miss recently added or removed apps (stale by age).",
                 level="warn",
             )
         )
@@ -369,7 +349,7 @@ def _run_apk_pull(active_device: Optional[Dict[str, Optional[str]]]) -> None:
             "0": "Cancel",
         }
         menu_utils.print_menu(options, show_exit=False, show_descriptions=False)
-        choice = prompt_utils.get_choice(list(options) + ["0"], default="0")
+        choice = prompt_utils.get_choice(list(options) + ["0"], default="1")
         if choice == "0":
             return
         if choice == "1":
@@ -378,6 +358,34 @@ def _run_apk_pull(active_device: Optional[Dict[str, Optional[str]]]) -> None:
             # refresh status after sync
             status = device_service.fetch_inventory_metadata(serial)
         # fall through to pull if choice == "2" or after sync
+    elif changed:
+        print("\nPull APKs")
+        print("=========")
+        print(
+            status_messages.status(
+                "Device packages changed since the last inventory snapshot.",
+                level="info",
+            )
+        )
+        print(
+            status_messages.status(
+                "Proceeding without sync may miss updated packages.",
+                level="warn",
+            )
+        )
+        options = {
+            "1": "Run inventory & database sync now (recommended)",
+            "2": "Use last snapshot anyway",
+            "0": "Cancel",
+        }
+        menu_utils.print_menu(options, show_exit=False, show_descriptions=False)
+        choice = prompt_utils.get_choice(list(options) + ["0"], default="1")
+        if choice == "0":
+            return
+        if choice == "1":
+            from scytaledroid.DeviceAnalysis.inventory import inventory_sync_menu
+            inventory_sync_menu(serial)
+            status = device_service.fetch_inventory_metadata(serial)
 
     if not ensure_recent_inventory(serial, device_context=active_device):
         return

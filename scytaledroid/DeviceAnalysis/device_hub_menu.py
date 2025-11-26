@@ -23,7 +23,7 @@ from scytaledroid.DeviceAnalysis.services.models import InventoryStatus
 
 def _inventory_badge(status: InventoryStatus | None) -> str:
     if status is None or status.last_run_ts is None:
-        return "NO SNAPSHOT"
+        return "NONE (no snapshot)"
     count_text = (
         f"{status.package_count} pkg" if status.package_count is not None else "unknown"
     )
@@ -34,7 +34,6 @@ def _render_header(adb_status: str, live_count: int, historical_count: int) -> N
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(text_blocks.headline(f"Android devices — {ts}", width=display_settings.default_width()))
     print(f"ADB: {adb_status}   Live devices: {live_count}   Historical devices: {historical_count}")
-    print(status_messages.status("Context: Devices hub", level="info"))
 
 
 def _render_live_devices(
@@ -115,7 +114,7 @@ def devices_hub() -> None:
         print()
         prompt_hint = "Select a device number to open its dashboard, or 0 to go back to main."
         print(prompt_hint)
-        print(status_messages.status("Shortcuts: r=Refresh  q/0=Back", level="info"))
+        print(status_messages.status("Shortcuts: r=Refresh  q/0=Back to main", level="info"))
         choice_keys = [str(idx) for idx in range(1, len(summaries) + 1)]
         default_choice = "0" if len(summaries) == 0 else ("0" if len(summaries) == 1 else "1")
         choice = prompt_utils.get_choice(

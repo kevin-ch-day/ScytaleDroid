@@ -1,0 +1,256 @@
+"""Snapshot I/O helpers for inventory (UI-free)."""
+
+from __future__ import annotations
+
+import json
+import hashlib
+from pathlib import Path
+from typing import Dict, Iterable, List, Optional
+from datetime import datetime, timezone
+
+from scytaledroid.Config import app_config
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
+from scytaledroid.DeviceAnalysis import inventory_meta
+from scytaledroid.Database.db_core import run_sql
+from scytaledroid.Database.db_func.harvest import device_inventory as inventory_repo
+
+
+_STATE_ROOT = Path(app_config.DATA_DIR) / app_config.DEVICE_STATE_DIR
+
+
+def _normalise_hash_token(*values: object) -> str:
+    parts = []
+    for value in values:
+        if value is None:
+            parts.append("")
+        else:
+            parts.append(str(value))
+    return "|".join(parts)
+
+
+def hash_rows(rows: Iterable[Dict[str, object]]) -> str:
+    digest = hashlib.sha256()
+    tokens = []
+    for row in rows:
+        tokens.append(
+            _normalise_hash_token(
+                row.get("package_name"),
+                row.get("version_name"),
+                row.get("version_code"),
+                row.get("primary_path"),
+            )
+        )
+    for token in sorted(tokens):
+        digest.update(token.encode("utf-8"))
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
+def load_latest_inventory(serial: str) -> Optional[Dict[str, object]]:
+    """Return the most recently persisted inventory snapshot payload if available."""
+    latest_file = _STATE_ROOT / serial / "inventory" / "latest.json"
+    if not latest_file.exists():
+        return None
+
+    try:
+        return json.loads(latest_file.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        log.warning(
+            f"Failed to parse {latest_file.relative_to(Path.cwd())}",
+            category="device",
+        )
+        return None
+
+
+def load_latest_snapshot_meta(serial: str) -> Optional[inventory_meta.InventoryMeta]:
+    """Return lightweight metadata for the most recent inventory snapshot."""
+    return inventory_meta.load_latest(serial)
+
+
+def load_canonical_metadata(package_names: Iterable[str]) -> Dict[str, Dict[str, object]]:
+    """Fetch canonical definitions keyed by package name."""
+
+    normalised = sorted({str(name).lower() for name in package_names if name})
+    if not normalised:
+        return {}
+
+    placeholders = ", ".join(["%s"] * len(normalised))
+
+    def _build_query(include_profiles: bool) -> str:
+        profile_select = (
+            "            d.profile_id,\n            d.profile_name"
+            if include_profiles
+            else "            NULL AS profile_id,\n            NULL AS profile_name"
+        )
+        return f"""
+            SELECT
+                LOWER(d.package_name) AS package_key,
+                d.app_name,
+                d.category_id,
+                c.category_name,
+                {profile_select}
+            FROM android_app_definitions d
+            LEFT JOIN android_app_categories c ON c.category_id = d.category_id
+            WHERE LOWER(d.package_name) IN ({placeholders})
+        """
+
+    rows: List[Dict[str, object]]
+    query = _build_query(include_profiles=True)
+    try:
+        rows = run_sql(query, tuple(normalised), fetch="all", dictionary=True) or []
+    except RuntimeError as exc:
+        if "Unknown column 'd.profile_id'" not in str(exc):
+            raise
+        log.warning(
+            "Profiles unsupported by current android_app_definitions schema; continuing without profile metadata.",
+            category="inventory",
+        )
+        fallback_query = _build_query(include_profiles=False)
+        rows = run_sql(fallback_query, tuple(normalised), fetch="all", dictionary=True) or []
+    canonical: Dict[str, Dict[str, object]] = {}
+    for row in rows:
+        key = str(row.get("package_key") or "").lower()
+        if not key:
+            continue
+        canonical[key] = {
+            "app_name": row.get("app_name"),
+            "category_id": row.get("category_id"),
+            "category_name": row.get("category_name"),
+            "profile_id": row.get("profile_id"),
+            "profile_name": row.get("profile_name"),
+        }
+    return canonical
+
+
+def persist_snapshot(
+    serial: str,
+    rows: List[Dict[str, object]],
+    *,
+    package_hash: Optional[str] = None,
+    package_list_hash: Optional[str] = None,
+    package_signature_hash: Optional[str] = None,
+    build_fingerprint: Optional[str] = None,
+    duration_seconds: Optional[float] = None,
+    snapshot_type: str = "full",
+    scope_hash: Optional[str] = None,
+    filename_suffix: Optional[str] = None,
+    collection_stats: Optional[object] = None,
+) -> Path:
+    """Persist inventory information under the state directory and database."""
+    captured_at = datetime.utcnow().replace(tzinfo=timezone.utc)
+    timestamp = captured_at.strftime("%Y%m%d-%H%M%S")
+    device_dir = _STATE_ROOT / serial / "inventory"
+    device_dir.mkdir(parents=True, exist_ok=True)
+
+    payload: Dict[str, object] = {
+        "generated_at": captured_at.isoformat().replace("+00:00", "Z"),
+        "device_serial": serial,
+        "package_count": len(rows),
+        "packages": rows,
+    }
+
+    if snapshot_type:
+        payload["snapshot_type"] = snapshot_type
+    if scope_hash:
+        payload["scope_hash"] = scope_hash
+    if filename_suffix:
+        payload["snapshot_variant"] = filename_suffix
+
+    if package_hash:
+        payload["package_hash"] = package_hash
+    if package_list_hash:
+        payload["package_list_hash"] = package_list_hash
+    if package_signature_hash:
+        payload["package_signature_hash"] = package_signature_hash
+    if build_fingerprint:
+        payload["build_fingerprint"] = build_fingerprint
+    if duration_seconds is not None:
+        payload["duration_seconds"] = duration_seconds
+
+    suffix_segment = f".{filename_suffix}" if filename_suffix else ""
+    target_file = device_dir / f"inventory_{timestamp}{suffix_segment}.json"
+    payload_text = json.dumps(payload, indent=2, sort_keys=True)
+    target_file.write_text(payload_text, encoding="utf-8")
+
+    latest_file = device_dir / "latest.json"
+    latest_file.write_text(payload_text, encoding="utf-8")
+
+    latest_suffix_file: Optional[Path] = None
+    if filename_suffix:
+        latest_suffix_file = device_dir / f"latest{suffix_segment}.json"
+        latest_suffix_file.write_text(payload_text, encoding="utf-8")
+
+    resolved_path = target_file.resolve()
+    try:
+        display_path = resolved_path.relative_to(Path.cwd())
+    except ValueError:
+        display_path = resolved_path
+
+    snapshot_id: Optional[int] = None
+    try:
+        snapshot_id = inventory_repo.create_snapshot(
+            serial,
+            captured_at=captured_at,
+            package_count=len(rows),
+            duration_seconds=duration_seconds,
+            package_hash=package_hash,
+            package_list_hash=package_list_hash,
+            package_signature_hash=package_signature_hash,
+            build_fingerprint=build_fingerprint,
+            scope_hash=scope_hash,
+            snapshot_type=snapshot_type,
+            scope_variant=filename_suffix,
+            scope_size=len(rows),
+            extras={
+                "snapshot_path": str(display_path),
+            },
+        )
+        if snapshot_id:
+            persisted = inventory_repo.replace_packages(snapshot_id, serial, rows)
+            payload["snapshot_id"] = snapshot_id
+            refreshed_payload = json.dumps(payload, indent=2, sort_keys=True)
+            target_file.write_text(refreshed_payload, encoding="utf-8")
+            latest_file.write_text(refreshed_payload, encoding="utf-8")
+            if latest_suffix_file is not None:
+                latest_suffix_file.write_text(refreshed_payload, encoding="utf-8")
+            log.info(
+                f"Inventory snapshot {snapshot_id} stored ({persisted} packages)",
+                category="device",
+                extra={"snapshot_id": snapshot_id, "device_serial": serial},
+            )
+    except Exception as exc:  # pragma: no cover - defensive
+        snapshot_id = None
+        log.warning(
+            f"Failed to persist inventory snapshot to database: {exc}",
+            category="database",
+        )
+
+    log.info(
+        f"Inventory written to {display_path}",
+        category="device",
+    )
+    meta = inventory_meta.InventoryMeta(
+        serial=serial,
+        captured_at=captured_at,
+        package_count=len(rows),
+        package_list_hash=package_list_hash,
+        package_signature_hash=package_signature_hash,
+        build_fingerprint=build_fingerprint,
+        duration_seconds=duration_seconds,
+        snapshot_type=snapshot_type,
+        scope_hash=scope_hash,
+        scope_size=len(rows),
+        snapshot_id=snapshot_id,
+    )
+    meta.write_files(timestamp, suffix=filename_suffix)
+
+    return display_path
+
+
+__all__ = [
+    "hash_rows",
+    "load_latest_inventory",
+    "load_latest_snapshot_meta",
+    "persist_snapshot",
+    "load_canonical_metadata",
+]

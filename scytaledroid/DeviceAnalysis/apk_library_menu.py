@@ -340,11 +340,17 @@ def _selection_manager() -> None:
     if pages > 1:
         print(status_messages.status(f"Showing first page of selected items (total pages: {pages}).", level="info"))
     print(status_messages.status(f"Selected APKs (artifacts): {count}", level="info"))
-    choice = prompt_utils.get_choice(["1", "2", "0"], default="0", casefold=True, prompt="1=Clear selection, 2=Keep, 0=Back")
-    if choice == "1":
+    print(status_messages.status("Commands: r=Run static on selection  c=Clear selection  0=Back", level="info"))
+    choice = prompt_utils.get_choice(["r", "c", "0"], default="r", casefold=True, prompt="r/c/0")
+    if choice.lower() == "c":
         static_scope_service.clear()
         print(status_messages.status("Cleared APK selection.", level="info"))
         prompt_utils.press_enter_to_continue()
+    elif choice.lower() == "r":
+        from scytaledroid.StaticAnalysis.cli import static_analysis_menu
+
+        # Jump into static analysis menu; it will detect the selection.
+        static_analysis_menu()
 
 
 def apk_library_menu(device_filter: Optional[str] = None) -> None:
@@ -368,6 +374,12 @@ def apk_library_menu(device_filter: Optional[str] = None) -> None:
                 width=display_settings.default_width(),
             )
         )
+        selection_line = (
+            f"Selection: {selected_count} APKs marked (commands: m/u/t/a/c/s, q/0=Back)"
+            if selected_count
+            else "Selection: none (use m <idx> or t <idx> to mark APKs)"
+        )
+        print(status_messages.status(selection_line, level="info", show_prefix=False))
         items = [
             menu_utils.MenuOption("1", "Browse APKs by device"),
             menu_utils.MenuOption("2", "Browse APKs by session (coming soon)", disabled=True),

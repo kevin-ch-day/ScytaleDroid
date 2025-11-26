@@ -94,7 +94,7 @@ def device_menu(return_to: str = EXIT_TO_MAIN) -> str:
         menu_utils.render_menu(spec)
         # Footer shortcuts (informational)
         print(
-            "Shortcuts: r=Refresh  c=Connect/Switch  i=Info  s=Shell  l=Logcat  q/0=Back"
+            "Shortcuts: r=Refresh  c=Connect/Switch  i=Info  s=Shell  l=Logcat  q/0=Back to main"
         )
 
         ensure_inventory_survey(
@@ -116,14 +116,6 @@ def device_menu(return_to: str = EXIT_TO_MAIN) -> str:
             active_device,
             active_details,
         )
-
-        if refresh_requested:
-            summary_cache.clear()
-            log.info(
-                "Device summary cache invalidated by user refresh.",
-                category="device",
-            )
-            continue
 
         present_serials = {d.get("serial") for d in devices if d.get("serial")}
         surveyed_serials.intersection_update(present_serials)
@@ -175,11 +167,16 @@ def _render_status_panel(
     print(colors.apply(status_line, label_style, bold=True) if colors.colors_enabled() else status_line)
     if isinstance(last_ts, datetime):
         print(f"Last sync: {last_ts.strftime('%Y-%m-%d %H:%M:%S %Z') or last_ts.isoformat()}")
-    print(f"Threshold: {INVENTORY_STALE_SECONDS // 60}m (inventory considered stale)")
+    threshold_label = f"{INVENTORY_STALE_SECONDS // 3600}h" if INVENTORY_STALE_SECONDS >= 3600 else f"{INVENTORY_STALE_SECONDS // 60}m"
+    if status_label.upper() == "NONE":
+        print(f"Staleness threshold: {threshold_label} (applies after the first snapshot)")
+        print(status_messages.status("No inventory snapshot found. Run a full sync to capture the current app state.", level="warn"))
+        return
+    print(f"Staleness threshold: {threshold_label}")
     if is_stale:
         print(
             status_messages.status(
-                "Recommendation: run Inventory & database sync before pulling APKs.",
+                "Recommendation: run Inventory & database sync before pulling APKs or static analysis.",
                 level="warn",
             )
         )
