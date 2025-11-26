@@ -129,7 +129,7 @@ def build_main_menu_options(
     needs_active = None if has_device else "needs active"
 
     options: List[menu_utils.MenuOption] = [
-        menu_utils.MenuOption("1", "Open devices hub"),
+        menu_utils.MenuOption("1", "Switch device / open devices hub"),
         menu_utils.MenuOption("2", "Connect to a device"),
         menu_utils.MenuOption(
             "3",

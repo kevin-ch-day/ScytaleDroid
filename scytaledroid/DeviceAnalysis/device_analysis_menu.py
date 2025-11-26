@@ -80,7 +80,7 @@ def device_menu(return_to: str = EXIT_TO_MAIN) -> str:
             )
 
         print()
-        menu_utils.print_header("Device Analysis", subtitle="Typical flow: Devices hub → Sync inventory → Pull APKs → Static analysis → Reporting")
+        menu_utils.print_header("Device Analysis")
         options = build_main_menu_options(active_details)
         # Default to List devices to give a quick view before deeper actions
         default_key = "1"

@@ -142,6 +142,31 @@ def run_shell_command(
         ) from exc
 
 
+def run_shell(
+    serial: str,
+    command: List[str],
+    *,
+    timeout: Optional[float] = None,
+    check: bool = False,
+) -> str:
+    """
+    Execute an adb shell command and return stdout text.
+
+    Args:
+        serial: device serial
+        command: list of command tokens to run after ``adb shell``
+        timeout: optional timeout in seconds
+        check: when True, raise RuntimeError on non-zero return code
+    """
+    completed = run_shell_command(serial, command, timeout=timeout)
+    if check and completed.returncode != 0:
+        stderr = (completed.stderr or "").strip()
+        raise RuntimeError(
+            f"adb shell {' '.join(command)} exited with {completed.returncode}: {stderr}"
+        )
+    return completed.stdout or ""
+
+
 def _fetch_all_properties(serial: str) -> Dict[str, str]:
     """Return the full ``getprop`` dictionary for the provided device."""
     try:

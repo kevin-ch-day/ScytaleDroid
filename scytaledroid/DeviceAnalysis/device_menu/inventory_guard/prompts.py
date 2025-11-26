@@ -31,24 +31,42 @@ def prompt_inventory_decision(
 
     # Title
     if age_stale and last_synced:
-        print(status_messages.status(f"Inventory is stale by age (last: {last_synced}).", level="warn"))
-    elif state_changed and last_synced:
-        print(status_messages.status(f"Inventory is fresh by age (last: {last_synced}) but packages changed since last snapshot.", level="warn"))
-    elif state_changed:
-        print(status_messages.status("Inventory is fresh by age, but packages changed since last snapshot.", level="warn"))
-    else:
-        print(status_messages.status("Inventory may be stale.", level="warn"))
-
-    # Body
-    if changes_total and changes_total > 0:
         print(
             status_messages.status(
-                f"Proceeding without sync may miss updated packages ({changes_total} changes).",
+                f"Inventory is stale by age (last: {last_synced}; threshold: {INVENTORY_STALE_SECONDS // 3600}h).",
+                level="warn",
+            )
+        )
+        print(
+            status_messages.status(
+                "Proceeding without a fresh inventory may miss newly installed or updated apps.",
                 level="info",
             )
         )
     elif state_changed:
-        print(status_messages.status("Proceeding without sync may miss updates.", level="info"))
+        change_clause = ""
+        if changes_total and changes_total > 0:
+            change_clause = f" ({changes_total} changes)"
+        freshness = f"(last: {last_synced})" if last_synced else ""
+        print(
+            status_messages.status(
+                f"Inventory is fresh by age {freshness} but packages changed since the last snapshot{change_clause}.",
+                level="warn",
+            )
+        )
+        print(
+            status_messages.status(
+                "Sync now is recommended before pulling APKs; using the existing snapshot may miss updates.",
+                level="info",
+            )
+        )
+    else:
+        print(
+            status_messages.status(
+                "Inventory snapshot is within the freshness window; proceed as needed.",
+                level="info",
+            )
+        )
 
     print("How would you like to proceed?")
     print("  1) Sync now (recommended)")
