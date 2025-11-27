@@ -135,6 +135,7 @@ def persist_snapshot(
     scope_hash: Optional[str] = None,
     filename_suffix: Optional[str] = None,
     collection_stats: Optional[object] = None,
+    delta: Optional[object] = None,
 ) -> Path:
     """Persist inventory information under the state directory and database."""
     captured_at = datetime.utcnow().replace(tzinfo=timezone.utc)
@@ -229,6 +230,12 @@ def persist_snapshot(
         f"Inventory written to {display_path}",
         category="device",
     )
+    delta_new = getattr(delta, "new_count", None) if delta else None
+    delta_removed = getattr(delta, "removed_count", None) if delta else None
+    delta_updated = getattr(delta, "updated_count", None) if delta else None
+    delta_changed = getattr(delta, "changed_packages_count", None) if delta else None
+    delta_split = getattr(delta, "split_delta", None) if delta else None
+
     meta = inventory_meta.InventoryMeta(
         serial=serial,
         captured_at=captured_at,
@@ -241,6 +248,11 @@ def persist_snapshot(
         scope_hash=scope_hash,
         scope_size=len(rows),
         snapshot_id=snapshot_id,
+        delta_new=delta_new,
+        delta_removed=delta_removed,
+        delta_updated=delta_updated,
+        delta_changed_count=delta_changed,
+        delta_split_delta=delta_split,
     )
     meta.write_files(timestamp, suffix=filename_suffix)
 

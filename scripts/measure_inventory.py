@@ -12,6 +12,12 @@ from __future__ import annotations
 import os
 import sys
 from argparse import ArgumentParser
+from pathlib import Path
+
+# Ensure project root is on sys.path when run from scripts//
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 from scytaledroid.DeviceAnalysis.services import inventory_service
 from scytaledroid.DeviceAnalysis import device_manager

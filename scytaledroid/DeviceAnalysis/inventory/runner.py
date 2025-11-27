@@ -25,9 +25,17 @@ class ProgressCallback(Protocol):
 class InventorySyncStats:
     total_packages: int
     split_packages: int
-    new_packages: int
-    removed_packages: int
     elapsed_seconds: float
+
+
+@dataclass
+class InventoryDelta:
+    new_count: int
+    removed_count: int
+    updated_count: int
+    split_delta: int
+    changed_packages_count: int
+    first_snapshot: bool = False
 
 
 @dataclass
@@ -40,12 +48,14 @@ class InventoryResult:
     previous_split: Optional[int]
     synced_app_definitions: int
     elapsed_seconds: float
+    delta: InventoryDelta
 
 
 def run_full_sync(
     serial: str,
     filter_fn: Optional[Callable[[Dict[str, object]], bool]] = None,
     progress_cb: Optional[ProgressCallback] = None,
+    mode: Optional[str] = None,
 ) -> InventoryResult:
     """
     Run a full inventory sync for *serial* and return a UI-free result.
@@ -53,6 +63,7 @@ def run_full_sync(
     prev_meta = snapshot_io.load_latest_snapshot_meta(serial)
     prev_snapshot = snapshot_io.load_latest_inventory(serial)
     prev_packages: set[str] = set()
+    prev_rows_map: Dict[str, Dict[str, object]] = {}
     prev_split = 0
     if prev_snapshot:
         pkgs = prev_snapshot.get("packages") or []
@@ -61,7 +72,12 @@ def run_full_sync(
                 if isinstance(item, dict):
                     name = item.get("package_name")
                     if isinstance(name, str):
-                        prev_packages.add(name)
+                        # Normalise package ids from older snapshots that may contain path=package
+                        if "=" in name:
+                            name = name.rsplit("=", 1)[-1].strip()
+                        if name:
+                            prev_packages.add(name)
+                            prev_rows_map[name] = item
                     if int(item.get("split_count") or 1) > 1:
                         prev_split += 1
 
@@ -90,7 +106,7 @@ def run_full_sync(
         progress_cb({"phase": "start", "total": None, "phase_label": "Collecting packages"})
 
     # Support a simple mode flag for faster paths (env only for now).
-    mode = os.getenv("SCYTALEDROID_INVENTORY_MODE", "baseline").lower().strip()
+    mode = (mode or os.getenv("SCYTALEDROID_INVENTORY_MODE", "baseline")).lower().strip()
     effective_filter = filter_fn
     if mode == "user_only":
         def _user_only(entry: Dict[str, object]) -> bool:
@@ -106,6 +122,53 @@ def run_full_sync(
     )
     collect_elapsed = time.time() - collect_start
 
+    # Build package name maps for delta computation.
+    current_pkg_names: set[str] = set()
+    split_count = 0
+    current_map: Dict[str, Dict[str, object]] = {}
+    for item in rows:
+        if isinstance(item, dict):
+            name = item.get("package_name")
+            if isinstance(name, str):
+                current_pkg_names.add(name)
+                current_map[name] = item
+            if int(item.get("split_count") or 1) > 1:
+                split_count += 1
+
+    stats = InventorySyncStats(
+        total_packages=len(current_pkg_names),
+        split_packages=split_count,
+        elapsed_seconds=coll_stats.elapsed_seconds,
+    )
+
+    # Compute delta vs previous snapshot (single source of truth).
+    first_snapshot = not bool(prev_packages)
+    new_pkgs = len(current_pkg_names - prev_packages) if prev_packages else len(current_pkg_names)
+    removed_pkgs = len(prev_packages - current_pkg_names) if prev_packages else 0
+
+    updated_pkgs = 0
+    if prev_packages:
+        # Keep change detection focused on stable fields to avoid noisy diffs.
+        compare_fields = ("version_code", "version_name", "primary_path", "split_count")
+        for name in current_pkg_names & prev_packages:
+            previous_entry = prev_rows_map.get(name)
+            current_entry = current_map.get(name) or {}
+            if previous_entry:
+                before = tuple(previous_entry.get(field) for field in compare_fields)
+                after = tuple(current_entry.get(field) for field in compare_fields)
+                if before != after:
+                    updated_pkgs += 1
+
+    split_delta = split_count - prev_split
+    delta = InventoryDelta(
+        new_count=new_pkgs,
+        removed_count=removed_pkgs,
+        updated_count=updated_pkgs,
+        split_delta=split_delta,
+        changed_packages_count=new_pkgs + removed_pkgs + updated_pkgs,
+        first_snapshot=first_snapshot,
+    )
+
     persist_start = time.time()
     snapshot_path = snapshot_io.persist_snapshot(
         serial=serial,
@@ -116,33 +179,13 @@ def run_full_sync(
         build_fingerprint=coll_stats.build_fingerprint,
         duration_seconds=coll_stats.elapsed_seconds,
         snapshot_type="full",
+        delta=delta,
     )
     persist_elapsed = time.time() - persist_start
 
     db_start = time.time()
     synced_defs = db_sync.sync_app_definitions(rows)
     db_elapsed = time.time() - db_start
-
-    current_pkg_names: set[str] = set()
-    split_count = 0
-    for item in rows:
-        if isinstance(item, dict):
-            name = item.get("package_name")
-            if isinstance(name, str):
-                current_pkg_names.add(name)
-            if int(item.get("split_count") or 1) > 1:
-                split_count += 1
-
-    new_pkgs = len(current_pkg_names - prev_packages) if prev_packages else len(current_pkg_names)
-    removed_pkgs = len(prev_packages - current_pkg_names) if prev_packages else 0
-
-    stats = InventorySyncStats(
-        total_packages=len(current_pkg_names),
-        split_packages=split_count,
-        new_packages=new_pkgs,
-        removed_packages=removed_pkgs,
-        elapsed_seconds=coll_stats.elapsed_seconds,
-    )
 
     result = InventoryResult(
         serial=serial,
@@ -153,6 +196,7 @@ def run_full_sync(
         previous_split=prev_split if prev_split else None,
         synced_app_definitions=synced_defs,
         elapsed_seconds=coll_stats.elapsed_seconds,
+        delta=delta,
     )
 
     if progress_cb:

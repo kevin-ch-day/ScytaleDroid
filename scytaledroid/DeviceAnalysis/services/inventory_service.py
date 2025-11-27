@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
+import os
 
 from scytaledroid.DeviceAnalysis import device_manager
 from scytaledroid.DeviceAnalysis.inventory import runner, snapshot_io, progress, summary
@@ -40,6 +41,7 @@ def run_full_sync(
     ui_prefs,
     *,
     progress_sink: str = "cli",
+    mode: Optional[str] = None,
 ) -> runner.InventoryResult:
     """
     High-level entry point for a full inventory sync.
@@ -53,13 +55,16 @@ def run_full_sync(
         device_manager.set_active_device(serial)
 
     meta = snapshot_io.load_latest_snapshot_meta(serial)
+    mode = (mode or os.getenv("SCYTALEDROID_INVENTORY_MODE", "baseline")).lower().strip()
     progress_cb = None
     if progress_sink == "cli":
-        progress.render_snapshot_block(meta, ui_prefs=ui_prefs)
+        progress.render_snapshot_block(meta, ui_prefs=ui_prefs, mode=mode)
         progress_cb = progress.make_cli_progress_printer(ui_prefs=ui_prefs)
 
     try:
-        result = runner.run_full_sync(serial=serial, filter_fn=None, progress_cb=progress_cb)
+        result = runner.run_full_sync(
+            serial=serial, filter_fn=None, progress_cb=progress_cb, mode=mode
+        )
     except Exception as exc:  # pragma: no cover - map to service error
         raise InventoryServiceError(f"Inventory sync failed for {serial}: {exc}") from exc
 

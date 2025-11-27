@@ -198,19 +198,27 @@ def _render_status_panel(
         return
     print(f"Staleness threshold: {threshold_label}")
 
-    # Last inventory result
-    added = int(delta.get("total_added", 0) or 0) if isinstance(delta, dict) else 0
-    removed = int(delta.get("total_removed", 0) or 0) if isinstance(delta, dict) else 0
-    updated = int(delta.get("total_updated", 0) or 0) if isinstance(delta, dict) else 0
+    # Last inventory result (now driven by unified InventoryDelta if available)
+    delta_obj = getattr(status, "delta", None)
+    added = removed = updated = 0
+    if delta_obj:
+        added = int(getattr(delta_obj, "new_count", 0) or 0)
+        removed = int(getattr(delta_obj, "removed_count", 0) or 0)
+        updated = int(getattr(delta_obj, "updated_count", 0) or 0)
+    elif isinstance(delta, dict):
+        added = int(delta.get("total_added", 0) or 0)
+        removed = int(delta.get("total_removed", 0) or 0)
+        updated = int(delta.get("total_updated", 0) or 0)
+
     if added or removed or updated:
-        change_tokens = []
+        tokens = []
         if added:
-            change_tokens.append(f"+{added}")
+            tokens.append(f"{added} new")
         if removed:
-            change_tokens.append(f"-{removed}")
+            tokens.append(f"{removed} removed")
         if updated:
-            change_tokens.append(f"Δ{updated}")
-        print(f"Last inventory result: {' / '.join(change_tokens)} (since previous snapshot)")
+            tokens.append(f"{updated} updated")
+        print(f"Last inventory result: {', '.join(tokens)}.")
     else:
         print("Last inventory result: identical to previous snapshot (baseline unchanged).")
 

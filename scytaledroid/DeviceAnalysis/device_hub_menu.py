@@ -112,11 +112,12 @@ def devices_hub() -> None:
                 continue
 
         print()
-        prompt_hint = "Select a device number to open its dashboard, or 0 to go back to main."
+        prompt_hint = "Select a device number to open its dashboard, or choose 0 to return to the main menu."
         print(prompt_hint)
+        print("0) Back to main menu")
         print(status_messages.status("Shortcuts: r=Refresh  q/0=Back to main", level="info"))
         choice_keys = [str(idx) for idx in range(1, len(summaries) + 1)]
-        default_choice = "0" if len(summaries) == 0 else ("0" if len(summaries) == 1 else "1")
+        default_choice = "0" if len(summaries) == 0 else ("1" if len(summaries) == 1 else "1")
         choice = prompt_utils.get_choice(
             choice_keys + ["0", "q"],
             default=default_choice,

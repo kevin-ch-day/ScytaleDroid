@@ -7,8 +7,30 @@ from datetime import datetime, timezone
 from typing import Optional, Dict
 
 from scytaledroid.Utils.DisplayUtils import status_messages, terminal
-from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.constants import INVENTORY_STALE_SECONDS
-from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.utils import humanize_seconds
+
+# Avoid pulling in the entire device_menu stack when running headless (e.g., measure_inventory).
+try:
+    from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.constants import INVENTORY_STALE_SECONDS
+    from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.utils import humanize_seconds
+except Exception:  # pragma: no cover - headless fall-back
+    INVENTORY_STALE_SECONDS = 24 * 60 * 60
+
+    def humanize_seconds(seconds: float | int | None) -> str:
+        if seconds is None:
+            return "unknown"
+        total = int(seconds)
+        mins, secs = divmod(total, 60)
+        hours, mins = divmod(mins, 60)
+        days, hours = divmod(hours, 24)
+        parts = []
+        if days:
+            parts.append(f"{days}d")
+        if hours or parts:
+            parts.append(f"{hours}h")
+        if mins or parts:
+            parts.append(f"{mins:02d}m")
+        parts.append(f"{secs:02d}s")
+        return " ".join(parts)
 
 
 def _format_duration(seconds: Optional[float]) -> str:
@@ -99,7 +121,7 @@ def make_cli_progress_printer(ui_prefs=None):
     return _printer
 
 
-def render_snapshot_block(previous_meta, ui_prefs=None) -> None:
+def render_snapshot_block(previous_meta, ui_prefs=None, mode: Optional[str] = None) -> None:
     """Render a stable snapshot info block before sync starts."""
     status_line = "Status   : UNKNOWN"
     age_line = "Age      : unknown"
@@ -118,11 +140,14 @@ def render_snapshot_block(previous_meta, ui_prefs=None) -> None:
         age_line = f"Age      : {humanize_seconds(age_seconds)}"
         pkg_line = f"Packages : {getattr(previous_meta, 'package_count', '—')}"
 
+    mode_text = mode or "baseline"
+
     print("Snapshot before sync")
     print(f"  {status_line}")
     print(f"  {age_line}")
     print(f"  {pkg_line}")
     print(f"  {threshold_line}")
+    print(f"  Mode     : {mode_text}")
     print()
 
 

@@ -32,6 +32,12 @@ class InventoryMeta:
     scope_size: Optional[int] = None
     scope_hashes: Optional[Dict[str, str]] = None
     snapshot_id: Optional[int] = None
+    # Optional diff metadata (populated by runner)
+    delta_new: Optional[int] = None
+    delta_removed: Optional[int] = None
+    delta_updated: Optional[int] = None
+    delta_changed_count: Optional[int] = None
+    delta_split_delta: Optional[int] = None
 
     def to_payload(self) -> dict:
         payload = asdict(self)
@@ -47,6 +53,16 @@ class InventoryMeta:
             payload.pop("scope_size", None)
         if self.scope_hashes is None:
             payload.pop("scope_hashes", None)
+        # Drop unset delta fields to avoid bloating meta files
+        for field in (
+            "delta_new",
+            "delta_removed",
+            "delta_updated",
+            "delta_changed_count",
+            "delta_split_delta",
+        ):
+            if payload.get(field) is None:
+                payload.pop(field, None)
         return payload
 
     @staticmethod
@@ -119,6 +135,20 @@ class InventoryMeta:
         else:
             snapshot_id = None
 
+        # Optional delta fields (may be absent on older snapshots)
+        def _coerce_int(value: object) -> Optional[int]:
+            if isinstance(value, (int, float)):
+                return int(value)
+            if isinstance(value, str) and value.isdigit():
+                return int(value)
+            return None
+
+        delta_new = _coerce_int(payload.get("delta_new"))
+        delta_removed = _coerce_int(payload.get("delta_removed"))
+        delta_updated = _coerce_int(payload.get("delta_updated"))
+        delta_changed_count = _coerce_int(payload.get("delta_changed_count"))
+        delta_split_delta = _coerce_int(payload.get("delta_split_delta"))
+
         return InventoryMeta(
             serial=serial,
             captured_at=captured_at,
@@ -132,6 +162,11 @@ class InventoryMeta:
             scope_size=scope_size,
             scope_hashes=scope_hashes,
             snapshot_id=snapshot_id,
+            delta_new=delta_new,
+            delta_removed=delta_removed,
+            delta_updated=delta_updated,
+            delta_changed_count=delta_changed_count,
+            delta_split_delta=delta_split_delta,
         )
 
     def write_files(self, timestamp: str, *, suffix: Optional[str] = None) -> None:

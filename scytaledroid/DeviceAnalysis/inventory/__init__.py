@@ -30,16 +30,21 @@ def _render_inventory_summary_compat(rows):
         return None
     return None
 
-# Legacy compatibility: load the old inventory.py so existing imports still work.
-_legacy_path = Path(__file__).resolve().parent.parent / "inventory.py"
-if _legacy_path.exists():
-    spec = importlib.util.spec_from_file_location(
-        "scytaledroid.DeviceAnalysis.inventory_legacy", _legacy_path
-    )
-    if spec and spec.loader:
-        _legacy_module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(_legacy_module)  # type: ignore[arg-type]
-        run_inventory_sync = getattr(_legacy_module, "run_inventory_sync", None)
+import os
+
+# Legacy compatibility: load the old inventory.py so existing imports still work,
+# but only when explicitly requested. The default path now uses the subpackage
+# + service façade to avoid circular imports.
+if os.getenv("SCYTALEDROID_LOAD_LEGACY_INVENTORY") == "1":
+    _legacy_path = Path(__file__).resolve().parent.parent / "inventory.py"
+    if _legacy_path.exists():
+        spec = importlib.util.spec_from_file_location(
+            "scytaledroid.DeviceAnalysis.inventory_legacy", _legacy_path
+        )
+        if spec and spec.loader:
+            _legacy_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(_legacy_module)  # type: ignore[arg-type]
+            run_inventory_sync = getattr(_legacy_module, "run_inventory_sync", None)
 
 try:
     from .runner import run_full_sync, InventoryResult, InventorySyncStats

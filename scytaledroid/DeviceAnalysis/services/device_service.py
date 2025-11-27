@@ -10,15 +10,7 @@ from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timezone
 
 from scytaledroid.DeviceAnalysis import adb_utils, device_manager
-from scytaledroid.DeviceAnalysis.device_menu.dashboard import build_device_summaries
-from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.metadata import (
-    get_latest_inventory_metadata,
-)
 from scytaledroid.DeviceAnalysis.services.models import InventoryStatus
-from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.constants import (
-    INVENTORY_STALE_SECONDS,
-)
-from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.utils import humanize_seconds
 from scytaledroid.DeviceAnalysis import inventory_meta
 from scytaledroid.DeviceAnalysis.inventory import load_latest_inventory
 from scytaledroid.DeviceAnalysis.inventory import runner as inventory_runner
@@ -35,6 +27,9 @@ def scan_devices(
     Dict[str, Dict[str, Optional[str]]],
 ]:
     """Return raw adb devices, warnings, enriched summaries, and a serial map."""
+
+    # Lazy import to avoid circular imports when used headless (e.g., measure_inventory).
+    from scytaledroid.DeviceAnalysis.device_menu.dashboard import build_device_summaries
 
     devices, warnings = adb_utils.scan_devices()
     summary_cache = cache or {}
@@ -78,6 +73,11 @@ def _compute_inventory_status(
     snapshot_meta: Optional[inventory_meta.InventoryMeta],
 ) -> InventoryStatus:
     """Compute a unified InventoryStatus from metadata or snapshot."""
+    # Local import to avoid circular dependency when services are used headless.
+    from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.constants import (
+        INVENTORY_STALE_SECONDS,
+    )
+    from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.utils import humanize_seconds
 
     ts = None
     pkg_count = None
@@ -143,6 +143,9 @@ def fetch_inventory_metadata(
     scope_id: str = "last_scope",
 ) -> Optional[InventoryStatus]:
     """Return the latest inventory metadata (and optional current-state diff) as InventoryStatus."""
+    from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.metadata import (
+        get_latest_inventory_metadata,
+    )
     meta = get_latest_inventory_metadata(
         serial,
         with_current_state=with_current_state,

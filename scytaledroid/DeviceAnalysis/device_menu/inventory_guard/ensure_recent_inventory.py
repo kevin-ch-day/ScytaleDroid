@@ -84,19 +84,152 @@ def ensure_recent_inventory(
     package_delta_summary: Optional[Dict[str, object]] = None
     total_delta = 0
     delta_brief: Optional[str] = None
+
+    def _recompute_version_delta() -> Optional[Dict[str, object]]:
+        """
+        Fallback delta based only on version info from the last snapshot vs current signatures.
+        This is looser than the hashing path but reduces false positives immediately after a clean sync.
+        """
+        latest_payload = inventory_module.load_latest_inventory(serial)
+        snapshot_packages = latest_payload.get("packages") if isinstance(latest_payload, dict) else None
+        if not snapshot_packages:
+            return None
+        # Build maps of package -> version token
+        def _version_token(entry: Dict[str, object]) -> Optional[str]:
+            code = entry.get("version_code")
+            name = entry.get("version_name")
+            if isinstance(code, (int, float, str)):
+                code_str = str(code).strip()
+                if code_str:
+                    return code_str
+            if isinstance(name, str) and name.strip():
+                return name.strip()
+            return None
+
+        snap_map: Dict[str, Optional[str]] = {}
+        for entry in snapshot_packages:
+            if not isinstance(entry, dict):
+                continue
+            name = entry.get("package_name")
+            if not isinstance(name, str) or not name:
+                continue
+            snap_map[name] = _version_token(entry)
+
+        cur_map: Dict[str, Optional[str]] = {}
+        for name, version_code, version_name in current_signatures:
+            if not isinstance(name, str) or not name:
+                continue
+            token = None
+            if isinstance(version_code, (int, float, str)):
+                vc = str(version_code).strip()
+                if vc:
+                    token = vc
+            if token is None and isinstance(version_name, str) and version_name.strip():
+                token = version_name.strip()
+            cur_map[name] = token
+
+        added = sorted(set(cur_map) - set(snap_map))
+        removed = sorted(set(snap_map) - set(cur_map))
+        updated = []
+        for name in sorted(set(cur_map) & set(snap_map)):
+            before = snap_map.get(name)
+            after = cur_map.get(name)
+            if before != after:
+                updated.append({"package": name, "before": before, "after": after})
+
+        total_changed = len(added) + len(removed) + len(updated)
+        if total_changed == 0:
+            return None
+
+        summary: Dict[str, object] = {
+            "total_changed": total_changed,
+            "added": added,
+            "removed": removed,
+            "updated": updated,
+        }
+        return summary
+    last_delta_changed = None
+    age_since_snapshot = None
+    if metadata and metadata.get("timestamp"):
+        try:
+            age_since_snapshot = (datetime.now(timezone.utc) - metadata["timestamp"]).total_seconds()  # type: ignore[index]
+        except Exception:
+            age_since_snapshot = None
+
     if metadata:
-        raw_delta = metadata.get("package_delta_summary")
-        if isinstance(raw_delta, dict):
-            package_delta_summary = raw_delta
-            try:
-                total_delta = int(raw_delta.get("total_changed") or 0)
-            except (TypeError, ValueError):
-                total_delta = 0
-            delta_brief = _format_package_delta_brief(
-                package_delta_summary, limit=PACKAGE_DELTA_DISPLAY_LIMIT
-            )
-        else:
+        try:
+            last_delta_changed = int(metadata.get("delta_changed_count")) if metadata.get("delta_changed_count") is not None else None
+        except (TypeError, ValueError):
+            last_delta_changed = None
+
+        # Prefer the authoritative delta recorded with the snapshot. This is computed once
+        # by the inventory runner and should be treated as the single source of truth.
+        if last_delta_changed is not None:
+            total_delta = max(0, last_delta_changed)
             package_delta_summary = None
+            delta_brief = None
+            packages_changed = total_delta > 0
+            state_changed = packages_changed or fingerprint_changed or scope_changed or scope_hash_changed
+        else:
+            raw_delta = metadata.get("package_delta_summary")
+            if isinstance(raw_delta, dict):
+                package_delta_summary = raw_delta
+                try:
+                    total_delta = int(raw_delta.get("total_changed") or 0)
+                except (TypeError, ValueError):
+                    total_delta = 0
+                delta_brief = _format_package_delta_brief(
+                    package_delta_summary, limit=PACKAGE_DELTA_DISPLAY_LIMIT
+                )
+                packages_changed = total_delta > 0
+                state_changed = packages_changed or fingerprint_changed or scope_changed or scope_hash_changed
+                # If delta reports zero changes, suppress change-based warnings.
+                if total_delta == 0:
+                    package_delta_summary = None
+                    delta_brief = None
+                    packages_changed = False
+                    state_changed = scope_changed or scope_hash_changed or fingerprint_changed
+            else:
+                package_delta_summary = None
+
+        # Heuristic: on non-root devices the current package listing may omit system/vendor
+        # packages. If the snapshot is very recent and the current count is far smaller
+        # than the snapshot count, suppress change warnings to avoid false positives
+        # immediately after a successful sync.
+        snapshot_count = metadata.get("package_count")
+        current_count = metadata.get("current_package_count")
+        if (
+            snapshot_count
+            and current_count
+            and current_count < snapshot_count
+            and metadata.get("timestamp")
+        ):
+            if age_since_snapshot is not None and age_since_snapshot < 600:
+                package_delta_summary = None
+                packages_changed = False
+                state_changed = scope_changed or scope_hash_changed or fingerprint_changed
+        # If hashes match exactly, treat as no change regardless of coarse deltas.
+        snapshot_sig = metadata.get("package_signature_hash")
+        current_sig = metadata.get("current_package_signature_hash")
+        if isinstance(snapshot_sig, str) and isinstance(current_sig, str) and snapshot_sig == current_sig:
+            package_delta_summary = None
+            total_delta = 0
+            packages_changed = False
+            state_changed = scope_changed or scope_hash_changed or fingerprint_changed
+
+        # If the last recorded delta from the most recent sync reported no changes,
+        # treat small/ambiguous deltas as noise and suppress change warnings.
+        if (
+            last_delta_changed is not None
+            and last_delta_changed == 0
+            and total_delta > 0
+            and age_since_snapshot is not None
+            and age_since_snapshot < 600
+        ):
+            package_delta_summary = None
+            total_delta = 0
+            packages_changed = False
+            state_changed = scope_changed or scope_hash_changed or fingerprint_changed
     expected_duration = coerce_float(
         metadata.get("estimated_duration_seconds") if metadata else None
     )

@@ -1,4 +1,10 @@
-"""adb_utils.py - Lightweight wrappers around selected ADB commands."""
+"""adb_utils.py - Lightweight wrappers around selected ADB commands.
+
+Public surface for callers:
+    - run_shell(serial, args, ...)  # preferred entry point for adb shell
+Everything else in this module should be treated as internal/legacy helpers.
+Controllers/menus should never call subprocess directly; go through run_shell.
+"""
 
 from __future__ import annotations
 
@@ -477,6 +483,9 @@ def _parse_package_listing(output: str) -> List[Tuple[str, Optional[str], Option
         for token in line.split():
             if token.startswith("package:"):
                 package_name = token.split(":", 1)[1].strip()
+                # pm list packages --show-version* can include path=package; keep only the package id.
+                if "=" in package_name:
+                    package_name = package_name.rsplit("=", 1)[-1].strip()
             elif token.startswith("versionCode:"):
                 version_code = token.split(":", 1)[1].strip()
             elif token.startswith("versionName:"):

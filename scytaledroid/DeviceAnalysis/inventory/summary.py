@@ -22,18 +22,26 @@ def _format_duration(seconds: float | None) -> str:
     return " ".join(parts)
 
 
-def _format_delta_text(current: int, previous: int | None) -> str:
-    if previous is None:
+def _format_delta_text(delta_value: int, *, first_snapshot: bool = False) -> str:
+    if first_snapshot:
         return "(first snapshot)"
-    delta = current - previous
-    if delta == 0:
-        return "(no change vs previous snapshot)"
-    sign = "+" if delta > 0 else "-"
-    return f"(Δ {sign}{abs(delta)} vs previous snapshot)"
+    if delta_value == 0:
+        return "(identical to previous snapshot)"
+    sign = "+" if delta_value > 0 else "-"
+    return f"(Δ {sign}{abs(delta_value)} vs previous snapshot)"
 
 
 def render_sync_summary_box(result) -> None:
     """Render the completion box for a sync."""
+    delta = getattr(result, "delta", None)
+    first_snapshot = bool(getattr(delta, "first_snapshot", False))
+    split_delta = getattr(delta, "split_delta", 0) if delta else 0
+    new_count = getattr(delta, "new_count", 0) if delta else 0
+    removed_count = getattr(delta, "removed_count", 0) if delta else 0
+    updated_count = getattr(delta, "updated_count", 0) if delta else 0
+    changed_total = getattr(delta, "changed_packages_count", 0) if delta else 0
+    net_count_delta = result.stats.total_packages - (result.previous_total or 0)
+
     lines = [
         status_messages.status("Inventory sync complete", level="success"),
         status_messages.status(
@@ -42,17 +50,29 @@ def render_sync_summary_box(result) -> None:
             show_prefix=False,
         ),
         status_messages.status(
-            f"Packages captured: {result.stats.total_packages} {_format_delta_text(result.stats.total_packages, result.previous_total)}",
+            (
+                f"Packages captured: {result.stats.total_packages} "
+                f"{_format_delta_text(net_count_delta if not first_snapshot else 0, first_snapshot=first_snapshot)}"
+            ),
             show_icon=False,
             show_prefix=False,
         ),
         status_messages.status(
-            f"Split APKs: {result.stats.split_packages} {_format_delta_text(result.stats.split_packages, result.previous_split)}",
+            f"Split APKs: {result.stats.split_packages} {_format_delta_text(split_delta, first_snapshot=first_snapshot)}",
             show_icon=False,
             show_prefix=False,
         ),
         status_messages.status(
-            f"New packages: {result.stats.new_packages} • Removed: {result.stats.removed_packages}",
+            (
+                "Delta vs previous snapshot: "
+                f"new={new_count}, removed={removed_count}, updated={updated_count}, "
+                f"changed_packages={changed_total}"
+            ),
+            show_icon=False,
+            show_prefix=False,
+        ),
+        status_messages.status(
+            f"New packages: {new_count} • Removed: {removed_count} • Updated: {updated_count}",
             show_icon=False,
             show_prefix=False,
         ),
@@ -80,9 +100,12 @@ def render_inventory_summary(result) -> None:
     total = len(rows)
     from collections import Counter
 
-    def _get_canonical_category(entry: Dict[str, object]) -> str:
-        value = entry.get("category_name") or entry.get("category")
-        return str(value) if value not in {None, ""} else "Unknown"
+    def _get_owner_role(entry: Dict[str, object]) -> str:
+        value = entry.get("owner_role")
+        if value not in {None, ""}:
+            return str(value)
+        # Fall back to partition-derived label if owner_role is missing
+        return _partition_label(entry)
 
     def _partition_label(entry: Dict[str, object]) -> str:
         primary_path = str(entry.get("primary_path") or "")
@@ -100,11 +123,14 @@ def render_inventory_summary(result) -> None:
             return "Other"
         return "Unknown"
 
-    category_counts = Counter(_get_canonical_category(entry) for entry in rows)
-    source_counts = Counter(str(entry.get("source") or "Unknown") for entry in rows)
+    category_counts = Counter(_get_owner_role(entry) for entry in rows)
+    # Install source is only meaningful for user-space apps; scope it accordingly.
+    user_entries = [entry for entry in rows if _get_owner_role(entry) == "User"]
+    source_counts = Counter(str(entry.get("source") or "Unknown") for entry in user_entries)
     split_packages = sum(1 for entry in rows if int(entry.get("split_count") or 1) > 1)
     profile_counts = Counter(str(entry.get("profile_name") or "Unclassified") for entry in rows)
     partition_counts = Counter(_partition_label(entry) for entry in rows)
+    user_scope_count = len(user_entries)
 
     print()
     print(text_blocks.headline("Inventory summary", width=70))
@@ -113,16 +139,27 @@ def render_inventory_summary(result) -> None:
         [
             ["Total packages", str(total)],
             ["Split APK packages", str(split_packages)],
+            ["User-scope candidates", str(user_scope_count)],
         ],
     )
 
     print()
-    print(text_blocks.headline("By install source", width=70))
+    # Show a concise source breakdown that matches the user-scope count.
+    play_installs = source_counts.get("Play Store", 0)
+    sideload_installs = source_counts.get("Sideload", 0)
+    unknown_installs = max(user_scope_count - play_installs - sideload_installs, 0)
+
+    print(
+        text_blocks.headline(
+            f"By install source (user apps: {user_scope_count})", width=70
+        )
+    )
     table_utils.render_table(
         ["Source", "Count"],
         [
-            ["Play Store installs", str(source_counts.get("Play Store", 0))],
-            ["Sideload / unknown", str(source_counts.get("Sideload", 0))],
+            ["Play Store installs", str(play_installs)],
+            ["Sideload", str(sideload_installs)],
+            ["Unknown / other", str(unknown_installs)],
         ],
     )
 
@@ -136,6 +173,7 @@ def render_inventory_summary(result) -> None:
             ["System core", str(category_counts.get("System", 0))],
             ["Google mainline", str(category_counts.get("Mainline", 0))],
             ["Vendor modules", str(category_counts.get("Vendor", 0))],
+            ["Unclassified / Unknown", str(category_counts.get("Unknown", 0))],
         ],
     )
 

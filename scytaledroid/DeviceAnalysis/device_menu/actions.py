@@ -36,12 +36,11 @@ from scytaledroid.DeviceAnalysis.services import info_service
 
 
 _HELPER_ROUTES = {
-    "5": ("inventory", "run_device_summary", True, "Collect detailed device summary"),
-    "6": ("apk_pull", "pull_apks", True, "Pull APKs from the device"),
-    "7": ("logcat", "stream_logcat", True, "Stream logcat output"),
-    "8": ("shell", "open_shell", True, "Open interactive adb shell"),
-    "10": ("report", "generate_device_report", True, "Export the device dossier"),
-    "11": ("watchlist_manager", "manage_watchlists", False, "Manage harvest watchlists"),
+    "4": ("inventory", "run_device_summary", True, "Collect detailed device summary"),
+    "6": ("logcat", "stream_logcat", True, "Stream logcat output"),
+    "7": ("shell", "open_shell", True, "Open interactive adb shell"),
+    "9": ("report", "generate_device_report", True, "Export the device dossier"),
+    "10": ("watchlist_manager", "manage_watchlists", False, "Manage harvest watchlists"),
 }
 
 
@@ -58,10 +57,8 @@ def handle_choice(
 
         devices_hub()
     elif choice == "2":
-        _connect_to_device(devices, summaries)
-    elif choice == "3":
         _show_device_info(active_device, active_details)
-    elif choice == "4":
+    elif choice == "3":
         serial = active_device.get("serial") if active_device else device_manager.get_active_serial()
         if not serial:
             error_panels.print_error_panel(
@@ -85,15 +82,15 @@ def handle_choice(
                 str(exc),
             )
             prompt_utils.press_enter_to_continue()
+    elif choice == "4":
+        _forward_to_helper(choice, active_device)
     elif choice == "5":
-        _forward_to_helper(choice, active_device)
-    elif choice == "6":
         _run_apk_pull(active_device)
-    elif choice in {"7", "8", "10", "11"}:
+    elif choice in {"6", "7", "9", "10"}:
         _forward_to_helper(choice, active_device)
-    elif choice == "9":
+    elif choice == "8":
         _disconnect_device()
-    elif choice == "12":
+    elif choice == "11":
         _open_apk_library_filtered(active_device)
     else:
         error_panels.print_error_panel(
@@ -109,6 +106,10 @@ def handle_choice(
 def build_main_menu_options(
     active_details: Optional[Dict[str, Optional[str]]]
 ) -> List[menu_utils.MenuOption]:
+    """
+    Single source of truth for the Device Analysis menu.
+    Any change to menu ordering/labels must be reflected here and in handlers.
+    """
     serial = active_details.get("serial") if active_details else device_manager.get_active_serial()
     has_device = bool(serial)
 
@@ -129,54 +130,58 @@ def build_main_menu_options(
     needs_active = None if has_device else "needs active"
 
     options: List[menu_utils.MenuOption] = [
-        menu_utils.MenuOption("1", "Switch device / open devices hub"),
-        menu_utils.MenuOption("2", "Connect to a device"),
+        menu_utils.MenuOption("1", "Devices hub / switch device"),
         menu_utils.MenuOption(
-            "3",
+            "2",
             "Device info",
             disabled=not has_device,
             badge=needs_active,
         ),
         menu_utils.MenuOption(
-            "4",
+            "3",
             "Inventory & database sync (full)",
             badge=inv_badge or needs_active,
             hint="Refresh all packages and DB entries",
         ),
         menu_utils.MenuOption(
-            "5",
+            "4",
             "Detailed device report",
             disabled=not has_device,
             badge=needs_active,
         ),
         menu_utils.MenuOption(
-            "6",
+            "5",
             "Pull APKs",
             disabled=not has_device,
             badge=pull_badge or needs_active,
             hint="Fetch APKs to data/apks for static analysis",
         ),
         menu_utils.MenuOption(
-            "7",
+            "6",
             "Logcat",
             disabled=not has_device,
             badge=needs_active,
         ),
         menu_utils.MenuOption(
-            "8",
+            "7",
             "Open ADB shell",
             disabled=not has_device,
             badge=needs_active,
         ),
         menu_utils.MenuOption(
-            "9",
+            "8",
             "Disconnect device",
             disabled=not has_device,
             badge=needs_active,
         ),
-        menu_utils.MenuOption("10", "Export device dossier", disabled=not has_device, badge=needs_active),
-        menu_utils.MenuOption("11", "Manage harvest watchlists"),
-        menu_utils.MenuOption("12", "Open APK library (filtered)"),
+        menu_utils.MenuOption(
+            "9",
+            "Export device dossier",
+            disabled=not has_device,
+            badge=needs_active,
+        ),
+        menu_utils.MenuOption("10", "Manage harvest watchlists"),
+        menu_utils.MenuOption("11", "Open APK library (filtered)"),
     ]
 
     return options
@@ -263,12 +268,13 @@ def _show_device_info(
 def _disconnect_device() -> None:
     if device_manager.get_active_serial():
         device_manager.disconnect()
-        print("\nDevice disconnected.")
         log.info("Active device cleared by user.", category="device")
     else:
-        print("\nNo active device to disconnect.")
         log.info("Disconnect request received but no active device was set.", category="device")
-    prompt_utils.press_enter_to_continue()
+    # Immediately return to the devices hub for a clean navigation model.
+    from scytaledroid.DeviceAnalysis.device_hub_menu import devices_hub
+
+    devices_hub()
 
 
 def _open_apk_library_filtered(active_device: Optional[Dict[str, Optional[str]]]) -> None:
@@ -345,7 +351,8 @@ def _run_apk_pull(active_device: Optional[Dict[str, Optional[str]]]) -> None:
             print(status_messages.status(f"Inventory sync failed: {exc}", level="error"))
         return
     # Detect change vs snapshot (if metadata carries change flags) or age-based staleness
-    changed = bool(getattr(status, "packages_changed", False) or getattr(status, "scope_changed", False))
+    # Defer change-based gating to inventory_guard to avoid duplicate/noisy prompts.
+    changed = False
     if status.is_stale:
         print("\nPull APKs")
         print("=========")
@@ -415,8 +422,17 @@ def _run_apk_pull(active_device: Optional[Dict[str, Optional[str]]]) -> None:
     if not ensure_recent_inventory(serial, device_context=active_device):
         return
 
-    device_context = active_device or {"serial": serial}
-    _forward_to_helper("6", device_context)
+    # Proceed to APK harvesting flow.
+    try:
+        from scytaledroid.DeviceAnalysis import apk_pull
+
+        apk_pull.pull_apks(serial)
+    except Exception as exc:
+        error_panels.print_error_panel(
+            "Pull APKs",
+            f"Failed to start APK harvest: {exc}",
+        )
+        prompt_utils.press_enter_to_continue()
 
 
 __all__ = ["handle_choice", "build_main_menu_options"]

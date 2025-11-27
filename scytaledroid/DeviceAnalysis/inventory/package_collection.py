@@ -58,7 +58,8 @@ def collect_inventory(
     adb_utils.clear_package_caches(serial)
 
     mode = os.getenv("SCYTALEDROID_INVENTORY_MODE", "baseline").strip().lower()
-    use_bulk = mode in {"baseline", "user_only", "incremental"}
+    # For now, favor correctness by disabling bulk path until enrichment parity is restored.
+    use_bulk = False
 
     packages_with_versions: List[Tuple[str, Optional[str], Optional[str]]] = []
     bulk_entries: List[adb_bulk.BulkPackageEntry] = []
@@ -86,7 +87,14 @@ def collect_inventory(
     device_properties = adb_utils.get_basic_properties(serial)
     fingerprint = device_properties.get("build_fingerprint") if device_properties else None
 
-    canonical_metadata = snapshot_io.load_canonical_metadata(package_names)
+    # Load canonical metadata from DB so category/profile tagging and scopes work.
+    canonical_metadata: Dict[str, Dict[str, object]] = {}
+    try:
+        if package_names:
+            canonical_metadata = snapshot_io.load_canonical_metadata(package_names) or {}
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning(f"Failed to load canonical metadata: {exc}", category="inventory")
+        canonical_metadata = {}
 
     rows: List[Dict[str, object]] = []
     package_definitions: Dict[str, Optional[str]] = {}
@@ -95,28 +103,9 @@ def collect_inventory(
     split_processed = 0
 
     for index, package_name in enumerate(package_names, start=1):
-        if bulk_entries:
-            # Try to reuse paths from bulk output; fall back to pm path if missing.
-            bulk_entry = next((e for e in bulk_entries if e.package_name == package_name), None)
-            paths = [bulk_entry.apk_path] if bulk_entry and bulk_entry.apk_path else []
-        else:
-            bulk_entry = None
-            paths = []
-
-        if not paths:
-            paths = adb_utils.get_package_paths(serial, package_name)
-
-        if bulk_entry:
-            metadata = {
-                "installer": None,  # pm list -f -U does not expose installer
-                "app_label": None,
-                "version_name": None,
-                "version_code": None,
-                "first_install": None,
-                "last_update": None,
-            }
-        else:
-            metadata = adb_utils.get_package_metadata(serial, package_name)
+        # For correctness, always fetch full metadata/paths per package for now.
+        paths = adb_utils.get_package_paths(serial, package_name)
+        metadata = adb_utils.get_package_metadata(serial, package_name)
         package_key = package_name.lower()
         canonical_entry = canonical_metadata.get(package_key)
         entry = _compose_inventory_entry(package_name, paths, metadata, canonical_entry)
@@ -236,6 +225,8 @@ def _compose_inventory_entry(
     source_category = category_name if category_name in _CATEGORY_ORDER else fallback_category
     source = _derive_source(str(source_category or fallback_category), installer)
 
+    role = fallback_category  # partition-derived owner role (User/OEM/System/Mainline/Vendor/Other/Unknown)
+
     app_label = (
         (canonical.get("app_name") if canonical else None)
         or metadata.get("app_label")
@@ -269,6 +260,8 @@ def _compose_inventory_entry(
         "review_needed": review_needed,
         "inferred_category": heuristic_category,
         "inferred_profile": heuristic_profile,
+        # owner/role derived from partition; kept separate from semantic category_name
+        "owner_role": role,
     }
 
     entry["split_count"] = split_count  # type: ignore[index]

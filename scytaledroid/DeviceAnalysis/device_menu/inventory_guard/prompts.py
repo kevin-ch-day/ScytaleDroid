@@ -29,8 +29,10 @@ def prompt_inventory_decision(
     last_synced = humanize_seconds(age_seconds) if timestamp and age_seconds is not None else None
     age_stale = bool(age_seconds is not None and age_seconds >= INVENTORY_STALE_SECONDS)
 
-    # Title
-    if age_stale and last_synced:
+    # Title/body (centralized copy by state)
+    if not timestamp:
+        print(status_messages.status("No inventory snapshot exists; run a full sync before pulling APKs.", level="warn"))
+    elif age_stale and last_synced:
         print(
             status_messages.status(
                 f"Inventory is stale by age (last: {last_synced}; threshold: {INVENTORY_STALE_SECONDS // 3600}h).",
@@ -39,18 +41,16 @@ def prompt_inventory_decision(
         )
         print(
             status_messages.status(
-                "Proceeding without a fresh inventory may miss newly installed or updated apps.",
+                "A fresh inventory is recommended to avoid missing newly installed or updated apps.",
                 level="info",
             )
         )
     elif state_changed:
-        change_clause = ""
-        if changes_total and changes_total > 0:
-            change_clause = f" ({changes_total} changes)"
+        changes_text = f" ({changes_total} changes)" if changes_total else ""
         freshness = f"(last: {last_synced})" if last_synced else ""
         print(
             status_messages.status(
-                f"Inventory is fresh by age {freshness} but packages changed since the last snapshot{change_clause}.",
+                f"Inventory is fresh by age {freshness} but packages changed since the last snapshot{changes_text}.",
                 level="warn",
             )
         )

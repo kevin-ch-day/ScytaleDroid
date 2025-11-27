@@ -473,7 +473,7 @@ def print_dashboard(
         show_descriptions=True,
     )
     menu_utils.render_menu(spec)
-    print("Shortcuts: r=Refresh  c=Connect/Switch  i=Info  s=Shell  l=Logcat  q/0=Back to main")
+    print("Shortcuts: r=Refresh  c=Devices hub/switch  i=Info  s=Shell  l=Logcat  q/0=Back to main")
 
     # ADB warnings
     if warnings:

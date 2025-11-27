@@ -9,9 +9,9 @@ from typing import Dict, Union
 DB_CONFIG: Dict[str, Union[str, int]] = {
     "host": "localhost",
     "port": 3306,
-    "user": "scytale",
-    "password": "StrongPass!",
-    "database": "scytaledroid_droid_intel_db_dev",
+    "user": "root",
+    "password": "Password123!",
+    "database": "scytaledroid_droid_intel_db_prod",
     "charset": "utf8mb4",
 }
 
