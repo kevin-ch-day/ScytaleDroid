@@ -8,7 +8,7 @@ from typing import Optional
 import os
 
 from scytaledroid.DeviceAnalysis import device_manager
-from scytaledroid.DeviceAnalysis.inventory import runner, snapshot_io, progress, summary
+from scytaledroid.DeviceAnalysis.inventory import runner, snapshot_io, progress, views
 from scytaledroid.Utils.DisplayUtils import status_messages
 
 
@@ -69,8 +69,14 @@ def run_full_sync(
         raise InventoryServiceError(f"Inventory sync failed for {serial}: {exc}") from exc
 
     if progress_sink == "cli":
-        summary.render_sync_summary_box(result)
-        summary.render_inventory_summary(result)
+        if mode == "legacy":
+            print(
+                status_messages.status(
+                    "SCYTALEDROID_INVENTORY_MODE=legacy is deprecated; use baseline/user_only/bulk modes.",
+                    level="warn",
+                )
+            )
+        views.print_inventory_run_summary_from_result(result)
         print(
             status_messages.status(
                 'Next steps: choose "Pull APKs" from Device Analysis to harvest artifacts for static analysis.',
