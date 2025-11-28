@@ -80,3 +80,44 @@ def test_guard_allows_pull_when_fresh_and_no_changes(monkeypatch):
     )
 
     assert guard_module.ensure_recent_inventory(serial="ABC123") is True
+
+
+def test_guard_handles_dict_delta_without_prompt(monkeypatch):
+    now = datetime.now(timezone.utc)
+
+    def _fake_inventory(_serial):
+        return {"packages": []}
+
+    def _fake_metadata(_serial, with_current_state=False, scope_packages=None):
+        return {
+            "timestamp": now,
+            "delta": {
+                "new": 0,
+                "removed": 0,
+                "updated": 0,
+                "changed": 0,
+            },
+            "scope_changed": False,
+            "scope_hash_changed": False,
+        }
+
+    def _fail_if_prompted(*_args, **_kwargs):  # pragma: no cover - guardrail
+        raise AssertionError("Guard should not prompt when delta reports no changes")
+
+    monkeypatch.setattr(
+        guard_module.inventory_module,
+        "load_latest_inventory",
+        _fake_inventory,
+    )
+    monkeypatch.setattr(
+        guard_module,
+        "get_latest_inventory_metadata",
+        _fake_metadata,
+    )
+    monkeypatch.setattr(
+        guard_module.prompt_utils,
+        "get_choice",
+        _fail_if_prompted,
+    )
+
+    assert guard_module.ensure_recent_inventory(serial="ABC123") is True

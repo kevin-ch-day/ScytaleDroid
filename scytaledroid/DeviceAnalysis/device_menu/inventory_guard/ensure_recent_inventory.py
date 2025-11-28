@@ -91,7 +91,21 @@ def ensure_recent_inventory(
     age_delta = timedelta(seconds=age_seconds or 0)
 
     delta_obj = metadata.get("delta") if metadata else None
-    if delta_obj is None and metadata:
+    if isinstance(delta_obj, dict):
+        delta_obj = InventoryDelta(
+            new_count=int(delta_obj.get("new") or 0),
+            removed_count=int(delta_obj.get("removed") or 0),
+            updated_count=int(delta_obj.get("updated") or 0),
+            changed_packages_count=int(
+                delta_obj.get("changed")
+                or (
+                    (delta_obj.get("new") or 0)
+                    + (delta_obj.get("removed") or 0)
+                    + (delta_obj.get("updated") or 0)
+                )
+            ),
+        )
+    elif delta_obj is None and metadata:
         delta_obj = InventoryDelta(
             new_count=int(metadata.get("delta_new") or 0),
             removed_count=int(metadata.get("delta_removed") or 0),

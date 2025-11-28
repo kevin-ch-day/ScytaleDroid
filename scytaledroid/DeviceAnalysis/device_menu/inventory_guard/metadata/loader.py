@@ -225,7 +225,15 @@ def get_latest_inventory_metadata(
         current_fingerprint = device_props.get("build_fingerprint")
 
     packages_changed = False
-    recorded_delta = metadata.get("delta_changed_count")
+    recorded_delta = coerce_int(metadata.get("delta_changed_count"))
+    if recorded_delta is None and metadata.get("delta") is not None:
+        delta_obj = metadata.get("delta")
+        if isinstance(delta_obj, dict):
+            recorded_delta = coerce_int(delta_obj.get("changed"))
+        else:
+            recorded_delta = coerce_int(
+                getattr(delta_obj, "changed_packages_count", None)
+            )
     if snapshot_type != "subset":
         # If the last sync recorded zero changes, treat that as authoritative and
         # do not mark the snapshot as changed unless scope/hash/fingerprint differ.
