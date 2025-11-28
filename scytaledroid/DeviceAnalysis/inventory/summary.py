@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Dict, List
 
-from scytaledroid.Utils.DisplayUtils import status_messages, table_utils, text_blocks
+from scytaledroid.Utils.DisplayUtils import status_messages, table_utils
+from scytaledroid.ui import formatter
 
 
 def _format_duration(seconds: float | None) -> str:
@@ -32,7 +33,7 @@ def _format_delta_text(delta_value: int, *, first_snapshot: bool = False) -> str
 
 
 def render_sync_summary_box(result) -> None:
-    """Render the completion box for a sync."""
+    """Render the completion summary for a sync (plain text, forensic style)."""
     delta = getattr(result, "delta", None)
     first_snapshot = bool(getattr(result, "first_snapshot", False))
     split_delta = result.stats.split_packages - (result.previous_split or 0)
@@ -42,39 +43,32 @@ def render_sync_summary_box(result) -> None:
     changed_total = getattr(delta, "changed_packages_count", 0) if delta else 0
     net_count_delta = result.stats.total_packages - (result.previous_total or 0)
 
-    lines = [
-        status_messages.status("Inventory sync complete", level="success"),
-        status_messages.status(
-            f"Snapshot saved to {result.snapshot_path}",
-            show_icon=False,
-            show_prefix=False,
-        ),
-        status_messages.status(
-            f"Packages: {result.stats.total_packages} • Split APKs: {result.stats.split_packages}",
-            show_icon=False,
-            show_prefix=False,
-        ),
-        status_messages.status(
-            (
-                "Delta vs previous snapshot: "
-                f"new={new_count}  removed={removed_count}  updated={updated_count} "
-                f"{_format_delta_text(net_count_delta if not first_snapshot else 0, first_snapshot=first_snapshot)}"
-            ),
-            show_icon=False,
-            show_prefix=False,
-        ),
-        status_messages.status(
-            f"App definitions synced to DB: {getattr(result, 'synced_app_definitions', 0)}",
-            show_icon=False,
-            show_prefix=False,
-        ),
-        status_messages.status(
-            f"Scan duration: {_format_duration(result.elapsed_seconds)}",
-            show_icon=False,
-            show_prefix=False,
-        ),
-    ]
-    print(text_blocks.boxed(lines, width=70))
+    formatter.print_header("Inventory Sync · RUN SUMMARY")
+    print(
+        formatter.format_kv_block(
+            "[RUN]",
+            {
+                "Snapshot": str(result.snapshot_path),
+                "Packages": f"{result.stats.total_packages}",
+                "Split APK packages": f"{result.stats.split_packages}",
+            },
+        )
+    )
+    print()
+    print(
+        formatter.format_kv_block(
+            "[RESULT]",
+            {
+                "Delta vs previous": (
+                    f"new={new_count}  removed={removed_count}  updated={updated_count} "
+                    f"{_format_delta_text(net_count_delta if not first_snapshot else 0, first_snapshot=first_snapshot)}"
+                ),
+                "App defs synced": f"{getattr(result, 'synced_app_definitions', 0)}",
+                "Scan duration": _format_duration(result.elapsed_seconds),
+            },
+        )
+    )
+    print()
 
 
 def render_inventory_summary(result) -> None:

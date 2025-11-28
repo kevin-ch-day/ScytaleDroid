@@ -21,6 +21,7 @@ from .snapshot_io import (
     load_latest_snapshot_meta,
     persist_snapshot,
 )
+from .views import print_inventory_run_summary_from_result
 
 # Compat alias used by older callers
 load_latest_snapshot = load_latest_inventory
@@ -69,4 +70,5 @@ __all__ = [
     "load_latest_inventory",
     "_render_inventory_summary",
     "run_inventory_sync",
+    "print_inventory_run_summary_from_result",
 ]
