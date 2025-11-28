@@ -5,12 +5,15 @@ from __future__ import annotations
 import json
 import hashlib
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, TYPE_CHECKING
 from datetime import datetime, timezone
 
 from scytaledroid.Config import app_config
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.DeviceAnalysis import inventory_meta
+
+if TYPE_CHECKING:  # pragma: no cover
+    from scytaledroid.DeviceAnalysis.inventory.runner import InventoryDelta
 from scytaledroid.Database.db_core import run_sql
 from scytaledroid.Database.db_func.harvest import device_inventory as inventory_repo
 
@@ -253,6 +256,7 @@ def persist_snapshot(
         delta_updated=delta_updated,
         delta_changed_count=delta_changed,
         delta_split_delta=delta_split,
+        delta_details=delta if delta is not None else None,
     )
     meta.write_files(timestamp, suffix=filename_suffix)
 

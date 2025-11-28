@@ -11,3 +11,9 @@ The CLI persistence pipeline now lives under `scytaledroid/StaticAnalysis/cli/pe
 `scytaledroid/StaticAnalysis/cli/db_persist.py` now simply re-exports `persist_run_summary` and `PersistenceOutcome` for backward compatibility.
 
 Integration tests cover the pipeline end-to-end (`tests/integration/test_persist_run_summary.py`), and new unit tests under `tests/persistence/` target helper modules.
+
+## Running persistence tests locally
+
+The persistence unit tests (`tests/persistence/`) connect to MariaDB/MySQL using the hardcoded defaults in `scytaledroid/Database/db_core/db_config.py` (host `localhost`, port `3306`, user `root`, password `Password123!`). If no database is listening, the tests will fail with `pymysql.err.OperationalError: (2003, "Can't connect to MySQL server on 'localhost' ([Errno 111] Connection refused)")`.
+
+To exercise these tests locally, start a compatible MariaDB/MySQL instance with a schema matching `DB_CONFIG["database"]` (default `scytaledroid_droid_intel_db_prod`). For smoke runs without a database, skip the persistence suite (e.g., `pytest -k 'not persistence'`) to avoid connection errors.

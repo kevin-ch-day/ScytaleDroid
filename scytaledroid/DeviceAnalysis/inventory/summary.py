@@ -34,8 +34,8 @@ def _format_delta_text(delta_value: int, *, first_snapshot: bool = False) -> str
 def render_sync_summary_box(result) -> None:
     """Render the completion box for a sync."""
     delta = getattr(result, "delta", None)
-    first_snapshot = bool(getattr(delta, "first_snapshot", False))
-    split_delta = getattr(delta, "split_delta", 0) if delta else 0
+    first_snapshot = bool(getattr(result, "first_snapshot", False))
+    split_delta = result.stats.split_packages - (result.previous_split or 0)
     new_count = getattr(delta, "new_count", 0) if delta else 0
     removed_count = getattr(delta, "removed_count", 0) if delta else 0
     updated_count = getattr(delta, "updated_count", 0) if delta else 0

@@ -2,13 +2,67 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Optional
 
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
 
 from .utils import humanize_seconds
 from .constants import INVENTORY_STALE_SECONDS
+from scytaledroid.DeviceAnalysis.inventory.runner import InventoryDelta
+
+
+@dataclass
+class InventoryGuardMessage:
+    severity: str  # "none" | "info" | "warn"
+    short: str
+    long: str | None = None
+
+
+def describe_inventory_state(
+    status: str,
+    delta: InventoryDelta | None,
+    age: timedelta,
+    threshold: timedelta,
+) -> InventoryGuardMessage:
+    # Normalize delta
+    if delta is None:
+        delta = InventoryDelta(0, 0, 0, 0)
+
+    if status == "NONE":
+        return InventoryGuardMessage(
+            severity="warn",
+            short="No inventory snapshot is available.",
+            long="Run a full inventory & database sync before pulling APKs.",
+        )
+
+    if age >= threshold:
+        hours = int(age.total_seconds() // 3600)
+        return InventoryGuardMessage(
+            severity="warn",
+            short=f"Inventory snapshot is older than {hours}h; re-sync is recommended.",
+            long="Pulling APKs may miss recent updates or installs.",
+        )
+
+    if delta.changed_packages_count == 0:
+        return InventoryGuardMessage(
+            severity="none",
+            short="Inventory is fresh and identical to the previous snapshot.",
+            long=None,
+        )
+
+    return InventoryGuardMessage(
+        severity="info",
+        short=(
+            "Inventory is fresh by age, but "
+            f"{delta.changed_packages_count} packages changed since the last snapshot."
+        ),
+        long=(
+            f"New: {delta.new_count}, removed: {delta.removed_count}, "
+            f"updated: {delta.updated_count}. Re-sync is recommended before pulling APKs."
+        ),
+    )
 
 
 def prompt_inventory_decision(

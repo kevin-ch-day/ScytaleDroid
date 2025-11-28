@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
@@ -10,13 +10,16 @@ from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from scytaledroid.DeviceAnalysis import adb_utils
 from scytaledroid.DeviceAnalysis import inventory as inventory_module
+from scytaledroid.DeviceAnalysis.inventory.runner import InventoryDelta
+from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.prompts import (
+    describe_inventory_state,
+)
 from .constants import (
     INVENTORY_STALE_SECONDS,
     LONG_RUNNING_SYNC_THRESHOLD,
     LOW_BATTERY_THRESHOLD,
 )
 from .metadata import get_latest_inventory_metadata
-from .prompts import prompt_inventory_decision
 from .utils import coerce_float, humanize_seconds, coarse_time_range
 
 
@@ -69,167 +72,13 @@ def ensure_recent_inventory(
 
     metadata = get_latest_inventory_metadata(
         serial,
-        with_current_state=True,
+        with_current_state=False,
         scope_packages=scope_packages,
     )
 
     timestamp = metadata.get("timestamp") if metadata else None
-    packages_changed = bool(metadata.get("packages_changed")) if metadata else False
-    fingerprint_changed = bool(metadata.get("build_fingerprint_changed")) if metadata else False
     scope_changed = bool(metadata.get("scope_changed")) if metadata else False
     scope_hash_changed = bool(metadata.get("scope_hash_changed")) if metadata else False
-    state_changed = (
-        packages_changed or fingerprint_changed or scope_changed or scope_hash_changed
-    )
-    package_delta_summary: Optional[Dict[str, object]] = None
-    total_delta = 0
-    delta_brief: Optional[str] = None
-
-    def _recompute_version_delta() -> Optional[Dict[str, object]]:
-        """
-        Fallback delta based only on version info from the last snapshot vs current signatures.
-        This is looser than the hashing path but reduces false positives immediately after a clean sync.
-        """
-        latest_payload = inventory_module.load_latest_inventory(serial)
-        snapshot_packages = latest_payload.get("packages") if isinstance(latest_payload, dict) else None
-        if not snapshot_packages:
-            return None
-        # Build maps of package -> version token
-        def _version_token(entry: Dict[str, object]) -> Optional[str]:
-            code = entry.get("version_code")
-            name = entry.get("version_name")
-            if isinstance(code, (int, float, str)):
-                code_str = str(code).strip()
-                if code_str:
-                    return code_str
-            if isinstance(name, str) and name.strip():
-                return name.strip()
-            return None
-
-        snap_map: Dict[str, Optional[str]] = {}
-        for entry in snapshot_packages:
-            if not isinstance(entry, dict):
-                continue
-            name = entry.get("package_name")
-            if not isinstance(name, str) or not name:
-                continue
-            snap_map[name] = _version_token(entry)
-
-        cur_map: Dict[str, Optional[str]] = {}
-        for name, version_code, version_name in current_signatures:
-            if not isinstance(name, str) or not name:
-                continue
-            token = None
-            if isinstance(version_code, (int, float, str)):
-                vc = str(version_code).strip()
-                if vc:
-                    token = vc
-            if token is None and isinstance(version_name, str) and version_name.strip():
-                token = version_name.strip()
-            cur_map[name] = token
-
-        added = sorted(set(cur_map) - set(snap_map))
-        removed = sorted(set(snap_map) - set(cur_map))
-        updated = []
-        for name in sorted(set(cur_map) & set(snap_map)):
-            before = snap_map.get(name)
-            after = cur_map.get(name)
-            if before != after:
-                updated.append({"package": name, "before": before, "after": after})
-
-        total_changed = len(added) + len(removed) + len(updated)
-        if total_changed == 0:
-            return None
-
-        summary: Dict[str, object] = {
-            "total_changed": total_changed,
-            "added": added,
-            "removed": removed,
-            "updated": updated,
-        }
-        return summary
-    last_delta_changed = None
-    age_since_snapshot = None
-    if metadata and metadata.get("timestamp"):
-        try:
-            age_since_snapshot = (datetime.now(timezone.utc) - metadata["timestamp"]).total_seconds()  # type: ignore[index]
-        except Exception:
-            age_since_snapshot = None
-
-    if metadata:
-        try:
-            last_delta_changed = int(metadata.get("delta_changed_count")) if metadata.get("delta_changed_count") is not None else None
-        except (TypeError, ValueError):
-            last_delta_changed = None
-
-        # Prefer the authoritative delta recorded with the snapshot. This is computed once
-        # by the inventory runner and should be treated as the single source of truth.
-        if last_delta_changed is not None:
-            total_delta = max(0, last_delta_changed)
-            package_delta_summary = None
-            delta_brief = None
-            packages_changed = total_delta > 0
-            state_changed = packages_changed or fingerprint_changed or scope_changed or scope_hash_changed
-        else:
-            raw_delta = metadata.get("package_delta_summary")
-            if isinstance(raw_delta, dict):
-                package_delta_summary = raw_delta
-                try:
-                    total_delta = int(raw_delta.get("total_changed") or 0)
-                except (TypeError, ValueError):
-                    total_delta = 0
-                delta_brief = _format_package_delta_brief(
-                    package_delta_summary, limit=PACKAGE_DELTA_DISPLAY_LIMIT
-                )
-                packages_changed = total_delta > 0
-                state_changed = packages_changed or fingerprint_changed or scope_changed or scope_hash_changed
-                # If delta reports zero changes, suppress change-based warnings.
-                if total_delta == 0:
-                    package_delta_summary = None
-                    delta_brief = None
-                    packages_changed = False
-                    state_changed = scope_changed or scope_hash_changed or fingerprint_changed
-            else:
-                package_delta_summary = None
-
-        # Heuristic: on non-root devices the current package listing may omit system/vendor
-        # packages. If the snapshot is very recent and the current count is far smaller
-        # than the snapshot count, suppress change warnings to avoid false positives
-        # immediately after a successful sync.
-        snapshot_count = metadata.get("package_count")
-        current_count = metadata.get("current_package_count")
-        if (
-            snapshot_count
-            and current_count
-            and current_count < snapshot_count
-            and metadata.get("timestamp")
-        ):
-            if age_since_snapshot is not None and age_since_snapshot < 600:
-                package_delta_summary = None
-                packages_changed = False
-                state_changed = scope_changed or scope_hash_changed or fingerprint_changed
-        # If hashes match exactly, treat as no change regardless of coarse deltas.
-        snapshot_sig = metadata.get("package_signature_hash")
-        current_sig = metadata.get("current_package_signature_hash")
-        if isinstance(snapshot_sig, str) and isinstance(current_sig, str) and snapshot_sig == current_sig:
-            package_delta_summary = None
-            total_delta = 0
-            packages_changed = False
-            state_changed = scope_changed or scope_hash_changed or fingerprint_changed
-
-        # If the last recorded delta from the most recent sync reported no changes,
-        # treat small/ambiguous deltas as noise and suppress change warnings.
-        if (
-            last_delta_changed is not None
-            and last_delta_changed == 0
-            and total_delta > 0
-            and age_since_snapshot is not None
-            and age_since_snapshot < 600
-        ):
-            package_delta_summary = None
-            total_delta = 0
-            packages_changed = False
-            state_changed = scope_changed or scope_hash_changed or fingerprint_changed
     expected_duration = coerce_float(
         metadata.get("estimated_duration_seconds") if metadata else None
     )
@@ -237,75 +86,96 @@ def ensure_recent_inventory(
     age_seconds = None
     if timestamp:
         age_seconds = (datetime.now(timezone.utc) - timestamp).total_seconds()
-        if age_seconds <= INVENTORY_STALE_SECONDS and not state_changed:
-            _set_guard_context(
-                stale_level="fresh",
-                reason="Inventory snapshot is within freshness window.",
-                scope_changed=scope_changed,
-                scope_hash_changed=scope_hash_changed,
-                packages_changed=packages_changed,
-                age_seconds=age_seconds,
-                package_delta=package_delta_summary,
-                package_delta_brief=delta_brief,
-            )
-            _record_guard_policy("quick")
-            return True
 
-    stale_level = "hard"
-    refresh_reason = "Inventory snapshot is stale—sync recommended before pull."
-    if not metadata or not timestamp:
-        refresh_reason = (
-            "No inventory snapshot found—inventory sync required before pull."
+    threshold = timedelta(seconds=INVENTORY_STALE_SECONDS)
+    age_delta = timedelta(seconds=age_seconds or 0)
+
+    delta_obj = metadata.get("delta") if metadata else None
+    if isinstance(delta_obj, dict):
+        delta_obj = InventoryDelta(
+            new_count=int(delta_obj.get("new") or 0),
+            removed_count=int(delta_obj.get("removed") or 0),
+            updated_count=int(delta_obj.get("updated") or 0),
+            changed_packages_count=int(
+                delta_obj.get("changed")
+                or (
+                    (delta_obj.get("new") or 0)
+                    + (delta_obj.get("removed") or 0)
+                    + (delta_obj.get("updated") or 0)
+                )
+            ),
         )
-    else:
-        age_stale = age_seconds is not None and age_seconds >= INVENTORY_STALE_SECONDS
-        if packages_changed or scope_changed or scope_hash_changed:
-            refresh_reason = (
-                "Inventory is fresh by age, but device packages changed since the last snapshot—sync recommended before pull."
-            )
-            if delta_brief:
-                refresh_reason = f"{refresh_reason} Recent changes: {delta_brief}."
-            stale_level = "hard"
-        elif age_stale:
-            refresh_reason = (
-                "Inventory snapshot exceeds the freshness threshold—sync recommended before pull."
-            )
-            stale_level = "hard"
-        elif fingerprint_changed:
-            stale_level = "soft"
-            refresh_reason = (
-                "Build fingerprint changed since the last inventory. Packages appear unchanged, so a quick harvest is recommended."
-            )
-        else:
-            stale_level = "fresh"
+    elif delta_obj is None and metadata:
+        delta_obj = InventoryDelta(
+            new_count=int(metadata.get("delta_new") or 0),
+            removed_count=int(metadata.get("delta_removed") or 0),
+            updated_count=int(metadata.get("delta_updated") or 0),
+            changed_packages_count=int(metadata.get("delta_changed_count") or 0),
+        )
 
-    if stale_level == "fresh" and timestamp:
+    if timestamp is None:
+        status = "NONE"
+    elif age_seconds is not None and age_seconds >= INVENTORY_STALE_SECONDS:
+        status = "STALE"
+    else:
+        status = "FRESH"
+
+    message = describe_inventory_state(status, delta_obj, age_delta, threshold)
+
+    if message.severity == "none":
         _set_guard_context(
             stale_level="fresh",
-            reason="Inventory snapshot is within freshness window.",
+            reason=message.short,
             scope_changed=scope_changed,
             scope_hash_changed=scope_hash_changed,
-            packages_changed=packages_changed,
+            packages_changed=False,
             age_seconds=age_seconds,
+            package_delta=None,
+            package_delta_brief=None,
         )
         _record_guard_policy("quick")
         return True
 
+    packages_changed = bool(delta_obj.changed_packages_count if delta_obj else 0)
     _set_guard_context(
-        stale_level=stale_level,
-        reason=refresh_reason,
+        stale_level="warn" if message.severity == "warn" else "fresh",
+        reason=message.short,
         scope_changed=scope_changed,
         scope_hash_changed=scope_hash_changed,
         packages_changed=packages_changed,
         age_seconds=age_seconds,
-        package_delta=package_delta_summary,
-        package_delta_brief=delta_brief,
+        package_delta=None,
+        package_delta_brief=None,
     )
 
-    # Only emit warnings here for missing/age-stale snapshots; defer change-only messaging to gating dialogs.
-    age_stale = age_seconds is not None and age_seconds >= INVENTORY_STALE_SECONDS if timestamp else False
-    if refresh_reason and (not timestamp or age_stale):
-        print(status_messages.status(refresh_reason, level="info"))
+    print(status_messages.status(message.short, level="warn" if message.severity == "warn" else "info"))
+    if message.long:
+        print(status_messages.status(message.long, level="info"))
+
+    options = ["1", "0"]
+    labels = {"1": "Sync now (recommended)", "0": "Cancel"}
+    if status != "NONE":
+        options.insert(1, "2")
+        labels["2"] = "Use last snapshot"
+
+    for key in options:
+        print(f"  {key}) {labels[key]}")
+
+    choice = prompt_utils.get_choice(options, default="1", prompt="Select option [1]: ")
+    if choice == "2":
+        snapshot_age_text = humanize_seconds(age_seconds) if age_seconds is not None else None
+        warning = (
+            f"Proceeding with existing inventory snapshot captured {snapshot_age_text} ago; results may be outdated."
+            if snapshot_age_text
+            else "Proceeding with existing inventory snapshot; results may be outdated."
+        )
+        print(status_messages.status(warning, level="warn"))
+        _record_guard_policy("quick")
+        return True
+    if choice == "0":
+        print(status_messages.status("APK pull cancelled until inventory sync is run.", level="warn"))
+        _record_guard_policy(None)
+        return False
 
     battery_context = _resolve_battery_context(serial, device_context)
     battery_level = battery_context.get("level")
@@ -314,74 +184,6 @@ def ensure_recent_inventory(
         and battery_level < LOW_BATTERY_THRESHOLD
         and not battery_context.get("is_charging")
     )
-
-    require_sync = not timestamp
-    if not require_sync:
-        quick_hint = None
-        hints: List[str] = []
-        if stale_level == "soft":
-            hints.append(
-                "Quick harvest recommended: build fingerprint changed but packages match the last snapshot."
-            )
-        if low_battery:
-            hints.append(
-                f"Battery is low ({battery_level}%). Defaulting to reuse the existing snapshot to avoid a long sync."
-            )
-        if scope_hash_changed:
-            hints.append(
-                "Scope selection changed since the last inventory; refresh recommended for complete coverage."
-            )
-        if package_delta_summary:
-            delta_hint = _format_package_delta_hint(
-                package_delta_summary, limit=PACKAGE_DELTA_DISPLAY_LIMIT
-            )
-            if delta_hint:
-                hints.append(delta_hint)
-
-        if hints:
-            quick_hint = " ".join(hints)
-
-        default_choice = "2" if (stale_level == "soft" or low_battery) else "1"
-
-        try:
-            decision = prompt_inventory_decision(
-                timestamp=timestamp,
-                age_seconds=age_seconds,
-                state_changed=state_changed,
-                stale_level=stale_level,
-                default_choice=default_choice,
-                quick_hint=quick_hint,
-                changes_total=total_delta if total_delta else None,
-            )
-        except KeyboardInterrupt:
-            print()
-            print(
-                status_messages.status(
-                    "Inventory guard cancelled; APK pull aborted.", level="warn"
-                )
-            )
-            _record_guard_policy("cancelled")
-            return False
-
-        if decision == "use_snapshot":
-            snapshot_age_text = humanize_seconds(age_seconds) if age_seconds is not None else None
-            warning = (
-                f"Proceeding with existing inventory snapshot captured {snapshot_age_text} ago; results may be outdated."
-                if snapshot_age_text
-                else "Proceeding with existing inventory snapshot; results may be outdated."
-            )
-            print(status_messages.status(warning, level="warn"))
-            _record_guard_policy("quick")
-            return True
-
-        if decision == "cancel":
-            print(
-                status_messages.status(
-                    "APK pull cancelled until inventory sync is run.", level="warn"
-                )
-            )
-            _record_guard_policy(None)
-            return False
 
     prompt_message = _build_sync_warning(battery_context, expected_duration)
 

@@ -35,6 +35,8 @@ from scytaledroid.DeviceAnalysis.services import apk_library_service, device_ser
 from scytaledroid.DeviceAnalysis.services import info_service
 
 
+# Keep menu routing aligned with handle_choice: option 5 must always map to
+# Pull APKs and option 6 to Logcat to avoid accidental swaps in the CLI.
 _HELPER_ROUTES = {
     "4": ("inventory", "run_device_summary", True, "Collect detailed device summary"),
     "6": ("logcat", "stream_logcat", True, "Stream logcat output"),
