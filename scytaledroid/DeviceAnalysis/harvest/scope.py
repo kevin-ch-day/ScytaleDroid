@@ -15,6 +15,13 @@ from .models import InventoryRow, ScopeSelection
 from . import rules
 from .watchlists import Watchlist, filter_rows_by_watchlist, load_watchlists
 
+# Human-friendly labels for why packages are filtered out of scope.
+_EXCLUSION_LABELS = {
+    "family_excluded": "Family excluded (com.android./com.motorola. not Play)",
+    "google_core": "Google core modules (not Play/allow-list)",
+    "not_in_scope": "Not in scope (no Play installer or /data path)",
+}
+
 
 def _maybe_str(value: object) -> Optional[str]:
     if value is None:
@@ -283,7 +290,11 @@ def select_package_scope(
                     label="Everything",
                     packages=list(rows),
                     kind="everything",
-                    metadata={"estimated_files": context["everything"].get("files", 0)},
+                    metadata={
+                        "estimated_files": context["everything"].get("files", 0),
+                        "candidate_count": len(rows),
+                        "selected_count": len(rows),
+                    },
                 ),
             }
         )
@@ -313,6 +324,7 @@ def select_package_scope(
         if selection is None:
             continue
 
+        _print_selection_diagnostics(selection)
         _store_last_scope(selection)
         return selection
 
@@ -338,11 +350,15 @@ def _format_watchlist_hint(entry: _WatchlistEntry) -> Optional[str]:
 
 def _scope_default(rows: Sequence[InventoryRow], allow: Set[str]) -> ScopeSelection:
     selected, excluded = _apply_default_scope(rows, allow)
+    excluded_samples = _collect_exclusion_samples(rows, selected, allow)
     metadata = {
         "estimated_files": _estimated_files(selected),
         "allowlist_size": len(allow),
         "excluded_counts": excluded,
         "sample_names": _sample_names(selected),
+        "excluded_samples": excluded_samples,
+        "candidate_count": len(rows),
+        "selected_count": len(selected),
     }
     return ScopeSelection("Play Store & user-installed", selected, "default", metadata)
 
@@ -397,6 +413,7 @@ def _scope_profiles(
         return None
 
     filtered, excluded = _apply_default_scope(profile_rows, allow)
+    excluded_samples = _collect_exclusion_samples(profile_rows, filtered, allow)
     if not filtered:
         print(
             status_messages.status(
@@ -411,6 +428,9 @@ def _scope_profiles(
         "estimated_files": _estimated_files(filtered),
         "excluded_counts": excluded,
         "sample_names": _sample_names(filtered),
+        "excluded_samples": excluded_samples,
+        "candidate_count": len(profile_rows),
+        "selected_count": len(filtered),
     }
     return ScopeSelection(
         label=f"Profiles: {', '.join(sorted(selected))}",
@@ -441,6 +461,8 @@ def _scope_google_user_apps(
         "estimated_files": _estimated_files(filtered),
         "excluded_counts": excluded,
         "sample_names": _sample_names(filtered),
+        "candidate_count": len(candidates),
+        "selected_count": len(filtered),
     }
     return ScopeSelection("Google user apps", filtered, "google_user", metadata)
 
@@ -472,6 +494,8 @@ def _scope_profile_subset(
         "estimated_files": _estimated_files(filtered),
         "excluded_counts": excluded,
         "sample_names": _sample_names(filtered),
+        "candidate_count": len(subset),
+        "selected_count": len(filtered),
     }
     return ScopeSelection(
         label=f"{label} apps",
@@ -511,6 +535,9 @@ def _scope_category_subset(
         "estimated_files": _estimated_files(filtered),
         "excluded_counts": excluded,
         "sample_names": _sample_names(filtered),
+        # Capture how many candidates existed vs how many survive policy filters.
+        "candidate_count": len(combined),
+        "selected_count": len(filtered),
     }
     return ScopeSelection(
         label=f"{scope_label} apps",
@@ -530,6 +557,8 @@ def _scope_watchlist(entry: _WatchlistEntry) -> Optional[ScopeSelection]:
         "estimated_files": entry.counts.get("files", 0),
         "excluded_counts": entry.excluded,
         "sample_names": _sample_names(entry.filtered),
+        "candidate_count": entry.counts.get("packages", 0) + sum(entry.excluded.values()),
+        "selected_count": len(entry.filtered),
     }
     return ScopeSelection(
         label=f"Watchlist: {entry.watchlist.name}",
@@ -555,10 +584,14 @@ def _scope_google_allowlist(
         )
         print(status_messages.status(message, level="warn"))
         return None
+    excluded_samples = _collect_exclusion_samples(candidates, filtered, allow)
     metadata = {
         "estimated_files": _estimated_files(filtered),
         "excluded_counts": excluded,
         "sample_names": _sample_names(filtered),
+        "excluded_samples": excluded_samples,
+        "candidate_count": len(candidates),
+        "selected_count": len(filtered),
     }
     return ScopeSelection("Google exceptions", filtered, "google_allow", metadata)
 
@@ -568,9 +601,14 @@ def _scope_families(rows: Sequence[InventoryRow]) -> Optional[ScopeSelection]:
     if not filtered:
         print(status_messages.status("No Android/Google/Motorola packages found.", level="warn"))
         return None
+    excluded_samples: Dict[str, List[str]] = {}
     metadata = {
         "estimated_files": _estimated_files(filtered),
         "sample_names": _sample_names(filtered),
+        "candidate_count": len(filtered),
+        "selected_count": len(filtered),
+        "excluded_counts": {},
+        "excluded_samples": excluded_samples,
     }
     return ScopeSelection("System families", filtered, "families", metadata)
 
@@ -618,6 +656,9 @@ def _scope_custom(rows: Sequence[InventoryRow], allow: Set[str]) -> Optional[Sco
         "estimated_files": _estimated_files(filtered),
         "excluded_counts": excluded,
         "sample_names": _sample_names(filtered),
+        "excluded_samples": _collect_exclusion_samples(matches, filtered, allow),
+        "candidate_count": len(matches),
+        "selected_count": len(filtered),
     }
     return ScopeSelection(
         label=f"Custom ({', '.join(patterns)})",
@@ -742,10 +783,61 @@ def _sample_names(rows: Sequence[InventoryRow], limit: int = 3) -> List[str]:
     return names
 
 
+def _collect_exclusion_samples(
+    rows: Sequence[InventoryRow],
+    kept: Sequence[InventoryRow],
+    allow: Set[str],
+    *,
+    limit_per_reason: int = 5,
+) -> Dict[str, List[str]]:
+    """
+    Provide sample package labels that were filtered out, per reason.
+    Always on; helps operators see which apps were skipped by policy.
+    """
+    kept_names = {row.package_name for row in kept}
+    samples: Dict[str, List[str]] = {}
+    for row in rows:
+        if row.package_name in kept_names:
+            continue
+        include, reason = _default_scope_decision(row, allow)
+        if include or not reason:
+            continue
+        bucket = samples.setdefault(reason, [])
+        if len(bucket) < limit_per_reason:
+            bucket.append(row.display_name())
+    return samples
+
+
 def _format_count_summary(rows: Optional[Sequence[InventoryRow]]) -> str:
     if not rows:
         return "0 pkg(s)"
     return f"{len(rows)} pkg(s)"
+
+
+def _print_selection_diagnostics(selection: ScopeSelection) -> None:
+    """
+    Explain how a chosen scope shrank from all candidates to the kept set, with reasons.
+    Always-on so operators see why a category collapsed.
+    """
+    meta = selection.metadata or {}
+    excluded_counts = meta.get("excluded_counts") or {}
+    selected = int(meta.get("selected_count") or len(selection.packages) or 0)
+    candidates = int(meta.get("candidate_count") or 0)
+    if not candidates:
+        candidates = selected + sum(int(v) for v in excluded_counts.values())
+    if not candidates:
+        return
+    filtered = max(candidates - selected, 0)
+    breakdown = []
+    for reason, count in sorted(excluded_counts.items()):
+        if not count:
+            continue
+        label = _EXCLUSION_LABELS.get(reason, reason)
+        breakdown.append(f"{label}={count}")
+    detail = f"{selection.label}: candidates={candidates} • kept={selected} • filtered={filtered}"
+    if breakdown:
+        detail = f"{detail} ({'; '.join(breakdown)})"
+    print(status_messages.status(detail, level="info"))
 
 
 def _scope_option_label(
@@ -897,6 +989,16 @@ def _print_scope_overview(
     menu_utils.print_hint(
         f"Default scope · {default_stats.get('packages', 0)} pkg(s) / ~{default_stats.get('files', 0)} file(s)"
     )
+    default_excluded = context.get("default_excluded") or {}
+    if default_excluded:
+        filtered_bits = []
+        for reason, count in sorted(default_excluded.items()):
+            label = _EXCLUSION_LABELS.get(reason, reason)
+            filtered_bits.append(f"{label}={count}")
+        if filtered_bits:
+            print(status_messages.status("Default scope filters:", level="info"))
+            for bit in filtered_bits:
+                print(status_messages.status(f"  • {bit}", level="info"))
     if not is_rooted:
         menu_utils.print_hint(
             "System/vendor partitions require root; they are filtered automatically.",

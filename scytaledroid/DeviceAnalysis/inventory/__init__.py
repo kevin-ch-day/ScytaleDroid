@@ -1,86 +1,72 @@
-"""Inventory subpackage public API."""
+"""
+Public facade for inventory internals.
 
-# NOTE: This file re-exports helpers for compatibility.
-# Preferred entry point: scytaledroid.DeviceAnalysis.services.inventory_service.
+Notes for new code:
+- Prefer calling services.inventory_service.run_full_sync from controllers/menus.
+- This module keeps a thin compat surface so legacy imports keep working
+  (load_latest_inventory, render_inventory_summary, etc).
+"""
+
+from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
 
-run_inventory_sync = None
-InventoryResult = None
-InventorySyncStats = None
-load_latest_snapshot = None
-load_latest_snapshot_meta = None
-persist_snapshot = None
-hash_rows = None
-load_canonical_metadata = None
-run_full_sync = None
-_render_inventory_summary = None
+from .runner import InventoryResult, InventorySyncStats, run_full_sync
+from .snapshot_io import (
+    hash_rows,
+    load_canonical_metadata,
+    load_latest_inventory,
+    load_latest_snapshot_meta,
+    persist_snapshot,
+)
 
-# Legacy-compatible wrapper for tests expecting _render_inventory_summary(rows)
-def _render_inventory_summary_compat(rows):
-    class _Tmp:
-        pass
-    tmp = _Tmp()
-    tmp.rows = rows
-    try:
-        from . import summary as _summary_mod
-        _summary_mod.render_inventory_summary(tmp)
-    except Exception:
-        return None
-    return None
+# Compat alias used by older callers
+load_latest_snapshot = load_latest_inventory
 
-import os
-
-# Legacy compatibility: load the old inventory.py so existing imports still work,
-# but only when explicitly requested. The default path now uses the subpackage
-# + service façade to avoid circular imports.
-if os.getenv("SCYTALEDROID_LOAD_LEGACY_INVENTORY") == "1":
-    _legacy_path = Path(__file__).resolve().parent.parent / "inventory.py"
-    if _legacy_path.exists():
-        spec = importlib.util.spec_from_file_location(
-            "scytaledroid.DeviceAnalysis.inventory_legacy", _legacy_path
-        )
-        if spec and spec.loader:
-            _legacy_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(_legacy_module)  # type: ignore[arg-type]
-            run_inventory_sync = getattr(_legacy_module, "run_inventory_sync", None)
-
+# Optional: compat render wrapper
 try:
-    from .runner import run_full_sync, InventoryResult, InventorySyncStats
-    from .snapshot_io import (
-        load_latest_inventory,
-        load_latest_inventory as load_latest_snapshot,
-        load_latest_snapshot_meta,
-        persist_snapshot,
-        hash_rows,
-        load_canonical_metadata,
-    )
-    load_latest_snapshot = load_latest_inventory
     from . import summary as _summary_mod
 except Exception:
     _summary_mod = None
 
-# Always expose a rows->summary wrapper for compatibility with existing tests.
-def _render_inventory_summary(rows):
-    class _Tmp:
-        pass
-    tmp = _Tmp()
-    tmp.rows = rows
-    if _summary_mod is not None:
-        return _summary_mod.render_inventory_summary(tmp)
-    return _render_inventory_summary_compat(rows)
+
+def _render_inventory_summary(obj) -> None:
+    """
+    Compatibility helper for legacy callers expecting render_inventory_summary.
+    Accepts any object with `.rows` attribute (e.g., InventoryResult or
+    LegacyInventoryResult). New code should import summary.render_inventory_summary
+    directly.
+    """
+    if _summary_mod is None:
+        raise RuntimeError("summary module unavailable; cannot render inventory summary")
+    _summary_mod.render_inventory_summary(obj)
+
+
+# Legacy support: allow opting into the old inventory.py via env flag
+run_inventory_sync = None
+if os.getenv("SCYTALEDROID_LOAD_LEGACY_INVENTORY") == "1":
+    legacy_path = Path(__file__).resolve().parent / "inventory.py"
+    if legacy_path.exists():
+        spec = importlib.util.spec_from_file_location("scytaledroid.DeviceAnalysis.inventory_legacy", legacy_path)
+        if spec and spec.loader:
+            legacy_mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(legacy_mod)
+            run_inventory_sync = getattr(legacy_mod, "run_inventory_sync", None)
 
 __all__ = [
-    "run_inventory_sync",
+    # Preferred API
     "run_full_sync",
     "InventoryResult",
     "InventorySyncStats",
-    "load_latest_inventory",
     "load_latest_snapshot",
     "load_latest_snapshot_meta",
     "persist_snapshot",
     "hash_rows",
     "load_canonical_metadata",
+    # Compat aliases
+    "load_latest_inventory",
     "_render_inventory_summary",
+    "run_inventory_sync",
 ]

@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, Optional, Protocol
-import time
-import os
 
-from scytaledroid.DeviceAnalysis.inventory import snapshot_io
-from scytaledroid.DeviceAnalysis.inventory import package_collection
-from scytaledroid.DeviceAnalysis.inventory import db_sync
+from scytaledroid.DeviceAnalysis.inventory import db_sync, package_collection, snapshot_io
+from scytaledroid.DeviceAnalysis.inventory.modes import InventoryConfig, InventoryMode
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
@@ -55,6 +53,7 @@ def run_full_sync(
     filter_fn: Optional[Callable[[Dict[str, object]], bool]] = None,
     progress_cb: Optional[ProgressCallback] = None,
     mode: Optional[str] = None,
+    config: Optional[InventoryConfig] = None,
 ) -> InventoryResult:
     """
     Run a full inventory sync for *serial* and return a UI-free result.
@@ -104,10 +103,11 @@ def run_full_sync(
     if progress_cb:
         progress_cb({"phase": "start", "total": None, "phase_label": "Collecting packages"})
 
-    # Support a simple mode flag for faster paths (env only for now).
-    mode = (mode or os.getenv("SCYTALEDROID_INVENTORY_MODE", "baseline")).lower().strip()
+    # Resolve mode/config once and keep it consistent for the run.
+    resolved_config = config or InventoryConfig.from_env()
+    mode = (mode or resolved_config.mode.value).lower().strip()
     effective_filter = filter_fn
-    if mode == "user_only":
+    if mode == InventoryMode.USER_ONLY.value:
         def _user_only(entry: Dict[str, object]) -> bool:
             primary_path = str(entry.get("primary_path") or "")
             return primary_path.startswith("/data/")

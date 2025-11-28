@@ -376,6 +376,19 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                 level="info",
             )
         )
+        if canonical_failures:
+            preview_limit = 5
+            unique_failures = sorted(set(canonical_failures))
+            preview = ", ".join(unique_failures[:preview_limit])
+            remaining = len(unique_failures) - preview_limit
+            if remaining > 0:
+                preview += f", +{remaining} more"
+            print(
+                status_messages.status(
+                    f"Status: WARN – canonical snapshot failed for {len(unique_failures)} package(s): {preview}",
+                    level="warn",
+                )
+            )
     else:
         print(
             status_messages.status(
@@ -395,7 +408,7 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             if remaining > 0:
                 preview += f", +{remaining} more"
             failure_message = (
-                "Failed to record canonical snapshot for "
+                "Canonical snapshot failed for "
                 f"{len(unique_failures)} package{'s' if len(unique_failures) != 1 else ''}: "
                 + preview
             )
@@ -422,9 +435,14 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                 )
             )
         if session_stamp and persist_enabled:
-            _render_persistence_footer(session_stamp, had_errors=bool(persistence_errors))
+            _render_persistence_footer(
+                session_stamp,
+                had_errors=bool(persistence_errors),
+                canonical_failures=canonical_failures,
+            )
             if persistence_errors:
-                print(status_messages.status("Persistence issues detected:", level="error"))
+                level = "warn"
+                print(status_messages.status("Persistence issues detected:", level=level))
                 for message in persistence_errors:
                     print(f"  - {message}")
 
@@ -1231,7 +1249,12 @@ def _render_db_severity_table(session_stamp: str) -> bool:
     return True
 
 
-def _render_persistence_footer(session_stamp: str, *, had_errors: bool = False) -> None:
+def _render_persistence_footer(
+    session_stamp: str,
+    *,
+    had_errors: bool = False,
+    canonical_failures: Optional[list[str]] = None,
+) -> None:
     try:
         run_rows = core_q.run_sql(
             "SELECT run_id FROM runs WHERE session_stamp = %s",
@@ -1420,8 +1443,20 @@ def _render_persistence_footer(session_stamp: str, *, had_errors: bool = False) 
     width = max(len(name) for name, _ in lines) if lines else 0
     for name, detail in lines:
         print(f"  {name.ljust(width)} : {detail}")
-    if had_errors:
+
+    if canonical_failures:
+        preview_limit = 5
+        unique_failures = sorted(set(canonical_failures))
+        preview = ", ".join(unique_failures[:preview_limit])
+        remaining = len(unique_failures) - preview_limit
+        if remaining > 0:
+            preview += f", +{remaining} more"
+        print(f"  {'status'.ljust(width)} : WARN (canonical snapshots failed)")
+        print(f"  {'canonical_failures'.ljust(width)} : {len(unique_failures)} ({preview})")
+    elif had_errors:
         print(f"  {'status'.ljust(width)} : ERROR (see logs)")
+    else:
+        print(f"  {'status'.ljust(width)} : OK")
 
     high_downgraded = 0
     if run_ids:

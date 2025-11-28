@@ -15,6 +15,7 @@ from typing import Any, Iterable, Mapping, MutableMapping, Optional, Sequence
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_queries.canonical import schema as canonical_schema
 from scytaledroid.StaticAnalysis.cli.persistence.utils import first_text
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
 def _ensure_schema_ready() -> bool:
@@ -200,20 +201,34 @@ def ingest_baseline_payload(payload: Mapping[str, object]) -> bool:
     This function does not yet persist observations; it establishes the app and
     version records to support later canonical ingestion.
     """
+    def _warn(reason: str) -> None:
+        try:
+            pkg = ""
+            app = payload.get("app") if isinstance(payload, Mapping) else None
+            if isinstance(app, Mapping):
+                pkg = first_text(app.get("package"), app.get("package_name")) or ""
+            log.warning(f"[ingest] {reason}" + (f" (package={pkg})" if pkg else ""), category="static_ingest")
+        except Exception:
+            pass
+
     try:
         if not isinstance(payload, Mapping):
+            _warn("payload not a mapping; skipping ingest")
             return False
         if not _ensure_schema_ready():
+            _warn("schema not ready; ingest aborted")
             return False
 
         app_section = payload.get("app")
         app = app_section if isinstance(app_section, Mapping) else {}
         package = first_text(app.get("package"), app.get("package_name")) or ""
         if not package:
+            _warn("missing package name in payload")
             return False
         display_name = first_text(app.get("label"), app.get("app_label")) or package
         app_id = _get_or_create_app(package, display_name)
         if not app_id:
+            _warn("failed to upsert app row")
             return False
         version_name = app.get("version_name")
         version_code = app.get("version_code")
@@ -226,10 +241,18 @@ def ingest_baseline_payload(payload: Mapping[str, object]) -> bool:
             min_sdk=int(min_sdk) if min_sdk is not None else None,
             target_sdk=int(target_sdk) if target_sdk is not None else None,
         )
-        if version_id and isinstance(payload, Mapping):
-            _persist_analysis_snapshot(int(version_id), payload)
+        if not version_id:
+            _warn("failed to upsert version row")
+            return False
+        if isinstance(payload, Mapping):
+            try:
+                _persist_analysis_snapshot(int(version_id), payload)
+            except Exception as exc:
+                _warn(f"persist_analysis_snapshot failed: {exc}")
+                return False
         return True
-    except Exception:
+    except Exception as exc:
+        _warn(f"ingest_baseline_payload raised: {exc}")
         return False
 
 

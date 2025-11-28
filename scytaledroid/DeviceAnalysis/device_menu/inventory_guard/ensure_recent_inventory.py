@@ -63,13 +63,6 @@ def ensure_recent_inventory(
         "guard_brief": None,
     }
 
-    if scope_packages is None:
-        snapshot_payload = inventory_module.load_latest_inventory(serial)
-        if isinstance(snapshot_payload, dict):
-            packages_value = snapshot_payload.get("packages")
-            if isinstance(packages_value, list):
-                scope_packages = packages_value
-
     metadata = get_latest_inventory_metadata(
         serial,
         with_current_state=False,
@@ -112,6 +105,8 @@ def ensure_recent_inventory(
             updated_count=int(metadata.get("delta_updated") or 0),
             changed_packages_count=int(metadata.get("delta_changed_count") or 0),
         )
+    else:
+        delta_obj = delta_obj or InventoryDelta(0, 0, 0, 0)
 
     if timestamp is None:
         status = "NONE"
@@ -119,6 +114,27 @@ def ensure_recent_inventory(
         status = "STALE"
     else:
         status = "FRESH"
+
+    # If we are fresh by age and the recorded delta says nothing changed, short‑circuit
+    # without emitting any warnings. This prevents spurious prompts immediately after
+    # a clean sync.
+    if (
+        status == "FRESH"
+        and (age_seconds or 0) < INVENTORY_STALE_SECONDS
+        and delta_obj.changed_packages_count == 0
+    ):
+        _set_guard_context(
+            stale_level="fresh",
+            reason="Inventory is fresh and unchanged.",
+            scope_changed=scope_changed,
+            scope_hash_changed=scope_hash_changed,
+            packages_changed=False,
+            age_seconds=age_seconds,
+            package_delta=None,
+            package_delta_brief=None,
+        )
+        _record_guard_policy("quick")
+        return True
 
     message = describe_inventory_state(status, delta_obj, age_delta, threshold)
 
@@ -151,6 +167,13 @@ def ensure_recent_inventory(
     print(status_messages.status(message.short, level="warn" if message.severity == "warn" else "info"))
     if message.long:
         print(status_messages.status(message.long, level="info"))
+    if delta_obj and delta_obj.changed_packages_count:
+        print(
+            status_messages.status(
+                "This delta compares installed packages to the last inventory snapshot. Pulling APKs does not reset it; re-run inventory to clear.",
+                level="info",
+            )
+        )
 
     options = ["1", "0"]
     labels = {"1": "Sync now (recommended)", "0": "Cancel"}

@@ -50,29 +50,16 @@ def render_sync_summary_box(result) -> None:
             show_prefix=False,
         ),
         status_messages.status(
-            (
-                f"Packages captured: {result.stats.total_packages} "
-                f"{_format_delta_text(net_count_delta if not first_snapshot else 0, first_snapshot=first_snapshot)}"
-            ),
-            show_icon=False,
-            show_prefix=False,
-        ),
-        status_messages.status(
-            f"Split APKs: {result.stats.split_packages} {_format_delta_text(split_delta, first_snapshot=first_snapshot)}",
+            f"Packages: {result.stats.total_packages} • Split APKs: {result.stats.split_packages}",
             show_icon=False,
             show_prefix=False,
         ),
         status_messages.status(
             (
                 "Delta vs previous snapshot: "
-                f"new={new_count}, removed={removed_count}, updated={updated_count}, "
-                f"changed_packages={changed_total}"
+                f"new={new_count}  removed={removed_count}  updated={updated_count} "
+                f"{_format_delta_text(net_count_delta if not first_snapshot else 0, first_snapshot=first_snapshot)}"
             ),
-            show_icon=False,
-            show_prefix=False,
-        ),
-        status_messages.status(
-            f"New packages: {new_count} • Removed: {removed_count} • Updated: {updated_count}",
             show_icon=False,
             show_prefix=False,
         ),
@@ -134,14 +121,12 @@ def render_inventory_summary(result) -> None:
 
     print()
     print(text_blocks.headline("Inventory summary", width=70))
-    table_utils.render_table(
-        ["Metric", "Count"],
-        [
-            ["Total packages", str(total)],
-            ["Split APK packages", str(split_packages)],
-            ["User-scope candidates", str(user_scope_count)],
-        ],
-    )
+    metric_rows = [["Total packages", str(total)]]
+    if split_packages:
+        metric_rows.append(["Split APK packages", str(split_packages)])
+    if user_scope_count:
+        metric_rows.append(["User apps (candidates)", str(user_scope_count)])
+    table_utils.render_table(["Metric", "Count"], metric_rows)
 
     print()
     # Show a concise source breakdown that matches the user-scope count.
@@ -149,44 +134,53 @@ def render_inventory_summary(result) -> None:
     sideload_installs = source_counts.get("Sideload", 0)
     unknown_installs = max(user_scope_count - play_installs - sideload_installs, 0)
 
-    print(
-        text_blocks.headline(
-            f"By install source (user apps: {user_scope_count})", width=70
+    source_rows = []
+    if play_installs:
+        source_rows.append(["Play Store installs", str(play_installs)])
+    if sideload_installs:
+        source_rows.append(["Sideload", str(sideload_installs)])
+    if unknown_installs:
+        source_rows.append(["Unknown / other", str(unknown_installs)])
+    if source_rows:
+        print(
+            text_blocks.headline(
+                f"By install source (user apps: {user_scope_count})", width=70
+            )
         )
-    )
-    table_utils.render_table(
-        ["Source", "Count"],
-        [
-            ["Play Store installs", str(play_installs)],
-            ["Sideload", str(sideload_installs)],
-            ["Unknown / other", str(unknown_installs)],
-        ],
-    )
+        table_utils.render_table(["Source", "Count"], source_rows)
 
-    print()
-    print(text_blocks.headline("By role / owner", width=70))
-    table_utils.render_table(
-        ["Role", "Count"],
-        [
-            ["User apps", str(category_counts.get("User", 0))],
-            ["OEM overlays", str(category_counts.get("OEM", 0))],
-            ["System core", str(category_counts.get("System", 0))],
-            ["Google mainline", str(category_counts.get("Mainline", 0))],
-            ["Vendor modules", str(category_counts.get("Vendor", 0))],
-            ["Unclassified / Unknown", str(category_counts.get("Unknown", 0))],
-        ],
-    )
+    role_rows = []
+    for label, key in [
+        ("User apps", "User"),
+        ("OEM overlays", "OEM"),
+        ("System core", "System"),
+        ("Google mainline", "Mainline"),
+        ("Vendor modules", "Vendor"),
+        ("Unclassified / Unknown", "Unknown"),
+    ]:
+        count = category_counts.get(key, 0)
+        if count:
+            role_rows.append([label, str(count)])
+    if role_rows:
+        print()
+        print(text_blocks.headline("By role / owner", width=70))
+        table_utils.render_table(["Role", "Count"], role_rows)
 
-    print()
-    print(text_blocks.headline("By partition", width=70))
-    partition_rows = [
-        ["Data (/data)", str(partition_counts.get("Data (/data)", 0))],
-        ["Product (/product)", str(partition_counts.get("Product (/product)", 0))],
-        ["System (/system)", str(partition_counts.get("System (/system, /system_ext)", 0))],
-        ["Apex (/apex)", str(partition_counts.get("Apex (/apex)", 0))],
-        ["Vendor (/vendor)", str(partition_counts.get("Vendor (/vendor)", 0))],
-    ]
-    table_utils.render_table(["Partition", "Packages"], partition_rows)
+    partition_rows = []
+    for label in [
+        "Data (/data)",
+        "Product (/product)",
+        "System (/system, /system_ext)",
+        "Apex (/apex)",
+        "Vendor (/vendor)",
+    ]:
+        count = partition_counts.get(label, 0)
+        if count:
+            partition_rows.append([label, str(count)])
+    if partition_rows:
+        print()
+        print(text_blocks.headline("By partition", width=70))
+        table_utils.render_table(["Partition", "Packages"], partition_rows)
 
     notable_profiles = [
         (name, count)

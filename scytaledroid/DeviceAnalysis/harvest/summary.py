@@ -202,6 +202,8 @@ def render_plan_summary(
     print()
     print(text_blocks.boxed(card_lines, width=70))
 
+    _print_scope_filtering(selection)
+    _print_exclusion_samples(selection.metadata.get("excluded_samples"))
     _print_exclusions(selection.metadata.get("excluded_counts"))
     _print_sample_focus(selection)
 
@@ -235,6 +237,16 @@ def print_package_result(result: PullResult, *, verbose: bool = False) -> None:
     if not verbose and not (result.errors or result.skipped):
         return
 
+    # If nothing was pulled and all skips are due to non-root policy, suppress noise (counts already shown elsewhere).
+    if (
+        not verbose
+        and not result.ok
+        and not result.errors
+        and result.skipped
+        and all(reason == "policy_non_root" for reason in result.skipped)
+    ):
+        return
+
     plan = result.plan
     inventory = plan.inventory
     header = (
@@ -258,7 +270,12 @@ def print_package_result(result: PullResult, *, verbose: bool = False) -> None:
 
     for error in result.errors:
         print(status_messages.status(f"  ✗ {error.source_path}: {error.reason}", level="error"))
+    filtered_skips = []
     for reason in result.skipped:
+        if not verbose and reason == "policy_non_root":
+            continue  # suppress noisy per-package policy skips; counts shown elsewhere
+        filtered_skips.append(reason)
+    for reason in filtered_skips:
         print(status_messages.status(f"  ⤷ skipped: {_describe_reason(reason, _SKIP_LABELS)}", level="warn"))
 
 
@@ -289,6 +306,7 @@ def render_harvest_summary(
     metrics = HarvestRunMetrics.from_run(plan, harvest_result, results)
     files_written = metrics.artifacts_written
     pull_errors = metrics.artifacts_failed
+    compact_mode = _should_compact_view(selection, metrics, plan)
 
     print()
     print(text_blocks.headline("APK Harvest Summary", width=70))
@@ -354,7 +372,8 @@ def render_harvest_summary(
             print(status_messages.status(f"  - {package}", level="warn"))
 
     _print_exclusions(metadata.get("excluded_counts"))
-    _print_top_packages(results)
+    _print_exclusion_samples(metadata.get("excluded_samples"))
+    _print_top_packages(results, limit=10 if compact_mode else 5)
     _print_sample_focus(selection)
 
     output_root = _run_output_root(harvest_result)
@@ -375,16 +394,7 @@ def render_harvest_summary(
 
     no_new = _packages_without_writes(harvest_result)
     if no_new:
-        print()
-        print(text_blocks.headline("No new artifacts", width=70))
-        for package, reason in no_new:
-            suffix = f" — {reason}" if reason else ""
-            print(
-                status_messages.status(
-                    f" • {package.app_label} ({package.package_name}){suffix}",
-                    level="warn",
-                )
-            )
+        _print_no_new_summary(no_new)
 
     delta_summary = metadata.get("package_delta_summary")
     if delta_summary:
@@ -501,6 +511,27 @@ def _build_summary_card_lines(
     if pull_errors:
         lines.append(_format_card_line("Errors", f"{pull_errors} artifact(s)"))
 
+    # Echo how the scope shrank from candidates to kept packages.
+    candidates = int(metadata.get("candidate_count") or 0)
+    selected = int(metadata.get("selected_count") or metrics.total_packages or 0)
+    excluded_counts = metadata.get("excluded_counts") or {}
+    if not candidates:
+        candidates = selected + sum(int(v) for v in excluded_counts.values())
+    if candidates:
+        filtered = max(candidates - selected, 0)
+        detail = f"kept {selected} of {candidates} candidates"
+        breakdown = []
+        for reason, count in sorted(excluded_counts.items()):
+            if not count:
+                continue
+            label = _describe_reason(reason, _EXCLUSION_LABELS)
+            breakdown.append(f"{label}={count}")
+        if breakdown:
+            detail = f"{detail} (filtered {filtered}: {', '.join(breakdown)})"
+        else:
+            detail = f"{detail} (filtered {filtered})"
+        lines.append(_format_card_line("Scope", detail))
+
     return lines
 
 
@@ -611,6 +642,42 @@ def _print_exclusions(excluded: object) -> None:
         print(status_messages.status(f"  - {label}: {count}", level="info"))
 
 
+def _print_exclusion_samples(samples: object) -> None:
+    """
+    Surface a few example package names that were filtered by scope policy,
+    so it's obvious which apps were skipped.
+    """
+    if not samples:
+        return
+    try:
+        entries = ((str(reason), list(names)) for reason, names in dict(samples).items())
+    except Exception:
+        return
+    for reason, names in entries:
+        if not names:
+            continue
+        label = _describe_reason(reason, _EXCLUSION_LABELS)
+        preview = ", ".join(names)
+        print(status_messages.status(f"  ↳ {label}: {preview}", level="info"))
+
+
+def _print_scope_filtering(selection: ScopeSelection) -> None:
+    """
+    Show how many packages were in the candidate set vs how many remain after
+    scope policy filters. Helps analysts understand why a category shrank.
+    """
+    meta = selection.metadata or {}
+    candidates = int(meta.get("candidate_count") or 0)
+    selected = int(meta.get("selected_count") or len(selection.packages) or 0)
+    if not candidates:
+        return
+    dropped = max(candidates - selected, 0)
+    msg = f"Scope kept {selected} of {candidates} candidate package(s)"
+    if dropped:
+        msg = f"{msg} (filtered out {dropped})"
+    print(status_messages.status(msg, level="info"))
+
+
 def _describe_reason(code: str, mapping: Dict[str, str]) -> str:
     return mapping.get(code, code)
 
@@ -660,13 +727,16 @@ def _format_policy_details(policy_counts: Dict[str, int]) -> str:
 
 
 def _print_sample_focus(selection: ScopeSelection) -> None:
-    samples = selection.metadata.get("sample_names")
+    # Prefer live package list; fall back to metadata if needed.
+    live_samples = [pkg.display_name() for pkg in selection.packages[:5]]
+    samples = live_samples or selection.metadata.get("sample_names")
     if not samples:
+        print(status_messages.status("Focus packages: none in scope (filtered by policy)", level="info"))
         return
     preview = ", ".join(samples)
     if len(selection.packages) > len(samples):
         preview += ", …"
-    print(status_messages.status(f"Focus packages: {preview}"))
+    print(status_messages.status(f"Focus packages: {preview}", level="info"))
 
 
 def _build_harvest_result(
@@ -753,6 +823,52 @@ def _packages_without_writes(
             reason = package.errors[0].reason
         packages.append((package, reason))
     return packages
+
+
+def _should_compact_view(selection: ScopeSelection, metrics: HarvestRunMetrics, plan: HarvestPlan) -> bool:
+    """
+    Decide if console output should be compacted due to large scope/skip volumes.
+    """
+    meta = selection.metadata or {}
+    candidates = int(meta.get("candidate_count") or 0)
+    selected = int(meta.get("selected_count") or metrics.total_packages or 0)
+    excluded_counts = meta.get("excluded_counts") or {}
+    filtered = max(candidates - selected, 0) if candidates else 0
+    policy_filtered = sum(int(v) for v in excluded_counts.values() if v)
+
+    if filtered > 100 or policy_filtered > 100:
+        return True
+    if metrics.total_packages > 100:
+        return True
+    if metrics.planned_artifacts and metrics.planned_artifacts > 1000:
+        return True
+    return False
+
+def _print_no_new_summary(no_new: List[tuple[PackageHarvestResult, Optional[str]]]) -> None:
+    """
+    Summarize packages with no new artifacts, grouped by skip reason, with small samples.
+    """
+    if not no_new:
+        return
+    print()
+    print(text_blocks.headline("No new artifacts", width=70))
+
+    # Group by reason
+    grouped: Dict[str, List[str]] = {}
+    for package, reason in no_new:
+        key = reason or "Skipped"
+        grouped.setdefault(key, []).append(package.display_name())
+
+    for reason, names in sorted(grouped.items(), key=lambda item: -len(item[1])):
+        count = len(names)
+        samples = ", ".join(names[:5])
+        suffix = f" … +{count - 5} more" if count > 5 else ""
+        print(
+            status_messages.status(
+                f"• {reason}: {count} ({samples}{suffix})",
+                level="warn",
+            )
+        )
 
 
 def _print_package_delta_summary(summary: Dict[str, object], *, limit: int = 10) -> None:

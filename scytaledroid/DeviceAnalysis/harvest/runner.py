@@ -139,8 +139,6 @@ def execute_harvest(
 
     try:
         for index, plan in enumerate(plans, start=1):
-            if not verbose:
-                _print_progress(index, total, plan)
             results.append(
                 _execute_package_plan(
                     serial=resolved_serial,

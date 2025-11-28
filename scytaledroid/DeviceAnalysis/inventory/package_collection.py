@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import os
 import time
+from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Protocol, Tuple
 
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from .. import adb_utils, package_profiles
 from .. import inventory_meta
-from . import snapshot_io
 from . import adb_bulk
-import os
+from . import snapshot_io
+from .modes import InventoryMode
 
 class ProgressCallback(Protocol):
     def __call__(
@@ -47,6 +48,7 @@ def collect_inventory(
     *,
     filter_fn: Optional[Callable[[Dict[str, object]], bool]] = None,
     progress_cb: Optional[ProgressCallback] = None,
+    use_bulk: Optional[bool] = None,
 ) -> Tuple[List[PackageRow], CollectionStats]:
     """
     Collect inventory rows from ADB and enrich them with canonical metadata.
@@ -57,9 +59,14 @@ def collect_inventory(
 
     adb_utils.clear_package_caches(serial)
 
-    mode = os.getenv("SCYTALEDROID_INVENTORY_MODE", "baseline").strip().lower()
-    # For now, favor correctness by disabling bulk path until enrichment parity is restored.
-    use_bulk = False
+    # Respect explicit caller intent; otherwise fall back to env/config.
+    if use_bulk is None:
+        env_mode = os.getenv("SCYTALEDROID_INVENTORY_MODE", InventoryMode.BASELINE.value).strip().lower()
+        try:
+            resolved_mode = InventoryMode(env_mode)
+        except ValueError:
+            resolved_mode = InventoryMode.BASELINE
+        use_bulk = resolved_mode == InventoryMode.BULK
 
     packages_with_versions: List[Tuple[str, Optional[str], Optional[str]]] = []
     bulk_entries: List[adb_bulk.BulkPackageEntry] = []

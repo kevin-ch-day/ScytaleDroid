@@ -26,7 +26,7 @@ def format_scope_target(selection: ScopeSelection) -> str:
 
 def select_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
     print()
-    menu_utils.print_header("Scope", "Select the analysis scope")
+    menu_utils.print_header("Scope", "Select the analysis scope (app, category, or all)")
     options = {"1": "App", "2": "Category", "3": "All apps"}
     for key, label in options.items():
         print(f" {key}) {label}")
@@ -47,7 +47,7 @@ def select_app_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
         return ScopeSelection("all", "All apps", tuple(groups))
 
     print()
-    menu_utils.print_header("Scope — App", "Select 1 package")
+    menu_utils.print_header("Scope — App", "Select a package (latest capture chosen automatically)")
     rows: list[list[str]] = []
     lookup_labels: list[str] = []
     for idx, (package, version, _count, app_label) in enumerate(packages, start=1):

@@ -209,6 +209,10 @@ def _render_status_panel(
         added = int(delta.get("total_added", 0) or 0)
         removed = int(delta.get("total_removed", 0) or 0)
         updated = int(delta.get("total_updated", 0) or 0)
+    elif isinstance(status, dict):
+        added = int(status.get("delta_new") or 0)
+        removed = int(status.get("delta_removed") or 0)
+        updated = int(status.get("delta_updated") or 0)
 
     if added or removed or updated:
         tokens = []
@@ -220,7 +224,7 @@ def _render_status_panel(
             tokens.append(f"{updated} updated")
         print(f"Last inventory result: {', '.join(tokens)}.")
     else:
-        print("Last inventory result: identical to previous snapshot (baseline unchanged).")
+        print("Last inventory result: identical to previous snapshot.")
 
     if is_stale:
         print(

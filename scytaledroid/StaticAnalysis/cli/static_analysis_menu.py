@@ -140,6 +140,12 @@ def static_analysis_menu() -> None:
     while True:
         print()
         menu_utils.print_header("Android APK Static Analysis")
+        print(
+            status_messages.status(
+                "Choose a workflow to scan harvested APKs. Results are persisted for reproducibility.",
+                level="info",
+            )
+        )
         selected_apks = static_scope_service.count()
         if selected_apks:
             print(
