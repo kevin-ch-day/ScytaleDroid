@@ -12,6 +12,7 @@ from scytaledroid.Utils.DisplayUtils import summary_cards, status_messages
 from scytaledroid.Utils.System import output_prefs
 from scytaledroid.StaticAnalysis.persistence import ingest as canonical_ingest
 from scytaledroid.StaticAnalysis.session import make_session_stamp
+from scytaledroid.ui import formatter
 
 from .execution import (
     build_analysis_config,
@@ -52,32 +53,32 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
     scope_target = format_scope_target(selection)
 
     workers_label = f"auto ({workers})" if isinstance(params.workers, str) else str(workers)
-    summary_items: list[tuple[str, object]] = [
-        ("Scope", scope_target),
-        ("Profile", params.profile_label),
-        ("Session", params.session_stamp),
-        ("Workers", workers_label),
-        ("Cache", "purge" if not params.reuse_cache else "reuse"),
-        ("Log level", params.log_level.upper()),
-        (
-            "Permission refresh",
-            "on" if params.permission_snapshot_refresh else "off",
-        ),
-    ]
-    if modules:
-        summary_items.append(("Detectors", ", ".join(modules)))
-    if params.trace_detectors:
-        summary_items.append(("Trace IDs", ", ".join(params.trace_detectors)))
-
-    print(
-        summary_cards.format_summary_card(
-            "Static Analysis Run",
-            summary_items,
-            subtitle=f"Target: {scope_target}",
-            footer="Run executes immediately after this summary.",
-            width=90,
-        )
+    formatter.print_header("Static Analysis · RUN START")
+    run_block = formatter.format_kv_block(
+        "[RUN]",
+        {
+            "Type": "static",
+            "Target": scope_target,
+            "Profile": params.profile_label,
+            "Run ID": params.session_stamp,
+        },
     )
+    meta_pairs = {
+        "Workers": workers_label,
+        "Cache": "purge" if not params.reuse_cache else "reuse",
+        "Log level": params.log_level.upper(),
+        "Perm cache": "refresh" if params.permission_snapshot_refresh else "skip",
+    }
+    if modules:
+        meta_pairs["Detectors"] = ", ".join(modules)
+    if params.trace_detectors:
+        meta_pairs["Trace IDs"] = ", ".join(params.trace_detectors)
+
+    print(run_block)
+    print()
+    print(formatter.format_kv_block("[META]", meta_pairs))
+    print()
+    print("Detector pipeline begins below. Results will be persisted to the evidence store.")
     print()
 
     configure_logging_for_cli(params.log_level)
