@@ -78,6 +78,8 @@ class HarvestOptions:
     write_db: bool = True
     write_meta: bool = True
     meta_fields: Tuple[str, ...] = DEFAULT_META_FIELDS
+    # Default stays "legacy" for compatibility with older menu paths; new
+    # call sites should pass an explicit mode (e.g., "quick", "full", "test").
     pull_mode: str = "legacy"
 
 

@@ -48,6 +48,7 @@ def _render_inventory_summary(obj) -> None:
 # Legacy support: allow opting into the old inventory.py via env flag
 run_inventory_sync = None
 if os.getenv("SCYTALEDROID_LOAD_LEGACY_INVENTORY") == "1":
+    print("[WARN] SCYTALEDROID_LOAD_LEGACY_INVENTORY is enabled (legacy path). New code should use run_full_sync.")
     legacy_path = Path(__file__).resolve().parent / "inventory.py"
     if legacy_path.exists():
         spec = importlib.util.spec_from_file_location("scytaledroid.DeviceAnalysis.inventory_legacy", legacy_path)

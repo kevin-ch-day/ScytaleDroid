@@ -13,6 +13,7 @@ from scytaledroid.Utils.System import output_prefs
 from scytaledroid.StaticAnalysis.persistence import ingest as canonical_ingest
 from scytaledroid.StaticAnalysis.session import make_session_stamp
 from scytaledroid.ui import formatter
+from .views import render_run_start, render_run_summary
 
 from .execution import (
     build_analysis_config,
@@ -53,33 +54,17 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
     scope_target = format_scope_target(selection)
 
     workers_label = f"auto ({workers})" if isinstance(params.workers, str) else str(workers)
-    formatter.print_header("Static Analysis · RUN START")
-    run_block = formatter.format_kv_block(
-        "[RUN]",
-        {
-            "Type": "static",
-            "Target": scope_target,
-            "Profile": params.profile_label,
-            "Run ID": params.session_stamp,
-        },
+    render_run_start(
+        run_id=params.session_stamp,
+        profile_label=params.profile_label,
+        target=scope_target,
+        modules=modules,
+        workers_desc=workers_label,
+        cache_desc="purge" if not params.reuse_cache else "reuse",
+        log_level=params.log_level,
+        perm_cache_desc="refresh" if params.permission_snapshot_refresh else "skip",
+        trace_ids=params.trace_detectors,
     )
-    meta_pairs = {
-        "Workers": workers_label,
-        "Cache": "purge" if not params.reuse_cache else "reuse",
-        "Log level": params.log_level.upper(),
-        "Perm cache": "refresh" if params.permission_snapshot_refresh else "skip",
-    }
-    if modules:
-        meta_pairs["Detectors"] = ", ".join(modules)
-    if params.trace_detectors:
-        meta_pairs["Trace IDs"] = ", ".join(params.trace_detectors)
-
-    print(run_block)
-    print()
-    print(formatter.format_kv_block("[META]", meta_pairs))
-    print()
-    print("Detector pipeline begins below. Results will be persisted to the evidence store.")
-    print()
 
     configure_logging_for_cli(params.log_level)
 
@@ -95,6 +80,34 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
     except Exception:
         pass
     render_run_results(outcome, params)
+
+    # Structured RUN SUMMARY (formatter-based) for transcripts/screenshots.
+    if outcome and getattr(outcome, "summary", None):
+        summary = outcome.summary
+        sev_counts = {
+            "high": getattr(summary, "high", 0),
+            "medium": getattr(summary, "medium", 0),
+            "low": getattr(summary, "low", 0),
+        }
+        perm_stats = {
+            "dangerous": getattr(summary, "dangerous_permissions", 0),
+            "signature": getattr(summary, "signature_permissions", 0),
+            "custom": getattr(summary, "custom_permissions", 0),
+        }
+        failed_masvs = list(getattr(summary, "failed_masvs", []) or [])
+        evidence_root = getattr(summary, "evidence_root", None)
+
+        render_run_summary(
+            run_id=params.session_stamp,
+            profile_label=params.profile_label,
+            target=scope_target,
+            detectors_count=len(modules),
+            findings_total=getattr(summary, "findings_total", 0),
+            sev_counts=sev_counts,
+            failed_masvs=failed_masvs,
+            perm_stats=perm_stats,
+            evidence_root=evidence_root,
+        )
 
     if params.session_stamp:
         try:

@@ -1,4 +1,12 @@
-"""Quick APK harvest implementation using live device state."""
+"""Quick APK harvest implementation using live device state.
+
+LEGACY NOTE
+-----------
+This path predates the newer planner + runner flow and is kept for compatibility
+with older CLI menu entries. New work should prefer the planner/runner engine
+in ``runner.execute_harvest`` and treat this module as a fallback that will be
+retired once the v2 flow is fully trusted.
+"""
 
 from __future__ import annotations
 

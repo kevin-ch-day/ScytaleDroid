@@ -22,6 +22,7 @@ from .summary import (
     render_harvest_summary,
     render_plan_summary,
 )
+from .views import render_harvest_summary_structured, render_scope_overview
 from .watchlists import (
     Watchlist,
     filter_rows_by_watchlist,
@@ -48,6 +49,8 @@ __all__ = [
     "print_package_result",
     "render_harvest_summary",
     "render_plan_summary",
+    "render_harvest_summary_structured",
+    "render_scope_overview",
     "reset_last_scope",
     "rules",
     "select_package_scope",

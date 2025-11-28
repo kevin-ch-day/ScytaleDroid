@@ -20,6 +20,7 @@ from .models import (
     PullResult,
     ScopeSelection,
 )
+from .views import render_harvest_summary_structured, render_scope_overview
 
 
 _EXCLUSION_LABELS = {
@@ -180,6 +181,7 @@ def render_plan_summary(
     *,
     is_rooted: bool,
     include_system_partitions: bool,
+    show_boxed: bool = False,
 ) -> None:
     """Present a concise overview of the planned harvest prior to execution."""
 
@@ -199,13 +201,22 @@ def render_plan_summary(
     if not include_system_partitions and not is_rooted:
         card_lines.append("Policy   : System/vendor filtered (non-root)")
 
-    print()
-    print(text_blocks.boxed(card_lines, width=70))
+    if show_boxed:
+        print()
+        print(text_blocks.boxed(card_lines, width=70))
 
     _print_scope_filtering(selection)
     _print_exclusion_samples(selection.metadata.get("excluded_samples"))
     _print_exclusions(selection.metadata.get("excluded_counts"))
     _print_sample_focus(selection)
+
+    # Structured, formatter-based overview for transcripts/screenshots.
+    render_scope_overview(
+        selection=selection,
+        plan=plan,
+        is_rooted=is_rooted,
+        include_system_partitions=include_system_partitions,
+    )
 
 
 def preview_plan(plan: HarvestPlan, *, limit: int = 10) -> None:
@@ -405,6 +416,18 @@ def render_harvest_summary(
             )
         )
         _print_package_delta_summary(delta_summary)
+
+    # Structured forensic-style summary (non-boxed) for transcripts/screenshots.
+    render_harvest_summary_structured(
+        selection_label=selection.label,
+        metrics=metrics,
+        pull_mode=pull_mode,
+        output_root=normalise_local_path(output_root) if output_root else None,
+        preflight_skips=metrics.preflight_skips,
+        runtime_skips=metrics.runtime_skips,
+        policy_filtered=plan.policy_filtered,
+        session_stamp=run_timestamp,
+    )
 
     print()
     print(status_messages.status("Next steps:", level="info"))
