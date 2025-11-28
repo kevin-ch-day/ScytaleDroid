@@ -7,9 +7,12 @@ import hashlib
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Iterable, Iterator, Mapping, Optional, Sequence, Tuple
+from typing import Dict, Iterable, Iterator, Mapping, Optional, Sequence, Tuple, TYPE_CHECKING
 
 from scytaledroid.Config import app_config
+
+if TYPE_CHECKING:  # pragma: no cover
+    from scytaledroid.DeviceAnalysis.inventory.runner import InventoryDelta
 
 
 def _state_root() -> Path:
@@ -38,6 +41,7 @@ class InventoryMeta:
     delta_updated: Optional[int] = None
     delta_changed_count: Optional[int] = None
     delta_split_delta: Optional[int] = None
+    delta_details: Optional["InventoryDelta"] = None
 
     def to_payload(self) -> dict:
         payload = asdict(self)
@@ -53,6 +57,15 @@ class InventoryMeta:
             payload.pop("scope_size", None)
         if self.scope_hashes is None:
             payload.pop("scope_hashes", None)
+        if self.delta_details is not None:
+            delta_payload = {
+                "new": getattr(self.delta_details, "new_count", None),
+                "removed": getattr(self.delta_details, "removed_count", None),
+                "updated": getattr(self.delta_details, "updated_count", None),
+                "changed": getattr(self.delta_details, "changed_packages_count", None),
+            }
+            payload["delta"] = delta_payload
+
         # Drop unset delta fields to avoid bloating meta files
         for field in (
             "delta_new",
@@ -60,6 +73,7 @@ class InventoryMeta:
             "delta_updated",
             "delta_changed_count",
             "delta_split_delta",
+            "delta_details",
         ):
             if payload.get(field) is None:
                 payload.pop(field, None)
@@ -149,6 +163,26 @@ class InventoryMeta:
         delta_changed_count = _coerce_int(payload.get("delta_changed_count"))
         delta_split_delta = _coerce_int(payload.get("delta_split_delta"))
 
+        delta_details = None
+        delta_payload = payload.get("delta")
+        if isinstance(delta_payload, dict):
+            try:
+                from scytaledroid.DeviceAnalysis.inventory.runner import InventoryDelta
+
+                delta_details = InventoryDelta(
+                    new_count=_coerce_int(delta_payload.get("new")) or 0,
+                    removed_count=_coerce_int(delta_payload.get("removed")) or 0,
+                    updated_count=_coerce_int(delta_payload.get("updated")) or 0,
+                    changed_packages_count=_coerce_int(delta_payload.get("changed"))
+                    or (
+                        (_coerce_int(delta_payload.get("new")) or 0)
+                        + (_coerce_int(delta_payload.get("removed")) or 0)
+                        + (_coerce_int(delta_payload.get("updated")) or 0)
+                    ),
+                )
+            except Exception:
+                delta_details = None
+
         return InventoryMeta(
             serial=serial,
             captured_at=captured_at,
@@ -167,6 +201,7 @@ class InventoryMeta:
             delta_updated=delta_updated,
             delta_changed_count=delta_changed_count,
             delta_split_delta=delta_split_delta,
+            delta_details=delta_details,
         )
 
     def write_files(self, timestamp: str, *, suffix: Optional[str] = None) -> None:

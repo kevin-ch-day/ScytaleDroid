@@ -152,6 +152,9 @@ def get_latest_inventory_metadata(
         if value is not None:
             metadata[field] = value
 
+    if snapshot_meta and getattr(snapshot_meta, "delta_details", None) is not None:
+        metadata["delta"] = snapshot_meta.delta_details
+
     normalized_scope = normalize_scope_entries(scope_packages) if scope_packages else []
     resolved_scope_id = scope_id
     expected_scope_hash: Optional[str] = None

@@ -167,3 +167,54 @@ scytaledroid/DeviceAnalysis/
 Keep this structure in mind when proposing changes or contributing code—the
 harvest submodules deliberately isolate scope, planning, and execution so they
 can be tested independently.
+
+## Inventory guard logging and improvement targets
+
+What is logged today
+
+- Inventory deltas are computed once during a sync and persisted in snapshot
+  metadata (new/removed/updated/changed), so dashboards and guard prompts read
+  the same numbers instead of recomputing on the fly.【F:scytaledroid/DeviceAnalysis/inventory/runner.py†L148-L186】【F:scytaledroid/DeviceAnalysis/inventory_meta.py†L18-L66】
+- The guard flow surfaces its decision through CLI status messages when a stale
+  snapshot or package changes require user action; fresh, unchanged snapshots
+  return immediately without prompting.【F:scytaledroid/DeviceAnalysis/device_menu/inventory_guard/ensure_recent_inventory.py†L88-L152】
+- The last guard decision is stored in memory (`_LAST_GUARD_DECISION`) for
+  troubleshooting during a single CLI session.【F:scytaledroid/DeviceAnalysis/device_menu/inventory_guard/ensure_recent_inventory.py†L23-L47】
+
+What is **not** logged or persisted
+
+- Guard prompts and operator choices are printed to the console only; they are
+  not emitted through `LoggingUtils` or persisted alongside the inventory
+  snapshot metadata for later review.【F:scytaledroid/DeviceAnalysis/device_menu/inventory_guard/ensure_recent_inventory.py†L132-L175】
+- The in-memory guard context is cleared on each call and never written to disk
+  or the database, so cross-run auditing is currently impossible.【F:scytaledroid/DeviceAnalysis/device_menu/inventory_guard/ensure_recent_inventory.py†L23-L81】
+
+Current issues to watch
+
+- Because prompts are console-only, there is no audit trail showing whether an
+  analyst bypassed a stale snapshot warning or how often quick-sync shortcuts
+  are used. This complicates incident review for missed APK pulls and hides
+  guard regressions when running unattended scripts.【F:scytaledroid/DeviceAnalysis/device_menu/inventory_guard/ensure_recent_inventory.py†L132-L175】
+- Dashboard summaries depend on persisted deltas; if snapshot metadata is
+  missing or malformed, the guard falls back to zeroed deltas and may under-
+  report changes. Hardened validation for metadata loading would reduce this
+  risk.【F:scytaledroid/DeviceAnalysis/device_menu/inventory_guard/ensure_recent_inventory.py†L88-L112】【F:scytaledroid/DeviceAnalysis/inventory_meta.py†L49-L112】
+
+Design improvements (database-aware)
+
+- Emit structured guard decisions (status, delta details, operator choice,
+  scope hash) via `LoggingUtils` and optionally persist them alongside the
+  snapshot metadata or to a small audit table in the existing database. This
+  would let us correlate APK pulls with the guard posture when debugging
+  missing artifacts.【F:scytaledroid/DeviceAnalysis/device_menu/inventory_guard/ensure_recent_inventory.py†L23-L175】【F:scytaledroid/DeviceAnalysis/inventory/runner.py†L148-L186】
+- Promote `_LAST_GUARD_DECISION` to a typed data class and serialize it when a
+  sync or APK pull completes, so automated runs can surface guard coverage in
+  dashboards without manual log scraping.【F:scytaledroid/DeviceAnalysis/device_menu/inventory_guard/ensure_recent_inventory.py†L23-L81】
+- Treat snapshot metadata as a contract: validate delta presence and shape at
+  load time, and drop to a “stale until proven fresh” posture if anything is
+  missing to avoid silent mis-gating. This can be implemented in
+  `inventory_meta.InventoryMeta.from_payload` with explicit warnings and
+  database-backed fallbacks where available.【F:scytaledroid/DeviceAnalysis/inventory_meta.py†L49-L112】
+- Consider writing guard outcomes to the same database that already receives
+  harvested APK rows, so investigators can join pull history with device guard
+  posture during retrospectives.【F:docs/device_analysis/README.md†L32-L70】【F:scytaledroid/DeviceAnalysis/inventory/runner.py†L186-L193】

@@ -33,9 +33,7 @@ class InventoryDelta:
     new_count: int
     removed_count: int
     updated_count: int
-    split_delta: int
     changed_packages_count: int
-    first_snapshot: bool = False
 
 
 @dataclass
@@ -49,6 +47,7 @@ class InventoryResult:
     synced_app_definitions: int
     elapsed_seconds: float
     delta: InventoryDelta
+    first_snapshot: bool
 
 
 def run_full_sync(
@@ -159,14 +158,11 @@ def run_full_sync(
                 if before != after:
                     updated_pkgs += 1
 
-    split_delta = split_count - prev_split
     delta = InventoryDelta(
         new_count=new_pkgs,
         removed_count=removed_pkgs,
         updated_count=updated_pkgs,
-        split_delta=split_delta,
         changed_packages_count=new_pkgs + removed_pkgs + updated_pkgs,
-        first_snapshot=first_snapshot,
     )
 
     persist_start = time.time()
@@ -197,6 +193,7 @@ def run_full_sync(
         synced_app_definitions=synced_defs,
         elapsed_seconds=coll_stats.elapsed_seconds,
         delta=delta,
+        first_snapshot=first_snapshot,
     )
 
     if progress_cb:
