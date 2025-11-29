@@ -650,18 +650,45 @@ class PermissionAuditAccumulator:
             # Ensure schema exists
             support.ensure_all()
 
+            def _has_column(table: str, column: str) -> bool:
+                try:
+                    rows = core_q.run_sql(f"SHOW COLUMNS FROM {table}", fetch="all")
+                    return any(r[0] == column for r in rows)
+                except Exception:
+                    return False
+
             inventory = snapshot_payload.get("inventory", {}) if isinstance(snapshot_payload, dict) else {}
             apps_total = int(inventory.get("apps_in_scope") or self.total_groups or 0)
             meta_str = json.dumps(snapshot_payload)
-
-            sid = core_q.run_sql(
-                """
-                INSERT INTO permission_audit_snapshots (snapshot_key, scope_label, apps_total, metadata)
-                VALUES (%s, %s, %s, %s)
-                """,
-                (self.snapshot_id, self.scope_label, apps_total, meta_str),
-                return_lastrowid=True,
+            run_id = snapshot_payload.get("run_id") if isinstance(snapshot_payload, dict) else None
+            static_run_id = snapshot_payload.get("static_run_id") if isinstance(snapshot_payload, dict) else None
+            if static_run_id is None:
+                log.warning(
+                    "static_run_id missing for permission audit snapshot; rows will not be keyed to static run",
+                    category="db",
+                )
+            has_run_id = _has_column("permission_audit_snapshots", "run_id")
+            has_static_run_id = _has_column("permission_audit_snapshots", "static_run_id")
+            header_columns = ["snapshot_key", "scope_label", "apps_total", "metadata"]
+            header_values = [self.snapshot_id, self.scope_label, apps_total, meta_str]
+            header_placeholders = ["%s", "%s", "%s", "%s"]
+            if has_run_id:
+                header_columns.insert(2, "run_id")
+                header_values.insert(2, run_id if run_id is not None else None)
+                header_placeholders.insert(2, "%s")
+            if has_static_run_id:
+                header_columns.insert(3 if has_run_id else 2, "static_run_id")
+                header_values.insert(3 if has_run_id else 2, static_run_id)
+                header_placeholders.insert(3 if has_run_id else 2, "%s")
+            header_sql = (
+                "INSERT INTO permission_audit_snapshots ("
+                + ", ".join(header_columns)
+                + ") VALUES ("
+                + ",".join(header_placeholders)
+                + ")"
             )
+
+            sid = core_q.run_sql(header_sql, tuple(header_values), return_lastrowid=True)
 
             for app in self.apps:
                 sd = dict(app.score_detail or {})
@@ -681,35 +708,60 @@ class PermissionAuditAccumulator:
                 }
                 details = json.dumps(details_obj)
 
-                core_q.run_sql(
-                    """
-                    INSERT INTO permission_audit_apps (
-                        snapshot_id, package_name, app_label,
-                        score_raw, score_capped, grade,
-                        dangerous_count, signature_count, vendor_count,
-                        combos_total, surprises_total, legacy_total,
-                        vendor_modifier, modernization_credit,
-                        details
-                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                    """,
-                    (
-                        int(sid),
-                        app.package,
-                        app.label,
-                        score_raw,
-                        score_capped,
-                        grade,
-                        int(app.counts.get("dangerous", 0) if app.counts else 0),
-                        int(app.counts.get("signature", 0) if app.counts else 0),
-                        int(app.counts.get("vendor", 0) if app.counts else 0),
-                        float(sd.get("combo_total", 0.0) or 0.0),
-                        float(sd.get("surprise_total", 0.0) or 0.0),
-                        float(sd.get("legacy_total", 0.0) or 0.0),
-                        float(sd.get("vendor_modifier", 0.0) or 0.0),
-                        float(sd.get("modernization_credit", 0.0) or 0.0),
-                        details,
-                    ),
+                app_columns = [
+                    "snapshot_id",
+                    "package_name",
+                    "app_label",
+                    "score_raw",
+                    "score_capped",
+                    "grade",
+                    "dangerous_count",
+                    "signature_count",
+                    "vendor_count",
+                    "combos_total",
+                    "surprises_total",
+                    "legacy_total",
+                    "vendor_modifier",
+                    "modernization_credit",
+                    "details",
+                ]
+                app_values = [
+                    int(sid),
+                    app.package,
+                    app.label,
+                    score_raw,
+                    score_capped,
+                    grade,
+                    int(app.counts.get("dangerous", 0) if app.counts else 0),
+                    int(app.counts.get("signature", 0) if app.counts else 0),
+                    int(app.counts.get("vendor", 0) if app.counts else 0),
+                    float(sd.get("combo_total", 0.0) or 0.0),
+                    float(sd.get("surprise_total", 0.0) or 0.0),
+                    float(sd.get("legacy_total", 0.0) or 0.0),
+                    float(sd.get("vendor_modifier", 0.0) or 0.0),
+                    float(sd.get("modernization_credit", 0.0) or 0.0),
+                    details,
+                ]
+                app_placeholders = ["%s"] * len(app_columns)
+                if _has_column("permission_audit_apps", "run_id"):
+                    app_columns.insert(3, "run_id")
+                    app_values.insert(3, run_id if run_id is not None else None)
+                    app_placeholders.insert(3, "%s")
+                if _has_column("permission_audit_apps", "static_run_id"):
+                    index = 4 if "run_id" in app_columns else 3
+                    app_columns.insert(index, "static_run_id")
+                    app_values.insert(index, static_run_id)
+                    app_placeholders.insert(index, "%s")
+
+                sql = (
+                    "INSERT INTO permission_audit_apps ("
+                    + ", ".join(app_columns)
+                    + ") VALUES ("
+                    + ",".join(app_placeholders)
+                    + ")"
                 )
+
+                core_q.run_sql(sql, tuple(app_values))
 
             return int(sid)
         except Exception:

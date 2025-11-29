@@ -189,6 +189,11 @@ def write_metrics(
     static_run_id: Optional[int] = None,
 ) -> bool:
     try:
+        if static_run_id is None:
+            log.warning(
+                f"static_run_id missing for metrics; run_id={run_id} will be used without static linkage",
+                category="db",
+            )
         for key, (num, text) in entries.items():
             core_q.run_sql(
                 (
@@ -196,10 +201,14 @@ def write_metrics(
                     "VALUES (%s,%s,%s,%s,%s,%s) "
                     "ON DUPLICATE KEY UPDATE value_num=VALUES(value_num), value_text=VALUES(value_text), module_id=VALUES(module_id), static_run_id=VALUES(static_run_id)"
                 ),
-                (run_id, static_run_id if static_run_id is not None else run_id, key, num, text, module_id),
+                (run_id, static_run_id, key, num, text, module_id),
             )
         return True
-    except Exception:
+    except Exception as exc:
+        log.error(
+            f"Failed to persist metrics for run_id={run_id} static_run_id={static_run_id}: {exc}",
+            category="db",
+        )
         return False
 
 
@@ -210,16 +219,25 @@ def write_buckets(
     static_run_id: Optional[int] = None,
 ) -> bool:
     try:
+        if static_run_id is None:
+            log.warning(
+                f"static_run_id missing for buckets; run_id={run_id} will be used without static linkage",
+                category="db",
+            )
         for name, (points, cap) in buckets.items():
             core_q.run_sql(
                 (
                     "INSERT INTO buckets (run_id, static_run_id, bucket, points, cap) "
                     "VALUES (%s,%s,%s,%s,%s)"
                 ),
-                (run_id, static_run_id if static_run_id is not None else run_id, name, points, cap),
+                (run_id, static_run_id, name, points, cap),
             )
         return True
-    except Exception:
+    except Exception as exc:
+        log.error(
+            f"Failed to persist buckets for run_id={run_id} static_run_id={static_run_id}: {exc}",
+            category="db",
+        )
         return False
 
 

@@ -8,7 +8,7 @@ import os
 from collections import Counter, defaultdict
 import math
 import statistics
-from typing import Mapping, MutableMapping, Sequence, Optional, Dict
+from typing import Mapping, MutableMapping, Sequence, Optional, Dict, Iterable
 
 from scytaledroid.Utils.DisplayUtils import (
     prompt_utils,
@@ -34,6 +34,7 @@ from ..renderer import render_app_result, write_baseline_json
 from ...persistence.ingest import ingest_baseline_payload
 from .scan_flow import format_duration
 from scytaledroid.Database.db_core import db_queries as core_q
+from scytaledroid.Database.db_scripts.static_run_audit import collect_static_run_counts
 from scytaledroid.StaticAnalysis.modules.permissions.simple import (
     render_permission_matrix,
     _classify_permissions as _perm_classify,
@@ -1204,40 +1205,137 @@ def _render_cross_app_insights(
     print(f"• Scope reviewed: {scope_label or 'n/a'} across {app_count} apps")
 
 
-def _render_db_severity_table(session_stamp: str) -> bool:
+def _table_has_column(table: str, column: str) -> bool:
+    try:
+        row = core_q.run_sql(
+            f"SHOW COLUMNS FROM {table} LIKE %s",
+            (column,),
+            fetch="one",
+        )
+    except Exception:
+        return False
+    return bool(row)
+
+
+def _resolve_static_run_ids(session_stamp: str) -> list[int]:
     try:
         rows = core_q.run_sql(
-            """
-            SELECT s.package_name, COALESCE(r.target_sdk, '—') AS target_sdk,
-                   s.high, s.med, s.low, s.info
-            FROM static_findings_summary s
-            LEFT JOIN runs r
-              ON r.package = s.package_name
-             AND r.session_stamp = s.session_stamp
-            WHERE s.session_stamp = %s
-            ORDER BY s.package_name
-            """,
+            "SELECT id FROM static_analysis_runs WHERE session_stamp=%s",
+            (session_stamp,),
+            fetch="all",
+        )
+    except Exception:
+        return []
+    ids: list[int] = []
+    for row in rows or []:
+        value = row[0] if not isinstance(row, dict) else next(iter(row.values()), None)
+        try:
+            if value is not None:
+                ids.append(int(value))
+        except (TypeError, ValueError):
+            continue
+    return ids
+
+
+def _per_app_severity_from_findings(
+    static_run_ids: Sequence[int], session_stamp: str | None = None
+) -> list[tuple[str, str, int]]:
+    if not static_run_ids:
+        return []
+    has_static = _table_has_column("findings", "static_run_id")
+    placeholders = ",".join(["%s"] * len(static_run_ids))
+    try:
+        if has_static:
+            rows = core_q.run_sql(
+                f"""
+                SELECT a.package_name, f.severity, COUNT(*) as cnt
+                FROM findings f
+                JOIN static_analysis_runs r ON r.id = f.static_run_id
+                JOIN app_versions av ON av.id = r.app_version_id
+                JOIN apps a ON a.id = av.app_id
+                WHERE f.static_run_id IN ({placeholders})
+                GROUP BY a.package_name, f.severity
+                ORDER BY a.package_name, f.severity
+                """,
+                tuple(static_run_ids),
+                fetch="all",
+            )
+        elif session_stamp:
+            rows = core_q.run_sql(
+                """
+                SELECT r.package, f.severity, COUNT(*) as cnt
+                FROM findings f
+                JOIN runs r ON r.run_id = f.run_id
+                WHERE r.session_stamp=%s
+                GROUP BY r.package, f.severity
+                ORDER BY r.package, f.severity
+                """,
+                (session_stamp,),
+                fetch="all",
+            )
+        else:
+            return []
+    except Exception:
+        return []
+
+    results: list[tuple[str, str, int]] = []
+    for row in rows or []:
+        if isinstance(row, dict):
+            pkg = row.get("package_name") or row.get("package")
+            sev = row.get("severity")
+            cnt = row.get("cnt")
+        else:
+            pkg, sev, cnt = row
+        if pkg is None or sev is None:
+            continue
+        try:
+            results.append((str(pkg), str(sev), int(cnt)))
+        except (TypeError, ValueError):
+            continue
+    return results
+
+
+def _render_db_severity_table(session_stamp: str) -> bool:
+    static_run_ids = _resolve_static_run_ids(session_stamp)
+    severity_rows = _per_app_severity_from_findings(static_run_ids, session_stamp)
+    if not severity_rows:
+        return False
+
+    counts: MutableMapping[str, MutableMapping[str, int]] = defaultdict(
+        lambda: {"High": 0, "Medium": 0, "Low": 0, "Info": 0}
+    )
+    for pkg, sev, cnt in severity_rows:
+        counts[pkg][sev] = cnt
+
+    target_map: Mapping[str, object] = {}
+    try:
+        target_rows = core_q.run_sql(
+            "SELECT package, target_sdk FROM runs WHERE session_stamp=%s",
             (session_stamp,),
             fetch="all",
             dictionary=True,
-        ) or []
+        )
+        target_map = {str(row.get("package")): row.get("target_sdk") for row in target_rows or []}
     except Exception:
-        return False
-
-    if not rows:
-        return False
+        target_map = {}
 
     table_rows = []
-    for idx, row in enumerate(rows, start=1):
+    for idx, pkg in enumerate(sorted(counts.keys()), start=1):
+        pkg_counts = counts[pkg]
+        target_sdk = target_map.get(pkg, "—")
+        try:
+            target_sdk = int(target_sdk) if target_sdk not in (None, "") else "—"
+        except Exception:
+            target_sdk = target_map.get(pkg, "—")
         table_rows.append(
             [
                 str(idx),
-                row.get("package_name", "—"),
-                str(row.get("target_sdk", "—")),
-                str(int(row.get("high") or 0)),
-                str(int(row.get("med") or 0)),
-                str(int(row.get("low") or 0)),
-                str(int(row.get("info") or 0)),
+                pkg,
+                str(target_sdk),
+                str(int(pkg_counts.get("High", 0))),
+                str(int(pkg_counts.get("Medium", 0))),
+                str(int(pkg_counts.get("Low", 0))),
+                str(int(pkg_counts.get("Info", 0))),
             ]
         )
 
@@ -1265,6 +1363,9 @@ def _render_persistence_footer(
         return
 
     run_ids = [int(row[0]) for row in run_rows if row and row[0] is not None]
+    static_run_ids = _resolve_static_run_ids(session_stamp)
+    audit = collect_static_run_counts(session_stamp=session_stamp) if static_run_ids else None
+    audit_counts = audit.counts if audit else {}
 
     def _count(sql: str, params: tuple[object, ...]) -> int:
         try:
@@ -1305,12 +1406,47 @@ def _render_persistence_footer(
     )
     snapshot_id = int(snapshot_row[0]) if snapshot_row and snapshot_row[0] is not None else None
 
-    findings_summary = _count(
+    def _from_audit(table: str) -> Optional[int]:
+        if table in audit_counts:
+            value = audit_counts[table][0]
+            try:
+                return int(value) if value is not None else 0
+            except (TypeError, ValueError):
+                return 0
+        return None
+
+    def _audit_or(table: str, fallback_sql: str | None = None, params: tuple[object, ...] = ()) -> int:
+        value = _from_audit(table)
+        if value is not None:
+            return value
+        if fallback_sql is None:
+            return 0
+        return _count(fallback_sql, params)
+
+    def _count_by_run(table: str) -> int:
+        if static_run_ids and _table_has_column(table, "static_run_id"):
+            placeholders = ",".join(["%s"] * len(static_run_ids))
+            params = tuple(static_run_ids)
+            return _count(
+                f"SELECT COUNT(*) FROM {table} WHERE static_run_id IN ({placeholders})",
+                params,
+            )
+        if run_ids:
+            placeholders = ",".join(["%s"] * len(run_ids))
+            params = tuple(run_ids)
+            return _count(
+                f"SELECT COUNT(*) FROM {table} WHERE run_id IN ({placeholders})",
+                params,
+            )
+        return 0
+
+    findings_summary = _audit_or(
+        "static_findings_summary",
         "SELECT COUNT(*) FROM static_findings_summary WHERE session_stamp = %s",
         (session_stamp,),
     )
-    findings_summary_total = _count_total("SELECT COUNT(*) FROM static_findings_summary")
-    findings_detail = _count(
+    findings_detail = _audit_or(
+        "static_findings",
         """
         SELECT COUNT(*)
         FROM static_findings f
@@ -1319,13 +1455,13 @@ def _render_persistence_footer(
         """,
         (session_stamp,),
     )
-    findings_detail_total = _count_total("SELECT COUNT(*) FROM static_findings")
-    strings_summary = _count(
+    strings_summary = _audit_or(
+        "static_string_summary",
         "SELECT COUNT(*) FROM static_string_summary WHERE session_stamp = %s",
         (session_stamp,),
     )
-    strings_summary_total = _count_total("SELECT COUNT(*) FROM static_string_summary")
-    string_samples_raw = _count(
+    string_samples_raw = _audit_or(
+        "static_string_samples",
         """
         SELECT COUNT(*)
         FROM static_string_samples x
@@ -1334,7 +1470,6 @@ def _render_persistence_footer(
         """,
         (session_stamp,),
     )
-    string_samples_raw_total = _count_total("SELECT COUNT(*) FROM static_string_samples")
     string_samples_effective = _count(
         """
         SELECT COUNT(*)
@@ -1344,7 +1479,6 @@ def _render_persistence_footer(
         """,
         (session_stamp,),
     )
-    string_samples_effective_total = _count_total("SELECT COUNT(*) FROM v_strings_effective")
     string_samples_suppressed = _count(
         """
         SELECT COUNT(*)
@@ -1354,37 +1488,30 @@ def _render_persistence_footer(
         """,
         (session_stamp,),
     )
-    string_samples_suppressed_total = _count_total("SELECT COUNT(*) FROM v_doc_policy_drift")
-    fileproviders = _count(
-        "SELECT COUNT(*) FROM static_fileproviders WHERE session_stamp = %s",
-        (session_stamp,),
-    )
-    fileproviders_total = _count_total("SELECT COUNT(*) FROM static_fileproviders")
-    provider_acl = _count(
-        "SELECT COUNT(*) FROM static_provider_acl WHERE session_stamp = %s",
-        (session_stamp,),
-    )
-    provider_acl_total = _count_total("SELECT COUNT(*) FROM static_provider_acl")
 
-    buckets = metrics = findings = contributors = 0
+    buckets = _audit_or("buckets") or _count_by_run("buckets")
+    metrics = _audit_or("metrics") or _count_by_run("metrics")
+    findings = _audit_or("findings") or _count_by_run("findings")
+
+    contributors = 0
     if run_ids:
         placeholders = ",".join(["%s"] * len(run_ids))
         params = tuple(run_ids)
-        buckets = _count(
-            f"SELECT COUNT(*) FROM buckets WHERE run_id IN ({placeholders})",
-            params,
-        )
-        metrics = _count(
-            f"SELECT COUNT(*) FROM metrics WHERE run_id IN ({placeholders})",
-            params,
-        )
-        findings = _count(
-            f"SELECT COUNT(*) FROM findings WHERE run_id IN ({placeholders})",
-            params,
-        )
         contributors = _count(
             f"SELECT COUNT(*) FROM contributors WHERE run_id IN ({placeholders})",
             params,
+        )
+
+    snapshot_count = _audit_or(
+        "permission_audit_snapshots",
+        "SELECT COUNT(*) FROM permission_audit_snapshots WHERE snapshot_key = %s",
+        (snapshot_key,),
+    )
+    snapshot_apps = _audit_or("permission_audit_apps")
+    if snapshot_apps == 0 and snapshot_id is not None:
+        snapshot_apps = _count(
+            "SELECT COUNT(*) FROM permission_audit_apps WHERE snapshot_id = %s",
+            (snapshot_id,),
         )
 
     runs_total = _count_total("SELECT COUNT(*) FROM runs")
@@ -1392,37 +1519,25 @@ def _render_persistence_footer(
     metrics_total = _count_total("SELECT COUNT(*) FROM metrics")
     findings_total = _count_total("SELECT COUNT(*) FROM findings")
     contributors_total = _count_total("SELECT COUNT(*) FROM contributors")
-
-    snapshot_count = _count(
-        "SELECT COUNT(*) FROM permission_audit_snapshots WHERE snapshot_key = %s",
-        (snapshot_key,),
-    )
+    strings_summary_total = _count_total("SELECT COUNT(*) FROM static_string_summary")
+    string_samples_raw_total = _count_total("SELECT COUNT(*) FROM static_string_samples")
+    string_samples_effective_total = _count_total("SELECT COUNT(*) FROM v_strings_effective")
+    string_samples_suppressed_total = _count_total("SELECT COUNT(*) FROM v_doc_policy_drift")
+    findings_summary_total = _count_total("SELECT COUNT(*) FROM static_findings_summary")
+    findings_detail_total = _count_total("SELECT COUNT(*) FROM static_findings")
     snapshot_total = _count_total("SELECT COUNT(*) FROM permission_audit_snapshots")
     snapshot_apps_total = _count_total("SELECT COUNT(*) FROM permission_audit_apps")
-    snapshot_apps = 0
-    if snapshot_id is not None:
-        snapshot_apps = _count(
-            "SELECT COUNT(*) FROM permission_audit_apps WHERE snapshot_id = %s",
-            (snapshot_id,),
-        )
 
-    print("Persisted")
-    print("----------")
+    print("Persisted (authoritative)")
+    print("------------------------")
     lines = [
         ("runs", f"{len(run_ids)} (total={runs_total})"),
-        (
-            "permission_audit_snapshots",
-            f"{snapshot_count} (total={snapshot_total})",
-        ),
-        (
-            "permission_audit_apps",
-            f"{snapshot_apps} (total={snapshot_apps_total})",
-        ),
+        ("findings", f"{findings} (total={findings_total})"),
         ("static_findings_summary", f"{findings_summary} (total={findings_summary_total})"),
         ("static_findings", f"{findings_detail} (total={findings_detail_total})"),
         ("static_string_summary", f"{strings_summary} (total={strings_summary_total})"),
         (
-            "static_string_samples (raw)",
+            "static_string_samples",
             f"{string_samples_raw} (total={string_samples_raw_total})",
         ),
         (
@@ -1433,16 +1548,31 @@ def _render_persistence_footer(
             "v_doc_policy_drift",
             f"{string_samples_suppressed} (total={string_samples_suppressed_total})",
         ),
-        ("static_fileproviders", f"{fileproviders} (total={fileproviders_total})"),
-        ("static_provider_acl", f"{provider_acl} (total={provider_acl_total})"),
         ("buckets", f"{buckets} (total={buckets_total})"),
         ("metrics", f"{metrics} (total={metrics_total})"),
-        ("findings", f"{findings} (total={findings_total})"),
-        ("contributors", f"{contributors} (total={contributors_total})"),
+        (
+            "permission_audit_snapshots",
+            f"{snapshot_count} (total={snapshot_total})",
+        ),
+        (
+            "permission_audit_apps",
+            f"{snapshot_apps} (total={snapshot_apps_total})",
+        ),
     ]
     width = max(len(name) for name, _ in lines) if lines else 0
     for name, detail in lines:
         print(f"  {name.ljust(width)} : {detail}")
+
+    required_counts = {
+        "findings": findings,
+        "static_string_summary": strings_summary,
+        "static_string_samples": string_samples_raw,
+        "buckets": buckets,
+        "metrics": metrics,
+        "permission_audit_snapshots": snapshot_count,
+        "permission_audit_apps": snapshot_apps,
+    }
+    missing = [name for name, value in required_counts.items() if not value]
 
     if canonical_failures:
         preview_limit = 5
@@ -1453,10 +1583,26 @@ def _render_persistence_footer(
             preview += f", +{remaining} more"
         print(f"  {'status'.ljust(width)} : WARN (canonical snapshots failed)")
         print(f"  {'canonical_failures'.ljust(width)} : {len(unique_failures)} ({preview})")
-    elif had_errors:
-        print(f"  {'status'.ljust(width)} : ERROR (see logs)")
+    elif had_errors or missing:
+        reason = "missing canonical tables" if missing else "see logs"
+        print(f"  {'status'.ljust(width)} : ERROR ({reason})")
     else:
         print(f"  {'status'.ljust(width)} : OK")
+
+    if audit:
+        audit_static_run_id = audit.static_run_id if hasattr(audit, "static_run_id") else None
+        if missing:
+            status_text = (
+                "ERROR (missing " + ", ".join(sorted(missing)) + ")"
+            )
+        else:
+            status_text = "OK (canonical tables populated)"
+        prefix = (
+            f"static_run_id={audit_static_run_id} "
+            if audit_static_run_id is not None
+            else ""
+        )
+        print(f"  {'db_verification'.ljust(width)} : {status_text} {prefix}".rstrip())
 
     high_downgraded = 0
     if run_ids:

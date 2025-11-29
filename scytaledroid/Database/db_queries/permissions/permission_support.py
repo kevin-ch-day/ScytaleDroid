@@ -53,11 +53,15 @@ CREATE TABLE IF NOT EXISTS permission_audit_snapshots (
     snapshot_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     snapshot_key VARCHAR(64) NOT NULL,
     scope_label VARCHAR(128) NULL,
+    run_id BIGINT UNSIGNED NULL,
+    static_run_id BIGINT UNSIGNED NULL,
     apps_total INT UNSIGNED NOT NULL DEFAULT 0,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     metadata JSON NULL,
     PRIMARY KEY (snapshot_id),
-    UNIQUE KEY ux_permission_audit_snapshots_key (snapshot_key)
+    UNIQUE KEY ux_permission_audit_snapshots_key (snapshot_key),
+    KEY ix_permission_audit_snapshots_run (run_id),
+    KEY ix_permission_audit_snapshots_static_run (static_run_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 """
 
@@ -67,6 +71,8 @@ CREATE TABLE IF NOT EXISTS permission_audit_apps (
     snapshot_id BIGINT UNSIGNED NOT NULL,
     package_name VARCHAR(255) NOT NULL,
     app_label VARCHAR(255) NULL,
+    run_id BIGINT UNSIGNED NULL,
+    static_run_id BIGINT UNSIGNED NULL,
     score_raw DECIMAL(8,3) NULL,
     score_capped DECIMAL(8,3) NULL,
     grade CHAR(1) NULL,
@@ -83,6 +89,8 @@ CREATE TABLE IF NOT EXISTS permission_audit_apps (
     PRIMARY KEY (audit_id),
     UNIQUE KEY ux_permission_audit_apps_snapshot_pkg (snapshot_id, package_name),
     KEY ix_permission_audit_apps_score (snapshot_id, score_capped),
+    KEY ix_permission_audit_apps_run (run_id),
+    KEY ix_permission_audit_apps_static_run (static_run_id),
     CONSTRAINT fk_permission_audit_apps_snapshot
         FOREIGN KEY (snapshot_id)
         REFERENCES permission_audit_snapshots (snapshot_id)

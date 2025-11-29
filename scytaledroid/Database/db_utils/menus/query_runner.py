@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from scytaledroid.Database.db_core import run_sql
+from scytaledroid.Database.db_scripts.static_run_audit import collect_static_run_counts
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
 from scytaledroid.StaticAnalysis.cli.masvs_summary import fetch_masvs_matrix
 
@@ -417,150 +418,67 @@ def prompt_persistence_audit() -> None:
 def render_session_digest(session_stamp: str | None, *, header: str | None = None) -> None:
     resolved = session_stamp or _latest_session_stamp()
     if not resolved:
-        print(status_messages.status("No sessions found in static_findings_summary.", level="warn"))
+        print(status_messages.status("No sessions found in static runs.", level="warn"))
         return
 
-    title = header or f"Verification digest — {resolved}"
+    audit = collect_static_run_counts(session_stamp=resolved)
+    if audit is None:
+        print(status_messages.status("No static_analysis_runs row found for session.", level="warn"))
+        return
+
+    title = header or f"Verification digest — {resolved} (static_run_id={audit.static_run_id})"
     print()
     menu_utils.print_section(title)
-    _print_session_counts(resolved)
 
-
-def _print_session_counts(session_stamp: str) -> None:
-    def _scalar(sql: str, params: Tuple[Any, ...]) -> int:
-        try:
-            value = run_sql(sql, params, fetch="one")
-        except Exception:
-            return 0
-        if isinstance(value, dict):
-            value = next(iter(value.values()), 0)
-        elif isinstance(value, (list, tuple)):
-            value = value[0] if value else 0
-        if value in (None, ""):
-            return 0
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return 0
-
-    counts = [
-        (
-            "static_findings (baseline)",
-            _scalar("SELECT COUNT(*) FROM static_findings_summary WHERE session_stamp=%s", (session_stamp,)),
-        ),
-        (
-            "findings (normalized)",
-            _scalar(
-                """
-                SELECT COUNT(*)
-                FROM static_analysis_findings f
-                JOIN static_analysis_runs r ON r.id = f.run_id
-                WHERE r.session_stamp = %s
-                """,
-                (session_stamp,),
-            ),
-        ),
-        (
-            "String summary rows",
-            _scalar("SELECT COUNT(*) FROM static_string_summary WHERE session_stamp=%s", (session_stamp,)),
-        ),
-        (
-            "String samples (raw)",
-            _scalar(
-                """
-                SELECT COUNT(*)
-                FROM static_string_samples x
-                JOIN static_findings_summary s ON s.id = x.summary_id
-                WHERE s.session_stamp = %s
-                """,
-                (session_stamp,),
-            ),
-        ),
-        (
-            "v_strings_effective",
-            _scalar(
-                """
-                SELECT COUNT(*)
-                FROM v_strings_effective x
-                JOIN static_string_summary s ON s.id = x.summary_id
-                WHERE s.session_stamp = %s
-                """,
-                (session_stamp,),
-            ),
-        ),
-        (
-            "v_doc_policy_drift",
-            _scalar(
-                """
-                SELECT COUNT(*)
-                FROM v_doc_policy_drift d
-                JOIN static_string_summary s ON s.id = d.summary_id
-                WHERE s.session_stamp = %s
-                """,
-                (session_stamp,),
-            ),
-        ),
-        (
-            "Static analysis runs",
-            _scalar("SELECT COUNT(*) FROM static_analysis_runs WHERE session_stamp=%s", (session_stamp,)),
-        ),
-        (
-            "Permission audit snapshots",
-            _scalar("SELECT COUNT(*) FROM permission_audit_snapshots WHERE session_stamp=%s", (session_stamp,)),
-        ),
-        (
-            "Permission audit apps",
-            _scalar("SELECT COUNT(*) FROM permission_audit_apps WHERE session_stamp=%s", (session_stamp,)),
-        ),
-        (
-            "Risk buckets",
-            _scalar(
-                """
-                SELECT COUNT(*)
-                FROM buckets b
-                JOIN static_analysis_runs r ON r.id = b.run_id
-                WHERE r.session_stamp = %s
-                """,
-                (session_stamp,),
-            ),
-        ),
-        (
-            "Metrics",
-            _scalar(
-                """
-                SELECT COUNT(*)
-                FROM metrics m
-                JOIN static_analysis_runs r ON r.id = m.run_id
-                WHERE r.session_stamp = %s
-                """,
-                (session_stamp,),
-            ),
-        ),
-        (
-            "findings (legacy table)",
-            _scalar(
-                "SELECT COUNT(*) FROM findings WHERE run_id IN (SELECT run_id FROM runs WHERE session_stamp=%s)",
-                (session_stamp,),
-            ),
-        ),
-        (
-            "static_provider_acl (legacy)",
-            _scalar("SELECT COUNT(*) FROM static_provider_acl WHERE session_stamp=%s", (session_stamp,)),
-        ),
-        (
-            "static_fileproviders (legacy)",
-            _scalar("SELECT COUNT(*) FROM static_fileproviders WHERE session_stamp=%s", (session_stamp,)),
-        ),
+    canonical = [
+        ("findings (normalized)", "findings"),
+        ("static_findings (baseline)", "static_findings"),
+        ("static_findings_summary", "static_findings_summary"),
+        ("static_string_summary", "static_string_summary"),
+        ("static_string_samples", "static_string_samples"),
+        ("Risk buckets", "buckets"),
+        ("Metrics", "metrics"),
+        ("Permission audit snapshots", "permission_audit_snapshots"),
+        ("Permission audit apps", "permission_audit_apps"),
     ]
 
-    headers = ["Table", "Rows"]
-    rows = [[name, str(value)] for name, value in counts]
-    table_utils.render_table(headers, rows)
+    rows = []
+    for label, key in canonical:
+        count, status = audit.counts.get(key, (None, "SKIP"))
+        rows.append([label, str(count or 0), status])
+
+    legacy = []
+    for label, key in (
+        ("static_analysis_findings (legacy)", "static_analysis_findings"),
+    ):
+        if key in audit.counts:
+            count, status = audit.counts[key]
+            legacy.append([f"{label} [legacy]", str(count or 0), status])
+
+    table_utils.render_table(["Table", "Rows", "Status"], rows + legacy)
+
+    required = (
+        "findings",
+        "static_string_summary",
+        "static_string_samples",
+        "buckets",
+        "metrics",
+        "permission_audit_snapshots",
+        "permission_audit_apps",
+    )
+    missing = [name for name in required if not audit.counts.get(name) or not audit.counts[name][0]]
+    if missing:
+        status_line = f"DB verification: ERROR (missing {', '.join(sorted(missing))} for static_run_id={audit.static_run_id})"
+    else:
+        status_line = (
+            f"DB verification: OK (canonical tables populated for static_run_id={audit.static_run_id})"
+        )
+    print(status_line)
 
 
 def _latest_session_stamp() -> Optional[str]:
     row = run_sql(
-        "SELECT session_stamp FROM static_findings_summary ORDER BY created_at DESC LIMIT 1",
+        "SELECT session_stamp FROM static_analysis_runs ORDER BY id DESC LIMIT 1",
         fetch="one",
         dictionary=True,
     )

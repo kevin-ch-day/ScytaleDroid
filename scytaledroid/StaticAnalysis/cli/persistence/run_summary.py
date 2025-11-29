@@ -69,6 +69,7 @@ def _persist_static_sections_wrapper(
     manifest: object | None,
     app_metadata: Mapping[str, object] | object,
     run_id: int | None,
+    static_run_id: int | None = None,
 ) -> Tuple[list[str], bool, int]:
     return persist_static_sections(
         package_name=package_name,
@@ -80,6 +81,7 @@ def _persist_static_sections_wrapper(
         manifest=manifest,
         app_metadata=app_metadata,
         run_id=run_id,
+        static_run_id=static_run_id,
     )
 
 
@@ -313,7 +315,10 @@ def persist_run_summary(
                 category="static_analysis",
             )
         elif not persist_findings(int(run_id), finding_rows, static_run_id=static_run_id):
-            message = f"Failed to persist findings for run_id={run_id}"
+            message = (
+                f"Failed to persist findings for run_id={run_id} "
+                f"static_run_id={static_run_id}"
+            )
             log.warning(message, category="static_analysis")
             outcome.add_error(message)
 
@@ -438,6 +443,7 @@ def persist_run_summary(
             manifest=br.manifest,
             app_metadata=baseline_payload.get("app") if isinstance(baseline_payload, Mapping) else {},
             run_id=run_id,
+            static_run_id=static_run_id,
         )
         if baseline_written:
             outcome.baseline_written = True

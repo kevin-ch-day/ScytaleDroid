@@ -143,6 +143,25 @@ def ensure_audit_snapshots() -> bool:
 
     try:
         run_sql(queries.CREATE_AUDIT_SNAPSHOTS)
+        try:
+            cols = run_sql("SHOW COLUMNS FROM permission_audit_snapshots", fetch="all")
+        except Exception:
+            cols = []
+        existing = {row[0] for row in cols or []}
+        if "run_id" not in existing:
+            try:
+                run_sql(
+                    "ALTER TABLE permission_audit_snapshots ADD COLUMN run_id BIGINT UNSIGNED NULL AFTER scope_label"
+                )
+            except Exception:
+                pass
+        if "static_run_id" not in existing:
+            try:
+                run_sql(
+                    "ALTER TABLE permission_audit_snapshots ADD COLUMN static_run_id BIGINT UNSIGNED NULL AFTER run_id"
+                )
+            except Exception:
+                pass
         return True
     except Exception:
         return False
@@ -153,6 +172,25 @@ def ensure_audit_apps() -> bool:
 
     try:
         run_sql(queries.CREATE_AUDIT_APPS)
+        try:
+            cols = run_sql("SHOW COLUMNS FROM permission_audit_apps", fetch="all")
+        except Exception:
+            cols = []
+        existing = {row[0] for row in cols or []}
+        if "run_id" not in existing:
+            try:
+                run_sql(
+                    "ALTER TABLE permission_audit_apps ADD COLUMN run_id BIGINT UNSIGNED NULL AFTER app_label"
+                )
+            except Exception:
+                pass
+        if "static_run_id" not in existing:
+            try:
+                run_sql(
+                    "ALTER TABLE permission_audit_apps ADD COLUMN static_run_id BIGINT UNSIGNED NULL AFTER run_id"
+                )
+            except Exception:
+                pass
         return True
     except Exception:
         return False

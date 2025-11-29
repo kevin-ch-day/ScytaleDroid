@@ -59,6 +59,7 @@ def persist_static_sections(
     manifest: object | None,
     app_metadata: Mapping[str, object] | object,
     run_id: int | None,
+    static_run_id: int | None = None,
 ) -> Tuple[list[str], bool, int]:
     errors: list[str] = []
     baseline_written = False
@@ -110,6 +111,7 @@ def persist_static_sections(
         details=details,
         findings=findings_seq,
         run_id=run_id,
+        static_run_id=static_run_id,
     )
     if baseline_errors:
         errors.extend(baseline_errors)
@@ -130,6 +132,7 @@ def persist_static_sections(
         counts=counts,
         samples=samples,
         run_id=run_id,
+        static_run_id=static_run_id,
     )
     if string_errors:
         errors.extend(string_errors)

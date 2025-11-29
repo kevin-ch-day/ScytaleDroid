@@ -14,6 +14,8 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import sys
+from dataclasses import dataclass
 from typing import Dict, Iterable, Optional, Tuple
 
 from scytaledroid.Database.db_core import db_engine
@@ -35,7 +37,7 @@ def _resolve_run(cursor, session_stamp: Optional[str], run_id: Optional[int]) ->
 
     if session_stamp:
         cursor.execute(
-            "SELECT id FROM static_analysis_runs WHERE session_stamp=%s",
+            "SELECT id FROM static_analysis_runs WHERE session_stamp=%s ORDER BY id DESC LIMIT 1",
             (session_stamp,),
         )
         row = cursor.fetchone()
@@ -68,57 +70,107 @@ def _count_for_table(cursor, table: str, run_id: Optional[int], session: Optiona
         return table, None, f"ERROR: {exc}"
 
 
-def audit_run(session_stamp: Optional[str], run_id: Optional[int]) -> None:
-    tables = [
-        "static_analysis_runs",
-        "findings",  # normalized findings (legacy name in some deployments)
-        "static_analysis_findings",
-        "static_findings",
-        "static_findings_summary",
+@dataclass
+class RunAudit:
+    static_run_id: int
+    session_stamp: Optional[str]
+    counts: Dict[str, Tuple[Optional[int], str]]
+    severity_rows: Iterable[Tuple[str, str, int]]
+
+
+def collect_static_run_counts(
+    *, session_stamp: Optional[str] = None, static_run_id: Optional[int] = None
+) -> Optional[RunAudit]:
+    with db_engine.connect() as conn:
+        cur = conn.cursor()
+        resolved_run_id, resolved_session = _resolve_run(cur, session_stamp, static_run_id)
+        if resolved_run_id is None:
+            return None
+
+        tables = [
+            "static_analysis_runs",
+            "findings",
+            "static_analysis_findings",
+            "static_findings",
+            "static_findings_summary",
+            "static_string_summary",
+            "static_string_samples",
+            "buckets",
+            "metrics",
+            "permission_audit_snapshots",
+            "permission_audit_apps",
+        ]
+        counts: Dict[str, Tuple[Optional[int], str]] = {}
+        for table in tables:
+            table_name, count, status = _count_for_table(
+                cur, table, resolved_run_id, resolved_session
+            )
+            counts[table_name] = (count, status)
+
+        severity_rows: list[tuple[str, str, int]] = []
+        try:
+            cur.execute(
+                """
+                SELECT a.package_name, f.severity, COUNT(*) as cnt
+                FROM findings f
+                JOIN static_analysis_runs r ON r.id = f.static_run_id
+                JOIN app_versions av ON av.id = r.app_version_id
+                JOIN apps a ON a.id = av.app_id
+                WHERE f.static_run_id=%s
+                GROUP BY a.package_name, f.severity
+                ORDER BY a.package_name, f.severity
+                """,
+                (resolved_run_id,),
+            )
+            severity_rows = [(pkg, sev, int(cnt)) for pkg, sev, cnt in cur.fetchall()]
+        except Exception:
+            severity_rows = []
+
+        cur.close()
+    return RunAudit(
+        static_run_id=resolved_run_id,
+        session_stamp=resolved_session,
+        counts=counts,
+        severity_rows=severity_rows,
+    )
+
+
+def audit_run(session_stamp: Optional[str], run_id: Optional[int]) -> int:
+    audit = collect_static_run_counts(session_stamp=session_stamp, static_run_id=run_id)
+    if audit is None:
+        print("Resolved run: id=None session=None")
+        print("No matching static_analysis_runs row found.")
+        return 1
+
+    print(f"Resolved run: id={audit.static_run_id} session={audit.session_stamp}")
+
+    required = {
+        "findings",
         "static_string_summary",
         "static_string_samples",
         "buckets",
         "metrics",
         "permission_audit_snapshots",
         "permission_audit_apps",
-    ]
-    with db_engine.connect() as conn:
-        cur = conn.cursor()
-        resolved_run_id, resolved_session = _resolve_run(cur, session_stamp, run_id)
-        print(f"Resolved run: id={resolved_run_id} session={resolved_session}")
-        if resolved_run_id is None and resolved_session is None:
-            print("No matching static_analysis_runs row found.")
-            return
+    }
+    missing = []
 
-        for table in tables:
-            table_name, count, status = _count_for_table(cur, table, resolved_run_id, resolved_session)
-            print(f"{table_name:28} -> {count!s:>5} ({status})")
+    for table, (count, status) in audit.counts.items():
+        print(f"{table:28} -> {count!s:>5} ({status})")
+        if table in required:
+            if count is None or int(count) == 0:
+                missing.append(table)
 
-        # Per-app severity from findings if possible
-        if resolved_run_id is not None:
-            try:
-                cur.execute(
-                    """
-                    SELECT a.package_name, saf.severity, COUNT(*) as cnt
-                    FROM static_analysis_findings saf
-                    JOIN static_analysis_runs r ON r.id = saf.run_id
-                    JOIN app_versions av ON av.id = r.app_version_id
-                    JOIN apps a ON a.id = av.app_id
-                    WHERE saf.run_id=%s
-                    GROUP BY a.package_name, saf.severity
-                    ORDER BY a.package_name, saf.severity
-                    """,
-                    (resolved_run_id,),
-                )
-                rows = cur.fetchall()
-                if rows:
-                    print("\nPer-app severity (from findings):")
-                    for pkg, sev, cnt in rows:
-                        print(f"  {pkg:35} {sev:<6} {cnt}")
-            except Exception as exc:
-                print(f"\nPer-app severity query failed: {exc}")
+    if audit.severity_rows:
+        print("\nPer-app severity (from findings):")
+        for pkg, sev, cnt in audit.severity_rows:
+            print(f"  {pkg:35} {sev:<6} {cnt}")
 
-        cur.close()
+    if missing:
+        print("\nDB verification: ERROR (missing: " + ", ".join(sorted(missing)) + ")")
+        return 2
+    print("\nDB verification: OK (canonical tables populated)")
+    return 0
 
 
 def main() -> None:
@@ -126,7 +178,8 @@ def main() -> None:
     ap.add_argument("--session", help="session_stamp (e.g., 20251128-203341)")
     ap.add_argument("--run-id", type=int, help="static_analysis_runs.id")
     args = ap.parse_args()
-    audit_run(args.session, args.run_id)
+    exit_code = audit_run(args.session, args.run_id)
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":
