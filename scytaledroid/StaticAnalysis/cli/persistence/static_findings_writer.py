@@ -39,6 +39,7 @@ def persist_static_findings(
     details: Mapping[str, object],
     findings: Sequence[object] | None,
     run_id: int | None,
+    static_run_id: int | None = None,
 ) -> list[str]:
     errors: list[str] = []
     try:
@@ -51,6 +52,7 @@ def persist_static_findings(
             severity_counts=severity_counts,
             details=details,
             run_id=run_id,
+            static_run_id=static_run_id,
         )
         if summary_id is None:
             # Fallback for legacy schemas without run_id linkage.
@@ -61,6 +63,7 @@ def persist_static_findings(
                 severity_counts=severity_counts,
                 details=details,
                 run_id=None,
+                static_run_id=static_run_id,
             )
         if summary_id is None:
             # Last-chance lookup in case the row was inserted but not returned due to schema quirks.
@@ -69,6 +72,7 @@ def persist_static_findings(
                 session_stamp=session_stamp,
                 scope_label=scope_label,
                 run_id=run_id,
+                static_run_id=static_run_id,
             )
         if summary_id is None:
             message = (
@@ -77,7 +81,9 @@ def persist_static_findings(
             log.warning(message, category="static_analysis")
         else:
             if findings:
-                _sf.replace_findings(summary_id, tuple(findings), run_id=run_id)
+                _sf.replace_findings(
+                    summary_id, tuple(findings), run_id=run_id, static_run_id=static_run_id
+                )
     except Exception as exc:  # pragma: no cover - defensive
         message = f"Failed to persist static findings summary for {package_name}: {exc}"
         log.warning(message, category="static_analysis")

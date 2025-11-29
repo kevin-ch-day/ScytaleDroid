@@ -45,9 +45,21 @@ def ensure_tables() -> bool:
                     )
                 except Exception:
                     pass
+            if not _table_has_column("static_findings_summary", "static_run_id"):
+                try:
+                    run_sql(
+                        "ALTER TABLE static_findings_summary ADD COLUMN static_run_id BIGINT UNSIGNED NULL AFTER run_id"
+                    )
+                except Exception:
+                    pass
             if not _table_has_index("static_findings_summary", "ix_findings_summary_run"):
                 try:
                     run_sql("ALTER TABLE static_findings_summary ADD KEY ix_findings_summary_run (run_id)")
+                except Exception:
+                    pass
+            if not _table_has_index("static_findings_summary", "ix_findings_static_run"):
+                try:
+                    run_sql("ALTER TABLE static_findings_summary ADD KEY ix_findings_static_run (static_run_id)")
                 except Exception:
                     pass
             if not _table_has_index("static_findings_summary", "ix_findings_session_pkg"):
@@ -64,15 +76,32 @@ def ensure_tables() -> bool:
                 )
             except Exception:
                 pass
+            try:
+                run_sql(
+                    "ALTER TABLE static_findings_summary ADD CONSTRAINT fk_findings_summary_static_run "
+                    "FOREIGN KEY (static_run_id) REFERENCES static_analysis_runs (id) ON DELETE SET NULL"
+                )
+            except Exception:
+                pass
 
             if not _table_has_column("static_findings", "run_id"):
                 try:
                     run_sql("ALTER TABLE static_findings ADD COLUMN run_id BIGINT UNSIGNED NULL AFTER summary_id")
                 except Exception:
                     pass
+            if not _table_has_column("static_findings", "static_run_id"):
+                try:
+                    run_sql("ALTER TABLE static_findings ADD COLUMN static_run_id BIGINT UNSIGNED NULL AFTER run_id")
+                except Exception:
+                    pass
             if not _table_has_index("static_findings", "ix_findings_run"):
                 try:
                     run_sql("ALTER TABLE static_findings ADD KEY ix_findings_run (run_id)")
+                except Exception:
+                    pass
+            if not _table_has_index("static_findings", "ix_findings_static_run"):
+                try:
+                    run_sql("ALTER TABLE static_findings ADD KEY ix_findings_static_run (static_run_id)")
                 except Exception:
                     pass
             if not _table_has_index("static_findings", "ix_findings_severity_summary"):
@@ -84,6 +113,13 @@ def ensure_tables() -> bool:
                 run_sql(
                     "ALTER TABLE static_findings ADD CONSTRAINT fk_findings_run "
                     "FOREIGN KEY (run_id) REFERENCES static_analysis_runs (id) ON DELETE SET NULL"
+                )
+            except Exception:
+                pass
+            try:
+                run_sql(
+                    "ALTER TABLE static_findings ADD CONSTRAINT fk_findings_static_run "
+                    "FOREIGN KEY (static_run_id) REFERENCES static_analysis_runs (id) ON DELETE SET NULL"
                 )
             except Exception:
                 pass
@@ -109,6 +145,7 @@ def upsert_summary(
     severity_counts: Mapping[str, int],
     details: Mapping[str, object] | None = None,
     run_id: int | None = None,
+    static_run_id: int | None = None,
 ) -> int | None:
     payload = {
         "package_name": package_name,
@@ -121,8 +158,16 @@ def upsert_summary(
         "details": json.dumps(details or {}),
     }
     has_run_column = _table_has_column("static_findings_summary", "run_id")
+    has_static_column = _table_has_column("static_findings_summary", "static_run_id")
     if run_id is not None and has_run_column:
         payload["run_id"] = int(run_id)
+    if static_run_id is not None and has_static_column:
+        payload["static_run_id"] = int(static_run_id)
+
+    if static_run_id is not None and has_static_column:
+        queries_select = queries.SELECT_FINDINGS_SUMMARY_ID_BY_STATIC_RUN
+        select_params = (int(static_run_id), payload["scope_label"])
+    elif run_id is not None and has_run_column:
         # Prefer run_id when available to avoid session collisions.
         queries_select = queries.SELECT_FINDINGS_SUMMARY_ID_BY_RUN
         select_params = (payload["run_id"], payload["scope_label"])
@@ -159,10 +204,12 @@ def replace_findings(
     summary_id: int,
     findings: Sequence[Mapping[str, object]],
     run_id: int | None = None,
+    static_run_id: int | None = None,
 ) -> tuple[int, int]:
     deleted = 0
     inserted = 0
     has_run_id = _table_has_column("static_findings", "run_id")
+    has_static_run = _table_has_column("static_findings", "static_run_id")
     with database_session():
         try:
             run_sql(queries.DELETE_FINDINGS_FOR_SUMMARY, (summary_id,))
@@ -177,10 +224,19 @@ def replace_findings(
                 evidence = f.get("evidence") if isinstance(f, dict) else None
                 fix = f.get("fix") if isinstance(f, dict) else None
                 ev_json = json.dumps(evidence or {})
-                if has_run_id:
+                if has_run_id or has_static_run:
                     run_sql(
                         queries.INSERT_FINDING_WITH_RUN,
-                        (summary_id, run_id, finding_id, severity, title, ev_json, fix),
+                        (
+                            summary_id,
+                            run_id if has_run_id else None,
+                            static_run_id if has_static_run else None,
+                            finding_id,
+                            severity,
+                            title,
+                            ev_json,
+                            fix,
+                        ),
                     )
                 else:
                     run_sql(queries.INSERT_FINDING, (summary_id, finding_id, severity, title, ev_json, fix))
@@ -196,10 +252,20 @@ def lookup_summary_id(
     session_stamp: str,
     scope_label: str,
     run_id: int | None = None,
+    static_run_id: int | None = None,
 ) -> int | None:
     """Best-effort fetch of a summary id even on legacy schemas."""
     has_run_column = _table_has_column("static_findings_summary", "run_id")
+    has_static_column = _table_has_column("static_findings_summary", "static_run_id")
     try:
+        if static_run_id is not None and has_static_column:
+            row = run_sql(
+                queries.SELECT_FINDINGS_SUMMARY_ID_BY_STATIC_RUN,
+                (int(static_run_id), scope_label),
+                fetch="one",
+            )
+            if row:
+                return int(row[0])
         if run_id is not None and has_run_column:
             row = run_sql(
                 queries.SELECT_FINDINGS_SUMMARY_ID_BY_RUN,

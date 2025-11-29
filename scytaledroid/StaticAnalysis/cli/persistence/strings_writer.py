@@ -46,23 +46,34 @@ def persist_string_summary(
     counts: Mapping[str, int],
     samples: Mapping[str, object],
     run_id: int | None,
+    static_run_id: int | None = None,
 ) -> list[str]:
     errors: list[str] = []
     try:
         if not _sa.ensure_tables():
             raise RuntimeError("static_string tables unavailable")
+        if static_run_id is None:
+            log.warning(
+                "static_run_id missing for string persistence; rows will not be keyed to static run",
+                category="static_analysis",
+            )
         summary_record = _sa.StringSummaryRecord(
             package_name=package_name,
             session_stamp=session_stamp,
             scope_label=scope_label,
-            run_id=None,
-            static_run_id=run_id,
+            run_id=run_id,
+            static_run_id=static_run_id,
             counts=counts,
         )
         summary_id = _sa.upsert_summary(summary_record)
         if summary_id is None:
             raise RuntimeError("upsert_summary returned None")
-        _sa.replace_top_samples(summary_id, samples, top_n=3, static_run_id=run_id)
+        _sa.replace_top_samples(
+            summary_id,
+            samples,
+            top_n=3,
+            static_run_id=static_run_id,
+        )
     except Exception as exc:  # pragma: no cover - defensive
         message = f"Failed to persist string analysis summary for {package_name}: {exc}"
         log.warning(message, category="static_analysis")

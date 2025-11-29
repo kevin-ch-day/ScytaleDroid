@@ -32,9 +32,8 @@ class StringSummaryRecord:
             "session_stamp": self.session_stamp,
             "scope_label": self.scope_label,
             # Keep run_id nullable to avoid FK conflicts with legacy runs table.
-            "run_id": None,
-            "static_run_id": (int(self.static_run_id) if self.static_run_id is not None else None)
-            or (int(self.run_id) if self.run_id is not None else None),
+            "run_id": int(self.run_id) if self.run_id is not None else None,
+            "static_run_id": int(self.static_run_id) if self.static_run_id is not None else None,
             "endpoints": int(counts.get("endpoints", 0)),
             "http_cleartext": int(counts.get("http_cleartext", 0)),
             "api_keys": int(counts.get("api_keys", 0)),

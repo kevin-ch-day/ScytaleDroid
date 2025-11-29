@@ -236,12 +236,20 @@ def persist_findings(run_id: int, rows: Sequence[Dict[str, Any]], *, static_run_
     the generic run_id.
     """
     try:
+        if static_run_id is None:
+            log.warning(
+                f"static_run_id missing for findings; run_id={run_id} will not be keyed to static run",
+                category="db",
+            )
         core_q.run_sql(
             "DELETE FROM findings WHERE run_id=%s OR static_run_id=%s",
             (run_id, static_run_id if static_run_id is not None else run_id),
         )
     except Exception as exc:  # pragma: no cover - defensive
-        log.warning(f"Failed to prune findings for run_id={run_id}: {exc}", category="static_analysis")
+        log.warning(
+            f"Failed to prune findings for run_id={run_id}: {exc}",
+            category="static_analysis",
+        )
     try:
         for row in rows:
             core_q.run_sql(
@@ -260,7 +268,7 @@ def persist_findings(run_id: int, rows: Sequence[Dict[str, Any]], *, static_run_
                 """,
                 (
                     run_id,
-                    static_run_id if static_run_id is not None else run_id,
+                    static_run_id,
                     row.get("severity"),
                     row.get("masvs"),
                     row.get("cvss"),
@@ -285,10 +293,12 @@ def persist_findings(run_id: int, rows: Sequence[Dict[str, Any]], *, static_run_
             )
         return True
     except Exception as exc:  # pragma: no cover - defensive
-        log.error(
-            f"Failed to persist findings for run_id={run_id} static_run_id={static_run_id}: {exc}",
-            category="static_analysis",
+        message = (
+            f"Failed to persist findings for run_id={run_id} "
+            f"static_run_id={static_run_id}: {exc}"
         )
+        log.error(message, category="db")
+        log.error(message, category="static_analysis")
         return False
 
 
