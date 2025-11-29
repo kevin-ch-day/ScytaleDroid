@@ -181,28 +181,42 @@ def create_run(
         raise RuntimeError(message) from exc
 
 
-def write_metrics(run_id: int, entries: Mapping[str, tuple[Optional[float], Optional[str]]], module_id: Optional[str] = None) -> bool:
+def write_metrics(
+    run_id: int,
+    entries: Mapping[str, tuple[Optional[float], Optional[str]]],
+    module_id: Optional[str] = None,
+    *,
+    static_run_id: Optional[int] = None,
+) -> bool:
     try:
         for key, (num, text) in entries.items():
             core_q.run_sql(
                 (
-                    "INSERT INTO metrics (run_id, feature_key, value_num, value_text, module_id) "
-                    "VALUES (%s,%s,%s,%s,%s) "
-                    "ON DUPLICATE KEY UPDATE value_num=VALUES(value_num), value_text=VALUES(value_text), module_id=VALUES(module_id)"
+                    "INSERT INTO metrics (run_id, static_run_id, feature_key, value_num, value_text, module_id) "
+                    "VALUES (%s,%s,%s,%s,%s,%s) "
+                    "ON DUPLICATE KEY UPDATE value_num=VALUES(value_num), value_text=VALUES(value_text), module_id=VALUES(module_id), static_run_id=VALUES(static_run_id)"
                 ),
-                (run_id, key, num, text, module_id),
+                (run_id, static_run_id if static_run_id is not None else run_id, key, num, text, module_id),
             )
         return True
     except Exception:
         return False
 
 
-def write_buckets(run_id: int, buckets: Mapping[str, tuple[float, Optional[float]]]) -> bool:
+def write_buckets(
+    run_id: int,
+    buckets: Mapping[str, tuple[float, Optional[float]]],
+    *,
+    static_run_id: Optional[int] = None,
+) -> bool:
     try:
         for name, (points, cap) in buckets.items():
             core_q.run_sql(
-                "INSERT INTO buckets (run_id, bucket, points, cap) VALUES (%s,%s,%s,%s)",
-                (run_id, name, points, cap),
+                (
+                    "INSERT INTO buckets (run_id, static_run_id, bucket, points, cap) "
+                    "VALUES (%s,%s,%s,%s,%s)"
+                ),
+                (run_id, static_run_id if static_run_id is not None else run_id, name, points, cap),
             )
         return True
     except Exception:

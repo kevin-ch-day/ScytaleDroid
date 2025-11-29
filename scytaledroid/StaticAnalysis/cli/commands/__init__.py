@@ -8,9 +8,8 @@ from .models import Command
 from .read_only import READ_ONLY_COMMANDS
 from .scans import SCAN_COMMANDS
 
-COMMANDS: List[Command] = sorted(
-    [*SCAN_COMMANDS, *READ_ONLY_COMMANDS], key=lambda cmd: int(cmd.id)
-)
+# Preserve declaration order from scans.py/read_only.py; some ids are non-numeric
+COMMANDS: List[Command] = [*SCAN_COMMANDS, *READ_ONLY_COMMANDS]
 
 
 def get_command(command_id: str) -> Optional[Command]:
@@ -27,4 +26,3 @@ def iter_commands(kind: str | None = None) -> Iterable[Command]:
 
 
 __all__ = ["COMMANDS", "get_command", "iter_commands"]
-

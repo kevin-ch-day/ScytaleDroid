@@ -228,29 +228,39 @@ def compute_cvss_base(rule_id: Optional[str]) -> Tuple[Optional[str], Optional[f
     return vector, score, meta
 
 
-def persist_findings(run_id: int, rows: Sequence[Dict[str, Any]]) -> bool:
+def persist_findings(run_id: int, rows: Sequence[Dict[str, Any]], *, static_run_id: int | None = None) -> bool:
+    """Persist normalized findings for a static run.
+
+    Both run_id and static_run_id are written where supported so newer schemas
+    can key by static_analysis_runs.id while legacy consumers can still use
+    the generic run_id.
+    """
     try:
-        core_q.run_sql("DELETE FROM findings WHERE run_id=%s", (run_id,))
-    except Exception:
-        pass
+        core_q.run_sql(
+            "DELETE FROM findings WHERE run_id=%s OR static_run_id=%s",
+            (run_id, static_run_id if static_run_id is not None else run_id),
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning(f"Failed to prune findings for run_id={run_id}: {exc}", category="static_analysis")
     try:
         for row in rows:
             core_q.run_sql(
                 """
                 INSERT INTO findings (
-                    run_id, severity, masvs, cvss, kind, evidence, module_id,
+                    run_id, static_run_id, severity, masvs, cvss, kind, evidence, module_id,
                     cvss_v40_b_score, cvss_v40_bt_score, cvss_v40_be_score, cvss_v40_bte_score,
                     cvss_v40_b_vector, cvss_v40_bt_vector, cvss_v40_be_vector, cvss_v40_bte_vector,
                     cvss_v40_meta, analyst_tag, evidence_path, evidence_offset, evidence_preview, rule_id
                 ) VALUES (
-                    %s,%s,%s,%s,%s,%s,%s,
+                    %s,%s,%s,%s,%s,%s,%s,%s,
                     %s,%s,%s,%s,
                     %s,%s,%s,%s,
-                    %s,%s,%s,%s,%s,%s
+                    %s,%s,%s,%s,%s,%s,%s
                 )
                 """,
                 (
                     run_id,
+                    static_run_id if static_run_id is not None else run_id,
                     row.get("severity"),
                     row.get("masvs"),
                     row.get("cvss"),
@@ -274,7 +284,11 @@ def persist_findings(run_id: int, rows: Sequence[Dict[str, Any]]) -> bool:
                 ),
             )
         return True
-    except Exception:  # pragma: no cover - defensive
+    except Exception as exc:  # pragma: no cover - defensive
+        log.error(
+            f"Failed to persist findings for run_id={run_id} static_run_id={static_run_id}: {exc}",
+            category="static_analysis",
+        )
         return False
 
 

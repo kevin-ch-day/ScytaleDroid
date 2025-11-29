@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
+from scytaledroid.Database.db_core import db_queries as core_q
 
 from ..cvss_v4 import apply_profiles
 from ..evidence import normalize_evidence
@@ -131,13 +132,34 @@ def persist_run_summary(
     run_id = envelope.run_id
     if run_id:
         outcome.run_id = run_id
+    static_run_id: int | None = None
+    try:
+        # Prefer an existing static_analysis_runs entry for this session/package
+        row = core_q.run_sql(
+            """
+            SELECT sar.id
+            FROM static_analysis_runs sar
+            JOIN app_versions av ON av.id = sar.app_version_id
+            JOIN apps a ON a.id = av.app_id
+            WHERE sar.session_stamp = %s
+              AND a.package = %s
+            ORDER BY sar.id DESC
+            LIMIT 1
+            """,
+            (session_stamp, package_for_run),
+            fetch="one",
+        )
+        if row and row[0]:
+            static_run_id = int(row[0])
+    except Exception:
+        static_run_id = None
 
     metrics_bundle = compute_metrics_bundle(br, string_data)
     code_http_hosts = metrics_bundle.code_http_hosts
     asset_http_hosts = metrics_bundle.asset_http_hosts
 
     if run_id is not None:
-        if not write_buckets(int(run_id), metrics_bundle.buckets):
+        if not write_buckets(int(run_id), metrics_bundle.buckets, static_run_id=static_run_id):
             message = f"Failed to persist scoring buckets for run_id={run_id}"
             log.warning(message, category="static_analysis")
             outcome.add_error(message)
@@ -290,7 +312,7 @@ def persist_run_summary(
                 ),
                 category="static_analysis",
             )
-        elif not persist_findings(int(run_id), finding_rows):
+        elif not persist_findings(int(run_id), finding_rows, static_run_id=static_run_id):
             message = f"Failed to persist findings for run_id={run_id}"
             log.warning(message, category="static_analysis")
             outcome.add_error(message)
@@ -378,7 +400,7 @@ def persist_run_summary(
     metrics_payload["cvss.base_vector_coverage_pct"] = (base_cov_pct, None)
     metrics_payload["cvss.bte_vector_coverage_pct"] = (bte_cov_pct, None)
 
-    if run_id is not None and not write_metrics(int(run_id), metrics_payload):
+    if run_id is not None and not write_metrics(int(run_id), metrics_payload, static_run_id=static_run_id):
         message = f"Failed to persist metrics for run_id={run_id}"
         log.warning(message, category="static_analysis")
         outcome.add_error(message)

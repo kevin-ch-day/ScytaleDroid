@@ -38,6 +38,7 @@ def persist_static_findings(
     severity_counts: Mapping[str, int],
     details: Mapping[str, object],
     findings: Sequence[object] | None,
+    run_id: int | None,
 ) -> list[str]:
     errors: list[str] = []
     try:
@@ -49,11 +50,34 @@ def persist_static_findings(
             scope_label=scope_label,
             severity_counts=severity_counts,
             details=details,
+            run_id=run_id,
         )
         if summary_id is None:
-            raise RuntimeError("upsert_summary returned None")
-        if findings:
-            _sf.replace_findings(summary_id, tuple(findings))
+            # Fallback for legacy schemas without run_id linkage.
+            summary_id = _sf.upsert_summary(
+                package_name=package_name,
+                session_stamp=session_stamp,
+                scope_label=scope_label,
+                severity_counts=severity_counts,
+                details=details,
+                run_id=None,
+            )
+        if summary_id is None:
+            # Last-chance lookup in case the row was inserted but not returned due to schema quirks.
+            summary_id = _sf.lookup_summary_id(
+                package_name=package_name,
+                session_stamp=session_stamp,
+                scope_label=scope_label,
+                run_id=run_id,
+            )
+        if summary_id is None:
+            message = (
+                "upsert_summary returned None (static findings summary may already exist under legacy schema)"
+            )
+            log.warning(message, category="static_analysis")
+        else:
+            if findings:
+                _sf.replace_findings(summary_id, tuple(findings), run_id=run_id)
     except Exception as exc:  # pragma: no cover - defensive
         message = f"Failed to persist static findings summary for {package_name}: {exc}"
         log.warning(message, category="static_analysis")

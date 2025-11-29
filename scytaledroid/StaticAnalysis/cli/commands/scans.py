@@ -35,6 +35,29 @@ SCAN_COMMANDS: tuple[Command, ...] = (
         dry_run=True,
         force_app_scope=True,
     ),
+    # Developer shortcuts (only shown when SCYTALEDROID_DEV_SHORTCUTS=1)
+    Command(
+        id="C",
+        title="Quick test: CNN (full profile)",
+        description="Dev shortcut — single-app calibration run for CNN",
+        kind="scan",
+        profile="full",
+        section="dev",
+        auto_verify=True,
+        force_app_scope=True,
+        prompt_reset=False,
+    ),
+    Command(
+        id="T",
+        title="Quick test: TikTok (full profile)",
+        description="Dev shortcut — stress run for TikTok",
+        kind="scan",
+        profile="full",
+        section="dev",
+        auto_verify=True,
+        force_app_scope=True,
+        prompt_reset=False,
+    ),
 )
 
 __all__ = ["SCAN_COMMANDS"]

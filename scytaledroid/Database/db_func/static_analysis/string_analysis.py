@@ -22,7 +22,8 @@ class StringSummaryRecord:
     session_stamp: str
     scope_label: str
     counts: Mapping[str, int]
-    run_id: int | None = None
+    run_id: int | None = None  # legacy FK to runs
+    static_run_id: int | None = None  # FK to static_analysis_runs
 
     def to_parameters(self) -> dict[str, object]:
         counts = self.counts
@@ -30,7 +31,10 @@ class StringSummaryRecord:
             "package_name": self.package_name,
             "session_stamp": self.session_stamp,
             "scope_label": self.scope_label,
-            "run_id": (int(self.run_id) if self.run_id is not None else None),
+            # Keep run_id nullable to avoid FK conflicts with legacy runs table.
+            "run_id": None,
+            "static_run_id": (int(self.static_run_id) if self.static_run_id is not None else None)
+            or (int(self.run_id) if self.run_id is not None else None),
             "endpoints": int(counts.get("endpoints", 0)),
             "http_cleartext": int(counts.get("http_cleartext", 0)),
             "api_keys": int(counts.get("api_keys", 0)),
@@ -80,38 +84,65 @@ def ensure_tables() -> bool:
             run_sql(queries.CREATE_STRING_SAMPLES)
             run_sql(queries.CREATE_STRING_MATCH_CACHE)
             run_sql(queries.CREATE_DOC_HOSTS_TABLE)
-            for statement in (
-                "ALTER TABLE static_string_summary ADD COLUMN run_id BIGINT UNSIGNED NULL AFTER scope_label",
-                "ALTER TABLE static_string_summary ADD COLUMN placeholders_downgraded INT UNSIGNED NOT NULL DEFAULT 0 AFTER high_entropy",
-                "ALTER TABLE static_string_summary ADD COLUMN placeholders_suppressed INT UNSIGNED NOT NULL DEFAULT 0 AFTER placeholders_downgraded",
-                "ALTER TABLE static_string_summary ADD COLUMN doc_hosts_suppressed INT UNSIGNED NOT NULL DEFAULT 0 AFTER placeholders_suppressed",
-                "ALTER TABLE static_string_summary ADD COLUMN doc_cdns_suppressed INT UNSIGNED NOT NULL DEFAULT 0 AFTER doc_hosts_suppressed",
-                "ALTER TABLE static_string_summary ADD COLUMN trailing_punct_trimmed INT UNSIGNED NOT NULL DEFAULT 0 AFTER doc_cdns_suppressed",
-                "ALTER TABLE static_string_summary ADD COLUMN ws_wss_seen INT UNSIGNED NOT NULL DEFAULT 0 AFTER trailing_punct_trimmed",
-                "ALTER TABLE static_string_summary ADD COLUMN ipv6_seen INT UNSIGNED NOT NULL DEFAULT 0 AFTER ws_wss_seen",
-                "ALTER TABLE static_string_summary ADD KEY ix_string_summary_run (run_id)",
-                "ALTER TABLE static_string_summary ADD CONSTRAINT fk_string_summary_run FOREIGN KEY (run_id) REFERENCES runs (run_id) ON DELETE SET NULL",
-                "ALTER TABLE static_string_summary ADD UNIQUE KEY ux_string_summary_run_scope (run_id, scope_label)",
-            ):
+            # Optional run_id and extended columns; guard against duplicate errors.
+            def _has_col(table: str, col: str) -> bool:
                 try:
-                    run_sql(statement)
+                    rows = run_sql(f"SHOW COLUMNS FROM {table}", fetch="all")
+                    return any(r[0] == col for r in rows)
                 except Exception:
-                    continue
-            for statement in (
-                "ALTER TABLE static_string_samples ADD COLUMN source_type VARCHAR(16) NULL",
-                "ALTER TABLE static_string_samples ADD COLUMN finding_type VARCHAR(32) NULL",
-                "ALTER TABLE static_string_samples ADD COLUMN provider VARCHAR(64) NULL",
-                "ALTER TABLE static_string_samples ADD COLUMN risk_tag VARCHAR(32) NULL",
-                "ALTER TABLE static_string_samples ADD COLUMN confidence VARCHAR(16) NULL",
-                "ALTER TABLE static_string_samples ADD COLUMN sample_hash CHAR(40) NULL",
-                "ALTER TABLE static_string_samples ADD COLUMN root_domain VARCHAR(191) NULL",
-                "ALTER TABLE static_string_samples ADD COLUMN resource_name VARCHAR(191) NULL",
-                "ALTER TABLE static_string_samples ADD COLUMN scheme VARCHAR(32) NULL",
-            ):
+                    return False
+
+            if not _has_col("static_string_summary", "run_id"):
                 try:
-                    run_sql(statement)
+                    run_sql("ALTER TABLE static_string_summary ADD COLUMN run_id BIGINT UNSIGNED NULL AFTER scope_label")
                 except Exception:
-                    continue
+                    pass
+            for col, stmt in (
+                ("placeholders_downgraded", "ALTER TABLE static_string_summary ADD COLUMN placeholders_downgraded INT UNSIGNED NOT NULL DEFAULT 0 AFTER high_entropy"),
+                ("placeholders_suppressed", "ALTER TABLE static_string_summary ADD COLUMN placeholders_suppressed INT UNSIGNED NOT NULL DEFAULT 0 AFTER placeholders_downgraded"),
+                ("doc_hosts_suppressed", "ALTER TABLE static_string_summary ADD COLUMN doc_hosts_suppressed INT UNSIGNED NOT NULL DEFAULT 0 AFTER placeholders_suppressed"),
+                ("doc_cdns_suppressed", "ALTER TABLE static_string_summary ADD COLUMN doc_cdns_suppressed INT UNSIGNED NOT NULL DEFAULT 0 AFTER doc_hosts_suppressed"),
+                ("trailing_punct_trimmed", "ALTER TABLE static_string_summary ADD COLUMN trailing_punct_trimmed INT UNSIGNED NOT NULL DEFAULT 0 AFTER doc_cdns_suppressed"),
+                ("ws_wss_seen", "ALTER TABLE static_string_summary ADD COLUMN ws_wss_seen INT UNSIGNED NOT NULL DEFAULT 0 AFTER trailing_punct_trimmed"),
+                ("ipv6_seen", "ALTER TABLE static_string_summary ADD COLUMN ipv6_seen INT UNSIGNED NOT NULL DEFAULT 0 AFTER ws_wss_seen"),
+            ):
+                if not _has_col("static_string_summary", col):
+                    try:
+                        run_sql(stmt)
+                    except Exception:
+                        pass
+            try:
+                run_sql("ALTER TABLE static_string_summary ADD KEY ix_string_summary_run (run_id)")
+            except Exception:
+                pass
+            try:
+                run_sql(
+                    "ALTER TABLE static_string_summary ADD CONSTRAINT fk_string_summary_run "
+                    "FOREIGN KEY (run_id) REFERENCES runs (run_id) ON DELETE SET NULL"
+                )
+            except Exception:
+                pass
+            try:
+                run_sql("ALTER TABLE static_string_summary ADD UNIQUE KEY ux_string_summary_run_scope (run_id, scope_label)")
+            except Exception:
+                pass
+
+            for col, stmt in (
+                ("source_type", "ALTER TABLE static_string_samples ADD COLUMN source_type VARCHAR(16) NULL"),
+                ("finding_type", "ALTER TABLE static_string_samples ADD COLUMN finding_type VARCHAR(32) NULL"),
+                ("provider", "ALTER TABLE static_string_samples ADD COLUMN provider VARCHAR(64) NULL"),
+                ("risk_tag", "ALTER TABLE static_string_samples ADD COLUMN risk_tag VARCHAR(32) NULL"),
+                ("confidence", "ALTER TABLE static_string_samples ADD COLUMN confidence VARCHAR(16) NULL"),
+                ("sample_hash", "ALTER TABLE static_string_samples ADD COLUMN sample_hash CHAR(40) NULL"),
+                ("root_domain", "ALTER TABLE static_string_samples ADD COLUMN root_domain VARCHAR(191) NULL"),
+                ("resource_name", "ALTER TABLE static_string_samples ADD COLUMN resource_name VARCHAR(191) NULL"),
+                ("scheme", "ALTER TABLE static_string_samples ADD COLUMN scheme VARCHAR(32) NULL"),
+            ):
+                if not _has_col("static_string_samples", col):
+                    try:
+                        run_sql(stmt)
+                    except Exception:
+                        pass
             for host in _default_doc_hosts():
                 try:
                     run_sql(queries.INSERT_DOC_HOST, (host,))
@@ -186,7 +217,7 @@ def upsert_summary(summary: SummaryRow) -> int | None:
         with database_session():
             run_sql(queries.INSERT_STRING_SUMMARY, payload)
             row = None
-            run_id = payload.get("run_id")
+            run_id = payload.get("static_run_id") or payload.get("run_id")
             if run_id is not None:
                 row = run_sql(
                     queries.SELECT_SUMMARY_ID_BY_RUN,
@@ -209,6 +240,7 @@ def replace_top_samples(
     samples: Mapping[str, Sequence[SampleRow]],
     *,
     top_n: int = 3,
+    static_run_id: int | None = None,
 ) -> tuple[int, int]:
     """Replace samples for summary_id with top N per bucket.
 
@@ -242,6 +274,7 @@ def replace_top_samples(
                         queries.INSERT_SAMPLE,
                         (
                             summary_id,
+                            static_run_id,
                             bucket,
                             str(value_masked)[:512] if value_masked is not None else None,
                             str(src)[:512] if src is not None else None,
@@ -363,4 +396,3 @@ __all__ = [
     "seed_doc_hosts",
     "seed_doc_hosts_from_config",
 ]
-

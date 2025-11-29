@@ -80,12 +80,12 @@ CREATE TABLE IF NOT EXISTS string_match_cache (
 
 INSERT_STRING_SUMMARY = """
 INSERT INTO static_string_summary (
-  package_name, session_stamp, scope_label, run_id,
+  package_name, session_stamp, scope_label, run_id, static_run_id,
   endpoints, http_cleartext, api_keys, analytics_ids, cloud_refs, ipc, uris, flags, certs, high_entropy,
   placeholders_downgraded, placeholders_suppressed, doc_hosts_suppressed, doc_cdns_suppressed,
   trailing_punct_trimmed, ws_wss_seen, ipv6_seen
 ) VALUES (
-  %(package_name)s, %(session_stamp)s, %(scope_label)s, %(run_id)s,
+  %(package_name)s, %(session_stamp)s, %(scope_label)s, %(run_id)s, %(static_run_id)s,
   %(endpoints)s, %(http_cleartext)s, %(api_keys)s, %(analytics_ids)s, %(cloud_refs)s, %(ipc)s, %(uris)s, %(flags)s, %(certs)s, %(high_entropy)s,
   %(placeholders_downgraded)s, %(placeholders_suppressed)s, %(doc_hosts_suppressed)s, %(doc_cdns_suppressed)s,
   %(trailing_punct_trimmed)s, %(ws_wss_seen)s, %(ipv6_seen)s
@@ -118,7 +118,7 @@ WHERE package_name=%s AND session_stamp=%s AND scope_label=%s
 
 SELECT_SUMMARY_ID_BY_RUN = """
 SELECT id FROM static_string_summary
-WHERE run_id=%s AND scope_label=%s
+WHERE static_run_id=%s AND scope_label=%s
 """
 
 DELETE_SAMPLES_FOR_SUMMARY = """
@@ -128,6 +128,7 @@ DELETE FROM static_string_samples WHERE summary_id=%s
 INSERT_SAMPLE = """
 INSERT INTO static_string_samples (
   summary_id,
+  static_run_id,
   bucket,
   value_masked,
   src,
@@ -143,7 +144,7 @@ INSERT INTO static_string_samples (
   resource_name,
   scheme
 )
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 """
 
 CREATE_DOC_HOSTS_TABLE = """
@@ -253,4 +254,3 @@ __all__ = [
     "TABLE_EXISTS_SUMMARY",
     "TABLE_EXISTS_SAMPLES",
 ]
-

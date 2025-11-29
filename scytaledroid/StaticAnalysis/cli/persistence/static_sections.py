@@ -109,6 +109,7 @@ def persist_static_sections(
         severity_counts=severity_counts,
         details=details,
         findings=findings_seq,
+        run_id=run_id,
     )
     if baseline_errors:
         errors.extend(baseline_errors)

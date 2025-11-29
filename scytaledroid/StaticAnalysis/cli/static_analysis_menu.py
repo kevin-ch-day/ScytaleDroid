@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -51,6 +52,21 @@ def render_reset_outcome(outcome: object) -> None:
     actions = _load_menu_actions()
     actions.render_reset_outcome(outcome)
 
+
+def _build_dev_selection(groups, shortcut_id):
+    from scytaledroid.StaticAnalysis.cli.models import ScopeSelection
+
+    targets = {
+        "C": ("CNN (com.cnn.mobile.android.phone)", "com.cnn.mobile.android.phone"),
+        "T": ("TikTok (com.zhiliaoapp.musically)", "com.zhiliaoapp.musically"),
+    }
+    if shortcut_id not in targets:
+        return None
+    _, package = targets[shortcut_id]
+    for group in groups:
+        if getattr(group, "package_name", None) == package:
+            return ScopeSelection(scope="app", label=package, groups=(group,))
+    return None
 
 def _library_scope_selection(groups):
     """Build a ScopeSelection from the APK library selection, if any."""
@@ -126,6 +142,7 @@ def static_analysis_menu() -> None:
 
     workflow_commands = tuple(cmd for cmd in iter_commands("scan") if cmd.section == "workflow")
     tool_commands = tuple(cmd for cmd in iter_commands("scan") if cmd.section == "tools")
+    dev_commands = tuple(cmd for cmd in iter_commands("scan") if cmd.section == "dev")
     insight_commands = tuple(cmd for cmd in iter_commands("readonly"))
     selectable_ids = [cmd.id for cmd in COMMANDS]
 
@@ -142,7 +159,7 @@ def static_analysis_menu() -> None:
         menu_utils.print_header("Android APK Static Analysis")
         print(
             status_messages.status(
-                "Choose a workflow to scan harvested APKs. Results are persisted for reproducibility.",
+                "Static runs are persisted to the evidence store for later SQL/reporting.",
                 level="info",
             )
         )
@@ -159,7 +176,20 @@ def static_analysis_menu() -> None:
             show_exit=False,
             default=default_key if default_key in {cmd.id for cmd in workflow_commands} else None,
         )
+        if workflow_commands:
+            print("Primary workflows")
+            print("-----------------")
         menu_utils.render_menu(workflow_spec)
+        if dev_commands:
+            print("Developer fixtures (calibrated test apps)")
+            print("-----------------------------------------")
+            menu_utils.render_menu(
+                MenuSpec(
+                    items=[_command_option(cmd) for cmd in dev_commands],
+                    show_exit=False,
+                    default=None,
+                )
+            )
         back_spec = MenuSpec(
             items=[],
             exit_label="Back",
@@ -167,7 +197,8 @@ def static_analysis_menu() -> None:
             show_descriptions=False,
         )
         menu_utils.render_menu(back_spec)
-        choice = prompt_utils.get_choice(selectable_ids + ["0"], default=default_choice)
+        choice_pool = selectable_ids + ["0"]
+        choice = prompt_utils.get_choice(choice_pool, default=default_choice)
 
         if choice == "0":
             break
@@ -188,12 +219,19 @@ def static_analysis_menu() -> None:
             print(status_messages.status("Command missing run profile.", level="error"))
             continue
 
-        selection = _choose_scope(groups)
-        if selection is None:
-            continue
-        if command.force_app_scope and selection.scope != "app":
-            print(status_messages.status("This workflow requires choosing a single app.", level="warn"))
-            continue
+        selection = None
+        if command.section == "dev":
+            selection = _build_dev_selection(groups, command.id)
+            if selection is None:
+                print(status_messages.status("Dev shortcut target not found in repository.", level="error"))
+                continue
+        else:
+            selection = _choose_scope(groups)
+            if selection is None:
+                continue
+            if command.force_app_scope and selection.scope != "app":
+                print(status_messages.status("This workflow requires choosing a single app.", level="warn"))
+                continue
 
         params = RunParameters(
             profile=command.profile,
@@ -203,6 +241,10 @@ def static_analysis_menu() -> None:
                 default_custom_tests() if command.profile == "custom" else tuple()
             ),
         )
+        if command.section == "dev":
+            # Make dev runs easy to identify
+            short = selection.label.split(".")[-1]
+            params = replace(params, session_stamp=f"static-dev-{short}")
 
         while True:
             action = ask_run_controls()

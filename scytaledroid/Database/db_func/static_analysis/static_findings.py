@@ -9,19 +9,84 @@ from ...db_core import database_session, run_sql
 from ...db_queries.static_analysis import static_findings as queries
 
 
+def _table_has_column(table: str, column: str) -> bool:
+    try:
+        rows = run_sql(f"SHOW COLUMNS FROM {table}", fetch="all")
+        return any(row[0] == column for row in rows)
+    except Exception:
+        return False
+
+
+def _table_has_index(table: str, index: str) -> bool:
+    try:
+        rows = run_sql(f"SHOW INDEX FROM {table}", fetch="all")
+        return any(row[2] == index for row in rows)
+    except Exception:
+        return False
+
+
 def ensure_tables() -> bool:
     try:
         with database_session():
-            run_sql(queries.CREATE_FINDINGS_SUMMARY)
-            run_sql(queries.CREATE_FINDINGS)
-            for statement in (
-                "ALTER TABLE static_findings_summary ADD KEY ix_findings_session_pkg (session_stamp, package_name)",
-                "ALTER TABLE static_findings ADD KEY ix_findings_severity_summary (severity, summary_id)",
-            ):
+            try:
+                run_sql(queries.CREATE_FINDINGS_SUMMARY)
+            except Exception:
+                # Table already exists or creation failed; keep going in best-effort mode.
+                pass
+            try:
+                run_sql(queries.CREATE_FINDINGS)
+            except Exception:
+                pass
+            # Optional run_id linkage (best-effort; safe if column/index already exists).
+            if not _table_has_column("static_findings_summary", "run_id"):
                 try:
-                    run_sql(statement)
+                    run_sql(
+                        "ALTER TABLE static_findings_summary ADD COLUMN run_id BIGINT UNSIGNED NULL AFTER scope_label"
+                    )
                 except Exception:
-                    continue
+                    pass
+            if not _table_has_index("static_findings_summary", "ix_findings_summary_run"):
+                try:
+                    run_sql("ALTER TABLE static_findings_summary ADD KEY ix_findings_summary_run (run_id)")
+                except Exception:
+                    pass
+            if not _table_has_index("static_findings_summary", "ix_findings_session_pkg"):
+                try:
+                    run_sql(
+                        "ALTER TABLE static_findings_summary ADD KEY ix_findings_session_pkg (session_stamp, package_name)"
+                    )
+                except Exception:
+                    pass
+            try:
+                run_sql(
+                    "ALTER TABLE static_findings_summary ADD CONSTRAINT fk_findings_summary_run "
+                    "FOREIGN KEY (run_id) REFERENCES static_analysis_runs (id) ON DELETE SET NULL"
+                )
+            except Exception:
+                pass
+
+            if not _table_has_column("static_findings", "run_id"):
+                try:
+                    run_sql("ALTER TABLE static_findings ADD COLUMN run_id BIGINT UNSIGNED NULL AFTER summary_id")
+                except Exception:
+                    pass
+            if not _table_has_index("static_findings", "ix_findings_run"):
+                try:
+                    run_sql("ALTER TABLE static_findings ADD KEY ix_findings_run (run_id)")
+                except Exception:
+                    pass
+            if not _table_has_index("static_findings", "ix_findings_severity_summary"):
+                try:
+                    run_sql("ALTER TABLE static_findings ADD KEY ix_findings_severity_summary (severity, summary_id)")
+                except Exception:
+                    pass
+            try:
+                run_sql(
+                    "ALTER TABLE static_findings ADD CONSTRAINT fk_findings_run "
+                    "FOREIGN KEY (run_id) REFERENCES static_analysis_runs (id) ON DELETE SET NULL"
+                )
+            except Exception:
+                pass
         return True
     except Exception:
         return False
@@ -43,6 +108,7 @@ def upsert_summary(
     scope_label: str,
     severity_counts: Mapping[str, int],
     details: Mapping[str, object] | None = None,
+    run_id: int | None = None,
 ) -> int | None:
     payload = {
         "package_name": package_name,
@@ -54,14 +120,36 @@ def upsert_summary(
         "info": int(severity_counts.get("Info", 0) or severity_counts.get("I", 0)),
         "details": json.dumps(details or {}),
     }
+    has_run_column = _table_has_column("static_findings_summary", "run_id")
+    if run_id is not None and has_run_column:
+        payload["run_id"] = int(run_id)
+        # Prefer run_id when available to avoid session collisions.
+        queries_select = queries.SELECT_FINDINGS_SUMMARY_ID_BY_RUN
+        select_params = (payload["run_id"], payload["scope_label"])
+    else:
+        queries_select = queries.SELECT_FINDINGS_SUMMARY_ID
+        select_params = (package_name, session_stamp, scope_label)
+    statement = (
+        queries.UPSERT_FINDINGS_SUMMARY
+        if has_run_column
+        else queries.UPSERT_FINDINGS_SUMMARY_LEGACY
+    )
+
     try:
         with database_session():
-            run_sql(queries.UPSERT_FINDINGS_SUMMARY, payload)
+            run_sql(statement, payload)
             row = run_sql(
-                queries.SELECT_FINDINGS_SUMMARY_ID,
-                (package_name, session_stamp, scope_label),
+                queries_select,
+                select_params,
                 fetch="one",
             )
+            if not row and queries_select is queries.SELECT_FINDINGS_SUMMARY_ID_BY_RUN:
+                # Fallback in case run_id was not populated during insert.
+                row = run_sql(
+                    queries.SELECT_FINDINGS_SUMMARY_ID,
+                    (package_name, session_stamp, scope_label),
+                    fetch="one",
+                )
         return int(row[0]) if row else None
     except Exception:
         return None
@@ -70,9 +158,11 @@ def upsert_summary(
 def replace_findings(
     summary_id: int,
     findings: Sequence[Mapping[str, object]],
+    run_id: int | None = None,
 ) -> tuple[int, int]:
     deleted = 0
     inserted = 0
+    has_run_id = _table_has_column("static_findings", "run_id")
     with database_session():
         try:
             run_sql(queries.DELETE_FINDINGS_FOR_SUMMARY, (summary_id,))
@@ -87,11 +177,45 @@ def replace_findings(
                 evidence = f.get("evidence") if isinstance(f, dict) else None
                 fix = f.get("fix") if isinstance(f, dict) else None
                 ev_json = json.dumps(evidence or {})
-                run_sql(queries.INSERT_FINDING, (summary_id, finding_id, severity, title, ev_json, fix))
+                if has_run_id:
+                    run_sql(
+                        queries.INSERT_FINDING_WITH_RUN,
+                        (summary_id, run_id, finding_id, severity, title, ev_json, fix),
+                    )
+                else:
+                    run_sql(queries.INSERT_FINDING, (summary_id, finding_id, severity, title, ev_json, fix))
                 inserted += 1
             except Exception:
                 continue
     return deleted, inserted
+
+
+def lookup_summary_id(
+    *,
+    package_name: str,
+    session_stamp: str,
+    scope_label: str,
+    run_id: int | None = None,
+) -> int | None:
+    """Best-effort fetch of a summary id even on legacy schemas."""
+    has_run_column = _table_has_column("static_findings_summary", "run_id")
+    try:
+        if run_id is not None and has_run_column:
+            row = run_sql(
+                queries.SELECT_FINDINGS_SUMMARY_ID_BY_RUN,
+                (int(run_id), scope_label),
+                fetch="one",
+            )
+            if row:
+                return int(row[0])
+        row = run_sql(
+            queries.SELECT_FINDINGS_SUMMARY_ID,
+            (package_name, session_stamp, scope_label),
+            fetch="one",
+        )
+        return int(row[0]) if row else None
+    except Exception:
+        return None
 
 
 __all__ = [
@@ -99,5 +223,5 @@ __all__ = [
     "tables_exist",
     "upsert_summary",
     "replace_findings",
+    "lookup_summary_id",
 ]
-
