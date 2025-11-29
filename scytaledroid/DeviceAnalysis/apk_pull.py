@@ -451,17 +451,24 @@ def pull_apks(serial: Optional[str]) -> None:
         for result in results:
             harvest.print_package_result(result, verbose=False)
 
-    harvest.render_harvest_summary(
-        active_plan,
-        results,
-        selection=active_selection,
-        pull_mode=pull_mode,
-        serial=serial,
-        run_timestamp=session_stamp,
-        guard_brief=active_selection.metadata.get("inventory_guard_brief"),
-        run_id=run_id,
-        harvest_logger=harvest_logger,
-    )
+    try:
+        harvest.render_harvest_summary(
+            active_plan,
+            results,
+            selection=active_selection,
+            pull_mode=pull_mode,
+            serial=serial,
+            run_timestamp=session_stamp,
+            guard_brief=active_selection.metadata.get("inventory_guard_brief"),
+            run_id=run_id,
+            harvest_logger=harvest_logger,
+        )
+    except Exception as exc:
+        error_panels.print_error_panel(
+            "APK Harvest",
+            f"Harvest completed, but summary rendering failed: {exc}",
+            hint="Artifacts and logs were written; inspect harvest logs for details.",
+        )
     _maybe_save_watchlist(active_selection)
     log.close_harvest_adapter(run_id)
     prompt_utils.press_enter_to_continue()
@@ -584,13 +591,8 @@ def _prompt_plan_action(
 ) -> str:
     print()
     print(text_blocks.headline("Plan actions", width=70))
-    # Streamlined action set
+    # Streamlined action set (legacy quick harvest hidden)
     menu_items = [
-        menu_utils.MenuOption(
-            "1",
-            "Quick Pull",
-            "Resolve paths via pm (fast, recommended)",
-        ),
         menu_utils.MenuOption(
             "2",
             "Full Pull",
@@ -605,14 +607,12 @@ def _prompt_plan_action(
     menu_utils.print_menu(
         menu_items,
         is_main=False,
-        default="1",
+        default="2",
         exit_label="Cancel",
         padding=True,
     )
     valid_keys = [item.key for item in menu_items]
-    choice = prompt_utils.get_choice(valid_keys + ["0"], default="1")
-    if choice == "1":
-        return "pull_quick"
+    choice = prompt_utils.get_choice(valid_keys + ["0"], default="2")
     if choice == "2":
         return "pull_snapshot"
     if choice == "3":

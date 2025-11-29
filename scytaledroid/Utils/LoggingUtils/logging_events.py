@@ -1,0 +1,13 @@
+"""Canonical event names for structured logs."""
+
+RUN_START = "run.start"
+RUN_END = "run.end"
+STAGE_START = "stage.start"
+STAGE_END = "stage.end"
+POLICY_FILTER = "policy.filter"
+ARTIFACT_SAVED = "acquisition.artifact.saved"
+ARTIFACT_SKIPPED = "acquisition.artifact.skipped"
+DB_PERSIST = "db.persist"
+DB_ERROR = "db.error"
+ERROR_RUNTIME = "error.runtime"
+ERROR_ADB = "adb.error"

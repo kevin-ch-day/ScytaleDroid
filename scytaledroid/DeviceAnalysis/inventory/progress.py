@@ -134,9 +134,8 @@ def render_snapshot_block(previous_meta, ui_prefs=None, mode: Optional[str] = No
             (datetime.now(timezone.utc) - previous_meta.captured_at).total_seconds(), 0.0
         )
         is_stale = age_seconds >= INVENTORY_STALE_SECONDS
-        bullet = "● " if not terminal.use_ascii_ui() else "* "
         status_text = "STALE" if is_stale else "FRESH"
-        status_line = f"Status   : {bullet}{status_text}"
+        status_line = f"Status   : {status_text}"
         age_line = f"Age      : {humanize_seconds(age_seconds)}"
         pkg_line = f"Packages : {getattr(previous_meta, 'package_count', '—')}"
 

@@ -19,6 +19,30 @@ def build_harvest_plan(
 
     planned_packages: List[PackagePlan] = []
     policy_filtered: Dict[str, int] = defaultdict(int)
+    plan_logger = None
+    try:
+        from scytaledroid.Utils.LoggingUtils.logging_context import RunContext, get_run_logger
+        from scytaledroid.Utils.LoggingUtils import logging_events as log_events
+
+        run_ctx = RunContext(
+            subsystem="harvest",
+            device_serial=None,
+            device_model=None,
+            run_id="HARVEST-PLAN",
+            scope=None,
+            profile=None,
+        )
+        plan_logger = get_run_logger("harvest", run_ctx)
+        plan_logger.info(
+            "Harvest policy.filter (planning)",
+            extra={
+                "event": log_events.POLICY_FILTER,
+                "note": "planning start",
+                "candidate_packages": len(packages),
+            },
+        )
+    except Exception:
+        plan_logger = None
 
     for row in packages:
         plan = _build_package_plan(row, include_system_partitions)
@@ -26,6 +50,17 @@ def build_harvest_plan(
         if plan.policy_filtered_count:
             reason = plan.policy_filtered_reason or "policy"
             policy_filtered[reason] += plan.policy_filtered_count
+
+    if plan_logger:
+        plan_logger.info(
+            "Harvest policy.filter (planning complete)",
+            extra={
+                "event": log_events.POLICY_FILTER,
+                "note": "planning complete",
+                "candidate_packages": len(packages),
+                "policy_filtered": dict(sorted(policy_filtered.items())),
+            },
+        )
 
     return HarvestPlan(
         packages=planned_packages,
@@ -94,4 +129,3 @@ def _artifact_identifier(source_name: str) -> tuple[str, bool]:
 
 
 __all__ = ["build_harvest_plan"]
-

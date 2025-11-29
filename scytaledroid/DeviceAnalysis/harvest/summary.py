@@ -10,6 +10,8 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from scytaledroid.Utils.DisplayUtils import status_messages, text_blocks
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.LoggingUtils import logging_engine
+from scytaledroid.Utils.LoggingUtils.logging_context import RunContext, get_run_logger
+from scytaledroid.Utils.LoggingUtils import logging_events as log_events
 
 from .common import normalise_local_path
 from .models import (
@@ -429,6 +431,34 @@ def render_harvest_summary(
         session_stamp=run_timestamp,
     )
 
+    # Emit policy.filter details for scope shrinking
+    if plan.policy_filtered:
+        try:
+            from scytaledroid.Utils.LoggingUtils.logging_context import RunContext, get_run_logger
+            from scytaledroid.Utils.LoggingUtils import logging_events as log_events
+
+            run_ctx = RunContext(
+                subsystem="harvest",
+                device_serial=serial,
+                device_model=None,
+                run_id=run_id or (run_timestamp or "HARVEST-RUN"),
+                scope=selection.label,
+                profile=pull_mode,
+            )
+            logger = harvest_logger or get_run_logger("harvest", run_ctx)
+            logger.info(
+                "Harvest policy.filter",
+                extra={
+                    "event": log_events.POLICY_FILTER,
+                    "scope": selection.label,
+                    "candidates": int(metadata.get("candidate_count") or 0),
+                    "kept": int(metadata.get("selected_count") or metrics.total_packages),
+                    "filtered_counts": plan.policy_filtered,
+                },
+            )
+        except Exception:
+            pass
+
     print()
     print(status_messages.status("Next steps:", level="info"))
     print(status_messages.status("  • Review metadata via view sd_app_catalog_flags", level="info"))
@@ -450,6 +480,36 @@ def render_harvest_summary(
             harvest_logger=harvest_logger,
             run_id=run_id,
         )
+        # Emit structured RUN_END to harvest logger for reproducibility.
+        try:
+            run_ctx = RunContext(
+                subsystem="harvest",
+                device_serial=harvest_result.device_serial if hasattr(harvest_result, "device_serial") else None,
+                device_model=None,
+                run_id=run_id or (run_timestamp or "HARVEST-RUN"),
+                scope=selection.label,
+                profile=pull_mode,
+            )
+            log_adapter = harvest_logger or get_run_logger("harvest", run_ctx)
+            payload = {
+                "event": log_events.RUN_END,
+                "scope": selection.label,
+                "pull_mode": pull_mode,
+                "packages_total": metrics.total_packages,
+                "packages_executed": metrics.executed_packages,
+                "packages_blocked": metrics.blocked_packages,
+                "artifacts_planned": metrics.planned_artifacts,
+                "artifacts_written": metrics.artifacts_written,
+                "artifacts_failed": metrics.artifacts_failed,
+                "preflight_skips": dict(metrics.preflight_skips),
+                "runtime_skips": dict(metrics.runtime_skips),
+                "policy_filtered": plan.policy_filtered,
+                "session_stamp": run_timestamp,
+                "output_root": normalise_local_path(output_root) if output_root else None,
+            }
+            log_adapter.info("Harvest RUN_END", extra=payload)
+        except Exception:
+            pass
 
 
 def _build_summary_card_lines(

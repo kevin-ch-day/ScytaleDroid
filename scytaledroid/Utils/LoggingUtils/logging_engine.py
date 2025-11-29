@@ -40,6 +40,7 @@ LOG_CONFIGS: Dict[str, _LoggerConfig] = {
     "application": _LoggerConfig(text_file="app.log", json_file="app.jsonl", level=logging.INFO),
     "database": _LoggerConfig(text_file=None, json_file="db.jsonl", level=logging.DEBUG),
     "device": _LoggerConfig(text_file="device_analysis.log", json_file="device_analysis.jsonl"),
+    "harvest": _LoggerConfig(text_file="harvest.log", json_file="harvest.jsonl"),
     "static": _LoggerConfig(text_file="static_analysis.log", json_file="static_analysis.jsonl"),
     "dynamic": _LoggerConfig(text_file="dynamic_analysis.log", json_file="dynamic_analysis.jsonl"),
     "error": _LoggerConfig(text_file="error.log", json_file=None, level=logging.ERROR),

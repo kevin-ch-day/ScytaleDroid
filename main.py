@@ -85,26 +85,27 @@ def main_menu() -> None:
     """Render the main menu loop using the shared menu framework."""
 
     menu_actions: list[tuple[str, str, Callable[[], None]]] = [
-        ("1", "Android devices", handle_device),
-        ("2", "Static analysis", handle_static),
-        ("3", "Harvest Android Permissions", handle_perm_catalog),
+        ("1", "Android Device Analysis", handle_device),
+        ("2", "Static APK analysis", handle_static),
+        ("3", "Permission cohort analysis", handle_perm_catalog),
         ("4", "Dynamic analysis", handle_dynamic),
         ("5", "Reporting", handle_reporting),
-        ("6", "Database utilities", handle_database),
+        ("6", "Database tools", handle_database),
         ("7", "Workspace maintenance & cleanup", handle_workspace),
         ("8", "APK library & archives", handle_browse_apks),
-        ("9", "About App", handle_about),
+        ("9", "About ScytaleDroid", handle_about),
     ]
 
     handlers = {key: (label, callback) for key, label, callback in menu_actions}
     valid_choices = list(handlers)
+    # Keep a default for enter-to-select but do not show "(default)" in UI.
     default_choice = "1"
     while True:
         print()
         menu_utils.print_header("Main Menu")
         spec = MenuSpec(
             items=[menu_utils.MenuOption(key, label) for key, label, _ in menu_actions],
-            default=default_choice,
+            default=None,
             exit_label="Exit",
             show_exit=True,
             show_descriptions=False,

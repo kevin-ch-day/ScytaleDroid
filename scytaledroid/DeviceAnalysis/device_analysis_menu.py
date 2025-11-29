@@ -80,22 +80,21 @@ def device_menu(return_to: str = EXIT_TO_MAIN) -> str:
             )
 
         print()
-        menu_utils.print_header("Device Analysis")
+        menu_utils.print_header("Device dashboard")
         options = build_main_menu_options(active_details)
         # Default to List devices to give a quick view before deeper actions
         default_key = "1"
         spec = menu_utils.MenuSpec(
             items=options,
-            default=default_key,
+            default=None,
             exit_label="Back",
             show_exit=True,
             show_descriptions=True,
         )
         menu_utils.render_menu(spec)
-        # Footer shortcuts (informational)
-        print(
-            "Shortcuts: r=Refresh  c=Connect/Switch  i=Info  s=Shell  l=Logcat  q/0=Back to main"
-        )
+        print()  # small spacer after the menu
+        print("Select action #:")
+        print("Shortcuts: r=Refresh  c=Switch  i=Info  s=Shell  l=Logcat  q/0=Back to main")
 
         ensure_inventory_survey(
             active_serial,
@@ -152,8 +151,8 @@ def _render_status_panel(
     if active_details:
         label = active_details.get("model") or active_details.get("device")
     heading = "Device dashboard"
-    if label and serial:
-        heading = f"Device dashboard — {label} ({serial})"
+    if label:
+        heading = f"Device dashboard — {label}"
     menu_utils.print_header(heading)
 
     if not active_details:
@@ -182,21 +181,21 @@ def _render_status_panel(
 
     print("Inventory status")
     print("================")
-    from scytaledroid.Utils.DisplayUtils.terminal import use_ascii_ui
-
-    palette = colors.get_palette()
-    bullet = "●" if not use_ascii_ui() else "*"
-    label_style = palette.success if status_label.upper() == "FRESH" and not is_stale else palette.warning
-    status_line = f"{bullet} {status_label.upper()}  • Age: {age}  • Packages: {pkg_count or '—'}"
-    print(colors.apply(status_line, label_style, bold=True) if colors.colors_enabled() else status_line)
-    if isinstance(last_ts, datetime):
-        print(f"Last sync: {last_ts.strftime('%Y-%m-%d %H:%M:%S %Z') or last_ts.isoformat()}")
+    status_line = f"Status      : {status_label.upper()}"
+    age_line = f"Age         : {age}"
+    pkg_line = f"Packages    : {pkg_count or '—'}"
     threshold_label = f"{INVENTORY_STALE_SECONDS // 3600}h" if INVENTORY_STALE_SECONDS >= 3600 else f"{INVENTORY_STALE_SECONDS // 60}m"
+    threshold_line = f"Stale after : {threshold_label}"
+    print(status_line)
+    print(age_line)
+    print(pkg_line)
+    if isinstance(last_ts, datetime):
+        print(f"Last sync   : {last_ts.strftime('%Y-%m-%d %H:%M:%S %Z') or last_ts.isoformat()}")
     if status_label.upper() == "NONE":
-        print(f"Staleness threshold: {threshold_label} (applies after the first snapshot)")
+        print(f"{threshold_line} (applies after the first snapshot)")
         print(status_messages.status("No inventory snapshot found. Run a full sync to capture the current app state.", level="warn"))
         return
-    print(f"Staleness threshold: {threshold_label}")
+    print(threshold_line)
 
     # Last inventory result (now driven by unified InventoryDelta if available)
     delta_obj = getattr(status, "delta", None)

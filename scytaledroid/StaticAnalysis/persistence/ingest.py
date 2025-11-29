@@ -162,7 +162,18 @@ def _get_or_create_app(package_name: str, display_name: Optional[str] = None) ->
             return_lastrowid=True,
         )
         return int(new_id) if new_id else None
-    except Exception:
+    except Exception as exc:
+        _warn(f"provider insert failed: {exc}")
+        try:
+            row = core_q.run_sql(
+                "SELECT id FROM static_fileproviders WHERE package_name=%s AND authority=%s LIMIT 1",
+                (context.package_name, authority),
+                fetch="one",
+            )
+            if row and row[0]:
+                return int(row[0])
+        except Exception:
+            pass
         return None
 
 
@@ -306,6 +317,9 @@ def _prune_missing_columns(table: str, row: dict[str, Optional[object]]) -> None
 def _persist_analysis_snapshot(app_version_id: int, payload: Mapping[str, object]) -> None:
     findings: Sequence[Mapping[str, object]] = _extract_findings(payload)
 
+    metadata_raw = payload.get("metadata")
+    metadata = metadata_raw if isinstance(metadata_raw, Mapping) else {}
+
     hashes_raw = payload.get("hashes")
     hashes_payload = hashes_raw if isinstance(hashes_raw, Mapping) else {}
     sha256 = first_text(hashes_payload.get("sha256"))
@@ -335,8 +349,6 @@ def _persist_analysis_snapshot(app_version_id: int, payload: Mapping[str, object
         payload.get("run_started_utc"),
         payload.get("generated_at"),
     )
-    metadata_raw = payload.get("metadata")
-    metadata = metadata_raw if isinstance(metadata_raw, Mapping) else {}
     profile = first_text(
         payload.get("scan_profile"),
         metadata.get("scan_profile"),
@@ -442,33 +454,30 @@ def _create_run_row(
     workload_profile: Mapping[str, object] | None,
 ) -> Optional[int]:
     try:
-        run_id = core_q.run_sql(
-            (
-                "INSERT INTO static_analysis_runs (app_version_id, session_stamp, scope_label, sha256, analysis_version, pipeline_version, "
-                "catalog_versions, config_hash, study_tag, run_started_utc, profile, findings_total, detector_metrics, repro_bundle, analysis_matrices, analysis_indicators, workload_profile) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
-            ),
-            (
-                app_version_id,
-                _normalise_optional_str(session_stamp),
-                _normalise_optional_str(scope_label),
-                _normalise_optional_str(sha256),
-                _normalise_optional_str(analysis_version),
-                _normalise_optional_str(pipeline_version),
-                _normalise_optional_str(catalog_versions),
-                _normalise_optional_str(config_hash),
-                _normalise_optional_str(study_tag),
-                _normalise_optional_str(run_started_utc),
-                _normalise_optional_str(profile),
-                findings_total,
-                _serialise_json(detector_metrics),
-                _serialise_json(repro_bundle),
-                _serialise_json(analysis_matrices),
-                _serialise_json(analysis_indicators),
-                _serialise_json(workload_profile),
-            ),
-            return_lastrowid=True,
-        )
+        row_data: dict[str, object] = {
+            "app_version_id": app_version_id,
+            "session_stamp": _normalise_optional_str(session_stamp),
+            "scope_label": _normalise_optional_str(scope_label),
+            "sha256": _normalise_optional_str(sha256),
+            "analysis_version": _normalise_optional_str(analysis_version),
+            "pipeline_version": _normalise_optional_str(pipeline_version),
+            "catalog_versions": _normalise_optional_str(catalog_versions),
+            "config_hash": _normalise_optional_str(config_hash),
+            "study_tag": _normalise_optional_str(study_tag),
+            "run_started_utc": _normalise_optional_str(run_started_utc),
+            "profile": _normalise_optional_str(profile),
+            "findings_total": findings_total,
+            "detector_metrics": _serialise_json(detector_metrics),
+            "repro_bundle": _serialise_json(repro_bundle),
+            "analysis_matrices": _serialise_json(analysis_matrices),
+            "analysis_indicators": _serialise_json(analysis_indicators),
+            "workload_profile": _serialise_json(workload_profile),
+        }
+        _prune_missing_columns("static_analysis_runs", row_data)
+        columns = list(row_data.keys())
+        placeholders = ", ".join(["%s"] * len(columns))
+        sql = f"INSERT INTO static_analysis_runs ({', '.join(columns)}) VALUES ({placeholders})"
+        run_id = core_q.run_sql(sql, tuple(row_data[col] for col in columns), return_lastrowid=True)
         return int(run_id) if run_id else None
     except Exception:
         return None

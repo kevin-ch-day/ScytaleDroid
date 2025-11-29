@@ -74,9 +74,7 @@ def handle_choice(
         from .formatters import format_device_line
 
         try:
-            label = format_device_line(active_details or {"serial": serial}, include_release=True)
-            if label:
-                print(text_blocks.headline(f"Inventory & database sync — {label}", width=70))
+            print(text_blocks.headline("Inventory & database sync", width=70))
             inventory_service.run_full_sync(serial, ui_prefs=None, progress_sink="cli")
         except inventory_service.InventoryServiceError as exc:
             error_panels.print_error_panel(
@@ -132,7 +130,7 @@ def build_main_menu_options(
     needs_active = None if has_device else "needs active"
 
     options: List[menu_utils.MenuOption] = [
-        menu_utils.MenuOption("1", "Devices hub / switch device"),
+        menu_utils.MenuOption("1", "Switch device (devices hub)"),
         menu_utils.MenuOption(
             "2",
             "Device info",
@@ -141,9 +139,8 @@ def build_main_menu_options(
         ),
         menu_utils.MenuOption(
             "3",
-            "Inventory & database sync (full)",
+            "Inventory & Database Sync (full)",
             badge=inv_badge or needs_active,
-            hint="Refresh all packages and DB entries",
         ),
         menu_utils.MenuOption(
             "4",
@@ -153,10 +150,9 @@ def build_main_menu_options(
         ),
         menu_utils.MenuOption(
             "5",
-            "Pull APKs",
+            "Pull APKs for static analysis",
             disabled=not has_device,
             badge=pull_badge or needs_active,
-            hint="Fetch APKs to data/apks for static analysis",
         ),
         menu_utils.MenuOption(
             "6",

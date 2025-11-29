@@ -30,10 +30,10 @@ def _inventory_badge(status: InventoryStatus | None) -> str:
     return f"{status.status_label} ({status.age_display}) {count_text}"
 
 
-def _render_header(adb_status: str, live_count: int, historical_count: int) -> None:
+def _render_header(adb_status: str, live_count: int) -> None:
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(text_blocks.headline(f"Android devices — {ts}", width=display_settings.default_width()))
-    print(f"ADB: {adb_status}   Live devices: {live_count}   Historical devices: {historical_count}")
+    print(text_blocks.headline(f"Android Device Analysis — {ts}", width=display_settings.default_width()))
+    print(f"ADB: {adb_status}  •  Live: {live_count}")
 
 
 def _render_live_devices(
@@ -46,22 +46,26 @@ def _render_live_devices(
 
     rows: List[List[str]] = []
     for idx, summary in enumerate(summaries, start=1):
-        label = summary.get("model") or summary.get("device") or summary.get("serial") or "Unknown device"
+        label = summary.get("model") or summary.get("device") or "Unknown device"
         serial = summary.get("serial") or "—"
         oem = summary.get("manufacturer") or summary.get("brand") or ""
-        android = summary.get("android_release") or summary.get("android_version") or "Unknown"
-        state = summary.get("state") or "Unknown"
-        rooted = summary.get("is_rooted") or "Unknown"
-        inv_badge = _inventory_badge(inventory_lookup.get(serial))
+        android_release = summary.get("android_release") or summary.get("android_version") or "Unknown"
+        android_sdk = summary.get("android_sdk") or summary.get("sdk") or None
+        android = f"{android_release} (SDK {android_sdk})" if android_sdk else android_release
+        rooted_raw = summary.get("is_rooted") or "Unknown"
+        rooted = "Yes" if str(rooted_raw).strip().upper() == "YES" else ("No" if str(rooted_raw).strip().upper() == "NO" else "Unknown")
+        inv = inventory_lookup.get(serial)
+        inv_age = inv.age_display if inv and inv.age_display else "—"
+        inv_pkgs = str(inv.package_count) if inv and inv.package_count is not None else "—"
         rows.append(
             [
                 str(idx),
-                f"{label} ({serial})",
+                label,
                 oem or "—",
-                state.upper(),
                 android,
                 rooted,
-                inv_badge,
+                inv_age,
+                inv_pkgs,
             ]
         )
 
@@ -69,7 +73,7 @@ def _render_live_devices(
         {"compact": True, "accent_first_column": False}
     )
     table_utils.render_table(
-        ["#", "Device", "OEM", "State", "Android", "Root", "Inventory"],
+        ["#", "Device", "OEM", "Android", "Root", "Inv age", "Pkgs"],
         rows,
         **table_kwargs,
     )
@@ -97,9 +101,9 @@ def devices_hub() -> None:
                 )
 
         print()
-        _render_header(adb_status, live_count, historical_count)
+        _render_header(adb_status, live_count)
         print()
-        print(text_blocks.headline("Live devices", width=72))
+        print(text_blocks.headline("Live devices (r=Refresh, 0/q=Back)", width=72))
         _render_live_devices(summaries, inv_lookup)
 
         if warnings:
@@ -112,10 +116,8 @@ def devices_hub() -> None:
                 continue
 
         print()
-        prompt_hint = "Select a device number to open its dashboard, or choose 0 to return to the main menu."
-        print(prompt_hint)
-        print("0) Back to main menu")
-        print(status_messages.status("Shortcuts: r=Refresh  q/0=Back to main", level="info"))
+        # Minimal prompt; shortcuts are in the section header.
+        print("Select device #:")
         choice_keys = [str(idx) for idx in range(1, len(summaries) + 1)]
         default_choice = "0" if len(summaries) == 0 else ("1" if len(summaries) == 1 else "1")
         choice = prompt_utils.get_choice(

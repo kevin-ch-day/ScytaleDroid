@@ -882,6 +882,14 @@ def _apply_default_scope(
 def _default_scope_decision(row: InventoryRow, allow: Set[str]) -> Tuple[bool, Optional[str]]:
     is_play = row.installer == rules.PLAY_STORE_INSTALLER
     is_user = rules.is_user_path(row.primary_path)
+
+    # Always require a user partition path for default scopes; system/vendor
+    # partitions are filtered on non-root devices even if reported as Play
+    # installed. This keeps scope metadata aligned with the policy applied
+    # later in the planner.
+    if not is_user:
+        return False, "non_root_paths"
+
     if not (is_play or is_user):
         return False, "not_in_scope"
 

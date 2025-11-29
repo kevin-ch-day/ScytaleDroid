@@ -40,8 +40,15 @@ def info(message: str, category: str = "application", *, extra: Optional[Mapping
 def warning(message: str, category: str = "application", *, extra: Optional[Mapping[str, object]] = None) -> None:
     """Log a WARNING message with optional structured context."""
 
+    payload = _coerce_extra(extra)
     logger = _get_logger(category)
-    logger.warning(message, extra=_coerce_extra(extra))
+    logger.warning(message, extra=payload)
+
+    err_logger = logging_engine.get_error_logger()
+    if logger is not err_logger:
+        err_payload = dict(payload)
+        err_payload.setdefault("source_category", category)
+        err_logger.warning(f"[{category.upper()}] {message}", extra=err_payload)
 
 
 def error(message: str, category: str = "application", *, extra: Optional[Mapping[str, object]] = None) -> None:

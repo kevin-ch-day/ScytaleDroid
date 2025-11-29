@@ -10,6 +10,8 @@ from scytaledroid.Database.db_func.harvest import apk_repository as repo
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.LoggingUtils import logging_engine
+from scytaledroid.Utils.LoggingUtils.logging_context import RunContext, get_run_logger
+from scytaledroid.Utils.LoggingUtils import logging_events as log_events
 
 from . import common
 from .common import (
@@ -55,6 +57,33 @@ def execute_harvest(
         "session_stamp": session_stamp,
         "pull_mode": pull_mode,
     }
+    if pull_mode == "legacy":
+        print(
+            "[WARN] pull_mode=legacy is deprecated; prefer explicit modes "
+            "(e.g., 'inventory' / 'snapshot')."
+        )
+
+    run_ctx = RunContext(
+        subsystem="harvest",
+        device_serial=resolved_serial,
+        device_model=None,
+        run_id=run_identifier,
+        scope=scope_label,
+        profile=pull_mode,
+    )
+    run_logger = get_run_logger("harvest", run_ctx)
+    try:
+        run_logger.info(
+            "Harvest RUN_START",
+            extra={
+                "event": log_events.RUN_START,
+                "packages_total": len(plans),
+                "scope": scope_label,
+                "pull_mode": pull_mode,
+            },
+        )
+    except Exception:
+        pass
 
     log_adapter = harvest_logger
     close_logger = False
@@ -123,6 +152,29 @@ def execute_harvest(
                 context={**base_context, "event": "storage_root.ensure"},
             )
             stats["db_storage_root"] += 1
+            try:
+                run_logger = get_run_logger(
+                    "harvest",
+                    RunContext(
+                        subsystem="harvest",
+                        device_serial=resolved_serial,
+                        device_model=None,
+                        run_id=run_identifier,
+                        scope=scope_label,
+                        profile=pull_mode,
+                    ),
+                )
+                run_logger.info(
+                    "Harvest db.persist",
+                    extra={
+                        "event": log_events.DB_PERSIST,
+                        "entity": "harvest.storage_root",
+                        "rows": 1,
+                        "host": host_name,
+                    },
+                )
+            except Exception:
+                pass
         except Exception as exc:
             stats["db_errors"] += 1
             _emit(

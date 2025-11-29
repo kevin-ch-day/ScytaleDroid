@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import os
 from typing import Dict, List
 
-from scytaledroid.Utils.DisplayUtils import status_messages, table_utils
+from scytaledroid.Utils.DisplayUtils import status_messages, table_utils, text_blocks
 from scytaledroid.ui import formatter
 
 
@@ -73,7 +74,11 @@ def render_sync_summary_box(result) -> None:
 
 def render_inventory_summary(result) -> None:
     """Render inventory summary tables."""
-    rows = getattr(result, "rows", None)
+    rows = None
+    if isinstance(result, (list, tuple)):
+        rows = list(result)
+    else:
+        rows = getattr(result, "rows", None)
     # If rows are not attached, skip.
     if not rows:
         return
@@ -95,10 +100,21 @@ def render_inventory_summary(result) -> None:
         if primary_path.startswith("/product/"):
             return "Product (/product)"
         if primary_path.startswith("/system/") or primary_path.startswith("/system_ext/"):
-            return "System (/system, /system_ext)"
+            return "System (/system)"
         if primary_path.startswith("/apex/"):
             return "Apex (/apex)"
         if primary_path.startswith("/vendor/"):
+            return "Vendor (/vendor)"
+        partition_field = str(entry.get("partition") or "").lower()
+        if partition_field == "data":
+            return "Data (/data)"
+        if partition_field == "product":
+            return "Product (/product)"
+        if partition_field == "system":
+            return "System (/system)"
+        if partition_field == "apex":
+            return "Apex (/apex)"
+        if partition_field == "vendor":
             return "Vendor (/vendor)"
         if primary_path:
             return "Other"
@@ -164,7 +180,7 @@ def render_inventory_summary(result) -> None:
     for label in [
         "Data (/data)",
         "Product (/product)",
-        "System (/system, /system_ext)",
+        "System (/system)",
         "Apex (/apex)",
         "Vendor (/vendor)",
     ]:

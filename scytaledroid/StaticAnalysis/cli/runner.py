@@ -14,6 +14,8 @@ from scytaledroid.StaticAnalysis.persistence import ingest as canonical_ingest
 from scytaledroid.StaticAnalysis.session import make_session_stamp
 from scytaledroid.ui import formatter
 from .views import render_run_start, render_run_summary
+from scytaledroid.Utils.LoggingUtils.logging_context import RunContext, get_run_logger
+from scytaledroid.Utils.LoggingUtils import logging_events as log_events
 
 from .execution import (
     build_analysis_config,
@@ -66,6 +68,33 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
         trace_ids=params.trace_detectors,
     )
 
+    # Structured RUN_START log with context
+    run_ctx = RunContext(
+        subsystem="static",
+        device_serial=getattr(selection, "device_serial", None),
+        device_model=None,
+        run_id=params.session_stamp,
+        scope=scope_target,
+        profile=params.profile_label,
+    )
+    try:
+        static_logger = get_run_logger("static", run_ctx)
+        static_logger.info(
+            "Static RUN_START",
+            extra={
+                "event": log_events.RUN_START,
+                "run_id": params.session_stamp,
+                "target": scope_target,
+                "profile": params.profile_label,
+                "modules": modules,
+                "workers": workers_label,
+                "cache": "purge" if not params.reuse_cache else "reuse",
+                "perm_cache": "refresh" if params.permission_snapshot_refresh else "skip",
+            },
+        )
+    except Exception:
+        static_logger = None
+
     configure_logging_for_cli(params.log_level)
 
     if params.profile == "permissions":
@@ -108,6 +137,29 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
             perm_stats=perm_stats,
             evidence_root=evidence_root,
         )
+        # Structured log for reproducibility (use fresh logger post-configuration)
+        try:
+            end_payload = {
+                "event": log_events.RUN_END,
+                "run_id": params.session_stamp,
+                "target": scope_target,
+                "profile": params.profile_label,
+                "detectors": modules,
+                "detectors_count": len(modules),
+                "findings_total": getattr(summary, "findings_total", 0),
+                "severity": sev_counts,
+                "failed_masvs": failed_masvs,
+                "permissions": perm_stats,
+                "evidence_root": evidence_root,
+                "status": "ok",
+                "duration_seconds": getattr(summary, "duration_seconds", None),
+                "applications": getattr(summary, "applications", None),
+                "artifacts": getattr(summary, "artifacts", None),
+            }
+            logger = logging_engine.get_static_logger()
+            logger.info("Static RUN_END", extra=logging_engine.ensure_trace(end_payload))
+        except Exception:
+            pass
 
     if params.session_stamp:
         try:
