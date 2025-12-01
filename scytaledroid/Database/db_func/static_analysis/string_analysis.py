@@ -96,6 +96,13 @@ def ensure_tables() -> bool:
                     run_sql("ALTER TABLE static_string_summary ADD COLUMN run_id BIGINT UNSIGNED NULL AFTER scope_label")
                 except Exception:
                     pass
+            if not _has_col("static_string_summary", "static_run_id"):
+                try:
+                    run_sql(
+                        "ALTER TABLE static_string_summary ADD COLUMN static_run_id BIGINT UNSIGNED NULL AFTER run_id"
+                    )
+                except Exception:
+                    pass
             for col, stmt in (
                 ("placeholders_downgraded", "ALTER TABLE static_string_summary ADD COLUMN placeholders_downgraded INT UNSIGNED NOT NULL DEFAULT 0 AFTER high_entropy"),
                 ("placeholders_suppressed", "ALTER TABLE static_string_summary ADD COLUMN placeholders_suppressed INT UNSIGNED NOT NULL DEFAULT 0 AFTER placeholders_downgraded"),
@@ -115,9 +122,20 @@ def ensure_tables() -> bool:
             except Exception:
                 pass
             try:
+                run_sql("ALTER TABLE static_string_summary ADD KEY ix_string_summary_static_run (static_run_id, scope_label)")
+            except Exception:
+                pass
+            try:
                 run_sql(
                     "ALTER TABLE static_string_summary ADD CONSTRAINT fk_string_summary_run "
                     "FOREIGN KEY (run_id) REFERENCES runs (run_id) ON DELETE SET NULL"
+                )
+            except Exception:
+                pass
+            try:
+                run_sql(
+                    "ALTER TABLE static_string_summary ADD CONSTRAINT fk_string_summary_static_run "
+                    "FOREIGN KEY (static_run_id) REFERENCES static_analysis_runs (id) ON DELETE SET NULL"
                 )
             except Exception:
                 pass
@@ -136,12 +154,24 @@ def ensure_tables() -> bool:
                 ("root_domain", "ALTER TABLE static_string_samples ADD COLUMN root_domain VARCHAR(191) NULL"),
                 ("resource_name", "ALTER TABLE static_string_samples ADD COLUMN resource_name VARCHAR(191) NULL"),
                 ("scheme", "ALTER TABLE static_string_samples ADD COLUMN scheme VARCHAR(32) NULL"),
+                ("static_run_id", "ALTER TABLE static_string_samples ADD COLUMN static_run_id BIGINT UNSIGNED NULL AFTER summary_id"),
             ):
                 if not _has_col("static_string_samples", col):
                     try:
                         run_sql(stmt)
                     except Exception:
                         pass
+            try:
+                run_sql("ALTER TABLE static_string_samples ADD KEY ix_samples_static_run (static_run_id)")
+            except Exception:
+                pass
+            try:
+                run_sql(
+                    "ALTER TABLE static_string_samples ADD CONSTRAINT fk_samples_static_run "
+                    "FOREIGN KEY (static_run_id) REFERENCES static_analysis_runs (id) ON DELETE SET NULL"
+                )
+            except Exception:
+                pass
             for host in _default_doc_hosts():
                 try:
                     run_sql(queries.INSERT_DOC_HOST, (host,))
@@ -179,6 +209,11 @@ def _summary_params(summary: SummaryRow) -> MutableMapping[str, object]:
     if isinstance(summary, StringSummaryRecord):
         return summary.to_parameters()
     base = dict(summary)
+    static_run = (
+        int(base["static_run_id"])
+        if base.get("static_run_id") is not None and str(base.get("static_run_id")).strip() != ""
+        else None
+    )
     return StringSummaryRecord(
         package_name=str(base.get("package_name", "")),
         session_stamp=str(base.get("session_stamp", "")),
@@ -207,11 +242,20 @@ def _summary_params(summary: SummaryRow) -> MutableMapping[str, object]:
             if base.get("run_id") is not None and str(base.get("run_id")).strip() != ""
             else None
         ),
+        static_run_id=static_run,
     ).to_parameters()
 
 
 def upsert_summary(summary: SummaryRow) -> int | None:
     payload = _summary_params(summary)
+    # Keep a copy for logging in case inserts fail.
+    log_payload = {
+        "package_name": payload.get("package_name"),
+        "session_stamp": payload.get("session_stamp"),
+        "scope_label": payload.get("scope_label"),
+        "run_id": payload.get("run_id"),
+        "static_run_id": payload.get("static_run_id"),
+    }
     try:
         with database_session():
             run_sql(queries.INSERT_STRING_SUMMARY, payload)
@@ -229,8 +273,36 @@ def upsert_summary(summary: SummaryRow) -> int | None:
                     (payload["package_name"], payload["session_stamp"], payload["scope_label"]),
                     fetch="one",
                 )
-            return int(row[0]) if row else None
-    except Exception:
+            if not row:
+                try:
+                    from scytaledroid.Utils.LoggingUtils import logging_utils as log
+
+                    log.warning(
+                        "static_string_summary lookup returned no row after insert "
+                        f"(package={payload.get('package_name')} session={payload.get('session_stamp')} "
+                        f"scope={payload.get('scope_label')} run_id={payload.get('run_id')} "
+                        f"static_run_id={payload.get('static_run_id')})",
+                        category="db",
+                    )
+                except Exception:
+                    pass
+                return None
+            return int(row[0])
+    except Exception as exc:
+        try:
+            from scytaledroid.Utils.LoggingUtils import logging_utils as log
+            log.warning(
+                f"Failed to upsert static_string_summary for {payload.get('package_name')} "
+                f"static_run_id={payload.get('static_run_id')} run_id={payload.get('run_id')}: {exc}",
+                category="db",
+            )
+            log.debug(
+                "static_string_summary payload: %s",
+                log_payload,
+                category="db",
+            )
+        except Exception:
+            pass
         return None
 
 
@@ -292,8 +364,23 @@ def replace_top_samples(
                     )
                     inserted += 1
                     rank += 1
-    except Exception:
-        pass
+    except Exception as exc:
+        try:
+            from scytaledroid.Utils.LoggingUtils import logging_utils as log
+            log.warning(
+                f"Failed to persist string samples for summary_id={summary_id} "
+                f"static_run_id={static_run_id}: {exc}",
+                category="db",
+            )
+            log.debug(
+                "String sample insert failed for summary_id=%s static_run_id=%s payload_keys=%s",
+                summary_id,
+                static_run_id,
+                list(samples.keys()),
+                category="db",
+            )
+        except Exception:
+            pass
     return deleted, inserted
 
 

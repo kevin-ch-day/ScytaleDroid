@@ -144,7 +144,7 @@ def persist_run_summary(
             JOIN app_versions av ON av.id = sar.app_version_id
             JOIN apps a ON a.id = av.app_id
             WHERE sar.session_stamp = %s
-              AND a.package = %s
+              AND a.package_name = %s
             ORDER BY sar.id DESC
             LIMIT 1
             """,
@@ -155,6 +155,111 @@ def persist_run_summary(
             static_run_id = int(row[0])
     except Exception:
         static_run_id = None
+
+    def _create_static_run(app_version_id: int) -> int | None:
+        try:
+            run_id = core_q.run_sql(
+                """
+                INSERT INTO static_analysis_runs (
+                    app_version_id, session_stamp, scope_label, profile, findings_total
+                ) VALUES (%s,%s,%s,%s,%s)
+                """,
+                (
+                    app_version_id,
+                    session_stamp,
+                    scope_label,
+                    "Full",
+                    int(finding_totals.get("total", 0) or 0),
+                ),
+                return_lastrowid=True,
+            )
+            return int(run_id) if run_id else None
+        except Exception as exc:  # pragma: no cover - defensive
+            log.error(
+                f"Failed to create static_analysis_runs row for {package_for_run}: {exc}",
+                category="db",
+            )
+            return None
+
+    def _ensure_app_version() -> int | None:
+        """Fetch or create an app_version so static_run_id can be keyed reliably."""
+        display_name = getattr(manifest_obj, "app_label", None) or package_for_run
+        version_code = None
+        version_name = getattr(manifest_obj, "version_name", None) if manifest_obj else None
+        min_sdk = safe_int(getattr(manifest_obj, "min_sdk", None) or getattr(manifest_obj, "min_sdk_version", None))
+        target_sdk = safe_int(getattr(manifest_obj, "target_sdk", None))
+        try:
+            version_code = safe_int(getattr(manifest_obj, "version_code", None)) if manifest_obj else None
+        except Exception:
+            version_code = None
+
+        try:
+            app_id = None
+            row = core_q.run_sql(
+                "SELECT id FROM apps WHERE package_name=%s",
+                (package_for_run,),
+                fetch="one",
+            )
+            if row and row[0]:
+                app_id = int(row[0])
+            else:
+                app_id = core_q.run_sql(
+                    "INSERT INTO apps (package_name, display_name) VALUES (%s,%s)",
+                    (package_for_run, display_name),
+                    return_lastrowid=True,
+                )
+                app_id = int(app_id) if app_id else None
+            if app_id is None:
+                return None
+
+            params = (app_id, version_name, version_code)
+            row = core_q.run_sql(
+                """
+                SELECT id FROM app_versions
+                WHERE app_id=%s AND version_name<=>%s AND version_code<=>%s
+                ORDER BY id DESC LIMIT 1
+                """,
+                params,
+                fetch="one",
+            )
+            if row and row[0]:
+                return int(row[0])
+
+            av_id = core_q.run_sql(
+                """
+                INSERT INTO app_versions (app_id, version_name, version_code, min_sdk, target_sdk)
+                VALUES (%s,%s,%s,%s,%s)
+                """,
+                (app_id, version_name, version_code, min_sdk, target_sdk),
+                return_lastrowid=True,
+            )
+            return int(av_id) if av_id else None
+        except Exception as exc:  # pragma: no cover - defensive
+            log.warning(
+                f"Failed to resolve/create app_version for {package_for_run}: {exc}",
+                category="static_analysis",
+            )
+            return None
+
+    if static_run_id is None and not dry_run:
+        # Attempt to create a static_analysis_runs row so downstream tables can
+        # be keyed by static_run_id even on fresh schemas.
+        app_version_id = _ensure_app_version()
+        if app_version_id is not None:
+            static_run_id = _create_static_run(app_version_id)
+            if static_run_id:
+                log.info(
+                    f"Resolved static_run_id={static_run_id} for {package_for_run} (session={session_stamp})",
+                    category="static_analysis",
+                )
+        else:
+            log.warning(
+                (
+                    f"Could not resolve app_version_id for {package_for_run}; "
+                    f"static_run_id will remain unset and persistence will be legacy-only."
+                ),
+                category="static_analysis",
+            )
 
     metrics_bundle = compute_metrics_bundle(br, string_data)
     code_http_hosts = metrics_bundle.code_http_hosts

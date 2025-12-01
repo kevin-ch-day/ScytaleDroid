@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS static_string_summary (
   session_stamp VARCHAR(32) NOT NULL,
   scope_label VARCHAR(191) NOT NULL,
   run_id BIGINT UNSIGNED NULL,
+  static_run_id BIGINT UNSIGNED NULL,
   endpoints INT UNSIGNED NOT NULL DEFAULT 0,
   http_cleartext INT UNSIGNED NOT NULL DEFAULT 0,
   api_keys INT UNSIGNED NOT NULL DEFAULT 0,
@@ -31,10 +32,14 @@ CREATE TABLE IF NOT EXISTS static_string_summary (
   PRIMARY KEY (id),
   UNIQUE KEY ux_string_summary (package_name, session_stamp, scope_label),
   UNIQUE KEY ux_string_summary_run_scope (run_id, scope_label),
+  KEY ix_string_summary_static_run (static_run_id, scope_label),
   KEY ix_string_summary_session (session_stamp),
   KEY ix_string_summary_run (run_id),
   CONSTRAINT fk_string_summary_run FOREIGN KEY (run_id)
     REFERENCES runs (run_id)
+    ON DELETE SET NULL,
+  CONSTRAINT fk_string_summary_static_run FOREIGN KEY (static_run_id)
+    REFERENCES static_analysis_runs (id)
     ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 """
@@ -44,6 +49,7 @@ CREATE_STRING_SAMPLES = """
 CREATE TABLE IF NOT EXISTS static_string_samples (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   summary_id BIGINT UNSIGNED NOT NULL,
+  static_run_id BIGINT UNSIGNED NULL,
   bucket VARCHAR(32) NOT NULL,
   value_masked VARCHAR(512) NULL,
   src VARCHAR(512) NULL,
@@ -61,9 +67,13 @@ CREATE TABLE IF NOT EXISTS static_string_samples (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   KEY ix_samples_summary (summary_id),
+  KEY ix_samples_static_run (static_run_id),
   CONSTRAINT fk_samples_summary FOREIGN KEY (summary_id)
     REFERENCES static_string_summary (id)
-    ON DELETE CASCADE
+    ON DELETE CASCADE,
+  CONSTRAINT fk_samples_static_run FOREIGN KEY (static_run_id)
+    REFERENCES static_analysis_runs (id)
+    ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 """
 
@@ -92,6 +102,7 @@ INSERT INTO static_string_summary (
 )
 ON DUPLICATE KEY UPDATE
   run_id=VALUES(run_id),
+  static_run_id=VALUES(static_run_id),
   endpoints=VALUES(endpoints),
   http_cleartext=VALUES(http_cleartext),
   api_keys=VALUES(api_keys),

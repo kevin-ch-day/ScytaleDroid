@@ -263,7 +263,7 @@ def persist_findings(run_id: int, rows: Sequence[Dict[str, Any]], *, static_run_
                     %s,%s,%s,%s,%s,%s,%s,%s,
                     %s,%s,%s,%s,
                     %s,%s,%s,%s,
-                    %s,%s,%s,%s,%s,%s,%s
+                    %s,%s,%s,%s,%s,%s
                 )
                 """,
                 (

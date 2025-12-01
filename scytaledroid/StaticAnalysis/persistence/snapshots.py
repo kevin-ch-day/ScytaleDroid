@@ -68,13 +68,19 @@ def _ensure_snapshot_schema() -> None:
         permission_support.ensure_audit_apps()
     except Exception as exc:  # pragma: no cover - defensive
         log.warning(
-            "Failed to ensure permission audit tables: %s", exc, category="static_analysis"
+            f"Failed to ensure permission audit tables: {exc}",
+            category="static_analysis",
         )
     for table, index, statement in _INDEX_DEFINITIONS:
         _ensure_index(table, index, statement)
 
 
-def write_permission_snapshot(session_stamp: str, *, scope_label: Optional[str] = None) -> Optional[int]:
+def write_permission_snapshot(
+    session_stamp: str,
+    *,
+    scope_label: Optional[str] = None,
+    static_run_id: Optional[int] = None,
+) -> Optional[int]:
     """Upsert a permission snapshot for ``session_stamp`` and return the snapshot ID."""
 
     if not session_stamp:
@@ -82,26 +88,45 @@ def write_permission_snapshot(session_stamp: str, *, scope_label: Optional[str] 
 
     _ensure_snapshot_schema()
 
+    if static_run_id is None:
+        try:
+            row = core_q.run_sql(
+                "SELECT id FROM static_analysis_runs WHERE session_stamp=%s ORDER BY id DESC LIMIT 1",
+                (session_stamp,),
+                fetch="one",
+            )
+            if row and row[0]:
+                static_run_id = int(row[0])
+        except Exception:
+            static_run_id = None
+    else:
+        try:
+            static_run_id = int(static_run_id)
+        except Exception:
+            static_run_id = None
+
     snapshot_key = SNAPSHOT_PREFIX + session_stamp
     scope_display = scope_label or f"Session {session_stamp}"
     metadata_scope = scope_label or scope_display
 
     header_sql = """
-        INSERT INTO permission_audit_snapshots (snapshot_key, scope_label, apps_total, metadata)
+        INSERT INTO permission_audit_snapshots (snapshot_key, scope_label, apps_total, metadata, static_run_id)
         SELECT %s,
                %s,
                COUNT(DISTINCT package_name),
-               JSON_OBJECT('session', %s, 'scope_label', %s, 'source', 'static-cli')
+               JSON_OBJECT('session', %s, 'scope_label', %s, 'source', 'static-cli'),
+               %s
         FROM static_findings_summary
         WHERE session_stamp = %s
         ON DUPLICATE KEY UPDATE
           scope_label = VALUES(scope_label),
           apps_total = VALUES(apps_total),
-          metadata = VALUES(metadata)
+          metadata = VALUES(metadata),
+          static_run_id = VALUES(static_run_id)
     """
     core_q.run_sql(
         header_sql,
-        (snapshot_key, scope_display, session_stamp, metadata_scope, session_stamp),
+        (snapshot_key, scope_display, session_stamp, metadata_scope, static_run_id, session_stamp),
     )
 
     row = core_q.run_sql(
@@ -127,23 +152,37 @@ def write_permission_snapshot(session_stamp: str, *, scope_label: Optional[str] 
         "ELSE 'A' END"
     ).format(fallback=fallback)
 
+    # NOTE: Column order matters; align explicitly with permission_audit_apps schema.
+    # Schema (in order): audit_id (PK), snapshot_id, static_run_id, package_name,
+    # app_label, run_id, score_raw, score_capped, grade, dangerous_count,
+    # signature_count, vendor_count, combos_total, surprises_total, legacy_total,
+    # vendor_modifier, modernization_credit, details, created_at.
     apps_sql = f"""
         INSERT INTO permission_audit_apps (
-          snapshot_id, package_name, app_label,
+          snapshot_id, static_run_id, package_name, app_label, run_id,
           score_raw, score_capped, grade,
           dangerous_count, signature_count, vendor_count,
+          combos_total, surprises_total, legacy_total,
+          vendor_modifier, modernization_credit,
           details
         )
         SELECT
           %s,
+          %s,
           sfs.package_name,
           MAX(r.app_label),
+          MAX(r.run_id),
           COALESCE(MAX(spr.risk_score), MAX(rs.risk_score), {fallback}),
           COALESCE(LEAST(MAX(spr.risk_score), 100), LEAST(MAX(rs.risk_score), 100), {fallback}),
           COALESCE(MAX(spr.risk_grade), MAX(rs.risk_grade), {grade_case}),
           COALESCE(MAX(spr.dangerous), MAX(rs.dangerous), 0),
           COALESCE(MAX(spr.signature), MAX(rs.signature), 0),
           COALESCE(MAX(spr.vendor), MAX(rs.vendor), 0),
+          COALESCE(MAX(spr.combo_total), 0),
+          COALESCE(MAX(spr.surprise_total), 0),
+          COALESCE(MAX(spr.legacy_total), 0),
+          COALESCE(MAX(spr.vendor_modifier), 0),
+          COALESCE(MAX(spr.modernization_credit), 0),
           JSON_OBJECT(
             'session', %s,
             'scope_label', %s,
@@ -170,21 +209,35 @@ def write_permission_snapshot(session_stamp: str, *, scope_label: Optional[str] 
           dangerous_count = VALUES(dangerous_count),
           signature_count = VALUES(signature_count),
           vendor_count = VALUES(vendor_count),
+          combos_total = VALUES(combos_total),
+          surprises_total = VALUES(surprises_total),
+          legacy_total = VALUES(legacy_total),
+          vendor_modifier = VALUES(vendor_modifier),
+          modernization_credit = VALUES(modernization_credit),
           details = VALUES(details)
     """
 
-    core_q.run_sql(
-        apps_sql,
-        (
-            snapshot_id,
-            session_stamp,
-            metadata_scope,
-            session_stamp,
-            session_stamp,
-            session_stamp,
-            session_stamp,
-        ),
-    )
+    try:
+        core_q.run_sql(
+            apps_sql,
+            (
+                snapshot_id,
+                static_run_id,
+                session_stamp,
+                metadata_scope,
+                session_stamp,
+                session_stamp,
+                session_stamp,
+                session_stamp,
+            ),
+        )
+    except Exception as exc:
+        log.error(
+            f"Failed to persist permission audit apps "
+            f"(snapshot_id={snapshot_id} static_run_id={static_run_id} session={session_stamp}): {exc}",
+            category="static_analysis",
+        )
+        raise
 
     return snapshot_id
 

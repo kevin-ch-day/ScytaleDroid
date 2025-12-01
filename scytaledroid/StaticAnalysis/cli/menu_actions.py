@@ -81,28 +81,11 @@ def prompt_session_label(params: RunParameters) -> RunParameters:
 
 
 def ask_run_controls() -> str:
-    """Prompt the user for the next action when running a command."""
+    """Run with defaults without prompting for options."""
 
-    while True:
-        print()
-        menu_utils.print_section("Run controls")
-        print("  R) Run with defaults")
-        print("  A) Advanced options")
-        print("  0) Back")
-
-        response = prompt_utils.prompt_text(
-            "",
-            default="R",
-            required=False,
-            error_message="Invalid choice. Please try again.",
-        )
-        choice = (response or "R").strip().lower()
-
-        if choice in {"", "r", "run", "1"}:
-            return "run"
-        if choice in {"a", "adv", "advanced", "2"}:
-            return "advanced"
-        if choice in {"0", "back", "b"}:
-            return "back"
-
-        print(status_messages.status("Invalid choice. Please try again.", level="warn"))
+    # Historically this prompted for R/A/Back; we now streamline to always run
+    # with defaults to reduce friction for common workflows. Keep the message
+    # minimal so the CLI no longer shows phantom menu choices.
+    print()
+    print(status_messages.status("Running with defaults…", level="info"))
+    return "run"

@@ -79,6 +79,14 @@ def persist_static_findings(
                 "upsert_summary returned None (static findings summary may already exist under legacy schema)"
             )
             log.warning(message, category="static_analysis")
+            log.warning(
+                (
+                    f"static findings summary unresolved "
+                    f"(package={package_name} session={session_stamp} scope={scope_label} "
+                    f"run_id={run_id} static_run_id={static_run_id})"
+                ),
+                category="db",
+            )
         else:
             if findings:
                 _sf.replace_findings(

@@ -67,7 +67,11 @@ def persist_string_summary(
         )
         summary_id = _sa.upsert_summary(summary_record)
         if summary_id is None:
-            raise RuntimeError("upsert_summary returned None")
+            raise RuntimeError(
+                f"upsert_summary returned None "
+                f"(package={package_name}, session={session_stamp}, scope={scope_label}, "
+                f"run_id={run_id}, static_run_id={static_run_id})"
+            )
         _sa.replace_top_samples(
             summary_id,
             samples,
@@ -75,8 +79,21 @@ def persist_string_summary(
             static_run_id=static_run_id,
         )
     except Exception as exc:  # pragma: no cover - defensive
-        message = f"Failed to persist string analysis summary for {package_name}: {exc}"
+        message = (
+            f"Failed to persist string analysis summary for {package_name}: {exc}"
+        )
         log.warning(message, category="static_analysis")
+        log.error(
+            "String persistence failure",
+            category="db",
+            extra={
+                "package": package_name,
+                "run_id": run_id,
+                "static_run_id": static_run_id,
+                "counts_keys": list(counts.keys()),
+                "exception": str(exc),
+            },
+        )
         errors.append(message)
     return errors
 
