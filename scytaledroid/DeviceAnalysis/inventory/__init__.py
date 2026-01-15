@@ -9,9 +9,6 @@ Notes for new code:
 
 from __future__ import annotations
 
-import importlib.util
-import os
-from pathlib import Path
 from typing import Dict, List, Optional
 
 from scytaledroid.Utils.DisplayUtils import (
@@ -54,17 +51,7 @@ def _render_inventory_summary(obj) -> None:
     _summary_mod.render_inventory_summary(obj)
 
 
-# Legacy support: allow opting into the old inventory.py via env flag
-run_inventory_sync = None
-if os.getenv("SCYTALEDROID_LOAD_LEGACY_INVENTORY") == "1":
-    print("[WARN] SCYTALEDROID_LOAD_LEGACY_INVENTORY is enabled (legacy path). New code should use run_full_sync.")
-    legacy_path = Path(__file__).resolve().parent.parent / "inventory.py"
-    if legacy_path.exists():
-        spec = importlib.util.spec_from_file_location("scytaledroid.DeviceAnalysis.inventory_legacy", legacy_path)
-        if spec and spec.loader:
-            legacy_mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(legacy_mod)
-            run_inventory_sync = getattr(legacy_mod, "run_inventory_sync", None)
+run_inventory_sync = None  # Legacy path removed; use run_full_sync instead.
 
 
 def _owner_role(entry: Dict[str, object]) -> str:

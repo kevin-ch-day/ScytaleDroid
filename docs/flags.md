@@ -12,11 +12,11 @@ Classification follows: **keep** (supported), **warn** (legacy, to deprecate), *
 
 ## Warn (legacy behavior; deprecate)
 - `SCYTALEDROID_INVENTORY_MODE=legacy` (old inventory path); warn on use.
-- `SCYTALEDROID_LOAD_LEGACY_INVENTORY` (old inventory loader); warn; target removal.
 - Legacy harvest pull modes (`pull_mode="legacy"`) – warn; hidden from UI.
 - Boxed UI output (`SCYTALEDROID_UI_BOXED`) – hidden dev-only switch.
 
 ## Remove (or move to legacy-only)
+- `SCYTALEDROID_LOAD_LEGACY_INVENTORY` (legacy loader removed; new inventory package is the only path).
 - Any flags that select legacy schemas/persistence paths (not currently required for PhD runs).
 - Any flags that resurrect legacy runners (quick_harvest) for normal operation.
 
