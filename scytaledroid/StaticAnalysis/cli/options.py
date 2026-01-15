@@ -42,9 +42,9 @@ class ScanDisplayOptions:
     max_evidence: int = _DEFAULT_EVIDENCE_LIMIT
     quiet: bool = False
     show_findings: bool = False
-    show_timings: bool = True
+    show_timings: bool = False
     finding_limit: int = 3
-    show_pipeline: bool = True
+    show_pipeline: bool = False
     explore: bool = False
 
     def describe(self) -> str:
@@ -75,8 +75,8 @@ def resolve_display_options() -> ScanDisplayOptions:
 
     quiet = _env_flag("SCYTALEDROID_STATIC_QUIET", False)
     show_findings_default = _env_flag("SCYTALEDROID_STATIC_SHOW_FINDINGS", False)
-    show_timings = _env_flag("SCYTALEDROID_STATIC_SHOW_TIMINGS", True)
-    show_pipeline_default = _env_flag("SCYTALEDROID_STATIC_SHOW_PIPELINE", True)
+    show_timings = _env_flag("SCYTALEDROID_STATIC_SHOW_TIMINGS", False)
+    show_pipeline_default = _env_flag("SCYTALEDROID_STATIC_SHOW_PIPELINE", False)
     limit = _env_int("SCYTALEDROID_STATIC_FINDING_LIMIT", 3)
 
     show_findings = False if quiet else show_findings_default
@@ -98,7 +98,7 @@ def parse_cli_args(argv: Sequence[str] | None = None) -> ScanDisplayOptions:
         prog="scd-static",
         description="Render static analysis results with deterministic formatting.",
     )
-    parser.set_defaults(show_pipeline=True)
+    parser.set_defaults(show_pipeline=False)
     parser.add_argument(
         "--profile",
         choices=_VALID_PROFILES,

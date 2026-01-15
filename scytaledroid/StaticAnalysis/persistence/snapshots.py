@@ -124,10 +124,17 @@ def write_permission_snapshot(
           metadata = VALUES(metadata),
           static_run_id = VALUES(static_run_id)
     """
-    core_q.run_sql(
-        header_sql,
-        (snapshot_key, scope_display, session_stamp, metadata_scope, static_run_id, session_stamp),
-    )
+    try:
+        core_q.run_sql(
+            header_sql,
+            (snapshot_key, scope_display, session_stamp, metadata_scope, static_run_id, session_stamp),
+        )
+    except Exception as exc:
+        log.warning(
+            f"Permission snapshot header skipped (session={session_stamp}): {exc}",
+            category="static_analysis",
+        )
+        return None
 
     row = core_q.run_sql(
         "SELECT snapshot_id FROM permission_audit_snapshots WHERE snapshot_key=%s",

@@ -90,7 +90,7 @@ def _execute_single_artifact(progress_label: str, artifact, params: RunParameter
     summary = _summarize_artifact(artifact, report, json_path, duration)
     print(
         status_messages.step(
-            f"Finished {artifact.artifact_label or 'base'} ({format_duration(duration)})",
+            f"Finished {artifact.artifact_label or 'base'}",
             label=progress_label,
             state="success",
         )
@@ -106,17 +106,7 @@ def _print_artifact_progress(label: str, summary: ArtifactOutcome, timings: Iter
         totals = severity.normalise_counts(severity_counts.items())
 
     card_items: list[summary_cards.SummaryCardItem] = []
-    if detector_timings:
-        total_seconds = sum(duration for _, duration in detector_timings)
-        card_items.append(summary_cards.summary_item("Detectors", len(detector_timings)))
-        duration_seconds = float(getattr(summary, "duration_seconds", 0.0) or 0.0)
-        if duration_seconds <= 0 or abs(duration_seconds - total_seconds) > 0.001:
-            card_items.append(
-                summary_cards.summary_item(
-                    "Detector time",
-                    format_duration(total_seconds),
-                )
-            )
+    # Suppress per-detector timing noise in the default UI; keep only findings counts.
     total_findings = sum(totals.values())
     if total_findings:
         style = "severity_high" if totals.get("high") else "emphasis"
@@ -168,8 +158,7 @@ def _print_artifact_progress(label: str, summary: ArtifactOutcome, timings: Iter
     print()
     print(f"Package: {package_name or '<unknown>'}")
     print(f"Filename: {filename}")
-    if summary.duration_seconds:
-        print(f"Duration: {format_duration(summary.duration_seconds)}")
+    # Suppress duration to keep output compact; timings remain available in verbose logs.
 
     if card_items:
         bullet_items = [
@@ -192,16 +181,7 @@ def _print_artifact_progress(label: str, summary: ArtifactOutcome, timings: Iter
         )
         print()
 
-    if detector_timings and output_prefs.get().verbose:
-        for name, duration in detector_timings:
-            print(
-                status_messages.step(
-                    f"{name:<18} {format_duration(duration)}",
-                    state="info",
-                    indent=4,
-                    show_icon=False,
-                )
-            )
+    # Suppress per-detector timing noise in the default menu view; timings remain available in logs.
 
 
 def _progress_label(group_index: int, group_total: int, artifact_index: int, artifact_total: int, package_name: str) -> str:

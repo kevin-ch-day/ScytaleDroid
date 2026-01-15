@@ -229,7 +229,7 @@ def _render_application_topology(
 
     duration = integrity_result.duration_sec if integrity_result else 0.0
     status = integrity_result.status if integrity_result else Badge.SKIPPED
-    lines.append(f"Timing: {_format_duration(duration)}")
+    # Suppress timing to keep output compact; status is still shown.
     lines.append(f"Status: {format_badge(status, glyphs)}")
     if isinstance(package_profile, dict):
         package_profile["_topology_printed"] = True
@@ -337,7 +337,6 @@ def _render_integrity_card(
         lines.extend(evidence_lines)
 
     lines.append("")
-    lines.append(f"Timing: {_format_duration(result.duration_sec)}")
     lines.append(f"Status: {format_badge(result.status, glyphs)}")
     return lines
 
@@ -442,7 +441,6 @@ def _render_network_card(
         lines.extend(_render_notes(result.notes, glyphs))
 
     lines.append("")
-    lines.append(f"Timing: {_format_duration(result.duration_sec)}")
     lines.append(f"Status: {format_badge(result.status, glyphs)}")
     return lines
 
@@ -471,7 +469,6 @@ def _render_secrets_card(
         lines.append(f"Evidence (≤{options.evidence_limit})")
         lines.extend(evidence_lines)
 
-    lines.append(f"Timing: {_format_duration(result.duration_sec)}")
     lines.append(f"Status: {format_badge(result.status, glyphs)}")
     return lines
 
@@ -506,7 +503,6 @@ def _render_generic_section(
         for finding in result.findings[: options.finding_limit]:
             lines.append(f"  - {finding.title} ({finding.severity_gate.value})")
 
-    lines.append(f"Timing: {_format_duration(result.duration_sec)}")
     lines.append(f"Status: {format_badge(result.status, glyphs)}")
     return lines
 
@@ -514,7 +510,6 @@ def _render_generic_section(
 def _render_missing_section(glyphs: GlyphSet, reason: str = "Detector not executed.") -> list[str]:
     return [
         f"Reason: {reason}",
-        "Timing: 0.0s",
         f"Status: {format_badge(Badge.SKIPPED, glyphs)}",
     ]
 

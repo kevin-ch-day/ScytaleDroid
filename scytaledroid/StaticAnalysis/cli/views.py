@@ -51,8 +51,6 @@ def render_run_start(
 
     print(formatter.format_kv_block("[META]", meta_pairs))
     print()
-    print("Detector pipeline begins below. Results will be persisted to the evidence store.")
-    print()
 
 
 def render_run_summary(

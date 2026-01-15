@@ -387,12 +387,17 @@ def ensure_all() -> bool:
 
     Returns True when all statements executed without error.
     """
-    try:
-        for stmt in _DDL_STATEMENTS:
+    ok = True
+    for stmt in _DDL_STATEMENTS:
+        try:
             core_q.run_sql(stmt)
-        return True
-    except Exception:
-        return False
+        except Exception as exc:
+            ok = False
+            try:
+                core_q.run_sql("/* canonical schema skipped statement */ SELECT 1")
+            except Exception:
+                pass
+    return ok
 
 
 __all__ = ["ensure_all"]

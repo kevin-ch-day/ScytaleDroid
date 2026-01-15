@@ -215,8 +215,10 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
 
     persistence_errors: list[str] = []
     canonical_failures: list[str] = []
+    canonical_skips: list[str] = []
     persist_enabled = not params.dry_run
-    compact_mode = not params.verbose_output and len(outcome.results) > 1
+    # Default to compact output unless the user explicitly asked for verbose.
+    compact_mode = not params.verbose_output
 
     for index, app_result in enumerate(outcome.results, start=1):
         base_report = app_result.base_report()
@@ -306,12 +308,11 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             try:
                 ingest_payload = _build_ingest_payload(payload, base_report, params)
                 if not ingest_baseline_payload(ingest_payload):
-                    canonical_failures.append(app_result.package_name)
-                    if params.verbose_output:
-                        warning = (
-                            f"Failed to record canonical snapshot for {app_result.package_name}."
-                        )
-                        print(status_messages.status(warning, level="warn"))
+                    canonical_skips.append(app_result.package_name)
+                    warning = (
+                        f"Canonical ingest skipped or unavailable for {app_result.package_name}."
+                    )
+                    print(status_messages.status(warning, level="warn"))
             except Exception as exc:
                 warning = (
                     f"Failed to ingest baseline snapshot for {app_result.package_name}: {exc}"
@@ -345,11 +346,14 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                     f"Failed to write baseline JSON for {app_result.package_name}: {exc}"
                 )
                 print(status_messages.status(warning, level="warn"))
-        if saved_path and not compact_mode:
-            print(f"  Saved baseline JSON → {saved_path.name}")
 
-        if report_reference and not compact_mode:
-            print(f"  Report reference    → {report_reference}")
+        if saved_path:
+            message = f"Saved baseline JSON → {saved_path.name}"
+            print(message if not compact_mode else status_messages.status(message, level="info"))
+
+        if report_reference:
+            message = f"Report reference    → {report_reference}"
+            print(message if not compact_mode else status_messages.status(message, level="info"))
 
         if index < len(outcome.results) and not compact_mode:
             print()
@@ -388,6 +392,13 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                 status_messages.status(
                     f"Status: WARN – canonical snapshot failed for {len(unique_failures)} package(s): {preview}",
                     level="warn",
+                )
+            )
+        elif canonical_skips:
+            print(
+                status_messages.status(
+                    f"Status: OK (with skips) – canonical ingest skipped for {len(set(canonical_skips))} package(s)",
+                    level="info",
                 )
             )
     else:
@@ -1531,32 +1542,41 @@ def _render_persistence_footer(
     print("Persisted (authoritative)")
     print("------------------------")
     lines = [
-        ("runs", f"{len(run_ids)} (total={runs_total})"),
-        ("findings", f"{findings} (total={findings_total})"),
-        ("static_findings_summary", f"{findings_summary} (total={findings_summary_total})"),
-        ("static_findings", f"{findings_detail} (total={findings_detail_total})"),
-        ("static_string_summary", f"{strings_summary} (total={strings_summary_total})"),
+        ("runs", f"this_run={len(run_ids)}  db_total={runs_total}"),
+        ("findings", f"this_run={findings}  db_total={findings_total}"),
+        (
+            "static_findings_summary",
+            f"this_run={findings_summary}  db_total={findings_summary_total}",
+        ),
+        (
+            "static_findings",
+            f"this_run={findings_detail}  db_total={findings_detail_total}",
+        ),
+        (
+            "static_string_summary",
+            f"this_run={strings_summary}  db_total={strings_summary_total}",
+        ),
         (
             "static_string_samples",
-            f"{string_samples_raw} (total={string_samples_raw_total})",
+            f"this_run={string_samples_raw}  db_total={string_samples_raw_total}",
         ),
         (
             "v_strings_effective",
-            f"{string_samples_effective} (total={string_samples_effective_total})",
+            f"this_run={string_samples_effective}  db_total={string_samples_effective_total}",
         ),
         (
             "v_doc_policy_drift",
-            f"{string_samples_suppressed} (total={string_samples_suppressed_total})",
+            f"this_run={string_samples_suppressed}  db_total={string_samples_suppressed_total}",
         ),
-        ("buckets", f"{buckets} (total={buckets_total})"),
-        ("metrics", f"{metrics} (total={metrics_total})"),
+        ("buckets", f"this_run={buckets}  db_total={buckets_total}"),
+        ("metrics", f"this_run={metrics}  db_total={metrics_total}"),
         (
             "permission_audit_snapshots",
-            f"{snapshot_count} (total={snapshot_total})",
+            f"this_run={snapshot_count}  db_total={snapshot_total}",
         ),
         (
             "permission_audit_apps",
-            f"{snapshot_apps} (total={snapshot_apps_total})",
+            f"this_run={snapshot_apps}  db_total={snapshot_apps_total}",
         ),
     ]
     width = max(len(name) for name, _ in lines) if lines else 0
