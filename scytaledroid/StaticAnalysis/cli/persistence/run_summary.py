@@ -151,12 +151,13 @@ def persist_run_summary(
         )
         if rows:
             if len(rows) > 1:
-                outcome.add_error(
-                    f"Multiple static_analysis_runs found for session={session_stamp} package={package_for_run}; "
-                    "cannot disambiguate. Use a unique session."
+                message = (
+                    f"Multiple static_analysis_runs found for session={session_stamp} "
+                    f"package={package_for_run}; cannot disambiguate. Use a unique session."
                 )
-            else:
-                static_run_id = int(rows[0][0])
+                outcome.add_error(message)
+                return outcome
+            static_run_id = int(rows[0][0])
     except Exception:
         static_run_id = None
 

@@ -237,7 +237,8 @@ def write_permission_snapshot(
             f"(snapshot_id={snapshot_id} static_run_id={static_run_id} session={session_stamp}): {exc}",
             category="static_analysis",
         )
-        raise
+        # Do not abort the entire snapshot on optional/legacy schema issues.
+        return snapshot_id
 
     return snapshot_id
 

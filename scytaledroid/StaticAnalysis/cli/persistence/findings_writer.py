@@ -12,6 +12,8 @@ try:  # pragma: no cover - optional dependency
 except Exception:  # pragma: no cover - optional dependency
     yaml = None
 
+from functools import lru_cache
+
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
@@ -235,16 +237,20 @@ def persist_findings(run_id: int, rows: Sequence[Dict[str, Any]], *, static_run_
     can key by static_analysis_runs.id while legacy consumers can still use
     the generic run_id.
     """
+    has_static_col = _has_column("findings", "static_run_id")
     try:
-        if static_run_id is None:
+        if static_run_id is None and has_static_col:
             log.warning(
                 f"static_run_id missing for findings; run_id={run_id} will not be keyed to static run",
                 category="db",
             )
-        core_q.run_sql(
-            "DELETE FROM findings WHERE run_id=%s OR static_run_id=%s",
-            (run_id, static_run_id if static_run_id is not None else run_id),
-        )
+        if has_static_col:
+            core_q.run_sql(
+                "DELETE FROM findings WHERE run_id=%s OR static_run_id=%s",
+                (run_id, static_run_id if static_run_id is not None else run_id),
+            )
+        else:
+            core_q.run_sql("DELETE FROM findings WHERE run_id=%s", (run_id,))
     except Exception as exc:  # pragma: no cover - defensive
         log.warning(
             f"Failed to prune findings for run_id={run_id}: {exc}",
@@ -252,45 +258,85 @@ def persist_findings(run_id: int, rows: Sequence[Dict[str, Any]], *, static_run_
         )
     try:
         for row in rows:
-            core_q.run_sql(
-                """
-                INSERT INTO findings (
-                    run_id, static_run_id, severity, masvs, cvss, kind, evidence, module_id,
-                    cvss_v40_b_score, cvss_v40_bt_score, cvss_v40_be_score, cvss_v40_bte_score,
-                    cvss_v40_b_vector, cvss_v40_bt_vector, cvss_v40_be_vector, cvss_v40_bte_vector,
-                    cvss_v40_meta, analyst_tag, evidence_path, evidence_offset, evidence_preview, rule_id
-                ) VALUES (
-                    %s,%s,%s,%s,%s,%s,%s,%s,
-                    %s,%s,%s,%s,
-                    %s,%s,%s,%s,
-                    %s,%s,%s,%s,%s,%s
+            if has_static_col:
+                core_q.run_sql(
+                    """
+                    INSERT INTO findings (
+                        run_id, static_run_id, severity, masvs, cvss, kind, evidence, module_id,
+                        cvss_v40_b_score, cvss_v40_bt_score, cvss_v40_be_score, cvss_v40_bte_score,
+                        cvss_v40_b_vector, cvss_v40_bt_vector, cvss_v40_be_vector, cvss_v40_bte_vector,
+                        cvss_v40_meta, analyst_tag, evidence_path, evidence_offset, evidence_preview, rule_id
+                    ) VALUES (
+                        %s,%s,%s,%s,%s,%s,%s,%s,
+                        %s,%s,%s,%s,
+                        %s,%s,%s,%s,
+                        %s,%s,%s,%s,%s,%s
+                    )
+                    """,
+                    (
+                        run_id,
+                        static_run_id,
+                        row.get("severity"),
+                        row.get("masvs"),
+                        row.get("cvss"),
+                        row.get("kind"),
+                        row.get("evidence"),
+                        row.get("module_id"),
+                        row.get("cvss_v40_b_score"),
+                        row.get("cvss_v40_bt_score"),
+                        row.get("cvss_v40_be_score"),
+                        row.get("cvss_v40_bte_score"),
+                        row.get("cvss_v40_b_vector"),
+                        row.get("cvss_v40_bt_vector"),
+                        row.get("cvss_v40_be_vector"),
+                        row.get("cvss_v40_bte_vector"),
+                        row.get("cvss_v40_meta"),
+                        None,
+                        row.get("evidence_path"),
+                        row.get("evidence_offset"),
+                        row.get("evidence_preview"),
+                        row.get("rule_id"),
+                    ),
                 )
-                """,
-                (
-                    run_id,
-                    static_run_id,
-                    row.get("severity"),
-                    row.get("masvs"),
-                    row.get("cvss"),
-                    row.get("kind"),
-                    row.get("evidence"),
-                    row.get("module_id"),
-                    row.get("cvss_v40_b_score"),
-                    row.get("cvss_v40_bt_score"),
-                    row.get("cvss_v40_be_score"),
-                    row.get("cvss_v40_bte_score"),
-                    row.get("cvss_v40_b_vector"),
-                    row.get("cvss_v40_bt_vector"),
-                    row.get("cvss_v40_be_vector"),
-                    row.get("cvss_v40_bte_vector"),
-                    row.get("cvss_v40_meta"),
-                    None,
-                    row.get("evidence_path"),
-                    row.get("evidence_offset"),
-                    row.get("evidence_preview"),
-                    row.get("rule_id"),
-                ),
-            )
+            else:
+                core_q.run_sql(
+                    """
+                    INSERT INTO findings (
+                        run_id, severity, masvs, cvss, kind, evidence, module_id,
+                        cvss_v40_b_score, cvss_v40_bt_score, cvss_v40_be_score, cvss_v40_bte_score,
+                        cvss_v40_b_vector, cvss_v40_bt_vector, cvss_v40_be_vector, cvss_v40_bte_vector,
+                        cvss_v40_meta, analyst_tag, evidence_path, evidence_offset, evidence_preview, rule_id
+                    ) VALUES (
+                        %s,%s,%s,%s,%s,%s,%s,
+                        %s,%s,%s,%s,
+                        %s,%s,%s,%s,
+                        %s,%s,%s,%s,%s,%s
+                    )
+                    """,
+                    (
+                        run_id,
+                        row.get("severity"),
+                        row.get("masvs"),
+                        row.get("cvss"),
+                        row.get("kind"),
+                        row.get("evidence"),
+                        row.get("module_id"),
+                        row.get("cvss_v40_b_score"),
+                        row.get("cvss_v40_bt_score"),
+                        row.get("cvss_v40_be_score"),
+                        row.get("cvss_v40_bte_score"),
+                        row.get("cvss_v40_b_vector"),
+                        row.get("cvss_v40_bt_vector"),
+                        row.get("cvss_v40_be_vector"),
+                        row.get("cvss_v40_bte_vector"),
+                        row.get("cvss_v40_meta"),
+                        None,
+                        row.get("evidence_path"),
+                        row.get("evidence_offset"),
+                        row.get("evidence_preview"),
+                        row.get("rule_id"),
+                    ),
+                )
         return True
     except Exception as exc:  # pragma: no cover - defensive
         message = (
@@ -299,6 +345,19 @@ def persist_findings(run_id: int, rows: Sequence[Dict[str, Any]], *, static_run_
         )
         log.error(message, category="db")
         log.error(message, category="static_analysis")
+        return False
+
+
+@lru_cache(maxsize=None)
+def _has_column(table: str, column: str) -> bool:
+    try:
+        row = core_q.run_sql(
+            f"SHOW COLUMNS FROM {table} LIKE %s",
+            (column,),
+            fetch="one",
+        )
+        return bool(row)
+    except Exception:
         return False
 
 
