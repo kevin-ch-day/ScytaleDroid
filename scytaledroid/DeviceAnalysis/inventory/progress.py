@@ -34,12 +34,12 @@ except Exception:  # pragma: no cover - headless fall-back
 
 
 def _format_duration(seconds: Optional[float]) -> str:
-    """Return a compact duration like 1h 12m, 3m 05s, 45s."""
+    """Return a tight duration like 1h02m, 3m05s, 45s."""
     if seconds is None:
         return "calculating…"
     if seconds < 0:
         return "--"
-    return humanize_seconds(seconds)
+    return humanize_seconds(seconds).replace(" ", "")
 
 
 def _format_progress_line(
@@ -54,25 +54,29 @@ def _format_progress_line(
     percentage = (processed / total) * 100 if total else 0.0
     eta_text = _format_duration(eta_seconds)
     elapsed_text = _format_duration(elapsed_seconds)
-    bar_width = 20
+
+    # Scale the bar to the terminal to avoid line wrapping on narrow consoles.
+    term_width = terminal.get_terminal_width(default=100)
+    bar_width = 24 if term_width >= 120 else 18 if term_width <= 80 else 20
+
     filled = int((percentage / 100.0) * bar_width)
     filled = max(0, min(bar_width, filled))
     empty = bar_width - filled
     fill_char = "█" if not terminal.use_ascii_ui() else "#"
     empty_char = "░" if not terminal.use_ascii_ui() else "."
     bar = f"{fill_char * filled}{empty_char * empty}"
-    message = f"[{bar}] {processed} / {total} ({percentage:.1f}%)"
-    message += f" • Elapsed {elapsed_text}"
+    message_parts = [f"[{bar}] {processed}/{total} ({percentage:.1f}%)"]
+    message_parts.append(f"t+{elapsed_text}")
     if processed >= total and total > 0:
-        message += " • ETA --:--"
+        message_parts.append("ETA --")
     elif eta_text and eta_text not in ("--", "calculating…"):
-        message += f" • ETA {eta_text}"
-    elif eta_text == "calculating…":
-        message += " • ETA calculating…"
-    message += f" • Split APKs: {split_processed}"
-    if phase_label:
-        return f"{phase_label}: {message}"
-    return message
+        message_parts.append(f"ETA {eta_text}")
+    else:
+        message_parts.append("ETA …")
+    message_parts.append(f"splits {split_processed}")
+
+    prefix = f"{phase_label} | " if phase_label else ""
+    return prefix + " | ".join(message_parts)
 
 
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")

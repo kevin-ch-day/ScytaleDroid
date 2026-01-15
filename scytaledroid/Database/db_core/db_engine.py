@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import logging
 import re
+import sqlite3
 import time
 import uuid
 from collections.abc import Iterable, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, closing
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, Iterator, MutableMapping, Optional, Tuple
 
 import pymysql
@@ -214,7 +216,7 @@ def _log_env_once(connection: pymysql.Connection) -> None:
     _ENV_LOGGED = True
 
 
-def _connect() -> pymysql.Connection:
+def _connect_mysql() -> pymysql.Connection:
     connection = pymysql.connect(
         host=str(DB_CONFIG.get("host", "localhost")),
         user=str(DB_CONFIG.get("user", "")),
@@ -231,9 +233,39 @@ def _connect() -> pymysql.Connection:
     return connection
 
 
+def _connect_sqlite() -> sqlite3.Connection:
+    db_path = Path(str(DB_CONFIG.get("database", "scytaledroid.sqlite")))
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(str(db_path))
+    connection.row_factory = sqlite3.Row
+    connection.isolation_level = None  # explicit commit/rollback control
+    return connection
+
+
+def _rewrite_for_sqlite(sql: str) -> str:
+    """Convert %s placeholders into SQLite's '?'."""
+    return sql.replace("%s", "?")
+
+
 @contextmanager
-def connect() -> Iterator[pymysql.Connection]:
-    connection = _connect()
+def _cursor_ctx(connection: Any, *, dict_mode: bool = False):
+    if dict_mode and not isinstance(connection, sqlite3.Connection):
+        cursor = connection.cursor(DictCursor)
+    else:
+        cursor = connection.cursor()
+    try:
+        yield cursor
+    finally:
+        try:
+            cursor.close()
+        except Exception:
+            pass
+
+
+@contextmanager
+def connect() -> Iterator[Any]:
+    engine = DatabaseEngine()
+    connection = engine._ensure_connection()
     try:
         yield connection
         connection.commit()
@@ -249,7 +281,6 @@ def connect() -> Iterator[pymysql.Connection]:
         except Exception:  # pragma: no cover - defensive cleanup
             pass
 
-
 def _execute(
     cursor: Cursor,
     sql: str,
@@ -259,6 +290,7 @@ def _execute(
     context: Optional[Mapping[str, Any]],
     many: bool,
 ) -> _NormalisedStatement:
+    dialect = "sqlite" if isinstance(cursor, sqlite3.Cursor) else "mysql"
     trace_id = uuid.uuid4().hex[:8]
     base_extra: Dict[str, Any] = {
         "event": "db.exec",
@@ -284,18 +316,22 @@ def _execute(
         raise
 
     summary = _summarise_params(normalised.params, many=many)
+    effective_sql = normalised.sql if dialect == "mysql" else _rewrite_for_sqlite(normalised.sql)
+    exec_params = normalised.params
+    if dialect == "sqlite" and exec_params is None:
+        exec_params = ()
 
     attempt = 0
     while True:
         attempt += 1
-        start = time.perf_counter()
+        start_ts = time.perf_counter()
         try:
             if many:
                 assert normalised.params is not None
-                cursor.executemany(normalised.sql, normalised.params)
+                cursor.executemany(effective_sql, exec_params)
             else:
-                cursor.execute(normalised.sql, normalised.params)
-            elapsed = int((time.perf_counter() - start) * 1000)
+                cursor.execute(effective_sql, exec_params)
+            elapsed = int((time.perf_counter() - start_ts) * 1000)
             _LOG.debug(
                 "db.exec.ok",
                 extra={
@@ -308,6 +344,19 @@ def _execute(
                 },
             )
             return normalised
+        except sqlite3.IntegrityError as exc:
+            _LOG.error(
+                "db.exec.integrity",
+                extra={
+                    **base_extra,
+                    **summary,
+                    "event": "db.exec.integrity",
+                    "detected_style": normalised.detected_style,
+                    "err_class": exc.__class__.__name__,
+                },
+                exc_info=True,
+            )
+            raise IntegrityDbError(str(exc)) from exc
         except err.IntegrityError as exc:
             _LOG.error(
                 "db.exec.integrity",
@@ -344,26 +393,63 @@ def _execute(
                 time.sleep(0.2 * attempt)
                 try:
                     cursor.connection.ping(reconnect=True)
-                except Exception:  # pragma: no cover - reconnect best effort
+                except Exception:
                     pass
                 continue
             if transient:
                 raise TransientDbError(str(exc)) from exc
             raise DatabaseError(str(exc)) from exc
-
-
+        except sqlite3.DatabaseError as exc:
+            _LOG.error(
+                "db.exec.failed",
+                extra={
+                    **base_extra,
+                    **summary,
+                    "event": "db.exec.failed",
+                    "detected_style": normalised.detected_style,
+                    "err_class": exc.__class__.__name__,
+                    "attempt": attempt,
+                },
+                exc_info=True,
+            )
+            raise DatabaseError(str(exc)) from exc
+        except Exception as exc:
+            _LOG.error(
+                "db.exec.failed",
+                extra={
+                    **base_extra,
+                    **summary,
+                    "event": "db.exec.failed",
+                    "detected_style": normalised.detected_style,
+                    "err_class": exc.__class__.__name__,
+                    "attempt": attempt,
+                },
+                exc_info=True,
+            )
+            raise DatabaseError(str(exc)) from exc
 class DatabaseEngine:
-    """Convenience wrapper around a dedicated PyMySQL connection."""
+    """Convenience wrapper around a dedicated database connection (MySQL or SQLite)."""
 
     def __init__(self) -> None:
-        self._connection: Optional[pymysql.Connection] = _connect()
+        self._dialect = str(DB_CONFIG.get("engine", "sqlite")).lower()
+        self._connection: Optional[Any] = self._connect_any()
         self._read_only = False
 
-    def _ensure_connection(self) -> pymysql.Connection:
+    def _connect_any(self) -> Any:
+        if self._dialect == "mysql":
+            return _connect_mysql()
+        return _connect_sqlite()
+
+    def _ensure_connection(self) -> Any:
         connection = self._connection
-        if connection is None or not getattr(connection, "open", False):
-            connection = _connect()
-            self._connection = connection
+        if self._dialect == "mysql":
+            if connection is None or not getattr(connection, "open", False):
+                connection = _connect_mysql()
+                self._connection = connection
+        else:
+            if connection is None:
+                connection = _connect_sqlite()
+                self._connection = connection
         return connection
 
     # ------------------------------------------------------------------
@@ -371,14 +457,20 @@ class DatabaseEngine:
     # ------------------------------------------------------------------
     def reconnect(self) -> None:
         connection = self._ensure_connection()
-        try:
-            connection.ping(reconnect=True)
-        except Exception as exc:  # pragma: no cover - ping failures rare
-            _LOG.warning("db.reconnect", extra={"event": "db.reconnect", "error": str(exc)})
+        if self._dialect == "mysql":
             try:
-                connection.close()
-            finally:
-                self._connection = _connect()
+                connection.ping(reconnect=True)
+            except Exception as exc:  # pragma: no cover - ping failures rare
+                _LOG.warning("db.reconnect", extra={"event": "db.reconnect", "error": str(exc)})
+                try:
+                    connection.close()
+                finally:
+                    self._connection = _connect_mysql()
+        else:
+            try:
+                connection.cursor().execute("SELECT 1")
+            except Exception:
+                self._connection = _connect_sqlite()
 
     def close(self) -> None:
         connection = self._connection
@@ -411,8 +503,11 @@ class DatabaseEngine:
     @contextmanager
     def transaction(self) -> Iterator["DatabaseEngine"]:
         connection = self._ensure_connection()
-        prev_autocommit = connection.get_autocommit()
-        connection.autocommit(False)
+        if self._dialect == "mysql":
+            prev_autocommit = connection.get_autocommit()
+            connection.autocommit(False)
+        else:
+            prev_autocommit = None
         try:
             yield self
             connection.commit()
@@ -420,10 +515,12 @@ class DatabaseEngine:
             try:
                 connection.rollback()
             finally:
-                connection.autocommit(prev_autocommit)
+                if self._dialect == "mysql":
+                    connection.autocommit(prev_autocommit)
             raise
         else:
-            connection.autocommit(prev_autocommit)
+            if self._dialect == "mysql":
+                connection.autocommit(prev_autocommit)
 
     # ------------------------------------------------------------------
     # Execution primitives
@@ -438,7 +535,7 @@ class DatabaseEngine:
     ) -> None:
         self._guard_write(sql)
         connection = self._ensure_connection()
-        with connection.cursor() as cursor:
+        with _cursor_ctx(connection) as cursor:
             _execute(cursor, sql, params, query_name=query_name or "execute", context=context, many=False)
         connection.commit()
 
@@ -455,7 +552,7 @@ class DatabaseEngine:
             return
         self._guard_write(sql)
         connection = self._ensure_connection()
-        with connection.cursor() as cursor:
+        with _cursor_ctx(connection) as cursor:
             _execute(cursor, sql, rows, query_name=query_name or "execute_many", context=context, many=True)
         connection.commit()
 
@@ -469,9 +566,9 @@ class DatabaseEngine:
     ) -> int:
         self._guard_write(sql)
         connection = self._ensure_connection()
-        with connection.cursor() as cursor:
+        with _cursor_ctx(connection) as cursor:
             _execute(cursor, sql, params, query_name=query_name or "execute_with_lastrowid", context=context, many=False)
-            lastrowid = cursor.lastrowid
+            lastrowid = getattr(cursor, "lastrowid", None)
         connection.commit()
         return int(lastrowid or 0)
 
@@ -484,10 +581,14 @@ class DatabaseEngine:
         context: Optional[Mapping[str, Any]] = None,
     ) -> Optional[Tuple[Any, ...]]:
         connection = self._ensure_connection()
-        with connection.cursor() as cursor:
+        with _cursor_ctx(connection) as cursor:
             _execute(cursor, sql, params, query_name=query_name or "fetch_one", context=context, many=False)
             row = cursor.fetchone()
-        return tuple(row) if row is not None else None
+        if row is None:
+            return None
+        if isinstance(row, sqlite3.Row):
+            return tuple(row)
+        return tuple(row)
 
     def fetch_all(
         self,
@@ -498,10 +599,16 @@ class DatabaseEngine:
         context: Optional[Mapping[str, Any]] = None,
     ) -> list[Tuple[Any, ...]]:
         connection = self._ensure_connection()
-        with connection.cursor() as cursor:
+        with _cursor_ctx(connection) as cursor:
             _execute(cursor, sql, params, query_name=query_name or "fetch_all", context=context, many=False)
             rows = cursor.fetchall()
-        return [tuple(row) for row in rows]
+        converted = []
+        for row in rows:
+            if isinstance(row, sqlite3.Row):
+                converted.append(tuple(row))
+            else:
+                converted.append(tuple(row))
+        return converted
 
     def fetch_one_dict(
         self,
@@ -512,10 +619,19 @@ class DatabaseEngine:
         context: Optional[Mapping[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         connection = self._ensure_connection()
-        with connection.cursor(DictCursor) as cursor:
-            _execute(cursor, sql, params, query_name=query_name or "fetch_one_dict", context=context, many=False)
-            row = cursor.fetchone()
-        return dict(row) if row is not None else None
+        if self._dialect == "mysql":
+            with _cursor_ctx(connection, dict_mode=True) as cursor:
+                _execute(cursor, sql, params, query_name=query_name or "fetch_one_dict", context=context, many=False)
+                row = cursor.fetchone()
+        else:
+            with _cursor_ctx(connection) as cursor:
+                _execute(cursor, sql, params, query_name=query_name or "fetch_one_dict", context=context, many=False)
+                row = cursor.fetchone()
+        if row is None:
+            return None
+        if isinstance(row, sqlite3.Row):
+            return dict(row)
+        return dict(row)
 
     def fetch_all_dict(
         self,
@@ -526,10 +642,15 @@ class DatabaseEngine:
         context: Optional[Mapping[str, Any]] = None,
     ) -> list[Dict[str, Any]]:
         connection = self._ensure_connection()
-        with connection.cursor(DictCursor) as cursor:
-            _execute(cursor, sql, params, query_name=query_name or "fetch_all_dict", context=context, many=False)
-            rows = cursor.fetchall()
-        return [dict(row) for row in rows]
+        if self._dialect == "mysql":
+            with _cursor_ctx(connection, dict_mode=True) as cursor:
+                _execute(cursor, sql, params, query_name=query_name or "fetch_all_dict", context=context, many=False)
+                rows = cursor.fetchall()
+        else:
+            with _cursor_ctx(connection) as cursor:
+                _execute(cursor, sql, params, query_name=query_name or "fetch_all_dict", context=context, many=False)
+                rows = cursor.fetchall()
+        return [dict(row) if not isinstance(row, sqlite3.Row) else dict(row) for row in rows]
 
 
 def sanity_probe() -> None:
@@ -560,4 +681,3 @@ __all__ = [
     "connect",
     "sanity_probe",
 ]
-
