@@ -32,6 +32,7 @@ def resolve_package_info(package: str) -> Dict[str, Optional[str]]:
         "build_fingerprint": None,
         "apk_path": None,
         "apk_hashes": {"md5": None, "sha1": None, "sha256": None},
+        "target_package_installed": False,
     }
     if rc == 0:
         for line in out.splitlines():
@@ -44,6 +45,7 @@ def resolve_package_info(package: str) -> Dict[str, Optional[str]]:
                 parts = line.split("versionName=")
                 if len(parts) > 1:
                     info["versionName"] = parts[1].strip()
+        info["target_package_installed"] = True
     # Basic device props
     rc2, props, _ = _shell(["adb", "shell", "getprop"])
     if rc2 == 0:
@@ -96,10 +98,10 @@ def resolve_pid_uid(package: str) -> Tuple[Optional[str], Optional[str]]:
     return uid, pid
 
 
-def collect_process_sample(package: str, uid: str, pid: Optional[str], ts: datetime, *, strict: bool = False) -> Dict[str, object]:
+def collect_process_sample(package: str, uid: Optional[str], pid: Optional[str], ts: datetime, *, strict: bool = False) -> Dict[str, object]:
     row: Dict[str, object] = {
         "ts_utc": ts.isoformat(),
-        "uid": uid,
+        "uid": uid or "",
         "pid": pid or "",
         "cpu_pct": "",
         "rss_kb": "",
@@ -109,6 +111,9 @@ def collect_process_sample(package: str, uid: str, pid: Optional[str], ts: datet
         "best_effort": 1,
         "collector_status": "unavailable",
     }
+    if uid is None:
+        row["collector_status"] = "unavailable_uid"
+        return row
     rc, out, _ = _shell(["adb", "shell", "top", "-b", "-n", "1", "-o", "PID,CPU,RES,NAME"])
     if rc == 0 and pid:
         for line in out.splitlines():
@@ -128,6 +133,9 @@ def collect_process_sample(package: str, uid: str, pid: Optional[str], ts: datet
                 row["best_effort"] = 0
                 row["collector_status"] = "ok"
                 break
+    if rc == 0 and not pid:
+        # PID missing but uid known: emit row with pid_missing
+        row["collector_status"] = "pid_missing"
     # Memory detail
     rc2, out2, _ = _shell(["adb", "shell", "dumpsys", "meminfo", "--package", package])
     if rc2 == 0:
@@ -158,6 +166,9 @@ def collect_network_sample(uid: str, ts: datetime) -> Dict[str, object]:
         "best_effort": 1,
         "collector_status": "unavailable",
     }
+    if not uid:
+        row["collector_status"] = "unavailable_uid"
+        return row
     rc, out, _ = _shell(["adb", "shell", "dumpsys", "netstats", "detail"])
     if rc == 0:
         bytes_in = 0

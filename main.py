@@ -227,6 +227,12 @@ def _run_diagnostics(json_mode: bool) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] == "behavior":
+        from scytaledroid.BehaviorAnalysis import cli as behavior_cli
+        behavior_cli.main(argv[1:])
+        return 0
+
     parser = argparse.ArgumentParser(description="ScytaleDroid CLI")
     parser.add_argument(
         "--diag",

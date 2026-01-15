@@ -93,6 +93,7 @@ def behavior_run(args: argparse.Namespace) -> None:
         "network_available": uid is not None,
         "events_available": True,  # markers always available
     }
+    telemetry_available = bool(uid)
 
     start = _now()
     end = start + timedelta(seconds=duration_s)
@@ -167,7 +168,12 @@ def behavior_run(args: argparse.Namespace) -> None:
         "git_commit": os.environ.get("SCYTALEDROID_GIT_HASH", "unknown"),
         "best_effort_network": any(row.get("best_effort") for row in network_rows),
         "model_backend": model_backend,
+        "telemetry_available": telemetry_available,
+        "uid_resolution": "success" if uid else "fail",
+        "pid_resolution": "success" if pid else ("fail" if uid else "skip"),
+        "target_package_installed": device_info.get("target_package_installed"),
     }
+    print(f"SESSION_ID={session_id}")
     _write_metadata(session_dir, metadata)
     _write_markers(session_dir, markers)
 
@@ -202,6 +208,24 @@ def write_csv(path: Path, rows: List[Dict[str, object]], schema, *, strict: bool
             pass
 
 
+def _load_csv(path: Path) -> List[Dict[str, object]]:
+    if not path.exists():
+        return []
+    rows: List[Dict[str, object]] = []
+    with path.open("r", encoding="utf-8") as handle:
+        lines = handle.read().splitlines()
+    if not lines:
+        return []
+    headers = lines[0].split(",")
+    for line in lines[1:]:
+        if not line.strip():
+            continue
+        parts = line.split(",")
+        row = {h: parts[idx] if idx < len(parts) else "" for idx, h in enumerate(headers)}
+        rows.append(row)
+    return rows
+
+
 def behavior_mark(args: argparse.Namespace) -> None:
     session_dir = _session_dir(args.session)
     append_marker(session_dir, args.label)
@@ -222,8 +246,8 @@ def behavior_report(args: argparse.Namespace) -> None:
                 markers.append(json.loads(line))
     windows_path = session_dir / "features" / "windows.csv"
     scores_path = session_dir / "model" / "scores.csv"
-    windows = []  # type: ignore[var-annotated]
-    scores = []  # type: ignore[var-annotated]
+    windows = _load_csv(windows_path)
+    scores = _load_csv(scores_path)
     report_path = session_dir / "reports" / "behavior_report.md"
     plot_path = session_dir / "plots" / "anomaly_timeline.png"
     build_behavior_report(metadata, markers, windows, scores, plot_path, report_path)
