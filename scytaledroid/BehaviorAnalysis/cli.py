@@ -16,6 +16,7 @@ from scytaledroid.BehaviorAnalysis.telemetry import (
     collect_network_sample,
     resolve_package_info,
     resolve_pid_uid,
+    should_mark_missed_sample,
 )
 from scytaledroid.BehaviorAnalysis.features import (
     build_windows,
@@ -105,17 +106,14 @@ def behavior_run(args: argparse.Namespace) -> None:
 
     while _now() < end:
         ts = _now()
-        if uid:
-            start_sample = time.time()
-            process_rows.append(collect_process_sample(package, uid, pid, ts, strict=strict_schema))
-            net_sample = collect_network_sample(uid, ts)
-            network_rows.append(net_sample)
-            src = str(net_sample.get("source") or "unknown")
-            network_source_summary[src] = network_source_summary.get(src, 0) + 1
-            elapsed = time.time() - start_sample
-            if elapsed > sample_rate * 2:
-                missed_samples += 1
-        else:
+        start_sample = time.time()
+        process_rows.append(collect_process_sample(package, uid, pid, ts, strict=strict_schema))
+        net_sample = collect_network_sample(uid or "", ts)
+        network_rows.append(net_sample)
+        src = str(net_sample.get("source") or "unknown")
+        network_source_summary[src] = network_source_summary.get(src, 0) + 1
+        elapsed = time.time() - start_sample
+        if should_mark_missed_sample(start_sample, sample_rate) or not uid:
             missed_samples += 1
         time.sleep(sample_rate)
 
@@ -135,16 +133,25 @@ def behavior_run(args: argparse.Namespace) -> None:
     write_features_csv(windows_path, windows)
 
     scores = score_windows(windows)
-    model_backend = "sklearn" if scores else "fallback"
     if not scores:
-        # fallback scoring is produced inside score_windows when sklearn missing
         scores = score_windows(windows, backend_hint="fallback")
-        model_backend = "fallback"
+    model_backend = scores[0].get("model_backend", "sklearn") if scores else "fallback"
     scores_path = model_dir / "scores.csv"
     write_csv(scores_path, scores, SCORES_SCHEMA, strict=strict_schema)
 
     plot_path = plots_dir / "anomaly_timeline.png"
     write_anomaly_plot(windows, scores, plot_path)
+
+    any_process_ok = any(r.get("collector_status") == "ok" for r in process_rows)
+    any_network_ok = any(r.get("collector_status") == "ok" for r in network_rows)
+    any_pid_missing = any(r.get("collector_status") == "pid_missing" for r in process_rows)
+    telemetry_status = "ok"
+    if not uid:
+        telemetry_status = "unavailable_uid"
+    elif not any_process_ok:
+        telemetry_status = "collector_failed" if not any_pid_missing else "pid_missing"
+    network_status = "ok" if any_network_ok else ("unavailable_uid" if not uid else "best_effort")
+    best_effort_network = any(row.get("best_effort") for row in network_rows)
 
     metadata = {
         "session_id": session_id,
@@ -166,12 +173,14 @@ def behavior_run(args: argparse.Namespace) -> None:
         "start_utc": start.isoformat(),
         "end_utc": _now().isoformat(),
         "git_commit": os.environ.get("SCYTALEDROID_GIT_HASH", "unknown"),
-        "best_effort_network": any(row.get("best_effort") for row in network_rows),
+        "best_effort_network": best_effort_network,
         "model_backend": model_backend,
         "telemetry_available": telemetry_available,
         "uid_resolution": "success" if uid else "fail",
         "pid_resolution": "success" if pid else ("fail" if uid else "skip"),
         "target_package_installed": device_info.get("target_package_installed"),
+        "telemetry_status": telemetry_status,
+        "network_status": network_status,
     }
     print(f"SESSION_ID={session_id}")
     _write_metadata(session_dir, metadata)

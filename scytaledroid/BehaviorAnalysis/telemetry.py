@@ -5,10 +5,13 @@ from __future__ import annotations
 import json
 import subprocess
 import re
+import time
 from datetime import datetime, timezone
 from typing import Dict, Optional, Tuple
 
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
+
+JITTER_MULTIPLIER = 1.5
 
 
 def _shell(cmd: list[str], timeout: float = 5.0) -> tuple[int, str, str]:
@@ -38,7 +41,7 @@ def resolve_package_info(package: str) -> Dict[str, Optional[str]]:
         for line in out.splitlines():
             line = line.strip()
             if "versionCode" in line:
-                match = re.search(r"versionCode=(\\d+)", line)
+                match = re.search(r"versionCode=(\d+)", line)
                 if match:
                     info["versionCode"] = match.group(1)
             if "versionName" in line:
@@ -88,14 +91,91 @@ def resolve_pid_uid(package: str) -> Tuple[Optional[str], Optional[str]]:
     uid = None
     rc, out, _ = _shell(["adb", "shell", "dumpsys", "package", package])
     if rc == 0:
-        match = re.search(r"userId=(\\d+)", out)
+        match = re.search(r"userId=(\d+)", out)
         if match:
             uid = match.group(1)
+    if uid is None:
+        rc_u, out_u, _ = _shell(["adb", "shell", "cmd", "package", "list", "packages", "-U", package])
+        if rc_u == 0:
+            m2 = re.search(r"uid:(\d+)", out_u)
+            if m2:
+                uid = m2.group(1)
     pid = None
     rc2, out2, _ = _shell(["adb", "shell", "pidof", "-s", package])
     if rc2 == 0:
         pid = out2.strip() or None
     return uid, pid
+
+
+def parse_top_output(output: str, target_pid: str) -> Dict[str, object]:
+    result: Dict[str, object] = {}
+    for line in output.splitlines():
+        parts = line.split()
+        if len(parts) < 4:
+            continue
+        if parts[0] == target_pid:
+            try:
+                result["cpu_pct"] = float(parts[1].rstrip("%"))
+            except Exception:
+                pass
+            try:
+                result["rss_kb"] = _parse_mem(parts[2])
+            except Exception:
+                pass
+            result["proc_name"] = " ".join(parts[3:])
+            break
+    return result
+
+
+def parse_meminfo_total(output: str) -> Optional[int]:
+    match = re.search(r"TOTAL\s+(\d+)", output)
+    if match:
+        try:
+            return int(match.group(1))
+        except Exception:
+            return None
+    return None
+
+
+def parse_netstats_detail(output: str, uid: str) -> Tuple[int, int]:
+    bytes_in = 0
+    bytes_out = 0
+    for line in output.splitlines():
+        if f"uid={uid}" not in line:
+            continue
+        m_in = re.search(r"rxBytes=(\d+)", line)
+        m_out = re.search(r"txBytes=(\d+)", line)
+        if m_in:
+            bytes_in += int(m_in.group(1))
+        if m_out:
+            bytes_out += int(m_out.group(1))
+    return bytes_in, bytes_out
+
+
+def parse_proc_net_dev(output: str) -> Tuple[int, int]:
+    bytes_in = 0
+    bytes_out = 0
+    for line in output.splitlines():
+        parts = line.split()
+        if len(parts) >= 10:
+            try:
+                bytes_in += int(parts[1])
+                bytes_out += int(parts[9])
+            except Exception:
+                continue
+    return bytes_in, bytes_out
+
+
+def should_mark_missed_sample(start_time: float, sample_rate: float) -> bool:
+    elapsed = time.time() - start_time
+    return elapsed > sample_rate * JITTER_MULTIPLIER
+
+
+def _resolve_pid_only(package: str) -> Optional[str]:
+    rc, out, _ = _shell(["adb", "shell", "pidof", "-s", package])
+    if rc == 0:
+        return out.strip() or None
+    return None
 
 
 def collect_process_sample(package: str, uid: Optional[str], pid: Optional[str], ts: datetime, *, strict: bool = False) -> Dict[str, object]:
@@ -114,34 +194,26 @@ def collect_process_sample(package: str, uid: Optional[str], pid: Optional[str],
     if uid is None:
         row["collector_status"] = "unavailable_uid"
         return row
+    pid = pid or _resolve_pid_only(package)
+    row["pid"] = pid or ""
     rc, out, _ = _shell(["adb", "shell", "top", "-b", "-n", "1", "-o", "PID,CPU,RES,NAME"])
     if rc == 0 and pid:
-        for line in out.splitlines():
-            parts = line.split()
-            if len(parts) < 4:
-                continue
-            if parts[0] == pid:
-                try:
-                    row["cpu_pct"] = float(parts[1].rstrip("%"))
-                except Exception:
-                    pass
-                try:
-                    row["rss_kb"] = _parse_mem(parts[2])
-                except Exception:
-                    pass
-                row["proc_name"] = " ".join(parts[3:])
-                row["best_effort"] = 0
-                row["collector_status"] = "ok"
-                break
+        parsed = parse_top_output(out, pid)
+        if parsed:
+            row["cpu_pct"] = parsed.get("cpu_pct", "")
+            row["rss_kb"] = parsed.get("rss_kb", "")
+            row["proc_name"] = parsed.get("proc_name", package)
+            row["best_effort"] = 0
+            row["collector_status"] = "ok"
     if rc == 0 and not pid:
         # PID missing but uid known: emit row with pid_missing
         row["collector_status"] = "pid_missing"
     # Memory detail
     rc2, out2, _ = _shell(["adb", "shell", "dumpsys", "meminfo", "--package", package])
     if rc2 == 0:
-        match = re.search(r"TOTAL\\s+(\\d+)", out2)
-        if match:
-            row["pss_kb"] = int(match.group(1))
+        mem_total = parse_meminfo_total(out2)
+        if mem_total is not None:
+            row["pss_kb"] = mem_total
     return row
 
 
@@ -168,19 +240,11 @@ def collect_network_sample(uid: str, ts: datetime) -> Dict[str, object]:
     }
     if not uid:
         row["collector_status"] = "unavailable_uid"
+        row["source"] = "unavailable"
         return row
     rc, out, _ = _shell(["adb", "shell", "dumpsys", "netstats", "detail"])
     if rc == 0:
-        bytes_in = 0
-        bytes_out = 0
-        for line in out.splitlines():
-            if f"uid={uid}" in line:
-                m_in = re.search(r"rxBytes=(\\d+)", line)
-                m_out = re.search(r"txBytes=(\\d+)", line)
-                if m_in:
-                    bytes_in += int(m_in.group(1))
-                if m_out:
-                    bytes_out += int(m_out.group(1))
+        bytes_in, bytes_out = parse_netstats_detail(out, uid)
         if bytes_in or bytes_out:
             row["bytes_in"] = bytes_in
             row["bytes_out"] = bytes_out
@@ -192,20 +256,11 @@ def collect_network_sample(uid: str, ts: datetime) -> Dict[str, object]:
     # Fallback: /proc/net/dev aggregate
     rc2, out2, _ = _shell(["adb", "shell", "cat", "/proc/net/dev"])
     if rc2 == 0:
-        bytes_in = 0
-        bytes_out = 0
-        for line in out2.splitlines():
-            parts = line.split()
-            if len(parts) >= 10:
-                try:
-                    bytes_in += int(parts[1])
-                    bytes_out += int(parts[9])
-                except Exception:
-                    continue
+        bytes_in, bytes_out = parse_proc_net_dev(out2)
         row["bytes_in"] = bytes_in
         row["bytes_out"] = bytes_out
         row["conn_count"] = ""
-        row["source"] = "iface"
+        row["source"] = "fallback_iface"
         row["best_effort"] = 1
         row["collector_status"] = "best_effort"
     return row

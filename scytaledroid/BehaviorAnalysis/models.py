@@ -27,6 +27,9 @@ def _feature_matrix(windows: List[Dict[str, object]]) -> np.ndarray:
 def score_windows(windows: List[Dict[str, object]], *, backend_hint: str = "sklearn") -> List[Dict[str, object]]:
     if not windows:
         return []
+    import os
+    if os.environ.get("SCYTALEDROID_BEHAVIOR_NO_SKLEARN") == "1":
+        return _fallback_scores(windows)
     try:
         from sklearn.ensemble import IsolationForest
         from sklearn.svm import OneClassSVM
