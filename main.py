@@ -92,6 +92,10 @@ def main_menu() -> None:
             from scytaledroid.BehaviorAnalysis import cli as behavior_cli
             behavior_cli.main(sys.argv[2:])
             return
+        if sys.argv[1] == "static":
+            from scytaledroid.StaticAnalysis.cli import headless as static_headless
+            static_headless.main(sys.argv[2:])
+            return
 
     menu_actions: list[tuple[str, str, Callable[[], None]]] = [
         ("1", "Android Device Analysis", handle_device),

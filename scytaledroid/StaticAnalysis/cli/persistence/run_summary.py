@@ -136,8 +136,8 @@ def persist_run_summary(
         outcome.run_id = run_id
     static_run_id: int | None = None
     try:
-        # Prefer an existing static_analysis_runs entry for this session/package
-        row = core_q.run_sql(
+        # Prefer an existing static_analysis_runs entry for this session/package.
+        rows = core_q.run_sql(
             """
             SELECT sar.id
             FROM static_analysis_runs sar
@@ -145,14 +145,18 @@ def persist_run_summary(
             JOIN apps a ON a.id = av.app_id
             WHERE sar.session_stamp = %s
               AND a.package_name = %s
-            ORDER BY sar.id DESC
-            LIMIT 1
             """,
             (session_stamp, package_for_run),
-            fetch="one",
+            fetch="all",
         )
-        if row and row[0]:
-            static_run_id = int(row[0])
+        if rows:
+            if len(rows) > 1:
+                outcome.add_error(
+                    f"Multiple static_analysis_runs found for session={session_stamp} package={package_for_run}; "
+                    "cannot disambiguate. Use a unique session."
+                )
+            else:
+                static_run_id = int(rows[0][0])
     except Exception:
         static_run_id = None
 

@@ -96,7 +96,12 @@ def run_full_sync(
             serial=serial, filter_fn=None, progress_cb=progress_cb, mode=mode
         )
     except Exception as exc:  # pragma: no cover - map to service error
-        raise InventoryServiceError(f"Inventory sync failed for {serial}: {exc}") from exc
+        msg = (
+            f"Inventory sync failed for {serial}: {exc}. "
+            "Run aborted before persistence; last good snapshot preserved."
+        )
+        print(status_messages.status(msg, level="error"))
+        raise InventoryServiceError(msg) from exc
 
     if progress_sink == "cli":
         if mode == "legacy":

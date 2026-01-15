@@ -26,9 +26,9 @@ SESSION1="demo-$(date +%Y%m%d-%H%M%S)-1"
 SESSION2="demo-$(date +%Y%m%d-%H%M%S)-2"
 
 echo "[INFO] Running static analysis session ${SESSION1}"
-"${ROOT_DIR}/run_mariadb.sh" static --apk "$APK_PATH" --scope DEMO --session "$SESSION1"
+"${ROOT_DIR}/run_mariadb.sh" static --apk "$APK_PATH" --session "$SESSION1" --scope-label DEMO
 
 echo "[INFO] Running static analysis session ${SESSION2}"
-"${ROOT_DIR}/run_mariadb.sh" static --apk "$APK_PATH" --scope DEMO --session "$SESSION2"
+"${ROOT_DIR}/run_mariadb.sh" static --apk "$APK_PATH" --session "$SESSION2" --scope-label DEMO
 
 echo "[INFO] Completed. Verify DB tables for two distinct run_ids and no duplicate explosions."

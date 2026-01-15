@@ -38,7 +38,9 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
     session_stamp = make_session_stamp()
     if previous_stamp and session_stamp == previous_stamp:
         session_stamp = make_session_stamp()
-    params = replace(params, session_stamp=session_stamp)
+    # Enforce unique session per run unless explicitly set by caller.
+    if not previous_stamp:
+        params = replace(params, session_stamp=session_stamp)
     output_prefs.set_verbose(bool(params.verbose_output))
 
     try:
