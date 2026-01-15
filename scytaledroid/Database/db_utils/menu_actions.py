@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from scytaledroid.Database.db_utils import diagnostics
 from scytaledroid.Database.db_core import db_config
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
@@ -46,6 +48,36 @@ def show_connection_and_config() -> None:
         print("    Connection failed. Check logs for details.")
         if backend == "mysql":
             print("    Verify SCYTALEDROID_DB_URL and ensure schema is bootstrapped.")
+    prompt_utils.press_enter_to_continue()
+
+
+def show_db_status() -> None:
+    """Show backend/schema status, config source, and env hints."""
+
+    cfg = db_config.DB_CONFIG
+    backend = str(cfg.get("engine", "sqlite"))
+    host = str(cfg.get("host", "<unknown>"))
+    port_display = str(cfg.get("port", "<unknown>"))
+    database = str(cfg.get("database", "<unknown>"))
+    user = str(cfg.get("user", "<unknown>"))
+    cfg_source = getattr(db_config, "DB_CONFIG_SOURCE", "default")
+    schema_version = diagnostics.get_schema_version() or "<unknown>"
+    db_url_env = os.environ.get("SCYTALEDROID_DB_URL")
+
+    def _section(title: str) -> None:
+        print(title)
+        print("-" * len(title))
+
+    _section("DB Status (Quick)")
+    print(f"    Backend    : {backend}")
+    print(f"    Host       : {host}")
+    print(f"    Port       : {port_display}")
+    print(f"    Database   : {database}")
+    print(f"    Username   : {user}")
+    print(f"    Schema ver : {schema_version}")
+    print(f"    Config via : {cfg_source}")
+    print(f"    SCYTALEDROID_DB_URL set: {bool(db_url_env)}")
+    print()
     prompt_utils.press_enter_to_continue()
 
 

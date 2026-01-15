@@ -20,6 +20,7 @@ analysis.
   - [Harvest devices](#harvest-devices)
   - [Run static analysis](#run-static-analysis)
   - [Work with standalone APKs](#work-with-standalone-apks)
+- [DB integration helpers](#db-integration-helpers)
 - [Project layout & docs](#project-layout--docs)
 - [Configuration](#configuration)
 - [Contributing](#contributing)
@@ -165,6 +166,14 @@ python -m scytaledroid.StaticAnalysis.cli.run --profile full --dry-run
 
 The **Analyze APK from local path** option lets you point the CLI at an individual APK file.
 This is useful for regression testing or reviewing artifacts harvested outside ScytaleDroid.
+
+## DB integration helpers
+
+- `python -m scytaledroid.Web.db_status_server --host 0.0.0.0 --port 8080` exposes a minimal `/db_status`
+  endpoint (backend, db, schema_version, ok flag). Purpose: integration/debug proof that web + CLI
+  see the same MariaDB; not a production service and unauthenticated by design.
+- Table ownership guidance for Phase-1 is documented in `docs/db/table_ownership.md` to avoid write
+  collisions as the web app comes online. Treat it as authoritative guidance for which side writes what.
 
 ## Project layout & docs
 

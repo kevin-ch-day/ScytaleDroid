@@ -15,7 +15,10 @@ from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
 from .menu_actions import (
     maybe_clear_screen,
     show_connection_and_config,
+    show_db_status,
 )
+from scytaledroid.Database.db_utils import diagnostics
+from scytaledroid.Database.db_core import db_config
 
 
 def database_menu() -> None:
@@ -26,6 +29,7 @@ def database_menu() -> None:
         "2": schema_browser.show_schema_browser,
         "3": query_runner.run_query_menu,
         "4": health_checks.prompt_reset_static_data,
+        "5": show_db_status,
     }
 
     options: List[MenuOption] = [
@@ -49,11 +53,22 @@ def database_menu() -> None:
             "Reset static analysis data",
             "Truncate derived static-analysis tables (destructive).",
         ),
+        MenuOption(
+            "5",
+            "DB status (backend/schema)",
+            "Quick view of backend, schema_version, and config source.",
+        ),
     ]
 
     while True:
         maybe_clear_screen()
+        cfg = db_config.DB_CONFIG
+        backend = str(cfg.get("engine", "sqlite"))
+        database = str(cfg.get("database", "<unknown>"))
+        host = str(cfg.get("host", "<local>"))
+        schema_ver = diagnostics.get_schema_version() or "<unknown>"
         menu_utils.print_header("Database Utilities")
+        print(f"[Backend: {backend} | DB: {database} | Host: {host} | Schema: {schema_ver}]")
         spec = MenuSpec(
             items=options,
             exit_label="Back",
@@ -62,7 +77,7 @@ def database_menu() -> None:
         )
         menu_utils.render_menu(spec)
 
-        choice = prompt_utils.get_choice([option.key for option in options] + ["0"])
+        choice = prompt_utils.get_choice([option.key for option in options] + ["0"], default="1")
 
         if choice == "0":
             break
