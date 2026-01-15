@@ -206,6 +206,9 @@ Environment variables control CLI behaviour:
 - `SCY_PERMISSION_RISK_TOML` – optional path to TOML scoring config. If unset,
   the engine looks for `config/permission_risk.toml` or
   `data/config/permission_risk.toml`.
+- `SCYTALEDROID_DB_URL` – set to a MariaDB DSN when using the shared backend (e.g.,
+  `mysql://scytale_cli:Password123!@localhost:3306/scytaledroid_droid_intel_db_dev`); place it in `.env`
+  for convenience and run via `./run_mariadb.sh`.
 
 Example TOML:
 

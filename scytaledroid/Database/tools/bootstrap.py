@@ -134,7 +134,7 @@ def bootstrap_database() -> None:
         )
         run_sql(
             "INSERT INTO schema_version (version, applied_at_utc) VALUES (%s, %s)",
-            ("0.2.0", datetime.utcnow().isoformat() + "Z"),
+            ("0.3.0", datetime.utcnow().isoformat() + "Z"),
         )
     except Exception as exc:  # pragma: no cover
         log.warning(f"Failed to record schema_version: {exc}", category="database")

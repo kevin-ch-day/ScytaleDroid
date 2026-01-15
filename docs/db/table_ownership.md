@@ -18,6 +18,7 @@ Purpose: avoid write collisions as the web app comes online by documenting which
 ## Web-owned (planned)
 - User/session/auth tables (when introduced)
 - UI preferences, saved filters, annotations/commentary
+  - Proposed: `web_user_prefs`, `web_annotations`
 - Any web-side task queues or background job metadata
 
 ## Shared / background
