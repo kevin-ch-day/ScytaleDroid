@@ -22,3 +22,8 @@ def test_split_count_defaults_to_one_when_single_path():
     entry = pc._compose_inventory_entry("com.example.app", ["/data/app/base.apk"], {}, None)
     assert entry["split_count"] == 1
     assert entry["split_flag"] == "No"
+
+
+def test_split_count_handles_string_flags():
+    entry = {"apk_paths": ["/data/app/base.apk", "/data/app/split.apk"], "split_count": "yes"}
+    assert pc._split_count(entry) == 2

@@ -9,6 +9,7 @@ import os
 
 from scytaledroid.DeviceAnalysis import device_manager
 from scytaledroid.DeviceAnalysis.inventory import runner, snapshot_io, progress, views
+from scytaledroid.DeviceAnalysis.inventory.errors import InventoryCollectionError
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils.logging_context import RunContext, get_run_logger
 from scytaledroid.Utils.LoggingUtils import logging_events as log_events
@@ -95,6 +96,15 @@ def run_full_sync(
         result = runner.run_full_sync(
             serial=serial, filter_fn=None, progress_cb=progress_cb, mode=mode
         )
+    except InventoryCollectionError as exc:  # pragma: no cover - map to service error
+        completed = max(0, exc.index - 1)
+        msg = (
+            f"Inventory sync failed for {serial}: package={exc.package} "
+            f"stage={exc.stage} progress={completed}/{exc.total}. "
+            "Run aborted before persistence; last good snapshot preserved."
+        )
+        print(status_messages.status(msg, level="error"))
+        raise InventoryServiceError(msg) from exc
     except Exception as exc:  # pragma: no cover - map to service error
         msg = (
             f"Inventory sync failed for {serial}: {exc}. "
