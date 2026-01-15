@@ -1,0 +1,200 @@
+"""Telemetry collection helpers for behavior sessions."""
+
+from __future__ import annotations
+
+import json
+import subprocess
+import re
+from datetime import datetime, timezone
+from typing import Dict, Optional, Tuple
+
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
+
+
+def _shell(cmd: list[str], timeout: float = 5.0) -> tuple[int, str, str]:
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
+        return proc.returncode, proc.stdout, proc.stderr
+    except Exception as exc:  # pragma: no cover - defensive
+        return 1, "", str(exc)
+
+
+def resolve_package_info(package: str) -> Dict[str, Optional[str]]:
+    rc, out, _ = _shell(["adb", "shell", "dumpsys", "package", package])
+    info: Dict[str, Optional[str]] = {
+        "package": package,
+        "versionCode": None,
+        "versionName": None,
+        "device_model": None,
+        "device_manufacturer": None,
+        "android_version": None,
+        "android_sdk": None,
+        "build_fingerprint": None,
+        "apk_path": None,
+        "apk_hashes": {"md5": None, "sha1": None, "sha256": None},
+    }
+    if rc == 0:
+        for line in out.splitlines():
+            line = line.strip()
+            if "versionCode" in line:
+                match = re.search(r"versionCode=(\\d+)", line)
+                if match:
+                    info["versionCode"] = match.group(1)
+            if "versionName" in line:
+                parts = line.split("versionName=")
+                if len(parts) > 1:
+                    info["versionName"] = parts[1].strip()
+    # Basic device props
+    rc2, props, _ = _shell(["adb", "shell", "getprop"])
+    if rc2 == 0:
+        def _get(prop: str) -> Optional[str]:
+            for line in props.splitlines():
+                if line.startswith(f"[{prop}]"):
+                    return line.split("]: [", 1)[-1].rstrip("]")
+            return None
+        info["device_model"] = _get("ro.product.model")
+        info["device_manufacturer"] = _get("ro.product.manufacturer")
+        info["android_version"] = _get("ro.build.version.release")
+        info["android_sdk"] = _get("ro.build.version.sdk")
+        info["build_fingerprint"] = _get("ro.build.fingerprint")
+    # APK path + hashes (best effort)
+    rc3, out3, _ = _shell(["adb", "shell", "pm", "path", package])
+    if rc3 == 0:
+        for line in out3.splitlines():
+            if line.startswith("package:"):
+                path = line.split("package:", 1)[-1].strip()
+                if path:
+                    info["apk_path"] = path
+                    info["apk_hashes"] = {
+                        "md5": _device_hash(path, "md5sum"),
+                        "sha1": _device_hash(path, "sha1sum"),
+                        "sha256": _device_hash(path, "sha256sum"),
+                    }
+                    break
+    return info
+
+
+def _device_hash(path: str, tool: str) -> Optional[str]:
+    rc, out, _ = _shell(["adb", "shell", tool, path])
+    if rc != 0:
+        return None
+    token = out.strip().split()
+    return token[0] if token else None
+
+
+def resolve_pid_uid(package: str) -> Tuple[Optional[str], Optional[str]]:
+    uid = None
+    rc, out, _ = _shell(["adb", "shell", "dumpsys", "package", package])
+    if rc == 0:
+        match = re.search(r"userId=(\\d+)", out)
+        if match:
+            uid = match.group(1)
+    pid = None
+    rc2, out2, _ = _shell(["adb", "shell", "pidof", "-s", package])
+    if rc2 == 0:
+        pid = out2.strip() or None
+    return uid, pid
+
+
+def collect_process_sample(package: str, uid: str, pid: Optional[str], ts: datetime, *, strict: bool = False) -> Dict[str, object]:
+    row: Dict[str, object] = {
+        "ts_utc": ts.isoformat(),
+        "uid": uid,
+        "pid": pid or "",
+        "cpu_pct": "",
+        "rss_kb": "",
+        "pss_kb": "",
+        "threads": "",
+        "proc_name": package,
+        "best_effort": 1,
+        "collector_status": "unavailable",
+    }
+    rc, out, _ = _shell(["adb", "shell", "top", "-b", "-n", "1", "-o", "PID,CPU,RES,NAME"])
+    if rc == 0 and pid:
+        for line in out.splitlines():
+            parts = line.split()
+            if len(parts) < 4:
+                continue
+            if parts[0] == pid:
+                try:
+                    row["cpu_pct"] = float(parts[1].rstrip("%"))
+                except Exception:
+                    pass
+                try:
+                    row["rss_kb"] = _parse_mem(parts[2])
+                except Exception:
+                    pass
+                row["proc_name"] = " ".join(parts[3:])
+                row["best_effort"] = 0
+                row["collector_status"] = "ok"
+                break
+    # Memory detail
+    rc2, out2, _ = _shell(["adb", "shell", "dumpsys", "meminfo", "--package", package])
+    if rc2 == 0:
+        match = re.search(r"TOTAL\\s+(\\d+)", out2)
+        if match:
+            row["pss_kb"] = int(match.group(1))
+    return row
+
+
+def _parse_mem(token: str) -> int:
+    # top RES may show K or M
+    token = token.upper()
+    if token.endswith("M"):
+        return int(float(token.rstrip("M")) * 1024)
+    if token.endswith("K"):
+        return int(float(token.rstrip("K")))
+    return int(float(token))
+
+
+def collect_network_sample(uid: str, ts: datetime) -> Dict[str, object]:
+    row: Dict[str, object] = {
+        "ts_utc": ts.isoformat(),
+        "uid": uid,
+        "bytes_in": "",
+        "bytes_out": "",
+        "conn_count": "",
+        "source": "best_effort",
+        "best_effort": 1,
+        "collector_status": "unavailable",
+    }
+    rc, out, _ = _shell(["adb", "shell", "dumpsys", "netstats", "detail"])
+    if rc == 0:
+        bytes_in = 0
+        bytes_out = 0
+        for line in out.splitlines():
+            if f"uid={uid}" in line:
+                m_in = re.search(r"rxBytes=(\\d+)", line)
+                m_out = re.search(r"txBytes=(\\d+)", line)
+                if m_in:
+                    bytes_in += int(m_in.group(1))
+                if m_out:
+                    bytes_out += int(m_out.group(1))
+        if bytes_in or bytes_out:
+            row["bytes_in"] = bytes_in
+            row["bytes_out"] = bytes_out
+            row["conn_count"] = ""  # unknown from netstats detail
+            row["source"] = "netstats"
+            row["best_effort"] = 0
+            row["collector_status"] = "ok"
+            return row
+    # Fallback: /proc/net/dev aggregate
+    rc2, out2, _ = _shell(["adb", "shell", "cat", "/proc/net/dev"])
+    if rc2 == 0:
+        bytes_in = 0
+        bytes_out = 0
+        for line in out2.splitlines():
+            parts = line.split()
+            if len(parts) >= 10:
+                try:
+                    bytes_in += int(parts[1])
+                    bytes_out += int(parts[9])
+                except Exception:
+                    continue
+        row["bytes_in"] = bytes_in
+        row["bytes_out"] = bytes_out
+        row["conn_count"] = ""
+        row["source"] = "iface"
+        row["best_effort"] = 1
+        row["collector_status"] = "best_effort"
+    return row

@@ -84,6 +84,13 @@ def print_banner(*, show_clocks: bool = False) -> None:
 def main_menu() -> None:
     """Render the main menu loop using the shared menu framework."""
 
+    if len(sys.argv) > 1:
+        # Support direct subcommands (behavior, static, etc.)
+        if sys.argv[1] == "behavior":
+            from scytaledroid.BehaviorAnalysis import cli as behavior_cli
+            behavior_cli.main(sys.argv[2:])
+            return
+
     menu_actions: list[tuple[str, str, Callable[[], None]]] = [
         ("1", "Android Device Analysis", handle_device),
         ("2", "Static APK analysis", handle_static),

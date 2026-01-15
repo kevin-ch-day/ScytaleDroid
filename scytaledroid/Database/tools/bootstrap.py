@@ -111,12 +111,32 @@ def bootstrap_database() -> None:
     for path in _iter_schema_files():
         ddl_blocks.extend(_extract_ddl_blocks(path))
 
+    # Ensure schema_version exists and is populated
+    schema_version_stmt = """
+    CREATE TABLE IF NOT EXISTS schema_version (
+      version TEXT NOT NULL,
+      applied_at_utc TEXT NOT NULL
+    );
+    """
+    ddl_blocks.insert(0, schema_version_stmt)
+
     if not ddl_blocks:
         log.warning("No schema statements discovered during bootstrap.", category="database")
         return
 
     log.info(f"Bootstrapping schema for {dialect} with {len(ddl_blocks)} statements.", category="database")
     _execute_statements(ddl_blocks, dialect=dialect)
+    # Record schema version after successful bootstrap
+    try:
+        run_sql(
+            "DELETE FROM schema_version"
+        )
+        run_sql(
+            "INSERT INTO schema_version (version, applied_at_utc) VALUES (%s, %s)",
+            ("0.2.0", datetime.utcnow().isoformat() + "Z"),
+        )
+    except Exception as exc:  # pragma: no cover
+        log.warning(f"Failed to record schema_version: {exc}", category="database")
     log.info("Schema bootstrap complete.", category="database")
 
 
