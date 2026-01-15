@@ -35,3 +35,11 @@ Goal: single shared MariaDB backend for CLI + web, no silent SQLite fallback.
 - Connection fails: verify credentials/host in `SCYTALEDROID_DB_URL`.
 - Schema missing: rerun `python -m scytaledroid.Database.tools.db_init`.
 - Want SQLite dev mode: unset `SCYTALEDROID_DB_URL` (explicit choice).
+
+## URL schemes and examples
+- Supported: `mysql://` or `mariadb://` (PyMySQL driver), `mysql+pymysql://` also works.
+- TCP example (`.env`):
+  ```
+  SCYTALEDROID_DB_URL=mysql://user:pass@localhost:3306/scytaledroid
+  ```
+- Socket auth: not covered in this checklist; if needed, add `?unix_socket=/path/to/socket` to the URL and ensure the MariaDB user permits socket auth on that host.
