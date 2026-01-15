@@ -178,11 +178,11 @@ def write_permission_snapshot(
           COALESCE(MAX(spr.dangerous), MAX(rs.dangerous), 0),
           COALESCE(MAX(spr.signature), MAX(rs.signature), 0),
           COALESCE(MAX(spr.vendor), MAX(rs.vendor), 0),
-          COALESCE(MAX(spr.combo_total), 0),
-          COALESCE(MAX(spr.surprise_total), 0),
-          COALESCE(MAX(spr.legacy_total), 0),
-          COALESCE(MAX(spr.vendor_modifier), 0),
-          COALESCE(MAX(spr.modernization_credit), 0),
+          0,  -- combo totals (column absent in static_permission_risk on schema 0.2.x)
+          0,  -- surprise totals (column absent in static_permission_risk on schema 0.2.x)
+          0,  -- legacy totals (column absent in static_permission_risk on schema 0.2.x)
+          0,  -- vendor modifier (column absent in static_permission_risk on schema 0.2.x)
+          0,  -- modernization credit (column absent in static_permission_risk on schema 0.2.x)
           JSON_OBJECT(
             'session', %s,
             'scope_label', %s,

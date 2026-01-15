@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 from typing import Any, Mapping, Optional, Sequence, Union
 
+from functools import lru_cache
+
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_queries import views as _views
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
@@ -188,21 +190,32 @@ def write_metrics(
     *,
     static_run_id: Optional[int] = None,
 ) -> bool:
+    has_static = _has_column("metrics", "static_run_id")
     try:
-        if static_run_id is None:
+        if static_run_id is None and has_static:
             log.warning(
                 f"static_run_id missing for metrics; run_id={run_id} will be used without static linkage",
                 category="db",
             )
         for key, (num, text) in entries.items():
-            core_q.run_sql(
-                (
-                    "INSERT INTO metrics (run_id, static_run_id, feature_key, value_num, value_text, module_id) "
-                    "VALUES (%s,%s,%s,%s,%s,%s) "
-                    "ON DUPLICATE KEY UPDATE value_num=VALUES(value_num), value_text=VALUES(value_text), module_id=VALUES(module_id), static_run_id=VALUES(static_run_id)"
-                ),
-                (run_id, static_run_id, key, num, text, module_id),
-            )
+            if has_static:
+                core_q.run_sql(
+                    (
+                        "INSERT INTO metrics (run_id, static_run_id, feature_key, value_num, value_text, module_id) "
+                        "VALUES (%s,%s,%s,%s,%s,%s) "
+                        "ON DUPLICATE KEY UPDATE value_num=VALUES(value_num), value_text=VALUES(value_text), module_id=VALUES(module_id), static_run_id=VALUES(static_run_id)"
+                    ),
+                    (run_id, static_run_id, key, num, text, module_id),
+                )
+            else:
+                core_q.run_sql(
+                    (
+                        "INSERT INTO metrics (run_id, feature_key, value_num, value_text, module_id) "
+                        "VALUES (%s,%s,%s,%s,%s) "
+                        "ON DUPLICATE KEY UPDATE value_num=VALUES(value_num), value_text=VALUES(value_text), module_id=VALUES(module_id)"
+                    ),
+                    (run_id, key, num, text, module_id),
+                )
         return True
     except Exception as exc:
         log.error(
@@ -218,20 +231,27 @@ def write_buckets(
     *,
     static_run_id: Optional[int] = None,
 ) -> bool:
+    has_static = _has_column("buckets", "static_run_id")
     try:
-        if static_run_id is None:
+        if static_run_id is None and has_static:
             log.warning(
                 f"static_run_id missing for buckets; run_id={run_id} will be used without static linkage",
                 category="db",
             )
         for name, (points, cap) in buckets.items():
-            core_q.run_sql(
-                (
-                    "INSERT INTO buckets (run_id, static_run_id, bucket, points, cap) "
-                    "VALUES (%s,%s,%s,%s,%s)"
-                ),
-                (run_id, static_run_id, name, points, cap),
-            )
+            if has_static:
+                core_q.run_sql(
+                    (
+                        "INSERT INTO buckets (run_id, static_run_id, bucket, points, cap) "
+                        "VALUES (%s,%s,%s,%s,%s)"
+                    ),
+                    (run_id, static_run_id, name, points, cap),
+                )
+            else:
+                core_q.run_sql(
+                    "INSERT INTO buckets (run_id, bucket, points, cap) VALUES (%s,%s,%s,%s)",
+                    (run_id, name, points, cap),
+                )
         return True
     except Exception as exc:
         log.error(
@@ -318,6 +338,19 @@ __all__ = [
     "write_findings",
     "write_contributors",
 ]
+
+
+@lru_cache(maxsize=None)
+def _has_column(table: str, column: str) -> bool:
+    try:
+        row = core_q.run_sql(
+            "SHOW COLUMNS FROM {} LIKE %s".format(table),
+            (column,),
+            fetch="one",
+        )
+        return bool(row)
+    except Exception:
+        return False
 
 
 def _ensure_runs_session_column() -> None:
