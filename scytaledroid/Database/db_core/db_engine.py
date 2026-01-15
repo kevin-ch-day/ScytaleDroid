@@ -680,4 +680,41 @@ __all__ = [
     "TransientDbError",
     "connect",
     "sanity_probe",
+    "ensure_db_ready",
 ]
+
+
+def ensure_db_ready(*, require_schema: bool = True) -> None:
+    """Fail fast when MariaDB is configured but unreachable or missing schema."""
+
+    dialect = str(DB_CONFIG.get("engine", "sqlite")).lower()
+    if dialect != "mysql":
+        return
+
+    def _fmt_cfg(key: str, default: str = "<unknown>") -> str:
+        val = DB_CONFIG.get(key)
+        return str(val) if val not in (None, "") else default
+
+    try:
+        engine = DatabaseEngine()
+        engine.fetch_one("SELECT 1")
+    except Exception as exc:
+        raise SystemExit(
+            f"Database connection failed for configured MariaDB backend "
+            f"({DB_CONFIG.get('user', '<unknown>')}@{_fmt_cfg('host')}:{_fmt_cfg('port')}/{_fmt_cfg('database')}): {exc}\n"
+            "Fix credentials/host or unset SCYTALEDROID_DB_URL to use SQLite."
+        )
+
+    if not require_schema:
+        return
+    try:
+        row = engine.fetch_one(
+            "SELECT version, applied_at_utc FROM schema_version ORDER BY applied_at_utc DESC LIMIT 1"
+        )
+        if not row:
+            raise RuntimeError("schema_version table empty")
+    except Exception as exc:
+        raise SystemExit(
+            f"Database schema missing or incompatible for {DB_CONFIG.get('database')}: {exc}\n"
+            "Run: python -m scytaledroid.Database.tools.bootstrap (or db migrate/init) against your MariaDB."
+        )

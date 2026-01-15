@@ -10,8 +10,63 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Mapping, MutableMapping, Sequence, Union
 
-from ...db_core import database_session, run_sql
+from ...db_core import database_session, run_sql, db_config
 from ...db_queries.static_analysis import string_analysis as queries
+
+_IS_SQLITE = str(db_config.DB_CONFIG.get("engine", "sqlite")).lower() == "sqlite"
+
+SQLITE_CREATE_SUMMARY = """
+CREATE TABLE IF NOT EXISTS static_string_summary (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  package_name TEXT NOT NULL,
+  session_stamp TEXT NOT NULL,
+  scope_label TEXT NOT NULL,
+  run_id INTEGER NULL,
+  static_run_id INTEGER NULL,
+  endpoints INTEGER NOT NULL DEFAULT 0,
+  http_cleartext INTEGER NOT NULL DEFAULT 0,
+  api_keys INTEGER NOT NULL DEFAULT 0,
+  analytics_ids INTEGER NOT NULL DEFAULT 0,
+  cloud_refs INTEGER NOT NULL DEFAULT 0,
+  ipc INTEGER NOT NULL DEFAULT 0,
+  uris INTEGER NOT NULL DEFAULT 0,
+  flags INTEGER NOT NULL DEFAULT 0,
+  certs INTEGER NOT NULL DEFAULT 0,
+  high_entropy INTEGER NOT NULL DEFAULT 0,
+  placeholders_downgraded INTEGER NOT NULL DEFAULT 0,
+  placeholders_suppressed INTEGER NOT NULL DEFAULT 0,
+  doc_hosts_suppressed INTEGER NOT NULL DEFAULT 0,
+  doc_cdns_suppressed INTEGER NOT NULL DEFAULT 0,
+  trailing_punct_trimmed INTEGER NOT NULL DEFAULT 0,
+  ws_wss_seen INTEGER NOT NULL DEFAULT 0,
+  ipv6_seen INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(package_name, session_stamp, scope_label)
+);
+"""
+
+SQLITE_CREATE_SAMPLES = """
+CREATE TABLE IF NOT EXISTS static_string_samples (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  summary_id INTEGER NOT NULL,
+  static_run_id INTEGER NULL,
+  bucket TEXT NOT NULL,
+  value_masked TEXT NULL,
+  src TEXT NULL,
+  tag TEXT NULL,
+  rank INTEGER NOT NULL DEFAULT 1,
+  source_type TEXT NULL,
+  finding_type TEXT NULL,
+  provider TEXT NULL,
+  risk_tag TEXT NULL,
+  confidence TEXT NULL,
+  sample_hash TEXT NULL,
+  root_domain TEXT NULL,
+  resource_name TEXT NULL,
+  scheme TEXT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+"""
 
 
 @dataclass(slots=True)
@@ -77,6 +132,17 @@ SampleRow = Union[StringSample, Mapping[str, object]]
 
 
 def ensure_tables() -> bool:
+    if _IS_SQLITE:
+        try:
+            with database_session():
+                run_sql(SQLITE_CREATE_SUMMARY)
+                run_sql(SQLITE_CREATE_SAMPLES)
+                run_sql(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS ux_string_summary ON static_string_summary(package_name, session_stamp, scope_label)"
+                )
+            return True
+        except Exception:
+            return False
     try:
         with database_session():
             run_sql(queries.CREATE_STRING_SUMMARY)
@@ -247,6 +313,52 @@ def _summary_params(summary: SummaryRow) -> MutableMapping[str, object]:
 
 
 def upsert_summary(summary: SummaryRow) -> int | None:
+    if _IS_SQLITE:
+        payload = _summary_params(summary)
+        stmt = """
+        INSERT INTO static_string_summary (
+          package_name, session_stamp, scope_label, run_id, static_run_id,
+          endpoints, http_cleartext, api_keys, analytics_ids, cloud_refs, ipc, uris, flags, certs,
+          high_entropy, placeholders_downgraded, placeholders_suppressed, doc_hosts_suppressed,
+          doc_cdns_suppressed, trailing_punct_trimmed, ws_wss_seen, ipv6_seen
+        ) VALUES (
+          %(package_name)s, %(session_stamp)s, %(scope_label)s, %(run_id)s, %(static_run_id)s,
+          %(endpoints)s, %(http_cleartext)s, %(api_keys)s, %(analytics_ids)s, %(cloud_refs)s, %(ipc)s, %(uris)s, %(flags)s, %(certs)s,
+          %(high_entropy)s, %(placeholders_downgraded)s, %(placeholders_suppressed)s, %(doc_hosts_suppressed)s,
+          %(doc_cdns_suppressed)s, %(trailing_punct_trimmed)s, %(ws_wss_seen)s, %(ipv6_seen)s
+        )
+        ON CONFLICT(package_name, session_stamp, scope_label) DO UPDATE SET
+          run_id=excluded.run_id,
+          static_run_id=excluded.static_run_id,
+          endpoints=excluded.endpoints,
+          http_cleartext=excluded.http_cleartext,
+          api_keys=excluded.api_keys,
+          analytics_ids=excluded.analytics_ids,
+          cloud_refs=excluded.cloud_refs,
+          ipc=excluded.ipc,
+          uris=excluded.uris,
+          flags=excluded.flags,
+          certs=excluded.certs,
+          high_entropy=excluded.high_entropy,
+          placeholders_downgraded=excluded.placeholders_downgraded,
+          placeholders_suppressed=excluded.placeholders_suppressed,
+          doc_hosts_suppressed=excluded.doc_hosts_suppressed,
+          doc_cdns_suppressed=excluded.doc_cdns_suppressed,
+          trailing_punct_trimmed=excluded.trailing_punct_trimmed,
+          ws_wss_seen=excluded.ws_wss_seen,
+          ipv6_seen=excluded.ipv6_seen;
+        """
+        try:
+            with database_session():
+                run_sql(stmt, payload)
+                row = run_sql(
+                    "SELECT id FROM static_string_summary WHERE package_name=%s AND session_stamp=%s AND scope_label=%s",
+                    (payload["package_name"], payload["session_stamp"], payload["scope_label"]),
+                    fetch="one",
+                )
+            return int(row[0]) if row else None
+        except Exception:
+            return None
     payload = _summary_params(summary)
     # Keep a copy for logging in case inserts fail.
     log_payload = {
@@ -317,6 +429,67 @@ def replace_top_samples(
 
     Returns (deleted, inserted).
     """
+    if _IS_SQLITE:
+        deleted = 0
+        inserted = 0
+        try:
+            with database_session():
+                run_sql("DELETE FROM static_string_samples WHERE summary_id=%s", (summary_id,))
+                deleted = 1
+                for bucket, entries in samples.items():
+                    if not entries:
+                        continue
+                    rank = 1
+                    for sample in list(entries)[: int(top_n)]:
+                        record = _sample_to_mapping(sample)
+                        value_masked = record.get("value_masked") or record.get("value")
+                        src = record.get("src")
+                        tag = record.get("tag")
+                        source_type = record.get("source_type")
+                        finding_type = record.get("finding_type")
+                        provider = record.get("provider")
+                        risk_tag = record.get("risk_tag")
+                        confidence = record.get("confidence")
+                        sample_hash = record.get("sample_hash")
+                        root_domain = record.get("root_domain")
+                        resource_name = record.get("resource_name")
+                        scheme = record.get("scheme")
+                        run_sql(
+                            """
+                            INSERT INTO static_string_samples (
+                              summary_id, static_run_id, bucket, value_masked, src, tag, rank,
+                              source_type, finding_type, provider, risk_tag, confidence,
+                              sample_hash, root_domain, resource_name, scheme
+                            ) VALUES (
+                              %s, %s, %s, %s, %s, %s, %s,
+                              %s, %s, %s, %s, %s,
+                              %s, %s, %s, %s
+                            )
+                            """,
+                            (
+                                summary_id,
+                                static_run_id,
+                                bucket,
+                                str(value_masked)[:512] if value_masked is not None else None,
+                                str(src)[:512] if src is not None else None,
+                                (str(tag)[:64] if tag is not None else None),
+                                rank,
+                                (str(source_type)[:16] if source_type else None),
+                                (str(finding_type)[:32] if finding_type else None),
+                                (str(provider)[:64] if provider else None),
+                                (str(risk_tag)[:32] if risk_tag else None),
+                                (str(confidence)[:16] if confidence else None),
+                                (str(sample_hash)[:40] if sample_hash else None),
+                                (str(root_domain)[:191] if root_domain else None),
+                                (str(resource_name)[:191] if resource_name else None),
+                                (str(scheme)[:32] if scheme else None),
+                            ),
+                        )
+                        inserted += 1
+                        rank += 1
+        except Exception:
+            pass
+        return deleted, inserted
     deleted = 0
     inserted = 0
     try:

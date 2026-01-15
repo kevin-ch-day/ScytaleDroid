@@ -85,12 +85,10 @@ def persist_permission_risk(
                 sha256 = first_text(row[0])
         except Exception:
             sha256 = None
+    if not sha256 and run_id is not None:
+        sha256 = f"run-{run_id}"
     if not sha256:
-        log.debug(
-            "Skipping permission risk persistence for %s: missing sha256",
-            package_name,
-            category="static_analysis",
-        )
+        log.debug(f"Skipping permission risk persistence for {package_name}: missing sha256", category="static_analysis")
         return
 
     app_id: Optional[int] = None
@@ -129,9 +127,7 @@ def persist_permission_risk(
         permission_risk_db.upsert(payload)
     except Exception as exc:  # pragma: no cover - defensive
         log.debug(
-            "Permission risk upsert skipped for %s: %s",
-            package_name,
-            exc,
+            f"Permission risk upsert skipped for {package_name}: {exc}",
             category="static_analysis",
         )
 

@@ -18,6 +18,7 @@ from scytaledroid.Utils.System.world_clock.display import (
     snapshot_clocks,
 )
 from scytaledroid.Utils.System.world_clock.state import ClockReference, WorldClockState, load_state
+from scytaledroid.Database.db_core.db_engine import ensure_db_ready
 
 
 def _resolve_timezones() -> WorldClockState:
@@ -84,6 +85,7 @@ def print_banner(*, show_clocks: bool = False) -> None:
 def main_menu() -> None:
     """Render the main menu loop using the shared menu framework."""
 
+    ensure_db_ready()
     if len(sys.argv) > 1:
         # Support direct subcommands (behavior, static, etc.)
         if sys.argv[1] == "behavior":

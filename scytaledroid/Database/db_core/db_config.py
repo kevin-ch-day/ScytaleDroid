@@ -13,6 +13,30 @@ from urllib.parse import urlparse
 
 from scytaledroid.Config import app_config
 
+_BASE_DIR = Path(__file__).resolve().parents[3]
+_DOTENV_DEFAULT = _BASE_DIR / ".env"
+
+
+def _load_dotenv() -> None:
+    """Lightweight .env loader (no external dependency)."""
+
+    env_path = Path(os.environ.get("SCYTALEDROID_ENV_FILE") or _DOTENV_DEFAULT)
+    if not env_path.exists():
+        return
+    try:
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                continue
+            key, value = stripped.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = value
+    except Exception:
+        # Silent failure to avoid blocking startup if .env unreadable.
+        return
+
 
 def _default_sqlite_path() -> Path:
     base = Path(app_config.DATA_DIR) / "db"
@@ -21,6 +45,7 @@ def _default_sqlite_path() -> Path:
 
 
 def _load_from_env() -> Dict[str, Union[str, int]]:
+    _load_dotenv()
     raw_url = os.environ.get("SCYTALEDROID_DB_URL")
     if not raw_url:
         # Default: SQLite under data/db/

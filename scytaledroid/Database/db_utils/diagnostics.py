@@ -41,6 +41,17 @@ def check_connection() -> bool:
         return False
 
 
+def get_schema_version() -> Optional[str]:
+    """Return the schema version string if available."""
+
+    try:
+        with _connected_engine(reuse_connection=False) as engine:
+            row = engine.fetch_one("SELECT version FROM schema_version ORDER BY applied_at_utc DESC LIMIT 1")
+            return str(row[0]) if row else None
+    except Exception:
+        return None
+
+
 def get_server_info() -> Dict[str, Any]:
     """Return a mapping with ``database``, ``version``, and ``user`` details."""
 

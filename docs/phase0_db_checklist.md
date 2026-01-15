@@ -1,0 +1,37 @@
+# Phase-0 Database Unification (MariaDB) Checklist
+
+Goal: single shared MariaDB backend for CLI + web, no silent SQLite fallback.
+
+## Prereqs
+- MariaDB running on Fedora and reachable.
+- `.env` (gitignored) with `SCYTALEDROID_DB_URL=mysql://user:pass@host:3306/dbname`
+  - Optional: set `SCYTALEDROID_ENV_FILE` to point to another env file.
+
+## Commands
+1) Bootstrap schema (MariaDB)
+   ```bash
+   python -m scytaledroid.Database.tools.db_init
+   ```
+2) Status check
+   ```bash
+   python -m scytaledroid.Database.tools.db_status
+   ```
+3) Run CLI against MariaDB
+   ```bash
+   ./run_mariadb.sh    # loads .env and enforces MariaDB
+   ```
+4) Database Utilities → “Check connection & show config”
+   - Backend shows `mysql`
+   - Host/Port/DB/User match MariaDB
+   - Schema ver populated
+
+## Acceptance
+- If `SCYTALEDROID_DB_URL` is set and connection/schema fails, CLI exits non-zero (no fallback).
+- Fresh MariaDB can be bootstrapped deterministically via `db_init`.
+- Schema version is stored and reported in db_status and the CLI menu.
+- Web app can point to the same DB (identical schema).
+
+## Troubleshooting
+- Connection fails: verify credentials/host in `SCYTALEDROID_DB_URL`.
+- Schema missing: rerun `python -m scytaledroid.Database.tools.db_init`.
+- Want SQLite dev mode: unset `SCYTALEDROID_DB_URL` (explicit choice).
