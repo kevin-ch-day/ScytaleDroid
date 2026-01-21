@@ -153,11 +153,17 @@ def persist_run_summary(
             if len(rows) > 1:
                 message = (
                     f"Multiple static_analysis_runs found for session={session_stamp} "
-                    f"package={package_for_run}; cannot disambiguate. Use a unique session."
+                    f"package={package_for_run}; cannot disambiguate. Use a unique session label."
                 )
                 outcome.add_error(message)
                 return outcome
-            static_run_id = int(rows[0][0])
+            # Enforce immutable runs: do not reuse an existing static_run_id for the same session/package.
+            message = (
+                f"Session label already used for package={package_for_run} "
+                f"(static_run_id={rows[0][0]}). Please rerun with a unique session label."
+            )
+            outcome.add_error(message)
+            return outcome
     except Exception:
         static_run_id = None
 

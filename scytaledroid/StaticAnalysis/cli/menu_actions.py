@@ -6,6 +6,12 @@ from dataclasses import replace
 from typing import Any
 
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
+from scytaledroid.StaticAnalysis.session import make_session_stamp
+
+try:  # optional DB access (offline mode)
+    from scytaledroid.Database.db_core import db_queries as core_q
+except Exception:  # pragma: no cover - DB optional
+    core_q = None
 
 from .commands.models import Command
 from .models import RunParameters
@@ -77,7 +83,30 @@ def prompt_session_label(params: RunParameters) -> RunParameters:
     ).strip()
     if not label or label == current:
         return params
-    return replace(params, session_stamp=label)
+
+    # Enforce unique session labels: if already present, auto-suffix to avoid run bleed.
+    session_stamp = label
+    if core_q is not None:
+        try:
+            exists = core_q.run_sql(
+                "SELECT id FROM runs WHERE session_stamp = %s LIMIT 1",
+                (session_stamp,),
+                fetch="one",
+            )
+            if exists:
+                suffix = make_session_stamp()
+                session_stamp = f"{label}-{suffix}"
+                print(
+                    status_messages.status(
+                        f"Session label '{label}' already exists. Using '{session_stamp}' instead.",
+                        level="warn",
+                    )
+                )
+        except Exception:
+            # If the check fails, fall back to the user-provided label.
+            session_stamp = label
+
+    return replace(params, session_stamp=session_stamp)
 
 
 def ask_run_controls() -> str:

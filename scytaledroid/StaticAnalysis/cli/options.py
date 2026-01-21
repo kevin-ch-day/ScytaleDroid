@@ -45,6 +45,7 @@ class ScanDisplayOptions:
     show_timings: bool = False
     finding_limit: int = 3
     show_pipeline: bool = False
+    show_split_summaries: bool = False
     explore: bool = False
 
     def describe(self) -> str:
@@ -77,10 +78,12 @@ def resolve_display_options() -> ScanDisplayOptions:
     show_findings_default = _env_flag("SCYTALEDROID_STATIC_SHOW_FINDINGS", False)
     show_timings = _env_flag("SCYTALEDROID_STATIC_SHOW_TIMINGS", False)
     show_pipeline_default = _env_flag("SCYTALEDROID_STATIC_SHOW_PIPELINE", False)
+    show_splits_default = _env_flag("SCYTALEDROID_STATIC_SHOW_SPLITS", False)
     limit = _env_int("SCYTALEDROID_STATIC_FINDING_LIMIT", 3)
 
     show_findings = False if quiet else show_findings_default
     show_pipeline = False if quiet else show_pipeline_default
+    show_split_summaries = False if quiet else show_splits_default
 
     return ScanDisplayOptions(
         quiet=quiet,
@@ -88,6 +91,7 @@ def resolve_display_options() -> ScanDisplayOptions:
         show_timings=show_timings,
         finding_limit=limit,
         show_pipeline=show_pipeline,
+        show_split_summaries=show_split_summaries,
     )
 
 

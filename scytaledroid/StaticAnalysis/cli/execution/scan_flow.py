@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -99,6 +100,16 @@ def _execute_single_artifact(progress_label: str, artifact, params: RunParameter
 
 
 def _print_artifact_progress(label: str, summary: ArtifactOutcome, timings: Iterable[tuple[str, float]]) -> None:
+    # Hide per-split banners unless explicitly enabled for debugging.
+    show_splits = os.getenv("SCYTALEDROID_STATIC_SHOW_SPLITS", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+        "y",
+    }
+    if not show_splits:
+        return
     detector_timings = [(name, dur) for name, dur in timings if dur > 0]
     severity_counts = getattr(summary, "severity", None)
     totals: dict[str, int] = {}

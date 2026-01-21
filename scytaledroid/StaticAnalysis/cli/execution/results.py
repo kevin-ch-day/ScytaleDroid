@@ -395,9 +395,10 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                 )
             )
         elif canonical_skips:
+            reason = ", ".join(sorted(set(canonical_skips)))
             print(
                 status_messages.status(
-                    f"Status: OK (with skips) – canonical ingest skipped for {len(set(canonical_skips))} package(s)",
+                    f"Status: OK (with skips) – optional canonical ingest skipped ({reason})",
                     level="info",
                 )
             )
@@ -1373,8 +1374,10 @@ def _render_persistence_footer(
     except Exception:
         return
 
-    run_ids = [int(row[0]) for row in run_rows if row and row[0] is not None]
-    static_run_ids = _resolve_static_run_ids(session_stamp)
+    run_ids = sorted(int(row[0]) for row in run_rows if row and row[0] is not None)
+    latest_run_ids = run_ids[-1:] if run_ids else []
+    static_run_ids = sorted(_resolve_static_run_ids(session_stamp))
+    latest_static_run_ids = static_run_ids[-1:] if static_run_ids else []
     audit = collect_static_run_counts(session_stamp=session_stamp) if static_run_ids else None
     audit_counts = audit.counts if audit else {}
 
@@ -1435,16 +1438,17 @@ def _render_persistence_footer(
         return _count(fallback_sql, params)
 
     def _count_by_run(table: str) -> int:
-        if static_run_ids and _table_has_column(table, "static_run_id"):
-            placeholders = ",".join(["%s"] * len(static_run_ids))
-            params = tuple(static_run_ids)
+        # Prefer most recent run/static_run to avoid accumulated totals when session labels are reused.
+        if latest_static_run_ids and _table_has_column(table, "static_run_id"):
+            placeholders = ",".join(["%s"] * len(latest_static_run_ids))
+            params = tuple(latest_static_run_ids)
             return _count(
                 f"SELECT COUNT(*) FROM {table} WHERE static_run_id IN ({placeholders})",
                 params,
             )
-        if run_ids:
-            placeholders = ",".join(["%s"] * len(run_ids))
-            params = tuple(run_ids)
+        if latest_run_ids:
+            placeholders = ",".join(["%s"] * len(latest_run_ids))
+            params = tuple(latest_run_ids)
             return _count(
                 f"SELECT COUNT(*) FROM {table} WHERE run_id IN ({placeholders})",
                 params,
@@ -1541,8 +1545,12 @@ def _render_persistence_footer(
 
     print("Persisted (authoritative)")
     print("------------------------")
+    scope_note = "run_id=" + ",".join(str(r) for r in latest_run_ids) if latest_run_ids else "run_id=<none>"
+    if latest_static_run_ids:
+        scope_note += f" static_run_id=" + ",".join(str(r) for r in latest_static_run_ids)
     lines = [
-        ("runs", f"this_run={len(run_ids)}  db_total={runs_total}"),
+        ("run_scope", scope_note),
+        ("runs", f"this_run={len(latest_run_ids)}  db_total={runs_total}"),
         ("findings", f"this_run={findings}  db_total={findings_total}"),
         (
             "static_findings_summary",

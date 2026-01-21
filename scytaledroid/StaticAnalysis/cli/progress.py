@@ -128,6 +128,8 @@ class ScanProgress:
         category: str | None,
         artifact_count: int,
     ) -> None:
+        if not self.options.show_split_summaries:
+            return
         category_text = category or "Uncategorised"
         version_text = version or "—"
         self._write(
@@ -142,9 +144,13 @@ class ScanProgress:
         artifact_total: int,
         label: str,
     ) -> None:
+        if not self.options.show_split_summaries:
+            return
         self._write(f"  {self.glyphs.arrow_right} Artifact {artifact_index}/{artifact_total}: {label}")
 
     def artifact_failed(self, label: str, message: str) -> None:
+        if not self.options.show_split_summaries:
+            return
         badge = format_badge(Badge.FAIL, self.glyphs)
         self._write(f"    {badge} {label}: {message}")
 
@@ -159,6 +165,9 @@ class ScanProgress:
     ) -> Counter[str]:
         counter = Counter(finding.severity_gate.value for finding in findings)
         self._severity_totals.update(counter)
+
+        if not self.options.show_split_summaries:
+            return counter
 
         if counter.get("P0"):
             badge = format_badge(Badge.FAIL, self.glyphs)

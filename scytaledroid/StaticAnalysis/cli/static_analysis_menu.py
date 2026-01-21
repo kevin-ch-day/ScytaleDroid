@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from dataclasses import replace
 from pathlib import Path
@@ -12,6 +13,7 @@ from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_mes
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuItemSpec, MenuSpec
 from scytaledroid.DeviceAnalysis.services.static_scope_service import static_scope_service
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
+from scytaledroid.StaticAnalysis.session import make_session_stamp
 
 if TYPE_CHECKING:
     from .commands.models import Command
@@ -244,7 +246,11 @@ def static_analysis_menu() -> None:
         if command.section == "dev":
             # Make dev runs easy to identify
             short = selection.label.split(".")[-1]
-            params = replace(params, session_stamp=f"static-dev-{short}")
+            params = replace(params, session_stamp=f"static-dev-{short}-{make_session_stamp()}")
+
+        # Optional split breakdown prompt (default off to keep output compact).
+        show_splits = prompt_utils.prompt_yes_no("Show split breakdown? (y/N)", default=False)
+        os.environ["SCYTALEDROID_STATIC_SHOW_SPLITS"] = "1" if show_splits else "0"
 
         while True:
             action = ask_run_controls()
