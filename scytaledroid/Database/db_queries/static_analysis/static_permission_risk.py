@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS static_permission_risk (
   app_id BIGINT UNSIGNED NULL,
   package_name VARCHAR(255) NOT NULL,
   sha256 CHAR(64) NOT NULL,
-  session_stamp VARCHAR(32) NOT NULL,
+  session_stamp VARCHAR(64) NOT NULL,
   scope_label VARCHAR(191) NOT NULL,
   risk_score DECIMAL(7,3) NOT NULL,
   risk_grade CHAR(1) NOT NULL,
@@ -59,4 +59,3 @@ __all__ = [
     "UPSERT_RISK",
     "TABLE_EXISTS",
 ]
-

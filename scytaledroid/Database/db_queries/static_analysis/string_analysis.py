@@ -7,7 +7,7 @@ CREATE_STRING_SUMMARY = """
 CREATE TABLE IF NOT EXISTS static_string_summary (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   package_name VARCHAR(191) NOT NULL,
-  session_stamp VARCHAR(32) NOT NULL,
+  session_stamp VARCHAR(64) NOT NULL,
   scope_label VARCHAR(191) NOT NULL,
   run_id BIGINT UNSIGNED NULL,
   static_run_id BIGINT UNSIGNED NULL,

@@ -48,7 +48,11 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
         if normalized != params.session_stamp:
             print(
                 status_messages.status(
-                    f"Session label normalized to '{normalized}' to fit DB limits.",
+                    (
+                        "Session label normalized for cross-table compatibility "
+                        f"({len(params.session_stamp)}→{len(normalized)} chars): "
+                        f"'{params.session_stamp}' → '{normalized}'."
+                    ),
                     level="warn",
                 )
             )

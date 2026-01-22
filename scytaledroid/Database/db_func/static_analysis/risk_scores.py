@@ -47,6 +47,18 @@ RiskRow = Union[RiskScoreRecord, Mapping[str, object]]
 def ensure_table() -> bool:
     try:
         run_sql(queries.CREATE_TABLE)
+        row = run_sql(
+            """
+            SELECT CHARACTER_MAXIMUM_LENGTH
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+              AND table_name = 'risk_scores'
+              AND column_name = 'session_stamp'
+            """,
+            fetch="one",
+        )
+        if row and row[0] is not None and int(row[0]) < 64:
+            run_sql("ALTER TABLE risk_scores MODIFY session_stamp VARCHAR(64) NOT NULL")
         return True
     except Exception:
         return False
@@ -89,4 +101,3 @@ __all__ = [
     "upsert_risk",
     "bulk_upsert_risks",
 ]
-

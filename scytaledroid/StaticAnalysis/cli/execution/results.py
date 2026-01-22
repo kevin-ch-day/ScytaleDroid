@@ -398,7 +398,7 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
         print(
             status_messages.status(
                 (
-                    "String samples persisted: "
+                    "String samples captured (pre-cap): "
                     f"{string_samples_persisted_total} "
                     f"(cap={params.string_max_samples} per bucket; entropy ≥ {params.string_min_entropy:.2f})"
                 ),
@@ -423,7 +423,7 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             if outcome.aborted:
                 reason += ";reason=aborted"
             else:
-                reason += ";reason=unavailable"
+                reason += ";reason=capability_unavailable"
             print(
                 status_messages.status(
                     f"Status: OK (with skips) – optional canonical ingest skipped ({reason})",

@@ -35,8 +35,11 @@ def make_session_stamp(now: datetime | None = None) -> str:
         return stamp
 
 
-def normalize_session_stamp(label: str, *, max_len: int = 32) -> str:
-    """Normalize a session label to fit DB constraints while remaining unique."""
+SESSION_STAMP_MAX_LEN = 64
+
+
+def normalize_session_stamp(label: str, *, max_len: int = SESSION_STAMP_MAX_LEN) -> str:
+    """Normalize a session label to fit cross-table constraints while remaining unique."""
     if not label:
         return label
     if len(label) <= max_len:

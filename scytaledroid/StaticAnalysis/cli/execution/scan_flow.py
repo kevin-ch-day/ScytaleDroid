@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import os
+import time
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, Mapping, MutableMapping, Optional, Sequence, Tuple
+from typing import Mapping, MutableMapping, Optional, Sequence, Tuple
 
-from scytaledroid.Utils.DisplayUtils import severity, status_messages, summary_cards
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
-from scytaledroid.Utils.System import output_prefs
 
 from ...core import (
     AnalysisConfig,
@@ -57,8 +56,9 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
     failures: list[str] = []
     completed_artifacts = 0
     total_artifacts = sum(len(_dedupe_artifacts(group.artifacts)) for group in selection.groups)
+    show_splits = _show_split_breakdown()
 
-    for group_index, group in enumerate(selection.groups, start=1):
+    for group in selection.groups:
         abort_requested, _, _ = _abort_state()
         if abort_requested:
             break
@@ -105,27 +105,36 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
         results.append(app_result)
 
         artifacts = _dedupe_artifacts(group.artifacts)
+        progress = _PipelineProgress(total=len(artifacts), show_splits=show_splits)
         for artifact_index, artifact in enumerate(artifacts, start=1):
             abort_requested, _, _ = _abort_state()
             if abort_requested:
                 break
-            progress_label = _progress_label(
-                group_index,
-                len(selection.groups),
-                artifact_index,
-                len(artifacts),
-                group.package_name,
-            )
-
-            report, summary, timings = _execute_single_artifact(
-                progress_label,
+            artifact_label = _artifact_label(artifact)
+            progress.start(artifact_index, artifact_label)
+            report, summary, timings, error_message, skipped = _execute_single_artifact(
                 artifact,
                 params,
                 selection,
                 base_dir,
             )
+            if skipped:
+                if error_message:
+                    progress.error(artifact_index, artifact_label, error_message)
+                    failures.append(error_message)
+                else:
+                    failures.append(f"No report generated for {artifact.display_path}")
+                completed_artifacts += 1
+                if _abort_state()[0]:
+                    break
+                continue
+
             if summary is None:
-                failures.append(f"No report generated for {artifact.display_path}")
+                if error_message:
+                    progress.error(artifact_index, artifact_label, error_message)
+                    failures.append(error_message)
+                else:
+                    failures.append(f"No report generated for {artifact.display_path}")
                 completed_artifacts += 1
                 if _abort_state()[0]:
                     break
@@ -134,11 +143,12 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
             app_result.artifacts.append(summary)
             completed_artifacts += 1
             if report is not None:
-                _print_artifact_progress(progress_label, summary, timings)
+                progress.finish(artifact_index, artifact_label)
             if _abort_state()[0]:
                 break
         if _abort_state()[0]:
             break
+        progress.end()
 
     finished_at = datetime.utcnow()
     abort_requested, abort_reason, abort_signal = _abort_state()
@@ -158,20 +168,13 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
     )
 
 
-def _execute_single_artifact(progress_label: str, artifact, params: RunParameters, selection: ScopeSelection, base_dir: Path):
-    print(
-        status_messages.step(
-            f"Starting {artifact.artifact_label or 'base'}",
-            label=progress_label,
-        )
-    )
+def _execute_single_artifact(artifact, params: RunParameters, selection: ScopeSelection, base_dir: Path):
     report, json_path, error, skipped = generate_report(artifact, base_dir, params)
     if skipped:
-        return None, None, tuple()
+        return None, None, tuple(), error, True
 
     if error:
-        print(status_messages.status(error, level="error"))
-        return None, None, tuple()
+        return None, None, tuple(), error, False
 
     duration = report.metadata.get("duration_seconds", 0.0) if isinstance(report.metadata, Mapping) else 0.0
     timings = tuple(
@@ -182,117 +185,86 @@ def _execute_single_artifact(progress_label: str, artifact, params: RunParameter
     if (duration or 0.0) <= 0.0 and total_detector_time > 0.0:
         duration = total_detector_time
     summary = _summarize_artifact(artifact, report, json_path, duration)
-    print(
-        status_messages.step(
-            f"Finished {artifact.artifact_label or 'base'}",
-            label=progress_label,
-            state="success",
-        )
-    )
-    return report, summary, timings
+    return report, summary, timings, None, False
 
 
-def _print_artifact_progress(label: str, summary: ArtifactOutcome, timings: Iterable[tuple[str, float]]) -> None:
-    # Hide per-split banners unless explicitly enabled for debugging.
-    show_splits = os.getenv("SCYTALEDROID_STATIC_SHOW_SPLITS", "").strip().lower() in {
+def _show_split_breakdown() -> bool:
+    return os.getenv("SCYTALEDROID_STATIC_SHOW_SPLITS", "").strip().lower() in {
         "1",
         "true",
         "yes",
         "on",
         "y",
     }
-    if not show_splits:
-        return
-    detector_timings = [(name, dur) for name, dur in timings if dur > 0]
-    severity_counts = getattr(summary, "severity", None)
-    totals: dict[str, int] = {}
-    if severity_counts:
-        totals = severity.normalise_counts(severity_counts.items())
-
-    card_items: list[summary_cards.SummaryCardItem] = []
-    # Suppress per-detector timing noise in the default UI; keep only findings counts.
-    total_findings = sum(totals.values())
-    if total_findings:
-        style = "severity_high" if totals.get("high") else "emphasis"
-        card_items.append(summary_cards.summary_item("Findings", total_findings, value_style=style))
-
-    report = getattr(summary, "report", None)
-    permission_summary = getattr(report, "permissions", None)
-    if permission_summary:
-        declared_set = set(permission_summary.declared or ())
-        dangerous_set = set(permission_summary.dangerous or ())
-        custom_set = set(permission_summary.custom or ())
-        signature_set = declared_set - dangerous_set - custom_set
-        if declared_set:
-            perm_value = f"D:{len(dangerous_set)} S:{len(signature_set)} C:{len(custom_set)}"
-            value_style = "severity_high" if dangerous_set else "emphasis"
-            card_items.append(
-                summary_cards.summary_item(
-                    "Permissions",
-                    perm_value,
-                    value_style=value_style,
-                )
-            )
-    if totals:
-        card_items.extend(severity.severity_summary_items(totals, include_zero=False))
-
-    metadata = getattr(summary, "metadata", None)
-    package_name: Optional[str] = None
-    filename: Optional[str] = getattr(summary, "label", None)
-    if isinstance(metadata, Mapping):
-        package_value = metadata.get("package_name")
-        if isinstance(package_value, str) and package_value.strip():
-            package_name = package_value.strip()
-        artifact_hint = metadata.get("artifact")
-        if isinstance(artifact_hint, str) and artifact_hint.strip():
-            filename = artifact_hint.strip()
-        else:
-            display_hint = metadata.get("display_path")
-            if isinstance(display_hint, str) and display_hint.strip():
-                filename = display_hint.strip()
-    if not package_name:
-        after_bracket = label.split("]", 1)[-1].strip()
-        if after_bracket:
-            package_name = after_bracket
-            if " (" in after_bracket and after_bracket.endswith(")"):
-                package_name = after_bracket.rsplit("(", 1)[0].strip()
-    if not filename:
-        filename = label
-
-    print()
-    print(f"Package: {package_name or '<unknown>'}")
-    print(f"Filename: {filename}")
-    # Suppress duration to keep output compact; timings remain available in verbose logs.
-
-    if card_items:
-        bullet_items = [
-            summary_cards.SummaryCardItem(
-                item.label,
-                item.value,
-                label_style=item.label_style,
-                value_style=item.value_style,
-                bullet="• ",
-            )
-            for item in card_items
-        ]
-        print()
-        print(
-            summary_cards.format_summary_card(
-                "Summary",
-                bullet_items,
-                width=48,
-            )
-        )
-        print()
-
-    # Suppress per-detector timing noise in the default menu view; timings remain available in logs.
 
 
-def _progress_label(group_index: int, group_total: int, artifact_index: int, artifact_total: int, package_name: str) -> str:
-    label = f"[{group_index}/{group_total}] {package_name}"
-    if artifact_total > 1:
-        label += f" ({artifact_index}/{artifact_total})"
-    return label
+class _PipelineProgress:
+    def __init__(self, total: int, show_splits: bool) -> None:
+        self.total = max(1, int(total))
+        self.show_splits = show_splits
+        self._start = time.monotonic()
+        self._last_len = 0
+        self._last_checkpoint = 0
+
+    def start(self, index: int, label: str) -> None:
+        if self.show_splits:
+            return
+        elapsed = _format_elapsed(time.monotonic() - self._start)
+        text = f"Artifact {index}/{self.total}: {label} | elapsed {elapsed}"
+        self._render_line(text)
+
+    def finish(self, index: int, label: str) -> None:
+        if self.show_splits:
+            line = f"[{index:2d}/{self.total}] {label} OK"
+            print(line)
+            return
+        if index == self.total or (index - self._last_checkpoint) >= 5:
+            self._last_checkpoint = index
+            elapsed = _format_elapsed(time.monotonic() - self._start)
+            self._clear_line()
+            print(f"Completed {index}/{self.total} artifacts ({elapsed} elapsed)")
+
+    def error(self, index: int, label: str, message: str) -> None:
+        self._clear_line()
+        print(f"ERROR Artifact {index}/{self.total}: {label} - {message}")
+
+    def end(self) -> None:
+        if self.show_splits:
+            return
+        if self._last_len:
+            self._clear_line()
+            print()
+
+    def _render_line(self, text: str) -> None:
+        truncated = _truncate_label(text, 96)
+        padded = truncated.ljust(self._last_len)
+        self._last_len = max(self._last_len, len(truncated))
+        print(f"\r{padded}", end="", flush=True)
+
+    def _clear_line(self) -> None:
+        if self._last_len:
+            print(f"\r{' ' * self._last_len}\r", end="", flush=True)
+            self._last_len = 0
+
+
+def _format_elapsed(seconds: float) -> str:
+    total = max(0, int(seconds))
+    minutes = total // 60
+    seconds = total % 60
+    return f"{minutes:02d}:{seconds:02d}"
+
+
+def _artifact_label(artifact) -> str:
+    label = getattr(artifact, "artifact_label", None) or getattr(artifact, "display_path", None)
+    if isinstance(label, str) and label.strip():
+        return label.strip()
+    return "base"
+
+
+def _truncate_label(value: str, max_len: int) -> str:
+    if len(value) <= max_len:
+        return value
+    return f"{value[: max_len - 3].rstrip()}..."
 
 
 def _summarize_artifact(artifact, report: StaticAnalysisReport, json_path: Optional[Path], duration: float) -> ArtifactOutcome:
@@ -472,7 +444,22 @@ def format_duration(seconds: float) -> str:
     if seconds < 1:
         millis = max(1, int(round(seconds * 1000)))
         return f"{millis} ms"
-    return f"{seconds:.2f} s"
+    if seconds < 60:
+        return f"{seconds:.2f} sec"
+    minutes = int(seconds // 60)
+    remaining = int(round(seconds - minutes * 60))
+    if remaining == 60:
+        minutes += 1
+        remaining = 0
+    if minutes < 60:
+        min_label = "min" if minutes == 1 else "mins"
+        sec_label = "sec" if remaining == 1 else "secs"
+        return f"{minutes} {min_label} {remaining} {sec_label}"
+    hours = minutes // 60
+    minutes = minutes % 60
+    hr_label = "hr" if hours == 1 else "hrs"
+    min_label = "min" if minutes == 1 else "mins"
+    return f"{hours} {hr_label} {minutes} {min_label}"
 
 
 def _severity_token(level: SeverityLevel) -> str:

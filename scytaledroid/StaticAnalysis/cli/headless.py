@@ -96,7 +96,11 @@ def main(argv: list[str] | None = None) -> int:
         normalized = normalize_session_stamp(params.session_stamp)
         if normalized != params.session_stamp:
             print(
-                f"⚠ Session label normalized to '{normalized}' to fit DB limits."
+                (
+                    "⚠ Session label normalized for cross-table compatibility "
+                    f"({len(params.session_stamp)}→{len(normalized)} chars): "
+                    f"'{params.session_stamp}' → '{normalized}'."
+                )
             )
             params = params.__class__(**{**params.__dict__, "session_stamp": normalized})
 

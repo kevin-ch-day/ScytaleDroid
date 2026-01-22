@@ -149,6 +149,21 @@ def ensure_tables() -> bool:
             run_sql(queries.CREATE_STRING_SAMPLES)
             run_sql(queries.CREATE_STRING_MATCH_CACHE)
             run_sql(queries.CREATE_DOC_HOSTS_TABLE)
+            try:
+                row = run_sql(
+                    """
+                    SELECT character_maximum_length
+                    FROM information_schema.columns
+                    WHERE table_schema = DATABASE()
+                      AND table_name = 'static_string_summary'
+                      AND column_name = 'session_stamp'
+                    """,
+                    fetch="one",
+                )
+                if row and row[0] and int(row[0]) < 64:
+                    run_sql("ALTER TABLE static_string_summary MODIFY session_stamp VARCHAR(64) NOT NULL")
+            except Exception:
+                pass
             # Optional run_id and extended columns; guard against duplicate errors.
             def _has_col(table: str, col: str) -> bool:
                 try:

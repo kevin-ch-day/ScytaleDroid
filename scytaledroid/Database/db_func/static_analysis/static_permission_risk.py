@@ -62,6 +62,21 @@ def ensure_table() -> bool:
             run_sql("CREATE UNIQUE INDEX IF NOT EXISTS ux_spr_apk ON static_permission_risk(apk_id)")
         else:
             run_sql(queries.CREATE_TABLE)
+            try:
+                row = run_sql(
+                    """
+                    SELECT character_maximum_length
+                    FROM information_schema.columns
+                    WHERE table_schema = DATABASE()
+                      AND table_name = 'static_permission_risk'
+                      AND column_name = 'session_stamp'
+                    """,
+                    fetch="one",
+                )
+                if row and row[0] and int(row[0]) < 64:
+                    run_sql("ALTER TABLE static_permission_risk MODIFY session_stamp VARCHAR(64) NOT NULL")
+            except Exception:
+                pass
         return True
     except Exception:
         return False

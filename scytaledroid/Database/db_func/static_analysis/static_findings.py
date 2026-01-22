@@ -82,6 +82,21 @@ def ensure_tables() -> bool:
                 run_sql(queries.CREATE_FINDINGS)
             except Exception:
                 pass
+            try:
+                row = run_sql(
+                    """
+                    SELECT character_maximum_length
+                    FROM information_schema.columns
+                    WHERE table_schema = DATABASE()
+                      AND table_name = 'static_findings_summary'
+                      AND column_name = 'session_stamp'
+                    """,
+                    fetch="one",
+                )
+                if row and row[0] and int(row[0]) < 64:
+                    run_sql("ALTER TABLE static_findings_summary MODIFY session_stamp VARCHAR(64) NOT NULL")
+            except Exception:
+                pass
             # Optional run_id linkage (best-effort; safe if column/index already exists).
             if not _table_has_column("static_findings_summary", "run_id"):
                 try:
