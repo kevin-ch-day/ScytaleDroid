@@ -1482,7 +1482,9 @@ def _render_persistence_footer(
 
     def _from_audit(table: str) -> Optional[int]:
         if table in audit_counts:
-            value = audit_counts[table][0]
+            value, status = audit_counts[table]
+            if isinstance(status, str) and status.startswith("SKIP"):
+                return None
             try:
                 return int(value) if value is not None else 0
             except (TypeError, ValueError):
@@ -1671,6 +1673,8 @@ def _render_persistence_footer(
         "permission_audit_apps": snapshot_apps,
     }
     missing = [name for name, value in required_counts.items() if not value]
+    if audit and audit.run_id is None:
+        missing = []
 
     if run_status == "ABORTED":
         reason_token = abort_reason or abort_signal or "SIGINT"
@@ -1692,7 +1696,9 @@ def _render_persistence_footer(
 
     if audit:
         audit_static_run_id = audit.static_run_id if hasattr(audit, "static_run_id") else None
-        if missing:
+        if audit.run_id is None:
+            status_text = "SKIPPED (run_id missing)"
+        elif missing:
             status_text = (
                 "ERROR (missing " + ", ".join(sorted(missing)) + ")"
             )

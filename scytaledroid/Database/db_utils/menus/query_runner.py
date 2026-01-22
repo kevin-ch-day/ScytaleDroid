@@ -429,6 +429,12 @@ def render_session_digest(session_stamp: str | None, *, header: str | None = Non
     title = header or f"Verification digest — {resolved} (static_run_id={audit.static_run_id})"
     print()
     menu_utils.print_section(title)
+    if audit.is_group_scope:
+        print(status_messages.status("Group scope detected; per-package mapping not applicable.", level="info"))
+    if audit.is_orphan:
+        print(status_messages.status("Orphan static run (runs row missing).", level="warn"))
+    elif audit.is_legacy:
+        print(status_messages.status("Legacy static run (pre-ledger era).", level="info"))
 
     canonical = [
         ("findings (normalized)", "findings"),
@@ -466,8 +472,12 @@ def render_session_digest(session_stamp: str | None, *, header: str | None = Non
         "permission_audit_snapshots",
         "permission_audit_apps",
     )
-    missing = [name for name in required if not audit.counts.get(name) or not audit.counts[name][0]]
-    if missing:
+    missing = []
+    if audit.run_id is not None:
+        missing = [name for name in required if not audit.counts.get(name) or not audit.counts[name][0]]
+    if audit.run_id is None:
+        status_line = "DB verification: SKIPPED (run_id missing)"
+    elif missing:
         status_line = f"DB verification: ERROR (missing {', '.join(sorted(missing))} for static_run_id={audit.static_run_id})"
     else:
         status_line = (

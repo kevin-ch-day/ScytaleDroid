@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import sys
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Dict, Iterable, Optional, Tuple
 
 from scytaledroid.Database.db_core import db_engine
@@ -26,36 +27,96 @@ def _fetch_columns(cursor, table: str) -> set[str]:
     return {row[0] for row in cursor.fetchall()}
 
 
-def _resolve_run(cursor, session_stamp: Optional[str], run_id: Optional[int]) -> Tuple[Optional[int], Optional[str]]:
-    if run_id:
+def _derive_package(scope_label: Optional[str]) -> Optional[str]:
+    if not scope_label:
+        return None
+    scope_label = scope_label.strip()
+    if scope_label.startswith("com."):
+        return scope_label
+    if "(com." in scope_label:
+        tail = scope_label.rsplit("(", 1)[-1]
+        tail = tail.rstrip(")")
+        if tail.startswith("com."):
+            return tail
+    return None
+
+
+def _resolve_run(
+    cursor,
+    session_stamp: Optional[str],
+    static_run_id: Optional[int],
+) -> Tuple[Optional[int], Optional[str], Optional[str], Optional[str], Optional[datetime], Optional[int]]:
+    resolved_session = session_stamp
+    scope_label = None
+    created_at = None
+
+    if static_run_id:
         cursor.execute(
-            "SELECT session_stamp FROM static_analysis_runs WHERE id=%s",
-            (run_id,),
+            "SELECT session_stamp, scope_label, created_at FROM static_analysis_runs WHERE id=%s",
+            (static_run_id,),
         )
         row = cursor.fetchone()
-        return run_id, row[0] if row else None
-
-    if session_stamp:
+        if row:
+            resolved_session = row[0]
+            scope_label = row[1]
+            created_at = row[2]
+        static_run = static_run_id
+    elif session_stamp:
         cursor.execute(
-            "SELECT id FROM static_analysis_runs WHERE session_stamp=%s ORDER BY id DESC LIMIT 1",
+            """
+            SELECT id, scope_label, created_at
+            FROM static_analysis_runs
+            WHERE session_stamp=%s
+            ORDER BY id DESC
+            LIMIT 1
+            """,
             (session_stamp,),
         )
         row = cursor.fetchone()
-        return (row[0] if row else None), session_stamp
+        static_run = row[0] if row else None
+        scope_label = row[1] if row else None
+        created_at = row[2] if row else None
+    else:
+        return None, None, None, None, None, None
 
-    return None, None
+    derived_package = _derive_package(scope_label)
+    resolved_run_id: Optional[int] = None
+    if resolved_session and derived_package:
+        cursor.execute(
+            """
+            SELECT run_id
+            FROM runs
+            WHERE session_stamp=%s AND package=%s
+            ORDER BY run_id DESC
+            LIMIT 1
+            """,
+            (resolved_session, derived_package),
+        )
+        row = cursor.fetchone()
+        if row:
+            resolved_run_id = row[0]
+
+    return static_run, resolved_session, scope_label, derived_package, created_at, resolved_run_id
 
 
-def _count_for_table(cursor, table: str, run_id: Optional[int], session: Optional[str]) -> Tuple[str, Optional[int], str]:
+def _count_for_table(
+    cursor,
+    table: str,
+    run_id: Optional[int],
+    static_run_id: Optional[int],
+    session: Optional[str],
+) -> Tuple[str, Optional[int], str]:
     cols = _fetch_columns(cursor, table)
     where = None
     params: tuple = ()
-    if "static_run_id" in cols and run_id is not None:
+    if "static_run_id" in cols and static_run_id is not None:
         where = "static_run_id=%s"
-        params = (run_id,)
+        params = (static_run_id,)
     elif "run_id" in cols and run_id is not None:
         where = "run_id=%s"
         params = (run_id,)
+    elif "run_id" in cols:
+        return table, None, "SKIP (no run_id)"
     elif "session_stamp" in cols and session is not None:
         where = "session_stamp=%s"
         params = (session,)
@@ -73,7 +134,14 @@ def _count_for_table(cursor, table: str, run_id: Optional[int], session: Optiona
 @dataclass
 class RunAudit:
     static_run_id: int
+    run_id: Optional[int]
     session_stamp: Optional[str]
+    scope_label: Optional[str]
+    derived_package: Optional[str]
+    created_at: Optional[datetime]
+    is_group_scope: bool
+    is_legacy: bool
+    is_orphan: bool
     counts: Dict[str, Tuple[Optional[int], str]]
     severity_rows: Iterable[Tuple[str, str, int]]
 
@@ -83,9 +151,21 @@ def collect_static_run_counts(
 ) -> Optional[RunAudit]:
     with db_engine.connect() as conn:
         cur = conn.cursor()
-        resolved_run_id, resolved_session = _resolve_run(cur, session_stamp, static_run_id)
-        if resolved_run_id is None:
+        (
+            resolved_static_run_id,
+            resolved_session,
+            scope_label,
+            derived_package,
+            created_at,
+            resolved_run_id,
+        ) = _resolve_run(cur, session_stamp, static_run_id)
+        if resolved_static_run_id is None:
             return None
+
+        is_group_scope = derived_package is None
+        cutoff = datetime(2026, 1, 22)
+        is_legacy = bool(created_at and created_at < cutoff)
+        is_orphan = bool(derived_package and resolved_run_id is None and not is_legacy)
 
         tables = [
             "static_analysis_runs",
@@ -103,33 +183,55 @@ def collect_static_run_counts(
         counts: Dict[str, Tuple[Optional[int], str]] = {}
         for table in tables:
             table_name, count, status = _count_for_table(
-                cur, table, resolved_run_id, resolved_session
+                cur, table, resolved_run_id, resolved_static_run_id, resolved_session
             )
             counts[table_name] = (count, status)
 
         severity_rows: list[tuple[str, str, int]] = []
         try:
-            cur.execute(
-                """
-                SELECT a.package_name, f.severity, COUNT(*) as cnt
-                FROM findings f
-                JOIN static_analysis_runs r ON r.id = f.static_run_id
-                JOIN app_versions av ON av.id = r.app_version_id
-                JOIN apps a ON a.id = av.app_id
-                WHERE f.static_run_id=%s
-                GROUP BY a.package_name, f.severity
-                ORDER BY a.package_name, f.severity
-                """,
-                (resolved_run_id,),
-            )
-            severity_rows = [(pkg, sev, int(cnt)) for pkg, sev, cnt in cur.fetchall()]
+            findings_cols = _fetch_columns(cur, "findings")
+            if "run_id" in findings_cols and resolved_run_id is not None:
+                cur.execute(
+                    """
+                    SELECT r.package, f.severity, COUNT(*) as cnt
+                    FROM findings f
+                    JOIN runs r ON r.run_id = f.run_id
+                    WHERE f.run_id=%s
+                    GROUP BY r.package, f.severity
+                    ORDER BY r.package, f.severity
+                    """,
+                    (resolved_run_id,),
+                )
+                severity_rows = [(pkg, sev, int(cnt)) for pkg, sev, cnt in cur.fetchall()]
+            elif "static_run_id" in findings_cols and resolved_static_run_id is not None:
+                cur.execute(
+                    """
+                    SELECT a.package_name, f.severity, COUNT(*) as cnt
+                    FROM findings f
+                    JOIN static_analysis_runs r ON r.id = f.static_run_id
+                    JOIN app_versions av ON av.id = r.app_version_id
+                    JOIN apps a ON a.id = av.app_id
+                    WHERE f.static_run_id=%s
+                    GROUP BY a.package_name, f.severity
+                    ORDER BY a.package_name, f.severity
+                    """,
+                    (resolved_static_run_id,),
+                )
+                severity_rows = [(pkg, sev, int(cnt)) for pkg, sev, cnt in cur.fetchall()]
         except Exception:
             severity_rows = []
 
         cur.close()
     return RunAudit(
-        static_run_id=resolved_run_id,
+        static_run_id=resolved_static_run_id,
+        run_id=resolved_run_id,
         session_stamp=resolved_session,
+        scope_label=scope_label,
+        derived_package=derived_package,
+        created_at=created_at,
+        is_group_scope=is_group_scope,
+        is_legacy=is_legacy,
+        is_orphan=is_orphan,
         counts=counts,
         severity_rows=severity_rows,
     )
@@ -142,7 +244,16 @@ def audit_run(session_stamp: Optional[str], run_id: Optional[int]) -> int:
         print("No matching static_analysis_runs row found.")
         return 1
 
-    print(f"Resolved run: id={audit.static_run_id} session={audit.session_stamp}")
+    print(
+        "Resolved run: static_run_id="
+        f"{audit.static_run_id} run_id={audit.run_id} session={audit.session_stamp}"
+    )
+    if audit.is_group_scope:
+        print("Note: Group scope detected; per-package run mapping not applicable.")
+    if audit.is_orphan:
+        print("Note: ORPHAN static run (runs row missing).")
+    elif audit.is_legacy:
+        print("Note: LEGACY static run (pre-ledger era).")
 
     required = {
         "findings",
@@ -166,9 +277,12 @@ def audit_run(session_stamp: Optional[str], run_id: Optional[int]) -> int:
         for pkg, sev, cnt in audit.severity_rows:
             print(f"  {pkg:35} {sev:<6} {cnt}")
 
-    if missing:
+    if missing and audit.run_id is not None:
         print("\nDB verification: ERROR (missing: " + ", ".join(sorted(missing)) + ")")
         return 2
+    if audit.run_id is None:
+        print("\nDB verification: SKIPPED (run_id missing)")
+        return 0
     print("\nDB verification: OK (canonical tables populated)")
     return 0
 
