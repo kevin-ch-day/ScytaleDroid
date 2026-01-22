@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+import os
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Protocol
 

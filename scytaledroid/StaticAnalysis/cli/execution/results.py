@@ -395,7 +395,7 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                 )
             )
         elif canonical_skips:
-            reason = ", ".join(sorted(set(canonical_skips)))
+            reason = "packages=" + ",".join(sorted(set(canonical_skips)))
             print(
                 status_messages.status(
                     f"Status: OK (with skips) – optional canonical ingest skipped ({reason})",
@@ -1587,6 +1587,13 @@ def _render_persistence_footer(
             f"this_run={snapshot_apps}  db_total={snapshot_apps_total}",
         ),
     ]
+    if len(run_ids) > 1 or len(static_run_ids) > 1:
+        lines.append(
+            (
+                "note",
+                "Multiple runs for session; this_run reflects latest run only.",
+            )
+        )
     width = max(len(name) for name, _ in lines) if lines else 0
     for name, detail in lines:
         print(f"  {name.ljust(width)} : {detail}")
