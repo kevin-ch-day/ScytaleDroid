@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from scytaledroid.DeviceAnalysis.inventory.models import (
     InventoryDelta,
@@ -11,7 +11,7 @@ from scytaledroid.DeviceAnalysis.inventory.diagnostics import compute_inventory_
 def test_inventory_delta_counts():
     prev = InventorySnapshot(
         device_serial="ABC",
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
         mode_key="baseline",
         packages=[
             PackageRecord(
@@ -36,7 +36,7 @@ def test_inventory_delta_counts():
     )
     curr = InventorySnapshot(
         device_serial="ABC",
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
         mode_key="baseline",
         packages=[
             PackageRecord(

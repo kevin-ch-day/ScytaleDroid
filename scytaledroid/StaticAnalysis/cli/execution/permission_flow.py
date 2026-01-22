@@ -11,7 +11,7 @@ from ...modules.permissions import collect_permissions_and_sdk
 from ...modules.permissions.render_postcard import render as render_permission_postcard
 from ...modules.permissions.audit import PermissionAuditAccumulator
 from ..models import RunParameters, ScopeSelection
-from ..session import make_session_stamp
+from ...session import make_session_stamp
 from .scan_flow import generate_report
 
 

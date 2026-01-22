@@ -101,11 +101,10 @@ def _compute_inventory_status(
     if isinstance(ts, datetime):
         try:
             if ts.tzinfo is None:
-                ts_utc = ts
-                now_utc = datetime.utcnow()
+                ts_utc = ts.replace(tzinfo=timezone.utc)
             else:
                 ts_utc = ts.astimezone(timezone.utc)
-                now_utc = datetime.now(timezone.utc)
+            now_utc = datetime.now(timezone.utc)
             age_seconds = max(0, int((now_utc - ts_utc).total_seconds()))
         except Exception:
             age_seconds = None

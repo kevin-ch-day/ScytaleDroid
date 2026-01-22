@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from scytaledroid.DeviceAnalysis.services.device_service import _compute_inventory_status
 from scytaledroid.DeviceAnalysis.services.models import InventoryStatus
@@ -15,7 +15,7 @@ def test_inventory_status_none_snapshot():
 
 
 def test_inventory_status_fresh_snapshot():
-    ts = datetime.utcnow()
+    ts = datetime.now(timezone.utc)
     meta = {"timestamp": ts, "package_count": 5}
     status = _compute_inventory_status(meta, None)
     assert status.status_label == "FRESH"
@@ -25,7 +25,7 @@ def test_inventory_status_fresh_snapshot():
 
 
 def test_inventory_status_stale_snapshot():
-    ts = datetime.utcnow() - timedelta(seconds=INVENTORY_STALE_SECONDS + 60)
+    ts = datetime.now(timezone.utc) - timedelta(seconds=INVENTORY_STALE_SECONDS + 60)
     meta = {"timestamp": ts, "package_count": 10}
     status = _compute_inventory_status(meta, None)
     assert status.status_label == "STALE"

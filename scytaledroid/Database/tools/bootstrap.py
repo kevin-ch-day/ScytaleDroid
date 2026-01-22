@@ -8,7 +8,7 @@ Usage:
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, List
 
@@ -134,7 +134,7 @@ def bootstrap_database() -> None:
         )
         run_sql(
             "INSERT INTO schema_version (version, applied_at_utc) VALUES (%s, %s)",
-            ("0.3.0", datetime.utcnow().isoformat() + "Z"),
+            ("0.3.0", datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")),
         )
     except Exception as exc:  # pragma: no cover
         log.warning(f"Failed to record schema_version: {exc}", category="database")
