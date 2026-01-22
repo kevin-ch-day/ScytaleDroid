@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Dict, List, Mapping, Optional, Sequence, Tuple
@@ -48,6 +49,7 @@ def execute_harvest(
     """Execute the provided harvest plan and return per-package results."""
 
     options = load_options(config, pull_mode=pull_mode)
+    compact_mode = _compact_mode()
     tracker = DedupeTracker(options)
     resolved_serial = serial or dest_root.name
     run_identifier = run_id or f"{resolved_serial}-{session_stamp}"
@@ -327,7 +329,7 @@ def _execute_package_plan(
             result.errors.append(ArtifactError(source_path="split-group", reason=str(exc)))
             return result
 
-    _print_package_header(plan, package_index, package_total)
+    _print_package_header(plan, package_index, package_total, compact_mode=compact_mode)
     emit(
         "info",
         "harvest.package.start",
@@ -383,7 +385,7 @@ def _execute_package_plan(
             package_stats["errors"] += 1
             stats["artifacts_failed"] += 1
 
-    _print_package_footer(plan, package_stats)
+    _print_package_footer(plan, package_stats, package_index, package_total, compact_mode=compact_mode)
     emit(
         "info",
         "harvest.package.summary",
@@ -662,7 +664,18 @@ def _print_progress(index: int, total: int, plan: PackagePlan) -> None:
     print(status_messages.status(message))
 
 
-def _print_package_header(plan: PackagePlan, package_index: int, package_total: int) -> None:
+def _compact_mode() -> bool:
+    return os.getenv("SCYTALEDROID_HARVEST_COMPACT", "1").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _print_package_header(plan: PackagePlan, package_index: int, package_total: int, *, compact_mode: bool) -> None:
+    if compact_mode:
+        return
     label = plan.inventory.display_name()
     artifact_total = len(plan.artifacts)
     detail = f"{artifact_total} artifact(s)"
@@ -676,7 +689,14 @@ def _print_package_header(plan: PackagePlan, package_index: int, package_total: 
     )
 
 
-def _print_package_footer(plan: PackagePlan, stats: Mapping[str, int]) -> None:
+def _print_package_footer(
+    plan: PackagePlan,
+    stats: Mapping[str, int],
+    package_index: int,
+    package_total: int,
+    *,
+    compact_mode: bool,
+) -> None:
     saved = int(stats.get("saved", 0) or 0)
     skipped = int(stats.get("skipped", 0) or 0)
     errors = int(stats.get("errors", 0) or 0)
@@ -700,6 +720,18 @@ def _print_package_footer(plan: PackagePlan, stats: Mapping[str, int]) -> None:
         level = "warn"
     else:
         level = "success"
+
+    if compact_mode:
+        total_planned = saved + skipped + errors
+        prefix = f"[{package_index}/{package_total}] "
+        compact_line = (
+            f"{prefix}{plan.inventory.package_name} • saved {saved}/{total_planned} • "
+            f"skipped {skipped} • errors {errors}"
+        )
+        if total_bytes > 0:
+            compact_line += f" • {format_file_size(total_bytes)}"
+        print(status_messages.status(compact_line, level=level))
+        return
 
     print(
         status_messages.status(

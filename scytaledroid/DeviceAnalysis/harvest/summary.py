@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
+from scytaledroid.Config import app_config
 from scytaledroid.Utils.DisplayUtils import status_messages, text_blocks
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.LoggingUtils import logging_engine
@@ -424,7 +425,7 @@ def render_harvest_summary(
         selection_label=selection.label,
         metrics=metrics,
         pull_mode=pull_mode,
-        output_root=normalise_local_path(output_root) if output_root else None,
+        output_root=normalise_local_path(Path(output_root)) if output_root else None,
         preflight_skips=metrics.preflight_skips,
         runtime_skips=metrics.runtime_skips,
         policy_filtered=plan.policy_filtered,
@@ -505,7 +506,7 @@ def render_harvest_summary(
                 "runtime_skips": dict(metrics.runtime_skips),
                 "policy_filtered": plan.policy_filtered,
                 "session_stamp": run_timestamp,
-                "output_root": normalise_local_path(output_root) if output_root else None,
+                "output_root": normalise_local_path(Path(output_root)) if output_root else None,
             }
             log_adapter.info("Harvest RUN_END", extra=payload)
         except Exception:
@@ -888,7 +889,8 @@ def _package_dest_dir(package: PackageHarvestResult) -> Optional[str]:
 def _run_output_root(result: HarvestResult) -> Optional[str]:
     if not (result.serial and result.run_timestamp):
         return None
-    return f"data/apks/device_apks/{result.serial}/{result.run_timestamp}/"
+    base = Path(app_config.DATA_DIR) / "apks" / "device_apks" / result.serial / result.run_timestamp
+    return str(base)
 
 
 def _packages_without_writes(

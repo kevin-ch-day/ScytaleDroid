@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Dict, Mapping, MutableMapping, Optional, Tuple
 
 from scytaledroid.Config import app_config
+import os
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
@@ -269,6 +270,15 @@ def print_artifact_status(
     suffix: Optional[str] = None,
     level: str = "info",
 ) -> None:
+    if level == "info":
+        compact = os.getenv("SCYTALEDROID_HARVEST_COMPACT", "1").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        if compact:
+            return
     message = f"    ▸ {package_label} [{index}/{total}] {artifact_label}"
     if suffix:
         message = f"{message} — {suffix}"
