@@ -59,9 +59,6 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
     show_splits = _show_split_breakdown()
 
     for group in selection.groups:
-        abort_requested, _, _ = _abort_state()
-        if abort_requested:
-            break
         app_result = AppRunResult(group.package_name, getattr(group, "category", "Uncategorized"))
         base_artifact = next(iter(_dedupe_artifacts(group.artifacts)), None)
         metadata = getattr(base_artifact, "metadata", {}) if base_artifact else {}
@@ -103,6 +100,9 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
             )
         app_result.static_run_id = static_run_id
         results.append(app_result)
+        abort_requested, _, _ = _abort_state()
+        if abort_requested:
+            break
 
         artifacts = _dedupe_artifacts(group.artifacts)
         progress = _PipelineProgress(total=len(artifacts), show_splits=show_splits)
@@ -145,6 +145,7 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
             if report is not None:
                 progress.finish(artifact_index, artifact_label)
             if _abort_state()[0]:
+                progress.end()
                 break
         if _abort_state()[0]:
             break

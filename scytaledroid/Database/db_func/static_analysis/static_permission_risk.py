@@ -73,8 +73,8 @@ def ensure_table() -> bool:
                     """,
                     fetch="one",
                 )
-                if row and row[0] and int(row[0]) < 64:
-                    run_sql("ALTER TABLE static_permission_risk MODIFY session_stamp VARCHAR(64) NOT NULL")
+                if row and row[0] and int(row[0]) < 128:
+                    run_sql("ALTER TABLE static_permission_risk MODIFY session_stamp VARCHAR(128) NOT NULL")
             except Exception:
                 pass
         return True

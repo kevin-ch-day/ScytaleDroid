@@ -58,7 +58,7 @@ def ensure_table() -> bool:
             fetch="one",
         )
         if row and row[0] is not None and int(row[0]) < 64:
-            run_sql("ALTER TABLE risk_scores MODIFY session_stamp VARCHAR(64) NOT NULL")
+            run_sql("ALTER TABLE risk_scores MODIFY session_stamp VARCHAR(128) NOT NULL")
         return True
     except Exception:
         return False

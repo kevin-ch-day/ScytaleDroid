@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS `risk_scores` (
   `id`            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `package_name`  VARCHAR(191)    NOT NULL,
   `app_label`     VARCHAR(191)    DEFAULT NULL,
-  `session_stamp` VARCHAR(64)     NOT NULL,
+  `session_stamp` VARCHAR(128)    NOT NULL,
   `scope_label`   VARCHAR(191)    NOT NULL,
   `risk_score`    DECIMAL(7,3)    NOT NULL,
   `risk_grade`    CHAR(1)         NOT NULL,

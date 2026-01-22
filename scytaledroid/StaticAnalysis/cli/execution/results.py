@@ -1657,6 +1657,20 @@ def _render_persistence_footer(
             f"this_run={snapshot_apps}  db_total={snapshot_apps_total}",
         ),
     ]
+    if audit and audit.is_group_scope:
+        lines.append(
+            (
+                "scope_note",
+                "Group scope detected; per-package mapping not applicable.",
+            )
+        )
+    if audit and audit.run_id is None:
+        if audit.is_orphan:
+            lines.append(("run_linkage", "ORPHAN (run_id missing)"))
+        elif audit.is_legacy:
+            lines.append(("run_linkage", "LEGACY (run_id missing)"))
+        else:
+            lines.append(("run_linkage", "run_id missing"))
     if run_status == "ABORTED":
         reason_token = abort_reason or abort_signal or "SIGINT"
         lines.append(("abort_reason", reason_token))
@@ -1687,6 +1701,13 @@ def _render_persistence_footer(
     if run_status == "ABORTED":
         reason_token = abort_reason or abort_signal or "SIGINT"
         print(f"  {'status'.ljust(width)} : ABORTED ({reason_token}) — counts may be partial")
+    elif audit and audit.run_id is None:
+        if audit.is_orphan:
+            print(f"  {'status'.ljust(width)} : WARN (orphan run_id missing)")
+        elif audit.is_legacy:
+            print(f"  {'status'.ljust(width)} : WARN (legacy run_id missing)")
+        else:
+            print(f"  {'status'.ljust(width)} : WARN (run_id missing)")
     elif canonical_failures:
         preview_limit = 5
         unique_failures = sorted(set(canonical_failures))
@@ -1705,7 +1726,12 @@ def _render_persistence_footer(
     if audit:
         audit_static_run_id = audit.static_run_id if hasattr(audit, "static_run_id") else None
         if audit.run_id is None:
-            status_text = "SKIPPED (run_id missing)"
+            if audit.is_orphan:
+                status_text = "ORPHAN (run_id missing)"
+            elif audit.is_legacy:
+                status_text = "LEGACY (run_id missing)"
+            else:
+                status_text = "SKIPPED (run_id missing)"
         elif missing:
             status_text = (
                 "ERROR (missing " + ", ".join(sorted(missing)) + ")"

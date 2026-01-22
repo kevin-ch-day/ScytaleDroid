@@ -162,6 +162,21 @@ def ensure_audit_snapshots() -> bool:
                 )
             except Exception:
                 pass
+        try:
+            row = run_sql(
+                """
+                SELECT character_maximum_length
+                FROM information_schema.columns
+                WHERE table_schema = DATABASE()
+                  AND table_name = 'permission_audit_snapshots'
+                  AND column_name = 'snapshot_key'
+                """,
+                fetch="one",
+            )
+            if row and row[0] and int(row[0]) < 128:
+                run_sql("ALTER TABLE permission_audit_snapshots MODIFY snapshot_key VARCHAR(128) NOT NULL")
+        except Exception:
+            pass
         return True
     except Exception:
         return False

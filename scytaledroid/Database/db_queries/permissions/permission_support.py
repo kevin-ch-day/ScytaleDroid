@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS permission_cohort_expectations (
 CREATE_AUDIT_SNAPSHOTS = """
 CREATE TABLE IF NOT EXISTS permission_audit_snapshots (
     snapshot_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    snapshot_key VARCHAR(64) NOT NULL,
+    snapshot_key VARCHAR(128) NOT NULL,
     scope_label VARCHAR(128) NULL,
     run_id BIGINT UNSIGNED NULL,
     static_run_id BIGINT UNSIGNED NULL,
