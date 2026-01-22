@@ -49,6 +49,10 @@ _DDL_STATEMENTS: list[str] = [
       config_hash      VARCHAR(128)   DEFAULT NULL,
       study_tag        VARCHAR(128)   DEFAULT NULL,
       run_started_utc  VARCHAR(64)    DEFAULT NULL,
+      status           VARCHAR(16)    DEFAULT 'RUNNING',
+      ended_at_utc     DATETIME       DEFAULT NULL,
+      abort_reason     VARCHAR(64)    DEFAULT NULL,
+      abort_signal     VARCHAR(16)    DEFAULT NULL,
       profile          VARCHAR(32)    DEFAULT NULL,
       findings_total   INT UNSIGNED   NOT NULL DEFAULT 0,
       detector_metrics JSON           DEFAULT NULL,
@@ -84,7 +88,11 @@ _DDL_STATEMENTS: list[str] = [
       ADD COLUMN IF NOT EXISTS catalog_versions VARCHAR(128) DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS config_hash VARCHAR(128) DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS study_tag VARCHAR(128) DEFAULT NULL,
-      ADD COLUMN IF NOT EXISTS run_started_utc VARCHAR(64) DEFAULT NULL;
+      ADD COLUMN IF NOT EXISTS run_started_utc VARCHAR(64) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS status VARCHAR(16) DEFAULT 'RUNNING',
+      ADD COLUMN IF NOT EXISTS ended_at_utc DATETIME DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS abort_reason VARCHAR(64) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS abort_signal VARCHAR(16) DEFAULT NULL;
     """,
     """
     CREATE INDEX IF NOT EXISTS ix_static_runs_session_version

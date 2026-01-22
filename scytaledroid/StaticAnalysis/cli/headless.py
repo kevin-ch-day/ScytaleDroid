@@ -13,6 +13,7 @@ from scytaledroid.Config import app_config
 from scytaledroid.StaticAnalysis.core.repository import RepositoryArtifact, ArtifactGroup, _load_metadata
 from scytaledroid.StaticAnalysis.cli.models import ScopeSelection, RunParameters
 from scytaledroid.StaticAnalysis.services import static_service
+from scytaledroid.StaticAnalysis.session import normalize_session_stamp
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 try:  # optional during offline runs
@@ -90,6 +91,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     if args.session:
         params = params.__class__(**{**params.__dict__, "session_stamp": args.session})
+
+    if params.session_stamp:
+        normalized = normalize_session_stamp(params.session_stamp)
+        if normalized != params.session_stamp:
+            print(
+                f"⚠ Session label normalized to '{normalized}' to fit DB limits."
+            )
+            params = params.__class__(**{**params.__dict__, "session_stamp": normalized})
+
+    if args.allow_session_reuse:
+        print(
+            "⚠ Session reuse enabled — reproducibility risk (may mix previous results)."
+        )
 
     _check_session_uniqueness(params.session_stamp, group.package_name, args.allow_session_reuse)
 

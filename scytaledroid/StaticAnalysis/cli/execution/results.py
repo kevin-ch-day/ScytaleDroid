@@ -21,7 +21,7 @@ from scytaledroid.Utils.DisplayUtils import (
 
 from ...core import StaticAnalysisReport
 from ...engine.strings import analyse_strings
-from ..db_persist import persist_run_summary
+from ..db_persist import persist_run_summary, update_static_run_status
 from ...persistence.snapshots import SNAPSHOT_PREFIX, write_permission_snapshot
 from ..detail import (
     SEVERITY_TOKEN_ORDER,
@@ -175,6 +175,14 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
     totals = severity.normalise_counts(aggregated)
     highlight_stats = _derive_highlight_stats(outcome)
     runtime_findings_total = sum(totals.values())
+    run_status = "COMPLETED"
+    if outcome.aborted:
+        run_status = "ABORTED"
+    elif outcome.failures:
+        run_status = "FAILED"
+    ended_at_utc = outcome.finished_at.isoformat(timespec="seconds") + "Z"
+    abort_reason = outcome.abort_reason
+    abort_signal = outcome.abort_signal
     normalized_findings_total = 0
     baseline_summary_total = 0
     string_samples_persisted_total = 0
@@ -225,6 +233,14 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
         if base_report is None:
             warning = f"No report generated for {app_result.package_name}."
             print(status_messages.status(warning, level="warn"))
+            if outcome.aborted and app_result.static_run_id and persist_enabled:
+                update_static_run_status(
+                    static_run_id=app_result.static_run_id,
+                    status="ABORTED",
+                    ended_at_utc=ended_at_utc,
+                    abort_reason=abort_reason,
+                    abort_signal=abort_signal,
+                )
             continue
 
         string_data = analyse_strings(
@@ -289,6 +305,11 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                     scope_label=params.scope_label,
                     finding_totals=finding_totals,
                     baseline_payload=payload,
+                    static_run_id=app_result.static_run_id,
+                    run_status=run_status,
+                    ended_at_utc=ended_at_utc,
+                    abort_reason=abort_reason,
+                    abort_signal=abort_signal,
                     dry_run=params.dry_run,
                 )
                 if outcome_status:
@@ -306,13 +327,16 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                 persistence_errors.append(str(exc))
 
             try:
-                ingest_payload = _build_ingest_payload(payload, base_report, params)
-                if not ingest_baseline_payload(ingest_payload):
+                if outcome.aborted:
                     canonical_skips.append(app_result.package_name)
-                    warning = (
-                        f"Canonical ingest skipped or unavailable for {app_result.package_name}."
-                    )
-                    print(status_messages.status(warning, level="warn"))
+                else:
+                    ingest_payload = _build_ingest_payload(payload, base_report, params)
+                    if not ingest_baseline_payload(ingest_payload):
+                        canonical_skips.append(app_result.package_name)
+                        warning = (
+                            f"Canonical ingest skipped or unavailable for {app_result.package_name}."
+                        )
+                        print(status_messages.status(warning, level="warn"))
             except Exception as exc:
                 warning = (
                     f"Failed to ingest baseline snapshot for {app_result.package_name}: {exc}"
@@ -396,10 +420,21 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             )
         elif canonical_skips:
             reason = "packages=" + ",".join(sorted(set(canonical_skips)))
+            if outcome.aborted:
+                reason += ";reason=aborted"
+            else:
+                reason += ";reason=unavailable"
             print(
                 status_messages.status(
                     f"Status: OK (with skips) – optional canonical ingest skipped ({reason})",
                     level="info",
+                )
+            )
+        if outcome.aborted:
+            print(
+                status_messages.status(
+                    "Status: ABORTED (SIGINT) — counts may be partial",
+                    level="warn",
                 )
             )
     else:
@@ -452,6 +487,9 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                 session_stamp,
                 had_errors=bool(persistence_errors),
                 canonical_failures=canonical_failures,
+                run_status=run_status,
+                abort_reason=abort_reason,
+                abort_signal=abort_signal,
             )
             if persistence_errors:
                 level = "warn"
@@ -477,6 +515,25 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             )
         if len(outcome.results) <= 5:
             _interactive_detail_loop(outcome, params)
+
+    if outcome.aborted:
+        completed = outcome.completed_artifacts
+        total = outcome.total_artifacts
+        completion = f"{completed}/{total}" if total else str(completed)
+        reason_token = abort_reason or abort_signal or "SIGINT"
+        static_ids = [res.static_run_id for res in outcome.results if res.static_run_id]
+        static_hint = f" static_run_id={static_ids[-1]}" if static_ids else ""
+        footer = [
+            "────────────────────────────────────────────────────────",
+            "STATIC ANALYSIS — ABORTED",
+            f"Reason : {reason_token} (Ctrl+C)",
+            f"Ended  : {ended_at_utc}",
+            f"Run    : session={params.session_stamp}{static_hint}",
+            f"Scope  : artifacts_completed={completion}",
+            "Note   : Partial results may exist. Re-run with a NEW session label.",
+            "────────────────────────────────────────────────────────",
+        ]
+        print("\n".join(footer))
 
     if outcome.warnings:
         for message in sorted(set(outcome.warnings)):
@@ -1364,6 +1421,9 @@ def _render_persistence_footer(
     *,
     had_errors: bool = False,
     canonical_failures: Optional[list[str]] = None,
+    run_status: str | None = None,
+    abort_reason: str | None = None,
+    abort_signal: str | None = None,
 ) -> None:
     try:
         run_rows = core_q.run_sql(
@@ -1587,6 +1647,9 @@ def _render_persistence_footer(
             f"this_run={snapshot_apps}  db_total={snapshot_apps_total}",
         ),
     ]
+    if run_status == "ABORTED":
+        reason_token = abort_reason or abort_signal or "SIGINT"
+        lines.append(("abort_reason", reason_token))
     if len(run_ids) > 1 or len(static_run_ids) > 1:
         lines.append(
             (
@@ -1609,7 +1672,10 @@ def _render_persistence_footer(
     }
     missing = [name for name, value in required_counts.items() if not value]
 
-    if canonical_failures:
+    if run_status == "ABORTED":
+        reason_token = abort_reason or abort_signal or "SIGINT"
+        print(f"  {'status'.ljust(width)} : ABORTED ({reason_token}) — counts may be partial")
+    elif canonical_failures:
         preview_limit = 5
         unique_failures = sorted(set(canonical_failures))
         preview = ", ".join(unique_failures[:preview_limit])
@@ -1637,6 +1703,8 @@ def _render_persistence_footer(
             if audit_static_run_id is not None
             else ""
         )
+        if run_status == "ABORTED":
+            status_text = "ABORTED (counts may be partial)"
         print(f"  {'db_verification'.ljust(width)} : {status_text} {prefix}".rstrip())
 
     high_downgraded = 0

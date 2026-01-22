@@ -117,6 +117,7 @@ class AppRunResult:
     category: str
     artifacts: list[ArtifactOutcome] = field(default_factory=list)
     signer: Optional[str] = None
+    static_run_id: Optional[int] = None
 
     def severity_totals(self) -> Counter[str]:
         totals: Counter[str] = Counter()
@@ -148,6 +149,11 @@ class RunOutcome:
     base_dir: Path
     warnings: list[str] = field(default_factory=list)
     failures: list[str] = field(default_factory=list)
+    aborted: bool = False
+    abort_reason: Optional[str] = None
+    abort_signal: Optional[str] = None
+    completed_artifacts: int = 0
+    total_artifacts: int = 0
 
     @property
     def duration_seconds(self) -> float:

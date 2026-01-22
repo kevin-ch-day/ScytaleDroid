@@ -22,22 +22,93 @@ from ...core import (
 from ...core.findings import SeverityLevel
 from ...persistence import ReportStorageError, save_report
 from ..models import AppRunResult, ArtifactOutcome, RunOutcome, RunParameters, ScopeSelection
+from ..persistence.run_summary import create_static_run_ledger
+
+
+_abort_requested = False
+_abort_reason: Optional[str] = None
+_abort_signal: Optional[str] = None
+
+
+def request_abort(reason: str = "SIGINT", signal: str = "SIGINT") -> None:
+    global _abort_requested, _abort_reason, _abort_signal
+    if _abort_requested:
+        return
+    _abort_requested = True
+    _abort_reason = reason
+    _abort_signal = signal
+
+
+def _abort_state() -> tuple[bool, Optional[str], Optional[str]]:
+    return _abort_requested, _abort_reason, _abort_signal
 
 
 def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Path) -> RunOutcome:
     """Execute static analysis across all scoped artifacts."""
 
+    global _abort_requested, _abort_reason, _abort_signal
+    _abort_requested = False
+    _abort_reason = None
+    _abort_signal = None
+
     started_at = datetime.utcnow()
     results: list[AppRunResult] = []
     warnings: list[str] = []
     failures: list[str] = []
+    completed_artifacts = 0
+    total_artifacts = sum(len(_dedupe_artifacts(group.artifacts)) for group in selection.groups)
 
     for group_index, group in enumerate(selection.groups, start=1):
+        abort_requested, _, _ = _abort_state()
+        if abort_requested:
+            break
         app_result = AppRunResult(group.package_name, getattr(group, "category", "Uncategorized"))
+        base_artifact = next(iter(_dedupe_artifacts(group.artifacts)), None)
+        metadata = getattr(base_artifact, "metadata", {}) if base_artifact else {}
+        if isinstance(metadata, Mapping):
+            display_name = metadata.get("app_label") or metadata.get("display_name")
+            version_name = metadata.get("version_name")
+            version_code_raw = metadata.get("version_code")
+            min_sdk_raw = metadata.get("min_sdk")
+            target_sdk_raw = metadata.get("target_sdk")
+        else:
+            display_name = None
+            version_name = None
+            version_code_raw = None
+            min_sdk_raw = None
+            target_sdk_raw = None
+
+        def _coerce_int(value: object) -> Optional[int]:
+            try:
+                if value is None or value == "":
+                    return None
+                return int(value)  # type: ignore[arg-type]
+            except Exception:
+                return None
+
+        static_run_id = None
+        if params.session_stamp:
+            static_run_id = create_static_run_ledger(
+                package_name=group.package_name,
+                session_stamp=params.session_stamp,
+                scope_label=params.scope_label,
+                profile=params.profile_label,
+                display_name=str(display_name) if display_name else None,
+                version_name=str(version_name) if version_name else None,
+                version_code=_coerce_int(version_code_raw),
+                min_sdk=_coerce_int(min_sdk_raw),
+                target_sdk=_coerce_int(target_sdk_raw),
+                run_started_utc=started_at.isoformat(timespec="seconds") + "Z",
+                dry_run=params.dry_run,
+            )
+        app_result.static_run_id = static_run_id
         results.append(app_result)
 
         artifacts = _dedupe_artifacts(group.artifacts)
         for artifact_index, artifact in enumerate(artifacts, start=1):
+            abort_requested, _, _ = _abort_state()
+            if abort_requested:
+                break
             progress_label = _progress_label(
                 group_index,
                 len(selection.groups),
@@ -55,14 +126,36 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
             )
             if summary is None:
                 failures.append(f"No report generated for {artifact.display_path}")
+                completed_artifacts += 1
+                if _abort_state()[0]:
+                    break
                 continue
 
             app_result.artifacts.append(summary)
+            completed_artifacts += 1
             if report is not None:
                 _print_artifact_progress(progress_label, summary, timings)
+            if _abort_state()[0]:
+                break
+        if _abort_state()[0]:
+            break
 
     finished_at = datetime.utcnow()
-    return RunOutcome(results, started_at, finished_at, selection, base_dir, warnings, failures)
+    abort_requested, abort_reason, abort_signal = _abort_state()
+    return RunOutcome(
+        results,
+        started_at,
+        finished_at,
+        selection,
+        base_dir,
+        warnings,
+        failures,
+        aborted=abort_requested,
+        abort_reason=abort_reason,
+        abort_signal=abort_signal,
+        completed_artifacts=completed_artifacts,
+        total_artifacts=total_artifacts,
+    )
 
 
 def _execute_single_artifact(progress_label: str, artifact, params: RunParameters, selection: ScopeSelection, base_dir: Path):

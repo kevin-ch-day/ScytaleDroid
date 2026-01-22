@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections import Counter
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
@@ -44,6 +45,7 @@ from .utils import (
 @dataclass(slots=True)
 class PersistenceOutcome:
     run_id: int | None = None
+    static_run_id: int | None = None
     runtime_findings: int = 0
     persisted_findings: int = 0
     baseline_written: bool = False
@@ -85,6 +87,181 @@ def _persist_static_sections_wrapper(
     )
 
 
+def _ensure_app_version(
+    *,
+    package_for_run: str,
+    display_name: str,
+    version_name: str | None,
+    version_code: int | None,
+    min_sdk: int | None,
+    target_sdk: int | None,
+) -> int | None:
+    """Fetch or create an app_version row for static_analysis_runs."""
+    try:
+        app_id = None
+        row = core_q.run_sql(
+            "SELECT id FROM apps WHERE package_name=%s",
+            (package_for_run,),
+            fetch="one",
+        )
+        if row and row[0]:
+            app_id = int(row[0])
+        else:
+            app_id = core_q.run_sql(
+                "INSERT INTO apps (package_name, display_name) VALUES (%s,%s)",
+                (package_for_run, display_name),
+                return_lastrowid=True,
+            )
+            app_id = int(app_id) if app_id else None
+        if app_id is None:
+            return None
+
+        params = (app_id, version_name, version_code)
+        row = core_q.run_sql(
+            """
+            SELECT id FROM app_versions
+            WHERE app_id=%s AND version_name<=>%s AND version_code<=>%s
+            ORDER BY id DESC LIMIT 1
+            """,
+            params,
+            fetch="one",
+        )
+        if row and row[0]:
+            return int(row[0])
+
+        av_id = core_q.run_sql(
+            """
+            INSERT INTO app_versions (app_id, version_name, version_code, min_sdk, target_sdk)
+            VALUES (%s,%s,%s,%s,%s)
+            """,
+            (app_id, version_name, version_code, min_sdk, target_sdk),
+            return_lastrowid=True,
+        )
+        return int(av_id) if av_id else None
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning(
+            f"Failed to resolve/create app_version for {package_for_run}: {exc}",
+            category="static_analysis",
+        )
+        return None
+
+
+def _create_static_run(
+    *,
+    app_version_id: int,
+    session_stamp: str,
+    scope_label: str,
+    profile: str,
+    findings_total: int,
+    run_started_utc: str | None,
+    status: str,
+) -> int | None:
+    try:
+        run_id = core_q.run_sql(
+            """
+            INSERT INTO static_analysis_runs (
+                app_version_id,
+                session_stamp,
+                scope_label,
+                profile,
+                findings_total,
+                run_started_utc,
+                status
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s)
+            """,
+            (
+                app_version_id,
+                session_stamp,
+                scope_label,
+                profile,
+                findings_total,
+                run_started_utc,
+                status,
+            ),
+            return_lastrowid=True,
+        )
+        return int(run_id) if run_id else None
+    except Exception as exc:  # pragma: no cover - defensive
+        log.error(
+            f"Failed to create static_analysis_runs row for session={session_stamp}: {exc}",
+            category="db",
+        )
+        return None
+
+
+def create_static_run_ledger(
+    *,
+    package_name: str,
+    session_stamp: str,
+    scope_label: str,
+    profile: str,
+    display_name: str | None = None,
+    version_name: str | None = None,
+    version_code: int | None = None,
+    min_sdk: int | None = None,
+    target_sdk: int | None = None,
+    run_started_utc: str | None = None,
+    dry_run: bool = False,
+) -> int | None:
+    """Create a RUNNING static_analysis_runs row before scanning begins."""
+    if dry_run:
+        return None
+
+    display_name = display_name or package_name
+    app_version_id = _ensure_app_version(
+        package_for_run=package_name,
+        display_name=display_name,
+        version_name=version_name,
+        version_code=version_code,
+        min_sdk=min_sdk,
+        target_sdk=target_sdk,
+    )
+    if app_version_id is None:
+        return None
+    run_started_utc = run_started_utc or datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    return _create_static_run(
+        app_version_id=app_version_id,
+        session_stamp=session_stamp,
+        scope_label=scope_label,
+        profile=profile,
+        findings_total=0,
+        run_started_utc=run_started_utc,
+        status="RUNNING",
+    )
+
+
+def update_static_run_status(
+    *,
+    static_run_id: int,
+    status: str,
+    ended_at_utc: str | None = None,
+    abort_reason: str | None = None,
+    abort_signal: str | None = None,
+) -> None:
+    try:
+        core_q.run_sql(
+            """
+            UPDATE static_analysis_runs
+            SET status=%s,
+                ended_at_utc=%s,
+                abort_reason=%s,
+                abort_signal=%s
+            WHERE id=%s
+            """,
+            (
+                status,
+                ended_at_utc,
+                abort_reason,
+                abort_signal,
+                static_run_id,
+            ),
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning(
+            f"Failed to update static_analysis_runs status for id={static_run_id}: {exc}",
+            category="db",
+        )
+
 def persist_run_summary(
     base_report,
     string_data: Mapping[str, object],
@@ -94,6 +271,11 @@ def persist_run_summary(
     scope_label: str,
     finding_totals: Mapping[str, int],
     baseline_payload: Mapping[str, object],
+    static_run_id: int | None = None,
+    run_status: str = "COMPLETED",
+    ended_at_utc: str | None = None,
+    abort_reason: str | None = None,
+    abort_signal: str | None = None,
     dry_run: bool = False,
 ) -> PersistenceOutcome:
     outcome = PersistenceOutcome()
@@ -134,68 +316,43 @@ def persist_run_summary(
     run_id = envelope.run_id
     if run_id:
         outcome.run_id = run_id
-    static_run_id: int | None = None
-    try:
-        # Prefer an existing static_analysis_runs entry for this session/package.
-        rows = core_q.run_sql(
-            """
-            SELECT sar.id
-            FROM static_analysis_runs sar
-            JOIN app_versions av ON av.id = sar.app_version_id
-            JOIN apps a ON a.id = av.app_id
-            WHERE sar.session_stamp = %s
-              AND a.package_name = %s
-            """,
-            (session_stamp, package_for_run),
-            fetch="all",
-        )
-        if rows:
-            if len(rows) > 1:
+    if static_run_id is None:
+        try:
+            # Prefer an existing static_analysis_runs entry for this session/package.
+            rows = core_q.run_sql(
+                """
+                SELECT sar.id
+                FROM static_analysis_runs sar
+                JOIN app_versions av ON av.id = sar.app_version_id
+                JOIN apps a ON a.id = av.app_id
+                WHERE sar.session_stamp = %s
+                  AND a.package_name = %s
+                """,
+                (session_stamp, package_for_run),
+                fetch="all",
+            )
+            if rows:
+                if len(rows) > 1:
+                    message = (
+                        f"Multiple static_analysis_runs found for session={session_stamp} "
+                        f"package={package_for_run}; cannot disambiguate. Use a unique session label."
+                    )
+                    outcome.add_error(message)
+                    return outcome
+                # Enforce immutable runs: do not reuse an existing static_run_id for the same session/package.
                 message = (
-                    f"Multiple static_analysis_runs found for session={session_stamp} "
-                    f"package={package_for_run}; cannot disambiguate. Use a unique session label."
+                    f"Session label already used for package={package_for_run} "
+                    f"(static_run_id={rows[0][0]}). Please rerun with a unique session label."
                 )
                 outcome.add_error(message)
                 return outcome
-            # Enforce immutable runs: do not reuse an existing static_run_id for the same session/package.
-            message = (
-                f"Session label already used for package={package_for_run} "
-                f"(static_run_id={rows[0][0]}). Please rerun with a unique session label."
-            )
-            outcome.add_error(message)
-            return outcome
-    except Exception:
-        static_run_id = None
+        except Exception:
+            static_run_id = None
 
-    def _create_static_run(app_version_id: int) -> int | None:
-        try:
-            run_id = core_q.run_sql(
-                """
-                INSERT INTO static_analysis_runs (
-                    app_version_id, session_stamp, scope_label, profile, findings_total
-                ) VALUES (%s,%s,%s,%s,%s)
-                """,
-                (
-                    app_version_id,
-                    session_stamp,
-                    scope_label,
-                    "Full",
-                    int(finding_totals.get("total", 0) or 0),
-                ),
-                return_lastrowid=True,
-            )
-            return int(run_id) if run_id else None
-        except Exception as exc:  # pragma: no cover - defensive
-            log.error(
-                f"Failed to create static_analysis_runs row for {package_for_run}: {exc}",
-                category="db",
-            )
-            return None
-
-    def _ensure_app_version() -> int | None:
-        """Fetch or create an app_version so static_run_id can be keyed reliably."""
+    if static_run_id is None and not dry_run:
+        # Attempt to create a static_analysis_runs row so downstream tables can
+        # be keyed by static_run_id even on fresh schemas.
         display_name = getattr(manifest_obj, "app_label", None) or package_for_run
-        version_code = None
         version_name = getattr(manifest_obj, "version_name", None) if manifest_obj else None
         min_sdk = safe_int(getattr(manifest_obj, "min_sdk", None) or getattr(manifest_obj, "min_sdk_version", None))
         target_sdk = safe_int(getattr(manifest_obj, "target_sdk", None))
@@ -204,60 +361,24 @@ def persist_run_summary(
         except Exception:
             version_code = None
 
-        try:
-            app_id = None
-            row = core_q.run_sql(
-                "SELECT id FROM apps WHERE package_name=%s",
-                (package_for_run,),
-                fetch="one",
-            )
-            if row and row[0]:
-                app_id = int(row[0])
-            else:
-                app_id = core_q.run_sql(
-                    "INSERT INTO apps (package_name, display_name) VALUES (%s,%s)",
-                    (package_for_run, display_name),
-                    return_lastrowid=True,
-                )
-                app_id = int(app_id) if app_id else None
-            if app_id is None:
-                return None
-
-            params = (app_id, version_name, version_code)
-            row = core_q.run_sql(
-                """
-                SELECT id FROM app_versions
-                WHERE app_id=%s AND version_name<=>%s AND version_code<=>%s
-                ORDER BY id DESC LIMIT 1
-                """,
-                params,
-                fetch="one",
-            )
-            if row and row[0]:
-                return int(row[0])
-
-            av_id = core_q.run_sql(
-                """
-                INSERT INTO app_versions (app_id, version_name, version_code, min_sdk, target_sdk)
-                VALUES (%s,%s,%s,%s,%s)
-                """,
-                (app_id, version_name, version_code, min_sdk, target_sdk),
-                return_lastrowid=True,
-            )
-            return int(av_id) if av_id else None
-        except Exception as exc:  # pragma: no cover - defensive
-            log.warning(
-                f"Failed to resolve/create app_version for {package_for_run}: {exc}",
-                category="static_analysis",
-            )
-            return None
-
-    if static_run_id is None and not dry_run:
-        # Attempt to create a static_analysis_runs row so downstream tables can
-        # be keyed by static_run_id even on fresh schemas.
-        app_version_id = _ensure_app_version()
+        app_version_id = _ensure_app_version(
+            package_for_run=package_for_run,
+            display_name=display_name,
+            version_name=version_name,
+            version_code=version_code,
+            min_sdk=min_sdk,
+            target_sdk=target_sdk,
+        )
         if app_version_id is not None:
-            static_run_id = _create_static_run(app_version_id)
+            static_run_id = _create_static_run(
+                app_version_id=app_version_id,
+                session_stamp=session_stamp,
+                scope_label=scope_label,
+                profile="Full",
+                findings_total=int(finding_totals.get("total", 0) or 0),
+                run_started_utc=None,
+                status="RUNNING",
+            )
             if static_run_id:
                 log.info(
                     f"Resolved static_run_id={static_run_id} for {package_for_run} (session={session_stamp})",
@@ -272,6 +393,7 @@ def persist_run_summary(
                 category="static_analysis",
             )
 
+    outcome.static_run_id = static_run_id
     metrics_bundle = compute_metrics_bundle(br, string_data)
     code_http_hosts = metrics_bundle.code_http_hosts
     asset_http_hosts = metrics_bundle.asset_http_hosts
@@ -567,7 +689,21 @@ def persist_run_summary(
         for err in static_errors:
             outcome.add_error(err)
 
+    if static_run_id and not dry_run:
+        update_static_run_status(
+            static_run_id=static_run_id,
+            status=run_status,
+            ended_at_utc=ended_at_utc,
+            abort_reason=abort_reason,
+            abort_signal=abort_signal,
+        )
+
     return outcome
 
 
-__all__ = ["persist_run_summary", "PersistenceOutcome"]
+__all__ = [
+    "persist_run_summary",
+    "create_static_run_ledger",
+    "update_static_run_status",
+    "PersistenceOutcome",
+]

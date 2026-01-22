@@ -5,13 +5,14 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import shutil
+import signal
 from dataclasses import replace
 
 from scytaledroid.Config import app_config
 from scytaledroid.Utils.DisplayUtils import summary_cards, status_messages
 from scytaledroid.Utils.System import output_prefs
 from scytaledroid.StaticAnalysis.persistence import ingest as canonical_ingest
-from scytaledroid.StaticAnalysis.session import make_session_stamp
+from scytaledroid.StaticAnalysis.session import make_session_stamp, normalize_session_stamp
 from scytaledroid.ui import formatter
 from .views import render_run_start, render_run_summary
 from scytaledroid.Utils.LoggingUtils.logging_context import RunContext, get_run_logger
@@ -24,6 +25,7 @@ from .execution import (
     execute_scan,
     format_duration,
     generate_report,
+    request_abort,
     render_run_results,
 )
 from .models import RunParameters, RunOutcome, ScopeSelection
@@ -41,6 +43,16 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
     # Enforce unique session per run unless explicitly set by caller.
     if not previous_stamp:
         params = replace(params, session_stamp=session_stamp)
+    if params.session_stamp:
+        normalized = normalize_session_stamp(params.session_stamp)
+        if normalized != params.session_stamp:
+            print(
+                status_messages.status(
+                    f"Session label normalized to '{normalized}' to fit DB limits.",
+                    level="warn",
+                )
+            )
+            params = replace(params, session_stamp=normalized)
     output_prefs.set_verbose(bool(params.verbose_output))
 
     try:
@@ -99,13 +111,30 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
 
     configure_logging_for_cli(params.log_level)
 
+    abort_notified = {"shown": False}
+
+    def _handle_sigint(signum, frame) -> None:  # pragma: no cover - signal path
+        if not abort_notified["shown"]:
+            print(status_messages.status("Interrupt received — stopping safely…", level="warn"))
+            abort_notified["shown"] = True
+        request_abort(reason="SIGINT", signal="SIGINT")
+
+    previous_handler = signal.getsignal(signal.SIGINT)
+    signal.signal(signal.SIGINT, _handle_sigint)
+
     if params.profile == "permissions":
         print(status_messages.step("Starting permission analysis workflow", label="Static Analysis"))
-        execute_permission_scan(selection, params)
+        try:
+            execute_permission_scan(selection, params)
+        finally:
+            signal.signal(signal.SIGINT, previous_handler)
         return None
 
     print(status_messages.step("Starting detector pipeline", label="Static Analysis"))
-    outcome = execute_scan(selection, params, base_dir)
+    try:
+        outcome = execute_scan(selection, params, base_dir)
+    finally:
+        signal.signal(signal.SIGINT, previous_handler)
     try:
         setattr(outcome, "session_stamp", params.session_stamp)
     except Exception:

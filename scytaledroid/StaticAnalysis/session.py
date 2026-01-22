@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+import hashlib
 from threading import Lock
 
 
@@ -34,4 +35,21 @@ def make_session_stamp(now: datetime | None = None) -> str:
         return stamp
 
 
-__all__ = ["make_session_stamp"]
+def normalize_session_stamp(label: str, *, max_len: int = 32) -> str:
+    """Normalize a session label to fit DB constraints while remaining unique."""
+    if not label:
+        return label
+    if len(label) <= max_len:
+        return label
+    tail = label[-15:]
+    if len(tail) == 15 and tail[:8].isdigit() and tail[8] == "-" and tail[9:].isdigit():
+        prefix_len = max_len - (len(tail) + 1)
+        prefix = label[: max(prefix_len, 0)]
+        return f"{prefix}-{tail}" if prefix else tail
+    digest = hashlib.sha1(label.encode("utf-8")).hexdigest()[:8]
+    prefix_len = max_len - (len(digest) + 1)
+    prefix = label[: max(prefix_len, 0)]
+    return f"{prefix}-{digest}" if prefix else digest
+
+
+__all__ = ["make_session_stamp", "normalize_session_stamp"]
