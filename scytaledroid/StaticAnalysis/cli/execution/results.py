@@ -465,7 +465,15 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
         printed_db_table = False
         if session_stamp and persist_enabled:
             try:
-                write_permission_snapshot(session_stamp, scope_label=params.scope_label)
+                snapshot_static_id = next(
+                    (res.static_run_id for res in reversed(outcome.results) if res.static_run_id),
+                    None,
+                )
+                write_permission_snapshot(
+                    session_stamp,
+                    scope_label=params.scope_label,
+                    static_run_id=snapshot_static_id,
+                )
             except Exception as exc:
                 warning = f"Failed to write permission snapshot: {exc}"
                 print(status_messages.status(warning, level="warn"))
@@ -513,7 +521,7 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                 trend_deltas,
                 scope_label=params.scope_label,
             )
-        if len(outcome.results) <= 5:
+        if params.verbose_output and len(outcome.results) <= 5:
             _interactive_detail_loop(outcome, params)
 
     if outcome.aborted:

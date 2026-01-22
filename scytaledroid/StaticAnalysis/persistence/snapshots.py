@@ -105,13 +105,44 @@ def write_permission_snapshot(
         except Exception:
             static_run_id = None
 
+    run_id: Optional[int] = None
+    derived_package: Optional[str] = None
+    if scope_label:
+        scope_label = scope_label.strip()
+        if scope_label.startswith("com."):
+            derived_package = scope_label
+        elif "(com." in scope_label:
+            derived_package = scope_label.rsplit("(", 1)[-1].rstrip(")")
+            if not derived_package.startswith("com."):
+                derived_package = None
+    if derived_package:
+        try:
+            row = core_q.run_sql(
+                """
+                SELECT run_id
+                FROM runs
+                WHERE session_stamp=%s AND package=%s
+                ORDER BY run_id DESC
+                LIMIT 1
+                """,
+                (session_stamp, derived_package),
+                fetch="one",
+            )
+            if row and row[0]:
+                run_id = int(row[0])
+        except Exception:
+            run_id = None
+
     snapshot_key = SNAPSHOT_PREFIX + session_stamp
     scope_display = scope_label or f"Session {session_stamp}"
     metadata_scope = scope_label or scope_display
 
     header_sql = """
-        INSERT INTO permission_audit_snapshots (snapshot_key, scope_label, apps_total, metadata, static_run_id)
+        INSERT INTO permission_audit_snapshots (
+          snapshot_key, scope_label, run_id, apps_total, metadata, static_run_id
+        )
         SELECT %s,
+               %s,
                %s,
                COUNT(DISTINCT package_name),
                JSON_OBJECT('session', %s, 'scope_label', %s, 'source', 'static-cli'),
@@ -120,6 +151,7 @@ def write_permission_snapshot(
         WHERE session_stamp = %s
         ON DUPLICATE KEY UPDATE
           scope_label = VALUES(scope_label),
+          run_id = VALUES(run_id),
           apps_total = VALUES(apps_total),
           metadata = VALUES(metadata),
           static_run_id = VALUES(static_run_id)
@@ -127,7 +159,15 @@ def write_permission_snapshot(
     try:
         core_q.run_sql(
             header_sql,
-            (snapshot_key, scope_display, session_stamp, metadata_scope, static_run_id, session_stamp),
+            (
+                snapshot_key,
+                scope_display,
+                run_id,
+                session_stamp,
+                metadata_scope,
+                static_run_id,
+                session_stamp,
+            ),
         )
     except Exception as exc:
         log.warning(
