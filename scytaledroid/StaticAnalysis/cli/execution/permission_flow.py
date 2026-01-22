@@ -11,6 +11,7 @@ from ...modules.permissions import collect_permissions_and_sdk
 from ...modules.permissions.render_postcard import render as render_permission_postcard
 from ...modules.permissions.audit import PermissionAuditAccumulator
 from ..models import RunParameters, ScopeSelection
+from ..session import make_session_stamp
 from .scan_flow import generate_report
 
 
@@ -28,10 +29,15 @@ def execute_permission_scan(
         return
 
     base_dir = Path(app_config.DATA_DIR) / "apks"
+    session_stamp = params.session_stamp or ""
+    if not session_stamp:
+        session_stamp = make_session_stamp()
+    snapshot_id = f"perm-audit:app:{session_stamp}"
     accumulator = PermissionAuditAccumulator(
         scope_label=params.scope_label or selection.label,
         scope_type=selection.scope,
         total_groups=len(scope_groups),
+        snapshot_id=snapshot_id,
     )
 
     for group in scope_groups:
@@ -44,7 +50,7 @@ def execute_permission_scan(
             continue
 
         permissions, defined, sdk = collect_permissions_and_sdk(str(artifact.path))
-        render_permission_postcard(
+        profile = render_permission_postcard(
             group.package_name,
             group.package_name,
             permissions,
@@ -71,9 +77,69 @@ def execute_permission_scan(
             except Exception:
                 pass
 
-        accumulator.observe(group.package_name, permissions, defined)
+        declared_permissions = [name for name, _tag in permissions]
+        declared_in = {name.split(".")[-1].upper(): tag for name, tag in permissions if name}
+        profile = profile if isinstance(profile, dict) else {}
+        counts = {
+            "dangerous": int(profile.get("risk_counts", {}).get("dangerous", 0)),
+            "signature": int(profile.get("risk_counts", {}).get("signature", 0)),
+            "vendor": int(profile.get("V", 0)),
+        }
+        accumulator.add_app(
+            package=group.package_name,
+            label=group.package_name,
+            cohort=group.category,
+            sdk=sdk or {},
+            counts=counts,
+            groups=profile.get("groups", {}),
+            declared_in=declared_in,
+            declared_permissions=declared_permissions,
+            score_detail=profile.get("score_detail", {}),
+            vendor_present=bool(profile.get("V", 0)),
+        )
 
-    accumulator.persist()
+    snapshot_payload = accumulator.finalize()
+    run_id = None
+    static_run_id = None
+    if session_stamp and len(accumulator.apps) == 1:
+        package_name = accumulator.apps[0].package
+        try:
+            from scytaledroid.Database.db_core import db_queries as core_q
+
+            row = core_q.run_sql(
+                """
+                SELECT run_id
+                FROM runs
+                WHERE session_stamp=%s AND package=%s
+                ORDER BY run_id DESC
+                LIMIT 1
+                """,
+                (session_stamp, package_name),
+                fetch="one",
+            )
+            if row and row[0]:
+                run_id = int(row[0])
+        except Exception:
+            run_id = None
+        try:
+            row = core_q.run_sql(
+                """
+                SELECT id
+                FROM static_analysis_runs
+                WHERE session_stamp=%s AND scope_label=%s
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (session_stamp, package_name),
+                fetch="one",
+            )
+            if row and row[0]:
+                static_run_id = int(row[0])
+        except Exception:
+            static_run_id = None
+    snapshot_payload["run_id"] = run_id
+    snapshot_payload["static_run_id"] = static_run_id
+    accumulator.persist_to_db(snapshot_payload)
 
 
 __all__ = ["execute_permission_scan"]

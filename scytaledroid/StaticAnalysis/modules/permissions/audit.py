@@ -463,6 +463,9 @@ class PermissionAuditAccumulator:
     # ------------------------------
 
     def _build_snapshot_payload(self, apps_in_scope: int) -> Dict[str, Any]:
+        session_value = self.snapshot_id
+        if isinstance(self.snapshot_id, str) and self.snapshot_id.startswith("perm-audit:app:"):
+            session_value = self.snapshot_id[len("perm-audit:app:") :]
         inventory = {
             "apps_total": self.total_groups,
             "apps_in_scope": apps_in_scope,
@@ -538,6 +541,7 @@ class PermissionAuditAccumulator:
 
         payload = {
             "snapshot_id": self.snapshot_id,
+            "session": session_value,
             "scope": self.scope_type,
             "scope_label": self.scope_label,
             "inventory": inventory,

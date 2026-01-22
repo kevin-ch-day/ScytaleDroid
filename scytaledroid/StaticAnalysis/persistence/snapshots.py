@@ -136,6 +136,7 @@ def write_permission_snapshot(
     snapshot_key = SNAPSHOT_PREFIX + session_stamp
     scope_display = scope_label or f"Session {session_stamp}"
     metadata_scope = scope_label or scope_display
+    metadata_package = derived_package
 
     header_sql = """
         INSERT INTO permission_audit_snapshots (
@@ -145,7 +146,12 @@ def write_permission_snapshot(
                %s,
                %s,
                COUNT(DISTINCT package_name),
-               JSON_OBJECT('session', %s, 'scope_label', %s, 'source', 'static-cli'),
+               JSON_OBJECT(
+                 'session', %s,
+                 'scope_label', %s,
+                 'package', %s,
+                 'source', 'static-cli'
+               ),
                %s
         FROM static_findings_summary
         WHERE session_stamp = %s
@@ -165,6 +171,7 @@ def write_permission_snapshot(
                 run_id,
                 session_stamp,
                 metadata_scope,
+                metadata_package,
                 static_run_id,
                 session_stamp,
             ),
@@ -182,10 +189,60 @@ def write_permission_snapshot(
         fetch="one",
     )
     if not row:
-        log.warning(
-            "Permission snapshot header was not created for session %s", session_stamp, category="static_analysis"
+        fallback_sql = """
+            INSERT INTO permission_audit_snapshots (
+              snapshot_key, scope_label, run_id, apps_total, metadata, static_run_id
+            )
+            VALUES (
+              %s,
+              %s,
+              %s,
+              0,
+              JSON_OBJECT(
+                'session', %s,
+                'scope_label', %s,
+                'package', %s,
+                'source', 'static-cli',
+                'note', 'header_fallback'
+              ),
+              %s
+            )
+            ON DUPLICATE KEY UPDATE
+              scope_label = VALUES(scope_label),
+              run_id = VALUES(run_id),
+              apps_total = VALUES(apps_total),
+              metadata = VALUES(metadata),
+              static_run_id = VALUES(static_run_id)
+        """
+        try:
+            core_q.run_sql(
+                fallback_sql,
+                (
+                    snapshot_key,
+                    scope_display,
+                    run_id,
+                    session_stamp,
+                    metadata_scope,
+                    metadata_package,
+                    static_run_id,
+                ),
+            )
+        except Exception as exc:
+            log.warning(
+                f"Permission snapshot header fallback failed (session={session_stamp}): {exc}",
+                category="static_analysis",
+            )
+            return None
+        row = core_q.run_sql(
+            "SELECT snapshot_id FROM permission_audit_snapshots WHERE snapshot_key=%s",
+            (snapshot_key,),
+            fetch="one",
         )
-        return None
+        if not row:
+            log.warning(
+                "Permission snapshot header was not created for session %s", session_stamp, category="static_analysis"
+            )
+            return None
 
     snapshot_id = int(row[0])
 
