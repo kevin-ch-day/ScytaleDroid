@@ -15,6 +15,7 @@ from typing import Iterable, List
 from scytaledroid.Database.db_core import db_engine
 from scytaledroid.Database.db_core.db_config import DB_CONFIG
 from scytaledroid.Database.db_core.db_queries import run_sql
+from scytaledroid.Database.db_queries.canonical import schema as canonical_schema
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
@@ -109,6 +110,19 @@ def _execute_statements(statements: Iterable[str], *, dialect: str) -> None:
 def bootstrap_database() -> None:
     dialect = str(DB_CONFIG.get("engine", "sqlite")).lower()
     ddl_blocks: List[str] = []
+
+    if dialect == "sqlite":
+        log.warning(
+            "SQLite bootstrap uses relaxed constraints; MariaDB/MySQL is canonical.",
+            category="database",
+        )
+
+    # Prefer ordered canonical schema statements first to avoid FK ordering issues.
+    try:
+        ddl_blocks.extend(list(getattr(canonical_schema, "_DDL_STATEMENTS", [])))
+    except Exception:
+        pass
+
     for path in _iter_schema_files():
         ddl_blocks.extend(_extract_ddl_blocks(path))
 
@@ -127,15 +141,17 @@ def bootstrap_database() -> None:
 
     log.info(f"Bootstrapping schema for {dialect} with {len(ddl_blocks)} statements.", category="database")
     _execute_statements(ddl_blocks, dialect=dialect)
-    # Record schema version after successful bootstrap
+    # Record schema version after successful bootstrap (append-only, if empty)
     try:
-        run_sql(
-            "DELETE FROM schema_version"
-        )
-        run_sql(
-            "INSERT INTO schema_version (version, applied_at_utc) VALUES (%s, %s)",
-            ("0.3.0", datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")),
-        )
+        row = run_sql("SELECT COUNT(*) FROM schema_version", fetch="one")
+        if row and int(row[0]) == 0:
+            run_sql(
+                "INSERT INTO schema_version (version, applied_at_utc) VALUES (%s, %s)",
+                (
+                    "0.3.0-bootstrap",
+                    datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                ),
+            )
     except Exception as exc:  # pragma: no cover
         log.warning(f"Failed to record schema_version: {exc}", category="database")
     log.info("Schema bootstrap complete.", category="database")

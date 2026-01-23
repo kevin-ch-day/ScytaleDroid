@@ -18,7 +18,9 @@ CREATE TABLE IF NOT EXISTS `android_detected_permissions` (
   PRIMARY KEY (`detected_id`),
   UNIQUE KEY `ux_detected_perm_apk_ns` (`apk_id`, `namespace`, `perm_key`),
   KEY `ix_detected_perm_pkg` (`package_name`),
-  KEY `ix_detected_perm_class` (`classification`)
+  KEY `ix_detected_perm_class` (`classification`),
+  CONSTRAINT `fk_detected_apk`
+    FOREIGN KEY (`apk_id`) REFERENCES `android_apk_repository` (`apk_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 """
 
