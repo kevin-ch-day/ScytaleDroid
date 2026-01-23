@@ -4,11 +4,32 @@ from __future__ import annotations
 
 from typing import Iterable, Mapping
 
-from ...db_core import run_sql
+from ...db_core import db_config, run_sql
 from ...db_queries.harvest import storage_surface as q
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
 def ensure_tables() -> bool:
+    engine = str(db_config.DB_CONFIG.get("engine", "sqlite")).lower()
+    if engine != "sqlite" and not db_config.allow_auto_create():
+        row = run_sql(
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = %s",
+            ("static_fileproviders",),
+            fetch="one",
+        )
+        ok_fp = bool(row and int(row[0]) > 0)
+        row = run_sql(
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = %s",
+            ("static_provider_acl",),
+            fetch="one",
+        )
+        ok_acl = bool(row and int(row[0]) > 0)
+        if not (ok_fp and ok_acl):
+            log.warning(
+                "storage surface tables missing; run bootstrap or migrations.",
+                category="database",
+            )
+        return ok_fp and ok_acl
     try:
         run_sql(q.CREATE_TABLE_FILEPROVIDERS)
         run_sql(q.CREATE_TABLE_PROVIDER_ACL)

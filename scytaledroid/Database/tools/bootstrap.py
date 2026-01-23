@@ -9,37 +9,13 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Iterable, List
 
 from scytaledroid.Database.db_core import db_engine
 from scytaledroid.Database.db_core.db_config import DB_CONFIG
 from scytaledroid.Database.db_core.db_queries import run_sql
-from scytaledroid.Database.db_queries.canonical import schema as canonical_schema
+from scytaledroid.Database.db_queries import schema_manifest
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
-
-
-_DDL_PATTERN = re.compile(r'"""(.*?)"""', re.DOTALL)
-
-
-def _extract_ddl_blocks(path: Path) -> List[str]:
-    blocks: List[str] = []
-    text = path.read_text(encoding="utf-8")
-    for match in _DDL_PATTERN.finditer(text):
-        block = match.group(1).strip()
-        if not block:
-            continue
-        upper_block = block.upper()
-        if "CREATE TABLE" in upper_block or "ALTER TABLE" in upper_block or "CREATE INDEX" in upper_block:
-            blocks.append(block)
-    return blocks
-
-
-def _iter_schema_files() -> Iterable[Path]:
-    root = Path(__file__).resolve().parent.parent / "db_queries"
-    for path in root.rglob("*.py"):
-        yield path
-
 
 def _normalize_sqlite(sql: str) -> str:
     """Translate MySQL-ish DDL to SQLite-friendly syntax."""
@@ -117,23 +93,8 @@ def bootstrap_database() -> None:
             category="database",
         )
 
-    # Prefer ordered canonical schema statements first to avoid FK ordering issues.
-    try:
-        ddl_blocks.extend(list(getattr(canonical_schema, "_DDL_STATEMENTS", [])))
-    except Exception:
-        pass
-
-    for path in _iter_schema_files():
-        ddl_blocks.extend(_extract_ddl_blocks(path))
-
-    # Ensure schema_version exists and is populated
-    schema_version_stmt = """
-    CREATE TABLE IF NOT EXISTS schema_version (
-      version TEXT NOT NULL,
-      applied_at_utc TEXT NOT NULL
-    );
-    """
-    ddl_blocks.insert(0, schema_version_stmt)
+    # Ordered manifest is the authoritative bootstrap source.
+    ddl_blocks = schema_manifest.ordered_schema_statements()
 
     if not ddl_blocks:
         log.warning("No schema statements discovered during bootstrap.", category="database")

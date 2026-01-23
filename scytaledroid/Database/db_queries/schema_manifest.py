@@ -1,0 +1,119 @@
+"""Ordered schema manifest for deterministic bootstrap."""
+
+from __future__ import annotations
+
+import re
+from typing import Iterable, List
+
+from .canonical import schema as canonical_schema
+from .permissions import (
+    detected_permissions,
+    framework_permissions,
+    permission_support,
+    taxonomy,
+    unknown_permissions,
+    vendor_permissions,
+)
+from .static_analysis import (
+    risk_scores,
+    static_findings,
+    static_permission_matrix,
+    static_permission_risk,
+    string_analysis,
+)
+from .harvest import device_inventory, dynamic_loading
+from .web import tables as web_tables
+
+
+_CREATE_TABLE_RE = re.compile(
+    r"CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+`?([a-zA-Z0-9_]+)`?",
+    re.IGNORECASE,
+)
+
+
+def _schema_version_stmt() -> str:
+    return """
+    CREATE TABLE IF NOT EXISTS schema_version (
+      version TEXT NOT NULL,
+      applied_at_utc TEXT NOT NULL
+    );
+    """
+
+
+def _dedupe_create_tables(statements: Iterable[str]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for stmt in statements:
+        match = _CREATE_TABLE_RE.search(stmt or "")
+        if match:
+            table = match.group(1).lower()
+            if table in seen:
+                continue
+            seen.add(table)
+        ordered.append(stmt)
+    return ordered
+
+
+def ordered_schema_statements() -> list[str]:
+    statements: list[str] = []
+
+    statements.append(_schema_version_stmt())
+
+    # Canonical static-analysis schema (ordered list).
+    statements.extend(list(getattr(canonical_schema, "_DDL_STATEMENTS", [])))
+
+    # Permission taxonomy and catalogs.
+    statements.extend(
+        [
+            taxonomy.CREATE_GROUPS,
+            taxonomy.CREATE_ANDROID_PERM_MAP,
+            taxonomy.CREATE_ANDROID_PERM_OVERRIDE,
+            framework_permissions.CREATE_TABLE,
+            vendor_permissions.CREATE_TABLE,
+            detected_permissions.CREATE_TABLE,
+            unknown_permissions.CREATE_TABLE,
+            permission_support.CREATE_SIGNAL_CATALOG,
+            permission_support.CREATE_SIGNAL_MAPPINGS,
+            permission_support.CREATE_COHORT_EXPECTATIONS,
+            permission_support.CREATE_AUDIT_SNAPSHOTS,
+            permission_support.CREATE_AUDIT_APPS,
+        ]
+    )
+
+    # Static analysis persistence tables not covered by canonical schema.
+    statements.extend(
+        [
+            static_findings.CREATE_FINDINGS_SUMMARY,
+            static_findings.CREATE_FINDINGS,
+            string_analysis.CREATE_STRING_SUMMARY,
+            string_analysis.CREATE_STRING_SAMPLES,
+            string_analysis.CREATE_STRING_MATCH_CACHE,
+            string_analysis.CREATE_DOC_HOSTS_TABLE,
+            static_permission_matrix.CREATE_TABLE,
+            static_permission_risk.CREATE_TABLE,
+            risk_scores.CREATE_TABLE,
+        ]
+    )
+
+    # Device inventory and dynamic loading tables.
+    statements.extend(
+        [
+            device_inventory.CREATE_SNAPSHOTS_TABLE,
+            device_inventory.CREATE_INVENTORY_TABLE,
+            dynamic_loading.CREATE_TABLE_DYNLOAD_EVENTS,
+            dynamic_loading.CREATE_TABLE_REFLECTION,
+        ]
+    )
+
+    # Web-owned additive tables.
+    statements.extend(
+        [
+            web_tables.CREATE_WEB_ANNOTATIONS,
+            web_tables.CREATE_WEB_USER_PREFS,
+        ]
+    )
+
+    return _dedupe_create_tables(statements)
+
+
+__all__ = ["ordered_schema_statements"]

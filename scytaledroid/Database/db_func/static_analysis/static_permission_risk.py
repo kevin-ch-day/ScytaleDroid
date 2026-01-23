@@ -6,6 +6,7 @@ from typing import Iterable, Mapping
 
 from ...db_core import db_config, run_sql
 from ...db_queries.static_analysis import static_permission_risk as queries
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 _IS_SQLITE = str(db_config.DB_CONFIG.get("engine", "sqlite")).lower() == "sqlite"
 
@@ -61,6 +62,14 @@ def ensure_table() -> bool:
             run_sql(SQLITE_CREATE_TABLE)
             run_sql("CREATE UNIQUE INDEX IF NOT EXISTS ux_spr_apk ON static_permission_risk(apk_id)")
         else:
+            if not db_config.allow_auto_create():
+                ok = table_exists()
+                if not ok:
+                    log.warning(
+                        "static_permission_risk missing; run bootstrap or migrations.",
+                        category="database",
+                    )
+                return ok
             run_sql(queries.CREATE_TABLE)
             try:
                 row = run_sql(

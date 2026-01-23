@@ -12,6 +12,7 @@ from typing import Iterable, Mapping, MutableMapping, Sequence, Union
 
 from ...db_core import database_session, run_sql, db_config
 from ...db_queries.static_analysis import string_analysis as queries
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 _IS_SQLITE = str(db_config.DB_CONFIG.get("engine", "sqlite")).lower() == "sqlite"
 
@@ -143,6 +144,27 @@ def ensure_tables() -> bool:
             return True
         except Exception:
             return False
+    if not db_config.allow_auto_create():
+        ok = True
+        for name in (
+            "static_string_summary",
+            "static_string_samples",
+            "string_match_cache",
+            "doc_hosts",
+        ):
+            row = run_sql(
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = %s",
+                (name,),
+                fetch="one",
+            )
+            present = bool(row and int(row[0]) > 0)
+            ok = ok and present
+            if not present:
+                log.warning(
+                    f"{name} missing; run bootstrap or migrations.",
+                    category="database",
+                )
+        return ok
     try:
         with database_session():
             run_sql(queries.CREATE_STRING_SUMMARY)

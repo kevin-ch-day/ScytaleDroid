@@ -9,8 +9,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Mapping, MutableMapping, Union
 
-from ...db_core import database_session, run_sql
+from ...db_core import db_config, database_session, run_sql
 from ...db_queries.static_analysis import risk_scores as queries
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
 @dataclass(slots=True)
@@ -45,6 +46,12 @@ RiskRow = Union[RiskScoreRecord, Mapping[str, object]]
 
 
 def ensure_table() -> bool:
+    engine = str(db_config.DB_CONFIG.get("engine", "sqlite")).lower()
+    if engine != "sqlite" and not db_config.allow_auto_create():
+        ok = table_exists()
+        if not ok:
+            log.warning("risk_scores missing; run bootstrap or migrations.", category="database")
+        return ok
     try:
         run_sql(queries.CREATE_TABLE)
         row = run_sql(

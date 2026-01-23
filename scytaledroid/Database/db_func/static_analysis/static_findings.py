@@ -8,6 +8,7 @@ from typing import Mapping, Sequence
 from ...db_core import database_session, run_sql
 from ...db_core import db_config
 from ...db_queries.static_analysis import static_findings as queries
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 _IS_SQLITE = str(db_config.DB_CONFIG.get("engine", "sqlite")).lower() == "sqlite"
 
@@ -71,6 +72,17 @@ def ensure_tables() -> bool:
             return True
         except Exception:
             return False
+    if not db_config.allow_auto_create():
+        row = run_sql(queries.TABLE_EXISTS_SUMMARY, fetch="one")
+        ok_summary = bool(row and int(row[0]) > 0)
+        row = run_sql(queries.TABLE_EXISTS_FINDINGS, fetch="one")
+        ok_findings = bool(row and int(row[0]) > 0)
+        if not (ok_summary and ok_findings):
+            log.warning(
+                "static_findings tables missing; run bootstrap or migrations.",
+                category="database",
+            )
+        return ok_summary and ok_findings
     try:
         with database_session():
             try:

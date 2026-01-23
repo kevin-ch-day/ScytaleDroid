@@ -99,6 +99,13 @@ _DEFAULT_DATABASE = DB_CONFIG.get("database", "")
 _DEFAULT_ENGINE = DB_CONFIG.get("engine", "sqlite")
 
 
+def allow_auto_create() -> bool:
+    """Allow runtime CREATE TABLE calls when the DB is missing tables."""
+
+    raw = os.environ.get("SCYTALEDROID_DB_AUTO_CREATE", "1").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
 def override_database(database: str | None) -> None:
     """Temporarily override the target database schema/path."""
 
@@ -110,4 +117,4 @@ def override_database(database: str | None) -> None:
         DB_CONFIG["engine"] = _DEFAULT_ENGINE
 
 
-__all__ = ["DB_CONFIG", "DB_CONFIG_SOURCE", "override_database"]
+__all__ = ["DB_CONFIG", "DB_CONFIG_SOURCE", "allow_auto_create", "override_database"]

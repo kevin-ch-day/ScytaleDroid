@@ -4,11 +4,32 @@ from __future__ import annotations
 
 from typing import Iterable, Mapping
 
-from ...db_core import run_sql
+from ...db_core import db_config, run_sql
 from ...db_queries.harvest import dynamic_loading as q
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
 def ensure_tables() -> bool:
+    engine = str(db_config.DB_CONFIG.get("engine", "sqlite")).lower()
+    if engine != "sqlite" and not db_config.allow_auto_create():
+        row = run_sql(
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = %s",
+            ("static_dynload_events",),
+            fetch="one",
+        )
+        ok_dyn = bool(row and int(row[0]) > 0)
+        row = run_sql(
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = %s",
+            ("static_reflection_calls",),
+            fetch="one",
+        )
+        ok_ref = bool(row and int(row[0]) > 0)
+        if not (ok_dyn and ok_ref):
+            log.warning(
+                "dynamic loading tables missing; run bootstrap or migrations.",
+                category="database",
+            )
+        return ok_dyn and ok_ref
     try:
         run_sql(q.CREATE_TABLE_DYNLOAD_EVENTS)
         run_sql(q.CREATE_TABLE_REFLECTION)
@@ -74,4 +95,3 @@ def json_dumps_safe(value: object) -> str:
 
 
 __all__ = ["ensure_tables", "replace_events", "replace_reflection_calls"]
-
