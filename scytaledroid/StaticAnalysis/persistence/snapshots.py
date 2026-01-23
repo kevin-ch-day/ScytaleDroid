@@ -48,16 +48,9 @@ def _ensure_index(table: str, index: str, statement: str) -> None:
         exists = bool(row and int(row[0]) > 0)
     except Exception:
         exists = False
-    if exists:
-        return
-    try:
-        core_q.run_sql(statement)
-    except Exception as exc:  # pragma: no cover - defensive
-        log.debug(
-            "Failed to create index %s on %s: %s",
-            index,
-            table,
-            exc,
+    if not exists:
+        log.warning(
+            f"Missing index {index} on {table}; apply migrations to add it.",
             category="static_analysis",
         )
 

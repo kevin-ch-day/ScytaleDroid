@@ -7,8 +7,10 @@ from typing import Iterable, List
 
 from .canonical import schema as canonical_schema
 from .permissions import (
+    aosp_baseline,
     detected_permissions,
     framework_permissions,
+    governance_snapshot,
     permission_support,
     taxonomy,
     unknown_permissions,
@@ -72,6 +74,11 @@ def ordered_schema_statements() -> list[str]:
             vendor_permissions.CREATE_TABLE,
             detected_permissions.CREATE_TABLE,
             unknown_permissions.CREATE_TABLE,
+            unknown_permissions.ALTER_ADD_TRIAGE_COLUMNS,
+            unknown_permissions.ALTER_ADD_GHOST_COLUMNS,
+            aosp_baseline.CREATE_BASELINE,
+            governance_snapshot.CREATE_GOVERNANCE_SNAPSHOTS,
+            governance_snapshot.CREATE_GOVERNANCE_ENTRIES,
             permission_support.CREATE_SIGNAL_CATALOG,
             permission_support.CREATE_SIGNAL_MAPPINGS,
             permission_support.CREATE_COHORT_EXPECTATIONS,

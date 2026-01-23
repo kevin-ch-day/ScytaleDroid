@@ -36,11 +36,27 @@ def _file_sha256(path: str | Path) -> str | None:
         return None
 
 
+def _android_release_for_sdk(target_sdk: int | None) -> str | None:
+    if target_sdk is None:
+        return None
+    sdk_map = {
+        33: "13",
+        34: "14",
+        35: "15",
+        36: "16",
+    }
+    try:
+        return sdk_map.get(int(target_sdk))
+    except Exception:
+        return None
+
+
 def persist_declared_permissions(
     *,
     package_name: str | None,
     version_name: str | None,
     version_code: str | None,
+    target_sdk: int | None = None,
     sha256: str | None,
     artifact_label: str | None,
     declared: Iterable[str],
@@ -56,6 +72,7 @@ def persist_declared_permissions(
             vendor_permissions as _vp,
             unknown_permissions as _up,
             detected_permissions as _dp,
+            aosp_baseline as _ab,
         )
     except Exception as exc:  # pragma: no cover - DB not configured
         log.warning(f"DB modules unavailable for permission persistence: {exc}", category="static_analysis")
@@ -78,9 +95,17 @@ def persist_declared_permissions(
     framework_map = {}
     try:
         short_keys = [str(n).split('.')[-1].upper() for n in declared_names if isinstance(n, str) and n.startswith('android.permission.')]
-        framework_map = _dp.framework_protection_map(short_keys)
+        framework_map = _dp.framework_protection_map(short_keys, target_sdk=target_sdk)
     except Exception:
         framework_map = {}
+
+    baseline_release = _android_release_for_sdk(target_sdk)
+    baseline_perms = set()
+    if baseline_release:
+        try:
+            baseline_perms = _ab.fetch_permissions(baseline_release)
+        except Exception:
+            baseline_perms = set()
 
     counts = {"framework": 0, "vendor": 0, "unknown": 0}
     for name in declared_names:
@@ -150,6 +175,10 @@ def persist_declared_permissions(
                         "last_seen_package": package_name,
                     }
                 )
+                if is_android_prefix and baseline_release and baseline_perms:
+                    canonical = name if name.startswith("android.permission.") else f"android.permission.{short_key}"
+                    if canonical and canonical not in baseline_perms:
+                        _up.mark_ghost_aosp(short_key or name, baseline_release)
             except Exception as exc:
                 log.warning(f"Unknown permission persist failed for {name}: {exc}", category="static_analysis")
             continue
@@ -184,8 +213,9 @@ def persist_permissions_to_db(report) -> None:
         package_name = getattr(report.manifest, "package_name", None)
         version_name = getattr(report.manifest, "version_name", None)
         version_code = getattr(report.manifest, "version_code", None)
+        target_sdk = getattr(report.manifest, "target_sdk", None)
     except Exception:
-        package_name = version_name = version_code = None
+        package_name = version_name = version_code = target_sdk = None
     try:
         sha = (report.hashes or {}).get("sha256")
     except Exception:
@@ -197,6 +227,7 @@ def persist_permissions_to_db(report) -> None:
         package_name=package_name,
         version_name=version_name,
         version_code=version_code,
+        target_sdk=target_sdk,
         sha256=sha,
         artifact_label=artifact_label,
         declared=declared,

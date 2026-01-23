@@ -4,26 +4,19 @@ from __future__ import annotations
 
 from typing import Iterable, Mapping, Optional
 
-from ...db_core import db_config, run_sql
+from ...db_core import run_sql
 from ...db_queries.permissions import detected_permissions as queries
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
 def ensure_table() -> bool:
-    engine = str(db_config.DB_CONFIG.get("engine", "sqlite")).lower()
-    if engine != "sqlite" and not db_config.allow_auto_create():
-        ok = table_exists()
-        if not ok:
-            log.warning(
-                "android_detected_permissions missing; run bootstrap or migrations.",
-                category="database",
-            )
-        return ok
-    try:
-        run_sql(queries.CREATE_TABLE)
-        return True
-    except Exception:
-        return False
+    ok = table_exists()
+    if not ok:
+        log.warning(
+            "android_detected_permissions missing; run DBA migrations.",
+            category="database",
+        )
+    return ok
 
 
 def table_exists() -> bool:

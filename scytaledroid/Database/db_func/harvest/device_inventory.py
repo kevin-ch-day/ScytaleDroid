@@ -6,7 +6,7 @@ import json
 from datetime import datetime
 from typing import Mapping, Optional, Sequence
 
-from ...db_core import db_config, run_sql, run_sql_many
+from ...db_core import run_sql, run_sql_many
 from ...db_queries.harvest import device_inventory as queries
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
@@ -19,8 +19,7 @@ def ensure_tables() -> bool:
     global _TABLES_READY
     if _TABLES_READY:
         return True
-    engine = str(db_config.DB_CONFIG.get("engine", "sqlite")).lower()
-    if engine != "sqlite" and not db_config.allow_auto_create():
+    try:
         row = run_sql(
             "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = %s",
             ("device_inventory_snapshots",),
@@ -35,18 +34,13 @@ def ensure_tables() -> bool:
         ok_inv = bool(row and int(row[0]) > 0)
         if not (ok_snap and ok_inv):
             log.warning(
-                "device_inventory tables missing; run bootstrap or migrations.",
+                "device_inventory tables missing; load a DB snapshot or apply migrations.",
                 category="database",
             )
         _TABLES_READY = ok_snap and ok_inv
         return _TABLES_READY
-    try:
-        run_sql(queries.CREATE_SNAPSHOTS_TABLE)
-        run_sql(queries.CREATE_INVENTORY_TABLE)
-        _TABLES_READY = True
-        return True
     except Exception as exc:  # pragma: no cover - defensive
-        log.warning(f"Failed to ensure inventory tables: {exc}", category="database")
+        log.warning(f"Failed to check inventory tables: {exc}", category="database")
         return False
 
 

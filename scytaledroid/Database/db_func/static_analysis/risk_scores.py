@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Mapping, MutableMapping, Union
 
-from ...db_core import db_config, database_session, run_sql
+from ...db_core import database_session, run_sql
 from ...db_queries.static_analysis import risk_scores as queries
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
@@ -46,27 +46,14 @@ RiskRow = Union[RiskScoreRecord, Mapping[str, object]]
 
 
 def ensure_table() -> bool:
-    engine = str(db_config.DB_CONFIG.get("engine", "sqlite")).lower()
-    if engine != "sqlite" and not db_config.allow_auto_create():
+    try:
         ok = table_exists()
         if not ok:
-            log.warning("risk_scores missing; run bootstrap or migrations.", category="database")
+            log.warning(
+                "risk_scores missing; load a DB snapshot or apply migrations.",
+                category="database",
+            )
         return ok
-    try:
-        run_sql(queries.CREATE_TABLE)
-        row = run_sql(
-            """
-            SELECT CHARACTER_MAXIMUM_LENGTH
-            FROM information_schema.columns
-            WHERE table_schema = DATABASE()
-              AND table_name = 'risk_scores'
-              AND column_name = 'session_stamp'
-            """,
-            fetch="one",
-        )
-        if row and row[0] is not None and int(row[0]) < 64:
-            run_sql("ALTER TABLE risk_scores MODIFY session_stamp VARCHAR(128) NOT NULL")
-        return True
     except Exception:
         return False
 

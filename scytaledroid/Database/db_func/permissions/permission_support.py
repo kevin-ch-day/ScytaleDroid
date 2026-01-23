@@ -8,6 +8,7 @@ from typing import Callable, Iterable, Mapping
 from ...db_core import run_sql
 from ...db_queries.permissions import permission_support as queries
 from . import framework_permissions, taxonomy
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 _ALLOWED_BANDS = {"critical", "high", "medium", "low", "none"}
 _ALLOWED_STAGES = {"declared", "runtime", "policy"}
@@ -108,107 +109,71 @@ def _normalize_stage(value: object) -> str:
     return text if text in _ALLOWED_STAGES else "declared"
 
 
-def ensure_signal_catalog() -> bool:
-    """Ensure the ``permission_signal_catalog`` table exists."""
-
+def _table_exists(table: str) -> bool:
     try:
-        run_sql(queries.CREATE_SIGNAL_CATALOG)
-        return True
+        row = run_sql(
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = %s",
+            (table,),
+            fetch="one",
+        )
+        return bool(row and int(row[0]) > 0)
     except Exception:
         return False
+
+
+def ensure_signal_catalog() -> bool:
+    """Verify the ``permission_signal_catalog`` table exists."""
+    ok = _table_exists("permission_signal_catalog")
+    if not ok:
+        log.warning(
+            "permission_signal_catalog missing; run DBA migrations.",
+            category="database",
+        )
+    return ok
 
 
 def ensure_signal_mappings() -> bool:
-    """Ensure the ``permission_signal_mappings`` table exists."""
-
-    try:
-        run_sql(queries.CREATE_SIGNAL_MAPPINGS)
-        return True
-    except Exception:
-        return False
+    """Verify the ``permission_signal_mappings`` table exists."""
+    ok = _table_exists("permission_signal_mappings")
+    if not ok:
+        log.warning(
+            "permission_signal_mappings missing; run DBA migrations.",
+            category="database",
+        )
+    return ok
 
 
 def ensure_cohort_expectations() -> bool:
-    """Ensure the ``permission_cohort_expectations`` table exists."""
-
-    try:
-        run_sql(queries.CREATE_COHORT_EXPECTATIONS)
-        return True
-    except Exception:
-        return False
+    """Verify the ``permission_cohort_expectations`` table exists."""
+    ok = _table_exists("permission_cohort_expectations")
+    if not ok:
+        log.warning(
+            "permission_cohort_expectations missing; run DBA migrations.",
+            category="database",
+        )
+    return ok
 
 
 def ensure_audit_snapshots() -> bool:
-    """Ensure the ``permission_audit_snapshots`` table exists."""
-
-    try:
-        run_sql(queries.CREATE_AUDIT_SNAPSHOTS)
-        try:
-            cols = run_sql("SHOW COLUMNS FROM permission_audit_snapshots", fetch="all")
-        except Exception:
-            cols = []
-        existing = {row[0] for row in cols or []}
-        if "run_id" not in existing:
-            try:
-                run_sql(
-                    "ALTER TABLE permission_audit_snapshots ADD COLUMN run_id BIGINT UNSIGNED NULL AFTER scope_label"
-                )
-            except Exception:
-                pass
-        if "static_run_id" not in existing:
-            try:
-                run_sql(
-                    "ALTER TABLE permission_audit_snapshots ADD COLUMN static_run_id BIGINT UNSIGNED NULL AFTER run_id"
-                )
-            except Exception:
-                pass
-        try:
-            row = run_sql(
-                """
-                SELECT character_maximum_length
-                FROM information_schema.columns
-                WHERE table_schema = DATABASE()
-                  AND table_name = 'permission_audit_snapshots'
-                  AND column_name = 'snapshot_key'
-                """,
-                fetch="one",
-            )
-            if row and row[0] and int(row[0]) < 128:
-                run_sql("ALTER TABLE permission_audit_snapshots MODIFY snapshot_key VARCHAR(128) NOT NULL")
-        except Exception:
-            pass
-        return True
-    except Exception:
-        return False
+    """Verify the ``permission_audit_snapshots`` table exists."""
+    ok = _table_exists("permission_audit_snapshots")
+    if not ok:
+        log.warning(
+            "permission_audit_snapshots missing; run DBA migrations.",
+            category="database",
+        )
+    return ok
 
 
 def ensure_audit_apps() -> bool:
-    """Ensure the ``permission_audit_apps`` table exists."""
-
-    try:
-        run_sql(queries.CREATE_AUDIT_APPS)
-        try:
-            cols = run_sql("SHOW COLUMNS FROM permission_audit_apps", fetch="all")
-        except Exception:
-            cols = []
-        existing = {row[0] for row in cols or []}
-        if "run_id" not in existing:
-            try:
-                run_sql(
-                    "ALTER TABLE permission_audit_apps ADD COLUMN run_id BIGINT UNSIGNED NULL AFTER app_label"
-                )
-            except Exception:
-                pass
-        if "static_run_id" not in existing:
-            try:
-                run_sql(
-                    "ALTER TABLE permission_audit_apps ADD COLUMN static_run_id BIGINT UNSIGNED NULL AFTER run_id"
-                )
-            except Exception:
-                pass
-        return True
-    except Exception:
-        return False
+    """Verify the ``permission_audit_apps`` table exists."""
+    ok = _table_exists("permission_audit_apps")
+    if not ok:
+        log.warning(
+            "permission_audit_apps missing; run DBA migrations.",
+            category="database",
+        )
+    return ok
 
 
 def ensure_all() -> dict[str, bool]:

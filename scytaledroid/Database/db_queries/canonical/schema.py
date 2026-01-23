@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Iterable
 
+import re
+
 from ...db_core import db_queries as core_q
 
 
@@ -124,6 +126,45 @@ _DDL_STATEMENTS: list[str] = [
       updated_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       PRIMARY KEY (session_stamp, scope_label),
       KEY ix_static_rollup_scope (scope_label)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS static_correlation_results (
+      id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      static_run_id    BIGINT UNSIGNED NOT NULL,
+      package_name     VARCHAR(255)    NOT NULL,
+      correlation_key  VARCHAR(128)    NOT NULL,
+      severity_band    ENUM('INFO','WARN','FAIL') NOT NULL,
+      score            INT             NOT NULL DEFAULT 0,
+      rationale        TEXT            NOT NULL,
+      evidence_path    VARCHAR(1024)   DEFAULT NULL,
+      evidence_preview TEXT            DEFAULT NULL,
+      created_at_utc   DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY uq_static_corr (static_run_id, package_name, correlation_key),
+      KEY ix_static_corr_run_pkg (static_run_id, package_name),
+      KEY ix_static_corr_key (correlation_key),
+      KEY ix_static_corr_sev (severity_band)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS permission_signal_observations (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      static_run_id BIGINT UNSIGNED NOT NULL,
+      package_name VARCHAR(255) NOT NULL,
+      signal_key VARCHAR(128) NOT NULL,
+      severity_band ENUM('INFO','WARN','FAIL') NOT NULL DEFAULT 'INFO',
+      score INT NOT NULL DEFAULT 0,
+      trigger_permissions_json JSON NOT NULL,
+      primary_permission VARCHAR(255) DEFAULT NULL,
+      rationale TEXT DEFAULT NULL,
+      evidence_path VARCHAR(1024) DEFAULT NULL,
+      observed_at_utc DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY uq_perm_sig (static_run_id, package_name, signal_key),
+      KEY ix_perm_sig_run_pkg (static_run_id, package_name),
+      KEY ix_perm_sig_key (signal_key),
+      KEY ix_perm_sig_sev (severity_band)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
     """
@@ -369,19 +410,33 @@ _DDL_STATEMENTS: list[str] = [
 ]
 
 
-def ensure_all() -> bool:
-    """Create all canonical tables if missing.
+_TABLE_NAME_PATTERN = re.compile(r"CREATE TABLE IF NOT EXISTS\\s+`?([a-zA-Z0-9_]+)`?", re.IGNORECASE)
 
-    Returns True when all statements executed without error.
-    """
-    ok = True
+
+def ensure_all() -> bool:
+    """Verify canonical tables exist; no runtime DDL is executed."""
+    tables = set()
     for stmt in _DDL_STATEMENTS:
+        match = _TABLE_NAME_PATTERN.search(stmt)
+        if match:
+            tables.add(match.group(1))
+    if not tables:
+        return True
+    ok = True
+    for table in sorted(tables):
         try:
-            core_q.run_sql(stmt)
-        except Exception as exc:
+            row = core_q.run_sql(
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = %s",
+                (table,),
+                fetch="one",
+            )
+            present = bool(row and int(row[0]) > 0)
+        except Exception:
+            present = False
+        if not present:
             ok = False
             try:
-                core_q.run_sql("/* canonical schema skipped statement */ SELECT 1")
+                core_q.run_sql("/* canonical schema missing */ SELECT 1")
             except Exception:
                 pass
     return ok

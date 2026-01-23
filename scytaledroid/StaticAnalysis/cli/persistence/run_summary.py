@@ -12,6 +12,7 @@ from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Database.db_core import db_queries as core_q
 
 from ..cvss_v4 import apply_profiles
+from ...core.findings import Badge, Finding
 from ..evidence import normalize_evidence
 from ..masvs_mapper import summarise_controls, rule_to_area
 from ..rule_mapping import derive_rule_id
@@ -57,6 +58,69 @@ def _normalize_datetime_value(value: str | None) -> str | None:
     return candidate
 
 
+def _severity_band_from_badge(badge: Badge) -> str:
+    if badge is Badge.FAIL:
+        return "FAIL"
+    if badge is Badge.WARN:
+        return "WARN"
+    return "INFO"
+
+
+def _score_from_finding(finding: Finding) -> int:
+    metrics = finding.metrics
+    if isinstance(metrics, Mapping):
+        value = metrics.get("score")
+        try:
+            return safe_int(value, default=0)
+        except (TypeError, ValueError):
+            pass
+    try:
+        from scytaledroid.StaticAnalysis.detectors.correlation.scoring import finding_weight
+
+        return safe_int(finding_weight(finding), default=0)
+    except Exception:
+        return 0
+
+
+def _correlation_rows_from_result(
+    result: object,
+    *,
+    static_run_id: int,
+    package_name: str,
+) -> list[Dict[str, object]]:
+    findings = getattr(result, "findings", None)
+    if not isinstance(findings, Sequence):
+        return []
+    rows: list[Dict[str, object]] = []
+    for finding in findings:
+        if not isinstance(finding, Finding):
+            continue
+        band = _severity_band_from_badge(finding.status)
+        score = _score_from_finding(finding)
+        rationale = finding.because or finding.title
+        evidence_path = None
+        evidence_preview = None
+        if finding.evidence:
+            pointer = finding.evidence[0]
+            evidence_path = getattr(pointer, "location", None)
+            evidence_preview = getattr(pointer, "description", None)
+        if not evidence_preview:
+            evidence_preview = rationale
+        rows.append(
+            {
+                "static_run_id": static_run_id,
+                "package_name": package_name,
+                "correlation_key": finding.finding_id,
+                "severity_band": band,
+                "score": score,
+                "rationale": truncate(rationale, 512),
+                "evidence_path": truncate(evidence_path, 1024),
+                "evidence_preview": truncate(evidence_preview, 1024),
+            }
+        )
+    return rows
+
+
 @dataclass(slots=True)
 class PersistenceOutcome:
     run_id: int | None = None
@@ -100,6 +164,71 @@ def _persist_static_sections_wrapper(
         run_id=run_id,
         static_run_id=static_run_id,
     )
+
+
+def _persist_correlation_results(rows: Sequence[Mapping[str, object]]) -> bool:
+    if not rows:
+        return True
+    try:
+        gov_version = None
+        gov_sha = None
+        try:
+            row = core_q.run_sql(
+                "SELECT governance_version, snapshot_sha256 "
+                "FROM permission_governance_snapshots "
+                "ORDER BY loaded_at_utc DESC LIMIT 1",
+                fetch="one",
+            )
+            if row:
+                gov_version, gov_sha = row[0], row[1]
+        except Exception:
+            pass
+        columns = [
+            "static_run_id",
+            "package_name",
+            "correlation_key",
+            "severity_band",
+            "score",
+            "rationale",
+            "evidence_path",
+            "evidence_preview",
+        ]
+        placeholders = ["%s"] * len(columns)
+        values_base = [
+            "static_run_id",
+            "package_name",
+            "correlation_key",
+            "severity_band",
+            "score",
+            "rationale",
+            "evidence_path",
+            "evidence_preview",
+        ]
+        if gov_version is not None or gov_sha is not None:
+            columns.extend(["governance_version", "governance_sha256"])
+            placeholders.extend(["%s", "%s"])
+            values_base.extend(["governance_version", "governance_sha256"])
+
+        for row in rows:
+            payload = dict(row)
+            payload["governance_version"] = gov_version
+            payload["governance_sha256"] = gov_sha
+            core_q.run_sql(
+                "INSERT INTO static_correlation_results ("
+                + ", ".join(columns)
+                + ") VALUES ("
+                + ",".join(placeholders)
+                + ") ON DUPLICATE KEY UPDATE "
+                + ", ".join(f"{col}=VALUES({col})" for col in columns if col not in {"static_run_id", "package_name", "correlation_key"}),
+                tuple(payload.get(key) for key in values_base),
+            )
+        return True
+    except Exception as exc:
+        log.warning(
+            f"Failed to persist correlation results: {exc}",
+            category="static_analysis",
+        )
+        return False
 
 
 def _ensure_app_version(
@@ -468,6 +597,7 @@ def persist_run_summary(
 
     finding_rows: list[Dict[str, Any]] = []
     control_entries: list[Tuple[str, Mapping[str, Any]]] = []
+    correlation_rows: list[Dict[str, object]] = []
     total_findings = 0
     rule_assigned = 0
     base_vector_count = 0
@@ -480,6 +610,14 @@ def persist_run_summary(
             detector_id = str(getattr(result, "detector_id", getattr(result, "section_key", None)) or "unknown")
             module_id_val = getattr(result, "module_id", None)
             module_id = str(module_id_val) if module_id_val not in (None, "") else None
+            if detector_id == "correlation_engine" and static_run_id:
+                correlation_rows.extend(
+                    _correlation_rows_from_result(
+                        result,
+                        static_run_id=static_run_id,
+                        package_name=package_for_run,
+                    )
+                )
             for f in result.findings:
                 total_findings += 1
                 detector_sev = normalise_severity_token(getattr(f, "severity", None))
@@ -617,6 +755,13 @@ def persist_run_summary(
             )
             log.warning(message, category="static_analysis")
             outcome.add_error(message)
+
+    if static_run_id and correlation_rows and not dry_run:
+        if not _persist_correlation_results(correlation_rows):
+            log.warning(
+                f"Correlation results persistence failed for static_run_id={static_run_id}",
+                category="static_analysis",
+            )
 
     if run_id is not None:
         if control_summary:

@@ -64,140 +64,29 @@ def _table_has_index(table: str, index: str) -> bool:
 def ensure_tables() -> bool:
     if _IS_SQLITE:
         try:
-            run_sql(SQLITE_CREATE_FINDINGS_SUMMARY)
-            run_sql(SQLITE_CREATE_FINDINGS)
-            run_sql(
-                "CREATE UNIQUE INDEX IF NOT EXISTS ux_findings_summary ON static_findings_summary(package_name, session_stamp, scope_label)"
+            row1 = run_sql(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='static_findings_summary'",
+                fetch="one",
             )
-            return True
+            row2 = run_sql(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='static_findings'",
+                fetch="one",
+            )
+            ok_summary = bool(row1)
+            ok_findings = bool(row2)
         except Exception:
             return False
-    if not db_config.allow_auto_create():
+    else:
         row = run_sql(queries.TABLE_EXISTS_SUMMARY, fetch="one")
         ok_summary = bool(row and int(row[0]) > 0)
         row = run_sql(queries.TABLE_EXISTS_FINDINGS, fetch="one")
         ok_findings = bool(row and int(row[0]) > 0)
-        if not (ok_summary and ok_findings):
-            log.warning(
-                "static_findings tables missing; run bootstrap or migrations.",
-                category="database",
-            )
-        return ok_summary and ok_findings
-    try:
-        with database_session():
-            try:
-                run_sql(queries.CREATE_FINDINGS_SUMMARY)
-            except Exception:
-                # Table already exists or creation failed; keep going in best-effort mode.
-                pass
-            try:
-                run_sql(queries.CREATE_FINDINGS)
-            except Exception:
-                pass
-            try:
-                row = run_sql(
-                    """
-                    SELECT character_maximum_length
-                    FROM information_schema.columns
-                    WHERE table_schema = DATABASE()
-                      AND table_name = 'static_findings_summary'
-                      AND column_name = 'session_stamp'
-                    """,
-                    fetch="one",
-                )
-                if row and row[0] and int(row[0]) < 64:
-                    run_sql("ALTER TABLE static_findings_summary MODIFY session_stamp VARCHAR(64) NOT NULL")
-            except Exception:
-                pass
-            # Optional run_id linkage (best-effort; safe if column/index already exists).
-            if not _table_has_column("static_findings_summary", "run_id"):
-                try:
-                    run_sql(
-                        "ALTER TABLE static_findings_summary ADD COLUMN run_id BIGINT UNSIGNED NULL AFTER scope_label"
-                    )
-                except Exception:
-                    pass
-            if not _table_has_column("static_findings_summary", "static_run_id"):
-                try:
-                    run_sql(
-                        "ALTER TABLE static_findings_summary ADD COLUMN static_run_id BIGINT UNSIGNED NULL AFTER run_id"
-                    )
-                except Exception:
-                    pass
-            if not _table_has_index("static_findings_summary", "ix_findings_summary_run"):
-                try:
-                    run_sql("ALTER TABLE static_findings_summary ADD KEY ix_findings_summary_run (run_id)")
-                except Exception:
-                    pass
-            if not _table_has_index("static_findings_summary", "ix_findings_static_run"):
-                try:
-                    run_sql("ALTER TABLE static_findings_summary ADD KEY ix_findings_static_run (static_run_id)")
-                except Exception:
-                    pass
-            if not _table_has_index("static_findings_summary", "ix_findings_session_pkg"):
-                try:
-                    run_sql(
-                        "ALTER TABLE static_findings_summary ADD KEY ix_findings_session_pkg (session_stamp, package_name)"
-                    )
-                except Exception:
-                    pass
-            try:
-                run_sql(
-                    "ALTER TABLE static_findings_summary ADD CONSTRAINT fk_findings_summary_run "
-                    "FOREIGN KEY (run_id) REFERENCES static_analysis_runs (id) ON DELETE SET NULL"
-                )
-            except Exception:
-                pass
-            try:
-                run_sql(
-                    "ALTER TABLE static_findings_summary ADD CONSTRAINT fk_findings_summary_static_run "
-                    "FOREIGN KEY (static_run_id) REFERENCES static_analysis_runs (id) ON DELETE SET NULL"
-                )
-            except Exception:
-                pass
-
-            if not _table_has_column("static_findings", "run_id"):
-                try:
-                    run_sql("ALTER TABLE static_findings ADD COLUMN run_id BIGINT UNSIGNED NULL AFTER summary_id")
-                except Exception:
-                    pass
-            if not _table_has_column("static_findings", "static_run_id"):
-                try:
-                    run_sql("ALTER TABLE static_findings ADD COLUMN static_run_id BIGINT UNSIGNED NULL AFTER run_id")
-                except Exception:
-                    pass
-            if not _table_has_index("static_findings", "ix_findings_run"):
-                try:
-                    run_sql("ALTER TABLE static_findings ADD KEY ix_findings_run (run_id)")
-                except Exception:
-                    pass
-            if not _table_has_index("static_findings", "ix_findings_static_run"):
-                try:
-                    run_sql("ALTER TABLE static_findings ADD KEY ix_findings_static_run (static_run_id)")
-                except Exception:
-                    pass
-            if not _table_has_index("static_findings", "ix_findings_severity_summary"):
-                try:
-                    run_sql("ALTER TABLE static_findings ADD KEY ix_findings_severity_summary (severity, summary_id)")
-                except Exception:
-                    pass
-            try:
-                run_sql(
-                    "ALTER TABLE static_findings ADD CONSTRAINT fk_findings_run "
-                    "FOREIGN KEY (run_id) REFERENCES static_analysis_runs (id) ON DELETE SET NULL"
-                )
-            except Exception:
-                pass
-            try:
-                run_sql(
-                    "ALTER TABLE static_findings ADD CONSTRAINT fk_findings_static_run "
-                    "FOREIGN KEY (static_run_id) REFERENCES static_analysis_runs (id) ON DELETE SET NULL"
-                )
-            except Exception:
-                pass
-        return True
-    except Exception:
-        return False
+    if not (ok_summary and ok_findings):
+        log.warning(
+            "static_findings tables missing; load a DB snapshot or apply migrations.",
+            category="database",
+        )
+    return ok_summary and ok_findings
 
 
 def tables_exist() -> bool:

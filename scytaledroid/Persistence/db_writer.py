@@ -12,123 +12,56 @@ from typing import Any, Mapping, Optional, Sequence, Union
 from functools import lru_cache
 
 from scytaledroid.Database.db_core import db_queries as core_q
-from scytaledroid.Database.db_queries import views as _views
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
-
-_DDL = [
-    """
-    CREATE TABLE IF NOT EXISTS runs (
-      run_id        BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-      package       VARCHAR(191)    NOT NULL,
-      app_label     VARCHAR(191)    NULL,
-      version_code  BIGINT          NULL,
-      version_name  VARCHAR(191)    NULL,
-      target_sdk    INT             NULL,
-      schema_version VARCHAR(32)    NULL,
-      ts            TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      session_stamp VARCHAR(32)     NULL,
-      prefs_hash    VARCHAR(64)     NULL,
-      installer     VARCHAR(191)    NULL,
-      confidence    VARCHAR(32)     NULL,
-      threat_profile VARCHAR(32)    NOT NULL DEFAULT 'Unknown',
-      env_profile   VARCHAR(32)     NOT NULL DEFAULT 'consumer',
-      PRIMARY KEY (run_id),
-      KEY ix_runs_session (session_stamp)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS metrics (
-      run_id     BIGINT UNSIGNED NOT NULL,
-      feature_key VARCHAR(191)   NOT NULL,
-      value_num  DECIMAL(12,4)   NULL,
-      value_text VARCHAR(512)    NULL,
-      module_id  VARCHAR(64)     NULL,
-      KEY ix_metrics_run (run_id),
-      KEY ix_metrics_feature (feature_key),
-      KEY ix_metrics_run_feature (run_id, feature_key),
-      UNIQUE KEY uq_metrics_run_key (run_id, feature_key)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS buckets (
-      run_id   BIGINT UNSIGNED NOT NULL,
-      bucket   VARCHAR(64)     NOT NULL,
-      points   DECIMAL(8,3)    NOT NULL,
-      cap      DECIMAL(8,3)    NULL,
-      KEY ix_buckets (run_id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS correlations (
-      run_id   BIGINT UNSIGNED NOT NULL,
-      rule_id  VARCHAR(64)     NOT NULL,
-      points   DECIMAL(8,3)    NOT NULL,
-      rationale VARCHAR(512)   NULL,
-      KEY ix_corr (run_id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS findings (
-      run_id   BIGINT UNSIGNED NOT NULL,
-      severity VARCHAR(16)     NOT NULL,
-      masvs    VARCHAR(32)     NULL,
-      cvss     VARCHAR(128)    NULL,
-      kind     VARCHAR(64)     NULL,
-      evidence VARCHAR(512)    NULL,
-      module_id VARCHAR(64)    NULL,
-      evidence_path   VARCHAR(512)   NULL,
-      evidence_offset VARCHAR(64)    NULL,
-      evidence_preview VARCHAR(256)  NULL,
-      rule_id         VARCHAR(64)    NULL,
-      cvss_v40_b_score   DECIMAL(4,1) NULL,
-      cvss_v40_bt_score  DECIMAL(4,1) NULL,
-      cvss_v40_be_score  DECIMAL(4,1) NULL,
-      cvss_v40_bte_score DECIMAL(4,1) NULL,
-      cvss_v40_b_vector   VARCHAR(128) NULL,
-      cvss_v40_bt_vector  VARCHAR(128) NULL,
-      cvss_v40_be_vector  VARCHAR(128) NULL,
-      cvss_v40_bte_vector VARCHAR(128) NULL,
-      cvss_v40_meta LONGTEXT NULL,
-      KEY ix_findings_run (run_id),
-      KEY ix_findings_rule (rule_id),
-      KEY ix_findings_masvs (masvs)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS contributors (
-      run_id   BIGINT UNSIGNED NOT NULL,
-      feature  VARCHAR(128)    NOT NULL,
-      points   DECIMAL(8,3)    NOT NULL,
-      explanation VARCHAR(512) NULL,
-      rank     INT             NULL,
-      KEY ix_contrib (run_id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    """,
-]
+_REQUIRED_TABLES = (
+    "runs",
+    "metrics",
+    "buckets",
+    "correlations",
+    "findings",
+    "contributors",
+)
 
 
 def ensure_schema(*, raise_on_error: bool = False) -> bool:
+    """Verify required tables exist; schema creation is managed elsewhere."""
+
     try:
-        for stmt in _DDL:
-            core_q.run_sql(stmt)
-        _ensure_runs_session_column()
-        _ensure_runs_timestamp_index()
-        _ensure_run_profiles_columns()
-        _ensure_findings_extended_columns()
-        _ensure_metrics_unique_key()
-        _ensure_buckets_foreign_key()
-        _ensure_views()
-        return True
+        row = core_q.run_sql(
+            """
+            SELECT table_name
+            FROM information_schema.tables
+            WHERE table_schema = DATABASE()
+              AND table_name IN ({})
+            """.format(",".join(["%s"] * len(_REQUIRED_TABLES))),
+            tuple(_REQUIRED_TABLES),
+            fetch="all",
+        )
+        present = {r[0] for r in row or []}
     except Exception as exc:
         message = (
-            "Failed to provision static-analysis persistence schema: "
+            "Failed to verify persistence schema: "
             f"{exc.__class__.__name__}: {exc}"
         )
         log.error(message, category="static_analysis")
         if raise_on_error:
             raise RuntimeError(message) from exc
         return False
+
+    missing = [name for name in _REQUIRED_TABLES if name not in present]
+    if missing:
+        message = (
+            "Required persistence tables are missing: "
+            f"{', '.join(missing)}. "
+            "Schema is managed by canonical schema tools; restore the DB snapshot "
+            "or run the canonical schema manifest."
+        )
+        log.error(message, category="static_analysis")
+        if raise_on_error:
+            raise RuntimeError(message)
+        return False
+    return True
 
 
 def create_run(
@@ -355,310 +288,3 @@ def _has_column(table: str, column: str) -> bool:
         return bool(row)
     except Exception:
         return False
-
-
-def _ensure_runs_session_column() -> None:
-    try:
-        column = core_q.run_sql(
-            "SHOW COLUMNS FROM runs LIKE 'session_stamp';",
-            fetch="one",
-        )
-        if not column:
-            core_q.run_sql(
-                "ALTER TABLE runs ADD COLUMN session_stamp VARCHAR(32) NULL AFTER ts;",
-            )
-    except Exception:
-        pass
-
-    try:
-        core_q.run_sql("ALTER TABLE runs ADD INDEX ix_runs_session (session_stamp);")
-    except Exception:
-        pass
-
-
-def _ensure_runs_timestamp_index() -> None:
-    try:
-        core_q.run_sql("ALTER TABLE runs ADD INDEX ix_runs_ts (ts);")
-    except Exception:
-        pass
-
-
-def _ensure_run_profiles_columns() -> None:
-    for column_name, ddl in (
-        (
-            "app_label",
-            "ALTER TABLE runs ADD COLUMN app_label VARCHAR(191) NULL AFTER package;",
-        ),
-        (
-            "threat_profile",
-            "ALTER TABLE runs ADD COLUMN threat_profile VARCHAR(32) NOT NULL DEFAULT 'Unknown' AFTER session_stamp;",
-        ),
-        (
-            "env_profile",
-            "ALTER TABLE runs ADD COLUMN env_profile VARCHAR(32) NOT NULL DEFAULT 'consumer' AFTER threat_profile;",
-        ),
-    ):
-        try:
-            column = core_q.run_sql(
-                "SHOW COLUMNS FROM runs LIKE %s;",
-                (column_name,),
-                fetch="one",
-            )
-            if not column:
-                core_q.run_sql(ddl)
-        except Exception:
-            pass
-
-    try:
-        core_q.run_sql("ALTER TABLE runs ADD INDEX ix_runs_session (session_stamp);")
-    except Exception:
-        pass
-
-
-def _ensure_findings_extended_columns() -> None:
-    try:
-        columns = core_q.run_sql(
-            """
-            SELECT COLUMN_NAME
-            FROM information_schema.COLUMNS
-            WHERE table_schema = DATABASE()
-              AND table_name = 'findings'
-            """,
-            fetch="all",
-        ) or []
-    except Exception:
-        columns = []
-    existing = {row[0] for row in columns if isinstance(row, (list, tuple)) and row}
-
-    def _safe(sql: str) -> None:
-        try:
-            core_q.run_sql(sql)
-        except Exception:
-            pass
-
-    if "analyst_tag" not in existing:
-        _safe(
-            "ALTER TABLE findings ADD COLUMN analyst_tag ENUM('FALSE_POSITIVE','ACCEPTED_RISK','NEEDS_REVIEW') NULL AFTER module_id;"
-        )
-    if "evidence_path" not in existing:
-        _safe("ALTER TABLE findings ADD COLUMN evidence_path VARCHAR(512) NULL AFTER analyst_tag;")
-    if "evidence_offset" not in existing:
-        _safe("ALTER TABLE findings ADD COLUMN evidence_offset VARCHAR(64) NULL AFTER evidence_path;")
-    if "evidence_preview" not in existing:
-        _safe("ALTER TABLE findings ADD COLUMN evidence_preview VARCHAR(256) NULL AFTER evidence_offset;")
-    if "rule_id" not in existing:
-        _safe("ALTER TABLE findings ADD COLUMN rule_id VARCHAR(64) NULL AFTER evidence_preview;")
-
-    cvss_cols = (
-        ("cvss_v40_b_score", "ALTER TABLE findings ADD COLUMN cvss_v40_b_score DECIMAL(3,1) NULL AFTER rule_id;"),
-        (
-            "cvss_v40_bt_score",
-            "ALTER TABLE findings ADD COLUMN cvss_v40_bt_score DECIMAL(3,1) NULL AFTER cvss_v40_b_score;",
-        ),
-        (
-            "cvss_v40_be_score",
-            "ALTER TABLE findings ADD COLUMN cvss_v40_be_score DECIMAL(3,1) NULL AFTER cvss_v40_bt_score;",
-        ),
-        (
-            "cvss_v40_bte_score",
-            "ALTER TABLE findings ADD COLUMN cvss_v40_bte_score DECIMAL(3,1) NULL AFTER cvss_v40_be_score;",
-        ),
-        (
-            "cvss_v40_b_vector",
-            "ALTER TABLE findings ADD COLUMN cvss_v40_b_vector VARCHAR(255) NULL AFTER cvss_v40_bte_score;",
-        ),
-        (
-            "cvss_v40_bt_vector",
-            "ALTER TABLE findings ADD COLUMN cvss_v40_bt_vector VARCHAR(255) NULL AFTER cvss_v40_b_vector;",
-        ),
-        (
-            "cvss_v40_be_vector",
-            "ALTER TABLE findings ADD COLUMN cvss_v40_be_vector VARCHAR(255) NULL AFTER cvss_v40_bt_vector;",
-        ),
-        (
-            "cvss_v40_bte_vector",
-            "ALTER TABLE findings ADD COLUMN cvss_v40_bte_vector VARCHAR(255) NULL AFTER cvss_v40_be_vector;",
-        ),
-        ("cvss_v40_meta", "ALTER TABLE findings ADD COLUMN cvss_v40_meta LONGTEXT NULL AFTER cvss_v40_bte_vector;"),
-    )
-    for column_name, ddl in cvss_cols:
-        if column_name not in existing:
-            _safe(ddl)
-
-    try:
-        idx = core_q.run_sql("SHOW KEYS FROM findings WHERE Key_name='ix_findings_run';", fetch="one")
-        if not idx:
-            core_q.run_sql("ALTER TABLE findings ADD INDEX ix_findings_run (run_id);")
-    except Exception:
-        pass
-
-    try:
-        idx = core_q.run_sql("SHOW KEYS FROM findings WHERE Key_name='ix_findings_rule';", fetch="one")
-        if not idx:
-            core_q.run_sql("ALTER TABLE findings ADD INDEX ix_findings_rule (rule_id);")
-    except Exception:
-        pass
-
-    try:
-        idx = core_q.run_sql("SHOW KEYS FROM findings WHERE Key_name='ix_findings_masvs';", fetch="one")
-        if not idx:
-            core_q.run_sql("ALTER TABLE findings ADD INDEX ix_findings_masvs (masvs);")
-    except Exception:
-        pass
-
-    try:
-        fk = core_q.run_sql(
-            """
-            SELECT CONSTRAINT_NAME
-            FROM information_schema.KEY_COLUMN_USAGE
-            WHERE table_schema = DATABASE()
-              AND table_name = 'findings'
-              AND CONSTRAINT_NAME = 'fk_findings_run'
-            """,
-            fetch="one",
-        )
-        if not fk:
-            core_q.run_sql(
-                "ALTER TABLE findings ADD CONSTRAINT fk_findings_run FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE;"
-            )
-    except Exception:
-        pass
-
-
-
-def _ensure_metrics_unique_key() -> None:
-    try:
-        existing = core_q.run_sql(
-            "SHOW INDEX FROM metrics WHERE Key_name=%s;",
-            ("uq_metrics_run_key",),
-            fetch="one",
-        )
-        if existing:
-            _ensure_metrics_indexes()
-            return
-    except Exception:
-        return
-
-    duplicates_present = False
-    try:
-        duplicate = core_q.run_sql(
-            """
-            SELECT run_id, feature_key
-            FROM metrics
-            GROUP BY run_id, feature_key
-            HAVING COUNT(*) > 1
-            LIMIT 1;
-            """,
-            fetch="one",
-            dictionary=True,
-        )
-        duplicates_present = bool(duplicate)
-    except Exception:
-        duplicates_present = False
-
-    if duplicates_present:
-        _deduplicate_metrics_table()
-
-    try:
-        core_q.run_sql(
-            "ALTER TABLE metrics ADD UNIQUE KEY uq_metrics_run_key (run_id, feature_key);"
-        )
-    except Exception:
-        pass
-
-    _ensure_metrics_indexes()
-
-
-def _ensure_metrics_indexes() -> None:
-    statements = (
-        "ALTER TABLE metrics ADD INDEX ix_metrics_run (run_id);",
-        "ALTER TABLE metrics ADD INDEX ix_metrics_feature (feature_key);",
-        "ALTER TABLE metrics ADD INDEX ix_metrics_run_feature (run_id, feature_key);",
-    )
-    for stmt in statements:
-        try:
-            core_q.run_sql(stmt)
-        except Exception:
-            continue
-
-
-def _deduplicate_metrics_table() -> None:
-    try:
-        core_q.run_sql("DROP TABLE IF EXISTS metrics_tmp;")
-        core_q.run_sql(
-            """
-            CREATE TABLE metrics_tmp (
-              run_id      BIGINT UNSIGNED NOT NULL,
-              feature_key VARCHAR(191)    NOT NULL,
-              value_num   DECIMAL(12,4)   NULL,
-              value_text  VARCHAR(512)    NULL,
-              module_id   VARCHAR(64)     NULL,
-              UNIQUE KEY uq_metrics_run_key (run_id, feature_key),
-              KEY ix_metrics_run (run_id),
-              KEY ix_metrics_feature (feature_key),
-              KEY ix_metrics_run_feature (run_id, feature_key)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-            """
-        )
-        core_q.run_sql(
-            """
-            INSERT INTO metrics_tmp (run_id, feature_key, value_num, value_text, module_id)
-            SELECT
-              run_id,
-              feature_key,
-              MAX(value_num) AS value_num,
-              SUBSTRING_INDEX(
-                GROUP_CONCAT(COALESCE(value_text, '') ORDER BY LENGTH(value_text) DESC SEPARATOR '\\x1D'),
-                '\\x1D', 1
-              ) AS value_text,
-              SUBSTRING_INDEX(
-                GROUP_CONCAT(COALESCE(module_id, '') ORDER BY LENGTH(module_id) DESC SEPARATOR '\\x1D'),
-                '\\x1D', 1
-              ) AS module_id
-            FROM metrics
-            GROUP BY run_id, feature_key;
-            """
-        )
-        core_q.run_sql(
-            "RENAME TABLE metrics TO metrics_backup_tmp, metrics_tmp TO metrics;"
-        )
-        core_q.run_sql("DROP TABLE IF EXISTS metrics_backup_tmp;")
-    except Exception:
-        pass
-
-
-def _ensure_buckets_foreign_key() -> None:
-    try:
-        fk_exists = core_q.run_sql(
-            """
-            SELECT CONSTRAINT_NAME
-            FROM information_schema.KEY_COLUMN_USAGE
-            WHERE table_schema = DATABASE()
-              AND table_name = 'buckets'
-              AND referenced_table_name = 'runs'
-              AND referenced_column_name = 'run_id';
-            """,
-            fetch="one",
-        )
-        if not fk_exists:
-            core_q.run_sql(
-                """
-                ALTER TABLE buckets
-                ADD CONSTRAINT fk_buckets_run
-                    FOREIGN KEY (run_id) REFERENCES runs(run_id)
-                    ON DELETE CASCADE;
-                """
-            )
-    except Exception:
-        pass
-
-
-def _ensure_views() -> None:
-    try:
-        core_q.run_sql(_views.CREATE_V_RUN_OVERVIEW)
-    except Exception:
-        pass
-    try:
-        core_q.run_sql(_views.CREATE_V_MASVS_MATRIX)
-    except Exception:
-        pass

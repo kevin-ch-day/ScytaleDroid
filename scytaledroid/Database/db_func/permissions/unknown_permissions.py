@@ -4,26 +4,19 @@ from __future__ import annotations
 
 from typing import Mapping
 
-from ...db_core import db_config, run_sql
+from ...db_core import run_sql
 from ...db_queries.permissions import unknown_permissions as queries
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
 def ensure_table() -> bool:
-    engine = str(db_config.DB_CONFIG.get("engine", "sqlite")).lower()
-    if engine != "sqlite" and not db_config.allow_auto_create():
-        ok = table_exists()
-        if not ok:
-            log.warning(
-                "android_unknown_permissions missing; run bootstrap or migrations.",
-                category="database",
-            )
-        return ok
-    try:
-        run_sql(queries.CREATE_TABLE)
-        return True
-    except Exception:
-        return False
+    ok = table_exists()
+    if not ok:
+        log.warning(
+            "android_unknown_permissions missing; run DBA migrations.",
+            category="database",
+        )
+    return ok
 
 
 def table_exists() -> bool:
@@ -43,8 +36,24 @@ def upsert_unknown_permission(payload: Mapping[str, object]) -> None:
     run_sql(queries.UPSERT_UNKNOWN, params)
 
 
+def mark_ghost_aosp(perm_name: str, baseline_version: str) -> None:
+    if not perm_name:
+        return
+    try:
+        run_sql(
+            queries.UPDATE_GHOST,
+            {"perm_name": perm_name, "ghost_baseline_version": baseline_version},
+        )
+    except Exception as exc:
+        log.warning(
+            f"Failed to update GhostAOSP flag for {perm_name}: {exc}",
+            category="database",
+        )
+
+
 __all__ = [
     "ensure_table",
     "table_exists",
     "upsert_unknown_permission",
+    "mark_ghost_aosp",
 ]

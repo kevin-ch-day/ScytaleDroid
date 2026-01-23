@@ -58,35 +58,13 @@ ON CONFLICT(apk_id) DO UPDATE SET
 
 def ensure_table() -> bool:
     try:
-        if _IS_SQLITE:
-            run_sql(SQLITE_CREATE_TABLE)
-            run_sql("CREATE UNIQUE INDEX IF NOT EXISTS ux_spr_apk ON static_permission_risk(apk_id)")
-        else:
-            if not db_config.allow_auto_create():
-                ok = table_exists()
-                if not ok:
-                    log.warning(
-                        "static_permission_risk missing; run bootstrap or migrations.",
-                        category="database",
-                    )
-                return ok
-            run_sql(queries.CREATE_TABLE)
-            try:
-                row = run_sql(
-                    """
-                    SELECT character_maximum_length
-                    FROM information_schema.columns
-                    WHERE table_schema = DATABASE()
-                      AND table_name = 'static_permission_risk'
-                      AND column_name = 'session_stamp'
-                    """,
-                    fetch="one",
-                )
-                if row and row[0] and int(row[0]) < 128:
-                    run_sql("ALTER TABLE static_permission_risk MODIFY session_stamp VARCHAR(128) NOT NULL")
-            except Exception:
-                pass
-        return True
+        ok = table_exists()
+        if not ok:
+            log.warning(
+                "static_permission_risk missing; load a DB snapshot or apply migrations.",
+                category="database",
+            )
+        return ok
     except Exception:
         return False
 

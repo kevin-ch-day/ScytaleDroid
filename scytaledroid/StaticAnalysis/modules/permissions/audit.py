@@ -18,6 +18,86 @@ import math
 from statistics import mean
 
 from scytaledroid.Utils.ops.operation_result import OperationResult
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
+from scytaledroid.Utils.LoggingUtils import logging_engine
+
+
+_SIGNAL_OBSERVATION_CONFIG: Mapping[str, Dict[str, object]] = {
+    "sms": {
+        "severity_band": "WARN",
+        "score": 8,
+        "rationale": "SMS permissions requested.",
+        "permissions": (
+            "READ_SMS",
+            "SEND_SMS",
+            "RECEIVE_SMS",
+            "RECEIVE_MMS",
+            "RECEIVE_WAP_PUSH",
+            "READ_CELL_BROADCASTS",
+        ),
+    },
+    "calls": {
+        "severity_band": "WARN",
+        "score": 6,
+        "rationale": "Call log or phone permissions requested.",
+        "permissions": (
+            "READ_CALL_LOG",
+            "WRITE_CALL_LOG",
+            "CALL_PHONE",
+            "READ_PHONE_STATE",
+            "PROCESS_OUTGOING_CALLS",
+            "ANSWER_PHONE_CALLS",
+        ),
+    },
+    "contacts": {
+        "severity_band": "WARN",
+        "score": 6,
+        "rationale": "Contacts permissions requested.",
+        "permissions": ("READ_CONTACTS", "WRITE_CONTACTS", "GET_ACCOUNTS"),
+    },
+    "background_location": {
+        "severity_band": "WARN",
+        "score": 7,
+        "rationale": "Background location requested.",
+        "permissions": ("ACCESS_BACKGROUND_LOCATION",),
+    },
+    "storage_broad": {
+        "severity_band": "WARN",
+        "score": 6,
+        "rationale": "Broad external storage access requested.",
+        "permissions": ("READ_EXTERNAL_STORAGE", "WRITE_EXTERNAL_STORAGE", "MANAGE_EXTERNAL_STORAGE"),
+    },
+    "overlay": {
+        "severity_band": "WARN",
+        "score": 5,
+        "rationale": "System overlay permission requested.",
+        "permissions": ("SYSTEM_ALERT_WINDOW",),
+    },
+    "accessibility_binding": {
+        "severity_band": "FAIL",
+        "score": 9,
+        "rationale": "Accessibility service binding requested.",
+        "permissions": ("BIND_ACCESSIBILITY_SERVICE",),
+    },
+    "query_all_packages": {
+        "severity_band": "WARN",
+        "score": 5,
+        "rationale": "QUERY_ALL_PACKAGES requested.",
+        "permissions": ("QUERY_ALL_PACKAGES",),
+    },
+    "usage_stats": {
+        "severity_band": "WARN",
+        "score": 5,
+        "rationale": "Usage stats access requested.",
+        "permissions": ("PACKAGE_USAGE_STATS",),
+    },
+    "ads_attr": {
+        "severity_band": "INFO",
+        "score": 2,
+        "rationale": "Advertising ID / attribution permission requested.",
+        "permissions": ("ACCESS_ADSERVICES_AD_ID", "com.google.android.gms.permission.AD_ID"),
+    },
+}
 
 @dataclass
 class AppSignals:
@@ -150,6 +230,33 @@ def _combo_definitions() -> Mapping[str, Any]:
         "camera_plus_mic": lambda g: g.get("CAM", 0) >= 1 and g.get("MIC", 0) >= 1,
         "contacts_plus_sms": lambda g: g.get("CNT", 0) >= 1 and g.get("SMS", 0) >= 1,
     }
+
+
+def _normalize_perm_token(value: str) -> str:
+    token = str(value or "").strip()
+    if not token:
+        return ""
+    if token.startswith("android.permission."):
+        return token.split(".", maxsplit=2)[-1]
+    return token
+
+
+def _match_permissions(
+    declared: Sequence[str],
+    candidates: Sequence[str],
+) -> list[str]:
+    if not declared:
+        return []
+    normalized = {perm: _normalize_perm_token(perm).upper() for perm in declared}
+    candidate_set = {str(candidate).upper() for candidate in candidates}
+    matches = [perm for perm, short in normalized.items() if short in candidate_set]
+    if "AD_ID" in candidate_set:
+        matches.extend(
+            perm
+            for perm in declared
+            if "AD_ID" in perm.upper() and perm not in matches
+        )
+    return matches
 
 
 def _pearson(values_a: Sequence[float], values_b: Sequence[float]) -> float:
@@ -663,6 +770,32 @@ class PermissionAuditAccumulator:
                 except Exception:
                     return False
 
+            def _table_exists(table: str) -> bool:
+                try:
+                    row = core_q.run_sql(
+                        "SELECT COUNT(*) FROM information_schema.tables "
+                        "WHERE table_schema = DATABASE() AND table_name = %s",
+                        (table,),
+                        fetch="one",
+                    )
+                    return bool(row and int(row[0]) > 0)
+                except Exception:
+                    return False
+
+            def _latest_governance_snapshot() -> tuple[str | None, str | None]:
+                try:
+                    row = core_q.run_sql(
+                        "SELECT governance_version, snapshot_sha256 "
+                        "FROM permission_governance_snapshots "
+                        "ORDER BY loaded_at_utc DESC LIMIT 1",
+                        fetch="one",
+                    )
+                    if row:
+                        return row[0], row[1]
+                except Exception:
+                    return None, None
+                return None, None
+
             inventory = snapshot_payload.get("inventory", {}) if isinstance(snapshot_payload, dict) else {}
             apps_total = int(inventory.get("apps_in_scope") or self.total_groups or 0)
             meta_str = json.dumps(snapshot_payload)
@@ -689,6 +822,13 @@ class PermissionAuditAccumulator:
                     "static_run_id missing for permission audit snapshot; rows will not be keyed to static run",
                     category="db",
                 )
+            signals_table_exists = _table_exists("permission_signal_observations")
+            if static_run_id is not None and not signals_table_exists:
+                log.warning(
+                    "permission_signal_observations missing; skipping signal persistence",
+                    category="db",
+                )
+            governance_version, governance_sha = _latest_governance_snapshot()
             has_run_id = _has_column("permission_audit_snapshots", "run_id")
             has_static_run_id = _has_column("permission_audit_snapshots", "static_run_id")
             header_columns = ["snapshot_key", "scope_label", "apps_total", "metadata"]
@@ -730,6 +870,8 @@ class PermissionAuditAccumulator:
                     },
                 )
 
+            evidence_path = str(self.base_output_dir / self.snapshot_id)
+            signal_write_failed = False
             for app in self.apps:
                 sd = dict(app.score_detail or {})
                 score_raw = float(sd.get("score_raw", sd.get("score_3dp", 0.0)) or 0.0)
@@ -827,6 +969,91 @@ class PermissionAuditAccumulator:
                         category="db",
                     )
                     continue
+
+                if static_run_id is not None and signals_table_exists:
+                    has_gov_version = _has_column("permission_signal_observations", "governance_version")
+                    has_gov_sha = _has_column("permission_signal_observations", "governance_sha256")
+                    extra_columns: list[str] = []
+                    extra_placeholders: list[str] = []
+                    extra_updates: list[str] = []
+                    if has_gov_version:
+                        extra_columns.append("governance_version")
+                        extra_placeholders.append("%(governance_version)s")
+                        extra_updates.append("governance_version=VALUES(governance_version)")
+                    if has_gov_sha:
+                        extra_columns.append("governance_sha256")
+                        extra_placeholders.append("%(governance_sha256)s")
+                        extra_updates.append("governance_sha256=VALUES(governance_sha256)")
+                    for signal_key, meta in _SIGNAL_OBSERVATION_CONFIG.items():
+                        if not app.signals.get(signal_key, False):
+                            continue
+                        candidates = tuple(meta.get("permissions") or ())
+                        trigger_permissions = _match_permissions(app.declared_permissions, candidates)
+                        payload = {
+                            "static_run_id": static_run_id,
+                            "package_name": app.package,
+                            "signal_key": signal_key,
+                            "severity_band": meta.get("severity_band"),
+                            "score": int(meta.get("score", 0) or 0),
+                            "trigger_permissions_json": json.dumps(trigger_permissions or []),
+                            "primary_permission": trigger_permissions[0] if trigger_permissions else None,
+                            "rationale": meta.get("rationale"),
+                            "evidence_path": evidence_path,
+                            "governance_version": governance_version if has_gov_version else None,
+                            "governance_sha256": governance_sha if has_gov_sha else None,
+                        }
+                        try:
+                            columns = [
+                                "static_run_id",
+                                "package_name",
+                                "signal_key",
+                                "severity_band",
+                                "score",
+                                "trigger_permissions_json",
+                                "primary_permission",
+                                "rationale",
+                                "evidence_path",
+                            ]
+                            placeholders = [
+                                "%(static_run_id)s",
+                                "%(package_name)s",
+                                "%(signal_key)s",
+                                "%(severity_band)s",
+                                "%(score)s",
+                                "%(trigger_permissions_json)s",
+                                "%(primary_permission)s",
+                                "%(rationale)s",
+                                "%(evidence_path)s",
+                            ]
+                            updates = [
+                                "severity_band=VALUES(severity_band)",
+                                "score=VALUES(score)",
+                                "trigger_permissions_json=VALUES(trigger_permissions_json)",
+                                "primary_permission=VALUES(primary_permission)",
+                                "rationale=VALUES(rationale)",
+                                "evidence_path=VALUES(evidence_path)",
+                            ]
+                            if extra_columns:
+                                columns.extend(extra_columns)
+                                placeholders.extend(extra_placeholders)
+                                updates.extend(extra_updates)
+                            core_q.run_sql(
+                                "INSERT INTO permission_signal_observations ("
+                                + ", ".join(columns)
+                                + ") VALUES ("
+                                + ", ".join(placeholders)
+                                + ") ON DUPLICATE KEY UPDATE "
+                                + ", ".join(updates),
+                                payload,
+                            )
+                        except Exception as exc:  # pragma: no cover - defensive
+                            if not signal_write_failed:
+                                log.warning(
+                                    f"permission signal persistence failed; skipping remainder: {exc}",
+                                    category="db",
+                                )
+                            signal_write_failed = True
+                            break
 
             context = {
                 "snapshot_id": int(sid),
