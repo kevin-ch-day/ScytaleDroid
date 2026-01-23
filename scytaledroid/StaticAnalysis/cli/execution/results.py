@@ -1623,10 +1623,11 @@ def _render_persistence_footer(
         return _count(fallback_sql, params)
 
     def _count_by_run(table: str) -> int:
-        # Prefer most recent run/static_run to avoid accumulated totals when session labels are reused.
-        if latest_static_run_ids and _table_has_column(table, "static_run_id"):
-            placeholders = ",".join(["%s"] * len(latest_static_run_ids))
-            params = tuple(latest_static_run_ids)
+        # Group scopes should aggregate across all static runs; single-app uses the latest run.
+        static_ids = static_run_ids if (audit and audit.is_group_scope) else latest_static_run_ids
+        if static_ids and _table_has_column(table, "static_run_id"):
+            placeholders = ",".join(["%s"] * len(static_ids))
+            params = tuple(static_ids)
             return _count(
                 f"SELECT COUNT(*) FROM {table} WHERE static_run_id IN ({placeholders})",
                 params,
@@ -1728,14 +1729,44 @@ def _render_persistence_footer(
     snapshot_total = _count_total("SELECT COUNT(*) FROM permission_audit_snapshots")
     snapshot_apps_total = _count_total("SELECT COUNT(*) FROM permission_audit_apps")
 
+    def _governance_status() -> str | None:
+        try:
+            row = core_q.run_sql(
+                """
+                SELECT s.governance_version, s.snapshot_sha256, COUNT(r.permission_string) AS row_count
+                FROM permission_governance_snapshots s
+                LEFT JOIN permission_governance_snapshot_rows r
+                  ON r.governance_version = s.governance_version
+                GROUP BY s.governance_version, s.snapshot_sha256
+                ORDER BY s.loaded_at_utc DESC
+                LIMIT 1
+                """,
+                fetch="one",
+            )
+            if row and row[0] and int(row[2] or 0) > 0:
+                return f"OK ({row[0]})"
+            rows_only = core_q.run_sql(
+                "SELECT COUNT(*) FROM permission_governance_snapshot_rows",
+                fetch="one",
+            )
+            if rows_only and int(rows_only[0] or 0) > 0:
+                return "ERROR (governance rows missing header)"
+            return "SKIPPED_GOVERNANCE_MISSING"
+        except Exception:
+            return None
+
     print("Persisted (authoritative)")
     print("------------------------")
-    scope_note = "run_id=" + ",".join(str(r) for r in latest_run_ids) if latest_run_ids else "run_id=<none>"
-    if latest_static_run_ids:
-        scope_note += f" static_run_id=" + ",".join(str(r) for r in latest_static_run_ids)
+    if audit and audit.is_group_scope:
+        scope_note = f"run_id={len(run_ids)} static_run_id={len(static_run_ids)}"
+    else:
+        scope_note = "run_id=" + ",".join(str(r) for r in latest_run_ids) if latest_run_ids else "run_id=<none>"
+        if latest_static_run_ids:
+            scope_note += f" static_run_id=" + ",".join(str(r) for r in latest_static_run_ids)
+    run_count = len(run_ids) if (audit and audit.is_group_scope) else len(latest_run_ids)
     lines = [
         ("run_scope", scope_note),
-        ("runs", f"this_run={len(latest_run_ids)}  db_total={runs_total}"),
+        ("runs", f"this_run={run_count}  db_total={runs_total}"),
         ("findings", f"this_run={findings}  db_total={findings_total}"),
         (
             "static_findings_summary",
@@ -1772,6 +1803,9 @@ def _render_persistence_footer(
             f"this_run={snapshot_apps}  db_total={snapshot_apps_total}",
         ),
     ]
+    governance_status = _governance_status()
+    if governance_status:
+        lines.append(("governance", governance_status))
     if audit and audit.is_group_scope:
         lines.append(
             (
@@ -1792,12 +1826,8 @@ def _render_persistence_footer(
         reason_token = abort_reason or abort_signal or "SIGINT"
         lines.append(("abort_reason", reason_token))
     if len(run_ids) > 1 or len(static_run_ids) > 1:
-        lines.append(
-            (
-                "note",
-                "Multiple runs for session; this_run reflects latest run only.",
-            )
-        )
+        note = "Multiple runs for session; this_run aggregates group scope." if audit and audit.is_group_scope else "Multiple runs for session; this_run reflects latest run only."
+        lines.append(("note", note))
     width = max(len(name) for name, _ in lines) if lines else 0
     for name, detail in lines:
         print(f"  {name.ljust(width)} : {detail}")

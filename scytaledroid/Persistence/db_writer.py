@@ -1,7 +1,7 @@
 """DB writer for run-level metrics, buckets, correlations, findings, contributors.
 
-Best-effort: functions return None/False if DB not reachable. Tables are
-created if missing. This writer is intentionally minimal and safe.
+Best-effort: functions return None/False if DB not reachable. Schema is
+verified only; migrations are handled by the canonical schema tools.
 """
 
 from __future__ import annotations

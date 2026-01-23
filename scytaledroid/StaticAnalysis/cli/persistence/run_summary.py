@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -174,15 +175,43 @@ def _persist_correlation_results(rows: Sequence[Mapping[str, object]]) -> bool:
         gov_sha = None
         try:
             row = core_q.run_sql(
-                "SELECT governance_version, snapshot_sha256 "
-                "FROM permission_governance_snapshots "
-                "ORDER BY loaded_at_utc DESC LIMIT 1",
+                """
+                SELECT s.governance_version, s.snapshot_sha256, COUNT(r.permission_string) AS row_count
+                FROM permission_governance_snapshots s
+                LEFT JOIN permission_governance_snapshot_rows r
+                  ON r.governance_version = s.governance_version
+                GROUP BY s.governance_version, s.snapshot_sha256
+                ORDER BY s.loaded_at_utc DESC
+                LIMIT 1
+                """,
                 fetch="one",
             )
-            if row:
+            if row and row[0] and int(row[2] or 0) > 0:
                 gov_version, gov_sha = row[0], row[1]
         except Exception:
             pass
+        if gov_version is None or gov_sha is None:
+            try:
+                row = core_q.run_sql(
+                    "SELECT COUNT(*) FROM permission_governance_snapshot_rows",
+                    fetch="one",
+                )
+                if row and int(row[0] or 0) > 0:
+                    log.warning(
+                        "Governance snapshot rows exist without header; correlation persistence skipped.",
+                        category="static_analysis",
+                    )
+            except Exception:
+                pass
+            log.warning(
+                "Governance snapshot missing; skipping correlation persistence.",
+                category="static_analysis",
+            )
+            return True
+        log.info(
+            f"Using governance snapshot {gov_version} (sha256={gov_sha})",
+            category="static_analysis",
+        )
         columns = [
             "static_run_id",
             "package_name",
@@ -211,6 +240,57 @@ def _persist_correlation_results(rows: Sequence[Mapping[str, object]]) -> bool:
 
         for row in rows:
             payload = dict(row)
+            static_run_id = payload.get("static_run_id")
+            package_name = payload.get("package_name")
+            artifact_token = f"run_{static_run_id}"
+            if static_run_id is not None:
+                try:
+                    sha_row = core_q.run_sql(
+                        "SELECT sha256 FROM static_analysis_runs WHERE id=%s",
+                        (static_run_id,),
+                        fetch="one",
+                    )
+                    if sha_row and sha_row[0]:
+                        artifact_token = str(sha_row[0])
+                except Exception:
+                    pass
+            rel_path = Path("evidence") / "static_runs" / str(static_run_id) / str(package_name) / artifact_token
+            rel_path.mkdir(parents=True, exist_ok=True)
+            corr_key = payload.get("correlation_key") or "correlation"
+            corr_file = rel_path / f"correlation_{corr_key}.json"
+            wrote_evidence = False
+            try:
+                corr_payload = {
+                    "static_run_id": static_run_id,
+                    "package_name": package_name,
+                    "correlation_key": corr_key,
+                    "severity_band": payload.get("severity_band"),
+                    "score": payload.get("score"),
+                    "rationale": payload.get("rationale"),
+                    "evidence_preview": payload.get("evidence_preview"),
+                    "governance_version": gov_version,
+                    "governance_sha256": gov_sha,
+                }
+                corr_file.write_text(
+                    json.dumps(corr_payload, ensure_ascii=True, indent=2),
+                    encoding="utf-8",
+                )
+                wrote_evidence = True
+            except Exception:
+                log.warning(
+                    f"Failed to write correlation evidence for static_run_id={static_run_id}",
+                    category="static_analysis",
+                )
+            if not wrote_evidence:
+                continue
+            payload["evidence_path"] = str(
+                Path("evidence")
+                / "static_runs"
+                / str(static_run_id)
+                / str(package_name)
+                / artifact_token
+                / corr_file.name
+            )
             payload["governance_version"] = gov_version
             payload["governance_sha256"] = gov_sha
             core_q.run_sql(
