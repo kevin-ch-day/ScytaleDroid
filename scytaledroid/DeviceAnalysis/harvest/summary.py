@@ -320,7 +320,6 @@ def render_harvest_summary(
     metrics = HarvestRunMetrics.from_run(plan, harvest_result, results)
     files_written = metrics.artifacts_written
     pull_errors = metrics.artifacts_failed
-    compact_mode = _should_compact_view(selection, metrics, plan)
 
     print()
     print(text_blocks.headline("APK Harvest Summary", width=70))
@@ -387,7 +386,10 @@ def render_harvest_summary(
 
     _print_exclusions(metadata.get("excluded_counts"))
     _print_exclusion_samples(metadata.get("excluded_samples"))
-    _print_top_packages(results, limit=10 if compact_mode else 5)
+    _print_top_packages(
+        results,
+        limit=10 if _should_compact_view(selection, metrics, plan) else 5,
+    )
     _print_sample_focus(selection)
 
     output_root = _run_output_root(harvest_result)

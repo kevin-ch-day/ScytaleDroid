@@ -440,6 +440,21 @@ def pull_apks(serial: Optional[str]) -> None:
                 harvest_logger=harvest_logger,
                 scope_label=active_selection.label,
             )
+    except NameError as exc:
+        if "compact_mode" in str(exc):
+            try:
+                from scytaledroid.DeviceAnalysis.harvest import runner as _runner
+                from scytaledroid.DeviceAnalysis.harvest import summary as _summary
+                details = (
+                    f"{exc} "
+                    f"(runner={_runner.__file__}, summary={_summary.__file__})"
+                )
+            except Exception:
+                details = str(exc)
+            log.close_harvest_adapter(run_id)
+            raise NameError(details) from exc
+        log.close_harvest_adapter(run_id)
+        raise
     except Exception:
         log.close_harvest_adapter(run_id)
         raise
