@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import os
+import traceback
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Sequence
 
@@ -852,26 +853,70 @@ class PermissionAuditAccumulator:
 
             try:
                 sid = core_q.run_sql(header_sql, tuple(header_values), return_lastrowid=True)
-            except Exception:  # pragma: no cover - defensive
-                log.exception(
-                    "Failed to persist permission_audit_snapshots "
-                    f"(snapshot_key={self.snapshot_id} scope={self.scope_label} "
-                    f"run_id={run_id} static_run_id={static_run_id})",
-                    category="db",
+            except Exception as exc:  # pragma: no cover - defensive
+                err_text = str(exc)
+                if "Duplicate entry" in err_text and self.snapshot_id in err_text:
+                    try:
+                        row = core_q.run_sql(
+                            "SELECT snapshot_id FROM permission_audit_snapshots WHERE snapshot_key=%s",
+                            (self.snapshot_id,),
+                            fetch="one",
+                        )
+                        if row and row[0]:
+                            sid = int(row[0])
+                        else:
+                            raise RuntimeError("Duplicate snapshot_key without existing row")
+                    except Exception:
+                        log.error(
+                            "Failed to recover permission_audit_snapshots duplicate "
+                            f"(snapshot_key={self.snapshot_id} scope={self.scope_label} "
+                            f"run_id={run_id} static_run_id={static_run_id})\n"
+                            + traceback.format_exc(),
+                            category="db",
+                        )
+                        return OperationResult.failure(
+                            user_message="Permission audit snapshot persistence failed.",
+                            error_code="perm_audit_snapshot_insert_failed",
+                            context={
+                                "snapshot_key": self.snapshot_id,
+                                "scope_label": self.scope_label,
+                                "run_id": run_id,
+                                "static_run_id": static_run_id,
+                            },
+                        )
+                else:
+                    log.error(
+                        "Failed to persist permission_audit_snapshots "
+                        f"(snapshot_key={self.snapshot_id} scope={self.scope_label} "
+                        f"run_id={run_id} static_run_id={static_run_id})\n"
+                        + traceback.format_exc(),
+                        category="db",
+                    )
+                    return OperationResult.failure(
+                        user_message="Permission audit snapshot persistence failed.",
+                        error_code="perm_audit_snapshot_insert_failed",
+                        context={
+                            "snapshot_key": self.snapshot_id,
+                            "scope_label": self.scope_label,
+                            "run_id": run_id,
+                            "static_run_id": static_run_id,
+                        },
+                    )
+
+            try:
+                row = core_q.run_sql(
+                    "SELECT static_run_id FROM permission_audit_snapshots WHERE snapshot_id=%s",
+                    (sid,),
+                    fetch="one",
                 )
-                return OperationResult.failure(
-                    user_message="Permission audit snapshot persistence failed.",
-                    error_code="perm_audit_snapshot_insert_failed",
-                    context={
-                        "snapshot_key": self.snapshot_id,
-                        "scope_label": self.scope_label,
-                        "run_id": run_id,
-                        "static_run_id": static_run_id,
-                    },
-                )
+                if row and row[0] is not None:
+                    static_run_id = int(row[0])
+            except Exception:
+                pass
 
             evidence_path = str(self.base_output_dir / self.snapshot_id)
             signal_write_failed = False
+            app_failures = 0
             for app in self.apps:
                 sd = dict(app.score_detail or {})
                 score_raw = float(sd.get("score_raw", sd.get("score_3dp", 0.0)) or 0.0)
@@ -950,22 +995,27 @@ class PermissionAuditAccumulator:
                 )
                 app_placeholders.extend(["%s"] * 12)
 
+                update_clause = ", ".join(
+                    f"{col}=VALUES({col})" for col in app_columns if col != "snapshot_id"
+                )
                 sql = (
                     "INSERT INTO permission_audit_apps ("
                     + ", ".join(app_columns)
                     + ") VALUES ("
                     + ",".join(app_placeholders)
                     + ")"
+                    + (" ON DUPLICATE KEY UPDATE " + update_clause if update_clause else "")
                 )
 
                 try:
                     core_q.run_sql(sql, tuple(app_values))
                 except Exception:  # pragma: no cover - defensive
                     app_failures += 1
-                    log.exception(
+                    log.error(
                         "Failed to persist permission_audit_apps "
                         f"(snapshot_id={sid} package={app.package} run_id={run_id} "
-                        f"static_run_id={static_run_id})",
+                        f"static_run_id={static_run_id})\n"
+                        + traceback.format_exc(),
                         category="db",
                     )
                     continue

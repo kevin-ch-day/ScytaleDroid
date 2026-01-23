@@ -7,6 +7,7 @@ from typing import Optional
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_func.permissions import permission_support
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
+import traceback
 
 SNAPSHOT_PREFIX = "perm-audit:app:"
 
@@ -170,9 +171,10 @@ def write_permission_snapshot(
             ),
         )
     except Exception:
-        log.exception(
-            "Permission snapshot header skipped (session=%s)",
+        log.error(
+            "Permission snapshot header skipped (session=%s)\n%s",
             session_stamp,
+            traceback.format_exc(),
             category="static_analysis",
         )
         return None
@@ -222,9 +224,10 @@ def write_permission_snapshot(
                 ),
             )
         except Exception:
-            log.exception(
-                "Permission snapshot header fallback failed (session=%s)",
+            log.error(
+                "Permission snapshot header fallback failed (session=%s)\n%s",
                 session_stamp,
+                traceback.format_exc(),
                 category="static_analysis",
             )
             return None

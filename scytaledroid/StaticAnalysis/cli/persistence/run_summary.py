@@ -392,6 +392,33 @@ def create_static_run_ledger(
     if dry_run:
         return None
 
+    try:
+        row = core_q.run_sql(
+            """
+            SELECT sar.id
+            FROM static_analysis_runs sar
+            JOIN app_versions av ON av.id = sar.app_version_id
+            JOIN apps a ON a.id = av.app_id
+            WHERE sar.session_stamp = %s
+              AND a.package_name = %s
+            ORDER BY sar.id DESC
+            LIMIT 1
+            """,
+            (session_stamp, package_name),
+            fetch="one",
+        )
+        if row and row[0]:
+            log.warning(
+                (
+                    f"static_analysis_runs already exists for session={session_stamp} "
+                    f"package={package_name}; reusing static_run_id={row[0]}"
+                ),
+                category="static_analysis",
+            )
+            return int(row[0])
+    except Exception:
+        pass
+
     display_name = display_name or package_name
     app_version_id = _ensure_app_version(
         package_for_run=package_name,
