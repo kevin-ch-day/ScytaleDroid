@@ -819,6 +819,21 @@ class PermissionAuditAccumulator:
 
             return int(sid)
         except Exception:
+            payload = {}
+            if isinstance(snapshot_payload, dict):
+                payload = {
+                    "snapshot_key": snapshot_payload.get("snapshot_id"),
+                    "session_stamp": snapshot_payload.get("session"),
+                    "scope_label": snapshot_payload.get("scope_label"),
+                    "run_id": snapshot_payload.get("run_id"),
+                    "static_run_id": snapshot_payload.get("static_run_id"),
+                }
+            logging_engine.get_error_logger().exception(
+                "Permission audit persistence failed",
+                extra=logging_engine.ensure_trace(
+                    {"event": "permission_audit.persist_failed", **payload}
+                ),
+            )
             return None
 
 

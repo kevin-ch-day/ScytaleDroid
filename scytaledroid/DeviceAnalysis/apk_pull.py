@@ -24,6 +24,7 @@ from scytaledroid.Utils.DisplayUtils import (
     text_blocks,
 )
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
+from scytaledroid.Utils.LoggingUtils import logging_engine
 
 
 def _extract_delta_summary(
@@ -479,6 +480,17 @@ def pull_apks(serial: Optional[str]) -> None:
             harvest_logger=harvest_logger,
         )
     except Exception as exc:
+        logging_engine.get_error_logger().exception(
+            "Harvest summary rendering failed",
+            extra=logging_engine.ensure_trace(
+                {
+                    "event": "apk_harvest.summary_failed",
+                    "run_id": run_id,
+                    "device_serial": serial,
+                    "scope_label": active_selection.label,
+                }
+            ),
+        )
         error_panels.print_error_panel(
             "APK Harvest",
             f"Harvest completed, but summary rendering failed: {exc}",

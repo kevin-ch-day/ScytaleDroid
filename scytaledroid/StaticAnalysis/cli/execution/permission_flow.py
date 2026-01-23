@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from scytaledroid.Config import app_config
 from scytaledroid.Utils.DisplayUtils import status_messages
+from scytaledroid.Utils.LoggingUtils import logging_engine
 
 from ...modules.permissions import collect_permissions_and_sdk
 from ...modules.permissions.render_postcard import render as render_permission_postcard
@@ -44,6 +45,7 @@ def execute_permission_scan(
 
     last_report = None
     last_category = None
+    persistence_failed = False
     for group in scope_groups:
         artifacts = group.artifacts
         if not artifacts:
@@ -81,7 +83,24 @@ def execute_permission_scan(
                     )
                 )
             except Exception:
-                pass
+                persistence_failed = True
+                logging_engine.get_error_logger().exception(
+                    "Permission analysis persistence failed",
+                    extra=logging_engine.ensure_trace(
+                        {
+                            "event": "permission_analysis.persist_failed",
+                            "session_stamp": session_stamp,
+                            "package": group.package_name,
+                            "scope_label": params.scope_label or selection.label,
+                        }
+                    ),
+                )
+                print(
+                    status_messages.status(
+                        "Persistence failed — see logs for traceback.",
+                        level="warn",
+                    )
+                )
 
         declared_permissions = [name for name, _tag in permissions]
         declared_in = {name.split(".")[-1].upper(): tag for name, tag in permissions if name}
@@ -193,11 +212,20 @@ def execute_permission_scan(
         linkage = {"status": "partial", "reason": "static_run_id_missing"}
     if linkage:
         snapshot_payload["linkage"] = linkage
-    accumulator.persist_to_db(snapshot_payload)
+    snapshot_id = accumulator.persist_to_db(snapshot_payload)
+    if snapshot_id is None:
+        persistence_failed = True
+        print(
+            status_messages.status(
+                "Permission audit persistence failed — see logs for traceback.",
+                level="warn",
+            )
+        )
     if static_run_id and persist_detections:
+        run_status = "FAILED" if persistence_failed else "COMPLETED"
         update_static_run_status(
             static_run_id=static_run_id,
-            status="COMPLETED",
+            status=run_status,
             ended_at_utc=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         )
 

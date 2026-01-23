@@ -14,6 +14,7 @@ from scytaledroid.Utils.DisplayUtils import (
     text_blocks,
 )
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
+from scytaledroid.Utils.LoggingUtils import logging_engine
 
 from scytaledroid.DeviceAnalysis import adb_utils, device_manager
 from .formatters import (
@@ -426,9 +427,20 @@ def _run_apk_pull(active_device: Optional[Dict[str, Optional[str]]]) -> None:
 
         apk_pull.pull_apks(serial)
     except Exception as exc:
+        logging_engine.get_error_logger().exception(
+            "APK harvest failed",
+            extra=logging_engine.ensure_trace(
+                {
+                    "event": "apk_harvest.start_failed",
+                    "device_serial": serial,
+                    "device_model": (active_device or {}).get("model") if active_device else None,
+                }
+            ),
+        )
         error_panels.print_error_panel(
             "Pull APKs",
             f"Failed to start APK harvest: {exc}",
+            hint="See logs for traceback.",
         )
         prompt_utils.press_enter_to_continue()
 
