@@ -270,15 +270,14 @@ def print_artifact_status(
     suffix: Optional[str] = None,
     level: str = "info",
 ) -> None:
-    if level == "info":
-        compact = os.getenv("SCYTALEDROID_HARVEST_COMPACT", "1").strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
-        if compact:
-            return
+    compact = os.getenv("SCYTALEDROID_HARVEST_COMPACT", "1").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if compact and level in {"info", "success"}:
+        return
     message = f"    ▸ {package_label} [{index}/{total}] {artifact_label}"
     if suffix:
         message = f"{message} — {suffix}"

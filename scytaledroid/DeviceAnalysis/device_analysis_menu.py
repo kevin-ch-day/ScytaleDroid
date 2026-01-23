@@ -2,29 +2,21 @@
 
 from __future__ import annotations
 
-import time
 from typing import Dict, Optional
 
 from datetime import datetime
-from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
-from scytaledroid.Utils.DisplayUtils import text_blocks, table_utils, colors
+from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
 from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.constants import INVENTORY_STALE_SECONDS
-from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
-from . import adb_utils
 from scytaledroid.DeviceAnalysis.services import device_service
 from .device_menu import (
-    build_device_summaries,
-    build_main_menu_options,
     handle_choice,
-    print_dashboard,
 )
 from .device_menu.auto_ops import (
     ensure_active_device as auto_connect_device,
     ensure_inventory_survey,
 )
 from .device_menu.actions import _connect_to_device  # reuse existing picker UI
-from .device_menu.inventory_guard.metadata import get_latest_inventory_metadata
 
 
 EXIT_TO_MAIN = "main"
@@ -38,7 +30,6 @@ def device_menu(return_to: str = EXIT_TO_MAIN) -> str:
 
     while True:
         devices, warnings, summaries, serial_map = device_service.scan_devices()
-        last_refresh_ts = time.time()
         active_device = device_service.resolve_active_device(devices)
         active_device, auto_messages = auto_connect_device(devices, active_device)
 
@@ -60,7 +51,7 @@ def device_menu(return_to: str = EXIT_TO_MAIN) -> str:
                 summary_cache.clear()
                 continue
 
-        _render_status_panel(active_details, inventory_metadata)
+        _render_dashboard(active_details, inventory_metadata)
 
         if warnings and not devices:
             # No devices / adb unavailable; prompt and continue loop
@@ -73,28 +64,14 @@ def device_menu(return_to: str = EXIT_TO_MAIN) -> str:
         if not active_device and len(devices) > 1:
             print(
                 status_messages.status(
-                    "Multiple devices detected. Use option 3 to select the target device.",
+                    "Multiple devices detected. Use option 9 to select the target device.",
                     level="info",
                 ),
                 flush=True,
             )
 
         print()
-        menu_utils.print_header("Device dashboard")
-        options = build_main_menu_options(active_details)
-        # Default to List devices to give a quick view before deeper actions
-        default_key = "1"
-        spec = menu_utils.MenuSpec(
-            items=options,
-            default=None,
-            exit_label="Back",
-            show_exit=True,
-            show_descriptions=True,
-        )
-        menu_utils.render_menu(spec)
-        print()  # small spacer after the menu
-        print("Select action #:")
-        print("Shortcuts: r=Refresh  c=Switch  i=Info  s=Shell  l=Logcat  q/0=Back to main")
+        print("Select action:")
 
         ensure_inventory_survey(
             active_serial,
@@ -102,30 +79,15 @@ def device_menu(return_to: str = EXIT_TO_MAIN) -> str:
             surveyed_serials=surveyed_serials,
             emit=lambda msg: print(msg, flush=True),
         )
-        valid_keys = [option.key for option in options]
-        # Support shortcuts: r=refresh (redraw), q=back, c=connect, i=info, s=shell, l=logcat
-        choice = prompt_utils.get_choice(valid_keys + ["0", "r", "q", "c", "i", "s", "l"], default="1")
 
-        if choice in {"0", "q"}:
+        valid_keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9"]
+        default_choice = "9" if not active_device else "1"
+        choice = prompt_utils.get_choice(valid_keys + ["0"], default=default_choice)
+
+        if choice == "0":
             return return_to
-        if choice == "r":
-            # Redraw dashboard without triggering sync
-            continue
-        if choice == "c":
-            _connect_to_device(devices, summaries)
-            summary_cache.clear()
-            continue
-        if choice == "i":
-            _show_device_info(active_device, active_details)
-            continue
-        if choice == "s":
-            handle_choice("8", devices, summaries, active_device, active_details)
-            continue
-        if choice == "l":
-            handle_choice("7", devices, summaries, active_device, active_details)
-            continue
 
-        refresh_requested = handle_choice(
+        handle_choice(
             choice,
             devices,
             summaries,
@@ -140,96 +102,81 @@ def device_menu(return_to: str = EXIT_TO_MAIN) -> str:
                 summary_cache.pop(serial, None)
 
 
-def _render_status_panel(
+def _render_dashboard(
     active_details: Optional[Dict[str, Optional[str]]],
     inventory_metadata: Optional[object],
 ) -> None:
+    from scytaledroid.DeviceAnalysis.device_menu.formatters import (
+        format_timestamp_utc,
+        prettify_model,
+    )
+
     print()
-    # Header context
-    serial = active_details.get("serial") if active_details else None
-    label = None
+    print("Device Dashboard")
+    print("================")
+
+    adb_state = "Connected" if active_details else "Disconnected"
+    root_state = "unknown"
+    serial = None
+    model_label = "Unknown"
     if active_details:
-        label = active_details.get("model") or active_details.get("device")
-    heading = "Device dashboard"
-    if label:
-        heading = f"Device dashboard — {label}"
-    menu_utils.print_header(heading)
+        serial = active_details.get("serial") or None
+        model_label = prettify_model(active_details.get("model") or active_details.get("device"))
+        root_raw = (active_details.get("is_rooted") or "").strip().upper()
+        if root_raw == "YES":
+            root_state = "root"
+        elif root_raw == "NO":
+            root_state = "non-root"
 
-    if not active_details:
-        print(status_messages.status("No active device. Use Connect to select one.", level="warn"))
-        return
+    device_label = model_label if model_label != "Unknown" else "—"
+    serial_label = serial or "—"
+    adb_label = f"{adb_state} · {root_state}"
 
-    # Inventory status panel
+    print(f"Device      : {device_label}")
+    print(f"Serial      : {serial_label}")
+    print(f"ADB         : {adb_label}")
+
+    print()
+    print("Inventory")
+    print("---------")
     status = inventory_metadata
-    if status is None:
-        print(status_messages.status("Inventory: not yet run. Use option 4 to sync.", level="warn"))
-        return
-
-    # Normalize InventoryStatus fields and optional delta info
-    status_label = getattr(status, "status_label", None) or "unknown"
-    age = getattr(status, "age_display", "unknown")
-    pkg_count = getattr(status, "package_count", None)
-    is_stale = bool(getattr(status, "is_stale", False))
-    last_ts = getattr(status, "last_run_ts", None)
-    delta = {}
-    if isinstance(status, dict):
-        delta = status.get("package_delta_summary") or {}
-        if not last_ts:
+    if not active_details:
+        print(status_messages.status("No active device. Use option 9 to select one.", level="warn"))
+    elif status is None:
+        print(status_messages.status("Inventory: not yet run. Use option 1 to sync.", level="warn"))
+    else:
+        status_label = getattr(status, "status_label", None) or "unknown"
+        age = getattr(status, "age_display", "unknown")
+        pkg_count = getattr(status, "package_count", None)
+        last_ts = getattr(status, "last_run_ts", None)
+        if isinstance(status, dict) and not last_ts:
             ts_val = status.get("timestamp")
             if isinstance(ts_val, datetime):
                 last_ts = ts_val
 
-    print("Inventory status")
-    print("================")
-    status_line = f"Status      : {status_label.upper()}"
-    age_line = f"Age         : {age}"
-    pkg_line = f"Packages    : {pkg_count or '—'}"
-    threshold_label = f"{INVENTORY_STALE_SECONDS // 3600}h" if INVENTORY_STALE_SECONDS >= 3600 else f"{INVENTORY_STALE_SECONDS // 60}m"
-    threshold_line = f"Stale after : {threshold_label}"
-    print(status_line)
-    print(age_line)
-    print(pkg_line)
-    if isinstance(last_ts, datetime):
-        print(f"Last sync   : {last_ts.strftime('%Y-%m-%d %H:%M:%S %Z') or last_ts.isoformat()}")
-    if status_label.upper() == "NONE":
-        print(f"{threshold_line} (applies after the first snapshot)")
-        print(status_messages.status("No inventory snapshot found. Run a full sync to capture the current app state.", level="warn"))
-        return
-    print(threshold_line)
-
-    # Last inventory result (now driven by unified InventoryDelta if available)
-    delta_obj = getattr(status, "delta", None)
-    added = removed = updated = 0
-    if delta_obj:
-        added = int(getattr(delta_obj, "new_count", 0) or 0)
-        removed = int(getattr(delta_obj, "removed_count", 0) or 0)
-        updated = int(getattr(delta_obj, "updated_count", 0) or 0)
-    elif isinstance(delta, dict):
-        added = int(delta.get("total_added", 0) or 0)
-        removed = int(delta.get("total_removed", 0) or 0)
-        updated = int(delta.get("total_updated", 0) or 0)
-    elif isinstance(status, dict):
-        added = int(status.get("delta_new") or 0)
-        removed = int(status.get("delta_removed") or 0)
-        updated = int(status.get("delta_updated") or 0)
-
-    if added or removed or updated:
-        tokens = []
-        if added:
-            tokens.append(f"{added} new")
-        if removed:
-            tokens.append(f"{removed} removed")
-        if updated:
-            tokens.append(f"{updated} updated")
-        print(f"Last inventory result: {', '.join(tokens)}.")
-    else:
-        print("Last inventory result: identical to previous snapshot.")
-
-    if is_stale:
-        print(
-            status_messages.status(
-                "Recommendation: run Inventory & database sync before pulling APKs or static analysis.",
-                level="warn",
-            )
+        threshold_label = (
+            f"{INVENTORY_STALE_SECONDS // 3600}h"
+            if INVENTORY_STALE_SECONDS >= 3600
+            else f"{INVENTORY_STALE_SECONDS // 60}m"
         )
+
+        print(f"Status      : {str(status_label).upper()}")
+        print(f"Packages    : {pkg_count or '—'}")
+        if last_ts:
+            print(f"Last sync   : {format_timestamp_utc(last_ts)}")
+        print(f"Age         : {age}")
+
+        if str(status_label).upper() == "NONE":
+            print(status_messages.status("No inventory snapshot found. Run a full sync to capture the current app state.", level="warn"))
+
     print()
+    print("1) Inventory & database sync")
+    print("2) Pull APKs for static analysis")
+    print("3) Detailed device report")
+    print("4) Logcat")
+    print("5) Open ADB shell")
+    print("6) Export device dossier")
+    print("7) Manage harvest watchlists")
+    print("8) Open APK library (filtered)")
+    print("9) Switch device")
+    print("0) Back")

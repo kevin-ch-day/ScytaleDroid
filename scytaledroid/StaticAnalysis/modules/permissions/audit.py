@@ -17,6 +17,7 @@ import json
 import math
 from statistics import mean
 
+from scytaledroid.Utils.ops.operation_result import OperationResult
 
 @dataclass
 class AppSignals:
@@ -415,6 +416,7 @@ class PermissionAuditAccumulator:
             apps_dir.mkdir(parents=True, exist_ok=True)
 
         if write_files:
+            app_failures = 0
             for app in self.apps:
                 record = {
                     "app": {
@@ -642,10 +644,10 @@ class PermissionAuditAccumulator:
     # Optional DB persistence
     # ------------------------------
 
-    def persist_to_db(self, snapshot_payload: Dict[str, Any]) -> int | None:
+    def persist_to_db(self, snapshot_payload: Dict[str, Any]) -> OperationResult:
         """Persist snapshot + per-app audit data into DB.
 
-        Returns inserted ``snapshot_id`` (int) or ``None`` on failure.
+        Returns an OperationResult containing the snapshot_id on success.
         """
         try:
             from scytaledroid.Database.db_func.permissions import permission_support as support
@@ -710,14 +712,23 @@ class PermissionAuditAccumulator:
 
             try:
                 sid = core_q.run_sql(header_sql, tuple(header_values), return_lastrowid=True)
-            except Exception as exc:  # pragma: no cover - defensive
-                log.error(
+            except Exception:  # pragma: no cover - defensive
+                log.exception(
                     "Failed to persist permission_audit_snapshots "
                     f"(snapshot_key={self.snapshot_id} scope={self.scope_label} "
-                    f"run_id={run_id} static_run_id={static_run_id}): {exc}",
+                    f"run_id={run_id} static_run_id={static_run_id})",
                     category="db",
                 )
-                return None
+                return OperationResult.failure(
+                    user_message="Permission audit snapshot persistence failed.",
+                    error_code="perm_audit_snapshot_insert_failed",
+                    context={
+                        "snapshot_key": self.snapshot_id,
+                        "scope_label": self.scope_label,
+                        "run_id": run_id,
+                        "static_run_id": static_run_id,
+                    },
+                )
 
             for app in self.apps:
                 sd = dict(app.score_detail or {})
@@ -807,17 +818,32 @@ class PermissionAuditAccumulator:
 
                 try:
                     core_q.run_sql(sql, tuple(app_values))
-                except Exception as exc:  # pragma: no cover - defensive
-                    log.error(
+                except Exception:  # pragma: no cover - defensive
+                    app_failures += 1
+                    log.exception(
                         "Failed to persist permission_audit_apps "
                         f"(snapshot_id={sid} package={app.package} run_id={run_id} "
-                        f"static_run_id={static_run_id}): {exc}",
+                        f"static_run_id={static_run_id})",
                         category="db",
                     )
-                    # Continue to next app, but overall snapshot remains valid.
                     continue
 
-            return int(sid)
+            context = {
+                "snapshot_id": int(sid),
+                "snapshot_key": self.snapshot_id,
+                "run_id": run_id,
+                "static_run_id": static_run_id,
+                "expected_app_rows": len(self.apps),
+                "persisted_app_rows": len(self.apps) - app_failures,
+                "failed_app_rows": app_failures,
+            }
+            if app_failures:
+                return OperationResult.partial(
+                    user_message="Permission audit app persistence partially failed.",
+                    error_code="perm_audit_apps_partial",
+                    context=context,
+                )
+            return OperationResult.success(context=context)
         except Exception:
             payload = {}
             if isinstance(snapshot_payload, dict):
@@ -834,7 +860,11 @@ class PermissionAuditAccumulator:
                     {"event": "permission_audit.persist_failed", **payload}
                 ),
             )
-            return None
+            return OperationResult.failure(
+                user_message="Permission audit persistence failed.",
+                error_code="perm_audit_persist_exception",
+                context=payload,
+            )
 
 
 __all__ = ["PermissionAuditAccumulator", "compute_signal_flags", "AppSignals"]

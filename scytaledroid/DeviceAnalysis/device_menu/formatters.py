@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from datetime import datetime, timezone
+from typing import Dict, List, Optional, Union
 
 
 def prettify_model(value: Optional[str]) -> str:
@@ -123,6 +124,7 @@ def format_device_line(
 
 
 __all__ = [
+    "format_timestamp_utc",
     "prettify_model",
     "prettify_manufacturer",
     "format_android_release",
@@ -132,3 +134,29 @@ __all__ = [
     "format_emulator_flag",
     "format_device_line",
 ]
+
+
+def format_timestamp_utc(value: Union[datetime, float, int, None]) -> str:
+    """Return a consistent, human-readable UTC timestamp string."""
+
+    if value is None:
+        return "Unknown"
+
+    if isinstance(value, (int, float)):
+        dt = datetime.fromtimestamp(value, tz=timezone.utc)
+    elif isinstance(value, datetime):
+        dt = value
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        else:
+            dt = dt.astimezone(timezone.utc)
+    else:
+        return "Unknown"
+
+    month = dt.strftime("%b")
+    day = dt.strftime("%d").lstrip("0") or "0"
+    year = dt.strftime("%Y")
+    hour = dt.strftime("%I").lstrip("0") or "12"
+    minute = dt.strftime("%M")
+    ampm = dt.strftime("%p")
+    return f"{month} {day}, {year} · {hour}:{minute} {ampm} (UTC)"

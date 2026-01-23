@@ -7,7 +7,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
-from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
+from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
 
 from .models import InventoryRow, ScopeSelection
@@ -60,189 +60,176 @@ def select_package_scope(
 
     watchlist_entries: List[_WatchlistEntry] = context.get("watchlists", [])  # type: ignore[assignment]
 
+    default_rows, _ = apply_default_scope(rows, allow)
+
     while True:
-        _print_scope_overview(rows, device_serial, is_rooted, context)
+        status_line = _render_scope_table(rows, device_serial, is_rooted, context, default_rows)
 
         option_handlers: Dict[str, Callable[[], Optional[ScopeSelection]]] = {}
-        menu_items: List[MenuOption] = []
+        entries: List[Dict[str, object]] = []
+
+        def _add_entry(
+            key: str,
+            label: str,
+            *,
+            packages: Optional[int] = None,
+            files: Optional[int] = None,
+            note: Optional[str] = None,
+            handler: Callable[[], Optional[ScopeSelection]] | None = None,
+        ) -> None:
+            entries.append(
+                {
+                    "key": key,
+                    "label": label,
+                    "packages": packages,
+                    "files": files,
+                    "note": note,
+                }
+            )
+            if handler:
+                option_handlers[key] = handler
 
         if _LAST_SCOPE is not None:
-            menu_items.append(
-                MenuOption(
-                    "R",
-                    _format_rerun_label(_LAST_SCOPE),
-                    hint="Replay the previous harvest scope",
-                )
+            _add_entry(
+                "R",
+                _format_rerun_label(_LAST_SCOPE),
+                note="re-run last scope",
+                handler=lambda: _LAST_SCOPE,
             )
-            option_handlers["R"] = lambda: _LAST_SCOPE
 
-        menu_items.append(
-            MenuOption(
-                "1",
-                _scope_option_label(
-                    "Play Store & user-installed apps",
-                    packages=context["default_counts"].get("packages"),
-                    files=context["default_counts"].get("files"),
-                ),
-            )
+        _add_entry(
+            "1",
+            "Play & user",
+            packages=context["default_counts"].get("packages"),
+            files=context["default_counts"].get("files"),
+            note="default",
+            handler=lambda: _scope_default(rows, allow),
         )
-        option_handlers["1"] = lambda: _scope_default(rows, allow)
 
         social_rows = category_groups.get("Social")
-        menu_items.append(
-            MenuOption(
-                "2",
-                _scope_option_label(
-                    "Social apps only",
-                    packages=len(social_rows) if social_rows else 0,
-                ),
-            )
-        )
-        option_handlers["2"] = lambda: _scope_category_subset(
-            category_groups, allow, {"Social"}
+        _add_entry(
+            "2",
+            "Social apps",
+            packages=len(social_rows) if social_rows else 0,
+            handler=lambda: _scope_category_subset(category_groups, allow, {"Social"}),
         )
 
         messaging_rows = category_groups.get("Messaging")
-        menu_items.append(
-            MenuOption(
-                "3",
-                _scope_option_label(
-                    "Messaging apps only",
-                    packages=len(messaging_rows) if messaging_rows else 0,
-                ),
-            )
-        )
-        option_handlers["3"] = lambda: _scope_category_subset(
-            category_groups, allow, {"Messaging"}
+        _add_entry(
+            "3",
+            "Messaging apps",
+            packages=len(messaging_rows) if messaging_rows else 0,
+            handler=lambda: _scope_category_subset(category_groups, allow, {"Messaging"}),
         )
 
         combined_rows = (social_rows or []) + (messaging_rows or [])
-        menu_items.append(
-            MenuOption(
-                "4",
-                _scope_option_label(
-                    "Social + Messaging",
-                    packages=len(combined_rows) if combined_rows else 0,
-                    note="non-root filtered" if not is_rooted else None,
-                ),
-            )
-        )
-        option_handlers["4"] = lambda: _scope_category_subset(
-            category_groups,
-            allow,
-            {"Social", "Messaging"},
-            label="Social & Messaging",
+        _add_entry(
+            "4",
+            "Social + Messaging",
+            packages=len(combined_rows) if combined_rows else 0,
+            note="non-root filtered" if not is_rooted else None,
+            handler=lambda: _scope_category_subset(
+                category_groups,
+                allow,
+                {"Social", "Messaging"},
+                label="Social & Messaging",
+            ),
         )
 
-        menu_items.append(
-            MenuOption(
-                "5",
-                _scope_option_label(
-                    "Google user apps",
-                    packages=context["google_user"].get("packages"),
-                    files=context["google_user"].get("files"),
-                ),
-            )
+        _add_entry(
+            "5",
+            "Google user",
+            packages=context["google_user"].get("packages"),
+            files=context["google_user"].get("files"),
+            handler=lambda: _scope_google_user_apps(rows, allow),
         )
-        option_handlers["5"] = lambda: _scope_google_user_apps(rows, allow)
 
         if profile_counts:
-            menu_items.append(
-                MenuOption(
-                    "6",
-                    _scope_option_label(
-                        "Profile targets…",
-                        packages=context["profile_summary"].get("packages"),
-                        files=context["profile_summary"].get("files"),
-                        note="Select any profile mix",
-                    ),
-                )
+            _add_entry(
+                "6",
+                "Profile targets",
+                packages=context["profile_summary"].get("packages"),
+                files=context["profile_summary"].get("files"),
+                note="social/messaging/shopping",
+                handler=lambda: _scope_profiles(rows, profile_counts, allow),
             )
-            option_handlers["6"] = lambda: _scope_profiles(rows, profile_counts, allow)
 
         if watchlist_entries:
             for idx, entry in enumerate(watchlist_entries, start=1):
                 key = f"W{idx}"
-                menu_items.append(
-                    MenuOption(
-                        key,
-                        _scope_option_label(
-                            f"Watchlist · {entry.watchlist.name}",
-                            packages=entry.counts.get("packages"),
-                            files=entry.counts.get("files"),
-                            note=_format_watchlist_hint(entry),
-                        ),
-                    )
+                _add_entry(
+                    key,
+                    f"Watchlist · {entry.watchlist.name}",
+                    packages=entry.counts.get("packages"),
+                    files=entry.counts.get("files"),
+                    note=_format_watchlist_hint(entry),
+                    handler=lambda e=entry: _scope_watchlist(e),
                 )
-                option_handlers[key] = lambda e=entry: _scope_watchlist(e)
 
-        menu_items.extend(
-            [
-                MenuOption(
-                    "7",
-                    _scope_option_label(
-                        "Google exceptions",
-                        packages=context["google_exceptions"].get("packages"),
-                        files=context["google_exceptions"].get("files"),
-                    ),
-                ),
-                MenuOption(
-                    "8",
-                    _scope_option_label(
-                        "Families (Android/Google/Motorola system)",
-                        packages=context["families"].get("packages"),
-                        files=context["families"].get("files"),
-                        note="Requires root",
-                    ),
-                ),
-                MenuOption(
-                    "9",
-                    _scope_option_label(
-                        "Custom patterns…",
-                        note="Comma-separated; * supports prefix wildcards",
-                    ),
-                ),
-                MenuOption(
-                    "E",
-                    _scope_option_label(
-                        "Everything (include system/vendor)",
-                        packages=context["everything"].get("packages"),
-                        files=context["everything"].get("files"),
-                    ),
-                ),
-            ]
+        _add_entry(
+            "7",
+            "Google exceptions",
+            packages=context["google_exceptions"].get("packages"),
+            files=context["google_exceptions"].get("files"),
+            note="allow-list",
+            handler=lambda: _scope_google_allowlist(rows, allow),
         )
-        option_handlers.update(
-            {
-                "7": lambda: _scope_google_allowlist(rows, allow),
-                "8": lambda: _scope_families(rows),
-                "9": lambda: _scope_custom(rows, allow),
-                "E": lambda: ScopeSelection(
-                    label="Everything",
-                    packages=list(rows),
-                    kind="everything",
-                    metadata={
-                        "estimated_files": context["everything"].get("files", 0),
-                        "candidate_count": len(rows),
-                        "selected_count": len(rows),
-                    },
-                ),
-            }
+        _add_entry(
+            "8",
+            "Families (system)",
+            packages=context["families"].get("packages"),
+            files=context["families"].get("files"),
+            note="root required",
+            handler=lambda: _scope_families(rows),
+        )
+        _add_entry(
+            "9",
+            "Custom patterns",
+            note="comma-separated; * prefix",
+            handler=lambda: _scope_custom(rows, allow),
+        )
+        _add_entry(
+            "E",
+            "Everything",
+            packages=context["everything"].get("packages"),
+            files=context["everything"].get("files"),
+            note="will be filtered (non-root)" if not is_rooted else None,
+            handler=lambda: ScopeSelection(
+                label="Everything",
+                packages=list(rows),
+                kind="everything",
+                metadata={
+                    "estimated_files": context["everything"].get("files", 0),
+                    "candidate_count": len(rows),
+                    "selected_count": len(rows),
+                },
+            ),
         )
 
-        spec = MenuSpec(
-            items=menu_items,
-            default="1",
-            exit_label="Cancel",
-            show_exit=True,
-            show_descriptions=False,
-        )
-        menu_utils.render_menu(spec)
+        headers = ["#", "Scope", "Pkgs", "Files", "Notes"]
+        table_rows = []
+        for entry in entries:
+            key = str(entry["key"])
+            label = entry["label"]
+            packages = entry.get("packages")
+            files = entry.get("files")
+            note = entry.get("note") or ""
+            pkg_cell = packages if isinstance(packages, int) else ""
+            files_cell = f"~{files}" if isinstance(files, int) and files else ""
+            table_rows.append([key, label, pkg_cell, files_cell, note])
+
+        table_utils.render_table(headers, table_rows, compact=True)
+        print(status_line)
+
         choice = prompt_utils.get_choice(
-            [item.key for item in menu_items] + ["0"],
+            [str(entry["key"]) for entry in entries] + ["0", "D"],
             default="1",
             casefold=True,
+            prompt="Select scope #: ",
         )
+        if choice.upper() == "D":
+            _render_scope_details(default_rows, context, is_rooted)
+            continue
         if choice == "0":
             return None
 
@@ -258,6 +245,44 @@ def select_package_scope(
         _print_selection_diagnostics(selection)
         _store_last_scope(selection)
         return selection
+
+
+def _render_scope_table(
+    rows: Sequence[InventoryRow],
+    device_serial: str,
+    is_rooted: bool,
+    context: Dict[str, object],
+    default_rows: Sequence[InventoryRow],
+) -> None:
+    mode_label = "root" if is_rooted else "non-root"
+    print(f"Pull APKs · Scope ({device_serial} • {mode_label})")
+    print("-" * 86)
+    pullable = sum(1 for row in rows if rules.is_user_path(row.primary_path))
+    blocked = len(rows) - pullable
+    policy = "none" if is_rooted else "non_root_paths"
+    status = f"Status: pullable≈{pullable}  blocked≈{blocked}  policy={policy}   [D] details   [0] back"
+    return status
+
+
+def _render_scope_details(
+    default_rows: Sequence[InventoryRow],
+    context: Dict[str, object],
+    is_rooted: bool,
+) -> None:
+    print()
+    print("Details (filters)")
+    excluded = context.get("default_excluded") or {}
+    for key, count in sorted(excluded.items()):
+        label = EXCLUSION_LABELS.get(key, key)
+        print(f"- {label}: {count}")
+    if not is_rooted:
+        print("- System/vendor partitions require root and are filtered automatically.")
+    focus = [row.package_name for row in default_rows[:3]]
+    total = len(default_rows)
+    if focus:
+        extra = f" (+{total - len(focus)} more)" if total > len(focus) else ""
+        print(f"Focus packages: {', '.join(focus)}{extra}")
+    print()
 
 
 def _format_rerun_label(selection: ScopeSelection) -> str:
@@ -625,6 +650,8 @@ def _print_selection_diagnostics(selection: ScopeSelection) -> None:
     Always-on so operators see why a category collapsed.
     """
     meta = selection.metadata or {}
+    if not meta.get("show_details"):
+        return
     excluded_counts = meta.get("excluded_counts") or {}
     selected = int(meta.get("selected_count") or len(selection.packages) or 0)
     candidates = int(meta.get("candidate_count") or 0)

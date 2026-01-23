@@ -176,9 +176,10 @@ def write_permission_snapshot(
                 session_stamp,
             ),
         )
-    except Exception as exc:
-        log.warning(
-            f"Permission snapshot header skipped (session={session_stamp}): {exc}",
+    except Exception:
+        log.exception(
+            "Permission snapshot header skipped (session=%s)",
+            session_stamp,
             category="static_analysis",
         )
         return None
@@ -227,9 +228,10 @@ def write_permission_snapshot(
                     static_run_id,
                 ),
             )
-        except Exception as exc:
-            log.warning(
-                f"Permission snapshot header fallback failed (session={session_stamp}): {exc}",
+        except Exception:
+            log.exception(
+                "Permission snapshot header fallback failed (session=%s)",
+                session_stamp,
                 category="static_analysis",
             )
             return None
@@ -240,7 +242,9 @@ def write_permission_snapshot(
         )
         if not row:
             log.warning(
-                "Permission snapshot header was not created for session %s", session_stamp, category="static_analysis"
+                "Permission snapshot header was not created for session %s",
+                session_stamp,
+                category="static_analysis",
             )
             return None
 

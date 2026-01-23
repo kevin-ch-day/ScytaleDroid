@@ -18,13 +18,13 @@ from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.utils import (
 )
 from scytaledroid.Utils.DisplayUtils import (
     error_panels,
-    menu_utils,
     prompt_utils,
     status_messages,
     text_blocks,
 )
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.LoggingUtils import logging_engine
+from scytaledroid.Utils.ops.operation_result import OperationResult
 
 
 def _extract_delta_summary(
@@ -96,7 +96,7 @@ def _apply_delta_filter(
     return (True, len(filtered))
 
 
-def pull_apks(serial: Optional[str]) -> None:
+def pull_apks(serial: Optional[str]) -> OperationResult:
     """Pull APK files for the active device and upsert metadata into the repository."""
 
     if not serial:
@@ -105,7 +105,11 @@ def pull_apks(serial: Optional[str]) -> None:
             "No active device. Connect first to pull APKs.",
         )
         prompt_utils.press_enter_to_continue()
-        return
+        return OperationResult.failure(
+            status="FAILED",
+            user_message="APK pull failed: no active device.",
+            error_code="apk_pull_no_device",
+        )
 
     if not adb_utils.is_available():
         error_panels.print_error_panel(
@@ -114,7 +118,11 @@ def pull_apks(serial: Optional[str]) -> None:
             hint="Ensure the Android platform tools are installed and exported in PATH.",
         )
         prompt_utils.press_enter_to_continue()
-        return
+        return OperationResult.failure(
+            status="FAILED",
+            user_message="APK pull failed: adb not available.",
+            error_code="apk_pull_no_adb",
+        )
 
     snapshot = inventory.load_latest_inventory(serial)
     if not snapshot:
@@ -131,10 +139,18 @@ def pull_apks(serial: Optional[str]) -> None:
             except Exception as exc:
                 error_panels.print_error_panel("APK Pull", f"Inventory sync failed: {exc}")
                 prompt_utils.press_enter_to_continue()
-                return
+                return OperationResult.failure(
+                    status="FAILED",
+                    user_message="APK pull failed: inventory sync error.",
+                    error_code="apk_pull_inventory_sync_failed",
+                )
         else:
             prompt_utils.press_enter_to_continue()
-            return
+            return OperationResult.failure(
+                status="CANCELLED",
+                user_message="APK pull cancelled before inventory sync.",
+                error_code="apk_pull_cancelled",
+            )
 
     if not snapshot or not snapshot.get("packages"):
         error_panels.print_error_panel(
@@ -142,7 +158,11 @@ def pull_apks(serial: Optional[str]) -> None:
             "Unable to retrieve inventory data after sync.",
         )
         prompt_utils.press_enter_to_continue()
-        return
+        return OperationResult.failure(
+            status="FAILED",
+            user_message="APK pull failed: inventory data unavailable.",
+            error_code="apk_pull_inventory_missing",
+        )
 
     packages = snapshot.get("packages", [])
     rows = harvest.build_inventory_rows(packages)
@@ -152,7 +172,11 @@ def pull_apks(serial: Optional[str]) -> None:
             "Inventory snapshot contains no packages.",
         )
         prompt_utils.press_enter_to_continue()
-        return
+        return OperationResult.failure(
+            status="FAILED",
+            user_message="APK pull failed: inventory snapshot empty.",
+            error_code="apk_pull_inventory_empty",
+        )
 
     is_rooted = _device_is_rooted(serial)
 
@@ -181,7 +205,11 @@ def pull_apks(serial: Optional[str]) -> None:
         if selection is None:
             print(status_messages.status("APK pull cancelled by user.", level="warn"))
             prompt_utils.press_enter_to_continue()
-            return
+            return OperationResult.failure(
+                status="CANCELLED",
+                user_message="APK pull cancelled by user.",
+                error_code="apk_pull_cancelled",
+            )
         if not selection.packages:
             print(status_messages.status("Selection contains no packages. Nothing to pull.", level="warn"))
             continue
@@ -246,13 +274,6 @@ def pull_apks(serial: Optional[str]) -> None:
             include_system_partitions=include_system_partitions,
         )
 
-        harvest.render_plan_summary(
-            selection,
-            plan,
-            is_rooted=is_rooted,
-            include_system_partitions=include_system_partitions,
-        )
-
         scheduled_packages = sum(1 for pkg in plan.packages if not pkg.skip_reason)
         blocked_packages = sum(1 for pkg in plan.packages if pkg.skip_reason)
         scheduled_files = sum(len(pkg.artifacts) for pkg in plan.packages if not pkg.skip_reason)
@@ -265,7 +286,7 @@ def pull_apks(serial: Optional[str]) -> None:
             )
             continue
 
-        _print_plan_ready_summary(selection, scheduled_packages, scheduled_files, blocked_packages)
+        _render_plan_overview(selection, plan, scheduled_packages, scheduled_files, blocked_packages)
 
         refresh_requested = False
         while True:
@@ -279,7 +300,11 @@ def pull_apks(serial: Optional[str]) -> None:
             if action == "cancel":
                 print(status_messages.status("APK pull cancelled by user.", level="warn"))
                 prompt_utils.press_enter_to_continue()
-                return
+                return OperationResult.failure(
+                    status="CANCELLED",
+                    user_message="APK pull cancelled by user.",
+                    error_code="apk_pull_cancelled",
+                )
             if action == "use_snapshot":
                 print(
                     status_messages.status(
@@ -288,7 +313,11 @@ def pull_apks(serial: Optional[str]) -> None:
                     )
                 )
                 prompt_utils.press_enter_to_continue()
-                return
+                return OperationResult.failure(
+                    status="CANCELLED",
+                    user_message="APK pull cancelled: using snapshot only.",
+                    error_code="apk_pull_snapshot_only",
+                )
             if action == "refresh_subset":
                 if _run_scope_refresh(serial, selection.packages):
                     snapshot = inventory.load_latest_inventory(serial)
@@ -299,7 +328,11 @@ def pull_apks(serial: Optional[str]) -> None:
                             hint="Run a full inventory sync to recover.",
                         )
                         prompt_utils.press_enter_to_continue()
-                        return
+                        return OperationResult.failure(
+                            status="FAILED",
+                            user_message="APK pull failed: scoped refresh produced no snapshot.",
+                            error_code="apk_pull_scoped_refresh_empty",
+                        )
                     packages = snapshot.get("packages", [])
                     rows = harvest.build_inventory_rows(packages)
                     if not rows:
@@ -309,7 +342,11 @@ def pull_apks(serial: Optional[str]) -> None:
                             hint="Adjust your selection or run a full sync.",
                         )
                         prompt_utils.press_enter_to_continue()
-                        return
+                        return OperationResult.failure(
+                            status="FAILED",
+                            user_message="APK pull failed: scoped snapshot empty.",
+                            error_code="apk_pull_scoped_snapshot_empty",
+                        )
                     latest_metadata = get_latest_inventory_metadata(
                         serial,
                         with_current_state=True,
@@ -346,7 +383,11 @@ def pull_apks(serial: Optional[str]) -> None:
                         hint="Run inventory sync from the main menu.",
                     )
                     prompt_utils.press_enter_to_continue()
-                    return
+                    return OperationResult.failure(
+                        status="FAILED",
+                        user_message="APK pull failed: inventory refresh produced no snapshot.",
+                        error_code="apk_pull_refresh_empty",
+                    )
                 packages = snapshot.get("packages", [])
                 rows = harvest.build_inventory_rows(packages)
                 if not rows:
@@ -355,7 +396,11 @@ def pull_apks(serial: Optional[str]) -> None:
                         "Inventory snapshot contains no packages after refresh.",
                     )
                     prompt_utils.press_enter_to_continue()
-                    return
+                    return OperationResult.failure(
+                        status="FAILED",
+                        user_message="APK pull failed: inventory snapshot empty after refresh.",
+                        error_code="apk_pull_refresh_snapshot_empty",
+                    )
                 latest_metadata = get_latest_inventory_metadata(
                     serial,
                     with_current_state=True,
@@ -386,7 +431,11 @@ def pull_apks(serial: Optional[str]) -> None:
             "No harvest plan available.",
         )
         prompt_utils.press_enter_to_continue()
-        return
+        return OperationResult.failure(
+            status="FAILED",
+            user_message="APK pull failed: no harvest plan.",
+            error_code="apk_pull_no_plan",
+        )
 
     adb_path = adb_utils.get_adb_binary()
     if not adb_path:
@@ -396,7 +445,11 @@ def pull_apks(serial: Optional[str]) -> None:
             hint="Install platform-tools and ensure adb is accessible.",
         )
         prompt_utils.press_enter_to_continue()
-        return
+        return OperationResult.failure(
+            status="FAILED",
+            user_message="APK pull failed: adb not available.",
+            error_code="apk_pull_no_adb",
+        )
 
     session_stamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
     dest_root = Path(app_config.DATA_DIR) / "apks" / "device_apks" / serial
@@ -443,22 +496,31 @@ def pull_apks(serial: Optional[str]) -> None:
             )
     except NameError as exc:
         if "compact_mode" in str(exc):
-            try:
-                from scytaledroid.DeviceAnalysis.harvest import runner as _runner
-                from scytaledroid.DeviceAnalysis.harvest import summary as _summary
-                details = (
-                    f"{exc} "
-                    f"(runner={_runner.__file__}, summary={_summary.__file__})"
-                )
-            except Exception:
-                details = str(exc)
             log.close_harvest_adapter(run_id)
-            raise NameError(details) from exc
+            logging_engine.get_error_logger().exception(
+                "APK harvest failed (compact_mode)",
+                extra=logging_engine.ensure_trace(
+                    {"event": "apk_harvest.compact_mode_error", "run_id": run_id}
+                ),
+            )
+            return OperationResult.failure(
+                user_message="compact_mode is not defined",
+                error_code="apk_harvest_compact_mode",
+                context={"run_id": run_id, "device_serial": serial},
+            )
         log.close_harvest_adapter(run_id)
-        raise
+        return OperationResult.failure(
+            user_message="APK harvest failed to start.",
+            error_code="apk_harvest_name_error",
+            context={"run_id": run_id, "device_serial": serial},
+        )
     except Exception:
         log.close_harvest_adapter(run_id)
-        raise
+        return OperationResult.failure(
+            user_message="APK harvest failed to start.",
+            error_code="apk_harvest_exception",
+            context={"run_id": run_id, "device_serial": serial},
+        )
 
     if verbose:
         for result in results:
@@ -499,6 +561,9 @@ def pull_apks(serial: Optional[str]) -> None:
     _maybe_save_watchlist(active_selection)
     log.close_harvest_adapter(run_id)
     prompt_utils.press_enter_to_continue()
+    return OperationResult.success(
+        context={"run_id": run_id, "device_serial": serial, "packages": len(active_plan.packages)}
+    )
 
 
 def _make_progress_callback(action_label: str) -> Callable[[Dict[str, object]], bool]:
@@ -591,58 +656,41 @@ def _run_scope_refresh(serial: str, packages: Sequence[object]) -> bool:
     return True
 
 
-def _print_plan_ready_summary(
+def _render_plan_overview(
     selection: harvest.ScopeSelection,
+    plan: harvest.HarvestPlan,
     packages: int,
     files: int,
     blocked_packages: int,
 ) -> None:
     print()
+    print("APK Harvest Plan")
+    print("-" * 86)
+    policy = "none"
+    if plan.policy_filtered:
+        policy = ",".join(sorted(plan.policy_filtered.keys()))
     print(
-        status_messages.status(
-            f"Ready to pull {packages} package(s) (~{files} artifact(s)) for scope '{selection.label}'",
-            level="info",
-        )
+        f"Scope={selection.label} | pullable={packages} | blocked={blocked_packages} | "
+        f"files≈{files} | policy={policy}"
     )
-    if blocked_packages:
-        print(
-            status_messages.status(
-                f"Filtered during planning: {blocked_packages} package(s)",
-                level="warn",
-            )
-        )
+    focus = selection.metadata.get("sample_names") or []
+    total = selection.metadata.get("selected_count") or len(selection.packages)
+    if focus:
+        extra = f" (+{int(total) - len(focus)} more)" if total and int(total) > len(focus) else ""
+        print(f"Focus: {', '.join(focus)}{extra}")
+    print("-" * 86)
 
 
 def _prompt_plan_action(
     selection: harvest.ScopeSelection, plan: harvest.HarvestPlan
 ) -> str:
-    print()
-    print(text_blocks.headline("Plan actions", width=70))
-    # Streamlined action set (legacy quick harvest hidden)
-    menu_items = [
-        menu_utils.MenuOption(
-            "2",
-            "Full Pull",
-            "Use inventory snapshot paths (slower, ordered)",
-        ),
-        menu_utils.MenuOption(
-            "3",
-            "Test Pull",
-            "Dry-run: list artifacts only (no downloads)",
-        ),
-    ]
-    menu_utils.print_menu(
-        menu_items,
-        is_main=False,
-        default="2",
-        exit_label="Cancel",
-        padding=True,
-    )
-    valid_keys = [item.key for item in menu_items]
-    choice = prompt_utils.get_choice(valid_keys + ["0"], default="2")
-    if choice == "2":
+    print("1) Full Pull (default)   - download APK splits + metadata")
+    print("2) Test Pull             - dry run (list only)")
+    print("0) Cancel")
+    choice = prompt_utils.get_choice(["1", "2", "0"], default="1", prompt="Select: ")
+    if choice == "1":
         return "pull_snapshot"
-    if choice == "3":
+    if choice == "2":
         return "dry-run"
     return "cancel"
 

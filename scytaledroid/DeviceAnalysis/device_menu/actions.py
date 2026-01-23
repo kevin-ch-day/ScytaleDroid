@@ -36,14 +36,13 @@ from scytaledroid.DeviceAnalysis.services import apk_library_service, device_ser
 from scytaledroid.DeviceAnalysis.services import info_service
 
 
-# Keep menu routing aligned with handle_choice: option 5 must always map to
-# Pull APKs and option 6 to Logcat to avoid accidental swaps in the CLI.
+# Keep menu routing aligned with handle_choice to avoid accidental swaps in the CLI.
 _HELPER_ROUTES = {
-    "4": ("inventory", "run_device_summary", True, "Collect detailed device summary"),
-    "6": ("logcat", "stream_logcat", True, "Stream logcat output"),
-    "7": ("shell", "open_shell", True, "Open interactive adb shell"),
-    "9": ("report", "generate_device_report", True, "Export the device dossier"),
-    "10": ("watchlist_manager", "manage_watchlists", False, "Manage harvest watchlists"),
+    "3": ("inventory", "run_device_summary", True, "Collect detailed device summary"),
+    "4": ("logcat", "stream_logcat", True, "Stream logcat output"),
+    "5": ("shell", "open_shell", True, "Open interactive adb shell"),
+    "6": ("report", "generate_device_report", True, "Export the device dossier"),
+    "7": ("watchlist_manager", "manage_watchlists", False, "Manage harvest watchlists"),
 }
 
 
@@ -54,14 +53,12 @@ def handle_choice(
     active_device: Optional[Dict[str, Optional[str]]],
     active_details: Optional[Dict[str, Optional[str]]],
 ) -> bool:
-    if choice == "1":
+    if choice == "9":
         # Jump to the full devices hub for consistent list/switch UX.
         from scytaledroid.DeviceAnalysis.device_hub_menu import devices_hub
 
         devices_hub()
-    elif choice == "2":
-        _show_device_info(active_device, active_details)
-    elif choice == "3":
+    elif choice == "1":
         serial = active_device.get("serial") if active_device else device_manager.get_active_serial()
         if not serial:
             error_panels.print_error_panel(
@@ -83,15 +80,11 @@ def handle_choice(
                 str(exc),
             )
             prompt_utils.press_enter_to_continue()
-    elif choice == "4":
-        _forward_to_helper(choice, active_device)
-    elif choice == "5":
+    elif choice == "2":
         _run_apk_pull(active_device)
-    elif choice in {"6", "7", "9", "10"}:
+    elif choice in {"3", "4", "5", "6", "7"}:
         _forward_to_helper(choice, active_device)
     elif choice == "8":
-        _disconnect_device()
-    elif choice == "11":
         _open_apk_library_filtered(active_device)
     else:
         error_panels.print_error_panel(
@@ -131,56 +124,44 @@ def build_main_menu_options(
     needs_active = None if has_device else "needs active"
 
     options: List[menu_utils.MenuOption] = [
-        menu_utils.MenuOption("1", "Switch device (devices hub)"),
         menu_utils.MenuOption(
-            "2",
-            "Device info",
-            disabled=not has_device,
-            badge=needs_active,
-        ),
-        menu_utils.MenuOption(
-            "3",
+            "1",
             "Inventory & Database Sync (full)",
             badge=inv_badge or needs_active,
         ),
         menu_utils.MenuOption(
-            "4",
-            "Detailed device report",
-            disabled=not has_device,
-            badge=needs_active,
-        ),
-        menu_utils.MenuOption(
-            "5",
+            "2",
             "Pull APKs for static analysis",
             disabled=not has_device,
             badge=pull_badge or needs_active,
         ),
         menu_utils.MenuOption(
-            "6",
+            "3",
+            "Detailed device report",
+            disabled=not has_device,
+            badge=needs_active,
+        ),
+        menu_utils.MenuOption(
+            "4",
             "Logcat",
             disabled=not has_device,
             badge=needs_active,
         ),
         menu_utils.MenuOption(
-            "7",
+            "5",
             "Open ADB shell",
             disabled=not has_device,
             badge=needs_active,
         ),
         menu_utils.MenuOption(
-            "8",
-            "Disconnect device",
-            disabled=not has_device,
-            badge=needs_active,
-        ),
-        menu_utils.MenuOption(
-            "9",
+            "6",
             "Export device dossier",
             disabled=not has_device,
             badge=needs_active,
         ),
-        menu_utils.MenuOption("10", "Manage harvest watchlists"),
-        menu_utils.MenuOption("11", "Open APK library (filtered)"),
+        menu_utils.MenuOption("7", "Manage harvest watchlists"),
+        menu_utils.MenuOption("8", "Open APK library (filtered)"),
+        menu_utils.MenuOption("9", "Switch device (devices hub)"),
     ]
 
     return options
@@ -254,7 +235,7 @@ def _show_device_info(
     if not info_rows:
         error_panels.print_error_panel(
             "Device Info",
-            "No active device. Use option 3 to connect first.",
+            "No active device. Use option 9 to select a device first.",
         )
         prompt_utils.press_enter_to_continue()
         return
@@ -425,7 +406,14 @@ def _run_apk_pull(active_device: Optional[Dict[str, Optional[str]]]) -> None:
     try:
         from scytaledroid.DeviceAnalysis import apk_pull
 
-        apk_pull.pull_apks(serial)
+        result = apk_pull.pull_apks(serial)
+        if hasattr(result, "ok") and not result.ok:
+            error_panels.print_error_panel(
+                "Pull APKs",
+                result.user_message or "APK harvest failed.",
+                hint=result.log_hint or "See logs for traceback.",
+            )
+            return False
     except Exception as exc:
         logging_engine.get_error_logger().exception(
             "APK harvest failed",

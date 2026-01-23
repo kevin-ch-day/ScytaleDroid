@@ -31,6 +31,7 @@ from .formatters import (
     format_android_release,
     format_battery,
     format_device_line,
+    format_timestamp_utc,
     format_wifi_state,
 )
 
@@ -280,7 +281,7 @@ def _render_inventory_status(metadata: object) -> None:
     timestamp_display = "Unknown"
     if isinstance(ts, datetime):
         ts_utc = ts.astimezone(timezone.utc)
-        timestamp_display = ts_utc.strftime("%Y-%m-%d %H:%M:%S %Z")
+        timestamp_display = format_timestamp_utc(ts_utc)
         if age_text is None:
             age_seconds = max(0, (datetime.now(timezone.utc) - ts_utc).total_seconds())
             age_text = humanize_seconds(age_seconds)
@@ -381,11 +382,7 @@ def print_dashboard(
     devices_found = len(summaries)
     connection_status = device_manager.get_connection_status() or "Unknown"
 
-    refreshed = (
-        datetime.fromtimestamp(last_refresh_ts).strftime("%Y-%m-%d %H:%M:%S")
-        if last_refresh_ts
-        else "Unknown"
-    )
+    refreshed = format_timestamp_utc(last_refresh_ts) if last_refresh_ts else "Unknown"
 
     # Header
     active_line = None
@@ -442,28 +439,25 @@ def print_dashboard(
     options = [
         menu_utils.MenuOption(
             "1",
-            "Open devices hub",
-            description="List/switch devices in the Android devices hub",
-        ),
-        menu_utils.MenuOption("2", "Connect to a device"),
-        menu_utils.MenuOption("3", "Device info"),
-        menu_utils.MenuOption(
-            "4",
             "Inventory & database sync (full)",
             hint="Refresh all packages and DB entries",
         ),
-        menu_utils.MenuOption("5", "Detailed device report"),
         menu_utils.MenuOption(
-            "6",
+            "2",
             "Pull APKs",
             hint="Fetch APKs to data/apks for static analysis",
         ),
-        menu_utils.MenuOption("7", "Logcat"),
-        menu_utils.MenuOption("8", "Open ADB shell"),
-        menu_utils.MenuOption("9", "Disconnect device"),
-        menu_utils.MenuOption("10", "Export device dossier"),
-        menu_utils.MenuOption("11", "Manage harvest watchlists"),
-        menu_utils.MenuOption("12", "Open APK library (filtered)"),
+        menu_utils.MenuOption("3", "Detailed device report"),
+        menu_utils.MenuOption("4", "Logcat"),
+        menu_utils.MenuOption("5", "Open ADB shell"),
+        menu_utils.MenuOption("6", "Export device dossier"),
+        menu_utils.MenuOption("7", "Manage harvest watchlists"),
+        menu_utils.MenuOption("8", "Open APK library (filtered)"),
+        menu_utils.MenuOption(
+            "9",
+            "Switch device (devices hub)",
+            description="List/switch devices in the Android devices hub",
+        ),
     ]
     spec = menu_utils.MenuSpec(
         items=options,
@@ -473,7 +467,6 @@ def print_dashboard(
         show_descriptions=True,
     )
     menu_utils.render_menu(spec)
-    print("Shortcuts: r=Refresh  c=Devices hub/switch  i=Info  s=Shell  l=Logcat  q/0=Back to main")
 
     # ADB warnings
     if warnings:

@@ -190,9 +190,15 @@ def execute_harvest(
 
     results: List[PullResult] = []
     total = len(plans)
+    display_total = sum(1 for plan in plans if not plan.skip_reason)
+    display_index = 0
 
     try:
         for index, plan in enumerate(plans, start=1):
+            current_display_index = None
+            if not plan.skip_reason:
+                display_index += 1
+                current_display_index = display_index
             results.append(
                 _execute_package_plan(
                     serial=resolved_serial,
@@ -206,6 +212,9 @@ def execute_harvest(
                     storage_root_id=storage_root_id if storage_root_id is not None else 0,
                     package_index=index,
                     package_total=total,
+                    compact_mode=compact_mode,
+                    display_index=current_display_index,
+                    display_total=display_total,
                     base_context=base_context,
                     emit=_emit,
                     stats=stats,
@@ -254,6 +263,9 @@ def _execute_package_plan(
     storage_root_id: Optional[int],
     package_index: int,
     package_total: int,
+    compact_mode: bool,
+    display_index: Optional[int],
+    display_total: int,
     base_context: Mapping[str, object],
     emit: Callable[[str, str, Optional[Mapping[str, object]], Optional[str]], None],
     stats: Dict[str, int],
@@ -329,7 +341,9 @@ def _execute_package_plan(
             result.errors.append(ArtifactError(source_path="split-group", reason=str(exc)))
             return result
 
-    _print_package_header(plan, package_index, package_total, compact_mode=compact_mode)
+    ui_index = display_index or package_index
+    ui_total = display_total or package_total
+    _print_package_header(plan, ui_index, ui_total, compact_mode=compact_mode)
     emit(
         "info",
         "harvest.package.start",
@@ -385,7 +399,7 @@ def _execute_package_plan(
             package_stats["errors"] += 1
             stats["artifacts_failed"] += 1
 
-    _print_package_footer(plan, package_stats, package_index, package_total, compact_mode=compact_mode)
+    _print_package_footer(plan, package_stats, ui_index, ui_total, compact_mode=compact_mode)
     emit(
         "info",
         "harvest.package.summary",

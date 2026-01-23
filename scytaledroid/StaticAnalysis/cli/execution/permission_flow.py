@@ -145,6 +145,16 @@ def execute_permission_scan(
             if row and row[0]:
                 run_id = int(row[0])
         except Exception:
+            logging_engine.get_error_logger().exception(
+                "Failed to resolve run_id for permission-only scan",
+                extra=logging_engine.ensure_trace(
+                    {
+                        "event": "permission_scan.run_id_lookup_failed",
+                        "session_stamp": session_stamp,
+                        "package": package_name,
+                    }
+                ),
+            )
             run_id = None
         if run_id is None:
             try:
@@ -163,6 +173,16 @@ def execute_permission_scan(
                 )
                 run_id = int(run_id) if run_id is not None else None
             except Exception:
+                logging_engine.get_error_logger().exception(
+                    "Failed to create run row for permission-only scan",
+                    extra=logging_engine.ensure_trace(
+                        {
+                            "event": "permission_scan.run_id_create_failed",
+                            "session_stamp": session_stamp,
+                            "package": package_name,
+                        }
+                    ),
+                )
                 run_id = None
         try:
             scope_label = params.scope_label or selection.label
@@ -181,6 +201,16 @@ def execute_permission_scan(
             if row and row[0]:
                 static_run_id = int(row[0])
         except Exception:
+            logging_engine.get_error_logger().exception(
+                "Failed to resolve static_run_id for permission-only scan",
+                extra=logging_engine.ensure_trace(
+                    {
+                        "event": "permission_scan.static_run_id_lookup_failed",
+                        "session_stamp": session_stamp,
+                        "package": package_name,
+                    }
+                ),
+            )
             static_run_id = None
         if static_run_id is None:
             try:
@@ -200,9 +230,21 @@ def execute_permission_scan(
                     dry_run=not persist_detections,
                 )
             except Exception:
+                logging_engine.get_error_logger().exception(
+                    "Failed to create static run ledger for permission-only scan",
+                    extra=logging_engine.ensure_trace(
+                        {
+                            "event": "permission_scan.static_run_id_create_failed",
+                            "session_stamp": session_stamp,
+                            "package": package_name,
+                        }
+                    ),
+                )
                 static_run_id = None
+        snapshot_payload["package"] = package_name
     snapshot_payload["run_id"] = run_id
     snapshot_payload["static_run_id"] = static_run_id
+    snapshot_payload["session_stamp"] = session_stamp
     linkage = {}
     if len(accumulator.apps) != 1:
         linkage = {"status": "partial", "reason": "multi_app_scope"}
@@ -212,15 +254,11 @@ def execute_permission_scan(
         linkage = {"status": "partial", "reason": "static_run_id_missing"}
     if linkage:
         snapshot_payload["linkage"] = linkage
-    snapshot_id = accumulator.persist_to_db(snapshot_payload)
-    if snapshot_id is None:
+    persist_result = accumulator.persist_to_db(snapshot_payload)
+    if not persist_result.ok:
         persistence_failed = True
-        print(
-            status_messages.status(
-                "Permission audit persistence failed — see logs for traceback.",
-                level="warn",
-            )
-        )
+        message = persist_result.user_message or "Permission audit persistence failed."
+        print(status_messages.status(f"{message} See logs for traceback.", level="warn"))
     if static_run_id and persist_detections:
         run_status = "FAILED" if persistence_failed else "COMPLETED"
         update_static_run_status(

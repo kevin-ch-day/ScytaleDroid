@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from scytaledroid.Utils.DisplayUtils import (
@@ -18,6 +18,7 @@ from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from scytaledroid.DeviceAnalysis import device_manager
 from scytaledroid.DeviceAnalysis.services import device_service
+from scytaledroid.DeviceAnalysis.device_menu.formatters import format_timestamp_utc
 from scytaledroid.DeviceAnalysis.services.models import InventoryStatus
 
 
@@ -31,9 +32,8 @@ def _inventory_badge(status: InventoryStatus | None) -> str:
 
 
 def _render_header(adb_status: str, live_count: int) -> None:
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(text_blocks.headline(f"Android Device Analysis — {ts}", width=display_settings.default_width()))
-    print(f"ADB: {adb_status}  •  Live: {live_count}")
+    ts = format_timestamp_utc(datetime.now(timezone.utc))
+    print(f"Android Device Analysis — {ts}  |  ADB: {adb_status}  |  Live: {live_count}")
 
 
 def _render_live_devices(
@@ -102,8 +102,7 @@ def devices_hub() -> None:
 
         print()
         _render_header(adb_status, live_count)
-        print()
-        print(text_blocks.headline("Live devices (r=Refresh, 0/q=Back)", width=72))
+        print("Live devices (r=Refresh, 0/q=Back)")
         _render_live_devices(summaries, inv_lookup)
 
         if warnings:
