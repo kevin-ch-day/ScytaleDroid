@@ -54,13 +54,16 @@ HARVEST_TABLES: Sequence[str] = (
 @dataclass(slots=True)
 class ResetOutcome:
     truncated: List[str]
+    cleared: List[str]
     skipped_protected: List[str]
     skipped_missing: List[str]
     failed: List[tuple[str, str]]
 
     def as_lines(self) -> Iterable[str]:
         if self.truncated:
-            yield f"Truncated ({len(self.truncated)}): {', '.join(self.truncated)}"
+            yield f"Cleared via TRUNCATE ({len(self.truncated)}): {', '.join(self.truncated)}"
+        if self.cleared:
+            yield f"Cleared via DELETE ({len(self.cleared)}): {', '.join(self.cleared)}"
         if self.skipped_protected:
             yield f"Protected ({len(self.skipped_protected)}): {', '.join(self.skipped_protected)}"
         if self.skipped_missing:
@@ -98,6 +101,7 @@ def reset_static_analysis_data(
     to_truncate = [table for table in ordered_candidates if table not in exclusions]
 
     truncated: List[str] = []
+    cleared: List[str] = []
     skipped_missing: List[str] = []
     failed: List[tuple[str, str]] = []
 
@@ -117,7 +121,16 @@ def reset_static_analysis_data(
                 engine.execute(f"TRUNCATE TABLE `{table}`")
                 truncated.append(table)
             except RuntimeError as exc:  # pragma: no cover - requires specific DB state
-                failed.append((table, str(exc)))
+                error_text = str(exc)
+                if "command denied" in error_text.lower():
+                    try:
+                        engine.execute(f"DELETE FROM `{table}`")
+                        cleared.append(table)
+                        continue
+                    except RuntimeError as delete_exc:  # pragma: no cover - requires specific DB state
+                        failed.append((table, str(delete_exc)))
+                        continue
+                failed.append((table, error_text))
 
         try:
             engine.execute("SET FOREIGN_KEY_CHECKS=1")
@@ -130,6 +143,7 @@ def reset_static_analysis_data(
 
     return ResetOutcome(
         truncated=truncated,
+        cleared=cleared,
         skipped_protected=list(dict.fromkeys(protected)),
         skipped_missing=skipped_missing,
         failed=failed,

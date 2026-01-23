@@ -151,6 +151,37 @@ def _format_highlight_tokens(
     return tokens
 
 
+def _warn_legacy_running_rows() -> None:
+    try:
+        row = core_q.run_sql(
+            """
+            SELECT COUNT(*)
+            FROM static_analysis_runs
+            WHERE status='RUNNING'
+              AND ended_at_utc IS NULL
+              AND TIMESTAMPDIFF(HOUR, created_at, UTC_TIMESTAMP()) > 24
+            """,
+            fetch="one",
+        )
+    except Exception:
+        return
+    if not row:
+        return
+    value = row[0] if not isinstance(row, dict) else next(iter(row.values()), 0)
+    try:
+        count = int(value or 0)
+    except (TypeError, ValueError):
+        return
+    if count <= 0:
+        return
+    print(
+        status_messages.status(
+            f"Detected {count} legacy RUNNING rows older than 24h (pre-finalization). No action required.",
+            level="warn",
+        )
+    )
+
+
 def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
     """Pretty-print run results and optionally drill into per-app details."""
 
@@ -222,6 +253,8 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
     if highlight_tokens:
         print(status_messages.highlight("; ".join(highlight_tokens), show_icon=True))
     print()
+
+    _warn_legacy_running_rows()
 
     persistence_errors: list[str] = []
     canonical_failures: list[str] = []
@@ -506,7 +539,7 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                 print(status_messages.status("Persistence issues detected:", level=level))
                 for message in persistence_errors:
                     print(f"  - {message}")
-            if len(outcome.results) > 1:
+            if outcome.results:
                 _persist_cohort_rollup(session_stamp, params.scope_label)
 
         _render_post_run_views(
@@ -1763,6 +1796,22 @@ def _render_persistence_footer(
     width = max(len(name) for name, _ in lines) if lines else 0
     for name, detail in lines:
         print(f"  {name.ljust(width)} : {detail}")
+
+    stale_runs = _count_total(
+        """
+        SELECT COUNT(*)
+        FROM static_analysis_runs
+        WHERE status='RUNNING'
+          AND TIMESTAMPDIFF(HOUR, created_at, UTC_TIMESTAMP()) > 24
+        """
+    )
+    if stale_runs:
+        print(
+            status_messages.status(
+                f"Legacy RUNNING rows >24h: {stale_runs} (pre-Phase-B legacy run)",
+                level="warn",
+            )
+        )
 
     required_counts = {
         "findings": findings,

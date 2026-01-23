@@ -42,11 +42,25 @@ def render_reset_outcome(outcome: Any) -> None:
 
     print()
     menu_utils.print_section("Reset summary")
+    print(
+        status_messages.status(
+            "Reset uses TRUNCATE when permitted; falls back to DELETE when TRUNCATE is denied.",
+            level="info",
+        )
+    )
     if getattr(outcome, "truncated", None):
         truncated = ", ".join(outcome.truncated)
         print(
             status_messages.status(
-                f"Truncated tables: {truncated}",
+                f"Cleared tables (TRUNCATE): {truncated}",
+                level="success",
+            )
+        )
+    if getattr(outcome, "cleared", None):
+        cleared = ", ".join(outcome.cleared)
+        print(
+            status_messages.status(
+                f"Cleared tables (DELETE): {cleared}",
                 level="success",
             )
         )
@@ -66,6 +80,7 @@ def render_reset_outcome(outcome: Any) -> None:
         print(status_messages.status(f"Missing tables skipped: {missing}", level="warn"))
     if not (
         getattr(outcome, "truncated", None)
+        or getattr(outcome, "cleared", None)
         or getattr(outcome, "failed", None)
         or getattr(outcome, "skipped_missing", None)
     ):

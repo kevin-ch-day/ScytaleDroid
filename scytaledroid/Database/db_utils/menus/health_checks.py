@@ -492,11 +492,20 @@ def prompt_reset_static_data() -> None:
 
     menu_utils.print_section("Reset summary")
     width = min(get_terminal_width(), 96)
+    print(
+        status_messages.status(
+            "Reset uses TRUNCATE when permitted; falls back to DELETE when TRUNCATE is denied.",
+            level="info",
+        )
+    )
 
     if outcome.truncated:
-        print(status_messages.status(f"Truncated {len(outcome.truncated)} table(s).", level="success"))
+        print(status_messages.status(f"Cleared {len(outcome.truncated)} table(s) via TRUNCATE.", level="success"))
         _print_wrapped_table_block(outcome.truncated, width)
-    else:
+    if getattr(outcome, "cleared", None):
+        print(status_messages.status(f"Cleared {len(outcome.cleared)} table(s) via DELETE.", level="success"))
+        _print_wrapped_table_block(outcome.cleared, width)
+    if not outcome.truncated and not getattr(outcome, "cleared", None):
         print(status_messages.status("No tables were truncated.", level="warn"))
 
     if outcome.skipped_protected:

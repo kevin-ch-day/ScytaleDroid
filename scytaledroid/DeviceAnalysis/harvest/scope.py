@@ -222,14 +222,11 @@ def select_package_scope(
         print(status_line)
 
         choice = prompt_utils.get_choice(
-            [str(entry["key"]) for entry in entries] + ["0", "D"],
+            [str(entry["key"]) for entry in entries] + ["0"],
             default="1",
             casefold=True,
             prompt="Select scope #: ",
         )
-        if choice.upper() == "D":
-            _render_scope_details(default_rows, context, is_rooted)
-            continue
         if choice == "0":
             return None
 
@@ -260,29 +257,8 @@ def _render_scope_table(
     pullable = sum(1 for row in rows if rules.is_user_path(row.primary_path))
     blocked = len(rows) - pullable
     policy = "none" if is_rooted else "non_root_paths"
-    status = f"Status: pullable≈{pullable}  blocked≈{blocked}  policy={policy}   [D] details   [0] back"
+    status = f"Status: pullable≈{pullable}  blocked≈{blocked}  policy={policy}   [0] back"
     return status
-
-
-def _render_scope_details(
-    default_rows: Sequence[InventoryRow],
-    context: Dict[str, object],
-    is_rooted: bool,
-) -> None:
-    print()
-    print("Details (filters)")
-    excluded = context.get("default_excluded") or {}
-    for key, count in sorted(excluded.items()):
-        label = EXCLUSION_LABELS.get(key, key)
-        print(f"- {label}: {count}")
-    if not is_rooted:
-        print("- System/vendor partitions require root and are filtered automatically.")
-    focus = [row.package_name for row in default_rows[:3]]
-    total = len(default_rows)
-    if focus:
-        extra = f" (+{total - len(focus)} more)" if total > len(focus) else ""
-        print(f"Focus packages: {', '.join(focus)}{extra}")
-    print()
 
 
 def _format_rerun_label(selection: ScopeSelection) -> str:
