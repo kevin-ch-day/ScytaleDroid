@@ -428,14 +428,7 @@ def _persist_analysis_snapshot(app_version_id: int, payload: Mapping[str, object
     if run_id is None:
         return
 
-    context_map = _build_finding_context(payload)
-    for finding in findings:
-        finding_id = first_text(
-            finding.get("finding_id"),
-            finding.get("id"),
-        )
-        context = context_map.get(finding_id or "") if finding_id else None
-        _create_finding_row(run_id, finding, context=context)
+    # Legacy static_analysis_findings writes are disabled in Phase-B.
 
     _persist_provider_acl(run_id, detector_metrics)
 
@@ -498,61 +491,8 @@ def _create_finding_row(
     *,
     context: Mapping[str, object] | None = None,
 ) -> None:
-    try:
-        finding_id = first_text(
-            finding.get("finding_id"),
-            finding.get("id"),
-        )
-        status = first_text(finding.get("status"), finding.get("state"))
-        severity = first_text(
-            finding.get("severity_gate"),
-            finding.get("severity"),
-            finding.get("level"),
-        ) or "Info"
-        category = first_text(
-            finding.get("category_masvs"),
-            finding.get("category"),
-        )
-        title = first_text(finding.get("title"), finding.get("message"))
-        if title:
-            title = title[:512]
-        fix_text = first_text(finding.get("fix"))
-        if fix_text:
-            fix_text = fix_text[:2048]
-        rule_id = first_text(finding.get("rule_id"))
-        tags_payload = _prepare_tags(finding.get("tags"))
-        evidence_payload = _prepare_evidence(finding.get("evidence"))
-        context_payload = context or {}
-        cvss_value = context_payload.get("cvss") if isinstance(context_payload, Mapping) else None
-        masvs_control = context_payload.get("masvs_control") if isinstance(context_payload, Mapping) else None
-        detector = context_payload.get("detector") if isinstance(context_payload, Mapping) else None
-        module = context_payload.get("module") if isinstance(context_payload, Mapping) else None
-        evidence_refs = context_payload.get("evidence_refs") if isinstance(context_payload, Mapping) else None
-        core_q.run_sql(
-            (
-                "INSERT INTO static_analysis_findings (run_id, finding_id, status, severity, category, title, tags, evidence, fix, rule_id, cvss_score, masvs_control, detector, module, evidence_refs) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
-            ),
-            (
-                run_id,
-                finding_id,
-                status,
-                severity,
-                category,
-                title,
-                _serialise_json(tags_payload),
-                _serialise_json(evidence_payload),
-                fix_text,
-                rule_id,
-                cvss_value,
-                _normalise_optional_str(masvs_control),
-                _normalise_optional_str(detector),
-                _normalise_optional_str(module),
-                _serialise_json(evidence_refs),
-            ),
-        )
-    except Exception:
-        return
+    # Phase-B: legacy static_analysis_findings writes removed.
+    return
 
 
 def _persist_provider_acl(
@@ -832,83 +772,8 @@ def _provider_evidence(row: Mapping[str, object]) -> Mapping[str, object]:
 def upsert_base002_for_session(session_stamp: Optional[str]) -> int:
     """Promote provider exposure candidates into canonical findings."""
 
-    if not _ensure_schema_ready():
-        return 0
-
-    clause = ""
-    params: tuple[object, ...] = ()
-    if session_stamp:
-        clause = " WHERE session_stamp = %s"
-        params = (session_stamp,)
-
-    try:
-        rows = core_q.run_sql(
-            (
-                "SELECT provider_id, run_id, app_version_id, session_stamp, scope_label, package_name, component_name, "
-                "authorities, effective_guard, read_guard, write_guard, base_permission, read_permission, write_permission, "
-                "grant_uri_permissions FROM v_base002_candidates" + clause
-            ),
-            params,
-            fetch="all_dict",
-        )
-    except Exception:
-        return 0
-
-    if not rows:
-        return 0
-
-    cleared: set[int] = set()
-    inserted = 0
-    for row in rows:
-        run_id = int(row.get("run_id") or 0)
-        if not run_id:
-            continue
-        if run_id not in cleared:
-            try:
-                core_q.run_sql(
-                    "DELETE FROM static_analysis_findings WHERE run_id = %s AND rule_id = 'BASE-002'",
-                    (run_id,),
-                )
-            except Exception:
-                pass
-            cleared.add(run_id)
-
-        severity = _canonical_severity(
-            row.get("effective_guard"),
-            row.get("read_guard"),
-            row.get("write_guard"),
-        )
-        evidence_payload = _provider_evidence(row)
-        finding_id = f"provider_{row.get('provider_id')}"
-
-        try:
-            core_q.run_sql(
-                (
-                    "INSERT INTO static_analysis_findings (run_id, finding_id, status, severity, category, title, tags, evidence, "
-                    "fix, rule_id, detector, module, evidence_refs) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
-                ),
-                (
-                    run_id,
-                    finding_id,
-                    "open",
-                    severity,
-                    "Platform",
-                    "Exported ContentProvider lacks strong guard",
-                    _serialise_json(["content_provider", "ipc", "exposure"]),
-                    _serialise_json(evidence_payload),
-                    "Restrict provider exposure with signature-level permissions or remove exports.",
-                    "BASE-002",
-                    "provider_acl",
-                    "manifest",
-                    None,
-                ),
-            )
-            inserted += 1
-        except Exception:
-            continue
-
-    return inserted
+    # Phase-B: legacy static_analysis_findings writes removed.
+    return 0
 
 
 def build_session_string_view(session_stamp: Optional[str]) -> int:

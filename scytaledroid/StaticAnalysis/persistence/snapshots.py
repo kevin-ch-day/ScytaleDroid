@@ -280,12 +280,12 @@ def write_permission_snapshot(
           sfs.package_name,
           MAX(r.app_label),
           MAX(r.run_id),
-          COALESCE(MAX(spr.risk_score), MAX(rs.risk_score), {fallback}),
-          COALESCE(LEAST(MAX(spr.risk_score), 100), LEAST(MAX(rs.risk_score), 100), {fallback}),
-          COALESCE(MAX(spr.risk_grade), MAX(rs.risk_grade), {grade_case}),
-          COALESCE(MAX(spr.dangerous), MAX(rs.dangerous), 0),
-          COALESCE(MAX(spr.signature), MAX(rs.signature), 0),
-          COALESCE(MAX(spr.vendor), MAX(rs.vendor), 0),
+          COALESCE(MAX(spr.risk_score), {fallback}),
+          COALESCE(LEAST(MAX(spr.risk_score), 100), {fallback}),
+          COALESCE(MAX(spr.risk_grade), {grade_case}),
+          COALESCE(MAX(spr.dangerous), 0),
+          COALESCE(MAX(spr.signature), 0),
+          COALESCE(MAX(spr.vendor), 0),
           0,  -- combo totals (column absent in static_permission_risk on schema 0.2.x)
           0,  -- surprise totals (column absent in static_permission_risk on schema 0.2.x)
           0,  -- legacy totals (column absent in static_permission_risk on schema 0.2.x)
@@ -305,9 +305,6 @@ def write_permission_snapshot(
         LEFT JOIN static_permission_risk spr
           ON spr.session_stamp = %s AND spr.scope_label = sfs.scope_label
           AND spr.package_name = sfs.package_name
-        LEFT JOIN risk_scores rs
-          ON rs.session_stamp = %s AND rs.scope_label = sfs.scope_label
-          AND rs.package_name = sfs.package_name
         WHERE sfs.session_stamp = %s
         GROUP BY sfs.package_name
         ON DUPLICATE KEY UPDATE
@@ -333,7 +330,6 @@ def write_permission_snapshot(
                 static_run_id,
                 session_stamp,
                 metadata_scope,
-                session_stamp,
                 session_stamp,
                 session_stamp,
                 session_stamp,

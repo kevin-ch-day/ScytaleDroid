@@ -269,7 +269,11 @@ def write_correlations(run_id: int, rows: Sequence[tuple[str, float, str]]) -> b
                 (run_id, rule_id, points, rationale),
             )
         return True
-    except Exception:
+    except Exception as exc:
+        log.warning(
+            f"Correlations write failed for run_id={run_id}: {exc}",
+            category="db",
+        )
         return False
 
 

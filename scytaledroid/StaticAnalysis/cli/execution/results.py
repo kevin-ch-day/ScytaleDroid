@@ -10,6 +10,8 @@ import math
 import statistics
 from typing import Mapping, MutableMapping, Sequence, Optional, Dict, Iterable
 
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
+
 from scytaledroid.Utils.DisplayUtils import (
     prompt_utils,
     severity,
@@ -504,6 +506,8 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                 print(status_messages.status("Persistence issues detected:", level=level))
                 for message in persistence_errors:
                     print(f"  - {message}")
+            if len(outcome.results) > 1:
+                _persist_cohort_rollup(session_stamp, params.scope_label)
 
         _render_post_run_views(
             permission_profiles,
@@ -552,6 +556,81 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
 
     if persist_enabled:
         _render_db_masvs_summary()
+
+
+def _persist_cohort_rollup(session_stamp: str | None, scope_label: str | None) -> None:
+    if not session_stamp:
+        return
+    scope_label = scope_label or ""
+    try:
+        row = core_q.run_sql(
+            """
+            SELECT
+              COUNT(*) AS total,
+              SUM(status='COMPLETED') AS completed,
+              SUM(status='FAILED') AS failed,
+              SUM(status='ABORTED') AS aborted,
+              SUM(status='RUNNING') AS running
+            FROM static_analysis_runs
+            WHERE session_stamp=%s AND scope_label=%s
+            """,
+            (session_stamp, scope_label),
+            fetch="one",
+            dictionary=True,
+        )
+    except Exception as exc:
+        log.warning(
+            f"Failed to compute cohort rollup for session={session_stamp}: {exc}",
+            category="static_analysis",
+        )
+        return
+
+    if not row:
+        return
+
+    total = int(row.get("total") or 0)
+    completed = int(row.get("completed") or 0)
+    failed = int(row.get("failed") or 0)
+    aborted = int(row.get("aborted") or 0)
+    running = int(row.get("running") or 0)
+    try:
+        core_q.run_sql(
+            """
+            INSERT INTO static_session_rollups (
+              session_stamp, scope_label, apps_total, completed, failed, aborted, running
+            )
+            VALUES (%s,%s,%s,%s,%s,%s,%s)
+            ON DUPLICATE KEY UPDATE
+              apps_total=VALUES(apps_total),
+              completed=VALUES(completed),
+              failed=VALUES(failed),
+              aborted=VALUES(aborted),
+              running=VALUES(running)
+            """,
+            (
+                session_stamp,
+                scope_label,
+                total,
+                completed,
+                failed,
+                aborted,
+                running,
+            ),
+        )
+    except Exception as exc:
+        log.warning(
+            f"Failed to persist cohort rollup for session={session_stamp}: {exc}",
+            category="static_analysis",
+        )
+        return
+
+    level = "info" if failed == 0 and aborted == 0 else "warn"
+    print(
+        status_messages.status(
+            f"Apps: {total} | Completed: {completed} | Failed: {failed} | Aborted: {aborted}",
+            level=level,
+        )
+    )
 
 
 def _build_ingest_payload(

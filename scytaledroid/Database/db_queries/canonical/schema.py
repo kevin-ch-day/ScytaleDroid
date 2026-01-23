@@ -40,7 +40,7 @@ _DDL_STATEMENTS: list[str] = [
     CREATE TABLE IF NOT EXISTS static_analysis_runs (
       id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
       app_version_id   BIGINT UNSIGNED NOT NULL,
-      session_stamp    VARCHAR(64)    DEFAULT NULL,
+      session_stamp    VARCHAR(128)   DEFAULT NULL,
       scope_label      VARCHAR(191)   DEFAULT NULL,
       category         VARCHAR(64)    DEFAULT NULL,
       sha256           CHAR(64)       DEFAULT NULL,
@@ -100,12 +100,31 @@ _DDL_STATEMENTS: list[str] = [
       ADD COLUMN IF NOT EXISTS abort_signal VARCHAR(16) DEFAULT NULL;
     """,
     """
+    ALTER TABLE static_analysis_runs
+      MODIFY session_stamp VARCHAR(128) DEFAULT NULL;
+    """,
+    """
     CREATE INDEX IF NOT EXISTS ix_static_runs_session_version
     ON static_analysis_runs (session_stamp, app_version_id);
     """,
     """
     CREATE INDEX IF NOT EXISTS ix_static_runs_category
     ON static_analysis_runs (category);
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS static_session_rollups (
+      session_stamp VARCHAR(128) NOT NULL,
+      scope_label   VARCHAR(191) NOT NULL DEFAULT '',
+      apps_total    INT UNSIGNED NOT NULL DEFAULT 0,
+      completed     INT UNSIGNED NOT NULL DEFAULT 0,
+      failed        INT UNSIGNED NOT NULL DEFAULT 0,
+      aborted       INT UNSIGNED NOT NULL DEFAULT 0,
+      running       INT UNSIGNED NOT NULL DEFAULT 0,
+      created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (session_stamp, scope_label),
+      KEY ix_static_rollup_scope (scope_label)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
     """
     CREATE TABLE IF NOT EXISTS static_analysis_findings (
@@ -221,18 +240,6 @@ _DDL_STATEMENTS: list[str] = [
     """,
     # Ingest/Audit
     """
-    CREATE TABLE IF NOT EXISTS analysis_runs (
-      id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-      app_version_id   BIGINT UNSIGNED NOT NULL,
-      profile          VARCHAR(32)     DEFAULT NULL,
-      scope_label      VARCHAR(191)    DEFAULT NULL,
-      raw_artifact_uri VARCHAR(512)    DEFAULT NULL,
-      created_at       TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY (id),
-      KEY ix_analysis_runs_version (app_version_id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    """,
-    """
     CREATE TABLE IF NOT EXISTS ingest_audit (
       id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
       analysis_run_id  BIGINT UNSIGNED DEFAULT NULL,
@@ -244,46 +251,6 @@ _DDL_STATEMENTS: list[str] = [
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
     # Canonical Observations
-    """
-    CREATE TABLE IF NOT EXISTS endpoints (
-      id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-      app_version_id   BIGINT UNSIGNED NOT NULL,
-      scheme           VARCHAR(8)      NOT NULL,
-      host_root        VARCHAR(191)    NOT NULL,
-      normalized_path  VARCHAR(512)    NOT NULL,
-      source_types     JSON            DEFAULT NULL,
-      occurrences      INT             NOT NULL DEFAULT 1,
-      PRIMARY KEY (id),
-      UNIQUE KEY ux_endpoints (app_version_id, scheme, host_root, normalized_path),
-      KEY ix_endpoints_host (app_version_id, host_root)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS secret_candidates (
-      id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-      app_version_id   BIGINT UNSIGNED NOT NULL,
-      value_hash       VARCHAR(191)    NOT NULL,
-      format_tag       VARCHAR(64)     DEFAULT NULL,
-      confidence       VARCHAR(16)     DEFAULT NULL,
-      evidence_types   JSON            DEFAULT NULL,
-      occurrences      INT             NOT NULL DEFAULT 1,
-      PRIMARY KEY (id),
-      UNIQUE KEY ux_secret_candidates (app_version_id, value_hash)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS analytics_ids (
-      id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-      app_version_id   BIGINT UNSIGNED NOT NULL,
-      vendor           VARCHAR(64)     NOT NULL,
-      id_hash          VARCHAR(191)    NOT NULL,
-      occurrences      INT             NOT NULL DEFAULT 1,
-      sources          JSON            DEFAULT NULL,
-      PRIMARY KEY (id),
-      UNIQUE KEY ux_analytics_ids (app_version_id, vendor, id_hash),
-      KEY ix_analytics_lookup (vendor, id_hash)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    """,
     """
     CREATE TABLE IF NOT EXISTS findings (
       id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -398,19 +365,6 @@ _DDL_STATEMENTS: list[str] = [
       ON spr.session_stamp = r.session_stamp
      AND spr.package_name = a.package_name
     GROUP BY COALESCE(r.category, 'Uncategorized');
-    """,
-    # Allowlist
-    """
-    CREATE TABLE IF NOT EXISTS allowlist (
-      id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-      type          ENUM('host','path','rule','source') NOT NULL,
-      pattern       VARCHAR(255)    NOT NULL,
-      vendor        VARCHAR(64)     DEFAULT NULL,
-      notes         VARCHAR(255)    DEFAULT NULL,
-      default_risk  VARCHAR(16)     DEFAULT NULL,
-      PRIMARY KEY (id),
-      KEY ix_allowlist_type (type)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
 ]
 

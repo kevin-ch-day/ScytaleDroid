@@ -170,7 +170,6 @@ def collect_static_run_counts(
         tables = [
             "static_analysis_runs",
             "findings",
-            "static_analysis_findings",
             "static_findings",
             "static_findings_summary",
             "static_string_summary",

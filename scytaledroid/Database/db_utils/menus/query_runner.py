@@ -453,19 +453,7 @@ def render_session_digest(session_stamp: str | None, *, header: str | None = Non
         count, status = audit.counts.get(key, (None, "SKIP"))
         rows.append([label, str(count or 0), status])
 
-    legacy = []
-    for label, key in (
-        ("static_analysis_findings (legacy)", "static_analysis_findings"),
-    ):
-        if key in audit.counts:
-            count, status = audit.counts[key]
-            legacy.append([f"{label} [legacy]", str(count or 0), status])
-
     table_utils.render_table(["Table", "Rows", "Status"], rows)
-    if legacy:
-        print()
-        menu_utils.print_section("Legacy compatibility tables (informational)")
-        table_utils.render_table(["Table", "Rows", "Status"], legacy)
 
     required = (
         "findings",

@@ -39,7 +39,6 @@ STATIC_ANALYSIS_TABLES: Sequence[str] = (
     "permission_audit_apps",
     "runs",
     # Optional detector caches
-    "string_match_cache",
 )
 
 HARVEST_TABLES: Sequence[str] = (

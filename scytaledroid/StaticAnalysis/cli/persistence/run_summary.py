@@ -42,6 +42,21 @@ from .utils import (
 )
 
 
+def _normalize_datetime_value(value: str | None) -> str | None:
+    if not value:
+        return None
+    candidate = value.strip()
+    if not candidate:
+        return None
+    if "T" in candidate or candidate.endswith("Z"):
+        try:
+            parsed = datetime.fromisoformat(candidate.replace("Z", "+00:00"))
+            return parsed.strftime("%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return candidate
+    return candidate
+
+
 @dataclass(slots=True)
 class PersistenceOutcome:
     run_id: int | None = None
@@ -280,6 +295,7 @@ def update_static_run_status(
     abort_reason: str | None = None,
     abort_signal: str | None = None,
 ) -> None:
+    normalized_ended_at = _normalize_datetime_value(ended_at_utc)
     try:
         core_q.run_sql(
             """
@@ -292,7 +308,7 @@ def update_static_run_status(
             """,
             (
                 status,
-                ended_at_utc,
+                normalized_ended_at,
                 abort_reason,
                 abort_signal,
                 static_run_id,
