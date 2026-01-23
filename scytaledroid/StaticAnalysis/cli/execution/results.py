@@ -500,15 +500,18 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
         printed_db_table = False
         if session_stamp and persist_enabled:
             try:
-                snapshot_static_id = next(
-                    (res.static_run_id for res in reversed(outcome.results) if res.static_run_id),
-                    None,
-                )
-                write_permission_snapshot(
-                    session_stamp,
-                    scope_label=params.scope_label,
-                    static_run_id=snapshot_static_id,
-                )
+                static_ids = [res.static_run_id for res in outcome.results if res.static_run_id]
+                snapshot_static_id = max(static_ids) if static_ids else None
+                if snapshot_static_id is None:
+                    warning = "Permission snapshot skipped: static_run_id missing for session."
+                    print(status_messages.status(warning, level="warn"))
+                    persistence_errors.append(warning)
+                else:
+                    write_permission_snapshot(
+                        session_stamp,
+                        scope_label=params.scope_label,
+                        static_run_id=snapshot_static_id,
+                    )
             except Exception as exc:
                 warning = f"Failed to write permission snapshot: {exc}"
                 print(status_messages.status(warning, level="warn"))
@@ -1777,7 +1780,9 @@ def _render_persistence_footer(
             )
         )
     if audit and audit.run_id is None:
-        if audit.is_orphan:
+        if audit.is_group_scope:
+            lines.append(("run_linkage", "Group scope (run_id not required)"))
+        elif audit.is_orphan:
             lines.append(("run_linkage", "ORPHAN (run_id missing)"))
         elif audit.is_legacy:
             lines.append(("run_linkage", "LEGACY (run_id missing)"))
@@ -1823,13 +1828,11 @@ def _render_persistence_footer(
         "permission_audit_apps": snapshot_apps,
     }
     missing = [name for name, value in required_counts.items() if not value]
-    if audit and audit.run_id is None:
-        missing = []
 
     if run_status == "ABORTED":
         reason_token = abort_reason or abort_signal or "SIGINT"
         print(f"  {'status'.ljust(width)} : ABORTED ({reason_token}) — counts may be partial")
-    elif audit and audit.run_id is None:
+    elif audit and audit.run_id is None and not audit.is_group_scope:
         if audit.is_orphan:
             print(f"  {'status'.ljust(width)} : WARN (orphan run_id missing)")
         elif audit.is_legacy:
@@ -1849,11 +1852,16 @@ def _render_persistence_footer(
         reason = "missing canonical tables" if missing else "see logs"
         print(f"  {'status'.ljust(width)} : ERROR ({reason})")
     else:
-        print(f"  {'status'.ljust(width)} : OK")
+        if audit and audit.is_group_scope:
+            print(f"  {'status'.ljust(width)} : OK (group scope)")
+        else:
+            print(f"  {'status'.ljust(width)} : OK")
 
     if audit:
         audit_static_run_id = audit.static_run_id if hasattr(audit, "static_run_id") else None
-        if audit.run_id is None:
+        if audit.is_group_scope:
+            status_text = "OK (group scope)" if not missing else "ERROR (missing " + ", ".join(sorted(missing)) + ")"
+        elif audit.run_id is None:
             if audit.is_orphan:
                 status_text = "ORPHAN (run_id missing)"
             elif audit.is_legacy:

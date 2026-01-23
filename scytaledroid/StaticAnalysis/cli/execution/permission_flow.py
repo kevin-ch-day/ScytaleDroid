@@ -188,14 +188,18 @@ def execute_permission_scan(
             scope_label = params.scope_label or selection.label
             row = core_q.run_sql(
                 """
-                SELECT id
-                FROM static_analysis_runs
-                WHERE session_stamp=%s
-                  AND (scope_label=%s OR scope_label=%s)
-                ORDER BY id DESC
+                SELECT sar.id
+                FROM static_analysis_runs sar
+                JOIN app_versions av ON av.id = sar.app_version_id
+                JOIN apps a ON a.id = av.app_id
+                WHERE sar.session_stamp=%s
+                  AND a.package_name=%s
+                  AND sar.profile=%s
+                  AND (sar.scope_label=%s OR sar.scope_label=%s)
+                ORDER BY sar.id DESC
                 LIMIT 1
                 """,
-                (session_stamp, package_name, scope_label),
+                (session_stamp, package_name, params.profile_label, package_name, scope_label),
                 fetch="one",
             )
             if row and row[0]:

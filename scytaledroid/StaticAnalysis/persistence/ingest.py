@@ -404,33 +404,38 @@ def _persist_analysis_snapshot(app_version_id: int, payload: Mapping[str, object
         if isinstance(workload_candidate, Mapping):
             workload_payload = workload_candidate
 
-    run_id = _create_run_row(
-        app_version_id,
-        sha256=sha256,
-        analysis_version=analysis_version,
-        pipeline_version=pipeline_version,
-        catalog_versions=catalog_versions,
-        config_hash=config_hash,
-        study_tag=study_tag_value,
-        run_started_utc=run_started_utc,
-        profile=profile,
-        session_stamp=session_stamp,
-        scope_label=scope_label,
-        category=category,
-        findings_total=len(findings),
-        detector_metrics=detector_metrics,
-        repro_bundle=repro_bundle,
-        analysis_matrices=matrices_payload,
-        analysis_indicators=indicators_payload,
-        workload_profile=workload_payload,
-    )
+    static_run_id = None
+    if session_stamp and profile:
+        try:
+            row = core_q.run_sql(
+                """
+                SELECT id
+                FROM static_analysis_runs
+                WHERE app_version_id=%s
+                  AND session_stamp=%s
+                  AND profile=%s
+                  AND (scope_label=%s OR scope_label=%s)
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (app_version_id, session_stamp, profile, scope_label, category),
+                fetch="one",
+            )
+            if row and row[0]:
+                static_run_id = int(row[0])
+        except Exception:
+            static_run_id = None
 
-    if run_id is None:
+    if static_run_id is None:
+        log.warning(
+            "No matching static_analysis_runs row for ingest payload; "
+            "skipping run-scoped persistence to avoid creating duplicates.",
+            category="static_ingest",
+        )
         return
 
     # Legacy static_analysis_findings writes are disabled in Phase-B.
-
-    _persist_provider_acl(run_id, detector_metrics)
+    _persist_provider_acl(static_run_id, detector_metrics)
 
 
 def _create_run_row(

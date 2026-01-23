@@ -105,16 +105,52 @@ def _count_for_table(
     run_id: Optional[int],
     static_run_id: Optional[int],
     session: Optional[str],
+    static_run_ids: Optional[Iterable[int]] = None,
+    is_group_scope: bool = False,
 ) -> Tuple[str, Optional[int], str]:
+    if is_group_scope and session:
+        if table == "permission_audit_snapshots":
+            try:
+                cursor.execute(
+                    "SELECT COUNT(*) FROM permission_audit_snapshots WHERE snapshot_key=%s",
+                    (f"perm-audit:app:{session}",),
+                )
+                (count,) = cursor.fetchone()
+                return table, int(count), "OK"
+            except Exception as exc:
+                return table, None, f"ERROR: {exc}"
+        if table == "permission_audit_apps":
+            try:
+                cursor.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM permission_audit_apps a
+                    JOIN permission_audit_snapshots s ON s.snapshot_id = a.snapshot_id
+                    WHERE s.snapshot_key=%s
+                    """,
+                    (f"perm-audit:app:{session}",),
+                )
+                (count,) = cursor.fetchone()
+                return table, int(count), "OK"
+            except Exception as exc:
+                return table, None, f"ERROR: {exc}"
+
+    static_id_list = list(static_run_ids or [])
     cols = _fetch_columns(cursor, table)
     where = None
     params: tuple = ()
-    if "static_run_id" in cols and static_run_id is not None:
+    if "static_run_id" in cols and static_id_list:
+        where = f"static_run_id IN ({','.join(['%s'] * len(static_id_list))})"
+        params = tuple(static_id_list)
+    elif "static_run_id" in cols and static_run_id is not None:
         where = "static_run_id=%s"
         params = (static_run_id,)
     elif "run_id" in cols and run_id is not None:
         where = "run_id=%s"
         params = (run_id,)
+    elif "run_id" in cols and session is not None and is_group_scope:
+        where = "run_id IN (SELECT run_id FROM runs WHERE session_stamp=%s)"
+        params = (session,)
     elif "run_id" in cols:
         return table, None, "SKIP (no run_id)"
     elif "session_stamp" in cols and session is not None:
@@ -166,6 +202,16 @@ def collect_static_run_counts(
         cutoff = datetime(2026, 1, 22)
         is_legacy = bool(created_at and created_at < cutoff)
         is_orphan = bool(derived_package and resolved_run_id is None and not is_legacy)
+        static_run_ids: list[int] = []
+        if resolved_session:
+            try:
+                cursor.execute(
+                    "SELECT id FROM static_analysis_runs WHERE session_stamp=%s",
+                    (resolved_session,),
+                )
+                static_run_ids = [int(row[0]) for row in cursor.fetchall() if row and row[0]]
+            except Exception:
+                static_run_ids = []
 
         tables = [
             "static_analysis_runs",
@@ -182,7 +228,13 @@ def collect_static_run_counts(
         counts: Dict[str, Tuple[Optional[int], str]] = {}
         for table in tables:
             table_name, count, status = _count_for_table(
-                cur, table, resolved_run_id, resolved_static_run_id, resolved_session
+                cur,
+                table,
+                resolved_run_id,
+                resolved_static_run_id,
+                resolved_session,
+                static_run_ids=static_run_ids,
+                is_group_scope=is_group_scope,
             )
             counts[table_name] = (count, status)
 

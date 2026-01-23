@@ -83,21 +83,22 @@ def write_permission_snapshot(
     _ensure_snapshot_schema()
 
     if static_run_id is None:
-        try:
-            row = core_q.run_sql(
-                "SELECT id FROM static_analysis_runs WHERE session_stamp=%s ORDER BY id DESC LIMIT 1",
-                (session_stamp,),
-                fetch="one",
-            )
-            if row and row[0]:
-                static_run_id = int(row[0])
-        except Exception:
-            static_run_id = None
-    else:
-        try:
-            static_run_id = int(static_run_id)
-        except Exception:
-            static_run_id = None
+        log.warning(
+            "Permission snapshot skipped: static_run_id is required for session=%s.",
+            session_stamp,
+            category="static_analysis",
+        )
+        return None
+    try:
+        static_run_id = int(static_run_id)
+    except Exception:
+        log.warning(
+            "Permission snapshot skipped: invalid static_run_id=%s for session=%s.",
+            static_run_id,
+            session_stamp,
+            category="static_analysis",
+        )
+        return None
 
     run_id: Optional[int] = None
     derived_package: Optional[str] = None

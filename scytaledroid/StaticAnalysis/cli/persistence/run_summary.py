@@ -584,11 +584,18 @@ def persist_run_summary(
             target_sdk=target_sdk,
         )
         if app_version_id is not None:
+            profile_token = first_text(
+                metadata_map.get("scan_profile") if isinstance(metadata_map, Mapping) else None,
+                metadata_map.get("run_profile") if isinstance(metadata_map, Mapping) else None,
+                baseline_payload.get("scan_profile") if isinstance(baseline_payload, Mapping) else None,
+                baseline_payload.get("profile") if isinstance(baseline_payload, Mapping) else None,
+                "Full",
+            )
             static_run_id = _create_static_run(
                 app_version_id=app_version_id,
                 session_stamp=session_stamp,
                 scope_label=scope_label,
-                profile="Full",
+                profile=profile_token,
                 findings_total=int(finding_totals.get("total", 0) or 0),
                 run_started_utc=None,
                 status="RUNNING",

@@ -802,6 +802,13 @@ class PermissionAuditAccumulator:
             meta_str = json.dumps(snapshot_payload)
             run_id = snapshot_payload.get("run_id") if isinstance(snapshot_payload, dict) else None
             static_run_id = snapshot_payload.get("static_run_id") if isinstance(snapshot_payload, dict) else None
+            session_stamp = (
+                snapshot_payload.get("session_stamp")
+                if isinstance(snapshot_payload, dict)
+                else None
+            )
+            if not session_stamp and isinstance(snapshot_payload, dict):
+                session_stamp = snapshot_payload.get("session")
             try:
                 run_id = int(run_id) if run_id is not None else None
             except Exception:
@@ -917,6 +924,7 @@ class PermissionAuditAccumulator:
             evidence_path = str(self.base_output_dir / self.snapshot_id)
             signal_write_failed = False
             app_failures = 0
+            run_id_cache: dict[str, int | None] = {}
             for app in self.apps:
                 sd = dict(app.score_detail or {})
                 score_raw = float(sd.get("score_raw", sd.get("score_3dp", 0.0)) or 0.0)
@@ -957,6 +965,26 @@ class PermissionAuditAccumulator:
                 app_placeholders.extend(["%s", "%s"])
 
                 if _has_column("permission_audit_apps", "run_id"):
+                    if run_id is None and session_stamp and app.package:
+                        cached = run_id_cache.get(app.package)
+                        if cached is None and app.package not in run_id_cache:
+                            try:
+                                row = core_q.run_sql(
+                                    """
+                                    SELECT run_id
+                                    FROM runs
+                                    WHERE session_stamp=%s AND package=%s
+                                    ORDER BY run_id DESC
+                                    LIMIT 1
+                                    """,
+                                    (session_stamp, app.package),
+                                    fetch="one",
+                                )
+                                cached = int(row[0]) if row and row[0] else None
+                            except Exception:
+                                cached = None
+                            run_id_cache[app.package] = cached
+                        run_id = cached
                     app_columns.append("run_id")
                     app_values.append(run_id if run_id is not None else None)
                     app_placeholders.append("%s")

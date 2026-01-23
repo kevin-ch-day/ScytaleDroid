@@ -464,17 +464,18 @@ def render_session_digest(session_stamp: str | None, *, header: str | None = Non
         "permission_audit_snapshots",
         "permission_audit_apps",
     )
-    missing = []
-    if audit.run_id is not None:
-        missing = [name for name in required if not audit.counts.get(name) or not audit.counts[name][0]]
-    if audit.run_id is None:
+    missing = [name for name in required if not audit.counts.get(name) or not audit.counts[name][0]]
+    if audit.is_group_scope:
+        if missing:
+            status_line = f"DB verification: ERROR (missing {', '.join(sorted(missing))} for session={resolved})"
+        else:
+            status_line = "DB verification: OK (group scope; run_id not required)"
+    elif audit.run_id is None:
         status_line = "DB verification: SKIPPED (run_id missing)"
     elif missing:
         status_line = f"DB verification: ERROR (missing {', '.join(sorted(missing))} for static_run_id={audit.static_run_id})"
     else:
-        status_line = (
-            f"DB verification: OK (canonical tables populated for static_run_id={audit.static_run_id})"
-        )
+        status_line = f"DB verification: OK (canonical tables populated for static_run_id={audit.static_run_id})"
     print(status_line)
 
 
