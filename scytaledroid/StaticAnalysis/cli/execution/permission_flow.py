@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import datetime, timezone
 
 from scytaledroid.Config import app_config
 from scytaledroid.Utils.DisplayUtils import status_messages
@@ -11,6 +12,7 @@ from ...modules.permissions import collect_permissions_and_sdk
 from ...modules.permissions.render_postcard import render as render_permission_postcard
 from ...modules.permissions.audit import PermissionAuditAccumulator
 from ..models import RunParameters, ScopeSelection
+from ..persistence.run_summary import create_static_run_ledger, update_static_run_status
 from ...session import make_session_stamp
 from .scan_flow import generate_report
 
@@ -40,6 +42,8 @@ def execute_permission_scan(
         snapshot_id=snapshot_id,
     )
 
+    last_report = None
+    last_category = None
     for group in scope_groups:
         artifacts = group.artifacts
         if not artifacts:
@@ -48,6 +52,8 @@ def execute_permission_scan(
         report, _, error, skipped = generate_report(artifact, base_dir, params)
         if skipped or error:
             continue
+        last_report = report
+        last_category = group.category
 
         permissions, defined, sdk = collect_permissions_and_sdk(str(artifact.path))
         profile = render_permission_postcard(
@@ -121,25 +127,79 @@ def execute_permission_scan(
                 run_id = int(row[0])
         except Exception:
             run_id = None
+        if run_id is None:
+            try:
+                from scytaledroid.Persistence import db_writer as _dw
+
+                manifest = getattr(last_report, "manifest", None) if last_report else None
+                run_id = _dw.create_run(
+                    package=package_name,
+                    app_label=getattr(manifest, "app_label", None) if manifest else None,
+                    version_code=getattr(manifest, "version_code", None) if manifest else None,
+                    version_name=getattr(manifest, "version_name", None) if manifest else None,
+                    target_sdk=getattr(manifest, "target_sdk", None) if manifest else None,
+                    session_stamp=session_stamp,
+                    threat_profile="Unknown",
+                    env_profile="consumer",
+                )
+                run_id = int(run_id) if run_id is not None else None
+            except Exception:
+                run_id = None
         try:
+            scope_label = params.scope_label or selection.label
             row = core_q.run_sql(
                 """
                 SELECT id
                 FROM static_analysis_runs
-                WHERE session_stamp=%s AND scope_label=%s
+                WHERE session_stamp=%s
+                  AND (scope_label=%s OR scope_label=%s)
                 ORDER BY id DESC
                 LIMIT 1
                 """,
-                (session_stamp, package_name),
+                (session_stamp, package_name, scope_label),
                 fetch="one",
             )
             if row and row[0]:
                 static_run_id = int(row[0])
         except Exception:
             static_run_id = None
+        if static_run_id is None:
+            try:
+                manifest = getattr(last_report, "manifest", None) if last_report else None
+                static_run_id = create_static_run_ledger(
+                    package_name=package_name,
+                    session_stamp=session_stamp,
+                    scope_label=params.scope_label or selection.label,
+                    category=last_category,
+                    profile=params.profile_label,
+                    display_name=getattr(manifest, "app_label", None) if manifest else None,
+                    version_name=getattr(manifest, "version_name", None) if manifest else None,
+                    version_code=getattr(manifest, "version_code", None) if manifest else None,
+                    min_sdk=getattr(manifest, "min_sdk", None) if manifest else None,
+                    target_sdk=getattr(manifest, "target_sdk", None) if manifest else None,
+                    run_started_utc=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    dry_run=not persist_detections,
+                )
+            except Exception:
+                static_run_id = None
     snapshot_payload["run_id"] = run_id
     snapshot_payload["static_run_id"] = static_run_id
+    linkage = {}
+    if len(accumulator.apps) != 1:
+        linkage = {"status": "partial", "reason": "multi_app_scope"}
+    elif run_id is None:
+        linkage = {"status": "partial", "reason": "run_id_missing"}
+    elif static_run_id is None:
+        linkage = {"status": "partial", "reason": "static_run_id_missing"}
+    if linkage:
+        snapshot_payload["linkage"] = linkage
     accumulator.persist_to_db(snapshot_payload)
+    if static_run_id and persist_detections:
+        update_static_run_status(
+            static_run_id=static_run_id,
+            status="COMPLETED",
+            ended_at_utc=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        )
 
 
 __all__ = ["execute_permission_scan"]

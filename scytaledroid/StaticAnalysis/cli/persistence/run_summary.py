@@ -100,12 +100,23 @@ def _ensure_app_version(
     try:
         app_id = None
         row = core_q.run_sql(
-            "SELECT id FROM apps WHERE package_name=%s",
+            "SELECT id, display_name FROM apps WHERE package_name=%s",
             (package_for_run,),
             fetch="one",
         )
         if row and row[0]:
             app_id = int(row[0])
+            existing_name = row[1] if len(row) > 1 else None
+            if (
+                isinstance(display_name, str)
+                and display_name.strip()
+                and display_name != package_for_run
+                and (existing_name is None or existing_name == "" or existing_name == package_for_run)
+            ):
+                core_q.run_sql(
+                    "UPDATE apps SET display_name=%s WHERE id=%s",
+                    (display_name, app_id),
+                )
         else:
             app_id = core_q.run_sql(
                 "INSERT INTO apps (package_name, display_name) VALUES (%s,%s)",
@@ -151,6 +162,7 @@ def _create_static_run(
     app_version_id: int,
     session_stamp: str,
     scope_label: str,
+    category: str | None,
     profile: str,
     findings_total: int,
     run_started_utc: str | None,
@@ -163,16 +175,18 @@ def _create_static_run(
                 app_version_id,
                 session_stamp,
                 scope_label,
+                category,
                 profile,
                 findings_total,
                 run_started_utc,
                 status
-            ) VALUES (%s,%s,%s,%s,%s,%s,%s)
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
             """,
             (
                 app_version_id,
                 session_stamp,
                 scope_label,
+                category,
                 profile,
                 findings_total,
                 run_started_utc,
@@ -181,12 +195,38 @@ def _create_static_run(
             return_lastrowid=True,
         )
         return int(run_id) if run_id else None
-    except Exception as exc:  # pragma: no cover - defensive
-        log.error(
-            f"Failed to create static_analysis_runs row for session={session_stamp}: {exc}",
-            category="db",
-        )
-        return None
+    except Exception:
+        try:
+            run_id = core_q.run_sql(
+                """
+                INSERT INTO static_analysis_runs (
+                    app_version_id,
+                    session_stamp,
+                    scope_label,
+                    profile,
+                    findings_total,
+                    run_started_utc,
+                    status
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s)
+                """,
+                (
+                    app_version_id,
+                    session_stamp,
+                    scope_label,
+                    profile,
+                    findings_total,
+                    run_started_utc,
+                    status,
+                ),
+                return_lastrowid=True,
+            )
+            return int(run_id) if run_id else None
+        except Exception as exc:  # pragma: no cover - defensive
+            log.error(
+                f"Failed to create static_analysis_runs row for session={session_stamp}: {exc}",
+                category="db",
+            )
+            return None
 
 
 def create_static_run_ledger(
@@ -194,6 +234,7 @@ def create_static_run_ledger(
     package_name: str,
     session_stamp: str,
     scope_label: str,
+    category: str | None = None,
     profile: str,
     display_name: str | None = None,
     version_name: str | None = None,
@@ -223,6 +264,7 @@ def create_static_run_ledger(
         app_version_id=app_version_id,
         session_stamp=session_stamp,
         scope_label=scope_label,
+        category=category,
         profile=profile,
         findings_total=0,
         run_started_utc=run_started_utc,

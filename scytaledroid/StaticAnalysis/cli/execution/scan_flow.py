@@ -19,6 +19,7 @@ from ...core import (
     analyze_apk,
 )
 from ...core.findings import SeverityLevel
+from ...modules import resolve_category
 from ...persistence import ReportStorageError, save_report
 from ..models import AppRunResult, ArtifactOutcome, RunOutcome, RunParameters, ScopeSelection
 from ..persistence.run_summary import create_static_run_ledger
@@ -89,6 +90,7 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
                 package_name=group.package_name,
                 session_stamp=params.session_stamp,
                 scope_label=params.scope_label,
+                category=group.category,
                 profile=params.profile_label,
                 display_name=str(display_name) if display_name else None,
                 version_name=str(version_name) if version_name else None,
@@ -344,6 +346,12 @@ def generate_report(artifact, base_dir: Path, params: RunParameters):
     metadata_payload["selected_tests"] = list(params.selected_tests)
     if params.session_stamp:
         metadata_payload["session_stamp"] = params.session_stamp
+    if not metadata_payload.get("category"):
+        package_name = getattr(artifact, "package_name", None)
+        if not isinstance(package_name, str) or not package_name.strip():
+            package_name = metadata_payload.get("package_name")
+        if isinstance(package_name, str) and package_name.strip():
+            metadata_payload["category"] = resolve_category(package_name, metadata_payload)
 
     try:
         report = analyze_apk(

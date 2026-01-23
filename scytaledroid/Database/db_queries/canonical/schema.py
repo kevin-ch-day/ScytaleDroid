@@ -42,6 +42,7 @@ _DDL_STATEMENTS: list[str] = [
       app_version_id   BIGINT UNSIGNED NOT NULL,
       session_stamp    VARCHAR(64)    DEFAULT NULL,
       scope_label      VARCHAR(191)   DEFAULT NULL,
+      category         VARCHAR(64)    DEFAULT NULL,
       sha256           CHAR(64)       DEFAULT NULL,
       analysis_version VARCHAR(32)    DEFAULT NULL,
       pipeline_version VARCHAR(32)    DEFAULT NULL,
@@ -72,6 +73,10 @@ _DDL_STATEMENTS: list[str] = [
     """,
     """
     ALTER TABLE static_analysis_runs
+      ADD COLUMN IF NOT EXISTS category VARCHAR(64) DEFAULT NULL;
+    """,
+    """
+    ALTER TABLE static_analysis_runs
       ADD COLUMN IF NOT EXISTS analysis_matrices JSON DEFAULT NULL;
     """,
     """
@@ -97,6 +102,10 @@ _DDL_STATEMENTS: list[str] = [
     """
     CREATE INDEX IF NOT EXISTS ix_static_runs_session_version
     ON static_analysis_runs (session_stamp, app_version_id);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_static_runs_category
+    ON static_analysis_runs (category);
     """,
     """
     CREATE TABLE IF NOT EXISTS static_analysis_findings (
@@ -373,6 +382,22 @@ _DDL_STATEMENTS: list[str] = [
           )
         )
     JOIN static_string_samples sm ON sm.summary_id = s.id;
+    """,
+    """
+    CREATE OR REPLACE VIEW v_static_run_category_summary AS
+    SELECT
+      COALESCE(r.category, 'Uncategorized') AS category,
+      COUNT(*) AS run_count,
+      MAX(r.created_at) AS latest_run,
+      AVG(spr.risk_score) AS avg_risk_score,
+      COUNT(spr.id) AS risk_rows
+    FROM static_analysis_runs r
+    JOIN app_versions av ON r.app_version_id = av.id
+    JOIN apps a ON av.app_id = a.id
+    LEFT JOIN static_permission_risk spr
+      ON spr.session_stamp = r.session_stamp
+     AND spr.package_name = a.package_name
+    GROUP BY COALESCE(r.category, 'Uncategorized');
     """,
     # Allowlist
     """

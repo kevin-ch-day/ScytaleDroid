@@ -364,6 +364,12 @@ def _persist_analysis_snapshot(app_version_id: int, payload: Mapping[str, object
         payload.get("run_scope_label"),
         payload.get("scope_label"),
     )
+    category = first_text(
+        metadata.get("run_category"),
+        metadata.get("category"),
+        payload.get("run_category"),
+        payload.get("category"),
+    )
     detector_metrics_raw = payload.get("detector_metrics")
     if not isinstance(detector_metrics_raw, Mapping):
         detector_metrics_raw = metadata.get("detector_metrics") if isinstance(metadata, Mapping) else {}
@@ -410,6 +416,7 @@ def _persist_analysis_snapshot(app_version_id: int, payload: Mapping[str, object
         profile=profile,
         session_stamp=session_stamp,
         scope_label=scope_label,
+        category=category,
         findings_total=len(findings),
         detector_metrics=detector_metrics,
         repro_bundle=repro_bundle,
@@ -446,6 +453,7 @@ def _create_run_row(
     profile: object,
     session_stamp: object,
     scope_label: object,
+    category: object,
     findings_total: int,
     detector_metrics: Mapping[str, object] | None,
     repro_bundle: object,
@@ -458,6 +466,7 @@ def _create_run_row(
             "app_version_id": app_version_id,
             "session_stamp": _normalise_optional_str(session_stamp),
             "scope_label": _normalise_optional_str(scope_label),
+            "category": _normalise_optional_str(category),
             "sha256": _normalise_optional_str(sha256),
             "analysis_version": _normalise_optional_str(analysis_version),
             "pipeline_version": _normalise_optional_str(pipeline_version),

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 import hashlib
+import re
 from threading import Lock
 
 
@@ -35,23 +36,28 @@ def make_session_stamp(now: datetime | None = None) -> str:
         return stamp
 
 
-SESSION_STAMP_MAX_LEN = 64
+SESSION_STAMP_MAX_LEN = 128
 
 
 def normalize_session_stamp(label: str, *, max_len: int = SESSION_STAMP_MAX_LEN) -> str:
-    """Normalize a session label to fit cross-table constraints while remaining unique."""
+    """Normalize a session label for safe cross-table use while remaining unique."""
     if not label:
         return label
-    if len(label) <= max_len:
-        return label
-    tail = label[-15:]
+    cleaned = re.sub(r"[^A-Za-z0-9._:-]+", "-", label).strip("-")
+    if not cleaned:
+        cleaned = label
+    if len(cleaned) <= max_len and cleaned != label:
+        return cleaned
+    if len(cleaned) <= max_len:
+        return cleaned
+    tail = cleaned[-15:]
     if len(tail) == 15 and tail[:8].isdigit() and tail[8] == "-" and tail[9:].isdigit():
         prefix_len = max_len - (len(tail) + 1)
-        prefix = label[: max(prefix_len, 0)]
+        prefix = cleaned[: max(prefix_len, 0)]
         return f"{prefix}-{tail}" if prefix else tail
-    digest = hashlib.sha1(label.encode("utf-8")).hexdigest()[:8]
+    digest = hashlib.sha1(cleaned.encode("utf-8")).hexdigest()[:8]
     prefix_len = max_len - (len(digest) + 1)
-    prefix = label[: max(prefix_len, 0)]
+    prefix = cleaned[: max(prefix_len, 0)]
     return f"{prefix}-{digest}" if prefix else digest
 
 

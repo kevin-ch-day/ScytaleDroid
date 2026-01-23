@@ -108,19 +108,6 @@ def perm_catalog_menu() -> None:
             _validate_and_report(catalog.items)
             continue
 
-        # Counts by group
-        if choice == "6":
-            catalog = load_cached_or_refresh(cache_path, source=source)
-            if not catalog.items:
-                continue
-            from collections import Counter
-            c = Counter((getattr(p, "group", None) or "—") for p in catalog.items)
-            rows = [[grp, str(cnt)] for grp, cnt in sorted(c.items(), key=lambda kv: (kv[0] == "—", kv[0]))]
-            print()
-            menu_utils.print_section("Counts by group")
-            table_utils.render_table(["Group", "Count"], rows)
-            continue
-
         # Harvest (online) and save JSON only
         if choice == "2":
             catalog = load_cached_or_refresh(cache_path, source="online")

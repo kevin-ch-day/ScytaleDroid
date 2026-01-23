@@ -121,6 +121,19 @@ def select_category_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
             print(status_messages.status(message, level="info"))
 
     scoped = tuple(collapsed)
+    if scoped:
+        print()
+        menu_utils.print_header("Category selection", f"{category_name} apps selected (latest capture)")
+        rows: list[list[str]] = []
+        for group in scoped:
+            base_artifact = group.base_artifact or next(iter(group.artifacts), None)
+            metadata = getattr(base_artifact, "metadata", {}) if base_artifact else {}
+            app_label = metadata.get("app_label") if isinstance(metadata, dict) else None
+            display_name = metadata.get("display_name") if isinstance(metadata, dict) else None
+            label = app_label or display_name or group.package_name
+            session_stamp = group.session_stamp or "undated"
+            rows.append([group.package_name, str(label), session_stamp, str(len(group.artifacts))])
+        table_utils.render_table(["Package", "App label", "Session", "Artifacts"], rows)
     return ScopeSelection("category", category_name, scoped)
 
 
