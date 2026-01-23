@@ -7,14 +7,16 @@ CREATE TABLE IF NOT EXISTS `android_detected_permissions` (
   `package_name`   VARCHAR(191)    DEFAULT NULL,
   `artifact_label` VARCHAR(64)     DEFAULT NULL,
   `perm_name`      VARCHAR(191)    NOT NULL,
-  `namespace`      VARCHAR(191)    DEFAULT NULL,
+  `perm_full`      VARCHAR(191)    NOT NULL DEFAULT '',
+  `perm_key`       VARCHAR(191)    NOT NULL DEFAULT '',
+  `namespace`      VARCHAR(191)    NOT NULL DEFAULT '',
   `classification` VARCHAR(16)     DEFAULT NULL,
   `protection`     VARCHAR(32)     DEFAULT NULL,
   `source`         VARCHAR(32)     DEFAULT NULL,
   `observed_at`    TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`     TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`detected_id`),
-  UNIQUE KEY `ux_detected_perm_apk` (`apk_id`, `perm_name`),
+  UNIQUE KEY `ux_detected_perm_apk_ns` (`apk_id`, `namespace`, `perm_key`),
   KEY `ix_detected_perm_pkg` (`package_name`),
   KEY `ix_detected_perm_class` (`classification`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -22,11 +24,13 @@ CREATE TABLE IF NOT EXISTS `android_detected_permissions` (
 
 UPSERT_DETECTED = """
 INSERT INTO android_detected_permissions
-  (apk_id, package_name, artifact_label, perm_name, namespace, classification, protection, source)
+  (apk_id, package_name, artifact_label, perm_name, perm_full, perm_key, namespace, classification, protection, source)
 VALUES
-  (%(apk_id)s, %(package_name)s, %(artifact_label)s, %(perm_name)s, %(namespace)s, %(classification)s, %(protection)s, %(source)s)
+  (%(apk_id)s, %(package_name)s, %(artifact_label)s, %(perm_name)s, %(perm_full)s, %(perm_key)s, %(namespace)s, %(classification)s, %(protection)s, %(source)s)
 ON DUPLICATE KEY UPDATE
   namespace = VALUES(namespace),
+  perm_full = VALUES(perm_full),
+  perm_key = VALUES(perm_key),
   classification = VALUES(classification),
   protection = VALUES(protection),
   source = VALUES(source),

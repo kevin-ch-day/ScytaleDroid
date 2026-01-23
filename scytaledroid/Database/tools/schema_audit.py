@@ -3,7 +3,7 @@
 Run standalone or from Database Utilities to inspect and optionally fix tables.
 
 Goals:
-  - android_detected_permissions uses apk_id + perm_name uniqueness
+  - android_detected_permissions uses apk_id + namespace + perm_key uniqueness
   - Backfill apk_id from android_apk_repository via sha256
   - Drop legacy columns (version_name, version_code, sha256) when possible
   - harvest_artifact_paths does not contain stray source_path column
@@ -39,7 +39,10 @@ def audit_detected_permissions(apply_fixes: bool = False) -> Tuple[List[str], Li
     has_apk_id = "apk_id" in cols
     has_sha = "sha256" in cols
     has_ver = ("version_name" in cols) or ("version_code" in cols)
-    has_apk_unique = _index_exists("android_detected_permissions", "ux_detected_perm_apk")
+    has_apk_unique = _index_exists("android_detected_permissions", "ux_detected_perm_apk_ns")
+    has_perm_full = "perm_full" in cols
+    has_perm_key = "perm_key" in cols
+    has_namespace = "namespace" in cols
     # Foreign key check (best-effort)
     def _fk_exists() -> bool:
         row = core_q.run_sql(
@@ -77,12 +80,15 @@ def audit_detected_permissions(apply_fixes: bool = False) -> Tuple[List[str], Li
         fixes_applied.append("backfilled apk_id from repository (binary match)")
 
     if not has_apk_unique:
-        issues.append("detected_permissions missing unique index (apk_id, perm_name)")
-        if apply_fixes and has_apk_id:
+        issues.append("detected_permissions missing unique index (apk_id, namespace, perm_key)")
+        if apply_fixes and has_apk_id and has_namespace and has_perm_key:
             core_q.run_sql(
-                "ALTER TABLE android_detected_permissions ADD UNIQUE KEY ux_detected_perm_apk (apk_id, perm_name)"
+                "ALTER TABLE android_detected_permissions ADD UNIQUE KEY ux_detected_perm_apk_ns (apk_id, namespace, perm_key)"
             )
-            fixes_applied.append("added unique on (apk_id, perm_name)")
+            fixes_applied.append("added unique on (apk_id, namespace, perm_key)")
+
+    if not (has_perm_full and has_perm_key and has_namespace):
+        issues.append("detected_permissions missing perm_full/perm_key/namespace columns")
 
     if has_sha_unique:
         issues.append("legacy unique index ux_detected_perm_sha present")
@@ -186,8 +192,10 @@ def audit_unknown_permissions(apply_fixes: bool = False) -> Tuple[List[str], Lis
     has_observed = ("observed_in_pkg" in cols) or ("observed_in_sha256" in cols)
     has_occ = "occurrences" in cols
     has_unique = _unknown_unique_exists()
+    has_seen_count = "seen_count" in cols
+    has_last_seen_pkg = "last_seen_package" in cols
 
-    if has_observed or has_occ or not has_unique:
+    if has_observed or has_occ or not has_unique or not (has_seen_count and has_last_seen_pkg):
         issues.append("unknown_permissions schema not aligned (drop observed/occurrences, unique perm_name)")
         if apply_fixes:
             # Drop indexes that reference legacy columns before removing them
@@ -217,6 +225,17 @@ def audit_unknown_permissions(apply_fixes: bool = False) -> Tuple[List[str], Lis
                     "ALTER TABLE android_unknown_permissions ADD UNIQUE KEY ux_android_unknown_perm (perm_name)"
                 )
                 fixes_applied.append("added unique on perm_name")
+
+            if "seen_count" not in cols:
+                core_q.run_sql(
+                    "ALTER TABLE android_unknown_permissions ADD COLUMN seen_count BIGINT UNSIGNED NOT NULL DEFAULT 0"
+                )
+                fixes_applied.append("added seen_count")
+            if "last_seen_package" not in cols:
+                core_q.run_sql(
+                    "ALTER TABLE android_unknown_permissions ADD COLUMN last_seen_package VARCHAR(191) NULL"
+                )
+                fixes_applied.append("added last_seen_package")
 
     return issues, fixes_applied
 

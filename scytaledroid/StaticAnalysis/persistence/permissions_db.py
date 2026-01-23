@@ -94,12 +94,16 @@ def persist_declared_permissions(
         in_framework_catalog = bool(short_key and short_key in framework_map)
         is_framework = bool(is_android_prefix and in_framework_catalog)
         classification = "framework" if is_framework else ("vendor" if "." in name and not is_android_prefix else "unknown")
-        ns = 'android.permission' if is_android_prefix else _ns_from_perm(name)
+        ns = 'android.permission' if is_android_prefix else (_ns_from_perm(name) or "")
+        perm_full = name
+        perm_key = short_key if is_android_prefix else name
         detected_payload = {
             "package_name": package_name,
             "artifact_label": artifact_label,
             # Store short (uppercase) for framework; vendor keeps full name
             "perm_name": short_key if is_framework else name,
+            "perm_full": perm_full,
+            "perm_key": perm_key or "",
             "namespace": ns,
             "classification": classification,
             "protection": prot,
@@ -143,6 +147,7 @@ def persist_declared_permissions(
                         # For android.permission.* entries that aren't in catalog, persist the short token
                         "perm_name": (short_key or name),
                         "notes": None,
+                        "last_seen_package": package_name,
                     }
                 )
             except Exception as exc:

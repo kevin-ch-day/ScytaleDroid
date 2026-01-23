@@ -45,6 +45,7 @@ CREATE_VW_DETECTED_PERMISSIONS_FQN = """
 CREATE OR REPLACE VIEW v_detected_permissions_fqn AS
 SELECT d.*,
        CASE
+         WHEN d.perm_full IS NOT NULL AND d.perm_full <> '' THEN d.perm_full
          WHEN d.namespace = 'android.permission' THEN CONCAT(d.namespace, '.', d.perm_name)
          ELSE d.perm_name
        END AS detected_fqn

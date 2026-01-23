@@ -10,7 +10,12 @@ import ipaddress
 import math
 import re
 from collections import Counter, defaultdict
+from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass
+import io
+import os
+import sys
+import tempfile
 from typing import Dict, Iterable, List, Mapping, MutableMapping
 import os
 from urllib.parse import urlsplit
@@ -47,6 +52,7 @@ from ..modules.string_analysis.constants import (
 )
 from ..modules.string_analysis.parsing.host_normalizer import registrable_domain
 from ..modules.string_analysis.parsing.punctuation import strip_wrap_punct
+from scytaledroid.Utils.LoggingUtils import logging_engine, logging_utils as log
 
 
 @dataclass(frozen=True)
@@ -354,6 +360,60 @@ def _env_flag(name: str, default: bool) -> bool:
     return value in {"1", "true", "yes", "on"}
 
 
+def _extract_bounds_warnings(text: str) -> list[str]:
+    """Extract resource parsing warnings emitted by third-party parsers."""
+
+    if not text:
+        return []
+    lines: list[str] = []
+    for raw in text.replace("\r", "\n").split("\n"):
+        candidate = raw.strip()
+        if not candidate:
+            continue
+        lowered = candidate.lower()
+        if "out of bound" in lowered or "complex entry" in lowered:
+            lines.append(candidate)
+    return lines
+
+
+def _summarize_bounds_warnings(lines: list[str]) -> dict[str, object]:
+    counts: list[int] = []
+    for line in lines:
+        match = re.search(r"Count:\s*(\d+)", line)
+        if match:
+            try:
+                counts.append(int(match.group(1)))
+            except ValueError:
+                continue
+    return {
+        "count_values": counts,
+        "lines": lines,
+    }
+
+
+def _run_with_fd_capture(callable_obj):
+    stdout_fd = os.dup(1)
+    stderr_fd = os.dup(2)
+    temp = tempfile.TemporaryFile(mode="w+b")
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os.dup2(temp.fileno(), 1)
+        os.dup2(temp.fileno(), 2)
+        result = callable_obj()
+        sys.stdout.flush()
+        sys.stderr.flush()
+    finally:
+        os.dup2(stdout_fd, 1)
+        os.dup2(stderr_fd, 2)
+        os.close(stdout_fd)
+        os.close(stderr_fd)
+    temp.seek(0)
+    raw = temp.read()
+    temp.close()
+    return result, raw.decode("utf-8", errors="replace")
+
+
 def analyse_strings(
     apk_path: str,
     *,
@@ -370,10 +430,35 @@ def analyse_strings(
     except Exception:
         return {"counts": {bucket: 0 for bucket in BUCKET_ORDER}, "samples": {}, "aggregates": {}}
 
+    bounds_warnings: list[str] = []
     try:
-        index = build_string_index(apk, include_resources=True)
+        buffer = io.StringIO()
+        with redirect_stdout(buffer), redirect_stderr(buffer):
+            index, fd_output = _run_with_fd_capture(
+                lambda: build_string_index(apk, include_resources=True)
+            )
+        captured = buffer.getvalue() + fd_output
+        bounds_warnings = _extract_bounds_warnings(captured)
+        if bounds_warnings:
+            summary = _summarize_bounds_warnings(bounds_warnings)
+            logging_engine.get_error_logger().warning(
+                "Resource table parsing emitted bounds warnings",
+                extra=logging_engine.ensure_trace(
+                    {
+                        "event": "strings.resource_bounds_warning",
+                        "apk_path": apk_path,
+                        "warning_lines": summary["lines"],
+                        "count_values": summary["count_values"],
+                    }
+                ),
+            )
     except Exception:
-        return {"counts": {bucket: 0 for bucket in BUCKET_ORDER}, "samples": {}, "aggregates": {}}
+        return {
+            "counts": {bucket: 0 for bucket in BUCKET_ORDER},
+            "samples": {},
+            "aggregates": {},
+            "warnings": bounds_warnings,
+        }
 
     entries = sorted(
         index.strings,
@@ -685,6 +770,7 @@ def analyse_strings(
         "extra_counts": dict(extra_counts),
         "aggregates": aggregates,
         "structured": structured,
+        "warnings": bounds_warnings,
         "options": {
             "max_samples": max_samples,
             "cleartext_only": cleartext_only,
