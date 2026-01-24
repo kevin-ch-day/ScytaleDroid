@@ -31,10 +31,10 @@ def apply_command_overrides(params: RunParameters, command: Command) -> RunParam
 def confirm_reset() -> bool:
     """Prompt the user to confirm resetting static-analysis tables."""
 
-    return prompt_utils.prompt_yes_no(
-        "Reset static-analysis tables before running?",
-        default=False,
-    )
+    print()
+    menu_utils.print_section("Reset static analysis")
+    print("This will truncate static analysis tables for the next run.")
+    return prompt_utils.prompt_yes_no("Proceed?", default=False)
 
 
 def render_reset_outcome(outcome: Any) -> None:
@@ -131,5 +131,5 @@ def ask_run_controls() -> str:
     # with defaults to reduce friction for common workflows. Keep the message
     # minimal so the CLI no longer shows phantom menu choices.
     print()
-    print(status_messages.status("Running with defaults…", level="info"))
+    print(status_messages.status("Running with selected options…", level="info"))
     return "run"

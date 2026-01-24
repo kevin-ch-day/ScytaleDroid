@@ -1,0 +1,137 @@
+{
+  "exported_components": {
+    "activities": [
+      "androidx.compose.ui.tooling.PreviewActivity",
+      "com.google.android.apps.safetyhub.LauncherActivity",
+      "com.google.android.apps.safetyhub.crisis.settings.CrisisSettings",
+      "com.google.android.apps.safetyhub.emergencycontacts.settings.EmergencyContactSettings",
+      "com.google.android.apps.safetyhub.emergencydialer.ui.EmergencyDialerActivity",
+      "com.google.android.apps.safetyhub.emergencysos.settings.EmergencySosSettings",
+      "com.google.android.apps.safetyhub.emergencysos.settings.EmergencySosSettingsTipsEntry",
+      "com.google.android.apps.safetyhub.home.AppActionsHomePageEntry",
+      "com.google.android.apps.safetyhub.home.HomePageAppInfoEntry",
+      "com.google.android.apps.safetyhub.home.HomePageTipsEntry",
+      "com.google.android.apps.safetyhub.lockscreen.LockScreenActivity",
+      "com.google.android.apps.safetyhub.medicalinfo.ui.MedicalInfoSettings",
+      "com.google.android.apps.safetyhub.platformsettings.EmergencyInfoAboutPhone",
+      "com.google.android.apps.safetyhub.platformsettings.EmergencyInfoMeCard",
+      "com.google.android.apps.safetyhub.settings.emergencyinfoaccess.EmergencyInfoAccessSetting",
+      "com.google.android.apps.safetyhub.setupflow.suw.SafetyGatewayActivity",
+      "com.google.android.libraries.social.licenses.LicenseMenuActivity",
+      "com.google.apps.tiktok.nav.gateway.AnimatedGatewayActivity",
+      "com.google.apps.tiktok.nav.gateway.GatewayActivity"
+    ],
+    "providers": [
+      "com.google.android.apps.safetyhub.platformsettings.EmergencyInfoSuggestionStateProvider",
+      "com.google.android.apps.safetyhub.platformsettings.search.EmergencySearchIndexablesProvider"
+    ],
+    "receivers": [
+      "androidx.work.impl.diagnostics.DiagnosticsReceiver",
+      "com.google.android.apps.safetyhub.crisis.notifications.impl.CrisisNotificationBroadcastReceiver_Receiver",
+      "com.google.android.apps.safetyhub.emergencysharing.receiver.IncidentTimezoneChangedBroadcastReceiver_Receiver",
+      "com.google.android.apps.safetyhub.emergencysharing.receiver.LsrBroadcastReceiver_Receiver",
+      "com.google.android.apps.safetyhub.localechange.LocaleChangedBroadcastReceiver_Receiver",
+      "com.google.android.apps.safetyhub.startup.StartupBroadcastReceiver_Receiver",
+      "com.google.android.libraries.appdoctor.AppDoctorReceiver",
+      "com.google.android.libraries.notifications.entrypoints.blockstatechanged.BlockStateChangedReceiver",
+      "com.google.android.libraries.notifications.platform.entrypoints.accountchanged.AccountChangedReceiver",
+      "com.google.android.libraries.notifications.platform.entrypoints.localechanged.LocaleChangedReceiver",
+      "com.google.android.libraries.notifications.platform.entrypoints.restart.RestartReceiver",
+      "com.google.android.libraries.notifications.platform.entrypoints.timezonechanged.TimezoneChangedReceiver",
+      "com.google.android.libraries.notifications.platform.entrypoints.update.UpdateReceiver",
+      "com.google.android.libraries.phenotype.client.stable.AccountRemovedBroadcastReceiver",
+      "com.google.android.libraries.phenotype.client.stable.PhenotypeUpdateBackgroundBroadcastReceiver",
+      "com.google.apps.tiktok.account.data.device.DeviceAccountsChangedReceiver_Receiver",
+      "com.google.apps.tiktok.experiments.phenotype.ConfigurationUpdatedReceiver_Receiver",
+      "com.google.firebase.iid.FirebaseInstanceIdReceiver"
+    ],
+    "services": [
+      "androidx.work.impl.background.systemjob.SystemJobService",
+      "com.google.android.apps.safetyhub.els.SafetyHubProvideAdditionalEmergencyInformationService",
+      "com.google.android.apps.safetyhub.emergencycontacts.dataservice.impl.Cp2PendingUpdateObserver",
+      "com.google.android.apps.safetyhub.setupflow.safetysuw.tasks.SafetyOnboardingTaskManagerService",
+      "com.google.android.apps.safetyhub.wearappbridge.listener.service.ExportedEndpointService"
+    ],
+    "total": 44
+  },
+  "generated_at": "2026-01-24T07:19:59.045634Z",
+  "hashes": {
+    "md5": "bcff1478399d7a227241628cc5d78c9a",
+    "sha1": "774f798bd61aff435d24890f1451d3300556631d",
+    "sha256": "f70dfe47f9fb7669d15e728d3c604445f86b957c9a7a27d434bc2c8741cc2af7"
+  },
+  "network_targets": {
+    "cleartext_domains": [],
+    "domains": []
+  },
+  "package_name": "com.google.android.apps.safetyhub",
+  "permissions": {
+    "dangerous": [
+      "android.permission.ACCESS_BACKGROUND_LOCATION",
+      "android.permission.ACCESS_FINE_LOCATION",
+      "android.permission.ANSWER_PHONE_CALLS",
+      "android.permission.CALL_PHONE",
+      "android.permission.CAMERA",
+      "android.permission.POST_NOTIFICATIONS",
+      "android.permission.READ_CONTACTS",
+      "android.permission.READ_PHONE_STATE",
+      "android.permission.RECORD_AUDIO"
+    ],
+    "declared": [
+      "android.permission.ACCESS_BACKGROUND_LOCATION",
+      "android.permission.ACCESS_FINE_LOCATION",
+      "android.permission.ACCESS_NETWORK_STATE",
+      "android.permission.ACCESS_NOTIFICATION_POLICY",
+      "android.permission.ANSWER_PHONE_CALLS",
+      "android.permission.CALL_PHONE",
+      "android.permission.CALL_PRIVILEGED",
+      "android.permission.CAMERA",
+      "android.permission.CAPTURE_AUDIO_OUTPUT",
+      "android.permission.FOREGROUND_SERVICE",
+      "android.permission.FOREGROUND_SERVICE_CAMERA",
+      "android.permission.FOREGROUND_SERVICE_LOCATION",
+      "android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED",
+      "android.permission.GET_PACKAGE_SIZE",
+      "android.permission.INTERNET",
+      "android.permission.MANAGE_USERS",
+      "android.permission.MODIFY_AUDIO_SETTINGS",
+      "android.permission.MODIFY_PHONE_STATE",
+      "android.permission.POST_NOTIFICATIONS",
+      "android.permission.READ_CONTACTS",
+      "android.permission.READ_PHONE_STATE",
+      "android.permission.READ_PRIVILEGED_PHONE_STATE",
+      "android.permission.RECEIVE_BOOT_COMPLETED",
+      "android.permission.RECORD_AUDIO",
+      "android.permission.SCHEDULE_EXACT_ALARM",
+      "android.permission.START_ACTIVITIES_FROM_BACKGROUND",
+      "android.permission.USE_BIOMETRIC",
+      "android.permission.USE_FULL_SCREEN_INTENT",
+      "android.permission.VIBRATE",
+      "android.permission.WAKE_LOCK",
+      "com.google.android.c2dm.permission.RECEIVE",
+      "com.google.android.providers.gsf.permission.READ_GSERVICES",
+      "com.google.android.setupwizard.SETUP_COMPAT_SERVICE"
+    ],
+    "high_value": [
+      "android.permission.ACCESS_FINE_LOCATION",
+      "android.permission.CAMERA",
+      "android.permission.READ_CONTACTS",
+      "android.permission.READ_PHONE_STATE",
+      "android.permission.RECORD_AUDIO"
+    ]
+  },
+  "risk_flags": {
+    "allow_backup": true,
+    "debuggable": null,
+    "network_security_config": null,
+    "request_legacy_external_storage": null,
+    "uses_cleartext_traffic": false,
+    "webview": null
+  },
+  "suggested_probes": [
+    "exported_components_probe",
+    "high_value_permission_probe"
+  ],
+  "version_code": "100747261",
+  "version_name": "2025.11.27.842255435.2-release_gms"
+}

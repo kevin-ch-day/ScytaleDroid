@@ -678,10 +678,17 @@ def persist_run_summary(
                 baseline_payload.get("profile") if isinstance(baseline_payload, Mapping) else None,
                 "Full",
             )
+            category_token = first_text(
+                metadata_map.get("category") if isinstance(metadata_map, Mapping) else None,
+                metadata_map.get("category_name") if isinstance(metadata_map, Mapping) else None,
+                baseline_payload.get("category") if isinstance(baseline_payload, Mapping) else None,
+                baseline_payload.get("category_name") if isinstance(baseline_payload, Mapping) else None,
+            )
             static_run_id = _create_static_run(
                 app_version_id=app_version_id,
                 session_stamp=session_stamp,
                 scope_label=scope_label,
+                category=category_token,
                 profile=profile_token,
                 findings_total=int(finding_totals.get("total", 0) or 0),
                 run_started_utc=None,

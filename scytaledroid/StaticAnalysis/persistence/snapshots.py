@@ -84,8 +84,7 @@ def write_permission_snapshot(
 
     if static_run_id is None:
         log.warning(
-            "Permission snapshot skipped: static_run_id is required for session=%s.",
-            session_stamp,
+            f"Permission snapshot skipped: static_run_id is required for session={session_stamp}.",
             category="static_analysis",
         )
         return None
@@ -93,9 +92,7 @@ def write_permission_snapshot(
         static_run_id = int(static_run_id)
     except Exception:
         log.warning(
-            "Permission snapshot skipped: invalid static_run_id=%s for session=%s.",
-            static_run_id,
-            session_stamp,
+            f"Permission snapshot skipped: invalid static_run_id={static_run_id} for session={session_stamp}.",
             category="static_analysis",
         )
         return None
@@ -173,9 +170,7 @@ def write_permission_snapshot(
         )
     except Exception:
         log.error(
-            "Permission snapshot header skipped (session=%s)\n%s",
-            session_stamp,
-            traceback.format_exc(),
+            f"Permission snapshot header skipped (session={session_stamp})\n{traceback.format_exc()}",
             category="static_analysis",
         )
         return None
@@ -226,9 +221,7 @@ def write_permission_snapshot(
             )
         except Exception:
             log.error(
-                "Permission snapshot header fallback failed (session=%s)\n%s",
-                session_stamp,
-                traceback.format_exc(),
+                f"Permission snapshot header fallback failed (session={session_stamp})\n{traceback.format_exc()}",
                 category="static_analysis",
             )
             return None
@@ -239,8 +232,7 @@ def write_permission_snapshot(
         )
         if not row:
             log.warning(
-                "Permission snapshot header was not created for session %s",
-                session_stamp,
+                f"Permission snapshot header was not created for session {session_stamp}",
                 category="static_analysis",
             )
             return None

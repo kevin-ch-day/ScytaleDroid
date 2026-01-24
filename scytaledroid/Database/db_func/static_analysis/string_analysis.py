@@ -319,8 +319,7 @@ def upsert_summary(summary: SummaryRow) -> int | None:
                 category="db",
             )
             log.debug(
-                "static_string_summary payload: %s",
-                log_payload,
+                f"static_string_summary payload: {log_payload}",
                 category="db",
             )
         except Exception:

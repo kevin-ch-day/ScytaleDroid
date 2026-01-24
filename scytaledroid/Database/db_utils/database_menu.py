@@ -38,37 +38,30 @@ def database_menu() -> None:
         MenuOption(
             "1",
             "Check connection & show config",
-            "Verify connectivity and display active parameters.",
         ),
         MenuOption(
             "2",
             "Schema snapshot / browser",
-            "Explore schema groups with indexes and sample rows.",
         ),
         MenuOption(
             "3",
             "Run database queries",
-            "Quick checks to validate static-analysis persistence.",
         ),
         MenuOption(
             "4",
             "Run health checks",
-            "Quick verification across ingestion + inventory.",
         ),
         MenuOption(
             "5",
             "Cleanup orphan inventory snapshots",
-            "Delete snapshot headers that have zero inventory rows.",
         ),
         MenuOption(
             "6",
             "Reset static analysis data",
-            "Truncate derived static-analysis tables (destructive).",
         ),
         MenuOption(
             "7",
             "DB status (backend/schema)",
-            "Quick view of backend, schema_version, and config source.",
         ),
     ]
 
@@ -86,6 +79,7 @@ def database_menu() -> None:
             exit_label="Back",
             padding=True,
             show_exit=True,
+            show_descriptions=False,
         )
         menu_utils.render_menu(spec)
 

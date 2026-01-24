@@ -74,7 +74,7 @@ def _preview_rows(packages: List[Dict[str, object]], *, role: str, limit: int) -
         rows.append(
             [
                 str(entry.get("package_name") or ""),
-                str(entry.get("app_label") or entry.get("app_name") or ""),
+                str(entry.get("app_label") or ""),
                 str(entry.get("version_name") or entry.get("version_code") or ""),
                 str(entry.get("profile_name") or "Unclassified"),
                 str(entry.get("primary_path") or ""),

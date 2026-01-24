@@ -7,6 +7,7 @@ verified only; migrations are handled by the canonical schema tools.
 from __future__ import annotations
 
 import json
+import math
 from typing import Any, Mapping, Optional, Sequence, Union
 
 from functools import lru_cache
@@ -131,6 +132,12 @@ def write_metrics(
                 category="db",
             )
         for key, (num, text) in entries.items():
+            if num is not None and not math.isfinite(float(num)):
+                log.warning(
+                    f"Skipping metric with non-finite value (run_id={run_id}, key={key}, value={num})",
+                    category="db",
+                )
+                continue
             if has_static:
                 core_q.run_sql(
                     (
@@ -172,6 +179,18 @@ def write_buckets(
                 category="db",
             )
         for name, (points, cap) in buckets.items():
+            if not math.isfinite(points):
+                log.warning(
+                    f"Skipping bucket with non-finite points (run_id={run_id}, bucket={name}, points={points})",
+                    category="db",
+                )
+                continue
+            if cap is not None and not math.isfinite(cap):
+                log.warning(
+                    f"Skipping bucket with non-finite cap (run_id={run_id}, bucket={name}, cap={cap})",
+                    category="db",
+                )
+                continue
             if has_static:
                 core_q.run_sql(
                     (
@@ -234,12 +253,22 @@ def write_findings(run_id: int, rows: Sequence[FindingRow]) -> bool:
                     severity, masvs, cvss, kind, evidence_payload = row[:5]
                     module_id = None
             evidence = _serialise_evidence(evidence_payload)
+            if isinstance(evidence, str) and len(evidence) > 512:
+                log.warning(
+                    f"Truncating evidence payload for run_id={run_id} (len={len(evidence)})",
+                    category="db",
+                )
+                evidence = evidence[:509] + "..."
             core_q.run_sql(
                 "INSERT INTO findings (run_id, severity, masvs, cvss, kind, evidence, module_id) VALUES (%s,%s,%s,%s,%s,%s,%s)",
                 (run_id, severity, masvs, cvss, kind, evidence, module_id),
             )
         return True
-    except Exception:
+    except Exception as exc:
+        log.error(
+            f"Failed to persist findings for run_id={run_id}: {exc}",
+            category="db",
+        )
         return False
 
 
@@ -262,7 +291,11 @@ def write_contributors(run_id: int, rows: Sequence[tuple[str, float, str, int]])
                 (run_id, feature, points, explanation, rank),
             )
         return True
-    except Exception:
+    except Exception as exc:
+        log.error(
+            f"Failed to persist contributors for run_id={run_id}: {exc}",
+            category="db",
+        )
         return False
 
 

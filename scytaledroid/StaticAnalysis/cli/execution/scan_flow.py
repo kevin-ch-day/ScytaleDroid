@@ -156,6 +156,7 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
             if report is not None:
                 progress.finish(artifact_index, artifact_label)
             if warning_lines:
+                progress.flush_line()
                 print()
                 for line in warning_lines:
                     print(status_messages.status(line, level="warn"))
@@ -216,8 +217,11 @@ def _append_resource_warning(
     inline_lines = [
         "We are out of bound with this complex entry.",
         f"Package: {package_name}",
-        f"Artifact: {artifact_label}",
     ]
+    app_label = metadata.get("app_label")
+    if isinstance(app_label, str) and app_label.strip() and app_label.strip() != package_name:
+        inline_lines.append(f"App: {app_label.strip()}")
+    inline_lines.append(f"Artifact: {artifact_label}")
     if counts:
         inline_lines.append(f"Count values: {', '.join(str(val) for val in sorted(set(counts)))}")
     inline_lines.append("String/resource results may be partial; re-run this APK if needed.")
@@ -290,6 +294,12 @@ class _PipelineProgress:
         if self._last_len:
             self._clear_line()
             print()
+
+    def flush_line(self) -> None:
+        """Clear the in-place progress line before printing multiline output."""
+        if self.show_splits:
+            return
+        self._clear_line()
 
     def _render_line(self, text: str) -> None:
         truncated = _truncate_label(text, 96)

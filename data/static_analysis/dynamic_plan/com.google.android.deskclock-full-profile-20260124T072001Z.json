@@ -1,0 +1,99 @@
+{
+  "exported_components": {
+    "activities": [
+      "com.android.deskclock.AnalogAppWidgetConfigActivity",
+      "com.android.deskclock.DeskClock",
+      "com.android.deskclock.DigitalAppWidgetConfigActivity",
+      "com.android.deskclock.DigitalCitiesAppWidgetConfigActivity",
+      "com.android.deskclock.DigitalStackedAppWidgetConfigActivity",
+      "com.android.deskclock.HandleApiCalls",
+      "com.android.deskclock.HandleSetApiCalls",
+      "com.android.deskclock.HandleUris",
+      "com.android.deskclock.alarms.TitanViewAlarmActivity",
+      "com.android.deskclock.alarms.TitanViewAlarmsActivity",
+      "com.android.deskclock.timer.TitanCreateTimerActivity",
+      "com.android.deskclock.timer.TitanViewTimersActivity",
+      "com.google.android.libraries.social.licenses.LicenseMenuActivity"
+    ],
+    "providers": [
+      "com.android.deskclock.provider.ClockContentProvider"
+    ],
+    "receivers": [
+      "androidx.work.impl.diagnostics.DiagnosticsReceiver",
+      "com.android.deskclock.AlarmInitReceiver",
+      "com.android.deskclock.indexing.job.ReindexingReceiver",
+      "com.android.deskclock.weather.WeatherReceiver",
+      "com.google.android.libraries.phenotype.client.stable.AccountRemovedBroadcastReceiver",
+      "com.google.android.libraries.phenotype.client.stable.PhenotypeUpdateBackgroundBroadcastReceiver"
+    ],
+    "services": [
+      "androidx.work.impl.background.systemjob.SystemJobService",
+      "com.android.deskclock.Screensaver",
+      "com.android.deskclock.remoteactions.ActionsService",
+      "com.android.deskclock.wearable.alarmsync.service.AlarmsListenerService",
+      "com.android.deskclock.wearable.alarmsync.service.OperationsListenerService",
+      "com.android.deskclock.wearable.alarmsync.service.WearableAlarmSyncListenerService"
+    ],
+    "total": 26
+  },
+  "generated_at": "2026-01-24T07:20:01.321351Z",
+  "hashes": {
+    "md5": "fd32172114d3c9e11d8200cd4c854f1b",
+    "sha1": "ef8e4654b946cdc21d842416c38095c0d1ea0fb6",
+    "sha256": "6790069fc3d6f443b7439a2e6fa938a54d2e96ee859ec25ee09be2de845c6400"
+  },
+  "network_targets": {
+    "cleartext_domains": [],
+    "domains": []
+  },
+  "package_name": "com.google.android.deskclock",
+  "permissions": {
+    "dangerous": [
+      "android.permission.POST_NOTIFICATIONS",
+      "android.permission.READ_CALENDAR",
+      "android.permission.READ_EXTERNAL_STORAGE",
+      "android.permission.READ_MEDIA_AUDIO"
+    ],
+    "declared": [
+      "android.Manifest.permission.TURN_SCREEN_ON",
+      "android.permission.ACCESS_NETWORK_STATE",
+      "android.permission.CONTROL_DISPLAY_COLOR_TRANSFORMS",
+      "android.permission.DISABLE_KEYGUARD",
+      "android.permission.FOREGROUND_SERVICE",
+      "android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED",
+      "android.permission.INTERACT_ACROSS_PROFILES",
+      "android.permission.INTERNET",
+      "android.permission.MODIFY_AUDIO_SETTINGS",
+      "android.permission.POST_NOTIFICATIONS",
+      "android.permission.QUERY_USERS",
+      "android.permission.READ_CALENDAR",
+      "android.permission.READ_EXTERNAL_STORAGE",
+      "android.permission.READ_MEDIA_AUDIO",
+      "android.permission.RECEIVE_BOOT_COMPLETED",
+      "android.permission.SCHEDULE_EXACT_ALARM",
+      "android.permission.START_FOREGROUND_SERVICES_FROM_BACKGROUND",
+      "android.permission.USE_EXACT_ALARM",
+      "android.permission.USE_FULL_SCREEN_INTENT",
+      "android.permission.VIBRATE",
+      "android.permission.WAKE_LOCK",
+      "com.android.systemui.permission.SEND_ALERT_BROADCASTS",
+      "com.google.android.apps.dreamliner.permission.BROADCAST_CLOCK_INTENT",
+      "com.google.android.deskclock.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
+      "com.google.android.providers.gsf.permission.READ_GSERVICES"
+    ],
+    "high_value": []
+  },
+  "risk_flags": {
+    "allow_backup": null,
+    "debuggable": null,
+    "network_security_config": null,
+    "request_legacy_external_storage": null,
+    "uses_cleartext_traffic": null,
+    "webview": null
+  },
+  "suggested_probes": [
+    "exported_components_probe"
+  ],
+  "version_code": "76024130",
+  "version_name": "8.4 (836900330)"
+}

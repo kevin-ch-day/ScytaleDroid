@@ -59,11 +59,19 @@ def compose_inventory_entry(
 
     role = fallback_category  # partition-derived owner role (User/OEM/System/Mainline/Vendor/Other/Unknown)
 
-    app_label = (
-        (canonical.get("app_name") if canonical else None)
-        or metadata.get("app_label")
-        or package_name
-    )
+    canonical_label = canonical.get("app_name") if canonical else None
+    metadata_label = metadata.get("app_label")
+    package_lower = package_name.lower()
+    canonical_clean = canonical_label.strip() if isinstance(canonical_label, str) else None
+    metadata_clean = metadata_label.strip() if isinstance(metadata_label, str) else None
+    if canonical_clean and canonical_clean.lower() != package_lower:
+        app_label = canonical_clean
+    elif metadata_clean:
+        app_label = metadata_clean
+    elif canonical_clean:
+        app_label = canonical_clean
+    else:
+        app_label = package_name
     version_name = metadata.get("version_name")
     version_code = metadata.get("version_code")
 

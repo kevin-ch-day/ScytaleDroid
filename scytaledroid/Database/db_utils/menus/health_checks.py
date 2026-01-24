@@ -447,9 +447,7 @@ def prompt_cleanup_orphan_inventory() -> None:
             level="warn",
         )
     )
-    print(status_messages.status("Type 'CLEAN' to delete or press Enter to cancel.", level="warn"))
-    confirmation = prompt_utils.prompt_text("Confirm cleanup keyword", required=False)
-    if confirmation.strip().upper() != "CLEAN":
+    if not prompt_utils.prompt_yes_no("Proceed?", default=False):
         print(status_messages.status("Cleanup cancelled.", level="warn"))
         prompt_utils.press_enter_to_continue()
         return
@@ -532,6 +530,33 @@ def _run_inventory_health_check() -> None:
         "SELECT COUNT(*) FROM apps WHERE publisher_key = 'VENDOR_MISC'"
     ) or 0
 
+    label_is_package = scalar(
+        """
+        SELECT COUNT(*)
+        FROM device_inventory
+        WHERE snapshot_id = %s
+          AND LOWER(CONVERT(app_label USING utf8mb4)) COLLATE utf8mb4_unicode_ci
+              = LOWER(CONVERT(package_name USING utf8mb4)) COLLATE utf8mb4_unicode_ci
+        """,
+        (latest_snapshot_id,),
+    ) if latest_snapshot_id else 0
+
+    label_mismatch = scalar(
+        """
+        SELECT COUNT(*)
+        FROM device_inventory i
+        JOIN apps a
+          ON LOWER(CONVERT(i.package_name USING utf8mb4)) COLLATE utf8mb4_unicode_ci
+             = LOWER(CONVERT(a.package_name USING utf8mb4)) COLLATE utf8mb4_unicode_ci
+        WHERE i.snapshot_id = %s
+          AND i.app_label IS NOT NULL
+          AND i.app_label <> ''
+          AND LOWER(CONVERT(i.app_label USING utf8mb4)) COLLATE utf8mb4_unicode_ci
+              <> LOWER(CONVERT(a.display_name USING utf8mb4)) COLLATE utf8mb4_unicode_ci
+        """,
+        (latest_snapshot_id,),
+    ) if latest_snapshot_id else 0
+
     if snapshot_headers_total:
         legacy_orphans = orphan_headers - (1 if latest_is_orphan else 0)
         if latest_snapshot_id and latest_rows == latest_expected and latest_expected:
@@ -577,6 +602,18 @@ def _run_inventory_health_check() -> None:
         detail=str(vendor_misc_remaining),
     )
 
+    if latest_snapshot_id:
+        _print_status_line(
+            "ok" if label_is_package == 0 else "warn",
+            "inventory labels equal package",
+            detail=str(label_is_package),
+        )
+        _print_status_line(
+            "ok" if label_mismatch == 0 else "warn",
+            "inventory label mismatch vs apps",
+            detail=str(label_mismatch),
+        )
+
 
 def prompt_reset_static_data() -> None:
     print()
@@ -597,21 +634,10 @@ def prompt_reset_static_data() -> None:
     if include_harvest:
         _print_table_list("Harvest tables scheduled", HARVEST_TABLES)
 
-    print(status_messages.status("Type 'RESET' to proceed or press Enter to cancel.", level="warn"))
-
-    while True:
-        confirmation = prompt_utils.prompt_text(
-            "Confirm reset keyword",
-            required=False,
-        )
-        normalised = confirmation.strip().upper()
-        if not normalised:
-            print(status_messages.status("Reset cancelled.", level="warn"))
-            prompt_utils.press_enter_to_continue()
-            return
-        if normalised == "RESET":
-            break
-        print(status_messages.status("Input not recognised. Type 'RESET' to confirm or press Enter to cancel.", level="warn"))
+    if not prompt_utils.prompt_yes_no("Proceed?", default=False):
+        print(status_messages.status("Reset cancelled.", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
 
     outcome = reset_static_analysis_data(include_harvest=include_harvest)
 

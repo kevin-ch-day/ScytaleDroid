@@ -116,6 +116,7 @@ def select_category_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
         grouped[package].append(group)
 
     collapsed: list[ArtifactGroup] = []
+    skipped_details: list[tuple[str, str, int]] = []
     for package in order:
         package_groups = tuple(grouped[package])
         selected = _select_latest_groups(package_groups)
@@ -124,27 +125,66 @@ def select_category_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
         if skipped > 0:
             newest = selected[0]
             stamp = newest.session_stamp or "undated"
-            message = (
-                f"Selected newest artifact set for {package} (session {stamp}); "
-                f"skipped {skipped} older capture{'s' if skipped != 1 else ''}."
-            )
-            print(status_messages.status(message, level="info"))
+            skipped_details.append((package, stamp, skipped))
 
     scoped = tuple(collapsed)
+    if skipped_details:
+        total_packages = len(skipped_details)
+        total_skipped = sum(count for _, _, count in skipped_details)
+        summary = (
+            f"Selected newest artifact sets for {total_packages} package"
+            f"{'s' if total_packages != 1 else ''}; skipped {total_skipped} older capture"
+            f"{'s' if total_skipped != 1 else ''}."
+        )
+        print(status_messages.status(summary, level="info"))
+        response = prompt_utils.prompt_text(
+            "Press D for selection details, or Enter to continue",
+            required=False,
+        ).strip().lower()
+        if response == "d":
+            for package, stamp, skipped in skipped_details:
+                message = (
+                    f"Selected newest artifact set for {package} (session {stamp}); "
+                    f"skipped {skipped} older capture{'s' if skipped != 1 else ''}."
+                )
+                print(status_messages.status(message, level="info"))
+
     if scoped:
         print()
-        menu_utils.print_header("Profile selection", f"{category_name} apps selected (latest capture)")
-        rows: list[list[str]] = []
-        for group in scoped:
-            base_artifact = group.base_artifact or next(iter(group.artifacts), None)
-            metadata = getattr(base_artifact, "metadata", {}) if base_artifact else {}
-            app_label = metadata.get("app_label") if isinstance(metadata, dict) else None
-            display_name = metadata.get("display_name") if isinstance(metadata, dict) else None
-            label = app_label or display_name or group.package_name
-            session_stamp = group.session_stamp or "undated"
-            rows.append([group.package_name, str(label), session_stamp, str(len(group.artifacts))])
-        table_utils.render_table(["Package", "App label", "Session", "Artifacts"], rows)
+        menu_utils.print_header("Profile selection", f"{category_name} selected (latest capture)")
+        _render_profile_selection_table(scoped)
     return ScopeSelection("profile", category_name, scoped)
+
+
+def _render_profile_selection_table(groups: Sequence[ArtifactGroup]) -> None:
+    rows: list[list[str]] = []
+    for group in groups:
+        base_artifact = group.base_artifact or next(iter(group.artifacts), None)
+        metadata = getattr(base_artifact, "metadata", {}) if base_artifact else {}
+        app_label = metadata.get("app_label") if isinstance(metadata, dict) else None
+        display_name = metadata.get("display_name") if isinstance(metadata, dict) else None
+        label = app_label or display_name or group.package_name
+        session_stamp = group.session_stamp or "undated"
+        rows.append([group.package_name, str(label), session_stamp, str(len(group.artifacts))])
+
+    max_rows = 10
+    if len(rows) > max_rows:
+        table_utils.render_table(
+            ["Package", "App label", "Session", "Artifacts"],
+            rows[:max_rows],
+        )
+        print(f"Showing {max_rows} of {len(rows)} apps.")
+        response = prompt_utils.prompt_text(
+            "Press L to list all, or Enter to continue",
+            required=False,
+        ).strip().lower()
+        if response == "l":
+            table_utils.render_table(
+                ["Package", "App label", "Session", "Artifacts"],
+                rows,
+            )
+    else:
+        table_utils.render_table(["Package", "App label", "Session", "Artifacts"], rows)
 
 
 def _resolve_index(prompt: str, labels: Sequence[str]) -> int:

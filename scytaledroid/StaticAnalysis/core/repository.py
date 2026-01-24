@@ -259,9 +259,15 @@ def _extract_app_label(group: ArtifactGroup) -> Optional[str]:
         label = artifact.metadata.get("app_label")
         if isinstance(label, str) and label.strip():
             return label.strip()
+        label = artifact.metadata.get("display_name")
+        if isinstance(label, str) and label.strip():
+            return label.strip()
     base = group.base_artifact
     if base:
         label = base.metadata.get("app_name")
+        if isinstance(label, str) and label.strip():
+            return label.strip()
+        label = base.metadata.get("display_name")
         if isinstance(label, str) and label.strip():
             return label.strip()
     return None
@@ -285,7 +291,7 @@ def _hydrate_app_labels(packages: Dict[str, Dict[str, object]]) -> None:
         return
     for row in rows:
         package = row.get("package_name")
-        label = row.get("app_name")
+        label = row.get("display_name")
         if not isinstance(package, str) or package not in packages:
             continue
         if isinstance(label, str) and label.strip():

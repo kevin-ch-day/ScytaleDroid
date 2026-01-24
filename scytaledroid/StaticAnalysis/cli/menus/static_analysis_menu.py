@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import os
-from functools import lru_cache
-from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -13,110 +11,25 @@ from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_mes
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuItemSpec, MenuSpec
 from scytaledroid.DeviceAnalysis.services.static_scope_service import static_scope_service
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
-from scytaledroid.StaticAnalysis.session import make_session_stamp
+from .static_analysis_menu_helpers import (
+    DEV_TARGETS,
+    apply_command_overrides,
+    ask_run_controls,
+    build_dev_selection,
+    choose_scope,
+    collect_view_options,
+    confirm_reset,
+    inject_dev_session_label,
+    prompt_session_label,
+    render_reset_outcome,
+    render_version_diff,
+    resolve_last_selection,
+)
 
 if TYPE_CHECKING:
     from ..commands.models import Command
     from ..core.models import RunParameters
 
-
-@lru_cache(maxsize=1)
-def _load_menu_actions():  # pragma: no cover - simple cache wrapper
-    from . import actions
-
-    return actions
-
-
-def apply_command_overrides(
-    params: "RunParameters",
-    command: "Command",
-) -> "RunParameters":
-    actions = _load_menu_actions()
-    return actions.apply_command_overrides(params, command)
-
-
-def ask_run_controls() -> str:
-    actions = _load_menu_actions()
-    return actions.ask_run_controls()
-
-
-def confirm_reset() -> bool:
-    actions = _load_menu_actions()
-    return actions.confirm_reset()
-
-
-def prompt_session_label(params: "RunParameters") -> "RunParameters":
-    actions = _load_menu_actions()
-    return actions.prompt_session_label(params)
-
-
-def render_reset_outcome(outcome: object) -> None:
-    actions = _load_menu_actions()
-    actions.render_reset_outcome(outcome)
-
-
-def _build_dev_selection(groups, shortcut_id):
-    from scytaledroid.StaticAnalysis.cli.core.models import ScopeSelection
-
-    targets = {
-        "C": ("CNN (com.cnn.mobile.android.phone)", "com.cnn.mobile.android.phone"),
-        "T": ("TikTok (com.zhiliaoapp.musically)", "com.zhiliaoapp.musically"),
-    }
-    if shortcut_id not in targets:
-        return None
-    _, package = targets[shortcut_id]
-    for group in groups:
-        if getattr(group, "package_name", None) == package:
-            return ScopeSelection(scope="app", label=package, groups=(group,))
-    return None
-
-def _library_scope_selection(groups):
-    """Build a ScopeSelection from the APK library selection, if any."""
-    from scytaledroid.StaticAnalysis.cli.core.models import ScopeSelection
-
-    selected_paths = set(static_scope_service.get_selected())
-    if not selected_paths:
-        return None
-
-    selected_groups = []
-    for group in groups:
-        if any(str(artifact.path) in selected_paths for artifact in group.artifacts):
-            selected_groups.append(group)
-
-    if not selected_groups:
-        return None
-
-    scope_label = f"Library selection ({len(selected_groups)} app{'s' if len(selected_groups) != 1 else ''})"
-    scope_type = "app" if len(selected_groups) == 1 else "library-selection"
-    return ScopeSelection(scope_type, scope_label, tuple(selected_groups))
-
-
-def _choose_scope(groups):
-    """Prompt for scope, preferring library selection when available."""
-    from ..flows.selection import select_scope
-    from scytaledroid.StaticAnalysis.cli.core.models import ScopeSelection
-
-    library_scope = _library_scope_selection(groups)
-    if library_scope:
-        print()
-        menu_utils.print_header("Static Analysis Scope")
-        print(
-            status_messages.status(
-                f"APK library selection is active: {len(library_scope.groups)} group(s), {static_scope_service.count()} APKs.",
-                level="info",
-            )
-        )
-        choice = prompt_utils.get_choice(
-            ["1", "2", "0"],
-            default="1",
-            prompt="1=Use selection  2=Choose different scope  0=Back ",
-        )
-        if choice == "0":
-            return None
-        if choice == "1":
-            return library_scope
-
-    return select_scope(groups)
 
 
 def static_analysis_menu() -> None:
@@ -170,13 +83,14 @@ def static_analysis_menu() -> None:
         workflow_spec = MenuSpec(
             items=[_command_option(cmd) for cmd in workflow_commands],
             show_exit=False,
-            default=default_key if default_key in {cmd.id for cmd in workflow_commands} else None,
+            show_descriptions=False,
         )
         if workflow_commands:
             print("Primary actions")
             print("---------------")
         menu_utils.render_menu(workflow_spec)
         if dev_commands:
+            print()
             print("Calibration & regression")
             print("------------------------")
             menu_utils.render_menu(
@@ -184,8 +98,10 @@ def static_analysis_menu() -> None:
                     items=[_command_option(cmd) for cmd in dev_commands],
                     show_exit=False,
                     default=None,
+                    show_descriptions=False,
                 )
             )
+        print()
         back_spec = MenuSpec(
             items=[],
             exit_label="Back",
@@ -217,17 +133,38 @@ def static_analysis_menu() -> None:
 
         selection = None
         if command.section == "dev":
-            selection = _build_dev_selection(groups, command.id)
+            selection = build_dev_selection(groups, command.id)
             if selection is None:
-                print(status_messages.status("Dev shortcut target not found in repository.", level="error"))
+                label, package = DEV_TARGETS.get(command.id, ("Target", "unknown"))
+                print(
+                    status_messages.status(
+                        f"{label} not found in APK library ({package}). Skipping fixture.",
+                        level="warn",
+                    )
+                )
                 continue
+        elif command.id == "3":
+            selection = resolve_last_selection(groups)
+            if selection is None:
+                prompt_utils.press_enter_to_continue()
+                continue
+        elif command.id == "4":
+            selection = resolve_last_selection(groups)
+            if selection is None:
+                prompt_utils.press_enter_to_continue()
+                continue
+            render_version_diff(selection.label)
+            prompt_utils.press_enter_to_continue()
+            continue
         else:
-            selection = _choose_scope(groups)
+            selection = choose_scope(groups)
             if selection is None:
                 continue
             if command.force_app_scope and selection.scope != "app":
                 print(status_messages.status("This workflow requires choosing a single app.", level="warn"))
                 continue
+
+        _, show_splits = collect_view_options(command)
 
         params = RunParameters(
             profile=command.profile,
@@ -239,11 +176,8 @@ def static_analysis_menu() -> None:
         )
         if command.section == "dev":
             # Make dev runs easy to identify
-            short = selection.label.split(".")[-1]
-            params = replace(params, session_stamp=f"static-dev-{short}-{make_session_stamp()}")
+            params = inject_dev_session_label(params, selection)
 
-        # Optional split breakdown prompt (default off to keep output compact).
-        show_splits = prompt_utils.prompt_yes_no("Show split breakdown? (y/N)", default=False)
         os.environ["SCYTALEDROID_STATIC_SHOW_SPLITS"] = "1" if show_splits else "0"
 
         while True:
@@ -290,21 +224,12 @@ def static_analysis_menu() -> None:
 
 
 def _command_option(command: Command) -> menu_utils.MenuOption:
-    badge = (command.profile or "").upper() if command.profile else None
-    hints: list[str] = []
-    if command.force_app_scope:
-        hints.append("Requires single-app scope")
-    if command.auto_verify:
-        hints.append("Auto-verifies persistence")
-    if command.dry_run or not command.persist:
-        hints.append("Dry run")
-    hint_text = " • ".join(hints) if hints else None
     return MenuItemSpec(
         key=command.id,
         label=command.title,
         description=command.description,
-        badge=badge,
-        hint=hint_text,
+        badge=None,
+        hint=None,
     )
 
 

@@ -198,14 +198,14 @@ def print_header(title: str, subtitle: Optional[str] = None) -> None:
     heading = title.strip()
     if not heading:
         return
-
+    palette = colors.get_palette()
     underline = "=" * len(heading)
-    print(heading)
-    print(underline)
+    print(colors.apply(heading, palette.header, bold=True))
+    print(colors.apply(underline, palette.divider))
     if subtitle:
         subheading = subtitle.strip()
         if subheading:
-            print(subheading)
+            print(colors.apply(subheading, palette.muted))
 
 
 def print_hint(message: str, *, icon: Optional[str] = None) -> None:
@@ -257,14 +257,17 @@ def print_menu(
 
     for item in primary_items:
         block: list[str] = []
-        label_line = [f"{item.key}) {item.label}"]
+        key_text = colors.apply(str(item.key), colors.style("option_key"), bold=True)
+        label_text = colors.apply(item.label, colors.style("option_text"))
+        label_line = [f"{key_text}) {label_text}"]
         notes: list[str] = []
         if item.badge:
-            notes.append(f"[{item.badge}]")
+            badge_text = colors.apply(f"[{item.badge}]", colors.style("badge"), bold=True)
+            notes.append(badge_text)
         if item.disabled:
-            notes.append("(disabled)")
+            notes.append(colors.apply("(disabled)", colors.style("disabled")))
         elif default and item.key == default:
-            notes.append("(default)")
+            notes.append(colors.apply("(default)", colors.style("option_default"), bold=True))
         if item.hint and not show_descriptions:
             notes.append(f"({item.hint})")
         if notes:

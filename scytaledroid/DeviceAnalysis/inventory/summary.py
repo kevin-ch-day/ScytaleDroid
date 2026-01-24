@@ -145,6 +145,12 @@ def render_inventory_summary(result) -> None:
     profile_counts = Counter(str(entry.get("profile_name") or "Unclassified") for entry in rows)
     partition_counts = Counter(_partition_label(entry) for entry in rows)
     user_scope_count = len(user_entries)
+    label_is_package = 0
+    for entry in rows:
+        package = str(entry.get("package_name") or "").strip().lower()
+        label = str(entry.get("app_label") or "").strip().lower()
+        if package and label and package == label:
+            label_is_package += 1
 
     print()
     print(text_blocks.headline("Inventory summary", width=70))
@@ -153,6 +159,10 @@ def render_inventory_summary(result) -> None:
         metric_rows.append(["Split APK packages", str(split_packages)])
     if user_scope_count:
         metric_rows.append(["User apps (candidates)", str(user_scope_count)])
+    if total:
+        friendly = total - label_is_package
+        metric_rows.append(["Friendly labels", str(friendly)])
+        metric_rows.append(["Package labels", str(label_is_package)])
     table_utils.render_table(["Metric", "Count"], metric_rows)
 
     print()

@@ -67,11 +67,6 @@ def _show_summary() -> None:
     prompt_utils.press_enter_to_continue()
 
 
-def _confirm(prompt: str, token: str) -> bool:
-    answer = prompt_utils.prompt_text(prompt, required=False).strip()
-    return answer.upper() == token.upper()
-
-
 def workspace_menu() -> None:
     """Render the workspace maintenance menu."""
 
@@ -79,12 +74,12 @@ def workspace_menu() -> None:
         print()
         menu_utils.print_header("Workspace maintenance & cleanup")
         items = [
-            menu_utils.MenuOption("1", "Show workspace usage summary"),
-            menu_utils.MenuOption("2", "Prune old APKs from disk", hint="Deletes APKs older than a chosen age", disabled=True),
-            menu_utils.MenuOption("3", "Remove stale devices (no longer seen)", disabled=True),
-            menu_utils.MenuOption("4", "Prune old static analysis runs from database", disabled=True),
-            menu_utils.MenuOption("5", "Clear temporary files and caches", disabled=True),
-            menu_utils.MenuOption("6", "Reset entire workspace", badge="[!] Destructive"),
+            menu_utils.MenuOption("1", "Show workspace usage"),
+            menu_utils.MenuOption("2", "Clear temporary files and caches"),
+            menu_utils.MenuOption("3", "Clean unused APK files"),
+            menu_utils.MenuOption("4", "Remove inactive devices"),
+            menu_utils.MenuOption("5", "Clean old static analysis runs"),
+            menu_utils.MenuOption("6", "Reset entire workspace [DESTRUCTIVE]"),
         ]
         spec_kwargs = display_settings.apply_menu_defaults(
             {"items": items, "exit_label": "Back", "show_exit": True}
@@ -96,14 +91,57 @@ def workspace_menu() -> None:
             break
         if choice == "1":
             _show_summary()
+        elif choice == "2":
+            print()
+            menu_utils.print_section("Clear temporary files and caches")
+            print("This will remove:")
+            print("• temp build artifacts")
+            print("• intermediate analysis caches")
+            print()
+            print("Safe: does NOT delete APKs or analysis results.")
+            if prompt_utils.prompt_yes_no("Proceed?", default=False):
+                print(status_messages.status("Not implemented yet — planned for Phase-D.", level="warn"))
+            else:
+                print(status_messages.status("Cancelled.", level="info"))
+            prompt_utils.press_enter_to_continue()
+        elif choice == "3":
+            print()
+            menu_utils.print_section("Clean unused APK files")
+            print("This will delete APKs older than a selected age that are not referenced by recent analyses.")
+            print("You will choose an age threshold next.")
+            if prompt_utils.prompt_yes_no("Proceed?", default=False):
+                print(status_messages.status("Not implemented yet — planned for Phase-D.", level="warn"))
+            else:
+                print(status_messages.status("Cancelled.", level="info"))
+            prompt_utils.press_enter_to_continue()
+        elif choice == "4":
+            print()
+            menu_utils.print_section("Remove inactive devices")
+            print("This will remove devices not seen within a chosen inactivity window.")
+            if prompt_utils.prompt_yes_no("Proceed?", default=False):
+                print(status_messages.status("Not implemented yet — planned for Phase-D.", level="warn"))
+            else:
+                print(status_messages.status("Cancelled.", level="info"))
+            prompt_utils.press_enter_to_continue()
+        elif choice == "5":
+            print()
+            menu_utils.print_section("Clean old static analysis runs")
+            print("This will prune old static analysis runs from the database.")
+            print("APKs are not deleted by this action.")
+            if prompt_utils.prompt_yes_no("Proceed?", default=False):
+                print(status_messages.status("Not implemented yet — planned for Phase-D.", level="warn"))
+            else:
+                print(status_messages.status("Cancelled.", level="info"))
+            prompt_utils.press_enter_to_continue()
         elif choice == "6":
             print()
-            print(text_blocks.headline("Reset entire workspace [!] Destructive", width=80))
-            print(
-                "This will delete ALL APKs under data/apks/, ALL static analysis runs/findings\n"
-                "from the database (if configured), and ALL device inventory snapshots/temp files."
-            )
-            if _confirm("Type RESET-WORKSPACE to confirm, or anything else to cancel:", "RESET-WORKSPACE"):
+            print(text_blocks.headline("Reset entire workspace [DESTRUCTIVE]", width=80))
+            print("This will permanently delete:")
+            print("• all APKs")
+            print("• all analysis results")
+            print("• all device inventory snapshots/temp files")
+            print()
+            if prompt_utils.prompt_yes_no("Proceed?", default=False):
                 print(status_messages.status("Workspace reset not yet implemented. No changes made.", level="warn"))
             else:
                 print(status_messages.status("Cancelled reset.", level="info"))

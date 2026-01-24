@@ -1,0 +1,53 @@
+{
+  "exported_components": {
+    "activities": [
+      "com.android.calculator2.Calculator",
+      "com.google.android.libraries.social.licenses.LicenseMenuActivity"
+    ],
+    "providers": [],
+    "receivers": [
+      "com.google.android.libraries.phenotype.client.stable.AccountRemovedBroadcastReceiver",
+      "com.google.android.libraries.phenotype.client.stable.PhenotypeUpdateBackgroundBroadcastReceiver"
+    ],
+    "services": [
+      "com.android.calculator2.CalculatorTileService"
+    ],
+    "total": 5
+  },
+  "generated_at": "2026-01-24T07:20:01.149683Z",
+  "hashes": {
+    "md5": "92fffc809dd1497a6c6192c12b2e213c",
+    "sha1": "a15df106bc647af46e53f5e2b02f9957d6b44474",
+    "sha256": "8925ddfea43ea7885dccd6e75d00f9e6398d2d26cb0e143e841fa18bc73627ea"
+  },
+  "network_targets": {
+    "cleartext_domains": [],
+    "domains": []
+  },
+  "package_name": "com.google.android.calculator",
+  "permissions": {
+    "dangerous": [],
+    "declared": [
+      "android.permission.ACCESS_NETWORK_STATE",
+      "android.permission.GET_PACKAGE_SIZE",
+      "android.permission.INTERNET",
+      "android.permission.WAKE_LOCK",
+      "com.google.android.calculator.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
+      "com.google.android.providers.gsf.permission.READ_GSERVICES"
+    ],
+    "high_value": []
+  },
+  "risk_flags": {
+    "allow_backup": true,
+    "debuggable": null,
+    "network_security_config": null,
+    "request_legacy_external_storage": null,
+    "uses_cleartext_traffic": null,
+    "webview": null
+  },
+  "suggested_probes": [
+    "exported_components_probe"
+  ],
+  "version_code": "85006863",
+  "version_name": "9.0 (827797324)"
+}
