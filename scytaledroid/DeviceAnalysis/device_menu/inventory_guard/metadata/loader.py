@@ -35,9 +35,11 @@ def get_latest_inventory_metadata(
     snapshot_type: Optional[str] = None
     snapshot_scope_hash: Optional[str] = None
     snapshot_scope_size: Optional[int] = None
+    snapshot_id: Optional[int] = None
     if snapshot_meta:
         timestamp = snapshot_meta.captured_at
         package_count = snapshot_meta.package_count
+        snapshot_id = snapshot_meta.snapshot_id
         package_list_hash = snapshot_meta.package_list_hash
         package_signature_hash = snapshot_meta.package_signature_hash
         build_fingerprint = snapshot_meta.build_fingerprint
@@ -65,6 +67,14 @@ def get_latest_inventory_metadata(
                 timestamp = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
             except ValueError:
                 timestamp = None
+
+        snapshot_identifier = snapshot.get("snapshot_id")
+        if isinstance(snapshot_identifier, (int, float)):
+            snapshot_id = int(snapshot_identifier)
+        elif isinstance(snapshot_identifier, str) and snapshot_identifier.isdigit():
+            snapshot_id = int(snapshot_identifier)
+        else:
+            snapshot_id = None
 
         package_count = coerce_int(snapshot.get("package_count"))
         package_list_hash_value = snapshot.get("package_list_hash")
@@ -122,6 +132,8 @@ def get_latest_inventory_metadata(
             snapshot_scope_size = int(scope_size_value)
 
     metadata: Dict[str, object] = {"timestamp": timestamp}
+    if snapshot_id is not None:
+        metadata["snapshot_id"] = snapshot_id
     if package_count is not None:
         metadata["package_count"] = package_count
     if package_list_hash:

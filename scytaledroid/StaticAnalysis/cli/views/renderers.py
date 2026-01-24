@@ -1691,4 +1691,158 @@ def write_baseline_json(
     return path
 
 
-__all__ = ["render_app_result", "render_exploratory_summary", "write_baseline_json"]
+def _extract_domains(string_payload: Mapping[str, object]) -> tuple[list[str], list[str]]:
+    aggregates = string_payload.get("aggregates", {}) if isinstance(string_payload, Mapping) else {}
+    samples = string_payload.get("samples", {}) if isinstance(string_payload, Mapping) else {}
+    domains: set[str] = set()
+    cleartext_domains: set[str] = set()
+
+    if isinstance(aggregates, Mapping):
+        endpoint_roots = aggregates.get("endpoint_roots")
+        if isinstance(endpoint_roots, Sequence):
+            for entry in endpoint_roots:
+                if not isinstance(entry, Mapping):
+                    continue
+                root = str(entry.get("root_domain") or "").strip()
+                if not root:
+                    continue
+                domains.add(root)
+                schemes = entry.get("schemes") if isinstance(entry.get("schemes"), Mapping) else {}
+                if str(schemes.get("http") or "0").isdigit() and int(schemes.get("http") or 0) > 0:
+                    cleartext_domains.add(root)
+        endpoint_clear = aggregates.get("endpoint_cleartext")
+        if isinstance(endpoint_clear, Sequence):
+            for entry in endpoint_clear:
+                if not isinstance(entry, Mapping):
+                    continue
+                root = str(entry.get("root_domain") or "").strip()
+                if root:
+                    domains.add(root)
+                    cleartext_domains.add(root)
+
+    if isinstance(samples, Mapping):
+        for bucket in samples.values():
+            if not isinstance(bucket, Sequence):
+                continue
+            for entry in bucket:
+                if not isinstance(entry, Mapping):
+                    continue
+                root = str(entry.get("root_domain") or "").strip()
+                if root:
+                    domains.add(root)
+                    scheme = str(entry.get("scheme") or "").lower()
+                    if scheme == "http":
+                        cleartext_domains.add(root)
+
+    return sorted(domains), sorted(cleartext_domains)
+
+
+def _high_value_permissions(declared: Sequence[str]) -> list[str]:
+    high_value = {
+        "android.permission.READ_SMS",
+        "android.permission.RECEIVE_SMS",
+        "android.permission.SEND_SMS",
+        "android.permission.READ_CONTACTS",
+        "android.permission.WRITE_CONTACTS",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.CAMERA",
+        "android.permission.READ_CALL_LOG",
+        "android.permission.WRITE_CALL_LOG",
+        "android.permission.READ_PHONE_STATE",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.REQUEST_INSTALL_PACKAGES",
+        "android.permission.PACKAGE_USAGE_STATS",
+        "android.permission.BIND_ACCESSIBILITY_SERVICE",
+    }
+    return sorted({perm for perm in declared if perm in high_value})
+
+
+def build_dynamic_plan(
+    report: StaticAnalysisReport,
+    payload: Mapping[str, object],
+) -> Mapping[str, object]:
+    metadata = payload.get("app", {}) if isinstance(payload, Mapping) else {}
+    baseline = payload.get("baseline", {}) if isinstance(payload, Mapping) else {}
+    string_payload = baseline.get("string_analysis", {}) if isinstance(baseline, Mapping) else {}
+    webview_summary = baseline.get("webview") if isinstance(baseline, Mapping) else None
+
+    exported = report.exported_components
+    permissions = report.permissions
+    domains, cleartext_domains = _extract_domains(string_payload)
+    declared = sorted(set(permissions.declared))
+    dangerous = sorted(set(permissions.dangerous))
+    high_value = _high_value_permissions(declared)
+
+    suggested_probes: list[str] = []
+    if exported.total() > 0:
+        suggested_probes.append("exported_components_probe")
+    if high_value:
+        suggested_probes.append("high_value_permission_probe")
+    if report.manifest_flags.uses_cleartext_traffic or cleartext_domains:
+        suggested_probes.append("network_cleartext_observation")
+    if webview_summary:
+        suggested_probes.append("webview_observation")
+
+    return {
+        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "package_name": metadata.get("package"),
+        "version_name": metadata.get("version_name"),
+        "version_code": metadata.get("version_code"),
+        "hashes": metadata.get("hashes"),
+        "exported_components": {
+            "activities": list(exported.activities),
+            "services": list(exported.services),
+            "receivers": list(exported.receivers),
+            "providers": list(exported.providers),
+            "total": exported.total(),
+        },
+        "permissions": {
+            "declared": declared,
+            "dangerous": dangerous,
+            "high_value": high_value,
+        },
+        "network_targets": {
+            "domains": domains,
+            "cleartext_domains": cleartext_domains,
+        },
+        "risk_flags": {
+            "debuggable": report.manifest_flags.debuggable,
+            "allow_backup": report.manifest_flags.allow_backup,
+            "uses_cleartext_traffic": report.manifest_flags.uses_cleartext_traffic,
+            "request_legacy_external_storage": report.manifest_flags.request_legacy_external_storage,
+            "network_security_config": report.manifest_flags.network_security_config,
+            "webview": webview_summary,
+        },
+        "suggested_probes": suggested_probes,
+    }
+
+
+def write_dynamic_plan_json(
+    plan: Mapping[str, object],
+    *,
+    package: str,
+    profile: str,
+    scope: str,
+) -> Path:
+    base_dir = Path(app_config.DATA_DIR) / "static_analysis" / "dynamic_plan"
+    base_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    safe_package = re.sub(r"[^A-Za-z0-9_.-]", "_", package)
+    safe_profile = re.sub(r"[^A-Za-z0-9_.-]", "_", profile)
+    safe_scope = re.sub(r"[^A-Za-z0-9_.-]", "_", scope)
+    filename = f"{safe_package}-{safe_profile}-{safe_scope}-{timestamp}.json"
+    path = base_dir / filename
+    with path.open("w", encoding="utf-8") as handle:
+        json.dump(plan, handle, indent=2, sort_keys=True)
+    return path
+
+
+__all__ = [
+    "render_app_result",
+    "render_exploratory_summary",
+    "write_baseline_json",
+    "build_dynamic_plan",
+    "write_dynamic_plan_json",
+]

@@ -45,6 +45,8 @@ def execute_harvest(
     run_id: Optional[str] = None,
     harvest_logger: Optional[logging_engine.ContextAdapter] = None,
     scope_label: Optional[str] = None,
+    snapshot_id: Optional[int] = None,
+    snapshot_captured_at: Optional[str] = None,
 ) -> List[PullResult]:
     """Execute the provided harvest plan and return per-package results."""
 
@@ -59,6 +61,10 @@ def execute_harvest(
         "session_stamp": session_stamp,
         "pull_mode": pull_mode,
     }
+    if snapshot_id is not None:
+        base_context["snapshot_id"] = snapshot_id
+    if snapshot_captured_at:
+        base_context["snapshot_captured_at"] = snapshot_captured_at
     if pull_mode == "legacy":
         print(
             "[WARN] pull_mode=legacy is deprecated; prefer explicit modes "
@@ -618,6 +624,10 @@ def _pull_and_record(
         "occurrence_index": occurrence,
         "artifact": artifact.artifact,
     }
+    if snapshot_id is not None:
+        extra_meta["snapshot_id"] = snapshot_id
+    if snapshot_captured_at:
+        extra_meta["snapshot_captured_at"] = snapshot_captured_at
     try:
         write_metadata_sidecar(
             dest_path,

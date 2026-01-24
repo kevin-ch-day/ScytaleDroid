@@ -38,7 +38,7 @@
 
 1. **Historical analytics and dashboards** – surface baseline trends (e.g.,
    weak custom permissions, rising secret-keyword hits, recurring custom
-   processes) via SQL views and lightweight dashboards once the new relational
+   processes) via SQL queries and lightweight dashboards once the new relational
    tables accumulate data. This provides analysts with immediate signal on
    risky apps or releases.
 2. **Detector calibration loop** – feed stored detector metrics back into risk

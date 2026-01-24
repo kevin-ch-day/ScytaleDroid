@@ -24,7 +24,7 @@
   summaries with badge/status alignment.
 - ✅ Canonical persistence ships with idempotent schema helpers, automatic
   promotion of provider exposures (BASE-002), lineage-aware diff baselines, and
-  cross-run analytics views.
+  cross-run analytics reports.
 - ✅ Permission scoring is centralised under ``scytaledroid.StaticAnalysis.risk``
   with consolidated weights, penalty/bonus handling, and shared helpers for
   CLI rendering, persistence, and downstream analysis.
@@ -88,10 +88,9 @@
   banding.
 - **Persistence Layer:** Dual-write adapters feed deterministic JSON reports and
   the canonical database. `scytaledroid/StaticAnalysis/persistence/ingest.py`
-  hosts the canonical writer (`ingest_baseline_payload`) along with
-  idempotent helpers (`ensure_provider_plumbing`, `upsert_base002_for_session`,
-  `build_session_string_view`). Reports embed pipeline metadata to support diff
-  tooling even without a DB.
+  hosts the canonical writer (`ingest_baseline_payload`) along with idempotent
+  helpers (`ensure_provider_plumbing`, `upsert_base002_for_session`). Reports
+  embed pipeline metadata to support diff tooling even without a DB.
 
 ## 5. Detector Framework
 ### Detector Interface (conceptual)
@@ -168,10 +167,9 @@ class Detector(Protocol):
   cleartext/storage flags), which improves coverage of `PLATFORM-IPC-1`,
   `NETWORK-1`, and `PRIVACY-1` controls during CLI summaries and reporting.
 
-Canonical helpers expose idempotent migrations (`ensure_provider_plumbing`),
-BASE-002 promotion (`upsert_base002_for_session`), and the flexible
-`v_session_string_samples` view builder (`build_session_string_view`) so the CLI
-and manual helper snippets can self-heal before ingesting runs.
+Canonical helpers expose idempotent migrations (`ensure_provider_plumbing`) and
+BASE-002 promotion (`upsert_base002_for_session`). Database views are not used;
+the CLI and manual helper snippets rely on direct table queries.
 
 ## 8. CLI Integration
 - Default run path launches immediately with tuned defaults (auto workers, INFO logging, cache purge) while an "Advanced options" branch exposes overrides for analysts who need to adjust thresholds or detector subsets.

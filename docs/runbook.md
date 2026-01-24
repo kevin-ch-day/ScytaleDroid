@@ -9,7 +9,7 @@ credentials for the canonical database target.
 
 1. **Bootstrap dependencies** – `./setup.sh` (or install the packages listed in
    `requirements.txt`).
-2. **Ensure schema + views** – prime the canonical helpers once per shell
+2. **Ensure schema helpers** – prime the canonical helpers once per shell
    session (idempotent):
    ```bash
    python - <<'PY'
@@ -19,7 +19,6 @@ credentials for the canonical database target.
    session = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
    canonical_ingest.ensure_provider_plumbing()
    canonical_ingest.upsert_base002_for_session(session)
-   canonical_ingest.build_session_string_view(session)
    print(f"Canonical helpers ready for session {session}")
    PY
    ```
@@ -124,9 +123,9 @@ WHERE sar.session_stamp = ':session'
   AND saf.rule_id = 'BASE-002'
 GROUP BY av.package_name, saf.rule_id;
 
--- Session-scoped string view returns samples even without session_stamp
+-- Session-scoped string samples (no DB views required)
 SELECT COUNT(*) AS samples
-FROM v_session_string_samples
+FROM static_string_samples
 WHERE session_stamp = ':session';
 
 -- NSC-aware cleartext suppression evidence
@@ -160,7 +159,7 @@ client.
 | Symptom | Likely cause | Next steps |
 | --- | --- | --- |
 | Manual ensure script reports `Failed to ensure canonical schema` | DB credentials missing or insufficient privileges | Confirm environment variables / DSN and re-run once grants are fixed. |
-| `v_session_string_samples` returns 0 despite active findings | Legacy string samples missing timestamps | Re-run the manual ensure snippet with the desired session stamp to rebuild the view with fallback matching. |
+| `static_string_samples` returns 0 despite active findings | Legacy string samples missing timestamps or session association | Re-run the scan for the session and confirm the string sampling cap/logs. |
 | BASE-002 findings missing from `static_analysis_findings` | Promotion step skipped (dry-run) or schema not ensured | Re-run the manual promotion snippet or check the application logs (`logs/app.log` or `logs/app.jsonl`) for INSERT errors. |
 | Secrets still show placeholder examples | Validators suppressed them; confidence is `"low"` | Use `validator_hits` in the evidence JSON to confirm suppression rationale. |
 | Diff views compare unrelated versions | Older runs lack version metadata | Ensure the APK metadata tables are populated; rerun analysis so `app_versions` captures versionName/versionCode for lineage-aware diffing. |
@@ -194,7 +193,6 @@ client.
   session = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
   canonical_ingest.ensure_provider_plumbing()
   canonical_ingest.upsert_base002_for_session(session)
-  canonical_ingest.build_session_string_view(session)
   PY
   ```
 * Inspect latest run summaries: `SELECT * FROM static_analysis_runs ORDER BY id DESC LIMIT 5;`

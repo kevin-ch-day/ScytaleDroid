@@ -200,10 +200,10 @@ def select_package_scope(
         )
         _add_entry(
             "E",
-            "Everything",
+            "Everything (policy-filtered)" if not is_rooted else "Everything",
             packages=context["everything"].get("packages"),
             files=context["everything"].get("files"),
-            note="will be filtered (non-root)" if not is_rooted else None,
+            note="policy-filtered (non-root)" if not is_rooted else None,
             handler=lambda: ScopeSelection(
                 label="Everything",
                 packages=list(rows),
@@ -212,6 +212,7 @@ def select_package_scope(
                     "estimated_files": context["everything"].get("files", 0),
                     "candidate_count": len(rows),
                     "selected_count": len(rows),
+                    "policy": "non_root_paths" if not is_rooted else "none",
                 },
             ),
         )
@@ -264,10 +265,16 @@ def _render_scope_table(
     mode_label = "root" if is_rooted else "non-root"
     print(f"Pull APKs · Scope ({device_serial} • {mode_label})")
     print("-" * 86)
-    pullable = sum(1 for row in rows if rules.is_user_path(row.primary_path))
-    blocked = len(rows) - pullable
+    candidates = len(rows)
+    eligible = candidates if is_rooted else sum(
+        1 for row in rows if rules.is_user_path(row.primary_path)
+    )
+    blocked = max(candidates - eligible, 0)
     policy = "none" if is_rooted else "non_root_paths"
-    status = f"Status: pullable≈{pullable}  blocked≈{blocked}  policy={policy}   [0] back"
+    status = (
+        f"Status: candidates={candidates}  eligible={eligible}  "
+        f"blocked={blocked}  policy={policy}   [0] back"
+    )
     return status
 
 

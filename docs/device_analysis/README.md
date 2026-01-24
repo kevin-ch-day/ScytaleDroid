@@ -14,7 +14,7 @@ pulls APK artifacts into a structured repository. The toolchain favors a
   embeds the package name and version code.
 - Each file is assigned an `apk_id` row in the `android_apk_repository` table,
   which becomes the anchor for static, dynamic, and threat-intel analysis.
-- Helper metadata such as user-friendly labels live in `android_app_definitions`
+- Helper metadata such as user-friendly labels live in `apps`
   and stay synchronized automatically during inventory runs.
 
 ## Device Analysis status (Phase 1)
@@ -52,6 +52,8 @@ inventory to curated APK harvesting and repository ingestion.
   Messaging).
 - Saves the snapshot on disk and keeps the `android_app_definitions` table in
   sync with the latest labels.
+- The snapshot guard now prints the selected snapshot ID and timestamp when
+  reporting package deltas, so the comparison target is always explicit.
 
 ### Harvest (tightening right now)
 
@@ -65,6 +67,8 @@ inventory to curated APK harvesting and repository ingestion.
   `com.google.*`, etc.).
 - Filters unreadable paths so `/system`, `/product`, `/vendor`, and `/apex`
   artifacts are skipped on non-root devices.
+- Scope status always shows candidates/eligible/blocked with a canonical policy
+  label; “Everything” means policy-filtered (non-root) unless explicitly rooted.
 - Enforces filenames shaped like `com_package_name_<vercode>__artifact.apk`
   (e.g., `com_motorola_aiservices_281117118__split_config.arm64_v8a.apk`).
 - Deduplicates artifacts by `sha256`, optionally keeping the latest copy when

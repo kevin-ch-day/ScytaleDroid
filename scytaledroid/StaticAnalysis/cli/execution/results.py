@@ -32,7 +32,12 @@ from ..views.detail import (
 )
 from ..reports.masvs_summary import fetch_db_masvs_summary
 from ..core.models import RunOutcome, RunParameters
-from ..views.renderers import render_app_result, write_baseline_json
+from ..views.renderers import (
+    render_app_result,
+    write_baseline_json,
+    build_dynamic_plan,
+    write_dynamic_plan_json,
+)
 from ...persistence.ingest import ingest_baseline_payload
 from .scan_flow import format_duration
 from scytaledroid.Database.db_core import db_queries as core_q
@@ -392,6 +397,7 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                 print(line)
 
         saved_path = None
+        dynamic_plan_path = None
         if persist_enabled:
             try:
                 saved_path = write_baseline_json(
@@ -405,9 +411,25 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                     f"Failed to write baseline JSON for {app_result.package_name}: {exc}"
                 )
                 print(status_messages.status(warning, level="warn"))
+            try:
+                plan_payload = build_dynamic_plan(base_report, payload)
+                dynamic_plan_path = write_dynamic_plan_json(
+                    plan_payload,
+                    package=app_result.package_name,
+                    profile=params.profile,
+                    scope=params.scope,
+                )
+            except Exception as exc:
+                warning = (
+                    f"Failed to write dynamic plan for {app_result.package_name}: {exc}"
+                )
+                print(status_messages.status(warning, level="warn"))
 
         if saved_path:
             message = f"Saved baseline JSON → {saved_path.name}"
+            print(message if not compact_mode else status_messages.status(message, level="info"))
+        if dynamic_plan_path:
+            message = f"Saved dynamic plan → {dynamic_plan_path.name}"
             print(message if not compact_mode else status_messages.status(message, level="info"))
 
         if report_reference:

@@ -164,6 +164,8 @@ def pull_apks(serial: Optional[str]) -> OperationResult:
             error_code="apk_pull_inventory_missing",
         )
 
+    snapshot_id = snapshot.get("snapshot_id")
+    snapshot_captured_at = snapshot.get("generated_at")
     packages = snapshot.get("packages", [])
     rows = harvest.build_inventory_rows(packages)
     if not rows:
@@ -247,6 +249,10 @@ def pull_apks(serial: Optional[str]) -> OperationResult:
             delta_brief_value = guard_decision.get("package_delta_brief")
             if delta_brief_value:
                 selection.metadata["package_delta_brief"] = delta_brief_value
+        if snapshot_id is not None:
+            selection.metadata["inventory_snapshot_id"] = snapshot_id
+        if snapshot_captured_at:
+            selection.metadata["inventory_snapshot_captured_at"] = snapshot_captured_at
 
         delta_applied, delta_count = _apply_delta_filter(selection, guard_metadata)
         if delta_applied:
@@ -464,6 +470,8 @@ def pull_apks(serial: Optional[str]) -> OperationResult:
             "session_stamp": session_stamp,
             "scope_label": active_selection.label,
             "pull_mode": pull_mode,
+            "snapshot_id": snapshot_id if isinstance(snapshot_id, int) else None,
+            "snapshot_captured_at": str(snapshot_captured_at) if snapshot_captured_at else None,
         },
     )
 
@@ -479,6 +487,8 @@ def pull_apks(serial: Optional[str]) -> OperationResult:
                 verbose=verbose,
                 run_id=run_id,
                 harvest_logger=harvest_logger,
+                snapshot_id=snapshot_id if isinstance(snapshot_id, int) else None,
+                snapshot_captured_at=str(snapshot_captured_at) if snapshot_captured_at else None,
             )
         else:
             results = harvest.execute_harvest(
@@ -493,6 +503,8 @@ def pull_apks(serial: Optional[str]) -> OperationResult:
                 run_id=run_id,
                 harvest_logger=harvest_logger,
                 scope_label=active_selection.label,
+                snapshot_id=snapshot_id if isinstance(snapshot_id, int) else None,
+                snapshot_captured_at=str(snapshot_captured_at) if snapshot_captured_at else None,
             )
     except NameError as exc:
         if "compact_mode" in str(exc):
@@ -666,12 +678,16 @@ def _render_plan_overview(
     print()
     print("APK Harvest Plan")
     print("-" * 86)
-    policy = "none"
-    if plan.policy_filtered:
-        policy = ",".join(sorted(plan.policy_filtered.keys()))
+    candidate_count = selection.metadata.get("candidate_count")
+    if not candidate_count:
+        candidate_count = packages + blocked_packages
+    eligible = packages
+    policy = selection.metadata.get("policy")
+    if not policy:
+        policy = ",".join(sorted(plan.policy_filtered.keys())) if plan.policy_filtered else "none"
     print(
-        f"Scope={selection.label} | pullable={packages} | blocked={blocked_packages} | "
-        f"files≈{files} | policy={policy}"
+        f"Scope={selection.label} | candidates={candidate_count} | eligible={eligible} | "
+        f"blocked={blocked_packages} | files≈{files} | policy={policy}"
     )
     focus = selection.metadata.get("sample_names") or []
     total = selection.metadata.get("selected_count") or len(selection.packages)

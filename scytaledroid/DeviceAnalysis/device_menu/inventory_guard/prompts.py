@@ -56,7 +56,7 @@ def describe_inventory_state(
         severity="info",
         short=(
             "Inventory is fresh by age, but "
-            f"{delta.changed_packages_count} packages changed since the last snapshot."
+            f"{delta.changed_packages_count} packages changed since the selected snapshot."
         ),
         long=(
             f"New: {delta.new_count}, removed: {delta.removed_count}, "
@@ -104,7 +104,7 @@ def prompt_inventory_decision(
         freshness = f"(last: {last_synced})" if last_synced else ""
         print(
             status_messages.status(
-                f"Inventory is fresh by age {freshness} but packages changed since the last snapshot{changes_text}.",
+                f"Inventory is fresh by age {freshness} but packages changed since the selected snapshot{changes_text}.",
                 level="warn",
             )
         )

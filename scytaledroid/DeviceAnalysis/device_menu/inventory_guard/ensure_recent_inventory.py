@@ -42,6 +42,16 @@ _LAST_GUARD_DECISION: Dict[str, object] = {
 }
 
 
+def _format_snapshot_reference(snapshot_id: object, timestamp: object) -> str:
+    snapshot_label = ""
+    if snapshot_id is not None:
+        snapshot_label = f"id={snapshot_id}"
+    if isinstance(timestamp, datetime):
+        stamp = timestamp.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        return f"{snapshot_label} captured_at={stamp}".strip()
+    return snapshot_label
+
+
 def ensure_recent_inventory(
     serial: str,
     *,
@@ -70,6 +80,7 @@ def ensure_recent_inventory(
     )
 
     timestamp = metadata.get("timestamp") if metadata else None
+    snapshot_id = metadata.get("snapshot_id") if metadata else None
     scope_changed = bool(metadata.get("scope_changed")) if metadata else False
     scope_hash_changed = bool(metadata.get("scope_hash_changed")) if metadata else False
     expected_duration = coerce_float(
@@ -170,10 +181,18 @@ def ensure_recent_inventory(
     if delta_obj and delta_obj.changed_packages_count:
         print(
             status_messages.status(
-                "This delta compares installed packages to the last inventory snapshot. Pulling APKs does not reset it; re-run inventory to clear.",
+                "This delta compares installed packages to the selected inventory snapshot. Pulling APKs does not reset it; re-run inventory to clear.",
                 level="info",
             )
         )
+        if snapshot_id or timestamp:
+            snapshot_stamp = _format_snapshot_reference(snapshot_id, timestamp)
+            print(
+                status_messages.status(
+                    f"Selected snapshot: {snapshot_stamp}",
+                    level="info",
+                )
+            )
 
     options = ["1", "0"]
     labels = {"1": "Sync now (recommended)", "0": "Cancel"}
@@ -187,10 +206,11 @@ def ensure_recent_inventory(
     choice = prompt_utils.get_choice(options, default="1", prompt="Select option [1]: ")
     if choice == "2":
         snapshot_age_text = humanize_seconds(age_seconds) if age_seconds is not None else None
+        snapshot_stamp = _format_snapshot_reference(snapshot_id, timestamp)
         warning = (
-            f"Proceeding with existing inventory snapshot captured {snapshot_age_text} ago; results may be outdated."
-            if snapshot_age_text
-            else "Proceeding with existing inventory snapshot; results may be outdated."
+            f"Proceeding with selected snapshot ({snapshot_stamp}); device state may differ."
+            if snapshot_stamp
+            else "Proceeding with selected snapshot; device state may differ."
         )
         print(status_messages.status(warning, level="warn"))
         _record_guard_policy("quick")

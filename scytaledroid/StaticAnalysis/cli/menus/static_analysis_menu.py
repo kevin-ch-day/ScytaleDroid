@@ -159,12 +159,6 @@ def static_analysis_menu() -> None:
     while True:
         print()
         menu_utils.print_header("Android APK Static Analysis")
-        print(
-            status_messages.status(
-                "Static runs are persisted to the evidence store for later SQL/reporting.",
-                level="info",
-            )
-        )
         selected_apks = static_scope_service.count()
         if selected_apks:
             print(
@@ -179,12 +173,12 @@ def static_analysis_menu() -> None:
             default=default_key if default_key in {cmd.id for cmd in workflow_commands} else None,
         )
         if workflow_commands:
-            print("Primary workflows")
-            print("-----------------")
+            print("Primary actions")
+            print("---------------")
         menu_utils.render_menu(workflow_spec)
         if dev_commands:
-            print("Developer fixtures (calibrated test apps)")
-            print("-----------------------------------------")
+            print("Calibration & regression")
+            print("------------------------")
             menu_utils.render_menu(
                 MenuSpec(
                     items=[_command_option(cmd) for cmd in dev_commands],

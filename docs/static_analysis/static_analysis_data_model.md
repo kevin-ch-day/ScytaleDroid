@@ -14,8 +14,9 @@ back to a concrete database record.
    adapter (`ingest_baseline_payload`) even when database writes are optional.
 3. Persistence helpers in `scytaledroid/StaticAnalysis/persistence/ingest.py`
    call the idempotent DDL from
-   `scytaledroid/Database/db_queries/canonical/schema.py`, promote provider
-   exposures, and materialise the session string view as needed.
+   `scytaledroid/Database/db_queries/canonical/schema.py` and promote provider
+   exposures as needed. Database views are not used; all validations run
+   directly on canonical tables.
 4. Analysts can verify schema health through the CLI database utilities
    (**Database Utilities → Schema snapshot**) or by running the canonical helper
    snippet shown in the persistence runbook.
@@ -29,10 +30,6 @@ back to a concrete database record.
 | `static_analysis_findings` | Normalised findings (rule, severity, status, tags, CVSS, MASVS control, detector/module attribution, evidence JSON). | PK `id`; FK `run_id` → `static_analysis_runs`. Indexed on `(run_id, rule_id)` and `(rule_id, severity, run_id)`. | `ingest_baseline_payload` and provider promotion helpers. |
 | `static_fileproviders` | Exported ContentProvider posture with authorities, guard strength, grant flags, and component metrics. | PK `id`; FK `run_id` → `static_analysis_runs`. Indexed on `component_name`, `effective_guard`. | `ingest_baseline_payload`. |
 | `static_provider_acl` | Path-permission breakdowns for providers (path/prefix/pattern + guard levels). | PK `id`; FK `provider_id` → `static_fileproviders`. Indexed on provider + path columns. | `ingest_baseline_payload`. |
-| `v_base002_candidates` | View exposing unguarded/weak providers sourced from canonical tables. | Materialised via schema helper (DROP/CREATE VIEW). | Queried by `upsert_base002_for_session`. |
-| `v_provider_exposure` | Analyst-facing view summarising guard strength, grant flags, and evidence payloads. | Materialised via schema helper. | Referenced in validation SQL. |
-| `v_session_string_samples` | Session-aware view joining string samples even when `session_stamp` is missing; falls back to `(package_name, created_at)` windows. | Materialised via schema helper. | Queried by CLI + manual helper snippet. |
-
 Legacy `static_findings_summary`, `static_findings`, and string tables remain for
 backward compatibility, but all new analytics flows should rely on the canonical
 tables above. Canonical ingest updates both worlds when legacy writes are
@@ -40,12 +37,9 @@ enabled, ensuring existing dashboards continue to function.
 
 ## 3. Session string samples
 
-Canonical ingest relies on `v_session_string_samples` to work even when legacy
-`static_string_samples` rows are missing a `session_stamp`. The view correlates
-samples by `(package_name, created_at)` windows so detector evidence remains
-queryable for BASE-002 and secrets workflows. Running the manual helper snippet
-with a chosen session stamp ensures the view exists and returns a row count for
-the requested session.
+Session-scoped queries now read directly from `static_string_samples`. If a
+legacy run lacks `session_stamp`, rerun the scan or use the stored evidence
+paths; the CLI no longer depends on a fallback view.
 
 ## 4. Query helpers & diagnostics
 
@@ -56,13 +50,11 @@ the requested session.
   findings into `static_analysis_findings` with structured evidence payloads.
 * **Diagnostics menu** – `python -m scytaledroid.Database.db_utils.database_menu`
   still exposes schema snapshots. For standalone validation without the CLI,
-  run the manual helper snippet (see runbook) to ensure schema/view readiness
-  and promote provider exposures.
+  run the manual helper snippet (see runbook) to ensure schema readiness and
+  promote provider exposures.
 * **String intel snapshot** – The exploratory renderer (`--explore`) mirrors the
-  canonical string view; evidence counts in the CLI now read from
-  `v_strings_effective` (clean endpoints/HTTP evidence) and surface the
-  suppressed appendix from `v_doc_policy_drift` once the ensure step has been
-  run.
+  canonical string tables; evidence counts in the CLI read from the persisted
+  `static_string_summary` and `static_string_samples` rows.
 
 ## 5. Joining with APK metadata
 
@@ -88,9 +80,8 @@ WHERE av.package_name = 'com.example.app'
   AND sar.session_stamp = '20241019-163000';
 ```
 
-When you need legacy `static_string_samples` context, join through
-`v_strings_normalized`, which already normalises package/session
-relationships and exposes the derived `host_normalized` column.
+When you need legacy `static_string_samples` context, join directly on
+`static_string_samples` and apply any required normalisation in the query.
 
 ## 6. Related documentation
 

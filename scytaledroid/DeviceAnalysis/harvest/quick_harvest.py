@@ -63,6 +63,8 @@ def quick_harvest(
     verbose: bool = False,
     run_id: Optional[str] = None,
     harvest_logger: Optional[logging_engine.ContextAdapter] = None,
+    snapshot_id: Optional[int] = None,
+    snapshot_captured_at: Optional[str] = None,
 ) -> List[PullResult]:
     """Execute a lightweight harvest by resolving paths via ``pm path``."""
 
@@ -79,6 +81,10 @@ def quick_harvest(
         "session_stamp": session_stamp,
         "pull_mode": "quick",
     }
+    if snapshot_id is not None:
+        base_context["snapshot_id"] = snapshot_id
+    if snapshot_captured_at:
+        base_context["snapshot_captured_at"] = snapshot_captured_at
 
     log_adapter = harvest_logger
     close_logger = False
@@ -511,6 +517,10 @@ def quick_harvest(
                     "occurrence_index": occurrence,
                     "artifact": artifact.artifact,
                 }
+                if snapshot_id is not None:
+                    extra_meta["snapshot_id"] = snapshot_id
+                if snapshot_captured_at:
+                    extra_meta["snapshot_captured_at"] = snapshot_captured_at
                 try:
                     write_metadata_sidecar(
                         dest_path,

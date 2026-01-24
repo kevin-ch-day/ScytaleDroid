@@ -7,8 +7,8 @@ from .models import Command
 SCAN_COMMANDS: tuple[Command, ...] = (
     Command(
         id="1",
-        title="Full analysis (persist + verification)",
-        description="Run all detectors, reset caches/persistence, and emit verification digest",
+        title="Full analysis [FULL] (recommended)",
+        description="Run complete static analysis with full detector coverage",
         kind="scan",
         profile="full",
         section="workflow",
@@ -17,8 +17,8 @@ SCAN_COMMANDS: tuple[Command, ...] = (
     ),
     Command(
         id="2",
-        title="Accelerated analysis (persist essentials)",
-        description="Run core detectors for MASVS/risk tracking and persist results",
+        title="Lightweight analysis [FAST]",
+        description="Run core detectors for quick MASVS/risk coverage",
         kind="scan",
         profile="lightweight",
         section="workflow",
@@ -38,8 +38,8 @@ SCAN_COMMANDS: tuple[Command, ...] = (
     # Developer shortcuts (only shown when SCYTALEDROID_DEV_SHORTCUTS=1)
     Command(
         id="C",
-        title="Quick test: CNN (full profile)",
-        description="Dev shortcut — single-app calibration run for CNN",
+        title="CNN — baseline regression",
+        description="Stable app used to verify detector outputs",
         kind="scan",
         profile="full",
         section="dev",
@@ -49,8 +49,8 @@ SCAN_COMMANDS: tuple[Command, ...] = (
     ),
     Command(
         id="T",
-        title="Quick test: TikTok (full profile)",
-        description="Dev shortcut — stress run for TikTok",
+        title="TikTok — stress / edge-case",
+        description="Complex app to stress components, strings, and permissions",
         kind="scan",
         profile="full",
         section="dev",
