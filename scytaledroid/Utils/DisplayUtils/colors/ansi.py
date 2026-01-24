@@ -9,6 +9,7 @@ from functools import lru_cache
 from typing import Iterable, Tuple
 
 from .models import Palette
+from .. import ui_prefs
 from .palette import get_palette
 
 RESET = "\033[0m"
@@ -37,6 +38,8 @@ def _colors_enabled() -> bool:
         return False
     if os.environ.get("FORCE_COLOR"):
         return True
+    if not ui_prefs.use_color():
+        return False
 
     stream = getattr(sys, "stdout", None)
     if stream is None:

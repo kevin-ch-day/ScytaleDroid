@@ -198,13 +198,11 @@ def print_header(title: str, subtitle: Optional[str] = None) -> None:
     heading = title.strip()
     if not heading:
         return
-    palette = colors.get_palette()
-    underline = "=" * len(heading)
-    print(colors.apply(heading, palette.header, bold=True))
-    print(colors.apply(underline, palette.divider))
+    print(text_blocks.headline(heading))
     if subtitle:
         subheading = subtitle.strip()
         if subheading:
+            palette = colors.get_palette()
             print(colors.apply(subheading, palette.muted))
 
 

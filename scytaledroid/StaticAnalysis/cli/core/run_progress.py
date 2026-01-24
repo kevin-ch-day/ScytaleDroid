@@ -28,7 +28,7 @@ from ...core.findings import Badge, DetectorResult, Finding
 from ...core.repository import ArtifactGroup
 from .glyphs import GlyphSet
 from .options import ScanDisplayOptions, describe_cli_flags
-from ..views.sections import (
+from ..views.view_sections import (
     SECTION_DEFINITIONS,
     extract_integrity_profiles,
     format_badge,

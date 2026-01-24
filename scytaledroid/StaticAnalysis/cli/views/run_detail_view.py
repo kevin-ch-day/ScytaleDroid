@@ -9,7 +9,7 @@ from scytaledroid.Utils.DisplayUtils import status_messages, table_utils, prompt
 
 from ...core.findings import EvidencePointer, SeverityLevel
 from ..core.models import AppRunResult
-from .sections import SECTION_DEFINITIONS
+from .view_sections import SECTION_DEFINITIONS
 
 _SECTION_TITLE_LOOKUP = {definition.key: definition.title for definition in SECTION_DEFINITIONS}
 _SEVERITY_LABELS: Mapping[SeverityLevel, tuple[str, str]] = {
@@ -177,7 +177,7 @@ def prompt_severity_filter(current: Iterable[str]) -> set[str]:
 
 
 def cycle_evidence_lines(current: int) -> int:
-    from ..core.prompts import EVIDENCE_STEPS
+    from ..core.run_prompts import EVIDENCE_STEPS
 
     try:
         index = EVIDENCE_STEPS.index(current)

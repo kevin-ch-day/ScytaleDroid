@@ -9,7 +9,7 @@ from typing import Optional, Dict, Mapping
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils, colors
 from scytaledroid.Database.db_core import db_queries as core_q
 
-from ..reports.masvs_summary import fetch_db_masvs_summary, fetch_masvs_matrix
+from ..reports.masvs_summary_report import fetch_db_masvs_summary, fetch_masvs_matrix
 
 
 def _humanize_descriptor(raw: object | None) -> str:

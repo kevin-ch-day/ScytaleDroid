@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Mapping
 import pytest
 
 from scytaledroid.Database.db_core import db_queries as core_q
-from scytaledroid.StaticAnalysis.cli.core.db_persist import persist_run_summary
+from scytaledroid.StaticAnalysis.cli.core.run_persistence import persist_run_summary
 from scytaledroid.StaticAnalysis.persistence import ingest
 from scytaledroid.StaticAnalysis.persistence.snapshots import write_permission_snapshot
 

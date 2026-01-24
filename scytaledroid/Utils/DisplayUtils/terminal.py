@@ -7,6 +7,8 @@ import shutil
 import sys
 from functools import lru_cache
 
+from . import ui_prefs
+
 MIN_WIDTH = 40
 
 
@@ -66,6 +68,8 @@ def _supports_unicode() -> bool:
 @lru_cache(maxsize=1)
 def _determine_ascii_mode() -> bool:
     if os.environ.get("ASCII_UI"):
+        return True
+    if not ui_prefs.use_unicode():
         return True
     term = os.environ.get("TERM", "")
     if term.lower() == "dumb":

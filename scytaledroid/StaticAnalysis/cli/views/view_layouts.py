@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Mapping, Sequence
 
-from scytaledroid.ui import formatter
+from scytaledroid.Utils.DisplayUtils import status_messages
 
 
 def render_run_start(
@@ -23,33 +23,29 @@ def render_run_start(
     perm_cache_desc: str,
     trace_ids: Sequence[str] | None = None,
 ) -> None:
-    formatter.print_header("Static Analysis · RUN START")
-
-    print(
-        formatter.format_kv_block(
-            "[RUN]",
-            {
-                "Type": "static",
-                "Target": target,
-                "Profile": profile_label,
-                "Run ID": run_id,
-            },
-        )
+    status_messages.print_strip(
+        "Static Analysis · Configuration",
+        [
+            ("Type", "static"),
+            ("Target", target),
+            ("Profile", profile_label),
+            ("Run ID", run_id),
+        ],
     )
     print()
 
-    meta_pairs = {
-        "Workers": workers_desc,
-        "Cache": cache_desc,
-        "Log level": log_level.upper(),
-        "Perm cache": perm_cache_desc,
-    }
+    meta_pairs = [
+        ("Workers", workers_desc),
+        ("Cache", cache_desc),
+        ("Log level", log_level.upper()),
+        ("Perm cache", perm_cache_desc),
+    ]
     if modules:
-        meta_pairs["Detectors"] = ", ".join(modules)
+        meta_pairs.append(("Detectors", ", ".join(modules)))
     if trace_ids:
-        meta_pairs["Trace IDs"] = ", ".join(trace_ids)
+        meta_pairs.append(("Trace IDs", ", ".join(trace_ids)))
 
-    print(formatter.format_kv_block("[META]", meta_pairs))
+    status_messages.print_strip("Static Analysis · Settings", meta_pairs)
     print()
 
 
@@ -65,17 +61,13 @@ def render_run_summary(
     perm_stats: Mapping[str, int],
     evidence_root: str | None = None,
 ) -> None:
-    formatter.print_header("Static Analysis · RUN SUMMARY")
-
-    print(
-        formatter.format_kv_block(
-            "[RUN]",
-            {
-                "Run ID": run_id,
-                "Target": target,
-                "Profile": profile_label,
-            },
-        )
+    status_messages.print_strip(
+        "Static Analysis · Complete",
+        [
+            ("Run ID", run_id),
+            ("Target", target),
+            ("Profile", profile_label),
+        ],
     )
     print()
 
@@ -94,20 +86,21 @@ def render_run_summary(
         f"Custom={perm_stats.get('custom', 0)}"
     )
 
-    print(
-        formatter.format_kv_block(
-            "[RESULT]",
-            {
-                "Detectors run": f"{detectors_count} modules",
-                "Total findings": str(findings_total),
-                "Severity": severity,
-                "MASVS coverage": masvs_summary,
-                "Permissions": perm_summary,
-            },
-        )
+    status_messages.print_strip(
+        "Static Analysis · Results",
+        [
+            ("Detectors run", f"{detectors_count} modules"),
+            ("Total findings", str(findings_total)),
+            ("Severity", severity),
+            ("MASVS coverage", masvs_summary),
+            ("Permissions", perm_summary),
+        ],
     )
     print()
 
     if evidence_root:
-        print(formatter.format_kv_block("[EVIDENCE]", {"Evidence root": evidence_root}))
+        status_messages.print_strip(
+            "Static Analysis · Evidence",
+            [("Evidence root", evidence_root)],
+        )
         print()

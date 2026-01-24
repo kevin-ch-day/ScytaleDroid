@@ -139,7 +139,7 @@ def boxed(lines: Iterable[str], *, width: int | None = None, padding: int = 1) -
 
 
 def headline(title: str, *, width: int | None = None, style: str = "header") -> str:
-    """Return a styled headline followed by an accent divider."""
+    """Return a styled headline followed by a thin divider."""
 
     available_width = width if width is not None else get_terminal_width()
     title = title.strip()
@@ -150,7 +150,7 @@ def headline(title: str, *, width: int | None = None, style: str = "header") -> 
         styled_title = colors.apply(title, colors.style(style), bold=True)
     else:
         styled_title = title
-    underline = divider("=", width=underline_width, style="divider")
+    underline = divider("─" if not use_ascii_ui() else "-", width=underline_width, style="divider")
     return f"{styled_title}\n{underline}"
 
 

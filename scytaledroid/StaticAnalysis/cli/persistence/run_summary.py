@@ -14,9 +14,9 @@ from scytaledroid.Database.db_core import db_queries as core_q
 
 from ..core.cvss_v4 import apply_profiles
 from ...core.findings import Badge, Finding
-from ..reports.evidence import normalize_evidence
+from ..reports.evidence_report import normalize_evidence
 from ..core.masvs_mapper import summarise_controls, rule_to_area
-from ..core.rule_mapping import derive_rule_id
+from ..core.rule_ids import derive_rule_id
 from .metrics_writer import compute_metrics_bundle, write_buckets, write_contributors, write_metrics
 from .findings_writer import (
     compute_cvss_base,

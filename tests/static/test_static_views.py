@@ -14,10 +14,10 @@ def test_render_run_start(capsys):
         trace_ids=("det1",),
     )
     out = capsys.readouterr().out
-    assert "Static Analysis · RUN START" in out
-    assert "[RUN] Target" in out
+    assert "Static Analysis · Configuration" in out
+    assert "Target" in out
     assert "permissions, strings" in out
-    assert "[META] Workers" in out
+    assert "Workers" in out
 
 
 def test_render_run_summary(capsys):
@@ -33,7 +33,7 @@ def test_render_run_summary(capsys):
         evidence_root="/tmp/evidence",
     )
     out = capsys.readouterr().out
-    assert "Static Analysis · RUN SUMMARY" in out
-    assert "[RESULT] Total findings" in out
+    assert "Static Analysis · Complete" in out
+    assert "Total findings" in out
     assert "MASVS coverage" in out
     assert "/tmp/evidence" in out

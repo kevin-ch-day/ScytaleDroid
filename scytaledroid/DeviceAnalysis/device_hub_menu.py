@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from scytaledroid.Utils.DisplayUtils import (
+    colors,
     display_settings,
     menu_utils,
     prompt_utils,
@@ -33,7 +34,15 @@ def _inventory_badge(status: InventoryStatus | None) -> str:
 
 def _render_header(adb_status: str, live_count: int) -> None:
     ts = format_timestamp_utc(datetime.now(timezone.utc))
-    print(f"Android Device Analysis — {ts}  |  ADB: {adb_status}  |  Live: {live_count}")
+    status_messages.print_strip(
+        "Android Device Analysis",
+        [
+            ("UTC", ts),
+            ("ADB", adb_status),
+            ("Live", live_count),
+        ],
+        width=96,
+    )
 
 
 def _render_live_devices(
@@ -45,6 +54,8 @@ def _render_live_devices(
         return
 
     rows: List[List[str]] = []
+    palette = colors.get_palette()
+    use_color = colors.colors_enabled()
     for idx, summary in enumerate(summaries, start=1):
         label = summary.get("model") or summary.get("device") or "Unknown device"
         serial = summary.get("serial") or "—"
@@ -53,7 +64,19 @@ def _render_live_devices(
         android_sdk = summary.get("android_sdk") or summary.get("sdk") or None
         android = f"{android_release} (SDK {android_sdk})" if android_sdk else android_release
         rooted_raw = summary.get("is_rooted") or "Unknown"
-        rooted = "Yes" if str(rooted_raw).strip().upper() == "YES" else ("No" if str(rooted_raw).strip().upper() == "NO" else "Unknown")
+        rooted_value = str(rooted_raw).strip().upper()
+        if rooted_value == "YES":
+            rooted = "Yes"
+            if use_color:
+                rooted = colors.apply(rooted, palette.warning, bold=True)
+        elif rooted_value == "NO":
+            rooted = "No"
+            if use_color:
+                rooted = colors.apply(rooted, palette.success, bold=True)
+        else:
+            rooted = "Unknown"
+            if use_color:
+                rooted = colors.apply(rooted, palette.muted)
         inv = inventory_lookup.get(serial)
         inv_age = inv.age_display if inv and inv.age_display else "—"
         inv_pkgs = str(inv.package_count) if inv and inv.package_count is not None else "—"
@@ -70,11 +93,13 @@ def _render_live_devices(
         )
 
     table_kwargs = display_settings.apply_table_defaults(
-        {"compact": True, "accent_first_column": False}
+        {"compact": True, "accent_first_column": False, "zebra": True}
     )
     table_utils.render_table(
         ["#", "Device", "OEM", "Android", "Root", "Inv age", "Pkgs"],
         rows,
+        column_styles=["muted", "accent", "muted", "text", None, "muted", "muted"],
+        alignments=["right", "left", "left", "left", "left", "right", "right"],
         **table_kwargs,
     )
 
@@ -102,7 +127,7 @@ def devices_hub() -> None:
 
         print()
         _render_header(adb_status, live_count)
-        print("Live devices (r=Refresh, 0/q=Back)")
+        print(text_blocks.headline("Devices", width=96))
         _render_live_devices(summaries, inv_lookup)
 
         if warnings:
@@ -115,7 +140,10 @@ def devices_hub() -> None:
                 continue
 
         print()
-        # Minimal prompt; shortcuts are in the section header.
+        hint = "Hint: r=Refresh  0/q=Back"
+        if colors.colors_enabled():
+            hint = colors.apply(hint, colors.get_palette().muted)
+        print(hint)
         print("Select device #:")
         choice_keys = [str(idx) for idx in range(1, len(summaries) + 1)]
         default_choice = "0" if len(summaries) == 0 else ("1" if len(summaries) == 1 else "1")

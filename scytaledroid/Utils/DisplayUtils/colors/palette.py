@@ -149,6 +149,67 @@ def palette_context(palette: Palette) -> Iterator[Palette]:
         set_palette(previous, name=previous_name)
 
 
+def _normalise_scale(value: float) -> float:
+    if value < 0:
+        return 0.0
+    if value <= 1.0:
+        return value
+    if value <= 10.0:
+        return value / 10.0
+    return 1.0
+
+
+def risk_color(score: float | int | None) -> tuple[str, ...]:
+    """Return a palette role for a risk score (0..1 or 0..10)."""
+
+    palette = get_palette()
+    if score is None:
+        return palette.muted
+    try:
+        value = _normalise_scale(float(score))
+    except (TypeError, ValueError):
+        return palette.muted
+    if value < 0.34:
+        return palette.muted
+    if value < 0.67:
+        return palette.warning
+    return palette.error
+
+
+def confidence_color(score: float | int | None) -> tuple[str, ...]:
+    """Return a palette role for confidence (0..1 or 0..10)."""
+
+    palette = get_palette()
+    if score is None:
+        return palette.muted
+    try:
+        value = _normalise_scale(float(score))
+    except (TypeError, ValueError):
+        return palette.muted
+    if value < 0.34:
+        return palette.error
+    if value < 0.67:
+        return palette.warning
+    return palette.success
+
+
+def progress_color(value: float | int | None) -> tuple[str, ...]:
+    """Return a palette role for progress/ratio values."""
+
+    palette = get_palette()
+    if value is None:
+        return palette.muted
+    try:
+        scaled = _normalise_scale(float(value))
+    except (TypeError, ValueError):
+        return palette.muted
+    if scaled < 0.34:
+        return palette.muted
+    if scaled < 0.67:
+        return palette.accent
+    return palette.success
+
+
 __all__ = [
     "Palette",
     "available_palettes",
@@ -158,8 +219,10 @@ __all__ = [
     "detect_palette_name",
     "get_palette",
     "palette_context",
+    "risk_color",
+    "confidence_color",
+    "progress_color",
     "reset_palette",
     "set_palette",
     "set_palette_by_name",
 ]
-

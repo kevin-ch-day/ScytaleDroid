@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from . import colors
+from . import colors, text_blocks
 from .terminal import use_ascii_ui
 
 _STATUS_PREFIX = {
@@ -134,4 +134,70 @@ def status_evidence(message: str) -> str:
     return status(message, level="evidence", show_icon=False)
 
 
-__all__ = ["print_status", "status", "step", "highlight"]
+def _strip_value_style(label: str, value: object) -> tuple[str, ...] | None:
+    palette = colors.get_palette()
+    if not isinstance(value, str):
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    key = label.strip().lower()
+    norm = raw.lower()
+    if key in {"status", "adb", "root"}:
+        if "connected" in norm or "fresh" in norm or norm in {"ok", "pass"}:
+            return palette.success
+        if "stale" in norm or "warn" in norm:
+            return palette.warning
+        if "disconnected" in norm or "fail" in norm or "error" in norm:
+            return palette.error
+    if key in {"mode"} and norm:
+        return palette.accent
+    return None
+
+
+def format_strip(
+    title: str,
+    items: Iterable[tuple[str, object]] = (),
+    *,
+    width: int | None = None,
+) -> str:
+    """Return a minimal status strip (title + divider + key/value lines)."""
+
+    heading = title.strip()
+    if not heading:
+        return ""
+    palette = colors.get_palette()
+    use_color = colors.colors_enabled()
+    divider = text_blocks.divider("─", width=width, style="divider")
+    title_text = colors.apply(heading, palette.header, bold=True) if use_color else heading
+
+    max_label = max((len(str(label)) for label, _ in items), default=0)
+    lines: list[str] = [title_text, divider]
+    for label, value in items:
+        label_text = f"{str(label):<{max_label}}"
+        value_text = str(value)
+        if use_color:
+            label_text = colors.apply(label_text, palette.muted)
+            value_style = _strip_value_style(str(label), value)
+            if value_style and "\033[" not in value_text:
+                value_text = colors.apply(value_text, value_style, bold=True)
+            elif "\033[" not in value_text:
+                value_text = colors.apply(value_text, palette.text)
+        lines.append(f"{label_text} : {value_text}")
+    return "\n".join(lines)
+
+
+def print_strip(
+    title: str,
+    items: Iterable[tuple[str, object]] = (),
+    *,
+    width: int | None = None,
+) -> None:
+    """Print a minimal status strip."""
+
+    strip = format_strip(title, items, width=width)
+    if strip:
+        print(strip)
+
+
+__all__ = ["format_strip", "print_status", "print_strip", "status", "step", "highlight"]

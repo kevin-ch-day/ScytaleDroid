@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Dict, Optional
 
 from datetime import datetime
-from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
+from scytaledroid.Utils.DisplayUtils import colors, prompt_utils, status_messages, text_blocks
 from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.constants import INVENTORY_STALE_SECONDS
 
 from scytaledroid.DeviceAnalysis.services import device_service
@@ -112,8 +112,7 @@ def _render_dashboard(
     )
 
     print()
-    print("Device Dashboard")
-    print("================")
+    print(text_blocks.headline("Device Dashboard", width=70))
 
     adb_state = "Connected" if active_details else "Disconnected"
     root_state = "unknown"
@@ -132,13 +131,18 @@ def _render_dashboard(
     serial_label = serial or "—"
     adb_label = f"{adb_state} · {root_state}"
 
-    print(f"Device      : {device_label}")
-    print(f"Serial      : {serial_label}")
-    print(f"ADB         : {adb_label}")
+    status_messages.print_strip(
+        "Device",
+        [
+            ("Model", device_label),
+            ("Serial", serial_label),
+            ("ADB", adb_label),
+        ],
+        width=70,
+    )
 
     print()
-    print("Inventory")
-    print("---------")
+    print(text_blocks.headline("Inventory", width=70))
     status = inventory_metadata
     if not active_details:
         print(status_messages.status("No active device. Use option 9 to select one.", level="warn"))
@@ -160,11 +164,17 @@ def _render_dashboard(
             else f"{INVENTORY_STALE_SECONDS // 60}m"
         )
 
-        print(f"Status      : {str(status_label).upper()}")
-        print(f"Packages    : {pkg_count or '—'}")
-        if last_ts:
-            print(f"Last sync   : {format_timestamp_utc(last_ts)}")
-        print(f"Age         : {age}")
+        status_messages.print_strip(
+            "Inventory snapshot",
+            [
+                ("Status", str(status_label).upper()),
+                ("Packages", pkg_count or "—"),
+                ("Last sync", format_timestamp_utc(last_ts) if last_ts else "—"),
+                ("Age", age),
+                ("Threshold", threshold_label),
+            ],
+            width=70,
+        )
 
         if str(status_label).upper() == "NONE":
             print(status_messages.status("No inventory snapshot found. Run a full sync to capture the current app state.", level="warn"))

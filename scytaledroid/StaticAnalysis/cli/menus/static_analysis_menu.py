@@ -39,7 +39,7 @@ def static_analysis_menu() -> None:
     from scytaledroid.StaticAnalysis.core.repository import group_artifacts
     from ..commands import COMMANDS, get_command, iter_commands
     from ..core.models import RunParameters
-    from ..core.prompts import default_custom_tests, prompt_advanced_options
+    from ..core.run_prompts import default_custom_tests, prompt_advanced_options
     from ..flows.selection import select_scope
     from scytaledroid.StaticAnalysis.services import static_service
 

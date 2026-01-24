@@ -14,7 +14,7 @@ from scytaledroid.Utils.System import output_prefs
 from scytaledroid.StaticAnalysis.persistence import ingest as canonical_ingest
 from scytaledroid.StaticAnalysis.session import make_session_stamp, normalize_session_stamp
 from scytaledroid.ui import formatter
-from ..views.layouts import render_run_start, render_run_summary
+from ..views.view_layouts import render_run_start, render_run_summary
 from scytaledroid.Utils.LoggingUtils.logging_context import RunContext, get_run_logger
 from scytaledroid.Utils.LoggingUtils import logging_events as log_events
 
@@ -29,7 +29,7 @@ from ..execution import (
     render_run_results,
 )
 from ..core.models import RunParameters, RunOutcome, ScopeSelection
-from ..core.profiles import run_modules_for_profile
+from ..core.analysis_profiles import run_modules_for_profile
 from .selection import format_scope_target
 
 

@@ -8,7 +8,7 @@ from ..menus.masvs_menu import (
     render_scoring_explainer_menu,
     render_masvs_matrix_menu,
 )
-from ..reports.diagnostics import render_static_diagnostics_menu
+from ..reports.session_diagnostics import render_static_diagnostics_menu
 
 READ_ONLY_COMMANDS: tuple[Command, ...] = (
     Command(

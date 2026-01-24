@@ -8,6 +8,7 @@ from typing import Iterable, Optional
 
 from . import colors
 from .terminal import get_terminal_width, use_ascii_ui
+from .text_blocks import divider
 
 
 _TONES = ("info", "warning", "success", "error")
@@ -79,7 +80,6 @@ def format_panel(
     content_width = panel_width
 
     ascii_ui = use_ascii_ui()
-    divider_char = "-" if ascii_ui else "─"
     bullet = "- " if ascii_ui else "• "
 
     content: list[str] = []
@@ -108,11 +108,9 @@ def format_panel(
         for line in hint_lines:
             content.append(colors.apply(line, hint_style))
 
-    divider = colors.apply(divider_char * content_width, border_style)
-
-    block = [divider]
+    top_divider = colors.apply(divider(content_width, style="divider"), border_style)
+    block = [top_divider]
     block.extend(content)
-    block.append(divider)
     return "\n".join(block)
 
 

@@ -126,7 +126,7 @@ class AppRunResult:
         return totals
 
     def base_artifact_outcome(self) -> Optional[ArtifactOutcome]:
-        from ..views.sections import extract_integrity_profiles  # localized import
+        from ..views.view_sections import extract_integrity_profiles  # localized import
 
         for artifact in self.artifacts:
             _, _, artifact_profile, _ = extract_integrity_profiles(artifact.report)

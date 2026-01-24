@@ -1,6 +1,8 @@
+import re
 from types import SimpleNamespace
 
 from scytaledroid.DeviceAnalysis.inventory.views import print_inventory_run_summary_from_result
+from scytaledroid.Utils.DisplayUtils import colors
 
 
 def _fake_result():
@@ -33,9 +35,9 @@ def _fake_result():
 def test_print_inventory_run_summary_from_result(capsys):
     result = _fake_result()
     print_inventory_run_summary_from_result(result)
-    out = capsys.readouterr().out
+    out = colors.strip(capsys.readouterr().out)
     assert "Inventory Sync · RUN SUMMARY" in out
     assert "[RUN] Snapshot" in out
-    assert "Packages: 2" in out or "Packages    : 2" in out
+    assert re.search(r"Packages\s*:\s*2", out)
     assert "Delta vs previous" in out
     assert "[RESULT] User apps" in out or "User apps (candidates)" in out

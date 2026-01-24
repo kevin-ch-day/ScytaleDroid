@@ -19,6 +19,13 @@ def _pad_visible(text: str, width: int) -> str:
     return text + " " * (width - visible)
 
 
+def _pad_visible_right(text: str, width: int) -> str:
+    visible = text_blocks.visible_width(text)
+    if visible >= width:
+        return text
+    return " " * (width - visible) + text
+
+
 def _shrink_widths(widths: list[int], available: int, padding: int) -> list[int]:
     if not widths:
         return widths
@@ -49,12 +56,20 @@ def render_table(
     accent_first_column: bool = True,
     compact: bool = False,
     column_styles: Sequence[str] | None = None,
+    alignments: Sequence[str] | None = None,
+    zebra: bool = False,
+    max_rows: int | None = None,
+    footer: str | None = None,
 ) -> None:
     """Render a simple left-aligned ASCII table."""
 
     rows = list(rows)
+    total_rows = len(rows)
     column_count = len(headers)
     widths: List[int] = [max(1, text_blocks.visible_width(str(header))) for header in headers]
+
+    if max_rows is not None and max_rows > 0:
+        rows = rows[:max_rows]
 
     for row in rows:
         if len(row) != column_count:
@@ -88,7 +103,7 @@ def render_table(
     print(formatted_headers)
     print(separator)
 
-    for row in rows:
+    for row_index, row in enumerate(rows):
         cells = []
         for idx, cell in enumerate(row):
             raw = _stringify(cell)
@@ -97,16 +112,48 @@ def render_table(
                 style_name = None
                 if column_styles and idx < len(column_styles):
                     style_name = column_styles[idx]
-                if style_name:
+                if style_name in {"risk", "confidence", "progress"}:
+                    try:
+                        numeric = float(cell)
+                    except (TypeError, ValueError):
+                        numeric = None
+                    if style_name == "risk":
+                        coloured = colors.apply(raw, colors.risk_color(numeric))
+                    elif style_name == "confidence":
+                        coloured = colors.apply(raw, colors.confidence_color(numeric))
+                    else:
+                        coloured = colors.apply(raw, colors.progress_color(numeric))
+                elif style_name:
                     coloured = colors.apply(raw, colors.style(style_name))
                 elif idx == 0 and accent_first_column and raw.strip():
                     coloured = colors.apply(raw, palette.accent, bold=True)
+                elif zebra and row_index % 2 == 1:
+                    coloured = colors.apply(raw, palette.muted)
                 else:
                     coloured = colors.apply(raw, palette.text)
             truncated = text_blocks.truncate_visible(coloured, widths[idx])
-            padded = _pad_visible(truncated, widths[idx])
+            align = None
+            if alignments and idx < len(alignments):
+                align = alignments[idx].lower()
+            elif isinstance(cell, (int, float)):
+                align = "right"
+            if align == "right":
+                padded = _pad_visible_right(truncated, widths[idx])
+            else:
+                padded = _pad_visible(truncated, widths[idx])
             cells.append(padded)
         print(pad.join(cells))
+    if max_rows is not None and total_rows > max_rows:
+        hidden = total_rows - max_rows
+        message = f"Showing {max_rows} of {total_rows} rows (+{hidden} more)."
+        if use_color and palette:
+            message = colors.apply(message, palette.muted)
+        print(message)
+    if footer:
+        footer_line = footer
+        if use_color and palette:
+            footer_line = colors.apply(footer_line, palette.hint)
+        print(footer_line)
 
 
 def render_key_value_pairs(pairs: Sequence[tuple[str, object]], *, padding: int = 2) -> None:

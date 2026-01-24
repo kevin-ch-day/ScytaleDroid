@@ -83,4 +83,11 @@ __all__ = [
     "toggle_clear",
     "get_max_width",
     "set_max_width",
+    "is_compact",
+    "set_compact",
+    "toggle_compact",
+    "use_color",
+    "set_use_color",
+    "use_unicode",
+    "set_use_unicode",
 ]

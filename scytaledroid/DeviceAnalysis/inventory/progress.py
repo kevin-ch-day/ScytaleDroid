@@ -6,7 +6,7 @@ import re
 from datetime import datetime, timezone
 from typing import Optional, Dict
 
-from scytaledroid.Utils.DisplayUtils import status_messages, terminal
+from scytaledroid.Utils.DisplayUtils import colors, status_messages, terminal, text_blocks
 
 # Avoid pulling in the entire device_menu stack when running headless (e.g., measure_inventory).
 try:
@@ -63,10 +63,20 @@ def _format_progress_lines(
     empty = bar_width - filled
     fill_char = "█" if not terminal.use_ascii_ui() else "#"
     empty_char = "░" if not terminal.use_ascii_ui() else "."
-    bar = f"{fill_char * filled}{empty_char * empty}"
+    filled_bar = f"{fill_char * filled}"
+    empty_bar = f"{empty_char * empty}"
+    if colors.colors_enabled():
+        palette = colors.get_palette()
+        filled_bar = colors.apply(filled_bar, palette.accent)
+        empty_bar = colors.apply(empty_bar, palette.muted)
+    bar = f"{filled_bar}{empty_bar}"
     line1 = f"[{bar}] {processed}/{total} ({percentage:.1f}%)"
     if phase_label:
-        line1 = f"{phase_label} | {line1}"
+        label = phase_label
+        if colors.colors_enabled():
+            palette = colors.get_palette()
+            label = colors.apply(phase_label, palette.header, bold=True)
+        line1 = f"{label}  {line1}"
 
     eta_display = "ETA --" if (processed >= total and total > 0) else f"ETA: {eta_text}"
     line2 = f"{eta_display}"
@@ -74,6 +84,35 @@ def _format_progress_lines(
         line2 = f"{line2} | splits {split_processed}"
 
     return line1, line2
+
+
+def _format_freshness_line(age_seconds: float, threshold_seconds: int) -> str:
+    if threshold_seconds <= 0:
+        return "unknown"
+    ratio = max(0.0, min(age_seconds / threshold_seconds, 1.0))
+    freshness = max(0.0, 1.0 - ratio)
+    bar_width = 16
+    filled = int(round(freshness * bar_width))
+    filled = max(0, min(bar_width, filled))
+    empty = bar_width - filled
+    fill_char = "█" if not terminal.use_ascii_ui() else "#"
+    empty_char = "░" if not terminal.use_ascii_ui() else "."
+    filled_bar = fill_char * filled
+    empty_bar = empty_char * empty
+    if colors.colors_enabled():
+        palette = colors.get_palette()
+        bar_color = colors.progress_color(freshness)
+        if ratio >= 1.0:
+            bar_color = palette.error
+        filled_bar = colors.apply(filled_bar, bar_color)
+        empty_bar = colors.apply(empty_bar, palette.muted)
+    threshold_label = (
+        f"{threshold_seconds // 3600}h"
+        if threshold_seconds >= 3600
+        else f"{threshold_seconds // 60}m"
+    )
+    percent = int(round(freshness * 100))
+    return f"[{filled_bar}{empty_bar}] {percent:>3d}% · {humanize_seconds(age_seconds)} / {threshold_label}"
 
 
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
@@ -122,8 +161,8 @@ def make_cli_progress_printer(ui_prefs=None):
             print()  # move to line2
             print()  # blank line after progress
             label = event.get("phase_label") or current_phase_label or "Sync"
-            done_line = f"Phase complete. Rendering summary…"
-            print(done_line)
+            done_line = f"{label} complete. Rendering summary…"
+            print(status_messages.status(done_line, level="success"))
         return True
 
     return _printer
@@ -134,8 +173,7 @@ def render_snapshot_block(previous_meta, ui_prefs=None, mode: Optional[str] = No
     status_line = "Status   : UNKNOWN"
     age_line = "Age      : unknown"
     pkg_line = "Packages : —"
-    threshold_label = f"{INVENTORY_STALE_SECONDS // 3600}h" if INVENTORY_STALE_SECONDS >= 3600 else f"{INVENTORY_STALE_SECONDS // 60}m"
-    threshold_line = f"Staleness threshold: {threshold_label}"
+    freshness_line = "—"
 
     if previous_meta and getattr(previous_meta, "captured_at", None):
         age_seconds = max(
@@ -146,15 +184,18 @@ def render_snapshot_block(previous_meta, ui_prefs=None, mode: Optional[str] = No
         status_line = f"Status   : {status_text}"
         age_line = f"Age      : {humanize_seconds(age_seconds)}"
         pkg_line = f"Packages : {getattr(previous_meta, 'package_count', '—')}"
+        freshness_line = _format_freshness_line(age_seconds, INVENTORY_STALE_SECONDS)
 
     mode_text = mode or "baseline"
 
-    print("Snapshot before sync")
-    print(f"  {status_line}")
-    print(f"  {age_line}")
-    print(f"  {pkg_line}")
-    print(f"  {threshold_line}")
-    print(f"  Mode     : {mode_text}")
+    items = [
+        ("Status", status_line.split(":", 1)[-1].strip()),
+        ("Age", age_line.split(":", 1)[-1].strip()),
+        ("Freshness", freshness_line),
+        ("Packages", pkg_line.split(":", 1)[-1].strip()),
+        ("Mode", mode_text),
+    ]
+    status_messages.print_strip("Snapshot before sync", items, width=70)
     print()
 
 
