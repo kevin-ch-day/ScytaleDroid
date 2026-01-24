@@ -160,6 +160,9 @@ def run_health_checks() -> None:
         )
 
     print()
+    _run_inventory_health_check()
+
+    print()
     print("Run linkage")
     if latest_run:
         run_label = f"run_id={run_id}, pkg={package}, ts={ts_dt or ts_value}"
@@ -297,7 +300,12 @@ def _render_scoring_checks() -> None:
     }
     for table, hint in optional_tables.items():
         count = scalar(f"SELECT COUNT(*) FROM {table}")
-        level = "ok" if count else "warn"
+        if count:
+            level = "ok"
+        elif table in {"correlations", "risk_scores"}:
+            level = "info"
+        else:
+            level = "warn"
         detail = f"{count or 0} rows"
         if not count:
             detail += f" — {hint}"
@@ -305,46 +313,11 @@ def _render_scoring_checks() -> None:
 
 
 def _render_integrity_checks(session_stamp: Optional[str]) -> None:
-    if view_exists("vw_latest_apk_per_package"):
-        params: Sequence[Any]
-        if session_stamp:
-            params = (session_stamp, session_stamp)
-        else:
-            params = (None, None)
-        try:
-            rows = run_sql(
-                """
-                SELECT v.package_name, s.id AS summary_id
-                FROM vw_latest_apk_per_package v
-                LEFT JOIN static_findings_summary s
-                  ON s.package_name = v.package_name
-                 AND (%s IS NULL OR s.session_stamp = %s)
-                ORDER BY v.updated_at DESC
-                LIMIT 10
-                """,
-                params,
-                fetch="all",
-                dictionary=True,
-            )
-        except Exception:
-            rows = []
-        missing = [row["package_name"] for row in rows if not row.get("summary_id")]
-        if rows and not missing:
-            _print_status_line("ok", "latest APK ↔ summary", detail=f"{len(rows)} packages checked")
-        elif missing:
-            _print_status_line(
-                "warn",
-                "latest APK ↔ summary",
-                detail=f"missing summaries for {', '.join(missing)}",
-            )
-        else:
-            _print_status_line("warn", "latest APK ↔ summary", detail="no packages returned from view")
-    else:
-        _print_status_line(
-            "warn",
-            "latest APK ↔ summary",
-            detail="vw_latest_apk_per_package view unavailable — create view to enable check",
-        )
+    _print_status_line(
+        "warn",
+        "latest APK ↔ summary",
+        detail="view checks disabled by policy (no DB views)",
+    )
 
     sample_rows = run_sql(
         """
@@ -451,6 +424,158 @@ def _print_status_line(level: str, label: str, *, detail: Optional[str] = None) 
     if detail:
         line += f" ({detail})"
     print(line)
+
+
+def prompt_cleanup_orphan_inventory() -> None:
+    menu_utils.print_header("Cleanup Orphan Inventory Snapshots")
+    orphan_count = scalar(
+        """
+        SELECT COUNT(*)
+        FROM device_inventory_snapshots s
+        LEFT JOIN device_inventory i ON i.snapshot_id = s.snapshot_id
+        WHERE i.snapshot_id IS NULL
+        """
+    ) or 0
+    if orphan_count == 0:
+        print(status_messages.status("No orphan inventory snapshots found.", level="success"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    print(
+        status_messages.status(
+            f"Found {orphan_count} orphan snapshot header(s) (no inventory rows).",
+            level="warn",
+        )
+    )
+    print(status_messages.status("Type 'CLEAN' to delete or press Enter to cancel.", level="warn"))
+    confirmation = prompt_utils.prompt_text("Confirm cleanup keyword", required=False)
+    if confirmation.strip().upper() != "CLEAN":
+        print(status_messages.status("Cleanup cancelled.", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    run_sql(
+        """
+        DELETE s
+        FROM device_inventory_snapshots s
+        LEFT JOIN device_inventory i ON i.snapshot_id = s.snapshot_id
+        WHERE i.snapshot_id IS NULL
+        """,
+    )
+    print(status_messages.status("Orphan inventory snapshots deleted.", level="success"))
+    prompt_utils.press_enter_to_continue()
+
+
+def _run_inventory_health_check() -> None:
+    menu_utils.print_section("Inventory DB health")
+
+    snapshot_headers_total = scalar("SELECT COUNT(*) FROM device_inventory_snapshots") or 0
+    inventory_rows_total = scalar("SELECT COUNT(*) FROM device_inventory") or 0
+    orphan_headers = scalar(
+        """
+        SELECT COUNT(*)
+        FROM device_inventory_snapshots s
+        LEFT JOIN device_inventory i ON i.snapshot_id = s.snapshot_id
+        WHERE i.snapshot_id IS NULL
+        """
+    ) or 0
+
+    latest = run_sql(
+        """
+        SELECT snapshot_id, package_count
+        FROM device_inventory_snapshots
+        ORDER BY captured_at DESC
+        LIMIT 1
+        """,
+        fetch="one",
+    )
+    latest_snapshot_id = int(latest[0]) if latest else 0
+    latest_expected = int(latest[1]) if latest else 0
+    latest_rows = 0
+    latest_is_orphan = False
+    if latest_snapshot_id:
+        latest_rows = scalar(
+            "SELECT COUNT(*) FROM device_inventory WHERE snapshot_id = %s",
+            (latest_snapshot_id,),
+        ) or 0
+        latest_is_orphan = latest_rows == 0
+
+    bad_pkg_count = scalar(
+        """
+        SELECT COUNT(*)
+        FROM device_inventory
+        WHERE package_name LIKE '%/%'
+           OR package_name LIKE '%=%'
+           OR package_name LIKE '%base.apk%'
+           OR package_name LIKE '% %'
+        """
+    ) or 0
+
+    case_variants = scalar(
+        """
+        SELECT COUNT(*)
+        FROM (
+            SELECT LOWER(a.package_name) AS pkg_lower,
+                   COUNT(DISTINCT a.package_name) AS variants_in_apps,
+                   COUNT(DISTINCT i.package_name) AS variants_in_inventory
+            FROM apps a
+            LEFT JOIN device_inventory i
+              ON LOWER(i.package_name) = LOWER(a.package_name)
+            GROUP BY LOWER(a.package_name)
+            HAVING COUNT(DISTINCT a.package_name) > 1
+                OR COUNT(DISTINCT i.package_name) > 1
+        ) v
+        """
+    ) or 0
+
+    vendor_misc_remaining = scalar(
+        "SELECT COUNT(*) FROM apps WHERE publisher_key = 'VENDOR_MISC'"
+    ) or 0
+
+    if snapshot_headers_total:
+        legacy_orphans = orphan_headers - (1 if latest_is_orphan else 0)
+        if latest_snapshot_id and latest_rows == latest_expected and latest_expected:
+            level = "ok" if orphan_headers == 0 else "warn"
+        else:
+            level = "fail" if orphan_headers else "warn"
+        _print_status_line(
+            level,
+            "inventory snapshots",
+            detail=(
+                f"headers={snapshot_headers_total} orphaned={orphan_headers} "
+                f"legacy={max(legacy_orphans, 0)}"
+            ),
+        )
+    else:
+        _print_status_line("warn", "inventory snapshots", detail="no snapshots recorded")
+
+    if latest_snapshot_id:
+        level = "ok" if latest_rows == latest_expected and latest_expected else "fail"
+        _print_status_line(
+            level,
+            "latest snapshot row count",
+            detail=f"id={latest_snapshot_id} rows={latest_rows} expected={latest_expected}",
+        )
+    else:
+        _print_status_line("warn", "latest snapshot", detail="no snapshot headers recorded")
+
+    _print_status_line(
+        "ok" if bad_pkg_count == 0 else "warn",
+        "suspicious package_name",
+        detail=str(bad_pkg_count),
+    )
+
+    _print_status_line(
+        "ok" if case_variants == 0 else "warn",
+        "case drift (apps ↔ inventory)",
+        detail=str(case_variants),
+    )
+
+    _print_status_line(
+        "ok" if vendor_misc_remaining == 0 else "warn",
+        "vendor_misc publishers",
+        detail=str(vendor_misc_remaining),
+    )
 
 
 def prompt_reset_static_data() -> None:

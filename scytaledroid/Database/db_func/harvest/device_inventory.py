@@ -108,6 +108,8 @@ def replace_packages(
     snapshot_id: int,
     device_serial: str,
     packages: Sequence[Mapping[str, object]],
+    *,
+    batch_size: int = 200,
 ) -> int:
     """Replace package rows for *snapshot_id* with *packages*."""
 
@@ -124,21 +126,31 @@ def replace_packages(
         # Continue attempting inserts despite the warning.
 
     rows = []
-    skipped = 0
     for entry in packages:
         bound = _bind_package(snapshot_id, device_serial, entry)
         if bound is None:
-            skipped += 1
             continue
         rows.append(bound)
-    if skipped:
+
+    if not rows:
         log.warning(
-            f"Skipped {skipped} inventory rows with invalid package_name.",
+            "No inventory rows available after binding; refusing to persist empty snapshot.",
             category="database",
+            extra={"snapshot_id": snapshot_id, "device_serial": device_serial},
         )
+        return 0
+
     try:
-        run_sql_many(queries.INSERT_PACKAGE, rows)
-        return len(rows)
+        inserted = 0
+        for batch_start in range(0, len(rows), batch_size):
+            batch = rows[batch_start : batch_start + batch_size]
+            run_sql_many(queries.INSERT_PACKAGE, batch)
+            inserted += len(batch)
+            log.info(
+                f"Persisted inventory rows {inserted}/{len(rows)} for snapshot {snapshot_id}.",
+                category="database",
+            )
+        return inserted
     except Exception as exc:  # pragma: no cover - defensive
         sample = rows[0] if rows else None
         log.warning(
@@ -187,12 +199,15 @@ def _bind_package(
     if not raw_package:
         return None
     cleaned_package = normalize_package_name(raw_package, context="database")
-    if not cleaned_package or is_suspicious_package_name(cleaned_package):
+    if not cleaned_package:
+        return None
+    suspicious = is_suspicious_package_name(cleaned_package)
+    if suspicious:
+        review_needed = 1
         log.warning(
-            f"Rejecting suspicious package_name '{raw_package}' in inventory snapshot.",
+            f"Suspicious package_name '{raw_package}' in inventory snapshot; persisting with review flag.",
             category="database",
         )
-        return None
 
     return (
         snapshot_id,
@@ -218,7 +233,14 @@ def _bind_package(
         _text(entry.get("primary_path")),
         apk_dirs,
         apk_paths,
-        extras_payload,
+        _serialise_json(
+            _merge_extras(
+                extras,
+                raw_package=raw_package,
+                cleaned_package=cleaned_package,
+                suspicious=suspicious,
+            )
+        ),
     )
 
 
@@ -240,9 +262,32 @@ def _prepare_extras(entry: Mapping[str, object]) -> Optional[dict]:
         extras["publisher_key"] = entry.get("publisher_key")
     if entry.get("publisher_name"):
         extras["publisher_name"] = entry.get("publisher_name")
+    if entry.get("category_source"):
+        extras["category_source"] = entry.get("category_source")
+    if entry.get("profile_source"):
+        extras["profile_source"] = entry.get("profile_source")
+    if entry.get("publisher_source"):
+        extras["publisher_source"] = entry.get("publisher_source")
     if "split_flag" in entry:
         extras["split_flag"] = entry.get("split_flag")
     return extras or None
+
+
+def _merge_extras(
+    extras: Optional[dict],
+    *,
+    raw_package: str,
+    cleaned_package: str,
+    suspicious: bool,
+) -> Optional[dict]:
+    merged = dict(extras or {})
+    if raw_package != cleaned_package:
+        merged.setdefault("raw_package_name", raw_package)
+        merged.setdefault("normalized_package_name", cleaned_package)
+    if suspicious:
+        merged.setdefault("review_needed_reason", "suspicious_package_name")
+        merged.setdefault("suspicious_flags", ["package_name"])
+    return merged or None
 
 
 __all__ = [

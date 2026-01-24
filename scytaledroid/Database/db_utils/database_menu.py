@@ -28,8 +28,10 @@ def database_menu() -> None:
         "1": show_connection_and_config,
         "2": schema_browser.show_schema_browser,
         "3": query_runner.run_query_menu,
-        "4": health_checks.prompt_reset_static_data,
-        "5": show_db_status,
+        "4": health_checks.run_health_checks,
+        "5": health_checks.prompt_cleanup_orphan_inventory,
+        "6": health_checks.prompt_reset_static_data,
+        "7": show_db_status,
     }
 
     options: List[MenuOption] = [
@@ -50,11 +52,21 @@ def database_menu() -> None:
         ),
         MenuOption(
             "4",
+            "Run health checks",
+            "Quick verification across ingestion + inventory.",
+        ),
+        MenuOption(
+            "5",
+            "Cleanup orphan inventory snapshots",
+            "Delete snapshot headers that have zero inventory rows.",
+        ),
+        MenuOption(
+            "6",
             "Reset static analysis data",
             "Truncate derived static-analysis tables (destructive).",
         ),
         MenuOption(
-            "5",
+            "7",
             "DB status (backend/schema)",
             "Quick view of backend, schema_version, and config source.",
         ),

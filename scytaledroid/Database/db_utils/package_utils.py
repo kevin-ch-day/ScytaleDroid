@@ -5,7 +5,7 @@ from __future__ import annotations
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
-_SUSPICIOUS_TOKENS = ("/", "\\", "=", "base.apk", ".apk")
+_SUSPICIOUS_TOKENS = ("/", "\\", "=", "base.apk")
 
 
 def normalize_package_name(value: str, *, context: str = "database") -> str:
@@ -18,6 +18,11 @@ def normalize_package_name(value: str, *, context: str = "database") -> str:
     if _looks_suspicious(cleaned):
         log.warning(
             f"Suspicious package_name '{value}' encountered; normalizing to '{cleaned}'.",
+            category=context,
+        )
+    elif cleaned.endswith(".apk"):
+        log.warning(
+            f"package_name '{value}' ends with .apk; allowing but flagging for review.",
             category=context,
         )
     return cleaned

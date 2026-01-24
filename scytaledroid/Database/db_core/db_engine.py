@@ -497,6 +497,14 @@ class DatabaseEngine:
         if keyword in {"INSERT", "UPDATE", "DELETE", "REPLACE", "CREATE", "ALTER", "DROP", "TRUNCATE"}:
             raise DatabaseError("Write attempt via read-only DatabaseEngine handle")
 
+    def _should_commit(self, connection: Any) -> bool:
+        if self._dialect == "mysql":
+            try:
+                return bool(connection.get_autocommit())
+            except Exception:
+                return True
+        return not bool(getattr(connection, "in_transaction", False))
+
     # ------------------------------------------------------------------
     # Transaction context
     # ------------------------------------------------------------------
@@ -537,7 +545,8 @@ class DatabaseEngine:
         connection = self._ensure_connection()
         with _cursor_ctx(connection) as cursor:
             _execute(cursor, sql, params, query_name=query_name or "execute", context=context, many=False)
-        connection.commit()
+        if self._should_commit(connection):
+            connection.commit()
 
     def execute_many(
         self,
@@ -554,7 +563,8 @@ class DatabaseEngine:
         connection = self._ensure_connection()
         with _cursor_ctx(connection) as cursor:
             _execute(cursor, sql, rows, query_name=query_name or "execute_many", context=context, many=True)
-        connection.commit()
+        if self._should_commit(connection):
+            connection.commit()
 
     def execute_with_lastrowid(
         self,
@@ -569,7 +579,8 @@ class DatabaseEngine:
         with _cursor_ctx(connection) as cursor:
             _execute(cursor, sql, params, query_name=query_name or "execute_with_lastrowid", context=context, many=False)
             lastrowid = getattr(cursor, "lastrowid", None)
-        connection.commit()
+        if self._should_commit(connection):
+            connection.commit()
         return int(lastrowid or 0)
 
     def fetch_one(

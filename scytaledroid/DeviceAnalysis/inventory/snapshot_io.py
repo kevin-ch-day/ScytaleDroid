@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, TYPE_CHECKING
 from datetime import datetime, timezone
@@ -14,7 +15,8 @@ from scytaledroid.DeviceAnalysis import inventory_meta
 
 if TYPE_CHECKING:  # pragma: no cover
     from scytaledroid.DeviceAnalysis.inventory.runner import InventoryDelta
-from scytaledroid.Database.db_core import run_sql
+from scytaledroid.Database.db_core import database_session, run_sql
+from scytaledroid.Database.db_utils.package_utils import normalize_package_name
 from scytaledroid.Database.db_func.harvest import device_inventory as inventory_repo
 
 
@@ -135,6 +137,13 @@ def load_canonical_metadata(package_names: Iterable[str]) -> Dict[str, Dict[str,
     return canonical
 
 
+@dataclass
+class PersistedSnapshot:
+    path: Path
+    snapshot_id: int | None
+    persisted_rows: int
+
+
 def persist_snapshot(
     serial: str,
     rows: List[Dict[str, object]],
@@ -149,18 +158,31 @@ def persist_snapshot(
     filename_suffix: Optional[str] = None,
     collection_stats: Optional[object] = None,
     delta: Optional[object] = None,
-) -> Path:
+) -> PersistedSnapshot:
     """Persist inventory information under the state directory and database."""
     captured_at = datetime.utcnow().replace(tzinfo=timezone.utc)
     timestamp = captured_at.strftime("%Y%m%d-%H%M%S")
     device_dir = _STATE_ROOT / serial / "inventory"
     device_dir.mkdir(parents=True, exist_ok=True)
 
+    normalized_rows: List[Dict[str, object]] = []
+    for entry in rows:
+        if not isinstance(entry, dict):
+            continue
+        raw_name = entry.get("package_name")
+        if isinstance(raw_name, str) and raw_name.strip():
+            cleaned = normalize_package_name(raw_name, context="inventory")
+            if cleaned and cleaned != raw_name:
+                entry = dict(entry)
+                entry["raw_package_name"] = raw_name
+                entry["package_name"] = cleaned
+        normalized_rows.append(entry)
+
     payload: Dict[str, object] = {
         "generated_at": captured_at.isoformat().replace("+00:00", "Z"),
         "device_serial": serial,
-        "package_count": len(rows),
-        "packages": rows,
+        "package_count": len(normalized_rows),
+        "packages": normalized_rows,
     }
 
     if snapshot_type:
@@ -201,27 +223,45 @@ def persist_snapshot(
         display_path = resolved_path
 
     snapshot_id: Optional[int] = None
+    persisted = 0
     try:
-        snapshot_id = inventory_repo.create_snapshot(
-            serial,
-            captured_at=captured_at,
-            package_count=len(rows),
-            duration_seconds=duration_seconds,
-            package_hash=package_hash,
-            package_list_hash=package_list_hash,
-            package_signature_hash=package_signature_hash,
-            build_fingerprint=build_fingerprint,
-            scope_hash=scope_hash,
-            snapshot_type=snapshot_type,
-            scope_variant=filename_suffix,
-            scope_size=len(rows),
-            extras={
-                "snapshot_path": str(display_path),
-            },
-        )
+        with database_session() as engine:
+            with engine.transaction():
+                snapshot_id = inventory_repo.create_snapshot(
+                    serial,
+                    captured_at=captured_at,
+                    package_count=len(normalized_rows),
+                    duration_seconds=duration_seconds,
+                    package_hash=package_hash,
+                    package_list_hash=package_list_hash,
+                    package_signature_hash=package_signature_hash,
+                    build_fingerprint=build_fingerprint,
+                    scope_hash=scope_hash,
+                    snapshot_type=snapshot_type,
+                    scope_variant=filename_suffix,
+                    scope_size=len(normalized_rows),
+                    extras={
+                        "snapshot_path": str(display_path),
+                    },
+                )
+                if snapshot_id:
+                    persisted = inventory_repo.replace_packages(snapshot_id, serial, normalized_rows)
+                    if persisted != len(normalized_rows):
+                        log.warning(
+                            "Inventory persistence mismatch; expected rows not written.",
+                            category="database",
+                            extra={
+                                "snapshot_id": snapshot_id,
+                                "device_serial": serial,
+                                "expected_rows": len(normalized_rows),
+                                "persisted_rows": persisted,
+                            },
+                        )
+                        raise RuntimeError(
+                            f"Inventory persistence mismatch (expected {len(normalized_rows)}, got {persisted})."
+                        )
+                    payload["snapshot_id"] = snapshot_id
         if snapshot_id:
-            persisted = inventory_repo.replace_packages(snapshot_id, serial, rows)
-            payload["snapshot_id"] = snapshot_id
             refreshed_payload = json.dumps(payload, indent=2, sort_keys=True)
             target_file.write_text(refreshed_payload, encoding="utf-8")
             latest_file.write_text(refreshed_payload, encoding="utf-8")
@@ -270,7 +310,7 @@ def persist_snapshot(
     )
     meta.write_files(timestamp, suffix=filename_suffix)
 
-    return display_path
+    return PersistedSnapshot(path=display_path, snapshot_id=snapshot_id, persisted_rows=persisted)
 
 
 __all__ = [
@@ -279,4 +319,5 @@ __all__ = [
     "load_latest_snapshot_meta",
     "persist_snapshot",
     "load_canonical_metadata",
+    "PersistedSnapshot",
 ]

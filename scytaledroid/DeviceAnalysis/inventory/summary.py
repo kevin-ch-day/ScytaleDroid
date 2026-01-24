@@ -69,6 +69,23 @@ def render_sync_summary_box(result) -> None:
             },
         )
     )
+    snapshot_id = getattr(result, "snapshot_id", None)
+    expected_rows = getattr(result, "expected_rows", None)
+    persisted_rows = getattr(result, "persisted_rows", None)
+    if snapshot_id is not None and expected_rows is not None and persisted_rows is not None:
+        status = "OK" if persisted_rows == expected_rows else "FAIL"
+        print()
+        print(
+            formatter.format_kv_block(
+                "[DB]",
+                {
+                    "Snapshot ID": str(snapshot_id),
+                    "Expected rows": str(expected_rows),
+                    "Persisted rows": str(persisted_rows),
+                    "Integrity": status,
+                },
+            )
+        )
     print()
 
 
@@ -199,7 +216,7 @@ def render_inventory_summary(result) -> None:
     ]
     if notable_profiles:
         print()
-        print(text_blocks.headline("Category matches", width=70))
+        print(text_blocks.headline("Profile matches", width=70))
         category_rows = [
             [name, str(count)]
             for name, count in sorted(notable_profiles, key=lambda item: (-item[1], item[0]))

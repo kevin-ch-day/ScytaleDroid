@@ -20,6 +20,7 @@ def compose_inventory_entry(
 
     category_id = canonical.get("category_id") if canonical else None
     category_name = canonical.get("category_name") if canonical else None
+    category_source = "apps_join" if category_name else "inferred_partition"
     heuristic_category = False
     if not category_name:
         category_name = fallback_category
@@ -27,22 +28,28 @@ def compose_inventory_entry(
 
     profile_key = canonical.get("profile_key") if canonical else None
     profile_name = canonical.get("profile_name") if canonical else None
+    profile_source = "apps_join" if profile_key or profile_name else "fallback"
     publisher_key = canonical.get("publisher_key") if canonical else None
     publisher_name = canonical.get("publisher_name") if canonical else None
+    publisher_source = "apps_join" if publisher_key or publisher_name else "fallback"
     heuristic_profile = False
     if not profile_key and not profile_name:
         profile = package_profiles.lookup_profile(package_name)
         profile_key = profile.id.upper() if profile else None
         profile_name = profile.name if profile else None
         heuristic_profile = bool(profile_key or profile_name)
+        if heuristic_profile:
+            profile_source = "inferred_partition"
 
     if not profile_key:
         profile_key = "UNCLASSIFIED"
         profile_name = profile_name or "Unclassified"
+        profile_source = "fallback"
 
     if not publisher_key:
         publisher_key = "VENDOR_MISC"
         publisher_name = publisher_name or "Vendor Misc"
+        publisher_source = "fallback"
 
     if heuristic_category or heuristic_profile:
         review_needed = True
@@ -82,6 +89,9 @@ def compose_inventory_entry(
         "profile_name": profile_name,
         "publisher_key": publisher_key,
         "publisher_name": publisher_name,
+        "category_source": category_source,
+        "profile_source": profile_source,
+        "publisher_source": publisher_source,
         "split_flag": "Yes" if split_count > 1 else "No",
         "apk_paths": paths,
         "apk_dirs": apk_dirs,

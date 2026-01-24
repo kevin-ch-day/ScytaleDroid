@@ -55,6 +55,24 @@ def print_inventory_run_summary_from_result(result) -> None:
     )
     print()
 
+    snapshot_id = getattr(result, "snapshot_id", None)
+    expected_rows = getattr(result, "expected_rows", None)
+    persisted_rows = getattr(result, "persisted_rows", None)
+    if snapshot_id is not None and expected_rows is not None and persisted_rows is not None:
+        status = "OK" if expected_rows == persisted_rows else "FAIL"
+        print(
+            formatter.format_kv_block(
+                "[DB]",
+                {
+                    "Snapshot ID": str(snapshot_id),
+                    "Expected rows": str(expected_rows),
+                    "Persisted rows": str(persisted_rows),
+                    "Integrity": status,
+                },
+            )
+        )
+        print()
+
     if metrics.by_install_source:
         print("By install source (user apps only)")
         print("----------------------------------")

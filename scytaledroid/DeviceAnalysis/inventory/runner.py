@@ -38,6 +38,9 @@ class InventoryDelta:
 class InventoryResult:
     serial: str
     snapshot_path: Path
+    snapshot_id: Optional[int]
+    expected_rows: int
+    persisted_rows: int
     rows: list
     stats: InventorySyncStats
     previous_total: Optional[int]
@@ -166,7 +169,7 @@ def run_full_sync(
     )
 
     persist_start = time.time()
-    snapshot_path = snapshot_io.persist_snapshot(
+    persist_result = snapshot_io.persist_snapshot(
         serial=serial,
         rows=rows,  # type: ignore[arg-type]
         package_hash=coll_stats.package_hash,
@@ -177,6 +180,10 @@ def run_full_sync(
         snapshot_type="full",
         delta=delta,
     )
+    snapshot_path = persist_result.path
+    snapshot_id = persist_result.snapshot_id
+    persisted_rows = persist_result.persisted_rows
+    expected_rows = stats.total_packages
     persist_elapsed = time.time() - persist_start
 
     db_start = time.time()
@@ -186,6 +193,9 @@ def run_full_sync(
     result = InventoryResult(
         serial=serial,
         snapshot_path=snapshot_path,
+        snapshot_id=snapshot_id,
+        expected_rows=expected_rows,
+        persisted_rows=persisted_rows,
         rows=rows,
         stats=stats,
         previous_total=(prev_meta.package_count if prev_meta else None),
