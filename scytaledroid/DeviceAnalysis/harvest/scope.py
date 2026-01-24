@@ -160,7 +160,7 @@ def select_package_scope(
                 "Profile targets",
                 packages=context["profile_summary"].get("packages"),
                 files=context["profile_summary"].get("files"),
-                note="social/messaging/shopping",
+                note="social/messaging/media/browser/productivity/shopping/news",
                 handler=lambda: _scope_profiles(rows, profile_counts, allow),
             )
 
@@ -316,8 +316,9 @@ def _scope_profiles(
 
     print()
     menu_utils.print_header("Choose profile(s)")
+    target_profiles = {"SOCIAL", "MESSAGING", "MEDIA", "BROWSER", "PRODUCTIVITY", "SHOPPING", "NEWS"}
     sorted_profiles = sorted(
-        [(name, count) for name, count in profile_counts.items() if name],
+        [(name, count) for name, count in profile_counts.items() if name in target_profiles],
         key=lambda item: (-item[1], item[0].lower()),
     )
     profile_menu: Dict[str, str] = {}
@@ -349,7 +350,11 @@ def _scope_profiles(
         print(status_messages.status("No valid profiles selected.", level="warn"))
         return None
 
-    profile_rows = [row for row in rows if row.profile and row.profile in selected]
+    profile_rows = [
+        row
+        for row in rows
+        if (row.profile_key or "").upper() in selected
+    ]
     if not profile_rows:
         print(status_messages.status("No packages matched the selected profiles.", level="warn"))
         return None

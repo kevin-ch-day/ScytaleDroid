@@ -153,8 +153,15 @@ def build_scope_context(rows: Sequence[InventoryRow], allow: Set[str]) -> Dict[s
     def estimate(selection: Sequence[InventoryRow]) -> Dict[str, int]:
         return {"packages": len(selection), "files": estimated_files(selection)}
 
-    profile_counts: Counter[str] = Counter(row.profile for row in rows if row.profile)
-    profile_total_rows = [row for row in rows if row.profile]
+    target_profiles = {"SOCIAL", "MESSAGING", "MEDIA", "BROWSER", "PRODUCTIVITY", "SHOPPING", "NEWS"}
+    profile_counts: Counter[str] = Counter(
+        (row.profile_key or "").upper()
+        for row in rows
+        if (row.profile_key or "").upper() in target_profiles
+    )
+    profile_total_rows = [
+        row for row in rows if (row.profile_key or "").upper() in target_profiles
+    ]
 
     default_rows, default_excluded = apply_default_scope(rows, allow)
     google_rows = [row for row in rows if row.package_name in allow]
