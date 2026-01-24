@@ -9,6 +9,7 @@ from typing import Mapping, Optional, Sequence
 from ...db_core import run_sql, run_sql_many
 from ...db_queries.harvest import device_inventory as queries
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
+from ...db_utils.package_utils import is_suspicious_package_name, normalize_package_name
 
 
 _TABLES_READY = False
@@ -122,12 +123,29 @@ def replace_packages(
         )
         # Continue attempting inserts despite the warning.
 
-    rows = [_bind_package(snapshot_id, device_serial, entry) for entry in packages]
+    rows = []
+    skipped = 0
+    for entry in packages:
+        bound = _bind_package(snapshot_id, device_serial, entry)
+        if bound is None:
+            skipped += 1
+            continue
+        rows.append(bound)
+    if skipped:
+        log.warning(
+            f"Skipped {skipped} inventory rows with invalid package_name.",
+            category="database",
+        )
     try:
         run_sql_many(queries.INSERT_PACKAGE, rows)
         return len(rows)
     except Exception as exc:  # pragma: no cover - defensive
-        log.warning(f"Failed to persist inventory rows: {exc}", category="database")
+        sample = rows[0] if rows else None
+        log.warning(
+            f"Failed to persist inventory rows: {exc}",
+            category="database",
+            extra={"rows": len(rows), "sample": sample},
+        )
         return 0
 
 
@@ -135,7 +153,7 @@ def _bind_package(
     snapshot_id: int,
     device_serial: str,
     entry: Mapping[str, object],
-) -> tuple[object, ...]:
+) -> Optional[tuple[object, ...]]:
     """Coerce a package entry into the SQL parameter tuple."""
 
     def _text(value: object) -> Optional[str]:
@@ -165,10 +183,21 @@ def _bind_package(
     extras = _prepare_extras(entry)
     extras_payload = _serialise_json(extras)
 
+    raw_package = _text(entry.get("package_name"))
+    if not raw_package:
+        return None
+    cleaned_package = normalize_package_name(raw_package, context="database")
+    if not cleaned_package or is_suspicious_package_name(cleaned_package):
+        log.warning(
+            f"Rejecting suspicious package_name '{raw_package}' in inventory snapshot.",
+            category="database",
+        )
+        return None
+
     return (
         snapshot_id,
         device_serial,
-        _text(entry.get("package_name")),
+        cleaned_package,
         _text(entry.get("app_label")),
         _text(entry.get("version_name")),
         _text(entry.get("version_code")),
@@ -207,6 +236,10 @@ def _prepare_extras(entry: Mapping[str, object]) -> Optional[dict]:
     extras = {}
     if "category" in entry and entry.get("category") != entry.get("category_name"):
         extras["category"] = entry.get("category")
+    if entry.get("publisher_key"):
+        extras["publisher_key"] = entry.get("publisher_key")
+    if entry.get("publisher_name"):
+        extras["publisher_name"] = entry.get("publisher_name")
     if "split_flag" in entry:
         extras["split_flag"] = entry.get("split_flag")
     return extras or None

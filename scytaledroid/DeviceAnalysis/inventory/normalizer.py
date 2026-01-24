@@ -27,6 +27,8 @@ def compose_inventory_entry(
 
     profile_key = canonical.get("profile_key") if canonical else None
     profile_name = canonical.get("profile_name") if canonical else None
+    publisher_key = canonical.get("publisher_key") if canonical else None
+    publisher_name = canonical.get("publisher_name") if canonical else None
     heuristic_profile = False
     if not profile_key and not profile_name:
         profile = package_profiles.lookup_profile(package_name)
@@ -37,6 +39,10 @@ def compose_inventory_entry(
     if not profile_key:
         profile_key = "UNCLASSIFIED"
         profile_name = profile_name or "Unclassified"
+
+    if not publisher_key:
+        publisher_key = "VENDOR_MISC"
+        publisher_name = publisher_name or "Vendor Misc"
 
     if heuristic_category or heuristic_profile:
         review_needed = True
@@ -74,6 +80,8 @@ def compose_inventory_entry(
         "profile_key": profile_key,
         "profile_id": profile_key,
         "profile_name": profile_name,
+        "publisher_key": publisher_key,
+        "publisher_name": publisher_name,
         "split_flag": "Yes" if split_count > 1 else "No",
         "apk_paths": paths,
         "apk_dirs": apk_dirs,

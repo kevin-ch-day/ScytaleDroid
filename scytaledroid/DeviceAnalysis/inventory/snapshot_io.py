@@ -81,12 +81,15 @@ def load_canonical_metadata(package_names: Iterable[str]) -> Dict[str, Dict[str,
 
     def _build_query(include_profiles: bool) -> str:
         profile_select = (
-            "            d.profile_key,\n            p.display_name AS profile_name"
+            "            d.profile_key,\n            p.display_name AS profile_name,\n"
+            "            d.publisher_key,\n            pub.display_name AS publisher_name"
             if include_profiles
-            else "            NULL AS profile_key,\n            NULL AS profile_name"
+            else "            NULL AS profile_key,\n            NULL AS profile_name,\n"
+                 "            NULL AS publisher_key,\n            NULL AS publisher_name"
         )
         profile_join = (
             "            LEFT JOIN android_app_profiles p ON p.profile_key = d.profile_key\n"
+            "            LEFT JOIN android_app_publishers pub ON pub.publisher_key = d.publisher_key\n"
             if include_profiles
             else ""
         )
@@ -126,6 +129,8 @@ def load_canonical_metadata(package_names: Iterable[str]) -> Dict[str, Dict[str,
             "category_name": row.get("category_name"),
             "profile_key": row.get("profile_key"),
             "profile_name": row.get("profile_name"),
+            "publisher_key": row.get("publisher_key"),
+            "publisher_name": row.get("publisher_name"),
         }
     return canonical
 
