@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import base64
 import binascii
+import gzip
 import hashlib
 import ipaddress
 import logging
+import math
 import os
+import re
+import zlib
 from dataclasses import dataclass
 from typing import Iterable, Mapping, MutableMapping, Sequence
 from urllib.parse import urlsplit
@@ -43,6 +47,46 @@ from .indexing import IndexedString, StringIndex, build_string_index
 
 
 logger = logging.getLogger(__name__)
+
+_RESOURCE_PATH_PATTERN = re.compile(
+    r"^(?:/)?(?:res|assets|lib|meta-inf|kotlin|androidx|org|com)/[^\s]+"
+    r"\.(?:xml|json|png|jpg|jpeg|webp|svg|ttf|otf|so|dex|jar|arsc|proto|bin|dat|txt|css|js)$",
+    re.IGNORECASE,
+)
+_FRAMEWORK_PREFIXES = (
+    "androidx.",
+    "kotlin.",
+    "kotlinx.",
+    "com.google.protobuf.",
+    "com.google.android.gms.",
+    "com.android.",
+    "android.",
+    "org.jetbrains.",
+    "com.squareup.",
+    "okhttp3.",
+)
+_LOW_ENTROPY_LENGTH = 256
+_LOW_ENTROPY_THRESHOLD = 3.2
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        return default
 
 
 def _env_flag(name: str, default: bool) -> bool:
@@ -118,10 +162,14 @@ class CollectionMetrics:
     aws_pairs: int
     jwt_near_auth: int
     base64_candidates: int
+    hex_candidates: int
+    regex_skipped: int
+    noise_counts: Mapping[str, int]
     decoded_blobs_total: int
     decoded_total_bytes: int
     decoded_yield_rate: float
     base64_decode_failures: int
+    hex_decode_failures: int
     s3_buckets: int
     firebase_projects: int
     doc_noise_count: int
@@ -180,7 +228,11 @@ class _MetricsCounter:
         self.aws_pairs = 0
         self.jwt_near_auth = 0
         self.base64_candidates = 0
+        self.hex_candidates = 0
+        self.regex_skipped = 0
+        self.noise_counts: MutableMapping[str, int] = {}
         self.decoded_success = 0
+        self.hex_decoded_success = 0
         self.decoded_total_bytes = 0
         self.s3_buckets = 0
         self.firebase_projects = 0
@@ -220,6 +272,7 @@ class _MetricsCounter:
         doc_ratio = self.doc_noise_count / total if total else 0.0
         yield_rate = self.decoded_success / self.base64_candidates if self.base64_candidates else 0.0
         failures = max(self.base64_candidates - self.decoded_success, 0)
+        hex_failures = max(self.hex_candidates - self.hex_decoded_success, 0)
         unknown_ratio = self.unknown_kind_count / total if total else 0.0
         issues = _derive_issue_flags(
             total=total,
@@ -250,10 +303,14 @@ class _MetricsCounter:
             aws_pairs=self.aws_pairs,
             jwt_near_auth=self.jwt_near_auth,
             base64_candidates=self.base64_candidates,
+            hex_candidates=self.hex_candidates,
+            regex_skipped=self.regex_skipped,
+            noise_counts=dict(self.noise_counts),
             decoded_blobs_total=self.decoded_success,
             decoded_total_bytes=self.decoded_total_bytes,
             decoded_yield_rate=yield_rate,
             base64_decode_failures=max(self.base64_candidates - self.decoded_success, 0),
+            hex_decode_failures=hex_failures,
             s3_buckets=self.s3_buckets,
             firebase_projects=self.firebase_projects,
             doc_noise_count=self.doc_noise_count,
@@ -447,9 +504,37 @@ def _normalise_entry(
     if obfuscation_hint:
         counter.note_obfuscation()
 
+    noise_tag = _detect_noise_tag(value, entry.origin, policy)
+    if noise_tag:
+        tags.append(noise_tag)
+        is_allowlisted = True
+
+    skip_regex = _should_skip_regex(value) or bool(noise_tag)
+    if skip_regex:
+        counter.regex_skipped += 1
+    if noise_tag:
+        counter.noise_counts[noise_tag] = counter.noise_counts.get(noise_tag, 0) + 1
+
     base64_candidate = False
+    hex_candidate = False
     decoded_blob: DecodedBlob | None = None
-    if _is_base64_candidate(stripped):
+    if _is_hex_candidate(stripped):
+        hex_candidate = True
+        counter.hex_candidates += 1
+        decoded_blob = _decode_hex_strict(stripped)
+        if decoded_blob:
+            counter.decoded_success += 1
+            counter.hex_decoded_success += 1
+            counter.decoded_total_bytes += decoded_blob.length
+            decoded_text = decoded_blob.text[:512]
+            decoded_kind = decoded_blob.kind
+            decoded_len = decoded_blob.length
+            decoded_hash = decoded_blob.sha1
+            tags.append("encoded")
+            tags.append("hex-encoded")
+        else:
+            decoded_kind = "junk"
+    if not decoded_blob and _is_base64_candidate(stripped):
         base64_candidate = True
         counter.base64_candidates += 1
         decoded_blob = _decode_base64_strict(stripped)
@@ -478,49 +563,50 @@ def _normalise_entry(
     stripped_for_candidates = strip_wrap_punct(value)
     selected_candidate: Candidate | None = None
     placeholder_candidate: tuple[Candidate, NormalizedHost, BucketDecision] | None = None
-    for candidate in extract_candidates(stripped_for_candidates):
-        normalized_candidate = normalize_host(candidate.host or candidate.raw)
-        decision = classify(candidate, normalized_candidate)
-        for tag in decision.tags:
-            if tag not in tags:
-                tags.append(tag)
-        if decision.placeholder:
-            if "placeholder" not in tags:
-                tags.append("placeholder")
-            counter.placeholders_dropped += 1
-            if placeholder_candidate is None:
-                placeholder_candidate = (candidate, normalized_candidate, decision)
-            continue
-        host_candidate = (
-            normalized_candidate.full_host or candidate.host or candidate.raw
-        )
-        if not host_candidate:
-            continue
-        if selected_candidate is None:
+    if not skip_regex:
+        for candidate in extract_candidates(stripped_for_candidates):
+            normalized_candidate = normalize_host(candidate.host or candidate.raw)
+            decision = classify(candidate, normalized_candidate)
+            for tag in decision.tags:
+                if tag not in tags:
+                    tags.append(tag)
+            if decision.placeholder:
+                if "placeholder" not in tags:
+                    tags.append("placeholder")
+                counter.placeholders_dropped += 1
+                if placeholder_candidate is None:
+                    placeholder_candidate = (candidate, normalized_candidate, decision)
+                continue
+            host_candidate = (
+                normalized_candidate.full_host or candidate.host or candidate.raw
+            )
+            if not host_candidate:
+                continue
+            if selected_candidate is None:
+                selected_candidate = candidate
+                normalized_host = normalized_candidate
+                host = host_candidate
+                scheme_lower = candidate.scheme.lower() if candidate.scheme else None
+                bucket_decision = decision
+                if candidate.scheme:
+                    tags.extend(
+                        _tags_for_url(candidate.raw, host=host_candidate, context=context)
+                    )
+                break
+
+        if selected_candidate is None and placeholder_candidate is not None:
+            candidate, normalized_candidate, decision = placeholder_candidate
             selected_candidate = candidate
             normalized_host = normalized_candidate
-            host = host_candidate
+            host = (
+                normalized_candidate.full_host or candidate.host or candidate.raw
+            )
             scheme_lower = candidate.scheme.lower() if candidate.scheme else None
             bucket_decision = decision
             if candidate.scheme:
                 tags.extend(
-                    _tags_for_url(candidate.raw, host=host_candidate, context=context)
+                    _tags_for_url(candidate.raw, host=host or candidate.host, context=context)
                 )
-            break
-
-    if selected_candidate is None and placeholder_candidate is not None:
-        candidate, normalized_candidate, decision = placeholder_candidate
-        selected_candidate = candidate
-        normalized_host = normalized_candidate
-        host = (
-            normalized_candidate.full_host or candidate.host or candidate.raw
-        )
-        scheme_lower = candidate.scheme.lower() if candidate.scheme else None
-        bucket_decision = decision
-        if candidate.scheme:
-            tags.extend(
-                _tags_for_url(candidate.raw, host=host or candidate.host, context=context)
-            )
 
     if selected_candidate:
         if selected_candidate.scheme:
@@ -598,28 +684,28 @@ def _normalise_entry(
 
     lowered = value.lower()
 
-    if GRAPHQL_HINT.search(value) and "graphql" not in tags:
+    if not skip_regex and GRAPHQL_HINT.search(value) and "graphql" not in tags:
         tags.append("graphql")
         if not is_allowlisted:
             counter.graphql_markers += 1
-    if GRPC_HINT.search(value) and "grpc" not in tags:
+    if not skip_regex and GRPC_HINT.search(value) and "grpc" not in tags:
         tags.append("grpc")
         if not is_allowlisted:
             counter.grpc_markers += 1
 
-    if AWS_ACCESS_KEY_PATTERN.search(value) and AWS_SECRET_KEY_PATTERN.search(value):
+    if not skip_regex and AWS_ACCESS_KEY_PATTERN.search(value) and AWS_SECRET_KEY_PATTERN.search(value):
         tags.extend(["aws-pair", "auth-adjacent"])
         confidence = "high"
         kind = "token"
         if not is_allowlisted:
             counter.aws_pairs += 1
 
-    if GOOGLE_API_KEY_PATTERN.search(value):
+    if not skip_regex and GOOGLE_API_KEY_PATTERN.search(value):
         tags.append("google-api-key")
         kind = "token"
         confidence = _raise_confidence(confidence, "medium")
 
-    token_match = JWT_PATTERN.search(value)
+    token_match = JWT_PATTERN.search(value) if not skip_regex else None
     if token_match and ("authorization" in lowered or "bearer" in lowered):
         tags.extend(["auth-token", "jwt-format"])
         if "bearer" in lowered:
@@ -629,19 +715,20 @@ def _normalise_entry(
         if not is_allowlisted:
             counter.jwt_near_auth += 1
 
-    for pattern_name, pattern in CLOUD_PATTERNS.items():
-        match = pattern.search(value)
-        if not match:
-            continue
-        if "firebase" in pattern_name:
-            tags.append("firebase")
-            if not is_allowlisted:
-                counter.firebase_projects += 1
-        else:
-            tags.append("cloud-bucket")
-            if not is_allowlisted:
-                counter.s3_buckets += 1
-        break
+    if not skip_regex:
+        for pattern_name, pattern in CLOUD_PATTERNS.items():
+            match = pattern.search(value)
+            if not match:
+                continue
+            if "firebase" in pattern_name:
+                tags.append("firebase")
+                if not is_allowlisted:
+                    counter.firebase_projects += 1
+            else:
+                tags.append("cloud-bucket")
+                if not is_allowlisted:
+                    counter.s3_buckets += 1
+            break
 
     has_url_candidate = bool(selected_candidate and selected_candidate.scheme)
     if any(keyword in lowered for keyword in FEATURE_KEYWORDS) and has_url_candidate:
@@ -803,6 +890,49 @@ def _is_base64_candidate(value: str) -> bool:
     return padding in {0, 1, 2}
 
 
+_HEX_PATTERN = re.compile(r"^[0-9a-fA-F]+$")
+
+
+def _is_hex_candidate(value: str) -> bool:
+    length = len(value)
+    if length < 32 or length > 512 or length % 2:
+        return False
+    if not _HEX_PATTERN.match(value):
+        return False
+    unique = len(set(value.lower()))
+    return unique > 3
+
+
+_MAX_DECODE_BYTES = 1024 * 1024
+
+
+def _maybe_decompress(raw: bytes) -> bytes | None:
+    if not raw:
+        return None
+    if raw.startswith(b"\x1f\x8b"):
+        try:
+            payload = gzip.decompress(raw)
+        except OSError:
+            return None
+        return payload[:_MAX_DECODE_BYTES]
+    if raw[:1] == b"\x78":
+        try:
+            payload = zlib.decompress(raw, max_length=_MAX_DECODE_BYTES)
+        except zlib.error:
+            return None
+        return payload
+    return None
+
+
+def _decode_hex_strict(value: str) -> DecodedBlob | None:
+    try:
+        raw = binascii.unhexlify(value)
+    except (binascii.Error, ValueError):
+        return None
+    payload = _maybe_decompress(raw) or raw
+    return _decode_bytes(payload)
+
+
 def _decode_base64_strict(value: str) -> DecodedBlob | None:
     try:
         if "-" in value or "_" in value:
@@ -811,6 +941,11 @@ def _decode_base64_strict(value: str) -> DecodedBlob | None:
             raw = base64.b64decode(value, validate=True)
     except (binascii.Error, ValueError):
         return None
+    payload = _maybe_decompress(raw) or raw
+    return _decode_bytes(payload)
+
+
+def _decode_bytes(raw: bytes) -> DecodedBlob | None:
     if not raw:
         return None
     printable_ratio = sum(32 <= byte < 127 for byte in raw) / max(len(raw), 1)
@@ -1008,6 +1143,54 @@ def _unknown_fingerprint(value: str, *, limit: int = 6) -> tuple[str, ...]:
         if len(bigrams) >= limit:
             break
     return tuple(bigrams)
+
+
+def _detect_noise_tag(value: str, source: str | None, policy: NoisePolicy) -> str | None:
+    lowered = value.strip().lower()
+    if not lowered:
+        return None
+    source_lower = source.replace("\\", "/").lower() if source else ""
+    value_contains = policy.substring_groups.get("noise.value_contains")
+    if value_contains and any(token in lowered for token in value_contains):
+        return "noise_config"
+    source_prefix = policy.source_prefix_groups.get("noise.source_prefix")
+    if source_prefix and any(source_lower.startswith(prefix) for prefix in source_prefix):
+        return "noise_config"
+    source_exact = policy.source_exact_groups.get("noise.source_exact")
+    if source_exact and source_lower in source_exact:
+        return "noise_config"
+    if any(lowered.startswith(prefix) for prefix in _FRAMEWORK_PREFIXES):
+        return "noise_framework"
+    if _RESOURCE_PATH_PATTERN.match(lowered):
+        return "noise_resource_path"
+    if source:
+        normalised = source.replace("\\", "/").lower()
+        if "/protobuf/" in normalised or "protobuf" in normalised:
+            return "noise_protobuf"
+    if "protobuf" in lowered and lowered.count(".") >= 2:
+        return "noise_protobuf"
+    return None
+
+
+def _shannon_entropy(value: str) -> float:
+    if not value:
+        return 0.0
+    counts: MutableMapping[str, int] = {}
+    for char in value:
+        counts[char] = counts.get(char, 0) + 1
+    length = len(value)
+    return -sum(
+        (count / length) * math.log2(count / length) for count in counts.values()
+    )
+
+
+def _should_skip_regex(value: str) -> bool:
+    length = len(value)
+    min_length = _env_int("SCYTALEDROID_STRINGS_LONG_STRING_LENGTH", _LOW_ENTROPY_LENGTH)
+    min_entropy = _env_float("SCYTALEDROID_STRINGS_LOW_ENTROPY_THRESHOLD", _LOW_ENTROPY_THRESHOLD)
+    if length < min_length:
+        return False
+    return _shannon_entropy(value) < min_entropy
 
 
 def _looks_obfuscated(entry: IndexedString) -> bool:

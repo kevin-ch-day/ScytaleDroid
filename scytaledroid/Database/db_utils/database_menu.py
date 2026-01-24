@@ -30,8 +30,9 @@ def database_menu() -> None:
         "3": query_runner.run_query_menu,
         "4": health_checks.run_health_checks,
         "5": health_checks.prompt_cleanup_orphan_inventory,
-        "6": health_checks.prompt_reset_static_data,
-        "7": show_db_status,
+        "6": health_checks.prompt_finalize_stale_runs,
+        "7": health_checks.prompt_reset_static_data,
+        "8": show_db_status,
     }
 
     options: List[MenuOption] = [
@@ -57,10 +58,14 @@ def database_menu() -> None:
         ),
         MenuOption(
             "6",
-            "Reset static analysis data",
+            "Finalize stale RUNNING runs",
         ),
         MenuOption(
             "7",
+            "Reset static analysis data",
+        ),
+        MenuOption(
+            "8",
             "DB status (backend/schema)",
         ),
     ]

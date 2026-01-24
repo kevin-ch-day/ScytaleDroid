@@ -595,6 +595,27 @@ def _extract_nsc(report: StaticAnalysisReport) -> Mapping[str, object]:
     }
 
 
+def _extract_react_native(report: StaticAnalysisReport) -> Mapping[str, object] | None:
+    try:
+        lookup = {res.section_key: res for res in report.detector_results}
+        result = lookup.get("react_native")
+    except Exception:
+        result = None
+    if not result or not isinstance(result.metrics, Mapping):
+        return None
+    metrics = result.metrics
+    if not metrics.get("rn_detected"):
+        return None
+    return {
+        "detected": True,
+        "bundles": int(metrics.get("bundles", 0)),
+        "native_libs": int(metrics.get("native_libs", 0)),
+        "namespaces": int(metrics.get("namespaces", 0)),
+        "hermes": bool(metrics.get("hermes")),
+        "fabric": bool(metrics.get("fabric")),
+    }
+
+
 def _app_metadata(report: StaticAnalysisReport, *, signer: str | None, split_count: int) -> Mapping[str, object]:
     manifest = report.manifest
     hashes = dict(sorted(report.hashes.items()))
@@ -643,6 +664,8 @@ def _normalise_string_data(raw: Mapping[str, object]) -> Mapping[str, object]:
     counts_payload = raw.get("counts") if isinstance(raw, Mapping) else {}
     samples_payload = raw.get("samples") if isinstance(raw, Mapping) else {}
     extra_counts_payload = raw.get("extra_counts") if isinstance(raw, Mapping) else {}
+    noise_counts_payload = raw.get("noise_counts") if isinstance(raw, Mapping) else {}
+    regex_skipped_payload = raw.get("regex_skipped") if isinstance(raw, Mapping) else 0
     aggregates_payload = raw.get("aggregates") if isinstance(raw, Mapping) else {}
     counts = {bucket: int(counts_payload.get(bucket, 0)) for bucket in BUCKET_ORDER}
     samples: MutableMapping[str, list[Mapping[str, object]]] = {}
@@ -677,6 +700,13 @@ def _normalise_string_data(raw: Mapping[str, object]) -> Mapping[str, object]:
     extra_counts = {}
     if isinstance(extra_counts_payload, Mapping):
         extra_counts = {str(k): int(extra_counts_payload.get(k, 0)) for k in extra_counts_payload}
+    noise_counts = {}
+    if isinstance(noise_counts_payload, Mapping):
+        noise_counts = {str(k): int(noise_counts_payload.get(k, 0)) for k in noise_counts_payload}
+    try:
+        regex_skipped = int(regex_skipped_payload or 0)
+    except Exception:
+        regex_skipped = 0
     aggregates = aggregates_payload if isinstance(aggregates_payload, Mapping) else {}
     structured_payload = raw.get("structured") if isinstance(raw, Mapping) else {}
     structured = dict(structured_payload) if isinstance(structured_payload, Mapping) else {}
@@ -708,6 +738,8 @@ def _normalise_string_data(raw: Mapping[str, object]) -> Mapping[str, object]:
         "counts": counts,
         "samples": samples,
         "extra_counts": extra_counts,
+        "noise_counts": noise_counts,
+        "regex_skipped": regex_skipped,
         "aggregates": aggregates,
         "structured": structured,
         "options": options,
@@ -721,6 +753,11 @@ def _string_lines(string_payload: Mapping[str, object]) -> list[str]:
     aggregates = string_payload.get("aggregates", {}) if isinstance(string_payload, Mapping) else {}
     structured = string_payload.get("structured", {}) if isinstance(string_payload, Mapping) else {}
     options = string_payload.get("options", {}) if isinstance(string_payload, Mapping) else {}
+    noise_counts = string_payload.get("noise_counts", {}) if isinstance(string_payload, Mapping) else {}
+    try:
+        regex_skipped = int(string_payload.get("regex_skipped", 0))
+    except Exception:
+        regex_skipped = 0
 
     try:
         sample_limit = max(int(options.get("max_samples", 2)), 1)
@@ -788,6 +825,27 @@ def _string_lines(string_payload: Mapping[str, object]) -> list[str]:
         lines.append("")
         lines.append("  Extra counters")
         lines.extend(_wrap_lines("  ".join(extra_pairs), indent=4, subsequent_indent=6))
+
+    if regex_skipped or noise_counts:
+        noise_pairs = []
+        if regex_skipped:
+            noise_pairs.append(f"regex_skipped={_short_number(regex_skipped)}")
+        if isinstance(noise_counts, Mapping):
+            for key, value in sorted(
+                noise_counts.items(), key=lambda item: (-int(item[1]), str(item[0]))
+            )[:6]:
+                try:
+                    count = int(value)
+                except Exception:
+                    continue
+                if count:
+                    noise_pairs.append(f"{key}={_short_number(count)}")
+        if noise_pairs:
+            lines.append("")
+            lines.append("  Noise gate")
+            lines.extend(
+                _wrap_lines("  ".join(noise_pairs), indent=4, subsequent_indent=6)
+            )
 
     structured_buckets: Mapping[str, Mapping[str, object]] = {}
     if isinstance(structured, Mapping):
@@ -1188,6 +1246,7 @@ def render_app_result(
     exports = _export_counts(report)
     permissions = _permission_payload(report)
     nsc = _extract_nsc(report)
+    rn_payload = _extract_react_native(report)
     string_payload = _normalise_string_data(string_data)
     findings, finding_totals = _baseline_findings(report, exports, string_payload, nsc=nsc)
 
@@ -1217,6 +1276,15 @@ def render_app_result(
     lines.append("")
     lines.append("Manifest Flags")
     lines.extend(_manifest_flag_lines(report))
+
+    if rn_payload:
+        lines.append("")
+        lines.append("React Native")
+        lines.append("  Detected : yes")
+        lines.append(f"  Bundles  : {rn_payload.get('bundles', 0)}")
+        lines.append(f"  Native   : {rn_payload.get('native_libs', 0)} libs")
+        lines.append(f"  Hermes   : {_clean_bool(rn_payload.get('hermes'))}")
+        lines.append(f"  Fabric   : {_clean_bool(rn_payload.get('fabric'))}")
 
     lines.append("")
     lines.append("Exported Components (no permission / weak ACL)")
@@ -1388,6 +1456,7 @@ def render_app_result(
             "exports": exports,
             "permissions": permissions,
             "nsc": nsc,
+            "react_native": rn_payload,
             "webview": webview_summary,
             "string_analysis": string_payload,
             "findings": [

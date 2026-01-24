@@ -11,6 +11,7 @@ import statistics
 from typing import Mapping, MutableMapping, Sequence, Optional, Dict, Iterable
 
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
+from scytaledroid.Database.db_core import db_queries as core_q
 
 from scytaledroid.Utils.DisplayUtils import (
     prompt_utils,
@@ -24,6 +25,7 @@ from scytaledroid.Utils.DisplayUtils import (
 from ...core import StaticAnalysisReport
 from ...engine.strings import analyse_strings
 from ..core.run_persistence import persist_run_summary, update_static_run_status
+from ..core.run_lifecycle import finalize_static_run
 from ...persistence.snapshots import SNAPSHOT_PREFIX, write_permission_snapshot
 from ..views.run_detail_view import (
     SEVERITY_TOKEN_ORDER,
@@ -273,14 +275,23 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
         if base_report is None:
             warning = f"No report generated for {app_result.package_name}."
             print(status_messages.status(warning, level="warn"))
-            if outcome.aborted and app_result.static_run_id and persist_enabled:
-                update_static_run_status(
-                    static_run_id=app_result.static_run_id,
-                    status="ABORTED",
-                    ended_at_utc=ended_at_utc,
-                    abort_reason=abort_reason,
-                    abort_signal=abort_signal,
-                )
+            if app_result.static_run_id and persist_enabled:
+                if outcome.aborted:
+                    update_static_run_status(
+                        static_run_id=app_result.static_run_id,
+                        status="ABORTED",
+                        ended_at_utc=ended_at_utc,
+                        abort_reason=abort_reason,
+                        abort_signal=abort_signal,
+                    )
+                else:
+                    update_static_run_status(
+                        static_run_id=app_result.static_run_id,
+                        status="FAILED",
+                        ended_at_utc=ended_at_utc,
+                        abort_reason="missing_report",
+                        abort_signal=abort_signal,
+                    )
             continue
 
         string_data = analyse_strings(
@@ -359,12 +370,29 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                     string_samples_persisted_total += int(outcome_status.string_samples_persisted)
                 if outcome_status and not outcome_status.success:
                     persistence_errors.extend(outcome_status.errors)
+                    if app_result.static_run_id and persist_enabled:
+                        finalize_static_run(
+                            static_run_id=app_result.static_run_id,
+                            status="FAILED",
+                            ended_at_utc=ended_at_utc,
+                            abort_reason="persist_error",
+                            abort_signal=abort_signal,
+                        )
             except Exception as exc:
                 warning = (
                     f"Failed to persist run summary for {app_result.package_name}: {exc}"
                 )
                 print(status_messages.status(warning, level="warn"))
                 persistence_errors.append(str(exc))
+                if app_result.static_run_id and persist_enabled:
+                    fail_status = "ABORTED" if outcome.aborted else "FAILED"
+                    finalize_static_run(
+                        static_run_id=app_result.static_run_id,
+                        status=fail_status,
+                        ended_at_utc=ended_at_utc,
+                        abort_reason=exc.__class__.__name__,
+                        abort_signal=abort_signal,
+                    )
 
             try:
                 if outcome.aborted:
@@ -524,6 +552,26 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             try:
                 static_ids = [res.static_run_id for res in outcome.results if res.static_run_id]
                 snapshot_static_id = max(static_ids) if static_ids else None
+                if snapshot_static_id is None:
+                    try:
+                        row = core_q.run_sql(
+                            """
+                            SELECT id
+                            FROM static_analysis_runs
+                            WHERE session_stamp=%s
+                            ORDER BY id DESC
+                            LIMIT 1
+                            """,
+                            (session_stamp,),
+                            fetch="one",
+                        )
+                        if row and row[0]:
+                            snapshot_static_id = int(row[0])
+                    except Exception as exc:
+                        log.warning(
+                            f"Failed to resolve static_run_id for permission snapshot: {exc}",
+                            category="static_analysis",
+                        )
                 if snapshot_static_id is None:
                     warning = "Permission snapshot skipped: static_run_id missing for session."
                     print(status_messages.status(warning, level="warn"))
@@ -1693,24 +1741,6 @@ def _render_persistence_footer(
         """,
         (session_stamp,),
     )
-    string_samples_effective = _count(
-        """
-        SELECT COUNT(*)
-        FROM v_strings_effective x
-        JOIN static_string_summary s ON s.id = x.summary_id
-        WHERE s.session_stamp = %s
-        """,
-        (session_stamp,),
-    )
-    string_samples_suppressed = _count(
-        """
-        SELECT COUNT(*)
-        FROM v_doc_policy_drift d
-        JOIN static_string_summary s ON s.id = d.summary_id
-        WHERE s.session_stamp = %s
-        """,
-        (session_stamp,),
-    )
 
     buckets = _audit_or("buckets") or _count_by_run("buckets")
     metrics = _audit_or("metrics") or _count_by_run("metrics")
@@ -1744,8 +1774,6 @@ def _render_persistence_footer(
     contributors_total = _count_total("SELECT COUNT(*) FROM contributors")
     strings_summary_total = _count_total("SELECT COUNT(*) FROM static_string_summary")
     string_samples_raw_total = _count_total("SELECT COUNT(*) FROM static_string_samples")
-    string_samples_effective_total = _count_total("SELECT COUNT(*) FROM v_strings_effective")
-    string_samples_suppressed_total = _count_total("SELECT COUNT(*) FROM v_doc_policy_drift")
     findings_summary_total = _count_total("SELECT COUNT(*) FROM static_findings_summary")
     findings_detail_total = _count_total("SELECT COUNT(*) FROM static_findings")
     snapshot_total = _count_total("SELECT COUNT(*) FROM permission_audit_snapshots")
@@ -1805,14 +1833,6 @@ def _render_persistence_footer(
         (
             "static_string_samples",
             f"this_run={string_samples_raw}  db_total={string_samples_raw_total}",
-        ),
-        (
-            "v_strings_effective",
-            f"this_run={string_samples_effective}  db_total={string_samples_effective_total}",
-        ),
-        (
-            "v_doc_policy_drift",
-            f"this_run={string_samples_suppressed}  db_total={string_samples_suppressed_total}",
         ),
         ("buckets", f"this_run={buckets}  db_total={buckets_total}"),
         ("metrics", f"this_run={metrics}  db_total={metrics_total}"),

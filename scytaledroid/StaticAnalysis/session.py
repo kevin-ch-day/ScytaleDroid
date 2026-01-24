@@ -36,7 +36,7 @@ def make_session_stamp(now: datetime | None = None) -> str:
         return stamp
 
 
-SESSION_STAMP_MAX_LEN = 128
+SESSION_STAMP_MAX_LEN = 64
 
 
 def normalize_session_stamp(label: str, *, max_len: int = SESSION_STAMP_MAX_LEN) -> str:

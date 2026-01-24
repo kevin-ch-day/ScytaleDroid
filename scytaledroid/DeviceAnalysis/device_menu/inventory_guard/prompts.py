@@ -54,14 +54,8 @@ def describe_inventory_state(
 
     return InventoryGuardMessage(
         severity="info",
-        short=(
-            "Inventory is fresh by age, but "
-            f"{delta.changed_packages_count} packages changed since the selected snapshot."
-        ),
-        long=(
-            f"New: {delta.new_count}, removed: {delta.removed_count}, "
-            f"updated: {delta.updated_count}. Re-sync is recommended before pulling APKs."
-        ),
+        short=f"Inventory changed since the selected snapshot ({delta.changed_packages_count} total).",
+        long=None,
     )
 
 

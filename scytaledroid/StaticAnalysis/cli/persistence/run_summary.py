@@ -399,6 +399,7 @@ def _create_static_run(
     run_started_utc: str | None,
     status: str,
 ) -> int | None:
+    normalized_started_at = _normalize_datetime_value(run_started_utc)
     try:
         run_id = core_q.run_sql(
             """
@@ -420,7 +421,7 @@ def _create_static_run(
                 category,
                 profile,
                 findings_total,
-                run_started_utc,
+                normalized_started_at,
                 status,
             ),
             return_lastrowid=True,
@@ -446,7 +447,7 @@ def _create_static_run(
                     scope_label,
                     profile,
                     findings_total,
-                    run_started_utc,
+                    normalized_started_at,
                     status,
                 ),
                 return_lastrowid=True,
@@ -517,7 +518,9 @@ def create_static_run_ledger(
     )
     if app_version_id is None:
         return None
-    run_started_utc = run_started_utc or datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    run_started_utc = _normalize_datetime_value(
+        run_started_utc or datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    )
     return _create_static_run(
         app_version_id=app_version_id,
         session_stamp=session_stamp,
@@ -560,6 +563,46 @@ def update_static_run_status(
     except Exception as exc:  # pragma: no cover - defensive
         log.warning(
             f"Failed to update static_analysis_runs status for id={static_run_id}: {exc}",
+            category="db",
+        )
+
+
+def finalize_open_static_runs(
+    static_run_ids: Sequence[int],
+    *,
+    status: str,
+    ended_at_utc: str | None = None,
+    abort_reason: str | None = None,
+    abort_signal: str | None = None,
+) -> None:
+    if not static_run_ids:
+        return
+    normalized_ended_at = _normalize_datetime_value(ended_at_utc)
+    placeholders = ", ".join(["%s"] * len(static_run_ids))
+    params = (
+        status,
+        normalized_ended_at,
+        abort_reason,
+        abort_signal,
+        *static_run_ids,
+    )
+    try:
+        core_q.run_sql(
+            f"""
+            UPDATE static_analysis_runs
+            SET status=%s,
+                ended_at_utc=%s,
+                abort_reason=%s,
+                abort_signal=%s
+            WHERE status='RUNNING'
+              AND ended_at_utc IS NULL
+              AND id IN ({placeholders})
+            """,
+            params,
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning(
+            f"Failed to finalize open static runs for ids={static_run_ids}: {exc}",
             category="db",
         )
 
@@ -1036,5 +1079,6 @@ __all__ = [
     "persist_run_summary",
     "create_static_run_ledger",
     "update_static_run_status",
+    "finalize_open_static_runs",
     "PersistenceOutcome",
 ]

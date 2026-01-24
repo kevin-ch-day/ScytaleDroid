@@ -147,9 +147,15 @@ def main(argv: list[str] | None = None) -> int:
 
     snapshot_hash = _sha256(path)
     try:
+        run_sql("START TRANSACTION")
         snapshot_id = _upsert_snapshot(args.version, snapshot_hash, args.source)
         inserted = _insert_entries(snapshot_id, rows)
+        run_sql("COMMIT")
     except Exception as exc:
+        try:
+            run_sql("ROLLBACK")
+        except Exception:
+            pass
         log.warning(f"Governance import failed: {exc}", category="database")
         print(f"Import failed: {exc}")
         return 1

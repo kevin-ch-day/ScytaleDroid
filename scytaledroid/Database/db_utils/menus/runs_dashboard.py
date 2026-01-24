@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional
 from scytaledroid.Database.db_core import run_sql
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 
-from .sql_helpers import coerce_datetime, format_session_stamp, view_exists
+from .sql_helpers import coerce_datetime, format_session_stamp
 
 
 def show_recent_runs_dashboard(limit: int = 5) -> None:
@@ -31,19 +31,6 @@ def show_recent_runs_dashboard(limit: int = 5) -> None:
 
 
 def _fetch_recent_runs(limit: int) -> Optional[list[Dict[str, Any]]]:
-    if view_exists("v_run_overview"):
-        try:
-            return run_sql(
-                "SELECT run_id, package, version_name, version_code, target_sdk, ts, session_stamp, total_points, total_cap "
-                "FROM v_run_overview ORDER BY run_id DESC LIMIT %s",
-                (limit,),
-                fetch="all",
-                dictionary=True,
-            )
-        except Exception as exc:
-            print(status_messages.status(f"Unable to query v_run_overview: {exc}", level="error"))
-            return None
-
     try:
         return run_sql(
             "SELECT run_id, package, version_name, version_code, target_sdk, ts, session_stamp FROM runs ORDER BY run_id DESC LIMIT %s",

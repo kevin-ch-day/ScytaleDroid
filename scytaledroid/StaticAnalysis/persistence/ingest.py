@@ -789,7 +789,7 @@ def upsert_base002_for_session(session_stamp: Optional[str]) -> int:
 
 
 def build_session_string_view(session_stamp: Optional[str]) -> int:
-    """Force materialisation of session string samples and return row count."""
+    """Return the row count for session-scoped string samples (no DB views)."""
 
     if not _ensure_schema_ready():
         return 0
@@ -802,7 +802,12 @@ def build_session_string_view(session_stamp: Optional[str]) -> int:
 
     try:
         row = core_q.run_sql(
-            f"SELECT COUNT(*) FROM v_session_string_samples{clause}",
+            (
+                "SELECT COUNT(*) "
+                "FROM static_string_samples x "
+                "JOIN static_string_summary s ON s.id = x.summary_id"
+                f"{clause}"
+            ),
             params,
             fetch="one",
         )

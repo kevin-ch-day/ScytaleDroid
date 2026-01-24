@@ -53,6 +53,26 @@ CLI output automatically.
 Additional informational entries are appended when sensitive strings are found
 only in **non-base splits** or locale-qualified resources.
 
+## Noise policy and performance gates
+
+Noise suppression and regex throttling are now configured via
+`config/strings/noise.toml` under the `[noise]` section. This lets you tune
+string noise filters without editing Python code.
+
+Environment overrides (optional):
+
+* `SCYTALEDROID_STRINGS_LONG_STRING_LENGTH` – length threshold for long-string
+  regex throttling (default 120).
+* `SCYTALEDROID_STRINGS_LOW_ENTROPY_THRESHOLD` – entropy threshold used to skip
+  regex on long, low-entropy strings (default 2.8).
+* `SCYTALEDROID_STRING_SAMPLE_BATCH_SIZE` – batch size for sample insert writes
+  (default 250).
+
+Exploratory summaries report the noise gate metrics:
+
+* `regex_skipped` – count of long strings skipped before regex matching.
+* `noise_counts` – top noise tags triggered during collection.
+
 ## Programmatic access
 
 The updated `CollectionMetrics` dataclass now tracks:

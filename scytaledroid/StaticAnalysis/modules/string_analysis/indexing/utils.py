@@ -7,6 +7,10 @@ from dataclasses import dataclass
 from typing import Iterable, Pattern, Tuple
 
 _PRINTABLE_FRAGMENT = re.compile(rb"[\x09\x0a\x0d\x20-\x7e]{4,}")
+_UTF16_LE_FRAGMENT = re.compile(rb"(?:[\x20-\x7e]\x00){4,}")
+_UTF16_BE_FRAGMENT = re.compile(rb"(?:\x00[\x20-\x7e]){4,}")
+_UTF32_LE_FRAGMENT = re.compile(rb"(?:[\x20-\x7e]\x00\x00\x00){4,}")
+_UTF32_BE_FRAGMENT = re.compile(rb"(?:\x00\x00\x00[\x20-\x7e]){4,}")
 _WHITESPACE = frozenset(b" \t\r\n")
 
 
@@ -63,6 +67,66 @@ def strings_from_binary(blob: bytes) -> tuple[StringFragment, ...]:
     return _extract_fragments(blob, minimum=6)
 
 
+def strings_from_utf16(blob: bytes) -> tuple[StringFragment, ...]:
+    """Return printable fragments decoded from UTF-16 sequences."""
+
+    if not blob:
+        return tuple()
+
+    results: list[StringFragment] = []
+    seen: set[Tuple[int, int]] = set()
+
+    for pattern, codec in (
+        (_UTF16_LE_FRAGMENT, "utf-16-le"),
+        (_UTF16_BE_FRAGMENT, "utf-16-be"),
+    ):
+        for match in pattern.finditer(blob):
+            start, end = match.span()
+            if (start, end) in seen:
+                continue
+            seen.add((start, end))
+            try:
+                text = match.group(0).decode(codec, errors="ignore")
+            except Exception:
+                continue
+            text = text.strip()
+            if len(text) < 4:
+                continue
+            results.append(StringFragment(value=text, start=start, end=end))
+
+    return tuple(results)
+
+
+def strings_from_utf32(blob: bytes) -> tuple[StringFragment, ...]:
+    """Return printable fragments decoded from UTF-32 sequences."""
+
+    if not blob:
+        return tuple()
+
+    results: list[StringFragment] = []
+    seen: set[Tuple[int, int]] = set()
+
+    for pattern, codec in (
+        (_UTF32_LE_FRAGMENT, "utf-32-le"),
+        (_UTF32_BE_FRAGMENT, "utf-32-be"),
+    ):
+        for match in pattern.finditer(blob):
+            start, end = match.span()
+            if (start, end) in seen:
+                continue
+            seen.add((start, end))
+            try:
+                text = match.group(0).decode(codec, errors="ignore")
+            except Exception:
+                continue
+            text = text.strip()
+            if len(text) < 4:
+                continue
+            results.append(StringFragment(value=text, start=start, end=end))
+
+    return tuple(results)
+
+
 def _extract_fragments(blob: bytes, *, minimum: int) -> tuple[StringFragment, ...]:
     if not blob:
         return tuple()
@@ -103,5 +167,7 @@ __all__ = [
     "looks_textual",
     "strings_from_text",
     "strings_from_binary",
+    "strings_from_utf16",
+    "strings_from_utf32",
     "StringFragment",
 ]

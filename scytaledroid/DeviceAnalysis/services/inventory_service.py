@@ -61,7 +61,7 @@ def run_full_sync(
     mode = (mode or os.getenv("SCYTALEDROID_INVENTORY_MODE", "baseline")).lower().strip()
     progress_cb = None
     if progress_sink == "cli":
-        progress.render_snapshot_block(meta, ui_prefs=ui_prefs, mode=mode)
+        progress.render_snapshot_block(meta, ui_prefs=ui_prefs, mode=mode, serial=serial)
         progress_cb = progress.make_cli_progress_printer(ui_prefs=ui_prefs)
 
     # Structured RUN_START log

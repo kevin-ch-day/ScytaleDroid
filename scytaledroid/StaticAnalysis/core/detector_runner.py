@@ -23,6 +23,7 @@ from ..detectors.network import NetworkSurfaceDetector
 from ..detectors.obfuscation import ObfuscationDetector
 from ..detectors.permissions import PermissionsProfileDetector
 from ..detectors.provider_acl import ProviderAclDetector
+from ..detectors.react_native import ReactNativeDetector
 from ..detectors.sdks import SdkInventoryDetector
 from ..detectors.secrets import SecretsDetector
 from ..detectors.storage import StorageBackupDetector
@@ -48,6 +49,7 @@ PIPELINE_STAGES: Tuple[PipelineStage, ...] = (
     PipelineStage(IpcExposureDetector, "ipc_components"),
     PipelineStage(ProviderAclDetector, "provider_acl"),
     PipelineStage(NetworkSurfaceDetector, "network_surface"),
+    PipelineStage(ReactNativeDetector, "react_native", include_in_quick=False),
     PipelineStage(DomainVerificationDetector, "domain_verification"),
     PipelineStage(SecretsDetector, "secrets"),
     PipelineStage(StorageBackupDetector, "storage_backup"),

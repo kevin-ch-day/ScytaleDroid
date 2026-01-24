@@ -5,16 +5,18 @@ from __future__ import annotations
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
+from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages, text_blocks
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from scytaledroid.DeviceAnalysis import adb_utils
+from scytaledroid.DeviceAnalysis.services import inventory_service
 from scytaledroid.DeviceAnalysis import inventory as inventory_module
 from scytaledroid.DeviceAnalysis.inventory.runner import InventoryDelta
 from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.prompts import (
     describe_inventory_state,
 )
 from .constants import (
+    INVENTORY_DELTA_SUPPRESS_SECONDS,
     INVENTORY_STALE_SECONDS,
     LONG_RUNNING_SYNC_THRESHOLD,
     LOW_BATTERY_THRESHOLD,
@@ -176,23 +178,40 @@ def ensure_recent_inventory(
     )
 
     print(status_messages.status(message.short, level="warn" if message.severity == "warn" else "info"))
-    if message.long:
-        print(status_messages.status(message.long, level="info"))
     if delta_obj and delta_obj.changed_packages_count:
-        print(
-            status_messages.status(
-                "This delta compares installed packages to the selected inventory snapshot. Pulling APKs does not reset it; re-run inventory to clear.",
-                level="info",
-            )
+        snapshot_stamp = _format_snapshot_reference(snapshot_id, timestamp)
+        current_count = metadata.get("current_package_count") if metadata else None
+        snapshot_count = metadata.get("package_count") if metadata else None
+        delta_line = (
+            f"Δ vs snapshot {snapshot_stamp}: +{delta_obj.new_count} "
+            f"-{delta_obj.removed_count} ~{delta_obj.updated_count} "
+            f"(total {delta_obj.changed_packages_count})."
         )
-        if snapshot_id or timestamp:
-            snapshot_stamp = _format_snapshot_reference(snapshot_id, timestamp)
+        print(status_messages.status(delta_line, level="info"))
+        if (
+            age_seconds is not None
+            and age_seconds < INVENTORY_DELTA_SUPPRESS_SECONDS
+            and isinstance(current_count, int)
+            and isinstance(snapshot_count, int)
+            and current_count > snapshot_count
+        ):
             print(
                 status_messages.status(
-                    f"Selected snapshot: {snapshot_stamp}",
+                    f"Device has {current_count - snapshot_count} new package(s); refreshing inventory now.",
                     level="info",
                 )
             )
+            try:
+                inventory_service.run_full_sync(serial=serial, ui_prefs=text_blocks.UI_PREFS)
+                _record_guard_policy("quick")
+                return True
+            except Exception as exc:
+                print(status_messages.status(f"Auto-sync failed: {exc}", level="warn"))
+        if age_seconds is not None and age_seconds < INVENTORY_DELTA_SUPPRESS_SECONDS:
+            print(status_messages.status("Recent snapshot; continuing without re-sync prompt.", level="info"))
+            _record_guard_policy("quick")
+            return True
+        print(status_messages.status("Sync is recommended before pulling APKs.", level="info"))
 
     options = ["1", "0"]
     labels = {"1": "Sync now (recommended)", "0": "Cancel"}

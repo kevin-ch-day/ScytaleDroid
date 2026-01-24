@@ -365,6 +365,18 @@ def load_noise_policy(path: str | Path | None) -> NoisePolicy:
             source_exact_groups[f"{base_key}.exact"] = normalized_exact
             sources_documentary.update(normalized_exact)
 
+    noise_section = config.get("noise", {}) or {}
+    if isinstance(noise_section, Mapping):
+        value_contains = list(noise_section.get("value_contains", ()))
+        if value_contains:
+            substring_groups["noise.value_contains"] = _normalise_substrings(value_contains)
+        source_prefix = list(noise_section.get("source_prefix", ()))
+        if source_prefix:
+            source_prefix_groups["noise.source_prefix"] = _normalise_sources(source_prefix)
+        source_exact = list(noise_section.get("source_exact", ()))
+        if source_exact:
+            source_exact_groups["noise.source_exact"] = _normalise_sources(source_exact)
+
     doc_hosts.difference_update(block_overrides_full)
     doc_hosts.difference_update(block_overrides_registrable)
     doc_host_defaults_full.difference_update(block_overrides_full)

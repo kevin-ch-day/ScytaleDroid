@@ -5,8 +5,8 @@ from __future__ import annotations
 import re
 from typing import Mapping
 
-HTTP_URL_PATTERN = re.compile(r"https?://[^\s'\"<>]+", re.IGNORECASE)
-ENDPOINT_PATTERN = re.compile(r"(?P<url>(?:https?|wss?)://[^\s'\"<>]+)", re.IGNORECASE)
+HTTP_URL_PATTERN = re.compile(r"https?://[^\s'\"<>]{1,2048}", re.IGNORECASE)
+ENDPOINT_PATTERN = re.compile(r"(?P<url>(?:https?|wss?)://[^\s'\"<>]{1,2048})", re.IGNORECASE)
 CONTENT_URI_PATTERN = re.compile(r"content://[^\s'\"<>]+", re.IGNORECASE)
 FILE_URI_PATTERN = re.compile(r"file://[^\s'\"<>]+", re.IGNORECASE)
 HOST_PATTERN = re.compile(
@@ -14,9 +14,11 @@ HOST_PATTERN = re.compile(
 )
 HOST_COMPONENT_PATTERN = re.compile(r"^[A-Za-z0-9_-]+(?:\.|$)")
 JWT_PATTERN = re.compile(
-    r"(?P<token>[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})"
+    r"(?P<token>[A-Za-z0-9_-]{10,400}\.[A-Za-z0-9_-]{10,400}\.[A-Za-z0-9_-]{10,400})"
 )
-JWT_FULLMATCH_PATTERN = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
+JWT_FULLMATCH_PATTERN = re.compile(
+    r"^[A-Za-z0-9_-]{10,400}\.[A-Za-z0-9_-]{10,400}\.[A-Za-z0-9_-]{10,400}$"
+)
 AWS_ACCESS_KEY_PATTERN = re.compile(r"A(?:KI|SI)A[0-9A-Z]{16}")
 AWS_SECRET_KEY_PATTERN = re.compile(r"(?<![A-Z0-9])[A-Za-z0-9/+=]{40,64}(?![A-Za-z0-9/+=])")
 GOOGLE_API_KEY_PATTERN = re.compile(r"AIza[0-9A-Za-z\-_]{35}")

@@ -37,6 +37,7 @@ SECTION_DEFINITIONS: tuple[SectionDefinition, ...] = (
     SectionDefinition("file_io_sinks", "File I/O"),
     SectionDefinition("interaction_risks", "User Interaction"),
     SectionDefinition("sdk_inventory", "SDK Inventory"),
+    SectionDefinition("react_native", "React Native"),
     SectionDefinition("native_jni", "Native / JNI"),
     SectionDefinition("obfuscation", "Obfuscation / Anti-Analysis"),
     SectionDefinition("correlation_findings", "Findings (P0/P1)"),

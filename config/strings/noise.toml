@@ -121,6 +121,86 @@ list = [
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Noise dictionary (performance gate)
+# ─────────────────────────────────────────────────────────────────────────────
+
+[noise]
+# Substrings that commonly indicate framework or resource noise.
+value_contains = [
+  "/res/",
+  "/assets/",
+  "/res/drawable",
+  "/res/layout",
+  "/res/xml",
+  "/res/raw",
+  "/res/mipmap",
+  "assets/flutter_assets",
+  "index.android.bundle",
+  ".bundle.map",
+  ".hbc",
+  "androidx",
+  "kotlin",
+  "protobuf",
+  "proto_",
+  "grpc",
+  "flutter",
+  "dart",
+  "react-native",
+  "reactnative",
+  "hermes",
+  "jsi",
+  "turbomodule",
+  "fabric",
+  "com/facebook/react",
+  "com/facebook/soloader",
+  "libflutter.so",
+  "libhermes.so",
+  "libreactnativejni.so",
+  "libreactnative.so",
+  "okhttp",
+  "okio",
+  "gson",
+  "guava",
+  "compose",
+  "buildconfig",
+  "classes.dex",
+  "fonts.gstatic.com",
+  "fonts.googleapis.com",
+  "cdnjs.cloudflare.com",
+  "googletagmanager.com",
+  "google-analytics.com",
+  "googlesyndication.com",
+  "doubleclick.net",
+  "gstatic.com",
+  "googleapis.com",
+]
+
+# Source prefixes that are almost always resource/framework noise.
+source_prefix = [
+  "res/",
+  "assets/",
+  "assets/flutter_assets/",
+  "assets/index.android.bundle",
+  "assets/index.android.bundle/",
+  "assets/reactnative/",
+  "lib/",
+  "kotlin/",
+  "androidx/",
+  "META-INF/services/",
+  "META-INF/maven/",
+  "META-INF/",
+]
+
+# Exact sources that should be treated as noise.
+source_exact = [
+  "resources.arsc",
+  "assets/index.android.bundle",
+  "assets/index.android.bundle.map",
+  "assets/index.android.bundle.packager.map",
+  "assets/index.android.bundle.hbc",
+]
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Rules (top→bottom; first match wins)
 # Conditions are ANDed within each rule.
 # Actions:

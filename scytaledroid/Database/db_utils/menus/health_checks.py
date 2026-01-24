@@ -121,37 +121,6 @@ def run_health_checks() -> None:
                 detail=str(samples_total or 0),
             )
 
-        effective_total = scalar(
-            """
-            SELECT COUNT(*)
-            FROM v_strings_effective x
-            JOIN static_string_summary s ON s.id = x.summary_id
-            WHERE s.session_stamp = %s
-            """,
-            (session_stamp,),
-        )
-        if effective_total is not None:
-            _print_status_line(
-                "ok" if effective_total else "warn",
-                "v_strings_effective",
-                detail=str(effective_total or 0),
-            )
-
-        suppressed_total = scalar(
-            """
-            SELECT COUNT(*)
-            FROM v_doc_policy_drift d
-            JOIN static_string_summary s ON s.id = d.summary_id
-            WHERE s.session_stamp = %s
-            """,
-            (session_stamp,),
-        )
-        if suppressed_total is not None:
-            _print_status_line(
-                "ok",
-                "v_doc_policy_drift",
-                detail=str(suppressed_total or 0),
-            )
     else:
         _print_status_line(
             "warn",
@@ -679,7 +648,67 @@ def prompt_reset_static_data() -> None:
     prompt_utils.press_enter_to_continue()
 
 
-__all__ = ["run_health_checks", "prompt_reset_static_data"]
+def prompt_finalize_stale_runs() -> None:
+    menu_utils.print_header("Finalize Stale RUNNING Runs")
+    threshold_minutes = 60
+    stale_count = scalar(
+        """
+        SELECT COUNT(*)
+        FROM static_analysis_runs
+        WHERE status='RUNNING'
+          AND ended_at_utc IS NULL
+          AND (
+            STR_TO_DATE(REPLACE(REPLACE(run_started_utc,'T',' '),'Z',''), '%Y-%m-%d %H:%i:%s.%f')
+              < (UTC_TIMESTAMP() - INTERVAL %s MINUTE)
+            OR STR_TO_DATE(REPLACE(REPLACE(run_started_utc,'T',' '),'Z',''), '%Y-%m-%d %H:%i:%s')
+              < (UTC_TIMESTAMP() - INTERVAL %s MINUTE)
+          )
+        """,
+        (threshold_minutes, threshold_minutes),
+    ) or 0
+
+    if stale_count == 0:
+        print(status_messages.status("No stale RUNNING rows found.", level="success"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    print(
+        status_messages.status(
+            f"Found {stale_count} RUNNING row(s) older than {threshold_minutes} minutes.",
+            level="warn",
+        )
+    )
+    if not prompt_utils.prompt_yes_no("Finalize now?", default=False):
+        print(status_messages.status("Finalize cancelled.", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    run_sql(
+        """
+        UPDATE static_analysis_runs
+        SET status='FAILED',
+            ended_at_utc=UTC_TIMESTAMP(),
+            abort_reason='stale_finalize'
+        WHERE status='RUNNING'
+          AND ended_at_utc IS NULL
+          AND (
+            STR_TO_DATE(REPLACE(REPLACE(run_started_utc,'T',' '),'Z',''), '%Y-%m-%d %H:%i:%s.%f')
+              < (UTC_TIMESTAMP() - INTERVAL %s MINUTE)
+            OR STR_TO_DATE(REPLACE(REPLACE(run_started_utc,'T',' '),'Z',''), '%Y-%m-%d %H:%i:%s')
+              < (UTC_TIMESTAMP() - INTERVAL %s MINUTE)
+          )
+        """,
+        (threshold_minutes, threshold_minutes),
+    )
+    print(status_messages.status("Stale RUNNING rows finalized.", level="success"))
+    prompt_utils.press_enter_to_continue()
+
+
+__all__ = [
+    "run_health_checks",
+    "prompt_finalize_stale_runs",
+    "prompt_reset_static_data",
+]
 
 
 def _print_table_list(title: str, tables: Sequence[str]) -> None:

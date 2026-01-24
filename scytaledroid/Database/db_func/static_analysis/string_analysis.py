@@ -7,14 +7,16 @@ This module mirrors the schema documented in
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
 from typing import Iterable, Mapping, MutableMapping, Sequence, Union
 
-from ...db_core import database_session, run_sql, db_config
+from ...db_core import database_session, run_sql, run_sql_many, db_config
 from ...db_queries.static_analysis import string_analysis as queries
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 _IS_SQLITE = str(db_config.DB_CONFIG.get("engine", "sqlite")).lower() == "sqlite"
+_SAMPLE_BATCH_SIZE = int(os.getenv("SCYTALEDROID_STRING_SAMPLE_BATCH_SIZE", "250"))
 
 SQLITE_CREATE_SUMMARY = """
 CREATE TABLE IF NOT EXISTS static_string_summary (
@@ -345,6 +347,7 @@ def replace_top_samples(
             with database_session():
                 run_sql("DELETE FROM static_string_samples WHERE summary_id=%s", (summary_id,))
                 deleted = 1
+                rows: list[tuple[object, ...]] = []
                 for bucket, entries in samples.items():
                     if not entries:
                         continue
@@ -363,18 +366,7 @@ def replace_top_samples(
                         root_domain = record.get("root_domain")
                         resource_name = record.get("resource_name")
                         scheme = record.get("scheme")
-                        run_sql(
-                            """
-                            INSERT INTO static_string_samples (
-                              summary_id, static_run_id, bucket, value_masked, src, tag, rank,
-                              source_type, finding_type, provider, risk_tag, confidence,
-                              sample_hash, root_domain, resource_name, scheme
-                            ) VALUES (
-                              %s, %s, %s, %s, %s, %s, %s,
-                              %s, %s, %s, %s, %s,
-                              %s, %s, %s, %s
-                            )
-                            """,
+                        rows.append(
                             (
                                 summary_id,
                                 static_run_id,
@@ -392,10 +384,25 @@ def replace_top_samples(
                                 (str(root_domain)[:191] if root_domain else None),
                                 (str(resource_name)[:191] if resource_name else None),
                                 (str(scheme)[:32] if scheme else None),
-                            ),
+                            )
                         )
-                        inserted += 1
                         rank += 1
+                if rows:
+                    stmt = """
+                    INSERT INTO static_string_samples (
+                      summary_id, static_run_id, bucket, value_masked, src, tag, rank,
+                      source_type, finding_type, provider, risk_tag, confidence,
+                      sample_hash, root_domain, resource_name, scheme
+                    ) VALUES (
+                      %s, %s, %s, %s, %s, %s, %s,
+                      %s, %s, %s, %s, %s,
+                      %s, %s, %s, %s
+                    )
+                    """
+                    batch_size = max(_SAMPLE_BATCH_SIZE, 1)
+                    for idx in range(0, len(rows), batch_size):
+                        run_sql_many(stmt, rows[idx : idx + batch_size])
+                    inserted = len(rows)
         except Exception:
             pass
         return deleted, inserted
@@ -405,6 +412,7 @@ def replace_top_samples(
         with database_session():
             run_sql(queries.DELETE_SAMPLES_FOR_SUMMARY, (summary_id,))
             deleted = 1  # semantic marker (not actual count)
+            rows: list[tuple[object, ...]] = []
             for bucket, entries in samples.items():
                 if not entries:
                     continue
@@ -423,8 +431,7 @@ def replace_top_samples(
                     root_domain = record.get("root_domain")
                     resource_name = record.get("resource_name")
                     scheme = record.get("scheme")
-                    run_sql(
-                        queries.INSERT_SAMPLE,
+                    rows.append(
                         (
                             summary_id,
                             static_run_id,
@@ -442,10 +449,14 @@ def replace_top_samples(
                             (str(root_domain)[:191] if root_domain else None),
                             (str(resource_name)[:191] if resource_name else None),
                             (str(scheme)[:32] if scheme else None),
-                        ),
+                        )
                     )
-                    inserted += 1
                     rank += 1
+            if rows:
+                batch_size = max(_SAMPLE_BATCH_SIZE, 1)
+                for idx in range(0, len(rows), batch_size):
+                    run_sql_many(queries.INSERT_SAMPLE, rows[idx : idx + batch_size])
+                inserted = len(rows)
     except Exception as exc:
         try:
             from scytaledroid.Utils.LoggingUtils import logging_utils as log

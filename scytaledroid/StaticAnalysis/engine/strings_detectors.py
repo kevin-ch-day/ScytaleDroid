@@ -43,6 +43,8 @@ def _sanitize_endpoint_value(value: str) -> tuple[str, bool]:
 
 
 def _detect_endpoints(value: str) -> Iterable[EndpointInfo]:
+    if "://" not in value:
+        return
     for raw in ENDPOINT_PATTERN.findall(value):
         sanitized, trimmed = _sanitize_endpoint_value(raw)
         parsed = urlsplit(sanitized)

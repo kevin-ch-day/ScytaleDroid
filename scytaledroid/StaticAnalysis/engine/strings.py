@@ -8,6 +8,8 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from contextlib import redirect_stderr, redirect_stdout
 import io
+import math
+import os
 from typing import Dict, Iterable, List, Mapping, MutableMapping
 
 from scytaledroid.StaticAnalysis._androguard import APK
@@ -19,6 +21,7 @@ from ..modules.string_analysis import (
     build_bucket_overview,
     build_string_index,
 )
+from ..modules.string_analysis.allowlist import DEFAULT_POLICY_ROOT, load_noise_policy
 from ..modules.string_analysis.constants import (
     CONTENT_URI_PATTERN,
     DOCUMENTARY_ROOTS,
@@ -36,6 +39,65 @@ from .strings_helpers import (
     _short_hash,
     _source_type_for,
 )
+
+_LOW_ENTROPY_LENGTH_DEFAULT = 256
+_LOW_ENTROPY_THRESHOLD_DEFAULT = 3.2
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        return default
+
+
+def _shannon_entropy(value: str) -> float:
+    if not value:
+        return 0.0
+    frequency: MutableMapping[str, int] = {}
+    for char in value:
+        frequency[char] = frequency.get(char, 0) + 1
+    length = len(value)
+    return -sum((count / length) * math.log2(count / length) for count in frequency.values())
+
+
+def _should_skip_regex(value: str) -> bool:
+    length = len(value)
+    min_length = _env_int("SCYTALEDROID_STRINGS_LONG_STRING_LENGTH", _LOW_ENTROPY_LENGTH_DEFAULT)
+    min_entropy = _env_float("SCYTALEDROID_STRINGS_LOW_ENTROPY_THRESHOLD", _LOW_ENTROPY_THRESHOLD_DEFAULT)
+    if length < min_length:
+        return False
+    return _shannon_entropy(value) < min_entropy
+
+
+def _noise_tag(value: str, source: str | None, policy) -> str | None:
+    lowered = value.strip().lower()
+    if not lowered:
+        return None
+    source_lower = source.replace("\\", "/").lower() if source else ""
+    value_contains = policy.substring_groups.get("noise.value_contains")
+    if value_contains and any(token in lowered for token in value_contains):
+        return "noise_config"
+    source_prefix = policy.source_prefix_groups.get("noise.source_prefix")
+    if source_prefix and any(source_lower.startswith(prefix) for prefix in source_prefix):
+        return "noise_config"
+    source_exact = policy.source_exact_groups.get("noise.source_exact")
+    if source_exact and source_lower in source_exact:
+        return "noise_config"
+    return None
 
 
 def analyse_strings(
@@ -111,6 +173,10 @@ def analyse_strings(
     counts.setdefault("trailing_punct_trimmed", 0)
     extra_counts: Counter[str] = Counter()
     samples: Dict[str, List[StringHit]] = defaultdict(list)
+    noise_counts: Counter[str] = Counter()
+    regex_skipped = 0
+
+    policy = load_noise_policy(DEFAULT_POLICY_ROOT)
 
     endpoint_totals: Counter[str] = Counter()
     endpoint_by_root: MutableMapping[str, Counter[str]] = defaultdict(Counter)
@@ -127,48 +193,22 @@ def analyse_strings(
         value = entry.value
         src = _normalise_src(entry.origin, entry.origin_type, entry.sha256)
         source_type = _source_type_for(entry.origin_type)
+        noise_tag = _noise_tag(value, entry.origin, policy)
+        skip_regex = _should_skip_regex(value) or bool(noise_tag)
+        if skip_regex:
+            regex_skipped += 1
+        if noise_tag:
+            noise_counts[noise_tag] += 1
 
-        for endpoint in _detect_endpoints(value):
-            sample_hash = _short_hash(endpoint.url)
-            if endpoint.root_domain:
-                domain_sources[endpoint.root_domain].add(source_type or "unknown")
-            if endpoint.trimmed:
-                extra_counts["trailing_punct_trimmed"] += 1
-            hit = StringHit(
-                bucket="endpoints",
-                value=endpoint.url,
-                src=src,
-                tag=endpoint.scheme,
-                sha256=entry.sha256,
-                masked=None,
-                finding_type="endpoint",
-                provider=None,
-                risk_tag=endpoint.risk_tag,
-                confidence="high",
-                scheme=endpoint.scheme,
-                root_domain=endpoint.root_domain,
-                resource_name=None,
-                source_type=source_type,
-                sample_hash=sample_hash,
-            )
-            samples["endpoints"].append(hit)
-            counts["endpoints"] += 1
-            endpoint_totals.update(endpoint.categories)
-            if endpoint.root_domain:
-                endpoint_by_root[endpoint.root_domain].update({endpoint.scheme or "other": 1})
-            if "http_cleartext" in endpoint.categories and endpoint.risk_tag == "http_cleartext":
-                if (
-                    endpoint.root_domain
-                    and endpoint.root_domain.lower() in DOCUMENTARY_ROOTS
-                ):
-                    continue
-                confidence = "high"
+        if not skip_regex:
+            for endpoint in _detect_endpoints(value):
+                sample_hash = _short_hash(endpoint.url)
                 if endpoint.root_domain:
-                    sources = domain_sources.get(endpoint.root_domain, set())
-                    if "dex" not in sources:
-                        confidence = "low"
-                clear_hit = StringHit(
-                    bucket="http_cleartext",
+                    domain_sources[endpoint.root_domain].add(source_type or "unknown")
+                if endpoint.trimmed:
+                    extra_counts["trailing_punct_trimmed"] += 1
+                hit = StringHit(
+                    bucket="endpoints",
                     value=endpoint.url,
                     src=src,
                     tag=endpoint.scheme,
@@ -177,30 +217,63 @@ def analyse_strings(
                     finding_type="endpoint",
                     provider=None,
                     risk_tag=endpoint.risk_tag,
-                    confidence=confidence,
+                    confidence="high",
                     scheme=endpoint.scheme,
                     root_domain=endpoint.root_domain,
                     resource_name=None,
                     source_type=source_type,
                     sample_hash=sample_hash,
                 )
-                samples["http_cleartext"].append(clear_hit)
-                counts["http_cleartext"] += 1
-                endpoint_cleartext.append(clear_hit)
-                if confidence != "low":
-                    extra_counts["http_cleartext"] += 1
-            if endpoint.scheme == "https":
-                extra_counts["https"] += 1
-            if "ip_private" in endpoint.categories:
-                extra_counts["ip_private"] += 1
-            if "ip_public" in endpoint.categories:
-                extra_counts["ip_public"] += 1
-            if "localhost" in endpoint.categories:
-                extra_counts["localhost"] += 1
-            if endpoint.scheme in {"ws", "wss"}:
-                extra_counts[endpoint.scheme] += 1
+                samples["endpoints"].append(hit)
+                counts["endpoints"] += 1
+                endpoint_totals.update(endpoint.categories)
+                if endpoint.root_domain:
+                    endpoint_by_root[endpoint.root_domain].update({endpoint.scheme or "other": 1})
+                if "http_cleartext" in endpoint.categories and endpoint.risk_tag == "http_cleartext":
+                    if (
+                        endpoint.root_domain
+                        and endpoint.root_domain.lower() in DOCUMENTARY_ROOTS
+                    ):
+                        continue
+                    confidence = "high"
+                    if endpoint.root_domain:
+                        sources = domain_sources.get(endpoint.root_domain, set())
+                        if "dex" not in sources:
+                            confidence = "low"
+                    clear_hit = StringHit(
+                        bucket="http_cleartext",
+                        value=endpoint.url,
+                        src=src,
+                        tag=endpoint.scheme,
+                        sha256=entry.sha256,
+                        masked=None,
+                        finding_type="endpoint",
+                        provider=None,
+                        risk_tag=endpoint.risk_tag,
+                        confidence=confidence,
+                        scheme=endpoint.scheme,
+                        root_domain=endpoint.root_domain,
+                        resource_name=None,
+                        source_type=source_type,
+                        sample_hash=sample_hash,
+                    )
+                    samples["http_cleartext"].append(clear_hit)
+                    counts["http_cleartext"] += 1
+                    endpoint_cleartext.append(clear_hit)
+                    if confidence != "low":
+                        extra_counts["http_cleartext"] += 1
+                if endpoint.scheme == "https":
+                    extra_counts["https"] += 1
+                if "ip_private" in endpoint.categories:
+                    extra_counts["ip_private"] += 1
+                if "ip_public" in endpoint.categories:
+                    extra_counts["ip_public"] += 1
+                if "localhost" in endpoint.categories:
+                    extra_counts["localhost"] += 1
+                if endpoint.scheme in {"ws", "wss"}:
+                    extra_counts[endpoint.scheme] += 1
 
-        if CONTENT_URI_PATTERN.search(value) or FILE_URI_PATTERN.search(value):
+        if not skip_regex and (CONTENT_URI_PATTERN.search(value) or FILE_URI_PATTERN.search(value)):
             tag = "content" if value.lower().startswith("content://") else "file"
             hit = StringHit(
                 bucket="uris",
@@ -223,72 +296,75 @@ def analyse_strings(
             counts["uris"] += 1
             extra_counts[tag] += 1
 
-        for cloud in _detect_cloud_refs(value):
-            hit = StringHit(
-                bucket="cloud_refs",
-                value=cloud.raw,
-                src=src,
-                tag=cloud.service or cloud.provider,
-                sha256=entry.sha256,
-                masked=None,
-                finding_type="cloud_ref",
-                provider=cloud.provider,
-                risk_tag="prod_domain",
-                confidence="medium",
-                scheme=None,
-                root_domain=None,
-                resource_name=cloud.resource,
-                source_type=source_type,
-                sample_hash=_short_hash(cloud.raw),
-            )
-            samples["cloud_refs"].append(hit)
-            counts["cloud_refs"] += 1
-            cloud_hits.append((hit, cloud.region))
+        if not skip_regex:
+            for cloud in _detect_cloud_refs(value):
+                hit = StringHit(
+                    bucket="cloud_refs",
+                    value=cloud.raw,
+                    src=src,
+                    tag=cloud.service or cloud.provider,
+                    sha256=entry.sha256,
+                    masked=None,
+                    finding_type="cloud_ref",
+                    provider=cloud.provider,
+                    risk_tag="prod_domain",
+                    confidence="medium",
+                    scheme=None,
+                    root_domain=None,
+                    resource_name=cloud.resource,
+                    source_type=source_type,
+                    sample_hash=_short_hash(cloud.raw),
+                )
+                samples["cloud_refs"].append(hit)
+                counts["cloud_refs"] += 1
+                cloud_hits.append((hit, cloud.region))
 
-        for token in _classify_token(value):
-            masked = _mask_value(token.value)
-            hit = StringHit(
-                bucket="api_keys",
-                value=token.value,
-                src=src,
-                tag=token.token_type,
-                sha256=entry.sha256,
-                masked=masked,
-                finding_type="api_key",
-                provider=token.provider,
-                risk_tag="token_candidate",
-                confidence=token.confidence,
-                scheme=None,
-                root_domain=None,
-                resource_name=None,
-                source_type=source_type,
-                sample_hash=_short_hash(token.value),
-            )
-            samples["api_keys"].append(hit)
-            counts["api_keys"] += 1
-            api_key_hits.append(hit)
+        if not skip_regex:
+            for token in _classify_token(value):
+                masked = _mask_value(token.value)
+                hit = StringHit(
+                    bucket="api_keys",
+                    value=token.value,
+                    src=src,
+                    tag=token.token_type,
+                    sha256=entry.sha256,
+                    masked=masked,
+                    finding_type="api_key",
+                    provider=token.provider,
+                    risk_tag="token_candidate",
+                    confidence=token.confidence,
+                    scheme=None,
+                    root_domain=None,
+                    resource_name=None,
+                    source_type=source_type,
+                    sample_hash=_short_hash(token.value),
+                )
+                samples["api_keys"].append(hit)
+                counts["api_keys"] += 1
+                api_key_hits.append(hit)
 
-        for analytic in _classify_analytics(value):
-            hit = StringHit(
-                bucket="analytics_ids",
-                value=analytic.identifier,
-                src=src,
-                tag=analytic.vendor,
-                sha256=entry.sha256,
-                masked=None,
-                finding_type="analytics_id",
-                provider=analytic.vendor,
-                risk_tag="prod_domain",
-                confidence="medium",
-                scheme=None,
-                root_domain=None,
-                resource_name=None,
-                source_type=source_type,
-                sample_hash=_short_hash(analytic.identifier),
-            )
-            samples["analytics_ids"].append(hit)
-            counts["analytics_ids"] += 1
-            analytics_vendor_ids[analytic.vendor][src].add(analytic.identifier)
+        if not skip_regex:
+            for analytic in _classify_analytics(value):
+                hit = StringHit(
+                    bucket="analytics_ids",
+                    value=analytic.identifier,
+                    src=src,
+                    tag=analytic.vendor,
+                    sha256=entry.sha256,
+                    masked=None,
+                    finding_type="analytics_id",
+                    provider=analytic.vendor,
+                    risk_tag="prod_domain",
+                    confidence="medium",
+                    scheme=None,
+                    root_domain=None,
+                    resource_name=None,
+                    source_type=source_type,
+                    sample_hash=_short_hash(analytic.identifier),
+                )
+                samples["analytics_ids"].append(hit)
+                counts["analytics_ids"] += 1
+                analytics_vendor_ids[analytic.vendor][src].add(analytic.identifier)
 
         bucket, entropy_value = _entropy_bucket(value, minimum=min_entropy)
         if bucket:
@@ -315,7 +391,7 @@ def analyse_strings(
             if bucket == "high":
                 entropy_high_samples.append(hit)
 
-        if _detect_jwt(value):
+        if not skip_regex and _detect_jwt(value):
             hit = StringHit(
                 bucket="api_keys",
                 value=value,
@@ -392,6 +468,8 @@ def analyse_strings(
         "counts": counts,
         "samples": ordered_samples,
         "extra_counts": dict(extra_counts),
+        "regex_skipped": regex_skipped,
+        "noise_counts": dict(noise_counts),
         "aggregates": aggregates,
         "structured": structured,
         "warnings": bounds_warnings,

@@ -10,7 +10,7 @@ PATTERNS: tuple[StringPattern, ...] = (
     StringPattern(
         name="stripe_secret_key",
         description="Potential Stripe secret key",
-        pattern=re.compile(r"sk_(?:live|test)_[0-9A-Za-z]{24,}"),
+        pattern=re.compile(r"sk_(?:live|test)_[0-9A-Za-z]{24,64}"),
         category="payments",
         provider="Stripe",
         tags=("secret", "stripe"),
@@ -29,7 +29,10 @@ PATTERNS: tuple[StringPattern, ...] = (
     StringPattern(
         name="braintree_access_token",
         description="Potential Braintree access token",
-        pattern=re.compile(r"access_token\$[a-z0-9_\-]+\$[a-z0-9_\-]+\$[a-z0-9_\-]+", re.IGNORECASE),
+        pattern=re.compile(
+            r"access_token\$[a-z0-9_\-]{4,64}\$[a-z0-9_\-]{4,64}\$[a-z0-9_\-]{4,128}",
+            re.IGNORECASE,
+        ),
         category="payments",
         provider="Braintree",
         tags=("access_token", "braintree"),
@@ -38,7 +41,7 @@ PATTERNS: tuple[StringPattern, ...] = (
     StringPattern(
         name="paypal_client_id",
         description="Potential PayPal client ID",
-        pattern=re.compile(r"A[A-Za-z0-9]{20,}-[A-Za-z0-9_-]{10,}"),
+        pattern=re.compile(r"A[A-Za-z0-9]{20,64}-[A-Za-z0-9_-]{10,64}"),
         category="payments",
         provider="PayPal",
         tags=("client_id", "paypal"),

@@ -269,9 +269,8 @@ class _PipelineProgress:
     def start(self, index: int, label: str) -> None:
         if self.show_splits:
             return
-        elapsed = _format_elapsed(time.monotonic() - self._start)
-        text = f"Artifact {index}/{self.total}: {label} | elapsed {elapsed}"
-        self._render_line(text)
+        # Avoid in-place lines that can interleave with warnings from other emitters.
+        return
 
     def finish(self, index: int, label: str) -> None:
         if self.show_splits:

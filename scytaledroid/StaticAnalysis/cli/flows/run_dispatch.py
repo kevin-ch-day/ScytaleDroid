@@ -29,6 +29,7 @@ from ..execution import (
     render_run_results,
 )
 from ..core.models import RunParameters, RunOutcome, ScopeSelection
+from ..core.run_lifecycle import finalize_open_runs
 from ..core.analysis_profiles import run_modules_for_profile
 from .selection import format_scope_target
 
@@ -138,15 +139,49 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
         return None
 
     print(status_messages.step("Starting detector pipeline", label="Static Analysis"))
+    outcome: RunOutcome | None = None
+    run_status: str | None = None
+    abort_reason: str | None = None
+    abort_signal: str | None = None
     try:
         outcome = execute_scan(selection, params, base_dir)
     finally:
         signal.signal(signal.SIGINT, previous_handler)
     try:
-        setattr(outcome, "session_stamp", params.session_stamp)
+        if outcome is not None:
+            setattr(outcome, "session_stamp", params.session_stamp)
     except Exception:
         pass
-    render_run_results(outcome, params)
+    try:
+        if outcome is not None:
+            render_run_results(outcome, params)
+            run_status = "COMPLETED"
+            if outcome.aborted:
+                run_status = "ABORTED"
+            elif outcome.failures:
+                run_status = "FAILED"
+            abort_reason = outcome.abort_reason
+            abort_signal = outcome.abort_signal
+    except Exception as exc:
+        run_status = "FAILED"
+        abort_reason = exc.__class__.__name__
+        raise
+    finally:
+        if outcome is not None and not params.dry_run and run_status:
+            static_run_ids = [
+                result.static_run_id
+                for result in outcome.results
+                if result.static_run_id
+            ]
+            if static_run_ids:
+                ended_at = outcome.finished_at.isoformat(timespec="seconds") + "Z"
+                finalize_open_runs(
+                    static_run_ids,
+                    status=run_status,
+                    ended_at_utc=ended_at,
+                    abort_reason=abort_reason,
+                    abort_signal=abort_signal,
+                )
 
     # Structured RUN SUMMARY (formatter-based) for transcripts/screenshots.
     if outcome and getattr(outcome, "summary", None):

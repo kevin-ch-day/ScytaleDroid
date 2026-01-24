@@ -16,6 +16,8 @@ from .utils import (
     looks_textual,
     strings_from_binary,
     strings_from_text,
+    strings_from_utf16,
+    strings_from_utf32,
 )
 
 _DEX_ID_PATTERN = re.compile(r"classes(?P<index>\d+)?\.dex", re.IGNORECASE)
@@ -118,6 +120,8 @@ def _is_probable_protobuf(blob: bytes) -> bool:
 def _should_scan_binary(origin_type: str, blob: bytes) -> bool:
     if origin_type == "native":
         return True
+    if origin_type == "rn_bundle":
+        return True
     if looks_textual(blob):
         return False
     return _is_probable_protobuf(blob)
@@ -167,6 +171,17 @@ def collect_file_strings(apk: APK) -> tuple[IndexedString, ...]:
             else:
                 continue
 
+        utf16_fragments = strings_from_utf16(blob)
+        utf32_fragments = strings_from_utf32(blob)
+        if utf16_fragments or utf32_fragments:
+            fragments = tuple(
+                {
+                    (frag.start, frag.end): frag
+                    for frag in fragments + utf16_fragments + utf32_fragments
+                }.values()
+            )
+            confidence = "low"
+
         for fragment in fragments:
             locale_qualifier = _locale_from_path(name)
             dex_id = _dex_id_from_name(name) if origin_type == "dex" else None
@@ -197,6 +212,13 @@ def classify_origin_type(path: str) -> str | None:
     """Map APK file paths to semantic origin types."""
 
     lowered = path.lower()
+    if lowered.startswith("assets/") and (
+        lowered.endswith(".hbc")
+        or lowered.endswith(".bundle")
+        or lowered.endswith(".bundle.js")
+        or "index.android.bundle" in lowered
+    ):
+        return "rn_bundle"
     if lowered.startswith("assets/"):
         return "asset"
     if lowered.startswith("res/raw"):

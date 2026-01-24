@@ -45,13 +45,16 @@ def persist_static_findings(
     try:
         if not _sf.ensure_tables():
             raise RuntimeError("static_findings tables unavailable")
+        # static_findings_summary.run_id points to static_analysis_runs.id,
+        # so only use legacy runs.run_id when no static_run_id is available.
+        effective_run_id = None if static_run_id is not None else run_id
         summary_id = _sf.upsert_summary(
             package_name=package_name,
             session_stamp=session_stamp,
             scope_label=scope_label,
             severity_counts=severity_counts,
             details=details,
-            run_id=run_id,
+            run_id=effective_run_id,
             static_run_id=static_run_id,
         )
         if summary_id is None:
@@ -71,7 +74,7 @@ def persist_static_findings(
                 package_name=package_name,
                 session_stamp=session_stamp,
                 scope_label=scope_label,
-                run_id=run_id,
+                run_id=effective_run_id,
                 static_run_id=static_run_id,
             )
         if summary_id is None:
@@ -83,14 +86,14 @@ def persist_static_findings(
                 (
                     f"static findings summary unresolved "
                     f"(package={package_name} session={session_stamp} scope={scope_label} "
-                    f"run_id={run_id} static_run_id={static_run_id})"
+                    f"run_id={effective_run_id} static_run_id={static_run_id})"
                 ),
                 category="db",
             )
         else:
             if findings:
                 _sf.replace_findings(
-                    summary_id, tuple(findings), run_id=run_id, static_run_id=static_run_id
+                    summary_id, tuple(findings), run_id=effective_run_id, static_run_id=static_run_id
                 )
     except Exception as exc:  # pragma: no cover - defensive
         message = f"Failed to persist static findings summary for {package_name}: {exc}"

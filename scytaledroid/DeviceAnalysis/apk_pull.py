@@ -703,15 +703,28 @@ def _render_plan_overview(
     print("APK Harvest Plan")
     print("-" * 86)
     candidate_count = selection.metadata.get("candidate_count")
+    selected_count = selection.metadata.get("selected_count")
+    if selection.metadata.get("delta_filter_applied"):
+        candidate_count = selection.metadata.get("delta_filter_matched")
+        selected_count = len(selection.packages)
     if not candidate_count:
-        candidate_count = packages + blocked_packages
-    eligible = packages
+        candidate_count = len(selection.packages)
+    if selected_count is None:
+        selected_count = len(selection.packages)
+
+    policy_blocked = sum(
+        1 for pkg in plan.packages if pkg.skip_reason == "policy_non_root"
+    )
+    eligible_policy = max(int(candidate_count) - int(policy_blocked), 0)
+    eligible_artifacts = packages
     policy = selection.metadata.get("policy")
     if not policy:
         policy = ",".join(sorted(plan.policy_filtered.keys())) if plan.policy_filtered else "none"
     print(
-        f"Scope={selection.label} | candidates={candidate_count} | eligible={eligible} | "
-        f"blocked={blocked_packages} | files≈{files} | policy={policy}"
+        f"Scope={selection.label} | candidates={candidate_count} | "
+        f"eligible_policy={eligible_policy} | eligible_artifacts={eligible_artifacts} | "
+        f"blocked_policy={policy_blocked} | blocked={blocked_packages} | "
+        f"files≈{files} | policy={policy}"
     )
     focus = selection.metadata.get("sample_names") or []
     total = selection.metadata.get("selected_count") or len(selection.packages)

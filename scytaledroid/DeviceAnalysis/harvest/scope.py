@@ -99,7 +99,7 @@ def select_package_scope(
 
         _add_entry(
             "1",
-            "Play & user",
+            "Play & user apps",
             packages=context["default_counts"].get("packages"),
             files=context["default_counts"].get("files"),
             note="default",
@@ -109,58 +109,59 @@ def select_package_scope(
         social_rows = profile_key_groups.get("SOCIAL")
         _add_entry(
             "2",
-            "Social Media",
+            "Profile: Social",
             packages=len(social_rows) if social_rows else 0,
             handler=lambda: _scope_profile_key_subset(
                 rows,
                 allow,
                 {"SOCIAL"},
-                label="Social Media",
+                label="Profile: Social",
             ),
         )
 
         messaging_rows = profile_key_groups.get("MESSAGING")
         _add_entry(
             "3",
-            "Messaging & Comms",
+            "Profile: Messaging",
             packages=len(messaging_rows) if messaging_rows else 0,
             handler=lambda: _scope_profile_key_subset(
                 rows,
                 allow,
                 {"MESSAGING"},
-                label="Messaging & Comms",
+                label="Profile: Messaging",
             ),
         )
 
         combined_rows = (social_rows or []) + (messaging_rows or [])
         _add_entry(
             "4",
-            "Social + Messaging",
+            "Profile: Social + Messaging",
             packages=len(combined_rows) if combined_rows else 0,
-            note="non-root filtered" if not is_rooted else None,
+            note="profile",
             handler=lambda: _scope_profile_key_subset(
                 rows,
                 allow,
                 {"SOCIAL", "MESSAGING"},
-                label="Social + Messaging",
+                label="Profile: Social + Messaging",
             ),
         )
 
         _add_entry(
             "5",
-            "Google user",
+            "Profile: Google user",
             packages=context["google_user"].get("packages"),
             files=context["google_user"].get("files"),
+            note="profile",
             handler=lambda: _scope_google_user_apps(rows, allow),
         )
 
         if profile_counts:
             _add_entry(
                 "6",
-                "Profile targets",
+                "Target profiles",
                 packages=context["profile_summary"].get("packages"),
                 files=context["profile_summary"].get("files"),
-                note="social/messaging/media/browser/productivity/shopping/news",
+                note="SOCIAL/MESSAGING/MEDIA/BROWSER/PRODUCTIVITY/SHOPPING/NEWS",
                 handler=lambda: _scope_profiles(rows, profile_counts, allow),
             )
 
@@ -178,7 +179,7 @@ def select_package_scope(
 
         _add_entry(
             "7",
-            "Google exceptions",
+            "Google allow-list",
             packages=context["google_exceptions"].get("packages"),
             files=context["google_exceptions"].get("files"),
             note="allow-list",
@@ -186,7 +187,7 @@ def select_package_scope(
         )
         _add_entry(
             "8",
-            "Families (system)",
+            "System families",
             packages=context["families"].get("packages"),
             files=context["families"].get("files"),
             note="root required",
@@ -195,7 +196,7 @@ def select_package_scope(
         _add_entry(
             "9",
             "Custom patterns",
-            note="comma-separated; * prefix",
+            note="pattern list (comma, * prefix)",
             handler=lambda: _scope_custom(rows, allow),
         )
         _add_entry(
@@ -203,7 +204,7 @@ def select_package_scope(
             "Everything (policy-filtered)" if not is_rooted else "Everything",
             packages=context["everything"].get("packages"),
             files=context["everything"].get("files"),
-            note="policy-filtered (non-root)" if not is_rooted else None,
+            note="policy-filtered" if not is_rooted else None,
             handler=lambda: ScopeSelection(
                 label="Everything",
                 packages=list(rows),
@@ -272,8 +273,8 @@ def _render_scope_table(
     blocked = max(candidates - eligible, 0)
     policy = "none" if is_rooted else "non_root_paths"
     status = (
-        f"Status: candidates={candidates}  eligible={eligible}  "
-        f"blocked={blocked}  policy={policy}   [0] back"
+        f"Status: candidates {candidates} | eligible (policy) {eligible} | "
+        f"blocked {blocked} | policy {policy}   [0] back"
     )
     return status
 

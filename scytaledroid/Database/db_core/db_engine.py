@@ -224,7 +224,8 @@ def _connect_mysql() -> pymysql.Connection:
         database=str(DB_CONFIG.get("database", "")),
         port=int(DB_CONFIG.get("port", 3306)),
         charset=str(DB_CONFIG.get("charset", "utf8mb4")),
-        autocommit=False,
+        # Autocommit keeps single-statement writes durable for FK-linked tables.
+        autocommit=True,
         connect_timeout=int(DB_CONFIG.get("connect_timeout", 5)),
         read_timeout=int(DB_CONFIG.get("read_timeout", 30)),
         write_timeout=int(DB_CONFIG.get("write_timeout", 30)),

@@ -38,7 +38,9 @@ PATTERNS: tuple[StringPattern, ...] = (
     StringPattern(
         name="analytics_write_key",
         description="Potential analytics token assignment",
-        pattern=re.compile(r'(?i)(?:api[_-]?key|write[_-]?key|token)["\'=:\s]+([A-Za-z0-9\-_]{20,})'),
+        pattern=re.compile(
+            r'(?i)(?:api[_-]?key|write[_-]?key|token)["\'=:\s]+([A-Za-z0-9\-_]{20,128})'
+        ),
         category="analytics",
         tags=("token", "assignment"),
         preferred_origins=DEFAULT_ORIGINS,

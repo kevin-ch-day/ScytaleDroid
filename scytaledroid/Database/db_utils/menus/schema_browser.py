@@ -26,7 +26,6 @@ _SCHEMA_GROUPS = {
         "harvest_storage_roots",
         "harvest_artifact_paths",
         "harvest_source_paths",
-        "vw_latest_apk_per_package",
     ),
     "app_data": (
         "apps",
@@ -37,7 +36,6 @@ _SCHEMA_GROUPS = {
         "android_framework_permissions",
         "android_unknown_permissions",
         "android_vendor_permissions",
-        "v_detected_permissions_fqn",
     ),
     "scoring": (
         "permission_audit_snapshots",

@@ -168,7 +168,13 @@ def make_cli_progress_printer(ui_prefs=None):
     return _printer
 
 
-def render_snapshot_block(previous_meta, ui_prefs=None, mode: Optional[str] = None) -> None:
+def render_snapshot_block(
+    previous_meta,
+    ui_prefs=None,
+    mode: Optional[str] = None,
+    *,
+    serial: Optional[str] = None,
+) -> None:
     """Render a stable snapshot info block before sync starts."""
     status_line = "Status   : UNKNOWN"
     age_line = "Age      : unknown"
@@ -181,10 +187,25 @@ def render_snapshot_block(previous_meta, ui_prefs=None, mode: Optional[str] = No
         )
         is_stale = age_seconds >= INVENTORY_STALE_SECONDS
         status_text = "STALE" if is_stale else "FRESH"
-        status_line = f"Status   : {status_text}"
         age_line = f"Age      : {humanize_seconds(age_seconds)}"
-        pkg_line = f"Packages : {getattr(previous_meta, 'package_count', '—')}"
-        freshness_line = _format_freshness_line(age_seconds, INVENTORY_STALE_SECONDS)
+        snapshot_count = getattr(previous_meta, "package_count", None)
+        device_count = None
+        if serial:
+            try:
+                from scytaledroid.DeviceAnalysis import adb_utils
+
+                device_count = len(adb_utils.list_packages(serial))
+            except Exception:
+                device_count = None
+        if snapshot_count is not None and device_count and device_count != snapshot_count:
+            status_text = "MISMATCH"
+            status_line = f"Status   : {status_text}"
+            pkg_line = f"Packages : {snapshot_count} (device {device_count})"
+            freshness_line = "n/a (count mismatch)"
+        else:
+            status_line = f"Status   : {status_text}"
+            pkg_line = f"Packages : {snapshot_count if snapshot_count is not None else '—'}"
+            freshness_line = _format_freshness_line(age_seconds, INVENTORY_STALE_SECONDS)
 
     mode_text = mode or "baseline"
 

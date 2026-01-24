@@ -29,7 +29,7 @@ PATTERNS: tuple[StringPattern, ...] = (
     StringPattern(
         name="firebase_database",
         description="Potential Firebase Realtime Database URL",
-        pattern=re.compile(r"https://[\w\-]+\.(?:firebaseio\.com|firebasedatabase\.app)"),
+        pattern=re.compile(r"https://[\w\-]{1,64}\.(?:firebaseio\.com|firebasedatabase\.app)"),
         category="cloud",
         provider="Firebase",
         tags=("url", "database"),
@@ -104,7 +104,10 @@ PATTERNS: tuple[StringPattern, ...] = (
     StringPattern(
         name="azure_storage_connection",
         description="Potential Azure storage connection string",
-        pattern=re.compile(r"DefaultEndpointsProtocol=.+AccountName=.+AccountKey=", re.IGNORECASE),
+        pattern=re.compile(
+            r"DefaultEndpointsProtocol=[^;]{1,32};AccountName=[^;]{1,64};AccountKey=[^;]{20,128}",
+            re.IGNORECASE,
+        ),
         category="cloud",
         provider="Azure",
         tags=("connection", "storage"),

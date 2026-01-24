@@ -14,7 +14,7 @@ from ...modules.permissions.render_postcard import render as render_permission_p
 from ...modules.permissions.audit import PermissionAuditAccumulator
 from ..core.models import RunParameters, ScopeSelection
 from ..persistence.run_summary import create_static_run_ledger, update_static_run_status
-from ...session import make_session_stamp
+from ...session import make_session_stamp, normalize_session_stamp
 from .scan_flow import generate_report
 
 
@@ -35,6 +35,19 @@ def execute_permission_scan(
     session_stamp = params.session_stamp or ""
     if not session_stamp:
         session_stamp = make_session_stamp()
+    normalized = normalize_session_stamp(session_stamp)
+    if normalized != session_stamp:
+        print(
+            status_messages.status(
+                (
+                    "Session label normalized for cross-table safety "
+                    f"({len(session_stamp)}→{len(normalized)} chars): "
+                    f"'{session_stamp}' → '{normalized}'."
+                ),
+                level="warn",
+            )
+        )
+        session_stamp = normalized
     snapshot_id = f"perm-audit:app:{session_stamp}"
     accumulator = PermissionAuditAccumulator(
         scope_label=params.scope_label or selection.label,
@@ -260,9 +273,10 @@ def execute_permission_scan(
     if linkage:
         snapshot_payload["linkage"] = linkage
     try:
-        persist_result = accumulator.persist_to_db()
-    except TypeError:
         persist_result = accumulator.persist_to_db(snapshot_payload)
+    except TypeError:
+        # Support legacy test doubles that accept only a single bound argument.
+        persist_result = accumulator.persist_to_db()
     if not persist_result.ok:
         audit_persist_failed = True
         message = persist_result.user_message or "Permission audit persistence failed."
@@ -272,8 +286,7 @@ def execute_permission_scan(
         update_static_run_status(
             static_run_id=static_run_id,
             status=run_status,
-            ended_at_utc=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         )
 
 
-__all__ = ["execute_permission_scan"]
+__all__ = ["execute_permission_scan", "update_static_run_status"]

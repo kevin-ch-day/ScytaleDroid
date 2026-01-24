@@ -32,8 +32,10 @@ back to a concrete database record.
 | `static_provider_acl` | Path-permission breakdowns for providers (path/prefix/pattern + guard levels). | PK `id`; FK `provider_id` → `static_fileproviders`. Indexed on provider + path columns. | `ingest_baseline_payload`. |
 Legacy `static_findings_summary`, `static_findings`, and string tables remain for
 backward compatibility, but all new analytics flows should rely on the canonical
-tables above. Canonical ingest updates both worlds when legacy writes are
-enabled, ensuring existing dashboards continue to function.
+tables above. When legacy writes are enabled, summaries are keyed by
+`static_run_id` (the `static_analysis_runs.id` FK). The legacy `runs.run_id`
+relationship is treated as optional and may be `NULL` when a static run ID is
+available.
 
 ## 3. Session string samples
 

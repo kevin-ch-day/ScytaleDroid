@@ -41,7 +41,8 @@ Key prompts:
 
 > **Permission refresh defaults to ON.** The CLI now enables the post-run
 > permission snapshot refresh automatically so `permission_audit_*` tables and
-> the `static_permission_matrix` table stay in sync with each scan. Disable it
+> the `static_permission_matrix` table stay in sync with each scan. Snapshot
+> headers + app rows are persisted atomically (single transaction). Disable it
 > only when you explicitly need a matrix-free run (set
 > `SCYTALEDROID_STATIC_REFRESH_PERMISSION_SNAPSHOT=0` before launching or toggle
 > the option in Advanced).
@@ -61,6 +62,9 @@ Persistence happens automatically at the end of each run:
   `static_string_samples`, `metrics`, `buckets`, `contributors`, and the
   permission audit tables. These are the sources that dashboards should
   consume—no need to parse the JSON artefacts under `output/`.
+- Legacy summaries (`static_findings_summary`, `static_string_summary`) are
+  keyed by `static_run_id` when available. `runs.run_id` is compatibility only
+  and may be `NULL` when a static run ID exists.
 - The CLI pipeline backing these inserts now lives under
   `scytaledroid/StaticAnalysis/cli/persistence/`; see `docs/persistence.md` for
   a breakdown of the new modules if you are reviewing code or debugging a

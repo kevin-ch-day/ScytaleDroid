@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional, Tuple
 
+from scytaledroid.Database.db_utils.package_utils import normalize_package_name
+
 from .. import package_profiles
 
 
@@ -13,6 +15,7 @@ def compose_inventory_entry(
     metadata: Dict[str, Optional[str]],
     canonical: Optional[Dict[str, object]] = None,
 ) -> Dict[str, object]:
+    cleaned_package = normalize_package_name(package_name, context="inventory") or package_name.strip()
     primary_path = paths[0] if paths else ""
     fallback_category, partition = _derive_category(primary_path)
     installer = _normalise_installer(metadata.get("installer"))
@@ -61,7 +64,7 @@ def compose_inventory_entry(
 
     canonical_label = canonical.get("app_name") if canonical else None
     metadata_label = metadata.get("app_label")
-    package_lower = package_name.lower()
+    package_lower = cleaned_package.lower()
     canonical_clean = canonical_label.strip() if isinstance(canonical_label, str) else None
     metadata_clean = metadata_label.strip() if isinstance(metadata_label, str) else None
     if canonical_clean and canonical_clean.lower() != package_lower:
@@ -71,7 +74,7 @@ def compose_inventory_entry(
     elif canonical_clean:
         app_label = canonical_clean
     else:
-        app_label = package_name
+        app_label = cleaned_package
     version_name = metadata.get("version_name")
     version_code = metadata.get("version_code")
 
@@ -79,7 +82,7 @@ def compose_inventory_entry(
     apk_dirs = sorted({path.rsplit("/", 1)[0] for path in paths if "/" in path})
 
     entry: Dict[str, object] = {
-        "package_name": package_name,
+        "package_name": cleaned_package,
         "app_label": app_label,
         "version_name": version_name,
         "version_code": version_code,

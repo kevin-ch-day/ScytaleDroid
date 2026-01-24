@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from datetime import datetime
 import json
-import re
 from pathlib import Path
 from typing import Mapping, Sequence
 
 from scytaledroid.Config import app_config
+from scytaledroid.Utils.evidence_store import filesystem_safe_slug
 
 from scytaledroid.StaticAnalysis.core import ManifestFlags, StaticAnalysisReport
 
@@ -97,9 +97,9 @@ def write_baseline_json(
     base_dir = Path(app_config.DATA_DIR) / "static_analysis" / "baseline"
     base_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
-    safe_package = re.sub(r"[^A-Za-z0-9_.-]", "_", package)
-    safe_profile = re.sub(r"[^A-Za-z0-9_.-]", "_", profile)
-    safe_scope = re.sub(r"[^A-Za-z0-9_.-]", "_", scope)
+    safe_package = filesystem_safe_slug(package)
+    safe_profile = filesystem_safe_slug(profile)
+    safe_scope = filesystem_safe_slug(scope)
     filename = f"{safe_package}-{safe_profile}-{safe_scope}-{timestamp}.json"
     path = base_dir / filename
     with path.open("w", encoding="utf-8") as handle:
@@ -245,9 +245,9 @@ def write_dynamic_plan_json(
     base_dir = Path(app_config.DATA_DIR) / "static_analysis" / "dynamic_plan"
     base_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
-    safe_package = re.sub(r"[^A-Za-z0-9_.-]", "_", package)
-    safe_profile = re.sub(r"[^A-Za-z0-9_.-]", "_", profile)
-    safe_scope = re.sub(r"[^A-Za-z0-9_.-]", "_", scope)
+    safe_package = filesystem_safe_slug(package)
+    safe_profile = filesystem_safe_slug(profile)
+    safe_scope = filesystem_safe_slug(scope)
     filename = f"{safe_package}-{safe_profile}-{safe_scope}-{timestamp}.json"
     path = base_dir / filename
     with path.open("w", encoding="utf-8") as handle:

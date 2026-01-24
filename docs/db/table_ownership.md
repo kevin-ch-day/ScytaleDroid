@@ -12,6 +12,8 @@ Purpose: avoid write collisions as the web app comes online by documenting which
   - `static_findings_summary`, `static_findings`
   - `static_permission_risk`
   - `static_string_summary`, `static_string_samples`, `static_string_match_cache`, `static_doc_hosts`
+  - Note: legacy summary tables should be keyed by `static_run_id` when present;
+    `runs.run_id` is compatibility-only.
 - Harvest/scopes: `harvest_*`, permission cohort tables
 - Behavior (new): behavior session outputs if/when persisted
 

@@ -70,8 +70,14 @@ def render_exploratory_summary(
         f"aws_pairs={metrics.aws_pairs} "
         f"jwt_near_auth={metrics.jwt_near_auth} "
         f"base64_candidates={metrics.base64_candidates} "
+        f"hex_candidates={metrics.hex_candidates} "
         f"decoded={metrics.decoded_blobs_total} "
-        f"decode_fail={metrics.base64_decode_failures}"
+        f"decode_fail={metrics.base64_decode_failures + metrics.hex_decode_failures}"
+    )
+    lines.append(
+        "Noise gate: "
+        f"regex_skipped={metrics.regex_skipped} "
+        + _format_counts(metrics.noise_counts, limit=6)
     )
     lines.append(
         "Cloud: "
