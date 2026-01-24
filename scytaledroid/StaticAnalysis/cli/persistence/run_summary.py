@@ -322,10 +322,16 @@ def _ensure_app_version(
 ) -> int | None:
     """Fetch or create an app_version row for static_analysis_runs."""
     try:
+        from scytaledroid.Database.db_utils.package_utils import normalize_package_name
+        from scytaledroid.Database.db_utils.publisher_rules import apply_publisher_mapping
+
+        cleaned_package = normalize_package_name(package_for_run, context="database")
+        if not cleaned_package:
+            return None
         app_id = None
         row = core_q.run_sql(
             "SELECT id, display_name FROM apps WHERE package_name=%s",
-            (package_for_run,),
+            (cleaned_package,),
             fetch="one",
         )
         if row and row[0]:
@@ -344,10 +350,11 @@ def _ensure_app_version(
         else:
             app_id = core_q.run_sql(
                 "INSERT INTO apps (package_name, display_name) VALUES (%s,%s)",
-                (package_for_run, display_name),
+                (cleaned_package, display_name),
                 return_lastrowid=True,
             )
             app_id = int(app_id) if app_id else None
+            apply_publisher_mapping([cleaned_package])
         if app_id is None:
             return None
 

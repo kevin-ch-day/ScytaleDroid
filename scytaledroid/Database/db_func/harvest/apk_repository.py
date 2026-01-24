@@ -10,6 +10,8 @@ from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Union
 from ...db_core import database_session, run_sql
 from ...db_queries.harvest import apk_repository as queries
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
+from ...db_utils.package_utils import normalize_package_name
+from ...db_utils.publisher_rules import apply_publisher_mapping
 
 
 @dataclass
@@ -49,7 +51,7 @@ class ApkRecord:
             harvested_at = self.harvested_at
         return {
             "app_id": self.app_id,
-            "package_name": self.package_name,
+            "package_name": normalize_package_name(self.package_name, context="database"),
             "file_name": self.file_name,
             "file_size": self.file_size,
             "is_system": 1 if self.is_system else 0,
@@ -110,13 +112,16 @@ def ensure_split_group(
 ) -> int:
     """Get or create a split group id for the given package."""
 
+    cleaned_package = normalize_package_name(package_name, context="database")
+    if not cleaned_package:
+        raise ValueError("package_name is required")
     query_context = dict(context or {})
-    query_context.setdefault("package_name", package_name)
+    query_context.setdefault("package_name", cleaned_package)
 
     with database_session():
         row = run_sql(
             queries.SELECT_SPLIT_GROUP_BY_PACKAGE,
-            (package_name,),
+            (cleaned_package,),
             fetch="one",
             query_name="harvest.split_group.lookup",
             context=query_context,
@@ -125,7 +130,7 @@ def ensure_split_group(
             return int(row[0])
         group_id = run_sql(
             queries.INSERT_SPLIT_GROUP,
-            (package_name,),
+            (cleaned_package,),
             return_lastrowid=True,
             query_name="harvest.split_group.insert",
             context=query_context,
@@ -134,7 +139,7 @@ def ensure_split_group(
             return int(group_id)
         row = run_sql(
             queries.SELECT_SPLIT_GROUP_BY_PACKAGE,
-            (package_name,),
+            (cleaned_package,),
             fetch="one",
             query_name="harvest.split_group.lookup",
             context=query_context,
@@ -179,7 +184,7 @@ def ensure_app_definition(
     context: Optional[Mapping[str, object]] = None,
 ) -> int:
     """Upsert a canonical app definition row and return app_id."""
-    cleaned_package = package_name.strip().lower()
+    cleaned_package = normalize_package_name(package_name, context="database")
     if not cleaned_package:
         raise ValueError("package_name is required")
 
@@ -248,6 +253,7 @@ def ensure_app_definition(
                 query_name="harvest.app_definition.update",
                 context=query_context,
             )
+        apply_publisher_mapping([cleaned_package], context=query_context)
 
     return app_id
 

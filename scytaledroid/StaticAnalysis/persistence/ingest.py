@@ -149,18 +149,25 @@ def _build_finding_context(
 
 def _get_or_create_app(package_name: str, display_name: Optional[str] = None) -> Optional[int]:
     try:
+        from scytaledroid.Database.db_utils.package_utils import normalize_package_name
+        from scytaledroid.Database.db_utils.publisher_rules import apply_publisher_mapping
+
+        cleaned_package = normalize_package_name(package_name, context="database")
+        if not cleaned_package:
+            return None
         row = core_q.run_sql(
             "SELECT id FROM apps WHERE package_name = %s",
-            (package_name,),
+            (cleaned_package,),
             fetch="one",
         )
         if row and row[0]:
             return int(row[0])
         new_id = core_q.run_sql(
             "INSERT INTO apps (package_name, display_name) VALUES (%s, %s)",
-            (package_name, display_name),
+            (cleaned_package, display_name),
             return_lastrowid=True,
         )
+        apply_publisher_mapping([cleaned_package])
         return int(new_id) if new_id else None
     except Exception as exc:
         _warn(f"provider insert failed: {exc}")
