@@ -520,16 +520,40 @@ def pull_apks(serial: Optional[str]) -> OperationResult:
                 error_code="apk_harvest_compact_mode",
                 context={"run_id": run_id, "device_serial": serial},
             )
+        logging_engine.get_error_logger().exception(
+            "APK harvest failed (NameError)",
+            extra=logging_engine.ensure_trace(
+                {
+                    "event": "apk_harvest_name_error",
+                    "run_id": run_id,
+                    "device_serial": serial,
+                    "pull_mode": pull_mode,
+                    "scope_label": active_selection.label,
+                }
+            ),
+        )
         log.close_harvest_adapter(run_id)
         return OperationResult.failure(
-            user_message="APK harvest failed to start.",
+            user_message="APK harvest failed to start (NameError). See logs/error.log.",
             error_code="apk_harvest_name_error",
             context={"run_id": run_id, "device_serial": serial},
         )
-    except Exception:
+    except Exception as exc:
+        logging_engine.get_error_logger().exception(
+            "APK harvest failed (exception)",
+            extra=logging_engine.ensure_trace(
+                {
+                    "event": "apk_harvest_exception",
+                    "run_id": run_id,
+                    "device_serial": serial,
+                    "pull_mode": pull_mode,
+                    "scope_label": active_selection.label,
+                }
+            ),
+        )
         log.close_harvest_adapter(run_id)
         return OperationResult.failure(
-            user_message="APK harvest failed to start.",
+            user_message=f"APK harvest failed to start ({exc.__class__.__name__}). See logs/error.log.",
             error_code="apk_harvest_exception",
             context={"run_id": run_id, "device_serial": serial},
         )

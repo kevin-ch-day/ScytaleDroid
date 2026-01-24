@@ -198,6 +198,8 @@ def execute_harvest(
     total = len(plans)
     display_total = sum(1 for plan in plans if not plan.skip_reason)
     display_index = 0
+    run_failed = False
+    run_error: Optional[str] = None
 
     try:
         for index, plan in enumerate(plans, start=1):
@@ -224,8 +226,24 @@ def execute_harvest(
                     base_context=base_context,
                     emit=_emit,
                     stats=stats,
+                    snapshot_id=snapshot_id,
+                    snapshot_captured_at=snapshot_captured_at,
                 )
             )
+    except Exception as exc:
+        run_failed = True
+        run_error = str(exc)
+        _emit(
+            "error",
+            "harvest.run.failed",
+            extra={"error": run_error},
+        )
+        log.error(
+            "Harvest run failed",
+            category="device",
+            extra={**base_context, "error": run_error},
+        )
+        raise
     finally:
         summary = {
             "package_total": stats["packages_total"],
@@ -243,6 +261,8 @@ def execute_harvest(
             "db_artifact_paths": stats["db_artifact_paths"],
             "db_source_paths": stats["db_source_paths"],
             "db_errors": stats["db_errors"],
+            "run_failed": run_failed,
+            "run_error": run_error,
         }
         _emit("info", "harvest.summary", extra=summary)
         log.info(
@@ -275,6 +295,8 @@ def _execute_package_plan(
     base_context: Mapping[str, object],
     emit: Callable[[str, str, Optional[Mapping[str, object]], Optional[str]], None],
     stats: Dict[str, int],
+    snapshot_id: Optional[int],
+    snapshot_captured_at: Optional[str],
 ) -> PullResult:
     result = PullResult(plan=plan)
 
@@ -384,6 +406,8 @@ def _execute_package_plan(
             base_context=base_context,
             emit=emit,
             stats=stats,
+            snapshot_id=snapshot_id,
+            snapshot_captured_at=snapshot_captured_at,
         )
         if skip_reason:
             result.skipped.append(skip_reason)
@@ -441,6 +465,8 @@ def _pull_and_record(
     base_context: Mapping[str, object],
     emit: Callable[[str, str, Optional[Mapping[str, object]], Optional[str]], None],
     stats: Dict[str, int],
+    snapshot_id: Optional[int],
+    snapshot_captured_at: Optional[str],
 ) -> Tuple[ArtifactResult | ArtifactError | None, Optional[str]]:
     dest_path = package_dir / artifact.file_name
     pull_result = adb_pull(

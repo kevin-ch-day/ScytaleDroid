@@ -13,6 +13,7 @@ def about_app() -> None:
     summary_lines = [
         f"{app_config.APP_NAME} v{app_config.APP_VERSION} ({app_config.APP_RELEASE})",
         app_config.APP_DESCRIPTION,
+        "Local-first research tooling for real-device APK analysis.",
     ]
     print(text_blocks.boxed(summary_lines, width=74))
 
@@ -27,11 +28,15 @@ def about_app() -> None:
 
     print()
     print(status_messages.status(
-        "Mission: streamline harvesting, static and dynamic triage for Android defenses.",
+        "Mission: build reproducible APK intelligence from real devices.",
         level="info",
     ))
     print(status_messages.status(
-        "Tip: Run 'Database Tasks' from the main menu before your first static analysis.",
+        "Focus: longitudinal app changes, permissions, components, and runtime context.",
+        level="info",
+    ))
+    print(status_messages.status(
+        "Tip: Run Database tools -> Health checks before your first static run.",
         level="info",
     ))
 

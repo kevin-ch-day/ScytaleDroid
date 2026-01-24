@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Callable
 import argparse
+from datetime import datetime, timezone
 import sys
 
 from scytaledroid.Config import app_config
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuSpec
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
+from scytaledroid.Utils.LoggingUtils.logging_core import LOG_DIR
 from scytaledroid.Utils.System.world_clock.display import (
     ClockSnapshot,
     describe_timezone,
@@ -132,6 +134,15 @@ def main_menu() -> None:
 
         if choice == "0":
             log.info("Application shutting down", category="application")
+            shutdown_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+            status_messages.print_strip(
+                "Session End",
+                [
+                    ("Time", shutdown_time),
+                    ("Logs", str(LOG_DIR)),
+                ],
+                width=70,
+            )
             status_messages.print_status("Goodbye!", level="info")
             break
 
