@@ -178,13 +178,12 @@ def _render_profile_selection_table(groups: Sequence[ArtifactGroup]) -> None:
         package = group.package_name
         preferred = display_map.get(package.lower())
         label = app_label or display_name or preferred or package
-        session_stamp = group.session_stamp or "undated"
-        rows.append([group.package_name, str(label), session_stamp, str(len(group.artifacts))])
+        rows.append([str(label), group.package_name, str(len(group.artifacts))])
 
     max_rows = 10
     if len(rows) > max_rows:
         table_utils.render_table(
-            ["Package", "App label", "Session", "Artifacts"],
+            ["App", "Package", "Artifacts"],
             rows[:max_rows],
         )
         print(f"Showing {max_rows} of {len(rows)} apps.")
@@ -194,11 +193,11 @@ def _render_profile_selection_table(groups: Sequence[ArtifactGroup]) -> None:
         ).strip().lower()
         if response == "l":
             table_utils.render_table(
-                ["Package", "App label", "Session", "Artifacts"],
+                ["App", "Package", "Artifacts"],
                 rows,
             )
     else:
-        table_utils.render_table(["Package", "App label", "Session", "Artifacts"], rows)
+        table_utils.render_table(["App", "Package", "Artifacts"], rows)
 
 
 def _resolve_index(prompt: str, labels: Sequence[str]) -> int:

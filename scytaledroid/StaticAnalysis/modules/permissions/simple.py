@@ -626,7 +626,8 @@ def render_permission_postcard(
     detail.setdefault("expected_mask_hit", [])
     detail.setdefault("unexpected_signals", [])
     detail.setdefault("grade_basis", "fixed_thresholds")
-    print(f"[{index}/{total}] {app_label}  {bar}  Risk {score:.3f}   (D:{d}  S:{s}  V:{v})  Grade {grade}")
+    print(f"[{index}/{total}] {app_label}  {bar}")
+    print(f"Risk {score:.3f}   (D:{d}  S:{s}  V:{v})  Grade {grade}")
     if high_tags:
         tags = "".join(f"[{t}]" for t in high_tags)
         print(f"High-signal:  {tags}")
@@ -640,6 +641,7 @@ def render_permission_postcard(
             weak = ", ".join(debug[key]["weak"]) or "-"
             print(f"  {key}: strong=[{strong}] weak=[{weak}]")
     print(f"Profile: {persona}")
+    print()
 
     return {
         "package": package_name,

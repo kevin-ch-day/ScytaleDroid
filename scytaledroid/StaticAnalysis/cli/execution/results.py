@@ -392,12 +392,16 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                 display_name = manifest.package_name
             else:
                 display_name = app_result.package_name
-            compact_line = (
-                f"• {display_name}: H{finding_totals.get('High', 0)} "
-                f"M{finding_totals.get('Medium', 0)} L{finding_totals.get('Low', 0)} "
-                f"I{finding_totals.get('Info', 0)} (runtime {format_duration(total_duration)})"
-            )
-            print(compact_line)
+            compact_block = [
+                f"• {display_name} (runtime {format_duration(total_duration)})",
+                (
+                    f"  Findings: H{finding_totals.get('High', 0)} "
+                    f"M{finding_totals.get('Medium', 0)} L{finding_totals.get('Low', 0)} "
+                    f"I{finding_totals.get('Info', 0)}"
+                ),
+            ]
+            for line in compact_block:
+                print(line)
 
         if persist_enabled:
             try:
@@ -508,16 +512,25 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
 
         if saved_path:
             message = f"Saved baseline JSON → {saved_path.name}"
-            print(message if not compact_mode else status_messages.status(message, level="info"))
+            if compact_mode:
+                print(status_messages.status(message, level="info"))
+            else:
+                print(message)
         if dynamic_plan_path:
             message = f"Saved dynamic plan → {dynamic_plan_path.name}"
-            print(message if not compact_mode else status_messages.status(message, level="info"))
+            if compact_mode:
+                print(status_messages.status(message, level="info"))
+            else:
+                print(message)
 
         if report_reference:
             message = f"Report reference    → {report_reference}"
-            print(message if not compact_mode else status_messages.status(message, level="info"))
+            if compact_mode:
+                print(status_messages.status(message, level="info"))
+            else:
+                print(message)
 
-        if index < len(outcome.results) and not compact_mode:
+        if index < len(outcome.results):
             print()
 
     if persist_enabled:

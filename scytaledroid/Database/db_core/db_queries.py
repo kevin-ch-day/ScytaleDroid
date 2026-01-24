@@ -241,4 +241,22 @@ def run_sql_many(
         db.execute_many(query, rows, query_name=query_name, context=context)
 
 
-__all__ = ["run_sql", "run_sql_many"]
+def run_sql_write(
+    query: str,
+    params: ParamsType = None,
+    *,
+    query_name: Optional[str] = None,
+    context: Optional[Mapping[str, Any]] = None,
+) -> None:
+    """Execute an idempotent write statement with centralized retry handling."""
+
+    run_sql(
+        query,
+        params,
+        fetch="none",
+        query_name=query_name or "run_sql.write",
+        context=context,
+    )
+
+
+__all__ = ["run_sql", "run_sql_many", "run_sql_write"]

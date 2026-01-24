@@ -30,6 +30,7 @@ from ..execution import (
 )
 from ..core.models import RunParameters, RunOutcome, ScopeSelection
 from ..core.run_lifecycle import finalize_open_runs
+from ..core.abort_reasons import classify_exception, normalize_abort_reason
 from ..core.analysis_profiles import run_modules_for_profile
 from .selection import format_scope_target
 
@@ -138,7 +139,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
             signal.signal(signal.SIGINT, previous_handler)
         return None
 
-    print(status_messages.step("Starting detector pipeline", label="Static Analysis"))
+    print("Starting Static Analysis pipeline")
     outcome: RunOutcome | None = None
     run_status: str | None = None
     abort_reason: str | None = None
@@ -160,11 +161,11 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
                 run_status = "ABORTED"
             elif outcome.failures:
                 run_status = "FAILED"
-            abort_reason = outcome.abort_reason
+            abort_reason = normalize_abort_reason(outcome.abort_reason or ("SIGINT" if outcome.aborted else None))
             abort_signal = outcome.abort_signal
     except Exception as exc:
         run_status = "FAILED"
-        abort_reason = exc.__class__.__name__
+        abort_reason = classify_exception(exc)
         raise
     finally:
         if outcome is not None and not params.dry_run and run_status:
@@ -179,7 +180,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
                     static_run_ids,
                     status=run_status,
                     ended_at_utc=ended_at,
-                    abort_reason=abort_reason,
+                    abort_reason=normalize_abort_reason(abort_reason),
                     abort_signal=abort_signal,
                 )
 

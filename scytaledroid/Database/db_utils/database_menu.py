@@ -28,11 +28,12 @@ def database_menu() -> None:
         "1": show_connection_and_config,
         "2": schema_browser.show_schema_browser,
         "3": query_runner.run_query_menu,
-        "4": health_checks.run_health_checks,
-        "5": health_checks.prompt_cleanup_orphan_inventory,
-        "6": health_checks.prompt_finalize_stale_runs,
-        "7": health_checks.prompt_reset_static_data,
-        "8": show_db_status,
+        "4": health_checks.run_health_summary,
+        "5": health_checks.run_health_checks,
+        "6": health_checks.prompt_cleanup_orphan_inventory,
+        "7": health_checks.prompt_finalize_stale_runs,
+        "8": health_checks.prompt_reset_static_data,
+        "9": show_db_status,
     }
 
     options: List[MenuOption] = [
@@ -50,22 +51,26 @@ def database_menu() -> None:
         ),
         MenuOption(
             "4",
-            "Run health checks",
+            "Health summary (one screen)",
         ),
         MenuOption(
             "5",
-            "Cleanup orphan inventory snapshots",
+            "Run health checks",
         ),
         MenuOption(
             "6",
-            "Finalize stale RUNNING runs",
+            "Cleanup orphan inventory snapshots",
         ),
         MenuOption(
             "7",
-            "Reset static analysis data",
+            "Finalize stale RUNNING runs",
         ),
         MenuOption(
             "8",
+            "Reset static analysis data",
+        ),
+        MenuOption(
+            "9",
             "DB status (backend/schema)",
         ),
     ]

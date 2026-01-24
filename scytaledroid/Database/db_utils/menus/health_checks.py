@@ -18,6 +18,113 @@ from ..reset_static import (
 )
 
 
+def run_health_summary() -> None:
+    """One-screen DB health summary for quick operator checks."""
+    print()
+    menu_utils.print_header("DB Health Summary")
+
+    def _column_exists(table: str, column: str) -> bool:
+        try:
+            row = run_sql(
+                """
+                SELECT COUNT(*)
+                FROM information_schema.columns
+                WHERE table_schema = DATABASE()
+                  AND table_name = %s
+                  AND column_name = %s
+                """,
+                (table, column),
+                fetch="one",
+            )
+        except Exception:
+            return False
+        return bool(row and row[0])
+
+    try:
+        rows = run_sql(
+            """
+            SELECT status, COUNT(*) AS total
+            FROM static_analysis_runs
+            WHERE (status='RUNNING' AND ended_at_utc IS NULL)
+               OR (ended_at_utc >= (UTC_TIMESTAMP() - INTERVAL 1 DAY))
+            GROUP BY status
+            """,
+            fetch="all",
+            dictionary=True,
+        ) or []
+    except Exception:
+        rows = []
+
+    totals = {str(row.get("status")): int(row.get("total") or 0) for row in rows}
+    running_total = totals.get("RUNNING", 0)
+    ok_total = totals.get("COMPLETED", 0) or totals.get("OK", 0)
+    failed_total = totals.get("FAILED", 0)
+    aborted_total = totals.get("ABORTED", 0)
+    menu_utils.print_section("Run status (last 24h + current RUNNING)")
+    print(f"RUNNING : {running_total}")
+    print(f"OK      : {ok_total}")
+    print(f"FAILED  : {failed_total}")
+    print(f"ABORTED : {aborted_total}")
+
+    menu_utils.print_section("Orphan checks")
+    orphan_findings = scalar(
+        """
+        SELECT COUNT(*)
+        FROM static_findings f
+        LEFT JOIN static_findings_summary s ON s.id = f.summary_id
+        WHERE s.id IS NULL
+        """
+    )
+    orphan_samples = scalar(
+        """
+        SELECT COUNT(*)
+        FROM static_string_samples x
+        LEFT JOIN static_string_summary s ON s.id = x.summary_id
+        WHERE s.id IS NULL
+        """
+    )
+    orphan_audit = scalar(
+        """
+        SELECT COUNT(*)
+        FROM permission_audit_apps a
+        LEFT JOIN permission_audit_snapshots s ON s.snapshot_id = a.snapshot_id
+        WHERE s.snapshot_id IS NULL
+        """
+    )
+    print(f"orphan_findings        : {orphan_findings if orphan_findings is not None else '—'}")
+    print(f"orphan_string_samples  : {orphan_samples if orphan_samples is not None else '—'}")
+    print(f"orphan_audit_apps      : {orphan_audit if orphan_audit is not None else '—'}")
+
+    menu_utils.print_section("Evidence integrity")
+    if _column_exists("permission_audit_snapshots", "evidence_relpath"):
+        missing_evidence = scalar(
+            """
+            SELECT COUNT(*)
+            FROM permission_audit_snapshots
+            WHERE evidence_relpath IS NULL OR evidence_relpath = ''
+            """
+        )
+        missing_hash = scalar(
+            """
+            SELECT COUNT(*)
+            FROM permission_audit_snapshots
+            WHERE evidence_sha256 IS NULL OR evidence_sha256 = ''
+            """
+        )
+        print(f"audit_missing_relpath  : {missing_evidence if missing_evidence is not None else '—'}")
+        print(f"audit_missing_sha256   : {missing_hash if missing_hash is not None else '—'}")
+    else:
+        print("audit evidence fields  : not tracked")
+
+    menu_utils.print_section("Governance snapshot")
+    gov_headers = scalar("SELECT COUNT(*) FROM permission_governance_snapshots")
+    gov_rows = scalar("SELECT COUNT(*) FROM permission_governance_snapshot_rows")
+    print(f"snapshots              : {gov_headers if gov_headers is not None else '—'}")
+    print(f"rows                   : {gov_rows if gov_rows is not None else '—'}")
+
+    prompt_utils.press_enter_to_continue()
+
+
 def run_health_checks() -> None:
     print()
     menu_utils.print_header("Data Health Checks")
@@ -705,6 +812,7 @@ def prompt_finalize_stale_runs() -> None:
 
 
 __all__ = [
+    "run_health_summary",
     "run_health_checks",
     "prompt_finalize_stale_runs",
     "prompt_reset_static_data",

@@ -13,7 +13,9 @@ from ...modules.permissions import collect_permissions_and_sdk
 from ...modules.permissions.render_postcard import render as render_permission_postcard
 from ...modules.permissions.audit import PermissionAuditAccumulator
 from ..core.models import RunParameters, ScopeSelection
-from ..persistence.run_summary import create_static_run_ledger, update_static_run_status
+from ..persistence.run_summary import create_static_run_ledger
+from ..core.run_lifecycle import finalize_static_run
+from ..core.abort_reasons import classify_exception, normalize_abort_reason
 from ...session import make_session_stamp, normalize_session_stamp
 from .scan_flow import generate_report
 
@@ -272,21 +274,31 @@ def execute_permission_scan(
         linkage = {"status": "partial", "reason": "static_run_id_missing"}
     if linkage:
         snapshot_payload["linkage"] = linkage
+    run_status = "COMPLETED"
+    abort_reason = None
     try:
-        persist_result = accumulator.persist_to_db(snapshot_payload)
-    except TypeError:
-        # Support legacy test doubles that accept only a single bound argument.
-        persist_result = accumulator.persist_to_db()
-    if not persist_result.ok:
+        try:
+            persist_result = accumulator.persist_to_db(snapshot_payload)
+        except TypeError:
+            # Support legacy test doubles that accept only a single bound argument.
+            persist_result = accumulator.persist_to_db()
+        if not persist_result.ok:
+            audit_persist_failed = True
+            message = persist_result.user_message or "Permission audit persistence failed."
+            print(status_messages.status(f"{message} See logs for traceback.", level="warn"))
+    except Exception as exc:
         audit_persist_failed = True
-        message = persist_result.user_message or "Permission audit persistence failed."
-        print(status_messages.status(f"{message} See logs for traceback.", level="warn"))
+        abort_reason = classify_exception(exc)
+        print(status_messages.status("Permission audit persistence failed — see logs.", level="warn"))
+    if audit_persist_failed:
+        run_status = "FAILED"
+        abort_reason = abort_reason or "persist_error"
     if static_run_id and persist_detections:
-        run_status = "FAILED" if audit_persist_failed else "COMPLETED"
-        update_static_run_status(
+        finalize_static_run(
             static_run_id=static_run_id,
             status=run_status,
+            abort_reason=normalize_abort_reason(abort_reason),
         )
 
 
-__all__ = ["execute_permission_scan", "update_static_run_status"]
+__all__ = ["execute_permission_scan"]

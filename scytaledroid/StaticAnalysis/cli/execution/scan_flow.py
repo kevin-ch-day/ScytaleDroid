@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import textwrap
 import time
 from collections import Counter
 from datetime import datetime
@@ -11,6 +12,7 @@ from pathlib import Path
 from typing import Mapping, MutableMapping, Optional, Sequence, Tuple
 
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
+from scytaledroid.Utils.DisplayUtils import status_messages
 
 from ...core import (
     AnalysisConfig,
@@ -19,6 +21,7 @@ from ...core import (
     StaticAnalysisReport,
     analyze_apk,
 )
+from ...core.detector_runner import PIPELINE_STAGES
 from ...core.findings import SeverityLevel
 from ...modules import resolve_category
 from ...core.repository import load_display_name_map
@@ -114,6 +117,15 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
             break
 
         artifacts = _dedupe_artifacts(group.artifacts)
+        last_report_for_app: StaticAnalysisReport | None = None
+        if display_name or group.package_name:
+            progress.flush_line()
+            print()
+            title = display_name or group.package_name
+            print(f"Scanning App: {title}")
+            print(f"Package: {group.package_name}")
+            print(f"Checks: {len(PIPELINE_STAGES)} stages · Profile: {params.profile_label}")
+            print("Status: running")
         for artifact_index, artifact in enumerate(artifacts, start=1):
             abort_requested, _, _ = _abort_state()
             if abort_requested:
@@ -162,6 +174,7 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
                     group.package_name,
                     artifact.display_path,
                 )
+                last_report_for_app = report
             if report is not None:
                 progress.finish(completed_artifacts, artifact_label)
             if warning_lines:
@@ -173,6 +186,54 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
             if _abort_state()[0]:
                 progress.end()
                 break
+        if not _abort_state()[0]:
+            progress.flush_line()
+            print(status_messages.status("Completed scan", level="success"))
+            if last_report_for_app is not None:
+                metadata = getattr(last_report_for_app, "metadata", {}) or {}
+                if isinstance(metadata, Mapping):
+                    summary = metadata.get("pipeline_summary")
+                    if isinstance(summary, Mapping):
+                        total = summary.get("detector_total")
+                        executed = summary.get("detector_executed")
+                        skipped = summary.get("detector_skipped")
+                        duration = summary.get("total_duration_sec")
+                        status_counts = summary.get("status_counts") if isinstance(summary.get("status_counts"), Mapping) else {}
+                        fail_count = int(status_counts.get("FAIL", 0) or 0)
+                        warn_count = int(status_counts.get("WARN", 0) or 0)
+                        ok_count = int(status_counts.get("OK", 0) or 0)
+                        info_count = int(status_counts.get("INFO", 0) or 0)
+                        skipped_count = int(skipped or 0)
+                        status_line = "Checks complete"
+                        if executed is not None and total is not None:
+                            status_line += f": {executed}/{total} executed"
+                        status_line += f" · ok={ok_count} warn={warn_count} fail={fail_count}"
+                        if info_count:
+                            status_line += f" info={info_count}"
+                        if skipped_count:
+                            status_line += f" skipped={skipped_count}"
+                        if duration is not None:
+                            status_line += f" · {duration:.1f}s"
+                        print(status_line)
+                        severity = summary.get("severity_counts") if isinstance(summary.get("severity_counts"), Mapping) else {}
+                        if severity:
+                            p0 = int(severity.get("P0", 0) or 0)
+                            p1 = int(severity.get("P1", 0) or 0)
+                            p2 = int(severity.get("P2", 0) or 0)
+                            note = int(severity.get("NOTE", 0) or 0)
+                            print(f"Findings: P0={p0} P1={p1} P2={p2} Note={note}")
+                        slowest = summary.get("slowest_detectors")
+                        if isinstance(slowest, Sequence) and slowest:
+                            slow_parts = []
+                            for entry in slowest[:3]:
+                                if not isinstance(entry, Mapping):
+                                    continue
+                                det = entry.get("detector") or entry.get("section")
+                                dur = entry.get("duration_sec")
+                                if det and isinstance(dur, (int, float)):
+                                    slow_parts.append(f"{det} {dur:.2f}s")
+                            if slow_parts:
+                                print("Slowest: " + "; ".join(slow_parts))
         if _abort_state()[0]:
             break
 

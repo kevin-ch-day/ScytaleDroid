@@ -11,6 +11,7 @@ from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Database.db_core import db_queries as core_q
+from scytaledroid.Database.db_core.db_queries import run_sql_write
 
 from ..core.cvss_v4 import apply_profiles
 from ...core.findings import Badge, Finding
@@ -542,8 +543,11 @@ def update_static_run_status(
     abort_signal: str | None = None,
 ) -> None:
     normalized_ended_at = _normalize_datetime_value(ended_at_utc)
+    from ..core.abort_reasons import normalize_abort_reason
+
+    normalized_abort_reason = normalize_abort_reason(abort_reason)
     try:
-        core_q.run_sql(
+        run_sql_write(
             """
             UPDATE static_analysis_runs
             SET status=%s,
@@ -555,7 +559,7 @@ def update_static_run_status(
             (
                 status,
                 normalized_ended_at,
-                abort_reason,
+                normalized_abort_reason,
                 abort_signal,
                 static_run_id,
             ),
@@ -578,16 +582,19 @@ def finalize_open_static_runs(
     if not static_run_ids:
         return
     normalized_ended_at = _normalize_datetime_value(ended_at_utc)
+    from ..core.abort_reasons import normalize_abort_reason
+
+    normalized_abort_reason = normalize_abort_reason(abort_reason)
     placeholders = ", ".join(["%s"] * len(static_run_ids))
     params = (
         status,
         normalized_ended_at,
-        abort_reason,
+        normalized_abort_reason,
         abort_signal,
         *static_run_ids,
     )
     try:
-        core_q.run_sql(
+        run_sql_write(
             f"""
             UPDATE static_analysis_runs
             SET status=%s,

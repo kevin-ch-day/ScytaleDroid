@@ -63,14 +63,14 @@ def test_permission_flow_warns_on_permissions_db_failure(tmp_path, monkeypatch, 
 
     updates = []
 
-    def _fake_update_static_run_status(*, static_run_id, status, **_kwargs):
+    def _fake_finalize_static_run(*, static_run_id, status, **_kwargs):
         updates.append((static_run_id, status))
 
     monkeypatch.setattr(permission_flow, "generate_report", _fake_generate_report)
     monkeypatch.setattr(permission_flow, "collect_permissions_and_sdk", _fake_collect_permissions_and_sdk)
     monkeypatch.setattr(permission_flow, "render_permission_postcard", _fake_render_permission_postcard)
     monkeypatch.setattr(permission_flow.PermissionAuditAccumulator, "persist_to_db", _fake_persist_to_db)
-    monkeypatch.setattr(permission_flow, "update_static_run_status", _fake_update_static_run_status)
+    monkeypatch.setattr(permission_flow, "finalize_static_run", _fake_finalize_static_run)
     monkeypatch.setattr(
         "scytaledroid.StaticAnalysis.persistence.permissions_db.persist_permissions_to_db",
         _fake_persist_permissions_to_db,
