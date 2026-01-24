@@ -9,7 +9,8 @@ from pathlib import Path
 from typing import Mapping, Sequence
 from xml.etree import ElementTree
 
-from scytaledroid.StaticAnalysis._androguard import APK
+from scytaledroid.StaticAnalysis._androguard import APK, open_apk_safely, merge_bounds_warnings
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .module_api import AppModuleContext, ModuleResult, StaticModule
 
@@ -54,7 +55,19 @@ class StorageSurfaceModule(StaticModule):
         return context.package_name
 
     def run(self, context: AppModuleContext) -> ModuleResult:
-        apk = APK(str(context.apk_path))
+        apk, warnings = open_apk_safely(str(context.apk_path))
+        if warnings:
+            merge_bounds_warnings(context.metadata, warnings)
+            log.warning(
+                "Resource table parsing emitted bounds warnings",
+                category="static_analysis",
+                extra={
+                    "event": "storage_surface.resource_bounds_warning",
+                    "apk_path": str(context.apk_path),
+                    "package_name": context.package_name,
+                    "warning_lines": warnings,
+                },
+            )
         if not context.session_stamp:
             return ModuleResult(module=self.name)
         manifest = apk.get_android_manifest_xml()

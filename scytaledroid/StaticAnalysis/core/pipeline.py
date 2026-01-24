@@ -6,13 +6,19 @@ from time import perf_counter
 from pathlib import Path
 from typing import Mapping, Optional, Sequence
 
+import io
+import os
+import sys
+import tempfile
 import shlex
 import shutil
 import subprocess
+from contextlib import redirect_stderr, redirect_stdout
 
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis.harvest.common import compute_hashes
 from scytaledroid.Utils.LoggingUtils.logging_engine import configure_third_party_loggers
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .._androguard import APK
 from .context import AnalysisConfig, DetectorContext
@@ -114,6 +120,63 @@ def _safe_permission_details(apk: APK, meta: dict) -> Mapping[str, Sequence[str]
         return {}
 
 
+def _extract_bounds_warnings(text: str) -> list[str]:
+    if not text:
+        return []
+    lines: list[str] = []
+    for raw in text.replace("\r", "\n").split("\n"):
+        candidate = raw.strip()
+        if not candidate:
+            continue
+        lowered = candidate.lower()
+        if "out of bound" in lowered or "complex entry" in lowered:
+            lines.append(candidate)
+    return lines
+
+
+def _run_with_fd_capture(callable_obj):
+    stdout_fd = os.dup(1)
+    stderr_fd = os.dup(2)
+    temp = tempfile.TemporaryFile(mode="w+b")
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os.dup2(temp.fileno(), 1)
+        os.dup2(temp.fileno(), 2)
+        result = callable_obj()
+        sys.stdout.flush()
+        sys.stderr.flush()
+    finally:
+        os.dup2(stdout_fd, 1)
+        os.dup2(stderr_fd, 2)
+        os.close(stdout_fd)
+        os.close(stderr_fd)
+    temp.seek(0)
+    raw = temp.read()
+    temp.close()
+    return result, raw.decode("utf-8", errors="replace")
+
+
+def _load_apk_safely(apk_path: Path, meta: dict) -> APK:
+    buffer = io.StringIO()
+    with redirect_stdout(buffer), redirect_stderr(buffer):
+        apk, fd_output = _run_with_fd_capture(lambda: APK(str(apk_path)))
+    captured = buffer.getvalue() + fd_output
+    warnings = _extract_bounds_warnings(captured)
+    if warnings:
+        meta["resource_bounds_warnings"] = warnings
+        log.warning(
+            "Resource table parsing emitted bounds warnings",
+            category="static_analysis",
+            extra={
+                "event": "apk.resource_bounds_warning",
+                "apk_path": str(apk_path),
+                "warning_lines": warnings,
+            },
+        )
+    return apk
+
+
 def _resolve_toolchain_versions() -> Mapping[str, str]:
     versions = {"androguard": "—", "aapt2": "—", "apksigner": "—"}
     try:  # pragma: no cover - dependency introspection
@@ -199,7 +262,7 @@ def analyze_apk(
         report_metadata["androguard_log_path"] = str(log_path)
 
     try:
-        apk = APK(str(apk_path))
+        apk = _load_apk_safely(apk_path, report_metadata)
     except Exception as exc:
         # Hard-open failure (corrupt zip, etc.)
         raise StaticAnalysisError(f"Failed to open APK: {exc}") from exc

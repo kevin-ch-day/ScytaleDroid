@@ -11,7 +11,8 @@ from typing import Iterable, Optional, Sequence
 from xml.etree import ElementTree
 from zipfile import BadZipFile, ZipFile, ZipInfo
 
-from scytaledroid.StaticAnalysis._androguard import APK
+from scytaledroid.StaticAnalysis._androguard import APK, open_apk_safely, merge_bounds_warnings
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ..core.context import DetectorContext
 from ..core.findings import Badge, DetectorResult, EvidencePointer
@@ -202,7 +203,19 @@ def _collect_modules(context: DetectorContext) -> tuple[tuple[ModuleProfile, ...
                 apk_obj = context.apk
                 manifest_root = context.manifest_root
             else:
-                apk_obj = APK(str(candidate))
+                apk_obj, warnings = open_apk_safely(str(candidate))
+                if warnings:
+                    merge_bounds_warnings(context.metadata, warnings)
+                    log.warning(
+                        "Resource table parsing emitted bounds warnings",
+                        category="static_analysis",
+                        extra={
+                            "event": "integrity.resource_bounds_warning",
+                            "apk_path": str(candidate),
+                            "package_name": context.apk.get_package(),
+                            "warning_lines": warnings,
+                        },
+                    )
                 manifest_root = _parse_manifest(apk_obj)
 
             if apk_obj.get_package() != base_pkg:

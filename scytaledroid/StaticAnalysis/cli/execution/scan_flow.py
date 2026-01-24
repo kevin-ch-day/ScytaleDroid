@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 from collections import Counter
 from datetime import datetime
@@ -144,8 +145,21 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
 
             app_result.artifacts.append(summary)
             completed_artifacts += 1
+            warning_lines: list[str] = []
+            if report is not None:
+                warning_lines = _append_resource_warning(
+                    warnings,
+                    report,
+                    group.package_name,
+                    artifact.display_path,
+                )
             if report is not None:
                 progress.finish(artifact_index, artifact_label)
+            if warning_lines:
+                print()
+                for line in warning_lines:
+                    print(status_messages.status(line, level="warn"))
+                print()
             if _abort_state()[0]:
                 progress.end()
                 break
@@ -169,6 +183,45 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
         completed_artifacts=completed_artifacts,
         total_artifacts=total_artifacts,
     )
+
+
+def _append_resource_warning(
+    warnings: list[str],
+    report: StaticAnalysisReport,
+    package_name: str,
+    artifact_label: str,
+) -> list[str]:
+    metadata = report.metadata
+    if not isinstance(metadata, Mapping):
+        return []
+    lines = metadata.get("resource_bounds_warnings")
+    if not isinstance(lines, list) or not lines:
+        return []
+    counts: list[int] = []
+    for line in lines:
+        if not isinstance(line, str):
+            continue
+        match = re.search(r"Count:\\s*(\\d+)", line)
+        if match:
+            try:
+                counts.append(int(match.group(1)))
+            except ValueError:
+                continue
+    count_hint = f" counts={sorted(set(counts))}" if counts else ""
+    warnings.append(
+        "Resource table parser emitted bounds warnings "
+        f"(package={package_name}, artifact={artifact_label}{count_hint}). "
+        "String/resource results may be partial; re-run this APK if needed."
+    )
+    inline_lines = [
+        "We are out of bound with this complex entry.",
+        f"Package: {package_name}",
+        f"Artifact: {artifact_label}",
+    ]
+    if counts:
+        inline_lines.append(f"Count values: {', '.join(str(val) for val in sorted(set(counts)))}")
+    inline_lines.append("String/resource results may be partial; re-run this APK if needed.")
+    return inline_lines
 
 
 def _execute_single_artifact(artifact, params: RunParameters, selection: ScopeSelection, base_dir: Path):

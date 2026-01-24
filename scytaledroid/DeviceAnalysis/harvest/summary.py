@@ -464,7 +464,7 @@ def render_harvest_summary(
 
     print()
     print(status_messages.status("Next steps:", level="info"))
-    print(status_messages.status("  • Review metadata via view sd_app_catalog_flags", level="info"))
+    print(status_messages.status("  • Review metadata via Database tools → Run database queries", level="info"))
     print(
         status_messages.status(
             "  • Run static analysis on harvested APKs (see docs/static_analysis)", level="info"

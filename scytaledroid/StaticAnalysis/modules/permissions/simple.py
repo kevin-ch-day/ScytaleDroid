@@ -6,9 +6,11 @@ from xml.etree import ElementTree as ET
 from typing import Dict, List, Sequence, Tuple, Mapping, Optional
 from pathlib import Path
 import os
+import re
 import yaml
 
-from scytaledroid.StaticAnalysis._androguard import APK
+from scytaledroid.StaticAnalysis._androguard import APK, open_apk_safely
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from .analysis.capability_signal_classifier import compute_group_strengths
 from .analysis.risk_scoring_engine import (
     permission_risk_score_detail,
@@ -83,7 +85,27 @@ def collect_permissions_and_sdk(
 ) -> Tuple[List[Tuple[str, str]], List[Dict[str, str | None]], Dict[str, str | None]]:
     """Collect declared permissions, custom definitions and SDK info."""
 
-    apk = APK(apk_path)
+    apk, warnings = open_apk_safely(apk_path)
+    if warnings:
+        counts = []
+        for line in warnings:
+            match = re.search(r"Count:\s*(\d+)", line)
+            if match:
+                try:
+                    counts.append(int(match.group(1)))
+                except ValueError:
+                    continue
+        log.warning(
+            "Resource table parsing emitted bounds warnings",
+            category="static_analysis",
+            extra={
+                "event": "permissions.resource_bounds_warning",
+                "apk_path": apk_path,
+                "package_name": apk.get_package(),
+                "warning_lines": warnings,
+                "count_values": counts,
+            },
+        )
 
     try:
         declared = _extract_declared_permissions(apk)

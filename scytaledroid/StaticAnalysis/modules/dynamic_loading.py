@@ -8,7 +8,8 @@ from dataclasses import dataclass
 from typing import Mapping
 
 from scytaledroid.Database.db_func.harvest import dynamic_loading as dyn_db
-from scytaledroid.StaticAnalysis._androguard import APK
+from scytaledroid.StaticAnalysis._androguard import APK, open_apk_safely, merge_bounds_warnings
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .module_api import AppModuleContext, ModuleResult, StaticModule
 from .string_analysis.indexing.builder import build_string_index
@@ -76,7 +77,19 @@ class DynamicLoadModule(StaticModule):
     writes_to_db = True
 
     def run(self, context: AppModuleContext) -> ModuleResult:
-        apk = APK(str(context.apk_path))
+        apk, warnings = open_apk_safely(str(context.apk_path))
+        if warnings:
+            merge_bounds_warnings(context.metadata, warnings)
+            log.warning(
+                "Resource table parsing emitted bounds warnings",
+                category="static_analysis",
+                extra={
+                    "event": "dynload.resource_bounds_warning",
+                    "apk_path": str(context.apk_path),
+                    "package_name": context.package_name,
+                    "warning_lines": warnings,
+                },
+            )
         index = build_string_index(apk)
 
         classloader_hits = [
@@ -218,4 +231,3 @@ def _classloader_severity(value: str) -> str:
 
 
 __all__ = ["DynamicLoadModule"]
-
