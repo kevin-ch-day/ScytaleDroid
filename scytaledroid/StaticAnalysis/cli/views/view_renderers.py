@@ -1371,7 +1371,11 @@ def render_app_result(
             low = counts_map.get("Low", 0)
             info = counts_map.get("Info", 0)
             status = "PASS"
-            if high:
+            quality = data.get("quality") if isinstance(data.get("quality"), Mapping) else {}
+            coverage_status = quality.get("coverage_status") if isinstance(quality, Mapping) else None
+            if coverage_status == "no_data":
+                status = "NO DATA"
+            elif high:
                 status = "FAIL"
             elif medium:
                 status = "WARN"
@@ -1393,7 +1397,6 @@ def render_app_result(
                 if bands_map.get(label)
             ]
             band_display = ", ".join(band_parts) if band_parts else "—"
-            quality = data.get("quality") if isinstance(data.get("quality"), Mapping) else {}
             risk_value = quality.get("risk_index") if isinstance(quality, Mapping) else None
             if isinstance(risk_value, (int, float)):
                 risk_display = f"{risk_value:>5.1f}"

@@ -128,6 +128,58 @@ def _dedupe_profile_entries(entries: Sequence[dict[str, object]]) -> list[dict[s
     return deduped
 
 
+def _apply_display_names(entries: Sequence[dict[str, object]]) -> None:
+    packages: list[str] = []
+    seen: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            continue
+        package = str(entry.get("package") or entry.get("package_name") or "").strip()
+        if not package:
+            continue
+        lowered = package.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        packages.append(lowered)
+
+    if not packages:
+        return
+
+    placeholders = ", ".join(["%s"] * len(packages))
+    try:
+        rows = core_q.run_sql(
+            f"SELECT package_name, display_name FROM apps WHERE package_name IN ({placeholders})",
+            tuple(packages),
+            fetch="all",
+            dictionary=True,
+        )
+    except Exception:
+        return
+
+    display_map: dict[str, str] = {}
+    for row in rows or []:
+        pkg = str(row.get("package_name") or "").strip().lower()
+        label = str(row.get("display_name") or "").strip()
+        if pkg and label:
+            display_map[pkg] = label
+
+    if not display_map:
+        return
+
+    for entry in entries:
+        if not isinstance(entry, MutableMapping):
+            continue
+        package = str(entry.get("package") or entry.get("package_name") or "").strip()
+        if not package:
+            continue
+        label = display_map.get(package.lower())
+        if not label:
+            continue
+        entry["display_name"] = label
+        entry["label"] = label
+
+
 def _format_highlight_tokens(
     stats: Mapping[str, int], totals: Mapping[str, int], app_count: int
 ) -> list[str]:
@@ -211,6 +263,7 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
     finding_profiles = _dedupe_profile_entries(finding_profiles)
     trend_deltas = _dedupe_profile_entries(trend_deltas)
     static_risk_rows = _dedupe_profile_entries(static_risk_rows)
+    _apply_display_names(permission_profiles)
 
     totals = severity.normalise_counts(aggregated)
     highlight_stats = _derive_highlight_stats(outcome)
@@ -850,11 +903,15 @@ def _render_db_masvs_summary() -> None:
         for area in ("NETWORK", "PLATFORM", "PRIVACY", "STORAGE"):
             entry = next((row for row in rows if row["area"] == area), None)
             if entry is None:
-                print(f"{area.title():<9}  0     0     0     0     PASS   —                        —    —")
+                print(f"{area.title():<9}  0     0     0     0     NO DATA —                        —    —")
             else:
                 high = entry.get("high", 0)
                 medium = entry.get("medium", 0)
-                if high:
+                quality = entry.get("quality") if isinstance(entry, dict) else None
+                coverage_status = quality.get("coverage_status") if isinstance(quality, dict) else None
+                if coverage_status == "no_data":
+                    status = "NO DATA"
+                elif high:
                     status = "FAIL"
                 elif medium:
                     status = "WARN"

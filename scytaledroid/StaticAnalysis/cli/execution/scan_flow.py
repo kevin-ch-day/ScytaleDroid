@@ -21,6 +21,7 @@ from ...core import (
 )
 from ...core.findings import SeverityLevel
 from ...modules import resolve_category
+from ...core.repository import load_display_name_map
 from ...persistence import ReportStorageError, save_report
 from ..core.models import AppRunResult, ArtifactOutcome, RunOutcome, RunParameters, ScopeSelection
 from ..persistence.run_summary import create_static_run_ledger
@@ -59,6 +60,8 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
     completed_artifacts = 0
     total_artifacts = sum(len(_dedupe_artifacts(group.artifacts)) for group in selection.groups)
     show_splits = _show_split_breakdown()
+    display_name_map = load_display_name_map(selection.groups)
+    progress = _PipelineProgress(total=total_artifacts, show_splits=show_splits)
 
     for group in selection.groups:
         app_result = AppRunResult(group.package_name, getattr(group, "category", "Uncategorized"))
@@ -76,6 +79,9 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
             version_code_raw = None
             min_sdk_raw = None
             target_sdk_raw = None
+
+        if not display_name or str(display_name).strip().lower() == group.package_name.lower():
+            display_name = display_name_map.get(group.package_name.lower()) or display_name
 
         def _coerce_int(value: object) -> Optional[int]:
             try:
@@ -108,12 +114,11 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
             break
 
         artifacts = _dedupe_artifacts(group.artifacts)
-        progress = _PipelineProgress(total=len(artifacts), show_splits=show_splits)
         for artifact_index, artifact in enumerate(artifacts, start=1):
             abort_requested, _, _ = _abort_state()
             if abort_requested:
                 break
-            artifact_label = _artifact_label(artifact)
+            artifact_label = _artifact_label(artifact, display_name=display_name)
             progress.start(artifact_index, artifact_label)
             report, summary, timings, error_message, skipped = _execute_single_artifact(
                 artifact,
@@ -122,23 +127,27 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
                 base_dir,
             )
             if skipped:
+                index_for_progress = completed_artifacts + 1
                 if error_message:
-                    progress.error(artifact_index, artifact_label, error_message)
+                    progress.error(index_for_progress, artifact_label, error_message)
                     failures.append(error_message)
                 else:
                     failures.append(f"No report generated for {artifact.display_path}")
                 completed_artifacts += 1
+                progress.finish(completed_artifacts, artifact_label)
                 if _abort_state()[0]:
                     break
                 continue
 
             if summary is None:
+                index_for_progress = completed_artifacts + 1
                 if error_message:
-                    progress.error(artifact_index, artifact_label, error_message)
+                    progress.error(index_for_progress, artifact_label, error_message)
                     failures.append(error_message)
                 else:
                     failures.append(f"No report generated for {artifact.display_path}")
                 completed_artifacts += 1
+                progress.finish(completed_artifacts, artifact_label)
                 if _abort_state()[0]:
                     break
                 continue
@@ -154,7 +163,7 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
                     artifact.display_path,
                 )
             if report is not None:
-                progress.finish(artifact_index, artifact_label)
+                progress.finish(completed_artifacts, artifact_label)
             if warning_lines:
                 progress.flush_line()
                 print()
@@ -166,7 +175,8 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
                 break
         if _abort_state()[0]:
             break
-        progress.end()
+
+    progress.end()
 
     finished_at = datetime.utcnow()
     abort_requested, abort_reason, abort_signal = _abort_state()
@@ -215,7 +225,7 @@ def _append_resource_warning(
         "String/resource results may be partial; re-run this APK if needed."
     )
     inline_lines = [
-        "We are out of bound with this complex entry.",
+        "Resource table bounds warning (string/resource parsing).",
         f"Package: {package_name}",
     ]
     app_label = metadata.get("app_label")
@@ -281,11 +291,15 @@ class _PipelineProgress:
             self._last_checkpoint = index
             elapsed = _format_elapsed(time.monotonic() - self._start)
             self._clear_line()
-            print(f"Completed {index}/{self.total} artifacts ({elapsed} elapsed)")
+            tail = _truncate_label(label, 48)
+            print(
+                f"Completed {index}/{self.total} artifacts ({elapsed} elapsed) | last: {tail}"
+            )
 
     def error(self, index: int, label: str, message: str) -> None:
         self._clear_line()
-        print(f"ERROR Artifact {index}/{self.total}: {label} - {message}")
+        tail = _truncate_label(label, 48)
+        print(f"ERROR Artifact {index}/{self.total}: {tail} - {message}")
 
     def end(self) -> None:
         if self.show_splits:
@@ -319,11 +333,29 @@ def _format_elapsed(seconds: float) -> str:
     return f"{minutes:02d}:{seconds:02d}"
 
 
-def _artifact_label(artifact) -> str:
+def _artifact_label(artifact, *, display_name: Optional[str] = None) -> str:
     label = getattr(artifact, "artifact_label", None) or getattr(artifact, "display_path", None)
     if isinstance(label, str) and label.strip():
-        return label.strip()
-    return "base"
+        split_label = label.strip()
+    else:
+        split_label = "base"
+
+    package = getattr(artifact, "package_name", None)
+    app_label = None
+    metadata = getattr(artifact, "metadata", None)
+    if isinstance(metadata, Mapping):
+        app_label = metadata.get("app_label") or metadata.get("display_name")
+    display = None
+    if isinstance(app_label, str) and app_label.strip():
+        display = app_label.strip()
+    elif isinstance(display_name, str) and display_name.strip():
+        display = display_name.strip()
+    elif isinstance(package, str) and package.strip():
+        display = package.strip()
+
+    if display:
+        return f"{display} • {split_label}"
+    return split_label
 
 
 def _truncate_label(value: str, max_len: int) -> str:

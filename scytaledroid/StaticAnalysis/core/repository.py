@@ -28,19 +28,19 @@ class RepositoryArtifact:
     def package_name(self) -> str:
         meta_value = self.metadata.get("package_name")
         if isinstance(meta_value, str) and meta_value.strip():
-            return meta_value
+            return meta_value.strip().lower()
         try:
             package_dir = self.path.parent.parent.name
             if package_dir:
-                return package_dir
+                return package_dir.lower()
         except Exception:  # pragma: no cover - defensive
             pass
         stem = self.path.stem
         if "__" in stem:
             candidate = stem.split("__", 1)[0]
             if candidate:
-                return candidate.replace("_", ".")
-        return stem
+                return candidate.replace("_", ".").lower()
+        return stem.lower()
 
     @property
     def version_display(self) -> str:
@@ -212,8 +212,14 @@ def _group_key_for_artifact(artifact: RepositoryArtifact) -> str:
     """Return a deterministic grouping key for an artifact."""
 
     if artifact.split_group_id:
+        package = artifact.package_name.lower()
+        if package:
+            return f"split-{package}-{artifact.split_group_id}"
         return f"split-{artifact.split_group_id}"
     if artifact.apk_id:
+        package = artifact.package_name.lower()
+        if package:
+            return f"apk-{package}-{artifact.apk_id}"
         return f"apk-{artifact.apk_id}"
     if artifact.sha256:
         return f"sha256-{artifact.sha256}"
@@ -345,7 +351,7 @@ def load_profile_map(groups: Sequence[ArtifactGroup]) -> Dict[str, str]:
     if not run_sql or not groups:
         return {}
 
-    packages = sorted({group.package_name for group in groups})
+    packages = sorted({group.package_name.lower() for group in groups if group.package_name})
     placeholders = ", ".join(["%s"] * len(packages))
     try:
         rows = run_sql(
@@ -364,11 +370,41 @@ def load_profile_map(groups: Sequence[ArtifactGroup]) -> Dict[str, str]:
 
     profile_map: Dict[str, str] = {}
     for row in rows or []:
-        pkg = str(row.get("package_name") or "").strip()
+        pkg = str(row.get("package_name") or "").strip().lower()
         label = str(row.get("display_name") or "").strip()
         if pkg and label:
             profile_map[pkg] = label
     return profile_map
+
+
+def load_display_name_map(groups: Sequence[ArtifactGroup]) -> Dict[str, str]:
+    """Return package -> display name map for the provided artifact groups."""
+
+    if not run_sql or not groups:
+        return {}
+
+    packages = sorted({group.package_name.lower() for group in groups if group.package_name})
+    placeholders = ", ".join(["%s"] * len(packages))
+    try:
+        rows = run_sql(
+            (
+                "SELECT package_name, display_name "
+                f"FROM apps WHERE package_name IN ({placeholders})"
+            ),
+            tuple(packages),
+            fetch="all",
+            dictionary=True,
+        )
+    except Exception:
+        return {}
+
+    display_map: Dict[str, str] = {}
+    for row in rows or []:
+        pkg = str(row.get("package_name") or "").strip().lower()
+        label = str(row.get("display_name") or "").strip()
+        if pkg and label:
+            display_map[pkg] = label
+    return display_map
 
 
 def list_categories(groups: Sequence[ArtifactGroup]) -> List[tuple[str, int]]:
@@ -377,7 +413,11 @@ def list_categories(groups: Sequence[ArtifactGroup]) -> List[tuple[str, int]]:
     profile_map = load_profile_map(groups)
     tally: Dict[str, set[str]] = {}
     for group in groups:
-        label = profile_map.get(group.package_name) or group.category or "Uncategorized"
+        label = (
+            profile_map.get(group.package_name.lower())
+            or group.category
+            or "Uncategorized"
+        )
         bucket = tally.setdefault(label, set())
         bucket.add(group.package_name)
     return sorted(((category, len(packages)) for category, packages in tally.items()), key=lambda item: item[0].lower())
@@ -390,5 +430,6 @@ __all__ = [
     "group_artifacts",
     "list_packages",
     "list_categories",
+    "load_display_name_map",
     "load_profile_map",
 ]

@@ -49,6 +49,8 @@ class NativeHardeningDetector(BaseDetector):
             )
 
         suspicious_hits = _scan_suspicious_tokens(libs)
+        for entry in libs:
+            entry.pop("blob", None)
         entropy_samples = sorted(libs, key=lambda item: item["entropy"], reverse=True)[:5]
 
         evidence: List[EvidencePointer] = []

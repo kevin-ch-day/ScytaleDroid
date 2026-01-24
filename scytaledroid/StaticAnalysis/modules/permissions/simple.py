@@ -830,7 +830,7 @@ def render_permission_matrix(
     show: int = 4,
 ) -> None:
     from datetime import datetime
-    from scytaledroid.Utils.DisplayUtils import table_utils
+    from scytaledroid.Utils.DisplayUtils import text_blocks
 
     if not profiles:
         return
@@ -838,7 +838,7 @@ def render_permission_matrix(
     top = list(sorted(profiles, key=lambda p: p.get("risk", 0.0), reverse=True))[: max(1, show)]
     display_labels = []
     for profile in top:
-        label = str(profile.get("label") or "").strip()
+        label = str(profile.get("display_name") or profile.get("label") or "").strip()
         if not label:
             label = str(profile.get("package") or "")
         if not label:
@@ -855,6 +855,15 @@ def render_permission_matrix(
     headers = ["Permission"] + display_labels
     rows: list[list[str]] = []
 
+    def _pad_center(value: str, width: int) -> str:
+        visible = text_blocks.visible_width(value)
+        if visible >= width:
+            return value
+        total = width - visible
+        left = total // 2
+        right = total - left
+        return (" " * left) + value + (" " * right)
+
     for group_title, perms in _MATRIX_ROWS:
         rows.append([group_title] + ["" for _ in top])
         for perm in perms:
@@ -868,7 +877,6 @@ def render_permission_matrix(
                     mark = "*" if perm in vendor else "-"
                 else:
                     mark = "X" if perm.upper() in fw_ds else "-"
-                # Apply subtle coloring to marks when available
                 from scytaledroid.Utils.DisplayUtils import colors as _colors
                 _pal = _colors.get_palette() if _colors.colors_enabled() else None
                 if _pal:
@@ -882,7 +890,29 @@ def render_permission_matrix(
                     row.append(mark)
             rows.append(row)
 
-    table_utils.render_table(headers, rows, accent_first_column=False)
+    headers = [text_blocks.truncate_visible(label, 18) for label in headers]
+    first_col = max(text_blocks.visible_width("Permission"), *(text_blocks.visible_width(row[0]) for row in rows))
+    app_col = max(5, *(text_blocks.visible_width(label) for label in headers[1:]))
+    widths = [first_col] + [app_col for _ in headers[1:]]
+    pad = "  "
+
+    header_cells = [
+        row.ljust(widths[idx])
+        for idx, row in enumerate(headers)
+    ]
+    print(pad.join(header_cells))
+    print(pad.join("-" * width for width in widths))
+
+    for row in rows:
+        cells = []
+        for idx, cell in enumerate(row):
+            text = str(cell)
+            if idx == 0:
+                cells.append(text.ljust(widths[idx]))
+            else:
+                cells.append(_pad_center(text, widths[idx]))
+        print(pad.join(cells))
+
     print("\nLegend:")
     print("X = framework (dangerous/signature)")
     print("* = vendor/custom/ads")

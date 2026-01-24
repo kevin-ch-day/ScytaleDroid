@@ -232,6 +232,9 @@ def _build_summary(
         entry = summary.setdefault(area, _empty_area(area))
         _merge_counts(entry, row)
 
+    for area in _AREA_ORDER:
+        summary.setdefault(area, _empty_area(area))
+
     _integrate_cvss(cvss_rows, summary)
 
     for area, entry in summary.items():

@@ -12,7 +12,13 @@ from scytaledroid.Utils.DisplayUtils import (
     table_utils,
 )
 
-from ...core.repository import ArtifactGroup, list_categories, list_packages, load_profile_map
+from ...core.repository import (
+    ArtifactGroup,
+    list_categories,
+    list_packages,
+    load_display_name_map,
+    load_profile_map,
+)
 from ..core.models import ScopeSelection
 
 
@@ -104,7 +110,12 @@ def select_category_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
     scoped_all = tuple(
         group
         for group in groups
-        if (profile_map.get(group.package_name) or group.category or "Uncategorized") == category_name
+        if (
+            profile_map.get(group.package_name.lower())
+            or group.category
+            or "Uncategorized"
+        )
+        == category_name
     )
     grouped: dict[str, list[ArtifactGroup]] = {}
     order: list[str] = []
@@ -157,13 +168,16 @@ def select_category_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
 
 
 def _render_profile_selection_table(groups: Sequence[ArtifactGroup]) -> None:
+    display_map = load_display_name_map(groups)
     rows: list[list[str]] = []
     for group in groups:
         base_artifact = group.base_artifact or next(iter(group.artifacts), None)
         metadata = getattr(base_artifact, "metadata", {}) if base_artifact else {}
         app_label = metadata.get("app_label") if isinstance(metadata, dict) else None
         display_name = metadata.get("display_name") if isinstance(metadata, dict) else None
-        label = app_label or display_name or group.package_name
+        package = group.package_name
+        preferred = display_map.get(package.lower())
+        label = app_label or display_name or preferred or package
         session_stamp = group.session_stamp or "undated"
         rows.append([group.package_name, str(label), session_stamp, str(len(group.artifacts))])
 

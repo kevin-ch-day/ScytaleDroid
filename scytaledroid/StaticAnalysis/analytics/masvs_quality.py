@@ -56,9 +56,37 @@ def compute_quality_metrics(entry: Mapping[str, object]) -> MutableMapping[str, 
     medium = _coerce_int(entry.get("medium"))
     low = _coerce_int(entry.get("low"))
     info = _coerce_int(entry.get("info"))
+    total_findings = high + medium + low + info
     control_count = _coerce_int(entry.get("control_count"))
-    if control_count <= 0:
+    if control_count <= 0 and total_findings:
         control_count = high + medium + low + info
+    elif control_count <= 0:
+        return {
+            "severity_pressure": 0.0,
+            "severity_density": 0.0,
+            "severity_density_norm": 0.0,
+            "cvss_coverage": None,
+            "cvss_band_score": 0.0,
+            "cvss_intensity": 0.0,
+            "risk_index": None,
+            "cvss_gap": None,
+            "scored_count": 0,
+            "control_count": 0,
+            "coverage_status": "no_data",
+            "risk_components": {
+                "inputs": {
+                    "severity_density_norm": 0.0,
+                    "cvss_band_score": 0.0,
+                    "cvss_intensity": 0.0,
+                },
+                "weights": dict(RISK_COMPONENT_WEIGHTS),
+                "contributions": {
+                    "severity": 0.0,
+                    "band": 0.0,
+                    "intensity": 0.0,
+                },
+            },
+        }
 
     severity_pressure = (
         high * SEVERITY_WEIGHTS["high"]
@@ -139,5 +167,6 @@ def compute_quality_metrics(entry: Mapping[str, object]) -> MutableMapping[str, 
         "cvss_gap": cvss_gap,
         "scored_count": scored_count,
         "control_count": control_count,
+        "coverage_status": "findings_based",
         "risk_components": risk_components,
     }

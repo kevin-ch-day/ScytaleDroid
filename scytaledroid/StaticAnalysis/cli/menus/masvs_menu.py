@@ -120,7 +120,11 @@ def render_masvs_summary_menu() -> None:
         medium = entry.get("medium", 0)
         low = entry["low"]
         info = entry["info"]
-        if high > 0:
+        quality = entry.get("quality") if isinstance(entry, dict) else None
+        coverage_status = quality.get("coverage_status") if isinstance(quality, dict) else None
+        if coverage_status == "no_data":
+            status = "NO DATA"
+        elif high > 0:
             status = "FAIL"
         elif medium > 0:
             status = "WARN"
@@ -128,10 +132,12 @@ def render_masvs_summary_menu() -> None:
             status = "PASS"
         if status == "PASS":
             passes += 1
-        total_controls = int(entry.get("control_count") or high + medium + low + info)
+        if coverage_status == "no_data":
+            total_controls = 0
+        else:
+            total_controls = int(entry.get("control_count") or high + medium + low + info)
         affected = high + medium
         worst_cvss, avg_cvss, band_cvss = _format_cvss(entry)
-        quality = entry.get("quality") if isinstance(entry, dict) else None
         basis_display = "—"
         if isinstance(quality, dict):
             risk_index = quality.get("risk_index")
