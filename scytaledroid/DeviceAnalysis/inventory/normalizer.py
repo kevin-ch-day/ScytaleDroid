@@ -25,14 +25,18 @@ def compose_inventory_entry(
         category_name = fallback_category
         heuristic_category = True
 
-    profile_id = canonical.get("profile_id") if canonical else None
+    profile_key = canonical.get("profile_key") if canonical else None
     profile_name = canonical.get("profile_name") if canonical else None
     heuristic_profile = False
-    if not profile_id and not profile_name:
+    if not profile_key and not profile_name:
         profile = package_profiles.lookup_profile(package_name)
-        profile_id = profile.id if profile else None
+        profile_key = profile.id.upper() if profile else None
         profile_name = profile.name if profile else None
-        heuristic_profile = bool(profile_id or profile_name)
+        heuristic_profile = bool(profile_key or profile_name)
+
+    if not profile_key:
+        profile_key = "UNCLASSIFIED"
+        profile_name = profile_name or "Unclassified"
 
     if heuristic_category or heuristic_profile:
         review_needed = True
@@ -67,7 +71,8 @@ def compose_inventory_entry(
         "category_id": category_id,
         "partition": partition,
         "source": source,
-        "profile_id": profile_id,
+        "profile_key": profile_key,
+        "profile_id": profile_key,
         "profile_name": profile_name,
         "split_flag": "Yes" if split_count > 1 else "No",
         "apk_paths": paths,

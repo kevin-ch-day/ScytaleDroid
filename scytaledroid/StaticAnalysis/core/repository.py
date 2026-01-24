@@ -275,8 +275,8 @@ def _hydrate_app_labels(packages: Dict[str, Dict[str, object]]) -> None:
         return
     placeholders = ", ".join(["%s"] * len(missing))
     query = (
-        "SELECT package_name, app_name "
-        "FROM android_app_definitions "
+        "SELECT package_name, display_name "
+        "FROM apps "
         f"WHERE package_name IN ({placeholders})"
     )
     try:
@@ -333,12 +333,45 @@ def list_packages(groups: Sequence[ArtifactGroup]) -> List[tuple[str, str, int, 
     return packages
 
 
+def load_profile_map(groups: Sequence[ArtifactGroup]) -> Dict[str, str]:
+    """Return package -> profile label map for the provided artifact groups."""
+
+    if not run_sql or not groups:
+        return {}
+
+    packages = sorted({group.package_name for group in groups})
+    placeholders = ", ".join(["%s"] * len(packages))
+    try:
+        rows = run_sql(
+            (
+                "SELECT d.package_name, p.display_name "
+                "FROM apps d "
+                "LEFT JOIN android_app_profiles p ON p.profile_key = d.profile_key "
+                f"WHERE d.package_name IN ({placeholders})"
+            ),
+            tuple(packages),
+            fetch="all",
+            dictionary=True,
+        )
+    except Exception:
+        return {}
+
+    profile_map: Dict[str, str] = {}
+    for row in rows or []:
+        pkg = str(row.get("package_name") or "").strip()
+        label = str(row.get("display_name") or "").strip()
+        if pkg and label:
+            profile_map[pkg] = label
+    return profile_map
+
+
 def list_categories(groups: Sequence[ArtifactGroup]) -> List[tuple[str, int]]:
     """Return sorted unique categories with unique package counts."""
 
+    profile_map = load_profile_map(groups)
     tally: Dict[str, set[str]] = {}
     for group in groups:
-        label = group.category or "Uncategorized"
+        label = profile_map.get(group.package_name) or group.category or "Uncategorized"
         bucket = tally.setdefault(label, set())
         bucket.add(group.package_name)
     return sorted(((category, len(packages)) for category, packages in tally.items()), key=lambda item: item[0].lower())
@@ -351,4 +384,5 @@ __all__ = [
     "group_artifacts",
     "list_packages",
     "list_categories",
+    "load_profile_map",
 ]

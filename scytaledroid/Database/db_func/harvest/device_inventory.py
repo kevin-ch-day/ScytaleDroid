@@ -178,7 +178,7 @@ def _bind_package(
         inferred_category,
         _text(entry.get("source")),
         _text(entry.get("partition")),
-        _text(entry.get("profile_id")),
+        _text(entry.get("profile_key") or entry.get("profile_id")),
         _text(entry.get("profile_name")),
         inferred_profile,
         split_count,

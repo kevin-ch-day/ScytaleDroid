@@ -163,8 +163,8 @@ def _resolve_app_names(packages: Iterable[str]) -> Dict[str, str]:
     if missing:
         placeholders = ", ".join(["%s"] * len(missing))
         query = (
-            "SELECT package_name, COALESCE(app_name, package_name) AS label "
-            "FROM android_app_definitions "
+            "SELECT package_name, COALESCE(display_name, package_name) AS label "
+            "FROM apps "
             f"WHERE package_name IN ({placeholders})"
         )
         rows = db_queries.run_sql(query, tuple(missing), fetch="all", dictionary=True)

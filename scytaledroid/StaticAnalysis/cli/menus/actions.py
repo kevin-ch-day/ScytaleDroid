@@ -13,8 +13,8 @@ try:  # optional DB access (offline mode)
 except Exception:  # pragma: no cover - DB optional
     core_q = None
 
-from .commands.models import Command
-from .models import RunParameters
+from ..commands.models import Command
+from ..core.models import RunParameters
 
 
 def apply_command_overrides(params: RunParameters, command: Command) -> RunParameters:

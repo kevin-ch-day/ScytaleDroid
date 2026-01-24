@@ -17,6 +17,7 @@ class InventoryRow:
     installer: Optional[str]
     category: Optional[str]
     primary_path: Optional[str]
+    profile_key: Optional[str]
     profile: Optional[str]
     version_name: Optional[str]
     version_code: Optional[str]

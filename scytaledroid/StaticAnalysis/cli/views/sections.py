@@ -9,8 +9,8 @@ from typing import Any, Mapping, MutableMapping, Sequence
 
 from ..core import StaticAnalysisReport
 from ..core.findings import Badge, DetectorResult, EvidencePointer, Finding, SeverityLevel
-from .glyphs import GlyphSet
-from .options import ScanDisplayOptions
+from ..core.glyphs import GlyphSet
+from ..core.options import ScanDisplayOptions
 
 
 @dataclass(frozen=True)

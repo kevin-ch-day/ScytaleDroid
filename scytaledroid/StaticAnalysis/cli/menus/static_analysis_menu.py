@@ -16,15 +16,15 @@ from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.StaticAnalysis.session import make_session_stamp
 
 if TYPE_CHECKING:
-    from .commands.models import Command
-    from .models import RunParameters
+    from ..commands.models import Command
+    from ..core.models import RunParameters
 
 
 @lru_cache(maxsize=1)
 def _load_menu_actions():  # pragma: no cover - simple cache wrapper
-    from . import menu_actions
+    from . import actions
 
-    return menu_actions
+    return actions
 
 
 def apply_command_overrides(
@@ -56,7 +56,7 @@ def render_reset_outcome(outcome: object) -> None:
 
 
 def _build_dev_selection(groups, shortcut_id):
-    from scytaledroid.StaticAnalysis.cli.models import ScopeSelection
+    from scytaledroid.StaticAnalysis.cli.core.models import ScopeSelection
 
     targets = {
         "C": ("CNN (com.cnn.mobile.android.phone)", "com.cnn.mobile.android.phone"),
@@ -72,7 +72,7 @@ def _build_dev_selection(groups, shortcut_id):
 
 def _library_scope_selection(groups):
     """Build a ScopeSelection from the APK library selection, if any."""
-    from scytaledroid.StaticAnalysis.cli.models import ScopeSelection
+    from scytaledroid.StaticAnalysis.cli.core.models import ScopeSelection
 
     selected_paths = set(static_scope_service.get_selected())
     if not selected_paths:
@@ -93,8 +93,8 @@ def _library_scope_selection(groups):
 
 def _choose_scope(groups):
     """Prompt for scope, preferring library selection when available."""
-    from .scope import select_scope
-    from scytaledroid.StaticAnalysis.cli.models import ScopeSelection
+    from ..flows.selection import select_scope
+    from scytaledroid.StaticAnalysis.cli.core.models import ScopeSelection
 
     library_scope = _library_scope_selection(groups)
     if library_scope:
@@ -124,10 +124,10 @@ def static_analysis_menu() -> None:
     from scytaledroid.Database.db_utils.reset_static import reset_static_analysis_data
 
     from ..core.repository import group_artifacts
-    from .commands import COMMANDS, get_command, iter_commands
-    from .models import RunParameters
-    from .prompts import default_custom_tests, prompt_advanced_options
-    from .scope import select_scope
+    from ..commands import COMMANDS, get_command, iter_commands
+    from ..core.models import RunParameters
+    from ..core.prompts import default_custom_tests, prompt_advanced_options
+    from ..flows.selection import select_scope
     from scytaledroid.StaticAnalysis.services import static_service
 
     base_dir = Path(app_config.DATA_DIR) / "apks"

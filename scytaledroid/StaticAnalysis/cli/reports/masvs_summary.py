@@ -12,7 +12,7 @@ from scytaledroid.StaticAnalysis.analytics.masvs_quality import (
 
 from scytaledroid.Database.db_core import db_queries as core_q
 
-from .cvss_v4 import parse_vector, score_vector, severity_band
+from ..core.cvss_v4 import parse_vector, score_vector, severity_band
 
 _AREA_ORDER = ("NETWORK", "PLATFORM", "PRIVACY", "STORAGE")
 

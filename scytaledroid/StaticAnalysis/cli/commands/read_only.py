@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from .models import Command
-from ..masvs_menu import (
+from ..menus.masvs_menu import (
     render_masvs_summary_menu,
     render_scoring_explainer_menu,
     render_masvs_matrix_menu,
 )
-from ..diagnostics import render_static_diagnostics_menu
+from ..reports.diagnostics import render_static_diagnostics_menu
 
 READ_ONLY_COMMANDS: tuple[Command, ...] = (
     Command(

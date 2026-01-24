@@ -177,8 +177,10 @@ def _write_report(
         )
     )
 
-    profile_counts = Counter(str(pkg.get("profile_id") or "") for pkg in packages)
-    active_profiles = [profile for profile in package_profiles.PROFILES if profile_counts.get(profile.id, 0)]
+    profile_counts = Counter(str(pkg.get("profile_key") or pkg.get("profile_id") or "") for pkg in packages)
+    active_profiles = [
+        profile for profile in package_profiles.PROFILES if profile_counts.get(profile.id, 0)
+    ]
     if active_profiles:
         lines.append("")
         lines.append("## App Categories of Interest")
@@ -203,7 +205,7 @@ def _profile_guidance(packages: List[Dict[str, object]]) -> List[str]:
     if not packages:
         return []
 
-    counts = Counter(str(pkg.get("profile_id") or "") for pkg in packages)
+    counts = Counter(str(pkg.get("profile_key") or pkg.get("profile_id") or "") for pkg in packages)
     blocks: List[str] = []
     for profile in package_profiles.PROFILES:
         count = counts.get(profile.id, 0)

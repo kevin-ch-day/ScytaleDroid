@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .menu import static_analysis_menu
+from ..menus.static_analysis_menu import static_analysis_menu
 
 
 def run() -> None:

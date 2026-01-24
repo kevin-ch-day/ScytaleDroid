@@ -29,7 +29,7 @@ _SCHEMA_GROUPS = {
         "vw_latest_apk_per_package",
     ),
     "app_data": (
-        "android_app_definitions",
+        "apps",
         "android_app_categories",
     ),
     "permissions": (

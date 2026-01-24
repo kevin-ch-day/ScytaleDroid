@@ -56,7 +56,7 @@ def select_package_scope(
     allow = set(google_allowlist or rules.GOOGLE_ALLOWLIST)
     context = build_scope_context(rows, allow)
     profile_counts = context["profile_counts"]  # type: ignore[assignment]
-    category_groups: Dict[str, List[InventoryRow]] = context.get("category_groups", {})  # type: ignore[assignment]
+    profile_key_groups = _group_by_profile_key(rows)
 
     watchlist_entries: List[_WatchlistEntry] = context.get("watchlists", [])  # type: ignore[assignment]
 
@@ -106,20 +106,30 @@ def select_package_scope(
             handler=lambda: _scope_default(rows, allow),
         )
 
-        social_rows = category_groups.get("Social")
+        social_rows = profile_key_groups.get("SOCIAL")
         _add_entry(
             "2",
-            "Social apps",
+            "Social Media",
             packages=len(social_rows) if social_rows else 0,
-            handler=lambda: _scope_category_subset(category_groups, allow, {"Social"}),
+            handler=lambda: _scope_profile_key_subset(
+                rows,
+                allow,
+                {"SOCIAL"},
+                label="Social Media",
+            ),
         )
 
-        messaging_rows = category_groups.get("Messaging")
+        messaging_rows = profile_key_groups.get("MESSAGING")
         _add_entry(
             "3",
-            "Messaging apps",
+            "Messaging & Comms",
             packages=len(messaging_rows) if messaging_rows else 0,
-            handler=lambda: _scope_category_subset(category_groups, allow, {"Messaging"}),
+            handler=lambda: _scope_profile_key_subset(
+                rows,
+                allow,
+                {"MESSAGING"},
+                label="Messaging & Comms",
+            ),
         )
 
         combined_rows = (social_rows or []) + (messaging_rows or [])
@@ -128,11 +138,11 @@ def select_package_scope(
             "Social + Messaging",
             packages=len(combined_rows) if combined_rows else 0,
             note="non-root filtered" if not is_rooted else None,
-            handler=lambda: _scope_category_subset(
-                category_groups,
+            handler=lambda: _scope_profile_key_subset(
+                rows,
                 allow,
-                {"Social", "Messaging"},
-                label="Social & Messaging",
+                {"SOCIAL", "MESSAGING"},
+                label="Social + Messaging",
             ),
         )
 
@@ -437,6 +447,44 @@ def _scope_profile_subset(
     )
 
 
+def _scope_profile_key_subset(
+    rows: Sequence[InventoryRow],
+    allow: Set[str],
+    profiles: Set[str],
+    *,
+    label: str,
+) -> Optional[ScopeSelection]:
+    normalized = {profile.upper() for profile in profiles}
+    subset = [row for row in rows if (row.profile_key or "").upper() in normalized]
+    if not subset:
+        print(status_messages.status(f"No packages tagged as {label}.", level="warn"))
+        return None
+
+    filtered, excluded = apply_default_scope(subset, allow)
+    if not filtered:
+        print(
+            status_messages.status(
+                f"{label} packages present but filtered by scope policy.", level="warn"
+            )
+        )
+        return None
+
+    metadata = {
+        "profiles": sorted({(row.profile_key or "").upper() for row in subset if row.profile_key}),
+        "estimated_files": estimated_files(filtered),
+        "excluded_counts": excluded,
+        "sample_names": sample_names(filtered),
+        "candidate_count": len(subset),
+        "selected_count": len(filtered),
+    }
+    return ScopeSelection(
+        label=f"{label} apps",
+        packages=filtered,
+        kind="profile_key_subset",
+        metadata=metadata,
+    )
+
+
 def _scope_category_subset(
     category_groups: Dict[str, List[InventoryRow]],
     allow: Set[str],
@@ -477,6 +525,16 @@ def _scope_category_subset(
         kind="category_subset",
         metadata=metadata,
     )
+
+
+def _group_by_profile_key(rows: Sequence[InventoryRow]) -> Dict[str, List[InventoryRow]]:
+    grouped: Dict[str, List[InventoryRow]] = {}
+    for row in rows:
+        key = (row.profile_key or "").strip().upper()
+        if not key:
+            continue
+        grouped.setdefault(key, []).append(row)
+    return grouped
 
 
 def _scope_watchlist(entry: _WatchlistEntry) -> Optional[ScopeSelection]:

@@ -18,10 +18,19 @@ _DDL_STATEMENTS: list[str] = [
     """
     CREATE TABLE IF NOT EXISTS apps (
       id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-      package_name  VARCHAR(191)    NOT NULL,
-      display_name  VARCHAR(191)    DEFAULT NULL,
+      package_name  VARCHAR(255)    NOT NULL,
+      display_name  VARCHAR(255)    DEFAULT NULL,
+      category_id   INT             DEFAULT NULL,
+      profile_key   VARCHAR(64)     NOT NULL DEFAULT 'UNCLASSIFIED',
+      created_at    TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at    TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       PRIMARY KEY (id),
-      UNIQUE KEY ux_apps_package (package_name)
+      UNIQUE KEY ux_apps_package (package_name),
+      KEY idx_app_category_id (category_id),
+      KEY idx_apps_profile_key (profile_key),
+      CONSTRAINT fk_app_category FOREIGN KEY (category_id)
+        REFERENCES android_app_categories (category_id)
+        ON DELETE SET NULL ON UPDATE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
     """
@@ -278,18 +287,6 @@ _DDL_STATEMENTS: list[str] = [
       ADD COLUMN IF NOT EXISTS read_guard VARCHAR(32) DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS write_guard VARCHAR(32) DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS metadata JSON DEFAULT NULL;
-    """,
-    # Ingest/Audit
-    """
-    CREATE TABLE IF NOT EXISTS ingest_audit (
-      id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-      analysis_run_id  BIGINT UNSIGNED DEFAULT NULL,
-      status           VARCHAR(32)     NOT NULL,
-      stats            JSON            DEFAULT NULL,
-      created_at       TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY (id),
-      KEY ix_ingest_audit_run (analysis_run_id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
     # Canonical Observations
     """

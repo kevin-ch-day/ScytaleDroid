@@ -21,7 +21,7 @@ from ...core import (
 from ...core.findings import SeverityLevel
 from ...modules import resolve_category
 from ...persistence import ReportStorageError, save_report
-from ..models import AppRunResult, ArtifactOutcome, RunOutcome, RunParameters, ScopeSelection
+from ..core.models import AppRunResult, ArtifactOutcome, RunOutcome, RunParameters, ScopeSelection
 from ..persistence.run_summary import create_static_run_ledger
 
 

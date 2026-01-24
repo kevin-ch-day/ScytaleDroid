@@ -298,6 +298,7 @@ def _execute_package_plan(
             app_id = repo.ensure_app_definition(
                 package_name,
                 inventory.app_label,
+                profile_key=inventory.profile_key,
                 context={**base_context, "package_name": package_name},
             )
             stats["db_app_definitions"] += 1

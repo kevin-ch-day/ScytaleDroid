@@ -11,11 +11,11 @@ def user_only(row: PackageRow) -> bool:
 
 
 def social(row: PackageRow) -> bool:
-    return (row.profile_name or "").lower() in {"social", "messaging"}
+    return (row.get("profile_key") or "").upper() in {"SOCIAL", "MESSAGING"}
 
 
 def finance(row: PackageRow) -> bool:
-    return (row.profile_name or "").lower() in {"finance", "shopping"}
+    return (row.get("profile_key") or "").upper() in {"SHOPPING", "AMAZON_USER"}
 
 
 __all__ = ["user_only", "social", "finance"]

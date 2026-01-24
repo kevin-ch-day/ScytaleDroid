@@ -10,7 +10,7 @@ from scytaledroid.Database.db_core.db_engine import DatabaseEngine
 
 PROTECTED_TABLES: Sequence[str] = (
     "android_app_categories",
-    "android_app_definitions",
+    "apps",
     "android_framework_permissions",
     "android_perm_map",
     "android_perm_override",

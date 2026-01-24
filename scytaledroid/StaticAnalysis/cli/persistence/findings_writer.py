@@ -17,7 +17,7 @@ from functools import lru_cache
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
-from ..cvss_v4 import score_vector
+from ..core.cvss_v4 import score_vector
 
 _CVSS_BASE_ORDER = ("AV", "AC", "AT", "PR", "UI", "VC", "VI", "VA", "SC", "SI", "SA")
 _LOGGED_MISSING_CONFIG = False

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .persistence.run_summary import (
+from ..persistence.run_summary import (
     PersistenceOutcome,
     persist_run_summary,
     update_static_run_status,

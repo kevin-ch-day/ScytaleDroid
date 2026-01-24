@@ -20,8 +20,8 @@ class PackageProfile:
 
 PROFILES: List[PackageProfile] = [
     PackageProfile(
-        id="social",
-        name="Social",
+        id="SOCIAL",
+        name="Social Media",
         matchers=(
             "com.facebook.",
             "com.instagram.",
@@ -50,8 +50,8 @@ PROFILES: List[PackageProfile] = [
         ),
     ),
     PackageProfile(
-        id="messaging",
-        name="Messaging / Comms",
+        id="MESSAGING",
+        name="Messaging & Comms",
         matchers=(
             "com.whatsapp",
             "org.telegram.messenger",
@@ -76,34 +76,8 @@ PROFILES: List[PackageProfile] = [
         ),
     ),
     PackageProfile(
-        id="finance",
-        name="Finance",
-        matchers=(
-            "com.paypal",
-            "com.chase",
-            "com.bankofamerica",
-            "com.wf.wellsfargomobile",
-            "com.citi",
-            "com.usbank",
-            "com.americanexpress",
-        ),
-        description=(
-            "Banking and payment clients with strong protections, heavy obfuscation, and strict policies."
-        ),
-        artifacts=(
-            "Encrypted SQLite databases and preference stores inside /data/data/<pkg>/",
-            "Hardware-backed keystore entries (non-extractable without instrumentation)",
-            "Crash logs or analytics traces indicating certificate pinning failures.",
-        ),
-        pull_strategy=(
-            "Pull APK(s) and extract manifest for exported components, debuggable, and crypto usage.",
-            "Expect native libs (libcrypto, libssl). Verify signature fingerprints.",
-            "Runtime secrets typically require rooted device or instrumentation harness.",
-        ),
-    ),
-    PackageProfile(
-        id="shopping",
-        name="Shopping",
+        id="SHOPPING",
+        name="Shopping / Retail",
         matchers=(
             "com.amazon.",
             "com.einnovation.temu",

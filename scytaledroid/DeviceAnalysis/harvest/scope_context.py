@@ -36,8 +36,8 @@ def load_app_names(package_names: Sequence[str]) -> Dict[str, str]:
     if missing:
         placeholders = ", ".join(["%s"] * len(missing))
         query = (
-            "SELECT package_name, app_name "
-            "FROM android_app_definitions "
+            "SELECT package_name, display_name "
+            "FROM apps "
             f"WHERE package_name IN ({placeholders})"
         )
         try:
@@ -46,7 +46,7 @@ def load_app_names(package_names: Sequence[str]) -> Dict[str, str]:
             rows = []
         for row in rows or []:
             pkg = maybe_str(row.get("package_name"))
-            label = maybe_str(row.get("app_name"))
+            label = maybe_str(row.get("display_name"))
             if pkg and label:
                 _APP_NAME_CACHE[pkg] = label
     return {name: _APP_NAME_CACHE.get(name) for name in package_names if name in _APP_NAME_CACHE}
@@ -75,6 +75,11 @@ def build_inventory_rows(packages: Sequence[Dict[str, object]]) -> List[Inventor
         ]
         split_count = int(pkg.get("split_count") or len(apk_paths) or 0)
         app_label = maybe_str(pkg.get("app_label")) or app_names.get(package_name)
+        profile_key = _normalize_profile_key(
+            maybe_str(pkg.get("profile_key") or pkg.get("profile_id")),
+            maybe_str(pkg.get("profile_name")),
+        )
+        profile_name = maybe_str(pkg.get("profile_name")) or profile_key
         rows.append(
             InventoryRow(
                 raw=dict(pkg),
@@ -83,7 +88,8 @@ def build_inventory_rows(packages: Sequence[Dict[str, object]]) -> List[Inventor
                 installer=maybe_str(pkg.get("installer")),
                 category=maybe_str(pkg.get("category")),
                 primary_path=maybe_str(pkg.get("primary_path")),
-                profile=maybe_str(pkg.get("profile_name")),
+                profile_key=profile_key,
+                profile=profile_name,
                 version_name=maybe_str(pkg.get("version_name")),
                 version_code=maybe_str(pkg.get("version_code")),
                 apk_paths=apk_paths,
@@ -91,6 +97,37 @@ def build_inventory_rows(packages: Sequence[Dict[str, object]]) -> List[Inventor
             )
         )
     return rows
+
+
+def _normalize_profile_key(profile_key: Optional[str], profile_name: Optional[str]) -> Optional[str]:
+    if profile_key and profile_key.strip():
+        return profile_key.strip().upper()
+    name = (profile_name or "").strip().lower()
+    if not name:
+        return None
+    if "social" in name:
+        return "SOCIAL"
+    if "messaging" in name or "comms" in name or "communication" in name:
+        return "MESSAGING"
+    if "shopping" in name:
+        return "SHOPPING"
+    if "amazon" in name:
+        return "AMAZON_USER"
+    if "google" in name:
+        return "GOOGLE_USER"
+    if "browser" in name:
+        return "BROWSER"
+    if "media" in name or "stream" in name:
+        return "MEDIA"
+    if "productivity" in name or "office" in name:
+        return "PRODUCTIVITY"
+    if "news" in name or "reading" in name:
+        return "NEWS"
+    if "system" in name or "core" in name:
+        return "SYSTEM_CORE"
+    if "unclassified" in name:
+        return "UNCLASSIFIED"
+    return None
 
 
 def in_default_scope(row: InventoryRow, allow: Set[str]) -> bool:
@@ -149,11 +186,33 @@ def build_scope_context(rows: Sequence[InventoryRow], allow: Set[str]) -> Dict[s
         watchlist_totals["files"] += counts["files"]
 
     category_map = _fetch_category_map([row.package_name for row in rows])
+    def _normalize_category(name: str | None) -> str | None:
+        if not name:
+            return None
+        cleaned = name.strip()
+        if not cleaned:
+            return None
+        lowered = cleaned.lower()
+        if lowered in {"social", "social media", "social-media"}:
+            return "Social media"
+        if lowered in {"messaging", "communication", "comm"} or (
+            "messaging" in lowered and "comm" in lowered
+        ):
+            return "Communication"
+        return cleaned
     category_groups: Dict[str, List[InventoryRow]] = {}
     for row in rows:
         category_name = category_map.get(row.package_name) or row.profile
-        if category_name:
-            category_groups.setdefault(category_name, []).append(row)
+        if not category_name:
+            try:
+                from scytaledroid.StaticAnalysis.modules.categories import resolve_category
+
+                category_name = resolve_category(row.package_name, {})
+            except Exception:
+                category_name = None
+        normalized = _normalize_category(category_name)
+        if normalized:
+            category_groups.setdefault(normalized, []).append(row)
 
     return {
         "default_counts": estimate(default_rows),
@@ -198,7 +257,7 @@ def _fetch_category_map(package_names: Sequence[str]) -> Dict[str, str]:
     placeholders = ", ".join(["%s"] * len(package_names))
     query = (
         "SELECT d.package_name, c.category_name "
-        "FROM android_app_definitions d "
+        "FROM apps d "
         "JOIN android_app_categories c ON c.category_id = d.category_id "
         f"WHERE d.package_name IN ({placeholders})"
     )

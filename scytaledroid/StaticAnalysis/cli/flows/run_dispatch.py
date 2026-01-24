@@ -14,11 +14,11 @@ from scytaledroid.Utils.System import output_prefs
 from scytaledroid.StaticAnalysis.persistence import ingest as canonical_ingest
 from scytaledroid.StaticAnalysis.session import make_session_stamp, normalize_session_stamp
 from scytaledroid.ui import formatter
-from .views import render_run_start, render_run_summary
+from ..views.layouts import render_run_start, render_run_summary
 from scytaledroid.Utils.LoggingUtils.logging_context import RunContext, get_run_logger
 from scytaledroid.Utils.LoggingUtils import logging_events as log_events
 
-from .execution import (
+from ..execution import (
     build_analysis_config,
     configure_logging_for_cli,
     execute_permission_scan,
@@ -28,9 +28,9 @@ from .execution import (
     request_abort,
     render_run_results,
 )
-from .models import RunParameters, RunOutcome, ScopeSelection
-from .profiles import run_modules_for_profile
-from .scope import format_scope_target
+from ..core.models import RunParameters, RunOutcome, ScopeSelection
+from ..core.profiles import run_modules_for_profile
+from .selection import format_scope_target
 
 
 def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir: Path) -> RunOutcome | None:

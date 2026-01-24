@@ -149,24 +149,28 @@ LIMIT 1
 """
 
 UPSERT_APP_DEFINITION = """
-INSERT INTO android_app_definitions (package_name, app_name)
+INSERT INTO apps (package_name, display_name)
 VALUES (%s, %s)
 ON DUPLICATE KEY UPDATE
-    app_name = COALESCE(VALUES(app_name), app_name),
+    display_name = COALESCE(VALUES(display_name), display_name),
     updated_at = CURRENT_TIMESTAMP
 """
 
 SELECT_APP_ID_BY_PACKAGE = """
-SELECT app_id
-FROM android_app_definitions
+SELECT id
+FROM apps
 WHERE package_name = %s
 LIMIT 1
 """
 
 SELECT_APP_DEFINITION_DETAILS = """
-SELECT app_name, category_id, profile_id, profile_name
-FROM android_app_definitions
-WHERE app_id = %s
+SELECT d.display_name,
+       d.category_id,
+       d.profile_key,
+       p.display_name AS profile_name
+FROM apps d
+LEFT JOIN android_app_profiles p ON p.profile_key = d.profile_key
+WHERE d.id = %s
 LIMIT 1
 """
 

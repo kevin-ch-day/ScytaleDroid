@@ -84,7 +84,7 @@ def load_google_allowlist(candidates: Optional[Sequence[str]] = None) -> Set[str
 
     placeholders = ", ".join(["%s"] * len(baseline))
     query = (
-        "SELECT package_name FROM android_app_definitions "
+        "SELECT package_name FROM apps "
         f"WHERE package_name IN ({placeholders})"
     )
 

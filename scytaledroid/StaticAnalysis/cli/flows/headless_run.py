@@ -11,7 +11,7 @@ from typing import Tuple
 
 from scytaledroid.Config import app_config
 from scytaledroid.StaticAnalysis.core.repository import RepositoryArtifact, ArtifactGroup, _load_metadata
-from scytaledroid.StaticAnalysis.cli.models import ScopeSelection, RunParameters
+from scytaledroid.StaticAnalysis.cli.core.models import ScopeSelection, RunParameters
 from scytaledroid.StaticAnalysis.services import static_service
 from scytaledroid.StaticAnalysis.session import normalize_session_stamp
 from scytaledroid.Utils.LoggingUtils import logging_utils as log

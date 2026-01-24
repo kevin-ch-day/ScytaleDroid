@@ -81,20 +81,25 @@ def load_canonical_metadata(package_names: Iterable[str]) -> Dict[str, Dict[str,
 
     def _build_query(include_profiles: bool) -> str:
         profile_select = (
-            "            d.profile_id,\n            d.profile_name"
+            "            d.profile_key,\n            p.display_name AS profile_name"
             if include_profiles
-            else "            NULL AS profile_id,\n            NULL AS profile_name"
+            else "            NULL AS profile_key,\n            NULL AS profile_name"
+        )
+        profile_join = (
+            "            LEFT JOIN android_app_profiles p ON p.profile_key = d.profile_key\n"
+            if include_profiles
+            else ""
         )
         return f"""
             SELECT
                 LOWER(d.package_name) AS package_key,
-                d.app_name,
+                d.display_name,
                 d.category_id,
                 c.category_name,
                 {profile_select}
-            FROM android_app_definitions d
+            FROM apps d
             LEFT JOIN android_app_categories c ON c.category_id = d.category_id
-            WHERE LOWER(d.package_name) IN ({placeholders})
+{profile_join}            WHERE LOWER(d.package_name) IN ({placeholders})
         """
 
     rows: List[Dict[str, object]]
@@ -102,10 +107,10 @@ def load_canonical_metadata(package_names: Iterable[str]) -> Dict[str, Dict[str,
     try:
         rows = run_sql(query, tuple(normalised), fetch="all", dictionary=True) or []
     except RuntimeError as exc:
-        if "Unknown column 'd.profile_id'" not in str(exc):
+        if "Unknown column 'd.profile_key'" not in str(exc):
             raise
         log.warning(
-            "Profiles unsupported by current android_app_definitions schema; continuing without profile metadata.",
+            "Profiles unsupported by current apps schema; continuing without profile metadata.",
             category="inventory",
         )
         fallback_query = _build_query(include_profiles=False)
@@ -116,10 +121,10 @@ def load_canonical_metadata(package_names: Iterable[str]) -> Dict[str, Dict[str,
         if not key:
             continue
         canonical[key] = {
-            "app_name": row.get("app_name"),
+            "app_name": row.get("display_name"),
             "category_id": row.get("category_id"),
             "category_name": row.get("category_name"),
-            "profile_id": row.get("profile_id"),
+            "profile_key": row.get("profile_key"),
             "profile_name": row.get("profile_name"),
         }
     return canonical

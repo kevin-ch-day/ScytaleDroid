@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from scytaledroid.Database.db_core import run_sql
 from scytaledroid.Database.db_scripts.static_run_audit import collect_static_run_counts
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
-from scytaledroid.StaticAnalysis.cli.masvs_summary import fetch_masvs_matrix
+from scytaledroid.StaticAnalysis.cli.reports.masvs_summary import fetch_masvs_matrix
 
 from .sql_helpers import coerce_datetime
 

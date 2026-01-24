@@ -23,16 +23,16 @@ from scytaledroid.Utils.DisplayUtils import (
 
 from ...core import StaticAnalysisReport
 from ...engine.strings import analyse_strings
-from ..db_persist import persist_run_summary, update_static_run_status
+from ..core.db_persist import persist_run_summary, update_static_run_status
 from ...persistence.snapshots import SNAPSHOT_PREFIX, write_permission_snapshot
-from ..detail import (
+from ..views.detail import (
     SEVERITY_TOKEN_ORDER,
     app_detail_loop,
     render_app_detail,
 )
-from ..masvs_summary import fetch_db_masvs_summary
-from ..models import RunOutcome, RunParameters
-from ..renderer import render_app_result, write_baseline_json
+from ..reports.masvs_summary import fetch_db_masvs_summary
+from ..core.models import RunOutcome, RunParameters
+from ..views.renderers import render_app_result, write_baseline_json
 from ...persistence.ingest import ingest_baseline_payload
 from .scan_flow import format_duration
 from scytaledroid.Database.db_core import db_queries as core_q
@@ -518,7 +518,7 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                 persistence_errors.append(str(exc))
             printed_db_table = _render_db_severity_table(session_stamp)
         if not printed_db_table:
-            from ..detail import render_app_table  # local import to avoid cycle
+            from ..views.detail import render_app_table  # local import to avoid cycle
 
             render_app_table(outcome.results)
         if compact_mode:

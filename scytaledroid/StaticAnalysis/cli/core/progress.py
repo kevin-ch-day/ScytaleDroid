@@ -28,7 +28,7 @@ from ..core.findings import Badge, DetectorResult, Finding
 from ..core.repository import ArtifactGroup
 from .glyphs import GlyphSet
 from .options import ScanDisplayOptions, describe_cli_flags
-from .sections import (
+from ..views.sections import (
     SECTION_DEFINITIONS,
     extract_integrity_profiles,
     format_badge,
@@ -134,7 +134,7 @@ class ScanProgress:
         version_text = version or "—"
         self._write(
             f"[{index}/{self.total_groups}] Package: {package_name}    Version: {version_text}    "
-            f"Artifacts: {artifact_count}    Category: {category_text}"
+            f"Artifacts: {artifact_count}    Profile: {category_text}"
         )
 
     def artifact_started(
@@ -236,7 +236,7 @@ class ScanProgress:
         self._write(f"Package:    {package_name}")
         self._write(version_line)
         self._write(f"Artifact:   {artifact_text}")
-        self._write(f"Category:   {category_text}")
+        self._write(f"Profile:    {category_text}")
         self._write(f"Started:    {format_timestamp(started_at)}")
         self._write()
 

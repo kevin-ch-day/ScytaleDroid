@@ -12,11 +12,11 @@ from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Database.db_core import db_queries as core_q
 
-from ..cvss_v4 import apply_profiles
+from ..core.cvss_v4 import apply_profiles
 from ...core.findings import Badge, Finding
-from ..evidence import normalize_evidence
-from ..masvs_mapper import summarise_controls, rule_to_area
-from ..rule_mapping import derive_rule_id
+from ..reports.evidence import normalize_evidence
+from ..core.masvs_mapper import summarise_controls, rule_to_area
+from ..core.rule_mapping import derive_rule_id
 from .metrics_writer import compute_metrics_bundle, write_buckets, write_contributors, write_metrics
 from .findings_writer import (
     compute_cvss_base,
@@ -911,7 +911,7 @@ def persist_run_summary(
                     permission_profiles_map = profiles
 
         persist_permission_matrix(
-            run_id=int(run_id),
+            static_run_id=int(static_run_id) if static_run_id is not None else None,
             package_name=package_for_run,
             apk_id=apk_identifier,
             permission_profiles=permission_profiles_map,

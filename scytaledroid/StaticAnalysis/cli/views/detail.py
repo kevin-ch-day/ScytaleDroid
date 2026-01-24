@@ -8,7 +8,7 @@ from typing import Dict, Iterable, Mapping, Sequence, Set
 from scytaledroid.Utils.DisplayUtils import status_messages, table_utils, prompt_utils
 
 from ..core.findings import EvidencePointer, SeverityLevel
-from .models import AppRunResult
+from ..core.models import AppRunResult
 from .sections import SECTION_DEFINITIONS
 
 _SECTION_TITLE_LOOKUP = {definition.key: definition.title for definition in SECTION_DEFINITIONS}
@@ -99,7 +99,7 @@ def render_app_detail(
     print(
         f"High {totals.get('H',0)}   Medium {totals.get('M',0)}   Low {totals.get('L',0)}   Information {totals.get('I',0)}"
     )
-    print(f"Version: {version}   targetSdk={target_sdk}   Category: {app_result.category}")
+    print(f"Version: {version}   targetSdk={target_sdk}   Profile: {app_result.category}")
 
     grouped = collect_findings(app_result, evidence_lines)
     for section_key in [definition.key for definition in SECTION_DEFINITIONS]:
@@ -177,7 +177,7 @@ def prompt_severity_filter(current: Iterable[str]) -> set[str]:
 
 
 def cycle_evidence_lines(current: int) -> int:
-    from .prompts import EVIDENCE_STEPS
+    from ..core.prompts import EVIDENCE_STEPS
 
     try:
         index = EVIDENCE_STEPS.index(current)

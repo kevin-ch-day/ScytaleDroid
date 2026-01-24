@@ -33,18 +33,18 @@ def _catalog_guardStrength(permission: str) -> str | None:
 
 def persist_permission_matrix(
     *,
-    run_id: int | None,
+    static_run_id: int | None,
     package_name: str,
     apk_id: int | None,
     permission_profiles: Mapping[str, Mapping[str, object]] | None,
 ) -> None:
     """Persist permission profile metadata when available."""
 
-    if run_id is None or not matrix_db.ensure_table():
+    if static_run_id is None or not matrix_db.ensure_table():
         return
 
     if not permission_profiles:
-        matrix_db.replace_for_run(int(run_id), ())
+        matrix_db.replace_for_run(int(static_run_id), ())
         return
 
     rows: list[dict[str, object]] = []
@@ -96,7 +96,7 @@ def persist_permission_matrix(
             is_flagged_normal = int(bool(profile.get("is_flagged_normal"))) if isinstance(profile, Mapping) else 0
 
             row = {
-                "run_id": int(run_id),
+                "run_id": int(static_run_id),
                 "apk_id": apk_id,
                 "package_name": package_name,
                 "permission_name": name,
@@ -123,7 +123,7 @@ def persist_permission_matrix(
             )
 
     try:
-        matrix_db.replace_for_run(int(run_id), rows)
+        matrix_db.replace_for_run(int(static_run_id), rows)
     except Exception as exc:
         log.warning(
             f"Failed to persist permission matrix for {package_name}: {exc}",

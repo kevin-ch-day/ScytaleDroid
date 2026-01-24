@@ -28,7 +28,7 @@ from scytaledroid.StaticAnalysis.modules.string_analysis import (
 from scytaledroid.Utils.System import output_prefs
 
 from ..core import ManifestFlags, StaticAnalysisReport
-from .cvss_v4 import score_vector, severity_band
+from ..core.cvss_v4 import score_vector, severity_band
 
 _WIDTH = 78
 

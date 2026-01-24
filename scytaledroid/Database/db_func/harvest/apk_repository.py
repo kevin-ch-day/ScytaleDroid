@@ -174,7 +174,7 @@ def ensure_app_definition(
     app_name: Optional[str] = None,
     *,
     category_name: Optional[str] = None,
-    profile_id: Optional[str] = None,
+    profile_key: Optional[str] = None,
     profile_name: Optional[str] = None,
     context: Optional[Mapping[str, object]] = None,
 ) -> int:
@@ -223,25 +223,25 @@ def ensure_app_definition(
             update_fields.append("category_id = %s")
             update_params.append(category_id)
 
-        if profile_id and str(profile_id).strip():
-            if column_flags["profile_id"]:
-                update_fields.append("profile_id = %s")
-                update_params.append(str(profile_id).strip())
+        if profile_key and str(profile_key).strip():
+            if column_flags["profile_key"]:
+                update_fields.append("profile_key = %s")
+                update_params.append(str(profile_key).strip())
             else:
                 _warn_missing_profile_columns()
 
         if profile_name and profile_name.strip():
-            if column_flags["profile_name"]:
-                update_fields.append("profile_name = %s")
-                update_params.append(profile_name.strip())
-            else:
-                _warn_missing_profile_columns()
+            log.debug(
+                "Profile display names are now sourced from android_app_profiles; "
+                "skipping direct apps.profile_name updates.",
+                category="database",
+            )
 
         if update_fields:
             set_clause = ", ".join(update_fields + ["updated_at = CURRENT_TIMESTAMP"])
             update_params.append(cleaned_package)
             run_sql(
-                f"""UPDATE android_app_definitions
+                f"""UPDATE apps
                 SET {set_clause}
                 WHERE package_name = %s""",
                 tuple(update_params),
@@ -254,24 +254,24 @@ def ensure_app_definition(
 
 @lru_cache(maxsize=1)
 def _get_definition_profile_columns() -> Dict[str, bool]:
-    """Return availability flags for profile columns on android_app_definitions."""
+    """Return availability flags for profile columns on apps."""
 
     try:
         rows = run_sql(
             """
             SELECT COLUMN_NAME
             FROM information_schema.columns
-            WHERE table_schema = DATABASE() AND table_name = 'android_app_definitions'
+            WHERE table_schema = DATABASE() AND table_name = 'apps'
             """,
             fetch="all",
             dictionary=True,
         ) or []
     except Exception as exc:  # pragma: no cover - defensive
         log.warning(
-            f"Failed to inspect android_app_definitions columns: {exc}",
+            f"Failed to inspect apps columns: {exc}",
             category="database",
         )
-        return {"profile_id": False, "profile_name": False}
+        return {"profile_key": False}
 
     normalised = {
         str(entry.get("COLUMN_NAME")).lower()
@@ -279,8 +279,7 @@ def _get_definition_profile_columns() -> Dict[str, bool]:
         if isinstance(entry, dict) and entry.get("COLUMN_NAME")
     }
     return {
-        "profile_id": "profile_id" in normalised,
-        "profile_name": "profile_name" in normalised,
+        "profile_key": "profile_key" in normalised,
     }
 
 
@@ -296,8 +295,8 @@ def _warn_missing_profile_columns() -> None:
 
     _PROFILE_WARNING_EMITTED = True
     log.warning(
-        "Profile metadata detected but android_app_definitions lacks profile_id/profile_name columns."
-        " Run the database migration to add them.",
+        "Profile metadata detected but apps lacks profile_key."
+        " Run the database migration to add it.",
         category="database",
     )
 

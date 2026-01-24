@@ -12,22 +12,22 @@ from scytaledroid.Utils.DisplayUtils import (
     table_utils,
 )
 
-from ..core.repository import ArtifactGroup, list_categories, list_packages
-from .models import ScopeSelection
+from ..core.repository import ArtifactGroup, list_categories, list_packages, load_profile_map
+from ..core.models import ScopeSelection
 
 
 def format_scope_target(selection: ScopeSelection) -> str:
     if selection.scope == "app":
         return f"App={selection.label}"
-    if selection.scope == "category":
-        return f"Category={selection.label}"
+    if selection.scope == "profile":
+        return f"Profile={selection.label}"
     return "All apps"
 
 
 def select_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
     print()
-    menu_utils.print_header("Scope", "Select the analysis scope (app, category, or all)")
-    options = {"1": "App", "2": "Category", "3": "All apps"}
+    menu_utils.print_header("Scope", "Select the analysis scope (app, profile, or all)")
+    options = {"1": "App", "2": "Profile", "3": "All apps"}
     for key, label in options.items():
         print(f" {key}) {label}")
     choice = prompt_utils.get_choice(list(options.keys()), default="1")
@@ -47,7 +47,10 @@ def select_app_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
         return ScopeSelection("all", "All apps", tuple(groups))
 
     print()
-    menu_utils.print_header("Scope — App", "Select a package (latest capture chosen automatically)")
+    menu_utils.print_header(
+        "Static Analysis · Scope (App)",
+        "Select a package (latest capture chosen automatically)",
+    )
     rows: list[list[str]] = []
     lookup_labels: list[str] = []
     for idx, (package, version, _count, app_label) in enumerate(packages, start=1):
@@ -59,7 +62,7 @@ def select_app_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
         else:
             lookup_labels.append(package)
 
-    table_utils.render_table(["#", "App / Package"], rows, padding=1)
+    table_utils.render_table(["#", "App / Package"], rows, padding=1, compact=True)
 
     index = _resolve_index(
         "Select package # or name",
@@ -84,18 +87,25 @@ def select_app_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
 def select_category_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
     categories = list_categories(groups)
     if not categories:
-        print(status_messages.status("No category data available.", level="warn"))
+        print(status_messages.status("No profile data available.", level="warn"))
         prompt_utils.press_enter_to_continue()
         return ScopeSelection("all", "All apps", tuple(groups))
 
     print()
-    menu_utils.print_header("Scope — Category", "Select category")
+    print("Static Analysis · Scope (Profile)")
+    print("-" * 86)
     rows = [[str(idx), category, str(count)] for idx, (category, count) in enumerate(categories, start=1)]
-    table_utils.render_table(["#", "Category", "Apps"], rows)
+    table_utils.render_table(["#", "Profile", "Apps"], rows, compact=True)
+    print(f"Status: profiles={len(categories)}")
 
-    index = _resolve_index("Select category # or name", [category for category, _ in categories])
+    index = _resolve_index("Select profile #", [category for category, _ in categories])
     category_name, _ = categories[index]
-    scoped_all = tuple(group for group in groups if getattr(group, "category", None) == category_name)
+    profile_map = load_profile_map(groups)
+    scoped_all = tuple(
+        group
+        for group in groups
+        if (profile_map.get(group.package_name) or group.category or "Uncategorized") == category_name
+    )
     grouped: dict[str, list[ArtifactGroup]] = {}
     order: list[str] = []
     for group in scoped_all:
@@ -123,7 +133,7 @@ def select_category_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
     scoped = tuple(collapsed)
     if scoped:
         print()
-        menu_utils.print_header("Category selection", f"{category_name} apps selected (latest capture)")
+        menu_utils.print_header("Profile selection", f"{category_name} apps selected (latest capture)")
         rows: list[list[str]] = []
         for group in scoped:
             base_artifact = group.base_artifact or next(iter(group.artifacts), None)
@@ -134,7 +144,7 @@ def select_category_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
             session_stamp = group.session_stamp or "undated"
             rows.append([group.package_name, str(label), session_stamp, str(len(group.artifacts))])
         table_utils.render_table(["Package", "App label", "Session", "Artifacts"], rows)
-    return ScopeSelection("category", category_name, scoped)
+    return ScopeSelection("profile", category_name, scoped)
 
 
 def _resolve_index(prompt: str, labels: Sequence[str]) -> int:

@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import os
 
-from scytaledroid.StaticAnalysis.cli.runner import launch_scan_flow
+from scytaledroid.StaticAnalysis.cli.flows.run_dispatch import launch_scan_flow
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
