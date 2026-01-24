@@ -10,6 +10,7 @@ def _row(package: str, *, installer="com.android.vending", primary="/data/app/pk
         installer=installer,
         category=None,
         primary_path=primary,
+        profile_key=None,
         profile=None,
         version_name=None,
         version_code=None,

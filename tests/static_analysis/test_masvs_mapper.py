@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from scytaledroid.StaticAnalysis.cli.masvs_mapper import summarise_controls
+from scytaledroid.StaticAnalysis.cli.core.masvs_mapper import summarise_controls
 
 
 def test_masvs_mapper_includes_provider_diff_rules():

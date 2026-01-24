@@ -23,9 +23,9 @@ except Exception:  # pragma: no cover - Python < 3.9 or missing module
 
 from scytaledroid.Config.app_config import APP_VERSION
 
-from ..core import StaticAnalysisReport
-from ..core.findings import Badge, DetectorResult, Finding
-from ..core.repository import ArtifactGroup
+from ...core import StaticAnalysisReport
+from ...core.findings import Badge, DetectorResult, Finding
+from ...core.repository import ArtifactGroup
 from .glyphs import GlyphSet
 from .options import ScanDisplayOptions, describe_cli_flags
 from ..views.sections import (

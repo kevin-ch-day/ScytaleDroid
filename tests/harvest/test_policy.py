@@ -15,6 +15,7 @@ def _row(
     installer: str = "com.android.vending",
     profile: str | None = None,
 ) -> InventoryRow:
+    profile_key = profile.upper() if profile else None
     return InventoryRow(
         raw={},
         package_name=package_name,
@@ -22,6 +23,7 @@ def _row(
         installer=installer,
         category=None,
         primary_path=primary_path,
+        profile_key=profile_key,
         profile=profile,
         version_name=None,
         version_code=None,

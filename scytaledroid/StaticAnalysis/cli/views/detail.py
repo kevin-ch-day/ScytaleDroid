@@ -7,7 +7,7 @@ from typing import Dict, Iterable, Mapping, Sequence, Set
 
 from scytaledroid.Utils.DisplayUtils import status_messages, table_utils, prompt_utils
 
-from ..core.findings import EvidencePointer, SeverityLevel
+from ...core.findings import EvidencePointer, SeverityLevel
 from ..core.models import AppRunResult
 from .sections import SECTION_DEFINITIONS
 

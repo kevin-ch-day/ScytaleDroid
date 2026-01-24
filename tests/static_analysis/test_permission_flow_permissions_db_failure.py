@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from scytaledroid.StaticAnalysis.cli.execution import permission_flow
-from scytaledroid.StaticAnalysis.cli.models import RunParameters, ScopeSelection
+from scytaledroid.StaticAnalysis.cli.core.models import RunParameters, ScopeSelection
 from scytaledroid.StaticAnalysis.core.repository import ArtifactGroup, RepositoryArtifact
 from scytaledroid.Utils.ops.operation_result import OperationResult
 

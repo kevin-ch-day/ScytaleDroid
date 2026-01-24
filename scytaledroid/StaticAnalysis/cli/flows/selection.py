@@ -12,7 +12,7 @@ from scytaledroid.Utils.DisplayUtils import (
     table_utils,
 )
 
-from ..core.repository import ArtifactGroup, list_categories, list_packages, load_profile_map
+from ...core.repository import ArtifactGroup, list_categories, list_packages, load_profile_map
 from ..core.models import ScopeSelection
 
 

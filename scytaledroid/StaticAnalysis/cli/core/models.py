@@ -9,9 +9,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Mapping, Optional, Tuple
 
-from ..core import StaticAnalysisReport
-from ..core.repository import ArtifactGroup
-from ..session import make_session_stamp
+from ...core import StaticAnalysisReport
+from ...core.repository import ArtifactGroup
+from ...session import make_session_stamp
 
 
 @dataclass(frozen=True)

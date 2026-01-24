@@ -123,7 +123,7 @@ def static_analysis_menu() -> None:
     from scytaledroid.Database.db_utils.menus import query_runner
     from scytaledroid.Database.db_utils.reset_static import reset_static_analysis_data
 
-    from ..core.repository import group_artifacts
+    from scytaledroid.StaticAnalysis.core.repository import group_artifacts
     from ..commands import COMMANDS, get_command, iter_commands
     from ..core.models import RunParameters
     from ..core.prompts import default_custom_tests, prompt_advanced_options

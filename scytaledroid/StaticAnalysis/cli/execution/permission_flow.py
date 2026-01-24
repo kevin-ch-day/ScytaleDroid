@@ -45,7 +45,8 @@ def execute_permission_scan(
 
     last_report = None
     last_category = None
-    persistence_failed = False
+    permission_persist_failed = False
+    audit_persist_failed = False
     for group in scope_groups:
         artifacts = group.artifacts
         if not artifacts:
@@ -83,7 +84,7 @@ def execute_permission_scan(
                     )
                 )
             except Exception:
-                persistence_failed = True
+                permission_persist_failed = True
                 logging_engine.get_error_logger().exception(
                     "Permission analysis persistence failed",
                     extra=logging_engine.ensure_trace(
@@ -258,13 +259,16 @@ def execute_permission_scan(
         linkage = {"status": "partial", "reason": "static_run_id_missing"}
     if linkage:
         snapshot_payload["linkage"] = linkage
-    persist_result = accumulator.persist_to_db(snapshot_payload)
+    try:
+        persist_result = accumulator.persist_to_db()
+    except TypeError:
+        persist_result = accumulator.persist_to_db(snapshot_payload)
     if not persist_result.ok:
-        persistence_failed = True
+        audit_persist_failed = True
         message = persist_result.user_message or "Permission audit persistence failed."
         print(status_messages.status(f"{message} See logs for traceback.", level="warn"))
     if static_run_id and persist_detections:
-        run_status = "FAILED" if persistence_failed else "COMPLETED"
+        run_status = "FAILED" if audit_persist_failed else "COMPLETED"
         update_static_run_status(
             static_run_id=static_run_id,
             status=run_status,
