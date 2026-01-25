@@ -1,0 +1,78 @@
+:root {
+  color-scheme: light;
+  --bg: #f4efe7;
+  --bg-soft: #fbf8f3;
+  --card: #ffffff;
+  --border: #e4ddd3;
+  --ink: #1f1d1a;
+  --muted: #6f665a;
+  --accent: #1f1d1a;
+  --accent-soft: #f3ede3;
+  --accent-2: #f7c65a;
+  --accent-3: #c2b39e;
+}
+
+body {
+  background: radial-gradient(circle at top left, #fff6dd 0%, var(--bg) 45%, #ede6da 100%);
+  color: var(--ink);
+}
+
+nav a {
+  color: var(--ink);
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow: 0 12px 30px rgba(46, 39, 30, 0.08);
+}
+
+input[type="text"], select {
+  border: 1px solid #d7cdbf;
+  background: #fff;
+}
+
+input[type="file"] {
+  border: 1px dashed #d7cdbf;
+  background: var(--bg-soft);
+}
+
+button {
+  background: var(--accent);
+  color: #fff;
+}
+
+button.secondary {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+button:hover {
+  box-shadow: 0 6px 18px rgba(31, 29, 26, 0.14);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.badge {
+  background: var(--accent-2);
+  color: var(--ink);
+}
+
+th {
+  color: var(--muted);
+}
+
+pre {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+}
+
+@media (max-width: 720px) {
+  body {
+    padding: 20px;
+  }
+}

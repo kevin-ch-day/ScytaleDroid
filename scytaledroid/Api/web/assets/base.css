@@ -1,0 +1,40 @@
+body {
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  margin: 0;
+  padding: 32px;
+}
+
+.card {
+  border-radius: 16px;
+  padding: 20px;
+  margin-bottom: 16px;
+  position: relative;
+  overflow: hidden;
+}
+
+nav a {
+  margin-right: 10px;
+  text-decoration: none;
+  font-weight: 600;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+}
+
+label {
+  font-size: 13px;
+  font-weight: 600;
+  display: block;
+  margin-bottom: 6px;
+}
+
+.muted {
+  font-size: 13px;
+}
+
+pre {
+  padding: 12px;
+  border-radius: 12px;
+}

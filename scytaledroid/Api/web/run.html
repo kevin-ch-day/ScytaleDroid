@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Run Viewer</title>
+    <link rel="stylesheet" href="/assets/theme.css" />
+    <link rel="stylesheet" href="/assets/base.css" />
+    <link rel="stylesheet" href="/assets/app.css" />
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <div>
+          <h1>Run Viewer</h1>
+          <div class="muted">Inspect a session using ?session=SESSION_STAMP.</div>
+        </div>
+        <nav>
+          <a href="/">Home</a>
+          <a href="/ui/upload">Upload</a>
+          <a href="/ui/jobs">Jobs</a>
+          <a href="/ui/runs">Runs</a>
+        </nav>
+      </header>
+
+      <div class="card">
+        <div id="runStatus" class="muted">Loading...</div>
+        <pre id="runCounts" class="muted"></pre>
+        <div class="row">
+          <a class="badge" id="statusLink">Status JSON</a>
+          <a class="badge" id="reportLink">Report JSON</a>
+          <a class="badge" id="evidenceLink">Evidence ZIP</a>
+        </div>
+      </div>
+    </div>
+    <script src="/assets/api.js"></script>
+    <script src="/assets/ui.js"></script>
+    <script src="/assets/app.js"></script>
+    <script>
+      const params = new URLSearchParams(window.location.search);
+      const session = params.get("session");
+      if (session) {
+        document.getElementById("statusLink").href = `/run/${session}/status`;
+        document.getElementById("reportLink").href = `/run/${session}/report.json`;
+        document.getElementById("evidenceLink").href = `/run/${session}/evidence.zip`;
+      }
+    </script>
+  </body>
+</html>

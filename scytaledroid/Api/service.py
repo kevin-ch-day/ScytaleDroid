@@ -28,6 +28,8 @@ try:  # optional database access for status queries
 except Exception:  # pragma: no cover - offline mode
     core_q = None
 
+WEB_DIR = Path(__file__).resolve().parent / "web"
+
 
 @dataclass
 class JobRecord:
@@ -135,10 +137,12 @@ def _collect_run_status(session_stamp: str) -> dict[str, Any]:
 
 def build_api_app() -> "FastAPI":
     from fastapi import FastAPI, File, HTTPException, UploadFile
-    from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, StreamingResponse
+    from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
+    from fastapi.staticfiles import StaticFiles
     from pydantic import BaseModel
 
     app = FastAPI(title="ScytaleDroid API", version=app_config.APP_VERSION)
+    app.mount("/assets", StaticFiles(directory=WEB_DIR / "assets"), name="assets")
 
     class ScanRequest(BaseModel):
         apk_path: str
@@ -172,65 +176,24 @@ def build_api_app() -> "FastAPI":
         }
 
     @app.get("/")
-    def root_status() -> HTMLResponse:
-        html = f"""<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>ScytaleDroid API</title>
-    <style>
-      body {{
-        font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
-        background: #f6f3ee;
-        color: #1f1d1a;
-        margin: 0;
-        padding: 32px;
-      }}
-      .card {{
-        background: #ffffff;
-        border: 1px solid #e4ddd3;
-        border-radius: 16px;
-        max-width: 760px;
-        padding: 24px;
-        box-shadow: 0 12px 30px rgba(46, 39, 30, 0.08);
-      }}
-      h1 {{
-        margin: 0 0 8px;
-        font-size: 24px;
-      }}
-      p {{
-        margin: 6px 0 14px;
-      }}
-      code {{
-        background: #f3ede3;
-        padding: 2px 6px;
-        border-radius: 6px;
-      }}
-      ul {{
-        padding-left: 18px;
-      }}
-    </style>
-  </head>
-  <body>
-    <div class="card">
-      <h1>ScytaleDroid API</h1>
-      <p>Status: <strong>ok</strong></p>
-      <p>Version: <code>{app_config.APP_VERSION}</code></p>
-      <p>Endpoints</p>
-      <ul>
-        <li><code>POST /upload</code> — upload an APK</li>
-        <li><code>POST /scan</code> — start a static scan</li>
-        <li><code>GET /job/{{job_id}}</code> — job status</li>
-        <li><code>GET /run/{{session_stamp}}/status</code></li>
-        <li><code>GET /run/{{session_stamp}}/report.json</code></li>
-        <li><code>GET /run/{{session_stamp}}/evidence.zip</code></li>
-      </ul>
-    </div>
-  </body>
-</html>
-"""
-        return HTMLResponse(content=html)
+    def root_status() -> FileResponse:
+        return FileResponse(WEB_DIR / "index.html", media_type="text/html")
+
+    @app.get("/ui/upload")
+    def ui_upload() -> FileResponse:
+        return FileResponse(WEB_DIR / "upload.html", media_type="text/html")
+
+    @app.get("/ui/jobs")
+    def ui_jobs() -> FileResponse:
+        return FileResponse(WEB_DIR / "jobs.html", media_type="text/html")
+
+    @app.get("/ui/run")
+    def ui_run() -> FileResponse:
+        return FileResponse(WEB_DIR / "run.html", media_type="text/html")
+
+    @app.get("/ui/runs")
+    def ui_runs() -> FileResponse:
+        return FileResponse(WEB_DIR / "runs.html", media_type="text/html")
 
     @app.post("/scan")
     def scan_apk(payload: ScanRequest) -> JSONResponse:
@@ -289,6 +252,65 @@ def build_api_app() -> "FastAPI":
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
         return _serialize_job(job)
+
+    @app.get("/jobs")
+    def jobs_list(limit: int = 25) -> dict[str, Any]:
+        with _jobs_lock:
+            jobs = list(_jobs.values())
+        jobs = sorted(jobs, key=lambda entry: entry.created_at, reverse=True)[:limit]
+        return {"jobs": [_serialize_job(job) for job in jobs]}
+
+    @app.get("/runs")
+    def runs_list(limit: int = 25) -> dict[str, Any]:
+        if core_q is None:
+            return {"runs": []}
+        rows = core_q.run_sql(
+            """
+            SELECT sar.session_stamp, sar.status, a.package_name
+            FROM static_analysis_runs sar
+            JOIN app_versions av ON av.id = sar.app_version_id
+            JOIN apps a ON a.id = av.app_id
+            ORDER BY sar.id DESC
+            LIMIT %s
+            """,
+            (limit,),
+            fetch="all",
+        )
+        runs = [
+            {
+                "session_stamp": row[0],
+                "status": row[1],
+                "package_name": row[2],
+            }
+            for row in (rows or [])
+        ]
+        return {"runs": runs}
+
+    @app.get("/health/summary")
+    def health_summary() -> dict[str, Any]:
+        if core_q is None:
+            return {"status": "db_unavailable"}
+        rows = core_q.run_sql(
+            """
+            SELECT status, COUNT(*) AS n
+            FROM static_analysis_runs
+            WHERE ended_at_utc >= (UTC_TIMESTAMP() - INTERVAL 1 DAY)
+            GROUP BY status
+            """,
+            fetch="all",
+        )
+        running_total = core_q.run_sql(
+            """
+            SELECT COUNT(*) FROM static_analysis_runs
+            WHERE status='RUNNING' AND ended_at_utc IS NULL
+            """,
+            fetch="one",
+        )
+        return {
+            "status": "ok",
+            "last_24h": {row[0]: int(row[1]) for row in (rows or [])},
+            "running_total": int(running_total[0]) if running_total else 0,
+        }
 
     @app.get("/run/{session_stamp}/status")
     def run_status(session_stamp: str) -> dict[str, Any]:

@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Jobs</title>
+    <link rel="stylesheet" href="/assets/theme.css" />
+    <link rel="stylesheet" href="/assets/base.css" />
+    <link rel="stylesheet" href="/assets/app.css" />
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <div>
+          <h1>Jobs</h1>
+          <div class="muted">Recent scan jobs on this host.</div>
+        </div>
+        <nav>
+          <a href="/">Home</a>
+          <a href="/ui/upload">Upload</a>
+          <a href="/ui/runs">Runs</a>
+        </nav>
+      </header>
+
+      <div class="card">
+        <div id="jobsStatus" class="muted">Loading...</div>
+        <table>
+          <thead>
+            <tr>
+              <th>Job</th>
+              <th>State</th>
+              <th>Session</th>
+              <th>Package</th>
+            </tr>
+          </thead>
+          <tbody id="jobsTable"></tbody>
+        </table>
+      </div>
+    </div>
+    <script src="/assets/api.js"></script>
+    <script src="/assets/ui.js"></script>
+    <script src="/assets/app.js"></script>
+  </body>
+</html>

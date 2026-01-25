@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Upload APK</title>
+    <link rel="stylesheet" href="/assets/theme.css" />
+    <link rel="stylesheet" href="/assets/base.css" />
+    <link rel="stylesheet" href="/assets/app.css" />
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <div>
+          <h1>Upload & Scan</h1>
+          <div class="muted">Upload an APK and start a static scan.</div>
+        </div>
+        <nav>
+          <a href="/">Home</a>
+          <a href="/ui/jobs">Jobs</a>
+          <a href="/ui/runs">Runs</a>
+        </nav>
+      </header>
+
+      <div class="card">
+        <div class="row">
+          <div>
+            <label for="apkFile">APK file</label>
+            <input id="apkFile" type="file" />
+          </div>
+          <div>
+            <label for="profile">Profile</label>
+            <select id="profile">
+              <option value="full">full</option>
+              <option value="lightweight">lightweight</option>
+              <option value="permissions">permissions</option>
+              <option value="metadata">metadata</option>
+            </select>
+          </div>
+          <div>
+            <label for="scopeLabel">Scope label (optional)</label>
+            <input id="scopeLabel" type="text" placeholder="e.g., demo scan" />
+          </div>
+        </div>
+        <div class="row" style="margin-top: 12px;">
+          <button id="uploadBtn">Upload</button>
+          <button id="scanBtn" class="secondary" disabled>Start scan</button>
+        </div>
+        <p id="uploadStatus" class="muted">Waiting for upload.</p>
+        <p id="jobStatus" class="muted">No job started.</p>
+        <div id="runLinks" class="muted"></div>
+      </div>
+    </div>
+    <script src="/assets/api.js"></script>
+    <script src="/assets/ui.js"></script>
+    <script src="/assets/app.js"></script>
+  </body>
+</html>
