@@ -6,7 +6,6 @@ Prefer importing from this module in new code.
 
 from __future__ import annotations
 
-from .simple import render_permission_postcard as render
+from .permission_console_rendering import render_permission_postcard as render
 
 __all__ = ["render"]
-

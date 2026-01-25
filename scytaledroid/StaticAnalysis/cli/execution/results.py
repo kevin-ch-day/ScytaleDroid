@@ -44,9 +44,11 @@ from ...persistence.ingest import ingest_baseline_payload
 from .scan_flow import format_duration
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_scripts.static_run_audit import collect_static_run_counts
-from scytaledroid.StaticAnalysis.modules.permissions.simple import (
+from scytaledroid.StaticAnalysis.modules.permissions.permission_console_rendering import (
     render_permission_matrix,
     _classify_permissions as _perm_classify,
+)
+from scytaledroid.StaticAnalysis.modules.permissions.permission_protection_lookup import (
     _fetch_protections as _perm_fetch_protections,
 )
 from scytaledroid.StaticAnalysis.risk.permission import (

@@ -11,8 +11,10 @@ from scytaledroid.StaticAnalysis.risk.permission import (
     permission_risk_grade as _perm_grade,
     permission_risk_score_detail as _perm_detail,
 )
-from scytaledroid.StaticAnalysis.modules.permissions.simple import (
+from scytaledroid.StaticAnalysis.modules.permissions.permission_console_rendering import (
     _classify_permissions as _classify,
+)
+from scytaledroid.StaticAnalysis.modules.permissions.permission_protection_lookup import (
     _fetch_protections as _prot_map,
 )
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
