@@ -1,15 +1,18 @@
+* {
+  box-sizing: border-box;
+}
+
 body {
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
   margin: 0;
   padding: 32px;
 }
 
-.card {
-  border-radius: 16px;
-  padding: 20px;
-  margin-bottom: 16px;
-  position: relative;
-  overflow: hidden;
+label {
+  font-size: 13px;
+  font-weight: 600;
+  display: block;
+  margin-bottom: 6px;
 }
 
 nav a {
@@ -21,13 +24,6 @@ nav a {
   align-items: center;
   gap: 6px;
   padding: 6px 12px;
-}
-
-label {
-  font-size: 13px;
-  font-weight: 600;
-  display: block;
-  margin-bottom: 6px;
 }
 
 .muted {

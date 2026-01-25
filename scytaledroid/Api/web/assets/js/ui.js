@@ -13,8 +13,16 @@ function setHtml(id, html) {
 }
 
 function formatDate(seconds) {
-  if (!seconds) return "-";
-  const date = new Date(seconds * 1000);
+  if (seconds === null || seconds === undefined || seconds === "") return "-";
+  if (typeof seconds === "string" && seconds.includes("T")) {
+    const parsed = new Date(seconds);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toLocaleString();
+    }
+  }
+  const num = Number(seconds);
+  if (Number.isNaN(num)) return "-";
+  const date = new Date(num * 1000);
   return date.toLocaleString();
 }
 

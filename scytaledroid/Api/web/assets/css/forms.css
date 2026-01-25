@@ -1,0 +1,27 @@
+input[type="text"], select {
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 14px;
+  min-width: 220px;
+}
+
+input[type="file"] {
+  border-radius: 10px;
+  padding: 10px;
+}
+
+button {
+  border: none;
+  border-radius: 10px;
+  padding: 10px 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+button.secondary {
+}
+
+button:hover {
+  transform: translateY(-1px);
+}

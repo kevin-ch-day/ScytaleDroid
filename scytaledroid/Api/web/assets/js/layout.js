@@ -15,7 +15,6 @@ function buildSidebar() {
       <a href="/ui/runs">Runs (debug)</a>
       <a href="/ui/ops">Ops</a>
       <a href="/ui/run">Run Viewer</a>
-      <a href="/ui/report">Report</a>
     </nav>
   `;
 }
