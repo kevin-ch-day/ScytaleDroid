@@ -15,19 +15,102 @@
         <div id="pageHeader" class="page-header"></div>
         <main class="container">
           <div class="card">
+            <h2>Report Viewer</h2>
             <div id="reportStatus" class="muted">Loading report…</div>
-            <div id="reportHeader" class="stat-grid"></div>
           </div>
+
           <div class="card">
-            <h2>Findings Summary</h2>
+            <h3>Identity</h3>
+            <div id="reportIdentity" class="stat-grid"></div>
+          </div>
+
+          <div class="card">
+            <h3>Run & Risk</h3>
+            <div id="reportRun" class="stat-grid"></div>
+            <div id="reportRisk" class="stat-grid"></div>
+          </div>
+
+          <div class="card">
+            <h3>Indicators</h3>
+            <div id="reportIndicators" class="stat-grid"></div>
+          </div>
+
+          <div class="card">
+            <h3>Findings Summary</h3>
             <div id="reportFindings" class="stat-grid"></div>
           </div>
+
           <div class="card">
-            <h2>Detectors</h2>
-            <div id="reportDetectors" class="muted">No detector data.</div>
+            <h3>Components</h3>
+            <div id="reportComponents" class="stat-grid"></div>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Type</th>
+                    <th>Exported (Top)</th>
+                  </tr>
+                </thead>
+                <tbody id="reportComponentsTable"></tbody>
+              </table>
+            </div>
           </div>
+
           <div class="card">
-            <h2>Report JSON</h2>
+            <h3>Permissions (Top)</h3>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Permission</th>
+                    <th>Risk</th>
+                    <th>Protection</th>
+                    <th>Namespace</th>
+                  </tr>
+                </thead>
+                <tbody id="reportPermissionsTable"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3>Findings (Top)</h3>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Title</th>
+                    <th>Status</th>
+                    <th>MASVS</th>
+                    <th>Tags</th>
+                    <th>Evidence</th>
+                  </tr>
+                </thead>
+                <tbody id="reportFindingsTable"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3>Detectors</h3>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Detector</th>
+                    <th>Status</th>
+                    <th>Duration</th>
+                    <th>Findings</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody id="reportDetectorsTable"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3>Report JSON</h3>
             <pre id="reportJson" class="muted"></pre>
           </div>
         </main>
