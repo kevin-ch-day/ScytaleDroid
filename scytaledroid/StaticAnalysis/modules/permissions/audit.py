@@ -57,6 +57,24 @@ _SIGNAL_OBSERVATION_CONFIG: Mapping[str, Dict[str, object]] = {
         "rationale": "Contacts permissions requested.",
         "permissions": ("READ_CONTACTS", "WRITE_CONTACTS", "GET_ACCOUNTS"),
     },
+    "calendar": {
+        "severity_band": "WARN",
+        "score": 5,
+        "rationale": "Calendar permissions requested.",
+        "permissions": ("READ_CALENDAR", "WRITE_CALENDAR"),
+    },
+    "sensors": {
+        "severity_band": "WARN",
+        "score": 6,
+        "rationale": "Body sensors or health data permissions requested.",
+        "permissions": ("BODY_SENSORS", "BODY_SENSORS_BACKGROUND", "HEALTH_CONNECT"),
+    },
+    "activity_recognition": {
+        "severity_band": "WARN",
+        "score": 5,
+        "rationale": "Activity recognition permission requested.",
+        "permissions": ("ACTIVITY_RECOGNITION",),
+    },
     "background_location": {
         "severity_band": "WARN",
         "score": 7,
@@ -112,6 +130,9 @@ class AppSignals:
     background_location: bool = False
     overlay: bool = False
     contacts: bool = False
+    calendar: bool = False
+    sensors: bool = False
+    activity_recognition: bool = False
     calls: bool = False
     sms: bool = False
     storage_broad: bool = False
@@ -154,6 +175,9 @@ def compute_signal_flags(
         background_location=has_any("ACCESS_BACKGROUND_LOCATION"),
         overlay=groups.get("OVR", 0) >= 1,
         contacts=groups.get("CNT", 0) >= 1,
+        calendar=groups.get("CAL", 0) >= 1,
+        sensors=groups.get("SENS", 0) >= 1,
+        activity_recognition=groups.get("ACT", 0) >= 1,
         calls=groups.get("PHN", 0) >= 1,
         sms=groups.get("SMS", 0) >= 1,
         storage_broad=has_any("READ_EXTERNAL_STORAGE", "WRITE_EXTERNAL_STORAGE", "MANAGE_EXTERNAL_STORAGE"),
@@ -1131,16 +1155,16 @@ class PermissionAuditAccumulator:
                     )
 
                 if app_static_run_id is not None and signals_table_exists:
-                        has_gov_version = _has_column("permission_signal_observations", "governance_version")
-                        has_gov_sha = _has_column("permission_signal_observations", "governance_sha256")
-                        if governance_version is None or governance_sha is None:
-                            if not signal_write_failed:
-                                log.warning(
-                                    "Governance snapshot missing; skipping permission signal persistence.",
-                                    category="db",
-                                )
-                            signal_write_failed = True
-                            continue
+                    has_gov_version = _has_column("permission_signal_observations", "governance_version")
+                    has_gov_sha = _has_column("permission_signal_observations", "governance_sha256")
+                    if governance_version is None or governance_sha is None:
+                        if not signal_write_failed:
+                            log.warning(
+                                "Governance snapshot missing; skipping permission signal persistence.",
+                                category="db",
+                            )
+                        signal_write_failed = True
+                    else:
                         extra_columns: list[str] = []
                         extra_placeholders: list[str] = []
                         extra_updates: list[str] = []
@@ -1168,7 +1192,12 @@ class PermissionAuditAccumulator:
                                     artifact_token = str(row[0])
                             except Exception:
                                 pass
-                            signal_dir = evidence_base / str(app_static_run_id) / app.package / artifact_token
+                            signal_dir = (
+                                evidence_base
+                                / str(app_static_run_id)
+                                / app.package
+                                / artifact_token
+                            )
                             try:
                                 signal_dir.mkdir(parents=True, exist_ok=True)
                             except Exception:
@@ -1203,7 +1232,14 @@ class PermissionAuditAccumulator:
                                 )
                             if not wrote_signal:
                                 continue
-                            evidence_path = str(Path("evidence") / "static_runs" / str(app_static_run_id) / app.package / artifact_token / signal_file.name)
+                            evidence_path = str(
+                                Path("evidence")
+                                / "static_runs"
+                                / str(app_static_run_id)
+                                / app.package
+                                / artifact_token
+                                / signal_file.name
+                            )
                             payload = {
                                 "static_run_id": app_static_run_id,
                                 "package_name": app.package,

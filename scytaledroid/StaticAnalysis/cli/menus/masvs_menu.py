@@ -204,7 +204,7 @@ def render_scoring_explainer_menu() -> None:
     print()
     menu_utils.print_header("Risk Scoring", "Explainer")
     try:
-        from scytaledroid.StaticAnalysis.modules.permissions.simple import render_scoring_legend
+        from scytaledroid.StaticAnalysis.modules.permissions.permission_console_rendering import render_scoring_legend
         render_scoring_legend()
     except Exception as exc:
         print(status_messages.status(f"Unable to render scoring legend: {exc}", level="warn"))
