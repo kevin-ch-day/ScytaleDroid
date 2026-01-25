@@ -15,14 +15,13 @@ def fetch_framework_protections(short_names: Iterable[str]) -> Mapping[str, Opti
     if not names:
         return {}
     try:
-        from scytaledroid.Database.db_func.permissions.detected_permissions import (
-            framework_protection_map,
+        from scytaledroid.Database.db_func.permissions.permission_dicts import (
+            fetch_aosp_protection_map,
         )
 
-        return framework_protection_map(names)
+        return fetch_aosp_protection_map(names)
     except Exception:
         return {}
 
 
 __all__ = ["fetch_framework_protections"]
-

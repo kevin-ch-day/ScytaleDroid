@@ -85,7 +85,24 @@ def table_exists() -> bool:
 
 def upsert(payload: Mapping[str, object]) -> None:
     if _IS_SQLITE:
-        run_sql(SQLITE_UPSERT, payload)
+        try:
+            run_sql(SQLITE_UPSERT, payload)
+        except Exception:
+            run_sql("DELETE FROM static_permission_risk WHERE apk_id = %s", (payload.get("apk_id"),))
+            insert_stmt = """
+            INSERT INTO static_permission_risk (
+              apk_id, app_id, package_name, sha256,
+              session_stamp, scope_label,
+              risk_score, risk_grade,
+              dangerous, signature, vendor
+            ) VALUES (
+              %(apk_id)s, %(app_id)s, %(package_name)s, %(sha256)s,
+              %(session_stamp)s, %(scope_label)s,
+              %(risk_score)s, %(risk_grade)s,
+              %(dangerous)s, %(signature)s, %(vendor)s
+            )
+            """
+            run_sql(insert_stmt, payload)
     else:
         run_sql(queries.UPSERT_RISK, payload)
 

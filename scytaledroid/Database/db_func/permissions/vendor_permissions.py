@@ -10,29 +10,22 @@ from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
 def ensure_table() -> bool:
-    ok = table_exists()
-    if not ok:
-        log.warning(
-            "android_vendor_permissions missing; run DBA migrations.",
-            category="database",
-        )
-    return ok
+    log.warning(
+        "android_vendor_permissions is deprecated; use android_permission_dict_oem.",
+        category="database",
+    )
+    return False
 
 
 def table_exists() -> bool:
-    try:
-        row = run_sql(queries.TABLE_EXISTS, fetch="one")
-        return bool(row and int(row[0]) > 0)
-    except Exception:
-        return False
+    return False
 
 
 def upsert_vendor_permission(payload: Mapping[str, object]) -> None:
-    params = dict(payload)
-    # Remove legacy fields if present in the payload
-    params.pop("occurrences", None)
-    params.pop("first_seen_apk", None)
-    run_sql(queries.UPSERT_VENDOR, params)
+    log.warning(
+        "vendor permission upsert ignored (deprecated).",
+        category="database",
+    )
 
 
 __all__ = [

@@ -120,13 +120,19 @@ def _load_yaml_catalog(path: Path, *, origin: Optional[str] = None) -> Mapping[s
 
 
 def _load_db_catalog() -> tuple[Mapping[str, PermissionDescriptor], str]:
-    try:  # optional DB dependency
-        from scytaledroid.Database.db_func.permissions import framework_permissions as fp
+    try:
+        from scytaledroid.Database.db_core import db_queries as _core_q
     except Exception:
         return {}, "0"
 
     try:
-        rows = fp.fetch_catalog_entries()
+        rows = _core_q.run_sql(
+            """
+            SELECT constant_value, protection_level, added_in_api_level, deprecated_in_api_level
+            FROM android_permission_dict_aosp
+            """,
+            fetch="all",
+        )
     except Exception:
         rows = []
     if not rows:
@@ -134,21 +140,21 @@ def _load_db_catalog() -> tuple[Mapping[str, PermissionDescriptor], str]:
 
     entries: MutableMapping[str, PermissionDescriptor] = {}
     for row in rows:
-        if not isinstance(row, Mapping):
+        if not row:
             continue
-        name = str(row.get("perm_name") or row.get("name") or "").strip()
+        name = str(row[0] or "").strip()
         if not name:
             continue
-        tokens = _normalise_tokens(row.get("protection_raw") or row.get("protection") or "")
+        tokens = _normalise_tokens(row[1] or "")
         entries[name] = PermissionDescriptor(
             name=name,
             protection=tokens,
-            source=str(row.get("source") or "db"),
-            added_api=_coerce_int(row.get("added_api")),
-            deprecated_api=_coerce_int(row.get("deprecated_api")),
+            source="dict_aosp",
+            added_api=_coerce_int(row[2]),
+            deprecated_api=_coerce_int(row[3]),
         )
 
-    version = fp.catalog_fingerprint()
+    version = str(len(entries))
     return entries, version
 
 

@@ -1162,7 +1162,7 @@ def persist_run_summary(
         "exports.total": (float(getattr(getattr(br, "exported_components", None), "total", lambda: 0)()), None),
         "permissions.dangerous_count": (float(getattr(metrics_bundle, "dangerous_permissions", 0)), None),
         "permissions.signature_count": (float(getattr(metrics_bundle, "signature_permissions", 0)), None),
-        "permissions.vendor_count": (float(getattr(metrics_bundle, "vendor_permissions", 0)), None),
+        "permissions.oem_count": (float(getattr(metrics_bundle, "oem_permissions", 0)), None),
         "permissions.flagged_normal_count": (flagged_normal_metric, None),
         "permissions.weak_guard_count": (weak_guard_metric, None),
         "permissions.risk_score": (float(getattr(metrics_bundle, "permission_score", 0.0)), None),

@@ -37,7 +37,7 @@ class MetricsBundle:
     uses_cleartext: bool
     dangerous_permissions: int
     signature_permissions: int
-    vendor_permissions: int
+    oem_permissions: int
     permission_score: float
     permission_grade: str
     permission_detail: Mapping[str, Any]
@@ -146,7 +146,7 @@ def compute_metrics_bundle(report: Any, string_data: Mapping[str, object]) -> Me
     rc, groups, vc, _fw_ds, _vn = _classify([(n, "uses-permission") for n in declared], pmap)
     dangerous = rc.get("dangerous", 0)
     signature = rc.get("signature", 0)
-    vendor = vc.get("ADS", 0)
+    oem = vc.get("ADS", 0)
     flags = flags or type("_Flags", (), {
         "allow_backup": False,
         "request_legacy_external_storage": False,
@@ -155,7 +155,7 @@ def compute_metrics_bundle(report: Any, string_data: Mapping[str, object]) -> Me
     raw_detail = _perm_detail(
         dangerous=dangerous,
         signature=signature,
-        vendor=vendor,
+        vendor=oem,
         groups=groups,
         target_sdk=target_sdk,
         allow_backup=getattr(flags, "allow_backup", False),
@@ -173,7 +173,8 @@ def compute_metrics_bundle(report: Any, string_data: Mapping[str, object]) -> Me
     detail.setdefault("grade", permission_grade)
     detail.setdefault("dangerous_count", int(dangerous))
     detail.setdefault("signature_count", int(signature))
-    detail.setdefault("vendor_count", int(vendor))
+    detail.setdefault("oem_count", int(oem))
+    detail.setdefault("vendor_count", int(oem))
     detail.setdefault("flagged_normal_count", flagged_normals)
     detail.setdefault("weak_guard_count", int(weak_guard_count))
     if flagged_normals_set and "flagged_permissions" not in detail:
@@ -229,7 +230,7 @@ def compute_metrics_bundle(report: Any, string_data: Mapping[str, object]) -> Me
         if sig_components:
             dangerous_pts = _points(sig_components.get("dangerous", 0.0))
             signature_pts = _points(sig_components.get("signature", 0.0))
-            vendor_pts = _points(sig_components.get("vendor", 0.0))
+            vendor_pts = _points(sig_components.get("oem", sig_components.get("vendor", 0.0)))
             if dangerous_pts:
                 contributors.append((
                     "permissions_dangerous",
@@ -246,9 +247,9 @@ def compute_metrics_bundle(report: Any, string_data: Mapping[str, object]) -> Me
                 ))
             if vendor_pts:
                 contributors.append((
-                    "permissions_vendor",
+                    "permissions_oem",
                     vendor_pts,
-                    f"Vendor/ads permissions (+{vendor_pts})",
+                    f"OEM/custom permissions (+{vendor_pts})",
                     0,
                 ))
         penalty_components = detail.get("penalty_components", {}) if isinstance(detail, Mapping) else {}
@@ -359,7 +360,7 @@ def compute_metrics_bundle(report: Any, string_data: Mapping[str, object]) -> Me
         uses_cleartext=uses_cleartext,
         dangerous_permissions=int(detail.get("dangerous_count", dangerous)),
         signature_permissions=int(detail.get("signature_count", signature)),
-        vendor_permissions=int(detail.get("vendor_count", vendor)),
+        oem_permissions=int(detail.get("oem_count", oem)),
         permission_score=permission_score,
         permission_grade=permission_grade,
         permission_detail=dict(detail),

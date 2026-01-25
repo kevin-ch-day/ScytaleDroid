@@ -174,11 +174,11 @@ def _fetch_protections(
     an empty mapping.
     """
     try:  # optional DB dependency
-        from scytaledroid.Database.db_func.permissions.detected_permissions import (
-            framework_protection_map,
+        from scytaledroid.Database.db_func.permissions.permission_dicts import (
+            fetch_aosp_protection_map,
         )
 
-        db_map = framework_protection_map(names, target_sdk=target_sdk)
+        db_map = fetch_aosp_protection_map(names, target_sdk=target_sdk)
     except Exception:
         db_map = {}
 
@@ -279,7 +279,7 @@ def print_permissions_block(
             print(f"  {permission}")
 
     if custom_perms:
-        print(f"Custom/vendor permissions ({len(custom_perms)}):")
+        print(f"Custom/OEM permissions ({len(custom_perms)}):")
         for permission in custom_perms:
             print(f"  {permission}")
 
@@ -325,7 +325,7 @@ _GROUP_ORDER = (
     "BT",   # Bluetooth/Nearby
     "OVR",  # Overlay
     "NOT",  # Notifications
-    "ADS",  # Ads/Attribution (vendor)
+    "ADS",  # Ads/Attribution (OEM/custom)
 )
 
 
@@ -335,16 +335,16 @@ def _classify_permissions(
 ) -> Tuple[Dict[str, int], Dict[str, int], Dict[str, int], set[str], set[str]]:
     """Return counts per class and group signals.
 
-    Returns (risk_counts, group_strength, vendor_counts)
+    Returns (risk_counts, group_strength, oem_counts)
     - risk_counts: counts of framework protections (dangerous/signature/normal/other)
     - group_strength: 0/1/2 intensity for each group key
-    - vendor_counts: count of vendor permissions overall and by group
+    - oem_counts: count of OEM/custom permissions overall and by group
     """
 
     risk_counts: Dict[str, int] = {"dangerous": 0, "signature": 0, "normal": 0, "other": 0}
     group_strength, fw_ds = compute_group_strengths(declared, protection_map)
-    vendor_counts: Dict[str, int] = {"ADS": 0}
-    vendor_names: set[str] = set()
+    oem_counts: Dict[str, int] = {"ADS": 0}
+    oem_names: set[str] = set()
 
     for name, _tag in declared:
         is_framework = name.startswith("android.")
@@ -358,10 +358,10 @@ def _classify_permissions(
         else:
             # Vendor/custom
             if "AD_ID" in short or "ADVERTISING" in short or "INSTALL_REFERRER" in short:
-                vendor_counts["ADS"] = vendor_counts.get("ADS", 0) + 1
-            vendor_names.add(name)
+                oem_counts["ADS"] = oem_counts.get("ADS", 0) + 1
+            oem_names.add(name)
 
-    return risk_counts, group_strength, vendor_counts, fw_ds, vendor_names
+    return risk_counts, group_strength, oem_counts, fw_ds, oem_names
 
 
 def _normalize_permission_key(name: str) -> str:
@@ -383,11 +383,11 @@ def _collect_declared_tokens(
 def _build_declared_origins(
     declared_sources: Mapping[str, Sequence[Tuple[str, str]]],
     fw_ds: Sequence[str],
-    vendor_names: Sequence[str],
+    oem_names: Sequence[str],
 ) -> Dict[str, str]:
     origins: Dict[str, str] = {}
     fw_set = {key.upper() for key in fw_ds}
-    vendor_set = set(vendor_names)
+    vendor_set = set(oem_names)
     for artifact_label, perms in declared_sources.items():
         origin = "base" if artifact_label == "base" else f"split:{artifact_label}"
         for perm_name, _ in perms:
@@ -585,11 +585,11 @@ def render_permission_postcard(
         legacy_ext_flag = bool(le) if le is not None else None
 
     protection_map = _fetch_protections(shorts_only, target_sdk=target_sdk_val)
-    risk_counts, groups, vendor, fw_ds, vendor_names = _classify_permissions(declared, protection_map)
+    risk_counts, groups, oem_counts, fw_ds, oem_names = _classify_permissions(declared, protection_map)
 
     d = risk_counts.get("dangerous", 0)
     s = risk_counts.get("signature", 0)
-    v = vendor.get("ADS", 0)
+    v = oem_counts.get("ADS", 0)
 
     detail = dict(
         permission_risk_score_detail(
@@ -627,7 +627,7 @@ def render_permission_postcard(
     detail.setdefault("unexpected_signals", [])
     detail.setdefault("grade_basis", "fixed_thresholds")
     print(f"[{index}/{total}] {app_label}  {bar}")
-    print(f"Risk {score:.3f}   (D:{d}  S:{s}  V:{v})  Grade {grade}")
+    print(f"Risk {score:.3f}   (D:{d}  S:{s}  O:{v})  Grade {grade}")
     if high_tags:
         tags = "".join(f"[{t}]" for t in high_tags)
         print(f"High-signal:  {tags}")
@@ -650,11 +650,12 @@ def render_permission_postcard(
         "D": d,
         "S": s,
         "V": v,
+        "O": v,
         "groups": groups,
         "footprint": footprint,
         "persona": persona,
         "fw_ds": fw_ds,
-        "vendor_names": vendor_names,
+        "vendor_names": oem_names,
         "risk_counts": risk_counts,
         "score_detail": detail,
     }
@@ -669,7 +670,7 @@ def render_barcode_line(package_name: str, label: str, profile: Mapping[str, obj
 
 def render_after_run_summary(rows: Sequence[Mapping[str, object]]) -> None:
     from scytaledroid.Utils.DisplayUtils import table_utils
-    headers = ["Abbr", "Score", "Grade", "D", "S", "V"]
+    headers = ["Abbr", "Score", "Grade", "D", "S", "O"]
     formatted = []
     for item in rows:
         label = f"{item['label']}"
@@ -682,7 +683,7 @@ def render_after_run_summary(rows: Sequence[Mapping[str, object]]) -> None:
             grade,
             str(item.get("D", 0)),
             str(item.get("S", 0)),
-            str(item.get("V", 0)),
+            str(item.get("O", item.get("V", 0))),
         ])
     print("Risk Summary — Top apps (by permission risk)")
     print("-" * 75)
@@ -701,7 +702,7 @@ def render_signal_matrix(items: Sequence[Mapping[str, object]]) -> None:
         if key in {"OVR", "NOT"}:
             return "S" if g >= 2 else ("D" if g == 1 else "·")
         if key == "ADS":
-            return "A" if item.get("V", 0) > 0 else "·"
+            return "A" if item.get("O", item.get("V", 0)) > 0 else "·"
         return "D" if g >= 1 else "·"
     signals = [
         ("Precise location", "LOC"),
@@ -789,11 +790,11 @@ def render_scoring_legend() -> None:
 
     print("\nScoring Model — Weights & Thresholds")
     print("-" * 38)
-    print(f"Weights: dangerous={dw:.2f}, signature={sw:.2f}, vendor={vw:.2f}")
+    print(f"Weights: dangerous={dw:.2f}, signature={sw:.2f}, oem={vw:.2f}")
     print(f"Breadth bonus: step={step:.2f}, cap={cap:.2f}")
     print("Modernization credit (max 0.8): +0.3 if targetSdk≥34; +0.3 if requestLegacyExternalStorage is absent; +0.2 if allowBackup=false")
     print("Grades: A≤2.0  B≤4.0  C≤6.5  D≤8.0  F>8.0")
-    print("Notes: vendor reflects ads/attribution; breadth counts distinct capability groups requested.")
+    print("Notes: OEM reflects ads/attribution; breadth counts distinct capability groups requested.")
 
 
 # ------------------------------
@@ -917,5 +918,5 @@ def render_permission_matrix(
 
     print("\nLegend:")
     print("X = framework (dangerous/signature)")
-    print("* = vendor/custom/ads")
+    print("* = oem/custom/ads")
     print("- = not requested")

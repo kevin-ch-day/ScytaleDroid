@@ -974,9 +974,9 @@ def _build_permission_profile(report, app_result) -> Optional[dict[str, object]]
     except Exception:
         protection_map = {}
     try:
-        risk_counts, groups, vendor_counts, fw_ds, vendor_names = _perm_classify(declared_pairs, protection_map)
+        risk_counts, groups, oem_counts, fw_ds, oem_names = _perm_classify(declared_pairs, protection_map)
     except Exception:
-        risk_counts, groups, vendor_counts, fw_ds, vendor_names = ({}, {}, {}, set(), set())
+        risk_counts, groups, oem_counts, fw_ds, oem_names = ({}, {}, {}, set(), set())
 
     detector_metrics = getattr(report, "detector_metrics", None)
     permissions_metrics: Mapping[str, object] | None = None
@@ -1013,7 +1013,7 @@ def _build_permission_profile(report, app_result) -> Optional[dict[str, object]]
 
     d = int(risk_counts.get("dangerous", 0))
     s = int(risk_counts.get("signature", 0))
-    v = int(vendor_counts.get("ADS", 0))
+    v = int(oem_counts.get("ADS", 0))
 
     try:
         detail = permission_risk_score_detail(
@@ -1053,9 +1053,10 @@ def _build_permission_profile(report, app_result) -> Optional[dict[str, object]]
         "D": d,
         "S": s,
         "V": v,
+        "O": v,
         "groups": groups,
         "fw_ds": set(fw_ds),
-        "vendor_names": set(vendor_names),
+        "vendor_names": set(oem_names),
         "risk_counts": risk_counts,
         "score_detail": detail,
         "flagged_normals": flagged_normals,

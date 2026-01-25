@@ -39,14 +39,10 @@ def main() -> None:
         return
 
     if args.cmd == "write-db":
-        from scytaledroid.Database.db_func.permissions import framework_permissions as fp
-        if not fp.table_exists() and not fp.ensure_table():
-            raise SystemExit("Unable to prepare android_framework_permissions table.")
-        cat = load_cached_or_refresh(DEFAULT_CACHE)
-        if not cat.items:
-            raise SystemExit("No catalog items loaded.")
-        processed = fp.upsert_permissions(cat.items, source="cli")
-        print(f"Upserts: {processed} / Items: {len(cat.items)}")
+        print(
+            "Framework permission DB writes are deprecated. "
+            "Use governance imports for android_permission_dict_aosp."
+        )
         return
 
     if args.cmd == "find":
@@ -77,4 +73,3 @@ def main() -> None:
 
 
 __all__ = ["main"]
-

@@ -6,22 +6,16 @@ from typing import List
 
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuSpec, MenuOption
-from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from scytaledroid.Database.db_utils import diagnostics
-from scytaledroid.Database.db_func.permissions import framework_permissions as fp
+from scytaledroid.Database.db_utils import diagnostics
 
 from scytaledroid.Utils.AndroidPermCatalog.loader import load_permission_doc, ONLINE_URL
 from scytaledroid.Utils.AndroidPermCatalog.parser import parse_manifest_permissions
 
 
 def _ensure_table() -> bool:
-    if fp.table_exists():
-        return True
-    created = fp.ensure_table()
-    if created:
-        log.info("Created framework_permissions table", category="database")
-    return created
+    return True
 
 
 def _harvest_and_write(*, limit: int | None) -> None:
@@ -35,8 +29,8 @@ def _harvest_and_write(*, limit: int | None) -> None:
         print(status_messages.status(f"Parse failed: {exc}", level="error"))
         return
 
-    if not _ensure_table():
-        print(status_messages.status("Database table could not be created.", level="error"))
+    if not diagnostics.check_connection():
+        print(status_messages.status("Database connection failed.", level="error"))
         return
 
     payloads: List[dict] = []
@@ -59,9 +53,11 @@ def _harvest_and_write(*, limit: int | None) -> None:
             }
         )
 
-    processed = fp.upsert_permissions(payloads, source=source_label, limit=limit)
-    total = len(payloads) if limit is None else min(len(payloads), limit)
-    print(status_messages.status(f"Upserted {processed}/{total} permissions from {source_label}", level="success"))
+    print(status_messages.status(
+        "Framework permission DB writes are deprecated. "
+        "Use governance imports for android_permission_dict_aosp.",
+        level="warn",
+    ))
 
 
 def perm_catalog_db_menu() -> None:
@@ -82,13 +78,8 @@ def perm_catalog_db_menu() -> None:
 
         if choice == "1":
             ok = diagnostics.check_connection()
-            table_ok = _ensure_table() if ok else False
-            if ok and table_ok:
-                count = fp.count_rows()
-                count_text = f" ({count} row(s))" if count is not None else ""
-                print(status_messages.status(f"Database OK; framework_permissions ready{count_text}.", level="success"))
-            elif ok and not table_ok:
-                print(status_messages.status("Connected but unable to create framework_permissions table.", level="warn"))
+            if ok:
+                print(status_messages.status("Database OK; use governance import for dict tables.", level="success"))
             else:
                 print(status_messages.status("Database connection failed.", level="error"))
             continue

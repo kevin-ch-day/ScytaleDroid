@@ -262,9 +262,25 @@ def upsert_summary(summary: SummaryRow) -> int | None:
         """
         try:
             with database_session():
-                run_sql(stmt, payload)
+                try:
+                    run_sql(stmt, payload)
+                except Exception:
+                    fallback_stmt = """
+                    INSERT INTO static_string_summary (
+                      package_name, session_stamp, scope_label, run_id, static_run_id,
+                      endpoints, http_cleartext, api_keys, analytics_ids, cloud_refs, ipc, uris, flags, certs,
+                      high_entropy, placeholders_downgraded, placeholders_suppressed, doc_hosts_suppressed,
+                      doc_cdns_suppressed, trailing_punct_trimmed, ws_wss_seen, ipv6_seen
+                    ) VALUES (
+                      %(package_name)s, %(session_stamp)s, %(scope_label)s, %(run_id)s, %(static_run_id)s,
+                      %(endpoints)s, %(http_cleartext)s, %(api_keys)s, %(analytics_ids)s, %(cloud_refs)s, %(ipc)s, %(uris)s, %(flags)s, %(certs)s,
+                      %(high_entropy)s, %(placeholders_downgraded)s, %(placeholders_suppressed)s, %(doc_hosts_suppressed)s,
+                      %(doc_cdns_suppressed)s, %(trailing_punct_trimmed)s, %(ws_wss_seen)s, %(ipv6_seen)s
+                    )
+                    """
+                    run_sql(fallback_stmt, payload)
                 row = run_sql(
-                    "SELECT id FROM static_string_summary WHERE package_name=%s AND session_stamp=%s AND scope_label=%s",
+                    "SELECT id FROM static_string_summary WHERE package_name=%s AND session_stamp=%s AND scope_label=%s ORDER BY id DESC LIMIT 1",
                     (payload["package_name"], payload["session_stamp"], payload["scope_label"]),
                     fetch="one",
                 )

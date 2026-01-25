@@ -10,43 +10,28 @@ from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
 def ensure_table() -> bool:
-    ok = table_exists()
-    if not ok:
-        log.warning(
-            "android_unknown_permissions missing; run DBA migrations.",
-            category="database",
-        )
-    return ok
+    log.warning(
+        "android_unknown_permissions is deprecated; use android_permission_dict_unknown.",
+        category="database",
+    )
+    return False
 
 
 def table_exists() -> bool:
-    try:
-        row = run_sql(queries.TABLE_EXISTS, fetch="one")
-        return bool(row and int(row[0]) > 0)
-    except Exception:
-        return False
+    return False
 
 
 def upsert_unknown_permission(payload: Mapping[str, object]) -> None:
-    params = dict(payload)
-    # Remove legacy fields if present in the payload
-    params.pop("observed_in_pkg", None)
-    params.pop("observed_in_sha256", None)
-    params.pop("occurrences", None)
-    run_sql(queries.UPSERT_UNKNOWN, params)
+    log.warning(
+        "unknown permission upsert ignored (deprecated).",
+        category="database",
+    )
 
 
 def mark_ghost_aosp(perm_name: str, baseline_version: str) -> None:
-    if not perm_name:
-        return
-    try:
-        run_sql(
-            queries.UPDATE_GHOST,
-            {"perm_name": perm_name, "ghost_baseline_version": baseline_version},
-        )
-    except Exception as exc:
+    if perm_name:
         log.warning(
-            f"Failed to update GhostAOSP flag for {perm_name}: {exc}",
+            "ghost AOSP updates are deprecated; use dict triage_status instead.",
             category="database",
         )
 

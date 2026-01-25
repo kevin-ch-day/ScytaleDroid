@@ -37,12 +37,16 @@ def perm_catalog_menu() -> None:
         # DB status hint (concise)
         try:
             from scytaledroid.Database.db_core import db_config as _dbc
-            from scytaledroid.Database.db_func.permissions import framework_permissions as _fp
-            row_count = _fp.count_rows()
+            from scytaledroid.Database.db_core import db_queries as _core_q
             cfg = _dbc.DB_CONFIG
-            db_name = cfg.get('database')
+            db_name = cfg.get("database")
+            row = _core_q.run_sql(
+                "SELECT COUNT(*) FROM android_permission_dict_aosp",
+                fetch="one",
+            )
+            row_count = int(row[0]) if row and row[0] is not None else None
             if row_count is None:
-                menu_utils.print_hint(f"DB: {db_name} — unable to query android_framework_permissions")
+                menu_utils.print_hint(f"DB: {db_name} — unable to query android_permission_dict_aosp")
             else:
                 menu_utils.print_hint(f"DB: {db_name} — {row_count} row(s)")
         except Exception:
@@ -59,9 +63,9 @@ def perm_catalog_menu() -> None:
         print("  3) Validate catalog")
 
         # No separate Database section heading — keep menu compact
-        print("  4) Write framework catalog to DB")
+        print("  4) Write framework catalog to DB (deprecated)")
         print("  5) Verify DB load (counts by protection)")
-        print("  6) Ensure permission tables (FW/Vendor/Unknown)")
+        print("  6) Ensure permission tables (dict/meta)")
 
         choice = prompt_utils.get_choice(["1","2","3","4","5","6","0"], default="0")
 
@@ -78,26 +82,10 @@ def perm_catalog_menu() -> None:
                 level="success",
             ))
             _validate_and_report(catalog.items)
-            from scytaledroid.Database.db_func.permissions import framework_permissions as fp
-            if not fp.table_exists() and not fp.ensure_table():
-                print(status_messages.status("Unable to prepare android_framework_permissions table.", level="error"))
-                continue
-            try:
-                processed = fp.upsert_permissions(catalog.items, source="online")
-                print(status_messages.status(f"Upserts: {processed} / Items: {len(catalog.items)}", level="success"))
-            except Exception as exc:
-                print(status_messages.status(f"DB write failed: {exc}", level="error"))
-                continue
-            # Verify DB counts
-            try:
-                from scytaledroid.Database.db_core import db_queries as _core_q
-                from scytaledroid.Database.db_queries.permissions import framework_permissions as _fpq
-                rows = _core_q.run_sql(_fpq.PROTECTION_COUNTS, fetch="all")
-                print()
-                menu_utils.print_section("DB: Counts by protection")
-                table_utils.render_table(["Protection", "Count"], rows or [])
-            except Exception as exc:
-                print(status_messages.status(f"DB verify failed: {exc}", level="error"))
+            print(status_messages.status(
+                "DB writes are handled by governance imports for android_permission_dict_aosp.",
+                level="info",
+            ))
             continue
 
         # Validate only
@@ -121,39 +109,27 @@ def perm_catalog_menu() -> None:
 
         # Write to DB
         if choice == "4":
-            from scytaledroid.Database.db_func.permissions import framework_permissions as fp
-            if not fp.table_exists() and not fp.ensure_table():
-                print(status_messages.status("Unable to prepare android_framework_permissions table.", level="error"))
-                continue
-            catalog = load_cached_or_refresh(cache_path, source=source)
-            if not catalog.items:
-                continue
-            try:
-                processed = fp.upsert_permissions(catalog.items, source=source)
-                print(status_messages.status(f"Upserts: {processed} / Items: {len(catalog.items)}", level="success"))
-            except Exception as exc:
-                print(status_messages.status(f"DB write failed: {exc}", level="error"))
-                continue
-            # DB counts summary
-            try:
-                from scytaledroid.Database.db_core import db_queries as _core_q
-                from scytaledroid.Database.db_queries.permissions import framework_permissions as _fpq
-                rows = _core_q.run_sql(_fpq.PROTECTION_COUNTS, fetch="all")
-                print()
-                menu_utils.print_section("DB: Counts by protection")
-                table_utils.render_table(["Protection", "Count"], rows or [])
-            except Exception:
-                pass
+            print(status_messages.status(
+                "Framework catalog writes are deprecated. Use governance import for dict tables.",
+                level="warn",
+            ))
             continue
 
         # Verify DB load (counts by protection)
         if choice == "5":
             try:
                 from scytaledroid.Database.db_core import db_queries as _core_q
-                from scytaledroid.Database.db_queries.permissions import framework_permissions as _fpq
-                rows = _core_q.run_sql(_fpq.PROTECTION_COUNTS, fetch="all")
+                rows = _core_q.run_sql(
+                    """
+                    SELECT COALESCE(protection_level, '(null)') AS protection, COUNT(*) AS total
+                    FROM android_permission_dict_aosp
+                    GROUP BY COALESCE(protection_level, '(null)')
+                    ORDER BY total DESC
+                    """,
+                    fetch="all",
+                )
                 print()
-                menu_utils.print_section("DB: Counts by protection")
+                menu_utils.print_section("DB: Counts by protection (dict)")
                 table_utils.render_table(["Protection", "Count"], rows or [])
             except Exception as exc:
                 print(status_messages.status(f"DB verify failed: {exc}", level="error"))
@@ -169,21 +145,36 @@ def perm_catalog_menu() -> None:
                     continue
             except Exception:
                 pass
-            ok_fw = ok_v = ok_u = ok_d = False
+            ok_aosp = ok_oem = ok_unknown = ok_queue = ok_meta = False
             try:
-                from scytaledroid.Database.db_func.permissions import framework_permissions as _fw
-                from scytaledroid.Database.db_func.permissions import vendor_permissions as _vp
-                from scytaledroid.Database.db_func.permissions import unknown_permissions as _up
-                from scytaledroid.Database.db_func.permissions import detected_permissions as _dp
-                ok_fw = _fw.ensure_table()
-                ok_v = _vp.ensure_table()
-                ok_u = _up.ensure_table()
-                ok_d = _dp.ensure_table()
+                from scytaledroid.Database.db_core import db_queries as _core_q
+
+                def _table_ok(name: str) -> bool:
+                    row = _core_q.run_sql(
+                        (
+                            "SELECT COUNT(*) FROM information_schema.tables "
+                            "WHERE table_schema = DATABASE() AND table_name = %s"
+                        ),
+                        (name,),
+                        fetch="one",
+                    )
+                    return bool(row and int(row[0]) > 0)
+
+                ok_aosp = _table_ok("android_permission_dict_aosp")
+                ok_oem = _table_ok("android_permission_dict_oem")
+                ok_unknown = _table_ok("android_permission_dict_unknown")
+                ok_queue = _table_ok("android_permission_dict_queue")
+                ok_meta = _table_ok("android_permission_meta_oem_vendor")
             except Exception:
                 pass
-            level = "success" if (ok_fw and ok_v and ok_u and ok_d) else ("warn" if (ok_fw or ok_v or ok_u or ok_d) else "error")
+            level = "success" if (ok_aosp and ok_oem and ok_unknown and ok_queue and ok_meta) else ("warn" if (ok_aosp or ok_oem or ok_unknown or ok_queue or ok_meta) else "error")
             print(status_messages.status(
-                f"Tables ensured → framework={'OK' if ok_fw else 'FAIL'}, vendor={'OK' if ok_v else 'FAIL'}, unknown={'OK' if ok_u else 'FAIL'}, detected={'OK' if ok_d else 'FAIL'}",
+                "Tables ensured → "
+                f"aosp={'OK' if ok_aosp else 'FAIL'}, "
+                f"oem={'OK' if ok_oem else 'FAIL'}, "
+                f"unknown={'OK' if ok_unknown else 'FAIL'}, "
+                f"queue={'OK' if ok_queue else 'FAIL'}, "
+                f"meta={'OK' if ok_meta else 'FAIL'}",
                 level=level,
             ))
             continue

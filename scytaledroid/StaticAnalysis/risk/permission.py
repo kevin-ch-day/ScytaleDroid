@@ -219,6 +219,7 @@ def _compute_score_detail(
         "dangerous": d * dangerous_weight,
         "signature": s * signature_weight,
         "vendor": vendor_component,
+        "oem": vendor_component,
     }
 
     fn = max(0, int(flagged_normals or 0))
@@ -266,6 +267,7 @@ def _compute_score_detail(
             "dangerous": dangerous_weight,
             "signature": signature_weight,
             "vendor": vendor_weight,
+            "oem": vendor_weight,
             "breadth_step": breadth_step,
             "breadth_cap": breadth_cap,
         },
@@ -273,6 +275,7 @@ def _compute_score_detail(
         "penalty_components": penalty_components,
         "signal_score_subtotal": base_total,
         "vendor_cap_applied": vendor_component != vendor_component_raw,
+        "oem_cap_applied": vendor_component != vendor_component_raw,
         "breadth": {
             "groups_present": groups_present,
             "applied": breadth,
@@ -284,6 +287,7 @@ def _compute_score_detail(
         "dangerous_count": d,
         "signature_count": s,
         "vendor_count": v,
+        "oem_count": v,
         "flagged_normal_count": fn,
         "weak_guard_count": wg,
         "penalty_weights": {

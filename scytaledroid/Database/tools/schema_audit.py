@@ -3,10 +3,8 @@
 Run standalone or from Database Utilities to inspect and optionally fix tables.
 
 Goals:
-  - android_detected_permissions uses apk_id + namespace + perm_key uniqueness
-  - Backfill apk_id from android_apk_repository via sha256
-  - Drop legacy columns (version_name, version_code, sha256) when possible
   - harvest_artifact_paths does not contain stray source_path column
+  - legacy permission table audits are skipped (deprecated)
 """
 
 from __future__ import annotations
@@ -31,105 +29,21 @@ def _index_exists(table: str, index_name: str) -> bool:
     return bool(row and int(row[0]) > 0)
 
 
+def _table_exists(table: str) -> bool:
+    row = core_q.run_sql(
+        (
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = DATABASE() AND table_name = %s"
+        ),
+        (table,),
+        fetch="one",
+    )
+    return bool(row and int(row[0]) > 0)
+
+
 def audit_detected_permissions(apply_fixes: bool = False) -> Tuple[List[str], List[str]]:
-    issues: List[str] = []
-    fixes_applied: List[str] = []
-
-    cols = get_table_columns("android_detected_permissions") or []
-    has_apk_id = "apk_id" in cols
-    has_sha = "sha256" in cols
-    has_ver = ("version_name" in cols) or ("version_code" in cols)
-    has_apk_unique = _index_exists("android_detected_permissions", "ux_detected_perm_apk_ns")
-    has_perm_full = "perm_full" in cols
-    has_perm_key = "perm_key" in cols
-    has_namespace = "namespace" in cols
-    # Foreign key check (best-effort)
-    def _fk_exists() -> bool:
-        row = core_q.run_sql(
-            (
-                "SELECT COUNT(*) FROM information_schema.referential_constraints "
-                "WHERE constraint_schema = DATABASE() AND table_name = 'android_detected_permissions' "
-                "AND constraint_name = 'fk_detected_apk'"
-            ),
-            fetch="one",
-        )
-        return bool(row and int(row[0]) > 0)
-    has_fk = _fk_exists()
-    has_sha_unique = _index_exists("android_detected_permissions", "ux_detected_perm_sha")
-
-    if not has_apk_id:
-        issues.append("detected_permissions missing apk_id column")
-        if apply_fixes:
-            core_q.run_sql(
-                "ALTER TABLE android_detected_permissions ADD COLUMN apk_id BIGINT UNSIGNED NULL AFTER detected_id"
-            )
-            fixes_applied.append("added apk_id column")
-            has_apk_id = True
-
-    # Backfill apk_id from sha256 if possible (fix mode only)
-    if apply_fixes and has_apk_id and has_sha:
-        # Force binary comparison to avoid collation mismatch across tables
-        core_q.run_sql(
-            """
-            UPDATE android_detected_permissions dp
-            JOIN android_apk_repository ar ON BINARY dp.sha256 = BINARY ar.sha256
-            SET dp.apk_id = ar.apk_id
-            WHERE dp.apk_id IS NULL
-            """
-        )
-        fixes_applied.append("backfilled apk_id from repository (binary match)")
-
-    if not has_apk_unique:
-        issues.append("detected_permissions missing unique index (apk_id, namespace, perm_key)")
-        if apply_fixes and has_apk_id and has_namespace and has_perm_key:
-            core_q.run_sql(
-                "ALTER TABLE android_detected_permissions ADD UNIQUE KEY ux_detected_perm_apk_ns (apk_id, namespace, perm_key)"
-            )
-            fixes_applied.append("added unique on (apk_id, namespace, perm_key)")
-
-    if not (has_perm_full and has_perm_key and has_namespace):
-        issues.append("detected_permissions missing perm_full/perm_key/namespace columns")
-
-    if has_sha_unique:
-        issues.append("legacy unique index ux_detected_perm_sha present")
-        if apply_fixes:
-            core_q.run_sql(
-                "ALTER TABLE android_detected_permissions DROP INDEX ux_detected_perm_sha"
-            )
-            fixes_applied.append("dropped legacy unique ux_detected_perm_sha")
-
-    # Add FK to repository if not present (optional)
-    if apply_fixes and has_apk_id and not has_fk:
-        try:
-            core_q.run_sql(
-                "ALTER TABLE android_detected_permissions ADD CONSTRAINT fk_detected_apk FOREIGN KEY (apk_id) REFERENCES android_apk_repository(apk_id)"
-            )
-            fixes_applied.append("added foreign key fk_detected_apk")
-        except Exception:
-            pass
-
-    # Drop legacy columns if requested
-    if (has_sha or has_ver) and apply_fixes:
-        drops = []
-        for c in ("version_name", "version_code", "sha256"):
-            if c in cols:
-                drops.append(f"DROP COLUMN {c}")
-        if drops:
-            core_q.run_sql("ALTER TABLE android_detected_permissions " + ", ".join(drops))
-            fixes_applied.append("dropped legacy version/sha columns")
-
-    # Enforce NOT NULL on apk_id if requested
-    if has_apk_id and apply_fixes:
-        try:
-            core_q.run_sql(
-                "ALTER TABLE android_detected_permissions MODIFY apk_id BIGINT UNSIGNED NOT NULL"
-            )
-            fixes_applied.append("enforced NOT NULL on apk_id")
-        except Exception:
-            # If rows still NULL due to missing repository mapping, keep it nullable
-            pass
-
-    return issues, fixes_applied
+    """Deprecated legacy audit stub (kept for backward imports)."""
+    return [], []
 
 
 def audit_harvest_paths(apply_fixes: bool = False) -> Tuple[List[str], List[str]]:
@@ -156,10 +70,6 @@ def audit_harvest_paths(apply_fixes: bool = False) -> Tuple[List[str], List[str]
     return issues, fixes_applied
 
 
-def _unknown_unique_exists() -> bool:
-    return _index_exists("android_unknown_permissions", "ux_android_unknown_perm")
-
-
 def _indexes_for_columns(table: str, columns: Sequence[str]) -> List[str]:
     if not columns:
         return []
@@ -184,78 +94,21 @@ def _indexes_for_columns(table: str, columns: Sequence[str]) -> List[str]:
     return names
 
 
-def audit_unknown_permissions(apply_fixes: bool = False) -> Tuple[List[str], List[str]]:
-    issues: List[str] = []
-    fixes_applied: List[str] = []
-
-    cols = get_table_columns("android_unknown_permissions") or []
-    has_observed = ("observed_in_pkg" in cols) or ("observed_in_sha256" in cols)
-    has_occ = "occurrences" in cols
-    has_unique = _unknown_unique_exists()
-    has_seen_count = "seen_count" in cols
-    has_last_seen_pkg = "last_seen_package" in cols
-
-    if has_observed or has_occ or not has_unique or not (has_seen_count and has_last_seen_pkg):
-        issues.append("unknown_permissions schema not aligned (drop observed/occurrences, unique perm_name)")
-        if apply_fixes:
-            # Drop indexes that reference legacy columns before removing them
-            legacy_columns = [c for c in ("observed_in_pkg", "observed_in_sha256", "occurrences") if c in cols]
-            for index_name in _indexes_for_columns("android_unknown_permissions", legacy_columns):
-                try:
-                    core_q.run_sql(
-                        "ALTER TABLE android_unknown_permissions DROP INDEX `{}`".format(index_name)
-                    )
-                    fixes_applied.append(f"dropped index {index_name}")
-                except Exception:
-                    pass
-
-            # Drop legacy columns safely one-by-one (handle already-dropped cases)
-            for c in legacy_columns:
-                try:
-                    core_q.run_sql(f"ALTER TABLE android_unknown_permissions DROP COLUMN `{c}`")
-                    fixes_applied.append(f"dropped column {c}")
-                except Exception:
-                    pass
-
-            # Refresh column cache after mutations
-            cols = get_table_columns("android_unknown_permissions") or []
-            # Add unique on perm_name if missing
-            if not _index_exists("android_unknown_permissions", "ux_android_unknown_perm"):
-                core_q.run_sql(
-                    "ALTER TABLE android_unknown_permissions ADD UNIQUE KEY ux_android_unknown_perm (perm_name)"
-                )
-                fixes_applied.append("added unique on perm_name")
-
-            if "seen_count" not in cols:
-                core_q.run_sql(
-                    "ALTER TABLE android_unknown_permissions ADD COLUMN seen_count BIGINT UNSIGNED NOT NULL DEFAULT 0"
-                )
-                fixes_applied.append("added seen_count")
-            if "last_seen_package" not in cols:
-                core_q.run_sql(
-                    "ALTER TABLE android_unknown_permissions ADD COLUMN last_seen_package VARCHAR(191) NULL"
-                )
-                fixes_applied.append("added last_seen_package")
-
-    return issues, fixes_applied
-
 
 def run_interactive() -> None:
     issues_total = 0
     fixes_total: list[str] = []
 
     print(sm.status("Auditing schema…", level="info"))
-    d_issues, _ = audit_detected_permissions(apply_fixes=False)
     h_issues, _ = audit_harvest_paths(apply_fixes=False)
-    u_issues, _ = audit_unknown_permissions(apply_fixes=False)
-    issues_total = len(d_issues) + len(h_issues) + len(u_issues)
+    issues_total = len(h_issues)
 
     if issues_total == 0:
         print(sm.status("Schema health: OK — no issues found.", level="success"))
         return
 
     print(sm.status(f"Schema health: {issues_total} issue(s) found.", level="warn"))
-    for msg in d_issues + h_issues + u_issues:
+    for msg in h_issues:
         print(f"  - {msg}")
 
     try:
@@ -268,11 +121,7 @@ def run_interactive() -> None:
         pass
 
     # Apply fixes
-    _, fixes = audit_detected_permissions(apply_fixes=True)
-    fixes_total.extend(fixes)
     _, fixes = audit_harvest_paths(apply_fixes=True)
-    fixes_total.extend(fixes)
-    _, fixes = audit_unknown_permissions(apply_fixes=True)
     fixes_total.extend(fixes)
 
     if fixes_total:
@@ -289,9 +138,8 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     if args.fix:
-        _, fixes1 = audit_detected_permissions(apply_fixes=True)
-        _, fixes2 = audit_harvest_paths(apply_fixes=True)
-        total = len(fixes1) + len(fixes2)
+        _, fixes = audit_harvest_paths(apply_fixes=True)
+        total = len(fixes)
         if total:
             print(sm.status(f"Applied {total} fix(es).", level="success"))
         else:

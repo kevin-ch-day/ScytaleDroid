@@ -41,21 +41,10 @@ def _insert_entries(
     generated_at: str,
     permissions: list[str],
 ) -> int:
-    count = 0
-    for perm in permissions:
-        run_sql(
-            """
-            INSERT INTO aosp_permission_baseline
-              (android_release, source_type, baseline_sha256, generated_at_utc, permission_string)
-            VALUES (%s, %s, %s, %s, %s)
-            ON DUPLICATE KEY UPDATE
-              baseline_sha256 = VALUES(baseline_sha256),
-              generated_at_utc = VALUES(generated_at_utc)
-            """,
-            (android_release, source_type, baseline_hash, generated_at, perm),
-        )
-        count += 1
-    return count
+    raise RuntimeError(
+        "AOSP baseline import is deprecated. "
+        "Use android_permission_dict_aosp as the sole AOSP source of truth."
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -80,15 +69,12 @@ def main(argv: list[str] | None = None) -> int:
     baseline_hash = _sha256(path)
     generated_at = args.generated_at or datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     try:
-        inserted = _insert_entries(args.android_release, args.source_type, baseline_hash, generated_at, permissions)
+        _insert_entries(args.android_release, args.source_type, baseline_hash, generated_at, permissions)
     except Exception as exc:
-        log.warning(f"AOSP baseline import failed: {exc}", category="database")
-        print(f"Import failed: {exc}")
-        return 1
+        log.warning(f"AOSP baseline import blocked: {exc}", category="database")
+        print(f"Import blocked: {exc}")
+        return 2
 
-    print(f"Imported AOSP baseline for Android {args.android_release}")
-    print(f"Baseline hash: {baseline_hash}")
-    print(f"Rows applied : {inserted}")
     return 0
 
 

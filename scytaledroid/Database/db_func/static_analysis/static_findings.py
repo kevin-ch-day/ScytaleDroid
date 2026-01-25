@@ -153,9 +153,21 @@ def upsert_summary(
         """
         try:
             with database_session():
-                run_sql(stmt, payload)
+                try:
+                    run_sql(stmt, payload)
+                except Exception:
+                    fallback_stmt = """
+                    INSERT INTO static_findings_summary (
+                      package_name, session_stamp, scope_label, run_id, static_run_id,
+                      high, med, low, info, details
+                    ) VALUES (
+                      %(package_name)s, %(session_stamp)s, %(scope_label)s, %(run_id)s, %(static_run_id)s,
+                      %(high)s, %(med)s, %(low)s, %(info)s, %(details)s
+                    )
+                    """
+                    run_sql(fallback_stmt, payload)
                 row = run_sql(
-                    "SELECT id FROM static_findings_summary WHERE package_name=%s AND session_stamp=%s AND scope_label=%s",
+                    "SELECT id FROM static_findings_summary WHERE package_name=%s AND session_stamp=%s AND scope_label=%s ORDER BY id DESC LIMIT 1",
                     (package_name, session_stamp, scope_label),
                     fetch="one",
                 )

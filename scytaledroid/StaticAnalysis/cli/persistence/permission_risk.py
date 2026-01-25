@@ -120,7 +120,7 @@ def persist_permission_risk(
         "risk_grade": risk_grade,
         "dangerous": int(getattr(metrics_bundle, "dangerous_permissions", detail.get("dangerous_count", 0)) or 0),
         "signature": int(getattr(metrics_bundle, "signature_permissions", detail.get("signature_count", 0)) or 0),
-        "vendor": int(getattr(metrics_bundle, "vendor_permissions", detail.get("vendor_count", 0)) or 0),
+        "vendor": int(getattr(metrics_bundle, "oem_permissions", detail.get("oem_count", detail.get("vendor_count", 0))) or 0),
     }
 
     try:

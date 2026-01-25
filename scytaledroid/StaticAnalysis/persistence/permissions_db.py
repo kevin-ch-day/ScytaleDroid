@@ -1,54 +1,40 @@
 from __future__ import annotations
 
-from typing import Iterable, Mapping, Optional
+from typing import Iterable
 
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
-from pathlib import Path
-import hashlib
+import re
 
 
-def _ns_from_perm(perm_name: str) -> Optional[str]:
-    parts = (perm_name or "").split(".")
-    if len(parts) >= 2:
-        return ".".join(parts[:2])
-    return parts[0] if parts else None
+def _normalize_permission_token(raw_value: str) -> tuple[str, str, bool]:
+    raw = str(raw_value or "")
+    stripped = raw.strip()
+    has_internal_ws = bool(re.search(r"\s", stripped))
+    return raw, stripped, has_internal_ws
 
 
-def _first_seen_token(report) -> Optional[str]:
-    pkg = getattr(report.manifest, "package_name", None)
-    ver = getattr(report.manifest, "version_name", None) or getattr(report.manifest, "version_code", None)
-    if pkg and ver:
-        return f"{pkg}:{ver}"
-    try:
-        return report.hashes.get("sha256")
-    except Exception:
-        return None
+def _valid_permission_token(token: str) -> bool:
+    if not token:
+        return False
+    if re.search(r"\s", token):
+        return False
+    if len(token) > 255:
+        return False
+    lowered = token.lower()
+    if lowered in {"null", "permission", "none", "undefined"}:
+        return False
+    return "." in token
 
 
-def _file_sha256(path: str | Path) -> str | None:
-    try:
-        h = hashlib.sha256()
-        with Path(path).open('rb') as f:
-            for chunk in iter(lambda: f.read(1024 * 1024), b''):
-                h.update(chunk)
-        return h.hexdigest()
-    except Exception:
-        return None
+_GHOSTAOSP_BROADCAST_PERMS = {
+    "android.permission.BROADCAST_PACKAGE_ADDED",
+    "android.permission.BROADCAST_PACKAGE_REPLACED",
+    "android.permission.BROADCAST_PACKAGE_CHANGED",
+}
 
-
-def _android_release_for_sdk(target_sdk: int | None) -> str | None:
-    if target_sdk is None:
-        return None
-    sdk_map = {
-        33: "13",
-        34: "14",
-        35: "15",
-        36: "16",
-    }
-    try:
-        return sdk_map.get(int(target_sdk))
-    except Exception:
-        return None
+_MALFORMED_PREFIXES = (
+    "android.premission.",
+)
 
 
 def persist_declared_permissions(
@@ -62,148 +48,155 @@ def persist_declared_permissions(
     declared: Iterable[str],
     custom_declared: Iterable[str] | None = None,
 ) -> dict:
-    """Persist vendor/unknown permissions observed in a StaticAnalysisReport.
+    """Persist OEM/unknown permissions observed in a StaticAnalysisReport.
 
-    - Vendor/custom: non-framework permissions in declared uses.
+    - OEM/custom: non-framework permissions in declared uses.
     - Unknown: malformed/odd permissions (no namespace dot) observed in uses.
     """
     try:
-        from scytaledroid.Database.db_func.permissions import (
-            vendor_permissions as _vp,
-            unknown_permissions as _up,
-            detected_permissions as _dp,
-            aosp_baseline as _ab,
-        )
+        from scytaledroid.Database.db_func.permissions import permission_dicts as _pd
     except Exception as exc:  # pragma: no cover - DB not configured
         log.warning(f"DB modules unavailable for permission persistence: {exc}", category="static_analysis")
-        return {"framework": 0, "vendor": 0, "unknown": 0}
+        return {"aosp": 0, "oem": 0, "app_defined": 0, "unknown": 0}
 
     # Deduplicate permission names to avoid double-counting (e.g., sdk-23 tag)
     declared_names: Iterable[str] = tuple(sorted(set(declared or ())))
     custom_set: set[str] = set(custom_declared or ())
-    first_seen = sha256
-
-    # Ensure tables (best-effort)
+    aosp_candidates = [
+        str(n) for n in declared_names if isinstance(n, str) and n.lower().startswith("android.permission.")
+    ]
     try:
-        _vp.ensure_table()
-        _up.ensure_table()
-        _dp.ensure_table()
+        aosp_entries = _pd.fetch_aosp_entries(aosp_candidates, case_insensitive=True)
     except Exception:
-        pass
+        aosp_entries = {}
+    aosp_lower = {key.lower(): value for key, value in aosp_entries.items()}
 
-    # Prefetch framework protections by short name (uppercase)
-    framework_map = {}
     try:
-        short_keys = [str(n).split('.')[-1].upper() for n in declared_names if isinstance(n, str) and n.startswith('android.permission.')]
-        framework_map = _dp.framework_protection_map(short_keys, target_sdk=target_sdk)
+        oem_entries = _pd.fetch_oem_entries(declared_names)
     except Exception:
-        framework_map = {}
+        oem_entries = {}
 
-    baseline_release = _android_release_for_sdk(target_sdk)
-    baseline_perms = set()
-    if baseline_release:
-        try:
-            baseline_perms = _ab.fetch_permissions(baseline_release)
-        except Exception:
-            baseline_perms = set()
+    try:
+        vendor_prefix_rules = _pd.fetch_vendor_prefix_rules()
+    except Exception:
+        vendor_prefix_rules = []
 
-    counts = {"framework": 0, "vendor": 0, "unknown": 0}
+    counts = {"aosp": 0, "oem": 0, "app_defined": 0, "unknown": 0}
     for name in declared_names:
         if not isinstance(name, str) or not name.strip():
             continue
-        # Detected permission record with classification
-        is_android_prefix = name.startswith("android.permission.")
-        short_key = name.split('.')[-1].upper() if is_android_prefix else None
-        prot = framework_map.get(short_key) if short_key else None
-        # Classify as framework only when present in the framework catalog
-        in_framework_catalog = bool(short_key and short_key in framework_map)
-        is_framework = bool(is_android_prefix and in_framework_catalog)
-        classification = "framework" if is_framework else ("vendor" if "." in name and not is_android_prefix else "unknown")
-        ns = 'android.permission' if is_android_prefix else (_ns_from_perm(name) or "")
-        perm_full = name
-        perm_key = short_key if is_android_prefix else name
-        detected_payload = {
-            "package_name": package_name,
-            "artifact_label": artifact_label,
-            # Store short (uppercase) for framework; vendor keeps full name
-            "perm_name": short_key if is_framework else name,
-            "perm_full": perm_full,
-            "perm_key": perm_key or "",
-            "namespace": ns,
-            "classification": classification,
-            "protection": prot,
-            "source": "static-analysis",
-        }
-        # Prefer apk_id-based schema; resolve from repository by sha256
-        apk_id: int | None = None
-        if first_seen:
+        raw, norm, has_internal_ws = _normalize_permission_token(name)
+        lowered_norm = norm.lower()
+        malformed_prefix = any(lowered_norm.startswith(prefix) for prefix in _MALFORMED_PREFIXES)
+        if has_internal_ws or malformed_prefix or not _valid_permission_token(norm):
             try:
-                from scytaledroid.Database.db_func.harvest.apk_repository import get_apk_by_sha256
-
-                row = get_apk_by_sha256(first_seen)
-                if row and isinstance(row, dict) and row.get("apk_id"):
-                    apk_id = int(row["apk_id"])
-            except Exception:
-                apk_id = None
-        if apk_id is not None:
-            detected_payload["apk_id"] = apk_id
-        else:
-            # Legacy schema fallback: provide version + sha256 fields
-            detected_payload.update(
-                {
-                    "version_name": version_name,
-                    "version_code": version_code,
-                    "sha256": first_seen or "",
-                }
-            )
-        try:
-            _dp.upsert_detected(detected_payload)
-        except Exception as exc:
-            log.warning(f"Detected permission persist failed for {name}: {exc}", category="static_analysis")
-        else:
-            counts[classification] = counts.get(classification, 0) + 1
-        if is_framework:
-            continue  # framework usage tracked via detected table only
-        # Unknown: no dot namespace pattern
-        if "." not in name or (is_android_prefix and not in_framework_catalog):
-            try:
-                _up.upsert_unknown_permission(
+                note_parts = []
+                if raw.strip() != norm:
+                    note_parts.append(f"[auto] normalized from {raw.strip()} to {norm}")
+                if has_internal_ws:
+                    note_parts.append("[auto] rejected internal whitespace")
+                if malformed_prefix:
+                    note_parts.append("[auto] malformed android permission prefix")
+                notes = "; ".join(note_parts) if note_parts else None
+                _pd.upsert_unknown(
                     {
-                        # For android.permission.* entries that aren't in catalog, persist the short token
-                        "perm_name": (short_key or name),
-                        "notes": None,
-                        "last_seen_package": package_name,
+                        "permission_string": norm,
+                        "triage_status": "malformed",
+                        "notes": notes,
+                        "example_package_name": package_name,
+                        "example_sample_id": None,
                     }
                 )
-                if is_android_prefix and baseline_release and baseline_perms:
-                    canonical = name if name.startswith("android.permission.") else f"android.permission.{short_key}"
-                    if canonical and canonical not in baseline_perms:
-                        _up.mark_ghost_aosp(short_key or name, baseline_release)
             except Exception as exc:
-                log.warning(f"Unknown permission persist failed for {name}: {exc}", category="static_analysis")
+                log.warning(f"Malformed permission persist failed for {name}: {exc}", category="static_analysis")
+            counts["unknown"] += 1
             continue
 
-        # Vendor/custom observed (exclude android.permission namespace — treat those as unknowns above)
-        namespace = _ns_from_perm(name)
-        if namespace == 'android.permission':
+        is_android = lowered_norm.startswith("android.permission.")
+        aosp_hit = aosp_lower.get(lowered_norm) if is_android else None
+        if aosp_hit:
+            counts["aosp"] += 1
             continue
-        declaring_pkg = package_name if name in custom_set else None
+
+        if norm in oem_entries:
+            try:
+                _pd.update_oem_seen(norm)
+            except Exception:
+                pass
+            counts["oem"] += 1
+            continue
+
+        if norm in custom_set:
+            try:
+                _pd.upsert_unknown(
+                    {
+                        "permission_string": norm,
+                        "triage_status": "app_defined",
+                        "notes": None,
+                        "example_package_name": package_name,
+                        "example_sample_id": None,
+                    }
+                )
+            except Exception as exc:
+                log.warning(f"App-defined permission persist failed for {name}: {exc}", category="static_analysis")
+            counts["app_defined"] += 1
+            continue
+
+        vendor_hint_prefix = None
+        if not is_android:
+            for rule in vendor_prefix_rules:
+                pattern = str(rule.get("namespace_prefix") or "")
+                if not pattern:
+                    continue
+                match_type = str(rule.get("match_type") or "prefix").lower()
+                if match_type == "regex":
+                    try:
+                        if re.search(pattern, norm):
+                            vendor_hint_prefix = pattern
+                            break
+                    except re.error:
+                        continue
+                else:
+                    if norm.startswith(pattern):
+                        vendor_hint_prefix = pattern
+                        break
+
+        triage_status = "oem_candidate" if vendor_hint_prefix else ("aosp_missing" if is_android else "new")
+        note_parts = []
+        if raw.strip() != norm:
+            note_parts.append(f"[auto] normalized from {raw.strip()} to {norm}")
+        if has_internal_ws:
+            note_parts.append("[auto] normalized internal whitespace")
+        if is_android and norm.upper() in _GHOSTAOSP_BROADCAST_PERMS:
+            note_parts.append("[GhostAOSP] broadcast-only permission")
+        if vendor_hint_prefix:
+            note_parts.append(f"[hint] prefix match {vendor_hint_prefix}")
+        notes = "; ".join(note_parts) if note_parts else None
+
         try:
-            _vp.upsert_vendor_permission(
+            _pd.upsert_unknown(
                 {
-                    "perm_name": name,
-                    "namespace": namespace,
-                    "declaring_pkg": declaring_pkg,
-                    "protection": None,
-                    "summary": None,
-                    "doc_url": None,
-                    "source": "static-analysis",
+                    "permission_string": norm,
+                    "triage_status": triage_status,
+                    "notes": notes,
+                    "example_package_name": package_name,
+                    "example_sample_id": None,
                 }
             )
+            if triage_status == "aosp_missing":
+                _pd.insert_queue(
+                    {
+                        "permission_string": norm,
+                        "queue_action": "aosp_promote",
+                        "triage_status": triage_status,
+                        "notes": notes,
+                        "requested_by": "static-analysis",
+                        "source_system": "static-analysis",
+                    }
+                )
         except Exception as exc:
-            log.warning(f"Vendor permission persist failed for {name}: {exc}", category="static_analysis")
-        else:
-            counts["vendor"] = counts.get("vendor", 0) + 1
+            log.warning(f"Unknown permission persist failed for {name}: {exc}", category="static_analysis")
+        counts["unknown"] += 1
     return counts
 
 

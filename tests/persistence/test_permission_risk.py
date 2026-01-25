@@ -25,7 +25,7 @@ def _bundle(dangerous: int, signature: int, vendor: int, score: float, grade: st
         uses_cleartext=False,
         dangerous_permissions=dangerous,
         signature_permissions=signature,
-        vendor_permissions=vendor,
+        oem_permissions=vendor,
         permission_score=score,
         permission_grade=grade,
         permission_detail={

@@ -93,8 +93,8 @@ def execute_permission_scan(
                 print(
                     status_messages.status(
                         f"Permission Analysis persisted: total={total} "
-                        f"(fw={counts.get('framework', 0)}, vendor={counts.get('vendor', 0)}, "
-                        f"unk={counts.get('unknown', 0)})",
+                        f"(aosp={counts.get('aosp', 0)}, oem={counts.get('oem', 0)}, "
+                        f"app={counts.get('app_defined', 0)}, unk={counts.get('unknown', 0)})",
                         level="info",
                     )
                 )
@@ -124,7 +124,7 @@ def execute_permission_scan(
         counts = {
             "dangerous": int(profile.get("risk_counts", {}).get("dangerous", 0)),
             "signature": int(profile.get("risk_counts", {}).get("signature", 0)),
-            "vendor": int(profile.get("V", 0)),
+            "oem": int(profile.get("V", 0)),
         }
         accumulator.add_app(
             package=group.package_name,

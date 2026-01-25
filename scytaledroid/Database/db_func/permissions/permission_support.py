@@ -7,7 +7,6 @@ from typing import Callable, Iterable, Mapping
 
 from ...db_core import run_sql
 from ...db_queries.permissions import permission_support as queries
-from . import framework_permissions, taxonomy
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 _ALLOWED_BANDS = {"critical", "high", "medium", "low", "none"}
@@ -180,8 +179,12 @@ def ensure_all() -> dict[str, bool]:
     """Ensure the complete permission analytics schema is present."""
 
     operations: tuple[tuple[str, Callable[[], bool]], ...] = (
-        ("perm_groups / android_perm_map / android_perm_override", taxonomy.ensure_tables),
-        ("android_framework_permissions", framework_permissions.ensure_table),
+        ("android_permission_dict_aosp", lambda: _table_exists("android_permission_dict_aosp")),
+        ("android_permission_dict_oem", lambda: _table_exists("android_permission_dict_oem")),
+        ("android_permission_dict_unknown", lambda: _table_exists("android_permission_dict_unknown")),
+        ("android_permission_dict_queue", lambda: _table_exists("android_permission_dict_queue")),
+        ("android_permission_meta_oem_vendor", lambda: _table_exists("android_permission_meta_oem_vendor")),
+        ("android_permission_meta_oem_prefix", lambda: _table_exists("android_permission_meta_oem_prefix")),
         ("permission_signal_catalog", ensure_signal_catalog),
         ("permission_signal_mappings", ensure_signal_mappings),
         ("permission_cohort_expectations", ensure_cohort_expectations),

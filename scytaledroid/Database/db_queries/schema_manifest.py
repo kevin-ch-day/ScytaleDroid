@@ -6,16 +6,7 @@ import re
 from typing import Iterable, List
 
 from .canonical import schema as canonical_schema
-from .permissions import (
-    aosp_baseline,
-    detected_permissions,
-    framework_permissions,
-    governance_snapshot,
-    permission_support,
-    taxonomy,
-    unknown_permissions,
-    vendor_permissions,
-)
+from .permissions import governance_snapshot, permission_support
 from .static_analysis import (
     risk_scores,
     static_findings,
@@ -67,16 +58,17 @@ def ordered_schema_statements() -> list[str]:
     # Permission taxonomy and catalogs.
     statements.extend(
         [
-            taxonomy.CREATE_GROUPS,
-            taxonomy.CREATE_ANDROID_PERM_MAP,
-            taxonomy.CREATE_ANDROID_PERM_OVERRIDE,
-            framework_permissions.CREATE_TABLE,
-            vendor_permissions.CREATE_TABLE,
-            detected_permissions.CREATE_TABLE,
-            unknown_permissions.CREATE_TABLE,
-            unknown_permissions.ALTER_ADD_TRIAGE_COLUMNS,
-            unknown_permissions.ALTER_ADD_GHOST_COLUMNS,
-            aosp_baseline.CREATE_BASELINE,
+            """
+            CREATE TABLE IF NOT EXISTS perm_groups (
+              group_key VARCHAR(64) NOT NULL,
+              display_name VARCHAR(191) NOT NULL,
+              description TEXT NULL,
+              default_band VARCHAR(16) NULL,
+              created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+              PRIMARY KEY (group_key)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            """,
             governance_snapshot.CREATE_GOVERNANCE_SNAPSHOTS,
             governance_snapshot.CREATE_GOVERNANCE_ENTRIES,
             permission_support.CREATE_SIGNAL_CATALOG,

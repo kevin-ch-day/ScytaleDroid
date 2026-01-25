@@ -11,12 +11,13 @@ from scytaledroid.Database.db_core.db_engine import DatabaseEngine
 PROTECTED_TABLES: Sequence[str] = (
     "android_app_categories",
     "apps",
-    "android_framework_permissions",
-    "android_perm_map",
-    "android_perm_override",
     "perm_groups",
-    "android_unknown_permissions",
-    "android_vendor_permissions",
+    "android_permission_dict_aosp",
+    "android_permission_dict_oem",
+    "android_permission_dict_queue",
+    "android_permission_dict_unknown",
+    "android_permission_meta_oem_prefix",
+    "android_permission_meta_oem_vendor",
 )
 
 STATIC_ANALYSIS_TABLES: Sequence[str] = (
@@ -42,7 +43,6 @@ STATIC_ANALYSIS_TABLES: Sequence[str] = (
 )
 
 HARVEST_TABLES: Sequence[str] = (
-    "android_detected_permissions",
     "harvest_artifact_paths",
     "harvest_source_paths",
     "android_apk_repository",

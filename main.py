@@ -21,6 +21,7 @@ from scytaledroid.Utils.System.world_clock.display import (
 )
 from scytaledroid.Utils.System.world_clock.state import ClockReference, WorldClockState, load_state
 from scytaledroid.Database.db_core.db_engine import ensure_db_ready
+from scytaledroid.Database.db_utils.legacy_guard import legacy_table_warnings
 from scytaledroid.Api import start_api_server
 
 
@@ -89,6 +90,15 @@ def main_menu() -> None:
     """Render the main menu loop using the shared menu framework."""
 
     ensure_db_ready()
+    legacy_tables = legacy_table_warnings()
+    if legacy_tables:
+        status_messages.print_status(
+            (
+                "Legacy permission tables still exist; they are deprecated and may "
+                f"cause drift: {', '.join(legacy_tables)}."
+            ),
+            level="warn",
+        )
     api_state = start_api_server()
     if api_state.status == "running":
         status_messages.print_status(

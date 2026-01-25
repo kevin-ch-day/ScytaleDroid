@@ -335,7 +335,7 @@ class PermissionAuditAccumulator:
     legacy_counters: MutableMapping[str, int] = field(default_factory=dict)
     dangerous_counts: List[int] = field(default_factory=list)
     signature_counts: List[int] = field(default_factory=list)
-    vendor_counts: List[int] = field(default_factory=list)
+    oem_counts: List[int] = field(default_factory=list)
     score_raws: List[float] = field(default_factory=list)
     score_cappeds: List[float] = field(default_factory=list)
     feature_shares_by_cohort: MutableMapping[str, List[Mapping[str, float]]] = field(default_factory=dict)
@@ -474,7 +474,7 @@ class PermissionAuditAccumulator:
 
         self.dangerous_counts.append(int(counts.get("dangerous", 0)))
         self.signature_counts.append(int(counts.get("signature", 0)))
-        self.vendor_counts.append(int(counts.get("vendor", 0)))
+        self.oem_counts.append(int(counts.get("oem", counts.get("vendor", 0))))
         self.score_raws.append(float(score_detail.get("score_raw", 0.0)))
         self.score_cappeds.append(float(score_detail.get("score_capped", 0.0)))
 
@@ -495,13 +495,13 @@ class PermissionAuditAccumulator:
     def _compute_component_shares(self, score_detail: Mapping[str, Any]) -> Dict[str, float]:
         score = float(score_detail.get("score_capped") or score_detail.get("score_raw") or 0.0)
         if score <= 0:
-            return {"signals": 0.0, "combos": 0.0, "surprises": 0.0, "legacy": 0.0, "vendor": 0.0, "credit": 0.0}
+            return {"signals": 0.0, "combos": 0.0, "surprises": 0.0, "legacy": 0.0, "oem": 0.0, "credit": 0.0}
         return {
             "signals": _safe_div(float(score_detail.get("signal_score_subtotal", 0.0)), score),
             "combos": _safe_div(float(score_detail.get("combo_total", 0.0)), score),
             "surprises": _safe_div(float(score_detail.get("surprise_total", 0.0)), score),
             "legacy": _safe_div(float(score_detail.get("legacy_total", 0.0)), score),
-            "vendor": _safe_div(float(score_detail.get("vendor_modifier", 0.0)), score),
+            "oem": _safe_div(float(score_detail.get("vendor_modifier", 0.0)), score),
             "credit": _safe_div(float(score_detail.get("modernization_credit", 0.0)), score),
         }
 
@@ -539,7 +539,7 @@ class PermissionAuditAccumulator:
                     "counts": {
                         "dangerous": int(app.counts.get("dangerous", 0)),
                         "signature": int(app.counts.get("signature", 0)),
-                        "vendor": int(app.counts.get("vendor", 0)),
+                        "oem": int(app.counts.get("oem", app.counts.get("vendor", 0))),
                     },
                     "signals": dict(app.signals),
                     "origins": {"declared_in": dict(app.declared_in)},
@@ -631,7 +631,7 @@ class PermissionAuditAccumulator:
         distributions = {
             "dangerous": _percentile_summary(self.dangerous_counts),
             "signature": _percentile_summary(self.signature_counts),
-            "vendor": _percentile_summary(self.vendor_counts),
+            "oem": _percentile_summary(self.oem_counts),
             "score_raw": _percentile_summary(self.score_raws),
             "score_capped": _percentile_summary(self.score_cappeds),
         }
@@ -642,7 +642,7 @@ class PermissionAuditAccumulator:
 
         feature_averages = {}
         for cohort, entries in self.feature_shares_by_cohort.items():
-            totals = {"signals": 0.0, "combos": 0.0, "surprises": 0.0, "legacy": 0.0, "vendor": 0.0, "credit": 0.0}
+            totals = {"signals": 0.0, "combos": 0.0, "surprises": 0.0, "legacy": 0.0, "oem": 0.0, "credit": 0.0}
             for entry in entries:
                 for key in totals:
                     totals[key] += float(entry.get(key, 0.0))
@@ -724,7 +724,7 @@ class PermissionAuditAccumulator:
             "score_capped": [float(app.score_detail.get("score_capped", 0.0)) for app in self.apps],
             "dangerous": [float(app.counts.get("dangerous", 0)) for app in self.apps],
             "signature": [float(app.counts.get("signature", 0)) for app in self.apps],
-            "vendor": [float(app.counts.get("vendor", 0)) for app in self.apps],
+            "oem": [float(app.counts.get("oem", app.counts.get("vendor", 0))) for app in self.apps],
         }
         for signal in sorted(self.signal_presence.keys()):
             feature_vectors[f"signal_{signal}"] = [1.0 if app.signals.get(signal, False) else 0.0 for app in self.apps]
@@ -1075,7 +1075,7 @@ class PermissionAuditAccumulator:
                             grade,
                             int(app.counts.get("dangerous", 0) if app.counts else 0),
                             int(app.counts.get("signature", 0) if app.counts else 0),
-                            int(app.counts.get("vendor", 0) if app.counts else 0),
+                            int(app.counts.get("oem", app.counts.get("vendor", 0)) if app.counts else 0),
                             float(sd.get("combo_total", 0.0) or 0.0),
                             float(sd.get("surprise_total", 0.0) or 0.0),
                             float(sd.get("legacy_total", 0.0) or 0.0),

@@ -11,46 +11,25 @@ from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
 def ensure_table() -> bool:
-    """Ensure the catalog table exists; returns True on success."""
-    ok = table_exists()
-    if not ok:
-        log.warning(
-            "android_framework_permissions missing; run DBA migrations.",
-            category="database",
-        )
-    return ok
+    """Deprecated: framework catalog table is no longer used."""
+    log.warning(
+        "android_framework_permissions is deprecated; use android_permission_dict_aosp.",
+        category="database",
+    )
+    return False
 
 
 def table_exists() -> bool:
-    try:
-        row = run_sql(queries.TABLE_EXISTS, fetch="one")
-        return bool(row and int(row[0]) > 0)
-    except Exception:
-        return False
+    return False
 
 
 def count_rows() -> Optional[int]:
-    try:
-        row = run_sql(queries.COUNT_ROWS, fetch="one")
-        return int(row[0]) if row else 0
-    except Exception:
-        return None
+    return None
 
 
 def catalog_fingerprint() -> str:
     """Return a stable fingerprint for the current catalog state."""
-
-    try:
-        row = run_sql(queries.SELECT_UPDATED_FINGERPRINT, fetch="one")
-    except Exception:
-        row = None
-    if row and row[0]:
-        try:
-            return str(int(row[0]))
-        except Exception:
-            return str(row[0])
-    total = count_rows() or 0
-    return f"rows:{total}"
+    return "deprecated"
 
 
 def _safe_int(value) -> Optional[int]:
@@ -111,38 +90,24 @@ def _bind_params(payload: Mapping[str, object]) -> Mapping[str, object]:
 
 
 def upsert_permission(payload: Mapping[str, object]) -> None:
-    params = _bind_params(payload)
-    run_sql(queries.UPSERT_PERMISSION, params)
+    log.warning(
+        "framework permission upsert ignored (deprecated).",
+        category="database",
+    )
 
 
 def upsert_permissions(items: Iterable[object], *, source: str, limit: Optional[int] = None) -> int:
     """Insert or update many permission rows; returns number processed."""
-    processed = 0
-    for index, meta in enumerate(items, start=1):
-        if limit is not None and index > limit:
-            break
-        if isinstance(meta, Mapping):
-            payload = dict(meta)
-        elif _is_dataclass(meta):
-            payload = _asdict(meta)
-        else:  # best-effort attribute mapping
-            payload = {k: getattr(meta, k) for k in dir(meta) if not k.startswith("_")}
-        payload.setdefault("source", source)
-        upsert_permission(payload)
-        processed += 1
-    return processed
+    log.warning(
+        "framework permission upsert ignored (deprecated).",
+        category="database",
+    )
+    return 0
 
 
 def fetch_catalog_entries() -> list[Mapping[str, object]]:
     """Return framework catalog rows as dictionaries."""
-
-    try:
-        rows = run_sql(queries.SELECT_CATALOG, fetch="all", dictionary=True)
-    except Exception:
-        return []
-    if not rows:
-        return []
-    return [dict(row) for row in rows if isinstance(row, Mapping)]
+    return []
 
 
 __all__ = [

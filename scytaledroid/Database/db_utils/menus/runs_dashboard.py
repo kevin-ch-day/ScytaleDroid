@@ -154,7 +154,7 @@ def _render_permission_snapshot(package: str) -> None:
             f"grade={row.get('grade') or '—'} "
             f"(dangerous={row.get('dangerous_count', 0)}, "
             f"signature={row.get('signature_count', 0)}, "
-            f"vendor={row.get('vendor_count', 0)})"
+            f"oem={row.get('vendor_count', 0)})"
         )
     else:
         print("  perm-audit (latest): (no snapshot)")
