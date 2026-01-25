@@ -1,0 +1,100 @@
+{
+  "exported_components": {
+    "activities": [
+      "com.lenovo.lsf.lenovoid.ui.PsLoginActivity",
+      "com.lenovo.lsf.lenovoid.ui.RegisterAccountByEmail",
+      "com.motorola.motoaccount.ui.WebAuthActivity",
+      "com.motorola.securityhub.MotoSecurityHubLauncher",
+      "com.motorola.securityhub.securelock.ui.SecureLockActivity",
+      "com.motorola.securityhub.ui.view.MainActivity",
+      "com.motorola.securityhub.ui.view.MalwareScanActivity",
+      "com.motorola.securityhub.ui.view.TransparentActivity"
+    ],
+    "providers": [
+      "com.motorola.securityhub.provider.SecurityHubProvider"
+    ],
+    "receivers": [
+      "androidx.profileinstaller.ProfileInstallReceiver",
+      "androidx.work.impl.diagnostics.DiagnosticsReceiver",
+      "com.motorola.securityhub.receiver.ApkInstallationReceiver",
+      "com.motorola.securityhub.receiver.BluetoothStatusReceiver",
+      "com.motorola.securityhub.receiver.CEContextReceiver",
+      "com.motorola.securityhub.receiver.FeatureHandleReceiver",
+      "com.motorola.securityhub.receiver.PackageUpdateReceiver"
+    ],
+    "services": [
+      "androidx.work.impl.background.systemjob.SystemJobService",
+      "com.google.android.gms.auth.api.signin.RevocationBoundService"
+    ],
+    "total": 18
+  },
+  "generated_at": "2026-01-25T03:36:16.513906Z",
+  "hashes": {
+    "md5": "2c55a4c0207aa68ad9186ad8083cbc9b",
+    "sha1": "c9ca436edf88fb1a985a52991a543613c4da7bab",
+    "sha256": "91fd9aaf014aa4819efec805e6e418dd25914073aa4a39ad888a9b8c5bca5cf5"
+  },
+  "network_targets": {
+    "cleartext_domains": [],
+    "domains": []
+  },
+  "package_name": "com.motorola.securityhub",
+  "permissions": {
+    "dangerous": [
+      "android.permission.ACCESS_BACKGROUND_LOCATION",
+      "android.permission.ACCESS_COARSE_LOCATION",
+      "android.permission.ACCESS_FINE_LOCATION",
+      "android.permission.BLUETOOTH_CONNECT",
+      "android.permission.BLUETOOTH_SCAN",
+      "android.permission.CAMERA",
+      "android.permission.POST_NOTIFICATIONS"
+    ],
+    "declared": [
+      "android.permission.ACCESS_BACKGROUND_LOCATION",
+      "android.permission.ACCESS_COARSE_LOCATION",
+      "android.permission.ACCESS_FINE_LOCATION",
+      "android.permission.ACCESS_NETWORK_STATE",
+      "android.permission.ACCESS_WIFI_STATE",
+      "android.permission.BLUETOOTH",
+      "android.permission.BLUETOOTH_CONNECT",
+      "android.permission.BLUETOOTH_SCAN",
+      "android.permission.CAMERA",
+      "android.permission.CHANGE_WIFI_STATE",
+      "android.permission.INTERNET",
+      "android.permission.POST_NOTIFICATIONS",
+      "android.permission.QUERY_ALL_PACKAGES",
+      "android.permission.READ_SAFETY_CENTER_STATUS",
+      "android.permission.RECEIVE_BOOT_COMPLETED",
+      "android.permission.USE_BIOMETRIC",
+      "android.permission.USE_FINGERPRINT",
+      "android.permission.WAKE_LOCK",
+      "android.permission.WRITE_SETTINGS",
+      "com.motorola.aiservices.BIND_SERVICE",
+      "com.motorola.ccc.plm.permission.READPROVIDER",
+      "com.motorola.motosecurecore.permission.LAUNCH_ACTIVITY",
+      "com.motorola.mya.aiservices.engine.permission.CONTEXT_ENGINE",
+      "com.motorola.permission.ACCESS_CHECKIN",
+      "com.motorola.permission.WRITE_SECURE_SETTINGS",
+      "com.motorola.securityhub.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+    ],
+    "high_value": [
+      "android.permission.ACCESS_COARSE_LOCATION",
+      "android.permission.ACCESS_FINE_LOCATION",
+      "android.permission.CAMERA"
+    ]
+  },
+  "risk_flags": {
+    "allow_backup": true,
+    "debuggable": null,
+    "network_security_config": null,
+    "request_legacy_external_storage": null,
+    "uses_cleartext_traffic": null,
+    "webview": null
+  },
+  "suggested_probes": [
+    "exported_components_probe",
+    "high_value_permission_probe"
+  ],
+  "version_code": "600026",
+  "version_name": "06.0.0.026"
+}

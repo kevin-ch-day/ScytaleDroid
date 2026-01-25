@@ -234,23 +234,29 @@ async function loadReportTemplate() {
   const session = params.get("session");
   const appVersionId = params.get("app_version_id");
   let sessionStamp = session;
+  let reportHash = null;
   if (!sessionStamp && appVersionId) {
     try {
       const latest = await apiGet(`/app_version/${appVersionId}/latest_run`);
       if (latest.status === "ok") {
-        sessionStamp = latest.session_stamp;
+        sessionStamp = latest.session_stamp || null;
+        reportHash = latest.report_hash || null;
+      } else {
+        setText("reportStatus", latest.message || "No completed runs for this app version.");
+        return;
       }
     } catch (err) {
       setText("reportStatus", String(err));
       return;
     }
   }
-  if (!sessionStamp) {
+  if (!sessionStamp && !reportHash) {
     setText("reportStatus", "Missing session or app_version_id parameter.");
     return;
   }
   try {
-    const report = await apiGet(`/run/${sessionStamp}/report.json`);
+    const reportPath = reportHash ? `/report/${reportHash}.json` : `/run/${sessionStamp}/report.json`;
+    const report = await apiGet(reportPath);
     const meta = report.metadata || {};
     const view = report.view || {};
     const summary = view.summary || {};

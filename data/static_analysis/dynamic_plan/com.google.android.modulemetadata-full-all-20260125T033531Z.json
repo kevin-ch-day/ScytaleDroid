@@ -1,0 +1,36 @@
+{
+  "exported_components": {
+    "activities": [],
+    "providers": [],
+    "receivers": [],
+    "services": [],
+    "total": 0
+  },
+  "generated_at": "2026-01-25T03:35:31.380574Z",
+  "hashes": {
+    "md5": "93a85b356fe4f33423b0a8ba92cda07b",
+    "sha1": "90e698e4b2a087b04db575bb58e73e69bbe0f75e",
+    "sha256": "573e5fcd44ce822db9892024face243a84cd9f6ee8aefa4382c8fe89f4d92fd1"
+  },
+  "network_targets": {
+    "cleartext_domains": [],
+    "domains": []
+  },
+  "package_name": "com.google.android.modulemetadata",
+  "permissions": {
+    "dangerous": [],
+    "declared": [],
+    "high_value": []
+  },
+  "risk_flags": {
+    "allow_backup": null,
+    "debuggable": false,
+    "network_security_config": null,
+    "request_legacy_external_storage": null,
+    "uses_cleartext_traffic": null,
+    "webview": null
+  },
+  "suggested_probes": [],
+  "version_code": "360875154",
+  "version_name": "2025-08-01S+"
+}

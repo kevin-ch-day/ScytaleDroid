@@ -1,0 +1,93 @@
+{
+  "exported_components": {
+    "activities": [
+      "com.motorola.mya.semantic.ui.screen.PermissionActivity",
+      "com.motorola.mya.semantic.ui.screen.RequestPermissionActivity"
+    ],
+    "providers": [
+      "com.motorola.aiservices.contentprovider.CloudContentProvider",
+      "com.motorola.aiservices.contentprovider.ServiceContentProvider"
+    ],
+    "receivers": [
+      "androidx.profileinstaller.ProfileInstallReceiver",
+      "androidx.work.impl.diagnostics.DiagnosticsReceiver",
+      "com.motorola.mya.engine.service.BootCompleteReceiver",
+      "com.motorola.mya.engine.service.predicates.semantic.SemanticPredicateReceiver",
+      "com.motorola.mya.memorymodel.associative.btuseractivity.receivers.LocalContextReceiver",
+      "com.motorola.mya.memorymodel.associative.btuseractivity.receivers.SysEventReceiver"
+    ],
+    "services": [
+      "androidx.work.impl.background.systemjob.SystemJobService",
+      "com.motorola.aiservices.controller.AiService",
+      "com.motorola.aiservices.controller.aidlservice.MotAIServiceImpl",
+      "com.motorola.mya.MayaManagerService",
+      "com.motorola.mya.engine.service.ContextEngineService",
+      "com.motorola.mya.semantic.datacollection.inoutdoor.service.IOTaskService",
+      "com.motorola.mya.semantic.misc.provider.ContextDbCleanJob",
+      "com.motorola.mya.semantic.service.SemanticLocationService"
+    ],
+    "total": 18
+  },
+  "generated_at": "2026-01-25T03:36:06.479689Z",
+  "hashes": {
+    "md5": "a6813e175b865fe38af73b5cb46c4b28",
+    "sha1": "a38d03a23e586c6649e5080fc592f0ca9dcd0453",
+    "sha256": "ec93c1450405dafe8897891ffa0823e2a76226b0fc5de77ee5aaa6165cdfcb38"
+  },
+  "network_targets": {
+    "cleartext_domains": [
+      "undefined",
+      "w3.org"
+    ],
+    "domains": [
+      "jsoup.org",
+      "undefined",
+      "w3.org"
+    ]
+  },
+  "package_name": "com.motorola.aiservices",
+  "permissions": {
+    "dangerous": [
+      "android.permission.BLUETOOTH_CONNECT",
+      "android.permission.READ_EXTERNAL_STORAGE",
+      "android.permission.WRITE_EXTERNAL_STORAGE"
+    ],
+    "declared": [
+      "android.permission.ACCESS_NETWORK_STATE",
+      "android.permission.ACCESS_WIFI_STATE",
+      "android.permission.BLUETOOTH",
+      "android.permission.BLUETOOTH_ADMIN",
+      "android.permission.BLUETOOTH_CONNECT",
+      "android.permission.CHANGE_WIFI_STATE",
+      "android.permission.INTERNET",
+      "android.permission.PACKAGE_USAGE_STATS",
+      "android.permission.READ_EXTERNAL_STORAGE",
+      "android.permission.RECEIVE_BOOT_COMPLETED",
+      "android.permission.WAKE_LOCK",
+      "android.permission.WRITE_EXTERNAL_STORAGE",
+      "com.android.alarm.permission.SET_ALARM",
+      "com.motorola.aiservices.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
+      "com.motorola.mya.aiservices.engine.permission.CONTEXT_ENGINE",
+      "com.motorola.permission.ACCESS_CHECKIN",
+      "com.motorola.permission.BIND_EXPERIENCE"
+    ],
+    "high_value": [
+      "android.permission.PACKAGE_USAGE_STATS"
+    ]
+  },
+  "risk_flags": {
+    "allow_backup": false,
+    "debuggable": null,
+    "network_security_config": null,
+    "request_legacy_external_storage": null,
+    "uses_cleartext_traffic": null,
+    "webview": null
+  },
+  "suggested_probes": [
+    "exported_components_probe",
+    "high_value_permission_probe",
+    "network_cleartext_observation"
+  ],
+  "version_code": "281118310",
+  "version_name": "1.1.183.10"
+}

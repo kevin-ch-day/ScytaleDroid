@@ -1,0 +1,131 @@
+{
+  "exported_components": {
+    "activities": [
+      "com.google.android.apps.miphone.aiai.autofill.settings.keyboard.s.KeyboardSuggestionsSettingsActivity",
+      "com.google.android.apps.miphone.aiai.captions.CaptionsSettingsActivity",
+      "com.google.android.apps.miphone.aiai.captions.quicksetting.CollapseQuickSettingsPanelActivity",
+      "com.google.android.apps.miphone.aiai.captions.settingsui.settingsactivity.CaptionsSettingsActivity",
+      "com.google.android.apps.miphone.aiai.echo.settings.ui.legacy.SettingsActivity",
+      "com.google.android.apps.miphone.aiai.settings.ui.quicksettings.QuickSettingsTileDispatchActivity",
+      "com.google.android.apps.miphone.aiai.settings.ui.user.AsiSettingsActivity",
+      "com.google.android.apps.miphone.aiai.settings.ui.user.PrivacyHubSettingslibActivity",
+      "com.google.android.apps.miphone.aiai.settings.ui.user.UserSettingsActivity"
+    ],
+    "providers": [],
+    "receivers": [
+      "androidx.work.impl.diagnostics.DiagnosticsReceiver",
+      "com.google.android.libraries.phenotype.client.stable.AccountRemovedBroadcastReceiver",
+      "com.google.android.libraries.phenotype.client.stable.PhenotypeUpdateBackgroundBroadcastReceiver"
+    ],
+    "services": [
+      "androidx.work.impl.background.systemjob.SystemJobService",
+      "com.google.android.apps.miphone.aiai.app.AiAiAugmentedAutofillService",
+      "com.google.android.apps.miphone.aiai.app.AiAiContentCaptureService",
+      "com.google.android.apps.miphone.aiai.app.AiAiContentSuggestionsService",
+      "com.google.android.apps.miphone.aiai.app.AiAiPredictionService",
+      "com.google.android.apps.miphone.aiai.app.AiAiSpeechRecognitionService",
+      "com.google.android.apps.miphone.aiai.attention.service.AiAiAttentionService",
+      "com.google.android.apps.miphone.aiai.captions.SystemCaptionsManagerService",
+      "com.google.android.apps.miphone.aiai.captions.quicksetting.CaptionsTileService",
+      "com.google.android.apps.miphone.aiai.common.notification.service.AiAiNotificationListenerService",
+      "com.google.android.apps.miphone.aiai.pecan.service.impl.PecanDumpSysService",
+      "com.google.android.apps.miphone.aiai.textclassifier.service.QAiaiTextClassifierService"
+    ],
+    "total": 24
+  },
+  "generated_at": "2026-01-25T03:34:42.732270Z",
+  "hashes": {
+    "md5": "dedab50260f5fb1e2ab8bb9b0142f8c8",
+    "sha1": "635182ad6274a5fc76475efe44985b0e2568b6c7",
+    "sha256": "8c9013114bb336f35907bb41b276e57614e62c2e94d3f1f79d74d93b274777d8"
+  },
+  "network_targets": {
+    "cleartext_domains": [],
+    "domains": []
+  },
+  "package_name": "com.google.android.as",
+  "permissions": {
+    "dangerous": [
+      "android.permission.ACCESS_BACKGROUND_LOCATION",
+      "android.permission.ACCESS_COARSE_LOCATION",
+      "android.permission.BLUETOOTH_CONNECT",
+      "android.permission.BLUETOOTH_SCAN",
+      "android.permission.CAMERA",
+      "android.permission.POST_NOTIFICATIONS",
+      "android.permission.READ_CALL_LOG",
+      "android.permission.READ_CONTACTS",
+      "android.permission.READ_PHONE_STATE",
+      "android.permission.READ_SMS",
+      "android.permission.RECORD_AUDIO"
+    ],
+    "declared": [
+      "android.permission.ACCESS_BACKGROUND_LOCATION",
+      "android.permission.ACCESS_COARSE_LOCATION",
+      "android.permission.ACCESS_NETWORK_STATE",
+      "android.permission.ACCESS_SHORTCUTS",
+      "android.permission.ACCESS_WIFI_STATE",
+      "android.permission.BLUETOOTH_ADMIN",
+      "android.permission.BLUETOOTH_CONNECT",
+      "android.permission.BLUETOOTH_SCAN",
+      "android.permission.CAMERA",
+      "android.permission.CAPTURE_AUDIO_OUTPUT",
+      "android.permission.CAPTURE_MEDIA_OUTPUT",
+      "android.permission.CAPTURE_VOICE_COMMUNICATION_OUTPUT",
+      "android.permission.CONTROL_INCALL_EXPERIENCE",
+      "android.permission.FOREGROUND_SERVICE",
+      "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
+      "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",
+      "android.permission.MANAGE_APP_PREDICTIONS",
+      "android.permission.MODIFY_AUDIO_ROUTING",
+      "android.permission.MODIFY_AUDIO_SETTINGS",
+      "android.permission.MODIFY_PHONE_STATE",
+      "android.permission.PACKAGE_USAGE_STATS",
+      "android.permission.POST_NOTIFICATIONS",
+      "android.permission.QUERY_ALL_PACKAGES",
+      "android.permission.READ_CALL_LOG",
+      "android.permission.READ_CONTACTS",
+      "android.permission.READ_DEVICE_CONFIG",
+      "android.permission.READ_OEM_UNLOCK_STATE",
+      "android.permission.READ_PHONE_STATE",
+      "android.permission.READ_SMS",
+      "android.permission.READ_SYSTEM_GRAMMATICAL_GENDER",
+      "android.permission.RECEIVE_BOOT_COMPLETED",
+      "android.permission.RECORD_AUDIO",
+      "android.permission.SET_SYSTEM_AUDIO_CAPTION",
+      "android.permission.START_ACTIVITIES_FROM_BACKGROUND",
+      "android.permission.SUBSTITUTE_NOTIFICATION_APP_NAME",
+      "android.permission.SYSTEM_APPLICATION_OVERLAY",
+      "android.permission.SYSTEM_CAMERA",
+      "android.permission.UNLIMITED_SHORTCUTS_API_CALLS",
+      "android.permission.UPDATE_DEVICE_STATS",
+      "android.permission.USE_ON_DEVICE_INTELLIGENCE",
+      "android.permission.WRITE_SECURE_SETTINGS",
+      "com.android.alarm.permission.SET_ALARM",
+      "com.google.android.as.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+    ],
+    "high_value": [
+      "android.permission.ACCESS_COARSE_LOCATION",
+      "android.permission.CAMERA",
+      "android.permission.PACKAGE_USAGE_STATS",
+      "android.permission.READ_CALL_LOG",
+      "android.permission.READ_CONTACTS",
+      "android.permission.READ_PHONE_STATE",
+      "android.permission.READ_SMS",
+      "android.permission.RECORD_AUDIO"
+    ]
+  },
+  "risk_flags": {
+    "allow_backup": true,
+    "debuggable": null,
+    "network_security_config": null,
+    "request_legacy_external_storage": null,
+    "uses_cleartext_traffic": null,
+    "webview": null
+  },
+  "suggested_probes": [
+    "exported_components_probe",
+    "high_value_permission_probe"
+  ],
+  "version_code": "12872254",
+  "version_name": "V.41.playstore.oemfull.843410720"
+}

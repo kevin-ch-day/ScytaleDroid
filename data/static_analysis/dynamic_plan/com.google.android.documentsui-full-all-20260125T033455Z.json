@@ -1,0 +1,73 @@
+{
+  "exported_components": {
+    "activities": [
+      "com.android.documentsui.LauncherActivity",
+      "com.android.documentsui.ScopedAccessActivity",
+      "com.android.documentsui.ViewDownloadsActivity",
+      "com.android.documentsui.files.FilesActivity",
+      "com.android.documentsui.picker.PickActivity",
+      "com.android.documentsui.picker.TrampolineActivity"
+    ],
+    "providers": [
+      "com.android.documentsui.archives.ArchivesProvider"
+    ],
+    "receivers": [
+      "androidx.profileinstaller.ProfileInstallReceiver",
+      "com.android.documentsui.PackageReceiver",
+      "com.android.documentsui.PreBootReceiver",
+      "com.android.documentsui.roots.BootReceiver"
+    ],
+    "services": [],
+    "total": 11
+  },
+  "generated_at": "2026-01-25T03:34:55.056947Z",
+  "hashes": {
+    "md5": "80acd7c639f202b8d0af097b1eca692c",
+    "sha1": "a4780c4fe76966cb918607353483f5dd2f57e5b0",
+    "sha256": "8065178f9a219ab86c27d61ec323ddee6dc41ead58059acea1256b919d43086b"
+  },
+  "network_targets": {
+    "cleartext_domains": [],
+    "domains": []
+  },
+  "package_name": "com.google.android.documentsui",
+  "permissions": {
+    "dangerous": [
+      "android.permission.POST_NOTIFICATIONS"
+    ],
+    "declared": [
+      "android.permission.CACHE_CONTENT",
+      "android.permission.CHANGE_OVERLAY_PACKAGES",
+      "android.permission.FOREGROUND_SERVICE",
+      "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
+      "android.permission.HIDE_OVERLAY_WINDOWS",
+      "android.permission.INTERACT_ACROSS_USERS",
+      "android.permission.LOG_COMPAT_CHANGE",
+      "android.permission.MANAGE_DOCUMENTS",
+      "android.permission.MODIFY_QUIET_MODE",
+      "android.permission.POST_NOTIFICATIONS",
+      "android.permission.QUERY_ALL_PACKAGES",
+      "android.permission.READ_COMPAT_CHANGE_CONFIG",
+      "android.permission.READ_DEVICE_CONFIG",
+      "android.permission.RECEIVE_BOOT_COMPLETED",
+      "android.permission.REMOVE_TASKS",
+      "android.permission.START_FOREGROUND_SERVICES_FROM_BACKGROUND",
+      "android.permission.WAKE_LOCK",
+      "com.google.android.documentsui.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+    ],
+    "high_value": []
+  },
+  "risk_flags": {
+    "allow_backup": true,
+    "debuggable": null,
+    "network_security_config": null,
+    "request_legacy_external_storage": null,
+    "uses_cleartext_traffic": null,
+    "webview": null
+  },
+  "suggested_probes": [
+    "exported_components_probe"
+  ],
+  "version_code": "360842240",
+  "version_name": "16"
+}

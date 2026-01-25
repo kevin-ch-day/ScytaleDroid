@@ -1,0 +1,36 @@
+{
+  "exported_components": {
+    "activities": [],
+    "providers": [],
+    "receivers": [],
+    "services": [],
+    "total": 0
+  },
+  "generated_at": "2026-01-25T03:36:03.078352Z",
+  "hashes": {
+    "md5": "5bea928f9b41d093daedd9ff123cb459",
+    "sha1": "49697dbd5dde410901facd28524e15d8bf74e574",
+    "sha256": "4b798e0a2d1d4c9650dfe98018eac3ca2a95f33d850c19fa627b98ade02f130b"
+  },
+  "network_targets": {
+    "cleartext_domains": [],
+    "domains": []
+  },
+  "package_name": "com.google.mainline.telemetry",
+  "permissions": {
+    "dangerous": [],
+    "declared": [],
+    "high_value": []
+  },
+  "risk_flags": {
+    "allow_backup": null,
+    "debuggable": false,
+    "network_security_config": null,
+    "request_legacy_external_storage": null,
+    "uses_cleartext_traffic": null,
+    "webview": null
+  },
+  "suggested_probes": [],
+  "version_code": "360702004",
+  "version_name": "2025-07-01S+"
+}

@@ -1,0 +1,113 @@
+{
+  "exported_components": {
+    "activities": [
+      "com.google.android.apps.youtube.music.activities.MusicActivity",
+      "com.google.android.apps.youtube.music.activities.MusicPickerActivity",
+      "com.google.android.apps.youtube.music.audiopreview.AudioPreviewPlayerActivity",
+      "com.google.android.apps.youtube.music.deeplink.MusicServiceDeepLinkActivity",
+      "com.google.android.libraries.social.licenses.LicenseMenuActivity",
+      "com.google.cardboard.sdk.HeadsetDetectionActivity"
+    ],
+    "providers": [],
+    "receivers": [
+      "androidx.media.session.MediaButtonReceiver",
+      "androidx.work.impl.diagnostics.DiagnosticsReceiver",
+      "com.google.android.apps.youtube.music.bluetooth.BluetoothA2dpReceiver",
+      "com.google.android.apps.youtube.music.mediabrowser.waze.MusicWazeBroadcastReceiver",
+      "com.google.android.apps.youtube.music.player.widget.MusicWidgetProvider",
+      "com.google.android.apps.youtube.music.player.widget.gm3.FlipWidgetProvider",
+      "com.google.android.apps.youtube.music.player.widget.gm3.FreeformMusicWidgetProvider",
+      "com.google.android.apps.youtube.music.player.widget.gm3.NowPlayingWidgetProvider",
+      "com.google.android.libraries.phenotype.client.stable.AccountRemovedBroadcastReceiver",
+      "com.google.android.libraries.phenotype.client.stable.PhenotypeUpdateBackgroundBroadcastReceiver",
+      "com.google.android.libraries.youtube.account.service.AccountsChangedReceiver",
+      "com.google.firebase.iid.FirebaseInstanceIdReceiver"
+    ],
+    "services": [
+      "androidx.work.impl.background.systemjob.SystemJobService",
+      "com.google.android.apps.youtube.music.mediabrowser.MusicBrowserService",
+      "com.google.android.apps.youtube.music.mediabrowser.androidautoprojected.AndroidAutoCarAppServices"
+    ],
+    "total": 21
+  },
+  "generated_at": "2026-01-25T03:34:33.502909Z",
+  "hashes": {
+    "md5": "614dabb79df0c0bebeecdebf91603055",
+    "sha1": "d82844565a8d10dd0534876caf3ec43cdc873791",
+    "sha256": "90e4f89ee99b09f85e29b817aaba832f183ef8189b88bf044461218f6dc4eb8a"
+  },
+  "network_targets": {
+    "cleartext_domains": [],
+    "domains": []
+  },
+  "package_name": "com.google.android.apps.youtube.music",
+  "permissions": {
+    "dangerous": [
+      "android.permission.ACCESS_FINE_LOCATION",
+      "android.permission.BLUETOOTH_ADVERTISE",
+      "android.permission.BLUETOOTH_CONNECT",
+      "android.permission.BLUETOOTH_SCAN",
+      "android.permission.CAMERA",
+      "android.permission.GET_ACCOUNTS",
+      "android.permission.POST_NOTIFICATIONS",
+      "android.permission.READ_EXTERNAL_STORAGE",
+      "android.permission.READ_MEDIA_AUDIO",
+      "android.permission.READ_MEDIA_IMAGES",
+      "android.permission.WRITE_EXTERNAL_STORAGE"
+    ],
+    "declared": [
+      "android.permission.ACCESS_FINE_LOCATION",
+      "android.permission.ACCESS_NETWORK_STATE",
+      "android.permission.ACCESS_WIFI_STATE",
+      "android.permission.BLUETOOTH",
+      "android.permission.BLUETOOTH_ADMIN",
+      "android.permission.BLUETOOTH_ADVERTISE",
+      "android.permission.BLUETOOTH_CONNECT",
+      "android.permission.BLUETOOTH_SCAN",
+      "android.permission.CAMERA",
+      "android.permission.FOREGROUND_SERVICE",
+      "android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE",
+      "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
+      "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+      "android.permission.GET_ACCOUNTS",
+      "android.permission.INTERNET",
+      "android.permission.MANAGE_ACCOUNTS",
+      "android.permission.NFC",
+      "android.permission.POST_NOTIFICATIONS",
+      "android.permission.READ_EXTERNAL_STORAGE",
+      "android.permission.READ_MEDIA_AUDIO",
+      "android.permission.READ_MEDIA_IMAGES",
+      "android.permission.RECEIVE_BOOT_COMPLETED",
+      "android.permission.REQUEST_COMPANION_START_FOREGROUND_SERVICES_FROM_BACKGROUND",
+      "android.permission.RUN_USER_INITIATED_JOBS",
+      "android.permission.USE_CREDENTIALS",
+      "android.permission.VIBRATE",
+      "android.permission.WAKE_LOCK",
+      "android.permission.WRITE_EXTERNAL_STORAGE",
+      "com.android.vending.BILLING",
+      "com.google.android.apps.youtube.music.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
+      "com.google.android.c2dm.permission.RECEIVE",
+      "com.google.android.gms.permission.ACTIVITY_RECOGNITION",
+      "com.google.android.gms.permission.AD_ID",
+      "com.google.android.providers.gsf.permission.READ_GSERVICES"
+    ],
+    "high_value": [
+      "android.permission.ACCESS_FINE_LOCATION",
+      "android.permission.CAMERA"
+    ]
+  },
+  "risk_flags": {
+    "allow_backup": true,
+    "debuggable": null,
+    "network_security_config": "@7F17001C",
+    "request_legacy_external_storage": null,
+    "uses_cleartext_traffic": null,
+    "webview": null
+  },
+  "suggested_probes": [
+    "exported_components_probe",
+    "high_value_permission_probe"
+  ],
+  "version_code": "90352240",
+  "version_name": "9.03.52"
+}

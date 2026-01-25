@@ -1,0 +1,115 @@
+{
+  "exported_components": {
+    "activities": [
+      "com.google.firebase.auth.internal.GenericIdpActivity",
+      "com.google.firebase.auth.internal.RecaptchaActivity",
+      "com.motorola.genie.contactus.ContactUsActivity",
+      "com.motorola.genie.contactus.moli.MoliChatWebViewActivity",
+      "com.motorola.genie.devicediagnosis.hardwaretest.activity.HardwareTestActivity",
+      "com.motorola.genie.main.start.LaunchActivity"
+    ],
+    "providers": [],
+    "receivers": [
+      "androidx.profileinstaller.ProfileInstallReceiver",
+      "com.google.firebase.iid.FirebaseInstanceIdReceiver",
+      "com.motorola.genie.contactus.moli.BootCompletedReceiver"
+    ],
+    "services": [],
+    "total": 9
+  },
+  "generated_at": "2026-01-25T03:36:13.158217Z",
+  "hashes": {
+    "md5": "40bbbb3cdeefcfbb23b38767da11b511",
+    "sha1": "7a777484f9e1e135108a171f165d7f6f8fa0d585",
+    "sha256": "8141231c88d86f7edb69d475b1aa6e59e0588a06f07ec7951a9dad08f520a92e"
+  },
+  "network_targets": {
+    "cleartext_domains": [],
+    "domains": []
+  },
+  "package_name": "com.motorola.genie",
+  "permissions": {
+    "dangerous": [
+      "android.permission.ACCESS_COARSE_LOCATION",
+      "android.permission.ACCESS_FINE_LOCATION",
+      "android.permission.BLUETOOTH_CONNECT",
+      "android.permission.BLUETOOTH_SCAN",
+      "android.permission.CALL_PHONE",
+      "android.permission.CAMERA",
+      "android.permission.POST_NOTIFICATIONS",
+      "android.permission.READ_CONTACTS",
+      "android.permission.READ_EXTERNAL_STORAGE",
+      "android.permission.READ_MEDIA_AUDIO",
+      "android.permission.READ_MEDIA_IMAGES",
+      "android.permission.READ_MEDIA_VIDEO",
+      "android.permission.READ_PHONE_STATE",
+      "android.permission.RECORD_AUDIO",
+      "android.permission.WRITE_CONTACTS"
+    ],
+    "declared": [
+      "android.permission.ACCESS_COARSE_LOCATION",
+      "android.permission.ACCESS_FINE_LOCATION",
+      "android.permission.ACCESS_NETWORK_STATE",
+      "android.permission.ACCESS_WIFI_STATE",
+      "android.permission.BLUETOOTH",
+      "android.permission.BLUETOOTH_ADMIN",
+      "android.permission.BLUETOOTH_CONNECT",
+      "android.permission.BLUETOOTH_SCAN",
+      "android.permission.CALL_PHONE",
+      "android.permission.CAMERA",
+      "android.permission.CHANGE_NETWORK_STATE",
+      "android.permission.CHANGE_WIFI_STATE",
+      "android.permission.FOREGROUND_SERVICE",
+      "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
+      "android.permission.INTERNET",
+      "android.permission.MODIFY_AUDIO_SETTINGS",
+      "android.permission.PACKAGE_USAGE_STATS",
+      "android.permission.POST_NOTIFICATIONS",
+      "android.permission.QUERY_ALL_PACKAGES",
+      "android.permission.READ_CONTACTS",
+      "android.permission.READ_EXTERNAL_STORAGE",
+      "android.permission.READ_MEDIA_AUDIO",
+      "android.permission.READ_MEDIA_IMAGES",
+      "android.permission.READ_MEDIA_VIDEO",
+      "android.permission.READ_PHONE_STATE",
+      "android.permission.READ_PRIVILEGED_PHONE_STATE",
+      "android.permission.RECEIVE_BOOT_COMPLETED",
+      "android.permission.RECORD_AUDIO",
+      "android.permission.REQUEST_DELETE_PACKAGES",
+      "android.permission.SYSTEM_ALERT_WINDOW",
+      "android.permission.USE_BIOMETRIC",
+      "android.permission.VIBRATE",
+      "android.permission.WAKE_LOCK",
+      "android.permission.WRITE_CONTACTS",
+      "android.permission.WRITE_SETTINGS",
+      "com.google.android.c2dm.permission.RECEIVE",
+      "com.google.android.finsky.permission.BIND_GET_INSTALL_REFERRER_SERVICE",
+      "com.google.android.gms.permission.AD_ID"
+    ],
+    "high_value": [
+      "android.permission.ACCESS_COARSE_LOCATION",
+      "android.permission.ACCESS_FINE_LOCATION",
+      "android.permission.CAMERA",
+      "android.permission.PACKAGE_USAGE_STATS",
+      "android.permission.READ_CONTACTS",
+      "android.permission.READ_PHONE_STATE",
+      "android.permission.RECORD_AUDIO",
+      "android.permission.SYSTEM_ALERT_WINDOW",
+      "android.permission.WRITE_CONTACTS"
+    ]
+  },
+  "risk_flags": {
+    "allow_backup": false,
+    "debuggable": null,
+    "network_security_config": null,
+    "request_legacy_external_storage": null,
+    "uses_cleartext_traffic": null,
+    "webview": null
+  },
+  "suggested_probes": [
+    "exported_components_probe",
+    "high_value_permission_probe"
+  ],
+  "version_code": "1300529",
+  "version_name": "13.5.29"
+}

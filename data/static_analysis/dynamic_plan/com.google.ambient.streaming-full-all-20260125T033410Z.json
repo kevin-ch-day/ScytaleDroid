@@ -1,0 +1,94 @@
+{
+  "exported_components": {
+    "activities": [
+      "com.google.ambient.streaming.core.CompanionDeviceSetupActivity",
+      "com.google.ambient.streaming.core.StreamControlActivity",
+      "com.google.android.libraries.social.licenses.LicenseMenuActivity"
+    ],
+    "providers": [],
+    "receivers": [
+      "androidx.work.impl.diagnostics.DiagnosticsReceiver",
+      "com.google.ambient.streaming.core.IncantationReceiver",
+      "com.google.ambient.streaming.core.StateRefreshReceiver",
+      "com.google.android.libraries.appdoctor.AppDoctorReceiver",
+      "com.google.android.libraries.phenotype.client.stable.AccountRemovedBroadcastReceiver",
+      "com.google.android.libraries.phenotype.client.stable.PhenotypeUpdateBackgroundBroadcastReceiver"
+    ],
+    "services": [
+      "androidx.work.impl.background.systemjob.SystemJobService",
+      "com.google.ambient.streaming.api.ExoNearbySignalingService",
+      "com.google.ambient.streaming.services.ExoCompanionDeviceService",
+      "com.google.android.gms.auth.api.signin.RevocationBoundService"
+    ],
+    "total": 13
+  },
+  "generated_at": "2026-01-25T03:34:10.419723Z",
+  "hashes": {
+    "md5": "dbb97aef585fe93acf4a99e7f4cc6eca",
+    "sha1": "178a014166677f24d9345399e90771b123f4afc1",
+    "sha256": "2967a326aef9e3d1fd53ab604d92fe04b9c177784c1684500e15e2d98a8e157b"
+  },
+  "network_targets": {
+    "cleartext_domains": [],
+    "domains": []
+  },
+  "package_name": "com.google.ambient.streaming",
+  "permissions": {
+    "dangerous": [
+      "android.permission.BLUETOOTH_ADVERTISE",
+      "android.permission.BLUETOOTH_CONNECT",
+      "android.permission.BLUETOOTH_SCAN",
+      "android.permission.POST_NOTIFICATIONS"
+    ],
+    "declared": [
+      "android.permission.ACCESS_NETWORK_STATE",
+      "android.permission.ACCESS_NOTIFICATIONS",
+      "android.permission.ACCESS_WIFI_STATE",
+      "android.permission.ADD_ALWAYS_UNLOCKED_DISPLAY",
+      "android.permission.ADD_TRUSTED_DISPLAY",
+      "android.permission.BATTERY_STATS",
+      "android.permission.BLUETOOTH_ADMIN",
+      "android.permission.BLUETOOTH_ADVERTISE",
+      "android.permission.BLUETOOTH_CONNECT",
+      "android.permission.BLUETOOTH_PRIVILEGED",
+      "android.permission.BLUETOOTH_SCAN",
+      "android.permission.CAPTURE_AUDIO_OUTPUT",
+      "android.permission.CAPTURE_VOICE_COMMUNICATION_OUTPUT",
+      "android.permission.CREATE_VIRTUAL_DEVICE",
+      "android.permission.FORCE_STOP_PACKAGES",
+      "android.permission.FOREGROUND_SERVICE",
+      "android.permission.INTERNET",
+      "android.permission.MANAGE_ACCESSIBILITY",
+      "android.permission.MANAGE_EXTERNAL_STORAGE",
+      "android.permission.MODIFY_AUDIO_ROUTING",
+      "android.permission.POST_NOTIFICATIONS",
+      "android.permission.QUERY_ALL_PACKAGES",
+      "android.permission.READ_DEVICE_CONFIG",
+      "android.permission.REAL_GET_TASKS",
+      "android.permission.RECEIVE_BOOT_COMPLETED",
+      "android.permission.RECEIVE_SENSITIVE_NOTIFICATIONS",
+      "android.permission.REQUEST_COMPANION_PROFILE_APP_STREAMING",
+      "android.permission.REQUEST_COMPANION_PROFILE_COMPUTER",
+      "android.permission.REQUEST_COMPANION_RUN_IN_BACKGROUND",
+      "android.permission.REQUEST_COMPANION_SELF_MANAGED",
+      "android.permission.START_ACTIVITIES_FROM_BACKGROUND",
+      "android.permission.START_FOREGROUND_SERVICES_FROM_BACKGROUND",
+      "android.permission.SUBSTITUTE_NOTIFICATION_APP_NAME",
+      "android.permission.WAKE_LOCK"
+    ],
+    "high_value": []
+  },
+  "risk_flags": {
+    "allow_backup": null,
+    "debuggable": null,
+    "network_security_config": null,
+    "request_legacy_external_storage": null,
+    "uses_cleartext_traffic": null,
+    "webview": null
+  },
+  "suggested_probes": [
+    "exported_components_probe"
+  ],
+  "version_code": "100102000",
+  "version_name": "1.0.1020.0"
+}

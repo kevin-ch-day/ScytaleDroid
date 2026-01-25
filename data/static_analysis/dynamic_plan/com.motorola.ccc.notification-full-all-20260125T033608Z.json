@@ -1,0 +1,124 @@
+{
+  "exported_components": {
+    "activities": [
+      "com.google.firebase.auth.internal.GenericIdpActivity",
+      "com.google.firebase.auth.internal.RecaptchaActivity",
+      "com.motorola.ccc.notification.DIMOSuggestion",
+      "com.motorola.ccc.notification.ExternalMarketplaceLauncher",
+      "com.motorola.ccc.notification.ExternalMonopolyLauncher",
+      "com.motorola.ccc.notification.ExternalUrlDimoLauncher",
+      "com.motorola.ccc.notification.ui.SubscriptionByQRActivity",
+      "com.motorola.ccc.notification.v2.ui.SettingsActivity",
+      "com.motorola.engageapp.ui.CardsActivity",
+      "com.motorola.engageapp.ui.EngageActivity",
+      "com.motorola.engageapp.ui.HelloYouActivity",
+      "com.motorola.engageapp.ui.MarketplaceActivity",
+      "com.motorola.engageapp.ui.MotoNewsActivity",
+      "com.motorola.engageapp.ui.MotopayActivity",
+      "com.motorola.engageapp.ui.MotoplaceActivity",
+      "com.motorola.engageapp.ui.SmartStreamWebActivity"
+    ],
+    "providers": [
+      "com.motorola.ccc.notification.CameraContentProvider",
+      "com.motorola.ccc.notification.DimoProvider",
+      "com.motorola.smartstreamsdk.provider.SmartStreamContentProvider"
+    ],
+    "receivers": [
+      "androidx.profileinstaller.ProfileInstallReceiver",
+      "androidx.work.impl.diagnostics.DiagnosticsReceiver",
+      "com.google.firebase.iid.FirebaseInstanceIdReceiver",
+      "com.motorola.ccc.notification.v2.AppStartUpRecv",
+      "com.motorola.ccc.notification.v2.OOBESetupReceiver",
+      "com.motorola.engageapp.Launcher3LoadedReceiver",
+      "com.motorola.engageapp.SecretCodeReceiver",
+      "com.motorola.engageapp.ui.WebviewActivity$MotopaySMSBroadcastReceiver",
+      "com.motorola.smartstreamsdk.receivers.DateChangeReceiver",
+      "com.motorola.smartstreamsdk.receivers.SecretCodeReceiver"
+    ],
+    "services": [
+      "androidx.work.impl.background.systemjob.SystemJobService",
+      "com.google.android.gms.auth.api.signin.RevocationBoundService"
+    ],
+    "total": 31
+  },
+  "generated_at": "2026-01-25T03:36:08.603592Z",
+  "hashes": {
+    "md5": "e736e8d69dd30b6196d98274492c0b67",
+    "sha1": "7d8a6f692f7737d523dc4a937e938bc18c8799e0",
+    "sha256": "0832e5d4e8f593a1d1e6d818cc2a5f98833daa46ebfef87d86c9c179b8a40f31"
+  },
+  "network_targets": {
+    "cleartext_domains": [],
+    "domains": []
+  },
+  "package_name": "com.motorola.ccc.notification",
+  "permissions": {
+    "dangerous": [],
+    "declared": [
+      "android.permission.ACCESS_ADSERVICES_AD_ID",
+      "android.permission.ACCESS_ADSERVICES_ATTRIBUTION",
+      "android.permission.ACCESS_COARSE_LOCATION",
+      "android.permission.ACCESS_FINE_LOCATION",
+      "android.permission.ACCESS_NETWORK_STATE",
+      "android.permission.CAMERA",
+      "android.permission.FOREGROUND_SERVICE",
+      "android.permission.HIDE_OVERLAY_WINDOWS",
+      "android.permission.HIGH_SAMPLING_RATE_SENSORS",
+      "android.permission.INTERNET",
+      "android.permission.NFC",
+      "android.permission.POST_NOTIFICATIONS",
+      "android.permission.QUERY_ALL_PACKAGES",
+      "android.permission.READ_CONTACTS",
+      "android.permission.READ_EXTERNAL_STORAGE",
+      "android.permission.READ_PHONE_STATE",
+      "android.permission.READ_PRIVILEGED_PHONE_STATE",
+      "android.permission.RECEIVE_BOOT_COMPLETED",
+      "android.permission.SUBSTITUTE_NOTIFICATION_APP_NAME",
+      "android.permission.SYSTEM_ALERT_WINDOW",
+      "android.permission.USE_BIOMETRIC",
+      "android.permission.VIBRATE",
+      "android.permission.WAKE_LOCK",
+      "android.permission.WRITE_EXTERNAL_STORAGE",
+      "com.android.launcher.permission.INSTALL_SHORTCUT",
+      "com.android.launcher3.permission.READ_SETTINGS",
+      "com.android.launcher3.permission.WRITE_SETTINGS",
+      "com.google.android.c2dm.permission.RECEIVE",
+      "com.google.android.gms.permission.AD_ID",
+      "com.google.android.providers.gsf.permission.READ_GSERVICES",
+      "com.motorola.blur.service.blur.Permissions.INTERACT_BLUR_SERVICE",
+      "com.motorola.ccc.notification.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
+      "com.motorola.ccc.notification.READ_NOTIFICATIONS",
+      "com.motorola.ccc.notification.WRITE_NOTIFICATIONS",
+      "com.motorola.ccc.ota.Permissions.INTERACT_OTA_SERVICE",
+      "com.motorola.ccc.plm.permission.READPROVIDER",
+      "com.motorola.help.permission.INTERACT_HELP",
+      "com.motorola.installer.permissions.ACCESS_MAIN_MOTO_INSTALLER",
+      "com.motorola.launcher3.permission.READ_SETTINGS",
+      "com.motorola.launcher3.permission.RECEIVE_FIRST_LOAD_BROADCAST",
+      "com.motorola.launcher3.permission.WRITE_SETTINGS",
+      "com.motorola.permission.ACCESS_CHECKIN"
+    ],
+    "high_value": [
+      "android.permission.ACCESS_COARSE_LOCATION",
+      "android.permission.ACCESS_FINE_LOCATION",
+      "android.permission.CAMERA",
+      "android.permission.READ_CONTACTS",
+      "android.permission.READ_PHONE_STATE",
+      "android.permission.SYSTEM_ALERT_WINDOW"
+    ]
+  },
+  "risk_flags": {
+    "allow_backup": false,
+    "debuggable": null,
+    "network_security_config": null,
+    "request_legacy_external_storage": true,
+    "uses_cleartext_traffic": false,
+    "webview": null
+  },
+  "suggested_probes": [
+    "exported_components_probe",
+    "high_value_permission_probe"
+  ],
+  "version_code": "180018",
+  "version_name": "18.0.018"
+}

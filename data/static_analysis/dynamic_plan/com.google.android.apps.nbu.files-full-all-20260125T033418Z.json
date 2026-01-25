@@ -1,0 +1,108 @@
+{
+  "exported_components": {
+    "activities": [
+      "com.google.android.apps.nbu.files.gateway.browse.BrowseGatewayHandler",
+      "com.google.android.apps.nbu.files.gateway.deeplink.FilesGoDeepLink",
+      "com.google.android.apps.nbu.files.gateway.downloads.DownloadsActivity",
+      "com.google.android.apps.nbu.files.gateway.pdf.PdfPreviewIntentGatewayHandler",
+      "com.google.android.apps.nbu.files.gateway.preview.PreviewActivity",
+      "com.google.android.apps.nbu.files.gateway.savetodownloads.SaveToDownloadsActivity",
+      "com.google.android.apps.nbu.files.gateway.storagebreakdown.StorageBreakdownActivity",
+      "com.google.android.apps.nbu.files.gateway.storagevolume.StorageVolumeActivity",
+      "com.google.android.apps.nbu.files.gateway.txt.TextPreviewGatewayHandler",
+      "com.google.android.apps.nbu.files.gateway.zip.ZipPreviewGatewayHandler",
+      "com.google.android.apps.nbu.files.home.HomeActivity",
+      "com.google.apps.tiktok.nav.gateway.AnimatedGatewayActivity",
+      "com.google.apps.tiktok.nav.gateway.GatewayActivity"
+    ],
+    "providers": [
+      "com.google.android.apps.nbu.files.googleguide.GoogleGuideContentProvider",
+      "com.google.android.apps.nbu.files.offlinesharing.foldersharing.FolderSharingContentProvider"
+    ],
+    "receivers": [
+      "androidx.work.impl.diagnostics.DiagnosticsReceiver",
+      "com.google.android.libraries.appdoctor.AppDoctorReceiver",
+      "com.google.android.libraries.internal.growth.growthkit.internal.debug.TestingToolsBroadcastReceiver",
+      "com.google.android.libraries.notifications.platform.entrypoints.accountchanged.AccountChangedReceiver",
+      "com.google.android.libraries.notifications.platform.entrypoints.localechanged.LocaleChangedReceiver",
+      "com.google.android.libraries.notifications.platform.entrypoints.restart.RestartReceiver",
+      "com.google.android.libraries.notifications.platform.entrypoints.timezonechanged.TimezoneChangedReceiver",
+      "com.google.android.libraries.notifications.platform.entrypoints.update.UpdateReceiver",
+      "com.google.android.libraries.phenotype.client.stable.AccountRemovedBroadcastReceiver",
+      "com.google.android.libraries.phenotype.client.stable.PhenotypeUpdateBackgroundBroadcastReceiver",
+      "com.google.apps.tiktok.experiments.phenotype.ConfigurationUpdatedReceiver_Receiver",
+      "com.google.firebase.iid.FirebaseInstanceIdReceiver"
+    ],
+    "services": [
+      "androidx.work.impl.background.systemjob.SystemJobService",
+      "com.google.android.apps.nbu.files.quicksettings.StorageAssistantTileService"
+    ],
+    "total": 29
+  },
+  "generated_at": "2026-01-25T03:34:18.188272Z",
+  "hashes": {
+    "md5": "20ef828c6afbf2fd208285c36963c3f1",
+    "sha1": "d7f56880e2314ea485dab84892e28ccef6cd72ab",
+    "sha256": "88d4de05b3bc172f6445a91aad8b36a3848b3ede4ae2f8b179b34084bc67387a"
+  },
+  "network_targets": {
+    "cleartext_domains": [],
+    "domains": []
+  },
+  "package_name": "com.google.android.apps.nbu.files",
+  "permissions": {
+    "dangerous": [
+      "android.permission.ACCESS_MEDIA_LOCATION",
+      "android.permission.POST_NOTIFICATIONS",
+      "android.permission.READ_EXTERNAL_STORAGE",
+      "android.permission.WRITE_EXTERNAL_STORAGE"
+    ],
+    "declared": [
+      "android.permission.ACCESS_MEDIA_LOCATION",
+      "android.permission.ACCESS_NETWORK_STATE",
+      "android.permission.ACCESS_WIFI_STATE",
+      "android.permission.FOREGROUND_SERVICE",
+      "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
+      "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+      "android.permission.GET_PACKAGE_SIZE",
+      "android.permission.INTERNET",
+      "android.permission.MANAGE_EXTERNAL_STORAGE",
+      "android.permission.PACKAGE_USAGE_STATS",
+      "android.permission.POST_NOTIFICATIONS",
+      "android.permission.QUERY_ALL_PACKAGES",
+      "android.permission.READ_EXTERNAL_STORAGE",
+      "android.permission.RECEIVE_BOOT_COMPLETED",
+      "android.permission.REQUEST_DELETE_PACKAGES",
+      "android.permission.REQUEST_INSTALL_PACKAGES",
+      "android.permission.USE_BIOMETRIC",
+      "android.permission.USE_FINGERPRINT",
+      "android.permission.WAKE_LOCK",
+      "android.permission.WRITE_EXTERNAL_STORAGE",
+      "android.permission.WRITE_SETTINGS",
+      "com.android.vending.p2p.APP_INSTALL_API",
+      "com.google.android.apps.nbu.files.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
+      "com.google.android.apps.nbu.files.permission.C2D_MESSAGE",
+      "com.google.android.apps.search.omnient.permission.LAUNCH_FROM_EXTERNAL_APP",
+      "com.google.android.c2dm.permission.RECEIVE",
+      "com.google.android.providers.gsf.permission.READ_GSERVICES"
+    ],
+    "high_value": [
+      "android.permission.PACKAGE_USAGE_STATS",
+      "android.permission.REQUEST_INSTALL_PACKAGES"
+    ]
+  },
+  "risk_flags": {
+    "allow_backup": true,
+    "debuggable": null,
+    "network_security_config": "@7F160014",
+    "request_legacy_external_storage": true,
+    "uses_cleartext_traffic": false,
+    "webview": null
+  },
+  "suggested_probes": [
+    "exported_components_probe",
+    "high_value_permission_probe"
+  ],
+  "version_code": "1671723",
+  "version_name": "1.9938.854818729.0-release"
+}

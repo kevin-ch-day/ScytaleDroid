@@ -1,0 +1,79 @@
+{
+  "exported_components": {
+    "activities": [
+      "com.google.android.wsu.openroaming.ChooseAccountActivity",
+      "com.google.android.wsu.openroaming.SignUpActivity"
+    ],
+    "providers": [],
+    "receivers": [
+      "androidx.work.impl.diagnostics.DiagnosticsReceiver",
+      "com.google.android.apps.carrier.carrierwifi.CarrierWifiReceiver",
+      "com.google.android.apps.carrier.carrierwifi.CarrierWifiTestReceiver",
+      "com.google.android.apps.carrier.carrierwifi.PhenotypeReceiver",
+      "com.google.android.apps.carrier.carrierwifi.mobility.BootReceiver",
+      "com.google.android.apps.carrier.carrierwifi.wifiscorer.BootReceiver",
+      "com.google.android.libraries.appdoctor.AppDoctorReceiver",
+      "com.google.android.libraries.phenotype.client.stable.AccountRemovedBroadcastReceiver",
+      "com.google.android.libraries.phenotype.client.stable.PhenotypeUpdateBackgroundBroadcastReceiver",
+      "com.google.android.wsu.openroaming.OpenRoamingReceiver"
+    ],
+    "services": [
+      "androidx.work.impl.background.systemjob.SystemJobService",
+      "com.google.android.apps.carrier.carrierwifi.wifiscorer.WifiScorerService",
+      "com.google.android.wsu.service.WsuServiceImpl"
+    ],
+    "total": 15
+  },
+  "generated_at": "2026-01-25T03:34:11.544530Z",
+  "hashes": {
+    "md5": "838d9f93d6f074a23826e681bcba6448",
+    "sha1": "27c6c5503ef495d08a358237f62eec5b8c74ec56",
+    "sha256": "4bc20e094c89e48722738c2da8d09c7868f792d4c47d840698f08a9ab4e692c6"
+  },
+  "network_targets": {
+    "cleartext_domains": [],
+    "domains": []
+  },
+  "package_name": "com.google.android.apps.carrier.carrierwifi",
+  "permissions": {
+    "dangerous": [
+      "android.permission.ACTIVITY_RECOGNITION"
+    ],
+    "declared": [
+      "android.permission.ACCESS_NETWORK_STATE",
+      "android.permission.ACCESS_WIFI_STATE",
+      "android.permission.ACTIVITY_RECOGNITION",
+      "android.permission.CHANGE_COMPONENT_ENABLED_STATE",
+      "android.permission.CHANGE_WIFI_STATE",
+      "android.permission.FOREGROUND_SERVICE",
+      "android.permission.GET_PACKAGE_SIZE",
+      "android.permission.INTERACT_ACROSS_USERS",
+      "android.permission.INTERNET",
+      "android.permission.LOCATION_HARDWARE",
+      "android.permission.MANAGE_WIFI_NETWORK_SELECTION",
+      "android.permission.MODIFY_PHONE_STATE",
+      "android.permission.NETWORK_CARRIER_PROVISIONING",
+      "android.permission.QUERY_ALL_PACKAGES",
+      "android.permission.READ_PRIVILEGED_PHONE_STATE",
+      "android.permission.RECEIVE_BOOT_COMPLETED",
+      "android.permission.WAKE_LOCK",
+      "android.permission.WIFI_SET_DEVICE_MOBILITY_STATE",
+      "android.permission.WIFI_UPDATE_USABILITY_STATS_SCORE",
+      "com.google.android.providers.gsf.permission.READ_GSERVICES"
+    ],
+    "high_value": []
+  },
+  "risk_flags": {
+    "allow_backup": false,
+    "debuggable": null,
+    "network_security_config": null,
+    "request_legacy_external_storage": null,
+    "uses_cleartext_traffic": null,
+    "webview": null
+  },
+  "suggested_probes": [
+    "exported_components_probe"
+  ],
+  "version_code": "122",
+  "version_name": "1.7.0.826058012"
+}

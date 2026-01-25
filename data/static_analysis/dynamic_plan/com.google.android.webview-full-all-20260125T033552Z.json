@@ -1,0 +1,109 @@
+{
+  "exported_components": {
+    "activities": [
+      "org.chromium.android_webview.devui.MainActivity",
+      "org.chromium.android_webview.nonembedded.LicenseActivity"
+    ],
+    "providers": [
+      "org.chromium.android_webview.nonembedded.LicenseContentProvider",
+      "org.chromium.android_webview.services.DeveloperModeContentProvider",
+      "org.chromium.android_webview.services.SafeModeContentProvider",
+      "org.chromium.android_webview.services.SafeModeVariationsSeedContentProvider"
+    ],
+    "receivers": [
+      "com.android.webview.chromium.SafeModeAppDoctorReceiver"
+    ],
+    "services": [
+      "org.chromium.android_webview.js_sandbox.service.JsSandboxService0",
+      "org.chromium.android_webview.services.AwMinidumpUploadJobService",
+      "org.chromium.android_webview.services.AwNetLogService",
+      "org.chromium.android_webview.services.ComponentsProviderService",
+      "org.chromium.android_webview.services.CrashReceiverService",
+      "org.chromium.android_webview.services.DeveloperUiService",
+      "org.chromium.android_webview.services.MetricsBridgeService",
+      "org.chromium.android_webview.services.MetricsUploadService",
+      "org.chromium.android_webview.services.SafeModeService",
+      "org.chromium.android_webview.services.StartupFeatureMetadataHolder",
+      "org.chromium.android_webview.services.VariationsSeedServer",
+      "org.chromium.content.app.SandboxedProcessService0",
+      "org.chromium.content.app.SandboxedProcessService1",
+      "org.chromium.content.app.SandboxedProcessService10",
+      "org.chromium.content.app.SandboxedProcessService11",
+      "org.chromium.content.app.SandboxedProcessService12",
+      "org.chromium.content.app.SandboxedProcessService13",
+      "org.chromium.content.app.SandboxedProcessService14",
+      "org.chromium.content.app.SandboxedProcessService15",
+      "org.chromium.content.app.SandboxedProcessService16",
+      "org.chromium.content.app.SandboxedProcessService17",
+      "org.chromium.content.app.SandboxedProcessService18",
+      "org.chromium.content.app.SandboxedProcessService19",
+      "org.chromium.content.app.SandboxedProcessService2",
+      "org.chromium.content.app.SandboxedProcessService20",
+      "org.chromium.content.app.SandboxedProcessService21",
+      "org.chromium.content.app.SandboxedProcessService22",
+      "org.chromium.content.app.SandboxedProcessService23",
+      "org.chromium.content.app.SandboxedProcessService24",
+      "org.chromium.content.app.SandboxedProcessService25",
+      "org.chromium.content.app.SandboxedProcessService26",
+      "org.chromium.content.app.SandboxedProcessService27",
+      "org.chromium.content.app.SandboxedProcessService28",
+      "org.chromium.content.app.SandboxedProcessService29",
+      "org.chromium.content.app.SandboxedProcessService3",
+      "org.chromium.content.app.SandboxedProcessService30",
+      "org.chromium.content.app.SandboxedProcessService31",
+      "org.chromium.content.app.SandboxedProcessService32",
+      "org.chromium.content.app.SandboxedProcessService33",
+      "org.chromium.content.app.SandboxedProcessService34",
+      "org.chromium.content.app.SandboxedProcessService35",
+      "org.chromium.content.app.SandboxedProcessService36",
+      "org.chromium.content.app.SandboxedProcessService37",
+      "org.chromium.content.app.SandboxedProcessService38",
+      "org.chromium.content.app.SandboxedProcessService39",
+      "org.chromium.content.app.SandboxedProcessService4",
+      "org.chromium.content.app.SandboxedProcessService5",
+      "org.chromium.content.app.SandboxedProcessService6",
+      "org.chromium.content.app.SandboxedProcessService7",
+      "org.chromium.content.app.SandboxedProcessService8",
+      "org.chromium.content.app.SandboxedProcessService9"
+    ],
+    "total": 58
+  },
+  "generated_at": "2026-01-25T03:35:52.986384Z",
+  "hashes": {
+    "md5": "103b66cf0ec0c73604ccb23ed1ce9bac",
+    "sha1": "71eea3f499193c8323d916cdb418c9b89dff31f4",
+    "sha256": "1aa0d708080ff33f42c043882a8bb0f0523611841dbd8f56dcc12fdc5f461a60"
+  },
+  "network_targets": {
+    "cleartext_domains": [],
+    "domains": []
+  },
+  "package_name": "com.google.android.webview",
+  "permissions": {
+    "dangerous": [
+      "android.permission.POST_NOTIFICATIONS"
+    ],
+    "declared": [
+      "android.permission.ACCESS_NETWORK_STATE",
+      "android.permission.FOREGROUND_SERVICE",
+      "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",
+      "android.permission.INTERNET",
+      "android.permission.POST_NOTIFICATIONS",
+      "android.permission.RECEIVE_BOOT_COMPLETED"
+    ],
+    "high_value": []
+  },
+  "risk_flags": {
+    "allow_backup": null,
+    "debuggable": null,
+    "network_security_config": null,
+    "request_legacy_external_storage": null,
+    "uses_cleartext_traffic": null,
+    "webview": null
+  },
+  "suggested_probes": [
+    "exported_components_probe"
+  ],
+  "version_code": "749919233",
+  "version_name": "143.0.7499.192"
+}

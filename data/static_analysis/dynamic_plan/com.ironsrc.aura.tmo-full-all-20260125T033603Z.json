@@ -1,0 +1,100 @@
+{
+  "exported_components": {
+    "activities": [
+      "com.ironsource.appmanager.reef.activities.ReefActivity",
+      "com.ironsource.appmanager.ui.activities.LauncherPostOOBEActivity",
+      "com.ironsource.appmanager.ui.activities.RecurringOOBEActivity",
+      "com.ironsource.aura.ams.ui.PreInstallDialogActivity",
+      "com.ironsource.aura.ams.ui.mba.MbaAppInfoActivity",
+      "com.tmobile.dm.ms.activities.VowifiEnablement"
+    ],
+    "providers": [
+      "com.ironsource.aura.profiler.host.content_providers.IdentityContentProvider",
+      "com.ironsource.aura.sdk.feature.attribution.referrer.AttributionReferrerContentProvider"
+    ],
+    "receivers": [
+      "androidx.profileinstaller.ProfileInstallReceiver",
+      "androidx.work.impl.diagnostics.DiagnosticsReceiver",
+      "com.ironsource.appmanager.receivers.ExportedBroadcastReceiver",
+      "com.ironsource.appmanager.receivers.SimStateChangeReceiver",
+      "com.ironsource.appmanager.receivers.SprintIDPackageFirstLaunchReceiver",
+      "com.ironsource.appmanager.selfupdate.SelfUpdateDownloadReceiver",
+      "com.ironsource.aura.sdk.feature.delivery.apk.DeliveryDownloadCompletedBroadcastReceiver",
+      "com.ironsource.aura.sdk.feature.selfupdate.AppSelfUpdateDownloadEventsReceiver"
+    ],
+    "services": [
+      "androidx.work.impl.background.systemjob.SystemJobService"
+    ],
+    "total": 17
+  },
+  "generated_at": "2026-01-25T03:36:03.939588Z",
+  "hashes": {
+    "md5": "d782f28db0426701f4a6ce47e3c76a22",
+    "sha1": "500583704974112c09a04fedfd55936f2616bbc2",
+    "sha256": "8226cd5a265bcbafc41954b0778608e5860847da157889c8d26605d60d1fb86a"
+  },
+  "network_targets": {
+    "cleartext_domains": [],
+    "domains": []
+  },
+  "package_name": "com.ironsrc.aura.tmo",
+  "permissions": {
+    "dangerous": [
+      "android.permission.POST_NOTIFICATIONS",
+      "android.permission.READ_PHONE_NUMBERS"
+    ],
+    "declared": [
+      "android.permission.ACCESS_NETWORK_STATE",
+      "android.permission.ACCESS_WIFI_STATE",
+      "android.permission.DOWNLOAD_WITHOUT_NOTIFICATION",
+      "android.permission.FOREGROUND_SERVICE",
+      "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",
+      "android.permission.GET_PACKAGE_SIZE",
+      "android.permission.INTERNET",
+      "android.permission.PACKAGE_USAGE_STATS",
+      "android.permission.POST_NOTIFICATIONS",
+      "android.permission.QUERY_ALL_PACKAGES",
+      "android.permission.READ_PHONE_NUMBERS",
+      "android.permission.READ_PRIVILEGED_PHONE_STATE",
+      "android.permission.RECEIVE_BOOT_COMPLETED",
+      "android.permission.REQUEST_DELETE_PACKAGES",
+      "android.permission.SUBSTITUTE_NOTIFICATION_APP_NAME",
+      "android.permission.WAKE_LOCK",
+      "com.google.android.gms.permission.AD_ID",
+      "com.google.android.providers.gsf.permission.READ_GSERVICES",
+      "com.sec.android.app.samsungapps.accesspermission.STORE_INFO_PROVIDER.READ",
+      "com.sprint.ce.updater.permission.BROADCAST_PACKAGE_FIRST_LAUNCH",
+      "com.sprint.ce.updater.permission.RECEIVER_PERMISSION",
+      "com.sprint.ce.updater.permission.TRUSTED_INSTALL_LOCAL_UPDATES",
+      "com.sprint.ce.updater.permission.TRUSTED_INSTALL_UPDATES",
+      "com.sprint.ce.updater.permission.TRUSTED_UNINSTALL_SELF",
+      "com.sprint.ce.updater.permission.TRUSTED_UNINSTALL_UPDATES",
+      "com.sprint.permission.TRUSTED_INFO_LAUNCHER_PLACEMENT",
+      "com.tmobile.dm.cm.permission.ADDITIONAL_SETTINGS_UI_START",
+      "com.tmobile.dm.ms.services.permission.EXTERNAL_SERVICE",
+      "com.tmobile.pr.adapt.permission.BROADCAST_PACKAGE_FIRST_LAUNCH_TRUSTED",
+      "com.tmobile.pr.adapt.permission.INSTALL_LOCAL_UPDATES_TRUSTED",
+      "com.tmobile.pr.adapt.permission.INSTALL_UPDATES_TRUSTED",
+      "com.tmobile.pr.adapt.permission.RECEIVER_PERMISSION_TRUSTED",
+      "com.tmobile.pr.adapt.permission.UNINSTALL_SELF_TRUSTED",
+      "com.tmobile.pr.adapt.permission.UNINSTALL_UPDATES_TRUSTED"
+    ],
+    "high_value": [
+      "android.permission.PACKAGE_USAGE_STATS"
+    ]
+  },
+  "risk_flags": {
+    "allow_backup": false,
+    "debuggable": null,
+    "network_security_config": "@7F180000",
+    "request_legacy_external_storage": null,
+    "uses_cleartext_traffic": null,
+    "webview": null
+  },
+  "suggested_probes": [
+    "exported_components_probe",
+    "high_value_permission_probe"
+  ],
+  "version_code": "9014400",
+  "version_name": "9.1.44.0"
+}

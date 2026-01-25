@@ -1,0 +1,36 @@
+{
+  "exported_components": {
+    "activities": [],
+    "providers": [],
+    "receivers": [],
+    "services": [],
+    "total": 0
+  },
+  "generated_at": "2026-01-25T03:36:02.807581Z",
+  "hashes": {
+    "md5": "92ca19de2af21bda0b279b60aa88a683",
+    "sha1": "3f8ba3b4c62f9d4340765e988cab2106bd856c77",
+    "sha256": "fb2aba82ebda78529dd0d9b14926d489d4adae167a065177cf66cbe62cf14a76"
+  },
+  "network_targets": {
+    "cleartext_domains": [],
+    "domains": []
+  },
+  "package_name": "com.google.mainline.adservices",
+  "permissions": {
+    "dangerous": [],
+    "declared": [],
+    "high_value": []
+  },
+  "risk_flags": {
+    "allow_backup": null,
+    "debuggable": false,
+    "network_security_config": null,
+    "request_legacy_external_storage": null,
+    "uses_cleartext_traffic": null,
+    "webview": null
+  },
+  "suggested_probes": [],
+  "version_code": "360811000",
+  "version_name": "2025-08-01T+"
+}

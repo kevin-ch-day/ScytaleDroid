@@ -84,6 +84,16 @@ def _find_report_for_session(session_stamp: str) -> Optional[Path]:
     return None
 
 
+def _find_report_by_hash(report_hash: str) -> Optional[Path]:
+    report_hash = report_hash.strip()
+    if not report_hash:
+        return None
+    for stored in list_reports():
+        if stored.path.stem == report_hash:
+            return stored.path
+    return None
+
+
 def _run_static_scan(
     job_id: str,
     apk_path: Path,
@@ -419,12 +429,22 @@ def build_api_app() -> "FastAPI":
         )
         if not row:
             return {"status": "not_found"}
+        report_path = _find_report_for_session(row[0]) if row[0] else None
+        report_hash = report_path.stem if report_path else None
         return {
             "status": "ok",
             "session_stamp": row[0],
             "ended_at_utc": row[2].isoformat() if row[2] else None,
             "sha256": row[3],
+            "report_hash": report_hash,
         }
+
+    @app.get("/report/{report_hash}.json")
+    def report_by_hash(report_hash: str) -> FileResponse:
+        report_path = _find_report_by_hash(report_hash)
+        if report_path is None:
+            raise HTTPException(status_code=404, detail="Report not found")
+        return FileResponse(report_path, media_type="application/json")
 
     @app.get("/health/summary")
     def health_summary() -> dict[str, Any]:

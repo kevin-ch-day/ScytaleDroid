@@ -1,0 +1,88 @@
+{
+  "exported_components": {
+    "activities": [
+      "com.google.android.apps.speech.tts.googletts.local.voicepack.ui.VoiceDataInstallActivity",
+      "com.google.android.apps.speech.tts.googletts.service.GoogleTTSActivity",
+      "com.google.android.apps.speech.tts.googletts.settings.CheckVoiceData",
+      "com.google.android.apps.speech.tts.googletts.settings.GetSampleText",
+      "com.google.android.apps.speech.tts.googletts.settings.asr.ForceEnableTntComponentsActivity",
+      "com.google.android.apps.speech.tts.googletts.settings.privacydashboard.PrivacyDashboardActivity",
+      "com.google.android.libraries.social.licenses.LicenseMenuActivity",
+      "com.google.android.libraries.speech.modelmanager.languagepack.legacy.DownloadActivity"
+    ],
+    "providers": [
+      "com.android.car.ui.core.SearchResultsProvider"
+    ],
+    "receivers": [
+      "androidx.work.impl.diagnostics.DiagnosticsReceiver",
+      "com.google.android.libraries.phenotype.client.stable.AccountRemovedBroadcastReceiver",
+      "com.google.android.libraries.phenotype.client.stable.PhenotypeUpdateBackgroundBroadcastReceiver",
+      "com.google.android.libraries.speech.modelmanager.languagepack.legacy.LanguagePackDetailsReceiver_Receiver",
+      "com.google.apps.tiktok.experiments.phenotype.ConfigurationUpdatedReceiver_Receiver"
+    ],
+    "services": [
+      "androidx.work.impl.background.systemjob.SystemJobService",
+      "com.google.android.apps.speech.tts.googletts.service.GoogleTTSRecognitionService",
+      "com.google.android.apps.speech.tts.googletts.service.GoogleTtsService",
+      "com.google.android.apps.speech.tts.googletts.settings.asr.voiceime.VoiceInputMethodService",
+      "com.google.android.libraries.speech.transcription.recognition.grpc.GoogleAsrService"
+    ],
+    "total": 19
+  },
+  "generated_at": "2026-01-25T03:35:35.102684Z",
+  "hashes": {
+    "md5": "db0347fe32be4cbb8d11cb6f61b77123",
+    "sha1": "8bb488886f85b79a7155140531a3ea04f0e01096",
+    "sha256": "6521b31e3dc90abd1681dccf1eaf422999f46bb5bcafac46b5117a0c1105a811"
+  },
+  "network_targets": {
+    "cleartext_domains": [],
+    "domains": []
+  },
+  "package_name": "com.google.android.tts",
+  "permissions": {
+    "dangerous": [
+      "android.permission.POST_NOTIFICATIONS",
+      "android.permission.RECORD_AUDIO"
+    ],
+    "declared": [
+      "android.permission.ACCESS_NETWORK_STATE",
+      "android.permission.CHANGE_NETWORK_STATE",
+      "android.permission.DOWNLOAD_WITHOUT_NOTIFICATION",
+      "android.permission.FOREGROUND_SERVICE",
+      "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
+      "android.permission.GET_PACKAGE_SIZE",
+      "android.permission.INTERNET",
+      "android.permission.POST_NOTIFICATIONS",
+      "android.permission.QUERY_ALL_PACKAGES",
+      "android.permission.RECEIVE_BOOT_COMPLETED",
+      "android.permission.RECORD_AUDIO",
+      "android.permission.START_ACTIVITIES_FROM_BACKGROUND",
+      "android.permission.SYSTEM_ALERT_WINDOW",
+      "android.permission.UPDATE_APP_OPS_STATS",
+      "android.permission.WAKE_LOCK",
+      "android.permission.WRITE_SETTINGS",
+      "com.google.android.apps.aicore.service.BIND_SERVICE",
+      "com.google.android.gms.permission.INTERNAL_BROADCAST",
+      "com.google.android.providers.gsf.permission.READ_GSERVICES"
+    ],
+    "high_value": [
+      "android.permission.RECORD_AUDIO",
+      "android.permission.SYSTEM_ALERT_WINDOW"
+    ]
+  },
+  "risk_flags": {
+    "allow_backup": null,
+    "debuggable": null,
+    "network_security_config": null,
+    "request_legacy_external_storage": null,
+    "uses_cleartext_traffic": false,
+    "webview": null
+  },
+  "suggested_probes": [
+    "exported_components_probe",
+    "high_value_permission_probe"
+  ],
+  "version_code": "210610884",
+  "version_name": "googletts.google-speech-apk_20251222.02_p0.847924619"
+}

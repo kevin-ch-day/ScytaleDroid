@@ -1,0 +1,115 @@
+{
+  "exported_components": {
+    "activities": [
+      "com.lenovo.lsf.lenovoid.ui.PsLoginActivity",
+      "com.lenovo.lsf.lenovoid.ui.RegisterAccountByEmail",
+      "com.motorola.motoaccount.ui.WebAuthActivity",
+      "com.motorola.spaces.presentation.LauncherActivity",
+      "com.motorola.spaces.presentation.router.OnBoardRouterActivity",
+      "com.motorola.spaces.presentation.ui.onboarding.setupwizard.ParentalControlActivity"
+    ],
+    "providers": [
+      "com.motorola.spaces.manager.contentproviders.RemoteInfoProvider",
+      "com.motorola.spaces.manager.contentproviders.SpacesProvider"
+    ],
+    "receivers": [
+      "androidx.profileinstaller.ProfileInstallReceiver",
+      "androidx.work.impl.diagnostics.DiagnosticsReceiver",
+      "com.google.firebase.iid.FirebaseInstanceIdReceiver",
+      "com.motorola.spaces.core.receiver.DeviceAdminReceiverImpl",
+      "com.motorola.spaces.manager.monitor.AppChangeMonitor",
+      "com.motorola.spaces.receiver.BootCompletedReceiver",
+      "com.motorola.spaces.receiver.LockedBootCompleteReceiver"
+    ],
+    "services": [
+      "androidx.work.impl.background.systemjob.SystemJobService",
+      "com.google.android.gms.nearby.exposurenotification.WakeUpService",
+      "com.motorola.spaces.presentation.tile.SpacesTileService"
+    ],
+    "total": 18
+  },
+  "generated_at": "2026-01-25T03:36:19.790180Z",
+  "hashes": {
+    "md5": "b25b9e48c9ef9a52b8a01d94c9991253",
+    "sha1": "a9064660e297fdf3cf5750b6db1ec0587966ab53",
+    "sha256": "0e21763a161330d810f45cda4d88168176798390a2524c3871ca395da5a1e6ed"
+  },
+  "network_targets": {
+    "cleartext_domains": [],
+    "domains": []
+  },
+  "package_name": "com.motorola.spaces",
+  "permissions": {
+    "dangerous": [
+      "android.permission.ACCESS_BACKGROUND_LOCATION",
+      "android.permission.ACCESS_COARSE_LOCATION",
+      "android.permission.ACCESS_FINE_LOCATION",
+      "android.permission.BLUETOOTH_ADVERTISE",
+      "android.permission.BLUETOOTH_CONNECT",
+      "android.permission.BLUETOOTH_SCAN",
+      "android.permission.CAMERA",
+      "android.permission.POST_NOTIFICATIONS",
+      "android.permission.UWB_RANGING"
+    ],
+    "declared": [
+      "android.permission.ACCESS_BACKGROUND_LOCATION",
+      "android.permission.ACCESS_COARSE_LOCATION",
+      "android.permission.ACCESS_FINE_LOCATION",
+      "android.permission.ACCESS_NETWORK_STATE",
+      "android.permission.ACCESS_NOTIFICATION_POLICY",
+      "android.permission.ACCESS_WIFI_STATE",
+      "android.permission.BLUETOOTH",
+      "android.permission.BLUETOOTH_ADMIN",
+      "android.permission.BLUETOOTH_ADVERTISE",
+      "android.permission.BLUETOOTH_CONNECT",
+      "android.permission.BLUETOOTH_SCAN",
+      "android.permission.CAMERA",
+      "android.permission.FOREGROUND_SERVICE",
+      "android.permission.FOREGROUND_SERVICE_LOCATION",
+      "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",
+      "android.permission.INTERNET",
+      "android.permission.MANAGE_USERS",
+      "android.permission.MODIFY_DAY_NIGHT_MODE",
+      "android.permission.PACKAGE_USAGE_STATS",
+      "android.permission.POST_NOTIFICATIONS",
+      "android.permission.QUERY_ALL_PACKAGES",
+      "android.permission.RECEIVE_BOOT_COMPLETED",
+      "android.permission.START_ACTIVITIES_FROM_BACKGROUND",
+      "android.permission.SYSTEM_APPLICATION_OVERLAY",
+      "android.permission.USE_BIOMETRIC",
+      "android.permission.USE_FINGERPRINT",
+      "android.permission.UWB_RANGING",
+      "android.permission.WAKE_LOCK",
+      "android.permission.WRITE_SECURE_SETTINGS",
+      "com.google.android.c2dm.permission.RECEIVE",
+      "com.google.android.providers.gsf.permission.READ_GSERVICES",
+      "com.motorola.launcher3.permission.READ_SETTINGS",
+      "com.motorola.launcher3.permission.WRITE_SETTINGS",
+      "com.motorola.motoactions.SETTINGS",
+      "com.motorola.permission.ACCESS_CHECKIN",
+      "com.motorola.permission.MANAGE_TYPE_MOTO_TRUSTED_APPS_OVERLAY",
+      "com.motorola.permission.WRITE_SECURE_SETTINGS",
+      "com.motorola.spaces.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+    ],
+    "high_value": [
+      "android.permission.ACCESS_COARSE_LOCATION",
+      "android.permission.ACCESS_FINE_LOCATION",
+      "android.permission.CAMERA",
+      "android.permission.PACKAGE_USAGE_STATS"
+    ]
+  },
+  "risk_flags": {
+    "allow_backup": false,
+    "debuggable": null,
+    "network_security_config": null,
+    "request_legacy_external_storage": null,
+    "uses_cleartext_traffic": null,
+    "webview": null
+  },
+  "suggested_probes": [
+    "exported_components_probe",
+    "high_value_permission_probe"
+  ],
+  "version_code": "310312813",
+  "version_name": "3.1.28.13"
+}

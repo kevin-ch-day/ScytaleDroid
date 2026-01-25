@@ -1,0 +1,107 @@
+{
+  "exported_components": {
+    "activities": [
+      "com.android.talkback.TalkBackPreferencesActivity",
+      "com.google.android.accessibility.accessibilitymenu.activity.A11yMenuSettingsActivity",
+      "com.google.android.accessibility.braille.brailledisplay.settings.BrailleGradeActivity",
+      "com.google.android.accessibility.selecttospeak.activities.SelectToSpeakPreferencesActivity",
+      "com.google.android.accessibility.selecttospeak.activities.ShowOverlayActivity",
+      "com.google.android.accessibility.selecttospeak.activities.WelcomeActivity",
+      "com.google.android.accessibility.selecttospeak.popup.SelectToSpeakPopupActivity",
+      "com.google.android.accessibility.talkback.NotificationActivity",
+      "com.google.android.accessibility.talkback.keyboard.TalkBackKeymapChangesActivity",
+      "com.google.android.accessibility.talkback.labeling.LabelImportActivity",
+      "com.google.android.accessibility.talkback.preference.GestureChangeNotificationActivity",
+      "com.google.android.accessibility.talkback.trainingcommon.SecondaryTrainingActivity",
+      "com.google.android.accessibility.talkback.trainingcommon.TrainingActivity",
+      "com.google.android.libraries.social.licenses.LicenseMenuActivity"
+    ],
+    "providers": [
+      "com.google.android.accessibility.switchaccesslegacy.migration.MigrationProvider",
+      "com.google.android.accessibility.talkback.labeling.LabelProvider",
+      "com.google.android.accessibility.talkback.preference.search.TalkBackSearchIndexablesProvider"
+    ],
+    "receivers": [
+      "androidx.work.impl.diagnostics.DiagnosticsReceiver",
+      "com.google.android.accessibility.brailleime.MyPackageReplacedReceiver",
+      "com.google.android.libraries.appdoctor.AppDoctorReceiver",
+      "com.google.android.libraries.phenotype.client.stable.AccountRemovedBroadcastReceiver",
+      "com.google.android.libraries.phenotype.client.stable.PhenotypeUpdateBackgroundBroadcastReceiver"
+    ],
+    "services": [
+      "androidx.work.impl.background.systemjob.SystemJobService",
+      "com.google.android.accessibility.brailleime.BrailleIme",
+      "com.google.android.accessibility.selecttospeak.SelectToSpeakService",
+      "com.google.android.accessibility.selecttospeak.system.TileService",
+      "com.google.android.marvin.talkback.TalkBackService"
+    ],
+    "total": 27
+  },
+  "generated_at": "2026-01-25T03:35:31.124447Z",
+  "hashes": {
+    "md5": "c8e37deb4a07b1716d2e040baf8e9c22",
+    "sha1": "c7d926b3152508dac27d34cca06b46148fbe2cf7",
+    "sha256": "fcf52dc021b8ba8364dad60e16b9243dd3e4bb56f152fec92be78393f3f07e7a"
+  },
+  "network_targets": {
+    "cleartext_domains": [],
+    "domains": []
+  },
+  "package_name": "com.google.android.marvin.talkback",
+  "permissions": {
+    "dangerous": [
+      "android.permission.ACCESS_COARSE_LOCATION",
+      "android.permission.ACCESS_FINE_LOCATION",
+      "android.permission.BLUETOOTH_CONNECT",
+      "android.permission.BLUETOOTH_SCAN",
+      "android.permission.POST_NOTIFICATIONS",
+      "android.permission.READ_PHONE_STATE",
+      "android.permission.RECORD_AUDIO"
+    ],
+    "declared": [
+      "android.permission.ACCESS_COARSE_LOCATION",
+      "android.permission.ACCESS_FINE_LOCATION",
+      "android.permission.ACCESS_NETWORK_STATE",
+      "android.permission.BLUETOOTH",
+      "android.permission.BLUETOOTH_ADMIN",
+      "android.permission.BLUETOOTH_CONNECT",
+      "android.permission.BLUETOOTH_SCAN",
+      "android.permission.FOREGROUND_SERVICE",
+      "android.permission.GET_PACKAGE_SIZE",
+      "android.permission.INTERNET",
+      "android.permission.MODIFY_AUDIO_SETTINGS",
+      "android.permission.POST_NOTIFICATIONS",
+      "android.permission.QUERY_ALL_PACKAGES",
+      "android.permission.READ_PHONE_STATE",
+      "android.permission.RECEIVE_BOOT_COMPLETED",
+      "android.permission.RECORD_AUDIO",
+      "android.permission.USE_FINGERPRINT",
+      "android.permission.VIBRATE",
+      "android.permission.WAKE_LOCK",
+      "android.permission.WRITE_SETTINGS",
+      "com.google.android.apps.aicore.service.BIND_SERVICE",
+      "com.google.android.marvin.talkback.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
+      "com.google.android.providers.gsf.permission.READ_GSERVICES"
+    ],
+    "high_value": [
+      "android.permission.ACCESS_COARSE_LOCATION",
+      "android.permission.ACCESS_FINE_LOCATION",
+      "android.permission.READ_PHONE_STATE",
+      "android.permission.RECORD_AUDIO"
+    ]
+  },
+  "risk_flags": {
+    "allow_backup": true,
+    "debuggable": null,
+    "network_security_config": null,
+    "request_legacy_external_storage": null,
+    "uses_cleartext_traffic": null,
+    "webview": null
+  },
+  "suggested_probes": [
+    "exported_components_probe",
+    "high_value_permission_probe"
+  ],
+  "version_code": "60192274",
+  "version_name": "16.2.0.855052621"
+}
