@@ -197,6 +197,8 @@ def preview_report_file(path: Path) -> None:
     prompt_utils.press_enter_to_continue()
 
 
+
+
 def relative_path(path: Path) -> Path:
     """Return the path relative to the current working directory if possible."""
 

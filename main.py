@@ -21,6 +21,7 @@ from scytaledroid.Utils.System.world_clock.display import (
 )
 from scytaledroid.Utils.System.world_clock.state import ClockReference, WorldClockState, load_state
 from scytaledroid.Database.db_core.db_engine import ensure_db_ready
+from scytaledroid.Api import start_api_server
 
 
 def _resolve_timezones() -> WorldClockState:
@@ -88,6 +89,17 @@ def main_menu() -> None:
     """Render the main menu loop using the shared menu framework."""
 
     ensure_db_ready()
+    api_state = start_api_server()
+    if api_state.status == "running":
+        status_messages.print_status(
+            f"API server running at {api_state.host}:{api_state.port} (http://{api_state.host}:{api_state.port}/).",
+            level="info",
+        )
+    elif api_state.status in {"unavailable", "disabled"}:
+        status_messages.print_status(
+            "API server unavailable (install fastapi/uvicorn/python-multipart).",
+            level="warn",
+        )
     if len(sys.argv) > 1:
         # Support direct subcommands (behavior, static, etc.)
         if sys.argv[1] == "behavior":
@@ -104,11 +116,12 @@ def main_menu() -> None:
         ("2", "Static APK analysis", handle_static),
         ("3", "Permission cohort analysis", handle_perm_catalog),
         ("4", "Dynamic analysis", handle_dynamic),
-        ("5", "Reporting", handle_reporting),
-        ("6", "Database tools", handle_database),
-        ("7", "Workspace maintenance & cleanup", handle_workspace),
-        ("8", "APK library & archives", handle_browse_apks),
-        ("9", "About ScytaleDroid", handle_about),
+        ("5", "API server", handle_api),
+        ("6", "Reporting", handle_reporting),
+        ("7", "Database tools", handle_database),
+        ("8", "Workspace maintenance & cleanup", handle_workspace),
+        ("9", "APK library & archives", handle_browse_apks),
+        ("10", "About ScytaleDroid", handle_about),
     ]
 
     handlers = {key: (label, callback) for key, label, callback in menu_actions}
@@ -198,6 +211,12 @@ def handle_reporting() -> None:
     from scytaledroid.Reporting.menu import reporting_menu
 
     reporting_menu()
+
+
+def handle_api() -> None:
+    from scytaledroid.Api.menu import api_menu
+
+    api_menu()
 
 
 def handle_database() -> None:
