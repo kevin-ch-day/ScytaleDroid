@@ -992,6 +992,7 @@ class PermissionAuditAccumulator:
                     score_raw = float(sd.get("score_raw", sd.get("score_3dp", 0.0)) or 0.0)
                     score_capped = float(sd.get("score_capped", score_raw) or score_raw)
                     grade = str(sd.get("grade") or "")
+                    declared_permissions = sorted(set(app.declared_permissions or ()))
                     details_obj = {
                         "groups": dict(app.groups or {}),
                         "signals": dict(app.signals or {}),
@@ -999,7 +1000,8 @@ class PermissionAuditAccumulator:
                         "cohort": app.cohort,
                         "sdk": dict(app.sdk or {}),
                         "declared_in": dict(app.declared_in or {}),
-                        "declared_permissions": list(app.declared_permissions or ()),
+                        "declared_permissions": declared_permissions,
+                        "declared_permissions_count": len(declared_permissions),
                         "contributions": dict(app.contributions or {}),
                         "combos": list(app.combos or ()),
                     }
@@ -1111,7 +1113,24 @@ class PermissionAuditAccumulator:
                         )
                         continue
 
-                    if app_static_run_id is not None and signals_table_exists:
+                try:
+                    core_q.run_sql(
+                        """
+                        UPDATE permission_audit_snapshots
+                        SET apps_total = (
+                          SELECT COUNT(*) FROM permission_audit_apps WHERE snapshot_id=%s
+                        )
+                        WHERE snapshot_id=%s
+                        """,
+                        (sid, sid),
+                    )
+                except Exception:
+                    log.warning(
+                        "Failed to refresh permission_audit_snapshots.apps_total",
+                        category="db",
+                    )
+
+                if app_static_run_id is not None and signals_table_exists:
                         has_gov_version = _has_column("permission_signal_observations", "governance_version")
                         has_gov_sha = _has_column("permission_signal_observations", "governance_sha256")
                         if governance_version is None or governance_sha is None:

@@ -269,6 +269,7 @@ def _collect_permission_rows(report: StaticAnalysisReport) -> list[Mapping[str, 
             special,
         )
         band = _risk_band(severity)
+        classification, ghost_reason = _classify_permission(name, profile)
 
         entries.append(
             {
@@ -279,11 +280,78 @@ def _collect_permission_rows(report: StaticAnalysisReport) -> list[Mapping[str, 
                 "weight": severity,
                 "is_custom": name in custom,
                 "profile": _serialise_permission_profile(profile),
+                "classification": classification,
+                "ghost_reason": ghost_reason,
             }
         )
 
     entries.sort(key=lambda entry: (-entry["weight"], entry["display_name"]))
     return entries
+
+
+def _classify_permission(
+    name: str,
+    profile: Mapping[str, Any] | None,
+) -> tuple[str, str | None]:
+    if not isinstance(name, str):
+        return "Unknown", None
+    if name.startswith("android.permission."):
+        source = None
+        if isinstance(profile, Mapping):
+            source = profile.get("catalog_source")
+        if source in {"dict_aosp", "catalog"}:
+            return "AOSP", None
+        reason = _ghost_reason(name)
+        return "AOSP-Legacy", reason
+    if isinstance(profile, Mapping) and profile.get("is_custom"):
+        return "App-Defined", None
+    return "Custom/OEM", None
+
+
+def _ghost_reason(name: str) -> str | None:
+    legacy_storage = {
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_EXTERNAL_STORAGE",
+    }
+    legacy_sms = {
+        "android.permission.WRITE_SMS",
+        "android.permission.READ_SMS",
+        "android.permission.RECEIVE_SMS",
+    }
+    removed_sdk = {
+        "android.permission.MANAGE_ACCOUNTS",
+        "android.permission.USE_CREDENTIALS",
+        "android.permission.AUTHENTICATE_ACCOUNTS",
+    }
+    broadcast_only = {
+        "android.permission.BROADCAST_PACKAGE_ADDED",
+        "android.permission.BROADCAST_PACKAGE_CHANGED",
+        "android.permission.BROADCAST_PACKAGE_REPLACED",
+    }
+    media_transition = {
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_MEDIA_AUDIO",
+    }
+    hidden_priv = {
+        "android.permission.INSTALL_PACKAGES",
+        "android.permission.DELETE_PACKAGES",
+        "android.permission.REQUEST_INSTALL_PACKAGES",
+        "android.permission.REQUEST_DELETE_PACKAGES",
+    }
+    if name in legacy_storage:
+        return "Legacy storage (scoped storage transition)"
+    if name in legacy_sms:
+        return "Legacy SMS access (deprecated)"
+    if name in removed_sdk:
+        return "Removed from public SDK (privileged enforcement)"
+    if name in broadcast_only:
+        return "Broadcast-only permission (install lifecycle)"
+    if name in media_transition:
+        return "Media permissions (API transition)"
+    if name in hidden_priv:
+        return "Privileged/hidden permission (installer surfaces)"
+    return "Legacy platform permission (missing from baseline)"
 
 
 def _risk_band(weight: int) -> str:

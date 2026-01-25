@@ -134,11 +134,14 @@ async function reportLoad() {
       permissionRows = permissionsList.slice(0, 20).map((perm) => {
         const riskLabel = perm.risk || "Low";
         const protection = perm.profile?.protection || "-";
+        const classification = perm.classification || "-";
+        const ghostHint = perm.ghost_reason || "-";
         return `<tr>
           <td>${escapeHtml(perm.display_name || perm.name || "-")}</td>
           <td><span class="${badgeForRisk(riskLabel)}">${escapeHtml(riskLabel)}</span></td>
           <td>${escapeHtml(protection)}</td>
-          <td>${escapeHtml(perm.namespace || "-")}</td>
+          <td>${escapeHtml(classification)}</td>
+          <td>${escapeHtml(ghostHint)}</td>
         </tr>`;
       });
     } else if (Array.isArray(permissionsFallback.declared)) {
@@ -147,13 +150,14 @@ async function reportLoad() {
           <td>${escapeHtml(name)}</td>
           <td><span class="badge">Declared</span></td>
           <td>-</td>
-          <td>${escapeHtml(String(name).split(".").slice(0, -1).join(".") || "-")}</td>
+          <td>-</td>
+          <td>-</td>
         </tr>`;
       });
     }
     setHtml(
       "reportPermissionsTable",
-      permissionRows.length ? permissionRows.join("") : "<tr><td colspan=\"4\">No permissions</td></tr>"
+      permissionRows.length ? permissionRows.join("") : "<tr><td colspan=\"5\">No permissions</td></tr>"
     );
 
     const findingsRows = findingsList.slice(0, 15).map((finding) => {
