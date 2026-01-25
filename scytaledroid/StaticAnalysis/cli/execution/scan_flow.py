@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import textwrap
 import time
 from collections import Counter
 from datetime import datetime
+from hashlib import sha256
 from pathlib import Path
 from typing import Mapping, MutableMapping, Optional, Sequence, Tuple
 
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.DisplayUtils import status_messages
 
+from scytaledroid.DeviceAnalysis.harvest.common import compute_hashes
 from ...core import (
     AnalysisConfig,
     SecretsSamplerConfig,
@@ -65,9 +68,18 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
     show_splits = _show_split_breakdown()
     display_name_map = load_display_name_map(selection.groups)
     progress = _PipelineProgress(total=total_artifacts, show_splits=show_splits)
+    config_hash = _compute_config_hash(params)
+    pipeline_version = os.getenv("SCYTALEDROID_PIPELINE_VERSION")
 
     for group in selection.groups:
         app_result = AppRunResult(group.package_name, getattr(group, "category", "Uncategorized"))
+        manifest_sha256 = _artifact_manifest_sha256(group)
+        run_signature = _run_signature_sha256(
+            manifest_sha256,
+            config_hash=config_hash,
+            profile=params.profile_label,
+            pipeline_version=pipeline_version,
+        )
         base_artifact = next(iter(_dedupe_artifacts(group.artifacts)), None)
         metadata = getattr(base_artifact, "metadata", {}) if base_artifact else {}
         if isinstance(metadata, Mapping):
@@ -107,6 +119,9 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
                 version_code=_coerce_int(version_code_raw),
                 min_sdk=_coerce_int(min_sdk_raw),
                 target_sdk=_coerce_int(target_sdk_raw),
+                sha256=manifest_sha256,
+                config_hash=config_hash,
+                pipeline_version=pipeline_version,
                 run_started_utc=started_at.isoformat(timespec="seconds") + "Z",
                 dry_run=params.dry_run,
             )
@@ -137,6 +152,12 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
                 params,
                 selection,
                 base_dir,
+                extra_metadata={
+                    "artifact_manifest_sha256": manifest_sha256,
+                    "config_hash": config_hash,
+                    "pipeline_version": pipeline_version,
+                    "run_signature_sha256": run_signature,
+                },
             )
             if skipped:
                 index_for_progress = completed_artifacts + 1
@@ -299,8 +320,20 @@ def _append_resource_warning(
     return inline_lines
 
 
-def _execute_single_artifact(artifact, params: RunParameters, selection: ScopeSelection, base_dir: Path):
-    report, json_path, error, skipped = generate_report(artifact, base_dir, params)
+def _execute_single_artifact(
+    artifact,
+    params: RunParameters,
+    selection: ScopeSelection,
+    base_dir: Path,
+    *,
+    extra_metadata: Mapping[str, object] | None = None,
+):
+    report, json_path, error, skipped = generate_report(
+        artifact,
+        base_dir,
+        params,
+        extra_metadata=extra_metadata,
+    )
     if skipped:
         return None, None, tuple(), error, True
 
@@ -493,7 +526,13 @@ def _artifact_mtime(artifact) -> float:
     return 0.0
 
 
-def generate_report(artifact, base_dir: Path, params: RunParameters):
+def generate_report(
+    artifact,
+    base_dir: Path,
+    params: RunParameters,
+    *,
+    extra_metadata: Mapping[str, object] | None = None,
+):
     metadata_payload: MutableMapping[str, object] = dict(artifact.metadata)
     metadata_payload["run_profile"] = params.profile
     metadata_payload["run_scope"] = params.scope
@@ -507,6 +546,14 @@ def generate_report(artifact, base_dir: Path, params: RunParameters):
             package_name = metadata_payload.get("package_name")
         if isinstance(package_name, str) and package_name.strip():
             metadata_payload["category"] = resolve_category(package_name, metadata_payload)
+    if extra_metadata:
+        metadata_payload.update(
+            {
+                key: value
+                for key, value in extra_metadata.items()
+                if value is not None
+            }
+        )
 
     try:
         report = analyze_apk(
@@ -527,6 +574,71 @@ def generate_report(artifact, base_dir: Path, params: RunParameters):
     except ReportStorageError as exc:
         log.error(str(exc), category="static_analysis")
         return report, None, str(exc), False
+
+
+def _artifact_manifest_sha256(group) -> str | None:
+    entries = []
+    for artifact in _dedupe_artifacts(group.artifacts):
+        sha = getattr(artifact, "sha256", None)
+        if not sha:
+            try:
+                hashes = compute_hashes(Path(artifact.path))
+                sha = hashes.get("sha256")
+            except Exception:
+                sha = None
+        meta = getattr(artifact, "metadata", {}) or {}
+        label = None
+        if isinstance(meta, Mapping):
+            label = meta.get("split_name") or meta.get("split") or meta.get("artifact")
+        label = str(label or artifact.path.name)
+        entries.append({"split": label, "sha256": sha or "unknown"})
+    if not entries:
+        return None
+    payload = {
+        "package": group.package_name,
+        "version": getattr(group, "version_display", None),
+        "artifacts": sorted(entries, key=lambda item: item["split"]),
+    }
+    return sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def _compute_config_hash(params: RunParameters) -> str:
+    payload = {
+        "profile": params.profile,
+        "profile_label": params.profile_label,
+        "scope": params.scope,
+        "selected_tests": list(params.selected_tests),
+        "strings_mode": params.strings_mode,
+        "string_min_entropy": params.string_min_entropy,
+        "string_max_samples": params.string_max_samples,
+        "string_cleartext_only": params.string_cleartext_only,
+        "string_include_https_risk": params.string_include_https_risk,
+        "secrets_entropy": params.secrets_entropy,
+        "secrets_hits_per_bucket": params.secrets_hits_per_bucket,
+        "secrets_scope": params.secrets_scope_canonical,
+        "workers": params.workers,
+        "reuse_cache": params.reuse_cache,
+        "log_level": params.log_level,
+        "trace_detectors": list(params.trace_detectors),
+        "permission_snapshot_refresh": params.permission_snapshot_refresh,
+    }
+    return sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def _run_signature_sha256(
+    manifest_sha256: str | None,
+    *,
+    config_hash: str,
+    profile: str,
+    pipeline_version: str | None,
+) -> str:
+    payload = {
+        "manifest_sha256": manifest_sha256 or "unknown",
+        "config_hash": config_hash,
+        "profile": profile,
+        "pipeline_version": pipeline_version or "",
+    }
+    return sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
 
 
 def build_analysis_config(params: RunParameters) -> AnalysisConfig:

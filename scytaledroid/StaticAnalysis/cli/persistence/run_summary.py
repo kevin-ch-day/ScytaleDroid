@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from collections import Counter
 from dataclasses import dataclass, field
@@ -399,6 +400,12 @@ def _create_static_run(
     findings_total: int,
     run_started_utc: str | None,
     status: str,
+    sha256: str | None = None,
+    config_hash: str | None = None,
+    pipeline_version: str | None = None,
+    analysis_version: str | None = None,
+    catalog_versions: str | None = None,
+    study_tag: str | None = None,
 ) -> int | None:
     normalized_started_at = _normalize_datetime_value(run_started_utc)
     try:
@@ -409,17 +416,29 @@ def _create_static_run(
                 session_stamp,
                 scope_label,
                 category,
+                sha256,
+                analysis_version,
+                pipeline_version,
+                catalog_versions,
+                config_hash,
+                study_tag,
                 profile,
                 findings_total,
                 run_started_utc,
                 status
-            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             """,
             (
                 app_version_id,
                 session_stamp,
                 scope_label,
                 category,
+                sha256,
+                analysis_version,
+                pipeline_version,
+                catalog_versions,
+                config_hash,
+                study_tag,
                 profile,
                 findings_total,
                 normalized_started_at,
@@ -436,16 +455,28 @@ def _create_static_run(
                     app_version_id,
                     session_stamp,
                     scope_label,
+                    sha256,
+                    analysis_version,
+                    pipeline_version,
+                    catalog_versions,
+                    config_hash,
+                    study_tag,
                     profile,
                     findings_total,
                     run_started_utc,
                     status
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s)
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 """,
                 (
                     app_version_id,
                     session_stamp,
                     scope_label,
+                    sha256,
+                    analysis_version,
+                    pipeline_version,
+                    catalog_versions,
+                    config_hash,
+                    study_tag,
                     profile,
                     findings_total,
                     normalized_started_at,
@@ -474,6 +505,12 @@ def create_static_run_ledger(
     version_code: int | None = None,
     min_sdk: int | None = None,
     target_sdk: int | None = None,
+    sha256: str | None = None,
+    config_hash: str | None = None,
+    pipeline_version: str | None = None,
+    analysis_version: str | None = None,
+    catalog_versions: str | None = None,
+    study_tag: str | None = None,
     run_started_utc: str | None = None,
     dry_run: bool = False,
 ) -> int | None:
@@ -519,6 +556,34 @@ def create_static_run_ledger(
     )
     if app_version_id is None:
         return None
+    if sha256 and config_hash:
+        try:
+            row = core_q.run_sql(
+                """
+                SELECT id, status
+                FROM static_analysis_runs
+                WHERE app_version_id=%s
+                  AND sha256=%s
+                  AND config_hash=%s
+                  AND profile=%s
+                  AND (pipeline_version<=>%s)
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (app_version_id, sha256, config_hash, profile, pipeline_version),
+                fetch="one",
+            )
+            if row and row[0] and str(row[1] or "").upper() == "COMPLETED":
+                log.info(
+                    (
+                        f"Reusing static_run_id={row[0]} for {package_name} "
+                        f"(sha256/config_hash match)."
+                    ),
+                    category="static_analysis",
+                )
+                return int(row[0])
+        except Exception:
+            pass
     run_started_utc = _normalize_datetime_value(
         run_started_utc or datetime.utcnow().isoformat(timespec="seconds") + "Z"
     )
@@ -531,7 +596,62 @@ def create_static_run_ledger(
         findings_total=0,
         run_started_utc=run_started_utc,
         status="RUNNING",
+        sha256=sha256,
+        config_hash=config_hash,
+        pipeline_version=pipeline_version,
+        analysis_version=analysis_version,
+        catalog_versions=catalog_versions,
+        study_tag=study_tag,
     )
+
+
+def _update_static_run_metadata(
+    static_run_id: int,
+    *,
+    sha256_value: str | None = None,
+    config_hash: str | None = None,
+    pipeline_version: str | None = None,
+    analysis_version: str | None = None,
+    catalog_versions: str | None = None,
+    study_tag: str | None = None,
+) -> None:
+    updates: list[str] = []
+    params: list[object] = []
+    if sha256_value:
+        updates.append("sha256=%s")
+        params.append(sha256_value)
+    if config_hash:
+        updates.append("config_hash=%s")
+        params.append(config_hash)
+    if pipeline_version:
+        updates.append("pipeline_version=%s")
+        params.append(pipeline_version)
+    if analysis_version:
+        updates.append("analysis_version=%s")
+        params.append(analysis_version)
+    if catalog_versions:
+        updates.append("catalog_versions=%s")
+        params.append(catalog_versions)
+    if study_tag:
+        updates.append("study_tag=%s")
+        params.append(study_tag)
+    if not updates:
+        return
+    params.append(static_run_id)
+    try:
+        run_sql_write(
+            f"""
+            UPDATE static_analysis_runs
+            SET {', '.join(updates)}
+            WHERE id=%s
+            """,
+            tuple(params),
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning(
+            f"Failed to update static_analysis_runs metadata for id={static_run_id}: {exc}",
+            category="db",
+        )
 
 
 def update_static_run_status(
@@ -759,6 +879,44 @@ def persist_run_summary(
             )
 
     outcome.static_run_id = static_run_id
+    if static_run_id and not dry_run:
+        manifest_sha = None
+        if isinstance(metadata_map, Mapping):
+            manifest_sha = first_text(
+                metadata_map.get("artifact_manifest_sha256"),
+                metadata_map.get("manifest_sha256"),
+            )
+        if not manifest_sha:
+            try:
+                manifest_sha = first_text(getattr(br, "hashes", {}).get("sha256"))
+            except Exception:
+                manifest_sha = None
+        config_hash = first_text(
+            metadata_map.get("config_hash") if isinstance(metadata_map, Mapping) else None,
+            os.getenv("SCYTALEDROID_CONFIG_HASH"),
+        )
+        pipeline_version = first_text(
+            metadata_map.get("pipeline_version") if isinstance(metadata_map, Mapping) else None,
+            os.getenv("SCYTALEDROID_PIPELINE_VERSION"),
+        )
+        catalog_versions = first_text(
+            metadata_map.get("catalog_versions") if isinstance(metadata_map, Mapping) else None,
+            os.getenv("SCYTALEDROID_CATALOG_VERSIONS"),
+        )
+        study_tag = first_text(
+            metadata_map.get("study_tag") if isinstance(metadata_map, Mapping) else None,
+            os.getenv("SCYTALEDROID_STUDY_TAG"),
+        )
+        analysis_version = first_text(getattr(br, "analysis_version", None))
+        _update_static_run_metadata(
+            static_run_id,
+            sha256_value=manifest_sha,
+            config_hash=config_hash,
+            pipeline_version=pipeline_version,
+            analysis_version=analysis_version,
+            catalog_versions=catalog_versions,
+            study_tag=study_tag,
+        )
     metrics_bundle = compute_metrics_bundle(br, string_data)
     code_http_hosts = metrics_bundle.code_http_hosts
     asset_http_hosts = metrics_bundle.asset_http_hosts

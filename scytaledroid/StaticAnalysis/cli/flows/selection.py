@@ -42,7 +42,56 @@ def select_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
         return select_app_scope(groups)
     if choice == "2":
         return select_category_scope(groups)
-    return ScopeSelection("all", "All apps", tuple(groups))
+    return _select_all_scope(groups)
+
+
+def _select_all_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
+    if not groups:
+        return ScopeSelection("all", "All apps", tuple())
+    grouped: dict[str, list[ArtifactGroup]] = {}
+    order: list[str] = []
+    for group in groups:
+        package = group.package_name
+        if package not in grouped:
+            grouped[package] = []
+            order.append(package)
+        grouped[package].append(group)
+
+    collapsed: list[ArtifactGroup] = []
+    skipped_details: list[tuple[str, str, int]] = []
+    for package in order:
+        package_groups = tuple(grouped[package])
+        selected = _select_latest_groups(package_groups)
+        collapsed.extend(selected)
+        skipped = len(package_groups) - len(selected)
+        if skipped > 0:
+            newest = selected[0]
+            stamp = newest.session_stamp or "undated"
+            skipped_details.append((package, stamp, skipped))
+
+    scoped = tuple(collapsed)
+    if skipped_details:
+        total_packages = len(skipped_details)
+        total_skipped = sum(count for _, _, count in skipped_details)
+        summary = (
+            f"Selected newest artifact sets for {total_packages} package"
+            f"{'s' if total_packages != 1 else ''}; skipped {total_skipped} older capture"
+            f"{'s' if total_skipped != 1 else ''}."
+        )
+        print(status_messages.status(summary, level="info"))
+        response = prompt_utils.prompt_text(
+            "Press D for selection details, or Enter to continue",
+            required=False,
+        ).strip().lower()
+        if response == "d":
+            for package, stamp, skipped in skipped_details:
+                message = (
+                    f"Selected newest artifact set for {package} (session {stamp}); "
+                    f"skipped {skipped} older capture{'s' if skipped != 1 else ''}."
+                )
+                print(status_messages.status(message, level="info"))
+
+    return ScopeSelection("all", "All apps", scoped)
 
 
 def select_app_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:

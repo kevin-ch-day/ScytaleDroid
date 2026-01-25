@@ -29,11 +29,11 @@ def database_menu() -> None:
         "2": schema_browser.show_schema_browser,
         "3": query_runner.run_query_menu,
         "4": health_checks.run_health_summary,
-        "5": health_checks.run_health_checks,
-        "6": health_checks.prompt_cleanup_orphan_inventory,
-        "7": health_checks.prompt_finalize_stale_runs,
-        "8": health_checks.prompt_reset_static_data,
-        "9": show_db_status,
+        "5": health_checks.run_app_identity_audit,
+        "6": health_checks.run_evidence_integrity_check,
+        "7": health_checks.prompt_cleanup_orphan_inventory,
+        "8": health_checks.prompt_finalize_stale_runs,
+        "9": health_checks.prompt_reset_static_data,
     }
 
     options: List[MenuOption] = [
@@ -55,23 +55,23 @@ def database_menu() -> None:
         ),
         MenuOption(
             "5",
-            "Run health checks",
+            "App identity audit (duplicates, missing version)",
         ),
         MenuOption(
             "6",
-            "Cleanup orphan inventory snapshots",
+            "Evidence integrity check (missing/sha mismatch)",
         ),
         MenuOption(
             "7",
-            "Finalize stale RUNNING runs",
+            "Cleanup orphan inventory snapshots",
         ),
         MenuOption(
             "8",
-            "Reset static analysis data",
+            "Finalize stale RUNNING runs",
         ),
         MenuOption(
             "9",
-            "DB status (backend/schema)",
+            "Reset static analysis data",
         ),
     ]
 
@@ -83,7 +83,10 @@ def database_menu() -> None:
         host = str(cfg.get("host", "<local>"))
         schema_ver = diagnostics.get_schema_version() or "<unknown>"
         menu_utils.print_header("Database Utilities")
-        print(f"[Backend: {backend} | DB: {database} | Host: {host} | Schema: {schema_ver}]")
+        print(f"Backend: {backend}")
+        print(f"Database: {database}")
+        print(f"Host: {host}")
+        print(f"Schema: {schema_ver}")
         spec = MenuSpec(
             items=options,
             exit_label="Back",

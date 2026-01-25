@@ -17,54 +17,77 @@ from ..reset_static import (
     reset_static_analysis_data,
 )
 
+def _column_exists(table: str, column: str) -> bool:
+    try:
+        row = run_sql(
+            """
+            SELECT COUNT(*)
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+              AND table_name = %s
+              AND column_name = %s
+            """,
+            (table, column),
+            fetch="one",
+        )
+    except Exception:
+        return False
+    return bool(row and row[0])
+
 
 def run_health_summary() -> None:
     """One-screen DB health summary for quick operator checks."""
     print()
     menu_utils.print_header("DB Health Summary")
 
-    def _column_exists(table: str, column: str) -> bool:
-        try:
-            row = run_sql(
-                """
-                SELECT COUNT(*)
-                FROM information_schema.columns
-                WHERE table_schema = DATABASE()
-                  AND table_name = %s
-                  AND column_name = %s
-                """,
-                (table, column),
-                fetch="one",
-            )
-        except Exception:
-            return False
-        return bool(row and row[0])
-
-    try:
-        rows = run_sql(
-            """
-            SELECT status, COUNT(*) AS total
-            FROM static_analysis_runs
-            WHERE (status='RUNNING' AND ended_at_utc IS NULL)
-               OR (ended_at_utc >= (UTC_TIMESTAMP() - INTERVAL 1 DAY))
-            GROUP BY status
-            """,
-            fetch="all",
-            dictionary=True,
-        ) or []
-    except Exception:
-        rows = []
-
-    totals = {str(row.get("status")): int(row.get("total") or 0) for row in rows}
-    running_total = totals.get("RUNNING", 0)
-    ok_total = totals.get("COMPLETED", 0) or totals.get("OK", 0)
-    failed_total = totals.get("FAILED", 0)
-    aborted_total = totals.get("ABORTED", 0)
-    menu_utils.print_section("Run status (last 24h + current RUNNING)")
-    print(f"RUNNING : {running_total}")
-    print(f"OK      : {ok_total}")
-    print(f"FAILED  : {failed_total}")
-    print(f"ABORTED : {aborted_total}")
+    running_total = scalar(
+        """
+        SELECT COUNT(*)
+        FROM static_analysis_runs
+        WHERE status='RUNNING' AND ended_at_utc IS NULL
+        """
+    )
+    running_recent = scalar(
+        """
+        SELECT COUNT(*)
+        FROM static_analysis_runs
+        WHERE status='RUNNING' AND ended_at_utc IS NULL
+          AND COALESCE(
+            STR_TO_DATE(REPLACE(REPLACE(run_started_utc,'T',' '),'Z',''), '%Y-%m-%d %H:%i:%s.%f'),
+            STR_TO_DATE(REPLACE(REPLACE(run_started_utc,'T',' '),'Z',''), '%Y-%m-%d %H:%i:%s')
+          ) >= (UTC_TIMESTAMP() - INTERVAL 1 DAY)
+        """
+    )
+    ok_recent = scalar(
+        """
+        SELECT COUNT(*)
+        FROM static_analysis_runs
+        WHERE status IN ('COMPLETED','OK')
+          AND ended_at_utc >= (UTC_TIMESTAMP() - INTERVAL 1 DAY)
+        """
+    )
+    failed_recent = scalar(
+        """
+        SELECT COUNT(*)
+        FROM static_analysis_runs
+        WHERE status='FAILED'
+          AND ended_at_utc >= (UTC_TIMESTAMP() - INTERVAL 1 DAY)
+        """
+    )
+    aborted_recent = scalar(
+        """
+        SELECT COUNT(*)
+        FROM static_analysis_runs
+        WHERE status='ABORTED'
+          AND ended_at_utc >= (UTC_TIMESTAMP() - INTERVAL 1 DAY)
+        """
+    )
+    menu_utils.print_section("Run status")
+    print(f"RUNNING (total)   : {running_total if running_total is not None else '—'}")
+    print(f"RUNNING (last 24h): {running_recent if running_recent is not None else '—'}")
+    print(f"OK (last 24h)     : {ok_recent if ok_recent is not None else '—'}")
+    print(f"FAILED (last 24h) : {failed_recent if failed_recent is not None else '—'}")
+    print(f"ABORTED (last 24h): {aborted_recent if aborted_recent is not None else '—'}")
 
     menu_utils.print_section("Orphan checks")
     orphan_findings = scalar(
@@ -273,6 +296,77 @@ def run_health_checks() -> None:
     print()
     print("Integrity")
     _render_integrity_checks(session_stamp)
+
+    prompt_utils.press_enter_to_continue()
+
+
+def run_app_identity_audit() -> None:
+    """Audit app identity consistency (duplicates, missing version info)."""
+    print()
+    menu_utils.print_header("App Identity Audit")
+
+    duplicates = run_sql(
+        """
+        SELECT a.package_name, av.version_code, COUNT(*) AS n
+        FROM app_versions av
+        JOIN apps a ON a.id = av.app_id
+        GROUP BY a.package_name, av.version_code
+        HAVING COUNT(*) > 1
+        ORDER BY n DESC
+        LIMIT 20
+        """,
+        fetch="all",
+        dictionary=True,
+    ) or []
+
+    missing_version_code = scalar(
+        "SELECT COUNT(*) FROM app_versions WHERE version_code IS NULL"
+    )
+    missing_version_name = scalar(
+        "SELECT COUNT(*) FROM app_versions WHERE version_name IS NULL OR version_name = ''"
+    )
+
+    menu_utils.print_section("Missing version fields")
+    print(f"version_code missing  : {missing_version_code if missing_version_code is not None else '—'}")
+    print(f"version_name missing  : {missing_version_name if missing_version_name is not None else '—'}")
+
+    menu_utils.print_section("Duplicates (package + version_code)")
+    if not duplicates:
+        print("None detected.")
+    else:
+        for row in duplicates:
+            package = row.get("package_name")
+            version_code = row.get("version_code")
+            count = row.get("n")
+            print(f"{package} v{version_code} -> {count} rows")
+
+    prompt_utils.press_enter_to_continue()
+
+
+def run_evidence_integrity_check() -> None:
+    """Check evidence linkage fields for snapshots."""
+    print()
+    menu_utils.print_header("Evidence Integrity Check")
+
+    if _column_exists("permission_audit_snapshots", "evidence_relpath"):
+        missing_relpath = scalar(
+            """
+            SELECT COUNT(*)
+            FROM permission_audit_snapshots
+            WHERE evidence_relpath IS NULL OR evidence_relpath = ''
+            """
+        )
+        missing_hash = scalar(
+            """
+            SELECT COUNT(*)
+            FROM permission_audit_snapshots
+            WHERE evidence_sha256 IS NULL OR evidence_sha256 = ''
+            """
+        )
+        print(f"audit_missing_relpath : {missing_relpath if missing_relpath is not None else '—'}")
+        print(f"audit_missing_sha256  : {missing_hash if missing_hash is not None else '—'}")
+    else:
+        print("permission_audit_snapshots evidence fields not tracked.")
 
     prompt_utils.press_enter_to_continue()
 
