@@ -195,6 +195,18 @@ def build_api_app() -> "FastAPI":
     def ui_runs() -> FileResponse:
         return FileResponse(WEB_DIR / "runs.html", media_type="text/html")
 
+    @app.get("/ui/apps")
+    def ui_apps() -> FileResponse:
+        return FileResponse(WEB_DIR / "apps.html", media_type="text/html")
+
+    @app.get("/ui/report")
+    def ui_report() -> FileResponse:
+        return FileResponse(WEB_DIR / "report.html", media_type="text/html")
+
+    @app.get("/ui/ops")
+    def ui_ops() -> FileResponse:
+        return FileResponse(WEB_DIR / "ops.html", media_type="text/html")
+
     @app.post("/scan")
     def scan_apk(payload: ScanRequest) -> JSONResponse:
         apk_path = Path(payload.apk_path).expanduser().resolve()
@@ -266,7 +278,13 @@ def build_api_app() -> "FastAPI":
             return {"runs": []}
         rows = core_q.run_sql(
             """
-            SELECT sar.session_stamp, sar.status, a.package_name
+            SELECT sar.session_stamp,
+                   sar.status,
+                   a.package_name,
+                   a.display_name,
+                   av.version_code,
+                   av.version_name,
+                   sar.ended_at_utc
             FROM static_analysis_runs sar
             JOIN app_versions av ON av.id = sar.app_version_id
             JOIN apps a ON a.id = av.app_id
@@ -281,10 +299,132 @@ def build_api_app() -> "FastAPI":
                 "session_stamp": row[0],
                 "status": row[1],
                 "package_name": row[2],
+                "display_name": row[3],
+                "version_code": row[4],
+                "version_name": row[5],
+                "ended_at_utc": row[6].isoformat() if row[6] else None,
             }
             for row in (rows or [])
         ]
         return {"runs": runs}
+
+    @app.get("/apps")
+    def apps_list(limit: int = 25) -> dict[str, Any]:
+        if core_q is None:
+            return {"apps": []}
+        rows = core_q.run_sql(
+            """
+            SELECT av.id AS app_version_id,
+                   a.package_name,
+                   a.display_name,
+                   av.version_code,
+                   av.version_name,
+                   r.status,
+                   r.ended_at_utc,
+                   r.sha256,
+                   r.session_stamp
+            FROM app_versions av
+            JOIN apps a ON a.id = av.app_id
+            LEFT JOIN (
+              SELECT r1.*
+              FROM static_analysis_runs r1
+              JOIN (
+                SELECT app_version_id, MAX(id) AS max_id
+                FROM static_analysis_runs
+                GROUP BY app_version_id
+              ) x ON x.app_version_id = r1.app_version_id AND x.max_id = r1.id
+            ) r ON r.app_version_id = av.id
+            ORDER BY r.ended_at_utc DESC
+            LIMIT %s
+            """,
+            (limit,),
+            fetch="all",
+        )
+        apps = [
+            {
+                "app_version_id": row[0],
+                "package_name": row[1],
+                "display_name": row[2],
+                "version_code": row[3],
+                "version_name": row[4],
+                "latest_status": row[5],
+                "latest_ended_at": row[6].isoformat() if row[6] else None,
+                "sha256": row[7],
+                "session_stamp": row[8],
+            }
+            for row in (rows or [])
+        ]
+        return {"apps": apps}
+
+    @app.get("/apps/recent")
+    def apps_recent(limit: int = 25) -> dict[str, Any]:
+        if core_q is None:
+            return {"apps": []}
+        rows = core_q.run_sql(
+            """
+            SELECT av.id AS app_version_id,
+                   a.package_name,
+                   a.display_name,
+                   av.version_code,
+                   av.version_name,
+                   r.status,
+                   r.ended_at_utc,
+                   r.sha256,
+                   r.session_stamp
+            FROM static_analysis_runs r
+            JOIN (
+              SELECT app_version_id, MAX(id) AS max_id
+              FROM static_analysis_runs
+              WHERE status='COMPLETED'
+              GROUP BY app_version_id
+            ) x ON x.app_version_id = r.app_version_id AND x.max_id = r.id
+            JOIN app_versions av ON av.id = r.app_version_id
+            JOIN apps a ON a.id = av.app_id
+            ORDER BY r.ended_at_utc DESC
+            LIMIT %s
+            """,
+            (limit,),
+            fetch="all",
+        )
+        apps = [
+            {
+                "app_version_id": row[0],
+                "package_name": row[1],
+                "display_name": row[2],
+                "version_code": row[3],
+                "version_name": row[4],
+                "latest_status": row[5],
+                "latest_ended_at": row[6].isoformat() if row[6] else None,
+                "sha256": row[7],
+                "session_stamp": row[8],
+            }
+            for row in (rows or [])
+        ]
+        return {"apps": apps}
+
+    @app.get("/app_version/{app_version_id}/latest_run")
+    def latest_run_for_version(app_version_id: int) -> dict[str, Any]:
+        if core_q is None:
+            return {"status": "db_unavailable"}
+        row = core_q.run_sql(
+            """
+            SELECT r.session_stamp, r.status, r.ended_at_utc, r.sha256
+            FROM static_analysis_runs r
+            WHERE r.app_version_id = %s AND r.status='COMPLETED'
+            ORDER BY r.id DESC
+            LIMIT 1
+            """,
+            (app_version_id,),
+            fetch="one",
+        )
+        if not row:
+            return {"status": "not_found"}
+        return {
+            "status": "ok",
+            "session_stamp": row[0],
+            "ended_at_utc": row[2].isoformat() if row[2] else None,
+            "sha256": row[3],
+        }
 
     @app.get("/health/summary")
     def health_summary() -> dict[str, Any]:
@@ -311,6 +451,27 @@ def build_api_app() -> "FastAPI":
             "last_24h": {row[0]: int(row[1]) for row in (rows or [])},
             "running_total": int(running_total[0]) if running_total else 0,
         }
+
+    @app.post("/maintenance/finalize_stale")
+    def finalize_stale(minutes: int = 60) -> dict[str, Any]:
+        if core_q is None:
+            return {"status": "db_unavailable"}
+        threshold = max(1, int(minutes))
+        query = """
+        UPDATE static_analysis_runs
+        SET status='FAILED',
+            ended_at_utc=UTC_TIMESTAMP(),
+            abort_reason='stale_finalize'
+        WHERE status='RUNNING'
+          AND ended_at_utc IS NULL
+          AND COALESCE(
+                STR_TO_DATE(REPLACE(REPLACE(run_started_utc,'T',' '),'Z',''), '%Y-%m-%d %H:%i:%s.%f'),
+                STR_TO_DATE(REPLACE(REPLACE(run_started_utc,'T',' '),'Z',''), '%Y-%m-%d %H:%i:%s')
+              ) < (UTC_TIMESTAMP() - INTERVAL %s MINUTE)
+        """
+        result = core_q.run_sql(query, (threshold,))
+        updated = result if isinstance(result, int) else 0
+        return {"status": "ok", "updated": updated, "threshold_minutes": threshold}
 
     @app.get("/run/{session_stamp}/status")
     def run_status(session_stamp: str) -> dict[str, Any]:

@@ -8,23 +8,15 @@
     <link rel="stylesheet" href="/assets/base.css" />
     <link rel="stylesheet" href="/assets/app.css" />
   </head>
-  <body>
-    <div class="container">
-      <header>
-        <div>
-          <h1>Run Viewer</h1>
-          <div class="muted">Inspect a session using ?session=SESSION_STAMP.</div>
-        </div>
-        <nav>
-          <a href="/">Home</a>
-          <a href="/ui/upload">Upload</a>
-          <a href="/ui/jobs">Jobs</a>
-          <a href="/ui/runs">Runs</a>
-        </nav>
-      </header>
-
-      <div class="card">
+  <body data-page-title="Run Viewer">
+    <div class="app-shell">
+      <aside id="sidebar" class="sidebar"></aside>
+      <div class="app-main">
+        <div id="pageHeader" class="page-header"></div>
+        <main class="container">
+          <div class="card">
         <div id="runStatus" class="muted">Loading...</div>
+        <div id="runSummary" class="muted"></div>
         <pre id="runCounts" class="muted"></pre>
         <div class="row">
           <a class="badge" id="statusLink">Status JSON</a>
@@ -32,9 +24,16 @@
           <a class="badge" id="evidenceLink">Evidence ZIP</a>
         </div>
       </div>
+        </main>
+        <footer id="pageFooter" class="page-footer"></footer>
+      </div>
     </div>
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <script src="/assets/api.js"></script>
     <script src="/assets/ui.js"></script>
+    <script src="/assets/layout.js"></script>
+    <script src="/assets/header.js"></script>
+    <script src="/assets/footer.js"></script>
     <script src="/assets/app.js"></script>
     <script>
       const params = new URLSearchParams(window.location.search);

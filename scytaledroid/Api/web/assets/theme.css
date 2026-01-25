@@ -1,47 +1,52 @@
 :root {
-  color-scheme: light;
-  --bg: #f4efe7;
-  --bg-soft: #fbf8f3;
-  --card: #ffffff;
-  --border: #e4ddd3;
-  --ink: #1f1d1a;
-  --muted: #6f665a;
-  --accent: #1f1d1a;
-  --accent-soft: #f3ede3;
-  --accent-2: #f7c65a;
-  --accent-3: #c2b39e;
+  color-scheme: dark;
+  --bg: #0f1215;
+  --bg-soft: #151a1f;
+  --card: #161b21;
+  --border: #252c34;
+  --ink: #e7edf2;
+  --muted: #9aa3ad;
+  --accent: #2ad3a4;
+  --accent-soft: #1c2a29;
+  --accent-2: #ffb454;
+  --accent-3: #5db1ff;
+  --danger: #ff6b6b;
+  --warn: #ffb454;
+  --ok: #2ad3a4;
 }
 
 body {
-  background: radial-gradient(circle at top left, #fff6dd 0%, var(--bg) 45%, #ede6da 100%);
+  background: radial-gradient(circle at top left, #18222a 0%, var(--bg) 50%, #0b0d10 100%);
   color: var(--ink);
 }
 
 nav a {
   color: var(--ink);
-  background: var(--bg-soft);
+  background: #11161b;
   border: 1px solid var(--border);
 }
 
 .card {
-  background: var(--card);
+  background: linear-gradient(140deg, rgba(22, 27, 33, 0.98) 0%, rgba(18, 22, 27, 0.96) 100%);
   border: 1px solid var(--border);
-  box-shadow: 0 12px 30px rgba(46, 39, 30, 0.08);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
 }
 
 input[type="text"], select {
-  border: 1px solid #d7cdbf;
-  background: #fff;
+  border: 1px solid var(--border);
+  background: #0f1419;
+  color: var(--ink);
 }
 
 input[type="file"] {
-  border: 1px dashed #d7cdbf;
-  background: var(--bg-soft);
+  border: 1px dashed #2b333c;
+  background: #10161c;
+  color: var(--muted);
 }
 
 button {
   background: var(--accent);
-  color: #fff;
+  color: #051412;
 }
 
 button.secondary {
@@ -50,7 +55,7 @@ button.secondary {
 }
 
 button:hover {
-  box-shadow: 0 6px 18px rgba(31, 29, 26, 0.14);
+  box-shadow: 0 6px 18px rgba(42, 211, 164, 0.25);
 }
 
 .muted {
@@ -58,8 +63,21 @@ button:hover {
 }
 
 .badge {
-  background: var(--accent-2);
-  color: var(--ink);
+  background: rgba(42, 211, 164, 0.15);
+  color: var(--accent);
+  border: 1px solid rgba(42, 211, 164, 0.3);
+}
+
+.badge.warn {
+  background: rgba(255, 180, 84, 0.18);
+  color: var(--warn);
+  border-color: rgba(255, 180, 84, 0.35);
+}
+
+.badge.danger {
+  background: rgba(255, 107, 107, 0.2);
+  color: var(--danger);
+  border-color: rgba(255, 107, 107, 0.35);
 }
 
 th {
@@ -67,8 +85,9 @@ th {
 }
 
 pre {
-  background: var(--bg-soft);
+  background: #0f1419;
   border: 1px solid var(--border);
+  color: var(--muted);
 }
 
 @media (max-width: 720px) {

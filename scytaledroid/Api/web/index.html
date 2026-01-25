@@ -8,54 +8,71 @@
     <link rel="stylesheet" href="/assets/base.css" />
     <link rel="stylesheet" href="/assets/app.css" />
   </head>
-  <body>
-    <div class="container">
-      <header>
-        <div>
-          <h1>ScytaleDroid UI</h1>
-          <div class="muted">Local operator console</div>
-        </div>
-        <nav>
-          <a href="/ui/upload">Upload</a>
-          <a href="/ui/jobs">Jobs</a>
-          <a href="/ui/runs">Runs</a>
-        </nav>
-      </header>
-
-      <div class="card">
+  <body data-page-title="Home">
+    <div class="app-shell">
+      <aside id="sidebar" class="sidebar"></aside>
+      <div class="app-main">
+        <div id="pageHeader" class="page-header"></div>
+        <main class="container">
+          <div class="card">
         <h2>Quick Links</h2>
         <p class="muted">Use the pages below to upload APKs, track jobs, and inspect run summaries.</p>
         <div class="row">
+          <a class="badge" href="/ui/apps">Apps</a>
           <a class="badge" href="/ui/upload">Upload & Scan</a>
           <a class="badge" href="/ui/jobs">Jobs</a>
-          <a class="badge" href="/ui/runs">Recent Runs</a>
+          <a class="badge" href="/ui/runs">Runs (debug)</a>
         </div>
       </div>
 
       <div class="card">
         <h2>Health Summary</h2>
         <div id="healthStatus" class="muted">Loading...</div>
-        <div class="row" id="healthCards"></div>
+        <div class="stat-grid" id="healthCards"></div>
       </div>
 
       <div class="card">
-        <h2>Recent Runs</h2>
-        <div id="runsStatus" class="muted">Loading...</div>
+        <h2>Apps (Latest Completed Run)</h2>
+        <div id="appsStatus" class="muted">Loading...</div>
         <table>
           <thead>
             <tr>
-              <th>Session</th>
+              <th>App</th>
+              <th>Version</th>
               <th>Status</th>
-              <th>Package</th>
+              <th>SHA</th>
+              <th>Last Analyzed</th>
               <th>Open</th>
             </tr>
           </thead>
-          <tbody id="runsTable"></tbody>
+          <tbody id="appsTable"></tbody>
         </table>
       </div>
+      <div class="card">
+        <h2>Recent Jobs</h2>
+        <div id="jobsStatus" class="muted">Loading...</div>
+        <table>
+          <thead>
+            <tr>
+              <th>Job</th>
+              <th>State</th>
+              <th>Session</th>
+              <th>Package</th>
+            </tr>
+          </thead>
+          <tbody id="jobsTable"></tbody>
+        </table>
+      </div>
+        </main>
+        <footer id="pageFooter" class="page-footer"></footer>
+      </div>
     </div>
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <script src="/assets/api.js"></script>
     <script src="/assets/ui.js"></script>
+    <script src="/assets/layout.js"></script>
+    <script src="/assets/header.js"></script>
+    <script src="/assets/footer.js"></script>
     <script src="/assets/app.js"></script>
   </body>
 </html>

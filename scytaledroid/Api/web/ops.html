@@ -3,31 +3,37 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Jobs</title>
+    <title>Operations</title>
     <link rel="stylesheet" href="/assets/theme.css" />
     <link rel="stylesheet" href="/assets/base.css" />
     <link rel="stylesheet" href="/assets/app.css" />
   </head>
-  <body data-page-title="Jobs">
+  <body data-page-title="Operations">
     <div class="app-shell">
       <aside id="sidebar" class="sidebar"></aside>
       <div class="app-main">
         <div id="pageHeader" class="page-header"></div>
         <main class="container">
           <div class="card">
-        <div id="jobsStatus" class="muted">Loading...</div>
-        <table>
-          <thead>
-            <tr>
-              <th>Job</th>
-              <th>State</th>
-              <th>Session</th>
-              <th>Package</th>
-            </tr>
-          </thead>
-          <tbody id="jobsTable"></tbody>
-        </table>
-      </div>
+            <h2>DB Health Summary</h2>
+            <div id="opsHealthStatus" class="muted">Loading...</div>
+            <div id="opsHealthCards" class="stat-grid"></div>
+          </div>
+          <div class="card">
+            <h2>Finalize Stale Runs</h2>
+            <p class="muted">Mark RUNNING runs older than the selected threshold as FAILED.</p>
+            <div class="row">
+              <div>
+                <label for="staleMinutes">Threshold (minutes)</label>
+                <input id="staleMinutes" type="text" value="60" />
+              </div>
+              <div>
+                <label>&nbsp;</label>
+                <button id="finalizeBtn">Finalize stale runs</button>
+              </div>
+            </div>
+            <p id="finalizeStatus" class="muted">No action yet.</p>
+          </div>
         </main>
         <footer id="pageFooter" class="page-footer"></footer>
       </div>

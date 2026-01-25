@@ -17,3 +17,18 @@ function formatDate(seconds) {
   const date = new Date(seconds * 1000);
   return date.toLocaleString();
 }
+
+function formatIso(isoValue) {
+  if (!isoValue) return "-";
+  const date = new Date(isoValue);
+  if (Number.isNaN(date.getTime())) {
+    return isoValue;
+  }
+  return date.toLocaleString([], {
+    hour: "numeric",
+    minute: "2-digit",
+    month: "numeric",
+    day: "numeric",
+    year: "numeric",
+  });
+}
