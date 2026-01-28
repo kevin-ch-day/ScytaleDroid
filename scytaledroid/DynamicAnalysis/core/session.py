@@ -17,6 +17,10 @@ class DynamicSessionConfig:
     harvest_session_id: Optional[int] = None
     plan_path: Optional[str] = None
     probes: Sequence[str] = field(default_factory=tuple)
+    scenario_id: str = "basic_usage"
+    observer_ids: Sequence[str] = field(default_factory=tuple)
+    interactive: bool = True
+    output_root: Optional[str] = None
 
 
 @dataclass
@@ -28,6 +32,8 @@ class DynamicSessionResult:
     status: str = "pending"
     notes: Optional[str] = None
     errors: list[str] = field(default_factory=list)
+    dynamic_run_id: Optional[str] = None
+    evidence_path: Optional[str] = None
 
     @property
     def elapsed_seconds(self) -> Optional[int]:
@@ -42,4 +48,3 @@ def make_session_result(config: DynamicSessionConfig) -> DynamicSessionResult:
         duration_seconds=config.duration_seconds,
         started_at=datetime.now(timezone.utc),
     )
-

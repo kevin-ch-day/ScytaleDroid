@@ -183,6 +183,8 @@ ScytaleDroid keeps detailed operator documentation under `docs/`:
   harvesting workflow, scope controls, and repository layout.
 - [`docs/static_analysis_contract.md`](docs/static_analysis_contract.md) –
   detector contracts, pipeline order, and rendering requirements.
+- [`docs/dynamic_analysis_contract.md`](docs/dynamic_analysis_contract.md) –
+  dynamic analysis contract, evidence packs, and run manifest requirements.
 - [`docs/static_analysis/static_analysis_pipeline_plan.md`](docs/static_analysis/static_analysis_pipeline_plan.md) – roadmap,
   implementation status, and research backlog.
 - [`docs/maintenance/housekeeping.md`](docs/maintenance/housekeeping.md) – log
