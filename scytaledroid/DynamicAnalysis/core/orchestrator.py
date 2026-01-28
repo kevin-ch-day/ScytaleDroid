@@ -18,6 +18,7 @@ from scytaledroid.DynamicAnalysis.core.evidence_pack import EvidencePackWriter
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord, ObserverRecord, RunManifest
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
 from scytaledroid.DynamicAnalysis.core.session import DynamicSessionConfig
+from scytaledroid.DynamicAnalysis.core.target_manager import TargetManager
 from scytaledroid.DynamicAnalysis.observers.base import Observer
 from scytaledroid.DynamicAnalysis.scenarios import ManualScenarioRunner
 
@@ -59,6 +60,12 @@ class DynamicRunOrchestrator:
         env_snapshot = env_manager.prepare(run_ctx)
         manifest.environment.update(env_snapshot.metadata)
         manifest.add_artifacts(env_snapshot.artifacts)
+
+        target_manager = TargetManager()
+        target_snapshot = target_manager.prepare(run_ctx)
+        if target_snapshot.metadata:
+            manifest.target.update(target_snapshot.metadata)
+        manifest.add_artifacts(target_snapshot.artifacts)
         self._emit_marker(run_ctx, "RUN_START")
 
         observer_records, observer_handles = self._start_observers(run_ctx)
@@ -94,6 +101,8 @@ class DynamicRunOrchestrator:
                 run_status = "degraded"
 
         manifest.add_artifacts(observer_artifacts)
+        target_finalize = target_manager.finalize(run_ctx)
+        manifest.add_artifacts(target_finalize.artifacts)
         env_finalize = env_manager.finalize(run_ctx)
         manifest.add_artifacts(env_finalize.artifacts)
         self._emit_marker(run_ctx, "RUN_END")
