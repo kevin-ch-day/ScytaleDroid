@@ -14,6 +14,9 @@ def run_dynamic_analysis(
     observer_ids: tuple[str, ...] = ("network_capture", "system_log_capture"),
     interactive: bool = True,
     output_root: str | None = None,
+    plan_path: str | None = None,
+    tier: str = "baseline",
+    probes: tuple[str, ...] = (),
 ) -> DynamicSessionResult:
     config = DynamicSessionConfig(
         package_name=package_name,
@@ -23,6 +26,9 @@ def run_dynamic_analysis(
         observer_ids=observer_ids,
         interactive=interactive,
         output_root=output_root,
+        plan_path=plan_path,
+        tier=tier,
+        probes=probes,
     )
     return run_dynamic_session(config)
 
