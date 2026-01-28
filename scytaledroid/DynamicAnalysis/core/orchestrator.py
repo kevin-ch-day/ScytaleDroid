@@ -13,6 +13,7 @@ from scytaledroid.Utils.LoggingUtils import logging_engine
 
 from scytaledroid.DeviceAnalysis import adb_utils
 from scytaledroid.DynamicAnalysis.analysis.summarizer import DynamicRunSummarizer
+from scytaledroid.DynamicAnalysis.core.event_logger import RunEventLogger
 from scytaledroid.DynamicAnalysis.core.environment import EnvironmentManager
 from scytaledroid.DynamicAnalysis.core.evidence_pack import EvidencePackWriter
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord, ObserverRecord, RunManifest
@@ -56,25 +57,45 @@ class DynamicRunOrchestrator:
 
         manifest = self._build_manifest(run_ctx)
         manifest.started_at = self._now()
+        event_logger = RunEventLogger(run_ctx)
+        event_logger.log(
+            "run_initialized",
+            {
+                "package_name": run_ctx.package_name,
+                "scenario_id": run_ctx.scenario_id,
+                "duration_seconds": run_ctx.duration_seconds,
+                "device_serial": run_ctx.device_serial,
+            },
+        )
         env_manager = EnvironmentManager()
         env_snapshot = env_manager.prepare(run_ctx)
         manifest.environment.update(env_snapshot.metadata)
         manifest.add_artifacts(env_snapshot.artifacts)
+        event_logger.log("environment_prepared", {"artifact_count": len(env_snapshot.artifacts)})
 
         target_manager = TargetManager()
         target_snapshot = target_manager.prepare(run_ctx)
         if target_snapshot.metadata:
             manifest.target.update(target_snapshot.metadata)
         manifest.add_artifacts(target_snapshot.artifacts)
+        event_logger.log("target_prepared", {"artifact_count": len(target_snapshot.artifacts)})
         self._emit_marker(run_ctx, "RUN_START")
+        event_logger.log("run_started")
 
         observer_records, observer_handles = self._start_observers(run_ctx)
         manifest.observers = observer_records
+        for record in observer_records:
+            event_logger.log(
+                "observer_started",
+                {"observer_id": record.observer_id, "status": record.status},
+            )
 
         scenario_runner = ManualScenarioRunner()
         self._emit_marker(run_ctx, "SCENARIO_START")
+        event_logger.log("scenario_started", {"scenario_id": run_ctx.scenario_id})
         scenario_result = scenario_runner.run(run_ctx)
         self._emit_marker(run_ctx, "SCENARIO_END")
+        event_logger.log("scenario_ended", {"notes": scenario_result.notes})
         manifest.scenario.update(
             {
                 "started_at": scenario_result.started_at.isoformat(),
@@ -97,20 +118,34 @@ class DynamicRunOrchestrator:
             observer_record.error = record.error
             observer_record.artifacts.extend(record.artifacts)
             observer_artifacts.extend(record.artifacts)
+            event_logger.log(
+                "observer_stopped",
+                {
+                    "observer_id": observer.observer_id,
+                    "status": record.status,
+                    "artifact_count": len(record.artifacts),
+                },
+            )
             if record.status != "success":
                 run_status = "degraded"
 
         manifest.add_artifacts(observer_artifacts)
         target_finalize = target_manager.finalize(run_ctx)
         manifest.add_artifacts(target_finalize.artifacts)
+        event_logger.log("target_finalized", {"artifact_count": len(target_finalize.artifacts)})
         env_finalize = env_manager.finalize(run_ctx)
         manifest.add_artifacts(env_finalize.artifacts)
+        event_logger.log("environment_finalized", {"artifact_count": len(env_finalize.artifacts)})
         self._emit_marker(run_ctx, "RUN_END")
+        event_logger.log("run_ended")
         marker_artifact = self._marker_artifact(run_ctx)
         if marker_artifact:
             manifest.add_artifacts([marker_artifact])
         manifest.status = run_status
         manifest.ended_at = self._now()
+        event_artifact = event_logger.finalize()
+        if event_artifact:
+            manifest.add_artifacts([event_artifact])
         manifest.finalize()
 
         summarizer = DynamicRunSummarizer(writer)

@@ -1,5 +1,6 @@
 """Core dynamic analysis session primitives."""
 
+from .event_logger import RunEvent, RunEventLogger
 from .manifest import ArtifactRecord, ObserverRecord, RunManifest
 from .orchestrator import DynamicRunOrchestrator
 from .runner import run_dynamic_session
@@ -13,6 +14,8 @@ __all__ = [
     "DynamicSessionResult",
     "ObserverRecord",
     "RunManifest",
+    "RunEvent",
+    "RunEventLogger",
     "TargetManager",
     "TargetSnapshot",
     "run_dynamic_session",
