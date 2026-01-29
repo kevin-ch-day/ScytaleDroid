@@ -850,6 +850,9 @@ class PermissionAuditAccumulator:
                 if isinstance(snapshot_payload, dict)
                 else None
             )
+            run_map_payload = snapshot_payload.get("run_map") if isinstance(snapshot_payload, dict) else None
+            run_map_required = bool(snapshot_payload.get("run_map_required")) if isinstance(snapshot_payload, dict) else False
+            allow_partial = bool(snapshot_payload.get("allow_partial_audit")) if isinstance(snapshot_payload, dict) else False
             if not session_stamp and isinstance(snapshot_payload, dict):
                 session_stamp = snapshot_payload.get("session")
             try:
@@ -872,6 +875,53 @@ class PermissionAuditAccumulator:
                 log.warning(
                     "static_run_id missing for permission audit snapshot; rows will not be keyed to static run",
                     category="db",
+                )
+            def _extract_run_map(payload: Any) -> dict[str, int]:
+                if not isinstance(payload, dict):
+                    return {}
+                by_package = payload.get("by_package")
+                if isinstance(by_package, dict):
+                    extracted: dict[str, int] = {}
+                    for pkg, entry in by_package.items():
+                        if not pkg or not isinstance(entry, dict):
+                            continue
+                        srid = entry.get("static_run_id")
+                        if isinstance(srid, int):
+                            extracted[pkg] = srid
+                        elif isinstance(srid, str) and srid.isdigit():
+                            extracted[pkg] = int(srid)
+                    return extracted
+                apps = payload.get("apps")
+                if not isinstance(apps, list):
+                    return {}
+                extracted = {}
+                for entry in apps:
+                    if not isinstance(entry, dict):
+                        continue
+                    pkg = entry.get("package") or entry.get("package_name")
+                    srid = entry.get("static_run_id")
+                    if not pkg or srid is None:
+                        continue
+                    try:
+                        extracted[str(pkg)] = int(srid)
+                    except Exception:
+                        continue
+                return extracted
+
+            static_run_id_map: dict[str, int] = _extract_run_map(run_map_payload)
+            missing_run_ids = [app.package for app in self.apps if app.package not in static_run_id_map]
+            if run_map_required and (not static_run_id_map or missing_run_ids):
+                log.error(
+                    "Permission audit run map missing required entries; aborting persistence.",
+                    category="db",
+                )
+                return OperationResult.failure(
+                    user_message="Permission audit run map missing; cannot safely link audit.",
+                    error_code="perm_audit_run_map_missing",
+                    context={
+                        "missing_packages": missing_run_ids,
+                        "session_stamp": session_stamp,
+                    },
                 )
             signals_table_exists = _table_exists("permission_signal_observations")
             if static_run_id is not None and not signals_table_exists:
@@ -912,65 +962,46 @@ class PermissionAuditAccumulator:
                 header_values.insert(3 if has_run_id else 2, static_run_id)
                 header_placeholders.insert(3 if has_run_id else 2, "%s")
             def _persist_snapshot() -> OperationResult:
+                update_clause = ", ".join(
+                    f"{col}=VALUES({col})" for col in header_columns if col != "snapshot_key"
+                )
                 header_sql = (
                     "INSERT INTO permission_audit_snapshots ("
                     + ", ".join(header_columns)
                     + ") VALUES ("
                     + ",".join(header_placeholders)
                     + ")"
+                    + (" ON DUPLICATE KEY UPDATE " + update_clause if update_clause else "")
                 )
 
                 try:
-                    sid = core_q.run_sql(header_sql, tuple(header_values), return_lastrowid=True)
-                except Exception as exc:  # pragma: no cover - defensive
-                    err_text = str(exc)
-                    if "Duplicate entry" in err_text and self.snapshot_id in err_text:
-                        try:
-                            row = core_q.run_sql(
-                                "SELECT snapshot_id FROM permission_audit_snapshots WHERE snapshot_key=%s",
-                                (self.snapshot_id,),
-                                fetch="one",
-                            )
-                            if row and row[0]:
-                                sid = int(row[0])
-                            else:
-                                raise RuntimeError("Duplicate snapshot_key without existing row")
-                        except Exception:
-                            log.error(
-                                "Failed to recover permission_audit_snapshots duplicate "
-                                f"(snapshot_key={self.snapshot_id} scope={self.scope_label} "
-                                f"run_id={run_id} static_run_id={static_run_id})\n"
-                                + traceback.format_exc(),
-                                category="db",
-                            )
-                            return OperationResult.failure(
-                                user_message="Permission audit snapshot persistence failed.",
-                                error_code="perm_audit_snapshot_insert_failed",
-                                context={
-                                    "snapshot_key": self.snapshot_id,
-                                    "scope_label": self.scope_label,
-                                    "run_id": run_id,
-                                    "static_run_id": static_run_id,
-                                },
-                            )
-                    else:
-                        log.error(
-                            "Failed to persist permission_audit_snapshots "
-                            f"(snapshot_key={self.snapshot_id} scope={self.scope_label} "
-                            f"run_id={run_id} static_run_id={static_run_id})\n"
-                            + traceback.format_exc(),
-                            category="db",
-                        )
-                        return OperationResult.failure(
-                            user_message="Permission audit snapshot persistence failed.",
-                            error_code="perm_audit_snapshot_insert_failed",
-                            context={
-                                "snapshot_key": self.snapshot_id,
-                                "scope_label": self.scope_label,
-                                "run_id": run_id,
-                                "static_run_id": static_run_id,
-                            },
-                        )
+                    core_q.run_sql(header_sql, tuple(header_values))
+                    row = core_q.run_sql(
+                        "SELECT snapshot_id FROM permission_audit_snapshots WHERE snapshot_key=%s",
+                        (self.snapshot_id,),
+                        fetch="one",
+                    )
+                    if not row or not row[0]:
+                        raise RuntimeError("Permission audit snapshot insert did not return an id")
+                    sid = int(row[0])
+                except Exception:  # pragma: no cover - defensive
+                    log.error(
+                        "Failed to persist permission_audit_snapshots "
+                        f"(snapshot_key={self.snapshot_id} scope={self.scope_label} "
+                        f"run_id={run_id} static_run_id={static_run_id})\n"
+                        + traceback.format_exc(),
+                        category="db",
+                    )
+                    return OperationResult.failure(
+                        user_message="Permission audit snapshot persistence failed.",
+                        error_code="perm_audit_snapshot_insert_failed",
+                        context={
+                            "snapshot_key": self.snapshot_id,
+                            "scope_label": self.scope_label,
+                            "run_id": run_id,
+                            "static_run_id": static_run_id,
+                        },
+                    )
 
                 try:
                     row = core_q.run_sql(
@@ -987,8 +1018,7 @@ class PermissionAuditAccumulator:
                 signal_write_failed = False
                 app_failures = 0
                 run_id_cache: dict[str, int | None] = {}
-                static_run_id_map: dict[str, int] = {}
-                if session_stamp:
+                if not static_run_id_map and session_stamp and not run_map_required:
                     try:
                         rows = core_q.run_sql(
                             """
@@ -1010,8 +1040,34 @@ class PermissionAuditAccumulator:
                                 static_run_id_map[package] = int(row[1])
                     except Exception:
                         static_run_id_map = {}
+                if missing_run_ids and not allow_partial and run_map_required:
+                    log.error(
+                        "Permission audit missing static_run_id for one or more apps.",
+                        category="db",
+                    )
+                    return OperationResult.failure(
+                        user_message="Permission audit missing static_run_id; cannot persist safely.",
+                        error_code="perm_audit_static_run_id_missing",
+                        context={
+                            "missing_packages": missing_run_ids,
+                            "session_stamp": session_stamp,
+                        },
+                    )
                 for app in self.apps:
                     app_static_run_id = static_run_id_map.get(app.package, static_run_id)
+                    if app_static_run_id is None and not allow_partial and run_map_required:
+                        log.error(
+                            "Permission audit missing static_run_id for app; aborting snapshot persistence.",
+                            category="db",
+                        )
+                        return OperationResult.failure(
+                            user_message="Permission audit missing static_run_id for app.",
+                            error_code="perm_audit_app_static_run_id_missing",
+                            context={
+                                "package": app.package,
+                                "session_stamp": session_stamp,
+                            },
+                        )
                     sd = dict(app.score_detail or {})
                     score_raw = float(sd.get("score_raw", sd.get("score_3dp", 0.0)) or 0.0)
                     score_capped = float(sd.get("score_capped", score_raw) or score_raw)

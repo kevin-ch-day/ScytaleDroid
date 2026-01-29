@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 from datetime import datetime, timezone
 
 from scytaledroid.Config import app_config
@@ -25,6 +26,9 @@ def execute_permission_scan(
     params: RunParameters,
     *,
     persist_detections: bool = True,
+    run_map: dict | None = None,
+    require_run_map: bool = False,
+    allow_partial_audit: bool = False,
 ) -> None:
     """Run the permission analysis workflow for the selected packages."""
 
@@ -138,6 +142,9 @@ def execute_permission_scan(
             score_detail=profile.get("score_detail", {}),
             vendor_present=bool(profile.get("V", 0)),
         )
+
+    if require_run_map and not run_map:
+        raise RuntimeError("Permission audit requires a run map, but none was provided.")
 
     snapshot_payload = accumulator.finalize()
     run_id = None
@@ -265,15 +272,42 @@ def execute_permission_scan(
     snapshot_payload["run_id"] = run_id
     snapshot_payload["static_run_id"] = static_run_id
     snapshot_payload["session_stamp"] = session_stamp
+    if run_map:
+        snapshot_payload["run_map"] = run_map
+        snapshot_payload["run_map_required"] = bool(require_run_map)
+        snapshot_payload["allow_partial_audit"] = bool(allow_partial_audit)
     linkage = {}
-    if len(accumulator.apps) != 1:
+    if len(accumulator.apps) != 1 and not run_map:
         linkage = {"status": "partial", "reason": "multi_app_scope"}
-    elif run_id is None:
+    elif run_id is None and len(accumulator.apps) == 1:
         linkage = {"status": "partial", "reason": "run_id_missing"}
-    elif static_run_id is None:
+    elif static_run_id is None and len(accumulator.apps) == 1:
         linkage = {"status": "partial", "reason": "static_run_id_missing"}
     if linkage:
         snapshot_payload["linkage"] = linkage
+
+    if run_map:
+        try:
+            snapshot_path = (
+                snapshot_payload.get("paths", {}).get("snapshot")
+                if isinstance(snapshot_payload, dict)
+                else None
+            )
+            if snapshot_path:
+                Path(snapshot_path).write_text(
+                    json.dumps(snapshot_payload, indent=2, sort_keys=True),
+                    encoding="utf-8",
+                )
+        except Exception:
+            logging_engine.get_error_logger().exception(
+                "Failed to update permission snapshot with run map",
+                extra=logging_engine.ensure_trace(
+                    {
+                        "event": "permission_audit.run_map_write_failed",
+                        "session_stamp": session_stamp,
+                    }
+                ),
+            )
     run_status = "COMPLETED"
     abort_reason = None
     try:

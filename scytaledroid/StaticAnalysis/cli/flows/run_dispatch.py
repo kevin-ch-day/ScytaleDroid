@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import os
+import json
 from pathlib import Path
 import shutil
 import signal
+from datetime import datetime, timezone
 from dataclasses import replace
 
 from scytaledroid.Config import app_config
@@ -255,9 +257,23 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
                     label="Static Analysis",
                 )
             )
-            execute_permission_scan(selection, params, persist_detections=False)
+            run_map = _build_session_run_map(outcome, params.session_stamp)
+            if run_map:
+                _persist_session_run_links(params.session_stamp, run_map)
+            execute_permission_scan(
+                selection,
+                params,
+                persist_detections=False,
+                run_map=run_map,
+                require_run_map=True,
+            )
         except Exception:
-            pass
+            print(
+                status_messages.status(
+                    "Permission snapshot refresh failed — see logs for details.",
+                    level="error",
+                )
+            )
     elif params.profile in {"full", "lightweight"} and not params.dry_run:
         print()
         print(
@@ -299,6 +315,104 @@ def _purge_run_cache() -> None:
                 shutil.rmtree(root)
         except OSError:
             continue
+
+
+def _build_session_run_map(outcome: RunOutcome | None, session_stamp: str | None) -> dict | None:
+    if outcome is None or not session_stamp:
+        return None
+    results = outcome.results or []
+    if not results:
+        return None
+    static_ids = [res.static_run_id for res in results if res.static_run_id]
+    origin_map: dict[int, str | None] = {}
+    if static_ids:
+        try:
+            from scytaledroid.Database.db_core import db_queries as core_q
+
+            rows = core_q.run_sql(
+                f"SELECT id, session_stamp FROM static_analysis_runs WHERE id IN ({','.join(['%s'] * len(static_ids))})",
+                tuple(static_ids),
+                fetch="all",
+            )
+            for row in rows:
+                if not row or row[0] is None:
+                    continue
+                origin_map[int(row[0])] = row[1] if row[1] else None
+        except Exception:
+            origin_map = {}
+    apps = []
+    by_package = {}
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    for res in results:
+        static_run_id = res.static_run_id
+        entry = {
+            "package": res.package_name,
+            "static_run_id": static_run_id,
+            "run_origin": None,
+            "origin_session_stamp": None,
+        }
+        if static_run_id:
+            origin_session = origin_map.get(static_run_id)
+            entry["origin_session_stamp"] = origin_session
+            entry["run_origin"] = "created" if origin_session == session_stamp else "reused"
+        apps.append(entry)
+        by_package[res.package_name] = entry
+    run_map = {
+        "session_stamp": session_stamp,
+        "created_at_utc": now,
+        "apps": apps,
+        "by_package": by_package,
+    }
+    try:
+        session_dir = Path(app_config.DATA_DIR) / "sessions" / session_stamp
+        session_dir.mkdir(parents=True, exist_ok=True)
+        run_map_path = session_dir / "run_map.json"
+        run_map_path.write_text(json.dumps(run_map, indent=2, sort_keys=True), encoding="utf-8")
+    except Exception:
+        print(status_messages.status("Failed to write session run map file.", level="warn"))
+    return run_map
+
+
+def _persist_session_run_links(session_stamp: str | None, run_map: dict | None) -> None:
+    if not session_stamp or not run_map:
+        return
+    try:
+        from scytaledroid.Database.db_core import db_queries as core_q
+
+        row = core_q.run_sql(
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = DATABASE() AND table_name = %s",
+            ("static_session_run_links",),
+            fetch="one",
+        )
+        if not row or int(row[0] or 0) == 0:
+            print(status_messages.status("static_session_run_links table missing; skipping linkage.", level="warn"))
+            return
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        for app in run_map.get("apps", []):
+            if not isinstance(app, dict):
+                continue
+            package = app.get("package")
+            static_run_id = app.get("static_run_id")
+            if not package or not static_run_id:
+                continue
+            origin = app.get("run_origin") or "reused"
+            origin_session = app.get("origin_session_stamp")
+            core_q.run_sql(
+                """
+                INSERT INTO static_session_run_links (
+                  session_stamp, package_name, static_run_id, run_origin, origin_session_stamp, linked_at_utc
+                ) VALUES (%s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                  static_run_id=VALUES(static_run_id),
+                  run_origin=VALUES(run_origin),
+                  origin_session_stamp=VALUES(origin_session_stamp),
+                  linked_at_utc=VALUES(linked_at_utc)
+                """,
+                (session_stamp, package, int(static_run_id), origin, origin_session, now),
+            )
+    except Exception:
+        print(status_messages.status("Failed to persist static session run links.", level="warn"))
 
 
 __all__ = [

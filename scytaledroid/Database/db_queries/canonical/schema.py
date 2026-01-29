@@ -138,6 +138,25 @@ _DDL_STATEMENTS: list[str] = [
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
     """
+    CREATE TABLE IF NOT EXISTS static_session_run_links (
+      link_id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      session_stamp       VARCHAR(128) NOT NULL,
+      package_name        VARCHAR(255) NOT NULL,
+      static_run_id       BIGINT UNSIGNED NOT NULL,
+      run_origin          ENUM('created','reused') NOT NULL DEFAULT 'created',
+      origin_session_stamp VARCHAR(128) DEFAULT NULL,
+      linked_at_utc       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (link_id),
+      UNIQUE KEY ux_static_session_run (session_stamp, package_name),
+      KEY ix_static_session_run_static (static_run_id),
+      KEY ix_static_session_run_origin (origin_session_stamp),
+      CONSTRAINT fk_static_session_run_static
+        FOREIGN KEY (static_run_id)
+        REFERENCES static_analysis_runs (id)
+        ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
+    """
     CREATE TABLE IF NOT EXISTS static_correlation_results (
       id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
       static_run_id    BIGINT UNSIGNED NOT NULL,

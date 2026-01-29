@@ -205,11 +205,11 @@ def collect_static_run_counts(
         static_run_ids: list[int] = []
         if resolved_session:
             try:
-                cursor.execute(
+                cur.execute(
                     "SELECT id FROM static_analysis_runs WHERE session_stamp=%s",
                     (resolved_session,),
                 )
-                static_run_ids = [int(row[0]) for row in cursor.fetchall() if row and row[0]]
+                static_run_ids = [int(row[0]) for row in cur.fetchall() if row and row[0]]
             except Exception:
                 static_run_ids = []
 

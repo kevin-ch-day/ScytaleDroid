@@ -556,7 +556,7 @@ def create_static_run_ledger(
     )
     if app_version_id is None:
         return None
-    if sha256 and config_hash:
+    if sha256 and config_hash and pipeline_version:
         try:
             row = core_q.run_sql(
                 """
@@ -584,6 +584,11 @@ def create_static_run_ledger(
                 return int(row[0])
         except Exception:
             pass
+    elif sha256 and config_hash and not pipeline_version:
+        log.warning(
+            "pipeline_version missing; static run reuse disabled for this scan.",
+            category="static_analysis",
+        )
     run_started_utc = _normalize_datetime_value(
         run_started_utc or datetime.utcnow().isoformat(timespec="seconds") + "Z"
     )
