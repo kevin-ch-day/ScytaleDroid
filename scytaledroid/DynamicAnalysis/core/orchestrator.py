@@ -18,6 +18,7 @@ from scytaledroid.DynamicAnalysis.core.environment import EnvironmentManager
 from scytaledroid.DynamicAnalysis.core.evidence_pack import EvidencePackWriter
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord, ObserverRecord, RunManifest
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
+from scytaledroid.DynamicAnalysis.plans.loader import load_dynamic_plan, validate_dynamic_plan
 from scytaledroid.DynamicAnalysis.core.session import DynamicSessionConfig
 from scytaledroid.DynamicAnalysis.core.target_manager import TargetManager
 from scytaledroid.DynamicAnalysis.observers.base import Observer
@@ -30,9 +31,11 @@ class DynamicRunOrchestrator:
         config: DynamicSessionConfig,
         *,
         observers: Iterable[Observer],
+        plan_payload: dict[str, object] | None = None,
     ) -> None:
         self.config = config
         self.observers = list(observers)
+        self.plan_payload = plan_payload
         self.logger = logging_engine.get_dynamic_logger()
 
     def run(self) -> tuple[RunManifest, Path]:
@@ -42,6 +45,10 @@ class DynamicRunOrchestrator:
         writer = EvidencePackWriter(run_dir)
         writer.ensure_layout()
 
+        plan_payload = self.plan_payload or self._load_plan_payload()
+        scenario_hint = None
+        if self.config.scenario_id == "permission_trigger":
+            scenario_hint = self._build_permission_trigger_hint(plan_payload)
         run_ctx = RunContext(
             dynamic_run_id=dynamic_run_id,
             package_name=self.config.package_name,
@@ -53,9 +60,15 @@ class DynamicRunOrchestrator:
             notes_dir=writer.notes_dir,
             interactive=self.config.interactive,
             device_serial=self.config.device_serial,
+            clear_logcat=self.config.clear_logcat,
+            static_run_id=self.config.static_run_id,
+            harvest_session_id=self.config.harvest_session_id,
+            static_plan=plan_payload,
+            proxy_port=self.config.proxy_port,
+            scenario_hint=scenario_hint,
         )
 
-        manifest = self._build_manifest(run_ctx)
+        manifest = self._build_manifest(run_ctx, plan_payload, writer)
         manifest.started_at = self._now()
         event_logger = RunEventLogger(run_ctx)
         event_logger.log(
@@ -85,13 +98,22 @@ class DynamicRunOrchestrator:
         observer_records, observer_handles = self._start_observers(run_ctx)
         manifest.observers = observer_records
         for record in observer_records:
+            if record.artifacts:
+                manifest.add_artifacts(record.artifacts)
+        for record in observer_records:
             event_logger.log(
                 "observer_started",
-                {"observer_id": record.observer_id, "status": record.status},
+                {
+                    "observer_id": record.observer_id,
+                    "status": record.status,
+                    "error": record.error,
+                },
             )
 
         scenario_runner = ManualScenarioRunner()
         self._emit_marker(run_ctx, "SCENARIO_START")
+        if run_ctx.scenario_hint:
+            event_logger.log("scenario_hint", {"hint": run_ctx.scenario_hint})
         event_logger.log("scenario_started", {"scenario_id": run_ctx.scenario_id})
         scenario_result = scenario_runner.run(run_ctx)
         self._emit_marker(run_ctx, "SCENARIO_END")
@@ -109,11 +131,22 @@ class DynamicRunOrchestrator:
         if any(record.status != "started" for record in observer_records):
             run_status = "degraded"
         for observer in self.observers:
-            handle = observer_handles.get(observer.observer_id)
-            record = self._stop_observer(observer, run_ctx, handle)
             observer_record = next(
                 existing for existing in manifest.observers if existing.observer_id == observer.observer_id
             )
+            if observer_record.status != "started":
+                event_logger.log(
+                    "observer_skipped",
+                    {
+                        "observer_id": observer_record.observer_id,
+                        "status": observer_record.status,
+                        "error": observer_record.error,
+                    },
+                )
+                run_status = "degraded"
+                continue
+            handle = observer_handles.get(observer.observer_id)
+            record = self._stop_observer(observer, run_ctx, handle)
             observer_record.status = record.status
             observer_record.error = record.error
             observer_record.artifacts.extend(record.artifacts)
@@ -165,8 +198,26 @@ class DynamicRunOrchestrator:
 
         return manifest, run_dir
 
-    def _build_manifest(self, run_ctx: RunContext) -> RunManifest:
+    def _build_manifest(
+        self,
+        run_ctx: RunContext,
+        plan_payload: dict[str, object] | None,
+        writer: EvidencePackWriter,
+    ) -> RunManifest:
         created_at = self._now()
+        plan_artifact = None
+        if plan_payload:
+            plan_path = writer.write_json(
+                "inputs/static_dynamic_plan.json",
+                plan_payload,
+            )
+            plan_artifact = ArtifactRecord(
+                relative_path=str(plan_path.relative_to(writer.run_dir)),
+                type="static_dynamic_plan",
+                sha256=writer.hash_file(plan_path),
+                size_bytes=plan_path.stat().st_size,
+                produced_by="dynamic_orchestrator",
+            )
         manifest = RunManifest(
             run_manifest_version=1,
             dynamic_run_id=run_ctx.dynamic_run_id,
@@ -176,6 +227,8 @@ class DynamicRunOrchestrator:
                 "duration_seconds": run_ctx.duration_seconds,
                 "static_run_id": self.config.static_run_id,
                 "harvest_session_id": self.config.harvest_session_id,
+                "static_plan_path": plan_artifact.relative_path if plan_artifact else None,
+                "static_plan_summary": self._summarize_plan(plan_payload),
             },
             environment={
                 "device_serial": run_ctx.device_serial,
@@ -196,6 +249,8 @@ class DynamicRunOrchestrator:
                 "host": platform.node(),
             },
         )
+        if plan_artifact:
+            manifest.add_artifacts([plan_artifact])
         return manifest
 
     def _start_observers(self, run_ctx: RunContext) -> tuple[list[ObserverRecord], dict[str, object]]:
@@ -210,11 +265,23 @@ class DynamicRunOrchestrator:
                     "Observer start failed",
                     extra={"observer_id": observer.observer_id, "error": str(exc)},
                 )
+                error_path = run_ctx.artifacts_dir / observer.observer_id / "observer_error.txt"
+                error_path.parent.mkdir(parents=True, exist_ok=True)
+                error_path.write_text(str(exc))
+                digest = EvidencePackWriter(run_ctx.run_dir).hash_file(error_path)
+                artifact = ArtifactRecord(
+                    relative_path=str(error_path.relative_to(run_ctx.run_dir)),
+                    type="observer_error",
+                    sha256=digest,
+                    size_bytes=error_path.stat().st_size,
+                    produced_by=observer.observer_id,
+                )
                 records.append(
                     ObserverRecord(
                         observer_id=observer.observer_id,
                         status="failed",
                         error=str(exc),
+                        artifacts=[artifact],
                     )
                 )
         return records, handles
@@ -287,6 +354,71 @@ class DynamicRunOrchestrator:
     @staticmethod
     def _now() -> str:
         return datetime.now(timezone.utc).isoformat()
+
+    def _load_plan_payload(self) -> dict[str, object] | None:
+        if not self.config.plan_path:
+            return None
+        try:
+            payload = load_dynamic_plan(self.config.plan_path)
+            valid, error = validate_dynamic_plan(
+                payload,
+                package_name=self.config.package_name,
+                static_run_id=self.config.static_run_id,
+            )
+            if not valid:
+                self.logger.warning(
+                    "Dynamic plan validation failed",
+                    extra={"plan_path": self.config.plan_path, "error": error},
+                )
+                return None
+            return payload
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning(
+                "Failed to load dynamic plan",
+                extra={"plan_path": self.config.plan_path, "error": str(exc)},
+            )
+            return None
+
+    def _summarize_plan(self, plan_payload: dict[str, object] | None) -> dict[str, object] | None:
+        if not plan_payload:
+            return None
+        perms = plan_payload.get("permissions") if isinstance(plan_payload.get("permissions"), dict) else {}
+        network = plan_payload.get("network_targets") if isinstance(plan_payload.get("network_targets"), dict) else {}
+        risk_flags = plan_payload.get("risk_flags") if isinstance(plan_payload.get("risk_flags"), dict) else {}
+        declared = perms.get("declared") if isinstance(perms.get("declared"), list) else []
+        dangerous = perms.get("dangerous") if isinstance(perms.get("dangerous"), list) else []
+        high_value = perms.get("high_value") if isinstance(perms.get("high_value"), list) else []
+        domains = network.get("domains") if isinstance(network.get("domains"), list) else []
+        cleartext = network.get("cleartext_domains") if isinstance(network.get("cleartext_domains"), list) else []
+        return {
+            "declared_permissions_count": len(declared),
+            "dangerous_permissions_count": len(dangerous),
+            "high_value_permissions_count": len(high_value),
+            "network_targets_count": len(domains),
+            "network_targets_sample": sorted(domains)[:5],
+            "cleartext_targets_sample": sorted(cleartext)[:5],
+            "risk_flags": risk_flags,
+        }
+
+    def _build_permission_trigger_hint(self, plan_payload: dict[str, object] | None) -> str | None:
+        if not plan_payload:
+            return (
+                "Trigger permissions relevant to the app (camera/mic/location/contacts). "
+                "If unsure: open app settings → permissions and attempt the related feature."
+            )
+        perms = plan_payload.get("permissions") if isinstance(plan_payload.get("permissions"), dict) else {}
+        high_value = perms.get("high_value") if isinstance(perms.get("high_value"), list) else []
+        if high_value:
+            shortlist = ", ".join(sorted(str(p) for p in high_value)[:6])
+            return (
+                "Trigger permissions relevant to the app. "
+                f"High-value candidates: {shortlist}. "
+                "If unsure: open app settings → permissions and attempt the related feature."
+            )
+        return (
+            "Trigger permissions relevant to the app (camera/mic/location/contacts). "
+            "If unsure: open app settings → permissions and attempt the related feature."
+        )
 
 
 __all__ = ["DynamicRunOrchestrator"]

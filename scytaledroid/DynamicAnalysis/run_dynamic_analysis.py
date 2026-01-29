@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from .core import DynamicSessionConfig, DynamicSessionResult, run_dynamic_session
+from .core import DynamicSessionConfig, DynamicSessionResult
+from .engine import run_dynamic_engine
 
 
 def run_dynamic_analysis(
@@ -11,12 +12,16 @@ def run_dynamic_analysis(
     duration_seconds: int = 120,
     device_serial: str | None = None,
     scenario_id: str = "basic_usage",
-    observer_ids: tuple[str, ...] = ("network_capture", "system_log_capture"),
+    observer_ids: tuple[str, ...] = ("proxy_capture", "system_log_capture"),
     interactive: bool = True,
     output_root: str | None = None,
     plan_path: str | None = None,
     tier: str = "baseline",
     probes: tuple[str, ...] = (),
+    static_run_id: int | None = None,
+    harvest_session_id: int | None = None,
+    clear_logcat: bool = True,
+    proxy_port: int = 8890,
 ) -> DynamicSessionResult:
     config = DynamicSessionConfig(
         package_name=package_name,
@@ -29,8 +34,13 @@ def run_dynamic_analysis(
         plan_path=plan_path,
         tier=tier,
         probes=probes,
+        static_run_id=static_run_id,
+        harvest_session_id=harvest_session_id,
+        clear_logcat=clear_logcat,
+        proxy_port=proxy_port,
     )
-    return run_dynamic_session(config)
+    engine_result = run_dynamic_engine(config)
+    return engine_result.session
 
 
 __all__ = ["run_dynamic_analysis"]

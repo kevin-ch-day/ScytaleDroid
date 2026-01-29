@@ -499,12 +499,17 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                 )
                 print(status_messages.status(warning, level="warn"))
             try:
-                plan_payload = build_dynamic_plan(base_report, payload)
+                plan_payload = build_dynamic_plan(
+                    base_report,
+                    payload,
+                    static_run_id=app_result.static_run_id,
+                )
                 dynamic_plan_path = write_dynamic_plan_json(
                     plan_payload,
                     package=app_result.package_name,
                     profile=params.profile,
                     scope=params.scope,
+                    static_run_id=app_result.static_run_id,
                 )
             except Exception as exc:
                 warning = (

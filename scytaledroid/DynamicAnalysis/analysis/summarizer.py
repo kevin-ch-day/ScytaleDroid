@@ -39,6 +39,8 @@ class DynamicRunSummarizer:
         destinations = self._load_destinations(manifest)
         cleartext_flag = self._detect_cleartext(destinations)
         notable_logs = self._scan_log_signals(manifest)
+        network_present = self._network_capture_present(manifest)
+        static_plan = manifest.target.get("static_plan_summary") if isinstance(manifest.target, dict) else None
         return {
             "dynamic_run_id": manifest.dynamic_run_id,
             "status": manifest.status,
@@ -48,10 +50,13 @@ class DynamicRunSummarizer:
             "observers": [asdict(observer) for observer in manifest.observers],
             "destinations_observed": destinations,
             "flags": {
+                "network_capture_present": network_present,
                 "cleartext_http_detected": cleartext_flag,
                 "tls_mitm_suspected": "unknown",
                 "notable_log_signals": notable_logs,
+                "static_watchlist_used": bool(static_plan),
             },
+            "static_watchlist": static_plan,
             "evidence": [
                 {
                     "relative_path": artifact.relative_path,
@@ -75,6 +80,8 @@ class DynamicRunSummarizer:
             "## Observations",
             f"- Destinations observed: {destinations_text}.",
             f"- Cleartext HTTP detected: {summary['flags'].get('cleartext_http_detected')}.",
+            f"- Network capture present: {summary['flags'].get('network_capture_present')}.",
+            f"- Static watchlist used: {summary['flags'].get('static_watchlist_used')}.",
             "- TLS MITM suspected: unknown.",
             "",
             "## Evidence",
@@ -131,6 +138,12 @@ class DynamicRunSummarizer:
             if "Cleartext" in content:
                 signals.append("CleartextTraffic")
         return sorted(set(signals))
+
+    def _network_capture_present(self, manifest: RunManifest) -> str:
+        for artifact in manifest.artifacts:
+            if artifact.type in {"network_capture", "proxy_capture"}:
+                return "true"
+        return "false"
 
 
 __all__ = ["DynamicRunSummarizer"]

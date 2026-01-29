@@ -22,6 +22,16 @@ class SystemLogObserver(Observer):
             raise RuntimeError("adb binary not available on PATH")
         if not run_ctx.device_serial:
             raise RuntimeError("device serial required for logcat capture")
+        if run_ctx.clear_logcat:
+            try:
+                subprocess.run(
+                    [adb_bin, "-s", run_ctx.device_serial, "logcat", "-c"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+            except Exception:
+                pass
         relative_path = f"artifacts/{self.observer_id}/logcat.txt"
         path = run_ctx.run_dir / relative_path
         path.parent.mkdir(parents=True, exist_ok=True)

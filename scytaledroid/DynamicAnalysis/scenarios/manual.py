@@ -27,6 +27,8 @@ class ManualScenarioRunner:
                     level="info",
                 )
             )
+            if run_ctx.scenario_hint:
+                print(status_messages.status(run_ctx.scenario_hint, level="info"))
             prompt_utils.press_enter_to_continue("Press Enter to start the scenario...")
             started_at = datetime.now(timezone.utc)
             prompt_utils.press_enter_to_continue("Press Enter when the scenario is complete...")

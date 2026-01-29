@@ -7,12 +7,20 @@ from datetime import datetime, timezone
 from scytaledroid.Utils.LoggingUtils import logging_engine
 
 from scytaledroid.DynamicAnalysis.core.orchestrator import DynamicRunOrchestrator
-from scytaledroid.DynamicAnalysis.observers import NetworkCaptureObserver, SystemLogObserver
+from scytaledroid.DynamicAnalysis.observers import (
+    NetworkCaptureObserver,
+    ProxyCaptureObserver,
+    SystemLogObserver,
+)
 
 from .session import DynamicSessionConfig, DynamicSessionResult, make_session_result
 
 
-def run_dynamic_session(config: DynamicSessionConfig) -> DynamicSessionResult:
+def run_dynamic_session(
+    config: DynamicSessionConfig,
+    *,
+    plan_payload: dict[str, object] | None = None,
+) -> DynamicSessionResult:
     logger = logging_engine.get_dynamic_logger()
     result = make_session_result(config)
     logger.info(
@@ -24,14 +32,16 @@ def run_dynamic_session(config: DynamicSessionConfig) -> DynamicSessionResult:
             "tier": config.tier,
         },
     )
-    observer_ids = set(config.observer_ids or ("network_capture", "system_log_capture"))
+    observer_ids = set(config.observer_ids or ("proxy_capture", "system_log_capture"))
     observers = []
+    if "proxy_capture" in observer_ids:
+        observers.append(ProxyCaptureObserver())
     if "network_capture" in observer_ids:
         observers.append(NetworkCaptureObserver())
     if "system_log_capture" in observer_ids:
         observers.append(SystemLogObserver())
 
-    orchestrator = DynamicRunOrchestrator(config, observers=observers)
+    orchestrator = DynamicRunOrchestrator(config, observers=observers, plan_payload=plan_payload)
     manifest, run_dir = orchestrator.run()
     result.status = manifest.status
     if manifest.ended_at:

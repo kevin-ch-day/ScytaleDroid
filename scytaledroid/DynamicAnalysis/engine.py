@@ -12,7 +12,7 @@ from scytaledroid.Utils.LoggingUtils import logging_engine
 from scytaledroid.DynamicAnalysis.core import DynamicSessionConfig, DynamicSessionResult, run_dynamic_session
 from scytaledroid.DynamicAnalysis.core.evidence_pack import EvidencePackWriter
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord
-from scytaledroid.DynamicAnalysis.plans.loader import load_dynamic_plan
+from scytaledroid.DynamicAnalysis.plans.loader import load_dynamic_plan, validate_dynamic_plan
 from scytaledroid.DynamicAnalysis.probes.registry import run_probe_set
 from scytaledroid.DynamicAnalysis.storage.persistence import persist_dynamic_summary
 
@@ -39,7 +39,7 @@ class DynamicAnalysisEngine:
 
     def run(self) -> DynamicEngineResult:
         plan_payload = self._resolve_plan_payload()
-        session_result = run_dynamic_session(self.config)
+        session_result = run_dynamic_session(self.config, plan_payload=dict(plan_payload) if plan_payload else None)
         probe_summary = run_probe_set(self.config, plan_payload)
         summary_payload = {
             "dynamic_run_id": session_result.dynamic_run_id,
@@ -72,15 +72,17 @@ class DynamicAnalysisEngine:
                 extra={"plan_path": self.config.plan_path, "error": str(exc)},
             )
             return None
-        package = payload.get("package_name")
-        if package and package != self.config.package_name:
+        valid, error = validate_dynamic_plan(
+            payload,
+            package_name=self.config.package_name,
+            static_run_id=self.config.static_run_id,
+        )
+        if not valid:
             self.logger.warning(
-                "Dynamic plan package mismatch",
-                extra={
-                    "plan_package": package,
-                    "config_package": self.config.package_name,
-                },
+                "Dynamic plan validation failed",
+                extra={"plan_path": self.config.plan_path, "error": error},
             )
+            return None
         return payload
 
     def _persist_summary(

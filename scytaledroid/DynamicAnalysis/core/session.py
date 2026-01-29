@@ -21,6 +21,8 @@ class DynamicSessionConfig:
     observer_ids: Sequence[str] = field(default_factory=tuple)
     interactive: bool = True
     output_root: Optional[str] = None
+    clear_logcat: bool = True
+    proxy_port: int = 8890
 
 
 @dataclass

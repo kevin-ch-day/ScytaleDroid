@@ -178,6 +178,8 @@ def _high_value_permissions(declared: Sequence[str]) -> list[str]:
 def build_dynamic_plan(
     report: StaticAnalysisReport,
     payload: Mapping[str, object],
+    *,
+    static_run_id: int | None = None,
 ) -> Mapping[str, object]:
     metadata = payload.get("app", {}) if isinstance(payload, Mapping) else {}
     baseline = payload.get("baseline", {}) if isinstance(payload, Mapping) else {}
@@ -201,7 +203,7 @@ def build_dynamic_plan(
     if webview_summary:
         suggested_probes.append("webview_observation")
 
-    return {
+    plan = {
         "generated_at": datetime.utcnow().isoformat() + "Z",
         "package_name": metadata.get("package"),
         "version_name": metadata.get("version_name"),
@@ -233,6 +235,9 @@ def build_dynamic_plan(
         },
         "suggested_probes": suggested_probes,
     }
+    if static_run_id is not None:
+        plan["static_run_id"] = static_run_id
+    return plan
 
 
 def write_dynamic_plan_json(
@@ -241,6 +246,7 @@ def write_dynamic_plan_json(
     package: str,
     profile: str,
     scope: str,
+    static_run_id: int | None = None,
 ) -> Path:
     base_dir = Path(app_config.DATA_DIR) / "static_analysis" / "dynamic_plan"
     base_dir.mkdir(parents=True, exist_ok=True)
@@ -248,7 +254,8 @@ def write_dynamic_plan_json(
     safe_package = filesystem_safe_slug(package)
     safe_profile = filesystem_safe_slug(profile)
     safe_scope = filesystem_safe_slug(scope)
-    filename = f"{safe_package}-{safe_profile}-{safe_scope}-{timestamp}.json"
+    run_segment = f"-sr{static_run_id}" if static_run_id is not None else ""
+    filename = f"{safe_package}-{safe_profile}-{safe_scope}{run_segment}-{timestamp}.json"
     path = base_dir / filename
     with path.open("w", encoding="utf-8") as handle:
         json.dump(plan, handle, indent=2, sort_keys=True)
