@@ -399,9 +399,8 @@ def _persist_session_run_links(session_stamp: str | None, run_map: dict | None) 
             fetch="one",
         )
         if not row or int(row[0] or 0) == 0:
-            print(status_messages.status("static_session_run_links table missing; skipping linkage.", level="warn"))
             return
-        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         for app in run_map.get("apps", []):
             if not isinstance(app, dict):
                 continue
@@ -424,8 +423,12 @@ def _persist_session_run_links(session_stamp: str | None, run_map: dict | None) 
                 """,
                 (session_stamp, package, int(static_run_id), origin, origin_session, now),
             )
-    except Exception:
-        print(status_messages.status("Failed to persist static session run links.", level="warn"))
+    except Exception as exc:
+        print(
+            status_messages.status(
+                f"Failed to persist static session run links: {exc}", level="warn"
+            )
+        )
 
 
 def _detect_duplicate_packages(results: list[AppRunResult]) -> set[str]:

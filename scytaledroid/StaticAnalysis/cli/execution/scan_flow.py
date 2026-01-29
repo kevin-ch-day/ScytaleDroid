@@ -69,7 +69,9 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
     display_name_map = load_display_name_map(selection.groups)
     progress = _PipelineProgress(total=total_artifacts, show_splits=show_splits)
     config_hash = _compute_config_hash(params)
-    pipeline_version = os.getenv("SCYTALEDROID_PIPELINE_VERSION")
+    pipeline_version = os.getenv("SCYTALEDROID_PIPELINE_VERSION") or getattr(
+        params, "analysis_version", None
+    )
 
     for group in selection.groups:
         app_result = AppRunResult(group.package_name, getattr(group, "category", "Uncategorized"))

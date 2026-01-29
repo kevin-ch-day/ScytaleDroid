@@ -36,6 +36,7 @@ data/static_analysis/reports/
 data/static_analysis/baseline/
 data/static_analysis/dynamic_plan/
 data/audit/
+data/sessions/
 scripts/db/**
 !scripts/db/
 !scripts/db/*.sql

@@ -47,6 +47,9 @@ class RunParameters:
     profile: str
     scope: str
     scope_label: str
+    analysis_version: str = field(
+        default_factory=lambda: os.getenv("SCYTALEDROID_PIPELINE_VERSION") or "2.0.0-alpha"
+    )
     selected_tests: Tuple[str, ...] = tuple()
     evidence_lines: int = 2
     finding_limit: int = 25
