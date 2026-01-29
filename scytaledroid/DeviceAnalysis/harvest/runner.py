@@ -41,7 +41,7 @@ def execute_harvest(
     config: object,
     *,
     verbose: bool = False,
-    pull_mode: str = "legacy",
+    pull_mode: str = "inventory",
     run_id: Optional[str] = None,
     harvest_logger: Optional[logging_engine.ContextAdapter] = None,
     scope_label: Optional[str] = None,
@@ -65,12 +65,6 @@ def execute_harvest(
         base_context["snapshot_id"] = snapshot_id
     if snapshot_captured_at:
         base_context["snapshot_captured_at"] = snapshot_captured_at
-    if pull_mode == "legacy":
-        print(
-            "[WARN] pull_mode=legacy is deprecated; prefer explicit modes "
-            "(e.g., 'inventory' / 'snapshot')."
-        )
-
     run_ctx = RunContext(
         subsystem="harvest",
         device_serial=resolved_serial,

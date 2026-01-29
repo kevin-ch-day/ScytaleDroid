@@ -186,24 +186,24 @@ def upsert_summary(
     }
     has_run_column = _table_has_column("static_findings_summary", "run_id")
     has_static_column = _table_has_column("static_findings_summary", "static_run_id")
-    if run_id is not None and has_run_column:
-        payload["run_id"] = int(run_id)
-    if static_run_id is not None and has_static_column:
-        payload["static_run_id"] = int(static_run_id)
+    if has_run_column:
+        payload["run_id"] = int(run_id) if run_id is not None else None
+    if has_static_column:
+        payload["static_run_id"] = int(static_run_id) if static_run_id is not None else None
 
     if static_run_id is not None and has_static_column:
         queries_select = queries.SELECT_FINDINGS_SUMMARY_ID_BY_STATIC_RUN
-        select_params = (int(static_run_id), payload["scope_label"])
+        select_params = (int(static_run_id), scope_label)
     elif run_id is not None and has_run_column:
         # Prefer run_id when available to avoid session collisions.
         queries_select = queries.SELECT_FINDINGS_SUMMARY_ID_BY_RUN
-        select_params = (payload["run_id"], payload["scope_label"])
+        select_params = (payload["run_id"], scope_label)
     else:
         queries_select = queries.SELECT_FINDINGS_SUMMARY_ID
         select_params = (package_name, session_stamp, scope_label)
     statement = (
         queries.UPSERT_FINDINGS_SUMMARY
-        if has_run_column
+        if has_run_column and has_static_column
         else queries.UPSERT_FINDINGS_SUMMARY_LEGACY
     )
 

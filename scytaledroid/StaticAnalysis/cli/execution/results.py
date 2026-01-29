@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import os
 
 from collections import Counter, defaultdict
@@ -11,8 +12,6 @@ import statistics
 from typing import Mapping, MutableMapping, Sequence, Optional, Dict, Iterable
 
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
-from scytaledroid.Database.db_core import db_queries as core_q
-
 from scytaledroid.Utils.DisplayUtils import (
     prompt_utils,
     severity,
@@ -26,7 +25,6 @@ from ...core import StaticAnalysisReport
 from ...engine.strings import analyse_strings
 from ..core.run_persistence import persist_run_summary, update_static_run_status
 from ..core.run_lifecycle import finalize_static_run
-from ...persistence.snapshots import SNAPSHOT_PREFIX, write_permission_snapshot
 from ..views.run_detail_view import (
     SEVERITY_TOKEN_ORDER,
     app_detail_loop,
@@ -43,6 +41,7 @@ from ..views.view_renderers import (
 from ...persistence.ingest import ingest_baseline_payload
 from .scan_flow import format_duration
 from scytaledroid.Database.db_core import db_queries as core_q
+from scytaledroid.Config import app_config
 from scytaledroid.Database.db_scripts.static_run_audit import collect_static_run_counts
 from scytaledroid.StaticAnalysis.modules.permissions.permission_console_rendering import (
     render_permission_matrix,
@@ -56,6 +55,8 @@ from scytaledroid.StaticAnalysis.risk.permission import (
     permission_risk_grade,
     permission_points_0_20,
 )
+
+SNAPSHOT_PREFIX = "perm-audit:app:"
 
 
 
@@ -622,43 +623,9 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                 persistence_errors.append(failure_message)
         printed_db_table = False
         if session_stamp and persist_enabled:
-            try:
-                static_ids = [res.static_run_id for res in outcome.results if res.static_run_id]
-                snapshot_static_id = max(static_ids) if static_ids else None
-                if snapshot_static_id is None:
-                    try:
-                        row = core_q.run_sql(
-                            """
-                            SELECT id
-                            FROM static_analysis_runs
-                            WHERE session_stamp=%s
-                            ORDER BY id DESC
-                            LIMIT 1
-                            """,
-                            (session_stamp,),
-                            fetch="one",
-                        )
-                        if row and row[0]:
-                            snapshot_static_id = int(row[0])
-                    except Exception as exc:
-                        log.warning(
-                            f"Failed to resolve static_run_id for permission snapshot: {exc}",
-                            category="static_analysis",
-                        )
-                if snapshot_static_id is None:
-                    warning = "Permission snapshot skipped: static_run_id missing for session."
-                    print(status_messages.status(warning, level="warn"))
-                    persistence_errors.append(warning)
-                else:
-                    write_permission_snapshot(
-                        session_stamp,
-                        scope_label=params.scope_label,
-                        static_run_id=snapshot_static_id,
-                    )
-            except Exception as exc:
-                warning = f"Failed to write permission snapshot: {exc}"
-                print(status_messages.status(warning, level="warn"))
-                persistence_errors.append(str(exc))
+            # Permission audit snapshots are now persisted via the run-map aware flow.
+            # Avoid legacy header writes that can overwrite run_map metadata.
+            pass
             printed_db_table = _render_db_severity_table(session_stamp)
         if not printed_db_table:
             from ..views.run_detail_view import render_app_table  # local import to avoid cycle
@@ -1558,27 +1525,34 @@ def _table_has_column(table: str, column: str) -> bool:
 
 
 def _resolve_static_run_ids(session_stamp: str) -> list[int]:
+    run_map_path = Path(app_config.DATA_DIR) / "sessions" / session_stamp / "run_map.json"
+    if not run_map_path.exists():
+        return []
     try:
-        rows = core_q.run_sql(
-            "SELECT id FROM static_analysis_runs WHERE session_stamp=%s",
-            (session_stamp,),
-            fetch="all",
-        )
+        payload = json.loads(run_map_path.read_text(encoding="utf-8"))
     except Exception:
         return []
+    if not isinstance(payload, dict):
+        return []
+    apps = payload.get("apps")
+    if not isinstance(apps, list):
+        return []
     ids: list[int] = []
-    for row in rows or []:
-        value = row[0] if not isinstance(row, dict) else next(iter(row.values()), None)
+    for entry in apps:
+        if not isinstance(entry, dict):
+            continue
+        srid = entry.get("static_run_id")
+        if srid is None:
+            continue
         try:
-            if value is not None:
-                ids.append(int(value))
+            ids.append(int(srid))
         except (TypeError, ValueError):
             continue
     return ids
 
 
 def _per_app_severity_from_findings(
-    static_run_ids: Sequence[int], session_stamp: str | None = None
+    static_run_ids: Sequence[int],
 ) -> list[tuple[str, str, int]]:
     if not static_run_ids:
         return []
@@ -1598,19 +1572,6 @@ def _per_app_severity_from_findings(
                 ORDER BY a.package_name, f.severity
                 """,
                 tuple(static_run_ids),
-                fetch="all",
-            )
-        elif session_stamp:
-            rows = core_q.run_sql(
-                """
-                SELECT r.package, f.severity, COUNT(*) as cnt
-                FROM findings f
-                JOIN runs r ON r.run_id = f.run_id
-                WHERE r.session_stamp=%s
-                GROUP BY r.package, f.severity
-                ORDER BY r.package, f.severity
-                """,
-                (session_stamp,),
                 fetch="all",
             )
         else:
@@ -1637,7 +1598,7 @@ def _per_app_severity_from_findings(
 
 def _render_db_severity_table(session_stamp: str) -> bool:
     static_run_ids = _resolve_static_run_ids(session_stamp)
-    severity_rows = _per_app_severity_from_findings(static_run_ids, session_stamp)
+    severity_rows = _per_app_severity_from_findings(static_run_ids)
     if not severity_rows:
         return False
 

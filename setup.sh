@@ -3,6 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REQ_FILE="$ROOT_DIR/requirements.txt"
+SETUP_STATE_DIR="$ROOT_DIR/.setup"
+REQ_HASH_FILE="$SETUP_STATE_DIR/requirements.sha256"
 
 command_exists() {
   command -v "$1" >/dev/null 2>&1
@@ -55,20 +57,33 @@ run_pip_install() {
   fi
 }
 
-# Light-weight probe to skip reinstalling when already present
-missing_modules=()
-python3 - <<'PY' 2>/dev/null || missing_modules+=(pymysql)
-import importlib
-importlib.import_module("pymysql")
+requirements_hash() {
+  if command_exists sha256sum; then
+    sha256sum "$REQ_FILE" | awk '{print $1}'
+  else
+    python3 - <<'PY'
+import hashlib
+from pathlib import Path
+path = Path(__file__).resolve().parent / "requirements.txt"
+data = path.read_bytes()
+print(hashlib.sha256(data).hexdigest())
 PY
-python3 - <<'PY' 2>/dev/null || missing_modules+=(androguard)
-import importlib
-importlib.import_module("androguard")
-PY
-python3 - <<'PY' 2>/dev/null || missing_modules+=(yaml)
-import importlib
-importlib.import_module("yaml")
-PY
+  fi
+}
+
+requirements_changed() {
+  if [[ ! -f "$REQ_FILE" || ! -s "$REQ_FILE" ]]; then
+    return 1
+  fi
+  local current
+  current="$(requirements_hash)"
+  if [[ ! -f "$REQ_HASH_FILE" ]]; then
+    return 0
+  fi
+  local previous
+  previous="$(cat "$REQ_HASH_FILE" 2>/dev/null || true)"
+  [[ "$current" != "$previous" ]]
+}
 
 echo "[Setup] Upgrading pip to the latest version..."
 run_pip_install --upgrade pip >/dev/null
@@ -79,9 +94,11 @@ run_pip_install --upgrade setuptools wheel >/dev/null
 echo "[Setup] Build helpers are up to date."
 
 if [[ -f "$REQ_FILE" && -s "$REQ_FILE" ]]; then
-  if (( ${#missing_modules[@]} > 0 )); then
-    echo "[Setup] Installing Python requirements from $REQ_FILE (missing: ${missing_modules[*]})..."
+  mkdir -p "$SETUP_STATE_DIR"
+  if [[ "${SCYTALEDROID_SETUP_FORCE:-0}" == "1" ]] || requirements_changed; then
+    echo "[Setup] Installing Python requirements from $REQ_FILE..."
     run_pip_install -r "$REQ_FILE"
+    requirements_hash > "$REQ_HASH_FILE"
     echo "[Setup] Python requirements are up to date."
   else
     echo "[Setup] Python requirements already satisfied."

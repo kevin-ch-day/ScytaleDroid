@@ -1,0 +1,104 @@
+{
+  "apps": [
+    {
+      "origin_session_stamp": "20260129-094950",
+      "package": "com.facebook.katana",
+      "run_origin": "created",
+      "static_run_id": 464
+    },
+    {
+      "origin_session_stamp": "20260129-094950",
+      "package": "com.instagram.android",
+      "run_origin": "created",
+      "static_run_id": 465
+    },
+    {
+      "origin_session_stamp": "20260129-094950",
+      "package": "com.pinterest",
+      "run_origin": "created",
+      "static_run_id": 466
+    },
+    {
+      "origin_session_stamp": "20260129-094950",
+      "package": "com.reddit.frontpage",
+      "run_origin": "created",
+      "static_run_id": 467
+    },
+    {
+      "origin_session_stamp": "20260129-094950",
+      "package": "com.snapchat.android",
+      "run_origin": "created",
+      "static_run_id": 468
+    },
+    {
+      "origin_session_stamp": "20260129-094950",
+      "package": "com.tinder",
+      "run_origin": "created",
+      "static_run_id": 469
+    },
+    {
+      "origin_session_stamp": "20260129-094950",
+      "package": "com.twitter.android",
+      "run_origin": "created",
+      "static_run_id": 470
+    },
+    {
+      "origin_session_stamp": "20260129-094950",
+      "package": "com.zhiliaoapp.musically",
+      "run_origin": "created",
+      "static_run_id": 471
+    }
+  ],
+  "by_package": {
+    "com.facebook.katana": {
+      "origin_session_stamp": "20260129-094950",
+      "package": "com.facebook.katana",
+      "run_origin": "created",
+      "static_run_id": 464
+    },
+    "com.instagram.android": {
+      "origin_session_stamp": "20260129-094950",
+      "package": "com.instagram.android",
+      "run_origin": "created",
+      "static_run_id": 465
+    },
+    "com.pinterest": {
+      "origin_session_stamp": "20260129-094950",
+      "package": "com.pinterest",
+      "run_origin": "created",
+      "static_run_id": 466
+    },
+    "com.reddit.frontpage": {
+      "origin_session_stamp": "20260129-094950",
+      "package": "com.reddit.frontpage",
+      "run_origin": "created",
+      "static_run_id": 467
+    },
+    "com.snapchat.android": {
+      "origin_session_stamp": "20260129-094950",
+      "package": "com.snapchat.android",
+      "run_origin": "created",
+      "static_run_id": 468
+    },
+    "com.tinder": {
+      "origin_session_stamp": "20260129-094950",
+      "package": "com.tinder",
+      "run_origin": "created",
+      "static_run_id": 469
+    },
+    "com.twitter.android": {
+      "origin_session_stamp": "20260129-094950",
+      "package": "com.twitter.android",
+      "run_origin": "created",
+      "static_run_id": 470
+    },
+    "com.zhiliaoapp.musically": {
+      "origin_session_stamp": "20260129-094950",
+      "package": "com.zhiliaoapp.musically",
+      "run_origin": "created",
+      "static_run_id": 471
+    }
+  },
+  "created_at_utc": "2026-01-29T15:55:22.225706Z",
+  "session_stamp": "20260129-094950"
+}

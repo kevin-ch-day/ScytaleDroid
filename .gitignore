@@ -34,6 +34,7 @@ data/watchlists/
 data/apks/
 data/static_analysis/reports/
 data/static_analysis/baseline/
+data/static_analysis/dynamic_plan/
 data/audit/
 scripts/db/**
 !scripts/db/

@@ -30,7 +30,7 @@ from ..execution import (
     request_abort,
     render_run_results,
 )
-from ..core.models import RunParameters, RunOutcome, ScopeSelection
+from ..core.models import RunParameters, RunOutcome, ScopeSelection, AppRunResult
 from ..core.run_lifecycle import finalize_open_runs
 from ..core.abort_reasons import classify_exception, normalize_abort_reason
 from ..core.analysis_profiles import run_modules_for_profile
@@ -244,6 +244,21 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
         except Exception:
             pass
 
+    run_map = None
+    if outcome is not None and params.session_stamp and not params.dry_run:
+        try:
+            run_map = _build_session_run_map(outcome, params.session_stamp)
+            if run_map:
+                _persist_session_run_links(params.session_stamp, run_map)
+        except Exception as exc:
+            print(
+                status_messages.status(
+                    f"Failed to build run map for session {params.session_stamp}: {exc}",
+                    level="error",
+                )
+            )
+            run_map = None
+
     if (
         params.permission_snapshot_refresh
         and params.profile in {"full", "lightweight"}
@@ -257,9 +272,6 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
                     label="Static Analysis",
                 )
             )
-            run_map = _build_session_run_map(outcome, params.session_stamp)
-            if run_map:
-                _persist_session_run_links(params.session_stamp, run_map)
             execute_permission_scan(
                 selection,
                 params,
@@ -323,6 +335,13 @@ def _build_session_run_map(outcome: RunOutcome | None, session_stamp: str | None
     results = outcome.results or []
     if not results:
         return None
+    duplicates = _detect_duplicate_packages(results)
+    if duplicates:
+        raise RuntimeError(
+            "Duplicate package(s) detected in session; cannot build run map. "
+            f"Duplicates: {', '.join(sorted(duplicates))}. "
+            "Disambiguate the scope or rerun with a single package per session."
+        )
     static_ids = [res.static_run_id for res in results if res.static_run_id]
     origin_map: dict[int, str | None] = {}
     if static_ids:
@@ -363,13 +382,7 @@ def _build_session_run_map(outcome: RunOutcome | None, session_stamp: str | None
         "apps": apps,
         "by_package": by_package,
     }
-    try:
-        session_dir = Path(app_config.DATA_DIR) / "sessions" / session_stamp
-        session_dir.mkdir(parents=True, exist_ok=True)
-        run_map_path = session_dir / "run_map.json"
-        run_map_path.write_text(json.dumps(run_map, indent=2, sort_keys=True), encoding="utf-8")
-    except Exception:
-        print(status_messages.status("Failed to write session run map file.", level="warn"))
+    _write_run_map_atomic(session_stamp, run_map)
     return run_map
 
 
@@ -413,6 +426,49 @@ def _persist_session_run_links(session_stamp: str | None, run_map: dict | None) 
             )
     except Exception:
         print(status_messages.status("Failed to persist static session run links.", level="warn"))
+
+
+def _detect_duplicate_packages(results: list[AppRunResult]) -> set[str]:
+    seen: set[str] = set()
+    duplicates: set[str] = set()
+    for res in results:
+        pkg = res.package_name
+        if not pkg:
+            continue
+        if pkg in seen:
+            duplicates.add(pkg)
+        else:
+            seen.add(pkg)
+    return duplicates
+
+
+def _write_run_map_atomic(session_stamp: str, run_map: dict) -> None:
+    session_dir = Path(app_config.DATA_DIR) / "sessions" / session_stamp
+    session_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = session_dir / ".run_map.lock"
+    lock_fd = None
+    try:
+        lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        raise RuntimeError(
+            f"run_map.json is locked for session {session_stamp}; another process may be writing it."
+        )
+    try:
+        tmp_path = session_dir / "run_map.json.tmp"
+        final_path = session_dir / "run_map.json"
+        payload = json.dumps(run_map, indent=2, sort_keys=True)
+        with open(tmp_path, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, final_path)
+    finally:
+        if lock_fd is not None:
+            os.close(lock_fd)
+            try:
+                os.unlink(lock_path)
+            except OSError:
+                pass
 
 
 __all__ = [

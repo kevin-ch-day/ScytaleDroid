@@ -33,8 +33,28 @@ _FALLBACK_RULES: Sequence[PublisherRule] = (
 )
 
 
+def _publisher_rules_table_exists() -> bool:
+    try:
+        row = run_sql(
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = %s",
+            ("android_publisher_prefix_rules",),
+            fetch="one",
+            query_name="publishers.table_exists",
+        )
+        return bool(row and int(row[0]) > 0)
+    except Exception:
+        return False
+
+
 def load_publisher_rules() -> List[PublisherRule]:
     """Return DB-driven publisher rules or a minimal fallback list."""
+
+    if not _publisher_rules_table_exists():
+        log.warning(
+            "Publisher rules table missing; using fallback list.",
+            category="database",
+        )
+        return list(_FALLBACK_RULES)
 
     try:
         rows = run_sql(

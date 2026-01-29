@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Tuple
 from scytaledroid.DeviceAnalysis import adb_utils
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from . import adb_bulk
-from .modes import InventoryMode
+from scytaledroid.DeviceAnalysis.modes.inventory import InventoryMode
 
 
 def list_packages(serial: str, use_bulk: Optional[bool]) -> Tuple[List[Tuple[str, Optional[str], Optional[str]]], List[str], bool]:

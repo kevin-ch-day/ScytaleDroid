@@ -4,7 +4,6 @@ Run standalone or from Database Utilities to inspect and optionally fix tables.
 
 Goals:
   - harvest_artifact_paths does not contain stray source_path column
-  - legacy permission table audits are skipped (deprecated)
 """
 
 from __future__ import annotations
@@ -39,11 +38,6 @@ def _table_exists(table: str) -> bool:
         fetch="one",
     )
     return bool(row and int(row[0]) > 0)
-
-
-def audit_detected_permissions(apply_fixes: bool = False) -> Tuple[List[str], List[str]]:
-    """Deprecated legacy audit stub (kept for backward imports)."""
-    return [], []
 
 
 def audit_harvest_paths(apply_fixes: bool = False) -> Tuple[List[str], List[str]]:

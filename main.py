@@ -21,7 +21,6 @@ from scytaledroid.Utils.System.world_clock.display import (
 )
 from scytaledroid.Utils.System.world_clock.state import ClockReference, WorldClockState, load_state
 from scytaledroid.Database.db_core.db_engine import ensure_db_ready
-from scytaledroid.Database.db_utils.legacy_guard import legacy_table_warnings
 from scytaledroid.Api import start_api_server
 
 
@@ -90,15 +89,6 @@ def main_menu() -> None:
     """Render the main menu loop using the shared menu framework."""
 
     ensure_db_ready()
-    legacy_tables = legacy_table_warnings()
-    if legacy_tables:
-        status_messages.print_status(
-            (
-                "Legacy permission tables still exist; they are deprecated and may "
-                f"cause drift: {', '.join(legacy_tables)}."
-            ),
-            level="warn",
-        )
     api_state = start_api_server()
     if api_state.status == "running":
         status_messages.print_status(
@@ -202,19 +192,14 @@ def handle_dynamic() -> None:
 
 
 def handle_perm_catalog() -> None:
-    # Open the Harvest Android Permissions menu directly
-    try:
-        from scytaledroid.Utils.AndroidPermCatalog.cli import perm_catalog_menu  # noqa: WPS433
-        perm_catalog_menu()
-    except Exception as exc:
-        log.error(
-            f"Failed to open permission catalog: {exc}",
-            category="application",
-        )
-        status_messages.print_status(
-            "Unable to open permission catalog. Check logs for details.",
-            level="error",
-        )
+    log.warning(
+        "Permission catalog utilities have been removed; use governance import + dict tables.",
+        category="application",
+    )
+    status_messages.print_status(
+        "Permission catalog tools are no longer available. Use governance import + dict tables.",
+        level="warn",
+    )
 
 
 def handle_reporting() -> None:

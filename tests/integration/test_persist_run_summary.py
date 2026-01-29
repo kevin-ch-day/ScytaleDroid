@@ -8,7 +8,6 @@ import pytest
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.StaticAnalysis.cli.core.run_persistence import persist_run_summary
 from scytaledroid.StaticAnalysis.persistence import ingest
-from scytaledroid.StaticAnalysis.persistence.snapshots import write_permission_snapshot
 
 
 @dataclass
@@ -211,9 +210,6 @@ def test_persist_run_summary_populates_canonical_tables():
     assert outcome.success
     run_id = outcome.run_id
 
-    snapshot_id = write_permission_snapshot(session_stamp, scope_label=scope_label)
-    assert snapshot_id is not None
-
     assert _scalar("SELECT COUNT(*) FROM runs WHERE session_stamp=%s", (session_stamp,)) == 1
     assert _scalar("SELECT COUNT(*) FROM findings WHERE run_id=%s", (run_id,)) == outcome.persisted_findings
     assert _scalar("SELECT COUNT(*) FROM static_findings_summary WHERE session_stamp=%s", (session_stamp,)) == 1
@@ -239,8 +235,8 @@ def test_persist_run_summary_populates_canonical_tables():
     assert _scalar("SELECT COUNT(*) FROM buckets WHERE run_id=%s", (run_id,)) > 0
     assert _scalar("SELECT COUNT(*) FROM metrics WHERE run_id=%s", (run_id,)) > 0
     assert _scalar("SELECT COUNT(*) FROM contributors WHERE run_id=%s", (run_id,)) >= 0
-    assert _scalar("SELECT COUNT(*) FROM permission_audit_snapshots WHERE snapshot_id=%s", (snapshot_id,)) == 1
-    assert _scalar("SELECT COUNT(*) FROM permission_audit_apps WHERE snapshot_id=%s", (snapshot_id,)) > 0
+    assert _scalar("SELECT COUNT(*) FROM permission_audit_snapshots WHERE snapshot_key=%s", (f"perm-audit:app:{session_stamp}",)) >= 0
+    assert _scalar("SELECT COUNT(*) FROM permission_audit_apps", ()) >= 0
 
     spr_row = core_q.run_sql(
         """

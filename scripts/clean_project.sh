@@ -19,9 +19,12 @@ DATA_DIR="${ROOT_DIR}/data"
 LOG_DIR="${ROOT_DIR}/logs"
 OUTPUT_DIR="${ROOT_DIR}/output"
 TESTS_DIR="${ROOT_DIR}/tests"
+STATIC_ANALYSIS_DIR="${DATA_DIR}/static_analysis"
+DYNAMIC_PLAN_DIR="${STATIC_ANALYSIS_DIR}/dynamic_plan"
 
 # The helper is menu driven and intentionally avoids CLI flags beyond this
 # invocation guard so operators choose the desired cleanup mode interactively.
+shopt -s extglob
 
 PRUNE_DIRS=(
   "$ROOT_DIR/.git"
@@ -181,6 +184,79 @@ perform_full_cleanup() {
   echo "Full cleanup complete."
 }
 
+dynamic_plan_stats() {
+  if [[ -d "$DYNAMIC_PLAN_DIR" ]]; then
+    local count
+    local size
+    count="$(find "$DYNAMIC_PLAN_DIR" -maxdepth 1 -type f -name "*.json" | wc -l | tr -d ' ')"
+    size="$(du -sh "$DYNAMIC_PLAN_DIR" | awk '{print $1}')"
+    echo "Dynamic plan files: ${count} | Size: ${size}"
+  else
+    echo "Dynamic plan directory not present: ${DYNAMIC_PLAN_DIR}"
+  fi
+}
+
+prune_dynamic_plan_by_age() {
+  local days="$1"
+  if [[ ! -d "$DYNAMIC_PLAN_DIR" ]]; then
+    echo "Dynamic plan directory not present; skipping."
+    return 0
+  fi
+
+  local removed=0
+  while IFS= read -r -d '' path; do
+    local rel_path="${path#$ROOT_DIR/}"
+    echo "Removing ${rel_path:-${path}}"
+    rm -f -- "$path"
+    removed=$((removed + 1))
+  done < <(find "$DYNAMIC_PLAN_DIR" -maxdepth 1 -type f -name "*.json" -mtime +"$days" -print0)
+
+  echo "Pruned ${removed} dynamic plan file(s) older than ${days} days."
+}
+
+prune_dynamic_plan_keep_latest() {
+  if [[ ! -d "$DYNAMIC_PLAN_DIR" ]]; then
+    echo "Dynamic plan directory not present; skipping."
+    return 0
+  fi
+
+  declare -A latest_file
+  declare -A latest_mtime
+  local file
+  for file in "$DYNAMIC_PLAN_DIR"/*.json; do
+    [[ -e "$file" ]] || continue
+    local base
+    base="$(basename "$file")"
+    local key="$base"
+    key="${key%-sr+([0-9])-+([0-9])T+([0-9])Z.json}"
+    key="${key%-+([0-9])T+([0-9])Z.json}"
+    local mtime
+    mtime="$(stat -c %Y "$file")"
+    if [[ -z "${latest_mtime[$key]:-}" || "$mtime" -gt "${latest_mtime[$key]}" ]]; then
+      latest_mtime["$key"]="$mtime"
+      latest_file["$key"]="$file"
+    fi
+  done
+
+  local removed=0
+  for file in "$DYNAMIC_PLAN_DIR"/*.json; do
+    [[ -e "$file" ]] || continue
+    local base
+    base="$(basename "$file")"
+    local key="$base"
+    key="${key%-sr+([0-9])-+([0-9])T+([0-9])Z.json}"
+    key="${key%-+([0-9])T+([0-9])Z.json}"
+    if [[ "${latest_file[$key]}" != "$file" ]]; then
+      local rel_path="${file#$ROOT_DIR/}"
+      echo "Removing ${rel_path:-${file}}"
+      rm -f -- "$file"
+      removed=$((removed + 1))
+    fi
+  done
+
+  echo "Pruned ${removed} dynamic plan file(s); kept newest per package/profile."
+}
+
 purge_tests_directory() {
   if [[ -d "$TESTS_DIR" ]]; then
     echo "Removing tests/ directory..."
@@ -202,11 +278,12 @@ run_menu() {
     cat <<MENU
 Select cleanup task:
   1) Full cleanup (caches, logs, output, data)
-  2) Remove tests/ directory
-  3) Full cleanup + remove tests/ directory
-  4) Exit
+  2) Prune dynamic plan files
+  3) Remove tests/ directory
+  4) Full cleanup + remove tests/ directory
+  5) Exit
 MENU
-    read -rp "Enter choice [1-4]: " selection
+    read -rp "Enter choice [1-5]: " selection
     case "$selection" in
       1)
         if confirm_action "Run full cleanup?"; then
@@ -216,13 +293,53 @@ MENU
         fi
         ;;
       2)
+        cat <<SUBMENU
+Dynamic plan cleanup:
+  1) Show current stats
+  2) Keep newest per package/profile
+  3) Prune files older than N days
+  4) Back
+SUBMENU
+        read -rp "Enter choice [1-4]: " dp_selection
+        case "$dp_selection" in
+          1)
+            dynamic_plan_stats
+            ;;
+          2)
+            if confirm_action "Keep newest per package/profile and delete the rest?"; then
+              prune_dynamic_plan_keep_latest
+            else
+              echo "Skipped dynamic plan prune."
+            fi
+            ;;
+          3)
+            read -rp "Prune files older than how many days? " days
+            if [[ "$days" =~ ^[0-9]+$ ]]; then
+              if confirm_action "Prune dynamic plan files older than ${days} days?"; then
+                prune_dynamic_plan_by_age "$days"
+              else
+                echo "Skipped dynamic plan prune."
+              fi
+            else
+              echo "Invalid day count."
+            fi
+            ;;
+          4)
+            echo "Returning to main menu."
+            ;;
+          *)
+            echo "Invalid selection."
+            ;;
+        esac
+        ;;
+      3)
         if confirm_action "Remove the tests/ directory?"; then
           purge_tests_directory
         else
           echo "Skipped tests/ removal."
         fi
         ;;
-      3)
+      4)
         if confirm_action "Run full cleanup and remove tests/?"; then
           perform_full_cleanup
           purge_tests_directory
@@ -230,16 +347,15 @@ MENU
           echo "Skipped combined cleanup."
         fi
         ;;
-      4)
+      5)
         echo "Exiting without changes."
         break
         ;;
       *)
-        echo "Invalid selection. Please choose 1-4." >&2
+        echo "Invalid selection. Please choose 1-5." >&2
         ;;
     esac
   done
 }
 
 run_menu
-

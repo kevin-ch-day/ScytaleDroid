@@ -3,8 +3,6 @@ Public facade for inventory internals.
 
 Notes for new code:
 - Prefer calling services.inventory_service.run_full_sync from controllers/menus.
-- This module keeps a thin compat surface so legacy imports keep working
-  (load_latest_inventory, render_inventory_summary, etc).
 """
 
 from __future__ import annotations
@@ -28,30 +26,6 @@ from .snapshot_io import (
     persist_snapshot,
 )
 from .views import print_inventory_run_summary_from_result
-
-# Compat alias used by older callers
-load_latest_snapshot = load_latest_inventory
-
-# Optional: compat render wrapper
-try:
-    from . import summary as _summary_mod
-except Exception:
-    _summary_mod = None
-
-
-def _render_inventory_summary(obj) -> None:
-    """
-    Compatibility helper for legacy callers expecting render_inventory_summary.
-    Accepts any object with `.rows` attribute (e.g., InventoryResult or
-    LegacyInventoryResult). New code should import summary.render_inventory_summary
-    directly.
-    """
-    if _summary_mod is None:
-        raise RuntimeError("summary module unavailable; cannot render inventory summary")
-    _summary_mod.render_inventory_summary(obj)
-
-
-run_inventory_sync = None  # Legacy path removed; use run_full_sync instead.
 
 
 def _owner_role(entry: Dict[str, object]) -> str:
@@ -149,20 +123,23 @@ def run_device_summary(serial: Optional[str]) -> None:
 
     prompt_utils.press_enter_to_continue()
 
+
+def _render_inventory_summary(packages: List[Dict[str, object]]) -> None:
+    """Compatibility wrapper for tests; delegates to summary renderer."""
+    from .summary import render_inventory_summary
+
+    render_inventory_summary(packages)
+
 __all__ = [
     # Preferred API
     "run_full_sync",
     "InventoryResult",
     "InventorySyncStats",
-    "load_latest_snapshot",
     "load_latest_snapshot_meta",
     "persist_snapshot",
     "hash_rows",
     "load_canonical_metadata",
-    # Compat aliases
     "load_latest_inventory",
-    "_render_inventory_summary",
-    "run_inventory_sync",
     "print_inventory_run_summary_from_result",
     "run_device_summary",
 ]

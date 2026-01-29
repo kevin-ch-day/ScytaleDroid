@@ -298,7 +298,7 @@ def render_harvest_summary(
     results: Sequence[PullResult],
     *,
     selection: ScopeSelection,
-    pull_mode: str = "legacy",
+    pull_mode: str = "inventory",
     serial: Optional[str] = None,
     run_timestamp: Optional[str] = None,
     guard_brief: Optional[str] = None,

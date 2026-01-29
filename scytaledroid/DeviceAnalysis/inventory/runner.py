@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Callable, Dict, Optional, Protocol
 
 from scytaledroid.DeviceAnalysis.inventory import db_sync, package_collection, snapshot_io
-from scytaledroid.DeviceAnalysis.inventory.modes import InventoryConfig, InventoryMode
+from scytaledroid.DeviceAnalysis.modes.inventory import InventoryConfig, InventoryMode
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 

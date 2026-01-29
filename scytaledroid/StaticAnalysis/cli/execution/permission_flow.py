@@ -144,7 +144,14 @@ def execute_permission_scan(
         )
 
     if require_run_map and not run_map:
-        raise RuntimeError("Permission audit requires a run map, but none was provided.")
+        run_map = _load_run_map(session_stamp)
+        if not run_map:
+            raise RuntimeError(
+                "Cannot refresh permission audit: no run_map.json available for this session. "
+                "Re-run the static analysis (or refresh immediately after a scan) to regenerate it."
+            )
+    if run_map:
+        _validate_run_map(run_map, session_stamp)
 
     snapshot_payload = accumulator.finalize()
     run_id = None
@@ -276,15 +283,7 @@ def execute_permission_scan(
         snapshot_payload["run_map"] = run_map
         snapshot_payload["run_map_required"] = bool(require_run_map)
         snapshot_payload["allow_partial_audit"] = bool(allow_partial_audit)
-    linkage = {}
-    if len(accumulator.apps) != 1 and not run_map:
-        linkage = {"status": "partial", "reason": "multi_app_scope"}
-    elif run_id is None and len(accumulator.apps) == 1:
-        linkage = {"status": "partial", "reason": "run_id_missing"}
-    elif static_run_id is None and len(accumulator.apps) == 1:
-        linkage = {"status": "partial", "reason": "static_run_id_missing"}
-    if linkage:
-        snapshot_payload["linkage"] = linkage
+    # run_map is authoritative for linkage; do not emit partial linkage hints here.
 
     if run_map:
         try:
@@ -332,6 +331,72 @@ def execute_permission_scan(
             static_run_id=static_run_id,
             status=run_status,
             abort_reason=normalize_abort_reason(abort_reason),
+        )
+
+
+def _run_map_path(session_stamp: str) -> Path:
+    return Path(app_config.DATA_DIR) / "sessions" / session_stamp / "run_map.json"
+
+
+def _run_map_lock_path(session_stamp: str) -> Path:
+    return Path(app_config.DATA_DIR) / "sessions" / session_stamp / ".run_map.lock"
+
+
+def _load_run_map(session_stamp: str) -> dict | None:
+    if not session_stamp:
+        return None
+    lock_path = _run_map_lock_path(session_stamp)
+    if lock_path.exists():
+        raise RuntimeError(
+            f"run_map.json is locked for session {session_stamp}; another process may be writing it."
+        )
+    path = _run_map_path(session_stamp)
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise RuntimeError(
+            f"run_map.json is invalid or corrupt at {path}: {exc}"
+        ) from exc
+    return payload if isinstance(payload, dict) else None
+
+
+def _validate_run_map(run_map: dict, session_stamp: str) -> None:
+    if not isinstance(run_map, dict):
+        raise RuntimeError("run_map.json schema invalid: not an object.")
+    if run_map.get("session_stamp") and run_map.get("session_stamp") != session_stamp:
+        raise RuntimeError(
+            f"run_map.json session mismatch: expected {session_stamp}, got {run_map.get('session_stamp')}"
+        )
+    apps = run_map.get("apps")
+    if not isinstance(apps, list):
+        raise RuntimeError("run_map.json schema invalid: missing apps list.")
+    seen: set[str] = set()
+    duplicates: set[str] = set()
+    missing: list[str] = []
+    for entry in apps:
+        if not isinstance(entry, dict):
+            continue
+        package = entry.get("package")
+        static_run_id = entry.get("static_run_id")
+        if not package or static_run_id is None:
+            missing.append(str(package) if package else "<missing>")
+            continue
+        if package in seen:
+            duplicates.add(str(package))
+        else:
+            seen.add(str(package))
+    if duplicates:
+        raise RuntimeError(
+            "run_map.json contains duplicate package entries: "
+            f"{', '.join(sorted(duplicates))}. "
+            "Disambiguate the scope or rerun with a single package per session."
+        )
+    if missing:
+        raise RuntimeError(
+            "run_map.json missing required fields for one or more apps: "
+            f"{', '.join(sorted(set(missing)))}."
         )
 
 

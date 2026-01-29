@@ -962,6 +962,7 @@ class PermissionAuditAccumulator:
                 header_values.insert(3 if has_run_id else 2, static_run_id)
                 header_placeholders.insert(3 if has_run_id else 2, "%s")
             def _persist_snapshot() -> OperationResult:
+                static_run_id_local = static_run_id
                 update_clause = ", ".join(
                     f"{col}=VALUES({col})" for col in header_columns if col != "snapshot_key"
                 )
@@ -988,7 +989,7 @@ class PermissionAuditAccumulator:
                     log.error(
                         "Failed to persist permission_audit_snapshots "
                         f"(snapshot_key={self.snapshot_id} scope={self.scope_label} "
-                        f"run_id={run_id} static_run_id={static_run_id})\n"
+                        f"run_id={run_id} static_run_id={static_run_id_local})\n"
                         + traceback.format_exc(),
                         category="db",
                     )
@@ -999,7 +1000,7 @@ class PermissionAuditAccumulator:
                             "snapshot_key": self.snapshot_id,
                             "scope_label": self.scope_label,
                             "run_id": run_id,
-                            "static_run_id": static_run_id,
+                            "static_run_id": static_run_id_local,
                         },
                     )
 
@@ -1010,7 +1011,7 @@ class PermissionAuditAccumulator:
                         fetch="one",
                     )
                     if row and row[0] is not None:
-                        static_run_id = int(row[0])
+                        static_run_id_local = int(row[0])
                 except Exception:
                     pass
 
@@ -1018,28 +1019,7 @@ class PermissionAuditAccumulator:
                 signal_write_failed = False
                 app_failures = 0
                 run_id_cache: dict[str, int | None] = {}
-                if not static_run_id_map and session_stamp and not run_map_required:
-                    try:
-                        rows = core_q.run_sql(
-                            """
-                            SELECT a.package_name, s.id
-                            FROM static_analysis_runs s
-                            JOIN app_versions av ON av.id = s.app_version_id
-                            JOIN apps a ON a.id = av.app_id
-                            WHERE s.session_stamp=%s
-                            ORDER BY s.id DESC
-                            """,
-                            (session_stamp,),
-                            fetch="all",
-                        )
-                        for row in rows:
-                            if not row or not row[0] or not row[1]:
-                                continue
-                            package = str(row[0])
-                            if package not in static_run_id_map:
-                                static_run_id_map[package] = int(row[1])
-                    except Exception:
-                        static_run_id_map = {}
+                run_id_map: dict[str, int] = dict(static_run_id_map)
                 if missing_run_ids and not allow_partial and run_map_required:
                     log.error(
                         "Permission audit missing static_run_id for one or more apps.",
@@ -1054,7 +1034,7 @@ class PermissionAuditAccumulator:
                         },
                     )
                 for app in self.apps:
-                    app_static_run_id = static_run_id_map.get(app.package, static_run_id)
+                    app_static_run_id = run_id_map.get(app.package, static_run_id_local)
                     if app_static_run_id is None and not allow_partial and run_map_required:
                         log.error(
                             "Permission audit missing static_run_id for app; aborting snapshot persistence.",
@@ -1193,6 +1173,159 @@ class PermissionAuditAccumulator:
                         )
                         continue
 
+                    if app_static_run_id is not None and signals_table_exists:
+                        has_gov_version = _has_column("permission_signal_observations", "governance_version")
+                        has_gov_sha = _has_column("permission_signal_observations", "governance_sha256")
+                        if governance_version is None or governance_sha is None:
+                            if not signal_write_failed:
+                                log.warning(
+                                    "Governance snapshot missing; skipping permission signal persistence.",
+                                    category="db",
+                                )
+                            signal_write_failed = True
+                        else:
+                            extra_columns: list[str] = []
+                            extra_placeholders: list[str] = []
+                            extra_updates: list[str] = []
+                            if has_gov_version:
+                                extra_columns.append("governance_version")
+                                extra_placeholders.append("%(governance_version)s")
+                                extra_updates.append("governance_version=VALUES(governance_version)")
+                            if has_gov_sha:
+                                extra_columns.append("governance_sha256")
+                                extra_placeholders.append("%(governance_sha256)s")
+                                extra_updates.append("governance_sha256=VALUES(governance_sha256)")
+                            for signal_key, meta in _SIGNAL_OBSERVATION_CONFIG.items():
+                                if not app.signals.get(signal_key, False):
+                                    continue
+                                candidates = tuple(meta.get("permissions") or ())
+                                trigger_permissions = _match_permissions(app.declared_permissions, candidates)
+                                artifact_token = f"run_{app_static_run_id}"
+                                try:
+                                    row = core_q.run_sql(
+                                        "SELECT sha256 FROM static_analysis_runs WHERE id=%s",
+                                        (app_static_run_id,),
+                                        fetch="one",
+                                    )
+                                    if row and row[0]:
+                                        artifact_token = str(row[0])
+                                except Exception:
+                                    pass
+                                signal_dir = (
+                                    evidence_base
+                                    / str(app_static_run_id)
+                                    / app.package
+                                    / artifact_token
+                                )
+                                try:
+                                    signal_dir.mkdir(parents=True, exist_ok=True)
+                                except Exception:
+                                    log.warning(
+                                        f"Failed to create signal evidence folder for {app.package}",
+                                        category="db",
+                                    )
+                                    continue
+                                signal_file = signal_dir / f"signal_{signal_key}.json"
+                                wrote_signal = False
+                                try:
+                                    signal_payload = {
+                                        "static_run_id": app_static_run_id,
+                                        "package_name": app.package,
+                                        "signal_key": signal_key,
+                                        "severity_band": meta.get("severity_band"),
+                                        "score": int(meta.get("score", 0) or 0),
+                                        "trigger_permissions": list(trigger_permissions or []),
+                                        "rationale": meta.get("rationale"),
+                                        "governance_version": governance_version,
+                                        "governance_sha256": governance_sha,
+                                    }
+                                    signal_file.write_text(
+                                        json.dumps(signal_payload, ensure_ascii=True, indent=2),
+                                        encoding="utf-8",
+                                    )
+                                    wrote_signal = True
+                                except Exception:
+                                    log.warning(
+                                        f"Failed to write signal evidence for {app.package} ({signal_key})",
+                                        category="db",
+                                    )
+                                if not wrote_signal:
+                                    continue
+                                evidence_path = str(
+                                    Path("evidence")
+                                    / "static_runs"
+                                    / str(app_static_run_id)
+                                    / app.package
+                                    / artifact_token
+                                    / signal_file.name
+                                )
+                                payload = {
+                                    "static_run_id": app_static_run_id,
+                                    "package_name": app.package,
+                                    "signal_key": signal_key,
+                                    "severity_band": meta.get("severity_band"),
+                                    "score": int(meta.get("score", 0) or 0),
+                                    "trigger_permissions_json": json.dumps(trigger_permissions or []),
+                                    "primary_permission": trigger_permissions[0] if trigger_permissions else None,
+                                    "rationale": meta.get("rationale"),
+                                    "evidence_path": evidence_path,
+                                    "governance_version": governance_version if has_gov_version else None,
+                                    "governance_sha256": governance_sha if has_gov_sha else None,
+                                }
+                                try:
+                                    columns = [
+                                        "static_run_id",
+                                        "package_name",
+                                        "signal_key",
+                                        "severity_band",
+                                        "score",
+                                        "trigger_permissions_json",
+                                        "primary_permission",
+                                        "rationale",
+                                        "evidence_path",
+                                    ]
+                                    placeholders = [
+                                        "%(static_run_id)s",
+                                        "%(package_name)s",
+                                        "%(signal_key)s",
+                                        "%(severity_band)s",
+                                        "%(score)s",
+                                        "%(trigger_permissions_json)s",
+                                        "%(primary_permission)s",
+                                        "%(rationale)s",
+                                        "%(evidence_path)s",
+                                    ]
+                                    updates = [
+                                        "severity_band=VALUES(severity_band)",
+                                        "score=VALUES(score)",
+                                        "trigger_permissions_json=VALUES(trigger_permissions_json)",
+                                        "primary_permission=VALUES(primary_permission)",
+                                        "rationale=VALUES(rationale)",
+                                        "evidence_path=VALUES(evidence_path)",
+                                    ]
+                                    if extra_columns:
+                                        columns.extend(extra_columns)
+                                        placeholders.extend(extra_placeholders)
+                                        updates.extend(extra_updates)
+                                    core_q.run_sql(
+                                        "INSERT INTO permission_signal_observations ("
+                                        + ", ".join(columns)
+                                        + ") VALUES ("
+                                        + ", ".join(placeholders)
+                                        + ") ON DUPLICATE KEY UPDATE "
+                                        + ", ".join(updates),
+                                        payload,
+                                    )
+                                except Exception as exc:  # pragma: no cover - defensive
+                                    if not signal_write_failed:
+                                        log.warning(
+                                            f"permission signal persistence failed; skipping remainder: {exc}",
+                                            category="db",
+                                        )
+                                    signal_write_failed = True
+                                    break
+
+
                 try:
                     core_q.run_sql(
                         """
@@ -1210,157 +1343,6 @@ class PermissionAuditAccumulator:
                         category="db",
                     )
 
-                if app_static_run_id is not None and signals_table_exists:
-                    has_gov_version = _has_column("permission_signal_observations", "governance_version")
-                    has_gov_sha = _has_column("permission_signal_observations", "governance_sha256")
-                    if governance_version is None or governance_sha is None:
-                        if not signal_write_failed:
-                            log.warning(
-                                "Governance snapshot missing; skipping permission signal persistence.",
-                                category="db",
-                            )
-                        signal_write_failed = True
-                    else:
-                        extra_columns: list[str] = []
-                        extra_placeholders: list[str] = []
-                        extra_updates: list[str] = []
-                        if has_gov_version:
-                            extra_columns.append("governance_version")
-                            extra_placeholders.append("%(governance_version)s")
-                            extra_updates.append("governance_version=VALUES(governance_version)")
-                        if has_gov_sha:
-                            extra_columns.append("governance_sha256")
-                            extra_placeholders.append("%(governance_sha256)s")
-                            extra_updates.append("governance_sha256=VALUES(governance_sha256)")
-                        for signal_key, meta in _SIGNAL_OBSERVATION_CONFIG.items():
-                            if not app.signals.get(signal_key, False):
-                                continue
-                            candidates = tuple(meta.get("permissions") or ())
-                            trigger_permissions = _match_permissions(app.declared_permissions, candidates)
-                            artifact_token = f"run_{app_static_run_id}"
-                            try:
-                                row = core_q.run_sql(
-                                    "SELECT sha256 FROM static_analysis_runs WHERE id=%s",
-                                    (app_static_run_id,),
-                                    fetch="one",
-                                )
-                                if row and row[0]:
-                                    artifact_token = str(row[0])
-                            except Exception:
-                                pass
-                            signal_dir = (
-                                evidence_base
-                                / str(app_static_run_id)
-                                / app.package
-                                / artifact_token
-                            )
-                            try:
-                                signal_dir.mkdir(parents=True, exist_ok=True)
-                            except Exception:
-                                log.warning(
-                                    f"Failed to create signal evidence folder for {app.package}",
-                                    category="db",
-                                )
-                                continue
-                            signal_file = signal_dir / f"signal_{signal_key}.json"
-                            wrote_signal = False
-                            try:
-                                signal_payload = {
-                                    "static_run_id": app_static_run_id,
-                                    "package_name": app.package,
-                                    "signal_key": signal_key,
-                                    "severity_band": meta.get("severity_band"),
-                                    "score": int(meta.get("score", 0) or 0),
-                                    "trigger_permissions": list(trigger_permissions or []),
-                                    "rationale": meta.get("rationale"),
-                                    "governance_version": governance_version,
-                                    "governance_sha256": governance_sha,
-                                }
-                                signal_file.write_text(
-                                    json.dumps(signal_payload, ensure_ascii=True, indent=2),
-                                    encoding="utf-8",
-                                )
-                                wrote_signal = True
-                            except Exception:
-                                log.warning(
-                                    f"Failed to write signal evidence for {app.package} ({signal_key})",
-                                    category="db",
-                                )
-                            if not wrote_signal:
-                                continue
-                            evidence_path = str(
-                                Path("evidence")
-                                / "static_runs"
-                                / str(app_static_run_id)
-                                / app.package
-                                / artifact_token
-                                / signal_file.name
-                            )
-                            payload = {
-                                "static_run_id": app_static_run_id,
-                                "package_name": app.package,
-                                "signal_key": signal_key,
-                                "severity_band": meta.get("severity_band"),
-                                "score": int(meta.get("score", 0) or 0),
-                                "trigger_permissions_json": json.dumps(trigger_permissions or []),
-                                "primary_permission": trigger_permissions[0] if trigger_permissions else None,
-                                "rationale": meta.get("rationale"),
-                                "evidence_path": evidence_path,
-                                "governance_version": governance_version if has_gov_version else None,
-                                "governance_sha256": governance_sha if has_gov_sha else None,
-                            }
-                            try:
-                                columns = [
-                                    "static_run_id",
-                                    "package_name",
-                                    "signal_key",
-                                    "severity_band",
-                                    "score",
-                                    "trigger_permissions_json",
-                                    "primary_permission",
-                                    "rationale",
-                                    "evidence_path",
-                                ]
-                                placeholders = [
-                                    "%(static_run_id)s",
-                                    "%(package_name)s",
-                                    "%(signal_key)s",
-                                    "%(severity_band)s",
-                                    "%(score)s",
-                                    "%(trigger_permissions_json)s",
-                                    "%(primary_permission)s",
-                                    "%(rationale)s",
-                                    "%(evidence_path)s",
-                                ]
-                                updates = [
-                                    "severity_band=VALUES(severity_band)",
-                                    "score=VALUES(score)",
-                                    "trigger_permissions_json=VALUES(trigger_permissions_json)",
-                                    "primary_permission=VALUES(primary_permission)",
-                                    "rationale=VALUES(rationale)",
-                                    "evidence_path=VALUES(evidence_path)",
-                                ]
-                                if extra_columns:
-                                    columns.extend(extra_columns)
-                                    placeholders.extend(extra_placeholders)
-                                    updates.extend(extra_updates)
-                                core_q.run_sql(
-                                    "INSERT INTO permission_signal_observations ("
-                                    + ", ".join(columns)
-                                    + ") VALUES ("
-                                    + ", ".join(placeholders)
-                                    + ") ON DUPLICATE KEY UPDATE "
-                                    + ", ".join(updates),
-                                    payload,
-                                )
-                            except Exception as exc:  # pragma: no cover - defensive
-                                if not signal_write_failed:
-                                    log.warning(
-                                        f"permission signal persistence failed; skipping remainder: {exc}",
-                                        category="db",
-                                    )
-                                signal_write_failed = True
-                                break
 
                 context = {
                     "snapshot_id": int(sid),

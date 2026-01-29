@@ -577,8 +577,15 @@ def _authority_from_entry(entry: Mapping[str, object]) -> Optional[str]:
         for candidate in authorities:
             text = _normalise_optional_str(candidate)
             if text:
-                return text
-    return _normalise_optional_str(authorities)
+                return _clamp_authority(text)
+    return _clamp_authority(_normalise_optional_str(authorities))
+
+
+def _clamp_authority(value: Optional[str], limit: int = 191) -> Optional[str]:
+    if not value:
+        return value
+    text = str(value)
+    return text[:limit]
 
 
 def _create_provider_row(run_id: int, entry: Mapping[str, object]) -> Optional[int]:
@@ -590,6 +597,7 @@ def _create_provider_row(run_id: int, entry: Mapping[str, object]) -> Optional[i
         }
         component_name = _normalise_optional_str(entry.get("name"))
         authority = _authority_from_entry(entry) or component_name or f"provider_{run_id}"
+        authority = _clamp_authority(authority)
         context = _provider_run_context(run_id)
         schema_mode = _provider_schema_mode()
 
