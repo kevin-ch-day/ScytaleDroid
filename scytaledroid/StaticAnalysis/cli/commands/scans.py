@@ -42,6 +42,18 @@ SCAN_COMMANDS: tuple[Command, ...] = (
         section="workflow",
     ),
     Command(
+        id="5",
+        title="Diagnostic scan",
+        description="Run analysis without persisting; surface warnings/errors for debugging",
+        kind="scan",
+        profile="full",
+        section="workflow",
+        persist=False,
+        dry_run=True,
+        auto_verify=False,
+        prompt_reset=False,
+    ),
+    Command(
         id="D",
         title="Single APK drilldown (read-only)",
         description="Inspect a single APK without writing to the database",

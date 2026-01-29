@@ -259,6 +259,8 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
     for app_result in outcome.results:
         aggregated.update(app_result.severity_totals())
         artifact_count += len(app_result.artifacts)
+    if params.dry_run:
+        artifact_count = outcome.completed_artifacts
 
     permission_profiles = _dedupe_profile_entries(permission_profiles)
     component_profiles = _dedupe_profile_entries(component_profiles)
@@ -274,7 +276,7 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
     run_status = "COMPLETED"
     if outcome.aborted:
         run_status = "ABORTED"
-    elif outcome.failures:
+    elif outcome.failures and not params.dry_run:
         run_status = "FAILED"
     ended_at_utc = outcome.finished_at.isoformat(timespec="seconds") + "Z"
     abort_reason = outcome.abort_reason
@@ -315,6 +317,15 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
     )
     if highlight_tokens:
         print(status_messages.highlight("; ".join(highlight_tokens), show_icon=True))
+    if params.dry_run:
+        print(
+            status_messages.status(
+                "Diagnostic dry-run — no persistence; "
+                f"artifacts processed={outcome.completed_artifacts}/{outcome.total_artifacts}; "
+                f"skipped={outcome.dry_run_skipped}",
+                level="info",
+            )
+        )
     print()
 
     _warn_legacy_running_rows()
@@ -329,8 +340,9 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
     for index, app_result in enumerate(outcome.results, start=1):
         base_report = app_result.base_report()
         if base_report is None:
-            warning = f"No report generated for {app_result.package_name}."
-            print(status_messages.status(warning, level="warn"))
+            if not params.dry_run:
+                warning = f"No report generated for {app_result.package_name}."
+                print(status_messages.status(warning, level="warn"))
             if app_result.static_run_id and persist_enabled:
                 if outcome.aborted:
                     update_static_run_status(
@@ -696,7 +708,7 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
     if outcome.warnings:
         for message in sorted(set(outcome.warnings)):
             print(status_messages.status(message, level="warn"))
-    if outcome.failures:
+    if outcome.failures and not params.dry_run:
         for message in sorted(set(outcome.failures)):
             print(status_messages.status(message, level="error"))
 

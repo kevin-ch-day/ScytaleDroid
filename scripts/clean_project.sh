@@ -335,8 +335,7 @@ purge_tests_directory() {
 
 confirm_action() {
   local message="$1"
-  echo "$message"
-  read -rp "Proceed? [y/N] " reply
+  read -rp "${message} [y/N] " reply
   [[ $reply =~ ^[Yy]$ ]]
 }
 
@@ -367,9 +366,8 @@ prompt_exit_if_empty() {
   dir_exists "$OUTPUT_DIR" && has_any="yes"
   dir_exists "$LOG_DIR" && has_any="yes"
   if [[ "$has_any" == "no" ]]; then
-    if confirm_action "Nothing left to clean. Exit?"; then
-      exit 0
-    fi
+    echo "Nothing left to clean. Exiting."
+    exit 0
   fi
 }
 
@@ -408,9 +406,9 @@ run_menu() {
     cat <<MENU
 Select cleanup task:
   1) Full cleanup (caches, logs, output, data)
-  2) Prune dynamic plan files (${has_dynamic_plans})
-  3) Prune session artifacts (${has_sessions})
-  4) Prune static analysis (baseline/reports) (${has_static_reports})
+  2) Prune dynamic plan files (available=${has_dynamic_plans})
+  3) Prune session artifacts (available=${has_sessions})
+  4) Prune static analysis (baseline/reports) (available=${has_static_reports})
   5) Remove tests/ directory
   6) Full cleanup + remove tests/ directory
   7) Exit
@@ -463,7 +461,6 @@ SUBMENU
             fi
             ;;
           4)
-            echo "Returning to main menu."
             ;;
           *)
             echo "Invalid selection."
@@ -499,7 +496,6 @@ SUBMENU
             fi
             ;;
           3)
-            echo "Returning to main menu."
             ;;
           *)
             echo "Invalid selection."
@@ -538,7 +534,7 @@ SUBMENU
         fi
         ;;
       7)
-        echo "Exiting without changes."
+        echo "Exiting."
         break
         ;;
       *)

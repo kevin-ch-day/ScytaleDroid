@@ -12,7 +12,7 @@ import math
 import os
 from typing import Dict, Iterable, List, Mapping, MutableMapping
 
-from scytaledroid.StaticAnalysis._androguard import APK
+from scytaledroid.StaticAnalysis._androguard import APK, open_apk_safely
 
 from ..modules.string_analysis import (
     BUCKET_ORDER,
@@ -112,21 +112,26 @@ def analyse_strings(
     """Return baseline string buckets for the APK at *apk_path*."""
 
     try:
-        apk = APK(apk_path)
+        apk, initial_warnings = open_apk_safely(apk_path)
     except Exception:
         return {"counts": {bucket: 0 for bucket in BUCKET_ORDER}, "samples": {}, "aggregates": {}}
 
     bounds_warnings: list[str] = []
+    if initial_warnings:
+        bounds_warnings.extend(initial_warnings)
+    skip_resources_on_warn = _env_flag("SCYTALEDROID_STRINGS_SKIP_RES_ON_ARSC_WARN", False)
+    include_resources = not (skip_resources_on_warn and bool(initial_warnings))
     try:
         buffer = io.StringIO()
         with redirect_stdout(buffer), redirect_stderr(buffer):
             index, fd_output = _run_with_fd_capture(
-                lambda: build_string_index(apk, include_resources=True)
+                lambda: build_string_index(apk, include_resources=include_resources)
             )
         captured = buffer.getvalue() + fd_output
-        bounds_warnings = _extract_bounds_warnings(captured)
+        bounds_warnings.extend(_extract_bounds_warnings(captured))
         if bounds_warnings:
-            summary = _summarize_bounds_warnings(bounds_warnings)
+            deduped = list(dict.fromkeys(bounds_warnings))
+            summary = _summarize_bounds_warnings(deduped)
             logging_engine.get_error_logger().warning(
                 "Resource table parsing emitted bounds warnings",
                 extra=logging_engine.ensure_trace(
@@ -144,6 +149,7 @@ def analyse_strings(
             "samples": {},
             "aggregates": {},
             "warnings": bounds_warnings,
+            "resource_strings_skipped": bool(skip_resources_on_warn and initial_warnings),
         }
 
     entries = sorted(
@@ -473,6 +479,7 @@ def analyse_strings(
         "aggregates": aggregates,
         "structured": structured,
         "warnings": bounds_warnings,
+        "resource_strings_skipped": bool(skip_resources_on_warn and initial_warnings),
         "options": {
             "max_samples": max_samples,
             "cleartext_only": cleartext_only,

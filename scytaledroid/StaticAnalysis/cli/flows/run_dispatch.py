@@ -18,6 +18,7 @@ from scytaledroid.StaticAnalysis.session import make_session_stamp, normalize_se
 from scytaledroid.ui import formatter
 from ..views.view_layouts import render_run_start, render_run_summary
 from scytaledroid.Utils.LoggingUtils.logging_context import RunContext, get_run_logger
+from scytaledroid.Utils.LoggingUtils import logging_engine
 from scytaledroid.Utils.LoggingUtils import logging_events as log_events
 
 from ..execution import (
@@ -111,10 +112,13 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
                 "run_id": params.session_stamp,
                 "target": scope_target,
                 "profile": params.profile_label,
+                "scope_label": params.scope_label,
+                "analysis_version": params.analysis_version,
                 "modules": modules,
                 "workers": workers_label,
                 "cache": "purge" if not params.reuse_cache else "reuse",
                 "perm_cache": "refresh" if params.permission_snapshot_refresh else "skip",
+                "dry_run": params.dry_run,
             },
         )
     except Exception:
@@ -186,6 +190,38 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
                     abort_signal=abort_signal,
                 )
 
+        # Always emit a RUN_END record even if summary rendering failed.
+        if params.session_stamp:
+            end_payload = {
+                "event": log_events.RUN_END,
+                "run_id": params.session_stamp,
+                "target": scope_target,
+                "profile": params.profile_label,
+                "scope_label": params.scope_label,
+                "analysis_version": params.analysis_version,
+                "detectors": modules,
+                "detectors_count": len(modules),
+                "status": (run_status or "UNKNOWN").lower(),
+                "dry_run": params.dry_run,
+            }
+            if outcome is not None:
+                end_payload["duration_seconds"] = outcome.duration_seconds
+                end_payload["applications"] = len(outcome.results or [])
+                end_payload["artifacts"] = outcome.total_artifacts
+                end_payload["artifacts_completed"] = outcome.completed_artifacts
+                end_payload["dry_run_skipped"] = outcome.dry_run_skipped
+                end_payload["warnings_count"] = len(outcome.warnings or [])
+                end_payload["failures_count"] = len(outcome.failures or [])
+            try:
+                static_logger = get_run_logger("static", run_ctx)
+                static_logger.info("Static RUN_END", extra=end_payload)
+            except Exception:
+                try:
+                    logger = logging_engine.get_static_logger()
+                    logger.info("Static RUN_END", extra=logging_engine.ensure_trace(end_payload))
+                except Exception:
+                    pass
+
     # Structured RUN SUMMARY (formatter-based) for transcripts/screenshots.
     if outcome and getattr(outcome, "summary", None):
         summary = outcome.summary
@@ -213,30 +249,6 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
             perm_stats=perm_stats,
             evidence_root=evidence_root,
         )
-        # Structured log for reproducibility (use fresh logger post-configuration)
-        try:
-            end_payload = {
-                "event": log_events.RUN_END,
-                "run_id": params.session_stamp,
-                "target": scope_target,
-                "profile": params.profile_label,
-                "detectors": modules,
-                "detectors_count": len(modules),
-                "findings_total": getattr(summary, "findings_total", 0),
-                "severity": sev_counts,
-                "failed_masvs": failed_masvs,
-                "permissions": perm_stats,
-                "evidence_root": evidence_root,
-                "status": "ok",
-                "duration_seconds": getattr(summary, "duration_seconds", None),
-                "applications": getattr(summary, "applications", None),
-                "artifacts": getattr(summary, "artifacts", None),
-            }
-            logger = logging_engine.get_static_logger()
-            logger.info("Static RUN_END", extra=logging_engine.ensure_trace(end_payload))
-        except Exception:
-            pass
-
     if params.session_stamp:
         try:
             canonical_ingest.upsert_base002_for_session(params.session_stamp)
@@ -392,6 +404,17 @@ def _persist_session_run_links(session_stamp: str | None, run_map: dict | None) 
     try:
         from scytaledroid.Database.db_core import db_queries as core_q
 
+        def _table_columns(table: str) -> set[str]:
+            try:
+                rows = core_q.run_sql(f"SHOW COLUMNS FROM {table}", fetch="all")
+            except Exception:
+                return set()
+            columns: set[str] = set()
+            for row in rows or []:
+                if row and row[0]:
+                    columns.add(str(row[0]))
+            return columns
+
         row = core_q.run_sql(
             "SELECT COUNT(*) FROM information_schema.tables "
             "WHERE table_schema = DATABASE() AND table_name = %s",
@@ -400,7 +423,57 @@ def _persist_session_run_links(session_stamp: str | None, run_map: dict | None) 
         )
         if not row or int(row[0] or 0) == 0:
             return
+        columns = _table_columns("static_session_run_links")
+        required = {"session_stamp", "package_name", "static_run_id"}
+        if not required.issubset(columns):
+            missing = ", ".join(sorted(required - columns))
+            raise RuntimeError(
+                "static_session_run_links schema missing required columns: "
+                f"{missing}. Apply migrations to update the table."
+            )
+
+        static_ids = sorted(
+            {
+                int(app.get("static_run_id"))
+                for app in run_map.get("apps", [])
+                if isinstance(app, dict) and app.get("static_run_id") is not None
+            }
+        )
+        if static_ids:
+            rows = core_q.run_sql(
+                f"SELECT id FROM static_analysis_runs WHERE id IN ({','.join(['%s'] * len(static_ids))})",
+                tuple(static_ids),
+                fetch="all",
+            )
+            existing = {int(row[0]) for row in rows or [] if row and row[0] is not None}
+            missing_ids = [sid for sid in static_ids if sid not in existing]
+            if missing_ids:
+                raise RuntimeError(
+                    "static_session_run_links foreign key failure: "
+                    f"static_run_id(s) missing from static_analysis_runs: {', '.join(map(str, missing_ids))}"
+                )
+
         now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        insert_columns = ["session_stamp", "package_name", "static_run_id"]
+        if "run_origin" in columns:
+            insert_columns.append("run_origin")
+        if "origin_session_stamp" in columns:
+            insert_columns.append("origin_session_stamp")
+        if "linked_at_utc" in columns:
+            insert_columns.append("linked_at_utc")
+        placeholders = ", ".join(["%s"] * len(insert_columns))
+        update_clause = ", ".join(
+            f"{col}=VALUES({col})" for col in insert_columns if col not in {"session_stamp", "package_name"}
+        )
+        insert_sql = (
+            "INSERT INTO static_session_run_links ("
+            + ", ".join(insert_columns)
+            + ") VALUES ("
+            + placeholders
+            + ")"
+            + (" ON DUPLICATE KEY UPDATE " + update_clause if update_clause else "")
+        )
+        failures: list[str] = []
         for app in run_map.get("apps", []):
             if not isinstance(app, dict):
                 continue
@@ -410,18 +483,23 @@ def _persist_session_run_links(session_stamp: str | None, run_map: dict | None) 
                 continue
             origin = app.get("run_origin") or "reused"
             origin_session = app.get("origin_session_stamp")
-            core_q.run_sql(
-                """
-                INSERT INTO static_session_run_links (
-                  session_stamp, package_name, static_run_id, run_origin, origin_session_stamp, linked_at_utc
-                ) VALUES (%s, %s, %s, %s, %s, %s)
-                ON DUPLICATE KEY UPDATE
-                  static_run_id=VALUES(static_run_id),
-                  run_origin=VALUES(run_origin),
-                  origin_session_stamp=VALUES(origin_session_stamp),
-                  linked_at_utc=VALUES(linked_at_utc)
-                """,
-                (session_stamp, package, int(static_run_id), origin, origin_session, now),
+            values: list[object] = [session_stamp, package, int(static_run_id)]
+            if "run_origin" in columns:
+                values.append(origin)
+            if "origin_session_stamp" in columns:
+                values.append(origin_session)
+            if "linked_at_utc" in columns:
+                values.append(now)
+            try:
+                core_q.run_sql(insert_sql, tuple(values))
+            except Exception as exc:
+                failures.append(f"{package} (static_run_id={static_run_id}): {exc}")
+                if len(failures) >= 3:
+                    break
+        if failures:
+            raise RuntimeError(
+                "static_session_run_links insert failed for "
+                f"{len(failures)} row(s). First error: {failures[0]}"
             )
     except Exception as exc:
         print(

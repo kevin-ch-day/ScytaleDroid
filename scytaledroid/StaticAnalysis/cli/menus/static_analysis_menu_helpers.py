@@ -91,6 +91,11 @@ def collect_view_options(command: "Command") -> tuple[bool, bool]:
             "Diffs latest two stored reports for the package",
             "Same package only (Phase-C)",
         ],
+        "5": [
+            "Runs full detector set without persisting results",
+            "Verbose output to surface warnings/errors",
+            "Intended for debugging pipeline issues",
+        ],
     }
     for line in details_map.get(command.id, ("No additional details.",)):
         print(f"• {line}")

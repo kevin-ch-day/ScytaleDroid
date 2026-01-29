@@ -106,12 +106,34 @@ def build_pipeline_summary(results: Sequence[DetectorResult]) -> Mapping[str, ob
     total_duration = sum(float(result.duration_sec or 0.0) for result in results)
 
     status_counts: Counter[str] = Counter(result.status.value for result in results)
+    error_detectors: list[dict[str, object]] = []
+    policy_fail_detectors: list[dict[str, object]] = []
 
     severity_counter: Counter[str] = Counter()
     for result in results:
         severity_counter.update(
             finding.severity_gate.value for finding in result.findings
         )
+        metrics_payload = _serialise_metrics(result.metrics)
+        error_text = _first_non_empty(
+            metrics_payload.get("error"),
+            *(note.strip() for note in result.notes if isinstance(note, str)),
+        )
+        if error_text and result.status is Badge.SKIPPED:
+            error_detectors.append(
+                {
+                    "detector": result.detector_id,
+                    "section": result.section_key,
+                    "reason": error_text,
+                }
+            )
+        elif result.status is Badge.FAIL:
+            policy_fail_detectors.append(
+                {
+                    "detector": result.detector_id,
+                    "section": result.section_key,
+                }
+            )
 
     total_findings = int(sum(severity_counter.values()))
 
@@ -166,6 +188,14 @@ def build_pipeline_summary(results: Sequence[DetectorResult]) -> Mapping[str, ob
 
     if slowest:
         summary["slowest_detectors"] = slowest
+
+    if error_detectors:
+        summary["error_count"] = len(error_detectors)
+        summary["error_detectors"] = error_detectors
+
+    if policy_fail_detectors:
+        summary["policy_fail_count"] = len(policy_fail_detectors)
+        summary["policy_fail_detectors"] = policy_fail_detectors
 
     if skipped_details:
         summary["skipped_detectors"] = skipped_details

@@ -63,6 +63,7 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
     results: list[AppRunResult] = []
     warnings: list[str] = []
     failures: list[str] = []
+    dry_run_skipped = 0
     completed_artifacts = 0
     total_artifacts = sum(len(_dedupe_artifacts(group.artifacts)) for group in selection.groups)
     show_splits = _show_split_breakdown()
@@ -164,10 +165,15 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
             if skipped:
                 index_for_progress = completed_artifacts + 1
                 if error_message:
-                    progress.error(index_for_progress, artifact_label, error_message)
-                    failures.append(error_message)
+                    if error_message == "dry-run (not persisted)":
+                        dry_run_skipped += 1
+                        progress.skip(index_for_progress, artifact_label, error_message)
+                    else:
+                        progress.error(index_for_progress, artifact_label, error_message)
+                        failures.append(error_message)
                 else:
-                    failures.append(f"No report generated for {artifact.display_path}")
+                    if not params.dry_run:
+                        failures.append(f"No report generated for {artifact.display_path}")
                 completed_artifacts += 1
                 progress.finish(completed_artifacts, artifact_label)
                 if _abort_state()[0]:
@@ -177,10 +183,15 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
             if summary is None:
                 index_for_progress = completed_artifacts + 1
                 if error_message:
-                    progress.error(index_for_progress, artifact_label, error_message)
-                    failures.append(error_message)
+                    if error_message == "dry-run (not persisted)":
+                        dry_run_skipped += 1
+                        progress.skip(index_for_progress, artifact_label, error_message)
+                    else:
+                        progress.error(index_for_progress, artifact_label, error_message)
+                        failures.append(error_message)
                 else:
-                    failures.append(f"No report generated for {artifact.display_path}")
+                    if not params.dry_run:
+                        failures.append(f"No report generated for {artifact.display_path}")
                 completed_artifacts += 1
                 progress.finish(completed_artifacts, artifact_label)
                 if _abort_state()[0]:
@@ -226,11 +237,14 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
                         warn_count = int(status_counts.get("WARN", 0) or 0)
                         ok_count = int(status_counts.get("OK", 0) or 0)
                         info_count = int(status_counts.get("INFO", 0) or 0)
+                        error_count = int(summary.get("error_count", 0) or 0)
                         skipped_count = int(skipped or 0)
                         status_line = "Checks complete"
                         if executed is not None and total is not None:
                             status_line += f": {executed}/{total} executed"
-                        status_line += f" · ok={ok_count} warn={warn_count} fail={fail_count}"
+                        status_line += f" · ok={ok_count} warn={warn_count} policy_fail={fail_count}"
+                        if error_count:
+                            status_line += f" error={error_count}"
                         if info_count:
                             status_line += f" info={info_count}"
                         if skipped_count:
@@ -238,6 +252,14 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
                         if duration is not None:
                             status_line += f" · {duration:.1f}s"
                         print(status_line)
+                        error_detectors = summary.get("error_detectors")
+                        if params.verbose_output and isinstance(error_detectors, Sequence) and error_detectors:
+                            for entry in error_detectors:
+                                if not isinstance(entry, Mapping):
+                                    continue
+                                det = entry.get("detector") or "unknown"
+                                reason = entry.get("reason") or "unspecified"
+                                print(status_messages.status(f"Detector error: {det} — {reason}", level="warn"))
                         severity = summary.get("severity_counts") if isinstance(summary.get("severity_counts"), Mapping) else {}
                         if severity:
                             p0 = int(severity.get("P0", 0) or 0)
@@ -264,6 +286,8 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
 
     finished_at = datetime.utcnow()
     abort_requested, abort_reason, abort_signal = _abort_state()
+    if params.dry_run:
+        failures = []
     return RunOutcome(
         results,
         started_at,
@@ -277,6 +301,7 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
         abort_signal=abort_signal,
         completed_artifacts=completed_artifacts,
         total_artifacts=total_artifacts,
+        dry_run_skipped=dry_run_skipped,
     )
 
 
@@ -289,6 +314,13 @@ def _append_resource_warning(
     metadata = report.metadata
     if not isinstance(metadata, Mapping):
         return []
+    fallback = metadata.get("resource_fallback")
+    if isinstance(fallback, Mapping) and fallback.get("fallback_used"):
+        reason = fallback.get("fallback_reason") or "aapt2"
+        warnings.append(
+            "Resource fallback used for APK parsing "
+            f"(package={package_name}, artifact={artifact_label}, reason={reason})."
+        )
     lines = metadata.get("resource_bounds_warnings")
     if not isinstance(lines, list) or not lines:
         return []
@@ -396,6 +428,11 @@ class _PipelineProgress:
         self._clear_line()
         tail = _truncate_label(label, 48)
         print(f"ERROR Artifact {index}/{self.total}: {tail} - {message}")
+
+    def skip(self, index: int, label: str, message: str) -> None:
+        self._clear_line()
+        tail = _truncate_label(label, 48)
+        print(f"SKIP Artifact {index}/{self.total}: {tail} - {message}")
 
     def end(self) -> None:
         if self.show_splits:

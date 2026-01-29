@@ -8,22 +8,32 @@ from typing import Dict, List, Tuple
 import re
 
 from scytaledroid.StaticAnalysis._androguard import APK, open_apk_safely
+from scytaledroid.StaticAnalysis.engine.strings_capture import _run_with_fd_capture
+from scytaledroid.StaticAnalysis.engine import aapt2_fallback
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 _ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
+
+
+def _silent_apk_call(callable_obj, default):
+    try:
+        result, _ = _run_with_fd_capture(callable_obj)
+        return result
+    except Exception:
+        return default
 
 
 def _extract_declared_permissions(apk: APK) -> List[Tuple[str, str]]:
     """Return manifest declared permissions with their element type."""
 
     try:
-        axml = apk.get_android_manifest_axml()
+        axml = _silent_apk_call(apk.get_android_manifest_axml, None)
         if axml is None:
             raise ValueError("missing manifest")
         xml_data = axml.get_xml()
         root = ET.fromstring(xml_data)
     except Exception:
-        names = sorted(set(apk.get_permissions() or []))
+        names = sorted(set(_silent_apk_call(apk.get_permissions, []) or []))
         return [(name, "uses-permission") for name in names]
 
     declared: List[Tuple[str, str]] = []
@@ -50,7 +60,23 @@ def collect_permissions_and_sdk(
 ) -> Tuple[List[Tuple[str, str]], List[Dict[str, str | None]], Dict[str, str | None]]:
     """Collect declared permissions, custom definitions and SDK info."""
 
-    apk, warnings = open_apk_safely(apk_path)
+    fallback_used = False
+    fallback_meta = aapt2_fallback.extract_metadata(apk_path) if aapt2_fallback.has_aapt2() else None
+    try:
+        apk, warnings = open_apk_safely(apk_path)
+    except Exception:
+        if fallback_meta:
+            declared = [(name, "uses-permission") for name in fallback_meta.get("permissions") or []]
+            sdk_info = {
+                "min": fallback_meta.get("min_sdk"),
+                "target": fallback_meta.get("target_sdk"),
+                "allow_backup": None,
+                "legacy_external_storage": None,
+                "fallback_used": True,
+                "fallback_reason": "androguard_open_failed",
+            }
+            return declared, [], sdk_info
+        raise
     if warnings:
         counts = []
         for line in warnings:
@@ -79,7 +105,7 @@ def collect_permissions_and_sdk(
 
     defined: List[Dict[str, str | None]] = []
     try:
-        for entry in apk.get_declared_permissions() or ():
+        for entry in _silent_apk_call(apk.get_declared_permissions, ()) or ():
             name = entry.get("name") or entry.get("android:name")
             protection = entry.get("protectionLevel") or entry.get("android:protectionLevel")
             if name:
@@ -87,20 +113,14 @@ def collect_permissions_and_sdk(
     except Exception:
         pass
 
-    try:
-        min_sdk = apk.get_min_sdk_version()
-    except Exception:
-        min_sdk = None
-    try:
-        target_sdk = apk.get_target_sdk_version()
-    except Exception:
-        target_sdk = None
+    min_sdk = _silent_apk_call(apk.get_min_sdk_version, None)
+    target_sdk = _silent_apk_call(apk.get_target_sdk_version, None)
 
     # Extract key flags for modernization credit
     allow_backup = None
     legacy_ext = None
     try:
-        axml = apk.get_android_manifest_axml()
+        axml = _silent_apk_call(apk.get_android_manifest_axml, None)
         if axml is not None:
             root = ET.fromstring(axml.get_xml())
             app_nodes = root.findall("application")
@@ -115,11 +135,22 @@ def collect_permissions_and_sdk(
     except Exception:
         pass
 
+    if (not declared or min_sdk is None or target_sdk is None) and fallback_meta:
+        fallback_used = True
+        if not declared:
+            declared = [(name, "uses-permission") for name in fallback_meta.get("permissions") or []]
+        if min_sdk is None:
+            min_sdk = fallback_meta.get("min_sdk")
+        if target_sdk is None:
+            target_sdk = fallback_meta.get("target_sdk")
+
     return declared, defined, {
         "min": min_sdk,
         "target": target_sdk,
         "allow_backup": allow_backup,
         "legacy_external_storage": legacy_ext,
+        "fallback_used": fallback_used,
+        "fallback_reason": "aapt2_badging" if fallback_used else None,
     }
 
 

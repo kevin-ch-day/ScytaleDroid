@@ -157,6 +157,7 @@ class RunOutcome:
     abort_signal: Optional[str] = None
     completed_artifacts: int = 0
     total_artifacts: int = 0
+    dry_run_skipped: int = 0
 
     @property
     def duration_seconds(self) -> float:

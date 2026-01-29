@@ -616,9 +616,14 @@ def _render_pipeline_summary(
         for key in ("OK", "INFO", "WARN", "FAIL", "skipped"):
             value = status_payload.get(key)
             if isinstance(value, int) and value > 0:
-                status_tokens.append(f"{key}={value}")
+                label = "policy_fail" if key == "FAIL" else key
+                status_tokens.append(f"{label}={value}")
         if status_tokens:
             lines.append("Statuses: " + ", ".join(status_tokens))
+
+    error_count = payload.get("error_count")
+    if isinstance(error_count, int) and error_count > 0:
+        lines.append(f"Errors: {error_count} detector execution error(s)")
 
     slowest_payload = payload.get("slowest_detectors")
     if isinstance(slowest_payload, Sequence):

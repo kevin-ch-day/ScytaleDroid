@@ -21,6 +21,8 @@ from scytaledroid.Utils.LoggingUtils.logging_engine import configure_third_party
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .._androguard import APK
+from ..engine import aapt2_fallback
+from .resource_fallback import open_apk_with_fallback, merge_metadata
 from .context import AnalysisConfig, DetectorContext
 from .context_builders import (
     build_detector_context,
@@ -59,7 +61,7 @@ def _safe_get_app_label(apk: APK, pkg_name: str, meta: dict) -> str:
     finally fall back to package name. Record fallbacks in metadata.
     """
     try:
-        label = apk.get_app_name()
+        label, _ = _run_with_fd_capture(apk.get_app_name)
         if isinstance(label, str) and label.strip():
             return label
     except Exception as e:
@@ -67,14 +69,11 @@ def _safe_get_app_label(apk: APK, pkg_name: str, meta: dict) -> str:
         meta["label_error"] = str(e)
 
     # aapt2 fallback (best-effort, short timeout)
-    aapt2 = shutil.which("aapt2")
-    if aapt2:
+    if aapt2_fallback.has_aapt2():
         try:
-            out = subprocess.check_output(
-                shlex.split(f"{aapt2} dump badging {apk.filename}"),
-                stderr=subprocess.STDOUT,
-                timeout=6,
-            ).decode(errors="ignore")
+            out = aapt2_fallback.dump_badging(apk.filename)
+            if not out:
+                raise RuntimeError("aapt2 dump badging returned no output")
             # Prefer generic label; if not present, accept first localized line
             for line in out.splitlines():
                 if line.startswith("application-label:"):
@@ -93,7 +92,8 @@ def _safe_get_app_label(apk: APK, pkg_name: str, meta: dict) -> str:
 
 def _safe_get_main_activity(apk: APK, meta: dict) -> Optional[str]:
     try:
-        return apk.get_main_activity()
+        result, _ = _run_with_fd_capture(apk.get_main_activity)
+        return result
     except Exception as e:
         meta["main_activity_fallback"] = True
         meta["main_activity_error"] = str(e)
@@ -102,7 +102,7 @@ def _safe_get_main_activity(apk: APK, meta: dict) -> Optional[str]:
 
 def _safe_tuple(callable_, meta: dict, meta_key: str) -> tuple[str, ...]:
     try:
-        data = callable_()  # may return list/tuple/None
+        data, _ = _run_with_fd_capture(callable_)  # may return list/tuple/None
         if not data:
             return ()
         return tuple(sorted(data))
@@ -113,7 +113,8 @@ def _safe_tuple(callable_, meta: dict, meta_key: str) -> tuple[str, ...]:
 
 def _safe_permission_details(apk: APK, meta: dict) -> Mapping[str, Sequence[str]]:
     try:
-        return apk.get_details_permissions() or {}
+        details, _ = _run_with_fd_capture(apk.get_details_permissions)
+        return details or {}
     except Exception as e:
         meta["permissions_fallback"] = True
         meta["permissions_error"] = str(e)
@@ -158,23 +159,22 @@ def _run_with_fd_capture(callable_obj):
 
 
 def _load_apk_safely(apk_path: Path, meta: dict) -> APK:
-    buffer = io.StringIO()
-    with redirect_stdout(buffer), redirect_stderr(buffer):
-        apk, fd_output = _run_with_fd_capture(lambda: APK(str(apk_path)))
-    captured = buffer.getvalue() + fd_output
-    warnings = _extract_bounds_warnings(captured)
-    if warnings:
-        meta["resource_bounds_warnings"] = warnings
+    fallback = open_apk_with_fallback(apk_path)
+    meta.update(merge_metadata(meta, fallback))
+    if fallback.warnings:
         log.warning(
             "Resource table parsing emitted bounds warnings",
             category="static_analysis",
             extra={
                 "event": "apk.resource_bounds_warning",
                 "apk_path": str(apk_path),
-                "warning_lines": warnings,
+                "warning_lines": fallback.warnings,
             },
         )
-    return apk
+    if fallback.apk is None:
+        reason = fallback.fallback_reason or "androguard_open_failed"
+        raise StaticAnalysisError(f"Failed to open APK with Androguard ({reason}).")
+    return fallback.apk
 
 
 def _resolve_toolchain_versions() -> Mapping[str, str]:

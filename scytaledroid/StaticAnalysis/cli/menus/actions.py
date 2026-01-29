@@ -23,7 +23,7 @@ def apply_command_overrides(params: RunParameters, command: Command) -> RunParam
     effective = params
     if command.dry_run or not command.persist:
         effective = replace(effective, dry_run=True)
-    if command.force_app_scope:
+    if command.force_app_scope or command.id == "5":
         effective = replace(effective, verbose_output=True)
     return effective
 
