@@ -21,18 +21,22 @@ class ScenarioResult:
 class ManualScenarioRunner:
     def run(self, run_ctx: RunContext) -> ScenarioResult:
         if run_ctx.interactive:
+            duration = f"{run_ctx.duration_seconds}s" if run_ctx.duration_seconds else "unspecified"
             print(
                 status_messages.status(
-                    f"Scenario: {run_ctx.scenario_id}. Use the app now.",
+                    f"Scenario: {run_ctx.scenario_id} (duration {duration}). Use the app normally.",
                     level="info",
                 )
             )
+            print(status_messages.status("Tip: keep the app in the foreground during the session.", level="info"))
             if run_ctx.scenario_hint:
                 print(status_messages.status(run_ctx.scenario_hint, level="info"))
-            prompt_utils.press_enter_to_continue("Press Enter to start the scenario...")
+            prompt_utils.press_enter_to_continue("Press Enter to begin (timer starts)...")
             started_at = datetime.now(timezone.utc)
-            prompt_utils.press_enter_to_continue("Press Enter when the scenario is complete...")
+            prompt_utils.press_enter_to_continue("Press Enter when finished (timer stops)...")
             ended_at = datetime.now(timezone.utc)
+            elapsed = int((ended_at - started_at).total_seconds())
+            print(status_messages.status(f"Scenario elapsed time: {elapsed}s.", level="info"))
         else:
             started_at = datetime.now(timezone.utc)
             time.sleep(max(run_ctx.duration_seconds, 0))

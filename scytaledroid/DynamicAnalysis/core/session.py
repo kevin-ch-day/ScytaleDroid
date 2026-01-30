@@ -16,6 +16,7 @@ class DynamicSessionConfig:
     static_run_id: Optional[int] = None
     harvest_session_id: Optional[int] = None
     plan_path: Optional[str] = None
+    plan_validation: Optional[object] = None
     probes: Sequence[str] = field(default_factory=tuple)
     scenario_id: str = "basic_usage"
     observer_ids: Sequence[str] = field(default_factory=tuple)

@@ -149,27 +149,27 @@ def render_plan_validation_block(outcome: PlanValidationOutcome) -> str:
     plan_package = outcome.plan.get("package") or "missing"
     plan_run_id = outcome.plan.get("static_run_id") or "missing"
     signature = _format_sig(outcome.plan.get("run_signature_version"), outcome.plan.get("run_signature"))
-    lines.append(f"Package              : {plan_package}")
-    lines.append(f"Static run           : {plan_run_id}")
-    lines.append(f"Run signature         : {signature}")
+    lines.append(f"Package             : {plan_package}")
+    lines.append(f"Static run          : {plan_run_id}")
+    lines.append(f"Run signature       : {signature}")
     if outcome.db.get("artifact_set_hash"):
         hash_match = _match_marker(
             outcome.plan.get("artifact_set_hash"),
             outcome.db.get("artifact_set_hash"),
         )
-        lines.append(f"Artifact set hash     : {hash_match}")
+        lines.append(f"Artifact set hash    : {hash_match}")
     if outcome.status == "PASS":
         if outcome.warnings:
-            lines.append(f"Warnings              : {', '.join(outcome.warnings)}")
-        lines.append("Validation result     : PASS")
+            lines.append(f"Warnings             : {', '.join(outcome.warnings)}")
+        lines.append("Validation result    : PASS")
         return "\n".join(lines)
 
     for reason in outcome.reasons:
-        lines.append(f"Reason                : {reason}")
+        lines.append(f"Reason               : {reason}")
     for mismatch in outcome.mismatches:
-        lines.append(f"Mismatch              : {mismatch['field']}")
-        lines.append(f"Expected              : {mismatch['expected']}")
-        lines.append(f"Plan                  : {mismatch['actual']}")
+        lines.append(f"Mismatch             : {mismatch['field']}")
+        lines.append(f"Expected             : {mismatch['expected']}")
+        lines.append(f"Plan                 : {mismatch['actual']}")
     lines.append("Dynamic execution blocked.")
     return "\n".join(lines)
 

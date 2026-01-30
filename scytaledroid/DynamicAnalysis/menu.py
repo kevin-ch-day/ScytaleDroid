@@ -21,6 +21,7 @@ def dynamic_analysis_menu() -> None:
         MenuOption("1", "Launch sandbox run"),
         MenuOption("2", "View recent dynamic sessions"),
         MenuOption("3", "Configure instrumentation"),
+        MenuOption("9", "Force FAIL (dev/test)"),
     ]
 
     while True:
@@ -61,6 +62,7 @@ def dynamic_analysis_menu() -> None:
                 print(status_messages.status("Selected device missing serial.", level="error"))
                 prompt_utils.press_enter_to_continue()
                 continue
+            _print_root_status(device_serial)
             print()
             menu_utils.print_header("Dynamic Run Scenario")
             scenario_options = [
@@ -83,7 +85,19 @@ def dynamic_analysis_menu() -> None:
             print()
             menu_utils.print_header("Dynamic Run Observers")
             use_proxy = prompt_utils.prompt_yes_no("Enable proxy network capture (recommended)?", default=True)
-            use_tcpdump = prompt_utils.prompt_yes_no("Enable device tcpdump capture (optional)?", default=False)
+            if _device_has_tcpdump(device_serial):
+                use_tcpdump = prompt_utils.prompt_yes_no(
+                    "Enable device tcpdump capture (optional)?",
+                    default=False,
+                )
+            else:
+                use_tcpdump = False
+                print(
+                    status_messages.status(
+                        "tcpdump not available on device (non-root). Network capture skipped.",
+                        level="warn",
+                    )
+                )
             use_logs = prompt_utils.prompt_yes_no("Enable system log capture?", default=True)
             observer_ids = []
             proxy_port = 8890
@@ -128,26 +142,13 @@ def dynamic_analysis_menu() -> None:
             package_name = _select_dynamic_target()
             if not package_name:
                 continue
-            static_override = prompt_utils.prompt_text(
-                "Static run id (optional)",
-                required=False,
-                default="",
-            )
-            static_run_id = None
-            if static_override:
-                try:
-                    static_run_id = int(static_override)
-                except ValueError:
-                    print(status_messages.status("Invalid static_run_id; leaving unset.", level="warn"))
-                    static_run_id = None
-            plan_path, selection_note = _resolve_plan_path(package_name, static_run_id)
-            if plan_path:
-                print(status_messages.status(f"Static plan: {plan_path}", level="info"))
-            else:
-                if selection_note:
-                    print(status_messages.status(selection_note, level="warn"))
-                else:
-                    print(status_messages.status("No dynamic plan found for package.", level="warn"))
+            plan_selection = _resolve_plan_selection(package_name)
+            if not plan_selection:
+                prompt_utils.press_enter_to_continue()
+                continue
+            plan_path = plan_selection["plan_path"]
+            static_run_id = plan_selection["static_run_id"]
+            _print_plan_selection_banner(plan_selection)
             clear_logcat = prompt_utils.prompt_yes_no("Clear logcat at run start?", default=True)
             from .run_dynamic_analysis import run_dynamic_analysis
 
@@ -163,11 +164,12 @@ def dynamic_analysis_menu() -> None:
                 clear_logcat=clear_logcat,
                 proxy_port=proxy_port,
             )
-            message = (
-                f"Selected duration: {label} ({duration_seconds}s). "
-                f"Session status: {result.status}."
-            )
-            print(status_messages.status(message, level="warn"))
+            _print_run_summary(result, label)
+            prompt_utils.press_enter_to_continue()
+            continue
+
+        if choice == "9":
+            _run_force_fail()
             prompt_utils.press_enter_to_continue()
             continue
 
@@ -203,6 +205,49 @@ def _select_dynamic_target() -> str | None:
         return _prompt_custom_package()
 
     return _prompt_custom_package()
+
+
+def _run_force_fail() -> None:
+    print()
+    menu_utils.print_header("Force FAIL (dev/test)")
+    print(status_messages.status("DEV/TEST MODE — generates a blocked run for validation proof.", level="warn"))
+    confirm = prompt_utils.prompt_yes_no("Continue with forced FAIL?", default=False)
+    if not confirm:
+        print(status_messages.status("Force FAIL cancelled.", level="info"))
+        return
+    package_name = prompt_utils.prompt_text(
+        "Package name",
+        default="com.example.nonexistent.app",
+        required=True,
+        hint="Use any package name; this run will be blocked by plan validation.",
+    )
+    plan_path = _write_force_fail_plan(package_name)
+    from .run_dynamic_analysis import run_dynamic_analysis
+
+    result = run_dynamic_analysis(
+        package_name,
+        duration_seconds=30,
+        scenario_id="basic_usage",
+        observer_ids=tuple(),
+        interactive=True,
+        plan_path=plan_path,
+    )
+    _print_run_summary(result, "Forced FAIL")
+    print(status_messages.status(f"Dev plan: {plan_path}", level="info"))
+
+
+def _write_force_fail_plan(package_name: str) -> str:
+    run_dir = Path(app_config.OUTPUT_DIR) / "dev_fail"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    plan_path = run_dir / f"fail-plan-{filesystem_safe_slug(package_name)}.json"
+    payload = {
+        "package": package_name,
+        "static_run_id": 0,
+        "run_signature_version": "v0",
+        "notes": "Intentionally invalid plan for validation FAIL proof.",
+    }
+    plan_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    return str(plan_path)
 
 
 def _select_profile_package(groups) -> str | None:
@@ -312,78 +357,212 @@ def _fetch_static_run_row(static_run_id: int | None) -> dict[str, object]:
     return {}
 
 
-def _resolve_plan_path(package_name: str, static_run_id: int | None) -> tuple[str | None, str | None]:
+def _resolve_plan_selection(package_name: str) -> dict[str, object] | None:
+    candidates, note = _load_plan_candidates(package_name)
+    if not candidates:
+        return _prompt_missing_baseline(package_name, note)
+
+    grouped: dict[str, list[dict[str, object]]] = {}
+    for candidate in candidates:
+        key = candidate["identity_key"]
+        grouped.setdefault(key, []).append(candidate)
+
+    if len(grouped) == 1:
+        only_key = next(iter(grouped))
+        selection = _pick_newest_candidate(grouped[only_key])
+        return _build_selection(selection)
+
+    return _prompt_baseline_selection(package_name, candidates)
+
+
+def _load_plan_candidates(package_name: str) -> tuple[list[dict[str, object]], str | None]:
     base_dir = Path(app_config.DATA_DIR) / "static_analysis" / "dynamic_plan"
     if not base_dir.exists():
-        return None, "No dynamic plan directory found."
+        return [], "No dynamic plan directory found."
 
     slug = filesystem_safe_slug(package_name)
-    candidates = sorted(base_dir.glob(f"{slug}-*.json"))
-    if not candidates:
-        return None, "No dynamic plans found for package."
+    paths = sorted(base_dir.glob(f"{slug}-*.json"))
+    if not paths:
+        return [], "No dynamic plans found for package."
 
-    plan_rows: list[dict[str, object]] = []
-    for candidate in candidates:
+    candidates: list[dict[str, object]] = []
+    for path in paths:
         try:
-            payload = json.loads(candidate.read_text(encoding="utf-8"))
+            payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
         identity = extract_plan_identity(payload)
         if str(identity.get("package") or "") != package_name:
             continue
-        plan_rows.append({"path": candidate, "identity": identity})
-
-    if not plan_rows:
-        return None, "No dynamic plans match the selected package."
-
-    if static_run_id is None:
-        run_ids = sorted({row["identity"].get("static_run_id") for row in plan_rows if row["identity"].get("static_run_id")})
-        if not run_ids:
-            return None, "No static_run_id found in plans; regenerate plan."
-        if len(run_ids) > 1:
-            return None, "Multiple static_run_id values found; specify static_run_id."
-        static_run_id = int(run_ids[0])
-
-    db_row = _fetch_static_run_row(static_run_id)
-    if not db_row:
-        return None, "No static_analysis_runs row found for static_run_id; run static analysis first."
-    db_signature = db_row.get("run_signature")
-    db_sig_version = db_row.get("run_signature_version")
-    if not db_signature or not db_sig_version:
-        return None, "static_analysis_runs missing run_signature or version; run migrations."
-    if db_sig_version not in SUPPORTED_SIGNATURE_VERSIONS:
-        return None, f"Unsupported run_signature_version: {db_sig_version}"
-
-    matching = []
-    for row in plan_rows:
-        ident = row["identity"]
-        if str(ident.get("static_run_id")) != str(static_run_id):
+        if identity.get("run_signature_version") not in SUPPORTED_SIGNATURE_VERSIONS:
             continue
-        if str(ident.get("run_signature")) != str(db_signature):
+        if not identity.get("run_signature") or not identity.get("artifact_set_hash"):
             continue
-        if str(ident.get("run_signature_version")) != str(db_sig_version):
-            continue
-        matching.append(row["path"])
+        generated_at = _parse_generated_at(payload.get("generated_at"))
+        identity_key = _identity_key(identity)
+        candidates.append(
+            {
+                "path": path,
+                "identity": identity,
+                "generated_at": generated_at,
+                "identity_key": identity_key,
+                "version_name": payload.get("version_name"),
+                "version_code": payload.get("version_code"),
+                "package_name": payload.get("package_name") or package_name,
+                "run_signature_version": identity.get("run_signature_version"),
+            }
+        )
+    if not candidates:
+        return [], "No valid dynamic plan candidates found; regenerate plan."
+    return candidates, None
 
-    if not matching:
-        note = "No plan matches static_run_id + run_signature; regenerate plan."
-        if _prompt_legacy_plan_selection():
-            legacy = _resolve_latest_plan_path_legacy(package_name, static_run_id)
-            if legacy:
-                _emit_legacy_plan_selection(package_name, static_run_id, legacy)
-                return legacy, "LEGACY PLAN SELECTION ENABLED — nondeterministic behavior"
-        return None, note
 
-    if len(matching) > 1:
-        note = "Multiple plans found for static_run_id; specify plan_id or regenerate plan."
-        if _prompt_legacy_plan_selection():
-            legacy = _resolve_latest_plan_path_legacy(package_name, static_run_id)
-            if legacy:
-                _emit_legacy_plan_selection(package_name, static_run_id, legacy)
-                return legacy, "LEGACY PLAN SELECTION ENABLED — nondeterministic behavior"
-        return None, note
+def _pick_newest_candidate(candidates: list[dict[str, object]]) -> dict[str, object]:
+    return sorted(
+        candidates,
+        key=lambda row: row.get("generated_at") or "",
+        reverse=True,
+    )[0]
 
-    return str(matching[0]), None
+
+def _build_selection(candidate: dict[str, object]) -> dict[str, object]:
+    identity = candidate["identity"]
+    return {
+        "plan_path": str(candidate["path"]),
+        "static_run_id": identity.get("static_run_id"),
+        "package_name": identity.get("package"),
+        "version_name": candidate.get("version_name"),
+        "version_code": candidate.get("version_code"),
+        "base_apk_sha256": identity.get("base_apk_sha256"),
+        "artifact_set_hash": identity.get("artifact_set_hash"),
+        "run_signature": identity.get("run_signature"),
+        "run_signature_version": identity.get("run_signature_version"),
+        "generated_at": candidate.get("generated_at"),
+    }
+
+
+def _prompt_baseline_selection(package_name: str, candidates: list[dict[str, object]]) -> dict[str, object] | None:
+    print()
+    menu_utils.print_header("Baseline selection required")
+    print(
+        status_messages.status(
+            "Multiple baseline artifacts found for this app. Choose a baseline or run static analysis.",
+            level="warn",
+        )
+    )
+    rows = []
+    sorted_candidates = sorted(candidates, key=lambda row: row.get("generated_at") or "", reverse=True)
+    for idx, candidate in enumerate(sorted_candidates, start=1):
+        rows.append(_format_candidate_row(idx, candidate))
+    table_utils.render_table(
+        ["#", "Version", "SHA256", "Bundle", "Generated"],
+        rows,
+        compact=True,
+    )
+    print()
+    print("Options: [number] Select baseline  |  S Run static analysis  |  L Legacy mtime  |  0 Cancel")
+    choice = prompt_utils.prompt_text("Select baseline", required=False).strip().lower()
+    if choice == "s":
+        from scytaledroid.StaticAnalysis.cli import static_analysis_menu
+
+        static_analysis_menu()
+        return None
+    if choice == "l":
+        legacy = _resolve_latest_plan_path_legacy(package_name, None)
+        if legacy:
+            _emit_legacy_plan_selection(package_name, None, legacy)
+            return {"plan_path": legacy, "static_run_id": None, "package_name": package_name}
+        print(status_messages.status("Legacy plan selection failed.", level="warn"))
+        return None
+    if choice == "0" or not choice:
+        print(status_messages.status("Baseline selection cancelled.", level="warn"))
+        return None
+    try:
+        index = int(choice) - 1
+    except ValueError:
+        print(status_messages.status("Invalid selection.", level="warn"))
+        return None
+    if index < 0 or index >= len(sorted_candidates):
+        print(status_messages.status("Selection out of range.", level="warn"))
+        return None
+    return _build_selection(sorted_candidates[index])
+
+
+def _prompt_missing_baseline(package_name: str, note: str | None) -> dict[str, object] | None:
+    print(status_messages.status(note or "No dynamic plan found for package.", level="warn"))
+    print()
+    print("Options: S Run static analysis  |  0 Cancel")
+    choice = prompt_utils.prompt_text("Selection", required=False).strip().lower()
+    if choice == "s":
+        from scytaledroid.StaticAnalysis.cli import static_analysis_menu
+
+        static_analysis_menu()
+        return None
+    print(status_messages.status("Baseline selection cancelled.", level="warn"))
+    return None
+
+
+def _format_candidate_row(index: int, candidate: dict[str, object]) -> list[str]:
+    identity = candidate["identity"]
+    version = _format_version(candidate.get("version_name"), candidate.get("version_code"))
+    sha_prefix = _prefix(identity.get("base_apk_sha256"))
+    bundle_prefix = _prefix(identity.get("artifact_set_hash"))
+    generated = candidate.get("generated_at") or "unknown"
+    return [str(index), version, sha_prefix, bundle_prefix, str(generated)]
+
+
+def _format_version(version_name: object, version_code: object) -> str:
+    name = str(version_name) if version_name else "unknown"
+    code = str(version_code) if version_code else "—"
+    return f"{name} ({code})"
+
+
+def _prefix(value: object, *, length: int = 4) -> str:
+    text = str(value or "")
+    if len(text) <= length * 2:
+        return text or "—"
+    return f"{text[:length]}…{text[-length:]}"
+
+
+def _parse_generated_at(value: object) -> str | None:
+    if not value:
+        return None
+    text = str(value)
+    return text.replace("Z", "")
+
+
+def _identity_key(identity: dict[str, object]) -> str:
+    artifact_set = identity.get("artifact_set_hash")
+    if artifact_set:
+        return f"set:{artifact_set}"
+    base_hash = identity.get("base_apk_sha256")
+    return f"base:{base_hash}" if base_hash else "unknown"
+
+
+def _print_plan_selection_banner(selection: dict[str, object]) -> None:
+    print()
+    menu_utils.print_header("Baseline selected")
+    artifact = (
+        f"SHA256 {_prefix(selection.get('base_apk_sha256'))} | "
+        f"Bundle {_prefix(selection.get('artifact_set_hash'))}"
+    )
+    signature = f"{selection.get('run_signature_version') or '—'} / {_prefix(selection.get('run_signature'))}"
+    generated = selection.get("generated_at") or "unknown"
+    lines = [
+        ("App", selection.get("package_name") or "unknown"),
+        ("Version", _format_version(selection.get("version_name"), selection.get("version_code"))),
+        ("Artifact", artifact),
+        ("Signature", signature),
+        ("Generated", str(generated)),
+        ("Static run", str(selection.get("static_run_id") or "—")),
+    ]
+    status_messages.print_strip("Baseline", lines, width=70)
+    print(
+        status_messages.status(
+            "Baseline resolved by artifact identity. If the app was updated, run static analysis.",
+            level="info",
+        )
+    )
 
 
 def _resolve_latest_plan_path_legacy(package_name: str, static_run_id: int | None) -> str | None:
@@ -435,6 +614,124 @@ def _emit_legacy_plan_selection(
     )
 
 
+def _print_run_summary(result, duration_label: str) -> None:
+    status = result.status or "unknown"
+    duration_seconds = result.elapsed_seconds or result.duration_seconds
+    print()
+    menu_utils.print_header("Dynamic run summary")
+    lines = [
+        ("Package", result.package_name or "unknown"),
+        ("Run ID", result.dynamic_run_id or "unknown"),
+        ("Duration", f"{duration_label} ({duration_seconds}s)"),
+        ("Status", status),
+    ]
+    if result.evidence_path:
+        lines.append(("Evidence", result.evidence_path))
+    status_messages.print_strip("Session", lines, width=70)
+
+    run_dir = Path(result.evidence_path) if result.evidence_path else None
+    manifest = _load_manifest(run_dir) if run_dir else None
+    if manifest:
+        observers = manifest.get("observers") or []
+        if observers:
+            observer_lines = []
+            failure_lines = []
+            for observer in observers:
+                observer_id = observer.get("observer_id", "unknown")
+                obs_status = observer.get("status", "unknown")
+                err = observer.get("error")
+                label = f"{observer_id}: {obs_status}"
+                if err:
+                    label += f" ({err})"
+                    if obs_status == "failed":
+                        failure_lines.append(f"{observer_id}: {err}")
+                observer_lines.append(label)
+            _print_simple_list("Observers", observer_lines)
+            if failure_lines:
+                _print_simple_list("Observer errors", failure_lines)
+
+        artifacts = manifest.get("artifacts") or []
+        outputs = manifest.get("outputs") or []
+        if artifacts or outputs:
+            artifact_types = sorted({a.get("type", "unknown") for a in artifacts if isinstance(a, dict)})
+            output_types = sorted({o.get("type", "unknown") for o in outputs if isinstance(o, dict)})
+            artifact_summary = [
+                f"Artifacts: {len(artifacts)} ({', '.join(artifact_types) if artifact_types else 'none'})",
+                f"Outputs: {len(outputs)} ({', '.join(output_types) if output_types else 'none'})",
+            ]
+            _print_simple_list("Artifacts", artifact_summary)
+
+        capture_lines = _summarize_capture(manifest)
+        if capture_lines:
+            _print_simple_list("Capture", capture_lines)
+
+        summary_paths = _summary_paths(manifest)
+        if summary_paths:
+            _print_simple_list("Summary", summary_paths)
+
+        if run_dir:
+            events_path = run_dir / "notes" / "run_events.jsonl"
+            if events_path.exists():
+                _print_simple_list("Logs", [f"Events: {events_path}"])
+
+    if status == "blocked":
+        print(status_messages.status("Session blocked by plan validation.", level="warn"))
+    elif status != "success":
+        print(status_messages.status("Session marked as degraded. Check observer errors above.", level="warn"))
+
+
+def _load_manifest(run_dir: Path | None) -> dict[str, object] | None:
+    if not run_dir:
+        return None
+    manifest_path = run_dir / "run_manifest.json"
+    if not manifest_path.exists():
+        return None
+    try:
+        return json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _summarize_capture(manifest: dict[str, object]) -> list[str]:
+    artifacts = manifest.get("artifacts") or []
+    types = {a.get("type") for a in artifacts if isinstance(a, dict)}
+    captured = []
+    if "system_log_capture" in types:
+        captured.append("logcat")
+    if "proxy_capture" in types:
+        captured.append("proxy")
+    if "network_capture" in types:
+        captured.append("tcpdump")
+    if not captured:
+        return ["No observer artifacts captured."]
+    return [f"Captured: {', '.join(captured)}."]
+
+
+def _summary_paths(manifest: dict[str, object]) -> list[str]:
+    outputs = manifest.get("outputs") or []
+    summary = {}
+    for item in outputs:
+        if not isinstance(item, dict):
+            continue
+        artifact_type = item.get("type")
+        path = item.get("relative_path")
+        if artifact_type and path:
+            summary[artifact_type] = path
+    lines = []
+    if "analysis_summary_json" in summary:
+        lines.append(f"summary.json: {summary['analysis_summary_json']}")
+    if "analysis_summary_md" in summary:
+        lines.append(f"summary.md: {summary['analysis_summary_md']}")
+    return lines
+
+
+def _print_simple_list(title: str, items: list[str]) -> None:
+    if not items:
+        return
+    lines = [(str(index + 1), value) for index, value in enumerate(items)]
+    status_messages.print_strip(title, lines, width=70)
+
+
 def _preflight_proxy_capture(port: int) -> bool:
     mitm_bin, hint = resolve_mitmdump_path()
     if mitm_bin is None:
@@ -449,6 +746,14 @@ def _preflight_proxy_capture(port: int) -> bool:
     return True
 
 
+def _device_has_tcpdump(device_serial: str) -> bool:
+    try:
+        path = adb_utils.run_shell(device_serial, ["which", "tcpdump"]).strip()
+    except Exception:
+        return False
+    return bool(path)
+
+
 def _is_port_free(port: int) -> bool:
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
@@ -458,3 +763,18 @@ def _is_port_free(port: int) -> bool:
     finally:
         sock.close()
     return True
+
+
+def _print_root_status(device_serial: str) -> None:
+    stats = adb_utils.get_device_stats(device_serial)
+    root_state = (stats.get("is_rooted") or "Unknown").strip().upper()
+    if root_state == "YES":
+        message = "Device root: YES (advanced capture available)."
+        level = "success"
+    elif root_state == "NO":
+        message = "Device root: NO (non-root mode)."
+        level = "info"
+    else:
+        message = "Device root: Unknown."
+        level = "warn"
+    print(status_messages.status(message, level=level))

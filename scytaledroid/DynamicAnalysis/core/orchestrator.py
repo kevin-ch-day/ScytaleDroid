@@ -27,7 +27,7 @@ from scytaledroid.DynamicAnalysis.plans.loader import (
 )
 from scytaledroid.DynamicAnalysis.core.session import DynamicSessionConfig
 from scytaledroid.DynamicAnalysis.core.target_manager import TargetManager
-from scytaledroid.DynamicAnalysis.observers.base import Observer
+from scytaledroid.DynamicAnalysis.observers.base import Observer, ObserverHandle
 from scytaledroid.DynamicAnalysis.scenarios import ManualScenarioRunner
 
 
@@ -43,6 +43,7 @@ class DynamicRunOrchestrator:
         self.observers = list(observers)
         self.plan_payload = plan_payload
         self.logger = logging_engine.get_dynamic_logger()
+        self._last_plan_validation = None
 
     def run(self) -> tuple[RunManifest, Path]:
         dynamic_run_id = str(uuid.uuid4())
@@ -51,7 +52,42 @@ class DynamicRunOrchestrator:
         writer = EvidencePackWriter(run_dir)
         writer.ensure_layout()
 
-        plan_payload = self.plan_payload or self._load_plan_payload()
+        try:
+            plan_payload = self.plan_payload or self._load_plan_payload()
+        except PlanValidationError as exc:
+            run_ctx = RunContext(
+                dynamic_run_id=dynamic_run_id,
+                package_name=self.config.package_name,
+                duration_seconds=self.config.duration_seconds,
+                scenario_id=self.config.scenario_id,
+                run_dir=run_dir,
+                artifacts_dir=writer.artifacts_dir,
+                analysis_dir=writer.analysis_dir,
+                notes_dir=writer.notes_dir,
+                interactive=self.config.interactive,
+                device_serial=self.config.device_serial,
+                clear_logcat=self.config.clear_logcat,
+                static_run_id=self.config.static_run_id,
+                harvest_session_id=self.config.harvest_session_id,
+                static_plan=None,
+                proxy_port=self.config.proxy_port,
+                scenario_hint=None,
+            )
+            event_logger = RunEventLogger(run_ctx)
+            event_logger.log("plan.validation", build_plan_validation_event(exc.outcome))
+            event_artifact = event_logger.finalize()
+            if event_artifact:
+                manifest = RunManifest(
+                    run_manifest_version=1,
+                    dynamic_run_id=dynamic_run_id,
+                    created_at=self._now(),
+                    status="blocked",
+                    target={"package_name": run_ctx.package_name},
+                )
+                manifest.add_artifacts([event_artifact])
+                manifest.finalize()
+                writer.write_manifest(manifest)
+            raise
         scenario_hint = None
         if self.config.scenario_id == "permission_trigger":
             scenario_hint = self._build_permission_trigger_hint(plan_payload)
@@ -77,6 +113,16 @@ class DynamicRunOrchestrator:
         manifest = self._build_manifest(run_ctx, plan_payload, writer)
         manifest.started_at = self._now()
         event_logger = RunEventLogger(run_ctx)
+        if self._last_plan_validation:
+            event_logger.log(
+                "plan.validation",
+                build_plan_validation_event(self._last_plan_validation),
+            )
+        elif self.config.plan_validation:
+            event_logger.log(
+                "plan.validation",
+                build_plan_validation_event(self.config.plan_validation),
+            )
         event_logger.log(
             "run_initialized",
             {
@@ -134,12 +180,22 @@ class DynamicRunOrchestrator:
 
         observer_artifacts: list[ArtifactRecord] = []
         run_status = "success"
-        if any(record.status != "started" for record in observer_records):
+        if any(record.status == "failed" for record in observer_records):
             run_status = "degraded"
         for observer in self.observers:
             observer_record = next(
                 existing for existing in manifest.observers if existing.observer_id == observer.observer_id
             )
+            if observer_record.status == "skipped":
+                event_logger.log(
+                    "observer_skipped",
+                    {
+                        "observer_id": observer_record.observer_id,
+                        "status": observer_record.status,
+                        "error": observer_record.error,
+                    },
+                )
+                continue
             if observer_record.status != "started":
                 event_logger.log(
                     "observer_skipped",
@@ -166,7 +222,8 @@ class DynamicRunOrchestrator:
                 },
             )
             if record.status != "success":
-                run_status = "degraded"
+                if record.status != "skipped":
+                    run_status = "degraded"
 
         manifest.add_artifacts(observer_artifacts)
         target_finalize = target_manager.finalize(run_ctx)
@@ -264,7 +321,22 @@ class DynamicRunOrchestrator:
         records: list[ObserverRecord] = []
         for observer in self.observers:
             try:
-                handles[observer.observer_id] = observer.start(run_ctx)
+                handle = observer.start(run_ctx)
+                if (
+                    isinstance(handle, ObserverHandle)
+                    and isinstance(handle.payload, dict)
+                    and handle.payload.get("skipped")
+                ):
+                    reason = str(handle.payload.get("reason") or "skipped")
+                    records.append(
+                        ObserverRecord(
+                            observer_id=observer.observer_id,
+                            status="skipped",
+                            error=reason,
+                        )
+                    )
+                    continue
+                handles[observer.observer_id] = handle
                 records.append(ObserverRecord(observer_id=observer.observer_id, status="started"))
             except Exception as exc:  # noqa: BLE001
                 self.logger.warning(
@@ -379,6 +451,8 @@ class DynamicRunOrchestrator:
                 )
                 raise PlanValidationError(validation)
             return payload
+        except PlanValidationError:
+            raise
         except Exception as exc:  # noqa: BLE001
             self.logger.warning(
                 "Failed to load dynamic plan",
@@ -389,6 +463,7 @@ class DynamicRunOrchestrator:
     def _emit_plan_validation(self, validation) -> None:
         if self.config.interactive:
             print(render_plan_validation_block(validation))
+        self._last_plan_validation = validation
         self.logger.info(
             "Dynamic plan validation",
             extra=build_plan_validation_event(validation),

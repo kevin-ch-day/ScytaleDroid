@@ -7,6 +7,10 @@ research-grade reproducibility.
 ## 0. Cross-Cutting Rules
 
 - **Run identity:** `dynamic_run_id` is a UUIDv4. It is not derived from inputs.
+- **Baseline resolution:** dynamic runs must be anchored to a resolved static
+  baseline derived from **artifact identity** (package + hashes). `static_run_id`
+  is always recorded and displayed for auditability, but it is **not** required
+  input in the normal operator flow.
 - **Schema versioning:** `run_manifest_version` starts at `1`. Bump only for
   breaking changes; readers should remain backward compatible when possible.
 - **Determinism:** Folder layout and filenames are stable. Do not embed
@@ -33,6 +37,17 @@ that can be re-processed without re-running the app.
 - **Artifacts:** stable registry with hashes and provenance
 - **Outputs:** analysis summaries and human-readable notes
 - **Status:** `success` | `degraded` | `failed`
+
+### Artifact identity (baseline linkage)
+
+Dynamic runs **must** identify the artifact being tested:
+
+- `base_apk_sha256` (single-APK identity)
+- `artifact_set_hash` (split/bundle identity; required when splits exist)
+
+If the installed artifact does not match the resolved baseline, the run must
+**pause and require operator action** (run static analysis now, select a
+different baseline, or cancel). No silent continuation.
 
 ## 2. Evidence Pack Layout
 
@@ -125,6 +140,8 @@ preconfigured; the operator only selects the app, scenario, and observers.
 - Choose the target app (already installed or installed now).
 - Choose the scenario (e.g., `basic_usage`).
 - Choose observers (e.g., `network_capture`, `system_logs`).
+- Confirm the resolved static baseline (package, version, hash, `static_run_id`).
+  If the baseline is missing or ambiguous, the run must not start.
 
 ### Step 1: Put the device in a known state
 
@@ -189,6 +206,13 @@ analysis/summary.md
   - `tls_mitm_suspected: true | false | unknown`
   - `notable_log_signals: []`
 - Evidence pointers (artifact paths + sha256)
+
+## 8.1 Telemetry windows (time-series readiness)
+
+Dynamic telemetry should be segmentable into fixed-length windows suitable for
+time-series modeling. Windowing metadata (window size, overlap, sampling rate)
+must be recorded in analysis outputs so experiments are reproducible and
+comparable across runs.
 
 `summary.md` provides a 10–20 line human-readable narrative suitable for paper
 drafting.

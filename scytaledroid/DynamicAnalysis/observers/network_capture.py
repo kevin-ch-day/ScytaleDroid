@@ -25,6 +25,15 @@ class NetworkCaptureObserver(Observer):
             raise RuntimeError("adb binary not available on PATH")
         if not run_ctx.device_serial:
             raise RuntimeError("device serial required for network capture")
+        tcpdump_path = adb_utils.run_shell(
+            run_ctx.device_serial,
+            ["which", "tcpdump"],
+        ).strip()
+        if not tcpdump_path:
+            return ObserverHandle(
+                observer_id=self.observer_id,
+                payload={"skipped": True, "reason": "tcpdump not available on device"},
+            )
         device_path = "/sdcard/scytaledroid_dynamic_capture.pcapng"
         command = [
             adb_bin,

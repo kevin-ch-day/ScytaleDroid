@@ -49,6 +49,17 @@ living checklist for implementation sequencing.
 - **Flags and indicators:** cleartext HTTP, TLS MITM, notable log signals.
 - **Evidence cross-links:** references from summary to raw artifacts.
 
+## 7.1 Telemetry windows + anomaly modeling (paper alignment)
+
+- **Telemetry capture:** CPU, memory, thread, and network counters collected
+  at stable intervals using non-root ADB interfaces.
+- **Windowing:** fixed-length, optionally overlapping windows with timestamps,
+  sampling rate, and window size recorded in metadata.
+- **Feature extraction:** per-window statistics (mean/variance/deltas).
+- **Models:** Isolation Forest + One-Class SVM with logged parameters.
+- **Outputs:** anomaly scores per window + thresholds, stored in
+  `analysis/telemetry_windows.json` and `analysis/anomaly_scores.json`.
+
 ## 8. Persistence + Indexing (future)
 
 - **Database integration:** defer to background job, maintain offline-first flow.

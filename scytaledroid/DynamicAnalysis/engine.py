@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import json
 from pathlib import Path
 from typing import Any, Mapping
+import uuid
 
 from scytaledroid.Utils.LoggingUtils import logging_engine
 
 from scytaledroid.DynamicAnalysis.core import DynamicSessionConfig, DynamicSessionResult, run_dynamic_session
 from scytaledroid.DynamicAnalysis.core.evidence_pack import EvidencePackWriter
-from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord
+from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord, RunManifest
+from scytaledroid.DynamicAnalysis.core.run_context import RunContext
+from scytaledroid.DynamicAnalysis.core.event_logger import RunEventLogger
 from scytaledroid.DynamicAnalysis.plans.loader import (
     build_plan_validation_event,
     load_dynamic_plan,
@@ -47,6 +50,7 @@ class DynamicAnalysisEngine:
         plan_payload, validation = self._resolve_plan_payload()
         if validation and not validation.is_pass:
             now = datetime.now(timezone.utc)
+            dynamic_run_id, evidence_path = self._write_blocked_event(validation)
             blocked = DynamicSessionResult(
                 package_name=self.config.package_name,
                 duration_seconds=self.config.duration_seconds,
@@ -55,12 +59,14 @@ class DynamicAnalysisEngine:
                 status="blocked",
                 notes="Dynamic execution blocked by plan validation.",
                 errors=list(validation.reasons) if validation.reasons else ["dynamic plan validation failed"],
+                dynamic_run_id=dynamic_run_id,
+                evidence_path=evidence_path,
             )
             summary_payload = {
-                "dynamic_run_id": None,
+                "dynamic_run_id": dynamic_run_id,
                 "package_name": self.config.package_name,
                 "status": blocked.status,
-                "evidence_path": None,
+                "evidence_path": evidence_path,
                 "plan": None,
                 "probes": {},
                 "plan_validation": build_plan_validation_event(validation),
@@ -72,7 +78,10 @@ class DynamicAnalysisEngine:
                 probe_summary={},
                 summary_payload=summary_payload,
             )
-        session_result = run_dynamic_session(self.config, plan_payload=dict(plan_payload) if plan_payload else None)
+        run_config = self.config
+        if validation is not None:
+            run_config = replace(self.config, plan_validation=validation)
+        session_result = run_dynamic_session(run_config, plan_payload=dict(plan_payload) if plan_payload else None)
         probe_summary = run_probe_set(self.config, plan_payload)
         summary_payload = {
             "dynamic_run_id": session_result.dynamic_run_id,
@@ -118,6 +127,49 @@ class DynamicAnalysisEngine:
             )
             return None, validation
         return payload, validation
+
+    def _write_blocked_event(self, validation) -> tuple[str | None, str | None]:
+        dynamic_run_id = str(uuid.uuid4())
+        output_root = Path(self.config.output_root or "output/evidence/dynamic")
+        run_dir = output_root / dynamic_run_id
+        writer = EvidencePackWriter(run_dir)
+        writer.ensure_layout()
+        run_ctx = RunContext(
+            dynamic_run_id=dynamic_run_id,
+            package_name=self.config.package_name,
+            duration_seconds=self.config.duration_seconds,
+            scenario_id=self.config.scenario_id,
+            run_dir=run_dir,
+            artifacts_dir=writer.artifacts_dir,
+            analysis_dir=writer.analysis_dir,
+            notes_dir=writer.notes_dir,
+            interactive=self.config.interactive,
+            device_serial=self.config.device_serial,
+            clear_logcat=self.config.clear_logcat,
+            static_run_id=self.config.static_run_id,
+            harvest_session_id=self.config.harvest_session_id,
+            static_plan=None,
+            proxy_port=self.config.proxy_port,
+        )
+        event_logger = RunEventLogger(run_ctx)
+        event_logger.log("plan.validation", build_plan_validation_event(validation))
+        event_artifact = event_logger.finalize()
+        manifest = RunManifest(
+            run_manifest_version=1,
+            dynamic_run_id=dynamic_run_id,
+            created_at=datetime.now(timezone.utc).isoformat(),
+            status="blocked",
+            target={
+                "package_name": self.config.package_name,
+                "static_run_id": self.config.static_run_id,
+            },
+            scenario={"id": self.config.scenario_id},
+        )
+        if event_artifact:
+            manifest.add_artifacts([event_artifact])
+        manifest.finalize()
+        writer.write_manifest(manifest)
+        return dynamic_run_id, str(run_dir)
 
     def _emit_plan_validation(self, validation) -> None:
         if self.config.interactive:
