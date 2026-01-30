@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Dict, Optional
 
-from scytaledroid.DeviceAnalysis import adb_utils, device_manager
+from scytaledroid.DeviceAnalysis import adb_devices, device_manager
 from scytaledroid.DeviceAnalysis.device_menu.formatters import (
     format_android_release,
     format_battery,
@@ -22,7 +22,7 @@ def fetch_device_info(active_details: Optional[Dict[str, Optional[str]]]) -> Dic
     if not serial:
         return {}
 
-    properties = active_details or adb_utils.get_basic_properties(serial) or {}
+    properties = active_details or adb_devices.get_basic_properties(serial) or {}
     info_rows = {
         "Serial": serial,
         "Device Type": properties.get("device_type", "Unknown"),

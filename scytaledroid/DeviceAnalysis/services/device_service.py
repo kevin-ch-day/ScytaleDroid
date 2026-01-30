@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timezone
 
-from scytaledroid.DeviceAnalysis import adb_utils, device_manager
+from scytaledroid.DeviceAnalysis import adb_devices, device_manager
 from scytaledroid.DeviceAnalysis.services.models import InventoryStatus
 from scytaledroid.DeviceAnalysis import inventory_meta
 from scytaledroid.DeviceAnalysis.inventory import load_latest_inventory
@@ -28,10 +28,10 @@ def scan_devices(
 ]:
     """Return raw adb devices, warnings, enriched summaries, and a serial map."""
 
-    # Lazy import to avoid circular imports when used headless (e.g., measure_inventory).
+    # Lazy import to avoid circular imports when used headless (e.g., measure_inventory_latency).
     from scytaledroid.DeviceAnalysis.device_menu.dashboard import build_device_summaries
 
-    devices, warnings = adb_utils.scan_devices()
+    devices, warnings = adb_devices.scan_devices()
     summary_cache = cache or {}
     summaries, serial_map = build_device_summaries(
         devices,

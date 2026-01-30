@@ -2,7 +2,7 @@
 Dry-run a harvest scope and show candidates/kept/filtered breakdown without pulling APKs.
 
 Usage:
-    python scripts/harvest_plan_dump.py [--serial SERIAL] [--scope default|social_messaging|google_user|everything] [--include-system]
+    python scripts/dev/dump_harvest_plan.py [--serial SERIAL] [--scope default|social_messaging|google_user|everything] [--include-system]
 """
 
 from __future__ import annotations

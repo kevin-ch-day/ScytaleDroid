@@ -22,7 +22,7 @@ from scytaledroid.Utils.DisplayUtils import (
 from scytaledroid.Utils.DisplayUtils.terminal import use_ascii_ui
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
-from scytaledroid.DeviceAnalysis import adb_utils, device_manager
+from scytaledroid.DeviceAnalysis import adb_devices, device_manager
 from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.constants import (
     INVENTORY_STALE_SECONDS,
 )
@@ -351,7 +351,7 @@ def build_device_summaries(
             cached.update({k: v for k, v in device.items() if v is not None})
             summary = cached
         else:
-            summary = adb_utils.build_device_summary(device)
+            summary = adb_devices.build_device_summary(device)
             if serial:
                 summary["_cache_time"] = time.time()
                 summary_cache[serial] = summary

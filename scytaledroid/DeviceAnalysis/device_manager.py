@@ -8,7 +8,7 @@ from typing import Dict, Optional
 
 from scytaledroid.Config import app_config
 
-from . import adb_utils
+from . import adb_devices
 
 
 _STATE_DIR = Path(app_config.DATA_DIR) / app_config.DEVICE_STATE_DIR
@@ -80,7 +80,7 @@ def get_active_device() -> Optional[Dict[str, Optional[str]]]:
     if not serial:
         return None
 
-    devices = adb_utils.list_devices()
+    devices = adb_devices.list_devices()
     for device in devices:
         if device.get("serial") == serial:
             return device
@@ -94,7 +94,7 @@ def set_active_device(serial: str) -> bool:
     """Promote a device to active if it exists in the adb inventory."""
     global _ACTIVE_SERIAL
     global _LAST_SERIAL
-    devices = adb_utils.list_devices()
+    devices = adb_devices.list_devices()
     for device in devices:
         if device.get("serial") == serial:
             _ACTIVE_SERIAL = serial
@@ -121,7 +121,7 @@ def describe_active_device() -> str:
     active = get_active_device()
     if not active:
         return "None"
-    return adb_utils.get_device_label(active)
+    return adb_devices.get_device_label(active)
 
 
 def get_last_serial() -> Optional[str]:

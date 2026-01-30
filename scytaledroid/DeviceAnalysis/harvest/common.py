@@ -14,7 +14,7 @@ from typing import Dict, Mapping, MutableMapping, Optional, Tuple
 from scytaledroid.Config import app_config
 import os
 from scytaledroid.Utils.DisplayUtils import status_messages
-from scytaledroid.DeviceAnalysis import adb_utils
+from scytaledroid.DeviceAnalysis import adb_packages
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .models import ArtifactError, InventoryRow
@@ -241,7 +241,7 @@ def adb_pull(
 
             allow_fallbacks = allow_inventory_fallbacks()
             try:
-                refreshed = adb_utils.get_package_paths(
+                refreshed = adb_packages.get_package_paths(
                     serial,
                     package_name,
                     refresh=True,

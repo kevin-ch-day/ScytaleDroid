@@ -16,7 +16,7 @@ from scytaledroid.Utils.DisplayUtils import (
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.LoggingUtils import logging_engine
 
-from scytaledroid.DeviceAnalysis import adb_utils, device_manager
+from scytaledroid.DeviceAnalysis import device_manager
 from .formatters import (
     format_android_release,
     format_build_tags,

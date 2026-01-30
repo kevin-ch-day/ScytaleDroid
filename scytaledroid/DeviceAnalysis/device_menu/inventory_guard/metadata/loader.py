@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from scytaledroid.DeviceAnalysis import adb_utils
+from scytaledroid.DeviceAnalysis import adb_devices, adb_packages
 from scytaledroid.DeviceAnalysis.services import device_service
 from scytaledroid.DeviceAnalysis import inventory as inventory_module
 from scytaledroid.DeviceAnalysis import inventory_meta
@@ -225,13 +225,13 @@ def get_latest_inventory_metadata(
     if not with_current_state:
         return metadata
 
-    current_signatures = adb_utils.list_packages_with_versions(serial)
+    current_signatures = adb_packages.list_packages_with_versions(serial)
     current_names = [name for name, _, _ in current_signatures]
     current_count = len(current_signatures)
     current_hash = inventory_meta.compute_name_hash(current_names)
     current_signature_hash = inventory_meta.compute_signature_hash(current_signatures)
 
-    device_props = adb_utils.get_basic_properties(serial)
+    device_props = adb_devices.get_basic_properties(serial)
     current_fingerprint = None
     if device_props:
         current_fingerprint = device_props.get("build_fingerprint")

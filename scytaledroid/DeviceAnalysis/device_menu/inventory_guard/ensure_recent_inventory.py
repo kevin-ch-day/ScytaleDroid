@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages, text_blocks
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
-from scytaledroid.DeviceAnalysis import adb_utils
+from scytaledroid.DeviceAnalysis import adb_status
 from scytaledroid.DeviceAnalysis.services import inventory_service
 from scytaledroid.DeviceAnalysis import inventory as inventory_module
 from scytaledroid.DeviceAnalysis.inventory.runner import InventoryDelta
@@ -437,7 +437,7 @@ def _resolve_battery_context(
             status = status_value
 
     if level is None or status is None:
-        stats = adb_utils.get_device_stats(serial)
+        stats = adb_status.get_device_stats(serial)
         if level is None:
             level = _parse_battery_level(stats.get("battery_level"))
         if status is None:

@@ -8,7 +8,7 @@ from typing import Optional, Dict
 
 from scytaledroid.Utils.DisplayUtils import colors, status_messages, terminal, text_blocks
 
-# Avoid pulling in the entire device_menu stack when running headless (e.g., measure_inventory).
+# Avoid pulling in the entire device_menu stack when running headless (e.g., measure_inventory_latency).
 try:
     from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.constants import INVENTORY_STALE_SECONDS
     from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.utils import humanize_seconds
@@ -192,9 +192,9 @@ def render_snapshot_block(
         device_count = None
         if serial:
             try:
-                from scytaledroid.DeviceAnalysis import adb_utils
+                from scytaledroid.DeviceAnalysis import adb_packages
 
-                device_count = len(adb_utils.list_packages(serial))
+                device_count = len(adb_packages.list_packages(serial))
             except Exception:
                 device_count = None
         if snapshot_count is not None and device_count and device_count != snapshot_count:

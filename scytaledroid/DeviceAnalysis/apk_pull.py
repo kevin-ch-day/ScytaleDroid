@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Callable, Dict, Mapping, Optional, Sequence, Set, Tuple
 
 from scytaledroid.Config import app_config
-from scytaledroid.DeviceAnalysis import adb_utils, harvest, inventory
+from scytaledroid.DeviceAnalysis import adb_client, adb_shell, harvest, inventory
 from scytaledroid.DeviceAnalysis.device_menu.inventory_guard import (
     get_last_guard_decision,
     get_latest_inventory_metadata,
@@ -111,7 +111,7 @@ def pull_apks(serial: Optional[str]) -> OperationResult:
             error_code="apk_pull_no_device",
         )
 
-    if not adb_utils.is_available():
+    if not adb_client.is_available():
         error_panels.print_error_panel(
             "APK Pull",
             "adb binary not found on PATH.",
@@ -443,7 +443,7 @@ def pull_apks(serial: Optional[str]) -> OperationResult:
             error_code="apk_pull_no_plan",
         )
 
-    adb_path = adb_utils.get_adb_binary()
+    adb_path = adb_client.get_adb_binary()
     if not adb_path:
         error_panels.print_error_panel(
             "APK Pull",
@@ -750,7 +750,7 @@ def _prompt_plan_action(
 
 def _device_is_rooted(serial: str) -> bool:
     try:
-        completed = adb_utils.run_shell_command(serial, ["id", "-u"])
+        completed = adb_shell.run_shell_command(serial, ["id", "-u"])
     except RuntimeError as exc:
         log.warning(f"Failed to determine root state for {serial}: {exc}", category="device")
         return False

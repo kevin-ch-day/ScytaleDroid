@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Tuple
 
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
-from .. import adb_utils
+from scytaledroid.DeviceAnalysis import adb_shell
 
 
 @dataclass
@@ -51,7 +51,7 @@ def _parse_pm_list_line(line: str) -> Optional[BulkPackageEntry]:
 
 def list_packages_bulk(serial: str) -> List[BulkPackageEntry]:
     """Return package entries via a single `pm list packages -f -U` call."""
-    output = adb_utils.run_shell(
+    output = adb_shell.run_shell(
         serial,
         ["pm", "list", "packages", "-f", "-U"],
         check=False,
@@ -91,7 +91,7 @@ def parse_dumpsys_package(raw: str) -> Dict[str, Dict[str, object]]:
 
 def dumpsys_package_bulk(serial: str) -> Dict[str, Dict[str, object]]:
     """Fetch and parse `dumpsys package` once for richer metadata (optional)."""
-    raw = adb_utils.run_shell(serial, ["dumpsys", "package"], check=False)
+    raw = adb_shell.run_shell(serial, ["dumpsys", "package"], check=False)
     if not raw:
         return {}
     return parse_dumpsys_package(raw)

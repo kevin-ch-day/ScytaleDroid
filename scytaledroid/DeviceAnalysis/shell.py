@@ -8,7 +8,7 @@ from typing import Optional
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
-from . import adb_utils
+from . import adb_client
 
 
 def open_shell(serial: Optional[str]) -> None:
@@ -17,7 +17,7 @@ def open_shell(serial: Optional[str]) -> None:
         print(status_messages.status("No active device. Connect first to open a shell.", level="warn"))
         return
 
-    adb_path = adb_utils.get_adb_binary()
+    adb_path = adb_client.get_adb_binary()
     if not adb_path:
         print(status_messages.status("adb binary not found on PATH.", level="error"))
         return

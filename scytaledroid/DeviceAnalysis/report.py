@@ -18,7 +18,7 @@ from scytaledroid.Utils.DisplayUtils import (
 )
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
-from . import adb_utils, package_profiles
+from . import adb_devices, package_profiles
 from scytaledroid.DeviceAnalysis.services import device_service
 
 
@@ -43,7 +43,7 @@ def generate_device_report(serial: Optional[str]) -> None:
         prompt_utils.press_enter_to_continue()
         return
 
-    summary = adb_utils.build_device_summary(device_entry)
+    summary = adb_devices.build_device_summary(device_entry)
     inventory_payload = device_service.fetch_raw_inventory(serial)
     if not inventory_payload:
         if prompt_utils.prompt_yes_no(
@@ -94,7 +94,7 @@ def generate_device_report(serial: Optional[str]) -> None:
 
 
 def _get_device_entry(serial: str) -> Optional[Dict[str, Optional[str]]]:
-    devices = adb_utils.list_devices()
+    devices = adb_devices.list_devices()
     for device in devices:
         if device.get("serial") == serial:
             return device

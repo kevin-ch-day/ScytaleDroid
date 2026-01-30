@@ -6,7 +6,7 @@ how many survive default harvest policies (Play installer or /data path),
 and which packages are filtered out (with sample names).
 
 Usage:
-    python scripts/scope_diagnostics.py [serial]
+    python scripts/operator/diagnose_scope.py [serial]
 
 If no serial is provided, the active device (if any) is used.
 """
