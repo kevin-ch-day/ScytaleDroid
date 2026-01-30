@@ -172,12 +172,15 @@ class DynamicRunOrchestrator:
                 package_name=run_ctx.package_name,
                 sample_rate_s=self.config.sampling_rate_s,
             )
-            sampler.start()
         self._emit_marker(run_ctx, "SCENARIO_START")
         if run_ctx.scenario_hint:
             event_logger.log("scenario_hint", {"hint": run_ctx.scenario_hint})
         event_logger.log("scenario_started", {"scenario_id": run_ctx.scenario_id})
-        scenario_result = scenario_runner.run(run_ctx)
+        scenario_result = scenario_runner.run(
+            run_ctx,
+            on_start=sampler.start if sampler else None,
+            on_end=None,
+        )
         if sampler:
             capture = sampler.stop()
             telemetry_payload = {

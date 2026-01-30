@@ -284,25 +284,22 @@ def _issues_from_telemetry(dynamic_run_id: str, payload: Mapping[str, Any]) -> l
     except Exception:
         ratio = None
     gap_threshold = 3 * int(rate)
+    details: dict[str, object] = {}
     if ratio is not None and ratio < 0.95:
+        details.update({"captured": captured, "expected": expected, "ratio": ratio})
+    try:
+        if max_gap is not None and float(max_gap) > gap_threshold:
+            details.update({"max_gap_s": max_gap, "threshold_s": gap_threshold})
+    except Exception:
+        pass
+    if details:
         issues.append(
             {
                 "dynamic_run_id": dynamic_run_id,
                 "issue_code": "telemetry_partial_samples",
-                "details_json": {"captured": captured, "expected": expected, "ratio": ratio},
+                "details_json": details,
             }
         )
-    try:
-        if max_gap is not None and float(max_gap) > gap_threshold:
-            issues.append(
-                {
-                    "dynamic_run_id": dynamic_run_id,
-                    "issue_code": "telemetry_partial_samples",
-                    "details_json": {"max_gap_s": max_gap, "threshold_s": gap_threshold},
-                }
-            )
-    except Exception:
-        pass
     return issues
 
 
