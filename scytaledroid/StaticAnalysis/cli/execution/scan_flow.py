@@ -67,8 +67,9 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
     completed_artifacts = 0
     total_artifacts = sum(len(_dedupe_artifacts(group.artifacts)) for group in selection.groups)
     show_splits = _show_split_breakdown()
+    show_artifacts = not params.dry_run or params.verbose_output
     display_name_map = load_display_name_map(selection.groups)
-    progress = _PipelineProgress(total=total_artifacts, show_splits=show_splits)
+    progress = _PipelineProgress(total=total_artifacts, show_splits=show_splits, show_artifacts=show_artifacts)
     config_hash = _compute_config_hash(params)
     pipeline_version = os.getenv("SCYTALEDROID_PIPELINE_VERSION") or getattr(
         params, "analysis_version", None
@@ -269,7 +270,14 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
         app_result.duration_seconds = time.monotonic() - app_start
         if not _abort_state()[0]:
             progress.flush_line()
-            print(status_messages.status("Completed scan", level="success"))
+            artifact_count = app_result.discovered_artifacts
+            elapsed = _format_elapsed(app_result.duration_seconds or 0.0)
+            print(
+                status_messages.status(
+                    f"Completed scan ({artifact_count} artifact{'s' if artifact_count != 1 else ''}) — {elapsed}",
+                    level="success",
+                )
+            )
             if last_report_for_app is not None:
                 metadata = getattr(last_report_for_app, "metadata", {}) or {}
                 if isinstance(metadata, Mapping):
@@ -444,9 +452,10 @@ def _show_split_breakdown() -> bool:
 
 
 class _PipelineProgress:
-    def __init__(self, total: int, show_splits: bool) -> None:
+    def __init__(self, total: int, show_splits: bool, show_artifacts: bool) -> None:
         self.total = max(1, int(total))
         self.show_splits = show_splits
+        self.show_artifacts = show_artifacts
         self._start = time.monotonic()
         self._last_len = 0
         self._last_checkpoint = 0
@@ -458,6 +467,8 @@ class _PipelineProgress:
         return
 
     def finish(self, index: int, label: str) -> None:
+        if not self.show_artifacts:
+            return
         if self.show_splits:
             line = f"[{index:2d}/{self.total}] {label} OK"
             print(line)
@@ -472,17 +483,24 @@ class _PipelineProgress:
             )
 
     def error(self, index: int, label: str, message: str) -> None:
+        if not self.show_artifacts:
+            return
         self._clear_line()
         tail = _truncate_label(label, 48)
         print(f"ERROR Artifact {index}/{self.total}: {tail} - {message}")
 
     def skip(self, index: int, label: str, message: str) -> None:
+        if not self.show_artifacts:
+            return
         self._clear_line()
         tail = _truncate_label(label, 48)
-        print(f"SKIP Artifact {index}/{self.total}: {tail} - {message}")
+        if message == "dry-run (not persisted)":
+            print(f"EXECUTED Artifact {index}/{self.total}: {tail} — NOT STORED (diagnostic)")
+        else:
+            print(f"SKIP Artifact {index}/{self.total}: {tail} - {message}")
 
     def end(self) -> None:
-        if self.show_splits:
+        if self.show_splits or not self.show_artifacts:
             return
         if self._last_len:
             self._clear_line()

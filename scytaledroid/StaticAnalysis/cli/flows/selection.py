@@ -229,7 +229,7 @@ def _render_profile_selection_table(groups: Sequence[ArtifactGroup]) -> None:
         label = app_label or display_name or preferred or package
         rows.append([str(label), group.package_name, str(len(group.artifacts))])
 
-    max_rows = 10
+    max_rows = 15
     if len(rows) > max_rows:
         table_utils.render_table(
             ["App", "Package", "Artifacts"],
@@ -244,6 +244,10 @@ def _render_profile_selection_table(groups: Sequence[ArtifactGroup]) -> None:
             table_utils.render_table(
                 ["App", "Package", "Artifacts"],
                 rows,
+            )
+            _ = prompt_utils.prompt_text(
+                "Press Enter to continue",
+                required=False,
             )
     else:
         table_utils.render_table(["App", "Package", "Artifacts"], rows)

@@ -42,6 +42,7 @@ from ..views.view_renderers import (
 from ...persistence.ingest import ingest_baseline_payload
 from .scan_flow import format_duration
 from scytaledroid.Database.db_core import db_queries as core_q
+from scytaledroid.Database.db_core.db_config import DB_CONFIG
 from scytaledroid.Config import app_config
 from scytaledroid.Database.db_scripts.static_run_audit import collect_static_run_counts
 from scytaledroid.StaticAnalysis.modules.permissions.permission_console_rendering import (
@@ -289,12 +290,19 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
         summary_cards.summary_item("Duration", format_duration(outcome.duration_seconds), value_style="emphasis"),
         summary_cards.summary_item("Applications", len(outcome.results)),
         summary_cards.summary_item("Artifacts", artifact_count),
-        summary_cards.summary_item(
-            "Findings (runtime)",
-            runtime_findings_total,
-            value_style="severity_high" if totals.get("high") or totals.get("critical") else "emphasis",
-        ),
     ]
+    if params.dry_run:
+        overview_items.append(
+            summary_cards.summary_item("Findings", "computed (not stored)")
+        )
+    else:
+        overview_items.append(
+            summary_cards.summary_item(
+                "Findings (runtime)",
+                runtime_findings_total,
+                value_style="severity_high" if totals.get("high") or totals.get("critical") else "emphasis",
+            )
+        )
     overview_items.extend(severity.severity_summary_items(totals))
     subtitle_parts = [params.profile_label]
     if params.scope_label:
@@ -660,9 +668,18 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             pass
             printed_db_table = _render_db_severity_table(session_stamp)
         if not printed_db_table:
-            from ..views.run_detail_view import render_app_table  # local import to avoid cycle
+            if params.dry_run and compact_mode:
+                print(
+                    status_messages.status(
+                        "Diagnostic metadata table suppressed in compact mode. "
+                        "Use --verbose-output to show full metadata.",
+                        level="info",
+                    )
+                )
+            else:
+                from ..views.run_detail_view import render_app_table  # local import to avoid cycle
 
-            render_app_table(outcome.results, diagnostic=params.dry_run)
+                render_app_table(outcome.results, diagnostic=params.dry_run, compact=compact_mode)
             if params.dry_run:
                 metadata_partial = any(
                     app.target_sdk is None or not app.signer for app in outcome.results
@@ -687,6 +704,7 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             diagnostic_warnings, linkage_states = _render_diagnostic_app_summary(
                 outcome,
                 session_stamp=session_stamp,
+                compact_mode=compact_mode,
             )
         if compact_mode:
             print(
@@ -714,6 +732,13 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             print(f"{'OK' if identity_ok else 'FAIL'} identity valid (artifact_set_hash computed)")
             ready = pipeline_version and linkage_ok and identity_ok
             print(f"Result: {'READY' if ready else 'NOT READY'}")
+            static_run_id_ok = linkage_ok
+            run_signature_ok = all(bool(app.run_signature) for app in outcome.results)
+            artifact_set_ok = all(bool(app.artifact_set_hash) for app in outcome.results)
+            print("\nPLAN PROVENANCE (preview)")
+            print(f"{'OK' if static_run_id_ok else 'FAIL'} static_run_id present")
+            print(f"{'OK' if run_signature_ok else 'FAIL'} run_signature present")
+            print(f"{'OK' if artifact_set_ok else 'FAIL'} artifact_set_hash present")
         if session_stamp and persist_enabled:
             _render_persistence_footer(
                 session_stamp,
@@ -1895,48 +1920,71 @@ def _render_diagnostic_app_summary(
     outcome: RunOutcome,
     *,
     session_stamp: str | None,
+    compact_mode: bool = True,
 ) -> tuple[list[tuple[str, str, str]], list[str]]:
     run_map = _load_run_map_for_session(session_stamp)
-    headers = ["App", "Artifacts", "Executed", "Persisted", "Identity", "Linkage", "Notes"]
+    headers = ["App", "Artifacts", "Executed", "Persisted", "Identity", "Linkage", "RunID", "Sig"]
     rows: list[list[str]] = []
+    issue_rows: list[list[str]] = []
     warnings: list[tuple[str, str, str]] = []
     linkage_states: list[str] = []
+    label_map: dict[str, str] = {}
     for app in outcome.results:
+        label_map[app.package_name] = app.app_label or app.package_name
         identity = "VALID" if app.identity_valid else "INVALID"
         identity_note = app.identity_error_reason if app.identity_valid is False else None
+        run_map_entry: Mapping[str, object] | None = None
+        db_link_entry: Mapping[str, object] | None = None
+        run_map_note: str | None = None
+        if run_map:
+            run_map_entry, run_map_note = _resolve_run_map_entry(app, run_map)
+        if session_stamp:
+            db_link_entry, _ = _fetch_db_linkage(session_stamp, app.package_name)
         linkage, linkage_note = _diagnostic_linkage_status(app, run_map=run_map, session_stamp=session_stamp)
         linkage_states.append(linkage)
-        notes = []
-        if identity_note:
-            notes.append(identity_note)
-        else:
-            base_prefix = _hash_prefix(app.base_apk_sha256)
-            set_prefix = _hash_prefix(app.artifact_set_hash)
-            if base_prefix or set_prefix:
-                notes.append(
-                    f"identity base={base_prefix or 'unknown'} set={set_prefix or 'unknown'} "
-                    f"(order=split_name_lex; count={app.discovered_artifacts})"
-                )
-        if linkage_note:
-            notes.append(linkage_note)
+        base_prefix = _hash_prefix(app.base_apk_sha256)
+        set_prefix = _hash_prefix(app.artifact_set_hash)
+        identity_cell = "b=— s=—"
+        if base_prefix or set_prefix:
+            identity_cell = f"b={base_prefix or '—'} s={set_prefix or '—'}"
+        static_run_id = None
+        run_signature = app.run_signature
+        if linkage.startswith("VALID"):
+            source = run_map_entry if "run_map" in linkage else db_link_entry
+            if source:
+                static_run_id = source.get("static_run_id")
+                run_signature = run_signature or source.get("run_signature")
         rows.append(
             [
                 app.app_label or app.package_name,
                 str(app.discovered_artifacts),
                 str(app.executed_artifacts),
                 str(app.persisted_artifacts),
-                identity,
+                identity_cell,
                 linkage,
-                "; ".join(notes) if notes else "—",
+                str(static_run_id) if static_run_id is not None else "—",
+                _hash_prefix(run_signature) or "—",
             ]
         )
         if identity_note:
             warnings.append(("Identity", app.package_name, identity_note))
+            issue_rows.append(
+                ["Identity", label_map[app.package_name], identity_note]
+            )
         if linkage_note and not linkage.startswith("VALID"):
             warnings.append(("Linkage", app.package_name, linkage_note))
+            issue_rows.append(
+                ["Linkage", label_map[app.package_name], linkage_note]
+            )
     if rows:
         print("\nDiagnostic — Per-app summary")
         table_utils.render_table(headers, rows)
+    if compact_mode and issue_rows:
+        print("\nDiagnostic — Issues")
+        for row in issue_rows:
+            if len(row[2]) > 80:
+                row[2] = f"{row[2][:79]}…"
+        table_utils.render_table(["Type", "App", "Note"], issue_rows)
     return warnings, linkage_states
 
 
@@ -2252,6 +2300,47 @@ def _render_persistence_footer(
         "permission_audit_apps": snapshot_apps,
     }
     missing = [name for name, value in required_counts.items() if not value]
+    audit_error_tables: list[str] = []
+    if audit_counts:
+        for table, (_, status) in audit_counts.items():
+            if isinstance(status, str) and status.startswith("ERROR"):
+                audit_error_tables.append(table)
+
+    def _format_list(items: list[str], *, limit: int = 5) -> str:
+        if not items:
+            return ""
+        unique = sorted(set(items))
+        preview = ", ".join(unique[:limit])
+        remaining = len(unique) - limit
+        if remaining > 0:
+            preview += f", +{remaining} more"
+        return preview
+
+    db_verification_status: str | None = None
+    audit_static_run_id = audit.static_run_id if audit and hasattr(audit, "static_run_id") else None
+    if audit:
+        if audit.is_group_scope:
+            db_verification_status = (
+                "OK (group scope)"
+                if not missing
+                else "ERROR (missing " + ", ".join(sorted(missing)) + ")"
+            )
+        elif audit.run_id is None:
+            if audit.is_orphan:
+                db_verification_status = "ORPHAN (run_id missing)"
+            elif audit.is_legacy:
+                db_verification_status = "LEGACY (run_id missing)"
+            else:
+                db_verification_status = "SKIPPED (run_id missing)"
+        elif missing:
+            db_verification_status = "ERROR (missing " + ", ".join(sorted(missing)) + ")"
+        else:
+            db_verification_status = "OK (canonical tables populated)"
+        if run_status == "ABORTED":
+            db_verification_status = "ABORTED (counts may be partial)"
+
+    db_verification_ok = bool(db_verification_status and db_verification_status.startswith("OK"))
+    db_engine = str(DB_CONFIG.get("engine", "")).lower()
 
     if run_status == "ABORTED":
         reason_token = abort_reason or abort_signal or "SIGINT"
@@ -2272,9 +2361,19 @@ def _render_persistence_footer(
             preview += f", +{remaining} more"
         print(f"  {'status'.ljust(width)} : WARN (canonical snapshots failed)")
         print(f"  {'canonical_failures'.ljust(width)} : {len(unique_failures)} ({preview})")
+    elif audit_error_tables:
+        print(
+            f"  {'status'.ljust(width)} : WARN (canonical checks failed: {_format_list(audit_error_tables)})"
+        )
     elif had_errors or missing:
-        reason = "missing canonical tables" if missing else "see logs"
-        print(f"  {'status'.ljust(width)} : ERROR ({reason})")
+        missing_preview = _format_list(missing)
+        backend_note = " (backend=sqlite)" if db_engine == "sqlite" else ""
+        if missing and db_verification_ok:
+            reason = f"missing canonical tables: {missing_preview}{backend_note}".strip()
+            print(f"  {'status'.ljust(width)} : WARN ({reason})")
+        else:
+            reason = f"missing canonical tables: {missing_preview}{backend_note}".strip() if missing else "see logs"
+            print(f"  {'status'.ljust(width)} : ERROR ({reason})")
     else:
         if audit and audit.is_group_scope:
             print(f"  {'status'.ljust(width)} : OK (group scope)")
@@ -2282,29 +2381,12 @@ def _render_persistence_footer(
             print(f"  {'status'.ljust(width)} : OK")
 
     if audit:
-        audit_static_run_id = audit.static_run_id if hasattr(audit, "static_run_id") else None
-        if audit.is_group_scope:
-            status_text = "OK (group scope)" if not missing else "ERROR (missing " + ", ".join(sorted(missing)) + ")"
-        elif audit.run_id is None:
-            if audit.is_orphan:
-                status_text = "ORPHAN (run_id missing)"
-            elif audit.is_legacy:
-                status_text = "LEGACY (run_id missing)"
-            else:
-                status_text = "SKIPPED (run_id missing)"
-        elif missing:
-            status_text = (
-                "ERROR (missing " + ", ".join(sorted(missing)) + ")"
-            )
-        else:
-            status_text = "OK (canonical tables populated)"
+        status_text = db_verification_status or "SKIPPED"
         prefix = (
             f"static_run_id={audit_static_run_id} "
             if audit_static_run_id is not None
             else ""
         )
-        if run_status == "ABORTED":
-            status_text = "ABORTED (counts may be partial)"
         print(f"  {'db_verification'.ljust(width)} : {status_text} {prefix}".rstrip())
 
     high_downgraded = 0

@@ -146,10 +146,16 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
         return None
 
     if params.dry_run:
+        pipeline_version = os.getenv("SCYTALEDROID_PIPELINE_VERSION") or getattr(
+            params, "analysis_version", None
+        )
+        run_sig_version = os.getenv("SCYTALEDROID_RUN_SIGNATURE_VERSION") or "v1"
         print("DIAGNOSTIC MODE (non-persisting)")
         print("────────────────────────────────")
         print("persist=false  evidence_pack=false  plan_generation=false")
         print("identity_required=true  linkage_required=true")
+        print("metadata_mode=partial  linkage_sources=run_map,db_link")
+        print(f"pipeline_version={pipeline_version or '—'}  run_signature_version={run_sig_version}")
         if params.session_stamp:
             print(
                 f"Session: {params.session_stamp}  Profile: {params.profile_label}  "

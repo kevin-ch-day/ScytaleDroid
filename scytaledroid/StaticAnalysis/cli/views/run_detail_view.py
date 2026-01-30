@@ -21,7 +21,20 @@ _SEVERITY_LABELS: Mapping[SeverityLevel, tuple[str, str]] = {
 SEVERITY_TOKEN_ORDER = ("H", "M", "L", "I")
 
 
-def render_app_table(results: Sequence[AppRunResult], *, diagnostic: bool = False) -> None:
+def _truncate(value: str, limit: int) -> str:
+    if len(value) <= limit:
+        return value
+    if limit <= 1:
+        return value[:limit]
+    return f"{value[: max(0, limit - 1)]}…"
+
+
+def render_app_table(
+    results: Sequence[AppRunResult],
+    *,
+    diagnostic: bool = False,
+    compact: bool = False,
+) -> None:
     rows: list[list[str]] = []
     for idx, app_result in enumerate(results, start=1):
         totals = app_result.severity_totals()
@@ -29,7 +42,7 @@ def render_app_table(results: Sequence[AppRunResult], *, diagnostic: bool = Fals
         version = "—"
         target_sdk = "—"
         display_name = app_result.package_name
-        suppressed_label = "suppressed (diagnostic)" if diagnostic else "—"
+        suppressed_label = "suppressed" if diagnostic else "—"
         if base_report:
             version_name = base_report.manifest.version_name or "—"
             version_code = base_report.manifest.version_code
@@ -50,16 +63,31 @@ def render_app_table(results: Sequence[AppRunResult], *, diagnostic: bool = Fals
             if app_result.target_sdk is not None:
                 target_sdk = app_result.target_sdk
             elif diagnostic:
-                target_sdk = suppressed_label
+                # Use a short placeholder to keep the column tight in diagnostic mode.
+                target_sdk = "—"
         signer = app_result.signer or "—"
         if diagnostic and signer == "—":
             signer = suppressed_label
+        if diagnostic and compact:
+            display_name = _truncate(display_name, 24)
+            version = _truncate(version, 28)
+            rows.append(
+                [
+                    str(idx),
+                    display_name,
+                    version,
+                    str(totals.get("H", 0)),
+                    str(totals.get("M", 0)),
+                    str(totals.get("L", 0)),
+                    str(totals.get("I", 0)),
+                ]
+            )
+            continue
         rows.append(
             [
                 str(idx),
                 display_name,
-                version,
-                f"targetSdk={target_sdk}",
+                str(target_sdk),
                 signer,
                 str(totals.get('H', 0)),
                 str(totals.get('M', 0)),
@@ -67,7 +95,10 @@ def render_app_table(results: Sequence[AppRunResult], *, diagnostic: bool = Fals
                 str(totals.get('I', 0)),
             ]
         )
-    headers = ["#", "App", "Version", "Target", "Signer", "High", "Medium", "Low", "Information"]
+    if diagnostic and compact:
+        headers = ["#", "App", "Version", "H", "M", "L", "I"]
+    else:
+        headers = ["#", "App", "Target", "Signer", "High", "Medium", "Low", "Info"]
     print()
     table_utils.render_table(headers, rows)
 
