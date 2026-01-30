@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -164,7 +165,7 @@ def static_analysis_menu() -> None:
                 print(status_messages.status("This workflow requires choosing a single app.", level="warn"))
                 continue
 
-        _, show_splits = collect_view_options(command)
+        _, show_splits, show_artifacts = collect_view_options(command)
 
         params = RunParameters(
             profile=command.profile,
@@ -174,6 +175,8 @@ def static_analysis_menu() -> None:
                 default_custom_tests() if command.profile == "custom" else tuple()
             ),
         )
+        if show_artifacts:
+            params = replace(params, artifact_detail=True)
         if command.section == "dev":
             # Make dev runs easy to identify
             params = inject_dev_session_label(params, selection)

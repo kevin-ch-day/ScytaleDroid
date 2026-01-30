@@ -6,9 +6,16 @@ from scytaledroid.StaticAnalysis.cli.core.models import AppRunResult
 from scytaledroid.StaticAnalysis.cli.execution import results
 
 
-def _app(package: str, signature: str | None = None) -> AppRunResult:
+def _app(
+    package: str,
+    signature: str | None = None,
+    signature_version: str | None = None,
+) -> AppRunResult:
     app = AppRunResult(package_name=package, category="test")
     app.run_signature = signature
+    if signature and signature_version is None:
+        signature_version = "v1"
+    app.run_signature_version = signature_version
     return app
 
 

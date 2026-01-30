@@ -64,13 +64,14 @@ def render_reset_outcome(outcome: object) -> None:
     actions.render_reset_outcome(outcome)
 
 
-def collect_view_options(command: "Command") -> tuple[bool, bool]:
-    prompt = "View options: [D]etails  [S]plit breakdown  [Enter] continue"
+def collect_view_options(command: "Command") -> tuple[bool, bool, bool]:
+    prompt = "View options: [D]etails  [S]plit breakdown  [A]rtifact detail  [Enter] continue"
     response = prompt_utils.prompt_text(prompt, required=False).strip().lower()
     want_details = "d" in response
     want_splits = "s" in response
+    want_artifacts = "a" in response
     if not want_details:
-        return want_details, want_splits
+        return want_details, want_splits, want_artifacts
     print()
     menu_utils.print_section("Details")
     details_map = {
@@ -93,13 +94,14 @@ def collect_view_options(command: "Command") -> tuple[bool, bool]:
         ],
         "5": [
             "Runs full detector set without persisting results",
-            "Verbose output to surface warnings/errors",
+            "Verbose output surfaces warnings/errors",
+            "Artifact detail requires [A]rtifact detail toggle",
             "Intended for debugging pipeline issues",
         ],
     }
     for line in details_map.get(command.id, ("No additional details.",)):
         print(f"• {line}")
-    return want_details, want_splits
+    return want_details, want_splits, want_artifacts
 
 
 def build_dev_selection(groups, shortcut_id):

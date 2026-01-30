@@ -50,6 +50,11 @@ def _default_sqlite_path() -> Path:
     return base / "scytaledroid.sqlite"
 
 
+def _sqlite_allow_write() -> bool:
+    raw = os.environ.get("SCYTALEDROID_SQLITE_ALLOW_WRITE", "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
 def _load_from_env() -> Dict[str, Union[str, int]]:
     _load_dotenv()
     # When running tests via pytest, force default SQLite to avoid hitting real DBs.
@@ -60,10 +65,14 @@ def _load_from_env() -> Dict[str, Union[str, int]]:
     if not raw_url:
         # Default: SQLite under data/db/
         sqlite_path = _default_sqlite_path()
+        readonly = not _sqlite_allow_write()
+        if any("pytest" in arg for arg in sys.argv[:1]) or "PYTEST_CURRENT_TEST" in os.environ:
+            readonly = False
         return {
             "engine": "sqlite",
             "database": str(sqlite_path),
             "charset": "utf8",
+            "readonly": readonly,
         }
 
     parsed = urlparse(raw_url)
@@ -72,10 +81,14 @@ def _load_from_env() -> Dict[str, Union[str, int]]:
         db_path = parsed.path or parsed.netloc
         if not db_path:
             db_path = str(_default_sqlite_path())
+        readonly = not _sqlite_allow_write()
+        if any("pytest" in arg for arg in sys.argv[:1]) or "PYTEST_CURRENT_TEST" in os.environ:
+            readonly = False
         return {
             "engine": "sqlite",
             "database": db_path,
             "charset": "utf8",
+            "readonly": readonly,
         }
 
     if scheme in {"mysql", "mariadb"}:

@@ -68,6 +68,7 @@ class RunParameters:
     dry_run: bool = False
     session_stamp: str | None = field(default_factory=make_session_stamp)
     verbose_output: bool = False
+    artifact_detail: bool = False
     permission_snapshot_refresh: bool = field(default_factory=_default_permission_refresh)
 
     @property

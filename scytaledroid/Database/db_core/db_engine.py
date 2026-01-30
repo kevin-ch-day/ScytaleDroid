@@ -236,8 +236,14 @@ def _connect_mysql() -> pymysql.Connection:
 
 def _connect_sqlite() -> sqlite3.Connection:
     db_path = Path(str(DB_CONFIG.get("database", "scytaledroid.sqlite")))
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(str(db_path))
+    readonly = bool(DB_CONFIG.get("readonly", False))
+    if not readonly:
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+    if readonly:
+        uri = f"file:{db_path}?mode=ro"
+        connection = sqlite3.connect(uri, uri=True)
+    else:
+        connection = sqlite3.connect(str(db_path))
     connection.row_factory = sqlite3.Row
     connection.isolation_level = None  # explicit commit/rollback control
     return connection

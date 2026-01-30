@@ -43,6 +43,7 @@ from ...persistence.ingest import ingest_baseline_payload
 from .scan_flow import format_duration
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_core.db_config import DB_CONFIG
+from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
 from scytaledroid.Config import app_config
 from scytaledroid.Database.db_scripts.static_run_audit import collect_static_run_counts
 from scytaledroid.StaticAnalysis.modules.permissions.permission_console_rendering import (
@@ -59,6 +60,7 @@ from scytaledroid.StaticAnalysis.risk.permission import (
 )
 
 SNAPSHOT_PREFIX = "perm-audit:app:"
+SUPPORTED_RUN_SIGNATURE_VERSIONS = {"v1"}
 
 
 
@@ -700,11 +702,13 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                     )
         diagnostic_warnings: list[tuple[str, str, str]] = []
         linkage_states: list[str] = []
+        run_id_states: list[bool] = []
         if params.dry_run and outcome.results:
-            diagnostic_warnings, linkage_states = _render_diagnostic_app_summary(
+            diagnostic_warnings, linkage_states, run_id_states = _render_diagnostic_app_summary(
                 outcome,
                 session_stamp=session_stamp,
                 compact_mode=compact_mode,
+                verbose_mode=params.verbose_output,
             )
         if compact_mode:
             print(
@@ -719,6 +723,11 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                 print("\nTop warnings/anomalies")
                 for line in grouped_warnings[:5]:
                     print(status_messages.status(line, level="warn"))
+            guard_ok, guard_detail = _schema_guard_status()
+            guard_label = f"Schema guard: {'OK' if guard_ok else 'FAIL'}"
+            if guard_detail:
+                guard_label += f" ({guard_detail})"
+            print("\n" + guard_label)
             pipeline_version = os.getenv("SCYTALEDROID_PIPELINE_VERSION") or getattr(
                 params, "analysis_version", None
             )
@@ -732,13 +741,16 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             print(f"{'OK' if identity_ok else 'FAIL'} identity valid (artifact_set_hash computed)")
             ready = pipeline_version and linkage_ok and identity_ok
             print(f"Result: {'READY' if ready else 'NOT READY'}")
-            static_run_id_ok = linkage_ok
+            static_run_id_ok = all(run_id_states) if run_id_states else False
             run_signature_ok = all(bool(app.run_signature) for app in outcome.results)
             artifact_set_ok = all(bool(app.artifact_set_hash) for app in outcome.results)
             print("\nPLAN PROVENANCE (preview)")
-            print(f"{'OK' if static_run_id_ok else 'FAIL'} static_run_id present")
-            print(f"{'OK' if run_signature_ok else 'FAIL'} run_signature present")
-            print(f"{'OK' if artifact_set_ok else 'FAIL'} artifact_set_hash present")
+            for line in _plan_provenance_lines(
+                run_id_states,
+                run_signature_ok,
+                artifact_set_ok,
+            ):
+                print(line)
         if session_stamp and persist_enabled:
             _render_persistence_footer(
                 session_stamp,
@@ -1887,6 +1899,14 @@ def _diagnostic_linkage_status(
         return "VALID (db_link)", f"static_run_id={db_link_entry.get('static_run_id')}"
 
     if app_result.run_signature:
+        run_sig_version = getattr(app_result, "run_signature_version", None)
+        if not run_sig_version:
+            return "UNAVAILABLE", "UNAVAILABLE: db_lookup_blocked: missing_signature_version"
+        if run_sig_version not in SUPPORTED_RUN_SIGNATURE_VERSIONS:
+            return (
+                "UNAVAILABLE",
+                f"UNAVAILABLE: db_lookup_blocked: unsupported_signature_version={run_sig_version}",
+            )
         lookup_entry, lookup_note = _fetch_db_linkage_by_signature(
             app_result.package_name,
             app_result.run_signature,
@@ -1895,6 +1915,12 @@ def _diagnostic_linkage_status(
             pipeline_version = lookup_entry.get("pipeline_version")
             if pipeline_version in (None, ""):
                 return "INVALID", "db_lookup missing pipeline_version"
+            lookup_version = lookup_entry.get("run_signature_version")
+            if lookup_version and lookup_version not in SUPPORTED_RUN_SIGNATURE_VERSIONS:
+                return (
+                    "UNAVAILABLE",
+                    f"UNAVAILABLE: db_lookup_blocked: unsupported_signature_version={lookup_version}",
+                )
             return "VALID (db_lookup)", f"static_run_id={lookup_entry.get('static_run_id')}"
         if lookup_note:
             return "UNAVAILABLE", f"UNAVAILABLE: {lookup_note}"
@@ -1921,13 +1947,16 @@ def _render_diagnostic_app_summary(
     *,
     session_stamp: str | None,
     compact_mode: bool = True,
-) -> tuple[list[tuple[str, str, str]], list[str]]:
+    verbose_mode: bool = False,
+) -> tuple[list[tuple[str, str, str]], list[str], list[bool]]:
     run_map = _load_run_map_for_session(session_stamp)
     headers = ["App", "Artifacts", "Executed", "Persisted", "Identity", "Linkage", "RunID", "Sig"]
     rows: list[list[str]] = []
     issue_rows: list[list[str]] = []
     warnings: list[tuple[str, str, str]] = []
     linkage_states: list[str] = []
+    run_id_states: list[bool] = []
+    trace_rows: list[list[str]] = []
     label_map: dict[str, str] = {}
     for app in outcome.results:
         label_map[app.package_name] = app.app_label or app.package_name
@@ -1949,8 +1978,25 @@ def _render_diagnostic_app_summary(
             identity_cell = f"b={base_prefix or '—'} s={set_prefix or '—'}"
         static_run_id = None
         run_signature = app.run_signature
+        lookup_entry: Mapping[str, object] | None = None
+        if linkage.startswith("VALID (db_lookup)") and app.run_signature:
+            lookup_entry, _ = _fetch_db_linkage_by_signature(
+                app.package_name,
+                app.run_signature,
+            )
+        trace_note = None
         if linkage.startswith("VALID"):
-            source = run_map_entry if "run_map" in linkage else db_link_entry
+            if "run_map" in linkage:
+                source = run_map_entry
+                trace_note = "resolved_from=run_map"
+            elif "db_link" in linkage:
+                source = db_link_entry
+                trace_note = "resolved_from=db_link"
+            elif "db_lookup" in linkage:
+                source = lookup_entry
+                trace_note = f"resolved_from=db_lookup (run_signature={app.run_signature_version or '—'} match)"
+            else:
+                source = None
             if source:
                 static_run_id = source.get("static_run_id")
                 run_signature = run_signature or source.get("run_signature")
@@ -1966,6 +2012,7 @@ def _render_diagnostic_app_summary(
                 _hash_prefix(run_signature) or "—",
             ]
         )
+        run_id_states.append(static_run_id is not None)
         if identity_note:
             warnings.append(("Identity", app.package_name, identity_note))
             issue_rows.append(
@@ -1976,6 +2023,8 @@ def _render_diagnostic_app_summary(
             issue_rows.append(
                 ["Linkage", label_map[app.package_name], linkage_note]
             )
+        if verbose_mode and trace_note:
+            trace_rows.append([label_map[app.package_name], trace_note])
     if rows:
         print("\nDiagnostic — Per-app summary")
         table_utils.render_table(headers, rows)
@@ -1985,7 +2034,10 @@ def _render_diagnostic_app_summary(
             if len(row[2]) > 80:
                 row[2] = f"{row[2][:79]}…"
         table_utils.render_table(["Type", "App", "Note"], issue_rows)
-    return warnings, linkage_states
+    if verbose_mode and trace_rows:
+        print("\nDiagnostic — Linkage trace")
+        table_utils.render_table(["App", "Resolution"], trace_rows)
+    return warnings, linkage_states, run_id_states
 
 
 def _group_diagnostic_warnings(
@@ -2007,6 +2059,60 @@ def _group_diagnostic_warnings(
             package_list = f"{package_list} (+{extra} more)"
         lines.append(f"{category} {note}: {len(packages_sorted)} apps — {package_list}")
     return sorted(lines)
+
+
+def _schema_guard_status() -> tuple[bool, str]:
+    required_columns = {
+        "static_session_run_links": {
+            "session_stamp",
+            "package_name",
+            "static_run_id",
+            "pipeline_version",
+            "run_signature",
+            "run_signature_version",
+            "base_apk_sha256",
+            "artifact_set_hash",
+        },
+        "static_analysis_runs": {
+            "id",
+            "pipeline_version",
+            "run_signature",
+            "run_signature_version",
+            "base_apk_sha256",
+            "artifact_set_hash",
+        },
+    }
+    missing: list[str] = []
+    for table, expected in required_columns.items():
+        comparison = db_diagnostics.compare_columns(table, expected)
+        if comparison.get("missing"):
+            missing.extend(f"{table}.{col}" for col in comparison["missing"])
+    if missing:
+        preview = ", ".join(missing[:6])
+        remaining = len(missing) - 6
+        if remaining > 0:
+            preview = f"{preview}, +{remaining} more"
+        return False, f"missing columns: {preview}"
+    version = db_diagnostics.get_schema_version()
+    return True, f"{version}" if version else "unknown"
+
+
+def _plan_provenance_lines(
+    run_id_states: list[bool],
+    run_signature_ok: bool,
+    artifact_set_ok: bool,
+) -> list[str]:
+    lines: list[str] = []
+    if run_id_states and all(run_id_states):
+        lines.append("OK static_run_id present")
+    else:
+        missing = sum(1 for ok in run_id_states if not ok)
+        total = len(run_id_states)
+        lines.append(f"FAIL static_run_id present (missing {missing}/{total})")
+        lines.append("    Fix: resolve linkage (run_map/db_link/db_lookup) so RunID is present.")
+    lines.append(f"{'OK' if run_signature_ok else 'FAIL'} run_signature present")
+    lines.append(f"{'OK' if artifact_set_ok else 'FAIL'} artifact_set_hash present")
+    return lines
 
 
 def _render_persistence_footer(

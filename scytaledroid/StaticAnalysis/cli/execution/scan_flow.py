@@ -67,9 +67,14 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
     completed_artifacts = 0
     total_artifacts = sum(len(_dedupe_artifacts(group.artifacts)) for group in selection.groups)
     show_splits = _show_split_breakdown()
-    show_artifacts = not params.dry_run or params.verbose_output
+    show_artifacts = (not params.dry_run) or bool(params.artifact_detail)
     display_name_map = load_display_name_map(selection.groups)
-    progress = _PipelineProgress(total=total_artifacts, show_splits=show_splits, show_artifacts=show_artifacts)
+    progress = _PipelineProgress(
+        total=total_artifacts,
+        show_splits=show_splits,
+        show_artifacts=show_artifacts,
+        show_checkpoints=not params.dry_run,
+    )
     config_hash = _compute_config_hash(params)
     pipeline_version = os.getenv("SCYTALEDROID_PIPELINE_VERSION") or getattr(
         params, "analysis_version", None
@@ -452,10 +457,17 @@ def _show_split_breakdown() -> bool:
 
 
 class _PipelineProgress:
-    def __init__(self, total: int, show_splits: bool, show_artifacts: bool) -> None:
+    def __init__(
+        self,
+        total: int,
+        show_splits: bool,
+        show_artifacts: bool,
+        show_checkpoints: bool,
+    ) -> None:
         self.total = max(1, int(total))
         self.show_splits = show_splits
         self.show_artifacts = show_artifacts
+        self.show_checkpoints = show_checkpoints
         self._start = time.monotonic()
         self._last_len = 0
         self._last_checkpoint = 0
@@ -472,6 +484,8 @@ class _PipelineProgress:
         if self.show_splits:
             line = f"[{index:2d}/{self.total}] {label} OK"
             print(line)
+            return
+        if not self.show_checkpoints:
             return
         if index == self.total or (index - self._last_checkpoint) >= 5:
             self._last_checkpoint = index
