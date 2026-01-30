@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from scytaledroid.DeviceAnalysis import adb_utils
-from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
+from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
 from scytaledroid.Utils.evidence_store import filesystem_safe_slug
 from scytaledroid.Config import app_config
 from pathlib import Path
@@ -11,6 +11,7 @@ from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
 from scytaledroid.DynamicAnalysis.observers.proxy_capture import resolve_mitmdump_path
 import json
 import socket
+from scytaledroid.StaticAnalysis.core.repository import group_artifacts, list_categories, list_packages, load_profile_map
 
 
 def dynamic_analysis_menu() -> None:
@@ -122,11 +123,9 @@ def dynamic_analysis_menu() -> None:
                 "2": "Standard",
                 "3": "Extended",
             }.get(selection, "Standard")
-            package_name = prompt_utils.prompt_text(
-                "Package name",
-                required=True,
-                error_message="Please provide a package name.",
-            )
+            package_name = _select_dynamic_target()
+            if not package_name:
+                continue
             static_override = prompt_utils.prompt_text(
                 "Static run id (optional)",
                 required=False,
@@ -171,6 +170,116 @@ def dynamic_analysis_menu() -> None:
 
         print(status_messages.status("Dynamic analysis workflow not implemented yet.", level="warn"))
         prompt_utils.press_enter_to_continue()
+
+
+def _select_dynamic_target() -> str | None:
+    print()
+    menu_utils.print_header("Dynamic Run Target")
+    target_options = [
+        MenuOption("1", "App (select from available artifacts)"),
+        MenuOption("2", "Profile (select app from profile)"),
+        MenuOption("3", "Custom package name"),
+    ]
+    target_spec = MenuSpec(items=target_options, exit_label="Cancel", show_exit=True)
+    menu_utils.render_menu(target_spec)
+    choice = prompt_utils.get_choice([option.key for option in target_options] + ["0"], default="1")
+    if choice == "0":
+        return None
+
+    groups = group_artifacts()
+    if choice == "1":
+        package_name = _select_package_from_groups(groups, title="App selection")
+        if package_name:
+            return package_name
+        return _prompt_custom_package()
+
+    if choice == "2":
+        package_name = _select_profile_package(groups)
+        if package_name:
+            return package_name
+        return _prompt_custom_package()
+
+    return _prompt_custom_package()
+
+
+def _select_profile_package(groups) -> str | None:
+    categories = list_categories(groups)
+    if not categories:
+        print(status_messages.status("No profile data available for selection.", level="warn"))
+        return None
+    print()
+    print("Dynamic Run Scope (Profile)")
+    print("-" * 86)
+    rows = [[str(idx), category, str(count)] for idx, (category, count) in enumerate(categories, start=1)]
+    table_utils.render_table(["#", "Profile", "Apps"], rows, compact=True)
+    print(f"Status: profiles={len(categories)}")
+    index = _choose_index("Select profile #", len(categories))
+    if index is None:
+        return None
+    category_name, _ = categories[index]
+    profile_map = load_profile_map(groups)
+    scoped_groups = tuple(
+        group
+        for group in groups
+        if (
+            profile_map.get(group.package_name.lower())
+            or group.category
+            or "Uncategorized"
+        )
+        == category_name
+    )
+    if not scoped_groups:
+        print(status_messages.status("No apps found for that profile.", level="warn"))
+        return None
+    return _select_package_from_groups(scoped_groups, title=f"{category_name} apps")
+
+
+def _select_package_from_groups(groups, *, title: str) -> str | None:
+    packages = list_packages(groups)
+    if not packages:
+        print(status_messages.status("No apps available for selection.", level="warn"))
+        return None
+    print()
+    menu_utils.print_header(title, "Select a package to run")
+    rows = []
+    for idx, (package, _version, count, app_label) in enumerate(packages, start=1):
+        display = app_label or package
+        rows.append([str(idx), display, package, str(count)])
+    _render_package_table(rows)
+    index = _choose_index("Select app #", len(packages))
+    if index is None:
+        return None
+    package_name, _, _, _ = packages[index]
+    return package_name
+
+
+def _render_package_table(rows, *, max_preview: int = 15) -> None:
+    if len(rows) <= max_preview:
+        table_utils.render_table(["#", "App", "Package", "Artifacts"], rows, compact=True)
+        return
+    preview = rows[:max_preview]
+    table_utils.render_table(["#", "App", "Package", "Artifacts"], preview, compact=True)
+    response = prompt_utils.prompt_text("Press L to list all, or Enter to continue", required=False)
+    if response.strip().lower() == "l":
+        table_utils.render_table(["#", "App", "Package", "Artifacts"], rows, compact=True)
+
+
+def _choose_index(prompt: str, total: int) -> int | None:
+    if total <= 0:
+        return None
+    options = [str(idx) for idx in range(1, total + 1)]
+    choice = prompt_utils.get_choice(options + ["0"], default="1", prompt=f"{prompt} ")
+    if choice == "0":
+        return None
+    return int(choice) - 1
+
+
+def _prompt_custom_package() -> str:
+    return prompt_utils.prompt_text(
+        "Package name",
+        required=True,
+        error_message="Please provide a package name.",
+    )
 
 
 def _resolve_latest_static_run_id(package_name: str) -> int | None:
