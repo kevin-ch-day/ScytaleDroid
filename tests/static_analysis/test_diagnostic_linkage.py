@@ -76,6 +76,17 @@ def test_linkage_valid_db_lookup(monkeypatch):
     assert note == "static_run_id=21"
 
 
+def test_linkage_db_lookup_blocked_for_unsupported_version(monkeypatch):
+    monkeypatch.setattr(results.core_q, "run_sql", lambda *args, **kwargs: None)
+    status, note = results._diagnostic_linkage_status(
+        _app("com.example.app", signature="sig", signature_version="v0"),
+        run_map=None,
+        session_stamp="20260130-000000",
+    )
+    assert status == "UNAVAILABLE"
+    assert "unsupported_signature_version" in (note or "")
+
+
 def test_linkage_invalid_mismatch(monkeypatch):
     def fake_run_sql(query, params=None, fetch="none", **kwargs):
         if "static_session_run_links" in query:

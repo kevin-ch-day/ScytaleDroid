@@ -18,7 +18,13 @@ from scytaledroid.DynamicAnalysis.core.environment import EnvironmentManager
 from scytaledroid.DynamicAnalysis.core.evidence_pack import EvidencePackWriter
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord, ObserverRecord, RunManifest
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
-from scytaledroid.DynamicAnalysis.plans.loader import load_dynamic_plan, validate_dynamic_plan
+from scytaledroid.DynamicAnalysis.plans.loader import (
+    PlanValidationError,
+    build_plan_validation_event,
+    load_dynamic_plan,
+    render_plan_validation_block,
+    validate_dynamic_plan,
+)
 from scytaledroid.DynamicAnalysis.core.session import DynamicSessionConfig
 from scytaledroid.DynamicAnalysis.core.target_manager import TargetManager
 from scytaledroid.DynamicAnalysis.observers.base import Observer
@@ -360,17 +366,18 @@ class DynamicRunOrchestrator:
             return None
         try:
             payload = load_dynamic_plan(self.config.plan_path)
-            valid, error = validate_dynamic_plan(
+            validation = validate_dynamic_plan(
                 payload,
                 package_name=self.config.package_name,
                 static_run_id=self.config.static_run_id,
             )
-            if not valid:
+            self._emit_plan_validation(validation)
+            if not validation.is_pass:
                 self.logger.warning(
                     "Dynamic plan validation failed",
-                    extra={"plan_path": self.config.plan_path, "error": error},
+                    extra={"plan_path": self.config.plan_path, "validation": build_plan_validation_event(validation)},
                 )
-                return None
+                raise PlanValidationError(validation)
             return payload
         except Exception as exc:  # noqa: BLE001
             self.logger.warning(
@@ -378,6 +385,14 @@ class DynamicRunOrchestrator:
                 extra={"plan_path": self.config.plan_path, "error": str(exc)},
             )
             return None
+
+    def _emit_plan_validation(self, validation) -> None:
+        if self.config.interactive:
+            print(render_plan_validation_block(validation))
+        self.logger.info(
+            "Dynamic plan validation",
+            extra=build_plan_validation_event(validation),
+        )
 
     def _summarize_plan(self, plan_payload: dict[str, object] | None) -> dict[str, object] | None:
         if not plan_payload:

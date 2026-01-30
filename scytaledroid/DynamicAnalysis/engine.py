@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 from typing import Any, Mapping
@@ -12,7 +13,12 @@ from scytaledroid.Utils.LoggingUtils import logging_engine
 from scytaledroid.DynamicAnalysis.core import DynamicSessionConfig, DynamicSessionResult, run_dynamic_session
 from scytaledroid.DynamicAnalysis.core.evidence_pack import EvidencePackWriter
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord
-from scytaledroid.DynamicAnalysis.plans.loader import load_dynamic_plan, validate_dynamic_plan
+from scytaledroid.DynamicAnalysis.plans.loader import (
+    build_plan_validation_event,
+    load_dynamic_plan,
+    render_plan_validation_block,
+    validate_dynamic_plan,
+)
 from scytaledroid.DynamicAnalysis.probes.registry import run_probe_set
 from scytaledroid.DynamicAnalysis.storage.persistence import persist_dynamic_summary
 
@@ -38,7 +44,34 @@ class DynamicAnalysisEngine:
         self.logger = logging_engine.get_dynamic_logger()
 
     def run(self) -> DynamicEngineResult:
-        plan_payload = self._resolve_plan_payload()
+        plan_payload, validation = self._resolve_plan_payload()
+        if validation and not validation.is_pass:
+            now = datetime.now(timezone.utc)
+            blocked = DynamicSessionResult(
+                package_name=self.config.package_name,
+                duration_seconds=self.config.duration_seconds,
+                started_at=now,
+                ended_at=now,
+                status="blocked",
+                notes="Dynamic execution blocked by plan validation.",
+                errors=list(validation.reasons) if validation.reasons else ["dynamic plan validation failed"],
+            )
+            summary_payload = {
+                "dynamic_run_id": None,
+                "package_name": self.config.package_name,
+                "status": blocked.status,
+                "evidence_path": None,
+                "plan": None,
+                "probes": {},
+                "plan_validation": build_plan_validation_event(validation),
+            }
+            return DynamicEngineResult(
+                config=self.config,
+                session=blocked,
+                plan=None,
+                probe_summary={},
+                summary_payload=summary_payload,
+            )
         session_result = run_dynamic_session(self.config, plan_payload=dict(plan_payload) if plan_payload else None)
         probe_summary = run_probe_set(self.config, plan_payload)
         summary_payload = {
@@ -59,11 +92,11 @@ class DynamicAnalysisEngine:
             summary_payload=summary_payload,
         )
 
-    def _resolve_plan_payload(self) -> Mapping[str, Any] | None:
+    def _resolve_plan_payload(self) -> tuple[Mapping[str, Any] | None, object | None]:
         if self.plan_payload is not None:
-            return self.plan_payload
+            return self.plan_payload, None
         if not self.config.plan_path:
-            return None
+            return None, None
         try:
             payload = load_dynamic_plan(self.config.plan_path)
         except (OSError, ValueError) as exc:
@@ -71,19 +104,28 @@ class DynamicAnalysisEngine:
                 "Failed to load dynamic plan",
                 extra={"plan_path": self.config.plan_path, "error": str(exc)},
             )
-            return None
-        valid, error = validate_dynamic_plan(
+            return None, None
+        validation = validate_dynamic_plan(
             payload,
             package_name=self.config.package_name,
             static_run_id=self.config.static_run_id,
         )
-        if not valid:
+        self._emit_plan_validation(validation)
+        if not validation.is_pass:
             self.logger.warning(
                 "Dynamic plan validation failed",
-                extra={"plan_path": self.config.plan_path, "error": error},
+                extra={"plan_path": self.config.plan_path, "validation": build_plan_validation_event(validation)},
             )
-            return None
-        return payload
+            return None, validation
+        return payload, validation
+
+    def _emit_plan_validation(self, validation) -> None:
+        if self.config.interactive:
+            print(render_plan_validation_block(validation))
+        self.logger.info(
+            "Dynamic plan validation",
+            extra=build_plan_validation_event(validation),
+        )
 
     def _persist_summary(
         self,
