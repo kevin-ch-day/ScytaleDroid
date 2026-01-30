@@ -14,6 +14,7 @@ fi
 
 if [ $# -ge 1 ]; then
   export SCYTALEDROID_DB_URL="$1"
+  shift
 fi
 
 if [ -z "${SCYTALEDROID_DB_URL:-}" ]; then

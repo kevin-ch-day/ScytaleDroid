@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REQ_FILE="$ROOT_DIR/requirements.txt"
 SETUP_STATE_DIR="$ROOT_DIR/.setup"
 REQ_HASH_FILE="$SETUP_STATE_DIR/requirements.sha256"
+ANDROID_TOOLS_LIB="$ROOT_DIR/scripts/lib/android_tools.sh"
 
 command_exists() {
   command -v "$1" >/dev/null 2>&1
@@ -19,6 +20,29 @@ if ! command_exists python3; then
   echo "Error: python3 is not installed. Please install Python 3 (e.g. 'sudo dnf install python3') and re-run." >&2
   exit 1
 fi
+
+ensure_adb() {
+  if command_exists adb; then
+    echo "[Setup] adb is available."
+    return 0
+  fi
+  if command_exists dnf; then
+    if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+      echo "Error: adb not found. Re-run as sudo ./setup.sh to install android-tools." >&2
+      exit 1
+    fi
+    echo "[Setup] adb not found. Installing android-tools..."
+    sudo dnf install -y android-tools >/dev/null 2>&1 || true
+    if ! command_exists adb; then
+      echo "Error: adb still missing after install. Please install android-tools manually and re-run." >&2
+      exit 1
+    fi
+    echo "[Setup] adb installed."
+    return 0
+  fi
+  echo "Error: adb not found and no supported package manager detected. Please install adb and re-run." >&2
+  exit 1
+}
 
 # Ensure pip is available
 if ! python3 -m pip --version >/dev/null 2>&1; then
@@ -61,10 +85,11 @@ requirements_hash() {
   if command_exists sha256sum; then
     sha256sum "$REQ_FILE" | awk '{print $1}'
   else
-    python3 - <<'PY'
+    REQ_FILE="$REQ_FILE" python3 - <<'PY'
 import hashlib
 from pathlib import Path
-path = Path(__file__).resolve().parent / "requirements.txt"
+import os
+path = Path(os.environ["REQ_FILE"]).resolve()
 data = path.read_bytes()
 print(hashlib.sha256(data).hexdigest())
 PY
@@ -120,6 +145,21 @@ if command_exists dnf; then
     echo "[Setup] Fedora detected. Missing system packages were found:"
     echo "        sudo dnf install ${missing[*]}"
   fi
+fi
+
+ensure_adb
+
+if [[ -f "$ANDROID_TOOLS_LIB" ]]; then
+  if ! command_exists sdkmanager; then
+    echo "[Setup] Android command-line tools not detected. Installing..."
+    # shellcheck disable=SC1090
+    source "$ANDROID_TOOLS_LIB"
+    setup_android_tools_main
+  else
+    echo "[Setup] Android command-line tools already available."
+  fi
+else
+  echo "[Setup] Android tools helper not found; skipping Android tools setup."
 fi
 
 echo "[Setup] Completed."

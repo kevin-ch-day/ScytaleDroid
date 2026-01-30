@@ -49,9 +49,9 @@ Key prompts:
 
 Useful helpers:
 
-- `python scripts/ensure_permission_matrix.py` – ensures the matrix table exists
+- `python scripts/operator/ensure_permission_matrix.py` – ensures the matrix table exists
   and prints the latest run + row count (also hints if the refresh was skipped).
-- `python scripts/get_latest_run.py` – quick summary of the most recent run for
+- `python scripts/dev/get_latest_run.py` – quick summary of the most recent run for
   downstream SQL lookups.
 
 ## 3. Persistence behaviour
