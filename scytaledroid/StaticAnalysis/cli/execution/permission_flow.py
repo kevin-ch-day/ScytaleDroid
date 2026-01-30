@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import json
 import os
 from datetime import datetime, timezone
 
@@ -21,6 +20,7 @@ from ..persistence.run_summary import create_static_run_ledger
 from ..core.run_lifecycle import finalize_static_run
 from ..core.abort_reasons import classify_exception, normalize_abort_reason
 from ...session import make_session_stamp, normalize_session_stamp
+from .static_run_map import load_run_map, validate_run_map
 from .scan_flow import generate_report
 
 
@@ -163,14 +163,14 @@ def execute_permission_scan(
         )
 
     if require_run_map and not run_map:
-        run_map = _load_run_map(session_stamp)
+        run_map = load_run_map(session_stamp)
         if not run_map:
             raise RuntimeError(
                 "Cannot refresh permission audit: no run_map.json available for this session. "
                 "Re-run the static analysis (or refresh immediately after a scan) to regenerate it."
             )
     if run_map:
-        _validate_run_map(run_map, session_stamp)
+        validate_run_map(run_map, session_stamp)
 
     snapshot_payload = accumulator.finalize()
     run_id = None
@@ -350,82 +350,6 @@ def execute_permission_scan(
             static_run_id=static_run_id,
             status=run_status,
             abort_reason=normalize_abort_reason(abort_reason),
-        )
-
-
-def _run_map_path(session_stamp: str) -> Path:
-    return Path(app_config.DATA_DIR) / "sessions" / session_stamp / "run_map.json"
-
-
-def _run_map_lock_path(session_stamp: str) -> Path:
-    return Path(app_config.DATA_DIR) / "sessions" / session_stamp / ".run_map.lock"
-
-
-def _load_run_map(session_stamp: str) -> dict | None:
-    if not session_stamp:
-        return None
-    lock_path = _run_map_lock_path(session_stamp)
-    if lock_path.exists():
-        raise RuntimeError(
-            f"run_map.json is locked for session {session_stamp}; another process may be writing it."
-        )
-    path = _run_map_path(session_stamp)
-    if not path.exists():
-        return None
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        raise RuntimeError(
-            f"run_map.json is invalid or corrupt at {path}: {exc}"
-        ) from exc
-    return payload if isinstance(payload, dict) else None
-
-
-def _validate_run_map(run_map: dict, session_stamp: str) -> None:
-    if not isinstance(run_map, dict):
-        raise RuntimeError("run_map.json schema invalid: not an object.")
-    if run_map.get("session_stamp") and run_map.get("session_stamp") != session_stamp:
-        raise RuntimeError(
-            f"run_map.json session mismatch: expected {session_stamp}, got {run_map.get('session_stamp')}"
-        )
-    apps = run_map.get("apps")
-    if not isinstance(apps, list):
-        raise RuntimeError("run_map.json schema invalid: missing apps list.")
-    seen: set[str] = set()
-    duplicates: set[str] = set()
-    missing: list[str] = []
-    for entry in apps:
-        if not isinstance(entry, dict):
-            continue
-        package = entry.get("package")
-        static_run_id = entry.get("static_run_id")
-        identity_valid = entry.get("identity_valid")
-        if identity_valid is False:
-            missing.append(str(package) if package else "<missing>")
-            continue
-        required_fields = [
-            entry.get("base_apk_sha256"),
-            entry.get("artifact_set_hash"),
-            entry.get("run_signature"),
-            entry.get("run_signature_version"),
-        ]
-        if not package or static_run_id is None or any(val in (None, "") for val in required_fields):
-            missing.append(str(package) if package else "<missing>")
-            continue
-        if package in seen:
-            duplicates.add(str(package))
-        else:
-            seen.add(str(package))
-    if duplicates:
-        raise RuntimeError(
-            "run_map.json contains duplicate package entries: "
-            f"{', '.join(sorted(duplicates))}. "
-            "Disambiguate the scope or rerun with a single package per session."
-        )
-    if missing:
-        raise RuntimeError(
-            "run_map.json missing required fields for one or more apps: "
-            f"{', '.join(sorted(set(missing)))}."
         )
 
 
