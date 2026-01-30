@@ -8,7 +8,7 @@ from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_func.static_analysis import static_permission_risk as permission_risk_db
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
-from .utils import first_text, safe_int
+from .utils import first_text, safe_int, require_canonical_schema
 
 _PERMISSION_TABLE_READY = False
 
@@ -42,6 +42,7 @@ def persist_permission_risk(
 ) -> None:
     if run_id is None or not _ensure_permission_table():
         return
+    require_canonical_schema()
 
     detail = getattr(metrics_bundle, "permission_detail", None)
     if not isinstance(detail, Mapping):

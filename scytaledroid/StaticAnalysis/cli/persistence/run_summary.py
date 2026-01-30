@@ -41,6 +41,7 @@ from .utils import (
     coerce_mapping,
     first_text,
     normalise_severity_token,
+    require_canonical_schema,
     safe_int,
     truncate,
 )
@@ -845,6 +846,14 @@ def persist_run_summary(
             f"Dry-run enabled; persistence for {run_package} will be simulated",
             category="static_analysis",
         )
+    else:
+        try:
+            require_canonical_schema()
+        except Exception as exc:
+            message = f"Canonical schema guard failed for {run_package}: {exc}"
+            log.warning(message, category="static_analysis")
+            outcome.add_error(message)
+            return outcome
 
     if not session_stamp and metadata_map:
         value = metadata_map.get("session_stamp")
@@ -955,10 +964,19 @@ def persist_run_summary(
             log.warning(
                 (
                     f"Could not resolve app_version_id for {package_for_run}; "
-                    f"static_run_id will remain unset and persistence will be legacy-only."
+                    "static_run_id will remain unset (legacy writes blocked; run migrations)."
                 ),
                 category="static_analysis",
             )
+
+    if static_run_id is None and not dry_run:
+        message = (
+            "DB schema is outdated or static_run_id missing; legacy writes are blocked. "
+            "Run migrations and retry."
+        )
+        log.error(message, category="static_analysis")
+        outcome.add_error(message)
+        return outcome
 
     outcome.static_run_id = static_run_id
     if static_run_id and not dry_run:

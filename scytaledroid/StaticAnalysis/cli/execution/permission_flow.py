@@ -11,7 +11,9 @@ from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_engine
 
 from ...modules.permissions import collect_permissions_and_sdk
-from ...modules.permissions.render_postcard import render as render_permission_postcard
+from ...modules.permissions.permission_console_rendering import (
+    render_permission_postcard,
+)
 from ...modules.permissions.audit import PermissionAuditAccumulator
 from ..core.models import RunParameters, ScopeSelection
 from ..persistence.run_summary import create_static_run_ledger

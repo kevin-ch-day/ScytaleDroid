@@ -18,6 +18,7 @@ from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ..core.cvss_v4 import score_vector
+from .utils import require_canonical_schema
 
 _CVSS_BASE_ORDER = ("AV", "AC", "AT", "PR", "UI", "VC", "VI", "VA", "SC", "SI", "SA")
 _LOGGED_MISSING_CONFIG = False
@@ -237,20 +238,26 @@ def persist_findings(run_id: int, rows: Sequence[Dict[str, Any]], *, static_run_
     can key by static_analysis_runs.id while legacy consumers can still use
     the generic run_id.
     """
+    require_canonical_schema()
     has_static_col = _has_column("findings", "static_run_id")
     try:
-        if static_run_id is None and has_static_col:
-            log.warning(
-                f"static_run_id missing for findings; run_id={run_id} will not be keyed to static run",
+        if not has_static_col:
+            log.error(
+                "Legacy findings schema detected; writes are blocked. Run migrations to use canonical schema.",
                 category="db",
             )
+            return False
+        if static_run_id is None:
+            log.error(
+                "static_run_id missing for findings; legacy writes are blocked. Run migrations.",
+                category="db",
+            )
+            return False
         if has_static_col:
             core_q.run_sql(
                 "DELETE FROM findings WHERE run_id=%s OR static_run_id=%s",
                 (run_id, static_run_id if static_run_id is not None else run_id),
             )
-        else:
-            core_q.run_sql("DELETE FROM findings WHERE run_id=%s", (run_id,))
     except Exception as exc:  # pragma: no cover - defensive
         log.warning(
             f"Failed to prune findings for run_id={run_id}: {exc}",
@@ -299,44 +306,7 @@ def persist_findings(run_id: int, rows: Sequence[Dict[str, Any]], *, static_run_
                     ),
                 )
             else:
-                core_q.run_sql(
-                    """
-                    INSERT INTO findings (
-                        run_id, severity, masvs, cvss, kind, evidence, module_id,
-                        cvss_v40_b_score, cvss_v40_bt_score, cvss_v40_be_score, cvss_v40_bte_score,
-                        cvss_v40_b_vector, cvss_v40_bt_vector, cvss_v40_be_vector, cvss_v40_bte_vector,
-                        cvss_v40_meta, analyst_tag, evidence_path, evidence_offset, evidence_preview, rule_id
-                    ) VALUES (
-                        %s,%s,%s,%s,%s,%s,%s,
-                        %s,%s,%s,%s,
-                        %s,%s,%s,%s,
-                        %s,%s,%s,%s,%s,%s
-                    )
-                    """,
-                    (
-                        run_id,
-                        row.get("severity"),
-                        row.get("masvs"),
-                        row.get("cvss"),
-                        row.get("kind"),
-                        row.get("evidence"),
-                        row.get("module_id"),
-                        row.get("cvss_v40_b_score"),
-                        row.get("cvss_v40_bt_score"),
-                        row.get("cvss_v40_be_score"),
-                        row.get("cvss_v40_bte_score"),
-                        row.get("cvss_v40_b_vector"),
-                        row.get("cvss_v40_bt_vector"),
-                        row.get("cvss_v40_be_vector"),
-                        row.get("cvss_v40_bte_vector"),
-                        row.get("cvss_v40_meta"),
-                        None,
-                        row.get("evidence_path"),
-                        row.get("evidence_offset"),
-                        row.get("evidence_preview"),
-                        row.get("rule_id"),
-                    ),
-                )
+                return False
         return True
     except Exception as exc:  # pragma: no cover - defensive
         message = (

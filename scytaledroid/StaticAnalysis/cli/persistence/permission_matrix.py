@@ -9,6 +9,7 @@ from scytaledroid.Database.db_func.static_analysis import static_permission_matr
 from scytaledroid.StaticAnalysis.modules.permissions import load_permission_catalog
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
+from .utils import require_canonical_schema
 
 def _coerce_source(permission: str) -> str:
     if permission.startswith("android."):
@@ -40,6 +41,7 @@ def persist_permission_matrix(
 ) -> None:
     """Persist permission profile metadata when available."""
 
+    require_canonical_schema()
     if static_run_id is None or not matrix_db.ensure_table():
         return
 

@@ -9,7 +9,6 @@ errors where appropriate.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, MutableMapping, Optional, Sequence
 
 from scytaledroid.Database.db_core import db_queries as core_q
@@ -23,6 +22,13 @@ def _ensure_schema_ready() -> bool:
         return canonical_schema.ensure_all()
     except Exception:
         return False
+
+
+def _require_canonical_schema() -> None:
+    if not _ensure_schema_ready():
+        raise RuntimeError("DB schema is outdated; run migrations to use canonical schema.")
+    if _provider_schema_mode() == "legacy":
+        raise RuntimeError("Legacy provider schema detected; run migrations for canonical schema.")
 
 
 def _normalise_optional_str(value: object) -> Optional[str]:
@@ -233,9 +239,7 @@ def ingest_baseline_payload(payload: Mapping[str, object]) -> bool:
         if not isinstance(payload, Mapping):
             _warn("payload not a mapping; skipping ingest")
             return False
-        if not _ensure_schema_ready():
-            _warn("schema not ready; ingest aborted")
-            return False
+        _require_canonical_schema()
 
         app_section = payload.get("app")
         app = app_section if isinstance(app_section, Mapping) else {}
@@ -282,16 +286,7 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True)
-class _RunProviderContext:
-    package_name: Optional[str]
-    session_stamp: Optional[str]
-    scope_label: Optional[str]
-    sha256: Optional[str]
-
-
 _PROVIDER_SCHEMA: Optional[str] = None
-_PROVIDER_CONTEXT_CACHE: dict[int, _RunProviderContext] = {}
 _PROVIDER_PARENT_CACHE: dict[int, dict[str, Optional[str]]] = {}
 _TABLE_COLUMN_CACHE: dict[str, set[str]] = {}
 
@@ -512,6 +507,7 @@ def _persist_provider_acl(
     detector_metrics: Mapping[str, object] | None,
 ) -> None:
     _PROVIDER_PARENT_CACHE.clear()
+    _require_canonical_schema()
     if not detector_metrics:
         return
     provider_metrics = detector_metrics.get("provider_acl")
@@ -543,34 +539,6 @@ def _provider_schema_mode() -> str:
     return _PROVIDER_SCHEMA
 
 
-def _provider_run_context(run_id: int) -> _RunProviderContext:
-    context = _PROVIDER_CONTEXT_CACHE.get(run_id)
-    if context is not None:
-        return context
-    try:
-        row = core_q.run_sql(
-            (
-                "SELECT r.session_stamp, r.scope_label, r.sha256, a.package_name "
-                "FROM static_analysis_runs r "
-                "JOIN app_versions av ON av.id = r.app_version_id "
-                "JOIN apps a ON a.id = av.app_id "
-                "WHERE r.id = %s"
-            ),
-            (run_id,),
-            fetch="one",
-        )
-    except Exception:
-        row = None
-    context = _RunProviderContext(
-        package_name=_normalise_optional_str(row[3]) if row else None,
-        session_stamp=_normalise_optional_str(row[0]) if row else None,
-        scope_label=_normalise_optional_str(row[1]) if row else None,
-        sha256=_normalise_optional_str(row[2]) if row else None,
-    )
-    _PROVIDER_CONTEXT_CACHE[run_id] = context
-    return context
-
-
 def _authority_from_entry(entry: Mapping[str, object]) -> Optional[str]:
     authorities = entry.get("authorities")
     if isinstance(authorities, Sequence) and not isinstance(authorities, (str, bytes)):
@@ -598,8 +566,9 @@ def _create_provider_row(run_id: int, entry: Mapping[str, object]) -> Optional[i
         component_name = _normalise_optional_str(entry.get("name"))
         authority = _authority_from_entry(entry) or component_name or f"provider_{run_id}"
         authority = _clamp_authority(authority)
-        context = _provider_run_context(run_id)
         schema_mode = _provider_schema_mode()
+        if schema_mode == "legacy":
+            raise RuntimeError("Legacy provider schema detected; run migrations.")
 
         row_data: dict[str, Optional[object]] = {
             "run_id": run_id,
@@ -619,28 +588,6 @@ def _create_provider_row(run_id: int, entry: Mapping[str, object]) -> Optional[i
             "metrics": _serialise_json(metrics_payload),
         }
 
-        # Duplicate fields for legacy schema compatibility.
-        if _table_has_column("static_fileproviders", "base_perm"):
-            row_data["base_perm"] = row_data["base_permission"]
-        if _table_has_column("static_fileproviders", "read_perm"):
-            row_data["read_perm"] = row_data["read_permission"]
-        if _table_has_column("static_fileproviders", "write_perm"):
-            row_data["write_perm"] = row_data["write_permission"]
-
-        if schema_mode == "legacy" or context.package_name:
-            # Populate legacy columns when present.
-            row_data.update(
-                {
-                    "package_name": context.package_name,
-                    "session_stamp": context.session_stamp,
-                    "scope_label": context.scope_label,
-                    "sha256": context.sha256,
-                    "run_key": _normalise_optional_str(
-                        f"{context.session_stamp or 'run'}:{context.package_name or authority}"
-                    ),
-                }
-            )
-
         _prune_missing_columns("static_fileproviders", row_data)
 
         columns = list(row_data.keys())
@@ -656,11 +603,6 @@ def _create_provider_row(run_id: int, entry: Mapping[str, object]) -> Optional[i
             _PROVIDER_PARENT_CACHE[provider_id_int] = {
                 "authority": authority,
                 "provider_name": component_name,
-                "package_name": context.package_name,
-                "session_stamp": context.session_stamp,
-                "scope_label": context.scope_label,
-                "run_key": row_data.get("run_key"),
-                "sha256": context.sha256,
                 "exported": row_data.get("exported"),
             }
         return provider_id_int
@@ -671,12 +613,6 @@ def _create_provider_row(run_id: int, entry: Mapping[str, object]) -> Optional[i
 def _create_provider_acl_row(provider_id: int, entry: Mapping[str, object]) -> None:
     try:
         parent = _PROVIDER_PARENT_CACHE.get(provider_id, {})
-        context = _RunProviderContext(
-            package_name=parent.get("package_name"),
-            session_stamp=parent.get("session_stamp"),
-            scope_label=parent.get("scope_label"),
-            sha256=parent.get("sha256"),
-        )
         path_value = _normalise_optional_str(entry.get("path")) or "*"
         path_type = _normalise_optional_str(entry.get("pathType")) or "base"
 
@@ -707,30 +643,7 @@ def _create_provider_acl_row(provider_id: int, entry: Mapping[str, object]) -> N
                 }
             ),
         }
-        base_perm_value = _normalise_optional_str(entry.get("base_permission"))
-        if _table_has_column("static_provider_acl", "base_permission"):
-            row_data["base_permission"] = base_perm_value
-        if _table_has_column("static_provider_acl", "base_perm"):
-            row_data["base_perm"] = base_perm_value
-        if _table_has_column("static_provider_acl", "read_perm"):
-            row_data["read_perm"] = row_data["read_permission"]
-        if _table_has_column("static_provider_acl", "write_perm"):
-            row_data["write_perm"] = row_data["write_permission"]
         row_data["path_type"] = path_type
-
-        if _provider_schema_mode() == "legacy" or context.package_name:
-            row_data.update(
-                {
-                    "package_name": context.package_name,
-                    "session_stamp": context.session_stamp,
-                    "scope_label": context.scope_label,
-                    "sha256": context.sha256,
-                    "run_key": parent.get("run_key"),
-                    "authority": parent.get("authority") or f"provider_{provider_id}",
-                    "provider_name": parent.get("provider_name"),
-                    "exported": parent.get("exported", 0),
-                }
-            )
 
         _prune_missing_columns("static_provider_acl", row_data)
         columns = list(row_data.keys())

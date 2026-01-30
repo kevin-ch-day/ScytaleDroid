@@ -80,7 +80,7 @@ class StringSummaryRecord:
     session_stamp: str
     scope_label: str
     counts: Mapping[str, int]
-    run_id: int | None = None  # legacy FK to runs
+    run_id: int | None = None  # legacy FK to runs (read-only compatibility)
     static_run_id: int | None = None  # FK to static_analysis_runs
 
     def to_parameters(self) -> dict[str, object]:
@@ -89,7 +89,7 @@ class StringSummaryRecord:
             "package_name": self.package_name,
             "session_stamp": self.session_stamp,
             "scope_label": self.scope_label,
-            # Keep run_id nullable to avoid FK conflicts with legacy runs table.
+            # Keep run_id nullable for legacy read-only compatibility.
             "run_id": int(self.run_id) if self.run_id is not None else None,
             "static_run_id": int(self.static_run_id) if self.static_run_id is not None else None,
             "endpoints": int(counts.get("endpoints", 0)),
@@ -132,6 +132,35 @@ class StringSample:
 
 SummaryRow = Union[StringSummaryRecord, Mapping[str, object]]
 SampleRow = Union[StringSample, Mapping[str, object]]
+
+def _table_has_column(table: str, column: str) -> bool:
+    try:
+        if _IS_SQLITE:
+            rows = run_sql(f"PRAGMA table_info({table})", fetch="all")
+            return any(row[1] == column for row in rows or ())
+        rows = run_sql(
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = DATABASE() AND table_name = %s AND column_name = %s",
+            (table, column),
+            fetch="one",
+        )
+        return bool(rows and int(rows[0]) > 0)
+    except Exception:
+        return False
+
+
+def _require_static_run_id(payload: Mapping[str, object], *, table: str) -> None:
+    static_run_id = payload.get("static_run_id")
+    if static_run_id is None or str(static_run_id).strip() == "":
+        raise ValueError(
+            "Legacy write blocked: static_run_id is required for canonical schema writes. "
+            "Run migrations or regenerate static outputs."
+        )
+    if not _table_has_column(table, "static_run_id"):
+        raise RuntimeError(
+            f"Legacy schema detected: {table}.static_run_id is missing. "
+            "Run migrations before persisting."
+        )
 
 
 def ensure_tables() -> bool:
@@ -227,6 +256,7 @@ def _summary_params(summary: SummaryRow) -> MutableMapping[str, object]:
 def upsert_summary(summary: SummaryRow) -> int | None:
     if _IS_SQLITE:
         payload = _summary_params(summary)
+        _require_static_run_id(payload, table="static_string_summary")
         stmt = """
         INSERT INTO static_string_summary (
           package_name, session_stamp, scope_label, run_id, static_run_id,
@@ -288,19 +318,19 @@ def upsert_summary(summary: SummaryRow) -> int | None:
         except Exception:
             return None
     payload = _summary_params(summary)
+    _require_static_run_id(payload, table="static_string_summary")
     # Keep a copy for logging in case inserts fail.
     log_payload = {
         "package_name": payload.get("package_name"),
         "session_stamp": payload.get("session_stamp"),
         "scope_label": payload.get("scope_label"),
-        "run_id": payload.get("run_id"),
         "static_run_id": payload.get("static_run_id"),
     }
     try:
         with database_session():
             run_sql(queries.INSERT_STRING_SUMMARY, payload)
             row = None
-            run_id = payload.get("static_run_id") or payload.get("run_id")
+            run_id = payload.get("static_run_id")
             if run_id is not None:
                 row = run_sql(
                     queries.SELECT_SUMMARY_ID_BY_RUN,
@@ -357,6 +387,7 @@ def replace_top_samples(
     Returns (deleted, inserted).
     """
     if _IS_SQLITE:
+        _require_static_run_id({"static_run_id": static_run_id}, table="static_string_samples")
         deleted = 0
         inserted = 0
         try:
@@ -422,6 +453,7 @@ def replace_top_samples(
         except Exception:
             pass
         return deleted, inserted
+    _require_static_run_id({"static_run_id": static_run_id}, table="static_string_samples")
     deleted = 0
     inserted = 0
     try:

@@ -19,6 +19,7 @@ from scytaledroid.StaticAnalysis.modules.permissions.permission_protection_looku
 )
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
+from .utils import require_canonical_schema
 _SUPPRESSED_RISK_TAGS = {
     "policy_drift",
     "dev_placeholder",
@@ -375,6 +376,7 @@ def write_buckets(
     *,
     static_run_id: int | None = None,
 ) -> bool:
+    require_canonical_schema()
     return _dw.write_buckets(run_id, payload, static_run_id=static_run_id)
 
 
@@ -384,10 +386,12 @@ def write_metrics(
     *,
     static_run_id: int | None = None,
 ) -> bool:
+    require_canonical_schema()
     return _dw.write_metrics(run_id, payload, static_run_id=static_run_id)
 
 
 def write_contributors(run_id: int, rows: Sequence[tuple[str, float, str, int]]) -> bool:
+    require_canonical_schema()
     return _dw.write_contributors(run_id, rows)
 
 

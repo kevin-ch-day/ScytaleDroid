@@ -58,9 +58,20 @@ def collect_inventory(
 
     adb_client.clear_package_caches(serial)
 
-    packages_with_versions, package_names, _ = adb_client.list_packages(serial, use_bulk)
+    packages_with_versions, package_names, _, fallback_used = adb_client.list_packages(serial, use_bulk)
     if not packages_with_versions:
         raise RuntimeError("adb did not return any packages.")
+    if fallback_used:
+        log.warning(
+            "Inventory fallback used (per-package listing). Results are valid but slower; "
+            "ensure non-root fallback is expected.",
+            category="inventory",
+            extra={
+                "event": "inventory.fallback",
+                "reason": "per_package_list",
+                "serial": serial,
+            },
+        )
 
     total = len(package_names)
 

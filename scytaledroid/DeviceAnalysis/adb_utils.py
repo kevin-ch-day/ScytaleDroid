@@ -309,6 +309,16 @@ def list_packages_with_versions(serial: str) -> List[Tuple[str, Optional[str], O
             return parsed
 
     # Fallback to basic package names if newer flags are unsupported.
+    log.warning(
+        "Inventory fallback invoked: pm --show-version* unsupported; "
+        "using package-only listing.",
+        category="inventory",
+        extra={
+            "event": "inventory.fallback",
+            "reason": "pm_list_versions_unsupported",
+            "serial": serial,
+        },
+    )
     return [(package, None, None) for package in list_packages(serial)]
 
 
@@ -327,6 +337,17 @@ def get_package_paths(serial: str, package_name: str, refresh: bool = False) -> 
                 paths.append(stripped.split(":", 1)[1].strip())
 
     if not paths:
+        log.warning(
+            "Inventory fallback invoked: pm path returned no entries; "
+            "using pm list packages -f.",
+            category="inventory",
+            extra={
+                "event": "inventory.fallback",
+                "reason": "pm_path_empty",
+                "serial": serial,
+                "package": package_name,
+            },
+        )
         fallback = run_shell_command(
             serial,
             ["pm", "list", "packages", "-f", package_name],

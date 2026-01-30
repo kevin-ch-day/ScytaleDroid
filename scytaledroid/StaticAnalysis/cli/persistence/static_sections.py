@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Mapping, Sequence, Tuple
 
-from scytaledroid.StaticAnalysis.cli.persistence.utils import first_text
+from scytaledroid.StaticAnalysis.cli.persistence.utils import first_text, require_canonical_schema
 from scytaledroid.StaticAnalysis.cli.persistence.static_findings_writer import persist_static_findings
 from scytaledroid.StaticAnalysis.cli.persistence.strings_writer import persist_string_summary
 from scytaledroid.StaticAnalysis.cli.persistence import static_findings_writer as sf_writer  # backwards compat
@@ -17,6 +17,10 @@ normalise_string_counts = str_writer.normalise_string_counts  # re-export
 
 
 def persist_storage_surface_data(report, session_stamp: str, scope_label: str) -> None:
+    try:
+        require_canonical_schema()
+    except Exception:
+        return
     try:
         from scytaledroid.StaticAnalysis.modules.storage_surface import (
             AppModuleContext,
@@ -63,6 +67,11 @@ def persist_static_sections(
 ) -> Tuple[list[str], bool, int]:
     errors: list[str] = []
     baseline_written = False
+    try:
+        require_canonical_schema()
+    except Exception as exc:
+        errors.append(str(exc))
+        return errors, baseline_written, 0
     metadata_map: Mapping[str, object] = (
         dict(app_metadata)
         if isinstance(app_metadata, Mapping)

@@ -5,6 +5,15 @@ from __future__ import annotations
 from dataclasses import is_dataclass
 from typing import Any, Dict, Iterable, Mapping, Optional
 
+from scytaledroid.Database.db_queries.canonical import schema as canonical_schema
+
+
+def require_canonical_schema() -> None:
+    """Hard-fail when canonical schema is unavailable."""
+
+    if not canonical_schema.ensure_all():
+        raise RuntimeError("DB schema is outdated; run migrations to use canonical schema.")
+
 
 def truncate(value: Optional[str], limit: int) -> Optional[str]:
     """Trim ``value`` to at most *limit* characters, preserving None."""

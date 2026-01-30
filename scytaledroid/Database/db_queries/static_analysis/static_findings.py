@@ -73,21 +73,6 @@ ON DUPLICATE KEY UPDATE
   static_run_id=VALUES(static_run_id)
 """
 
-UPSERT_FINDINGS_SUMMARY_LEGACY = """
-INSERT INTO static_findings_summary (
-  package_name, session_stamp, scope_label,
-  high, med, low, info, details
-) VALUES (
-  %(package_name)s, %(session_stamp)s, %(scope_label)s,
-  %(high)s, %(med)s, %(low)s, %(info)s, %(details)s
-)
-ON DUPLICATE KEY UPDATE
-  high=VALUES(high),
-  med=VALUES(med),
-  low=VALUES(low),
-  info=VALUES(info),
-  details=VALUES(details)
-"""
 
 SELECT_FINDINGS_SUMMARY_ID = """
 SELECT id FROM static_findings_summary
@@ -136,7 +121,6 @@ __all__ = [
     "CREATE_FINDINGS_SUMMARY",
     "CREATE_FINDINGS",
     "UPSERT_FINDINGS_SUMMARY",
-    "UPSERT_FINDINGS_SUMMARY_LEGACY",
     "SELECT_FINDINGS_SUMMARY_ID",
     "SELECT_FINDINGS_SUMMARY_ID_BY_RUN",
     "SELECT_FINDINGS_SUMMARY_ID_BY_STATIC_RUN",

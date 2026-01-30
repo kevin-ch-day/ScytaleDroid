@@ -7,6 +7,7 @@ from typing import Mapping, MutableMapping
 from scytaledroid.Database.db_func.static_analysis import string_analysis as _sa
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
+from .utils import require_canonical_schema
 _STRING_COUNT_KEYS: tuple[str, ...] = (
     "endpoints",
     "http_cleartext",
@@ -50,12 +51,13 @@ def persist_string_summary(
 ) -> list[str]:
     errors: list[str] = []
     try:
+        require_canonical_schema()
         if not _sa.ensure_tables():
             raise RuntimeError("static_string tables unavailable")
         if static_run_id is None:
-            log.warning(
-                "static_run_id missing for string persistence; rows will not be keyed to static run",
-                category="static_analysis",
+            raise RuntimeError(
+                "static_run_id missing for string persistence; "
+                "run migrations or regenerate static outputs."
             )
         summary_record = _sa.StringSummaryRecord(
             package_name=package_name,

@@ -8,6 +8,7 @@ from typing import Any, Mapping, Optional, Sequence, Tuple
 from scytaledroid.Persistence import db_writer as _dw
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Database.db_core import db_queries as core_q
+from scytaledroid.Database.db_queries.canonical import schema as canonical_schema
 
 
 @dataclass(slots=True)
@@ -146,27 +147,37 @@ def prepare_run_envelope(
     if not dry_run:
         creation_failed = False
         try:
-            run_id = _dw.create_run(
-                package=getattr(manifest, "package_name", None) or run_package,
-                app_label=app_label,
-                version_code=(
-                    int(getattr(manifest, "version_code", None))
-                    if manifest and getattr(manifest, "version_code", None)
-                    else None
-                ),
-                version_name=getattr(manifest, "version_name", None) if manifest else None,
-                target_sdk=target_sdk,
-                session_stamp=session_stamp,
-                threat_profile=threat_profile_value,
-                env_profile=env_profile_value,
-            )
-        except Exception as exc:  # pragma: no cover - defensive
-            run_id = None
+            if not canonical_schema.ensure_all():
+                raise RuntimeError("DB schema is outdated; run migrations to use canonical schema.")
+        except Exception as exc:
             creation_failed = True
-            message = f"Failed to create run record for {run_package}: {exc}"
+            message = f"Canonical schema guard failed: {exc}"
             log.warning(message, category="static_analysis")
             errors.append(message)
             _append_diagnostic()
+        if not creation_failed:
+            try:
+                run_id = _dw.create_run(
+                    package=getattr(manifest, "package_name", None) or run_package,
+                    app_label=app_label,
+                    version_code=(
+                        int(getattr(manifest, "version_code", None))
+                        if manifest and getattr(manifest, "version_code", None)
+                        else None
+                    ),
+                    version_name=getattr(manifest, "version_name", None) if manifest else None,
+                    target_sdk=target_sdk,
+                    session_stamp=session_stamp,
+                    threat_profile=threat_profile_value,
+                    env_profile=env_profile_value,
+                )
+            except Exception as exc:  # pragma: no cover - defensive
+                run_id = None
+                creation_failed = True
+                message = f"Failed to create run record for {run_package}: {exc}"
+                log.warning(message, category="static_analysis")
+                errors.append(message)
+                _append_diagnostic()
         if run_id is None and not creation_failed:
             message = f"Failed to create run record for {run_package}"
             log.warning(message, category="static_analysis")
