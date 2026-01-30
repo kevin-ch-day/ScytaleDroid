@@ -164,12 +164,12 @@ _DDL_STATEMENTS: list[str] = [
       static_run_id       BIGINT UNSIGNED NOT NULL,
       run_origin          VARCHAR(16) NOT NULL DEFAULT 'created',
       origin_session_stamp VARCHAR(128) DEFAULT NULL,
-      pipeline_version    VARCHAR(32) DEFAULT NULL,
-      base_apk_sha256     CHAR(64) DEFAULT NULL,
-      artifact_set_hash   CHAR(64) DEFAULT NULL,
-      run_signature       CHAR(64) DEFAULT NULL,
-      run_signature_version VARCHAR(16) DEFAULT NULL,
-      identity_valid      TINYINT(1) DEFAULT NULL,
+      pipeline_version    VARCHAR(32) NOT NULL,
+      base_apk_sha256     CHAR(64) NOT NULL,
+      artifact_set_hash   CHAR(64) NOT NULL,
+      run_signature       CHAR(64) NOT NULL,
+      run_signature_version VARCHAR(16) NOT NULL,
+      identity_valid      TINYINT(1) NOT NULL,
       identity_error_reason VARCHAR(128) DEFAULT NULL,
       linked_at_utc       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (link_id),
@@ -195,6 +195,15 @@ _DDL_STATEMENTS: list[str] = [
       ADD COLUMN IF NOT EXISTS run_signature_version VARCHAR(16) DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS identity_valid TINYINT(1) DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS identity_error_reason VARCHAR(128) DEFAULT NULL;
+    """,
+    """
+    ALTER TABLE static_session_run_links
+      MODIFY pipeline_version VARCHAR(32) NOT NULL,
+      MODIFY base_apk_sha256 CHAR(64) NOT NULL,
+      MODIFY artifact_set_hash CHAR(64) NOT NULL,
+      MODIFY run_signature CHAR(64) NOT NULL,
+      MODIFY run_signature_version VARCHAR(16) NOT NULL,
+      MODIFY identity_valid TINYINT(1) NOT NULL;
     """,
     """
     CREATE TABLE IF NOT EXISTS static_correlation_results (

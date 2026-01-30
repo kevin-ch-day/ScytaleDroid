@@ -121,6 +121,8 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
         app_result.identity_error_reason = identity.get("identity_error_reason")
         app_result.base_apk_sha256 = identity.get("base_apk_sha256")
         app_result.artifact_set_hash = identity.get("artifact_set_hash")
+        app_result.run_signature = run_signature
+        app_result.run_signature_version = identity.get("run_signature_version")
 
         static_run_id = None
         if not identity["identity_valid"] and not params.dry_run:

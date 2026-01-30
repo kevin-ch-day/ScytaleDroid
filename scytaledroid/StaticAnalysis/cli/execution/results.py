@@ -1757,12 +1757,58 @@ def _fetch_db_linkage(
             (session_stamp, package_name),
             fetch="one_dict",
         )
-    except Exception:
-        return None, "db_link_query_failed"
+    except Exception as exc:
+        log.warning(
+            f"Diagnostic linkage db_link query failed for session={session_stamp} package={package_name}: {exc}",
+            category="static_analysis",
+        )
+        reason = "db_link_query_failed"
+        if "Unknown column" in str(exc):
+            reason = "db_link_query_failed (schema mismatch)"
+        return None, reason
     if not row:
         return None, None
     if not isinstance(row, Mapping):
         return None, "db_link_invalid_row"
+    return row, None
+
+
+def _fetch_db_linkage_by_signature(
+    package_name: str,
+    run_signature: str,
+) -> tuple[Mapping[str, object] | None, str | None]:
+    try:
+        row = core_q.run_sql(
+            """
+            SELECT sar.id AS static_run_id,
+                   sar.pipeline_version,
+                   sar.run_signature,
+                   sar.run_signature_version
+              FROM static_analysis_runs sar
+              JOIN app_versions av ON av.id = sar.app_version_id
+              JOIN apps a ON a.id = av.app_id
+             WHERE a.package_name = %s
+               AND sar.run_signature = %s
+               AND sar.status = 'COMPLETED'
+             ORDER BY sar.id DESC
+             LIMIT 1
+            """,
+            (package_name, run_signature),
+            fetch="one_dict",
+        )
+    except Exception as exc:
+        log.warning(
+            f"Diagnostic linkage db_lookup failed for package={package_name} signature={run_signature}: {exc}",
+            category="static_analysis",
+        )
+        reason = "db_lookup_failed"
+        if "Unknown column" in str(exc):
+            reason = "db_lookup_failed (schema mismatch)"
+        return None, reason
+    if not row:
+        return None, None
+    if not isinstance(row, Mapping):
+        return None, "db_lookup_invalid_row"
     return row, None
 
 
@@ -1771,7 +1817,7 @@ def _resolve_run_map_entry(
     run_map: Mapping[str, object],
 ) -> tuple[Mapping[str, object] | None, str | None]:
     apps = run_map.get("apps") if isinstance(run_map, Mapping) else None
-    if not isinstance(apps, Sequence):
+    if not isinstance(apps, Sequence) or isinstance(apps, (str, bytes)):
         return None, "run_map missing apps list"
     for entry in apps:
         if not isinstance(entry, Mapping):
@@ -1804,8 +1850,8 @@ def _diagnostic_linkage_status(
         run_map_id = run_map_entry.get("static_run_id")
         db_link_id = db_link_entry.get("static_run_id")
         if run_map_id != db_link_id:
-        return "INVALID", "INVALID: run_map/db_link mismatch"
-    return "VALID (run_map+db_link)", f"static_run_id={run_map_id}"
+            return "INVALID", "INVALID: run_map/db_link mismatch"
+        return "VALID (run_map+db_link)", f"static_run_id={run_map_id}"
 
     if run_map_entry:
         return "VALID (run_map)", f"static_run_id={run_map_entry.get('static_run_id')}"
@@ -1814,6 +1860,19 @@ def _diagnostic_linkage_status(
         if db_pipeline in (None, ""):
             return "INVALID", "db_link missing pipeline_version"
         return "VALID (db_link)", f"static_run_id={db_link_entry.get('static_run_id')}"
+
+    if app_result.run_signature:
+        lookup_entry, lookup_note = _fetch_db_linkage_by_signature(
+            app_result.package_name,
+            app_result.run_signature,
+        )
+        if lookup_entry:
+            pipeline_version = lookup_entry.get("pipeline_version")
+            if pipeline_version in (None, ""):
+                return "INVALID", "db_lookup missing pipeline_version"
+            return "VALID (db_lookup)", f"static_run_id={lookup_entry.get('static_run_id')}"
+        if lookup_note:
+            return "UNAVAILABLE", f"UNAVAILABLE: {lookup_note}"
 
     if db_link_note:
         return "UNAVAILABLE", "UNAVAILABLE: db_link query failed"

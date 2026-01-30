@@ -136,6 +136,8 @@ class AppRunResult:
     identity_error_reason: Optional[str] = None
     base_apk_sha256: Optional[str] = None
     artifact_set_hash: Optional[str] = None
+    run_signature: Optional[str] = None
+    run_signature_version: Optional[str] = None
 
     def severity_totals(self) -> Counter[str]:
         totals: Counter[str] = Counter()

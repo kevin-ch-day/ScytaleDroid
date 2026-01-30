@@ -268,9 +268,29 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
             pass
 
     run_map = None
+    required_fields = (
+        "static_run_id",
+        "pipeline_version",
+        "base_apk_sha256",
+        "artifact_set_hash",
+        "run_signature",
+        "run_signature_version",
+    )
     if outcome is not None and params.session_stamp:
         try:
             run_map = _build_session_run_map(outcome, params.session_stamp)
+            if run_map and not params.dry_run:
+                for entry in run_map.get("apps", []):
+                    missing = [
+                        field
+                        for field in required_fields
+                        if entry.get(field) in (None, "")
+                    ]
+                    if missing:
+                        raise RuntimeError(
+                            "run_map incomplete for package "
+                            f"{entry.get('package')}: missing {', '.join(missing)}"
+                        )
             if run_map and not params.dry_run:
                 _persist_session_run_links(params.session_stamp, run_map)
         except Exception as exc:
