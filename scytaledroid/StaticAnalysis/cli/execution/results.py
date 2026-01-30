@@ -348,6 +348,9 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
     persistence_errors: list[str] = []
     canonical_failures: list[str] = []
     canonical_skips: list[str] = []
+    baseline_written_count = 0
+    plan_written_count = 0
+    report_reference_count = 0
     persist_enabled = not params.dry_run
     # Default to compact output unless the user explicitly asked for verbose.
     compact_mode = not params.verbose_output
@@ -488,10 +491,11 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                     ingest_payload = _build_ingest_payload(payload, base_report, params)
                     if not ingest_baseline_payload(ingest_payload):
                         canonical_skips.append(app_result.package_name)
-                        warning = (
-                            f"Canonical ingest skipped or unavailable for {app_result.package_name}."
-                        )
-                        print(status_messages.status(warning, level="warn"))
+                        if not compact_mode:
+                            warning = (
+                                f"Canonical ingest skipped or unavailable for {app_result.package_name}."
+                            )
+                            print(status_messages.status(warning, level="warn"))
             except Exception as exc:
                 warning = (
                     f"Failed to ingest baseline snapshot for {app_result.package_name}: {exc}"
@@ -561,23 +565,20 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                 print(status_messages.status(warning, level="warn"))
 
         if saved_path:
+            baseline_written_count += 1
             message = f"Saved baseline JSON → {saved_path.name}"
-            if compact_mode:
-                print(status_messages.status(message, level="info"))
-            else:
+            if not compact_mode:
                 print(message)
         if dynamic_plan_path:
+            plan_written_count += 1
             message = f"Saved dynamic plan → {dynamic_plan_path.name}"
-            if compact_mode:
-                print(status_messages.status(message, level="info"))
-            else:
+            if not compact_mode:
                 print(message)
 
         if report_reference:
+            report_reference_count += 1
             message = f"Report reference    → {report_reference}"
-            if compact_mode:
-                print(status_messages.status(message, level="info"))
-            else:
+            if not compact_mode:
                 print(message)
 
         if index < len(outcome.results):
@@ -606,6 +607,15 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                 level="info",
             )
         )
+        if compact_mode:
+            print(
+                status_messages.status(
+                    "Artifacts saved: "
+                    f"baseline={baseline_written_count} plan={plan_written_count} "
+                    f"report={report_reference_count}",
+                    level="info",
+                )
+            )
         if canonical_failures:
             preview_limit = 5
             unique_failures = sorted(set(canonical_failures))
@@ -620,7 +630,13 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                 )
             )
         elif canonical_skips:
-            reason = "packages=" + ",".join(sorted(set(canonical_skips)))
+            unique_skips = sorted(set(canonical_skips))
+            preview_limit = 5 if compact_mode else len(unique_skips)
+            preview = ", ".join(unique_skips[:preview_limit])
+            remaining = len(unique_skips) - preview_limit
+            if remaining > 0:
+                preview += f", +{remaining} more"
+            reason = f"packages={len(unique_skips)} ({preview})"
             if outcome.aborted:
                 reason += ";reason=aborted"
             else:
@@ -762,9 +778,24 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             )
             if persistence_errors:
                 level = "warn"
-                print(status_messages.status("Persistence issues detected:", level=level))
-                for message in persistence_errors:
-                    print(f"  - {message}")
+                if params.verbose_output:
+                    print(status_messages.status("Persistence issues detected:", level=level))
+                    for message in persistence_errors:
+                        print(f"  - {message}")
+                else:
+                    preview_limit = 5
+                    unique_errors = list(dict.fromkeys(persistence_errors))
+                    preview = unique_errors[:preview_limit]
+                    remaining = len(unique_errors) - len(preview)
+                    summary = ", ".join(preview)
+                    if remaining > 0:
+                        summary += f", +{remaining} more"
+                    print(
+                        status_messages.status(
+                            f"Persistence issues: {len(unique_errors)} item(s) — {summary}",
+                            level=level,
+                        )
+                    )
             if outcome.results:
                 _persist_cohort_rollup(session_stamp, params.scope_label)
 
@@ -1755,7 +1786,7 @@ def _render_db_severity_table(session_stamp: str) -> bool:
 
     print()
     table_utils.render_table(
-        ["#", "Package", "targetSdk", "High", "Medium", "Low", "Information"],
+        ["#", "Package", "targetSdk", "High", "Medium", "Low", "Info"],
         table_rows,
     )
     return True

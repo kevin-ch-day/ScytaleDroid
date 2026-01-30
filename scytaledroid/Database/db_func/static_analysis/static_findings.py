@@ -212,6 +212,7 @@ def upsert_summary(
         "low": int(severity_counts.get("Low", 0) or severity_counts.get("L", 0)),
         "info": int(severity_counts.get("Info", 0) or severity_counts.get("I", 0)),
         "details": json.dumps(details or {}),
+        "run_id": int(run_id) if run_id is not None else None,
         "static_run_id": static_run_id,
     }
     queries_select = queries.SELECT_FINDINGS_SUMMARY_ID_BY_STATIC_RUN

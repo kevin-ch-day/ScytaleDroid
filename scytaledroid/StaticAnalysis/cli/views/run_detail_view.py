@@ -29,6 +29,24 @@ def _truncate(value: str, limit: int) -> str:
     return f"{value[: max(0, limit - 1)]}…"
 
 
+def _format_target_sdk(value: object) -> str:
+    if value is None:
+        return "—"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if cleaned.lower().startswith("targetsdk="):
+            cleaned = cleaned.split("=", 1)[-1].strip()
+        if cleaned.lower() in {"suppressed", "—", "n/a", "na", ""}:
+            return "—"
+        try:
+            return str(int(cleaned))
+        except Exception:
+            return cleaned
+    return str(value)
+
+
 def render_app_table(
     results: Sequence[AppRunResult],
     *,
@@ -40,7 +58,7 @@ def render_app_table(
         totals = app_result.severity_totals()
         base_report = app_result.base_report()
         version = "—"
-        target_sdk = "—"
+        target_sdk: object = "—"
         display_name = app_result.package_name
         suppressed_label = "suppressed" if diagnostic else "—"
         if base_report:
@@ -87,7 +105,7 @@ def render_app_table(
             [
                 str(idx),
                 display_name,
-                str(target_sdk),
+                _format_target_sdk(target_sdk),
                 signer,
                 str(totals.get('H', 0)),
                 str(totals.get('M', 0)),
@@ -140,12 +158,12 @@ def render_app_detail(
         version_name = base_report.manifest.version_name or "—"
         version_code = base_report.manifest.version_code
         version = f"{version_name} ({version_code})" if version_code else version_name
-        target_sdk = base_report.manifest.target_sdk or "—"
+        target_sdk = _format_target_sdk(base_report.manifest.target_sdk)
     totals = app_result.severity_totals()
     print()
     print(f"Package: {app_result.package_name}")
     print(
-        f"High {totals.get('H',0)}   Medium {totals.get('M',0)}   Low {totals.get('L',0)}   Information {totals.get('I',0)}"
+        f"High {totals.get('H',0)}   Medium {totals.get('M',0)}   Low {totals.get('L',0)}   Info {totals.get('I',0)}"
     )
     print(f"Version: {version}   targetSdk={target_sdk}   Profile: {app_result.category}")
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
+import os
 from datetime import datetime, timezone
 
 from scytaledroid.Config import app_config
@@ -31,6 +32,7 @@ def execute_permission_scan(
     run_map: dict | None = None,
     require_run_map: bool = False,
     allow_partial_audit: bool = False,
+    compact_output: bool | None = None,
 ) -> None:
     """Run the permission analysis workflow for the selected packages."""
 
@@ -68,6 +70,20 @@ def execute_permission_scan(
     last_category = None
     permission_persist_failed = False
     audit_persist_failed = False
+    if compact_output is None:
+        env_override = os.getenv("SCYTALEDROID_PERM_SNAPSHOT_COMPACT")
+        if env_override is not None:
+            compact_output = env_override.strip().lower() not in {"0", "false", "no"}
+        else:
+            compact_output = selection.scope == "all" or len(scope_groups) > 15
+    if compact_output:
+        print(
+            status_messages.status(
+                "Permission snapshot: compact summary (set SCYTALEDROID_PERM_SNAPSHOT_COMPACT=0 for full).",
+                level="info",
+            )
+        )
+
     for group in scope_groups:
         artifacts = group.artifacts
         if not artifacts:
@@ -88,6 +104,7 @@ def execute_permission_scan(
             sdk=sdk,
             index=1,
             total=1,
+            compact=bool(compact_output),
         )
 
         if persist_detections and report is not None:

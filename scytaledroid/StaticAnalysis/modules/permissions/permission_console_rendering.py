@@ -329,6 +329,7 @@ def render_permission_postcard(
     *,
     index: int,
     total: int,
+    compact: bool = False,
 ) -> Dict[str, object]:
     """Analyze and print a compact permission-first postcard.
 
@@ -394,18 +395,24 @@ def render_permission_postcard(
     print(f"[{index}/{total}] {app_label}  {bar}")
     print(f"Risk {score:.3f}   (D:{d}  S:{s}  O:{v})  Grade {grade}")
     if high_tags:
-        tags = "".join(f"[{t}]" for t in high_tags)
+        tag_list = list(high_tags)
+        if compact and len(tag_list) > 5:
+            shown = tag_list[:5]
+            tags = "".join(f"[{t}]" for t in shown) + f"[+{len(tag_list) - 5}]"
+        else:
+            tags = "".join(f"[{t}]" for t in tag_list)
         print(f"High-signal:  {tags}")
-    _footprint_multiline(groups)
-    # Optional debug block to explain footprint composition
-    if os.environ.get("SCY_PERM_DEBUG") == "1":
-        debug = _group_trigger_debug(declared, protection_map)
-        print("Debug — group triggers (strong/weak):")
-        for key in _GROUP_ORDER:
-            strong = ", ".join(debug[key]["strong"]) or "-"
-            weak = ", ".join(debug[key]["weak"]) or "-"
-            print(f"  {key}: strong=[{strong}] weak=[{weak}]")
-    print(f"Profile: {persona}")
+    if not compact:
+        _footprint_multiline(groups)
+        # Optional debug block to explain footprint composition
+        if os.environ.get("SCY_PERM_DEBUG") == "1":
+            debug = _group_trigger_debug(declared, protection_map)
+            print("Debug — group triggers (strong/weak):")
+            for key in _GROUP_ORDER:
+                strong = ", ".join(debug[key]["strong"]) or "-"
+                weak = ", ".join(debug[key]["weak"]) or "-"
+                print(f"  {key}: strong=[{strong}] weak=[{weak}]")
+        print(f"Profile: {persona}")
     print()
 
     return {
