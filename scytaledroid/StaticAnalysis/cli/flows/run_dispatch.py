@@ -35,6 +35,7 @@ from ..core.models import RunParameters, RunOutcome, ScopeSelection, AppRunResul
 from ..core.run_lifecycle import finalize_open_runs
 from ..core.abort_reasons import classify_exception, normalize_abort_reason
 from ..core.analysis_profiles import run_modules_for_profile
+from ..execution.static_run_map import REQUIRED_FIELDS, validate_run_map
 from .selection import format_scope_target
 
 
@@ -274,14 +275,6 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
             pass
 
     run_map = None
-    required_fields = (
-        "static_run_id",
-        "pipeline_version",
-        "base_apk_sha256",
-        "artifact_set_hash",
-        "run_signature",
-        "run_signature_version",
-    )
     if outcome is not None and params.session_stamp:
         try:
             run_map = _build_session_run_map(outcome, params.session_stamp)
@@ -289,7 +282,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
                 for entry in run_map.get("apps", []):
                     missing = [
                         field
-                        for field in required_fields
+                        for field in ("static_run_id", *REQUIRED_FIELDS)
                         if entry.get(field) in (None, "")
                     ]
                     if missing:
@@ -297,6 +290,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
                             "run_map incomplete for package "
                             f"{entry.get('package')}: missing {', '.join(missing)}"
                         )
+                validate_run_map(run_map, params.session_stamp)
             if run_map and not params.dry_run:
                 _persist_session_run_links(params.session_stamp, run_map)
         except Exception as exc:
