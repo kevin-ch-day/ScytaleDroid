@@ -17,6 +17,7 @@ class DynamicSessionConfig:
     harvest_session_id: Optional[int] = None
     plan_path: Optional[str] = None
     plan_validation: Optional[object] = None
+    sampling_rate_s: int = 1
     probes: Sequence[str] = field(default_factory=tuple)
     scenario_id: str = "basic_usage"
     observer_ids: Sequence[str] = field(default_factory=tuple)
@@ -37,6 +38,9 @@ class DynamicSessionResult:
     errors: list[str] = field(default_factory=list)
     dynamic_run_id: Optional[str] = None
     evidence_path: Optional[str] = None
+    telemetry_process: list[dict[str, object]] = field(default_factory=list)
+    telemetry_network: list[dict[str, object]] = field(default_factory=list)
+    telemetry_stats: dict[str, object] = field(default_factory=dict)
 
     @property
     def elapsed_seconds(self) -> Optional[int]:

@@ -15,6 +15,7 @@ from .static_analysis import (
     string_analysis,
 )
 from .harvest import device_inventory, dynamic_loading
+from .dynamic import schema as dynamic_schema
 from .web import tables as web_tables
 
 
@@ -102,6 +103,9 @@ def ordered_schema_statements() -> list[str]:
             dynamic_loading.CREATE_TABLE_REFLECTION,
         ]
     )
+
+    # Dynamic analysis sessions + telemetry (Phase 2).
+    statements.extend(list(getattr(dynamic_schema, "_DDL_STATEMENTS", [])))
 
     # Web-owned additive tables.
     statements.extend(

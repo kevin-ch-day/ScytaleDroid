@@ -29,6 +29,7 @@ from scytaledroid.DynamicAnalysis.core.session import DynamicSessionConfig
 from scytaledroid.DynamicAnalysis.core.target_manager import TargetManager
 from scytaledroid.DynamicAnalysis.observers.base import Observer, ObserverHandle
 from scytaledroid.DynamicAnalysis.scenarios import ManualScenarioRunner
+from scytaledroid.DynamicAnalysis.telemetry.sampler import TelemetrySampler
 
 
 class DynamicRunOrchestrator:
@@ -45,7 +46,7 @@ class DynamicRunOrchestrator:
         self.logger = logging_engine.get_dynamic_logger()
         self._last_plan_validation = None
 
-    def run(self) -> tuple[RunManifest, Path]:
+    def run(self) -> tuple[RunManifest, Path, dict[str, object]]:
         dynamic_run_id = str(uuid.uuid4())
         output_root = Path(self.config.output_root or "output/evidence/dynamic")
         run_dir = output_root / dynamic_run_id
@@ -163,11 +164,28 @@ class DynamicRunOrchestrator:
             )
 
         scenario_runner = ManualScenarioRunner()
+        telemetry_payload: dict[str, object] = {}
+        sampler = None
+        if run_ctx.device_serial:
+            sampler = TelemetrySampler(
+                device_serial=run_ctx.device_serial,
+                package_name=run_ctx.package_name,
+                sample_rate_s=self.config.sampling_rate_s,
+            )
+            sampler.start()
         self._emit_marker(run_ctx, "SCENARIO_START")
         if run_ctx.scenario_hint:
             event_logger.log("scenario_hint", {"hint": run_ctx.scenario_hint})
         event_logger.log("scenario_started", {"scenario_id": run_ctx.scenario_id})
         scenario_result = scenario_runner.run(run_ctx)
+        if sampler:
+            capture = sampler.stop()
+            telemetry_payload = {
+                "telemetry_process": capture.process_rows,
+                "telemetry_network": capture.network_rows,
+                "telemetry_stats": capture.stats,
+                "sampling_rate_s": self.config.sampling_rate_s,
+            }
         self._emit_marker(run_ctx, "SCENARIO_END")
         event_logger.log("scenario_ended", {"notes": scenario_result.notes})
         manifest.scenario.update(
@@ -259,7 +277,7 @@ class DynamicRunOrchestrator:
             },
         )
 
-        return manifest, run_dir
+        return manifest, run_dir, telemetry_payload
 
     def _build_manifest(
         self,

@@ -22,6 +22,7 @@ def run_dynamic_analysis(
     harvest_session_id: int | None = None,
     clear_logcat: bool = True,
     proxy_port: int = 8890,
+    sampling_rate_s: int = 1,
 ) -> DynamicSessionResult:
     config = DynamicSessionConfig(
         package_name=package_name,
@@ -38,6 +39,7 @@ def run_dynamic_analysis(
         harvest_session_id=harvest_session_id,
         clear_logcat=clear_logcat,
         proxy_port=proxy_port,
+        sampling_rate_s=sampling_rate_s,
     )
     engine_result = run_dynamic_engine(config)
     return engine_result.session

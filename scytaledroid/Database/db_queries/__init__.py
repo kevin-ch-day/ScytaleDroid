@@ -13,6 +13,7 @@ from .static_analysis import (
     static_permission_risk,
     string_analysis,
 )
+from .dynamic import schema as dynamic_schema
 
 __all__ = [
     "apk_repository",
@@ -24,4 +25,5 @@ __all__ = [
     "static_findings",
     "static_permission_risk",
     "string_analysis",
+    "dynamic_schema",
 ]

@@ -90,6 +90,10 @@ class DynamicAnalysisEngine:
             "evidence_path": session_result.evidence_path,
             "plan": plan_payload,
             "probes": probe_summary,
+            "telemetry_process": session_result.telemetry_process,
+            "telemetry_network": session_result.telemetry_network,
+            "telemetry_stats": session_result.telemetry_stats,
+            "sampling_rate_s": self.config.sampling_rate_s,
         }
         self._attach_engine_outputs(session_result, plan_payload, probe_summary, summary_payload)
         self._persist_summary(session_result, summary_payload)

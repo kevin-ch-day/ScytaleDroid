@@ -44,7 +44,7 @@ def run_dynamic_session(
 
     orchestrator = DynamicRunOrchestrator(config, observers=observers, plan_payload=plan_payload)
     try:
-        manifest, run_dir = orchestrator.run()
+        manifest, run_dir, telemetry_payload = orchestrator.run()
     except PlanValidationError as exc:
         result.status = "blocked"
         result.errors = list(exc.outcome.reasons) if exc.outcome.reasons else ["dynamic plan validation failed"]
@@ -63,4 +63,8 @@ def run_dynamic_session(
     result.notes = f"Dynamic run captured at {run_dir}."
     result.dynamic_run_id = manifest.dynamic_run_id
     result.evidence_path = str(run_dir)
+    if telemetry_payload:
+        result.telemetry_process = list(telemetry_payload.get("telemetry_process") or [])
+        result.telemetry_network = list(telemetry_payload.get("telemetry_network") or [])
+        result.telemetry_stats = dict(telemetry_payload.get("telemetry_stats") or {})
     return result
