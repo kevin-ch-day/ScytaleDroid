@@ -625,6 +625,7 @@ def _app_metadata(report: StaticAnalysisReport, *, signer: str | None, split_cou
             ordered_hashes[key] = hashes.pop(key)
     for key in sorted(hashes):
         ordered_hashes[key] = hashes[key]
+    extra_meta = report.metadata if isinstance(report.metadata, Mapping) else {}
     metadata: MutableMapping[str, object] = {
         "package": manifest.package_name or "unknown",
         "version_name": manifest.version_name or "—",
@@ -634,6 +635,12 @@ def _app_metadata(report: StaticAnalysisReport, *, signer: str | None, split_cou
         "signer": signer,
         "splits": split_count,
         "hashes": ordered_hashes,
+        "base_apk_sha256": extra_meta.get("base_apk_sha256"),
+        "artifact_set_hash": extra_meta.get("artifact_set_hash"),
+        "run_signature": extra_meta.get("run_signature"),
+        "run_signature_version": extra_meta.get("run_signature_version"),
+        "identity_valid": extra_meta.get("identity_valid"),
+        "identity_error_reason": extra_meta.get("identity_error_reason"),
     }
     return metadata
 

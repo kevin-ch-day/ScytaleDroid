@@ -679,6 +679,7 @@ class PermissionAuditAccumulator:
             "snapshot_id": self.snapshot_id,
             "session": session_value,
             "scope": self.scope_type,
+            "scope_type": self.scope_type,
             "scope_label": self.scope_label,
             "inventory": inventory,
             "permission_prevalence": {"permissions": permissions, "signals": signals},

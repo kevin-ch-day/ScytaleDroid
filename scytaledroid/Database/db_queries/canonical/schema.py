@@ -55,10 +55,16 @@ _DDL_STATEMENTS: list[str] = [
       scope_label      VARCHAR(191)   DEFAULT NULL,
       category         VARCHAR(64)    DEFAULT NULL,
       sha256           CHAR(64)       DEFAULT NULL,
+      base_apk_sha256  CHAR(64)       DEFAULT NULL,
+      artifact_set_hash CHAR(64)      DEFAULT NULL,
+      run_signature    CHAR(64)       DEFAULT NULL,
+      run_signature_version VARCHAR(16) DEFAULT NULL,
+      identity_valid   TINYINT(1)     DEFAULT NULL,
+      identity_error_reason VARCHAR(128) DEFAULT NULL,
       analysis_version VARCHAR(32)    DEFAULT NULL,
       pipeline_version VARCHAR(32)    DEFAULT NULL,
       catalog_versions VARCHAR(128)   DEFAULT NULL,
-      config_hash      VARCHAR(128)   DEFAULT NULL,
+      config_hash      CHAR(64)       DEFAULT NULL,
       study_tag        VARCHAR(128)   DEFAULT NULL,
       run_started_utc  VARCHAR(64)    DEFAULT NULL,
       status           VARCHAR(16)    DEFAULT 'RUNNING',
@@ -102,13 +108,26 @@ _DDL_STATEMENTS: list[str] = [
     ALTER TABLE static_analysis_runs
       ADD COLUMN IF NOT EXISTS pipeline_version VARCHAR(32) DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS catalog_versions VARCHAR(128) DEFAULT NULL,
-      ADD COLUMN IF NOT EXISTS config_hash VARCHAR(128) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS config_hash CHAR(64) DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS study_tag VARCHAR(128) DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS run_started_utc VARCHAR(64) DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS status VARCHAR(16) DEFAULT 'RUNNING',
       ADD COLUMN IF NOT EXISTS ended_at_utc DATETIME DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS abort_reason VARCHAR(64) DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS abort_signal VARCHAR(16) DEFAULT NULL;
+    """,
+    """
+    ALTER TABLE static_analysis_runs
+      ADD COLUMN IF NOT EXISTS base_apk_sha256 CHAR(64) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS artifact_set_hash CHAR(64) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS run_signature CHAR(64) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS run_signature_version VARCHAR(16) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS identity_valid TINYINT(1) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS identity_error_reason VARCHAR(128) DEFAULT NULL;
+    """,
+    """
+    ALTER TABLE static_analysis_runs
+      MODIFY config_hash CHAR(64) DEFAULT NULL;
     """,
     """
     ALTER TABLE static_analysis_runs
@@ -143,8 +162,15 @@ _DDL_STATEMENTS: list[str] = [
       session_stamp       VARCHAR(128) NOT NULL,
       package_name        VARCHAR(255) NOT NULL,
       static_run_id       BIGINT UNSIGNED NOT NULL,
-      run_origin          ENUM('created','reused') NOT NULL DEFAULT 'created',
+      run_origin          VARCHAR(16) NOT NULL DEFAULT 'created',
       origin_session_stamp VARCHAR(128) DEFAULT NULL,
+      pipeline_version    VARCHAR(32) DEFAULT NULL,
+      base_apk_sha256     CHAR(64) DEFAULT NULL,
+      artifact_set_hash   CHAR(64) DEFAULT NULL,
+      run_signature       CHAR(64) DEFAULT NULL,
+      run_signature_version VARCHAR(16) DEFAULT NULL,
+      identity_valid      TINYINT(1) DEFAULT NULL,
+      identity_error_reason VARCHAR(128) DEFAULT NULL,
       linked_at_utc       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (link_id),
       UNIQUE KEY ux_static_session_run (session_stamp, package_name),
@@ -155,6 +181,20 @@ _DDL_STATEMENTS: list[str] = [
         REFERENCES static_analysis_runs (id)
         ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
+    """
+    ALTER TABLE static_session_run_links
+      MODIFY run_origin VARCHAR(16) NOT NULL DEFAULT 'created';
+    """,
+    """
+    ALTER TABLE static_session_run_links
+      ADD COLUMN IF NOT EXISTS pipeline_version VARCHAR(32) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS base_apk_sha256 CHAR(64) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS artifact_set_hash CHAR(64) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS run_signature CHAR(64) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS run_signature_version VARCHAR(16) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS identity_valid TINYINT(1) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS identity_error_reason VARCHAR(128) DEFAULT NULL;
     """,
     """
     CREATE TABLE IF NOT EXISTS static_correlation_results (

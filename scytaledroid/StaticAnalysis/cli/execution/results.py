@@ -20,6 +20,7 @@ from scytaledroid.Utils.DisplayUtils import (
     table_utils,
     colors,
 )
+from scytaledroid.Config import app_config
 
 from ...core import StaticAnalysisReport
 from ...engine.strings import analyse_strings
@@ -318,11 +319,15 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
     if highlight_tokens:
         print(status_messages.highlight("; ".join(highlight_tokens), show_icon=True))
     if params.dry_run:
+        executed = outcome.completed_artifacts
+        discovered = outcome.total_artifacts
+        persisted = sum(app.persisted_artifacts for app in outcome.results)
+        failed = sum(app.failed_artifacts for app in outcome.results)
         print(
             status_messages.status(
                 "Diagnostic dry-run — no persistence; "
-                f"artifacts processed={outcome.completed_artifacts}/{outcome.total_artifacts}; "
-                f"skipped={outcome.dry_run_skipped}",
+                f"discovered={discovered} executed={executed} persisted={persisted} "
+                f"failed={failed} persistence_skipped={outcome.dry_run_skipped}",
                 level="info",
             )
         )
@@ -512,18 +517,33 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                 )
                 print(status_messages.status(warning, level="warn"))
             try:
-                plan_payload = build_dynamic_plan(
-                    base_report,
-                    payload,
-                    static_run_id=app_result.static_run_id,
-                )
-                dynamic_plan_path = write_dynamic_plan_json(
-                    plan_payload,
-                    package=app_result.package_name,
-                    profile=params.profile,
-                    scope=params.scope,
-                    static_run_id=app_result.static_run_id,
-                )
+                identity_valid = None
+                metadata_map = base_report.metadata if isinstance(base_report.metadata, Mapping) else {}
+                if isinstance(metadata_map, Mapping):
+                    identity_valid = metadata_map.get("identity_valid")
+                if identity_valid is False:
+                    print(
+                        status_messages.status(
+                            (
+                                "Skipping dynamic plan generation for "
+                                f"{app_result.package_name}: run identity invalid."
+                            ),
+                            level="warn",
+                        )
+                    )
+                else:
+                    plan_payload = build_dynamic_plan(
+                        base_report,
+                        payload,
+                        static_run_id=app_result.static_run_id,
+                    )
+                    dynamic_plan_path = write_dynamic_plan_json(
+                        plan_payload,
+                        package=app_result.package_name,
+                        profile=params.profile,
+                        scope=params.scope,
+                        static_run_id=app_result.static_run_id,
+                    )
             except Exception as exc:
                 warning = (
                     f"Failed to write dynamic plan for {app_result.package_name}: {exc}"
@@ -642,7 +662,32 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
         if not printed_db_table:
             from ..views.run_detail_view import render_app_table  # local import to avoid cycle
 
-            render_app_table(outcome.results)
+            render_app_table(outcome.results, diagnostic=params.dry_run)
+            if params.dry_run:
+                metadata_partial = any(
+                    app.target_sdk is None or not app.signer for app in outcome.results
+                )
+                if metadata_partial:
+                    print(
+                        status_messages.status(
+                            "Diagnostic metadata mode: partial (targetSdk/signers suppressed).",
+                            level="info",
+                        )
+                    )
+                else:
+                    print(
+                        status_messages.status(
+                            "Diagnostic metadata mode: full.",
+                            level="info",
+                        )
+                    )
+        diagnostic_warnings: list[tuple[str, str, str]] = []
+        linkage_states: list[str] = []
+        if params.dry_run and outcome.results:
+            diagnostic_warnings, linkage_states = _render_diagnostic_app_summary(
+                outcome,
+                session_stamp=session_stamp,
+            )
         if compact_mode:
             print(
                 status_messages.status(
@@ -650,6 +695,25 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                     level="info",
                 )
             )
+        if params.dry_run:
+            grouped_warnings = _group_diagnostic_warnings(diagnostic_warnings)
+            if grouped_warnings:
+                print("\nTop warnings/anomalies")
+                for line in grouped_warnings[:5]:
+                    print(status_messages.status(line, level="warn"))
+            pipeline_version = os.getenv("SCYTALEDROID_PIPELINE_VERSION") or getattr(
+                params, "analysis_version", None
+            )
+            identity_ok = all(app.identity_valid for app in outcome.results)
+            linkage_ok = all(state.startswith("VALID") for state in linkage_states) if linkage_states else False
+            print("\nDYNAMIC-READY CHECKS (diagnostic)")
+            print(f"{'OK' if pipeline_version else 'FAIL'} pipeline_version present")
+            print(f"{'OK' if linkage_ok else 'FAIL'} linkage resolvable (run_map/session links)")
+            if not linkage_ok:
+                print("    Fix: ensure run_map.json is written or static_session_run_links rows exist.")
+            print(f"{'OK' if identity_ok else 'FAIL'} identity valid (artifact_set_hash computed)")
+            ready = pipeline_version and linkage_ok and identity_ok
+            print(f"Result: {'READY' if ready else 'NOT READY'}")
         if session_stamp and persist_enabled:
             _render_persistence_footer(
                 session_stamp,
@@ -1658,6 +1722,184 @@ def _render_db_severity_table(session_stamp: str) -> bool:
         table_rows,
     )
     return True
+
+
+def _load_run_map_for_session(session_stamp: str | None) -> Mapping[str, object] | None:
+    if not session_stamp:
+        return None
+    path = Path(app_config.DATA_DIR) / "sessions" / session_stamp / "run_map.json"
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _fetch_db_linkage(
+    session_stamp: str,
+    package_name: str,
+) -> tuple[Mapping[str, object] | None, str | None]:
+    try:
+        row = core_q.run_sql(
+            """
+            SELECT static_run_id,
+                   pipeline_version,
+                   run_signature,
+                   run_signature_version,
+                   run_origin,
+                   origin_session_stamp
+              FROM static_session_run_links
+             WHERE session_stamp = %s
+               AND package_name = %s
+            """,
+            (session_stamp, package_name),
+            fetch="one_dict",
+        )
+    except Exception:
+        return None, "db_link_query_failed"
+    if not row:
+        return None, None
+    if not isinstance(row, Mapping):
+        return None, "db_link_invalid_row"
+    return row, None
+
+
+def _resolve_run_map_entry(
+    app_result,
+    run_map: Mapping[str, object],
+) -> tuple[Mapping[str, object] | None, str | None]:
+    apps = run_map.get("apps") if isinstance(run_map, Mapping) else None
+    if not isinstance(apps, Sequence):
+        return None, "run_map missing apps list"
+    for entry in apps:
+        if not isinstance(entry, Mapping):
+            continue
+        if entry.get("package") != app_result.package_name:
+            continue
+        static_run_id = entry.get("static_run_id")
+        pipeline_version = entry.get("pipeline_version")
+        if static_run_id is None or pipeline_version in (None, ""):
+            return None, "run_map missing static_run_id/pipeline_version"
+        return entry, None
+    return None, "package missing from run_map"
+
+
+def _diagnostic_linkage_status(
+    app_result,
+    *,
+    run_map: Mapping[str, object] | None,
+    session_stamp: str | None,
+) -> tuple[str, str | None]:
+    if not session_stamp:
+        return "UNAVAILABLE", "UNAVAILABLE: session_stamp missing"
+    run_map_entry: Mapping[str, object] | None = None
+    run_map_note: str | None = None
+    if run_map:
+        run_map_entry, run_map_note = _resolve_run_map_entry(app_result, run_map)
+    db_link_entry, db_link_note = _fetch_db_linkage(session_stamp, app_result.package_name)
+
+    if run_map_entry and db_link_entry:
+        run_map_id = run_map_entry.get("static_run_id")
+        db_link_id = db_link_entry.get("static_run_id")
+        if run_map_id != db_link_id:
+        return "INVALID", "INVALID: run_map/db_link mismatch"
+    return "VALID (run_map+db_link)", f"static_run_id={run_map_id}"
+
+    if run_map_entry:
+        return "VALID (run_map)", f"static_run_id={run_map_entry.get('static_run_id')}"
+    if db_link_entry:
+        db_pipeline = db_link_entry.get("pipeline_version")
+        if db_pipeline in (None, ""):
+            return "INVALID", "db_link missing pipeline_version"
+        return "VALID (db_link)", f"static_run_id={db_link_entry.get('static_run_id')}"
+
+    if db_link_note:
+        return "UNAVAILABLE", "UNAVAILABLE: db_link query failed"
+    if run_map_note:
+        if "static_run_id/pipeline_version" in run_map_note:
+            return "UNAVAILABLE", f"UNAVAILABLE: {run_map_note}"
+        return "INVALID", f"INVALID: {run_map_note}"
+    return "UNAVAILABLE", "UNAVAILABLE: no run_map; no db link"
+
+
+def _hash_prefix(value: str | None, *, prefix: int = 4, suffix: int = 4) -> str | None:
+    if not value or not isinstance(value, str):
+        return None
+    if len(value) <= (prefix + suffix + 2):
+        return value
+    return f"{value[:prefix]}…{value[-suffix:]}"
+
+
+def _render_diagnostic_app_summary(
+    outcome: RunOutcome,
+    *,
+    session_stamp: str | None,
+) -> tuple[list[tuple[str, str, str]], list[str]]:
+    run_map = _load_run_map_for_session(session_stamp)
+    headers = ["App", "Artifacts", "Executed", "Persisted", "Identity", "Linkage", "Notes"]
+    rows: list[list[str]] = []
+    warnings: list[tuple[str, str, str]] = []
+    linkage_states: list[str] = []
+    for app in outcome.results:
+        identity = "VALID" if app.identity_valid else "INVALID"
+        identity_note = app.identity_error_reason if app.identity_valid is False else None
+        linkage, linkage_note = _diagnostic_linkage_status(app, run_map=run_map, session_stamp=session_stamp)
+        linkage_states.append(linkage)
+        notes = []
+        if identity_note:
+            notes.append(identity_note)
+        else:
+            base_prefix = _hash_prefix(app.base_apk_sha256)
+            set_prefix = _hash_prefix(app.artifact_set_hash)
+            if base_prefix or set_prefix:
+                notes.append(
+                    f"identity base={base_prefix or 'unknown'} set={set_prefix or 'unknown'} "
+                    f"(order=split_name_lex; count={app.discovered_artifacts})"
+                )
+        if linkage_note:
+            notes.append(linkage_note)
+        rows.append(
+            [
+                app.app_label or app.package_name,
+                str(app.discovered_artifacts),
+                str(app.executed_artifacts),
+                str(app.persisted_artifacts),
+                identity,
+                linkage,
+                "; ".join(notes) if notes else "—",
+            ]
+        )
+        if identity_note:
+            warnings.append(("Identity", app.package_name, identity_note))
+        if linkage_note and not linkage.startswith("VALID"):
+            warnings.append(("Linkage", app.package_name, linkage_note))
+    if rows:
+        print("\nDiagnostic — Per-app summary")
+        table_utils.render_table(headers, rows)
+    return warnings, linkage_states
+
+
+def _group_diagnostic_warnings(
+    entries: list[tuple[str, str, str]],
+    *,
+    max_packages: int = 5,
+) -> list[str]:
+    grouped: dict[tuple[str, str], list[str]] = {}
+    for category, package, note in entries:
+        key = (category, note)
+        grouped.setdefault(key, []).append(package)
+    lines: list[str] = []
+    for (category, note), packages in grouped.items():
+        packages_sorted = sorted(set(packages))
+        shown = packages_sorted[:max_packages]
+        extra = len(packages_sorted) - len(shown)
+        package_list = ", ".join(shown)
+        if extra > 0:
+            package_list = f"{package_list} (+{extra} more)"
+        lines.append(f"{category} {note}: {len(packages_sorted)} apps — {package_list}")
+    return sorted(lines)
 
 
 def _render_persistence_footer(

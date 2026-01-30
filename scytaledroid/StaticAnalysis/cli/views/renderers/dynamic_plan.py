@@ -209,6 +209,14 @@ def build_dynamic_plan(
         "version_name": metadata.get("version_name"),
         "version_code": metadata.get("version_code"),
         "hashes": metadata.get("hashes"),
+        "run_identity": {
+            "base_apk_sha256": metadata.get("base_apk_sha256"),
+            "artifact_set_hash": metadata.get("artifact_set_hash"),
+            "run_signature": metadata.get("run_signature"),
+            "run_signature_version": metadata.get("run_signature_version"),
+            "identity_valid": metadata.get("identity_valid"),
+            "identity_error_reason": metadata.get("identity_error_reason"),
+        },
         "exported_components": {
             "activities": list(exported.activities),
             "services": list(exported.services),

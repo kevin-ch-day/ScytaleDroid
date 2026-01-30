@@ -121,6 +121,21 @@ class AppRunResult:
     artifacts: list[ArtifactOutcome] = field(default_factory=list)
     signer: Optional[str] = None
     static_run_id: Optional[int] = None
+    app_label: Optional[str] = None
+    version_name: Optional[str] = None
+    version_code: Optional[int] = None
+    min_sdk: Optional[int] = None
+    target_sdk: Optional[int] = None
+    discovered_artifacts: int = 0
+    executed_artifacts: int = 0
+    persisted_artifacts: int = 0
+    failed_artifacts: int = 0
+    persistence_skipped: int = 0
+    duration_seconds: float = 0.0
+    identity_valid: Optional[bool] = None
+    identity_error_reason: Optional[str] = None
+    base_apk_sha256: Optional[str] = None
+    artifact_set_hash: Optional[str] = None
 
     def severity_totals(self) -> Counter[str]:
         totals: Counter[str] = Counter()

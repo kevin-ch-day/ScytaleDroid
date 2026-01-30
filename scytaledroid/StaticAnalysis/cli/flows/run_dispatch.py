@@ -145,6 +145,17 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
             signal.signal(signal.SIGINT, previous_handler)
         return None
 
+    if params.dry_run:
+        print("DIAGNOSTIC MODE (non-persisting)")
+        print("────────────────────────────────")
+        print("persist=false  evidence_pack=false  plan_generation=false")
+        print("identity_required=true  linkage_required=true")
+        if params.session_stamp:
+            print(
+                f"Session: {params.session_stamp}  Profile: {params.profile_label}  "
+                f"Scope: {params.scope_label or params.scope}"
+            )
+        print()
     print("Starting Static Analysis pipeline")
     outcome: RunOutcome | None = None
     run_status: str | None = None
@@ -257,10 +268,10 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
             pass
 
     run_map = None
-    if outcome is not None and params.session_stamp and not params.dry_run:
+    if outcome is not None and params.session_stamp:
         try:
             run_map = _build_session_run_map(outcome, params.session_stamp)
-            if run_map:
+            if run_map and not params.dry_run:
                 _persist_session_run_links(params.session_stamp, run_map)
         except Exception as exc:
             print(
@@ -376,11 +387,22 @@ def _build_session_run_map(outcome: RunOutcome | None, session_stamp: str | None
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     for res in results:
         static_run_id = res.static_run_id
+        base_report = res.base_report()
+        meta = getattr(base_report, "metadata", {}) if base_report else {}
+        if not isinstance(meta, dict):
+            meta = {}
         entry = {
             "package": res.package_name,
             "static_run_id": static_run_id,
             "run_origin": None,
             "origin_session_stamp": None,
+            "pipeline_version": meta.get("pipeline_version"),
+            "base_apk_sha256": meta.get("base_apk_sha256"),
+            "artifact_set_hash": meta.get("artifact_set_hash"),
+            "run_signature": meta.get("run_signature"),
+            "run_signature_version": meta.get("run_signature_version"),
+            "identity_valid": meta.get("identity_valid"),
+            "identity_error_reason": meta.get("identity_error_reason"),
         }
         if static_run_id:
             origin_session = origin_map.get(static_run_id)
@@ -459,6 +481,20 @@ def _persist_session_run_links(session_stamp: str | None, run_map: dict | None) 
             insert_columns.append("run_origin")
         if "origin_session_stamp" in columns:
             insert_columns.append("origin_session_stamp")
+        if "pipeline_version" in columns:
+            insert_columns.append("pipeline_version")
+        if "base_apk_sha256" in columns:
+            insert_columns.append("base_apk_sha256")
+        if "artifact_set_hash" in columns:
+            insert_columns.append("artifact_set_hash")
+        if "run_signature" in columns:
+            insert_columns.append("run_signature")
+        if "run_signature_version" in columns:
+            insert_columns.append("run_signature_version")
+        if "identity_valid" in columns:
+            insert_columns.append("identity_valid")
+        if "identity_error_reason" in columns:
+            insert_columns.append("identity_error_reason")
         if "linked_at_utc" in columns:
             insert_columns.append("linked_at_utc")
         placeholders = ", ".join(["%s"] * len(insert_columns))
@@ -483,11 +519,32 @@ def _persist_session_run_links(session_stamp: str | None, run_map: dict | None) 
                 continue
             origin = app.get("run_origin") or "reused"
             origin_session = app.get("origin_session_stamp")
+            pipeline_version = app.get("pipeline_version")
+            base_apk_sha256 = app.get("base_apk_sha256")
+            artifact_set_hash = app.get("artifact_set_hash")
+            run_signature = app.get("run_signature")
+            run_signature_version = app.get("run_signature_version")
+            identity_valid = app.get("identity_valid")
+            identity_error_reason = app.get("identity_error_reason")
             values: list[object] = [session_stamp, package, int(static_run_id)]
             if "run_origin" in columns:
                 values.append(origin)
             if "origin_session_stamp" in columns:
                 values.append(origin_session)
+            if "pipeline_version" in columns:
+                values.append(pipeline_version)
+            if "base_apk_sha256" in columns:
+                values.append(base_apk_sha256)
+            if "artifact_set_hash" in columns:
+                values.append(artifact_set_hash)
+            if "run_signature" in columns:
+                values.append(run_signature)
+            if "run_signature_version" in columns:
+                values.append(run_signature_version)
+            if "identity_valid" in columns:
+                values.append(1 if identity_valid else 0 if identity_valid is not None else None)
+            if "identity_error_reason" in columns:
+                values.append(identity_error_reason)
             if "linked_at_utc" in columns:
                 values.append(now)
             try:

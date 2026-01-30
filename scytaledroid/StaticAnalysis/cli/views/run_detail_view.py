@@ -21,7 +21,7 @@ _SEVERITY_LABELS: Mapping[SeverityLevel, tuple[str, str]] = {
 SEVERITY_TOKEN_ORDER = ("H", "M", "L", "I")
 
 
-def render_app_table(results: Sequence[AppRunResult]) -> None:
+def render_app_table(results: Sequence[AppRunResult], *, diagnostic: bool = False) -> None:
     rows: list[list[str]] = []
     for idx, app_result in enumerate(results, start=1):
         totals = app_result.severity_totals()
@@ -29,6 +29,7 @@ def render_app_table(results: Sequence[AppRunResult]) -> None:
         version = "—"
         target_sdk = "—"
         display_name = app_result.package_name
+        suppressed_label = "suppressed (diagnostic)" if diagnostic else "—"
         if base_report:
             version_name = base_report.manifest.version_name or "—"
             version_code = base_report.manifest.version_code
@@ -36,7 +37,23 @@ def render_app_table(results: Sequence[AppRunResult]) -> None:
             target_sdk = base_report.manifest.target_sdk or "—"
             if base_report.manifest.app_label:
                 display_name = base_report.manifest.app_label
+        else:
+            if app_result.app_label:
+                display_name = app_result.app_label
+            if app_result.version_name:
+                if app_result.version_code:
+                    version = f"{app_result.version_name} ({app_result.version_code})"
+                else:
+                    version = app_result.version_name
+            elif diagnostic:
+                version = suppressed_label
+            if app_result.target_sdk is not None:
+                target_sdk = app_result.target_sdk
+            elif diagnostic:
+                target_sdk = suppressed_label
         signer = app_result.signer or "—"
+        if diagnostic and signer == "—":
+            signer = suppressed_label
         rows.append(
             [
                 str(idx),

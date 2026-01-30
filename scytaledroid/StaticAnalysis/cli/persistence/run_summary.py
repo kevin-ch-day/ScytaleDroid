@@ -401,6 +401,12 @@ def _create_static_run(
     run_started_utc: str | None,
     status: str,
     sha256: str | None = None,
+    base_apk_sha256: str | None = None,
+    artifact_set_hash: str | None = None,
+    run_signature: str | None = None,
+    run_signature_version: str | None = None,
+    identity_valid: bool | None = None,
+    identity_error_reason: str | None = None,
     config_hash: str | None = None,
     pipeline_version: str | None = None,
     analysis_version: str | None = None,
@@ -417,6 +423,12 @@ def _create_static_run(
                 scope_label,
                 category,
                 sha256,
+                base_apk_sha256,
+                artifact_set_hash,
+                run_signature,
+                run_signature_version,
+                identity_valid,
+                identity_error_reason,
                 analysis_version,
                 pipeline_version,
                 catalog_versions,
@@ -426,7 +438,7 @@ def _create_static_run(
                 findings_total,
                 run_started_utc,
                 status
-            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             """,
             (
                 app_version_id,
@@ -434,6 +446,12 @@ def _create_static_run(
                 scope_label,
                 category,
                 sha256,
+                base_apk_sha256,
+                artifact_set_hash,
+                run_signature,
+                run_signature_version,
+                identity_valid,
+                identity_error_reason,
                 analysis_version,
                 pipeline_version,
                 catalog_versions,
@@ -456,6 +474,12 @@ def _create_static_run(
                     session_stamp,
                     scope_label,
                     sha256,
+                    base_apk_sha256,
+                    artifact_set_hash,
+                    run_signature,
+                    run_signature_version,
+                    identity_valid,
+                    identity_error_reason,
                     analysis_version,
                     pipeline_version,
                     catalog_versions,
@@ -465,13 +489,19 @@ def _create_static_run(
                     findings_total,
                     run_started_utc,
                     status
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 """,
                 (
                     app_version_id,
                     session_stamp,
                     scope_label,
                     sha256,
+                    base_apk_sha256,
+                    artifact_set_hash,
+                    run_signature,
+                    run_signature_version,
+                    identity_valid,
+                    identity_error_reason,
                     analysis_version,
                     pipeline_version,
                     catalog_versions,
@@ -506,6 +536,12 @@ def create_static_run_ledger(
     min_sdk: int | None = None,
     target_sdk: int | None = None,
     sha256: str | None = None,
+    base_apk_sha256: str | None = None,
+    artifact_set_hash: str | None = None,
+    run_signature: str | None = None,
+    run_signature_version: str | None = None,
+    identity_valid: bool | None = None,
+    identity_error_reason: str | None = None,
     config_hash: str | None = None,
     pipeline_version: str | None = None,
     analysis_version: str | None = None,
@@ -563,14 +599,25 @@ def create_static_run_ledger(
                 SELECT id, status
                 FROM static_analysis_runs
                 WHERE app_version_id=%s
-                  AND sha256=%s
+                  AND base_apk_sha256=%s
+                  AND artifact_set_hash=%s
                   AND config_hash=%s
                   AND profile=%s
                   AND (pipeline_version<=>%s)
+                  AND (run_signature_version<=>%s)
+                  AND (identity_valid=1)
                 ORDER BY id DESC
                 LIMIT 1
                 """,
-                (app_version_id, sha256, config_hash, profile, pipeline_version),
+                (
+                    app_version_id,
+                    base_apk_sha256 or sha256,
+                    artifact_set_hash,
+                    config_hash,
+                    profile,
+                    pipeline_version,
+                    run_signature_version,
+                ),
                 fetch="one",
             )
             if row and row[0] and str(row[1] or "").upper() == "COMPLETED":
@@ -602,6 +649,12 @@ def create_static_run_ledger(
         run_started_utc=run_started_utc,
         status="RUNNING",
         sha256=sha256,
+        base_apk_sha256=base_apk_sha256,
+        artifact_set_hash=artifact_set_hash,
+        run_signature=run_signature,
+        run_signature_version=run_signature_version,
+        identity_valid=identity_valid,
+        identity_error_reason=identity_error_reason,
         config_hash=config_hash,
         pipeline_version=pipeline_version,
         analysis_version=analysis_version,
@@ -614,6 +667,12 @@ def _update_static_run_metadata(
     static_run_id: int,
     *,
     sha256_value: str | None = None,
+    base_apk_sha256: str | None = None,
+    artifact_set_hash: str | None = None,
+    run_signature: str | None = None,
+    run_signature_version: str | None = None,
+    identity_valid: bool | None = None,
+    identity_error_reason: str | None = None,
     config_hash: str | None = None,
     pipeline_version: str | None = None,
     analysis_version: str | None = None,
@@ -625,6 +684,24 @@ def _update_static_run_metadata(
     if sha256_value:
         updates.append("sha256=%s")
         params.append(sha256_value)
+    if base_apk_sha256:
+        updates.append("base_apk_sha256=%s")
+        params.append(base_apk_sha256)
+    if artifact_set_hash:
+        updates.append("artifact_set_hash=%s")
+        params.append(artifact_set_hash)
+    if run_signature:
+        updates.append("run_signature=%s")
+        params.append(run_signature)
+    if run_signature_version:
+        updates.append("run_signature_version=%s")
+        params.append(run_signature_version)
+    if identity_valid is not None:
+        updates.append("identity_valid=%s")
+        params.append(1 if identity_valid else 0)
+    if identity_error_reason:
+        updates.append("identity_error_reason=%s")
+        params.append(identity_error_reason)
     if config_hash:
         updates.append("config_hash=%s")
         params.append(config_hash)
@@ -886,11 +963,23 @@ def persist_run_summary(
     outcome.static_run_id = static_run_id
     if static_run_id and not dry_run:
         manifest_sha = None
+        base_apk_sha256 = None
+        artifact_set_hash = None
+        run_signature = None
+        run_signature_version = None
+        identity_valid = None
+        identity_error_reason = None
         if isinstance(metadata_map, Mapping):
             manifest_sha = first_text(
                 metadata_map.get("artifact_manifest_sha256"),
                 metadata_map.get("manifest_sha256"),
             )
+            base_apk_sha256 = first_text(metadata_map.get("base_apk_sha256"))
+            artifact_set_hash = first_text(metadata_map.get("artifact_set_hash"))
+            run_signature = first_text(metadata_map.get("run_signature"))
+            run_signature_version = first_text(metadata_map.get("run_signature_version"))
+            identity_valid = metadata_map.get("identity_valid")
+            identity_error_reason = first_text(metadata_map.get("identity_error_reason"))
         if not manifest_sha:
             try:
                 manifest_sha = first_text(getattr(br, "hashes", {}).get("sha256"))
@@ -915,7 +1004,13 @@ def persist_run_summary(
         analysis_version = first_text(getattr(br, "analysis_version", None))
         _update_static_run_metadata(
             static_run_id,
-            sha256_value=manifest_sha,
+            sha256_value=base_apk_sha256 or manifest_sha,
+            base_apk_sha256=base_apk_sha256,
+            artifact_set_hash=artifact_set_hash,
+            run_signature=run_signature,
+            run_signature_version=run_signature_version,
+            identity_valid=identity_valid if isinstance(identity_valid, bool) else None,
+            identity_error_reason=identity_error_reason,
             config_hash=config_hash,
             pipeline_version=pipeline_version,
             analysis_version=analysis_version,

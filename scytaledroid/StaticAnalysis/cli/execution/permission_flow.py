@@ -380,7 +380,17 @@ def _validate_run_map(run_map: dict, session_stamp: str) -> None:
             continue
         package = entry.get("package")
         static_run_id = entry.get("static_run_id")
-        if not package or static_run_id is None:
+        identity_valid = entry.get("identity_valid")
+        if identity_valid is False:
+            missing.append(str(package) if package else "<missing>")
+            continue
+        required_fields = [
+            entry.get("base_apk_sha256"),
+            entry.get("artifact_set_hash"),
+            entry.get("run_signature"),
+            entry.get("run_signature_version"),
+        ]
+        if not package or static_run_id is None or any(val in (None, "") for val in required_fields):
             missing.append(str(package) if package else "<missing>")
             continue
         if package in seen:

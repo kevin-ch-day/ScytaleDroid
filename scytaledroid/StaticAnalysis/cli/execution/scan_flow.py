@@ -76,12 +76,15 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
 
     for group in selection.groups:
         app_result = AppRunResult(group.package_name, getattr(group, "category", "Uncategorized"))
+        identity = _compute_run_identity(group)
         manifest_sha256 = _artifact_manifest_sha256(group)
         run_signature = _run_signature_sha256(
-            manifest_sha256,
+            identity["base_apk_sha256"],
+            identity["artifact_set_hash"],
             config_hash=config_hash,
             profile=params.profile_label,
             pipeline_version=pipeline_version,
+            run_signature_version=identity["run_signature_version"],
         )
         base_artifact = next(iter(_dedupe_artifacts(group.artifacts)), None)
         metadata = getattr(base_artifact, "metadata", {}) if base_artifact else {}
@@ -109,7 +112,22 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
             except Exception:
                 return None
 
+        app_result.app_label = str(display_name) if display_name else None
+        app_result.version_name = str(version_name) if version_name else None
+        app_result.version_code = _coerce_int(version_code_raw)
+        app_result.min_sdk = _coerce_int(min_sdk_raw)
+        app_result.target_sdk = _coerce_int(target_sdk_raw)
+        app_result.identity_valid = identity.get("identity_valid")
+        app_result.identity_error_reason = identity.get("identity_error_reason")
+        app_result.base_apk_sha256 = identity.get("base_apk_sha256")
+        app_result.artifact_set_hash = identity.get("artifact_set_hash")
+
         static_run_id = None
+        if not identity["identity_valid"] and not params.dry_run:
+            raise RuntimeError(
+                "Run identity invalid; cannot proceed with static analysis. "
+                f"Package={group.package_name}; reason={identity['identity_error_reason']}"
+            )
         if params.session_stamp:
             static_run_id = create_static_run_ledger(
                 package_name=group.package_name,
@@ -122,7 +140,13 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
                 version_code=_coerce_int(version_code_raw),
                 min_sdk=_coerce_int(min_sdk_raw),
                 target_sdk=_coerce_int(target_sdk_raw),
-                sha256=manifest_sha256,
+                sha256=identity["base_apk_sha256"],
+                base_apk_sha256=identity["base_apk_sha256"],
+                artifact_set_hash=identity["artifact_set_hash"],
+                run_signature=run_signature,
+                run_signature_version=identity["run_signature_version"],
+                identity_valid=identity["identity_valid"],
+                identity_error_reason=identity["identity_error_reason"],
                 config_hash=config_hash,
                 pipeline_version=pipeline_version,
                 run_started_utc=started_at.isoformat(timespec="seconds") + "Z",
@@ -135,6 +159,7 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
             break
 
         artifacts = _dedupe_artifacts(group.artifacts)
+        app_result.discovered_artifacts = len(artifacts)
         last_report_for_app: StaticAnalysisReport | None = None
         if display_name or group.package_name:
             progress.flush_line()
@@ -144,6 +169,7 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
             print(f"Package: {group.package_name}")
             print(f"Checks: {len(PIPELINE_STAGES)} stages · Profile: {params.profile_label}")
             print("Status: running")
+        app_start = time.monotonic()
         for artifact_index, artifact in enumerate(artifacts, start=1):
             abort_requested, _, _ = _abort_state()
             if abort_requested:
@@ -159,7 +185,12 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
                     "artifact_manifest_sha256": manifest_sha256,
                     "config_hash": config_hash,
                     "pipeline_version": pipeline_version,
-                    "run_signature_sha256": run_signature,
+                    "base_apk_sha256": identity["base_apk_sha256"],
+                    "artifact_set_hash": identity["artifact_set_hash"],
+                    "run_signature": run_signature,
+                    "run_signature_version": identity["run_signature_version"],
+                    "identity_valid": identity["identity_valid"],
+                    "identity_error_reason": identity["identity_error_reason"],
                 },
             )
             if skipped:
@@ -167,14 +198,18 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
                 if error_message:
                     if error_message == "dry-run (not persisted)":
                         dry_run_skipped += 1
+                        app_result.persistence_skipped += 1
                         progress.skip(index_for_progress, artifact_label, error_message)
                     else:
+                        app_result.failed_artifacts += 1
                         progress.error(index_for_progress, artifact_label, error_message)
                         failures.append(error_message)
                 else:
                     if not params.dry_run:
+                        app_result.failed_artifacts += 1
                         failures.append(f"No report generated for {artifact.display_path}")
                 completed_artifacts += 1
+                app_result.executed_artifacts += 1
                 progress.finish(completed_artifacts, artifact_label)
                 if _abort_state()[0]:
                     break
@@ -185,14 +220,18 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
                 if error_message:
                     if error_message == "dry-run (not persisted)":
                         dry_run_skipped += 1
+                        app_result.persistence_skipped += 1
                         progress.skip(index_for_progress, artifact_label, error_message)
                     else:
+                        app_result.failed_artifacts += 1
                         progress.error(index_for_progress, artifact_label, error_message)
                         failures.append(error_message)
                 else:
                     if not params.dry_run:
+                        app_result.failed_artifacts += 1
                         failures.append(f"No report generated for {artifact.display_path}")
                 completed_artifacts += 1
+                app_result.executed_artifacts += 1
                 progress.finish(completed_artifacts, artifact_label)
                 if _abort_state()[0]:
                     break
@@ -200,6 +239,11 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
 
             app_result.artifacts.append(summary)
             completed_artifacts += 1
+            app_result.executed_artifacts += 1
+            if summary.saved_path:
+                app_result.persisted_artifacts += 1
+            elif params.dry_run:
+                app_result.persistence_skipped += 1
             warning_lines: list[str] = []
             if report is not None:
                 warning_lines = _append_resource_warning(
@@ -220,6 +264,7 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
             if _abort_state()[0]:
                 progress.end()
                 break
+        app_result.duration_seconds = time.monotonic() - app_start
         if not _abort_state()[0]:
             progress.flush_line()
             print(status_messages.status("Completed scan", level="success"))
@@ -618,13 +663,7 @@ def generate_report(
 def _artifact_manifest_sha256(group) -> str | None:
     entries = []
     for artifact in _dedupe_artifacts(group.artifacts):
-        sha = getattr(artifact, "sha256", None)
-        if not sha:
-            try:
-                hashes = compute_hashes(Path(artifact.path))
-                sha = hashes.get("sha256")
-            except Exception:
-                sha = None
+        sha = _artifact_sha256(artifact)
         meta = getattr(artifact, "metadata", {}) or {}
         label = None
         if isinstance(meta, Mapping):
@@ -639,6 +678,75 @@ def _artifact_manifest_sha256(group) -> str | None:
         "artifacts": sorted(entries, key=lambda item: item["split"]),
     }
     return sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def _artifact_sha256(artifact) -> str | None:
+    sha = getattr(artifact, "sha256", None)
+    if isinstance(sha, str) and sha.strip():
+        return sha.strip()
+    try:
+        hashes = compute_hashes(Path(artifact.path))
+        sha = hashes.get("sha256")
+        return sha.strip() if isinstance(sha, str) and sha.strip() else None
+    except Exception:
+        return None
+
+
+def _split_name_for_artifact(artifact) -> str | None:
+    meta = getattr(artifact, "metadata", {}) or {}
+    if isinstance(meta, Mapping):
+        name = meta.get("split_name") or meta.get("split") or meta.get("artifact")
+        if isinstance(name, str) and name.strip():
+            return name.strip().lower()
+    try:
+        stem = Path(artifact.path).stem
+    except Exception:
+        stem = None
+    if isinstance(stem, str) and stem.strip():
+        return stem.strip().lower()
+    return None
+
+
+def _compute_run_identity(group) -> dict:
+    base = getattr(group, "base_artifact", None)
+    identity = {
+        "base_apk_sha256": None,
+        "artifact_set_hash": None,
+        "run_signature_version": "v1",
+        "identity_valid": False,
+        "identity_error_reason": None,
+    }
+    if base is None:
+        identity["identity_error_reason"] = "missing_base_artifact"
+        return identity
+
+    base_sha = _artifact_sha256(base)
+    if not base_sha:
+        identity["identity_error_reason"] = "base_sha256_missing"
+        return identity
+
+    entries = []
+    for artifact in _dedupe_artifacts(group.artifacts):
+        sha = _artifact_sha256(artifact)
+        if not sha:
+            identity["identity_error_reason"] = "artifact_sha256_missing"
+            return identity
+        split_name = _split_name_for_artifact(artifact)
+        if not split_name:
+            identity["identity_error_reason"] = "split_name_missing"
+            return identity
+        is_base = artifact == base or not getattr(artifact, "is_split_member", True)
+        entries.append({"split_name": split_name, "sha256": sha, "is_base": is_base})
+
+    ordered = [e for e in entries if e["is_base"]]
+    ordered.extend(sorted((e for e in entries if not e["is_base"]), key=lambda item: item["split_name"]))
+    split_hashes = [e["sha256"] for e in ordered]
+    artifact_set_hash = sha256(json.dumps(split_hashes).encode("utf-8")).hexdigest()
+
+    identity["base_apk_sha256"] = base_sha
+    identity["artifact_set_hash"] = artifact_set_hash
+    identity["identity_valid"] = True
+    return identity
 
 
 def _compute_config_hash(params: RunParameters) -> str:
@@ -665,17 +773,21 @@ def _compute_config_hash(params: RunParameters) -> str:
 
 
 def _run_signature_sha256(
-    manifest_sha256: str | None,
+    base_apk_sha256: str | None,
+    artifact_set_hash: str | None,
     *,
     config_hash: str,
     profile: str,
     pipeline_version: str | None,
+    run_signature_version: str,
 ) -> str:
     payload = {
-        "manifest_sha256": manifest_sha256 or "unknown",
+        "base_apk_sha256": base_apk_sha256 or "unknown",
+        "artifact_set_hash": artifact_set_hash or "unknown",
         "config_hash": config_hash,
         "profile": profile,
         "pipeline_version": pipeline_version or "",
+        "run_signature_version": run_signature_version,
     }
     return sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
 
