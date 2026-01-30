@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Iterable, Mapping, Optional, Sequence, Tuple
 
 from . import colors, table_utils, text_blocks
-from .terminal import get_terminal_width
+from .terminal import get_terminal_width, use_ascii_ui
 
 
 @dataclass(frozen=True)
@@ -122,20 +122,38 @@ def _wrap_text(text: str, width: int) -> list[str]:
     return wrapped or [text]
 
 
+def _format_kv_lines(
+    items: Sequence[Tuple[str, object]],
+    *,
+    label_style: tuple[str, ...],
+    value_style: tuple[str, ...],
+    max_width: int,
+    indent: str = "",
+) -> list[str]:
+    if not items:
+        return []
+    label_width = max((text_blocks.visible_width(str(label)) for label, _ in items), default=0)
+    lines: list[str] = []
+    for label, value in items:
+        label_text = colors.apply(str(label).ljust(label_width), label_style)
+        value_text = colors.apply(str(value), value_style, bold=True)
+        line = f"{indent}{label_text} : {value_text}"
+        lines.append(text_blocks.truncate_visible(line, max_width))
+    return lines
+
+
 def print_banner(app_name: str, app_version: str, app_release: str, app_description: str) -> None:
     """Print the global banner shown at startup."""
 
     palette = colors.get_palette()
-    title = colors.apply(app_name, palette.header, bold=True)
-    underline = colors.apply("=" * len(app_name), palette.divider)
+    term_width = min(get_terminal_width(), 96)
+    header = colors.apply(app_name, palette.header, bold=True)
     version_line = colors.apply(f"Version: {app_version} ({app_release})", palette.accent)
-
-    print(title)
-    print(underline)
-    print(version_line)
+    lines = [header, version_line]
     if app_description:
-        description = colors.apply(app_description, palette.muted)
-        print(description)
+        for line in _wrap_text(app_description, term_width - 4):
+            lines.append(colors.apply(line, palette.muted))
+    print(text_blocks.boxed(lines, width=term_width, padding=1))
     print()
 
 
@@ -154,38 +172,46 @@ def print_main_banner(
 ) -> None:
     """Render a simplified banner used at the top of the main menu."""
 
-    # ``width`` is kept for API compatibility with previous implementations.
-    _ = width
-
     palette = colors.get_palette()
-    title = colors.apply(app_name, palette.header, bold=True)
-    underline = colors.apply("=" * len(app_name), palette.divider)
-    version_line = colors.apply(f"Version: {app_version} ({app_release})", palette.accent)
+    term_width = width or min(get_terminal_width(), 100)
+    inner_width = max(0, term_width - 4)
+    ascii_ui = use_ascii_ui()
 
-    print(title)
-    print(underline)
-    print(version_line)
+    header = colors.apply(app_name, palette.header, bold=True)
+    version_line = colors.apply(
+        f"{'Version' if ascii_ui else 'Version'}: {app_version} ({app_release})",
+        palette.accent,
+    )
+
+    banner_lines = [header, version_line]
     if app_description:
-        description = colors.apply(app_description, palette.muted)
-        print(description)
+        for line in _wrap_text(app_description, inner_width):
+            banner_lines.append(colors.apply(line, palette.muted))
 
     if metrics:
-        print()
-        for label, value in metrics:
-            label_text = colors.apply(f"{label}:", palette.muted)
-            value_text = colors.apply(str(value), palette.accent, bold=True)
-            print(f"{label_text} {value_text}")
+        banner_lines.append(colors.apply("Status", palette.banner_primary, bold=True))
+        banner_lines.extend(
+            _format_kv_lines(
+                metrics,
+                label_style=palette.muted,
+                value_style=palette.accent,
+                max_width=inner_width,
+                indent="  ",
+            )
+        )
 
     if hint:
-        print()
-        hint_text = colors.apply(hint, palette.hint)
-        print(hint_text)
+        banner_lines.append(colors.apply("Tip", palette.banner_primary, bold=True))
+        for line in _wrap_text(hint, inner_width):
+            banner_lines.append(colors.apply(line, palette.hint))
 
     hero_messages = [line.strip() for line in hero_lines if line.strip()]
     if hero_messages:
-        print()
+        bullet = "-" if ascii_ui else "•"
         for message in hero_messages:
-            print(f"* {message}")
+            banner_lines.append(f"{bullet} {message}")
+
+    print(text_blocks.boxed(banner_lines, width=term_width, padding=1))
 
     if menu_title:
         print()
