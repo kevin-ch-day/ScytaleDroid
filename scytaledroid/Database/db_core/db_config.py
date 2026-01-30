@@ -18,17 +18,18 @@ _BASE_DIR = Path(__file__).resolve().parents[3]
 _DOTENV_DEFAULT = _BASE_DIR / ".env"
 
 
-def _load_dotenv() -> None:
+def _load_dotenv() -> bool:
     """Lightweight .env loader (no external dependency)."""
 
     if os.environ.get("SCYTALEDROID_NO_DOTENV") == "1":
-        return
+        return False
     # Avoid pulling production/dev settings into unit tests.
     if "PYTEST_CURRENT_TEST" in os.environ or any("pytest" in arg for arg in sys.argv[:1]):
-        return
+        return False
     env_path = Path(os.environ.get("SCYTALEDROID_ENV_FILE") or _DOTENV_DEFAULT)
     if not env_path.exists():
-        return
+        return False
+    loaded_any = False
     try:
         for line in env_path.read_text(encoding="utf-8").splitlines():
             stripped = line.strip()
@@ -39,9 +40,11 @@ def _load_dotenv() -> None:
             value = value.strip().strip('"').strip("'")
             if key and key not in os.environ:
                 os.environ[key] = value
+                loaded_any = True
     except Exception:
         # Silent failure to avoid blocking startup if .env unreadable.
-        return
+        return False
+    return loaded_any
 
 
 def _default_sqlite_path() -> Path:
@@ -56,12 +59,24 @@ def _sqlite_allow_write() -> bool:
 
 
 def _load_from_env() -> Dict[str, Union[str, int]]:
-    _load_dotenv()
+    loaded_dotenv = _load_dotenv()
     # When running tests via pytest, force default SQLite to avoid hitting real DBs.
     if any("pytest" in arg for arg in sys.argv[:1]) or "PYTEST_CURRENT_TEST" in os.environ:
         raw_url = None
     else:
         raw_url = os.environ.get("SCYTALEDROID_DB_URL")
+        if raw_url is not None:
+            raw_url = raw_url.strip()
+        if not raw_url and not os.environ.get("SCYTALEDROID_ALLOW_SQLITE"):
+            env_path = Path(os.environ.get("SCYTALEDROID_ENV_FILE") or _DOTENV_DEFAULT)
+            source = "missing"
+            if env_path.exists():
+                source = "empty" if loaded_dotenv else "missing_key"
+            raise RuntimeError(
+                "SCYTALEDROID_DB_URL is required for non-test runs "
+                f"({source} in .env). Set SCYTALEDROID_DB_URL or set "
+                "SCYTALEDROID_ALLOW_SQLITE=1 to use the local SQLite fallback."
+            )
     if not raw_url:
         # Default: SQLite under data/db/
         sqlite_path = _default_sqlite_path()
