@@ -52,7 +52,7 @@ def test_permission_flow_marks_failed_on_persist_failure(tmp_path, monkeypatch, 
     def _fake_collect_permissions_and_sdk(_path):
         return [("android.permission.CAMERA", "framework")], {}, {"target_sdk": 35}
 
-    def _fake_render_permission_postcard(*_args, **_kwargs):
+    def _fake_render_permission_profile(*_args, **_kwargs):
         return {"risk_counts": {"dangerous": 1, "signature": 0}, "V": 0, "score_detail": {"score_raw": 1}}
 
     def _fake_persist_to_db(_payload):
@@ -65,7 +65,7 @@ def test_permission_flow_marks_failed_on_persist_failure(tmp_path, monkeypatch, 
 
     monkeypatch.setattr(permission_flow, "generate_report", _fake_generate_report)
     monkeypatch.setattr(permission_flow, "collect_permissions_and_sdk", _fake_collect_permissions_and_sdk)
-    monkeypatch.setattr(permission_flow, "render_permission_postcard", _fake_render_permission_postcard)
+    monkeypatch.setattr(permission_flow, "render_permission_profile", _fake_render_permission_profile)
     monkeypatch.setattr(permission_flow.PermissionAuditAccumulator, "persist_to_db", _fake_persist_to_db)
     monkeypatch.setattr(permission_flow, "finalize_static_run", _fake_finalize_static_run)
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from scytaledroid.DeviceAnalysis import adb_utils
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
 from scytaledroid.Utils.evidence_store import filesystem_safe_slug
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Config import app_config
 from pathlib import Path
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
@@ -12,6 +13,7 @@ from scytaledroid.DynamicAnalysis.observers.proxy_capture import resolve_mitmdum
 import json
 import socket
 from scytaledroid.StaticAnalysis.core.repository import group_artifacts, list_categories, list_packages, load_profile_map
+from scytaledroid.DynamicAnalysis.plans.loader import extract_plan_identity, SUPPORTED_SIGNATURE_VERSIONS
 
 
 def dynamic_analysis_menu() -> None:
@@ -136,15 +138,16 @@ def dynamic_analysis_menu() -> None:
                 try:
                     static_run_id = int(static_override)
                 except ValueError:
-                    print(status_messages.status("Invalid static_run_id; using latest.", level="warn"))
+                    print(status_messages.status("Invalid static_run_id; leaving unset.", level="warn"))
                     static_run_id = None
-            if static_run_id is None:
-                static_run_id = _resolve_latest_static_run_id(package_name)
-            plan_path = _resolve_latest_plan_path(package_name, static_run_id)
+            plan_path, selection_note = _resolve_plan_path(package_name, static_run_id)
             if plan_path:
                 print(status_messages.status(f"Static plan: {plan_path}", level="info"))
             else:
-                print(status_messages.status("No dynamic plan found for package.", level="warn"))
+                if selection_note:
+                    print(status_messages.status(selection_note, level="warn"))
+                else:
+                    print(status_messages.status("No dynamic plan found for package.", level="warn"))
             clear_logcat = prompt_utils.prompt_yes_no("Clear logcat at run start?", default=True)
             from .run_dynamic_analysis import run_dynamic_analysis
 
@@ -282,31 +285,108 @@ def _prompt_custom_package() -> str:
     )
 
 
-def _resolve_latest_static_run_id(package_name: str) -> int | None:
+def _fetch_static_run_row(static_run_id: int | None) -> dict[str, object]:
+    if static_run_id is None:
+        return {}
     try:
         from scytaledroid.Database.db_core import db_queries as core_q
 
         row = core_q.run_sql(
             """
-            SELECT sar.id
+            SELECT sar.id AS static_run_id,
+                   sar.run_signature,
+                   sar.run_signature_version,
+                   sar.artifact_set_hash,
+                   sar.base_apk_sha256,
+                   sar.pipeline_version
             FROM static_analysis_runs sar
-            JOIN app_versions av ON av.id = sar.app_version_id
-            JOIN apps a ON a.id = av.app_id
-            WHERE a.package_name=%s AND sar.status='COMPLETED'
-            ORDER BY sar.id DESC
-            LIMIT 1
+            WHERE sar.id=%s
             """,
-            (package_name,),
-            fetch="one",
+            (static_run_id,),
+            fetch="one_dict",
         )
-        if row and row[0]:
-            return int(row[0])
+        if isinstance(row, dict):
+            return row
     except Exception:
-        return None
-    return None
+        return {}
+    return {}
 
 
-def _resolve_latest_plan_path(package_name: str, static_run_id: int | None) -> str | None:
+def _resolve_plan_path(package_name: str, static_run_id: int | None) -> tuple[str | None, str | None]:
+    base_dir = Path(app_config.DATA_DIR) / "static_analysis" / "dynamic_plan"
+    if not base_dir.exists():
+        return None, "No dynamic plan directory found."
+
+    slug = filesystem_safe_slug(package_name)
+    candidates = sorted(base_dir.glob(f"{slug}-*.json"))
+    if not candidates:
+        return None, "No dynamic plans found for package."
+
+    plan_rows: list[dict[str, object]] = []
+    for candidate in candidates:
+        try:
+            payload = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        identity = extract_plan_identity(payload)
+        if str(identity.get("package") or "") != package_name:
+            continue
+        plan_rows.append({"path": candidate, "identity": identity})
+
+    if not plan_rows:
+        return None, "No dynamic plans match the selected package."
+
+    if static_run_id is None:
+        run_ids = sorted({row["identity"].get("static_run_id") for row in plan_rows if row["identity"].get("static_run_id")})
+        if not run_ids:
+            return None, "No static_run_id found in plans; regenerate plan."
+        if len(run_ids) > 1:
+            return None, "Multiple static_run_id values found; specify static_run_id."
+        static_run_id = int(run_ids[0])
+
+    db_row = _fetch_static_run_row(static_run_id)
+    if not db_row:
+        return None, "No static_analysis_runs row found for static_run_id; run static analysis first."
+    db_signature = db_row.get("run_signature")
+    db_sig_version = db_row.get("run_signature_version")
+    if not db_signature or not db_sig_version:
+        return None, "static_analysis_runs missing run_signature or version; run migrations."
+    if db_sig_version not in SUPPORTED_SIGNATURE_VERSIONS:
+        return None, f"Unsupported run_signature_version: {db_sig_version}"
+
+    matching = []
+    for row in plan_rows:
+        ident = row["identity"]
+        if str(ident.get("static_run_id")) != str(static_run_id):
+            continue
+        if str(ident.get("run_signature")) != str(db_signature):
+            continue
+        if str(ident.get("run_signature_version")) != str(db_sig_version):
+            continue
+        matching.append(row["path"])
+
+    if not matching:
+        note = "No plan matches static_run_id + run_signature; regenerate plan."
+        if _prompt_legacy_plan_selection():
+            legacy = _resolve_latest_plan_path_legacy(package_name, static_run_id)
+            if legacy:
+                _emit_legacy_plan_selection(package_name, static_run_id, legacy)
+                return legacy, "LEGACY PLAN SELECTION ENABLED — nondeterministic behavior"
+        return None, note
+
+    if len(matching) > 1:
+        note = "Multiple plans found for static_run_id; specify plan_id or regenerate plan."
+        if _prompt_legacy_plan_selection():
+            legacy = _resolve_latest_plan_path_legacy(package_name, static_run_id)
+            if legacy:
+                _emit_legacy_plan_selection(package_name, static_run_id, legacy)
+                return legacy, "LEGACY PLAN SELECTION ENABLED — nondeterministic behavior"
+        return None, note
+
+    return str(matching[0]), None
+
+
+def _resolve_latest_plan_path_legacy(package_name: str, static_run_id: int | None) -> str | None:
     base_dir = Path(app_config.DATA_DIR) / "static_analysis" / "dynamic_plan"
     if not base_dir.exists():
         return None
@@ -324,6 +404,35 @@ def _resolve_latest_plan_path(package_name: str, static_run_id: int | None) -> s
         if str(payload.get("static_run_id")) == str(static_run_id):
             return str(candidate)
     return None
+
+
+def _prompt_legacy_plan_selection() -> bool:
+    message = "Allow legacy plan selection by mtime? (nondeterministic)"
+    return prompt_utils.prompt_yes_no(message, default=False)
+
+
+def _emit_legacy_plan_selection(
+    package_name: str,
+    static_run_id: int | None,
+    plan_path: str,
+) -> None:
+    print(
+        status_messages.status(
+            "LEGACY PLAN SELECTION ENABLED — nondeterministic behavior",
+            level="warn",
+        )
+    )
+    log.warning(
+        "Legacy plan selection enabled",
+        category="dynamic",
+        extra={
+            "event": "plan.selection",
+            "mode": "legacy_mtime",
+            "package": package_name,
+            "static_run_id": static_run_id,
+            "plan_path": plan_path,
+        },
+    )
 
 
 def _preflight_proxy_capture(port: int) -> bool:

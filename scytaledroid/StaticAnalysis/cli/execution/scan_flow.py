@@ -22,7 +22,6 @@ from ...core import (
     StaticAnalysisReport,
     analyze_apk,
 )
-from ...core.detector_runner import PIPELINE_STAGES
 from ...core.findings import SeverityLevel
 from ...modules import resolve_category
 from ...core.repository import load_display_name_map
@@ -37,6 +36,11 @@ from .scan_identity_helpers import (
     _run_signature_sha256,
 )
 from .scan_progress_display import _PipelineProgress, _format_elapsed
+from .scan_view import (
+    render_app_completion,
+    render_app_start,
+    render_resource_warnings,
+)
 
 
 _abort_requested = False
@@ -177,12 +181,11 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
         last_report_for_app: StaticAnalysisReport | None = None
         if display_name or group.package_name:
             progress.flush_line()
-            print()
-            title = display_name or group.package_name
-            print(f"Scanning App: {title}")
-            print(f"Package: {group.package_name}")
-            print(f"Checks: {len(PIPELINE_STAGES)} stages · Profile: {params.profile_label}")
-            print("Status: running")
+            render_app_start(
+                title=display_name or group.package_name,
+                package_name=group.package_name,
+                profile_label=params.profile_label,
+            )
         app_start = time.monotonic()
         for artifact_index, artifact in enumerate(artifacts, start=1):
             abort_requested, _, _ = _abort_state()
@@ -271,10 +274,7 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
                 progress.finish(completed_artifacts, artifact_label)
             if warning_lines:
                 progress.flush_line()
-                print()
-                for line in warning_lines:
-                    print(status_messages.status(line, level="warn"))
-                print()
+                render_resource_warnings(warning_lines)
             if _abort_state()[0]:
                 progress.end()
                 break
@@ -282,69 +282,13 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
         if not _abort_state()[0]:
             progress.flush_line()
             artifact_count = app_result.discovered_artifacts
-            elapsed = _format_elapsed(app_result.duration_seconds or 0.0)
-            print(
-                status_messages.status(
-                    f"Completed scan ({artifact_count} artifact{'s' if artifact_count != 1 else ''}) — {elapsed}",
-                    level="success",
-                )
+            metadata = getattr(last_report_for_app, "metadata", {}) if last_report_for_app else None
+            render_app_completion(
+                artifact_count=artifact_count,
+                elapsed_seconds=app_result.duration_seconds or 0.0,
+                report_metadata=metadata if isinstance(metadata, Mapping) else None,
+                params=params,
             )
-            if last_report_for_app is not None:
-                metadata = getattr(last_report_for_app, "metadata", {}) or {}
-                if isinstance(metadata, Mapping):
-                    summary = metadata.get("pipeline_summary")
-                    if isinstance(summary, Mapping):
-                        total = summary.get("detector_total")
-                        executed = summary.get("detector_executed")
-                        skipped = summary.get("detector_skipped")
-                        duration = summary.get("total_duration_sec")
-                        status_counts = summary.get("status_counts") if isinstance(summary.get("status_counts"), Mapping) else {}
-                        fail_count = int(status_counts.get("FAIL", 0) or 0)
-                        warn_count = int(status_counts.get("WARN", 0) or 0)
-                        ok_count = int(status_counts.get("OK", 0) or 0)
-                        info_count = int(status_counts.get("INFO", 0) or 0)
-                        error_count = int(summary.get("error_count", 0) or 0)
-                        skipped_count = int(skipped or 0)
-                        status_line = "Checks complete"
-                        if executed is not None and total is not None:
-                            status_line += f": {executed}/{total} executed"
-                        status_line += f" · ok={ok_count} warn={warn_count} policy_fail={fail_count}"
-                        if error_count:
-                            status_line += f" error={error_count}"
-                        if info_count:
-                            status_line += f" info={info_count}"
-                        if skipped_count:
-                            status_line += f" skipped={skipped_count}"
-                        if duration is not None:
-                            status_line += f" · {duration:.1f}s"
-                        print(status_line)
-                        error_detectors = summary.get("error_detectors")
-                        if params.verbose_output and isinstance(error_detectors, Sequence) and error_detectors:
-                            for entry in error_detectors:
-                                if not isinstance(entry, Mapping):
-                                    continue
-                                det = entry.get("detector") or "unknown"
-                                reason = entry.get("reason") or "unspecified"
-                                print(status_messages.status(f"Detector error: {det} — {reason}", level="warn"))
-                        severity = summary.get("severity_counts") if isinstance(summary.get("severity_counts"), Mapping) else {}
-                        if severity:
-                            p0 = int(severity.get("P0", 0) or 0)
-                            p1 = int(severity.get("P1", 0) or 0)
-                            p2 = int(severity.get("P2", 0) or 0)
-                            note = int(severity.get("NOTE", 0) or 0)
-                            print(f"Findings: P0={p0} P1={p1} P2={p2} Note={note}")
-                        slowest = summary.get("slowest_detectors")
-                        if isinstance(slowest, Sequence) and slowest:
-                            slow_parts = []
-                            for entry in slowest[:3]:
-                                if not isinstance(entry, Mapping):
-                                    continue
-                                det = entry.get("detector") or entry.get("section")
-                                dur = entry.get("duration_sec")
-                                if det and isinstance(dur, (int, float)):
-                                    slow_parts.append(f"{det} {dur:.2f}s")
-                            if slow_parts:
-                                print("Slowest: " + "; ".join(slow_parts))
         if _abort_state()[0]:
             break
 

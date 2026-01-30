@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from scytaledroid.StaticAnalysis.cli.core.models import AppRunResult
-from scytaledroid.StaticAnalysis.cli.execution import results
+from scytaledroid.StaticAnalysis.cli.execution import diagnostics
 
 
 def _app(
@@ -25,7 +25,7 @@ def test_linkage_valid_run_map():
             {"package": "com.example.app", "static_run_id": 7, "pipeline_version": "2.0.0-alpha"}
         ]
     }
-    status, note = results._diagnostic_linkage_status(
+    status, note = diagnostics._diagnostic_linkage_status(
         _app("com.example.app"), run_map=run_map, session_stamp="20260130-000000"
     )
     assert status == "VALID (run_map)"
@@ -43,8 +43,8 @@ def test_linkage_valid_db_link(monkeypatch):
             }
         return None
 
-    monkeypatch.setattr(results.core_q, "run_sql", fake_run_sql)
-    status, note = results._diagnostic_linkage_status(
+    monkeypatch.setattr(diagnostics.core_q, "run_sql", fake_run_sql)
+    status, note = diagnostics._diagnostic_linkage_status(
         _app("com.example.app"),
         run_map=None,
         session_stamp="20260130-000000",
@@ -66,8 +66,8 @@ def test_linkage_valid_db_lookup(monkeypatch):
             }
         return None
 
-    monkeypatch.setattr(results.core_q, "run_sql", fake_run_sql)
-    status, note = results._diagnostic_linkage_status(
+    monkeypatch.setattr(diagnostics.core_q, "run_sql", fake_run_sql)
+    status, note = diagnostics._diagnostic_linkage_status(
         _app("com.example.app", signature="sig"),
         run_map=None,
         session_stamp="20260130-000000",
@@ -77,8 +77,8 @@ def test_linkage_valid_db_lookup(monkeypatch):
 
 
 def test_linkage_db_lookup_blocked_for_unsupported_version(monkeypatch):
-    monkeypatch.setattr(results.core_q, "run_sql", lambda *args, **kwargs: None)
-    status, note = results._diagnostic_linkage_status(
+    monkeypatch.setattr(diagnostics.core_q, "run_sql", lambda *args, **kwargs: None)
+    status, note = diagnostics._diagnostic_linkage_status(
         _app("com.example.app", signature="sig", signature_version="v0"),
         run_map=None,
         session_stamp="20260130-000000",
@@ -98,13 +98,13 @@ def test_linkage_invalid_mismatch(monkeypatch):
             }
         return None
 
-    monkeypatch.setattr(results.core_q, "run_sql", fake_run_sql)
+    monkeypatch.setattr(diagnostics.core_q, "run_sql", fake_run_sql)
     run_map = {
         "apps": [
             {"package": "com.example.app", "static_run_id": 1, "pipeline_version": "2.0.0-alpha"}
         ]
     }
-    status, note = results._diagnostic_linkage_status(
+    status, note = diagnostics._diagnostic_linkage_status(
         _app("com.example.app"),
         run_map=run_map,
         session_stamp="20260130-000000",
@@ -114,8 +114,8 @@ def test_linkage_invalid_mismatch(monkeypatch):
 
 
 def test_linkage_unavailable(monkeypatch):
-    monkeypatch.setattr(results.core_q, "run_sql", lambda *args, **kwargs: None)
-    status, note = results._diagnostic_linkage_status(
+    monkeypatch.setattr(diagnostics.core_q, "run_sql", lambda *args, **kwargs: None)
+    status, note = diagnostics._diagnostic_linkage_status(
         _app("com.example.app"),
         run_map=None,
         session_stamp="20260130-000000",
@@ -125,8 +125,8 @@ def test_linkage_unavailable(monkeypatch):
 
 
 def test_linkage_invalid_run_map_shape(monkeypatch):
-    monkeypatch.setattr(results.core_q, "run_sql", lambda *args, **kwargs: None)
-    status, note = results._diagnostic_linkage_status(
+    monkeypatch.setattr(diagnostics.core_q, "run_sql", lambda *args, **kwargs: None)
+    status, note = diagnostics._diagnostic_linkage_status(
         _app("com.example.app"),
         run_map={"apps": "bad"},
         session_stamp="20260130-000000",
@@ -136,9 +136,9 @@ def test_linkage_invalid_run_map_shape(monkeypatch):
 
 
 def test_linkage_unavailable_run_map_missing_fields(monkeypatch):
-    monkeypatch.setattr(results.core_q, "run_sql", lambda *args, **kwargs: None)
+    monkeypatch.setattr(diagnostics.core_q, "run_sql", lambda *args, **kwargs: None)
     run_map = {"apps": [{"package": "com.example.app", "static_run_id": 1, "pipeline_version": ""}]}
-    status, note = results._diagnostic_linkage_status(
+    status, note = diagnostics._diagnostic_linkage_status(
         _app("com.example.app"),
         run_map=run_map,
         session_stamp="20260130-000000",
@@ -158,8 +158,8 @@ def test_linkage_invalid_db_link_missing_pipeline(monkeypatch):
             }
         return None
 
-    monkeypatch.setattr(results.core_q, "run_sql", fake_run_sql)
-    status, note = results._diagnostic_linkage_status(
+    monkeypatch.setattr(diagnostics.core_q, "run_sql", fake_run_sql)
+    status, note = diagnostics._diagnostic_linkage_status(
         _app("com.example.app"),
         run_map=None,
         session_stamp="20260130-000000",
@@ -169,8 +169,8 @@ def test_linkage_invalid_db_link_missing_pipeline(monkeypatch):
 
 
 def test_linkage_skips_db_lookup_without_signature(monkeypatch):
-    monkeypatch.setattr(results.core_q, "run_sql", lambda *args, **kwargs: None)
-    status, note = results._diagnostic_linkage_status(
+    monkeypatch.setattr(diagnostics.core_q, "run_sql", lambda *args, **kwargs: None)
+    status, note = diagnostics._diagnostic_linkage_status(
         _app("com.example.app", signature=None),
         run_map=None,
         session_stamp="20260130-000000",

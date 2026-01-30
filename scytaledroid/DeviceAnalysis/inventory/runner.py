@@ -24,6 +24,7 @@ class InventorySyncStats:
     total_packages: int
     split_packages: int
     elapsed_seconds: float
+    fallback_used: bool = False
 
 
 @dataclass
@@ -43,6 +44,7 @@ class InventoryResult:
     persisted_rows: int
     rows: list
     stats: InventorySyncStats
+    fallback_used: bool
     previous_total: Optional[int]
     previous_split: Optional[int]
     synced_app_definitions: int
@@ -121,6 +123,7 @@ def run_full_sync(
         serial=serial,
         filter_fn=effective_filter,
         progress_cb=_progress_adapter if progress_cb else None,
+        allow_fallbacks=resolved_config.allow_fallbacks,
     )
     collect_elapsed = time.time() - collect_start
 
@@ -141,6 +144,7 @@ def run_full_sync(
         total_packages=len(current_pkg_names),
         split_packages=split_count,
         elapsed_seconds=coll_stats.elapsed_seconds,
+        fallback_used=bool(getattr(coll_stats, "fallback_used", False)),
     )
 
     # Compute delta vs previous snapshot (single source of truth).
@@ -198,6 +202,7 @@ def run_full_sync(
         persisted_rows=persisted_rows,
         rows=rows,
         stats=stats,
+        fallback_used=bool(getattr(coll_stats, "fallback_used", False)),
         previous_total=(prev_meta.package_count if prev_meta else None),
         previous_split=prev_split if prev_split else None,
         synced_app_definitions=synced_defs,

@@ -40,6 +40,7 @@ class CollectionStats:
     package_list_hash: Optional[str] = None
     package_signature_hash: Optional[str] = None
     build_fingerprint: Optional[str] = None
+    fallback_used: bool = False
 
 
 def collect_inventory(
@@ -48,6 +49,7 @@ def collect_inventory(
     filter_fn: Optional[Callable[[Dict[str, object]], bool]] = None,
     progress_cb: Optional[ProgressCallback] = None,
     use_bulk: Optional[bool] = None,
+    allow_fallbacks: bool = False,
 ) -> Tuple[List[PackageRow], CollectionStats]:
     """
     Collect inventory rows from ADB and enrich them with canonical metadata.
@@ -58,10 +60,17 @@ def collect_inventory(
 
     adb_client.clear_package_caches(serial)
 
-    packages_with_versions, package_names, _, fallback_used = adb_client.list_packages(serial, use_bulk)
+    packages_with_versions, package_names, _, fallback_used = adb_client.list_packages(
+        serial, use_bulk, allow_fallbacks=allow_fallbacks
+    )
     if not packages_with_versions:
         raise RuntimeError("adb did not return any packages.")
     if fallback_used:
+        if not allow_fallbacks:
+            raise RuntimeError(
+                "Inventory fallback blocked (per-package listing). "
+                "Enable inventory fallbacks in the Device Analysis menu to proceed."
+            )
         log.warning(
             "Inventory fallback used (per-package listing). Results are valid but slower; "
             "ensure non-root fallback is expected.",
@@ -104,7 +113,9 @@ def collect_inventory(
         t0 = time.time()
         stage = "paths"
         try:
-            paths = adb_client.get_package_paths(serial, package_name)
+            paths = adb_client.get_package_paths(
+                serial, package_name, allow_fallbacks=allow_fallbacks
+            )
             t_paths = time.time() - t0
             stage = "metadata"
             metadata = adb_client.get_package_metadata(serial, package_name)
@@ -204,6 +215,7 @@ def collect_inventory(
         package_list_hash=package_list_hash,
         package_signature_hash=package_signature_hash,
         build_fingerprint=fingerprint,
+        fallback_used=fallback_used,
     )
 
     return rows, stats

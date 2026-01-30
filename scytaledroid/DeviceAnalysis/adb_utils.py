@@ -287,7 +287,11 @@ def list_packages(serial: str) -> List[str]:
     return packages
 
 
-def list_packages_with_versions(serial: str) -> List[Tuple[str, Optional[str], Optional[str]]]:
+def list_packages_with_versions(
+    serial: str,
+    *,
+    allow_fallbacks: bool = False,
+) -> List[Tuple[str, Optional[str], Optional[str]]]:
     """Return package identifiers along with version metadata when available."""
 
     attempts = [
@@ -309,6 +313,20 @@ def list_packages_with_versions(serial: str) -> List[Tuple[str, Optional[str], O
             return parsed
 
     # Fallback to basic package names if newer flags are unsupported.
+    if not allow_fallbacks:
+        log.warning(
+            "Inventory fallback blocked: pm --show-version* unsupported.",
+            category="inventory",
+            extra={
+                "event": "inventory.fallback_blocked",
+                "reason": "pm_list_versions_unsupported",
+                "serial": serial,
+            },
+        )
+        raise RuntimeError(
+            "Inventory fallback blocked (pm --show-version* unsupported). "
+            "Enable inventory fallbacks in the Device Analysis menu to proceed."
+        )
     log.warning(
         "Inventory fallback invoked: pm --show-version* unsupported; "
         "using package-only listing.",
@@ -322,7 +340,13 @@ def list_packages_with_versions(serial: str) -> List[Tuple[str, Optional[str], O
     return [(package, None, None) for package in list_packages(serial)]
 
 
-def get_package_paths(serial: str, package_name: str, refresh: bool = False) -> List[str]:
+def get_package_paths(
+    serial: str,
+    package_name: str,
+    refresh: bool = False,
+    *,
+    allow_fallbacks: bool = False,
+) -> List[str]:
     """Return canonical APK paths for a package using ``pm path``."""
     cache_key = (serial, package_name)
     if not refresh and cache_key in _PACKAGE_PATH_CACHE:
@@ -337,6 +361,21 @@ def get_package_paths(serial: str, package_name: str, refresh: bool = False) -> 
                 paths.append(stripped.split(":", 1)[1].strip())
 
     if not paths:
+        if not allow_fallbacks:
+            log.warning(
+                "Inventory fallback blocked: pm path returned no entries.",
+                category="inventory",
+                extra={
+                    "event": "inventory.fallback_blocked",
+                    "reason": "pm_path_empty",
+                    "serial": serial,
+                    "package": package_name,
+                },
+            )
+            raise RuntimeError(
+                "Inventory fallback blocked (pm path empty). "
+                "Enable inventory fallbacks in the Device Analysis menu to proceed."
+            )
         log.warning(
             "Inventory fallback invoked: pm path returned no entries; "
             "using pm list packages -f.",

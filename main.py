@@ -289,6 +289,7 @@ def main(argv: list[str] | None = None) -> int:
         _run_diagnostics(json_mode=args.json)
         return 0
 
+
     print_banner(show_clocks=args.with_clocks)
     try:
         main_menu()

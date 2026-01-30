@@ -187,16 +187,22 @@ def build_plan_validation_event(outcome: PlanValidationOutcome) -> dict[str, obj
 
 
 def _normalize_plan(plan: Dict[str, Any]) -> dict[str, object]:
+    identity = plan.get("run_identity") if isinstance(plan.get("run_identity"), dict) else {}
     return {
         "package": plan.get("package_name") or plan.get("package"),
         "package_name": plan.get("package_name"),
         "static_run_id": plan.get("static_run_id"),
-        "run_signature": plan.get("run_signature"),
-        "run_signature_version": plan.get("run_signature_version"),
-        "artifact_set_hash": plan.get("artifact_set_hash"),
-        "base_apk_sha256": plan.get("base_apk_sha256"),
+        "run_signature": plan.get("run_signature") or identity.get("run_signature"),
+        "run_signature_version": plan.get("run_signature_version") or identity.get("run_signature_version"),
+        "artifact_set_hash": plan.get("artifact_set_hash") or identity.get("artifact_set_hash"),
+        "base_apk_sha256": plan.get("base_apk_sha256") or identity.get("base_apk_sha256"),
         "session_stamp": plan.get("session_stamp"),
     }
+
+
+def extract_plan_identity(plan: Dict[str, Any]) -> dict[str, object]:
+    """Expose normalized identity fields for plan selection."""
+    return _normalize_plan(plan)
 
 
 def _missing_required_fields(plan: dict[str, object]) -> list[str]:
@@ -353,6 +359,7 @@ __all__ = [
     "PlanValidationError",
     "PlanValidationOutcome",
     "SUPPORTED_SIGNATURE_VERSIONS",
+    "extract_plan_identity",
     "build_plan_validation_event",
     "load_dynamic_plan",
     "render_plan_validation_block",

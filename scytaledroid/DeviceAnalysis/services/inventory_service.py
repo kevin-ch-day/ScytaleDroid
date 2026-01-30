@@ -10,6 +10,8 @@ import os
 from scytaledroid.DeviceAnalysis import device_manager
 from scytaledroid.DeviceAnalysis.inventory import runner, snapshot_io, progress, views
 from scytaledroid.DeviceAnalysis.inventory.errors import InventoryCollectionError
+from scytaledroid.DeviceAnalysis.modes.inventory import InventoryConfig
+from scytaledroid.DeviceAnalysis.runtime_flags import allow_inventory_fallbacks
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils.logging_context import RunContext, get_run_logger
 from scytaledroid.Utils.LoggingUtils import logging_events as log_events
@@ -45,6 +47,7 @@ def run_full_sync(
     *,
     progress_sink: str = "cli",
     mode: Optional[str] = None,
+    allow_fallbacks: Optional[bool] = None,
 ) -> runner.InventoryResult:
     """
     High-level entry point for a full inventory sync.
@@ -58,6 +61,10 @@ def run_full_sync(
         device_manager.set_active_device(serial)
 
     meta = snapshot_io.load_latest_snapshot_meta(serial)
+    resolved_config = InventoryConfig.from_env()
+    if allow_fallbacks is None:
+        allow_fallbacks = allow_inventory_fallbacks()
+    resolved_config.allow_fallbacks = bool(allow_fallbacks)
     mode = (mode or os.getenv("SCYTALEDROID_INVENTORY_MODE", "baseline")).lower().strip()
     if mode == "legacy":
         raise InventoryServiceError(
@@ -96,9 +103,22 @@ def run_full_sync(
     except Exception:
         inventory_logger = None
 
+    if resolved_config.allow_fallbacks and progress_sink == "cli":
+        print(
+            status_messages.status(
+                "Inventory fallbacks enabled (explicit opt-in). "
+                "Fallbacks will be logged if invoked.",
+                level="warn",
+            )
+        )
+
     try:
         result = runner.run_full_sync(
-            serial=serial, filter_fn=None, progress_cb=progress_cb, mode=mode
+            serial=serial,
+            filter_fn=None,
+            progress_cb=progress_cb,
+            mode=mode,
+            config=resolved_config,
         )
     except InventoryCollectionError as exc:  # pragma: no cover - map to service error
         completed = max(0, exc.index - 1)
@@ -119,6 +139,13 @@ def run_full_sync(
 
     if progress_sink == "cli":
         views.print_inventory_run_summary_from_result(result)
+        if getattr(result, "fallback_used", False):
+            print(
+                status_messages.status(
+                    "Inventory fallback used (allowed by flag). Results may be slower or lower fidelity.",
+                    level="warn",
+                )
+            )
         print(
             status_messages.status(
                 'Next steps: choose "Pull APKs" from Device Analysis to harvest artifacts for static analysis.',
@@ -160,6 +187,7 @@ def run_full_sync(
             "delta_removed": getattr(delta, "removed_count", None) if delta else None,
             "delta_updated": getattr(delta, "updated_count", None) if delta else None,
             "elapsed_seconds": getattr(result, "elapsed_seconds", None),
+            "fallback_used": getattr(result, "fallback_used", False),
         }
         (inventory_logger or get_run_logger("device", run_ctx)).info(
             "Inventory RUN_END", extra=summary_payload

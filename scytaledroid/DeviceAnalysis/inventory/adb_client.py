@@ -14,6 +14,8 @@ from scytaledroid.DeviceAnalysis.modes.inventory import InventoryMode
 def list_packages(
     serial: str,
     use_bulk: Optional[bool],
+    *,
+    allow_fallbacks: bool = False,
 ) -> Tuple[List[Tuple[str, Optional[str], Optional[str]]], List[str], bool, bool]:
     """Return (packages_with_versions, package_names, bulk_used, fallback_used)."""
     packages_with_versions: List[Tuple[str, Optional[str], Optional[str]]] = []
@@ -34,6 +36,20 @@ def list_packages(
             packages_with_versions = [(entry.package_name, None, None) for entry in bulk_entries]
             bulk_used = True
         else:
+            if not allow_fallbacks:
+                log.warning(
+                    "Inventory fallback blocked: bulk listing returned no entries.",
+                    category="inventory",
+                    extra={
+                        "event": "inventory.fallback_blocked",
+                        "reason": "bulk_list_empty",
+                        "serial": serial,
+                    },
+                )
+                raise RuntimeError(
+                    "Inventory fallback blocked (bulk listing empty). "
+                    "Enable inventory fallbacks in the Device Analysis menu to proceed."
+                )
             log.warning(
                 "Inventory fallback invoked: bulk listing returned no entries; "
                 "using per-package listing.",
@@ -47,7 +63,9 @@ def list_packages(
             fallback_used = True
 
     if not packages_with_versions:
-        packages_with_versions = adb_utils.list_packages_with_versions(serial)
+        packages_with_versions = adb_utils.list_packages_with_versions(
+            serial, allow_fallbacks=allow_fallbacks
+        )
         if use_bulk:
             fallback_used = True
 
@@ -59,8 +77,17 @@ def clear_package_caches(serial: str) -> None:
     adb_utils.clear_package_caches(serial)
 
 
-def get_package_paths(serial: str, package_name: str) -> List[str]:
-    return adb_utils.get_package_paths(serial, package_name)
+def get_package_paths(
+    serial: str,
+    package_name: str,
+    *,
+    allow_fallbacks: bool = False,
+) -> List[str]:
+    return adb_utils.get_package_paths(
+        serial,
+        package_name,
+        allow_fallbacks=allow_fallbacks,
+    )
 
 
 def get_package_metadata(serial: str, package_name: str) -> Dict[str, Optional[str]]:

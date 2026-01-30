@@ -237,7 +237,22 @@ def adb_pull(
         stderr = (completed.stderr or "").strip()
         stderr = stderr or stdout or "adb pull failed"
         if _is_stale_path_error(stderr):
-            refreshed = adb_utils.get_package_paths(serial, package_name, refresh=True)
+            from scytaledroid.DeviceAnalysis.runtime_flags import allow_inventory_fallbacks
+
+            allow_fallbacks = allow_inventory_fallbacks()
+            try:
+                refreshed = adb_utils.get_package_paths(
+                    serial,
+                    package_name,
+                    refresh=True,
+                    allow_fallbacks=allow_fallbacks,
+                )
+            except RuntimeError as exc:
+                log.warning(
+                    f"adb pull refresh blocked for {package_name}: {exc}",
+                    category="device",
+                )
+                refreshed = []
             replacement = _match_refreshed_path(source_path, refreshed)
             if replacement:
                 if verbose:

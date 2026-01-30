@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from scytaledroid.StaticAnalysis.cli.execution import results
+from scytaledroid.StaticAnalysis.cli.execution import diagnostics, results_formatters
 
 
 def test_hash_prefix_short_value():
-    assert results._hash_prefix("abcd") == "abcd"
+    assert results_formatters._hash_prefix("abcd") == "abcd"
 
 
 def test_hash_prefix_long_value():
-    assert results._hash_prefix("0123456789abcdef") == "0123…cdef"
+    assert results_formatters._hash_prefix("0123456789abcdef") == "0123…cdef"
 
 
 def test_group_diagnostic_warnings_dedupes():
@@ -18,13 +18,13 @@ def test_group_diagnostic_warnings_dedupes():
         ("Identity", "pkg.alpha", "missing split"),
         ("Identity", "pkg.alpha", "missing split"),
     ]
-    lines = results._group_diagnostic_warnings(warnings, max_packages=3)
+    lines = diagnostics._group_diagnostic_warnings(warnings, max_packages=3)
     assert any("Linkage UNAVAILABLE: no run_map; no db link" in line for line in lines)
     assert any("Identity missing split" in line for line in lines)
 
 
 def test_plan_provenance_requires_runids():
-    lines = results._plan_provenance_lines(
+    lines = diagnostics._plan_provenance_lines(
         run_id_states=[True, False, True],
         run_signature_ok=True,
         artifact_set_ok=True,
@@ -58,10 +58,10 @@ def test_diagnostic_summary_populates_runid_for_db_lookup(monkeypatch):
         base_dir=Path("."),
     )
 
-    monkeypatch.setattr(results, "_load_run_map_for_session", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(results, "_fetch_db_linkage", lambda *_args, **_kwargs: (None, None))
+    monkeypatch.setattr(diagnostics, "load_run_map", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(diagnostics, "_fetch_db_linkage", lambda *_args, **_kwargs: (None, None))
     monkeypatch.setattr(
-        results,
+        diagnostics,
         "_fetch_db_linkage_by_signature",
         lambda *_args, **_kwargs: (
             {
@@ -79,9 +79,9 @@ def test_diagnostic_summary_populates_runid_for_db_lookup(monkeypatch):
     def fake_render_table(headers, rows, *args, **kwargs):
         captured.append((headers, rows))
 
-    monkeypatch.setattr(results.table_utils, "render_table", fake_render_table)
+    monkeypatch.setattr(diagnostics.table_utils, "render_table", fake_render_table)
 
-    results._render_diagnostic_app_summary(
+    diagnostics._render_diagnostic_app_summary(
         outcome,
         session_stamp="20260130-000000",
         compact_mode=True,

@@ -4,7 +4,7 @@ from collections import Counter
 
 import pytest
 
-from scytaledroid.StaticAnalysis.cli.execution import results
+from scytaledroid.StaticAnalysis.cli.execution import analytics, results_formatters, results
 
 
 @pytest.mark.unit
@@ -37,7 +37,7 @@ def test_format_highlight_tokens_prefers_provider_count():
     stats = {"providers": 37, "nsc_guard": 9, "secrets_suppressed": 0}
     totals = {"high": 0, "critical": 0}
 
-    tokens = results._format_highlight_tokens(stats, totals, app_count=8)
+    tokens = results_formatters._format_highlight_tokens(stats, totals, app_count=8)
 
     assert tokens[0].startswith("37 exported provider")
 
@@ -47,7 +47,7 @@ def test_format_highlight_tokens_falls_back_to_high_findings():
     stats = {"providers": 0, "nsc_guard": 0, "secrets_suppressed": 0}
     totals = {"high": 2, "critical": 0}
 
-    tokens = results._format_highlight_tokens(stats, totals, app_count=5)
+    tokens = results_formatters._format_highlight_tokens(stats, totals, app_count=5)
 
     assert "high-severity" in tokens[0]
 
@@ -68,7 +68,7 @@ def test_collect_component_stats_counts_exports():
         manifest = FakeManifest()
         exported_components = FakeExports()
 
-    stats = results._collect_component_stats(FakeReport())
+    stats = analytics._collect_component_stats(FakeReport())
 
     assert stats == {
         "package": "pkg.alpha",
@@ -102,7 +102,7 @@ def test_collect_secret_stats_aggregates_samples():
     class FakeReport:
         manifest = FakeManifest()
 
-    stats = results._collect_secret_stats(payload, FakeReport())
+    stats = analytics._collect_secret_stats(payload, FakeReport())
 
     assert stats["package"] == "pkg.alpha"
     assert stats["api_keys"] == 2
@@ -114,11 +114,11 @@ def test_collect_secret_stats_aggregates_samples():
 def test_compute_trend_delta_returns_differences(monkeypatch):
     previous = {"session_stamp": "20251020-000000", "high": 1, "med": 2, "low": 3}
 
-    monkeypatch.setattr(results.core_q, "run_sql", lambda *args, **kwargs: previous)
+    monkeypatch.setattr(analytics.core_q, "run_sql", lambda *args, **kwargs: previous)
 
     totals = Counter({"High": 3, "Medium": 5, "Low": 7})
 
-    delta = results._compute_trend_delta("pkg.alpha", "20251026-202635", totals)
+    delta = analytics._compute_trend_delta("pkg.alpha", "20251026-202635", totals)
 
     assert delta == {
         "package": "pkg.alpha",
@@ -131,7 +131,7 @@ def test_compute_trend_delta_returns_differences(monkeypatch):
 
 @pytest.mark.unit
 def test_compute_trend_delta_handles_missing_previous(monkeypatch):
-    monkeypatch.setattr(results.core_q, "run_sql", lambda *args, **kwargs: None)
+    monkeypatch.setattr(analytics.core_q, "run_sql", lambda *args, **kwargs: None)
     totals = Counter({"High": 1})
 
-    assert results._compute_trend_delta("pkg.alpha", "20251026-202635", totals) is None
+    assert analytics._compute_trend_delta("pkg.alpha", "20251026-202635", totals) is None

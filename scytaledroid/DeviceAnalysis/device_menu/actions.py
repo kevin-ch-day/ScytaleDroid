@@ -69,11 +69,22 @@ def handle_choice(
             return False
         # Use service façade for sync (CLI path)
         from scytaledroid.DeviceAnalysis.services import inventory_service
+        from scytaledroid.DeviceAnalysis.runtime_flags import set_allow_inventory_fallbacks
         from .formatters import format_device_line
 
         try:
             print(text_blocks.headline("Inventory & database sync", width=70))
-            inventory_service.run_full_sync(serial, ui_prefs=None, progress_sink="cli")
+            allow_fallbacks = prompt_utils.prompt_yes_no(
+                "Allow inventory fallback methods if needed? (recommended only for non-root devices)",
+                default=False,
+            )
+            set_allow_inventory_fallbacks(allow_fallbacks)
+            inventory_service.run_full_sync(
+                serial,
+                ui_prefs=None,
+                progress_sink="cli",
+                allow_fallbacks=allow_fallbacks,
+            )
         except inventory_service.InventoryServiceError as exc:
             error_panels.print_error_panel(
                 "Inventory & database sync",

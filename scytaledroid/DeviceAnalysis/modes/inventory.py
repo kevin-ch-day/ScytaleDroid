@@ -43,11 +43,12 @@ class InventoryMode(str, Enum):
 class InventoryConfig:
     mode: InventoryMode = InventoryMode.BASELINE
     user_handle: Optional[int] = None
+    allow_fallbacks: bool = False
 
     @classmethod
     def from_env(cls) -> "InventoryConfig":
         raw_mode = os.getenv("SCYTALEDROID_INVENTORY_MODE", InventoryMode.BASELINE.value)
-        return cls(mode=InventoryMode.from_str(raw_mode))
+        return cls(mode=InventoryMode.from_str(raw_mode), allow_fallbacks=False)
 
     def is_user_only(self) -> bool:
         return self.mode is InventoryMode.USER_ONLY

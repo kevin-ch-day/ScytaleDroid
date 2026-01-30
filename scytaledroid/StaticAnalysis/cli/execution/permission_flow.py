@@ -11,9 +11,6 @@ from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_engine
 
 from ...modules.permissions import collect_permissions_and_sdk
-from ...modules.permissions.permission_console_rendering import (
-    render_permission_postcard,
-)
 from ...modules.permissions.audit import PermissionAuditAccumulator
 from ..core.models import RunParameters, ScopeSelection
 from ..persistence.run_summary import create_static_run_ledger
@@ -22,6 +19,12 @@ from ..core.abort_reasons import classify_exception, normalize_abort_reason
 from ...session import make_session_stamp, normalize_session_stamp
 from .static_run_map import load_run_map, validate_run_map
 from .scan_flow import generate_report
+from .permission_view import (
+    render_compact_notice,
+    render_permission_profile,
+    render_permission_persisted,
+    render_permission_persist_failed,
+)
 
 
 def execute_permission_scan(
@@ -77,12 +80,7 @@ def execute_permission_scan(
         else:
             compact_output = selection.scope == "all" or len(scope_groups) > 15
     if compact_output:
-        print(
-            status_messages.status(
-                "Permission snapshot: compact summary (set SCYTALEDROID_PERM_SNAPSHOT_COMPACT=0 for full).",
-                level="info",
-            )
-        )
+        render_compact_notice()
 
     for group in scope_groups:
         artifacts = group.artifacts
@@ -96,14 +94,11 @@ def execute_permission_scan(
         last_category = group.category
 
         permissions, defined, sdk = collect_permissions_and_sdk(str(artifact.path))
-        profile = render_permission_postcard(
-            group.package_name,
-            group.package_name,
-            permissions,
-            defined,
+        profile = render_permission_profile(
+            package_name=group.package_name,
+            permissions=permissions,
+            defined=defined,
             sdk=sdk,
-            index=1,
-            total=1,
             compact=bool(compact_output),
         )
 
@@ -112,15 +107,7 @@ def execute_permission_scan(
                 from scytaledroid.StaticAnalysis.persistence.permissions_db import persist_permissions_to_db
 
                 counts = persist_permissions_to_db(report)
-                total = sum(counts.values()) if isinstance(counts, dict) else 0
-                print(
-                    status_messages.status(
-                        f"Permission Analysis persisted: total={total} "
-                        f"(aosp={counts.get('aosp', 0)}, oem={counts.get('oem', 0)}, "
-                        f"app={counts.get('app_defined', 0)}, unk={counts.get('unknown', 0)})",
-                        level="info",
-                    )
-                )
+                render_permission_persisted(counts)
             except Exception:
                 permission_persist_failed = True
                 logging_engine.get_error_logger().exception(
@@ -134,12 +121,7 @@ def execute_permission_scan(
                         }
                     ),
                 )
-                print(
-                    status_messages.status(
-                        "Persistence failed — see logs for traceback.",
-                        level="warn",
-                    )
-                )
+                render_permission_persist_failed()
 
         declared_permissions = [name for name, _tag in permissions]
         declared_in = {name.split(".")[-1].upper(): tag for name, tag in permissions if name}
