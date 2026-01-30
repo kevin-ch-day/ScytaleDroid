@@ -4,10 +4,9 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional, Tuple
 
-import subprocess
-
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis import adb_client
+from scytaledroid.DeviceAnalysis.adb_shell import ADB_TIMEOUT_DISCOVERY
 
 
 def scan_devices() -> Tuple[List[Dict[str, Optional[str]]], List[str]]:
@@ -21,8 +20,9 @@ def scan_devices() -> Tuple[List[Dict[str, Optional[str]]], List[str]]:
         return [], warnings
 
     try:
-        result = subprocess.run(
-            [adb_bin, "devices", "-l"],
+        result = adb_client.run_adb_command(
+            ["devices", "-l"],
+            timeout=ADB_TIMEOUT_DISCOVERY,
             capture_output=True,
             text=True,
             check=False,

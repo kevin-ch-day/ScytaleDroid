@@ -8,7 +8,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from scytaledroid.DeviceAnalysis import adb_utils
+from scytaledroid.DeviceAnalysis import adb_client, adb_shell
 
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
@@ -20,12 +20,9 @@ class NetworkCaptureObserver(Observer):
     observer_name = "Network Capture"
 
     def start(self, run_ctx: RunContext) -> ObserverHandle:
-        adb_bin = adb_utils.get_adb_binary()
-        if adb_bin is None:
-            raise RuntimeError("adb binary not available on PATH")
         if not run_ctx.device_serial:
             raise RuntimeError("device serial required for network capture")
-        tcpdump_path = adb_utils.run_shell(
+        tcpdump_path = adb_shell.run_shell(
             run_ctx.device_serial,
             ["which", "tcpdump"],
         ).strip()
@@ -35,21 +32,24 @@ class NetworkCaptureObserver(Observer):
                 payload={"skipped": True, "reason": "tcpdump not available on device"},
             )
         device_path = "/sdcard/scytaledroid_dynamic_capture.pcapng"
-        command = [
-            adb_bin,
-            "-s",
-            run_ctx.device_serial,
-            "shell",
-            "tcpdump",
-            "-i",
-            "any",
-            "-p",
-            "-s",
-            "0",
-            "-w",
-            device_path,
-        ]
-        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        process = adb_client.run_adb_popen(
+            [
+                "-s",
+                run_ctx.device_serial,
+                "shell",
+                "tcpdump",
+                "-i",
+                "any",
+                "-p",
+                "-s",
+                "0",
+                "-w",
+                device_path,
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
         return ObserverHandle(
             observer_id=self.observer_id,
             payload={
@@ -73,11 +73,8 @@ class NetworkCaptureObserver(Observer):
         relative_path = f"artifacts/{self.observer_id}/capture.pcapng"
         path = run_ctx.run_dir / relative_path
         path.parent.mkdir(parents=True, exist_ok=True)
-        adb_bin = adb_utils.get_adb_binary()
-        if adb_bin is None:
-            raise RuntimeError("adb binary not available on PATH")
-        pull = subprocess.run(
-            [adb_bin, "-s", run_ctx.device_serial or "", "pull", device_path, str(path)],
+        pull = adb_client.run_adb_command(
+            ["-s", run_ctx.device_serial or "", "pull", device_path, str(path)],
             capture_output=True,
             text=True,
         )

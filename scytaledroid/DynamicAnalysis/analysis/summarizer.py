@@ -141,7 +141,7 @@ class DynamicRunSummarizer:
 
     def _network_capture_present(self, manifest: RunManifest) -> str:
         for artifact in manifest.artifacts:
-            if artifact.type in {"network_capture", "proxy_capture"}:
+            if artifact.type in {"network_capture", "proxy_capture", "pcapdroid_capture"}:
                 return "true"
         return "false"
 

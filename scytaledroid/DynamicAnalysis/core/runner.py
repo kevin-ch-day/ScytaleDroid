@@ -10,6 +10,7 @@ from scytaledroid.DynamicAnalysis.core.orchestrator import DynamicRunOrchestrato
 from scytaledroid.DynamicAnalysis.plans.loader import PlanValidationError, build_plan_validation_event
 from scytaledroid.DynamicAnalysis.observers import (
     NetworkCaptureObserver,
+    PcapdroidCaptureObserver,
     ProxyCaptureObserver,
     SystemLogObserver,
 )
@@ -39,6 +40,8 @@ def run_dynamic_session(
         observers.append(ProxyCaptureObserver())
     if "network_capture" in observer_ids:
         observers.append(NetworkCaptureObserver())
+    if "pcapdroid_capture" in observer_ids:
+        observers.append(PcapdroidCaptureObserver())
     if "system_log_capture" in observer_ids:
         observers.append(SystemLogObserver())
 

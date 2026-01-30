@@ -6,7 +6,7 @@ import hashlib
 
 import subprocess
 
-from scytaledroid.DeviceAnalysis import adb_utils
+from scytaledroid.DeviceAnalysis import adb_client
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
 from scytaledroid.DynamicAnalysis.observers.base import Observer, ObserverHandle, ObserverResult
@@ -17,15 +17,14 @@ class SystemLogObserver(Observer):
     observer_name = "System Logs"
 
     def start(self, run_ctx: RunContext) -> ObserverHandle:
-        adb_bin = adb_utils.get_adb_binary()
-        if adb_bin is None:
+        if not adb_client.is_available():
             raise RuntimeError("adb binary not available on PATH")
         if not run_ctx.device_serial:
             raise RuntimeError("device serial required for logcat capture")
         if run_ctx.clear_logcat:
             try:
-                subprocess.run(
-                    [adb_bin, "-s", run_ctx.device_serial, "logcat", "-c"],
+                adb_client.run_adb_command(
+                    ["-s", run_ctx.device_serial, "logcat", "-c"],
                     capture_output=True,
                     text=True,
                     check=False,
@@ -36,8 +35,8 @@ class SystemLogObserver(Observer):
         path = run_ctx.run_dir / relative_path
         path.parent.mkdir(parents=True, exist_ok=True)
         handle = path.open("w", encoding="utf-8")
-        process = subprocess.Popen(
-            [adb_bin, "-s", run_ctx.device_serial, "logcat", "-v", "threadtime"],
+        process = adb_client.run_adb_popen(
+            ["-s", run_ctx.device_serial, "logcat", "-v", "threadtime"],
             stdout=handle,
             stderr=subprocess.PIPE,
             text=True,

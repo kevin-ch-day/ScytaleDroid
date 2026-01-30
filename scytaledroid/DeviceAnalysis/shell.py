@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
 from typing import Optional
 
 from scytaledroid.Utils.DisplayUtils import status_messages
@@ -25,9 +24,8 @@ def open_shell(serial: Optional[str]) -> None:
     print(status_messages.status("Starting interactive adb shell. Press Ctrl+D or type 'exit' to leave."))
     log.info(f"Opening adb shell for {serial}", category="device")
 
-    command = [adb_path, "-s", serial, "shell"]
     try:
-        subprocess.call(command)
+        adb_client.run_adb_interactive_shell(serial)
     except KeyboardInterrupt:
         print()
         print(status_messages.status("Shell interrupted by user.", level="warn"))

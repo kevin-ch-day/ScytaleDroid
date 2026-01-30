@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import subprocess
 from dataclasses import dataclass, field
 import socket
 from datetime import datetime, timezone
@@ -14,7 +13,7 @@ from typing import Dict, Mapping, MutableMapping, Optional, Tuple
 from scytaledroid.Config import app_config
 import os
 from scytaledroid.Utils.DisplayUtils import status_messages
-from scytaledroid.DeviceAnalysis import adb_packages
+from scytaledroid.DeviceAnalysis import adb_client, adb_packages
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .models import ArtifactError, InventoryRow
@@ -222,8 +221,8 @@ def adb_pull(
     if verbose:
         print(status_messages.status(f"Executing: {' '.join(command)}", level="info"))
     try:
-        completed = subprocess.run(
-            command,
+        completed = adb_client.run_adb_command(
+            command[1:],  # drop adb binary
             capture_output=not verbose,
             text=True,
             check=False,
@@ -262,8 +261,8 @@ def adb_pull(
                             level="warn",
                         )
                     )
-                retry = subprocess.run(
-                    [adb_path, "-s", serial, "pull", replacement, str(dest_path)],
+                retry = adb_client.run_adb_command(
+                    ["-s", serial, "pull", replacement, str(dest_path)],
                     capture_output=not verbose,
                     text=True,
                     check=False,

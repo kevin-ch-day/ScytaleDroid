@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
-from scytaledroid.DeviceAnalysis import adb_utils
+from scytaledroid.DeviceAnalysis import adb_shell
 from scytaledroid.BehaviorAnalysis.telemetry import (
     parse_meminfo_total,
     parse_netstats_detail,
@@ -100,7 +100,7 @@ class TelemetrySampler:
 
 def _run_shell(serial: str, command: list[str], timeout: float) -> tuple[int, str, bool]:
     try:
-        completed = adb_utils.run_shell_command(serial, command, timeout=timeout)
+        completed = adb_shell.run_shell_command(serial, command, timeout=timeout)
         return completed.returncode, completed.stdout or "", False
     except RuntimeError as exc:
         message = str(exc).lower()

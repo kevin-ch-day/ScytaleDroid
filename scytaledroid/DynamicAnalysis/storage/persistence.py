@@ -250,6 +250,11 @@ def _map_observer_issue(observer_id: object, status: object, error: object) -> s
             return "tcpdump_unavailable_nonroot"
         if status == "failed":
             return "tcpdump_start_failed"
+    if observer_id == "pcapdroid_capture":
+        if "not installed" in error_text:
+            return "pcapdroid_unavailable"
+        if status == "failed":
+            return "pcapdroid_capture_failed"
     if status == "failed":
         return "observer_failed"
     if status == "skipped" and "tcpdump" in error_text:

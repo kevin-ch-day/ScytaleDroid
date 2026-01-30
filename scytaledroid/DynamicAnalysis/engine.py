@@ -191,7 +191,12 @@ class DynamicAnalysisEngine:
         summary_payload: Mapping[str, Any],
     ) -> None:
         try:
-            persist_dynamic_summary(self.config, session_result, dict(summary_payload))
+            payload = dict(summary_payload)
+            # Include telemetry rows for DB persistence without bloating engine_summary.json.
+            payload["telemetry_process"] = session_result.telemetry_process
+            payload["telemetry_network"] = session_result.telemetry_network
+            payload["telemetry_stats"] = session_result.telemetry_stats
+            persist_dynamic_summary(self.config, session_result, payload)
         except NotImplementedError:
             self.logger.info("Dynamic persistence not enabled yet.")
         except Exception as exc:  # noqa: BLE001

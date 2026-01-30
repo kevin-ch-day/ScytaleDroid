@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Iterable, List, Optional
 
 from scytaledroid.Config import app_config
-from scytaledroid.DeviceAnalysis import adb_utils, device_manager
+from scytaledroid.DeviceAnalysis import adb_devices, device_manager
 from scytaledroid.DeviceAnalysis.report import generate_device_report
 from scytaledroid.Reporting.generator import export_static_analysis_markdown
 from scytaledroid.StaticAnalysis.persistence import list_reports
@@ -221,7 +221,7 @@ def format_timestamp(value: str) -> str:
 
 
 def _select_device_serial() -> Optional[str]:
-    devices, warnings = adb_utils.scan_devices()
+    devices, warnings = adb_devices.scan_devices()
     for message in warnings:
         print(status_messages.status(message, level="warn"))
 

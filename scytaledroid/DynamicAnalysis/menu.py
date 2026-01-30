@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from scytaledroid.DeviceAnalysis import adb_utils
+from scytaledroid.DeviceAnalysis import adb_devices, adb_shell, adb_status
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
 from scytaledroid.Utils.evidence_store import filesystem_safe_slug
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
@@ -10,6 +10,7 @@ from scytaledroid.Config import app_config
 from pathlib import Path
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
 from scytaledroid.DynamicAnalysis.observers.proxy_capture import resolve_mitmdump_path
+from scytaledroid.DynamicAnalysis.observers.pcapdroid_capture import PCAPDROID_PACKAGE
 import json
 import socket
 from scytaledroid.StaticAnalysis.core.repository import group_artifacts, list_categories, list_packages, load_profile_map
@@ -37,7 +38,7 @@ def dynamic_analysis_menu() -> None:
         if choice == "1":
             print()
             menu_utils.print_header("Dynamic Run Device")
-            devices, warnings = adb_utils.scan_devices()
+            devices, warnings = adb_devices.scan_devices()
             for warning in warnings:
                 print(status_messages.status(warning, level="warn"))
             if not devices:
@@ -45,7 +46,7 @@ def dynamic_analysis_menu() -> None:
                 prompt_utils.press_enter_to_continue()
                 continue
             device_options = [
-                MenuOption(str(index + 1), adb_utils.get_device_label(device))
+                MenuOption(str(index + 1), adb_devices.get_device_label(device))
                 for index, device in enumerate(devices)
             ]
             device_spec = MenuSpec(items=device_options, exit_label="Cancel", show_exit=True)
@@ -62,7 +63,8 @@ def dynamic_analysis_menu() -> None:
                 print(status_messages.status("Selected device missing serial.", level="error"))
                 prompt_utils.press_enter_to_continue()
                 continue
-            _print_root_status(device_serial)
+            is_rooted = _print_root_status(device_serial)
+            _print_network_status(device_serial)
             print()
             menu_utils.print_header("Dynamic Run Scenario")
             scenario_options = [
@@ -82,44 +84,6 @@ def dynamic_analysis_menu() -> None:
                 scenario_choice,
                 "basic_usage",
             )
-            print()
-            menu_utils.print_header("Dynamic Run Observers")
-            use_proxy = prompt_utils.prompt_yes_no("Enable proxy network capture (recommended)?", default=True)
-            if _device_has_tcpdump(device_serial):
-                use_tcpdump = prompt_utils.prompt_yes_no(
-                    "Enable device tcpdump capture (optional)?",
-                    default=False,
-                )
-            else:
-                use_tcpdump = False
-                print(
-                    status_messages.status(
-                        "tcpdump not available on device (non-root). Network capture skipped.",
-                        level="warn",
-                    )
-                )
-            use_logs = prompt_utils.prompt_yes_no("Enable system log capture?", default=True)
-            observer_ids = []
-            proxy_port = 8890
-            if use_proxy:
-                if not _preflight_proxy_capture(proxy_port):
-                    proceed_without_proxy = prompt_utils.prompt_yes_no(
-                        "Proxy capture unavailable. Continue without proxy capture?",
-                        default=True,
-                    )
-                    if not proceed_without_proxy:
-                        continue
-                    use_proxy = False
-                if use_proxy:
-                    observer_ids.append("proxy_capture")
-            if use_tcpdump:
-                observer_ids.append("network_capture")
-            if use_logs:
-                observer_ids.append("system_log_capture")
-            if not observer_ids:
-                print(status_messages.status("Select at least one observer.", level="error"))
-                prompt_utils.press_enter_to_continue()
-                continue
             print()
             menu_utils.print_header("Dynamic Run Duration")
             duration_options = [
@@ -141,6 +105,71 @@ def dynamic_analysis_menu() -> None:
             }.get(selection, "Standard")
             package_name = _select_dynamic_target()
             if not package_name:
+                continue
+            print()
+            menu_utils.print_header("Dynamic Run Observers")
+            use_pcapdroid = False
+            if _device_has_pcapdroid(device_serial):
+                use_pcapdroid = prompt_utils.prompt_yes_no(
+                    "Enable VPN capture via PCAPdroid (recommended for non-root)?",
+                    default=not is_rooted,
+                )
+            else:
+                print(status_messages.status("PCAPdroid not installed; VPN capture unavailable.", level="warn"))
+
+            use_proxy = False
+            proxy_notice = None
+            if not use_pcapdroid:
+                proxy_default, proxy_notice = _proxy_default_for_package(package_name, is_rooted)
+                if proxy_notice:
+                    print(status_messages.status(proxy_notice, level="warn"))
+                use_proxy = prompt_utils.prompt_yes_no(
+                    "Enable proxy network capture? (may break pinned apps)",
+                    default=proxy_default,
+                )
+                if use_proxy and proxy_notice:
+                    confirm_proxy = prompt_utils.prompt_yes_no(
+                        "Proceed with proxy capture anyway?",
+                        default=False,
+                    )
+                    if not confirm_proxy:
+                        use_proxy = False
+            if _device_has_tcpdump(device_serial):
+                use_tcpdump = prompt_utils.prompt_yes_no(
+                    "Enable device tcpdump capture (requires root)?",
+                    default=False,
+                )
+            else:
+                use_tcpdump = False
+                print(
+                    status_messages.status(
+                        "tcpdump not available on device (non-root). Network capture disabled.",
+                        level="warn",
+                    )
+                )
+            use_logs = prompt_utils.prompt_yes_no("Enable system log capture?", default=True)
+            observer_ids = []
+            proxy_port = 8890
+            if use_pcapdroid:
+                observer_ids.append("pcapdroid_capture")
+            if use_proxy:
+                if not _preflight_proxy_capture(proxy_port):
+                    proceed_without_proxy = prompt_utils.prompt_yes_no(
+                        "Proxy capture unavailable. Continue without proxy capture?",
+                        default=True,
+                    )
+                    if not proceed_without_proxy:
+                        continue
+                    use_proxy = False
+                if use_proxy:
+                    observer_ids.append("proxy_capture")
+            if use_tcpdump:
+                observer_ids.append("network_capture")
+            if use_logs:
+                observer_ids.append("system_log_capture")
+            if not observer_ids:
+                print(status_messages.status("Select at least one observer.", level="error"))
+                prompt_utils.press_enter_to_continue()
                 continue
             plan_selection = _resolve_plan_selection(package_name)
             if not plan_selection:
@@ -702,6 +731,8 @@ def _summarize_capture(manifest: dict[str, object]) -> list[str]:
         captured.append("proxy")
     if "network_capture" in types:
         captured.append("tcpdump")
+    if "pcapdroid_capture" in types:
+        captured.append("pcapdroid")
     if not captured:
         return ["No observer artifacts captured."]
     return [f"Captured: {', '.join(captured)}."]
@@ -748,10 +779,18 @@ def _preflight_proxy_capture(port: int) -> bool:
 
 def _device_has_tcpdump(device_serial: str) -> bool:
     try:
-        path = adb_utils.run_shell(device_serial, ["which", "tcpdump"]).strip()
+        path = adb_shell.run_shell(device_serial, ["which", "tcpdump"]).strip()
     except Exception:
         return False
     return bool(path)
+
+
+def _device_has_pcapdroid(device_serial: str) -> bool:
+    try:
+        output = adb_shell.run_shell(device_serial, ["pm", "path", PCAPDROID_PACKAGE]).strip()
+    except Exception:
+        return False
+    return output.startswith("package:")
 
 
 def _is_port_free(port: int) -> bool:
@@ -765,16 +804,63 @@ def _is_port_free(port: int) -> bool:
     return True
 
 
-def _print_root_status(device_serial: str) -> None:
-    stats = adb_utils.get_device_stats(device_serial)
+def _print_root_status(device_serial: str) -> bool:
+    stats = adb_status.get_device_stats(device_serial)
     root_state = (stats.get("is_rooted") or "Unknown").strip().upper()
     if root_state == "YES":
         message = "Device root: YES (advanced capture available)."
         level = "success"
+        is_rooted = True
     elif root_state == "NO":
         message = "Device root: NO (non-root mode)."
         level = "info"
+        is_rooted = False
     else:
         message = "Device root: Unknown."
         level = "warn"
+        is_rooted = False
     print(status_messages.status(message, level=level))
+    return is_rooted
+
+
+def _print_network_status(device_serial: str) -> None:
+    details = []
+    try:
+        status = adb_shell.run_shell(device_serial, ["dumpsys", "connectivity"]).lower()
+    except Exception:
+        print(status_messages.status("Network status: unable to read connectivity state.", level="warn"))
+        return
+    if "validated" in status:
+        details.append("validated")
+    if "not_vpn" in status or "not vpn" in status:
+        details.append("not_vpn")
+    if "not connected" in status:
+        print(status_messages.status("Network status: not connected.", level="warn"))
+        return
+    label = "Network status: " + (", ".join(details) if details else "unknown")
+    print(status_messages.status(label, level="info"))
+
+
+def _proxy_default_for_package(package_name: str, is_rooted: bool) -> tuple[bool, str | None]:
+    if not package_name:
+        return (False, None)
+    pinned_prefixes = ("com.google.", "com.android.")
+    pinned_exact = {
+        "com.zhiliaoapp.musically",
+        "com.whatsapp",
+        "org.telegram.messenger",
+        "com.instagram.android",
+        "com.facebook.katana",
+        "com.facebook.orca",
+        "com.snapchat.android",
+        "com.twitter.android",
+    }
+    pinned = package_name in pinned_exact or package_name.startswith(pinned_prefixes)
+    if pinned:
+        notice = (
+            "This app likely enforces certificate pinning; proxy capture can break loading."
+        )
+        return (False, notice)
+    if not is_rooted:
+        return (False, None)
+    return (True, None)

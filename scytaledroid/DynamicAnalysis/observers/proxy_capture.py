@@ -11,7 +11,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from scytaledroid.DeviceAnalysis import adb_utils
+from scytaledroid.DeviceAnalysis import adb_client, adb_shell
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
 from scytaledroid.DynamicAnalysis.observers.base import Observer, ObserverHandle, ObserverResult
@@ -22,8 +22,7 @@ class ProxyCaptureObserver(Observer):
     observer_name = "Proxy Capture"
 
     def start(self, run_ctx: RunContext) -> ObserverHandle:
-        adb_bin = adb_utils.get_adb_binary()
-        if adb_bin is None:
+        if not adb_client.is_available():
             raise RuntimeError("adb binary not available on PATH")
         if not run_ctx.device_serial:
             raise RuntimeError("device serial required for proxy capture")
@@ -41,8 +40,8 @@ class ProxyCaptureObserver(Observer):
         meta_path = capture_dir / "proxy_capture_meta.json"
         flow_log_path = capture_dir / "flows.jsonl"
 
-        adb_utils.run_shell(run_ctx.device_serial, ["reverse", f"tcp:{port}", f"tcp:{port}"])
-        adb_utils.run_shell(run_ctx.device_serial, ["settings", "put", "global", "http_proxy", f"127.0.0.1:{port}"])
+        adb_shell.run_shell(run_ctx.device_serial, ["reverse", f"tcp:{port}", f"tcp:{port}"])
+        adb_shell.run_shell(run_ctx.device_serial, ["settings", "put", "global", "http_proxy", f"127.0.0.1:{port}"])
 
         addon_path = Path(__file__).with_name("mitm_flow_logger.py")
         env = os.environ.copy()
@@ -171,9 +170,9 @@ class ProxyCaptureObserver(Observer):
 
         if run_ctx.device_serial:
             try:
-                adb_utils.run_shell(run_ctx.device_serial, ["settings", "put", "global", "http_proxy", ":0"])
-                adb_utils.run_shell(run_ctx.device_serial, ["settings", "delete", "global", "http_proxy"])
-                adb_utils.run_shell(run_ctx.device_serial, ["reverse", "--remove", f"tcp:{port}"])
+                adb_shell.run_shell(run_ctx.device_serial, ["settings", "put", "global", "http_proxy", ":0"])
+                adb_shell.run_shell(run_ctx.device_serial, ["settings", "delete", "global", "http_proxy"])
+                adb_shell.run_shell(run_ctx.device_serial, ["reverse", "--remove", f"tcp:{port}"])
             except Exception:
                 pass
 

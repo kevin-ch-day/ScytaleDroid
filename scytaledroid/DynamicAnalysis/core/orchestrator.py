@@ -11,7 +11,7 @@ from typing import Iterable
 
 from scytaledroid.Utils.LoggingUtils import logging_engine
 
-from scytaledroid.DeviceAnalysis import adb_utils
+from scytaledroid.DeviceAnalysis import adb_shell
 from scytaledroid.DynamicAnalysis.analysis.summarizer import DynamicRunSummarizer
 from scytaledroid.DynamicAnalysis.core.event_logger import RunEventLogger
 from scytaledroid.DynamicAnalysis.core.environment import EnvironmentManager
@@ -427,7 +427,7 @@ class DynamicRunOrchestrator:
             handle.write(marker_line + "\n")
         if run_ctx.device_serial:
             try:
-                adb_utils.run_shell(
+                adb_shell.run_shell(
                     run_ctx.device_serial,
                     ["log", "-t", "SCYTALE_DYNAMIC", marker_line],
                 )

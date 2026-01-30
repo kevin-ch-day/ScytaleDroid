@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from scytaledroid.DeviceAnalysis import adb_utils
+from scytaledroid.DeviceAnalysis import adb_shell
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
 
@@ -55,7 +55,7 @@ class TargetManager:
         return TargetSnapshot(metadata={}, artifacts=artifacts)
 
     def _capture_package_info(self, run_ctx: RunContext) -> tuple[dict[str, Any], ArtifactRecord]:
-        package_dump = adb_utils.run_shell(
+        package_dump = adb_shell.run_shell(
             run_ctx.device_serial or "",
             ["dumpsys", "package", run_ctx.package_name],
         )
@@ -76,7 +76,7 @@ class TargetManager:
         return metadata, artifact
 
     def _read_package_paths(self, run_ctx: RunContext) -> list[str]:
-        output = adb_utils.run_shell(
+        output = adb_shell.run_shell(
             run_ctx.device_serial or "",
             ["pm", "path", run_ctx.package_name],
         )
@@ -89,7 +89,7 @@ class TargetManager:
         return paths
 
     def _launch_app(self, run_ctx: RunContext) -> Path | None:
-        output = adb_utils.run_shell(
+        output = adb_shell.run_shell(
             run_ctx.device_serial or "",
             [
                 "monkey",
@@ -106,7 +106,7 @@ class TargetManager:
         return path
 
     def _force_stop_app(self, run_ctx: RunContext) -> Path | None:
-        output = adb_utils.run_shell(
+        output = adb_shell.run_shell(
             run_ctx.device_serial or "",
             ["am", "force-stop", run_ctx.package_name],
         )

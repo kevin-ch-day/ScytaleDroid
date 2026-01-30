@@ -7,14 +7,15 @@ import time
 from datetime import datetime
 from typing import Dict, Optional, Tuple
 
-from scytaledroid.DeviceAnalysis import adb_client
+from scytaledroid.DeviceAnalysis import adb_shell
+from scytaledroid.DeviceAnalysis.adb_errors import AdbError
 JITTER_MULTIPLIER = 1.5
 
 
 def _shell(serial: str, cmd: list[str], timeout: float = 5.0) -> tuple[int, str, str]:
     try:
-        proc = adb_client.run_shell_command(serial, cmd, timeout=timeout)
-    except RuntimeError as exc:  # pragma: no cover - defensive
+        proc = adb_shell.run_shell_command(serial, cmd, timeout=timeout)
+    except AdbError as exc:  # pragma: no cover - defensive
         return 1, "", str(exc)
     return proc.returncode, proc.stdout or "", proc.stderr or ""
 

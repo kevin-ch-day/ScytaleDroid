@@ -76,7 +76,6 @@ CLEAN_FILE_PATTERNS=(
 )
 
 PURGE_DIRS_ENSURE=(
-  "$DATA_DIR"
   "$LOG_DIR"
   "$OUTPUT_DIR"
   "$OUTPUT_DIR/reports"
@@ -85,6 +84,10 @@ PURGE_DIRS_ENSURE=(
 )
 
 PURGE_DIRS_OPTIONAL=(
+  "$ROOT_DIR/scripts/db"
+)
+
+NUKE_DATA_DIRS=(
   "$DATA_DIR/state"
   "$DATA_DIR/watchlists"
   "$DATA_DIR/apks"
@@ -93,7 +96,6 @@ PURGE_DIRS_OPTIONAL=(
   "$DATA_DIR/static_analysis/baseline"
   "$DATA_DIR/audit"
   "$DATA_DIR/sessions"
-  "$ROOT_DIR/scripts/db"
 )
 
 safe_find() {
@@ -217,7 +219,24 @@ perform_full_cleanup() {
     esac
   done
 
-  echo "Full cleanup complete."
+  echo "Full cleanup complete (data/ preserved)."
+}
+
+perform_data_nuke() {
+  if [[ "$DRY_RUN" == "1" ]]; then
+    echo "Dry run enabled (set SCYTALE_CLEAN_DRY_RUN=0 to apply)."
+  fi
+  echo "WARNING: This will delete data/ artifacts (apks, sessions, static_analysis, audit)."
+  if ! confirm_action "Proceed with data/ cleanup?"; then
+    echo "Skipped data/ cleanup."
+    return 0
+  fi
+  for target in "${NUKE_DATA_DIRS[@]}"; do
+    if [[ -d "$target" ]]; then
+      clear_directory_contents "$target"
+    fi
+  done
+  echo "Data cleanup complete."
 }
 
 dynamic_plan_stats() {
@@ -405,20 +424,21 @@ run_menu() {
     dir_exists "$STATIC_ANALYSIS_DIR" && has_static_reports="yes"
     cat <<MENU
 Select cleanup task:
-  1) Full cleanup (caches, logs, output, data)
+  1) Full cleanup (caches, logs, output)
   2) Prune dynamic plan files (available=${has_dynamic_plans})
   3) Prune session artifacts (available=${has_sessions})
   4) Prune static analysis (baseline/reports) (available=${has_static_reports})
-  5) Remove tests/ directory
-  6) Full cleanup + remove tests/ directory
-  7) Exit
+  5) Nuke data/ artifacts (apks, sessions, static_analysis)
+  6) Remove tests/ directory
+  7) Full cleanup + remove tests/ directory
+  8) Exit
 MENU
-    read -rp "Enter choice [1-7]: " selection
+    read -rp "Enter choice [1-8]: " selection
     case "$selection" in
       1)
         if confirm_action "Run full cleanup?"; then
           perform_full_cleanup
-          echo "Note: data/ was cleared; prune options will be unavailable until new runs generate artifacts."
+          echo "Note: data/ preserved; prune options remain available."
           prompt_exit_if_empty
         else
           echo "Skipped full cleanup."
@@ -519,13 +539,16 @@ SUBMENU
         fi
         ;;
       5)
+        perform_data_nuke
+        ;;
+      6)
         if confirm_action "Remove the tests/ directory?"; then
           purge_tests_directory
         else
           echo "Skipped tests/ removal."
         fi
         ;;
-      6)
+      7)
         if confirm_action "Run full cleanup and remove tests/?"; then
           perform_full_cleanup
           purge_tests_directory
@@ -533,12 +556,12 @@ SUBMENU
           echo "Skipped combined cleanup."
         fi
         ;;
-      7)
+      8)
         echo "Exiting."
         break
         ;;
       *)
-        echo "Invalid selection. Please choose 1-7." >&2
+        echo "Invalid selection. Please choose 1-8." >&2
         ;;
     esac
   done

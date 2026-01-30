@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from scytaledroid.DeviceAnalysis import adb_utils
+from scytaledroid.DeviceAnalysis import adb_devices, adb_shell
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
 
@@ -24,7 +24,7 @@ class EnvironmentManager:
         artifacts: list[ArtifactRecord] = []
         metadata: dict[str, Any] = {}
         if run_ctx.device_serial:
-            metadata.update(adb_utils.get_basic_properties(run_ctx.device_serial))
+            metadata.update(adb_devices.get_basic_properties(run_ctx.device_serial))
             metadata["device_serial"] = run_ctx.device_serial
             metadata["build_fingerprint"] = metadata.get("build_fingerprint")
         device_info_path = self._write_json(
@@ -52,10 +52,10 @@ class EnvironmentManager:
         return EnvironmentSnapshot(metadata=metadata, artifacts=artifacts)
 
     def _clear_app_data(self, run_ctx: RunContext) -> None:
-        adb_utils.run_shell(run_ctx.device_serial or "", ["pm", "clear", run_ctx.package_name])
+        adb_shell.run_shell(run_ctx.device_serial or "", ["pm", "clear", run_ctx.package_name])
 
     def _capture_permissions(self, run_ctx: RunContext, filename: str) -> Path:
-        output = adb_utils.run_shell(
+        output = adb_shell.run_shell(
             run_ctx.device_serial or "",
             ["dumpsys", "package", run_ctx.package_name],
         )

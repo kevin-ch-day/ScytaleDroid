@@ -10,7 +10,6 @@ retired once the v2 flow is fully trusted.
 
 from __future__ import annotations
 
-import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple
@@ -19,6 +18,8 @@ from scytaledroid.Database.db_func.harvest import apk_repository as repo
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.LoggingUtils import logging_engine
+
+from scytaledroid.DeviceAnalysis import adb_shell
 
 from . import rules
 from . import common
@@ -623,15 +624,10 @@ def _resolve_package_paths(
     *,
     verbose: bool = False,
 ) -> Tuple[List[str], Optional[str]]:
-    command = [adb_path, "-s", serial, "shell", "pm", "path", package_name]
-    if verbose:
-        print(status_messages.status(f"Executing: {' '.join(command)}", level="info"))
     try:
-        completed = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            check=False,
+        completed = adb_shell.run_shell_command(
+            serial,
+            ["pm", "path", package_name],
         )
     except Exception as exc:  # pragma: no cover - defensive
         return [], str(exc)

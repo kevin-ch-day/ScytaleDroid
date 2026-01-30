@@ -34,7 +34,8 @@ from scytaledroid.BehaviorAnalysis.schemas import (
 )
 from scytaledroid.Config import app_config
 from scytaledroid.Database.tools.bootstrap import bootstrap_database
-from scytaledroid.DeviceAnalysis import adb_utils
+from scytaledroid.DeviceAnalysis import adb_devices
+from scytaledroid.DeviceAnalysis.adb_errors import AdbError, AdbDeviceSelectionError
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
@@ -53,18 +54,15 @@ def _session_dir(session_id: str) -> Path:
 
 
 def _resolve_device_serial(serial: Optional[str]) -> Optional[str]:
-    if serial:
-        return serial
-    devices = adb_utils.list_devices()
-    if not devices:
+    try:
+        devices = adb_devices.list_devices()
+        return adb_devices.resolve_serial(devices, serial)
+    except AdbDeviceSelectionError as exc:
+        log.error(str(exc), category="behavior")
         return None
-    if len(devices) > 1:
-        log.warning(
-            "Multiple adb devices detected; using first device. "
-            "Provide --serial to target a specific device.",
-            category="behavior",
-        )
-    return devices[0].get("serial")
+    except AdbError as exc:
+        log.error(str(exc), category="behavior")
+        return None
 
 
 def _write_metadata(

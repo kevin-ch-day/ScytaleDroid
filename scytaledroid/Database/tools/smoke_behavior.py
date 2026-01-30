@@ -6,19 +6,19 @@ import argparse
 import subprocess
 import re
 from scytaledroid.Database.tools.bootstrap import bootstrap_database
-from scytaledroid.DeviceAnalysis import adb_utils
+from scytaledroid.DeviceAnalysis import adb_devices, adb_shell
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
 def _package_installed(pkg: str) -> bool:
-    devices = adb_utils.list_devices()
+    devices = adb_devices.list_devices()
     if not devices:
         return False
     serial = devices[0].get("serial")
     if not serial:
         return False
     try:
-        output = adb_utils.run_shell(serial, ["pm", "list", "packages", pkg])
+        output = adb_shell.run_shell(serial, ["pm", "list", "packages", pkg])
     except RuntimeError:
         return False
     return pkg in output

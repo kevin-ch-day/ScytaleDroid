@@ -6,6 +6,8 @@ import shutil
 import subprocess
 from typing import Optional, Sequence
 
+from scytaledroid.DeviceAnalysis.adb_errors import AdbBinaryNotFoundError
+
 
 def _resolve_adb() -> Optional[str]:
     """Return the adb binary path when available."""
@@ -31,7 +33,7 @@ def run_shell_command(
     """Execute an arbitrary ``adb shell`` command for the selected device."""
     adb_bin = _resolve_adb()
     if adb_bin is None:
-        raise RuntimeError("adb binary not found on PATH")
+        raise AdbBinaryNotFoundError("adb binary not found on PATH")
 
     adb_command = [adb_bin, "-s", serial, "shell", *command]
     try:
@@ -46,6 +48,55 @@ def run_shell_command(
         raise RuntimeError(
             f"adb shell {' '.join(command)} timed out after {timeout}s"
         ) from exc
+
+
+def run_adb_command(
+    args: Sequence[str],
+    *,
+    timeout: Optional[float] = None,
+    capture_output: bool = True,
+    text: bool = True,
+    check: bool = False,
+) -> subprocess.CompletedProcess[str]:
+    """Execute a raw adb command (non-shell)."""
+    adb_bin = _resolve_adb()
+    if adb_bin is None:
+        raise AdbBinaryNotFoundError("adb binary not found on PATH")
+    adb_command = [adb_bin, *args]
+    try:
+        return subprocess.run(
+            adb_command,
+            capture_output=capture_output,
+            text=text,
+            check=check,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:  # pragma: no cover - defensive
+        raise RuntimeError(
+            f"adb {' '.join(args)} timed out after {timeout}s"
+        ) from exc
+
+
+def run_adb_interactive_shell(serial: str) -> int:
+    """Launch an interactive adb shell for the provided serial."""
+    adb_bin = _resolve_adb()
+    if adb_bin is None:
+        raise AdbBinaryNotFoundError("adb binary not found on PATH")
+    return subprocess.call([adb_bin, "-s", serial, "shell"])
+
+
+def run_adb_popen(
+    args: Sequence[str],
+    *,
+    stdout=None,
+    stderr=None,
+    text: bool = True,
+) -> subprocess.Popen[str]:
+    """Launch a long-running adb process."""
+    adb_bin = _resolve_adb()
+    if adb_bin is None:
+        raise AdbBinaryNotFoundError("adb binary not found on PATH")
+    return subprocess.Popen([adb_bin, *args], stdout=stdout, stderr=stderr, text=text)
 
 
 def run_shell(
