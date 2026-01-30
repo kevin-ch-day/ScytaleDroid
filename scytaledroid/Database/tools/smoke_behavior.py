@@ -6,12 +6,22 @@ import argparse
 import subprocess
 import re
 from scytaledroid.Database.tools.bootstrap import bootstrap_database
+from scytaledroid.DeviceAnalysis import adb_utils
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
 def _package_installed(pkg: str) -> bool:
-    rc = subprocess.run(["adb", "shell", "pm", "list", "packages", pkg], capture_output=True, text=True)
-    return pkg in (rc.stdout or "")
+    devices = adb_utils.list_devices()
+    if not devices:
+        return False
+    serial = devices[0].get("serial")
+    if not serial:
+        return False
+    try:
+        output = adb_utils.run_shell(serial, ["pm", "list", "packages", pkg])
+    except RuntimeError:
+        return False
+    return pkg in output
 
 
 def main() -> int:

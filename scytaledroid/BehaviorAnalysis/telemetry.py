@@ -2,28 +2,25 @@
 
 from __future__ import annotations
 
-import json
-import subprocess
 import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Dict, Optional, Tuple
 
-from scytaledroid.Utils.LoggingUtils import logging_utils as log
-
+from scytaledroid.DeviceAnalysis import adb_client
 JITTER_MULTIPLIER = 1.5
 
 
-def _shell(cmd: list[str], timeout: float = 5.0) -> tuple[int, str, str]:
+def _shell(serial: str, cmd: list[str], timeout: float = 5.0) -> tuple[int, str, str]:
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
-        return proc.returncode, proc.stdout, proc.stderr
-    except Exception as exc:  # pragma: no cover - defensive
+        proc = adb_client.run_shell_command(serial, cmd, timeout=timeout)
+    except RuntimeError as exc:  # pragma: no cover - defensive
         return 1, "", str(exc)
+    return proc.returncode, proc.stdout or "", proc.stderr or ""
 
 
-def resolve_package_info(package: str) -> Dict[str, Optional[str]]:
-    rc, out, _ = _shell(["adb", "shell", "dumpsys", "package", package])
+def resolve_package_info(serial: str, package: str) -> Dict[str, Optional[str]]:
+    rc, out, _ = _shell(serial, ["dumpsys", "package", package])
     info: Dict[str, Optional[str]] = {
         "package": package,
         "versionCode": None,
@@ -50,7 +47,7 @@ def resolve_package_info(package: str) -> Dict[str, Optional[str]]:
                     info["versionName"] = parts[1].strip()
         info["target_package_installed"] = True
     # Basic device props
-    rc2, props, _ = _shell(["adb", "shell", "getprop"])
+    rc2, props, _ = _shell(serial, ["getprop"])
     if rc2 == 0:
         def _get(prop: str) -> Optional[str]:
             for line in props.splitlines():
@@ -63,7 +60,7 @@ def resolve_package_info(package: str) -> Dict[str, Optional[str]]:
         info["android_sdk"] = _get("ro.build.version.sdk")
         info["build_fingerprint"] = _get("ro.build.fingerprint")
     # APK path + hashes (best effort)
-    rc3, out3, _ = _shell(["adb", "shell", "pm", "path", package])
+    rc3, out3, _ = _shell(serial, ["pm", "path", package])
     if rc3 == 0:
         for line in out3.splitlines():
             if line.startswith("package:"):
@@ -71,37 +68,37 @@ def resolve_package_info(package: str) -> Dict[str, Optional[str]]:
                 if path:
                     info["apk_path"] = path
                     info["apk_hashes"] = {
-                        "md5": _device_hash(path, "md5sum"),
-                        "sha1": _device_hash(path, "sha1sum"),
-                        "sha256": _device_hash(path, "sha256sum"),
+                        "md5": _device_hash(serial, path, "md5sum"),
+                        "sha1": _device_hash(serial, path, "sha1sum"),
+                        "sha256": _device_hash(serial, path, "sha256sum"),
                     }
                     break
     return info
 
 
-def _device_hash(path: str, tool: str) -> Optional[str]:
-    rc, out, _ = _shell(["adb", "shell", tool, path])
+def _device_hash(serial: str, path: str, tool: str) -> Optional[str]:
+    rc, out, _ = _shell(serial, [tool, path])
     if rc != 0:
         return None
     token = out.strip().split()
     return token[0] if token else None
 
 
-def resolve_pid_uid(package: str) -> Tuple[Optional[str], Optional[str]]:
+def resolve_pid_uid(serial: str, package: str) -> Tuple[Optional[str], Optional[str]]:
     uid = None
-    rc, out, _ = _shell(["adb", "shell", "dumpsys", "package", package])
+    rc, out, _ = _shell(serial, ["dumpsys", "package", package])
     if rc == 0:
         match = re.search(r"userId=(\d+)", out)
         if match:
             uid = match.group(1)
     if uid is None:
-        rc_u, out_u, _ = _shell(["adb", "shell", "cmd", "package", "list", "packages", "-U", package])
+        rc_u, out_u, _ = _shell(serial, ["cmd", "package", "list", "packages", "-U", package])
         if rc_u == 0:
             m2 = re.search(r"uid:(\d+)", out_u)
             if m2:
                 uid = m2.group(1)
     pid = None
-    rc2, out2, _ = _shell(["adb", "shell", "pidof", "-s", package])
+    rc2, out2, _ = _shell(serial, ["pidof", "-s", package])
     if rc2 == 0:
         pid = out2.strip() or None
     return uid, pid
@@ -171,14 +168,22 @@ def should_mark_missed_sample(start_time: float, sample_rate: float) -> bool:
     return elapsed > sample_rate * JITTER_MULTIPLIER
 
 
-def _resolve_pid_only(package: str) -> Optional[str]:
-    rc, out, _ = _shell(["adb", "shell", "pidof", "-s", package])
+def _resolve_pid_only(serial: str, package: str) -> Optional[str]:
+    rc, out, _ = _shell(serial, ["pidof", "-s", package])
     if rc == 0:
         return out.strip() or None
     return None
 
 
-def collect_process_sample(package: str, uid: Optional[str], pid: Optional[str], ts: datetime, *, strict: bool = False) -> Dict[str, object]:
+def collect_process_sample(
+    serial: str,
+    package: str,
+    uid: Optional[str],
+    pid: Optional[str],
+    ts: datetime,
+    *,
+    strict: bool = False,
+) -> Dict[str, object]:
     row: Dict[str, object] = {
         "ts_utc": ts.isoformat(),
         "uid": uid or "",
@@ -194,9 +199,9 @@ def collect_process_sample(package: str, uid: Optional[str], pid: Optional[str],
     if uid is None:
         row["collector_status"] = "unavailable_uid"
         return row
-    pid = pid or _resolve_pid_only(package)
+    pid = pid or _resolve_pid_only(serial, package)
     row["pid"] = pid or ""
-    rc, out, _ = _shell(["adb", "shell", "top", "-b", "-n", "1", "-o", "PID,CPU,RES,NAME"])
+    rc, out, _ = _shell(serial, ["top", "-b", "-n", "1", "-o", "PID,CPU,RES,NAME"])
     if rc == 0 and pid:
         parsed = parse_top_output(out, pid)
         if parsed:
@@ -209,7 +214,7 @@ def collect_process_sample(package: str, uid: Optional[str], pid: Optional[str],
         # PID missing but uid known: emit row with pid_missing
         row["collector_status"] = "pid_missing"
     # Memory detail
-    rc2, out2, _ = _shell(["adb", "shell", "dumpsys", "meminfo", "--package", package])
+    rc2, out2, _ = _shell(serial, ["dumpsys", "meminfo", "--package", package])
     if rc2 == 0:
         mem_total = parse_meminfo_total(out2)
         if mem_total is not None:
@@ -227,7 +232,7 @@ def _parse_mem(token: str) -> int:
     return int(float(token))
 
 
-def collect_network_sample(uid: str, ts: datetime) -> Dict[str, object]:
+def collect_network_sample(serial: str, uid: str, ts: datetime) -> Dict[str, object]:
     row: Dict[str, object] = {
         "ts_utc": ts.isoformat(),
         "uid": uid,
@@ -242,7 +247,7 @@ def collect_network_sample(uid: str, ts: datetime) -> Dict[str, object]:
         row["collector_status"] = "unavailable_uid"
         row["source"] = "unavailable"
         return row
-    rc, out, _ = _shell(["adb", "shell", "dumpsys", "netstats", "detail"])
+    rc, out, _ = _shell(serial, ["dumpsys", "netstats", "detail"])
     if rc == 0:
         bytes_in, bytes_out = parse_netstats_detail(out, uid)
         if bytes_in or bytes_out:
@@ -254,7 +259,7 @@ def collect_network_sample(uid: str, ts: datetime) -> Dict[str, object]:
             row["collector_status"] = "ok"
             return row
     # Fallback: /proc/net/dev aggregate
-    rc2, out2, _ = _shell(["adb", "shell", "cat", "/proc/net/dev"])
+    rc2, out2, _ = _shell(serial, ["cat", "/proc/net/dev"])
     if rc2 == 0:
         bytes_in, bytes_out = parse_proc_net_dev(out2)
         row["bytes_in"] = bytes_in

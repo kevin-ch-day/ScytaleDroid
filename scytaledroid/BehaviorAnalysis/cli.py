@@ -34,6 +34,7 @@ from scytaledroid.BehaviorAnalysis.schemas import (
 )
 from scytaledroid.Config import app_config
 from scytaledroid.Database.tools.bootstrap import bootstrap_database
+from scytaledroid.DeviceAnalysis import adb_utils
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
@@ -49,6 +50,21 @@ def _now() -> datetime:
 
 def _session_dir(session_id: str) -> Path:
     return Path(app_config.OUTPUT_DIR) / "behavior_sessions" / session_id
+
+
+def _resolve_device_serial(serial: Optional[str]) -> Optional[str]:
+    if serial:
+        return serial
+    devices = adb_utils.list_devices()
+    if not devices:
+        return None
+    if len(devices) > 1:
+        log.warning(
+            "Multiple adb devices detected; using first device. "
+            "Provide --serial to target a specific device.",
+            category="behavior",
+        )
+    return devices[0].get("serial")
 
 
 def _write_metadata(
@@ -70,6 +86,10 @@ def _write_markers(session_dir: Path, markers: List[Dict[str, object]]) -> None:
 def behavior_run(args: argparse.Namespace) -> None:
     bootstrap_database()
     package = args.package
+    device_serial = _resolve_device_serial(args.serial)
+    if not device_serial:
+        log.error("No adb devices available for behavior telemetry.", category="behavior")
+        raise SystemExit(1)
     duration_s = args.duration
     sample_rate = args.sample_rate
     scenario = args.scenario
@@ -87,8 +107,8 @@ def behavior_run(args: argparse.Namespace) -> None:
     for directory in (telemetry_dir, features_dir, model_dir, plots_dir, reports_dir):
         directory.mkdir(parents=True, exist_ok=True)
 
-    device_info = resolve_package_info(package)
-    uid, pid = resolve_pid_uid(package)
+    device_info = resolve_package_info(device_serial, package)
+    uid, pid = resolve_pid_uid(device_serial, package)
     capabilities = {
         "process_available": uid is not None,
         "network_available": uid is not None,
@@ -107,8 +127,10 @@ def behavior_run(args: argparse.Namespace) -> None:
     while _now() < end:
         ts = _now()
         start_sample = time.time()
-        process_rows.append(collect_process_sample(package, uid, pid, ts, strict=strict_schema))
-        net_sample = collect_network_sample(uid or "", ts)
+        process_rows.append(
+            collect_process_sample(device_serial, package, uid, pid, ts, strict=strict_schema)
+        )
+        net_sample = collect_network_sample(device_serial, uid or "", ts)
         network_rows.append(net_sample)
         src = str(net_sample.get("source") or "unknown")
         network_source_summary[src] = network_source_summary.get(src, 0) + 1
@@ -165,6 +187,7 @@ def behavior_run(args: argparse.Namespace) -> None:
         "training_mode": "in_session_quantile",
         "threshold_policy": "quantile_0.98",
         "device": device_info,
+        "device_serial": device_serial,
         "uid": uid,
         "pid": pid,
         "collector_capabilities": capabilities,
@@ -269,6 +292,7 @@ def make_parser() -> argparse.ArgumentParser:
 
     run_p = sub.add_parser("run", help="Run a behavior session")
     run_p.add_argument("--package", required=True, help="Target package name")
+    run_p.add_argument("--serial", help="ADB device serial (defaults to first device)")
     run_p.add_argument("--duration", type=int, default=300, help="Duration seconds")
     run_p.add_argument("--sample-rate", type=float, default=DEFAULT_SAMPLE_RATE, help="Sample interval seconds")
     run_p.add_argument("--scenario", default="idle", help="Scenario label")
