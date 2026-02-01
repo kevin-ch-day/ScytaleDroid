@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import os
 import shutil
+from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Iterable, Optional
 
 from scytaledroid.Config import app_config
 from scytaledroid.Utils.DisplayUtils import status_messages
@@ -47,7 +47,7 @@ def show_log_locations() -> None:
     for category, target in sorted(log_targets.items()):
         friendly = category.replace("_", " ").title()
         details: list[str] = []
-        if target.text_path is not None:
+        if target.text_path is not None and category != "harvest_runs":
             details.append(f"human → {target.text_path}")
         if target.json_path is not None:
             suffix = "structured →"
@@ -55,6 +55,8 @@ def show_log_locations() -> None:
                 details.append(f"{suffix} {target.json_path}/<run>.jsonl")
             else:
                 details.append(f"{suffix} {target.json_path}")
+        if target.text_path is not None and category == "harvest_runs":
+            details.append(f"human → {target.text_path}/<run>.log")
         if not details:
             continue
         print(
@@ -78,7 +80,7 @@ def show_log_locations() -> None:
     )
 
 
-def clean_static_analysis_artifacts(*, retention_days: Optional[int] = None) -> None:
+def clean_static_analysis_artifacts(*, retention_days: int | None = None) -> None:
     """Remove stale static-analysis artefacts to keep local storage tidy."""
 
     resolved_retention = _resolve_retention_days(retention_days)
@@ -89,7 +91,7 @@ def clean_static_analysis_artifacts(*, retention_days: Optional[int] = None) -> 
     cache_dir = static_root / "cache"
     html_root = Path(app_config.OUTPUT_DIR) / "reports" / "static_analysis"
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=resolved_retention)
+    cutoff = datetime.now(UTC) - timedelta(days=resolved_retention)
 
     report_patterns = ("*.json", "*.ndjson", "*.ndjson.gz", "*.json.gz", "*.zip", "*.tar.gz")
     removed_reports = _prune_files(reports_dir, report_patterns, cutoff)
@@ -127,7 +129,7 @@ def clean_static_analysis_artifacts(*, retention_days: Optional[int] = None) -> 
     )
 
 
-def _resolve_retention_days(retention_days: Optional[int]) -> int:
+def _resolve_retention_days(retention_days: int | None) -> int:
     if retention_days is not None and retention_days > 0:
         return retention_days
 
@@ -158,7 +160,7 @@ def _prune_files(
     for pattern in patterns:
         for path in directory.glob(pattern):
             try:
-                modified = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+                modified = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
                 if modified < cutoff:
                     removed.bytes_freed += path.stat().st_size
                     path.unlink()
@@ -214,7 +216,7 @@ def _render_cleanup_summary(
     label: str,
     stats: _RemovalStats | None,
     missing: str,
-    retention_days: Optional[int] = None,
+    retention_days: int | None = None,
 ) -> None:
     if stats is None:
         print(status_messages.status(missing, level="info"))

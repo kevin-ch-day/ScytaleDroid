@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 import argparse
-from datetime import datetime, timezone
 import sys
+from collections.abc import Callable
+from datetime import UTC, datetime
 
+from scytaledroid.Api import start_api_server
 from scytaledroid.Config import app_config
+from scytaledroid.Database.db_core.db_engine import ensure_db_ready
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuSpec
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
@@ -19,9 +21,7 @@ from scytaledroid.Utils.System.world_clock.display import (
     format_dst_status_text,
     snapshot_clocks,
 )
-from scytaledroid.Utils.System.world_clock.state import ClockReference, WorldClockState, load_state
-from scytaledroid.Database.db_core.db_engine import ensure_db_ready
-from scytaledroid.Api import start_api_server
+from scytaledroid.Utils.System.world_clock.state import WorldClockState, load_state
 
 
 def _resolve_timezones() -> WorldClockState:
@@ -147,7 +147,7 @@ def main_menu() -> None:
 
         if choice == "0":
             log.info("Application shutting down", category="application")
-            shutdown_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+            shutdown_time = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
             status_messages.print_strip(
                 "Session End",
                 [
@@ -288,7 +288,6 @@ def main(argv: list[str] | None = None) -> int:
     if args.diag:
         _run_diagnostics(json_mode=args.json)
         return 0
-
 
     print_banner(show_clocks=args.with_clocks)
     try:

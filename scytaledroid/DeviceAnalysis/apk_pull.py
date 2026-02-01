@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from collections.abc import Callable, Mapping, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable, Dict, Mapping, Optional, Sequence, Set, Tuple
 
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis import adb_client, adb_shell, harvest, inventory
@@ -22,15 +22,15 @@ from scytaledroid.Utils.DisplayUtils import (
     status_messages,
     text_blocks,
 )
-from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.LoggingUtils import logging_engine
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.ops.operation_result import OperationResult
 
 
 def _extract_delta_summary(
     selection_metadata: Mapping[str, object],
-    guard_metadata: Optional[Mapping[str, object]],
-) -> Optional[Mapping[str, object]]:
+    guard_metadata: Mapping[str, object] | None,
+) -> Mapping[str, object] | None:
     """Return the most relevant delta summary available for the current scope."""
 
     for container in (selection_metadata, guard_metadata or {}):
@@ -43,10 +43,10 @@ def _extract_delta_summary(
     return None
 
 
-def _collect_delta_package_names(summary: Mapping[str, object]) -> Set[str]:
+def _collect_delta_package_names(summary: Mapping[str, object]) -> set[str]:
     """Extract the set of package names that should be harvested based on a delta summary."""
 
-    names: Set[str] = set()
+    names: set[str] = set()
     added = summary.get("added_full") or summary.get("added")
     if isinstance(added, Sequence):
         for entry in added:
@@ -67,8 +67,8 @@ def _collect_delta_package_names(summary: Mapping[str, object]) -> Set[str]:
 
 def _apply_delta_filter(
     selection: harvest.ScopeSelection,
-    guard_metadata: Optional[Mapping[str, object]],
-) -> Tuple[bool, int]:
+    guard_metadata: Mapping[str, object] | None,
+) -> tuple[bool, int]:
     """Filter the selection packages down to delta-only scope when appropriate.
 
     Returns a tuple indicating whether a delta filter was applied, and how many packages remain.
@@ -96,7 +96,7 @@ def _apply_delta_filter(
     return (True, len(filtered))
 
 
-def pull_apks(serial: Optional[str]) -> OperationResult:
+def pull_apks(serial: str | None) -> OperationResult:
     """Pull APK files for the active device and upsert metadata into the repository."""
 
     if not serial:
@@ -187,11 +187,11 @@ def pull_apks(serial: Optional[str]) -> OperationResult:
     include_system_partitions = False
     verbose = False
     google_allowlist = harvest.rules.load_google_allowlist()
-    guard_metadata: Optional[Dict[str, object]] = get_latest_inventory_metadata(
+    guard_metadata: dict[str, object] | None = get_latest_inventory_metadata(
         serial, with_current_state=True
     )
     guard_decision = get_last_guard_decision()
-    pull_mode: Optional[str] = None
+    pull_mode: str | None = None
 
     while True:
         active_plan = None
@@ -364,8 +364,8 @@ def pull_apks(serial: Optional[str]) -> OperationResult:
                     break
                 break
             if action == "refresh_full":
-                progress = _make_progress_callback("Refreshing full inventory")
                 from scytaledroid.DeviceAnalysis.services import inventory_service
+
                 try:
                     inventory_service.run_full_sync(
                         serial=serial,
@@ -457,14 +457,14 @@ def pull_apks(serial: Optional[str]) -> OperationResult:
             error_code="apk_pull_no_adb",
         )
 
-    session_stamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    session_stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     dest_root = Path(app_config.DATA_DIR) / "apks" / "device_apks" / serial
     dest_root.mkdir(parents=True, exist_ok=True)
 
     run_id = f"{serial or 'device'}-{session_stamp}"
     harvest_logger = log.harvest_adapter(
         run_id,
-        started_at=datetime.utcnow(),
+        started_at=datetime.now(UTC),
         context={
             "device_serial": serial,
             "session_stamp": session_stamp,
@@ -602,10 +602,10 @@ def pull_apks(serial: Optional[str]) -> OperationResult:
     )
 
 
-def _make_progress_callback(action_label: str) -> Callable[[Dict[str, object]], bool]:
+def _make_progress_callback(action_label: str) -> Callable[[dict[str, object]], bool]:
     last_reported = 0.0
 
-    def _callback(event: Dict[str, object]) -> bool:
+    def _callback(event: dict[str, object]) -> bool:
         nonlocal last_reported
 
         phase = event.get("phase")

@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 
 from scytaledroid.Config import app_config
-from scytaledroid.Utils.LoggingUtils import logging_utils as log
+from scytaledroid.Utils.LoggingUtils.logging_core import LOG_DIR
 from scytaledroid.Utils.LoggingUtils.logging_engine import configure_third_party_loggers
 
 
@@ -18,8 +18,8 @@ def configure_logging_for_cli(level: str) -> None:
         level = "info"
 
     verbosity = "debug" if level == "debug" else "normal"
-    debug_dir = getattr(log, "LOGS_DIR", app_config.LOGS_DIR)
-    debug_dir_str = str(Path(debug_dir).resolve()) if debug_dir else None
+    debug_dir = LOG_DIR if LOG_DIR else Path(app_config.LOGS_DIR)
+    debug_dir_str = str(debug_dir.expanduser().resolve())
     configure_third_party_loggers(
         verbosity=verbosity,
         run_id="cli",
@@ -39,4 +39,3 @@ def configure_logging_for_cli(level: str) -> None:
 
 
 __all__ = ["configure_logging_for_cli"]
-
