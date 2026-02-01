@@ -13,9 +13,10 @@ import json
 import logging
 import logging.handlers
 import os
-from datetime import datetime, timezone
+from collections.abc import Iterable, Mapping, MutableMapping
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, Mapping, MutableMapping, Optional
+from typing import Any
 
 from scytaledroid.Config import app_config
 
@@ -23,7 +24,7 @@ from scytaledroid.Config import app_config
 LOG_DIR = Path(getattr(app_config, "LOGS_DIR", "logs")).expanduser()
 
 
-def _ensure_log_dir(path: Optional[Path] = None) -> Path:
+def _ensure_log_dir(path: Path | None = None) -> Path:
     """Ensure that the base log directory and optional *path* parents exist."""
 
     LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -41,7 +42,7 @@ LOG_FORMAT = (
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 
-def _serialize_extra(record: logging.LogRecord) -> Dict[str, Any]:
+def _serialize_extra(record: logging.LogRecord) -> dict[str, Any]:
     """Return a serialisable copy of ``record`` extras.
 
     ``logging`` stores standard attributes in ``LogRecord.__dict__`` alongside
@@ -76,7 +77,7 @@ def _serialize_extra(record: logging.LogRecord) -> Dict[str, Any]:
         "extra_suffix",
     }
 
-    payload: Dict[str, Any] = {}
+    payload: dict[str, Any] = {}
     for key, value in record.__dict__.items():
         if key in standard:
             continue
@@ -117,8 +118,8 @@ class JsonFormatter(logging.Formatter):
     """Formatter that emits structured JSON for downstream tooling."""
 
     def format(self, record: logging.LogRecord) -> str:  # pragma: no cover - thin
-        data: Dict[str, Any] = {
-            "ts": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+        data: dict[str, Any] = {
+            "ts": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
@@ -165,6 +166,23 @@ def _make_rotating_handler(
     return handler
 
 
+def make_rotating_handler(
+    path: Path,
+    *,
+    max_bytes: int,
+    backup_count: int,
+    formatter: logging.Formatter,
+) -> logging.Handler:
+    """Public wrapper for creating a rotating handler with gzip archives."""
+
+    return _make_rotating_handler(
+        path,
+        max_bytes=max_bytes,
+        backup_count=backup_count,
+        formatter=formatter,
+    )
+
+
 def _format_suffix(extras: Mapping[str, Any]) -> str:
     if not extras:
         return ""
@@ -177,8 +195,8 @@ def _prepare_handlers(
     level: int,
     max_bytes: int,
     backup_count: int,
-    text_path: Optional[Path] = None,
-    json_path: Optional[Path] = None,
+    text_path: Path | None = None,
+    json_path: Path | None = None,
 ) -> Iterable[logging.Handler]:
     text_formatter = logging.Formatter(LOG_FORMAT, DATE_FORMAT)
     json_formatter = JsonFormatter()
@@ -214,9 +232,9 @@ def _prepare_handlers(
 def setup_logger(
     name: str,
     *,
-    text_file: Optional[str] = None,
-    json_file: Optional[str] = None,
-    subdir: Optional[str] = None,
+    text_file: str | None = None,
+    json_file: str | None = None,
+    subdir: str | None = None,
     level: int = logging.INFO,
     max_bytes: int = 10 * 1024 * 1024,
     backup_count: int = 10,
@@ -271,5 +289,6 @@ class _ExtraSuffixFilter(logging.Filter):
 
 __all__ = [
     "JsonFormatter",
+    "make_rotating_handler",
     "setup_logger",
 ]

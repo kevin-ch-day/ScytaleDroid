@@ -67,6 +67,9 @@ def use_color() -> bool:
 
 def set_use_color(enabled: bool) -> None:
     _PREFS.use_color = bool(enabled)
+    from . import colors
+
+    colors.colors_enabled(force_refresh=True)
 
 
 def use_unicode() -> bool:
@@ -75,6 +78,9 @@ def use_unicode() -> bool:
 
 def set_use_unicode(enabled: bool) -> None:
     _PREFS.use_unicode = bool(enabled)
+    from .terminal import use_ascii_ui
+
+    use_ascii_ui(force_refresh=True)
 
 
 __all__ = [
