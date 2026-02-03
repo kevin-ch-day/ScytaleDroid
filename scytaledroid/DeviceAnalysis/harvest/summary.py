@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+import os
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -321,8 +322,10 @@ def render_harvest_summary(
     files_written = metrics.artifacts_written
     pull_errors = metrics.artifacts_failed
 
-    print()
-    print(text_blocks.headline("APK Harvest Summary", width=70))
+    simple_mode = _harvest_simple_mode()
+    if not simple_mode:
+        print()
+        print(text_blocks.headline("APK Harvest Summary", width=70))
 
     metadata = selection.metadata or {}
     summary_lines = _build_summary_card_lines(
@@ -335,10 +338,13 @@ def render_harvest_summary(
     )
     scope_hash_changed = metadata.get("inventory_scope_hash_changed")
 
-    print(text_blocks.boxed(summary_lines, width=70))
+    quiet_mode = _harvest_quiet_mode()
+
+    if not simple_mode:
+        print(text_blocks.boxed(summary_lines, width=70))
 
     highlights = _harvest_highlights(metrics, pull_errors)
-    if highlights:
+    if highlights and not quiet_mode:
         print()
         print(text_blocks.headline("Highlights", width=70))
         for level, message in highlights:
@@ -354,10 +360,10 @@ def render_harvest_summary(
     if pull_errors:
         print(status_messages.status("Review package errors above before re-running.", level="warn"))
 
-    if plan.policy_filtered:
+    if plan.policy_filtered and not quiet_mode:
         policy_details = _format_policy_details(plan.policy_filtered)
         print(status_messages.status(f"Filtered before pull (policy): {policy_details}", level="warn"))
-    if metrics.preflight_skips or metrics.runtime_skips:
+    if (metrics.preflight_skips or metrics.runtime_skips) and not quiet_mode:
         print()
         print(text_blocks.headline("Skipped packages", width=70))
         if metrics.preflight_skips:
@@ -381,39 +387,42 @@ def render_harvest_summary(
     )
     if denied:
         print(status_messages.status("Permission denied (requires root):", level="warn"))
-        for package in denied:
-            print(status_messages.status(f"  - {package}", level="warn"))
+        if not quiet_mode:
+            for package in denied:
+                print(status_messages.status(f"  - {package}", level="warn"))
 
-    _print_exclusions(metadata.get("excluded_counts"))
-    _print_exclusion_samples(metadata.get("excluded_samples"))
-    _print_top_packages(
-        results,
-        limit=10 if _should_compact_view(selection, metrics, plan) else 5,
-    )
-    _print_sample_focus(selection)
+    if not quiet_mode:
+        _print_exclusions(metadata.get("excluded_counts"))
+        _print_exclusion_samples(metadata.get("excluded_samples"))
+        _print_top_packages(
+            results,
+            limit=10 if _should_compact_view(selection, metrics, plan) else 5,
+        )
+        _print_sample_focus(selection)
 
     output_root = _run_output_root(harvest_result)
-    if output_root:
+    if output_root and not simple_mode:
         print()
         print(status_messages.status("Artifacts saved under:", level="info"))
         print(status_messages.status(f"  {output_root}", level="info"))
-        shown = 0
-        for package in harvest_result.packages:
-            dest = _package_dest_dir(package)
-            if not dest:
-                continue
-            label = f"  • {package.app_label} ({package.package_name}) → {dest}"
-            print(status_messages.status(label, level="info"))
-            shown += 1
-            if shown >= 5:
-                break
+        if not quiet_mode:
+            shown = 0
+            for package in harvest_result.packages:
+                dest = _package_dest_dir(package)
+                if not dest:
+                    continue
+                label = f"  • {package.app_label} ({package.package_name}) → {dest}"
+                print(status_messages.status(label, level="info"))
+                shown += 1
+                if shown >= 5:
+                    break
 
     no_new = _packages_without_writes(harvest_result)
-    if no_new:
+    if no_new and not quiet_mode:
         _print_no_new_summary(no_new)
 
     delta_summary = metadata.get("package_delta_summary")
-    if delta_summary:
+    if delta_summary and not quiet_mode:
         print()
         print(
             text_blocks.headline(
@@ -422,17 +431,49 @@ def render_harvest_summary(
         )
         _print_package_delta_summary(delta_summary)
 
+    if simple_mode:
+        print()
+        print(status_messages.status("APK Harvest complete ✓", level="success"))
+        print(
+            status_messages.status(
+                (
+                    "packages: "
+                    f"{metrics.total_packages} "
+                    f"(clean={metrics.packages_successful} "
+                    f"partial={metrics.packages_with_partial_errors} "
+                    f"failed={metrics.packages_failed})"
+                ),
+                level="info",
+            )
+        )
+        print(
+            status_messages.status(
+                f"artifacts: {metrics.artifacts_written}/{metrics.planned_artifacts} written",
+                level="info",
+            )
+        )
+        if output_root:
+            print(status_messages.status(f"output: {output_root}", level="info"))
+        print(
+            status_messages.status(
+                "next: Static Analysis → Run on harvested APKs",
+                level="info",
+            )
+        )
+        return
+
     # Structured forensic-style summary (non-boxed) for transcripts/screenshots.
-    render_harvest_summary_structured(
-        selection_label=selection.label,
-        metrics=metrics,
-        pull_mode=pull_mode,
-        output_root=normalise_local_path(Path(output_root)) if output_root else None,
-        preflight_skips=metrics.preflight_skips,
-        runtime_skips=metrics.runtime_skips,
-        policy_filtered=plan.policy_filtered,
-        session_stamp=run_timestamp,
-    )
+    if not quiet_mode:
+        render_harvest_summary_structured(
+            selection_label=selection.label,
+            metrics=metrics,
+            pull_mode=pull_mode,
+            output_root=normalise_local_path(Path(output_root)) if output_root else None,
+            preflight_skips=metrics.preflight_skips,
+            runtime_skips=metrics.runtime_skips,
+            policy_filtered=plan.policy_filtered,
+            session_stamp=run_timestamp,
+        )
 
     # Emit policy.filter details for scope shrinking
     if plan.policy_filtered:
@@ -462,14 +503,15 @@ def render_harvest_summary(
         except Exception:
             pass
 
-    print()
-    print(status_messages.status("Next steps:", level="info"))
-    print(status_messages.status("  • Review metadata via Database tools → Run database queries", level="info"))
-    print(
-        status_messages.status(
-            "  • Run static analysis on harvested APKs (see docs/static_analysis)", level="info"
+    if not quiet_mode:
+        print()
+        print(status_messages.status("Next steps:", level="info"))
+        print(status_messages.status("  • Review metadata via Database tools → Run database queries", level="info"))
+        print(
+            status_messages.status(
+                "  • Run static analysis on harvested APKs (see docs/static_analysis)", level="info"
+            )
         )
-    )
 
     if log_summary:
         _log_harvest_summary(
@@ -930,6 +972,28 @@ def _should_compact_view(selection: ScopeSelection, metrics: HarvestRunMetrics, 
     if metrics.planned_artifacts and metrics.planned_artifacts > 1000:
         return True
     return False
+
+
+def _harvest_quiet_mode() -> bool:
+    if _harvest_simple_mode():
+        return True
+    return os.getenv("SCYTALEDROID_HARVEST_QUIET", "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _harvest_simple_mode() -> bool:
+    return os.getenv("SCYTALEDROID_HARVEST_SIMPLE", "1").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 
 def _print_no_new_summary(no_new: List[tuple[PackageHarvestResult, Optional[str]]]) -> None:
     """

@@ -183,7 +183,7 @@ def quick_harvest(
                 continue
 
             inventory = plan.inventory
-            package_dir = dest_root / inventory.package_name / session_stamp
+            package_dir = dest_root / inventory.package_name
             package_dir.mkdir(parents=True, exist_ok=True)
 
             paths, error = _resolve_package_paths(

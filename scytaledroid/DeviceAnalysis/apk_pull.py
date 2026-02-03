@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -457,11 +458,12 @@ def pull_apks(serial: str | None) -> OperationResult:
             error_code="apk_pull_no_adb",
         )
 
-    session_stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    dest_root = Path(app_config.DATA_DIR) / "apks" / "device_apks" / serial
+    now_utc = datetime.now(UTC)
+    session_stamp = now_utc.strftime("%Y%m%d")
+    dest_root = Path(app_config.DATA_DIR) / "apks" / "device_apks" / serial / session_stamp
     dest_root.mkdir(parents=True, exist_ok=True)
 
-    run_id = f"{serial or 'device'}-{session_stamp}"
+    run_id = f"{serial or 'device'}-{now_utc.strftime('%Y%m%d-%H%M%S')}"
     harvest_logger = log.harvest_adapter(
         run_id,
         started_at=datetime.now(UTC),
@@ -700,6 +702,32 @@ def _render_plan_overview(
     blocked_packages: int,
 ) -> None:
     print()
+    if _harvest_simple_mode():
+        candidate_count = selection.metadata.get("candidate_count")
+        selected_count = selection.metadata.get("selected_count")
+        if selection.metadata.get("delta_filter_applied"):
+            candidate_count = selection.metadata.get("delta_filter_matched")
+            selected_count = len(selection.packages)
+        if not candidate_count:
+            candidate_count = len(selection.packages)
+        if selected_count is None:
+            selected_count = len(selection.packages)
+
+        policy_blocked = sum(
+            1 for pkg in plan.packages if pkg.skip_reason == "policy_non_root"
+        )
+        eligible_policy = max(int(candidate_count) - int(policy_blocked), 0)
+        policy = selection.metadata.get("policy")
+        if not policy:
+            policy = ",".join(sorted(plan.policy_filtered.keys())) if plan.policy_filtered else "none"
+        line = (
+            "APK Harvest started • "
+            f"inventory={candidate_count} • eligible={eligible_policy} • "
+            f"artifacts≈{files} • policy={policy}"
+        )
+        print(status_messages.status(line, level="info"))
+        return
+
     print("APK Harvest Plan")
     print("-" * 86)
     candidate_count = selection.metadata.get("candidate_count")
@@ -757,6 +785,15 @@ def _device_is_rooted(serial: str) -> bool:
     if completed.returncode != 0:
         return False
     return completed.stdout.strip() == "0"
+
+
+def _harvest_simple_mode() -> bool:
+    return os.getenv("SCYTALEDROID_HARVEST_SIMPLE", "1").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def _maybe_save_watchlist(selection: harvest.ScopeSelection) -> None:

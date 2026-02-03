@@ -120,6 +120,9 @@ def execute_harvest(
     stats: Dict[str, int] = {
         "packages_total": len(plans),
         "packages_skipped": 0,
+        "packages_clean": 0,
+        "packages_partial": 0,
+        "packages_failed": 0,
         "artifacts_planned": sum(len(plan.artifacts) for plan in plans),
         "artifacts_written": 0,
         "artifacts_failed": 0,
@@ -201,28 +204,34 @@ def execute_harvest(
             if not plan.skip_reason:
                 display_index += 1
                 current_display_index = display_index
-            results.append(
-                _execute_package_plan(
-                    serial=resolved_serial,
-                    adb_path=adb_path,
-                    dest_root=dest_root,
-                    session_stamp=session_stamp,
-                    plan=plan,
-                    verbose=verbose,
-                    options=options,
-                    tracker=tracker,
-                    storage_root_id=storage_root_id if storage_root_id is not None else 0,
-                    package_index=index,
-                    package_total=total,
-                    compact_mode=compact_mode,
-                    display_index=current_display_index,
-                    display_total=display_total,
-                    base_context=base_context,
-                    emit=_emit,
-                    stats=stats,
-                    snapshot_id=snapshot_id,
-                    snapshot_captured_at=snapshot_captured_at,
-                )
+            result = _execute_package_plan(
+                serial=resolved_serial,
+                adb_path=adb_path,
+                dest_root=dest_root,
+                session_stamp=session_stamp,
+                plan=plan,
+                verbose=verbose,
+                options=options,
+                tracker=tracker,
+                storage_root_id=storage_root_id if storage_root_id is not None else 0,
+                package_index=index,
+                package_total=total,
+                compact_mode=compact_mode,
+                display_index=current_display_index,
+                display_total=display_total,
+                base_context=base_context,
+                emit=_emit,
+                stats=stats,
+                snapshot_id=snapshot_id,
+                snapshot_captured_at=snapshot_captured_at,
+            )
+            results.append(result)
+            _update_package_outcome(stats, result)
+            _maybe_print_progress(
+                result=result,
+                stats=stats,
+                package_index=current_display_index or index,
+                package_total=display_total or total,
             )
     except Exception as exc:
         run_failed = True
@@ -311,7 +320,7 @@ def _execute_package_plan(
 
     inventory = plan.inventory
     package_name = inventory.package_name
-    package_dir = dest_root / package_name / session_stamp
+    package_dir = dest_root / package_name
     package_dir.mkdir(parents=True, exist_ok=True)
 
     app_id: Optional[int] = None
@@ -718,8 +727,88 @@ def _compact_mode() -> bool:
     }
 
 
+def _quiet_mode() -> bool:
+    if _simple_mode():
+        return True
+    return os.getenv("SCYTALEDROID_HARVEST_QUIET", "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _simple_mode() -> bool:
+    return os.getenv("SCYTALEDROID_HARVEST_SIMPLE", "1").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _progress_every() -> int:
+    value = os.getenv("SCYTALEDROID_HARVEST_PROGRESS_EVERY", "5").strip()
+    try:
+        return max(int(value), 1)
+    except ValueError:
+        return 5
+
+
+def _update_package_outcome(stats: Dict[str, int], result: PullResult) -> None:
+    if result.skipped and not result.ok and not result.errors:
+        return
+    if result.errors and result.ok:
+        stats["packages_partial"] += 1
+    elif result.errors and not result.ok:
+        stats["packages_failed"] += 1
+    else:
+        stats["packages_clean"] += 1
+
+
+def _maybe_print_progress(
+    result: PullResult,
+    stats: Mapping[str, int],
+    package_index: int,
+    package_total: int,
+) -> None:
+    if not _quiet_mode():
+        return
+    if package_total <= 0:
+        return
+    if result.errors:
+        _print_progress_line(result, stats, package_index, package_total, force=True)
+        return
+    every = _progress_every()
+    if package_index % every == 0 or package_index == package_total:
+        _print_progress_line(result, stats, package_index, package_total, force=False)
+
+
+def _print_progress_line(
+    result: PullResult,
+    stats: Mapping[str, int],
+    package_index: int,
+    package_total: int,
+    *,
+    force: bool,
+) -> None:
+    if not _quiet_mode() and not force:
+        return
+    ok_count = int(stats.get("packages_clean", 0)) + int(stats.get("packages_partial", 0))
+    err_count = int(stats.get("packages_failed", 0))
+    skipped = int(stats.get("packages_skipped", 0))
+    last_pkg = result.plan.inventory.package_name
+    suffix = f"(last: {last_pkg})"
+    line = (
+        f"Progress: {package_index}/{package_total} "
+        f"ok={ok_count} fail={err_count} skipped={skipped} {suffix}"
+    )
+    level = "error" if err_count else "info"
+    print(status_messages.status(line, level=level))
+
+
 def _print_package_header(plan: PackagePlan, package_index: int, package_total: int, *, compact_mode: bool) -> None:
-    if compact_mode:
+    if compact_mode or _quiet_mode():
         return
     label = plan.inventory.display_name()
     artifact_total = len(plan.artifacts)
@@ -747,6 +836,9 @@ def _print_package_footer(
     errors = int(stats.get("errors", 0) or 0)
     total_bytes = int(stats.get("bytes", 0) or 0)
 
+    if _quiet_mode() and errors == 0 and skipped == 0:
+        return
+
     parts: list[str] = []
     parts.append(
         f"saved {saved} artifact{'s' if saved != 1 else ''}"
@@ -767,6 +859,8 @@ def _print_package_footer(
         level = "success"
 
     if compact_mode:
+        if _quiet_mode() and errors == 0 and skipped == 0:
+            return
         total_planned = saved + skipped + errors
         prefix = f"[{package_index}/{package_total}] "
         compact_line = (

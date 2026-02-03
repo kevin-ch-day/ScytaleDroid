@@ -6,6 +6,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set
+import re
 
 from scytaledroid.Config import app_config
 from scytaledroid.Utils.DisplayUtils import (
@@ -34,6 +35,7 @@ class _DeviceLibrarySummary:
     total_artifacts: int
     base_path: Path
     package_counts: Counter[str]
+    layout: str
 
     @property
     def session_count(self) -> int:
@@ -116,7 +118,11 @@ def browse_saved_apk_library() -> None:
 
 def _scan_saved_apks(base_dir: Path) -> List[_DeviceLibrarySummary]:
     summaries: List[_DeviceLibrarySummary] = []
+    date_dir_pattern = re.compile(r"^\d{8}$")
     for serial_dir in sorted(p for p in base_dir.iterdir() if p.is_dir()):
+        child_dirs = [p for p in serial_dir.iterdir() if p.is_dir()]
+        has_date_dirs = any(date_dir_pattern.match(p.name) for p in child_dirs)
+        layout = "date_first" if has_date_dirs else "package_first"
         session_packages: Dict[str, Dict[str, object]] = defaultdict(
             lambda: {"packages": set(), "artifacts": 0, "package_counts": Counter()}
         )
@@ -124,29 +130,56 @@ def _scan_saved_apks(base_dir: Path) -> List[_DeviceLibrarySummary]:
         packages_seen: Set[str] = set()
         total_artifacts = 0
 
-        for package_dir in serial_dir.iterdir():
-            if not package_dir.is_dir():
-                continue
-            package_name = package_dir.name
-            for session_dir in package_dir.iterdir():
-                if not session_dir.is_dir():
+        if layout == "date_first":
+            for day_dir in child_dirs:
+                if not day_dir.is_dir():
                     continue
-                apk_files = [path for path in session_dir.iterdir() if path.suffix.lower() == ".apk"]
-                if not apk_files:
+                if not date_dir_pattern.match(day_dir.name):
                     continue
+                for package_dir in day_dir.iterdir():
+                    if not package_dir.is_dir():
+                        continue
+                    package_name = package_dir.name
+                    apk_files = [path for path in package_dir.iterdir() if path.suffix.lower() == ".apk"]
+                    if not apk_files:
+                        continue
 
-                stats = session_packages[session_dir.name]
-                packages_set = stats["packages"]
-                if isinstance(packages_set, set):
-                    packages_set.add(package_name)
-                stats["artifacts"] = int(stats["artifacts"]) + len(apk_files)
-                pkg_counter = stats["package_counts"]
-                if isinstance(pkg_counter, Counter):
-                    pkg_counter[package_name] += len(apk_files)
+                    stats = session_packages[day_dir.name]
+                    packages_set = stats["packages"]
+                    if isinstance(packages_set, set):
+                        packages_set.add(package_name)
+                    stats["artifacts"] = int(stats["artifacts"]) + len(apk_files)
+                    pkg_counter = stats["package_counts"]
+                    if isinstance(pkg_counter, Counter):
+                        pkg_counter[package_name] += len(apk_files)
 
-                package_counts[package_name] += len(apk_files)
-                packages_seen.add(package_name)
-                total_artifacts += len(apk_files)
+                    package_counts[package_name] += len(apk_files)
+                    packages_seen.add(package_name)
+                    total_artifacts += len(apk_files)
+        else:
+            for package_dir in child_dirs:
+                if not package_dir.is_dir():
+                    continue
+                package_name = package_dir.name
+                for session_dir in package_dir.iterdir():
+                    if not session_dir.is_dir():
+                        continue
+                    apk_files = [path for path in session_dir.iterdir() if path.suffix.lower() == ".apk"]
+                    if not apk_files:
+                        continue
+
+                    stats = session_packages[session_dir.name]
+                    packages_set = stats["packages"]
+                    if isinstance(packages_set, set):
+                        packages_set.add(package_name)
+                    stats["artifacts"] = int(stats["artifacts"]) + len(apk_files)
+                    pkg_counter = stats["package_counts"]
+                    if isinstance(pkg_counter, Counter):
+                        pkg_counter[package_name] += len(apk_files)
+
+                    package_counts[package_name] += len(apk_files)
+                    packages_seen.add(package_name)
+                    total_artifacts += len(apk_files)
 
         if not session_packages:
             continue
@@ -175,6 +208,7 @@ def _scan_saved_apks(base_dir: Path) -> List[_DeviceLibrarySummary]:
                 total_artifacts=total_artifacts,
                 base_path=serial_dir,
                 package_counts=package_counts,
+                layout=layout,
             )
         )
 
@@ -217,7 +251,10 @@ def _show_device_library_detail(summary: _DeviceLibrarySummary) -> None:
     print()
     print()
     print(status_messages.status(f"Base directory: {summary.base_path}", level="info"))
-    example_hint = summary.base_path / "<package>" / "<timestamp>"
+    if summary.layout == "date_first":
+        example_hint = summary.base_path / "<YYYYMMDD>" / "<package>"
+    else:
+        example_hint = summary.base_path / "<package>" / "<timestamp>"
     print(status_messages.status(f"APK location pattern: {example_hint}", level="info"))
 
     session_map = {str(idx + 1): session for idx, session in enumerate(summary.sessions)}
@@ -249,11 +286,15 @@ def _show_session_packages(summary: _DeviceLibrarySummary, session: _SessionSumm
 
     rows: List[List[str]] = []
     for package, count in session.package_counts.most_common():
+        if summary.layout == "date_first":
+            path = summary.base_path / session.stamp / package
+        else:
+            path = summary.base_path / package / session.stamp
         rows.append(
             [
                 package,
                 str(count),
-                str(summary.base_path / package / session.stamp),
+                str(path),
             ]
         )
 
