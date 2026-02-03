@@ -83,6 +83,9 @@ class DynamicRunSummarizer:
                 telemetry_quality["netstats_available"] = bool(netstats_available)
         if telemetry_quality.get("netstats_available") is False:
             telemetry_quality["netstats_warning"] = "netstats_unavailable"
+        netstats_missing_rows = int((telemetry_stats or {}).get("netstats_missing_rows") or 0) if telemetry_stats else 0
+        if netstats_missing_rows:
+            telemetry_quality["netstats_warning"] = "netstats_missing"
         if network_signal_quality == "netstats_zero_bytes":
             telemetry_quality["netstats_warning"] = "netstats_zero_bytes"
         return {

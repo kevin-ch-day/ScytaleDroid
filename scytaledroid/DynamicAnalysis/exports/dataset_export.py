@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import json
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -53,14 +54,30 @@ def export_tier1_pack(output_dir: Path) -> dict[str, Path]:
     else:
         _write_csv(rollup_path, [])
 
-    included_run_ids = [
-        row["dynamic_run_id"]
+    included = [
+        row
         for row in manifest_rows
         if row.get("inclusion_status") == "include"
     ]
     telemetry_dir = output_dir / "telemetry"
-    for run_id in included_run_ids:
-        export_run_telemetry_csv(dynamic_run_id=run_id, output_dir=telemetry_dir, include_network=True)
+    _reset_telemetry_dir(telemetry_dir)
+    for row in included:
+        run_id = row["dynamic_run_id"]
+        network_status = row.get("network_inclusion_status")
+        include_network = network_status == "netstats_ok"
+        export_run_telemetry_csv(
+            dynamic_run_id=run_id,
+            output_dir=telemetry_dir,
+            include_network=include_network,
+        )
+        if not include_network:
+            stale_network = telemetry_dir / f"{run_id}-network.csv"
+            if stale_network.exists():
+                stale_network.unlink()
+            _write_network_skipped(
+                telemetry_dir / f"{run_id}-network_skipped.json",
+                reason=str(network_status or "network_unavailable"),
+            )
     analysis_dir = output_dir / "analysis"
     feature_health = build_feature_health_report(
         telemetry_dir,
@@ -173,9 +190,14 @@ def _fetch_manifest_rows() -> list[dict[str, Any]]:
         ORDER BY ds.started_at_utc DESC
     """
     rows = core_q.run_sql(sql, (DATASET_NAME,), fetch="all", dictionary=True) or []
+    totals = _fetch_netstats_totals([row.get("dynamic_run_id") for row in rows if row.get("dynamic_run_id")])
     enriched: list[dict[str, Any]] = []
     for row in rows:
         payload = dict(row)
+        run_id = payload.get("dynamic_run_id")
+        totals_row = totals.get(run_id, {}) if run_id else {}
+        payload["netstats_bytes_in_total"] = totals_row.get("sum_in")
+        payload["netstats_bytes_out_total"] = totals_row.get("sum_out")
         payload["network_inclusion_status"] = _derive_network_inclusion(payload)
         enriched.append(payload)
     return enriched
@@ -261,12 +283,14 @@ def _build_tier1_rollup_rows(manifest_rows: list[dict[str, Any]]) -> list[dict[s
 def _derive_network_inclusion(row: Mapping[str, Any]) -> str:
     quality = row.get("network_signal_quality")
     if isinstance(quality, str) and quality:
-        if quality in {"netstats_ok", "netstats_only"}:
+        if quality == "netstats_ok":
             return "netstats_ok"
         if quality == "netstats_partial":
             return "netstats_partial"
-        if quality in {"netstats_missing", "none"}:
+        if quality == "netstats_missing":
             return "netstats_missing"
+        if quality == "none":
+            return "none"
         if quality == "netstats_zero_bytes":
             return "netstats_zero_bytes"
         if quality == "pcap_only":
@@ -277,6 +301,14 @@ def _derive_network_inclusion(row: Mapping[str, Any]) -> str:
     except (TypeError, ValueError):
         netstats_rows = 0
         netstats_missing = 0
+    try:
+        sum_in = int(row.get("netstats_bytes_in_total") or 0)
+        sum_out = int(row.get("netstats_bytes_out_total") or 0)
+    except (TypeError, ValueError):
+        sum_in = 0
+        sum_out = 0
+    if netstats_rows and (sum_in + sum_out) == 0:
+        return "netstats_zero_bytes"
     if netstats_rows and netstats_missing:
         return "netstats_partial"
     if netstats_rows:
@@ -284,6 +316,20 @@ def _derive_network_inclusion(row: Mapping[str, Any]) -> str:
     if netstats_missing:
         return "netstats_missing"
     return "none"
+
+
+def _write_network_skipped(path: Path, *, reason: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"reason": reason}
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def _reset_telemetry_dir(telemetry_dir: Path) -> None:
+    if not telemetry_dir.exists():
+        return
+    for path in telemetry_dir.iterdir():
+        if path.is_file() and (path.suffix == ".csv" or path.name.endswith("_skipped.json")):
+            path.unlink()
 
 
 def _safe_ratio(captured: object, expected: object) -> float | None:
@@ -367,3 +413,28 @@ def _dynamic_sessions_has_column(column_name: str) -> bool:
         except Exception:
             _DYN_SESSIONS_COLUMNS = set()
     return column_name.lower() in _DYN_SESSIONS_COLUMNS
+
+
+def _fetch_netstats_totals(run_ids: list[str]) -> dict[str, dict[str, int]]:
+    if not run_ids:
+        return {}
+    placeholders = ", ".join(["%s"] * len(run_ids))
+    sql = f"""
+        SELECT dynamic_run_id,
+               SUM(COALESCE(bytes_in,0)) AS sum_in,
+               SUM(COALESCE(bytes_out,0)) AS sum_out
+        FROM dynamic_telemetry_network
+        WHERE dynamic_run_id IN ({placeholders})
+          AND source = 'netstats'
+        GROUP BY dynamic_run_id
+    """
+    rows = core_q.run_sql(sql, tuple(run_ids), fetch="all", dictionary=True) or []
+    totals: dict[str, dict[str, int]] = {}
+    for row in rows:
+        run_id = row.get("dynamic_run_id")
+        if run_id:
+            totals[str(run_id)] = {
+                "sum_in": int(row.get("sum_in") or 0),
+                "sum_out": int(row.get("sum_out") or 0),
+            }
+    return totals

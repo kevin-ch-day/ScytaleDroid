@@ -10,6 +10,7 @@ from typing import Any, Dict, Iterable, Mapping
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_queries.dynamic import schema as dynamic_schema
 from scytaledroid.DynamicAnalysis.plans.loader import extract_plan_identity
+from scytaledroid.Utils.network_quality import evaluate_network_signal_quality
 
 from ..core.session import DynamicSessionConfig, DynamicSessionResult
 
@@ -424,11 +425,22 @@ def _extract_network_signal_quality(payload: Mapping[str, Any]) -> str | None:
         return None
     netstats_rows = sum(1 for row in rows if row.get("source") == "netstats")
     netstats_missing_rows = sum(1 for row in rows if row.get("source") == "netstats_missing")
-    if netstats_rows > 0 and netstats_missing_rows > 0:
-        return "netstats_partial"
-    if netstats_rows > 0:
-        return "netstats_only"
-    return "none"
+    total_in = 0
+    total_out = 0
+    for row in rows:
+        if row.get("source") != "netstats":
+            continue
+        try:
+            total_in += int(float(row.get("bytes_in") or 0))
+            total_out += int(float(row.get("bytes_out") or 0))
+        except (TypeError, ValueError):
+            continue
+    return evaluate_network_signal_quality(
+        netstats_rows=netstats_rows,
+        netstats_missing_rows=netstats_missing_rows,
+        sum_bytes_in=total_in,
+        sum_bytes_out=total_out,
+    )
 
 
 def _extract_netstats_rows(payload: Mapping[str, Any]) -> int | None:

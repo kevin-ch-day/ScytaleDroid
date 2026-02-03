@@ -959,6 +959,16 @@ def run_tier1_audit_report() -> None:
             "Feature Health",
             detail=feature_health_status,
         )
+        if feature_health_status == "WARN":
+            feature_health = _load_feature_health_report()
+            if feature_health and feature_health.get("network_channel_excluded"):
+                reason = feature_health.get("network_channel_reason") or "network_channel_excluded"
+                print(
+                    status_messages.status(
+                        f"Feature Health WARN due to network channel exclusion ({reason}).",
+                        level="info",
+                    )
+                )
     else:
         _print_status_line("warn", "Feature Health", detail="missing (run export)")
 
@@ -1032,6 +1042,12 @@ def run_tier1_audit_report() -> None:
                     level="warn",
                 )
             )
+        print()
+
+    rollup = _fetch_network_quality_rollup()
+    if rollup:
+        rollup_text = ", ".join(f"{row['quality']}={row['runs']}" for row in rollup)
+        print(status_messages.status(f"Network quality rollup: {rollup_text}", level="info"))
         print()
 
     prompt_utils.press_enter_to_continue()
@@ -1281,6 +1297,69 @@ def prompt_backfill_pcap_metadata() -> None:
     prompt_utils.press_enter_to_continue()
 
 
+def prompt_recompute_network_signal_quality() -> None:
+    print()
+    menu_utils.print_header("Recompute Network Signal Quality")
+
+    count = scalar(
+        """
+        SELECT COUNT(*)
+        FROM dynamic_sessions
+        WHERE tier='dataset'
+        """
+    ) or 0
+
+    if count == 0:
+        print(status_messages.status("No dataset-tier runs found.", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    print(status_messages.status(f"Dataset runs to update: {count}", level="info"))
+    if not prompt_utils.prompt_typed_confirmation(
+        "Type RECOMPUTE NETWORK to continue",
+        "RECOMPUTE NETWORK",
+    ):
+        print(status_messages.status("Recompute cancelled.", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    started_at = datetime.now(timezone.utc)
+    run_sql(
+        """
+        UPDATE dynamic_sessions ds
+        LEFT JOIN (
+          SELECT dynamic_run_id,
+                 SUM(COALESCE(bytes_in,0)) AS sum_in,
+                 SUM(COALESCE(bytes_out,0)) AS sum_out,
+                 COUNT(*) AS row_count
+          FROM dynamic_telemetry_network
+          WHERE source='netstats'
+          GROUP BY dynamic_run_id
+        ) t ON t.dynamic_run_id = ds.dynamic_run_id
+        SET ds.network_signal_quality =
+          CASE
+            WHEN COALESCE(t.row_count,0) = 0 AND ds.netstats_missing_rows > 0 THEN 'netstats_missing'
+            WHEN COALESCE(t.row_count,0) = 0 THEN 'none'
+            WHEN (COALESCE(t.sum_in,0) + COALESCE(t.sum_out,0)) = 0 THEN 'netstats_zero_bytes'
+            WHEN ds.netstats_missing_rows > 0 THEN 'netstats_partial'
+            ELSE 'netstats_ok'
+          END
+        WHERE ds.tier='dataset'
+        """,
+        fetch=None,
+    )
+    finished_at = datetime.now(timezone.utc)
+    log_db_op(
+        operation="recompute_network_signal_quality",
+        started_at=started_at,
+        finished_at=finished_at,
+        success=True,
+        error_text=f"updated_rows={int(count)}",
+    )
+    print(status_messages.status("Network signal quality recomputed.", level="success"))
+    prompt_utils.press_enter_to_continue()
+
+
 __all__ = [
     "run_health_summary",
     "run_health_checks",
@@ -1288,6 +1367,7 @@ __all__ = [
     "prompt_finalize_stale_runs",
     "prompt_delete_orphan_permission_snapshots",
     "prompt_backfill_pcap_metadata",
+    "prompt_recompute_network_signal_quality",
     "prompt_reset_static_data",
 ]
 
@@ -1388,6 +1468,18 @@ def _load_feature_health_status() -> str | None:
     return status if isinstance(status, str) else None
 
 
+def _load_feature_health_report() -> dict[str, Any] | None:
+    export_dir = Path(app_config.OUTPUT_DIR) / "exports" / "scytaledroid_dyn_v1" / "analysis"
+    json_path = export_dir / "feature_health.json"
+    if not json_path.exists():
+        return None
+    try:
+        payload = json.loads(json_path.read_text())
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
 def _fetch_pcap_audit_counts() -> dict[str, int]:
     linked_rows = run_sql(
         """
@@ -1416,6 +1508,23 @@ def _fetch_pcap_audit_counts() -> dict[str, int]:
         except Exception:
             continue
     return {"linked": linked, "exists": exists, "valid": valid}
+
+
+def _fetch_network_quality_rollup() -> list[dict[str, object]]:
+    rows = run_sql(
+        """
+        SELECT
+          COALESCE(network_signal_quality, 'unknown') AS quality,
+          COUNT(*) AS runs
+        FROM dynamic_sessions
+        WHERE tier='dataset'
+        GROUP BY COALESCE(network_signal_quality, 'unknown')
+        ORDER BY runs DESC
+        """,
+        fetch="all",
+        dictionary=True,
+    ) or []
+    return rows
 
 
 def _count_tables(table_names: Sequence[str]) -> dict[str, int]:

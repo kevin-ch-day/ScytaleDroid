@@ -13,6 +13,8 @@ def evaluate_network_signal_quality(
     pcap_bytes: int | None = None,
 ) -> str:
     total_bytes = (sum_bytes_in or 0) + (sum_bytes_out or 0)
+    if netstats_rows > 0 and netstats_missing_rows > 0:
+        return "netstats_partial"
     if netstats_rows > 0:
         if total_bytes == 0:
             return "netstats_zero_bytes"
@@ -21,7 +23,7 @@ def evaluate_network_signal_quality(
         return "netstats_missing"
     if pcap_present or (pcap_bytes or 0) > 0:
         return "pcap_only"
-    return "no_network_signal"
+    return "none"
 
 
 __all__ = ["evaluate_network_signal_quality"]

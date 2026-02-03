@@ -57,6 +57,7 @@ class TelemetrySampler:
         self._netstats_samples: int = 0
         self._netstats_skipped: int = 0
         self._last_network_row: dict[str, object] | None = None
+        self._last_netstats_totals: tuple[int, int] | None = None
         self._meminfo_interval_s = max(self.sample_rate_s * 3, 3)
         self._last_meminfo_monotonic: float | None = None
         self._meminfo_samples: int = 0
@@ -133,7 +134,7 @@ class TelemetrySampler:
                     self._netstats_samples += 1
                 else:
                     self._netstats_skipped += 1
-                network_row = _collect_network_sample(
+                network_row, netstats_totals = _collect_network_sample(
                     self.device_serial,
                     self._uid,
                     ts,
@@ -145,6 +146,8 @@ class TelemetrySampler:
                     debug_dir=self._netstats_debug_dir,
                     debug_captured=self._netstats_debug_captured,
                 )
+                if netstats_totals is not None:
+                    network_row = self._apply_netstats_delta(network_row, netstats_totals)
                 if network_row.get("collector_status") == "debug_captured":
                     self._netstats_debug_captured = True
                 network_row["sample_index"] = sample_index
@@ -177,6 +180,36 @@ class TelemetrySampler:
         else:
             self._meminfo_skipped += 1
             _set_pss(row, self._last_meminfo_pss)
+
+    def _apply_netstats_delta(
+        self,
+        row: dict[str, object],
+        totals: tuple[int, int],
+    ) -> dict[str, object]:
+        if self._last_netstats_totals is None:
+            self._last_netstats_totals = totals
+            row["source"] = "netstats_missing"
+            row["collector_status"] = "delta_init"
+            row["bytes_in"] = None
+            row["bytes_out"] = None
+            row["conn_count"] = None
+            return row
+        delta_in = totals[0] - self._last_netstats_totals[0]
+        delta_out = totals[1] - self._last_netstats_totals[1]
+        self._last_netstats_totals = totals
+        if delta_in < 0 or delta_out < 0:
+            row["source"] = "netstats_missing"
+            row["collector_status"] = "counter_reset"
+            row["bytes_in"] = None
+            row["bytes_out"] = None
+            row["conn_count"] = None
+            return row
+        row["bytes_in"] = delta_in
+        row["bytes_out"] = delta_out
+        row["source"] = "netstats"
+        row["best_effort"] = 0
+        row["collector_status"] = "ok_delta"
+        return row
 
 
 def _run_shell(serial: str, command: list[str], timeout: float) -> tuple[int, str, bool]:
@@ -298,7 +331,7 @@ def _collect_network_sample(
     netstats_parser: NetstatsParser,
     debug_dir: Path | None = None,
     debug_captured: bool = False,
-) -> dict[str, object]:
+) -> tuple[dict[str, object], tuple[int, int] | None]:
     row: dict[str, object] = {
         "uid": uid or "",
         "bytes_in": "",
@@ -311,21 +344,8 @@ def _collect_network_sample(
     if not uid:
         row["collector_status"] = "unavailable_uid"
         row["source"] = "unavailable"
-        return row
+        return row, None
     if use_netstats:
-        detail = netstats_collector.collect_detail(serial)
-        if detail.timed_out:
-            row["collector_status"] = "timeout"
-        if detail.returncode == 0 and detail.stdout:
-            sample = netstats_parser.parse_detail(detail.stdout, uid, ts_utc=ts)
-            if sample.rx_bytes is not None and sample.tx_bytes is not None:
-                row["bytes_in"] = sample.rx_bytes
-                row["bytes_out"] = sample.tx_bytes
-                row["conn_count"] = ""
-                row["source"] = "netstats"
-                row["best_effort"] = 0
-                row["collector_status"] = "ok"
-                return row
         uid_output = netstats_collector.collect_uid(serial, uid)
         if uid_output.timed_out:
             row["collector_status"] = "timeout"
@@ -337,8 +357,21 @@ def _collect_network_sample(
                 row["conn_count"] = ""
                 row["source"] = "netstats"
                 row["best_effort"] = 0
-                row["collector_status"] = "ok"
-                return row
+                row["collector_status"] = "ok_total"
+                return row, (sample.rx_bytes, sample.tx_bytes)
+        detail = netstats_collector.collect_detail(serial)
+        if detail.timed_out:
+            row["collector_status"] = "timeout"
+        if detail.returncode == 0 and detail.stdout:
+            sample = netstats_parser.parse_detail(detail.stdout, uid, ts_utc=ts)
+            if sample.rx_bytes is not None and sample.tx_bytes is not None:
+                row["bytes_in"] = sample.rx_bytes
+                row["bytes_out"] = sample.tx_bytes
+                row["conn_count"] = ""
+                row["source"] = "netstats"
+                row["best_effort"] = 0
+                row["collector_status"] = "ok_total"
+                return row, (sample.rx_bytes, sample.tx_bytes)
         row["source"] = "netstats_missing"
         row["collector_status"] = row.get("collector_status") or "missing_uid_stats"
         row["best_effort"] = 0
@@ -362,9 +395,9 @@ def _collect_network_sample(
             row["bytes_in"] = None
             row["bytes_out"] = None
             row["conn_count"] = None
-            return row
+            return row, None
         if row["source"] == "netstats_missing":
-            return row
+            return row, None
     if last_netstats:
         row["bytes_in"] = last_netstats.get("bytes_in", "")
         row["bytes_out"] = last_netstats.get("bytes_out", "")
@@ -372,10 +405,10 @@ def _collect_network_sample(
         row["source"] = "netstats_cached"
         row["best_effort"] = 1
         row["collector_status"] = "cached"
-        return row
+        return row, None
     row["collector_status"] = "skipped"
     row["source"] = "unavailable"
-    return row
+    return row, None
 
 
 def _sum_netstats_bytes(rows: list[dict[str, object]]) -> tuple[int, int]:

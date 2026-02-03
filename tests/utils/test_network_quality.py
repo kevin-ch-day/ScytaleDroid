@@ -40,3 +40,14 @@ def test_network_quality_pcap_only():
         pcap_present=True,
     )
     assert result == "pcap_only"
+
+
+def test_network_quality_none():
+    result = evaluate_network_signal_quality(
+        netstats_rows=0,
+        netstats_missing_rows=0,
+        sum_bytes_in=None,
+        sum_bytes_out=None,
+        pcap_present=False,
+    )
+    assert result == "none"

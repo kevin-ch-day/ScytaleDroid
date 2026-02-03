@@ -171,8 +171,10 @@ class PcapdroidCaptureObserver(Observer):
                         json.dumps(meta_payload, indent=2, sort_keys=True),
                         encoding="utf-8",
                     )
-                adb_client.run_adb_command(
-                    ["-s", run_ctx.device_serial, "pull", device_path, str(local_path)],
+                _pull_with_retries(
+                    run_ctx.device_serial,
+                    device_path,
+                    local_path,
                 )
             if not local_path.exists():
                 fallback_path = _latest_pcapdroid_capture(
@@ -184,8 +186,10 @@ class PcapdroidCaptureObserver(Observer):
                     device_path = fallback_path
                     resolved_name = Path(fallback_path).name
                     local_path = meta_path.parent / resolved_name
-                    adb_client.run_adb_command(
-                        ["-s", run_ctx.device_serial, "pull", device_path, str(local_path)],
+                    _pull_with_retries(
+                        run_ctx.device_serial,
+                        device_path,
+                        local_path,
                     )
                     if meta_path.exists():
                         try:
@@ -332,6 +336,27 @@ def _device_file_exists(device_serial: str, path: str) -> bool:
     if "no such file" in stderr:
         return False
     return True
+
+
+def _pull_with_retries(
+    device_serial: str,
+    device_path: str,
+    local_path: Path,
+    *,
+    retries: int = 3,
+    delay_s: float = 0.5,
+) -> bool:
+    for _ in range(max(retries, 1)):
+        if not _device_file_exists(device_serial, device_path):
+            time.sleep(delay_s)
+            continue
+        adb_client.run_adb_command(
+            ["-s", device_serial, "pull", device_path, str(local_path)],
+        )
+        if local_path.exists():
+            return True
+        time.sleep(delay_s)
+    return False
 
 
 def _latest_pcapdroid_capture(device_serial: str, *, min_epoch: float | None = None) -> str | None:

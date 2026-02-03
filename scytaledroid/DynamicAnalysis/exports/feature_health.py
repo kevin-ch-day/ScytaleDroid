@@ -60,6 +60,7 @@ def build_feature_health_report(
     output_dir.mkdir(parents=True, exist_ok=True)
     column_stats: dict[str, ColumnStats] = {}
     csv_files = sorted(telemetry_dir.glob("*.csv"))
+    network_csvs = [path for path in csv_files if path.name.endswith("-network.csv")]
     for csv_path in csv_files:
         with csv_path.open("r", encoding="utf-8", newline="") as handle:
             reader = csv.DictReader(handle)
@@ -86,7 +87,13 @@ def build_feature_health_report(
         if variance == 0 or (zero_pct is not None and zero_pct >= 0.99):
             degenerate[column] = metrics[column]
 
-    core_columns = {"bytes_in", "bytes_out"}
+    core_columns = {"cpu_pct", "rss_kb", "pss_kb"}
+    network_channel_excluded = not network_csvs
+    network_channel_reason = None
+    if network_channel_excluded:
+        network_channel_reason = "network_csv_skipped"
+    else:
+        core_columns |= {"bytes_in", "bytes_out"}
     core_degenerate = {name: info for name, info in degenerate.items() if name in core_columns}
     status = "PASS"
     if core_degenerate:
@@ -100,6 +107,8 @@ def build_feature_health_report(
         "degenerate": degenerate,
         "metrics": metrics,
         "telemetry_files": [path.name for path in csv_files],
+        "network_channel_excluded": network_channel_excluded,
+        "network_channel_reason": network_channel_reason,
     }
     if manifest_path and manifest_path.exists():
         report["pcap_bytes"] = _summarize_pcap_bytes(manifest_path)
@@ -137,6 +146,10 @@ def _render_markdown(report: dict[str, Any]) -> str:
         failed = gating.get("failed_features") or []
         if failed:
             lines.append(f"- failed_features={', '.join(failed)}")
+        lines.append("")
+    if report.get("network_channel_excluded"):
+        lines.append("## Network channel")
+        lines.append(f"- excluded=true reason={report.get('network_channel_reason')}")
         lines.append("")
     pcap_summary = report.get("pcap_bytes")
     if isinstance(pcap_summary, dict) and pcap_summary.get("count"):

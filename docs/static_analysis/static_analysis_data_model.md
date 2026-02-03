@@ -33,15 +33,13 @@ back to a concrete database record.
 Legacy `static_findings_summary`, `static_findings`, and string tables remain for
 backward compatibility, but all new analytics flows should rely on the canonical
 tables above. When legacy writes are enabled, summaries are keyed by
-`static_run_id` (the `static_analysis_runs.id` FK). The legacy `runs.run_id`
-relationship is treated as optional and may be `NULL` when a static run ID is
-available.
+`static_run_id` (the `static_analysis_runs.id` FK).
 
 ## 3. Session string samples
 
 Session-scoped queries now read directly from `static_string_samples`. If a
-legacy run lacks `session_stamp`, rerun the scan or use the stored evidence
-paths; the CLI no longer depends on a fallback view.
+run lacks `session_stamp`, rerun the scan or use the stored evidence paths; the
+CLI no longer depends on a fallback view.
 
 ## 4. Query helpers & diagnostics
 
@@ -82,7 +80,7 @@ WHERE av.package_name = 'com.example.app'
   AND sar.session_stamp = '20241019-163000';
 ```
 
-When you need legacy `static_string_samples` context, join directly on
+When you need `static_string_samples` context, join directly on
 `static_string_samples` and apply any required normalisation in the query.
 
 ## 6. Related documentation
