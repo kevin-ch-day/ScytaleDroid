@@ -460,7 +460,7 @@ def pull_apks(serial: str | None) -> OperationResult:
 
     now_utc = datetime.now(UTC)
     session_stamp = now_utc.strftime("%Y%m%d")
-    dest_root = Path(app_config.DATA_DIR) / "apks" / "device_apks" / serial / session_stamp
+    dest_root = Path(app_config.DATA_DIR) / "device_apks" / serial / session_stamp
     dest_root.mkdir(parents=True, exist_ok=True)
 
     run_id = f"{serial or 'device'}-{now_utc.strftime('%Y%m%d-%H%M%S')}"

@@ -145,7 +145,7 @@ def discover_repository_artifacts(base_dir: Optional[Path] = None) -> List[Repos
     """Return every APK artifact tracked within the repository."""
 
     if base_dir is None:
-        base_dir = (Path(app_config.DATA_DIR) / "apks").resolve()
+        base_dir = (Path(app_config.DATA_DIR) / "device_apks").resolve()
     else:
         base_dir = base_dir.resolve()
 

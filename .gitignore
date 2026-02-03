@@ -32,6 +32,7 @@ output/
 data/state/
 data/watchlists/
 data/apks/
+data/device_apks/
 data/static_analysis/reports/
 data/static_analysis/baseline/
 data/static_analysis/dynamic_plan/

@@ -111,7 +111,7 @@ def main(argv: list[str] | None = None) -> int:
 
     _check_session_uniqueness(params.session_stamp, group.package_name, args.allow_session_reuse)
 
-    base_dir = Path(app_config.DATA_DIR) / "apks"
+    base_dir = Path(app_config.DATA_DIR) / "device_apks"
     try:
         static_service.run_scan(selection, params, base_dir)
     except Exception as exc:

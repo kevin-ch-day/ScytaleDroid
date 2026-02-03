@@ -40,7 +40,7 @@ def _humanize_bytes(value: int) -> str:
 
 def _show_summary() -> None:
     data_dir = Path("data")
-    apks_dir = data_dir / "apks"
+    apks_dir = data_dir / "device_apks"
     logs_dir = Path("logs")
     cache_dirs = [data_dir / "static_analysis" / "cache", Path("output")]
     apk_files = list(apks_dir.rglob("*.apk")) if apks_dir.exists() else []

@@ -44,7 +44,7 @@ def execute_permission_scan(
         print(status_messages.status("No scope groups resolved for permission scan.", level="warn"))
         return
 
-    base_dir = Path(app_config.DATA_DIR) / "apks"
+    base_dir = Path(app_config.DATA_DIR) / "device_apks"
     session_stamp = params.session_stamp or ""
     if not session_stamp:
         session_stamp = make_session_stamp()

@@ -51,7 +51,7 @@ class _DeviceLibrarySummary:
 def browse_saved_apk_library() -> None:
     """Display harvested APKs saved on disk and allow drill-down per device."""
 
-    base_dir = Path(app_config.DATA_DIR).resolve() / "apks" / "device_apks"
+    base_dir = Path(app_config.DATA_DIR).resolve() / "device_apks"
     if not base_dir.exists():
         print()
         error_panels.print_info_panel(

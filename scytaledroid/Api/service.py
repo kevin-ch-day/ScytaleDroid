@@ -110,7 +110,7 @@ def _run_static_scan(
         params = params.__class__(**{**params.__dict__, "session_stamp": session_stamp})
 
         _check_session_uniqueness(session_stamp, group.package_name, allow_reuse)
-        base_dir = Path(app_config.DATA_DIR) / "apks"
+        base_dir = Path(app_config.DATA_DIR) / "device_apks"
         static_service.run_scan(selection, params, base_dir)
         _update_job(job_id, state="OK")
     except Exception as exc:  # pragma: no cover - async path
@@ -163,7 +163,7 @@ def build_api_app() -> "FastAPI":
 
     @app.post("/upload")
     def upload_apk(file: UploadFile = File(...)) -> dict[str, Any]:
-        upload_dir = Path(app_config.DATA_DIR) / "apks" / "repo_uploads"
+        upload_dir = Path(app_config.DATA_DIR) / "device_apks" / "repo_uploads"
         upload_dir.mkdir(parents=True, exist_ok=True)
         suffix = Path(file.filename or "upload.apk").suffix or ".apk"
         upload_id = uuid.uuid4().hex

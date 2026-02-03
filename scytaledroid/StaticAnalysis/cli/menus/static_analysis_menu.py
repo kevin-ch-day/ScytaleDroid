@@ -44,12 +44,12 @@ def static_analysis_menu() -> None:
     from ..flows.selection import select_scope
     from scytaledroid.StaticAnalysis.services import static_service
 
-    base_dir = Path(app_config.DATA_DIR) / "apks"
+    base_dir = Path(app_config.DATA_DIR) / "device_apks"
     groups = tuple(group_artifacts(base_dir))
     if not groups:
         print(
             status_messages.status(
-                "No harvested APK groups found. Run Device Analysis → 7 to pull artifacts.",
+                "No harvested APK groups found. Run Device Analysis → 2 to pull artifacts.",
                 level="warn",
             )
         )

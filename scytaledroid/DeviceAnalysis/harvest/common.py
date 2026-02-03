@@ -47,7 +47,7 @@ DEFAULT_META_FIELDS: Tuple[str, ...] = (
 def _harvest_base_dir() -> Path:
     """Return the absolute base directory for harvested APKs."""
 
-    return (Path(app_config.DATA_DIR) / "apks").resolve()
+    return (Path(app_config.DATA_DIR) / "device_apks").resolve()
 
 
 def normalise_local_path(dest_path: Path) -> str:

@@ -933,7 +933,7 @@ def _package_dest_dir(package: PackageHarvestResult) -> Optional[str]:
 def _run_output_root(result: HarvestResult) -> Optional[str]:
     if not (result.serial and result.run_timestamp):
         return None
-    base = Path(app_config.DATA_DIR) / "apks" / "device_apks" / result.serial / result.run_timestamp
+    base = Path(app_config.DATA_DIR) / "device_apks" / result.serial / result.run_timestamp
     return str(base)
 
 

@@ -17,7 +17,7 @@ def list_groups(
 ) -> List[ArtifactGroup]:
     """Return grouped APK artifacts with optional device/session filters."""
 
-    resolved_dir = base_dir or Path(app_config.DATA_DIR) / "apks"
+    resolved_dir = base_dir or Path(app_config.DATA_DIR) / "device_apks"
     device_filter_set = {s.strip() for s in device_filter or () if s} or None
     session_filter_set = {s.strip() for s in session_filter or () if s} or None
 

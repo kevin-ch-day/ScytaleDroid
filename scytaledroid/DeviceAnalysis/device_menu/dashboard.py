@@ -445,7 +445,7 @@ def print_dashboard(
         menu_utils.MenuOption(
             "2",
             "Pull APKs",
-            hint="Fetch APKs to data/apks for static analysis",
+            hint="Fetch APKs to data/device_apks for static analysis",
         ),
         menu_utils.MenuOption("3", "Detailed device report"),
         menu_utils.MenuOption("4", "Logcat"),
