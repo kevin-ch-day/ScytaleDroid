@@ -907,6 +907,8 @@ def run_tier1_audit_report() -> None:
         "netstats_missing_rows",
         "sampling_duration_seconds",
         "clock_alignment_delta_s",
+        "sample_first_gap_s",
+        "sample_max_gap_excluding_first_s",
     )
     missing_columns = []
     for column in required_columns:

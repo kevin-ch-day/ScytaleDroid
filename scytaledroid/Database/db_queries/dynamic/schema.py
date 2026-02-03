@@ -36,6 +36,8 @@ _DDL_STATEMENTS: list[str] = [
       sample_avg_delta_s FLOAT        DEFAULT NULL,
       sample_max_delta_s FLOAT        DEFAULT NULL,
       sample_max_gap_s   FLOAT        DEFAULT NULL,
+      sample_first_gap_s FLOAT        DEFAULT NULL,
+      sample_max_gap_excluding_first_s FLOAT DEFAULT NULL,
       netstats_available TINYINT(1)   DEFAULT NULL,
       network_signal_quality VARCHAR(32) DEFAULT NULL,
       netstats_rows     INT          DEFAULT NULL,

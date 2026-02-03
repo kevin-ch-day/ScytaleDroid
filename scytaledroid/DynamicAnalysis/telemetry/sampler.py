@@ -474,6 +474,8 @@ def _compute_stats(
         "sample_avg_delta_s": None,
         "sample_max_delta_s": None,
         "sample_max_gap_s": None,
+        "sample_first_gap_s": None,
+        "sample_max_gap_excluding_first_s": None,
         "error": error,
     }
     elapsed = None
@@ -495,6 +497,11 @@ def _compute_stats(
         stats["sample_avg_delta_s"] = sum(deltas) / len(deltas)
         stats["sample_max_delta_s"] = max(deltas)
         stats["sample_max_gap_s"] = max(deltas)
+        stats["sample_first_gap_s"] = deltas[0]
+        if len(deltas) > 1:
+            stats["sample_max_gap_excluding_first_s"] = max(deltas[1:])
+        else:
+            stats["sample_max_gap_excluding_first_s"] = deltas[0]
     return stats
 
 

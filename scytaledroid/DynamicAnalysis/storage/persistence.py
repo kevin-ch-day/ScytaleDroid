@@ -70,6 +70,8 @@ def persist_dynamic_summary(
         "sample_avg_delta_s": qa_stats.get("sample_avg_delta_s"),
         "sample_max_delta_s": qa_stats.get("sample_max_delta_s"),
         "sample_max_gap_s": qa_stats.get("sample_max_gap_s"),
+        "sample_first_gap_s": qa_stats.get("sample_first_gap_s"),
+        "sample_max_gap_excluding_first_s": qa_stats.get("sample_max_gap_excluding_first_s"),
         "netstats_available": netstats_available,
         "network_signal_quality": network_signal_quality,
         "netstats_rows": netstats_rows,
@@ -90,6 +92,10 @@ def persist_dynamic_summary(
         session_row.pop("netstats_available", None)
     if not _dynamic_sessions_has_column("network_signal_quality"):
         session_row.pop("network_signal_quality", None)
+    if not _dynamic_sessions_has_column("sample_first_gap_s"):
+        session_row.pop("sample_first_gap_s", None)
+    if not _dynamic_sessions_has_column("sample_max_gap_excluding_first_s"):
+        session_row.pop("sample_max_gap_excluding_first_s", None)
     if not _dynamic_sessions_has_column("netstats_rows"):
         session_row.pop("netstats_rows", None)
     if not _dynamic_sessions_has_column("netstats_missing_rows"):
@@ -352,7 +358,7 @@ def _issues_from_telemetry(dynamic_run_id: str, payload: Mapping[str, Any]) -> l
 
     expected = stats.get("expected_samples")
     captured = stats.get("captured_samples")
-    max_gap = stats.get("sample_max_gap_s")
+    max_gap = stats.get("sample_max_gap_excluding_first_s") or stats.get("sample_max_gap_s")
     rate = payload.get("sampling_rate_s") or 1
     ratio = None
     try:
@@ -406,6 +412,8 @@ def _extract_qa_stats(payload: Mapping[str, Any]) -> dict[str, Any]:
             "sample_avg_delta_s": None,
             "sample_max_delta_s": None,
             "sample_max_gap_s": None,
+            "sample_first_gap_s": None,
+            "sample_max_gap_excluding_first_s": None,
         }
     return {
         "expected_samples": _safe_int(stats.get("expected_samples")),
@@ -415,6 +423,8 @@ def _extract_qa_stats(payload: Mapping[str, Any]) -> dict[str, Any]:
         "sample_avg_delta_s": _safe_float(stats.get("sample_avg_delta_s")),
         "sample_max_delta_s": _safe_float(stats.get("sample_max_delta_s")),
         "sample_max_gap_s": _safe_float(stats.get("sample_max_gap_s")),
+        "sample_first_gap_s": _safe_float(stats.get("sample_first_gap_s")),
+        "sample_max_gap_excluding_first_s": _safe_float(stats.get("sample_max_gap_excluding_first_s")),
     }
 
 
@@ -491,8 +501,11 @@ def _extract_pcap_meta(payload: Mapping[str, Any], evidence_path: str | None) ->
         evidence = []
 
     pcap_relpath = None
+    meta_relpath = None
     pcap_sha256 = None
     pcap_bytes = None
+    pcap_valid = None
+    min_pcap_bytes = 30 * 1024
     for entry in evidence:
         if not isinstance(entry, dict):
             continue
@@ -502,10 +515,81 @@ def _extract_pcap_meta(payload: Mapping[str, Any], evidence_path: str | None) ->
             pcap_bytes = entry.get("size_bytes")
             break
 
-    pcap_valid = capture.get("pcap_valid")
+    if pcap_relpath is None and evidence_path:
+        manifest_path = Path(evidence_path) / "run_manifest.json"
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            manifest = {}
+        capture_types = {"pcapdroid_capture", "network_capture", "proxy_capture"}
+        meta_types = {"pcapdroid_capture_meta"}
+        for bucket in ("artifacts", "outputs"):
+            for entry in manifest.get(bucket) or []:
+                if not isinstance(entry, dict):
+                    continue
+                if entry.get("type") in capture_types:
+                    pcap_relpath = entry.get("relative_path")
+                    pcap_sha256 = entry.get("sha256")
+                    pcap_bytes = entry.get("size_bytes")
+                    break
+                if entry.get("type") in meta_types and not meta_relpath:
+                    meta_relpath = entry.get("relative_path")
+            if pcap_relpath:
+                break
+        if not pcap_relpath:
+            for observer in manifest.get("observers") or []:
+                if not isinstance(observer, dict):
+                    continue
+                for entry in observer.get("artifacts") or []:
+                    if not isinstance(entry, dict):
+                        continue
+                    if entry.get("type") in capture_types:
+                        pcap_relpath = entry.get("relative_path")
+                        pcap_sha256 = entry.get("sha256")
+                        pcap_bytes = entry.get("size_bytes")
+                        break
+                    if entry.get("type") in meta_types and not meta_relpath:
+                        meta_relpath = entry.get("relative_path")
+                if pcap_relpath:
+                    break
+
+        if meta_relpath and evidence_path:
+            meta_path = Path(evidence_path) / meta_relpath
+            try:
+                meta_payload = json.loads(meta_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                meta_payload = {}
+            if pcap_bytes is None:
+                meta_size = meta_payload.get("pcap_size_bytes")
+                if isinstance(meta_size, int):
+                    pcap_bytes = meta_size
+            if pcap_valid is None:
+                meta_valid = meta_payload.get("pcap_valid")
+                if isinstance(meta_valid, bool):
+                    pcap_valid = meta_valid
+            if not pcap_relpath:
+                resolved_name = meta_payload.get("resolved_pcap_name") or meta_payload.get("pcap_name")
+                if isinstance(resolved_name, str) and resolved_name and evidence_path:
+                    candidate = Path(evidence_path) / "artifacts" / "pcapdroid_capture" / resolved_name
+                    if candidate.exists():
+                        pcap_relpath = str(candidate.relative_to(Path(evidence_path)))
+
+    capture_valid = capture.get("pcap_valid")
+    if capture_valid is not None:
+        pcap_valid = capture_valid
     pcap_size = capture.get("pcap_size_bytes")
     if pcap_bytes is None and isinstance(pcap_size, int):
         pcap_bytes = pcap_size
+
+    if pcap_relpath and evidence_path:
+        pcap_path = Path(evidence_path) / pcap_relpath
+        try:
+            if pcap_bytes is None and pcap_path.exists():
+                pcap_bytes = pcap_path.stat().st_size
+            if pcap_valid is None and pcap_path.exists():
+                pcap_valid = pcap_path.stat().st_size >= min_pcap_bytes
+        except OSError:
+            pass
 
     pcap_validated_at = None
     if pcap_valid is not None:
@@ -524,22 +608,28 @@ def _extract_pcap_meta(payload: Mapping[str, Any], evidence_path: str | None) ->
 _DYN_SESSIONS_COLUMNS: set[str] | None = None
 
 
+def _refresh_dynamic_sessions_columns() -> set[str]:
+    try:
+        rows = core_q.run_sql(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = DATABASE() AND table_name = 'dynamic_sessions'",
+            fetch="all",
+            dictionary=True,
+        )
+        return {str(row.get("column_name")).lower() for row in rows or [] if row.get("column_name")}
+    except Exception:
+        return set()
+
+
 def _dynamic_sessions_has_column(column_name: str) -> bool:
     global _DYN_SESSIONS_COLUMNS
     if _DYN_SESSIONS_COLUMNS is None:
-        try:
-            rows = core_q.run_sql(
-                "SELECT column_name FROM information_schema.columns "
-                "WHERE table_schema = DATABASE() AND table_name = 'dynamic_sessions'",
-                fetch="all",
-                dictionary=True,
-            )
-            _DYN_SESSIONS_COLUMNS = {
-                str(row.get("column_name")).lower() for row in rows or [] if row.get("column_name")
-            }
-        except Exception:
-            _DYN_SESSIONS_COLUMNS = set()
-    return column_name.lower() in _DYN_SESSIONS_COLUMNS
+        _DYN_SESSIONS_COLUMNS = _refresh_dynamic_sessions_columns()
+    needle = column_name.lower()
+    if needle not in _DYN_SESSIONS_COLUMNS:
+        # Refresh once in case the schema changed during this process (migrations).
+        _DYN_SESSIONS_COLUMNS = _refresh_dynamic_sessions_columns()
+    return needle in _DYN_SESSIONS_COLUMNS
 
 
 def _fmt_dt(value: object | None) -> str | None:

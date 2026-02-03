@@ -67,7 +67,7 @@ def database_menu() -> None:
         database = str(cfg.get("database", "<unknown>"))
         host = str(cfg.get("host", "<local>"))
         schema_ver = diagnostics.get_schema_version() or "<unknown>"
-        expected_schema = "0.2.5"
+        expected_schema = "0.2.6"
         menu_utils.print_header("Database Tools")
         print(f"Backend: {backend}")
         print(f"Database: {database}")

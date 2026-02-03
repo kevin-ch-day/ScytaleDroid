@@ -278,7 +278,7 @@ def fetch_tier1_status() -> dict[str, object]:
 
     status: dict[str, object] = {
         "schema_version": None,
-        "expected_schema": "0.2.5",
+        "expected_schema": "0.2.6",
         "tier1_ready_runs": 0,
         "last_export_path": None,
         "last_export_at": None,

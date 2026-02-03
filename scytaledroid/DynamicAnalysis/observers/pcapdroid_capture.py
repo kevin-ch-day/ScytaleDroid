@@ -252,8 +252,21 @@ class PcapdroidCaptureObserver(Observer):
                             encoding="utf-8",
                         )
             else:
-                status = "failed"
+                # Keep run usable even if PCAP is missing; mark PCAP invalid instead of degrading.
+                status = "success"
                 error = "PCAPdroid capture file missing after pull."
+                if meta_path.exists():
+                    try:
+                        meta_payload = json.loads(meta_path.read_text(encoding="utf-8"))
+                    except Exception:
+                        meta_payload = {}
+                    meta_payload["pcap_size_bytes"] = 0
+                    meta_payload["pcap_valid"] = False
+                    meta_payload["min_pcap_bytes"] = MIN_PCAP_BYTES
+                    meta_path.write_text(
+                        json.dumps(meta_payload, indent=2, sort_keys=True),
+                        encoding="utf-8",
+                    )
         except Exception as exc:
             status = "failed"
             error = f"PCAPdroid capture failed: {exc}"
@@ -272,6 +285,19 @@ class PcapdroidCaptureObserver(Observer):
                 )
 
         if status == "failed":
+            error_path = meta_path.parent / "observer_error.txt"
+            error_path.write_text(error or "", encoding="utf-8")
+            digest = hashlib.sha256(error_path.read_bytes()).hexdigest()
+            artifacts.append(
+                ArtifactRecord(
+                    relative_path=str(error_path.relative_to(run_ctx.run_dir)),
+                    type="observer_error",
+                    sha256=digest,
+                    size_bytes=error_path.stat().st_size,
+                    produced_by=self.observer_id,
+                )
+            )
+        elif error:
             error_path = meta_path.parent / "observer_error.txt"
             error_path.write_text(error or "", encoding="utf-8")
             digest = hashlib.sha256(error_path.read_bytes()).hexdigest()

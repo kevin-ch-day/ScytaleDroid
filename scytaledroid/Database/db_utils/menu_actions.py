@@ -395,6 +395,54 @@ def ensure_dynamic_sampling_duration_columns(*, prompt_user: bool = True) -> boo
     return True
 
 
+def ensure_dynamic_gap_columns(*, prompt_user: bool = True) -> bool:
+    """Ensure dynamic_sessions has warm-up gap columns."""
+
+    cfg = db_config.DB_CONFIG
+    backend = str(cfg.get("engine", "sqlite"))
+    if backend != "mysql":
+        print(
+            status_messages.status(
+                "gap column migrations are only supported for MySQL/MariaDB backends.",
+                level="warn",
+            )
+        )
+        return False
+
+    columns = diagnostics.get_table_columns("dynamic_sessions") or []
+    column_set = {col.lower() for col in columns}
+    needed = {"sample_first_gap_s", "sample_max_gap_excluding_first_s"}
+    missing = sorted(needed - column_set)
+    if not missing:
+        print(status_messages.status("dynamic_sessions warm-up gap columns already present.", level="success"))
+        return True
+
+    print(status_messages.status(f"Missing dynamic_sessions columns: {', '.join(missing)}.", level="warn"))
+    if prompt_user and not prompt_utils.prompt_yes_no(
+        "Apply migration now? (ALTER TABLE dynamic_sessions ADD COLUMN warm-up gap)",
+        default=True,
+    ):
+        return False
+
+    if "sample_first_gap_s" in missing:
+        core_q.run_sql_write(
+            "ALTER TABLE dynamic_sessions ADD COLUMN sample_first_gap_s FLOAT DEFAULT NULL",
+            query_name="db_utils.dynamic_sessions.add_sample_first_gap_s",
+        )
+        print(status_messages.status("Added dynamic_sessions.sample_first_gap_s column.", level="success"))
+    if "sample_max_gap_excluding_first_s" in missing:
+        core_q.run_sql_write(
+            "ALTER TABLE dynamic_sessions ADD COLUMN sample_max_gap_excluding_first_s FLOAT DEFAULT NULL",
+            query_name="db_utils.dynamic_sessions.add_sample_max_gap_excluding_first_s",
+        )
+        print(
+            status_messages.status(
+                "Added dynamic_sessions.sample_max_gap_excluding_first_s column.", level="success"
+            )
+        )
+    return True
+
+
 def ensure_dynamic_tier_migrations(*, prompt_user: bool = True) -> bool:
     """Apply all Tier-1 dynamic schema migrations in one step."""
 
@@ -409,7 +457,8 @@ def ensure_dynamic_tier_migrations(*, prompt_user: bool = True) -> bool:
         netstats_ok = ensure_dynamic_netstats_rows_columns(prompt_user=prompt_user)
         pcap_ok = ensure_dynamic_pcap_columns(prompt_user=prompt_user)
         sampling_ok = ensure_dynamic_sampling_duration_columns(prompt_user=prompt_user)
-        success = tier_ok and quality_ok and netstats_ok and pcap_ok and sampling_ok
+        gap_ok = ensure_dynamic_gap_columns(prompt_user=prompt_user)
+        success = tier_ok and quality_ok and netstats_ok and pcap_ok and sampling_ok and gap_ok
         target_version = _tier1_schema_version()
         if success and schema_before != target_version:
             _record_schema_version(target_version)
@@ -431,7 +480,7 @@ def ensure_dynamic_tier_migrations(*, prompt_user: bool = True) -> bool:
 
 
 def _tier1_schema_version() -> str:
-    return "0.2.5"
+    return "0.2.6"
 
 
 def _ensure_db_ops_log_table() -> None:
@@ -542,6 +591,7 @@ __all__ = [
     "ensure_dynamic_netstats_rows_columns",
     "ensure_dynamic_pcap_columns",
     "ensure_dynamic_sampling_duration_columns",
+    "ensure_dynamic_gap_columns",
     "ensure_dynamic_tier_migrations",
     "log_db_op",
 ]

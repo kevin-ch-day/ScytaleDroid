@@ -173,6 +173,8 @@ def _fetch_manifest_rows() -> list[dict[str, Any]]:
           ds.expected_samples,
           ds.captured_samples,
           ds.sample_max_gap_s,
+          ds.sample_first_gap_s,
+          ds.sample_max_gap_excluding_first_s,
           ds.status,
           {netstats_rows_select},
           {netstats_missing_select},
@@ -188,7 +190,8 @@ def _fetch_manifest_rows() -> list[dict[str, Any]]:
               OR COALESCE(ds.sampling_duration_seconds, ds.duration_seconds) < 90 THEN 'exclude_duration'
             WHEN ds.expected_samples IS NULL OR ds.captured_samples IS NULL THEN 'exclude_missing_stats'
             WHEN ds.captured_samples / NULLIF(ds.expected_samples,0) < 0.90 THEN 'exclude_low_capture'
-            WHEN ds.sample_max_gap_s > (ds.sampling_rate_s * 2) THEN 'exclude_gap'
+            WHEN COALESCE(ds.sample_max_gap_excluding_first_s, ds.sample_max_gap_s) > (ds.sampling_rate_s * 2)
+              THEN 'exclude_gap'
             ELSE 'include'
           END AS inclusion_status,
           %s AS dataset_name
@@ -238,6 +241,8 @@ def _build_tier1_summary_rows(manifest_rows: list[dict[str, Any]]) -> list[dict[
                 "inclusion_status": row.get("inclusion_status"),
                 "capture_ratio": _safe_ratio(row.get("captured_samples"), row.get("expected_samples")),
                 "sample_max_gap_s": row.get("sample_max_gap_s"),
+                "sample_first_gap_s": row.get("sample_first_gap_s"),
+                "sample_max_gap_excluding_first_s": row.get("sample_max_gap_excluding_first_s"),
                 "netstats_available": row.get("netstats_available"),
                 "network_signal_quality": row.get("network_signal_quality"),
                 "network_signal_quality_stored": row.get("network_signal_quality_stored"),

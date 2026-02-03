@@ -1009,6 +1009,7 @@ def _print_run_summary(result, duration_label: str) -> None:
             expected = telemetry_stats.get("expected_samples")
             captured = telemetry_stats.get("captured_samples")
             max_gap = telemetry_stats.get("sample_max_gap_s")
+            max_gap_excl_first = telemetry_stats.get("sample_max_gap_excluding_first_s")
             avg_delta = telemetry_stats.get("sample_avg_delta_s")
             sampling_duration = telemetry_stats.get("sampling_duration_seconds")
             ratio = None
@@ -1031,6 +1032,8 @@ def _print_run_summary(result, duration_label: str) -> None:
                 telemetry_lines.append(f"Capture ratio: {ratio:.3f}")
             if max_gap is not None:
                 telemetry_lines.append(f"Max gap: {max_gap:.2f}s")
+            if max_gap_excl_first is not None:
+                telemetry_lines.append(f"Max gap (excl first): {max_gap_excl_first:.2f}s")
             if avg_delta is not None:
                 telemetry_lines.append(f"Avg delta: {avg_delta:.2f}s")
             if sampling_duration is not None and duration_seconds:
