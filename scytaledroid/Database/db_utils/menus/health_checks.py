@@ -943,6 +943,35 @@ def run_tier1_audit_report() -> None:
         "evidence integrity (missing fields)",
         detail=str(evidence_missing),
     )
+    if evidence_missing:
+        if prompt_utils.prompt_yes_no("Show missing evidence details?", default=False):
+            rows = _fetch_evidence_integrity_issues(limit=25)
+            if rows:
+                table_rows = [
+                    [
+                        str(row.get("snapshot_id") or ""),
+                        str(row.get("snapshot_key") or ""),
+                        str(row.get("run_id") or ""),
+                        str(row.get("static_run_id") or ""),
+                        "yes" if row.get("missing_relpath") else "no",
+                        "yes" if row.get("missing_sha256") else "no",
+                    ]
+                    for row in rows
+                ]
+                print()
+                table_utils.render_table(
+                    [
+                        "snapshot_id",
+                        "snapshot_key",
+                        "run_id",
+                        "static_run_id",
+                        "missing_relpath",
+                        "missing_sha256",
+                    ],
+                    table_rows,
+                    compact=True,
+                )
+                print()
 
     prompt_utils.press_enter_to_continue()
 
@@ -1037,6 +1066,25 @@ def _count_evidence_integrity_issues() -> int:
         ) or 0
         return int(missing_relpath) + int(missing_hash)
     return 0
+
+
+def _fetch_evidence_integrity_issues(limit: int = 25) -> list[dict[str, object]]:
+    rows = run_sql(
+        """
+        SELECT snapshot_id, snapshot_key, run_id, static_run_id,
+               (evidence_relpath IS NULL OR evidence_relpath='') AS missing_relpath,
+               (evidence_sha256 IS NULL OR evidence_sha256='') AS missing_sha256
+        FROM permission_audit_snapshots
+        WHERE (evidence_relpath IS NULL OR evidence_relpath='')
+           OR (evidence_sha256 IS NULL OR evidence_sha256='')
+        ORDER BY created_at DESC
+        LIMIT %s
+        """,
+        (limit,),
+        fetch="all",
+        dictionary=True,
+    )
+    return rows or []
 
 
 def _count_tables(table_names: Sequence[str]) -> dict[str, int]:

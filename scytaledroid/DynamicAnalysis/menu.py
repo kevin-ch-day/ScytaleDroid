@@ -227,6 +227,17 @@ def _select_dynamic_target() -> tuple[str, str] | None:
     if choice == "1":
         package_name = _select_package_from_groups(groups, title="App selection")
         if package_name:
+            dataset_pkgs: set[str] = set()
+            try:
+                dataset_pkgs = {pkg.lower() for pkg in _load_profile_packages("RESEARCH_DATASET_ALPHA")}
+            except Exception:
+                dataset_pkgs = set()
+            if package_name.lower() in dataset_pkgs:
+                run_as_dataset = prompt_utils.prompt_yes_no(
+                    "This app is in Research Dataset Alpha. Run as dataset tier?",
+                    default=True,
+                )
+                return (package_name, "dataset" if run_as_dataset else "exploration")
             return (package_name, "exploration")
         package_name = _prompt_custom_package()
         return (package_name, "exploration") if package_name else None

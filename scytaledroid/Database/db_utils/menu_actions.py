@@ -257,8 +257,9 @@ def ensure_dynamic_tier_migrations(*, prompt_user: bool = True) -> bool:
         tier_ok = ensure_dynamic_tier_column(prompt_user=prompt_user)
         quality_ok = ensure_dynamic_network_quality_column(prompt_user=prompt_user)
         success = tier_ok and quality_ok
-        if success:
-            _record_schema_version(_tier1_schema_version())
+        target_version = _tier1_schema_version()
+        if success and schema_before != target_version:
+            _record_schema_version(target_version)
         return success
     except Exception as exc:
         error_text = str(exc)
@@ -268,7 +269,7 @@ def ensure_dynamic_tier_migrations(*, prompt_user: bool = True) -> bool:
         _log_db_op(
             operation="tier1_schema_migrations",
             schema_before=schema_before,
-            schema_after=diagnostics.get_schema_version() or schema_before,
+            schema_after=_tier1_schema_version() if success else (diagnostics.get_schema_version() or schema_before),
             started_at=started_at,
             finished_at=finished_at,
             success=success,

@@ -24,6 +24,7 @@ from .logging_core import (
     LOG_DIR,
     LOG_FORMAT,
     JsonFormatter,
+    SafeFormatter,
     make_rotating_handler,
     setup_logger,
 )
@@ -297,7 +298,7 @@ def create_harvest_run_logger(
         text_path,
         max_bytes=10 * 1024 * 1024,
         backup_count=10,
-        formatter=logging.Formatter(LOG_FORMAT, DATE_FORMAT),
+        formatter=SafeFormatter(LOG_FORMAT, DATE_FORMAT),
     )
     text_handler.setLevel(logging.DEBUG)
 

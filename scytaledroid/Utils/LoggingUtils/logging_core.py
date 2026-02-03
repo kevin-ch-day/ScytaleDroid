@@ -135,6 +135,24 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(data, ensure_ascii=False)
 
 
+class SafeFormatter(logging.Formatter):
+    """Formatter that tolerates missing extra_suffix on LogRecords."""
+
+    def format(self, record: logging.LogRecord) -> str:  # pragma: no cover - thin
+        if not hasattr(record, "extra_suffix"):
+            record.extra_suffix = ""
+        return super().format(record)
+
+
+class EnsureExtraSuffixFilter(logging.Filter):
+    """Ensure extra_suffix exists even for records bypassing our adapters."""
+
+    def filter(self, record: logging.LogRecord) -> bool:  # pragma: no cover - trivial
+        if not hasattr(record, "extra_suffix"):
+            record.extra_suffix = ""
+        return True
+
+
 def _gzip_rotator(source: str, dest: str) -> None:  # pragma: no cover - filesystem
     """Compress rotated log files using gzip for compact retention."""
 
@@ -161,6 +179,7 @@ def _make_rotating_handler(
     )
 
     handler.setFormatter(formatter)
+    handler.addFilter(EnsureExtraSuffixFilter())
     handler.namer = lambda name: f"{name}.gz"
     handler.rotator = _gzip_rotator
     return handler
@@ -198,7 +217,7 @@ def _prepare_handlers(
     text_path: Path | None = None,
     json_path: Path | None = None,
 ) -> Iterable[logging.Handler]:
-    text_formatter = logging.Formatter(LOG_FORMAT, DATE_FORMAT)
+    text_formatter = SafeFormatter(LOG_FORMAT, DATE_FORMAT)
     json_formatter = JsonFormatter()
 
     handlers: list[logging.Handler] = []
@@ -270,7 +289,7 @@ def setup_logger(
     if getattr(app_config, "ENABLE_CONSOLE_LOGS", False) and text_file is not None:
         console_handler = logging.StreamHandler()
         console_handler.setLevel(level)
-        console_handler.setFormatter(logging.Formatter(LOG_FORMAT, DATE_FORMAT))
+        console_handler.setFormatter(SafeFormatter(LOG_FORMAT, DATE_FORMAT))
         logger.addHandler(console_handler)
 
     logger.setLevel(level)
@@ -289,6 +308,8 @@ class _ExtraSuffixFilter(logging.Filter):
 
 __all__ = [
     "JsonFormatter",
+    "EnsureExtraSuffixFilter",
+    "SafeFormatter",
     "make_rotating_handler",
     "setup_logger",
 ]

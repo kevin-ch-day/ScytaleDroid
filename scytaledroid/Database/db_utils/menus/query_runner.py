@@ -507,8 +507,7 @@ def _run_read_only(
 
 
 def _ensure_read_only_sql(sql: str) -> None:
-    cleaned = sql.strip()
-    cleaned = re.sub(r"(?s)^(?:\\s*(?:--.*?\\n|/\\*.*?\\*/))*", "", cleaned)
+    cleaned = _strip_sql_comments(sql).strip()
     lowered = cleaned.lower().strip()
     stripped = lowered.rstrip(";").strip()
     if ";" in stripped:
@@ -521,6 +520,12 @@ def _ensure_read_only_sql(sql: str) -> None:
     )
     if forbidden:
         raise RuntimeError(f"Read-only query rejected: forbidden keyword '{forbidden.group(1)}' detected.")
+
+
+def _strip_sql_comments(sql: str) -> str:
+    sql = re.sub(r"(?s)/\\*.*?\\*/", " ", sql)
+    sql = re.sub(r"(?m)--.*?$", " ", sql)
+    return sql
 
 
 __all__ = [

@@ -118,11 +118,16 @@ def database_menu() -> None:
         database = str(cfg.get("database", "<unknown>"))
         host = str(cfg.get("host", "<local>"))
         schema_ver = diagnostics.get_schema_version() or "<unknown>"
+        expected_schema = "0.2.2"
         menu_utils.print_header("Database Tools")
         print(f"Backend: {backend}")
         print(f"Database: {database}")
         print(f"Host: {host}")
-        print(f"Schema: {schema_ver}")
+        if schema_ver != expected_schema and schema_ver != "<unknown>":
+            print(f"Schema: {schema_ver} (Tier-1 expects {expected_schema}) [OUTDATED]")
+            print("Tip: Run option (2) Apply Tier-1 schema migrations")
+        else:
+            print(f"Schema: {schema_ver}")
         print()
 
         menu_utils.print_section("Research / Tier-1")
