@@ -10,6 +10,8 @@ from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis import adb_devices, device_manager
 from scytaledroid.DeviceAnalysis.report import generate_device_report
 from scytaledroid.Reporting.generator import export_static_analysis_markdown
+from scytaledroid.DynamicAnalysis.exports.dataset_export import export_tier1_pack
+from scytaledroid.Database.db_utils.menus import health_checks
 from scytaledroid.StaticAnalysis.persistence import list_reports
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
@@ -195,6 +197,106 @@ def preview_report_file(path: Path) -> None:
     resolved = relative_path(path)
     print(status_messages.status(f"Full report available at {resolved}", level="info"))
     prompt_utils.press_enter_to_continue()
+
+
+def handle_tier1_export_pack() -> None:
+    """Export the Tier-1 dataset pack (manifest + telemetry + summary)."""
+
+    default_dir = Path(app_config.OUTPUT_DIR) / "exports" / "scytaledroid_dyn_v1"
+    print(status_messages.status(f"Export directory: {default_dir}", level="info"))
+    if not prompt_utils.prompt_yes_no("Generate Tier-1 export pack now?", default=True):
+        return
+    outputs = export_tier1_pack(default_dir)
+    print(status_messages.status(f"Manifest written: {outputs['manifest']}", level="success"))
+    print(status_messages.status(f"Summary written: {outputs['summary']}", level="success"))
+    print(status_messages.status(f"Telemetry dir: {outputs['telemetry_dir']}", level="success"))
+    prompt_utils.press_enter_to_continue()
+
+
+def handle_tier1_audit_report() -> None:
+    """Run Tier-1 dataset readiness audit."""
+
+    health_checks.run_tier1_audit_report()
+
+
+def fetch_tier1_status() -> dict[str, object]:
+    """Return a compact Tier-1 readiness snapshot for the reporting menu."""
+
+    status: dict[str, object] = {
+        "schema_version": None,
+        "expected_schema": "0.2.3",
+        "tier1_ready_runs": 0,
+        "last_export_path": None,
+        "last_export_at": None,
+        "pcap_valid_runs": 0,
+        "pcap_total_runs": 0,
+    }
+    try:
+        row = core_q.run_sql(
+            "SELECT version FROM schema_version ORDER BY applied_at_utc DESC LIMIT 1",
+            fetch="one",
+            dictionary=True,
+        )
+        if row:
+            status["schema_version"] = row.get("version")
+    except Exception:
+        status["schema_version"] = None
+
+    try:
+        row = core_q.run_sql(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM dynamic_sessions
+            WHERE tier='dataset'
+              AND status='success'
+              AND captured_samples / NULLIF(expected_samples,0) >= 0.90
+              AND sample_max_gap_s <= (sampling_rate_s * 2)
+            """,
+            fetch="one",
+            dictionary=True,
+        )
+        if row:
+            status["tier1_ready_runs"] = int(row.get("cnt") or 0)
+    except Exception:
+        status["tier1_ready_runs"] = 0
+
+    try:
+        row = core_q.run_sql(
+            """
+            SELECT
+              SUM(CASE WHEN issue_code='pcapdroid_capture_empty' THEN 0 ELSE 1 END) AS valid_count,
+              COUNT(*) AS total_count
+            FROM dynamic_session_issues
+            WHERE dynamic_run_id IN (
+              SELECT dynamic_run_id
+              FROM dynamic_sessions
+              WHERE tier='dataset'
+            )
+              AND issue_code IN ('pcapdroid_capture_empty','pcapdroid_capture_failed')
+            """,
+            fetch="one",
+            dictionary=True,
+        )
+        if row:
+            status["pcap_valid_runs"] = int(row.get("valid_count") or 0)
+            status["pcap_total_runs"] = int(row.get("total_count") or 0)
+    except Exception:
+        status["pcap_valid_runs"] = 0
+        status["pcap_total_runs"] = 0
+
+    try:
+        export_dir = Path(app_config.OUTPUT_DIR) / "exports" / "scytaledroid_dyn_v1"
+        manifest_path = export_dir / "scytaledroid_dyn_v1_manifest.csv"
+        if manifest_path.exists():
+            status["last_export_path"] = relative_path(manifest_path)
+            status["last_export_at"] = datetime.fromtimestamp(
+                manifest_path.stat().st_mtime
+            ).strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        status["last_export_path"] = None
+        status["last_export_at"] = None
+
+    return status
 
 
 

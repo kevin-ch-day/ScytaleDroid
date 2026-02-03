@@ -28,6 +28,8 @@ def persist_dynamic_summary(
     qa_stats = _extract_qa_stats(payload)
     netstats_available = _extract_netstats_available(payload)
     network_signal_quality = _extract_network_signal_quality(payload)
+    netstats_rows = _extract_netstats_rows(payload)
+    netstats_missing_rows = _extract_netstats_missing_rows(payload)
 
     duration_seconds = config.duration_seconds
     if (not duration_seconds or int(duration_seconds) == 0) and result.started_at and result.ended_at:
@@ -59,6 +61,8 @@ def persist_dynamic_summary(
         "sample_max_gap_s": qa_stats.get("sample_max_gap_s"),
         "netstats_available": netstats_available,
         "network_signal_quality": network_signal_quality,
+        "netstats_rows": netstats_rows,
+        "netstats_missing_rows": netstats_missing_rows,
     }
     if not _dynamic_sessions_has_column("tier"):
         session_row.pop("tier", None)
@@ -66,6 +70,10 @@ def persist_dynamic_summary(
         session_row.pop("netstats_available", None)
     if not _dynamic_sessions_has_column("network_signal_quality"):
         session_row.pop("network_signal_quality", None)
+    if not _dynamic_sessions_has_column("netstats_rows"):
+        session_row.pop("netstats_rows", None)
+    if not _dynamic_sessions_has_column("netstats_missing_rows"):
+        session_row.pop("netstats_missing_rows", None)
 
     _insert_dynamic_session(session_row)
 
@@ -401,6 +409,30 @@ def _extract_network_signal_quality(payload: Mapping[str, Any]) -> str | None:
     if netstats_rows > 0:
         return "netstats_only"
     return "none"
+
+
+def _extract_netstats_rows(payload: Mapping[str, Any]) -> int | None:
+    stats = payload.get("telemetry_stats") or {}
+    if isinstance(stats, dict):
+        value = stats.get("netstats_rows")
+        if value is not None:
+            return _safe_int(value)
+    rows = payload.get("telemetry_network") or []
+    if not isinstance(rows, list):
+        return None
+    return sum(1 for row in rows if row.get("source") == "netstats")
+
+
+def _extract_netstats_missing_rows(payload: Mapping[str, Any]) -> int | None:
+    stats = payload.get("telemetry_stats") or {}
+    if isinstance(stats, dict):
+        value = stats.get("netstats_missing_rows")
+        if value is not None:
+            return _safe_int(value)
+    rows = payload.get("telemetry_network") or []
+    if not isinstance(rows, list):
+        return None
+    return sum(1 for row in rows if row.get("source") == "netstats_missing")
 
 
 _DYN_SESSIONS_COLUMNS: set[str] | None = None

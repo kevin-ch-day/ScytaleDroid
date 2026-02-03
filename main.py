@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from scytaledroid.Api import start_api_server
 from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core.db_engine import ensure_db_ready
-from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
+from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, summary_cards
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuSpec
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.LoggingUtils.logging_core import LOG_DIR
@@ -131,6 +131,7 @@ def main_menu() -> None:
     while True:
         print()
         menu_utils.print_header("Main Menu")
+        _print_tier1_status_banner()
         spec = MenuSpec(
             items=[menu_utils.MenuOption(key, label) for key, label, _ in menu_actions],
             default=None,
@@ -168,6 +169,43 @@ def main_menu() -> None:
         label, callback = selected
         log.info(f"User selected: {label}", category="application")
         callback()
+
+
+def _print_tier1_status_banner() -> None:
+    """Render a compact Tier-1 status banner for the main menu."""
+
+    try:
+        from scytaledroid.Reporting.menu_actions import fetch_tier1_status
+    except Exception:
+        return
+
+    try:
+        status = fetch_tier1_status()
+    except Exception:
+        return
+
+    schema_ver = status.get("schema_version") or "<unknown>"
+    expected = status.get("expected_schema") or "<unknown>"
+    tier1_ready = status.get("tier1_ready_runs", 0)
+    badge = "✅" if tier1_ready and int(tier1_ready) > 0 else "⚠️"
+    schema_outdated = schema_ver != expected
+    schema_label = (
+        f"{schema_ver} (expects {expected}) [OUTDATED]" if schema_outdated else str(schema_ver)
+    )
+    schema_style = "severity_high" if schema_outdated else "severity_info"
+    summary_items = [
+        summary_cards.summary_item("Schema", schema_label, value_style=schema_style),
+        summary_cards.summary_item(f"Tier-1 ready runs {badge}", str(tier1_ready), value_style="progress"),
+    ]
+    footer = None
+    if schema_outdated:
+        footer = "Next step: Database Tools → Apply Tier-1 schema migrations"
+    summary_cards.print_summary_card(
+        "Tier-1 Snapshot",
+        summary_items,
+        subtitle="Dataset readiness at a glance",
+        footer=footer,
+    )
 
 
 # --- Handlers for each menu option ---

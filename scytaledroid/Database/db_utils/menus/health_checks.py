@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from scytaledroid.Database.db_core import run_sql
 from scytaledroid.Database.db_utils import diagnostics
-from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
+from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
 from scytaledroid.Utils.DisplayUtils.terminal import get_terminal_width
 
 from .sql_helpers import coerce_datetime, scalar, view_exists
@@ -896,7 +896,13 @@ def run_tier1_audit_report() -> None:
         detail="ok" if not missing_tables else ", ".join(missing_tables),
     )
 
-    required_columns = ("tier", "netstats_available", "network_signal_quality")
+    required_columns = (
+        "tier",
+        "netstats_available",
+        "network_signal_quality",
+        "netstats_rows",
+        "netstats_missing_rows",
+    )
     missing_columns = []
     for column in required_columns:
         if not _column_exists("dynamic_sessions", column):
@@ -972,6 +978,25 @@ def run_tier1_audit_report() -> None:
                     compact=True,
                 )
                 print()
+
+    netstats_summary = _fetch_netstats_missing_summary()
+    if netstats_summary:
+        print(status_messages.status("Tier-1 netstats missing summary:", level="info"))
+        table_rows = [
+            [
+                row.get("package_name", ""),
+                str(row.get("run_count") or 0),
+                str(row.get("total_missing") or 0),
+                str(row.get("max_missing") or 0),
+            ]
+            for row in netstats_summary
+        ]
+        table_utils.render_table(
+            ["package_name", "runs", "missing_rows_total", "missing_rows_max"],
+            table_rows,
+            compact=True,
+        )
+        print()
 
     prompt_utils.press_enter_to_continue()
 
@@ -1081,6 +1106,25 @@ def _fetch_evidence_integrity_issues(limit: int = 25) -> list[dict[str, object]]
         LIMIT %s
         """,
         (limit,),
+        fetch="all",
+        dictionary=True,
+    )
+    return rows or []
+
+
+def _fetch_netstats_missing_summary() -> list[dict[str, object]]:
+    rows = run_sql(
+        """
+        SELECT
+          package_name,
+          COUNT(*) AS run_count,
+          SUM(COALESCE(netstats_missing_rows,0)) AS total_missing,
+          MAX(COALESCE(netstats_missing_rows,0)) AS max_missing
+        FROM dynamic_sessions
+        WHERE tier='dataset'
+        GROUP BY package_name
+        ORDER BY total_missing DESC
+        """,
         fetch="all",
         dictionary=True,
     )

@@ -9,7 +9,6 @@ from scytaledroid.Database.db_utils.menus import (
     query_runner,
     schema_browser,
 )
-from scytaledroid.DynamicAnalysis.exports.dataset_export import export_manifest_csv
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
 
@@ -30,85 +29,29 @@ def database_menu() -> None:
     actions: Dict[str, Callable[[], None]] = {
         "1": seed_paper_dataset_profile,
         "2": ensure_dynamic_tier_migrations,
-        "3": _run_manifest_export,
-        "4": show_connection_and_config,
-        "5": schema_browser.show_schema_browser,
-        "6": health_checks.run_health_summary,
-        "7": health_checks.run_app_identity_audit,
-        "8": health_checks.run_evidence_integrity_check,
-        "9": query_runner.run_query_menu,
-        "10": health_checks.run_tier1_audit_report,
-        "11": health_checks.prompt_cleanup_orphan_inventory,
-        "12": health_checks.prompt_finalize_stale_runs,
-        "13": health_checks.prompt_reset_static_data,
+        "3": show_connection_and_config,
+        "4": schema_browser.show_schema_browser,
+        "5": health_checks.run_health_summary,
+        "6": health_checks.run_app_identity_audit,
+        "7": health_checks.run_evidence_integrity_check,
+        "8": query_runner.run_query_menu,
+        "9": health_checks.prompt_cleanup_orphan_inventory,
+        "10": health_checks.prompt_finalize_stale_runs,
+        "11": health_checks.prompt_reset_static_data,
     }
 
     options: List[MenuOption] = [
-        MenuOption(
-            "1",
-            "Seed research dataset profile",
-            "Create/update Research Dataset Alpha (v1).",
-        ),
-        MenuOption(
-            "2",
-            "Apply Tier-1 schema migrations",
-            "Adds tier + network_signal_quality columns.",
-        ),
-        MenuOption(
-            "3",
-            "Export dynamic dataset manifest (CSV)",
-            "Build the ScytaleDroid-Dyn-v1 manifest export.",
-        ),
-        MenuOption(
-            "4",
-            "Check connection & show config",
-            "Verify DB connection, backend, schema version.",
-        ),
-        MenuOption(
-            "5",
-            "Schema browser (tables, indexes)",
-            "Inspect table schema, PKs, and indexes.",
-        ),
-        MenuOption(
-            "6",
-            "Health summary (one screen)",
-            "One-screen DB health and counts.",
-        ),
-        MenuOption(
-            "7",
-            "App identity audit (duplicates, missing version)",
-            "Find duplicate packages and missing versions.",
-        ),
-        MenuOption(
-            "8",
-            "Evidence integrity check (missing/sha mismatch)",
-            "Detect missing or mismatched evidence artifacts.",
-        ),
-        MenuOption(
-            "9",
-            "Curated queries (read-only)",
-            "Safe, read-only SQL checks.",
-        ),
-        MenuOption(
-            "10",
-            "Tier-1 audit report (dataset readiness)",
-            "One-screen Tier-1 readiness and schema checks.",
-        ),
-        MenuOption(
-            "11",
-            "Cleanup orphan snapshots (repair)",
-            "Remove orphaned inventory snapshots.",
-        ),
-        MenuOption(
-            "12",
-            "Recover stale RUNNING runs (finalize)",
-            "Finalize orphaned RUNNING sessions.",
-        ),
-        MenuOption(
-            "13",
-            "Reset static analysis data (DESTRUCTIVE)",
-            "Clear static analysis tables (dangerous).",
-        ),
+        MenuOption("1", "Seed research dataset profile"),
+        MenuOption("2", "Apply Tier-1 schema migrations"),
+        MenuOption("3", "Check connection & show config"),
+        MenuOption("4", "Schema browser (tables, indexes)"),
+        MenuOption("5", "Health summary (one screen)"),
+        MenuOption("6", "App identity audit (duplicates, missing version)"),
+        MenuOption("7", "Evidence integrity check (missing/sha mismatch)"),
+        MenuOption("8", "Curated queries (read-only)"),
+        MenuOption("9", "Cleanup orphan snapshots (repair)"),
+        MenuOption("10", "Recover stale RUNNING runs (finalize)"),
+        MenuOption("11", "Reset static analysis data (DESTRUCTIVE)"),
     ]
 
     while True:
@@ -118,7 +61,7 @@ def database_menu() -> None:
         database = str(cfg.get("database", "<unknown>"))
         host = str(cfg.get("host", "<local>"))
         schema_ver = diagnostics.get_schema_version() or "<unknown>"
-        expected_schema = "0.2.2"
+        expected_schema = "0.2.3"
         menu_utils.print_header("Database Tools")
         print(f"Backend: {backend}")
         print(f"Database: {database}")
@@ -133,7 +76,7 @@ def database_menu() -> None:
         menu_utils.print_section("Research / Tier-1")
         menu_utils.render_menu(
             MenuSpec(
-                items=options[:3],
+                items=options[:2],
                 exit_label=None,
                 show_exit=False,
                 padding=True,
@@ -143,7 +86,7 @@ def database_menu() -> None:
         menu_utils.print_section("Read-only Diagnostics")
         menu_utils.render_menu(
             MenuSpec(
-                items=options[3:10],
+                items=options[2:8],
                 exit_label=None,
                 show_exit=False,
                 padding=True,
@@ -153,7 +96,7 @@ def database_menu() -> None:
         menu_utils.print_section("Maintenance / Repairs")
         menu_utils.render_menu(
             MenuSpec(
-                items=options[10:12],
+                items=options[8:10],
                 exit_label=None,
                 show_exit=False,
                 padding=True,
@@ -163,7 +106,7 @@ def database_menu() -> None:
         menu_utils.print_section("Danger Zone (Destructive)")
         menu_utils.render_menu(
             MenuSpec(
-                items=options[12:],
+                items=options[10:],
                 exit_label="Back",
                 show_exit=True,
                 padding=True,
@@ -179,20 +122,6 @@ def database_menu() -> None:
         action = actions.get(choice)
         if action:
             action()
-
-
-def _run_manifest_export() -> None:
-    from pathlib import Path
-    from scytaledroid.Config import app_config
-    from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
-
-    default_path = Path(app_config.OUTPUT_DIR) / "exports" / "scytaledroid_dyn_v1_manifest.csv"
-    print(status_messages.status(f"Export path: {default_path}", level="info"))
-    if not prompt_utils.prompt_yes_no("Generate manifest export now?", default=True):
-        return
-    output_path = export_manifest_csv(default_path)
-    print(status_messages.status(f"Manifest written: {output_path}", level="success"))
-    prompt_utils.press_enter_to_continue()
 
 
 if __name__ == "__main__":  # pragma: no cover

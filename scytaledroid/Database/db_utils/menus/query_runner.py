@@ -507,6 +507,8 @@ def _run_read_only(
 
 
 def _ensure_read_only_sql(sql: str) -> None:
+    if "--" in sql or "/*" in sql:
+        raise RuntimeError("Read-only query rejected: SQL comments are not allowed.")
     cleaned = _strip_sql_comments(sql).strip()
     lowered = cleaned.lower().strip()
     stripped = lowered.rstrip(";").strip()
@@ -515,7 +517,7 @@ def _ensure_read_only_sql(sql: str) -> None:
     if not stripped.startswith(("select", "with", "explain")):
         raise RuntimeError("Read-only query rejected: only SELECT/WITH/EXPLAIN statements are allowed.")
     forbidden = re.search(
-        r"\\b(insert|update|delete|drop|alter|create|truncate|rename|grant|revoke|call|set|use)\\b",
+        r"\b(insert|update|delete|drop|alter|create|truncate|rename|grant|revoke|call|set|use)\b",
         stripped,
     )
     if forbidden:
@@ -523,7 +525,7 @@ def _ensure_read_only_sql(sql: str) -> None:
 
 
 def _strip_sql_comments(sql: str) -> str:
-    sql = re.sub(r"(?s)/\\*.*?\\*/", " ", sql)
+    sql = re.sub(r"(?s)/\*.*?\*/", " ", sql)
     sql = re.sub(r"(?m)--.*?$", " ", sql)
     return sql
 

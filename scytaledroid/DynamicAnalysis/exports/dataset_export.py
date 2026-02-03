@@ -25,6 +25,41 @@ def export_manifest_csv(output_path: Path) -> Path:
     return output_path
 
 
+def export_tier1_pack(output_dir: Path) -> dict[str, Path]:
+    """Export manifest + summary + filtered telemetry for Tier-1 runs."""
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = output_dir / "scytaledroid_dyn_v1_manifest.csv"
+    summary_path = output_dir / "scytaledroid_dyn_v1_summary.csv"
+
+    manifest_rows = _fetch_manifest_rows()
+    if manifest_rows:
+        _write_csv(manifest_path, manifest_rows)
+    else:
+        _write_csv(manifest_path, [])
+
+    summary_rows = _build_tier1_summary_rows(manifest_rows)
+    if summary_rows:
+        _write_csv(summary_path, summary_rows)
+    else:
+        _write_csv(summary_path, [])
+
+    included_run_ids = [
+        row["dynamic_run_id"]
+        for row in manifest_rows
+        if row.get("inclusion_status") == "include"
+    ]
+    telemetry_dir = output_dir / "telemetry"
+    for run_id in included_run_ids:
+        export_run_telemetry_csv(dynamic_run_id=run_id, output_dir=telemetry_dir, include_network=True)
+
+    return {
+        "manifest": manifest_path,
+        "summary": summary_path,
+        "telemetry_dir": telemetry_dir,
+    }
+
+
 def export_run_telemetry_csv(
     *,
     dynamic_run_id: str,
@@ -56,9 +91,15 @@ def _fetch_manifest_rows() -> list[dict[str, Any]]:
     has_tier = _dynamic_sessions_has_column("tier")
     has_netstats = _dynamic_sessions_has_column("netstats_available")
     has_quality = _dynamic_sessions_has_column("network_signal_quality")
+    has_netstats_rows = _dynamic_sessions_has_column("netstats_rows")
+    has_netstats_missing = _dynamic_sessions_has_column("netstats_missing_rows")
     tier_select = "ds.tier" if has_tier else "NULL AS tier"
     netstats_select = "ds.netstats_available" if has_netstats else "NULL AS netstats_available"
     quality_select = "ds.network_signal_quality" if has_quality else "NULL AS network_signal_quality"
+    netstats_rows_select = "ds.netstats_rows" if has_netstats_rows else "NULL AS netstats_rows"
+    netstats_missing_select = (
+        "ds.netstats_missing_rows" if has_netstats_missing else "NULL AS netstats_missing_rows"
+    )
     netstats_gate = "WHEN ds.netstats_available = 0 THEN 'exclude_netstats'" if has_netstats else ""
     sql = f"""
         SELECT
@@ -80,6 +121,8 @@ def _fetch_manifest_rows() -> list[dict[str, Any]]:
           ds.captured_samples,
           ds.sample_max_gap_s,
           ds.status,
+          {netstats_rows_select},
+          {netstats_missing_select},
           CASE
             WHEN ds.tier IS NOT NULL AND ds.tier <> 'dataset' THEN 'exclude_non_dataset'
             WHEN ds.duration_seconds IS NULL OR ds.duration_seconds < 90 THEN 'exclude_duration'
@@ -95,6 +138,40 @@ def _fetch_manifest_rows() -> list[dict[str, Any]]:
     """
     rows = core_q.run_sql(sql, (DATASET_NAME,), fetch="all", dictionary=True) or []
     return [dict(row) for row in rows]
+
+
+def _build_tier1_summary_rows(manifest_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not manifest_rows:
+        return []
+    summary: list[dict[str, Any]] = []
+    for row in manifest_rows:
+        summary.append(
+            {
+                "dynamic_run_id": row.get("dynamic_run_id"),
+                "package_name": row.get("package_name"),
+                "tier": row.get("tier"),
+                "status": row.get("status"),
+                "inclusion_status": row.get("inclusion_status"),
+                "capture_ratio": _safe_ratio(row.get("captured_samples"), row.get("expected_samples")),
+                "sample_max_gap_s": row.get("sample_max_gap_s"),
+                "netstats_available": row.get("netstats_available"),
+                "network_signal_quality": row.get("network_signal_quality"),
+                "netstats_rows": row.get("netstats_rows"),
+                "netstats_missing_rows": row.get("netstats_missing_rows"),
+            }
+        )
+    return summary
+
+
+def _safe_ratio(captured: object, expected: object) -> float | None:
+    try:
+        cap = float(captured)
+        exp = float(expected)
+    except (TypeError, ValueError):
+        return None
+    if exp == 0:
+        return None
+    return round(cap / exp, 3)
 
 
 def _fetch_process_rows(dynamic_run_id: str) -> list[dict[str, Any]]:
@@ -140,9 +217,9 @@ def _fetch_network_rows(dynamic_run_id: str) -> list[dict[str, Any]]:
 
 def _write_csv(path: Path, rows: Iterable[Mapping[str, Any]]) -> None:
     rows = list(rows)
-    if not rows:
-        return
     with path.open("w", newline="", encoding="utf-8") as handle:
+        if not rows:
+            return
         writer = csv.DictWriter(handle, fieldnames=list(rows[0].keys()))
         writer.writeheader()
         writer.writerows(rows)

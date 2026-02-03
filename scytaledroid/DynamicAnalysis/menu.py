@@ -224,14 +224,15 @@ def _select_dynamic_target() -> tuple[str, str] | None:
         return None
 
     groups = group_artifacts()
+    dataset_pkgs: set[str] = set()
+    try:
+        dataset_pkgs = {pkg.lower() for pkg in _load_profile_packages("RESEARCH_DATASET_ALPHA")}
+    except Exception:
+        dataset_pkgs = set()
+
     if choice == "1":
         package_name = _select_package_from_groups(groups, title="App selection")
         if package_name:
-            dataset_pkgs: set[str] = set()
-            try:
-                dataset_pkgs = {pkg.lower() for pkg in _load_profile_packages("RESEARCH_DATASET_ALPHA")}
-            except Exception:
-                dataset_pkgs = set()
             if package_name.lower() in dataset_pkgs:
                 run_as_dataset = prompt_utils.prompt_yes_no(
                     "This app is in Research Dataset Alpha. Run as dataset tier?",
@@ -240,7 +241,9 @@ def _select_dynamic_target() -> tuple[str, str] | None:
                 return (package_name, "dataset" if run_as_dataset else "exploration")
             return (package_name, "exploration")
         package_name = _prompt_custom_package()
-        return (package_name, "exploration") if package_name else None
+        if package_name:
+            return _resolve_custom_tier(package_name, dataset_pkgs)
+        return None
 
     if choice == "2":
         profile_selection = _select_profile_package(groups)
@@ -249,10 +252,28 @@ def _select_dynamic_target() -> tuple[str, str] | None:
             tier = "dataset" if profile_key == "RESEARCH_DATASET_ALPHA" else "exploration"
             return (package_name, tier)
         package_name = _prompt_custom_package()
-        return (package_name, "exploration") if package_name else None
+        if package_name:
+            return _resolve_custom_tier(package_name, dataset_pkgs)
+        return None
 
     package_name = _prompt_custom_package()
-    return (package_name, "exploration") if package_name else None
+    if package_name:
+        return _resolve_custom_tier(package_name, dataset_pkgs)
+    return None
+
+
+def _resolve_custom_tier(package_name: str, dataset_pkgs: set[str]) -> tuple[str, str]:
+    if package_name.lower() in dataset_pkgs:
+        run_as_dataset = prompt_utils.prompt_yes_no(
+            "This app is in Research Dataset Alpha. Run as dataset tier?",
+            default=True,
+        )
+        return (package_name, "dataset" if run_as_dataset else "exploration")
+    run_as_dataset = prompt_utils.prompt_yes_no(
+        "Run this custom package as dataset tier?",
+        default=False,
+    )
+    return (package_name, "dataset" if run_as_dataset else "exploration")
 
 
 def _run_force_fail() -> None:
