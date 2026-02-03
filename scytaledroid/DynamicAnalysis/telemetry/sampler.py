@@ -31,11 +31,12 @@ class TelemetrySampler:
         *,
         device_serial: str,
         package_name: str,
-        sample_rate_s: int = 1,
+        sample_rate_s: int = 2,
     ) -> None:
         self.device_serial = device_serial
         self.package_name = package_name
         self.sample_rate_s = max(int(sample_rate_s), 1)
+        self._netstats_interval_s = max(self.sample_rate_s * 3, 3)
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._error: Optional[str] = None
@@ -47,6 +48,15 @@ class TelemetrySampler:
         self._pid: Optional[str] = None
         self._start_monotonic: Optional[float] = None
         self._end_monotonic: Optional[float] = None
+        self._last_netstats_monotonic: Optional[float] = None
+        self._netstats_samples: int = 0
+        self._netstats_skipped: int = 0
+        self._last_network_row: dict[str, object] | None = None
+        self._meminfo_interval_s = max(self.sample_rate_s * 3, 3)
+        self._last_meminfo_monotonic: Optional[float] = None
+        self._meminfo_samples: int = 0
+        self._meminfo_skipped: int = 0
+        self._last_meminfo_pss: Optional[int] = None
 
     def start(self) -> None:
         self._uid, self._pid = _resolve_pid_uid(self.device_serial, self.package_name)
@@ -67,15 +77,24 @@ class TelemetrySampler:
             sample_rate_s=self.sample_rate_s,
             error=self._error,
         )
+        stats["netstats_interval_s"] = self._netstats_interval_s
+        stats["netstats_samples"] = self._netstats_samples
+        stats["netstats_skipped"] = self._netstats_skipped
+        stats["netstats_available"] = self._netstats_samples > 0
+        stats["meminfo_interval_s"] = self._meminfo_interval_s
+        stats["meminfo_samples"] = self._meminfo_samples
+        stats["meminfo_skipped"] = self._meminfo_skipped
         return TelemetryCapture(self._process_rows, self._network_rows, stats)
 
     def _run(self) -> None:
         sample_index = 0
         try:
+            next_tick = time.monotonic()
             while not self._stop_event.is_set():
                 ts = datetime.now(timezone.utc)
+                now_monotonic = time.monotonic()
                 self._timestamps.append(ts.timestamp())
-                self._monotonic_timestamps.append(time.monotonic())
+                self._monotonic_timestamps.append(now_monotonic)
                 process_row = _collect_process_sample(
                     self.device_serial,
                     self.package_name,
@@ -83,19 +102,56 @@ class TelemetrySampler:
                     self._pid,
                     ts,
                 )
+                self._maybe_collect_meminfo(process_row, now_monotonic)
                 process_row["sample_index"] = sample_index
                 process_row["timestamp_utc"] = ts
                 self._process_rows.append(process_row)
 
-                network_row = _collect_network_sample(self.device_serial, self._uid, ts)
+                use_netstats = True
+                if self._last_netstats_monotonic is not None:
+                    use_netstats = (now_monotonic - self._last_netstats_monotonic) >= self._netstats_interval_s
+                if use_netstats:
+                    self._last_netstats_monotonic = now_monotonic
+                    self._netstats_samples += 1
+                else:
+                    self._netstats_skipped += 1
+                network_row = _collect_network_sample(
+                    self.device_serial,
+                    self._uid,
+                    ts,
+                    use_netstats=use_netstats,
+                    last_netstats=self._last_network_row,
+                )
                 network_row["sample_index"] = sample_index
                 network_row["timestamp_utc"] = ts
                 self._network_rows.append(network_row)
+                if network_row.get("source") == "netstats":
+                    self._last_network_row = dict(network_row)
 
                 sample_index += 1
-                time.sleep(self.sample_rate_s)
+                next_tick += self.sample_rate_s
+                sleep_for = max(0.0, next_tick - time.monotonic())
+                if sleep_for:
+                    time.sleep(sleep_for)
         except Exception as exc:  # pragma: no cover - defensive
             self._error = str(exc)
+
+    def _maybe_collect_meminfo(self, row: dict[str, object], now_monotonic: float) -> None:
+        if self._uid is None:
+            return
+        use_meminfo = True
+        if self._last_meminfo_monotonic is not None:
+            use_meminfo = (now_monotonic - self._last_meminfo_monotonic) >= self._meminfo_interval_s
+        if use_meminfo:
+            self._last_meminfo_monotonic = now_monotonic
+            self._meminfo_samples += 1
+            mem_total = _maybe_parse_meminfo(self.device_serial, self.package_name)
+            if mem_total is not None:
+                self._last_meminfo_pss = mem_total
+                _set_pss(row, mem_total)
+        else:
+            self._meminfo_skipped += 1
+            _set_pss(row, self._last_meminfo_pss)
 
 
 def _run_shell(serial: str, command: list[str], timeout: float) -> tuple[int, str, bool]:
@@ -202,18 +258,17 @@ def _collect_process_sample(
     except Exception:
         row["collector_status"] = "collector_failed"
 
-    try:
-        rc, mem_out, _ = _run_shell(serial, ["dumpsys", "meminfo", "--package", package], timeout=5.0)
-        if rc == 0:
-            mem_total = parse_meminfo_total(mem_out)
-            if mem_total is not None:
-                row["pss_kb"] = mem_total
-    except Exception:
-        pass
     return row
 
 
-def _collect_network_sample(serial: str, uid: Optional[str], ts: datetime) -> dict[str, object]:
+def _collect_network_sample(
+    serial: str,
+    uid: Optional[str],
+    ts: datetime,
+    *,
+    use_netstats: bool = True,
+    last_netstats: dict[str, object] | None = None,
+) -> dict[str, object]:
     row: dict[str, object] = {
         "uid": uid or "",
         "bytes_in": "",
@@ -227,39 +282,49 @@ def _collect_network_sample(serial: str, uid: Optional[str], ts: datetime) -> di
         row["collector_status"] = "unavailable_uid"
         row["source"] = "unavailable"
         return row
-    try:
-        rc, out, timed_out = _run_shell(serial, ["dumpsys", "netstats", "detail"], timeout=5.0)
-        if timed_out:
-            row["collector_status"] = "timeout"
-        elif rc == 0 and f"uid={uid}" in out:
-            bytes_in, bytes_out = parse_netstats_detail(out, uid)
-            row["bytes_in"] = bytes_in
-            row["bytes_out"] = bytes_out
-            row["conn_count"] = ""
-            row["source"] = "netstats"
-            row["best_effort"] = 0
-            row["collector_status"] = "ok"
-            return row
-    except Exception:
-        pass
-    try:
-        rc, out2, timed_out = _run_shell(serial, ["cat", "/proc/net/dev"], timeout=3.0)
-        if timed_out:
-            row["collector_status"] = "timeout"
-            row["source"] = "unavailable"
-        elif rc == 0:
-            bytes_in, bytes_out = parse_proc_net_dev(out2)
-            row["bytes_in"] = bytes_in
-            row["bytes_out"] = bytes_out
-            row["conn_count"] = ""
-            row["source"] = "fallback_iface"
-            row["best_effort"] = 1
-            row["collector_status"] = "best_effort"
-        else:
-            row["collector_status"] = "collector_failed"
-    except Exception:
-        row["collector_status"] = "collector_failed"
+    if use_netstats:
+        try:
+            rc, out, timed_out = _run_shell(serial, ["dumpsys", "netstats", "detail"], timeout=5.0)
+            if timed_out:
+                row["collector_status"] = "timeout"
+            elif rc == 0 and f"uid={uid}" in out:
+                bytes_in, bytes_out = parse_netstats_detail(out, uid)
+                row["bytes_in"] = bytes_in
+                row["bytes_out"] = bytes_out
+                row["conn_count"] = ""
+                row["source"] = "netstats"
+                row["best_effort"] = 0
+                row["collector_status"] = "ok"
+                return row
+        except Exception:
+            pass
+    if last_netstats:
+        row["bytes_in"] = last_netstats.get("bytes_in", "")
+        row["bytes_out"] = last_netstats.get("bytes_out", "")
+        row["conn_count"] = last_netstats.get("conn_count", "")
+        row["source"] = "netstats_cached"
+        row["best_effort"] = 1
+        row["collector_status"] = "cached"
+        return row
+    row["collector_status"] = "skipped"
+    row["source"] = "unavailable"
     return row
+
+
+def _maybe_parse_meminfo(serial: str, package: str) -> Optional[int]:
+    try:
+        rc, mem_out, _ = _run_shell(serial, ["dumpsys", "meminfo", "--package", package], timeout=5.0)
+        if rc == 0:
+            return parse_meminfo_total(mem_out)
+    except Exception:
+        return None
+    return None
+
+
+def _set_pss(row: dict[str, object], value: Optional[int]) -> None:
+    if value is None:
+        return
+    row["pss_kb"] = value
 
 
 def _compute_stats(

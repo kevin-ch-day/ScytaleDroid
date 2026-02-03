@@ -189,6 +189,14 @@ class DynamicRunOrchestrator:
                 "telemetry_stats": capture.stats,
                 "sampling_rate_s": self.config.sampling_rate_s,
             }
+            manifest.operator["telemetry_stats"] = capture.stats
+            manifest.operator["telemetry_counts"] = {
+                "process": len(capture.process_rows),
+                "network": len(capture.network_rows),
+            }
+            manifest.operator["telemetry_schema_version"] = 1
+            manifest.operator["sampling_rate_s"] = self.config.sampling_rate_s
+            manifest.operator["tier"] = self.config.tier
         self._emit_marker(run_ctx, "SCENARIO_END")
         event_logger.log("scenario_ended", {"notes": scenario_result.notes})
         manifest.scenario.update(

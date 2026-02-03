@@ -14,6 +14,7 @@ from scytaledroid.DynamicAnalysis.observers.pcapdroid_capture import PCAPDROID_P
 import json
 import socket
 from scytaledroid.StaticAnalysis.core.repository import group_artifacts, list_categories, list_packages, load_profile_map
+from scytaledroid.Database.db_core import run_sql
 from scytaledroid.DynamicAnalysis.plans.loader import extract_plan_identity, SUPPORTED_SIGNATURE_VERSIONS
 
 
@@ -66,7 +67,11 @@ def dynamic_analysis_menu() -> None:
             is_rooted = _print_root_status(device_serial)
             _print_network_status(device_serial)
             print()
+            scenario_id = "basic_usage"
+            duration_seconds = 0
+            label = "Manual"
             menu_utils.print_header("Dynamic Run Scenario")
+            print(status_messages.status("Tip: Basic usage is recommended for validation runs.", level="info"))
             scenario_options = [
                 MenuOption("1", "Cold start"),
                 MenuOption("2", "Basic usage"),
@@ -84,25 +89,6 @@ def dynamic_analysis_menu() -> None:
                 scenario_choice,
                 "basic_usage",
             )
-            print()
-            menu_utils.print_header("Dynamic Run Duration")
-            duration_options = [
-                MenuOption("1", "Short (90s)"),
-                MenuOption("2", "Standard (120s)"),
-                MenuOption("3", "Extended (180s)"),
-            ]
-            duration_spec = MenuSpec(items=duration_options, exit_label="Cancel", show_exit=True)
-            menu_utils.render_menu(duration_spec)
-            selection = prompt_utils.get_choice(["1", "2", "3", "0"], default="2")
-            if selection == "0":
-                continue
-            duration_map = {"1": 90, "2": 120, "3": 180}
-            duration_seconds = duration_map.get(selection, 120)
-            label = {
-                "1": "Short",
-                "2": "Standard",
-                "3": "Extended",
-            }.get(selection, "Standard")
             package_name = _select_dynamic_target()
             if not package_name:
                 continue
@@ -114,6 +100,14 @@ def dynamic_analysis_menu() -> None:
                     "Enable VPN capture via PCAPdroid (recommended for non-root)?",
                     default=not is_rooted,
                 )
+                if use_pcapdroid:
+                    print(
+                        status_messages.status(
+                            "PCAPdroid scope: app-only traffic (UID). If traffic is missing, consider full-device "
+                            "capture for diagnostics.",
+                            level="info",
+                        )
+                    )
             else:
                 print(status_messages.status("PCAPdroid not installed; VPN capture unavailable.", level="warn"))
 
@@ -281,19 +275,68 @@ def _write_force_fail_plan(package_name: str) -> str:
 
 def _select_profile_package(groups) -> str | None:
     categories = list_categories(groups)
-    if not categories:
+    db_profiles = _load_db_profiles()
+    if not categories and not db_profiles:
         print(status_messages.status("No profile data available for selection.", level="warn"))
         return None
     print()
     print("Dynamic Run Scope (Profile)")
     print("-" * 86)
-    rows = [[str(idx), category, str(count)] for idx, (category, count) in enumerate(categories, start=1)]
-    table_utils.render_table(["#", "Profile", "Apps"], rows, compact=True)
-    print(f"Status: profiles={len(categories)}")
-    index = _choose_index("Select profile #", len(categories))
+    available_counts = {label: count for label, count in categories}
+    profile_rows = []
+    for profile in db_profiles:
+        profile_rows.append(
+            {
+                "label": profile["display_name"],
+                "key": profile["profile_key"],
+                "db_count": profile["app_count"],
+                "available_count": available_counts.get(profile["display_name"], 0),
+            }
+        )
+    for label, count in categories:
+        if any(row["label"] == label for row in profile_rows):
+            continue
+        profile_rows.append(
+            {
+                "label": label,
+                "key": None,
+                "db_count": count,
+                "available_count": count,
+            }
+        )
+    profile_rows.sort(
+        key=lambda row: (
+            0 if row.get("key") == "RESEARCH_DATASET_ALPHA" else 1,
+            row["label"].lower(),
+        )
+    )
+    rows = [
+        [str(idx), row["label"], str(row["db_count"]), str(row["available_count"])]
+        for idx, row in enumerate(profile_rows, start=1)
+    ]
+    table_utils.render_table(["#", "Profile", "Apps (db)", "Available"], rows, compact=True)
+    index = _choose_index("Select profile #", len(profile_rows))
     if index is None:
         return None
-    category_name, _ = categories[index]
+    selected = profile_rows[index]
+    profile_key = selected.get("key")
+    if profile_key:
+        packages = _load_profile_packages(profile_key)
+        if not packages:
+            print(status_messages.status("No apps found for that profile.", level="warn"))
+            return None
+        available = {group.package_name.lower() for group in groups if group.package_name}
+        scoped_groups = tuple(group for group in groups if group.package_name.lower() in available.intersection(packages))
+        if not scoped_groups:
+            print(
+                status_messages.status(
+                    "No APK artifacts available yet for that profile. Pull APKs or use Custom package name.",
+                    level="warn",
+                )
+            )
+            return None
+        return _select_package_from_groups(scoped_groups, title=f"{selected['label']} apps")
+    category_name = selected["label"]
     profile_map = load_profile_map(groups)
     scoped_groups = tuple(
         group
@@ -309,6 +352,47 @@ def _select_profile_package(groups) -> str | None:
         print(status_messages.status("No apps found for that profile.", level="warn"))
         return None
     return _select_package_from_groups(scoped_groups, title=f"{category_name} apps")
+
+
+def _load_db_profiles() -> list[dict[str, object]]:
+    try:
+        rows = run_sql(
+            (
+                "SELECT p.profile_key, p.display_name, COUNT(a.package_name) AS app_count "
+                "FROM android_app_profiles p "
+                "LEFT JOIN apps a ON a.profile_key = p.profile_key "
+                "WHERE p.is_active = 1 "
+                "GROUP BY p.profile_key, p.display_name "
+                "ORDER BY p.display_name"
+            ),
+            fetch="all",
+            dictionary=True,
+        )
+    except Exception:
+        return []
+    profiles = []
+    for row in rows or []:
+        profiles.append(
+            {
+                "profile_key": str(row.get("profile_key") or "").strip(),
+                "display_name": str(row.get("display_name") or "").strip() or "Unnamed profile",
+                "app_count": int(row.get("app_count") or 0),
+            }
+        )
+    return [row for row in profiles if row["profile_key"]]
+
+
+def _load_profile_packages(profile_key: str) -> set[str]:
+    try:
+        rows = run_sql(
+            "SELECT package_name FROM apps WHERE profile_key = %s",
+            (profile_key,),
+            fetch="all",
+            dictionary=True,
+        )
+    except Exception:
+        return set()
+    return {str(row.get("package_name") or "").strip().lower() for row in rows or [] if row.get("package_name")}
 
 
 def _select_package_from_groups(groups, *, title: str) -> str | None:
@@ -660,7 +744,43 @@ def _print_run_summary(result, duration_label: str) -> None:
 
     run_dir = Path(result.evidence_path) if result.evidence_path else None
     manifest = _load_manifest(run_dir) if run_dir else None
+    summary_payload = _load_summary(run_dir) if run_dir else None
     if manifest:
+        operator = manifest.get("operator") or {}
+        telemetry_stats = operator.get("telemetry_stats") or {}
+        sampling_rate = operator.get("sampling_rate_s")
+        if telemetry_stats:
+            expected = telemetry_stats.get("expected_samples")
+            captured = telemetry_stats.get("captured_samples")
+            max_gap = telemetry_stats.get("sample_max_gap_s")
+            avg_delta = telemetry_stats.get("sample_avg_delta_s")
+            ratio = None
+            if expected and captured is not None:
+                try:
+                    ratio = float(captured) / float(expected)
+                except Exception:
+                    ratio = None
+            telemetry_lines = []
+            if sampling_rate:
+                telemetry_lines.append(f"Sampling rate: {sampling_rate}s")
+            if expected is not None and captured is not None:
+                telemetry_lines.append(f"Samples: {captured}/{expected}")
+            if ratio is not None:
+                telemetry_lines.append(f"Capture ratio: {ratio:.3f}")
+            if max_gap is not None:
+                telemetry_lines.append(f"Max gap: {max_gap:.2f}s")
+            if avg_delta is not None:
+                telemetry_lines.append(f"Avg delta: {avg_delta:.2f}s")
+            if telemetry_lines:
+                _print_simple_list("Telemetry", telemetry_lines)
+            if summary_payload:
+                net_quality = (
+                    summary_payload.get("telemetry", {})
+                    .get("network_signal_quality")
+                )
+                if net_quality:
+                    _print_simple_list("Network signal", [f"Quality: {net_quality}"])
+
         observers = manifest.get("observers") or []
         if observers:
             observer_lines = []
@@ -693,6 +813,20 @@ def _print_run_summary(result, duration_label: str) -> None:
         capture_lines = _summarize_capture(manifest)
         if capture_lines:
             _print_simple_list("Capture", capture_lines)
+        if summary_payload:
+            capture_info = summary_payload.get("capture") or {}
+            pcap_valid = capture_info.get("pcap_valid")
+            pcap_size = capture_info.get("pcap_size_bytes")
+            capture_mode = capture_info.get("capture_mode")
+            details = []
+            if pcap_valid is not None:
+                details.append(f"pcap_valid: {pcap_valid}")
+            if pcap_size is not None:
+                details.append(f"pcap_size: {pcap_size}B")
+            if capture_mode:
+                details.append(f"mode: {capture_mode}")
+            if details:
+                _print_simple_list("PCAP", details)
 
         summary_paths = _summary_paths(manifest)
         if summary_paths:
@@ -721,21 +855,63 @@ def _load_manifest(run_dir: Path | None) -> dict[str, object] | None:
         return None
 
 
+def _load_summary(run_dir: Path | None) -> dict[str, object] | None:
+    if not run_dir:
+        return None
+    summary_path = run_dir / "analysis" / "summary.json"
+    if not summary_path.exists():
+        return None
+    try:
+        return json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
 def _summarize_capture(manifest: dict[str, object]) -> list[str]:
     artifacts = manifest.get("artifacts") or []
     types = {a.get("type") for a in artifacts if isinstance(a, dict)}
     captured = []
     if "system_log_capture" in types:
         captured.append("logcat")
-    if "proxy_capture" in types:
-        captured.append("proxy")
-    if "network_capture" in types:
-        captured.append("tcpdump")
-    if "pcapdroid_capture" in types:
-        captured.append("pcapdroid")
+    network_label = _network_capture_label(artifacts)
+    if network_label:
+        captured.append(network_label)
     if not captured:
         return ["No observer artifacts captured."]
     return [f"Captured: {', '.join(captured)}."]
+
+
+def _network_capture_label(artifacts: list[object]) -> str | None:
+    size_bytes = 0
+    sources = []
+    min_bytes = 30 * 1024
+    for artifact in artifacts:
+        if not isinstance(artifact, dict):
+            continue
+        a_type = artifact.get("type")
+        if a_type not in {"proxy_capture", "network_capture", "pcapdroid_capture"}:
+            continue
+        sources.append(a_type.replace("_capture", ""))
+        try:
+            size_bytes += int(artifact.get("size_bytes") or 0)
+        except Exception:
+            continue
+    if not sources:
+        return None
+    if size_bytes < min_bytes:
+        return None
+    size_label = _format_bytes(size_bytes) if size_bytes else "size unknown"
+    return f"network({'+'.join(sorted(set(sources)))}, {size_label})"
+
+
+def _format_bytes(size: int) -> str:
+    if size <= 0:
+        return "0B"
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024:
+            return f"{size:.0f}{unit}"
+        size /= 1024
+    return f"{size:.1f}TB"
 
 
 def _summary_paths(manifest: dict[str, object]) -> list[str]:

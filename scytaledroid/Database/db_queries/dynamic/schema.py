@@ -33,6 +33,7 @@ _DDL_STATEMENTS: list[str] = [
       sample_avg_delta_s FLOAT        DEFAULT NULL,
       sample_max_delta_s FLOAT        DEFAULT NULL,
       sample_max_gap_s   FLOAT        DEFAULT NULL,
+      netstats_available TINYINT(1)   DEFAULT NULL,
       created_at         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (dynamic_run_id),
       KEY idx_dyn_sessions_pkg_scenario_started (package_name, scenario_id, started_at_utc),

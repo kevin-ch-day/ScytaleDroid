@@ -26,13 +26,17 @@ def persist_dynamic_summary(
     plan_identity = _extract_plan_identity(plan_payload)
     sampling_rate_s = _safe_int(payload.get("sampling_rate_s"))
     qa_stats = _extract_qa_stats(payload)
+    netstats_available = _extract_netstats_available(payload)
 
+    duration_seconds = config.duration_seconds
+    if (not duration_seconds or int(duration_seconds) == 0) and result.started_at and result.ended_at:
+        duration_seconds = int((result.ended_at - result.started_at).total_seconds())
     session_row = {
         "dynamic_run_id": dynamic_run_id,
         "package_name": config.package_name,
         "device_serial": config.device_serial,
         "scenario_id": config.scenario_id,
-        "duration_seconds": config.duration_seconds,
+        "duration_seconds": duration_seconds,
         "sampling_rate_s": sampling_rate_s,
         "started_at_utc": _fmt_dt(result.started_at),
         "ended_at_utc": _fmt_dt(result.ended_at),
@@ -51,7 +55,10 @@ def persist_dynamic_summary(
         "sample_avg_delta_s": qa_stats.get("sample_avg_delta_s"),
         "sample_max_delta_s": qa_stats.get("sample_max_delta_s"),
         "sample_max_gap_s": qa_stats.get("sample_max_gap_s"),
+        "netstats_available": netstats_available,
     }
+    if not _dynamic_sessions_has_column("netstats_available"):
+        session_row.pop("netstats_available", None)
 
     _insert_dynamic_session(session_row)
 
@@ -253,6 +260,10 @@ def _map_observer_issue(observer_id: object, status: object, error: object) -> s
     if observer_id == "pcapdroid_capture":
         if "not installed" in error_text:
             return "pcapdroid_unavailable"
+        if "mismatch" in error_text:
+            return "pcapdroid_capture_mismatch"
+        if "empty" in error_text:
+            return "pcapdroid_capture_empty"
         if status == "failed":
             return "pcapdroid_capture_failed"
     if status == "failed":
@@ -278,6 +289,16 @@ def _issues_from_telemetry(dynamic_run_id: str, payload: Mapping[str, Any]) -> l
         )
         return issues
 
+    netstats_available = stats.get("netstats_available")
+    if netstats_available is False:
+        issues.append(
+            {
+                "dynamic_run_id": dynamic_run_id,
+                "issue_code": "netstats_unavailable",
+                "details_json": {"netstats_available": False},
+            }
+        )
+
     expected = stats.get("expected_samples")
     captured = stats.get("captured_samples")
     max_gap = stats.get("sample_max_gap_s")
@@ -288,9 +309,9 @@ def _issues_from_telemetry(dynamic_run_id: str, payload: Mapping[str, Any]) -> l
             ratio = float(captured or 0) / float(expected)
     except Exception:
         ratio = None
-    gap_threshold = 3 * int(rate)
+    gap_threshold = 2 * int(rate)
     details: dict[str, object] = {}
-    if ratio is not None and ratio < 0.95:
+    if ratio is not None and ratio < 0.90:
         details.update({"captured": captured, "expected": expected, "ratio": ratio})
     try:
         if max_gap is not None and float(max_gap) > gap_threshold:
@@ -342,6 +363,37 @@ def _extract_qa_stats(payload: Mapping[str, Any]) -> dict[str, Any]:
         "sample_max_delta_s": _safe_float(stats.get("sample_max_delta_s")),
         "sample_max_gap_s": _safe_float(stats.get("sample_max_gap_s")),
     }
+
+
+def _extract_netstats_available(payload: Mapping[str, Any]) -> int | None:
+    stats = payload.get("telemetry_stats") or {}
+    if not isinstance(stats, dict):
+        return None
+    value = stats.get("netstats_available")
+    if value is None:
+        return None
+    return 1 if bool(value) else 0
+
+
+_DYN_SESSIONS_COLUMNS: set[str] | None = None
+
+
+def _dynamic_sessions_has_column(column_name: str) -> bool:
+    global _DYN_SESSIONS_COLUMNS
+    if _DYN_SESSIONS_COLUMNS is None:
+        try:
+            rows = core_q.run_sql(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = DATABASE() AND table_name = 'dynamic_sessions'",
+                fetch="all",
+                dictionary=True,
+            )
+            _DYN_SESSIONS_COLUMNS = {
+                str(row.get("column_name")).lower() for row in rows or [] if row.get("column_name")
+            }
+        except Exception:
+            _DYN_SESSIONS_COLUMNS = set()
+    return column_name.lower() in _DYN_SESSIONS_COLUMNS
 
 
 def _fmt_dt(value: object | None) -> str | None:

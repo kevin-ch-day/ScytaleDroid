@@ -36,6 +36,11 @@ def get_basic_properties(serial: str) -> Dict[str, str]:
     return device_info.get_basic_properties(serial)
 
 
+def get_play_services_version(serial: str) -> Optional[str]:
+    """Return Google Play services versionName when available."""
+    return device_info.get_play_services_version(serial)
+
+
 def resolve_serial(
     devices: List[Dict[str, Optional[str]]],
     requested_serial: Optional[str],
@@ -65,5 +70,6 @@ __all__ = [
     "get_device_label",
     "build_device_summary",
     "get_basic_properties",
+    "get_play_services_version",
     "resolve_serial",
 ]

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import select
+import sys
 import time
 from typing import Callable
 
@@ -42,8 +44,12 @@ class ManualScenarioRunner:
             started_at = datetime.now(timezone.utc)
             if on_start:
                 on_start()
-            prompt_utils.press_enter_to_continue("Press Enter when finished (timer stops)...")
-            ended_at = datetime.now(timezone.utc)
+            duration_seconds = max(int(run_ctx.duration_seconds or 0), 0)
+            if duration_seconds:
+                print(status_messages.status("Press Enter to stop early (optional).", level="info"))
+                ended_at = _run_countdown(duration_seconds)
+            else:
+                ended_at = _run_stopwatch()
             if on_end:
                 on_end()
             elapsed = int((ended_at - started_at).total_seconds())
@@ -57,6 +63,45 @@ class ManualScenarioRunner:
             if on_end:
                 on_end()
         return ScenarioResult(started_at=started_at, ended_at=ended_at)
+
+
+def _run_countdown(duration_seconds: int) -> datetime:
+    if not sys.stdin.isatty():
+        time.sleep(max(duration_seconds, 0))
+        return datetime.now(timezone.utc)
+    start = time.monotonic()
+    while True:
+        elapsed = time.monotonic() - start
+        remaining = max(duration_seconds - int(elapsed), 0)
+        message = f"\rTime remaining: {remaining:>4}s"
+        print(message, end="", flush=True)
+        if remaining <= 0:
+            print()
+            break
+        readable, _, _ = select.select([sys.stdin], [], [], 1.0)
+        if readable:
+            _ = sys.stdin.readline()
+            print()
+            break
+    return datetime.now(timezone.utc)
+
+
+def _run_stopwatch() -> datetime:
+    if not sys.stdin.isatty():
+        prompt_utils.press_enter_to_continue("Press Enter when finished (timer stops)...")
+        return datetime.now(timezone.utc)
+    start = time.monotonic()
+    print(status_messages.status("Press Enter when finished (timer stops).", level="info"))
+    while True:
+        elapsed = int(time.monotonic() - start)
+        message = f"\rElapsed time: {elapsed:>4}s"
+        print(message, end="", flush=True)
+        readable, _, _ = select.select([sys.stdin], [], [], 1.0)
+        if readable:
+            _ = sys.stdin.readline()
+            print()
+            break
+    return datetime.now(timezone.utc)
 
 
 __all__ = ["ManualScenarioRunner", "ScenarioResult"]

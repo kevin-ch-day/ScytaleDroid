@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import time
 from pathlib import Path
 
 from scytaledroid.DeviceAnalysis import adb_client, adb_shell
@@ -15,6 +16,8 @@ from scytaledroid.DynamicAnalysis.observers.base import Observer, ObserverHandle
 PCAPDROID_PACKAGE = "com.emanuelef.remote_capture"
 PCAPDROID_COMPONENT = "com.emanuelef.remote_capture/.activities.CaptureCtrl"
 PCAPDROID_DOWNLOAD_DIR = "/sdcard/Download/PCAPdroid"
+MIN_PCAP_BYTES = 30 * 1024
+CAPTURE_MODE = "app_only"
 
 
 class PcapdroidCaptureObserver(Observer):
@@ -36,6 +39,7 @@ class PcapdroidCaptureObserver(Observer):
         pcap_name = f"scytaledroid_{run_ctx.dynamic_run_id}.pcap"
         device_path = f"{PCAPDROID_DOWNLOAD_DIR}/{pcap_name}"
         api_key = os.environ.get("SCYTALEDROID_PCAPDROID_API_KEY")
+        capture_start = time.time()
 
         start_args = [
             "am",
@@ -59,13 +63,32 @@ class PcapdroidCaptureObserver(Observer):
             start_args = start_args[:-2] + ["-e", "api_key", api_key] + start_args[-2:]
 
         adb_shell.run_shell(run_ctx.device_serial, start_args)
+        status_ok, status_error = _pcapdroid_status_ok(run_ctx.device_serial, api_key)
+        newest_hint = _peek_latest_pcapdroid(run_ctx.device_serial, min_epoch=capture_start)
+        start_probe = _poll_latest_pcapdroid(
+            run_ctx.device_serial,
+            min_epoch=capture_start,
+            timeout_s=2.0,
+        )
+        if status_ok is None and start_probe.get("latest_path"):
+            status_ok = True
+        if status_ok is False:
+            raise RuntimeError(status_error or "PCAPdroid capture did not start")
         meta_path.write_text(
             json.dumps(
                 {
                     "pcap_name": pcap_name,
                     "device_path": device_path,
                     "app_filter": run_ctx.package_name,
+                    "capture_mode": CAPTURE_MODE,
                     "pcapdroid_package": PCAPDROID_PACKAGE,
+                    "capture_start_epoch": capture_start,
+                    "status_check": {
+                        "ok": status_ok,
+                        "error": status_error,
+                    },
+                    "start_hint": newest_hint,
+                    "start_probe": start_probe,
                 },
                 indent=2,
                 sort_keys=True,
@@ -79,6 +102,7 @@ class PcapdroidCaptureObserver(Observer):
                 "pcap_name": pcap_name,
                 "device_path": device_path,
                 "meta_path": meta_path,
+                "capture_start_epoch": capture_start,
             },
         )
 
@@ -89,6 +113,7 @@ class PcapdroidCaptureObserver(Observer):
         pcap_name: str = payload["pcap_name"]
         device_path: str = payload["device_path"]
         meta_path: Path = payload["meta_path"]
+        capture_start_epoch = payload.get("capture_start_epoch")
         api_key = os.environ.get("SCYTALEDROID_PCAPDROID_API_KEY")
 
         stop_args = [
@@ -122,35 +147,125 @@ class PcapdroidCaptureObserver(Observer):
 
         local_path = meta_path.parent / pcap_name
         try:
-            if _device_file_exists(run_ctx.device_serial, device_path):
+            resolved_path = _wait_for_capture_path(
+                run_ctx.device_serial,
+                device_path,
+                min_epoch=capture_start_epoch,
+            )
+            resolved_from_fallback = False
+            if resolved_path:
+                if resolved_path != device_path:
+                    resolved_from_fallback = True
+                device_path = resolved_path
+                resolved_name = Path(resolved_path).name
+                local_path = meta_path.parent / resolved_name
+                if meta_path.exists():
+                    try:
+                        meta_payload = json.loads(meta_path.read_text(encoding="utf-8"))
+                    except Exception:
+                        meta_payload = {}
+                    meta_payload["resolved_device_path"] = resolved_path
+                    meta_payload["resolved_pcap_name"] = resolved_name
+                    meta_payload["resolved_from_fallback"] = resolved_from_fallback
+                    meta_path.write_text(
+                        json.dumps(meta_payload, indent=2, sort_keys=True),
+                        encoding="utf-8",
+                    )
                 adb_client.run_adb_command(
                     ["-s", run_ctx.device_serial, "pull", device_path, str(local_path)],
                 )
-            else:
-                fallback_path = _latest_pcapdroid_capture(run_ctx.device_serial)
-                if fallback_path:
+            if not local_path.exists():
+                fallback_path = _latest_pcapdroid_capture(
+                    run_ctx.device_serial,
+                    min_epoch=capture_start_epoch,
+                )
+                if fallback_path and fallback_path != device_path:
+                    resolved_from_fallback = True
                     device_path = fallback_path
-                    local_path = meta_path.parent / Path(fallback_path).name
+                    resolved_name = Path(fallback_path).name
+                    local_path = meta_path.parent / resolved_name
                     adb_client.run_adb_command(
                         ["-s", run_ctx.device_serial, "pull", device_path, str(local_path)],
                     )
+                    if meta_path.exists():
+                        try:
+                            meta_payload = json.loads(meta_path.read_text(encoding="utf-8"))
+                        except Exception:
+                            meta_payload = {}
+                        meta_payload["resolved_device_path"] = fallback_path
+                        meta_payload["resolved_pcap_name"] = resolved_name
+                        meta_payload["resolved_from_fallback"] = True
+                        meta_path.write_text(
+                            json.dumps(meta_payload, indent=2, sort_keys=True),
+                            encoding="utf-8",
+                        )
+            mismatch_warning = None
             if local_path.exists():
-                digest = hashlib.sha256(local_path.read_bytes()).hexdigest()
-                artifacts.append(
-                    ArtifactRecord(
-                        relative_path=str(local_path.relative_to(run_ctx.run_dir)),
-                        type="pcapdroid_capture",
-                        sha256=digest,
-                        size_bytes=local_path.stat().st_size,
-                        produced_by=self.observer_id,
+                file_size = local_path.stat().st_size
+                if file_size < MIN_PCAP_BYTES:
+                    error = (
+                        f"PCAPdroid capture file empty/too small "
+                        f"({file_size}B < {MIN_PCAP_BYTES}B)."
                     )
-                )
+                    if meta_path.exists():
+                        try:
+                            meta_payload = json.loads(meta_path.read_text(encoding="utf-8"))
+                        except Exception:
+                            meta_payload = {}
+                        meta_payload["pcap_size_bytes"] = file_size
+                        meta_payload["pcap_valid"] = False
+                        meta_payload["min_pcap_bytes"] = MIN_PCAP_BYTES
+                        meta_path.write_text(
+                            json.dumps(meta_payload, indent=2, sort_keys=True),
+                            encoding="utf-8",
+                        )
+                else:
+                    resolved_name = local_path.name
+                    if run_ctx.dynamic_run_id not in resolved_name:
+                        mismatch_warning = (
+                            "PCAPdroid capture filename mismatch (fallback file does not match run id)."
+                        )
+                    digest = hashlib.sha256(local_path.read_bytes()).hexdigest()
+                    artifacts.append(
+                        ArtifactRecord(
+                            relative_path=str(local_path.relative_to(run_ctx.run_dir)),
+                            type="pcapdroid_capture",
+                            sha256=digest,
+                            size_bytes=local_path.stat().st_size,
+                            produced_by=self.observer_id,
+                        )
+                    )
+                    if meta_path.exists():
+                        try:
+                            meta_payload = json.loads(meta_path.read_text(encoding="utf-8"))
+                        except Exception:
+                            meta_payload = {}
+                        meta_payload["pcap_size_bytes"] = file_size
+                        meta_payload["pcap_valid"] = True
+                        meta_payload["min_pcap_bytes"] = MIN_PCAP_BYTES
+                        meta_path.write_text(
+                            json.dumps(meta_payload, indent=2, sort_keys=True),
+                            encoding="utf-8",
+                        )
             else:
                 status = "failed"
                 error = "PCAPdroid capture file missing after pull."
         except Exception as exc:
             status = "failed"
             error = f"PCAPdroid capture failed: {exc}"
+
+        if mismatch_warning and status == "success":
+            error = mismatch_warning
+            if meta_path.exists():
+                try:
+                    meta_payload = json.loads(meta_path.read_text(encoding="utf-8"))
+                except Exception:
+                    meta_payload = {}
+                meta_payload["mismatch_warning"] = mismatch_warning
+                meta_path.write_text(
+                    json.dumps(meta_payload, indent=2, sort_keys=True),
+                    encoding="utf-8",
+                )
 
         if status == "failed":
             error_path = meta_path.parent / "observer_error.txt"
@@ -182,23 +297,112 @@ def _pcapdroid_installed(device_serial: str) -> bool:
     return "package:" in output
 
 
+def _pcapdroid_status_ok(device_serial: str, api_key: str | None) -> tuple[bool | None, str | None]:
+    status_args = [
+        "am",
+        "start",
+        "-e",
+        "action",
+        "get_status",
+        "-n",
+        PCAPDROID_COMPONENT,
+    ]
+    if api_key:
+        status_args = status_args[:-2] + ["-e", "api_key", api_key] + status_args[-2:]
+    try:
+        output = adb_shell.run_shell(device_serial, status_args)
+    except Exception as exc:
+        return None, f"PCAPdroid status check failed: {exc}"
+    lowered = output.lower()
+    if "running=true" in lowered:
+        return True, None
+    if "running=false" in lowered:
+        return False, "PCAPdroid reported running=false"
+    return None, "PCAPdroid status unavailable"
+
+
 def _device_file_exists(device_serial: str, path: str) -> bool:
     try:
-        adb_shell.run_shell(device_serial, ["ls", "-l", path])
+        completed = adb_shell.run_shell_command(device_serial, ["ls", "-l", path])
     except Exception:
+        return False
+    if completed.returncode != 0:
+        return False
+    stderr = (completed.stderr or "").lower()
+    if "no such file" in stderr:
         return False
     return True
 
 
-def _latest_pcapdroid_capture(device_serial: str) -> str | None:
+def _latest_pcapdroid_capture(device_serial: str, *, min_epoch: float | None = None) -> str | None:
     try:
         output = adb_shell.run_shell(
             device_serial,
-            ["sh", "-c", f"ls -t {PCAPDROID_DOWNLOAD_DIR}/*.pcap* 2>/dev/null | head -n 1"],
+            [
+                "sh",
+                "-c",
+                f"ls -t {PCAPDROID_DOWNLOAD_DIR}/*.pcap* 2>/dev/null | head -n 1",
+            ],
         ).strip()
     except Exception:
         return None
-    return output if output.startswith(PCAPDROID_DOWNLOAD_DIR) else None
+    if not output.startswith(PCAPDROID_DOWNLOAD_DIR):
+        return None
+    if min_epoch is None:
+        return output
+    try:
+        stat_out = adb_shell.run_shell(device_serial, ["stat", "-c", "%Y", output]).strip()
+        mtime = float(stat_out)
+        if mtime + 2 < float(min_epoch):
+            return None
+    except Exception:
+        return None
+    return output
+
+
+def _peek_latest_pcapdroid(device_serial: str, *, min_epoch: float | None = None) -> dict[str, object]:
+    path = _latest_pcapdroid_capture(device_serial, min_epoch=min_epoch)
+    if not path:
+        return {"latest_path": None, "latest_mtime": None}
+    mtime = None
+    try:
+        stat_out = adb_shell.run_shell(device_serial, ["stat", "-c", "%Y", path]).strip()
+        mtime = float(stat_out)
+    except Exception:
+        mtime = None
+    return {"latest_path": path, "latest_mtime": mtime}
+
+
+def _poll_latest_pcapdroid(
+    device_serial: str, *, min_epoch: float | None = None, timeout_s: float = 2.0
+) -> dict[str, object]:
+    deadline = time.time() + max(timeout_s, 0.1)
+    last = {"latest_path": None, "latest_mtime": None}
+    while time.time() < deadline:
+        last = _peek_latest_pcapdroid(device_serial, min_epoch=min_epoch)
+        if last.get("latest_path"):
+            return last
+        time.sleep(0.2)
+    return last
+
+
+def _wait_for_capture_path(
+    device_serial: str,
+    expected_path: str,
+    *,
+    min_epoch: float | None = None,
+    timeout_s: float = 6.0,
+    poll_s: float = 0.5,
+) -> str | None:
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        if _device_file_exists(device_serial, expected_path):
+            return expected_path
+        fallback = _latest_pcapdroid_capture(device_serial, min_epoch=min_epoch)
+        if fallback:
+            return fallback
+        time.sleep(poll_s)
+    return None
 
 
 __all__ = ["PcapdroidCaptureObserver", "PCAPDROID_PACKAGE"]

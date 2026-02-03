@@ -158,6 +158,7 @@ def get_basic_properties(serial: str) -> Dict[str, str]:
             "ro.product.model": "model",
             "ro.build.version.release": "android_version",
             "ro.build.version.sdk": "sdk_level",
+            "ro.build.version.security_patch": "security_patch_level",
         }
 
     result: Dict[str, str] = {}
@@ -181,6 +182,25 @@ def get_basic_properties(serial: str) -> Dict[str, str]:
         result["build_fingerprint"] = fingerprint
 
     return result
+
+
+def get_play_services_version(serial: str) -> str | None:
+    """Return the installed Google Play services versionName when available."""
+    try:
+        completed = adb_client.run_shell_command(
+            serial,
+            ["dumpsys", "package", "com.google.android.gms"],
+            timeout=ADB_TIMEOUT_DISCOVERY,
+        )
+    except RuntimeError:
+        return None
+    if completed.returncode != 0:
+        return None
+    for raw_line in completed.stdout.splitlines():
+        line = raw_line.strip()
+        if line.startswith("versionName="):
+            return line.split("=", 1)[-1].strip() or None
+    return None
 
 
 def build_device_summary(device: Dict[str, Optional[str]]) -> Dict[str, Optional[str]]:

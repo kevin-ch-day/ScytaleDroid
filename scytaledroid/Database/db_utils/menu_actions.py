@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 
 from scytaledroid.Database.db_utils import diagnostics
-from scytaledroid.Database.db_core import db_config
+from scytaledroid.Database.db_core import db_config, db_queries as core_q
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
 
 
@@ -96,8 +96,88 @@ def maybe_clear_screen() -> None:
     except Exception:
         print()
 
+def seed_paper_dataset_profile() -> None:
+    """Create or update the paper dataset profile and assign packages."""
+
+    profile_key = "RESEARCH_DATASET_ALPHA"
+    display_name = "Research Dataset Alpha (v1)"
+    description = "ScytaleDroid-Dyn-v1 research dataset (Tier 0/1/2 apps)"
+    scope_group = "research"
+    sort_order = 10
+    is_active = 1
+    packages = [
+        "com.zhiliaoapp.musically",
+        "com.instagram.android",
+        "com.reddit.frontpage",
+        "com.twitter.android",
+        "com.snapchat.android",
+        "com.facebook.katana",
+        "com.facebook.lite",
+        "com.linkedin.android",
+        "com.whatsapp",
+        "org.telegram.messenger",
+        "org.thoughtcrime.securesms",
+        "com.discord",
+        "com.facebook.orca",
+        "com.google.android.apps.messaging",
+        "com.tinder",
+        "tv.twitch.android.app",
+        "com.pinterest",
+    ]
+
+    print(status_messages.status("Seeding paper dataset profile (DB).", level="info"))
+    print(f"Profile key: {profile_key}")
+    print(f"Display name: {display_name}")
+    print(f"Packages: {len(packages)}")
+    if not prompt_utils.prompt_yes_no("Apply these updates now?", default=True):
+        return
+
+    profile_sql = """
+        INSERT INTO android_app_profiles (
+            profile_key,
+            display_name,
+            description,
+            scope_group,
+            sort_order,
+            is_active
+        ) VALUES (%s, %s, %s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+            display_name=VALUES(display_name),
+            description=VALUES(description),
+            scope_group=VALUES(scope_group),
+            sort_order=VALUES(sort_order),
+            is_active=VALUES(is_active)
+    """
+    core_q.run_sql_write(
+        profile_sql,
+        (
+            profile_key,
+            display_name,
+            description,
+            scope_group,
+            sort_order,
+            is_active,
+        ),
+        query_name="db_utils.seed_paper_profile",
+    )
+
+    app_sql = """
+        INSERT INTO apps (package_name, profile_key, publisher_key)
+        VALUES (%s, %s, 'UNKNOWN')
+        ON DUPLICATE KEY UPDATE profile_key=VALUES(profile_key)
+    """
+    payload = [(pkg, profile_key) for pkg in packages]
+    core_q.run_sql_many(app_sql, payload, query_name="db_utils.seed_paper_profile.apps")
+
+    placeholders = ", ".join(["%s"] * len(packages))
+    count_sql = f"SELECT COUNT(*) AS matched FROM apps WHERE package_name IN ({placeholders})"
+    rows = core_q.run_sql(count_sql, tuple(packages), fetch="one", dictionary=True)
+    matched = rows.get("matched") if isinstance(rows, dict) else None
+    print(status_messages.status(f"Updated apps: {matched or 0}", level="success"))
+    prompt_utils.press_enter_to_continue()
 
 __all__ = [
     "maybe_clear_screen",
     "show_connection_and_config",
+    "seed_paper_dataset_profile",
 ]

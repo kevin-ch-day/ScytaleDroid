@@ -12,7 +12,7 @@ def run_dynamic_analysis(
     duration_seconds: int = 120,
     device_serial: str | None = None,
     scenario_id: str = "basic_usage",
-    observer_ids: tuple[str, ...] = ("proxy_capture", "system_log_capture"),
+    observer_ids: tuple[str, ...] = ("system_log_capture",),
     interactive: bool = True,
     output_root: str | None = None,
     plan_path: str | None = None,
@@ -22,7 +22,7 @@ def run_dynamic_analysis(
     harvest_session_id: int | None = None,
     clear_logcat: bool = True,
     proxy_port: int = 8890,
-    sampling_rate_s: int = 1,
+    sampling_rate_s: int = 2,
 ) -> DynamicSessionResult:
     config = DynamicSessionConfig(
         package_name=package_name,

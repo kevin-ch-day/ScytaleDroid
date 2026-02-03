@@ -27,6 +27,9 @@ class EnvironmentManager:
             metadata.update(adb_devices.get_basic_properties(run_ctx.device_serial))
             metadata["device_serial"] = run_ctx.device_serial
             metadata["build_fingerprint"] = metadata.get("build_fingerprint")
+            play_services = adb_devices.get_play_services_version(run_ctx.device_serial)
+            if play_services:
+                metadata["play_services_version"] = play_services
         device_info_path = self._write_json(
             run_ctx,
             "artifacts/environment/device_info.json",

@@ -9,11 +9,13 @@ from scytaledroid.Database.db_utils.menus import (
     query_runner,
     schema_browser,
 )
+from scytaledroid.DynamicAnalysis.exports.dataset_export import export_manifest_csv
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
 
 from .menu_actions import (
     maybe_clear_screen,
+    seed_paper_dataset_profile,
     show_connection_and_config,
     show_db_status,
 )
@@ -34,6 +36,8 @@ def database_menu() -> None:
         "7": health_checks.prompt_cleanup_orphan_inventory,
         "8": health_checks.prompt_finalize_stale_runs,
         "9": health_checks.prompt_reset_static_data,
+        "10": seed_paper_dataset_profile,
+        "11": _run_manifest_export,
     }
 
     options: List[MenuOption] = [
@@ -73,6 +77,14 @@ def database_menu() -> None:
             "9",
             "Reset static analysis data",
         ),
+        MenuOption(
+            "10",
+            "Seed paper dataset profile",
+        ),
+        MenuOption(
+            "11",
+            "Export dynamic dataset manifest (CSV)",
+        ),
     ]
 
     while True:
@@ -104,6 +116,20 @@ def database_menu() -> None:
         action = actions.get(choice)
         if action:
             action()
+
+
+def _run_manifest_export() -> None:
+    from pathlib import Path
+    from scytaledroid.Config import app_config
+    from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
+
+    default_path = Path(app_config.OUTPUT_DIR) / "exports" / "scytaledroid_dyn_v1_manifest.csv"
+    print(status_messages.status(f"Export path: {default_path}", level="info"))
+    if not prompt_utils.prompt_yes_no("Generate manifest export now?", default=True):
+        return
+    output_path = export_manifest_csv(default_path)
+    print(status_messages.status(f"Manifest written: {output_path}", level="success"))
+    prompt_utils.press_enter_to_continue()
 
 
 if __name__ == "__main__":  # pragma: no cover

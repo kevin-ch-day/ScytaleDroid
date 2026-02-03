@@ -17,7 +17,7 @@ class DynamicSessionConfig:
     harvest_session_id: Optional[int] = None
     plan_path: Optional[str] = None
     plan_validation: Optional[object] = None
-    sampling_rate_s: int = 1
+    sampling_rate_s: int = 2
     probes: Sequence[str] = field(default_factory=tuple)
     scenario_id: str = "basic_usage"
     observer_ids: Sequence[str] = field(default_factory=tuple)

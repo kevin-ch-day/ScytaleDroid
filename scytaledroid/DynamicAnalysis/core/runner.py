@@ -34,7 +34,7 @@ def run_dynamic_session(
             "tier": config.tier,
         },
     )
-    observer_ids = set(config.observer_ids or ("proxy_capture", "system_log_capture"))
+    observer_ids = set(config.observer_ids or ("system_log_capture",))
     observers = []
     if "proxy_capture" in observer_ids:
         observers.append(ProxyCaptureObserver())
