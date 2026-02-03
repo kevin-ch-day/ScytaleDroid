@@ -37,6 +37,8 @@ def database_menu() -> None:
         "8": query_runner.run_query_menu,
         "9": health_checks.prompt_cleanup_orphan_inventory,
         "10": health_checks.prompt_finalize_stale_runs,
+        "12": health_checks.prompt_delete_orphan_permission_snapshots,
+        "13": health_checks.prompt_backfill_pcap_metadata,
         "11": health_checks.prompt_reset_static_data,
     }
 
@@ -51,6 +53,8 @@ def database_menu() -> None:
         MenuOption("8", "Curated queries (read-only)"),
         MenuOption("9", "Cleanup orphan snapshots (repair)"),
         MenuOption("10", "Recover stale RUNNING runs (finalize)"),
+        MenuOption("12", "Delete orphan permission snapshots (repair)"),
+        MenuOption("13", "Backfill PCAP metadata (repair)"),
         MenuOption("11", "Reset static analysis data (DESTRUCTIVE)"),
     ]
 
@@ -61,7 +65,7 @@ def database_menu() -> None:
         database = str(cfg.get("database", "<unknown>"))
         host = str(cfg.get("host", "<local>"))
         schema_ver = diagnostics.get_schema_version() or "<unknown>"
-        expected_schema = "0.2.3"
+        expected_schema = "0.2.4"
         menu_utils.print_header("Database Tools")
         print(f"Backend: {backend}")
         print(f"Database: {database}")
@@ -73,10 +77,15 @@ def database_menu() -> None:
             print(f"Schema: {schema_ver}")
         print()
 
+        research_options = options[:2]
+        read_only_options = options[2:8]
+        maintenance_options = [options[8], options[9], options[10], options[11]]
+        danger_options = [options[12]]
+
         menu_utils.print_section("Research / Tier-1")
         menu_utils.render_menu(
             MenuSpec(
-                items=options[:2],
+                items=research_options,
                 exit_label=None,
                 show_exit=False,
                 padding=True,
@@ -86,7 +95,7 @@ def database_menu() -> None:
         menu_utils.print_section("Read-only Diagnostics")
         menu_utils.render_menu(
             MenuSpec(
-                items=options[2:8],
+                items=read_only_options,
                 exit_label=None,
                 show_exit=False,
                 padding=True,
@@ -96,7 +105,7 @@ def database_menu() -> None:
         menu_utils.print_section("Maintenance / Repairs")
         menu_utils.render_menu(
             MenuSpec(
-                items=options[8:10],
+                items=maintenance_options,
                 exit_label=None,
                 show_exit=False,
                 padding=True,
@@ -106,7 +115,7 @@ def database_menu() -> None:
         menu_utils.print_section("Danger Zone (Destructive)")
         menu_utils.render_menu(
             MenuSpec(
-                items=options[10:],
+                items=danger_options,
                 exit_label="Back",
                 show_exit=True,
                 padding=True,

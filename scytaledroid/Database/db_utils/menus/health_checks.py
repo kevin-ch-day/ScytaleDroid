@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import textwrap
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 from scytaledroid.Database.db_core import run_sql
@@ -930,11 +932,17 @@ def run_tier1_audit_report() -> None:
     tier1_ready = scalar(
         """
         SELECT COUNT(*)
-        FROM dynamic_sessions
-        WHERE tier='dataset'
-          AND status='success'
-          AND captured_samples / NULLIF(expected_samples,0) >= 0.90
-          AND sample_max_gap_s <= (sampling_rate_s * 2)
+        FROM dynamic_sessions ds
+        WHERE ds.tier='dataset'
+          AND ds.status='success'
+          AND ds.captured_samples / NULLIF(ds.expected_samples,0) >= 0.90
+          AND ds.sample_max_gap_s <= (ds.sampling_rate_s * 2)
+          AND NOT EXISTS (
+            SELECT 1
+            FROM dynamic_session_issues i
+            WHERE i.dynamic_run_id = ds.dynamic_run_id
+              AND i.issue_code = 'telemetry_partial_samples'
+          )
         """
     )
     _print_status_line(
@@ -979,6 +987,15 @@ def run_tier1_audit_report() -> None:
                 )
                 print()
 
+    pcap_counts = _fetch_pcap_audit_counts()
+    if pcap_counts:
+        linked = pcap_counts.get("linked", 0)
+        exists = pcap_counts.get("exists", 0)
+        valid = pcap_counts.get("valid", 0)
+        detail = f"linked={linked} exists={exists} valid={valid}"
+        level = "ok" if linked and valid else "warn"
+        _print_status_line(level, "PCAP linkage/validity", detail=detail)
+
     netstats_summary = _fetch_netstats_missing_summary()
     if netstats_summary:
         print(status_messages.status("Tier-1 netstats missing summary:", level="info"))
@@ -988,14 +1005,22 @@ def run_tier1_audit_report() -> None:
                 str(row.get("run_count") or 0),
                 str(row.get("total_missing") or 0),
                 str(row.get("max_missing") or 0),
+                row.get("missing_pct", "n/a"),
             ]
             for row in netstats_summary
         ]
         table_utils.render_table(
-            ["package_name", "runs", "missing_rows_total", "missing_rows_max"],
+            ["package_name", "runs", "missing_rows_total", "missing_rows_max", "missing_pct"],
             table_rows,
             compact=True,
         )
+        if any(row.get("missing_pct_value", 0) > 0.10 for row in netstats_summary):
+            print(
+                status_messages.status(
+                    "Warning: netstats missing rate exceeds 10% for at least one dataset app.",
+                    level="warn",
+                )
+            )
         print()
 
     prompt_utils.press_enter_to_continue()
@@ -1057,11 +1082,201 @@ def prompt_finalize_stale_runs() -> None:
     prompt_utils.press_enter_to_continue()
 
 
+def prompt_delete_orphan_permission_snapshots() -> None:
+    print()
+    menu_utils.print_header("Delete Orphan Permission Audit Snapshots")
+
+    rows = run_sql(
+        """
+        SELECT snapshot_id, snapshot_key, created_at
+        FROM permission_audit_snapshots
+        WHERE run_id IS NULL
+          AND static_run_id IS NULL
+        ORDER BY created_at DESC
+        LIMIT 10
+        """,
+        fetch="all",
+        dictionary=True,
+    ) or []
+    count = scalar(
+        """
+        SELECT COUNT(*)
+        FROM permission_audit_snapshots
+        WHERE run_id IS NULL
+          AND static_run_id IS NULL
+        """
+    ) or 0
+
+    if count == 0:
+        print(status_messages.status("No orphan permission_audit_snapshots found.", level="success"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    print(status_messages.status(f"Found {count} orphan snapshot(s).", level="warn"))
+    if rows:
+        table_rows = [
+            [
+                str(row.get("snapshot_id") or ""),
+                str(row.get("snapshot_key") or ""),
+                str(row.get("created_at") or ""),
+            ]
+            for row in rows
+        ]
+        table_utils.render_table(["snapshot_id", "snapshot_key", "created_at"], table_rows, compact=True)
+        print()
+
+    if not prompt_utils.prompt_yes_no("Proceed with delete?", default=False):
+        print(status_messages.status("Delete cancelled.", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    confirmation = prompt_utils.prompt_text(
+        "Type DELETE ORPHANS to confirm",
+        required=True,
+    ).strip()
+    if confirmation != "DELETE ORPHANS":
+        print(status_messages.status("Confirmation mismatch. Delete cancelled.", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    started_at = datetime.now(timezone.utc)
+    run_sql(
+        """
+        DELETE FROM permission_audit_snapshots
+        WHERE run_id IS NULL
+          AND static_run_id IS NULL
+        """,
+        fetch=None,
+    )
+    finished_at = datetime.now(timezone.utc)
+    deleted_rows = int(count or 0)
+    log_db_op(
+        operation="delete_orphan_permission_snapshots",
+        started_at=started_at,
+        finished_at=finished_at,
+        success=True,
+        error_text=f"deleted_rows={deleted_rows}",
+    )
+    print(status_messages.status(f"Deleted {deleted_rows} orphan snapshot(s).", level="success"))
+    prompt_utils.press_enter_to_continue()
+
+
+def prompt_backfill_pcap_metadata() -> None:
+    print()
+    menu_utils.print_header("Backfill PCAP Metadata")
+
+    rows = run_sql(
+        """
+        SELECT dynamic_run_id, evidence_path
+        FROM dynamic_sessions
+        WHERE pcap_relpath IS NULL
+          AND evidence_path IS NOT NULL
+        ORDER BY started_at_utc DESC
+        LIMIT 25
+        """,
+        fetch="all",
+        dictionary=True,
+    ) or []
+    count = scalar(
+        """
+        SELECT COUNT(*)
+        FROM dynamic_sessions
+        WHERE pcap_relpath IS NULL
+          AND evidence_path IS NOT NULL
+        """
+    ) or 0
+
+    if count == 0:
+        print(status_messages.status("No runs require PCAP backfill.", level="success"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    print(status_messages.status(f"Found {count} run(s) missing PCAP metadata.", level="warn"))
+    if rows:
+        table_rows = [
+            [str(row.get("dynamic_run_id") or ""), str(row.get("evidence_path") or "")]
+            for row in rows
+        ]
+        table_utils.render_table(["dynamic_run_id", "evidence_path"], table_rows, compact=True)
+        print()
+
+    if not prompt_utils.prompt_yes_no("Backfill PCAP metadata now?", default=True):
+        print(status_messages.status("Backfill cancelled.", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    updated = 0
+    started_at = datetime.now(timezone.utc)
+    for row in rows:
+        run_id = row.get("dynamic_run_id")
+        evidence_path = row.get("evidence_path")
+        if not run_id or not evidence_path:
+            continue
+        summary_path = Path(str(evidence_path)) / "analysis" / "summary.json"
+        if not summary_path.exists():
+            continue
+        try:
+            payload = json.loads(summary_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        capture = payload.get("capture") or {}
+        evidence = payload.get("evidence") or []
+        pcap_relpath = None
+        pcap_sha256 = None
+        pcap_bytes = None
+        for entry in evidence:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("type") in {"pcapdroid_capture", "network_capture", "proxy_capture"}:
+                pcap_relpath = entry.get("relative_path")
+                pcap_sha256 = entry.get("sha256")
+                pcap_bytes = entry.get("size_bytes")
+                break
+        if pcap_bytes is None and isinstance(capture, dict):
+            pcap_bytes = capture.get("pcap_size_bytes")
+        pcap_valid = capture.get("pcap_valid")
+        pcap_validated_at = datetime.now(timezone.utc) if pcap_valid is not None else None
+        run_sql(
+            """
+            UPDATE dynamic_sessions
+            SET pcap_relpath = %s,
+                pcap_bytes = %s,
+                pcap_sha256 = %s,
+                pcap_valid = %s,
+                pcap_validated_at_utc = %s
+            WHERE dynamic_run_id = %s
+            """,
+            (
+                pcap_relpath,
+                pcap_bytes,
+                pcap_sha256,
+                1 if pcap_valid is True else 0 if pcap_valid is False else None,
+                pcap_validated_at.strftime("%Y-%m-%d %H:%M:%S") if pcap_validated_at else None,
+                run_id,
+            ),
+            fetch=None,
+        )
+        updated += 1
+
+    finished_at = datetime.now(timezone.utc)
+    log_db_op(
+        operation="backfill_pcap_metadata",
+        started_at=started_at,
+        finished_at=finished_at,
+        success=True,
+        error_text=f"updated_rows={updated}",
+    )
+    print(status_messages.status(f"Backfilled PCAP metadata for {updated} run(s).", level="success"))
+    prompt_utils.press_enter_to_continue()
+
+
 __all__ = [
     "run_health_summary",
     "run_health_checks",
     "run_tier1_audit_report",
     "prompt_finalize_stale_runs",
+    "prompt_delete_orphan_permission_snapshots",
+    "prompt_backfill_pcap_metadata",
     "prompt_reset_static_data",
 ]
 
@@ -1119,7 +1334,8 @@ def _fetch_netstats_missing_summary() -> list[dict[str, object]]:
           package_name,
           COUNT(*) AS run_count,
           SUM(COALESCE(netstats_missing_rows,0)) AS total_missing,
-          MAX(COALESCE(netstats_missing_rows,0)) AS max_missing
+          MAX(COALESCE(netstats_missing_rows,0)) AS max_missing,
+          SUM(COALESCE(netstats_rows,0)) AS total_rows
         FROM dynamic_sessions
         WHERE tier='dataset'
         GROUP BY package_name
@@ -1128,7 +1344,54 @@ def _fetch_netstats_missing_summary() -> list[dict[str, object]]:
         fetch="all",
         dictionary=True,
     )
-    return rows or []
+    summary: list[dict[str, object]] = []
+    for row in rows or []:
+        total_missing = float(row.get("total_missing") or 0)
+        total_rows = float(row.get("total_rows") or 0)
+        missing_pct = None
+        if total_rows > 0:
+            missing_pct = total_missing / total_rows
+        summary.append(
+            {
+                "package_name": row.get("package_name"),
+                "run_count": row.get("run_count"),
+                "total_missing": row.get("total_missing"),
+                "max_missing": row.get("max_missing"),
+                "missing_pct": f"{missing_pct:.1%}" if missing_pct is not None else "n/a",
+                "missing_pct_value": missing_pct or 0.0,
+            }
+        )
+    return summary
+
+
+def _fetch_pcap_audit_counts() -> dict[str, int]:
+    linked_rows = run_sql(
+        """
+        SELECT dynamic_run_id, evidence_path, pcap_relpath, pcap_valid
+        FROM dynamic_sessions
+        WHERE tier='dataset'
+          AND pcap_relpath IS NOT NULL
+        """,
+        fetch="all",
+        dictionary=True,
+    ) or []
+    linked = len(linked_rows)
+    exists = 0
+    valid = 0
+    for row in linked_rows:
+        if row.get("pcap_valid") == 1:
+            valid += 1
+        evidence_path = row.get("evidence_path")
+        relpath = row.get("pcap_relpath")
+        if not evidence_path or not relpath:
+            continue
+        try:
+            pcap_path = Path(str(evidence_path)) / str(relpath)
+            if pcap_path.exists():
+                exists += 1
+        except Exception:
+            continue
+    return {"linked": linked, "exists": exists, "valid": valid}
 
 
 def _count_tables(table_names: Sequence[str]) -> dict[str, int]:

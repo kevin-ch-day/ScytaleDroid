@@ -30,6 +30,7 @@ def persist_dynamic_summary(
     network_signal_quality = _extract_network_signal_quality(payload)
     netstats_rows = _extract_netstats_rows(payload)
     netstats_missing_rows = _extract_netstats_missing_rows(payload)
+    pcap_meta = _extract_pcap_meta(payload, result.evidence_path)
 
     duration_seconds = config.duration_seconds
     if (not duration_seconds or int(duration_seconds) == 0) and result.started_at and result.ended_at:
@@ -63,6 +64,11 @@ def persist_dynamic_summary(
         "network_signal_quality": network_signal_quality,
         "netstats_rows": netstats_rows,
         "netstats_missing_rows": netstats_missing_rows,
+        "pcap_relpath": pcap_meta.get("pcap_relpath"),
+        "pcap_bytes": pcap_meta.get("pcap_bytes"),
+        "pcap_sha256": pcap_meta.get("pcap_sha256"),
+        "pcap_valid": pcap_meta.get("pcap_valid"),
+        "pcap_validated_at_utc": pcap_meta.get("pcap_validated_at_utc"),
     }
     if not _dynamic_sessions_has_column("tier"):
         session_row.pop("tier", None)
@@ -74,6 +80,16 @@ def persist_dynamic_summary(
         session_row.pop("netstats_rows", None)
     if not _dynamic_sessions_has_column("netstats_missing_rows"):
         session_row.pop("netstats_missing_rows", None)
+    if not _dynamic_sessions_has_column("pcap_relpath"):
+        session_row.pop("pcap_relpath", None)
+    if not _dynamic_sessions_has_column("pcap_bytes"):
+        session_row.pop("pcap_bytes", None)
+    if not _dynamic_sessions_has_column("pcap_sha256"):
+        session_row.pop("pcap_sha256", None)
+    if not _dynamic_sessions_has_column("pcap_valid"):
+        session_row.pop("pcap_valid", None)
+    if not _dynamic_sessions_has_column("pcap_validated_at_utc"):
+        session_row.pop("pcap_validated_at_utc", None)
 
     _insert_dynamic_session(session_row)
 
@@ -120,7 +136,11 @@ def _persist_telemetry(dynamic_run_id: str, payload: Mapping[str, Any], *, tier:
     process_rows = payload.get("telemetry_process") or []
     network_rows = payload.get("telemetry_network") or []
     if tier == "dataset":
-        network_rows = [row for row in network_rows if row.get("source") == "netstats"]
+        network_rows = [
+            row
+            for row in network_rows
+            if row.get("source") in {"netstats", "netstats_missing"}
+        ]
     if process_rows:
         _insert_process_rows(dynamic_run_id, process_rows)
     if network_rows:
@@ -433,6 +453,45 @@ def _extract_netstats_missing_rows(payload: Mapping[str, Any]) -> int | None:
     if not isinstance(rows, list):
         return None
     return sum(1 for row in rows if row.get("source") == "netstats_missing")
+
+
+def _extract_pcap_meta(payload: Mapping[str, Any], evidence_path: str | None) -> dict[str, Any]:
+    capture = payload.get("capture") or {}
+    evidence = payload.get("evidence") or []
+    if not isinstance(capture, dict):
+        capture = {}
+    if not isinstance(evidence, list):
+        evidence = []
+
+    pcap_relpath = None
+    pcap_sha256 = None
+    pcap_bytes = None
+    for entry in evidence:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("type") in {"pcapdroid_capture", "network_capture", "proxy_capture"}:
+            pcap_relpath = entry.get("relative_path")
+            pcap_sha256 = entry.get("sha256")
+            pcap_bytes = entry.get("size_bytes")
+            break
+
+    pcap_valid = capture.get("pcap_valid")
+    pcap_size = capture.get("pcap_size_bytes")
+    if pcap_bytes is None and isinstance(pcap_size, int):
+        pcap_bytes = pcap_size
+
+    pcap_validated_at = None
+    if pcap_valid is not None:
+        pcap_validated_at = datetime.now(timezone.utc)
+
+    return {
+        "pcap_relpath": pcap_relpath,
+        "pcap_bytes": _safe_int(pcap_bytes),
+        "pcap_sha256": pcap_sha256,
+        "pcap_valid": 1 if pcap_valid is True else 0 if pcap_valid is False else None,
+        "pcap_validated_at_utc": _fmt_dt(pcap_validated_at),
+        "pcap_evidence_path": evidence_path,
+    }
 
 
 _DYN_SESSIONS_COLUMNS: set[str] | None = None

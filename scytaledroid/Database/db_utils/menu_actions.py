@@ -245,6 +245,68 @@ def ensure_dynamic_network_quality_column(*, prompt_user: bool = True) -> bool:
     return True
 
 
+def ensure_dynamic_pcap_columns(*, prompt_user: bool = True) -> bool:
+    """Ensure dynamic_sessions has PCAP metadata columns (DB migration helper)."""
+
+    cfg = db_config.DB_CONFIG
+    backend = str(cfg.get("engine", "sqlite"))
+    if backend != "mysql":
+        print(
+            status_messages.status(
+                "PCAP metadata migrations are only supported for MySQL/MariaDB backends.",
+                level="warn",
+            )
+        )
+        return False
+
+    columns = diagnostics.get_table_columns("dynamic_sessions") or []
+    column_set = {col.lower() for col in columns}
+    needed = {"pcap_relpath", "pcap_bytes", "pcap_sha256", "pcap_valid", "pcap_validated_at_utc"}
+    missing = sorted(needed - column_set)
+    if not missing:
+        print(status_messages.status("dynamic_sessions PCAP columns already present.", level="success"))
+        return True
+
+    print(status_messages.status(f"Missing dynamic_sessions columns: {', '.join(missing)}.", level="warn"))
+    if prompt_user and not prompt_utils.prompt_yes_no(
+        "Apply migration now? (ALTER TABLE dynamic_sessions ADD COLUMN pcap metadata)",
+        default=True,
+    ):
+        return False
+
+    if "pcap_relpath" in missing:
+        core_q.run_sql_write(
+            "ALTER TABLE dynamic_sessions ADD COLUMN pcap_relpath VARCHAR(512) DEFAULT NULL",
+            query_name="db_utils.dynamic_sessions.add_pcap_relpath",
+        )
+        print(status_messages.status("Added dynamic_sessions.pcap_relpath column.", level="success"))
+    if "pcap_bytes" in missing:
+        core_q.run_sql_write(
+            "ALTER TABLE dynamic_sessions ADD COLUMN pcap_bytes BIGINT DEFAULT NULL",
+            query_name="db_utils.dynamic_sessions.add_pcap_bytes",
+        )
+        print(status_messages.status("Added dynamic_sessions.pcap_bytes column.", level="success"))
+    if "pcap_sha256" in missing:
+        core_q.run_sql_write(
+            "ALTER TABLE dynamic_sessions ADD COLUMN pcap_sha256 CHAR(64) DEFAULT NULL",
+            query_name="db_utils.dynamic_sessions.add_pcap_sha256",
+        )
+        print(status_messages.status("Added dynamic_sessions.pcap_sha256 column.", level="success"))
+    if "pcap_valid" in missing:
+        core_q.run_sql_write(
+            "ALTER TABLE dynamic_sessions ADD COLUMN pcap_valid TINYINT(1) DEFAULT NULL",
+            query_name="db_utils.dynamic_sessions.add_pcap_valid",
+        )
+        print(status_messages.status("Added dynamic_sessions.pcap_valid column.", level="success"))
+    if "pcap_validated_at_utc" in missing:
+        core_q.run_sql_write(
+            "ALTER TABLE dynamic_sessions ADD COLUMN pcap_validated_at_utc DATETIME DEFAULT NULL",
+            query_name="db_utils.dynamic_sessions.add_pcap_validated_at",
+        )
+        print(status_messages.status("Added dynamic_sessions.pcap_validated_at_utc column.", level="success"))
+    return True
+
+
 def ensure_dynamic_netstats_rows_columns(*, prompt_user: bool = True) -> bool:
     """Ensure dynamic_sessions has netstats row counters (DB migration helper)."""
 
@@ -301,7 +363,8 @@ def ensure_dynamic_tier_migrations(*, prompt_user: bool = True) -> bool:
         tier_ok = ensure_dynamic_tier_column(prompt_user=prompt_user)
         quality_ok = ensure_dynamic_network_quality_column(prompt_user=prompt_user)
         netstats_ok = ensure_dynamic_netstats_rows_columns(prompt_user=prompt_user)
-        success = tier_ok and quality_ok and netstats_ok
+        pcap_ok = ensure_dynamic_pcap_columns(prompt_user=prompt_user)
+        success = tier_ok and quality_ok and netstats_ok and pcap_ok
         target_version = _tier1_schema_version()
         if success and schema_before != target_version:
             _record_schema_version(target_version)
@@ -323,7 +386,7 @@ def ensure_dynamic_tier_migrations(*, prompt_user: bool = True) -> bool:
 
 
 def _tier1_schema_version() -> str:
-    return "0.2.3"
+    return "0.2.4"
 
 
 def _ensure_db_ops_log_table() -> None:

@@ -23,6 +23,7 @@ def dynamic_analysis_menu() -> None:
         MenuOption("1", "Launch sandbox run"),
         MenuOption("2", "View recent dynamic sessions"),
         MenuOption("3", "Configure instrumentation"),
+        MenuOption("4", "Run Research Dataset Alpha (guided)"),
         MenuOption("9", "Force FAIL (dev/test)"),
     ]
 
@@ -200,6 +201,11 @@ def dynamic_analysis_menu() -> None:
             prompt_utils.press_enter_to_continue()
             continue
 
+        if choice == "4":
+            _run_guided_dataset_run()
+            prompt_utils.press_enter_to_continue()
+            continue
+
         if choice == "9":
             _run_force_fail()
             prompt_utils.press_enter_to_continue()
@@ -260,6 +266,192 @@ def _select_dynamic_target() -> tuple[str, str] | None:
     if package_name:
         return _resolve_custom_tier(package_name, dataset_pkgs)
     return None
+
+
+def _run_guided_dataset_run() -> None:
+    print()
+    menu_utils.print_header("Guided Dataset Run")
+    devices, warnings = adb_devices.scan_devices()
+    for warning in warnings:
+        print(status_messages.status(warning, level="warn"))
+    if not devices:
+        print(status_messages.status("No devices detected via adb.", level="error"))
+        return
+
+    device_options = [
+        MenuOption(str(index + 1), adb_devices.get_device_label(device))
+        for index, device in enumerate(devices)
+    ]
+    device_spec = MenuSpec(items=device_options, exit_label="Cancel", show_exit=True)
+    menu_utils.render_menu(device_spec)
+    device_choice = prompt_utils.get_choice(
+        [option.key for option in device_options] + ["0"],
+        default="1",
+    )
+    if device_choice == "0":
+        return
+    device_index = int(device_choice) - 1
+    device_serial = devices[device_index].get("serial")
+    if not device_serial:
+        print(status_messages.status("Selected device missing serial.", level="error"))
+        return
+
+    is_rooted = _print_root_status(device_serial)
+    _print_network_status(device_serial)
+
+    scenario_id = "basic_usage"
+    duration_seconds = 0
+    label = "Dataset (guided)"
+
+    groups = group_artifacts()
+    dataset_pkgs = _load_profile_packages("RESEARCH_DATASET_ALPHA")
+    if not dataset_pkgs:
+        print(status_messages.status("Research Dataset Alpha profile has no apps.", level="warn"))
+        return
+
+    available = {group.package_name.lower() for group in groups if group.package_name}
+    scoped_groups = tuple(
+        group for group in groups if group.package_name and group.package_name.lower() in available.intersection(dataset_pkgs)
+    )
+    if not scoped_groups:
+        print(
+            status_messages.status(
+                "No APK artifacts available for Research Dataset Alpha. Pull APKs or use Custom package name.",
+                level="warn",
+            )
+        )
+        return
+
+    package_name = _select_package_from_groups(scoped_groups, title="Research Dataset Alpha apps")
+    if not package_name:
+        return
+
+    tier = "dataset"
+
+    print()
+    menu_utils.print_header("Dynamic Run Observers")
+    observer_ids: list[str] = []
+    use_pcapdroid = False
+    if _device_has_pcapdroid(device_serial):
+        use_pcapdroid = prompt_utils.prompt_yes_no(
+            "Enable VPN capture via PCAPdroid?",
+            default=not is_rooted,
+        )
+        if use_pcapdroid:
+            print(
+                status_messages.status(
+                    "PCAPdroid scope: app-only traffic (UID). If traffic is missing, consider full-device capture "
+                    "for diagnostics.",
+                    level="info",
+                )
+            )
+            observer_ids.append("pcapdroid_capture")
+    else:
+        print(status_messages.status("PCAPdroid not installed; VPN capture unavailable.", level="warn"))
+
+    use_logs = prompt_utils.prompt_yes_no("Enable system log capture?", default=True)
+    if use_logs:
+        observer_ids.append("system_log_capture")
+
+    if not observer_ids:
+        print(status_messages.status("Select at least one observer.", level="error"))
+        return
+
+    plan_selection = _resolve_plan_selection(package_name)
+    if not plan_selection:
+        return
+    plan_path = plan_selection["plan_path"]
+    static_run_id = plan_selection["static_run_id"]
+    _print_plan_selection_banner(plan_selection)
+    clear_logcat = prompt_utils.prompt_yes_no("Clear logcat at run start?", default=True)
+
+    from .run_dynamic_analysis import run_dynamic_analysis
+
+    result = run_dynamic_analysis(
+        package_name,
+        duration_seconds=duration_seconds,
+        device_serial=device_serial,
+        scenario_id=scenario_id,
+        observer_ids=tuple(observer_ids),
+        interactive=True,
+        plan_path=plan_path,
+        tier=tier,
+        static_run_id=static_run_id,
+        clear_logcat=clear_logcat,
+        proxy_port=8890,
+    )
+    _print_run_summary(result, label)
+    if result.dynamic_run_id:
+        _print_tier1_qa_result(result.dynamic_run_id)
+
+
+def _print_tier1_qa_result(dynamic_run_id: str) -> None:
+    row = run_sql(
+        """
+        SELECT
+          ds.dynamic_run_id,
+          ds.status,
+          ds.tier,
+          ds.sampling_rate_s,
+          ds.expected_samples,
+          ds.captured_samples,
+          ds.sample_max_gap_s,
+          MAX(CASE WHEN i.issue_code = 'telemetry_partial_samples' THEN 1 ELSE 0 END) AS telemetry_partial
+        FROM dynamic_sessions ds
+        LEFT JOIN dynamic_session_issues i
+          ON i.dynamic_run_id = ds.dynamic_run_id
+        WHERE ds.dynamic_run_id = %s
+        GROUP BY ds.dynamic_run_id, ds.status, ds.tier, ds.sampling_rate_s,
+                 ds.expected_samples, ds.captured_samples, ds.sample_max_gap_s
+        """,
+        (dynamic_run_id,),
+        fetch="one",
+        dictionary=True,
+    )
+    if not row:
+        print(status_messages.status("Tier-1 QA check unavailable for this run.", level="warn"))
+        return
+
+    failures = []
+    if row.get("tier") != "dataset":
+        failures.append("tier_not_dataset")
+    if row.get("status") != "success":
+        failures.append("status_not_success")
+    ratio = _safe_ratio(row.get("captured_samples"), row.get("expected_samples"))
+    if ratio is None:
+        failures.append("missing_capture_ratio")
+    elif ratio < 0.90:
+        failures.append("low_capture_ratio")
+    try:
+        sampling_rate = float(row.get("sampling_rate_s"))
+        max_gap = float(row.get("sample_max_gap_s"))
+        if max_gap > (sampling_rate * 2):
+            failures.append("max_gap_exceeded")
+    except (TypeError, ValueError):
+        failures.append("missing_gap_stats")
+    if row.get("telemetry_partial"):
+        failures.append("telemetry_partial_samples")
+
+    if failures:
+        print(
+            status_messages.status(
+                f"Tier-1 QA: FAIL ({', '.join(failures)})",
+                level="warn",
+            )
+        )
+    else:
+        print(status_messages.status("Tier-1 QA: PASS", level="success"))
+
+
+def _safe_ratio(captured: object, expected: object) -> float | None:
+    try:
+        cap = float(captured)
+        exp = float(expected)
+    except (TypeError, ValueError):
+        return None
+    if exp == 0:
+        return None
+    return cap / exp
 
 
 def _resolve_custom_tier(package_name: str, dataset_pkgs: set[str]) -> tuple[str, str]:

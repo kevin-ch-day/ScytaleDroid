@@ -31,6 +31,7 @@ def export_tier1_pack(output_dir: Path) -> dict[str, Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = output_dir / "scytaledroid_dyn_v1_manifest.csv"
     summary_path = output_dir / "scytaledroid_dyn_v1_summary.csv"
+    rollup_path = output_dir / "scytaledroid_dyn_v1_rollup.csv"
 
     manifest_rows = _fetch_manifest_rows()
     if manifest_rows:
@@ -44,6 +45,12 @@ def export_tier1_pack(output_dir: Path) -> dict[str, Path]:
     else:
         _write_csv(summary_path, [])
 
+    rollup_rows = _build_tier1_rollup_rows(manifest_rows)
+    if rollup_rows:
+        _write_csv(rollup_path, rollup_rows)
+    else:
+        _write_csv(rollup_path, [])
+
     included_run_ids = [
         row["dynamic_run_id"]
         for row in manifest_rows
@@ -56,6 +63,7 @@ def export_tier1_pack(output_dir: Path) -> dict[str, Path]:
     return {
         "manifest": manifest_path,
         "summary": summary_path,
+        "rollup": rollup_path,
         "telemetry_dir": telemetry_dir,
     }
 
@@ -93,12 +101,24 @@ def _fetch_manifest_rows() -> list[dict[str, Any]]:
     has_quality = _dynamic_sessions_has_column("network_signal_quality")
     has_netstats_rows = _dynamic_sessions_has_column("netstats_rows")
     has_netstats_missing = _dynamic_sessions_has_column("netstats_missing_rows")
+    has_pcap_relpath = _dynamic_sessions_has_column("pcap_relpath")
+    has_pcap_bytes = _dynamic_sessions_has_column("pcap_bytes")
+    has_pcap_sha256 = _dynamic_sessions_has_column("pcap_sha256")
+    has_pcap_valid = _dynamic_sessions_has_column("pcap_valid")
+    has_pcap_validated = _dynamic_sessions_has_column("pcap_validated_at_utc")
     tier_select = "ds.tier" if has_tier else "NULL AS tier"
     netstats_select = "ds.netstats_available" if has_netstats else "NULL AS netstats_available"
     quality_select = "ds.network_signal_quality" if has_quality else "NULL AS network_signal_quality"
     netstats_rows_select = "ds.netstats_rows" if has_netstats_rows else "NULL AS netstats_rows"
     netstats_missing_select = (
         "ds.netstats_missing_rows" if has_netstats_missing else "NULL AS netstats_missing_rows"
+    )
+    pcap_relpath_select = "ds.pcap_relpath" if has_pcap_relpath else "NULL AS pcap_relpath"
+    pcap_bytes_select = "ds.pcap_bytes" if has_pcap_bytes else "NULL AS pcap_bytes"
+    pcap_sha256_select = "ds.pcap_sha256" if has_pcap_sha256 else "NULL AS pcap_sha256"
+    pcap_valid_select = "ds.pcap_valid" if has_pcap_valid else "NULL AS pcap_valid"
+    pcap_validated_select = (
+        "ds.pcap_validated_at_utc" if has_pcap_validated else "NULL AS pcap_validated_at_utc"
     )
     netstats_gate = "WHEN ds.netstats_available = 0 THEN 'exclude_netstats'" if has_netstats else ""
     sql = f"""
@@ -123,6 +143,11 @@ def _fetch_manifest_rows() -> list[dict[str, Any]]:
           ds.status,
           {netstats_rows_select},
           {netstats_missing_select},
+          {pcap_relpath_select},
+          {pcap_bytes_select},
+          {pcap_sha256_select},
+          {pcap_valid_select},
+          {pcap_validated_select},
           CASE
             WHEN ds.tier IS NOT NULL AND ds.tier <> 'dataset' THEN 'exclude_non_dataset'
             WHEN ds.duration_seconds IS NULL OR ds.duration_seconds < 90 THEN 'exclude_duration'
@@ -161,6 +186,59 @@ def _build_tier1_summary_rows(manifest_rows: list[dict[str, Any]]) -> list[dict[
             }
         )
     return summary
+
+
+def _build_tier1_rollup_rows(manifest_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not manifest_rows:
+        return []
+    rollup: dict[str, dict[str, Any]] = {}
+    for row in manifest_rows:
+        pkg = row.get("package_name") or "<unknown>"
+        bucket = rollup.setdefault(
+            pkg,
+            {
+                "package_name": pkg,
+                "runs_total": 0,
+                "runs_included": 0,
+                "runs_excluded": 0,
+                "avg_capture_ratio": [],
+                "netstats_missing_pct": [],
+            },
+        )
+        bucket["runs_total"] += 1
+        if row.get("inclusion_status") == "include":
+            bucket["runs_included"] += 1
+        else:
+            bucket["runs_excluded"] += 1
+        ratio = _safe_ratio(row.get("captured_samples"), row.get("expected_samples"))
+        if ratio is not None:
+            bucket["avg_capture_ratio"].append(ratio)
+        missing_rows = row.get("netstats_missing_rows")
+        total_rows = row.get("netstats_rows")
+        try:
+            missing = float(missing_rows)
+            total = float(total_rows)
+        except (TypeError, ValueError):
+            missing = None
+            total = None
+        if missing is not None and total and total > 0:
+            bucket["netstats_missing_pct"].append(missing / total)
+
+    output: list[dict[str, Any]] = []
+    for pkg, bucket in rollup.items():
+        ratios = bucket.pop("avg_capture_ratio")
+        miss_pct = bucket.pop("netstats_missing_pct")
+        output.append(
+            {
+                "package_name": pkg,
+                "runs_total": bucket["runs_total"],
+                "runs_included": bucket["runs_included"],
+                "runs_excluded": bucket["runs_excluded"],
+                "avg_capture_ratio": round(sum(ratios) / len(ratios), 3) if ratios else None,
+                "avg_netstats_missing_pct": round(sum(miss_pct) / len(miss_pct), 3) if miss_pct else None,
+            }
+        )
+    return output
 
 
 def _safe_ratio(captured: object, expected: object) -> float | None:

@@ -296,14 +296,27 @@ def _collect_network_sample(
             if timed_out:
                 row["collector_status"] = "timeout"
             elif rc == 0 and f"uid={uid}" in out:
-                bytes_in, bytes_out = parse_netstats_detail(out, uid)
-                row["bytes_in"] = bytes_in
-                row["bytes_out"] = bytes_out
-                row["conn_count"] = ""
-                row["source"] = "netstats"
-                row["best_effort"] = 0
-                row["collector_status"] = "ok"
-                return row
+                has_rx = "rxBytes=" in out or "txBytes=" in out
+                if has_rx:
+                    bytes_in, bytes_out = parse_netstats_detail(out, uid)
+                    row["bytes_in"] = bytes_in
+                    row["bytes_out"] = bytes_out
+                    row["conn_count"] = ""
+                    row["source"] = "netstats"
+                    row["best_effort"] = 0
+                    row["collector_status"] = "ok"
+                    return row
+                row["collector_status"] = "unsupported_format"
+                rc2, out2, timed_out2 = _run_shell(serial, ["dumpsys", "netstats", "--uid", uid], timeout=5.0)
+                if not timed_out2 and rc2 == 0 and ("rxBytes=" in out2 or "txBytes=" in out2):
+                    bytes_in, bytes_out = parse_netstats_detail(out2, uid)
+                    row["bytes_in"] = bytes_in
+                    row["bytes_out"] = bytes_out
+                    row["conn_count"] = ""
+                    row["source"] = "netstats"
+                    row["best_effort"] = 0
+                    row["collector_status"] = "ok"
+                    return row
         except Exception:
             pass
         if not allow_fallback_iface:

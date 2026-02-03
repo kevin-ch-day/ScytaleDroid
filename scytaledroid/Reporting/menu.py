@@ -11,6 +11,7 @@ from .menu_actions import (
     handle_static_report,
     handle_tier1_audit_report,
     handle_tier1_export_pack,
+    handle_tier1_qa_failures_report,
     fetch_tier1_status,
     view_saved_reports,
 )
@@ -22,6 +23,7 @@ def reporting_menu() -> None:
     actions = {
         "1": handle_tier1_export_pack,
         "2": handle_tier1_audit_report,
+        "7": handle_tier1_qa_failures_report,
         "3": handle_device_report,
         "4": handle_static_report,
         "5": view_saved_reports,
@@ -31,6 +33,7 @@ def reporting_menu() -> None:
     options = [
         MenuOption("1", "Export Tier-1 dataset pack (manifest + telemetry + summary)"),
         MenuOption("2", "Tier-1 audit report (dataset readiness)"),
+        MenuOption("7", "Tier-1 QA failures (last 10 runs)"),
         MenuOption("3", "Generate device summary report"),
         MenuOption("4", "Generate static analysis report"),
         MenuOption("5", "View saved reports"),
@@ -80,7 +83,7 @@ def reporting_menu() -> None:
         menu_utils.print_section("Research / Tier-1")
         menu_utils.render_menu(
             MenuSpec(
-                items=options[:2],
+                items=options[:3],
                 show_exit=False,
                 exit_label=None,
                 show_descriptions=False,

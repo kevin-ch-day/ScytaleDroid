@@ -53,7 +53,7 @@ class ManualScenarioRunner:
             if on_end:
                 on_end()
             elapsed = int((ended_at - started_at).total_seconds())
-            print(status_messages.status(f"Scenario elapsed time: {elapsed}s.", level="info"))
+            print(status_messages.status(f"Scenario elapsed time: {_format_duration(elapsed)}.", level="info"))
         else:
             started_at = datetime.now(timezone.utc)
             if on_start:
@@ -66,15 +66,24 @@ class ManualScenarioRunner:
 
 
 def _run_countdown(duration_seconds: int) -> datetime:
-    if not sys.stdin.isatty():
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
         time.sleep(max(duration_seconds, 0))
         return datetime.now(timezone.utc)
     start = time.monotonic()
+    line_width = 32
+    last_rendered = None
     while True:
         elapsed = time.monotonic() - start
         remaining = max(duration_seconds - int(elapsed), 0)
-        message = f"\rTime remaining: {remaining:>4}s"
-        print(message, end="", flush=True)
+        formatted = _format_duration(remaining)
+        total = _format_duration(duration_seconds)
+        elapsed_fmt = _format_duration(int(elapsed))
+        suffix = _pulse_marker(int(elapsed))
+        message = f"\rTime remaining: {formatted} | {elapsed_fmt}/{total}{suffix}".ljust(line_width)
+        if message != last_rendered:
+            sys.stdout.write(message)
+            sys.stdout.flush()
+            last_rendered = message
         if remaining <= 0:
             print()
             break
@@ -87,21 +96,42 @@ def _run_countdown(duration_seconds: int) -> datetime:
 
 
 def _run_stopwatch() -> datetime:
-    if not sys.stdin.isatty():
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
         prompt_utils.press_enter_to_continue("Press Enter when finished (timer stops)...")
         return datetime.now(timezone.utc)
     start = time.monotonic()
+    line_width = 32
     print(status_messages.status("Press Enter when finished (timer stops).", level="info"))
+    last_rendered = None
     while True:
         elapsed = int(time.monotonic() - start)
-        message = f"\rElapsed time: {elapsed:>4}s"
-        print(message, end="", flush=True)
+        formatted = _format_duration(elapsed)
+        message = f"\rElapsed time: {formatted} (Enter to stop)".ljust(line_width)
+        if message != last_rendered:
+            sys.stdout.write(message)
+            sys.stdout.flush()
+            last_rendered = message
         readable, _, _ = select.select([sys.stdin], [], [], 1.0)
         if readable:
             _ = sys.stdin.readline()
             print()
             break
     return datetime.now(timezone.utc)
+
+
+def _format_duration(seconds: int) -> str:
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes, secs = divmod(seconds, 60)
+    min_label = "Min" if minutes == 1 else "Mins"
+    sec_label = "Sec" if secs == 1 else "Secs"
+    return f"{minutes} {min_label} {secs} {sec_label}"
+
+
+def _pulse_marker(elapsed_seconds: int) -> str:
+    if elapsed_seconds > 0 and elapsed_seconds % 10 == 0:
+        return " •"
+    return ""
 
 
 __all__ = ["ManualScenarioRunner", "ScenarioResult"]

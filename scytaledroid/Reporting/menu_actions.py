@@ -209,6 +209,7 @@ def handle_tier1_export_pack() -> None:
     outputs = export_tier1_pack(default_dir)
     print(status_messages.status(f"Manifest written: {outputs['manifest']}", level="success"))
     print(status_messages.status(f"Summary written: {outputs['summary']}", level="success"))
+    print(status_messages.status(f"Rollup written: {outputs['rollup']}", level="success"))
     print(status_messages.status(f"Telemetry dir: {outputs['telemetry_dir']}", level="success"))
     prompt_utils.press_enter_to_continue()
 
@@ -219,12 +220,57 @@ def handle_tier1_audit_report() -> None:
     health_checks.run_tier1_audit_report()
 
 
+def handle_tier1_qa_failures_report() -> None:
+    """Show the most recent Tier-1 QA failures with reasons."""
+
+    print()
+    menu_utils.print_header("Tier-1 QA Failures (last 10 runs)")
+    rows = _fetch_recent_tier1_candidates(limit=10)
+    if not rows:
+        print(status_messages.status("No dynamic runs found.", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    table_rows = []
+    for row in rows:
+        failures = _evaluate_tier1_qa_failures(row)
+        table_rows.append(
+            [
+                row.get("dynamic_run_id") or "",
+                row.get("package_name") or "",
+                row.get("tier") or "",
+                row.get("status") or "",
+                _fmt_ratio(row.get("captured_samples"), row.get("expected_samples")),
+                _fmt_gap(row.get("sample_max_gap_s")),
+                "yes" if row.get("telemetry_partial") else "no",
+                ", ".join(failures) if failures else "ok",
+            ]
+        )
+
+    table_utils.render_table(
+        [
+            "run_id",
+            "package",
+            "tier",
+            "status",
+            "capture_ratio",
+            "max_gap_s",
+            "partial_samples",
+            "failed_checks",
+        ],
+        table_rows,
+        compact=True,
+    )
+    print()
+    prompt_utils.press_enter_to_continue()
+
+
 def fetch_tier1_status() -> dict[str, object]:
     """Return a compact Tier-1 readiness snapshot for the reporting menu."""
 
     status: dict[str, object] = {
         "schema_version": None,
-        "expected_schema": "0.2.3",
+        "expected_schema": "0.2.4",
         "tier1_ready_runs": 0,
         "last_export_path": None,
         "last_export_at": None,
@@ -246,11 +292,17 @@ def fetch_tier1_status() -> dict[str, object]:
         row = core_q.run_sql(
             """
             SELECT COUNT(*) AS cnt
-            FROM dynamic_sessions
-            WHERE tier='dataset'
-              AND status='success'
-              AND captured_samples / NULLIF(expected_samples,0) >= 0.90
-              AND sample_max_gap_s <= (sampling_rate_s * 2)
+            FROM dynamic_sessions ds
+            WHERE ds.tier='dataset'
+              AND ds.status='success'
+              AND ds.captured_samples / NULLIF(ds.expected_samples,0) >= 0.90
+              AND ds.sample_max_gap_s <= (ds.sampling_rate_s * 2)
+              AND NOT EXISTS (
+                SELECT 1
+                FROM dynamic_session_issues i
+                WHERE i.dynamic_run_id = ds.dynamic_run_id
+                  AND i.issue_code = 'telemetry_partial_samples'
+              )
             """,
             fetch="one",
             dictionary=True,
@@ -264,22 +316,17 @@ def fetch_tier1_status() -> dict[str, object]:
         row = core_q.run_sql(
             """
             SELECT
-              SUM(CASE WHEN issue_code='pcapdroid_capture_empty' THEN 0 ELSE 1 END) AS valid_count,
-              COUNT(*) AS total_count
-            FROM dynamic_session_issues
-            WHERE dynamic_run_id IN (
-              SELECT dynamic_run_id
-              FROM dynamic_sessions
-              WHERE tier='dataset'
-            )
-              AND issue_code IN ('pcapdroid_capture_empty','pcapdroid_capture_failed')
+              SUM(CASE WHEN pcap_valid = 1 THEN 1 ELSE 0 END) AS valid_count,
+              SUM(CASE WHEN pcap_relpath IS NOT NULL THEN 1 ELSE 0 END) AS linked_count
+            FROM dynamic_sessions
+            WHERE tier='dataset'
             """,
             fetch="one",
             dictionary=True,
         )
         if row:
             status["pcap_valid_runs"] = int(row.get("valid_count") or 0)
-            status["pcap_total_runs"] = int(row.get("total_count") or 0)
+            status["pcap_total_runs"] = int(row.get("linked_count") or 0)
     except Exception:
         status["pcap_valid_runs"] = 0
         status["pcap_total_runs"] = 0
@@ -297,6 +344,87 @@ def fetch_tier1_status() -> dict[str, object]:
         status["last_export_at"] = None
 
     return status
+
+
+def _fetch_recent_tier1_candidates(limit: int = 10) -> list[dict[str, object]]:
+    sql = """
+        SELECT
+          ds.dynamic_run_id,
+          ds.package_name,
+          ds.tier,
+          ds.status,
+          ds.sampling_rate_s,
+          ds.expected_samples,
+          ds.captured_samples,
+          ds.sample_max_gap_s,
+          MAX(CASE WHEN i.issue_code = 'telemetry_partial_samples' THEN 1 ELSE 0 END) AS telemetry_partial
+        FROM dynamic_sessions ds
+        LEFT JOIN dynamic_session_issues i
+          ON i.dynamic_run_id = ds.dynamic_run_id
+        GROUP BY ds.dynamic_run_id, ds.package_name, ds.tier, ds.status,
+                 ds.sampling_rate_s, ds.expected_samples, ds.captured_samples, ds.sample_max_gap_s
+        ORDER BY ds.started_at_utc DESC
+        LIMIT %s
+    """
+    rows = core_q.run_sql(sql, (limit,), fetch="all", dictionary=True) or []
+    return [dict(row) for row in rows]
+
+
+def _evaluate_tier1_qa_failures(row: dict[str, object]) -> list[str]:
+    failures: list[str] = []
+    tier = row.get("tier")
+    status = row.get("status")
+    sampling_rate = row.get("sampling_rate_s")
+    expected = row.get("expected_samples")
+    captured = row.get("captured_samples")
+    max_gap = row.get("sample_max_gap_s")
+    partial = row.get("telemetry_partial")
+
+    if tier != "dataset":
+        failures.append("tier_not_dataset")
+    if status != "success":
+        failures.append("status_not_success")
+    ratio = _safe_ratio(captured, expected)
+    if ratio is None:
+        failures.append("missing_capture_ratio")
+    elif ratio < 0.90:
+        failures.append("low_capture_ratio")
+    if sampling_rate is None or max_gap is None:
+        failures.append("missing_gap_stats")
+    else:
+        try:
+            if float(max_gap) > (float(sampling_rate) * 2):
+                failures.append("max_gap_exceeded")
+        except (TypeError, ValueError):
+            failures.append("invalid_gap_stats")
+    if partial:
+        failures.append("telemetry_partial_samples")
+    return failures
+
+
+def _safe_ratio(captured: object, expected: object) -> float | None:
+    try:
+        cap = float(captured)
+        exp = float(expected)
+    except (TypeError, ValueError):
+        return None
+    if exp == 0:
+        return None
+    return cap / exp
+
+
+def _fmt_ratio(captured: object, expected: object) -> str:
+    ratio = _safe_ratio(captured, expected)
+    if ratio is None:
+        return "n/a"
+    return f"{ratio:.3f}"
+
+
+def _fmt_gap(value: object) -> str:
+    try:
+        return f"{float(value):.2f}"
+    except (TypeError, ValueError):
+        return "n/a"
 
 
 
