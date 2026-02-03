@@ -14,12 +14,19 @@ import platform
 import re
 import sys
 import uuid
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable, Dict, Mapping, Optional
 
-from .logging_core import LOG_DIR, JsonFormatter, setup_logger
+from .logging_core import (
+    DATE_FORMAT,
+    LOG_DIR,
+    LOG_FORMAT,
+    JsonFormatter,
+    make_rotating_handler,
+    setup_logger,
+)
 
 try:  # pragma: no cover - optional dependency
     from loguru import logger as _loguru_logger
@@ -28,17 +35,17 @@ except Exception:  # pragma: no cover - optional dependency
 
 @dataclass(frozen=True)
 class _LoggerConfig:
-    text_file: Optional[str]
-    json_file: Optional[str]
+    text_file: str | None
+    json_file: str | None
     level: int = logging.INFO
-    subdir: Optional[str] = None
+    subdir: str | None = None
     max_bytes: int = 10 * 1024 * 1024
     backup_count: int = 14
 
 
-LOG_CONFIGS: Dict[str, _LoggerConfig] = {
+LOG_CONFIGS: dict[str, _LoggerConfig] = {
     "application": _LoggerConfig(text_file="app.log", json_file="app.jsonl", level=logging.INFO),
-    "database": _LoggerConfig(text_file=None, json_file="db.jsonl", level=logging.DEBUG),
+    "database": _LoggerConfig(text_file="db.log", json_file="db.jsonl", level=logging.DEBUG),
     "device": _LoggerConfig(text_file="device_analysis.log", json_file="device_analysis.jsonl"),
     "harvest": _LoggerConfig(text_file="harvest.log", json_file="harvest.jsonl"),
     "static": _LoggerConfig(text_file="static_analysis.log", json_file="static_analysis.jsonl"),
@@ -53,12 +60,12 @@ LOG_CONFIGS: Dict[str, _LoggerConfig] = {
 class LogTarget:
     """Resolved log file destinations for a logging category."""
 
-    text_path: Optional[Path]
-    json_path: Optional[Path]
+    text_path: Path | None
+    json_path: Path | None
 
 
 _LOGGERS: dict[str, logging.Logger] = {}
-_HARVEST_LOGGERS: dict[str, "ContextAdapter"] = {}
+_HARVEST_LOGGERS: dict[str, ContextAdapter] = {}
 
 _HARVEST_SUBDIR = "harvest"
 
@@ -148,7 +155,7 @@ def list_log_files() -> dict[str, LogTarget]:
         files[category] = LogTarget(text_path=text_path, json_path=json_path)
 
     harvest_dir = (base_dir / _HARVEST_SUBDIR).expanduser().resolve()
-    files["harvest_runs"] = LogTarget(text_path=None, json_path=harvest_dir)
+    files["harvest_runs"] = LogTarget(text_path=harvest_dir, json_path=harvest_dir)
 
     return files
 
@@ -170,7 +177,7 @@ def bind_logger(category: str, **context: object) -> ContextAdapter:
     return ContextAdapter(base_logger, {k: v for k, v in context.items() if v is not None})
 
 
-def ensure_trace(extra: Optional[Mapping[str, object]] = None) -> Dict[str, object]:
+def ensure_trace(extra: Mapping[str, object] | None = None) -> dict[str, object]:
     """Return a mutable copy of ``extra`` containing a ``trace_id`` field."""
 
     payload = dict(extra or {})
@@ -178,7 +185,7 @@ def ensure_trace(extra: Optional[Mapping[str, object]] = None) -> Dict[str, obje
     return payload
 
 
-def emit_environment_snapshot(logger: Optional[logging.Logger] = None) -> None:
+def emit_environment_snapshot(logger: logging.Logger | None = None) -> None:
     """Log runtime environment metadata to aid debugging."""
 
     target = logger or get_app_logger()
@@ -252,19 +259,21 @@ def _slugify(identifier: str) -> str:
 def create_harvest_run_logger(
     run_id: str,
     *,
-    started_at: Optional[datetime] = None,
-    context: Optional[Mapping[str, object]] = None,
+    started_at: datetime | None = None,
+    context: Mapping[str, object] | None = None,
 ) -> ContextAdapter:
     """Create a dedicated JSONL logger for the given harvest run."""
 
     if not run_id:
         raise ValueError("run_id must be provided for harvest logging")
 
-    started = started_at or datetime.now(timezone.utc)
-    timestamp = started.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    started = started_at or datetime.now(UTC)
+    timestamp = started.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
     slug = _slugify(run_id)
-    filename = f"{timestamp}_run-{slug}.jsonl"
-    log_path = (LOG_DIR / _HARVEST_SUBDIR / filename).expanduser()
+    json_filename = f"{timestamp}_run-{slug}.jsonl"
+    text_filename = f"{timestamp}_run-{slug}.log"
+    log_path = (LOG_DIR / _HARVEST_SUBDIR / json_filename).expanduser()
+    text_path = (LOG_DIR / _HARVEST_SUBDIR / text_filename).expanduser()
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     logger_name = f"harvest.{slug}"
@@ -276,17 +285,31 @@ def create_harvest_run_logger(
         except Exception:  # pragma: no cover - defensive cleanup
             pass
 
-    handler = logging.FileHandler(log_path, encoding="utf-8")
+    handler = make_rotating_handler(
+        log_path,
+        max_bytes=10 * 1024 * 1024,
+        backup_count=10,
+        formatter=JsonFormatter(),
+    )
     handler.setLevel(logging.DEBUG)
-    handler.setFormatter(JsonFormatter())
+
+    text_handler = make_rotating_handler(
+        text_path,
+        max_bytes=10 * 1024 * 1024,
+        backup_count=10,
+        formatter=logging.Formatter(LOG_FORMAT, DATE_FORMAT),
+    )
+    text_handler.setLevel(logging.DEBUG)
 
     logger.setLevel(logging.DEBUG)
     logger.propagate = False
     logger.addHandler(handler)
+    logger.addHandler(text_handler)
 
-    base_extra: Dict[str, object] = {
+    base_extra: dict[str, object] = {
         "run_id": run_id,
         "log_path": str(log_path),
+        "log_path_text": str(text_path),
         "run_started": started.isoformat(),
     }
     if context:
@@ -314,7 +337,7 @@ def close_harvest_run_logger(run_id: str) -> None:
 
 
 def _configure_loguru(
-    *, verbosity: str, log_path: Optional[Path], noise_filter: Callable[[str], bool]
+    *, verbosity: str, log_path: Path | None, noise_filter: Callable[[str], bool]
 ) -> None:
     """Apply loguru gating that mirrors the python-logging behaviour."""
 
@@ -387,9 +410,9 @@ def _configure_loguru(
 def configure_third_party_loggers(
     *,
     verbosity: str,
-    run_id: Optional[str],
-    debug_dir: Optional[str] = None,
-) -> Optional[Path]:
+    run_id: str | None,
+    debug_dir: str | None = None,
+) -> Path | None:
     """Configure androguard logging based on the requested verbosity.
 
     Returns the path to the debug log file when running in debug mode, otherwise
@@ -420,7 +443,7 @@ def configure_third_party_loggers(
         )
     )
 
-    log_path: Optional[Path] = None
+    log_path: Path | None = None
 
     if verbosity != "debug":
         for logger in all_loggers:
@@ -438,9 +461,7 @@ def configure_third_party_loggers(
 
     resolved_debug_dir = debug_dir
     if not resolved_debug_dir:
-        from os import path as _os_path
-
-        default_root = Path(_os_path.expanduser("~")) / ".scytaledroid" / "logs"
+        default_root = LOG_DIR / "third_party"
         resolved_debug_dir = str(default_root)
 
     target_dir = Path(resolved_debug_dir).expanduser().resolve()

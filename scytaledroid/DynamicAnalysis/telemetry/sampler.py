@@ -6,16 +6,15 @@ import re
 import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
-from scytaledroid.DeviceAnalysis import adb_shell
 from scytaledroid.BehaviorAnalysis.telemetry import (
     parse_meminfo_total,
     parse_netstats_detail,
     parse_proc_net_dev,
     parse_top_output,
 )
+from scytaledroid.DeviceAnalysis import adb_shell
 
 
 @dataclass
@@ -38,25 +37,25 @@ class TelemetrySampler:
         self.sample_rate_s = max(int(sample_rate_s), 1)
         self._netstats_interval_s = max(self.sample_rate_s * 3, 3)
         self._stop_event = threading.Event()
-        self._thread: Optional[threading.Thread] = None
-        self._error: Optional[str] = None
+        self._thread: threading.Thread | None = None
+        self._error: str | None = None
         self._process_rows: list[dict[str, object]] = []
         self._network_rows: list[dict[str, object]] = []
         self._timestamps: list[float] = []
         self._monotonic_timestamps: list[float] = []
-        self._uid: Optional[str] = None
-        self._pid: Optional[str] = None
-        self._start_monotonic: Optional[float] = None
-        self._end_monotonic: Optional[float] = None
-        self._last_netstats_monotonic: Optional[float] = None
+        self._uid: str | None = None
+        self._pid: str | None = None
+        self._start_monotonic: float | None = None
+        self._end_monotonic: float | None = None
+        self._last_netstats_monotonic: float | None = None
         self._netstats_samples: int = 0
         self._netstats_skipped: int = 0
         self._last_network_row: dict[str, object] | None = None
         self._meminfo_interval_s = max(self.sample_rate_s * 3, 3)
-        self._last_meminfo_monotonic: Optional[float] = None
+        self._last_meminfo_monotonic: float | None = None
         self._meminfo_samples: int = 0
         self._meminfo_skipped: int = 0
-        self._last_meminfo_pss: Optional[int] = None
+        self._last_meminfo_pss: int | None = None
 
     def start(self) -> None:
         self._uid, self._pid = _resolve_pid_uid(self.device_serial, self.package_name)
@@ -91,7 +90,7 @@ class TelemetrySampler:
         try:
             next_tick = time.monotonic()
             while not self._stop_event.is_set():
-                ts = datetime.now(timezone.utc)
+                ts = datetime.now(UTC)
                 now_monotonic = time.monotonic()
                 self._timestamps.append(ts.timestamp())
                 self._monotonic_timestamps.append(now_monotonic)
@@ -164,7 +163,7 @@ def _run_shell(serial: str, command: list[str], timeout: float) -> tuple[int, st
         return 1, "", timed_out
 
 
-def _resolve_pid_uid(serial: str, package: str) -> tuple[Optional[str], Optional[str]]:
+def _resolve_pid_uid(serial: str, package: str) -> tuple[str | None, str | None]:
     uid = None
     try:
         rc, out, _ = _run_shell(serial, ["dumpsys", "package", package], timeout=5.0)
@@ -202,8 +201,8 @@ def _resolve_pid_uid(serial: str, package: str) -> tuple[Optional[str], Optional
 def _collect_process_sample(
     serial: str,
     package: str,
-    uid: Optional[str],
-    pid: Optional[str],
+    uid: str | None,
+    pid: str | None,
     ts: datetime,
 ) -> dict[str, object]:
     row: dict[str, object] = {
@@ -263,7 +262,7 @@ def _collect_process_sample(
 
 def _collect_network_sample(
     serial: str,
-    uid: Optional[str],
+    uid: str | None,
     ts: datetime,
     *,
     use_netstats: bool = True,
@@ -311,7 +310,7 @@ def _collect_network_sample(
     return row
 
 
-def _maybe_parse_meminfo(serial: str, package: str) -> Optional[int]:
+def _maybe_parse_meminfo(serial: str, package: str) -> int | None:
     try:
         rc, mem_out, _ = _run_shell(serial, ["dumpsys", "meminfo", "--package", package], timeout=5.0)
         if rc == 0:
@@ -321,7 +320,7 @@ def _maybe_parse_meminfo(serial: str, package: str) -> Optional[int]:
     return None
 
 
-def _set_pss(row: dict[str, object], value: Optional[int]) -> None:
+def _set_pss(row: dict[str, object], value: int | None) -> None:
     if value is None:
         return
     row["pss_kb"] = value
@@ -331,10 +330,10 @@ def _compute_stats(
     *,
     timestamps: list[float],
     monotonic_timestamps: list[float],
-    start_monotonic: Optional[float],
-    end_monotonic: Optional[float],
+    start_monotonic: float | None,
+    end_monotonic: float | None,
     sample_rate_s: int,
-    error: Optional[str],
+    error: str | None,
 ) -> dict[str, object]:
     stats: dict[str, object] = {
         "expected_samples": None,
@@ -349,7 +348,9 @@ def _compute_stats(
         elapsed = max(end_monotonic - start_monotonic, 0.0)
         stats["expected_samples"] = int(elapsed / sample_rate_s) + 1
     if len(monotonic_timestamps) >= 2:
-        deltas = [b - a for a, b in zip(monotonic_timestamps, monotonic_timestamps[1:])]
+        deltas = [
+            b - a for a, b in zip(monotonic_timestamps, monotonic_timestamps[1:], strict=False)
+        ]
         stats["sample_min_delta_s"] = min(deltas)
         stats["sample_avg_delta_s"] = sum(deltas) / len(deltas)
         stats["sample_max_delta_s"] = max(deltas)

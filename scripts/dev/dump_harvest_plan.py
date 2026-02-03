@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from typing import Dict, List, Optional, Sequence, Set
+from collections.abc import Sequence
 
 from scytaledroid.DeviceAnalysis import device_manager
 from scytaledroid.DeviceAnalysis.harvest import planner, rules, scope
@@ -17,7 +17,7 @@ from scytaledroid.DeviceAnalysis.harvest.models import InventoryRow, ScopeSelect
 from scytaledroid.DeviceAnalysis.inventory import snapshot_io
 
 
-def _load_serial(serial_arg: Optional[str]) -> Optional[str]:
+def _load_serial(serial_arg: str | None) -> str | None:
     if serial_arg:
         return serial_arg
     active = device_manager.get_active_device()
@@ -26,7 +26,7 @@ def _load_serial(serial_arg: Optional[str]) -> Optional[str]:
     return None
 
 
-def _load_rows(serial: str) -> List[InventoryRow]:
+def _load_rows(serial: str) -> list[InventoryRow]:
     snapshot = snapshot_io.load_latest_inventory(serial)
     if not snapshot:
         print(f"[ERROR] No inventory snapshot found for {serial}. Run inventory sync first.")
@@ -41,8 +41,8 @@ def _load_rows(serial: str) -> List[InventoryRow]:
 def _resolve_scope(
     name: str,
     rows: Sequence[InventoryRow],
-    allow: Set[str],
-) -> Optional[ScopeSelection]:
+    allow: set[str],
+) -> ScopeSelection | None:
     if name == "default":
         return scope._scope_default(rows, allow)  # type: ignore[attr-defined]
     if name == "social_messaging":
@@ -67,7 +67,7 @@ def _print_scope(selection: ScopeSelection, plan) -> None:
     meta = selection.metadata or {}
     candidates = int(meta.get("candidate_count") or 0)
     selected = int(meta.get("selected_count") or len(selection.packages))
-    excluded_counts: Dict[str, int] = meta.get("excluded_counts") or {}
+    excluded_counts: dict[str, int] = meta.get("excluded_counts") or {}
     if not candidates:
         candidates = selected + sum(int(v) for v in excluded_counts.values())
     filtered = max(candidates - selected, 0)
@@ -99,7 +99,7 @@ def _print_scope(selection: ScopeSelection, plan) -> None:
             print(f"  - {reason}: {preview}{suffix}")
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Dry-run harvest planning for a scope.")
     parser.add_argument("--serial", help="Device serial (defaults to active device).")
     parser.add_argument(
