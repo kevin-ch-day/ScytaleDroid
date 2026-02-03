@@ -9,6 +9,8 @@ from typing import Dict, Optional, Tuple
 
 from scytaledroid.DeviceAnalysis import adb_shell
 from scytaledroid.DeviceAnalysis.adb_errors import AdbError
+from scytaledroid.Utils.netstats_collector import NetstatsCollector
+from scytaledroid.Utils.netstats_parser import NetstatsParser
 JITTER_MULTIPLIER = 1.5
 
 
@@ -136,18 +138,9 @@ def parse_meminfo_total(output: str) -> Optional[int]:
 
 
 def parse_netstats_detail(output: str, uid: str) -> Tuple[int, int]:
-    bytes_in = 0
-    bytes_out = 0
-    for line in output.splitlines():
-        if f"uid={uid}" not in line:
-            continue
-        m_in = re.search(r"rxBytes=(\d+)", line)
-        m_out = re.search(r"txBytes=(\d+)", line)
-        if m_in:
-            bytes_in += int(m_in.group(1))
-        if m_out:
-            bytes_out += int(m_out.group(1))
-    return bytes_in, bytes_out
+    parser = NetstatsParser()
+    sample = parser.parse_detail(output, uid)
+    return sample.rx_bytes or 0, sample.tx_bytes or 0
 
 
 def parse_proc_net_dev(output: str) -> Tuple[int, int]:
@@ -248,25 +241,34 @@ def collect_network_sample(serial: str, uid: str, ts: datetime) -> Dict[str, obj
         row["collector_status"] = "unavailable_uid"
         row["source"] = "unavailable"
         return row
-    rc, out, _ = _shell(serial, ["dumpsys", "netstats", "detail"])
-    if rc == 0:
-        bytes_in, bytes_out = parse_netstats_detail(out, uid)
-        if bytes_in or bytes_out:
-            row["bytes_in"] = bytes_in
-            row["bytes_out"] = bytes_out
+    collector = NetstatsCollector()
+    parser = NetstatsParser()
+    detail = collector.collect_detail(serial)
+    if detail.returncode == 0:
+        sample = parser.parse_detail(detail.stdout, uid, ts_utc=ts)
+        if sample.rx_bytes is not None and sample.tx_bytes is not None:
+            row["bytes_in"] = sample.rx_bytes
+            row["bytes_out"] = sample.tx_bytes
             row["conn_count"] = ""  # unknown from netstats detail
             row["source"] = "netstats"
             row["best_effort"] = 0
             row["collector_status"] = "ok"
             return row
-    # Fallback: /proc/net/dev aggregate
-    rc2, out2, _ = _shell(serial, ["cat", "/proc/net/dev"])
-    if rc2 == 0:
-        bytes_in, bytes_out = parse_proc_net_dev(out2)
-        row["bytes_in"] = bytes_in
-        row["bytes_out"] = bytes_out
-        row["conn_count"] = ""
-        row["source"] = "fallback_iface"
-        row["best_effort"] = 1
-        row["collector_status"] = "best_effort"
+    uid_output = collector.collect_uid(serial, uid)
+    if uid_output.returncode == 0:
+        sample = parser.parse_uid(uid_output.stdout, uid, ts_utc=ts)
+        if sample.rx_bytes is not None and sample.tx_bytes is not None:
+            row["bytes_in"] = sample.rx_bytes
+            row["bytes_out"] = sample.tx_bytes
+            row["conn_count"] = ""
+            row["source"] = "netstats"
+            row["best_effort"] = 0
+            row["collector_status"] = "ok"
+            return row
+    row["source"] = "netstats_missing"
+    row["collector_status"] = "missing"
+    row["bytes_in"] = None
+    row["bytes_out"] = None
+    row["conn_count"] = None
+    row["best_effort"] = 0
     return row

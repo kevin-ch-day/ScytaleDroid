@@ -7,14 +7,13 @@ import threading
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 
-from scytaledroid.BehaviorAnalysis.telemetry import (
-    parse_meminfo_total,
-    parse_netstats_detail,
-    parse_proc_net_dev,
-    parse_top_output,
-)
+from scytaledroid.BehaviorAnalysis.telemetry import parse_meminfo_total, parse_top_output
 from scytaledroid.DeviceAnalysis import adb_shell
+from scytaledroid.Utils.netstats_collector import NetstatsCollector
+from scytaledroid.Utils.netstats_parser import NetstatsParser
+from scytaledroid.Utils.network_quality import evaluate_network_signal_quality
 
 
 @dataclass
@@ -32,12 +31,17 @@ class TelemetrySampler:
         package_name: str,
         sample_rate_s: int = 2,
         allow_fallback_iface: bool = True,
+        netstats_debug_dir: Path | None = None,
     ) -> None:
         self.device_serial = device_serial
         self.package_name = package_name
         self.sample_rate_s = max(int(sample_rate_s), 1)
         self._netstats_interval_s = max(self.sample_rate_s * 3, 3)
         self._allow_fallback_iface = allow_fallback_iface
+        self._netstats_debug_dir = netstats_debug_dir
+        self._netstats_debug_captured = False
+        self._netstats_collector = NetstatsCollector()
+        self._netstats_parser = NetstatsParser()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._error: str | None = None
@@ -81,12 +85,20 @@ class TelemetrySampler:
         stats["netstats_interval_s"] = self._netstats_interval_s
         stats["netstats_samples"] = self._netstats_samples
         stats["netstats_skipped"] = self._netstats_skipped
-        stats["netstats_available"] = self._netstats_samples > 0
         netstats_rows = sum(1 for row in self._network_rows if row.get("source") == "netstats")
         netstats_missing_rows = sum(1 for row in self._network_rows if row.get("source") == "netstats_missing")
+        netstats_bytes_in, netstats_bytes_out = _sum_netstats_bytes(self._network_rows)
+        stats["netstats_available"] = netstats_rows > 0
         stats["netstats_rows"] = netstats_rows
         stats["netstats_missing_rows"] = netstats_missing_rows
-        stats["network_signal_quality"] = _network_signal_quality(netstats_rows, netstats_missing_rows)
+        stats["netstats_bytes_in_total"] = netstats_bytes_in
+        stats["netstats_bytes_out_total"] = netstats_bytes_out
+        stats["network_signal_quality"] = evaluate_network_signal_quality(
+            netstats_rows=netstats_rows,
+            netstats_missing_rows=netstats_missing_rows,
+            sum_bytes_in=netstats_bytes_in,
+            sum_bytes_out=netstats_bytes_out,
+        )
         stats["meminfo_interval_s"] = self._meminfo_interval_s
         stats["meminfo_samples"] = self._meminfo_samples
         stats["meminfo_skipped"] = self._meminfo_skipped
@@ -128,7 +140,13 @@ class TelemetrySampler:
                     use_netstats=use_netstats,
                     last_netstats=self._last_network_row,
                     allow_fallback_iface=self._allow_fallback_iface,
+                    netstats_collector=self._netstats_collector,
+                    netstats_parser=self._netstats_parser,
+                    debug_dir=self._netstats_debug_dir,
+                    debug_captured=self._netstats_debug_captured,
                 )
+                if network_row.get("collector_status") == "debug_captured":
+                    self._netstats_debug_captured = True
                 network_row["sample_index"] = sample_index
                 network_row["timestamp_utc"] = ts
                 self._network_rows.append(network_row)
@@ -276,6 +294,10 @@ def _collect_network_sample(
     use_netstats: bool = True,
     last_netstats: dict[str, object] | None = None,
     allow_fallback_iface: bool = True,
+    netstats_collector: NetstatsCollector,
+    netstats_parser: NetstatsParser,
+    debug_dir: Path | None = None,
+    debug_captured: bool = False,
 ) -> dict[str, object]:
     row: dict[str, object] = {
         "uid": uid or "",
@@ -291,41 +313,57 @@ def _collect_network_sample(
         row["source"] = "unavailable"
         return row
     if use_netstats:
-        try:
-            rc, out, timed_out = _run_shell(serial, ["dumpsys", "netstats", "detail"], timeout=5.0)
-            if timed_out:
-                row["collector_status"] = "timeout"
-            elif rc == 0 and f"uid={uid}" in out:
-                has_rx = "rxBytes=" in out or "txBytes=" in out
-                if has_rx:
-                    bytes_in, bytes_out = parse_netstats_detail(out, uid)
-                    row["bytes_in"] = bytes_in
-                    row["bytes_out"] = bytes_out
-                    row["conn_count"] = ""
-                    row["source"] = "netstats"
-                    row["best_effort"] = 0
-                    row["collector_status"] = "ok"
-                    return row
-                row["collector_status"] = "unsupported_format"
-                rc2, out2, timed_out2 = _run_shell(serial, ["dumpsys", "netstats", "--uid", uid], timeout=5.0)
-                if not timed_out2 and rc2 == 0 and ("rxBytes=" in out2 or "txBytes=" in out2):
-                    bytes_in, bytes_out = parse_netstats_detail(out2, uid)
-                    row["bytes_in"] = bytes_in
-                    row["bytes_out"] = bytes_out
-                    row["conn_count"] = ""
-                    row["source"] = "netstats"
-                    row["best_effort"] = 0
-                    row["collector_status"] = "ok"
-                    return row
-        except Exception:
-            pass
+        detail = netstats_collector.collect_detail(serial)
+        if detail.timed_out:
+            row["collector_status"] = "timeout"
+        if detail.returncode == 0 and detail.stdout:
+            sample = netstats_parser.parse_detail(detail.stdout, uid, ts_utc=ts)
+            if sample.rx_bytes is not None and sample.tx_bytes is not None:
+                row["bytes_in"] = sample.rx_bytes
+                row["bytes_out"] = sample.tx_bytes
+                row["conn_count"] = ""
+                row["source"] = "netstats"
+                row["best_effort"] = 0
+                row["collector_status"] = "ok"
+                return row
+        uid_output = netstats_collector.collect_uid(serial, uid)
+        if uid_output.timed_out:
+            row["collector_status"] = "timeout"
+        if uid_output.returncode == 0 and uid_output.stdout:
+            sample = netstats_parser.parse_uid(uid_output.stdout, uid, ts_utc=ts)
+            if sample.rx_bytes is not None and sample.tx_bytes is not None:
+                row["bytes_in"] = sample.rx_bytes
+                row["bytes_out"] = sample.tx_bytes
+                row["conn_count"] = ""
+                row["source"] = "netstats"
+                row["best_effort"] = 0
+                row["collector_status"] = "ok"
+                return row
+        row["source"] = "netstats_missing"
+        row["collector_status"] = row.get("collector_status") or "missing_uid_stats"
+        row["best_effort"] = 0
+        row["bytes_in"] = None
+        row["bytes_out"] = None
+        row["conn_count"] = None
+        if debug_dir and not debug_captured:
+            output = ""
+            if detail.stdout:
+                output = detail.stdout
+            elif uid_output.stdout:
+                output = uid_output.stdout
+            if output:
+                debug_path = debug_dir / f"netstats_debug_{uid}.txt"
+                try:
+                    netstats_parser.write_debug_capture(output, uid=uid, destination=debug_path)
+                    row["collector_status"] = "debug_captured"
+                except Exception:
+                    row["collector_status"] = "debug_failed"
         if not allow_fallback_iface:
-            row["source"] = "netstats_missing"
-            row["collector_status"] = "missing_uid_stats"
-            row["best_effort"] = 0
             row["bytes_in"] = None
             row["bytes_out"] = None
             row["conn_count"] = None
+            return row
+        if row["source"] == "netstats_missing":
             return row
     if last_netstats:
         row["bytes_in"] = last_netstats.get("bytes_in", "")
@@ -340,12 +378,20 @@ def _collect_network_sample(
     return row
 
 
-def _network_signal_quality(netstats_rows: int, netstats_missing_rows: int) -> str:
-    if netstats_rows > 0 and netstats_missing_rows > 0:
-        return "netstats_partial"
-    if netstats_rows > 0:
-        return "netstats_only"
-    return "none"
+def _sum_netstats_bytes(rows: list[dict[str, object]]) -> tuple[int, int]:
+    total_in = 0
+    total_out = 0
+    for row in rows:
+        if row.get("source") != "netstats":
+            continue
+        try:
+            if row.get("bytes_in") is not None:
+                total_in += int(float(row.get("bytes_in") or 0))
+            if row.get("bytes_out") is not None:
+                total_out += int(float(row.get("bytes_out") or 0))
+        except (TypeError, ValueError):
+            continue
+    return total_in, total_out
 
 
 def _maybe_parse_meminfo(serial: str, package: str) -> int | None:

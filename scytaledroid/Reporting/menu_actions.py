@@ -211,6 +211,14 @@ def handle_tier1_export_pack() -> None:
     print(status_messages.status(f"Summary written: {outputs['summary']}", level="success"))
     print(status_messages.status(f"Rollup written: {outputs['rollup']}", level="success"))
     print(status_messages.status(f"Telemetry dir: {outputs['telemetry_dir']}", level="success"))
+    feature_health = outputs.get("feature_health") or {}
+    if feature_health:
+        print(
+            status_messages.status(
+                f"Feature health ({feature_health.get('status')}): {feature_health.get('json_path')}",
+                level="success",
+            )
+        )
     prompt_utils.press_enter_to_continue()
 
 

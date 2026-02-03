@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from scytaledroid.Database.db_core import db_queries as core_q
+from scytaledroid.DynamicAnalysis.exports.feature_health import build_feature_health_report
+from scytaledroid.DynamicAnalysis.analysis.privacy_manifest import write_privacy_manifest
 
 
 DATASET_NAME = "ScytaleDroid-Dyn-v1"
@@ -59,12 +61,22 @@ def export_tier1_pack(output_dir: Path) -> dict[str, Path]:
     telemetry_dir = output_dir / "telemetry"
     for run_id in included_run_ids:
         export_run_telemetry_csv(dynamic_run_id=run_id, output_dir=telemetry_dir, include_network=True)
+    analysis_dir = output_dir / "analysis"
+    feature_health = build_feature_health_report(
+        telemetry_dir,
+        analysis_dir,
+        manifest_path=manifest_path,
+    )
+    privacy_manifest = write_privacy_manifest(analysis_dir)
 
     return {
         "manifest": manifest_path,
         "summary": summary_path,
         "rollup": rollup_path,
         "telemetry_dir": telemetry_dir,
+        "analysis_dir": analysis_dir,
+        "feature_health": feature_health,
+        "privacy_manifest": privacy_manifest,
     }
 
 
