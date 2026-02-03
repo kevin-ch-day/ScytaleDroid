@@ -114,7 +114,7 @@ expands to:
    the repository folders that `StaticAnalysis/core/pipeline.py` consumes,
    enabling reproducibility bundles (manifest, NSC, strings) and split-aware
    posture diffing without additional preparation.
-2. **Dynamic analysis:** sandbox executions, behavior logging, and network
+2. **Dynamic analysis:** sandbox executions, dynamic logging, and network
    capture ingestion.
 3. **Threat-intel enrichment:** signer lineage analysis and reputation
    scoring sourced from internal datasets.
@@ -158,7 +158,10 @@ expands to:
 ```
 scytaledroid/DeviceAnalysis/
   inventory.py        # inventory capture & classification
-  adb_utils.py        # adb helper functions
+  adb_shell.py        # adb helper functions
+  adb_devices.py      # device discovery
+  adb_packages.py     # package queries
+  adb_status.py       # status/health checks
   apk_pull.py         # orchestrates scoped harvests
   harvest/
     rules.py          # brand/path logic and filename builder

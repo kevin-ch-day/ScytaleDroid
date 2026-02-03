@@ -90,7 +90,6 @@
 
 ### Low priority / after paper
 - Menu refactor (dynamic menu is large/god-file).
-- Consolidate telemetry pipelines (BehaviorAnalysis vs DynamicAnalysis).
 - Advanced PCAP stats explorer in Reporting.
 
 ## Immediate Next Actions (this week)

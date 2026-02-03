@@ -1,0 +1,6 @@
+  mAppUidStatsMap:
+    uid rxBytes rxPackets txBytes txPackets
+    10234 1500 10 3000 12
+    10454 863299312 277987 21213135 139309
+  mStatsMapA:
+    ifaceIndex ifaceName tag_hex uid_int cnt_set rxBytes rxPackets txBytes txPackets

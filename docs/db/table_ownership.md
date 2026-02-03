@@ -15,7 +15,7 @@ Purpose: avoid write collisions as the web app comes online by documenting which
   - Note: legacy summary tables should be keyed by `static_run_id` when present;
     `runs.run_id` is compatibility-only.
 - Harvest/scopes: `harvest_*`, permission cohort tables
-- Behavior (new): behavior session outputs if/when persisted
+- Dynamic (new): dynamic session outputs if/when persisted
 
 ## Web-owned (planned)
 - User/session/auth tables (when introduced)

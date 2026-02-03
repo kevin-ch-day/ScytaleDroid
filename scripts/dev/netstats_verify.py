@@ -7,10 +7,10 @@ import argparse
 import sys
 from pathlib import Path
 
-from scytaledroid.BehaviorAnalysis.telemetry import resolve_pid_uid
 from scytaledroid.DeviceAnalysis import adb_client
 from scytaledroid.Utils.netstats_collector import NetstatsCollector
 from scytaledroid.Utils.netstats_parser import NetstatsParser
+from scytaledroid.Utils.process_parsers import resolve_pid_uid
 
 
 def _resolve_serial(serial: str | None) -> str:

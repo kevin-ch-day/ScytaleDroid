@@ -132,7 +132,6 @@ def _fetch_manifest_rows() -> list[dict[str, Any]]:
     pcap_validated_select = (
         "ds.pcap_validated_at_utc" if has_pcap_validated else "NULL AS pcap_validated_at_utc"
     )
-    netstats_gate = "WHEN ds.netstats_available = 0 THEN 'exclude_netstats'" if has_netstats else ""
     sql = f"""
         SELECT
           ds.dynamic_run_id,
@@ -161,12 +160,12 @@ def _fetch_manifest_rows() -> list[dict[str, Any]]:
           {pcap_valid_select},
           {pcap_validated_select},
           CASE
-            WHEN ds.tier IS NOT NULL AND ds.tier <> 'dataset' THEN 'exclude_non_dataset'
+            WHEN ds.tier IS NULL THEN 'exclude_missing_tier'
+            WHEN ds.tier <> 'dataset' THEN 'exclude_non_dataset'
             WHEN ds.duration_seconds IS NULL OR ds.duration_seconds < 90 THEN 'exclude_duration'
             WHEN ds.expected_samples IS NULL OR ds.captured_samples IS NULL THEN 'exclude_missing_stats'
             WHEN ds.captured_samples / NULLIF(ds.expected_samples,0) < 0.90 THEN 'exclude_low_capture'
             WHEN ds.sample_max_gap_s > (ds.sampling_rate_s * 2) THEN 'exclude_gap'
-            {netstats_gate}
             ELSE 'include'
           END AS inclusion_status,
           %s AS dataset_name
@@ -174,7 +173,12 @@ def _fetch_manifest_rows() -> list[dict[str, Any]]:
         ORDER BY ds.started_at_utc DESC
     """
     rows = core_q.run_sql(sql, (DATASET_NAME,), fetch="all", dictionary=True) or []
-    return [dict(row) for row in rows]
+    enriched: list[dict[str, Any]] = []
+    for row in rows:
+        payload = dict(row)
+        payload["network_inclusion_status"] = _derive_network_inclusion(payload)
+        enriched.append(payload)
+    return enriched
 
 
 def _build_tier1_summary_rows(manifest_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -193,6 +197,7 @@ def _build_tier1_summary_rows(manifest_rows: list[dict[str, Any]]) -> list[dict[
                 "sample_max_gap_s": row.get("sample_max_gap_s"),
                 "netstats_available": row.get("netstats_available"),
                 "network_signal_quality": row.get("network_signal_quality"),
+                "network_inclusion_status": row.get("network_inclusion_status"),
                 "netstats_rows": row.get("netstats_rows"),
                 "netstats_missing_rows": row.get("netstats_missing_rows"),
             }
@@ -251,6 +256,34 @@ def _build_tier1_rollup_rows(manifest_rows: list[dict[str, Any]]) -> list[dict[s
             }
         )
     return output
+
+
+def _derive_network_inclusion(row: Mapping[str, Any]) -> str:
+    quality = row.get("network_signal_quality")
+    if isinstance(quality, str) and quality:
+        if quality in {"netstats_ok", "netstats_only"}:
+            return "netstats_ok"
+        if quality == "netstats_partial":
+            return "netstats_partial"
+        if quality in {"netstats_missing", "none"}:
+            return "netstats_missing"
+        if quality == "netstats_zero_bytes":
+            return "netstats_zero_bytes"
+        if quality == "pcap_only":
+            return "pcap_only"
+    try:
+        netstats_rows = int(row.get("netstats_rows") or 0)
+        netstats_missing = int(row.get("netstats_missing_rows") or 0)
+    except (TypeError, ValueError):
+        netstats_rows = 0
+        netstats_missing = 0
+    if netstats_rows and netstats_missing:
+        return "netstats_partial"
+    if netstats_rows:
+        return "netstats_ok"
+    if netstats_missing:
+        return "netstats_missing"
+    return "none"
 
 
 def _safe_ratio(captured: object, expected: object) -> float | None:

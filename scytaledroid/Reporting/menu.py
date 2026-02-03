@@ -93,7 +93,7 @@ def reporting_menu() -> None:
         menu_utils.print_section("Operational Reports")
         menu_utils.render_menu(
             MenuSpec(
-                items=options[2:],
+                items=options[3:],
                 show_exit=False,
                 exit_label=None,
                 show_descriptions=False,

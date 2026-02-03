@@ -11,7 +11,7 @@ predictable filenames, and ready for follow-on static, dynamic, or threat-intel
 analysis.
 
 Dynamic analysis runs are executed on physical devices (non-root telemetry),
-structured as behavior sessions, and designed to support time-series anomaly
+structured as dynamic sessions, and designed to support time-series anomaly
 detection pipelines (Isolation Forest / One-Class SVM) with reproducible
 baseline linkage.
 

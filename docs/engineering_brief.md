@@ -37,7 +37,7 @@
 ## Design Principles & Constraints
 - **Correctness > speed:** Baseline mode is sacrosanct; no optimizations that drop fields or change semantics silently.
 - **Single sources of truth:** One menu spec; one gating helper for freshness states; one InventoryDelta reused across UI; one place for run metadata stamping.
-- **Service-layer architecture:** Controllers orchestrate; work happens in services/subpackages. ADB via `adb_utils` only.
+- **Service-layer architecture:** Controllers orchestrate; work happens in services/subpackages. ADB via `adb_shell`/`adb_devices`/`adb_packages`/`adb_status`.
 - **Test + transcript discipline:** For non-trivial changes, run smoke imports/pytest; capture at least one transcript of inventory + pull (and static when applicable).
 - **Publication standard:** Any change affecting counts/classifications/risk must be explainable in a methods section (e.g., how user_only mode filters by partition).
 

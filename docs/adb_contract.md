@@ -72,5 +72,5 @@ Cache invalidation must occur on:
 
 ## 7) Deprecations
 
-`adb_utils.py` is deprecated and will be removed by **MILESTONE-DYNAMIC-C**.
+`adb_utils.py` has been removed; use `adb_shell`, `adb_devices`, `adb_packages`, and `adb_status` directly.
 All new code must use `adb_shell`, `adb_devices`, `adb_packages`, and `adb_status` directly.
