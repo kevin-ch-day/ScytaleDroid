@@ -1010,6 +1010,7 @@ def _print_run_summary(result, duration_label: str) -> None:
             captured = telemetry_stats.get("captured_samples")
             max_gap = telemetry_stats.get("sample_max_gap_s")
             avg_delta = telemetry_stats.get("sample_avg_delta_s")
+            sampling_duration = telemetry_stats.get("sampling_duration_seconds")
             ratio = None
             if expected and captured is not None:
                 try:
@@ -1019,6 +1020,11 @@ def _print_run_summary(result, duration_label: str) -> None:
             telemetry_lines = []
             if sampling_rate:
                 telemetry_lines.append(f"Sampling rate: {sampling_rate}s")
+            if sampling_duration is not None:
+                try:
+                    telemetry_lines.append(f"Sampling window: {float(sampling_duration):.0f}s")
+                except Exception:
+                    telemetry_lines.append(f"Sampling window: {sampling_duration}s")
             if expected is not None and captured is not None:
                 telemetry_lines.append(f"Samples: {captured}/{expected}")
             if ratio is not None:
@@ -1027,6 +1033,12 @@ def _print_run_summary(result, duration_label: str) -> None:
                 telemetry_lines.append(f"Max gap: {max_gap:.2f}s")
             if avg_delta is not None:
                 telemetry_lines.append(f"Avg delta: {avg_delta:.2f}s")
+            if sampling_duration is not None and duration_seconds:
+                try:
+                    delta = abs(float(duration_seconds) - float(sampling_duration))
+                    telemetry_lines.append(f"Clock delta: {delta:.0f}s")
+                except Exception:
+                    pass
             if telemetry_lines:
                 _print_simple_list("Telemetry", telemetry_lines)
             if summary_payload:

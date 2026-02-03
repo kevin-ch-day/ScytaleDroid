@@ -13,6 +13,9 @@ from scytaledroid.DynamicAnalysis.analysis.privacy_manifest import write_privacy
 
 
 DATASET_NAME = "ScytaleDroid-Dyn-v1"
+NETSTATS_MISSING_RATIO_MAX = 0.25
+NETSTATS_PCAP_RATIO_MIN = 0.05
+NETSTATS_PCAP_RATIO_MAX = 5.0
 
 
 def export_manifest_csv(output_path: Path) -> Path:
@@ -64,7 +67,7 @@ def export_tier1_pack(output_dir: Path) -> dict[str, Path]:
     for row in included:
         run_id = row["dynamic_run_id"]
         network_status = row.get("network_inclusion_status")
-        include_network = network_status == "netstats_ok"
+        include_network = bool(row.get("network_csv_included"))
         export_run_telemetry_csv(
             dynamic_run_id=run_id,
             output_dir=telemetry_dir,
@@ -164,6 +167,8 @@ def _fetch_manifest_rows() -> list[dict[str, Any]]:
           ds.started_at_utc,
           ds.ended_at_utc,
           ds.duration_seconds,
+          ds.sampling_duration_seconds,
+          ds.clock_alignment_delta_s,
           {netstats_select},
           ds.expected_samples,
           ds.captured_samples,
@@ -179,7 +184,8 @@ def _fetch_manifest_rows() -> list[dict[str, Any]]:
           CASE
             WHEN ds.tier IS NULL THEN 'exclude_missing_tier'
             WHEN ds.tier <> 'dataset' THEN 'exclude_non_dataset'
-            WHEN ds.duration_seconds IS NULL OR ds.duration_seconds < 90 THEN 'exclude_duration'
+            WHEN COALESCE(ds.sampling_duration_seconds, ds.duration_seconds) IS NULL
+              OR COALESCE(ds.sampling_duration_seconds, ds.duration_seconds) < 90 THEN 'exclude_duration'
             WHEN ds.expected_samples IS NULL OR ds.captured_samples IS NULL THEN 'exclude_missing_stats'
             WHEN ds.captured_samples / NULLIF(ds.expected_samples,0) < 0.90 THEN 'exclude_low_capture'
             WHEN ds.sample_max_gap_s > (ds.sampling_rate_s * 2) THEN 'exclude_gap'
@@ -198,7 +204,22 @@ def _fetch_manifest_rows() -> list[dict[str, Any]]:
         totals_row = totals.get(run_id, {}) if run_id else {}
         payload["netstats_bytes_in_total"] = totals_row.get("sum_in")
         payload["netstats_bytes_out_total"] = totals_row.get("sum_out")
-        payload["network_inclusion_status"] = _derive_network_inclusion(payload)
+        stored_quality = payload.get("network_signal_quality")
+        computed_quality = _compute_network_quality(payload)
+        payload["network_signal_quality_stored"] = stored_quality
+        payload["network_signal_quality_computed"] = computed_quality
+        payload["network_signal_quality_final"] = computed_quality
+        payload["network_quality_mismatch"] = bool(
+            stored_quality
+            and isinstance(stored_quality, str)
+            and computed_quality
+            and stored_quality != computed_quality
+        )
+        payload["network_signal_quality"] = computed_quality
+        payload["network_inclusion_status"] = computed_quality
+        payload["network_csv_included"] = _should_include_network(payload)
+        payload["expected_math_flag_sampling"] = _expected_math_flag_sampling(payload)
+        payload["clock_alignment_flag"] = _clock_alignment_flag(payload)
         enriched.append(payload)
     return enriched
 
@@ -219,9 +240,18 @@ def _build_tier1_summary_rows(manifest_rows: list[dict[str, Any]]) -> list[dict[
                 "sample_max_gap_s": row.get("sample_max_gap_s"),
                 "netstats_available": row.get("netstats_available"),
                 "network_signal_quality": row.get("network_signal_quality"),
+                "network_signal_quality_stored": row.get("network_signal_quality_stored"),
+                "network_signal_quality_computed": row.get("network_signal_quality_computed"),
+                "network_signal_quality_final": row.get("network_signal_quality_final"),
+                "network_quality_mismatch": row.get("network_quality_mismatch"),
                 "network_inclusion_status": row.get("network_inclusion_status"),
+                "network_csv_included": row.get("network_csv_included"),
                 "netstats_rows": row.get("netstats_rows"),
                 "netstats_missing_rows": row.get("netstats_missing_rows"),
+                "sampling_duration_seconds": row.get("sampling_duration_seconds"),
+                "clock_alignment_delta_s": row.get("clock_alignment_delta_s"),
+                "expected_math_flag_sampling": row.get("expected_math_flag_sampling"),
+                "clock_alignment_flag": row.get("clock_alignment_flag"),
             }
         )
     return summary
@@ -280,21 +310,7 @@ def _build_tier1_rollup_rows(manifest_rows: list[dict[str, Any]]) -> list[dict[s
     return output
 
 
-def _derive_network_inclusion(row: Mapping[str, Any]) -> str:
-    quality = row.get("network_signal_quality")
-    if isinstance(quality, str) and quality:
-        if quality == "netstats_ok":
-            return "netstats_ok"
-        if quality == "netstats_partial":
-            return "netstats_partial"
-        if quality == "netstats_missing":
-            return "netstats_missing"
-        if quality == "none":
-            return "none"
-        if quality == "netstats_zero_bytes":
-            return "netstats_zero_bytes"
-        if quality == "pcap_only":
-            return "pcap_only"
+def _compute_network_quality(row: Mapping[str, Any]) -> str:
     try:
         netstats_rows = int(row.get("netstats_rows") or 0)
         netstats_missing = int(row.get("netstats_missing_rows") or 0)
@@ -307,6 +323,10 @@ def _derive_network_inclusion(row: Mapping[str, Any]) -> str:
     except (TypeError, ValueError):
         sum_in = 0
         sum_out = 0
+    try:
+        pcap_bytes = int(row.get("pcap_bytes") or 0)
+    except (TypeError, ValueError):
+        pcap_bytes = 0
     if netstats_rows and (sum_in + sum_out) == 0:
         return "netstats_zero_bytes"
     if netstats_rows and netstats_missing:
@@ -315,7 +335,45 @@ def _derive_network_inclusion(row: Mapping[str, Any]) -> str:
         return "netstats_ok"
     if netstats_missing:
         return "netstats_missing"
+    if pcap_bytes > 0:
+        return "pcap_only"
     return "none"
+
+
+def _should_include_network(row: Mapping[str, Any]) -> bool:
+    quality = row.get("network_signal_quality") or row.get("network_signal_quality_final")
+    if quality not in {"netstats_ok", "netstats_partial"}:
+        return False
+    try:
+        netstats_rows = int(row.get("netstats_rows") or 0)
+        netstats_missing = int(row.get("netstats_missing_rows") or 0)
+    except (TypeError, ValueError):
+        netstats_rows = 0
+        netstats_missing = 0
+    try:
+        sum_in = int(row.get("netstats_bytes_in_total") or 0)
+        sum_out = int(row.get("netstats_bytes_out_total") or 0)
+    except (TypeError, ValueError):
+        sum_in = 0
+        sum_out = 0
+    net_total = sum_in + sum_out
+    if net_total <= 0:
+        return False
+    denom = netstats_rows + netstats_missing
+    if denom <= 0:
+        return False
+    missing_ratio = netstats_missing / denom
+    if missing_ratio > NETSTATS_MISSING_RATIO_MAX:
+        return False
+    try:
+        pcap_bytes = int(row.get("pcap_bytes") or 0)
+    except (TypeError, ValueError):
+        pcap_bytes = 0
+    if pcap_bytes > 0:
+        ratio = net_total / pcap_bytes if pcap_bytes else 0
+        if ratio < NETSTATS_PCAP_RATIO_MIN or ratio > NETSTATS_PCAP_RATIO_MAX:
+            return False
+    return True
 
 
 def _write_network_skipped(path: Path, *, reason: str) -> None:
@@ -341,6 +399,29 @@ def _safe_ratio(captured: object, expected: object) -> float | None:
     if exp == 0:
         return None
     return round(cap / exp, 3)
+
+
+def _expected_math_flag_sampling(row: Mapping[str, Any]) -> str | None:
+    try:
+        sampling_duration = float(row.get("sampling_duration_seconds") or 0)
+        sampling_rate = float(row.get("sampling_rate_s") or 0)
+        expected_samples = float(row.get("expected_samples") or 0)
+    except (TypeError, ValueError):
+        return None
+    if sampling_duration <= 0 or sampling_rate <= 0:
+        return "missing"
+    ideal_expected = sampling_duration / sampling_rate
+    if abs(expected_samples - ideal_expected) > 2:
+        return "mismatch"
+    return "ok"
+
+
+def _clock_alignment_flag(row: Mapping[str, Any], *, threshold_s: float = 5.0) -> str | None:
+    try:
+        delta = float(row.get("clock_alignment_delta_s"))
+    except (TypeError, ValueError):
+        return None
+    return "misaligned" if delta > threshold_s else "ok"
 
 
 def _fetch_process_rows(dynamic_run_id: str) -> list[dict[str, Any]]:

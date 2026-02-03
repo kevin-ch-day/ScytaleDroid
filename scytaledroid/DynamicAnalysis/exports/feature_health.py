@@ -71,6 +71,7 @@ def build_feature_health_report(
 
     metrics: dict[str, dict[str, Any]] = {}
     degenerate: dict[str, dict[str, Any]] = {}
+    ignore_degenerate = {"uid", "pid", "sample_index"}
     for column, stats in column_stats.items():
         variance = stats.variance()
         missing_pct = stats.missing_pct()
@@ -85,7 +86,8 @@ def build_feature_health_report(
             "total_samples": stats.total,
         }
         if variance == 0 or (zero_pct is not None and zero_pct >= 0.99):
-            degenerate[column] = metrics[column]
+            if column not in ignore_degenerate:
+                degenerate[column] = metrics[column]
 
     core_columns = {"cpu_pct", "rss_kb", "pss_kb"}
     network_channel_excluded = not network_csvs
@@ -127,6 +129,12 @@ def build_feature_health_report(
 
 def _render_markdown(report: dict[str, Any]) -> str:
     lines = ["# Feature Health Report", "", f"Status: **{report.get('status')}**", ""]
+    if report.get("status") == "WARN" and report.get("network_channel_excluded"):
+        lines.append(
+            "Note: WARN may be expected when optional channels (e.g., network) are excluded by policy; "
+            "core process telemetry remains authoritative."
+        )
+        lines.append("")
     core = report.get("core_degenerate") or {}
     if core:
         lines.append("## Core feature issues")

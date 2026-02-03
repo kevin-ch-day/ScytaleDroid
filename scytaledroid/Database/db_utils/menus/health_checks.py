@@ -905,6 +905,8 @@ def run_tier1_audit_report() -> None:
         "network_signal_quality",
         "netstats_rows",
         "netstats_missing_rows",
+        "sampling_duration_seconds",
+        "clock_alignment_delta_s",
     )
     missing_columns = []
     for column in required_columns:
@@ -929,6 +931,22 @@ def run_tier1_audit_report() -> None:
         "stale RUNNING rows",
         detail=str(stale_running),
     )
+
+    if _column_exists("dynamic_sessions", "clock_alignment_delta_s"):
+        misaligned = scalar(
+            """
+            SELECT COUNT(*)
+            FROM dynamic_sessions
+            WHERE tier='dataset'
+              AND clock_alignment_delta_s IS NOT NULL
+              AND clock_alignment_delta_s > 5
+            """
+        ) or 0
+        _print_status_line(
+            "ok" if misaligned == 0 else "warn",
+            "clock alignment > 5s",
+            detail=str(misaligned),
+        )
 
     tier1_ready = scalar(
         """

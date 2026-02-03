@@ -36,6 +36,13 @@ def persist_dynamic_summary(
     duration_seconds = config.duration_seconds
     if (not duration_seconds or int(duration_seconds) == 0) and result.started_at and result.ended_at:
         duration_seconds = int((result.ended_at - result.started_at).total_seconds())
+    sampling_duration_seconds = qa_stats.get("sampling_duration_seconds")
+    clock_alignment_delta_s = None
+    try:
+        if duration_seconds is not None and sampling_duration_seconds is not None:
+            clock_alignment_delta_s = abs(float(duration_seconds) - float(sampling_duration_seconds))
+    except (TypeError, ValueError):
+        clock_alignment_delta_s = None
     session_row = {
         "dynamic_run_id": dynamic_run_id,
         "package_name": config.package_name,
@@ -43,6 +50,8 @@ def persist_dynamic_summary(
         "scenario_id": config.scenario_id,
         "tier": config.tier,
         "duration_seconds": duration_seconds,
+        "sampling_duration_seconds": sampling_duration_seconds,
+        "clock_alignment_delta_s": clock_alignment_delta_s,
         "sampling_rate_s": sampling_rate_s,
         "started_at_utc": _fmt_dt(result.started_at),
         "ended_at_utc": _fmt_dt(result.ended_at),
@@ -73,6 +82,10 @@ def persist_dynamic_summary(
     }
     if not _dynamic_sessions_has_column("tier"):
         session_row.pop("tier", None)
+    if not _dynamic_sessions_has_column("sampling_duration_seconds"):
+        session_row.pop("sampling_duration_seconds", None)
+    if not _dynamic_sessions_has_column("clock_alignment_delta_s"):
+        session_row.pop("clock_alignment_delta_s", None)
     if not _dynamic_sessions_has_column("netstats_available"):
         session_row.pop("netstats_available", None)
     if not _dynamic_sessions_has_column("network_signal_quality"):
@@ -388,6 +401,7 @@ def _extract_qa_stats(payload: Mapping[str, Any]) -> dict[str, Any]:
         return {
             "expected_samples": None,
             "captured_samples": None,
+            "sampling_duration_seconds": None,
             "sample_min_delta_s": None,
             "sample_avg_delta_s": None,
             "sample_max_delta_s": None,
@@ -396,6 +410,7 @@ def _extract_qa_stats(payload: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "expected_samples": _safe_int(stats.get("expected_samples")),
         "captured_samples": _safe_int(stats.get("captured_samples")),
+        "sampling_duration_seconds": _safe_float(stats.get("sampling_duration_seconds")),
         "sample_min_delta_s": _safe_float(stats.get("sample_min_delta_s")),
         "sample_avg_delta_s": _safe_float(stats.get("sample_avg_delta_s")),
         "sample_max_delta_s": _safe_float(stats.get("sample_max_delta_s")),

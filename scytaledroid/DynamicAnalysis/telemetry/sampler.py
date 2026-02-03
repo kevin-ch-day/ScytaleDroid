@@ -87,11 +87,21 @@ class TelemetrySampler:
         stats["netstats_samples"] = self._netstats_samples
         stats["netstats_skipped"] = self._netstats_skipped
         netstats_rows = sum(1 for row in self._network_rows if row.get("source") == "netstats")
-        netstats_missing_rows = sum(1 for row in self._network_rows if row.get("source") == "netstats_missing")
+        netstats_delta_init_rows = sum(
+            1
+            for row in self._network_rows
+            if row.get("source") == "netstats_missing" and row.get("collector_status") == "delta_init"
+        )
+        netstats_missing_rows = sum(
+            1
+            for row in self._network_rows
+            if row.get("source") == "netstats_missing" and row.get("collector_status") != "delta_init"
+        )
         netstats_bytes_in, netstats_bytes_out = _sum_netstats_bytes(self._network_rows)
         stats["netstats_available"] = netstats_rows > 0
         stats["netstats_rows"] = netstats_rows
         stats["netstats_missing_rows"] = netstats_missing_rows
+        stats["netstats_delta_init_rows"] = netstats_delta_init_rows
         stats["netstats_bytes_in_total"] = netstats_bytes_in
         stats["netstats_bytes_out_total"] = netstats_bytes_out
         stats["network_signal_quality"] = evaluate_network_signal_quality(
@@ -134,27 +144,31 @@ class TelemetrySampler:
                     self._netstats_samples += 1
                 else:
                     self._netstats_skipped += 1
-                network_row, netstats_totals = _collect_network_sample(
-                    self.device_serial,
-                    self._uid,
-                    ts,
-                    use_netstats=use_netstats,
-                    last_netstats=self._last_network_row,
-                    allow_fallback_iface=self._allow_fallback_iface,
-                    netstats_collector=self._netstats_collector,
-                    netstats_parser=self._netstats_parser,
-                    debug_dir=self._netstats_debug_dir,
-                    debug_captured=self._netstats_debug_captured,
-                )
-                if netstats_totals is not None:
-                    network_row = self._apply_netstats_delta(network_row, netstats_totals)
-                if network_row.get("collector_status") == "debug_captured":
-                    self._netstats_debug_captured = True
-                network_row["sample_index"] = sample_index
-                network_row["timestamp_utc"] = ts
-                self._network_rows.append(network_row)
-                if network_row.get("source") == "netstats":
-                    self._last_network_row = dict(network_row)
+                network_row = None
+                netstats_totals = None
+                if use_netstats or self._allow_fallback_iface:
+                    network_row, netstats_totals = _collect_network_sample(
+                        self.device_serial,
+                        self._uid,
+                        ts,
+                        use_netstats=use_netstats,
+                        last_netstats=self._last_network_row,
+                        allow_fallback_iface=self._allow_fallback_iface,
+                        netstats_collector=self._netstats_collector,
+                        netstats_parser=self._netstats_parser,
+                        debug_dir=self._netstats_debug_dir,
+                        debug_captured=self._netstats_debug_captured,
+                    )
+                if network_row is not None:
+                    if netstats_totals is not None:
+                        network_row = self._apply_netstats_delta(network_row, netstats_totals)
+                    if network_row.get("collector_status") == "debug_captured":
+                        self._netstats_debug_captured = True
+                    network_row["sample_index"] = sample_index
+                    network_row["timestamp_utc"] = ts
+                    self._network_rows.append(network_row)
+                    if network_row.get("source") == "netstats":
+                        self._last_network_row = dict(network_row)
 
                 sample_index += 1
                 next_tick += self.sample_rate_s
@@ -455,15 +469,24 @@ def _compute_stats(
     stats: dict[str, object] = {
         "expected_samples": None,
         "captured_samples": len(timestamps),
+        "sampling_duration_seconds": None,
         "sample_min_delta_s": None,
         "sample_avg_delta_s": None,
         "sample_max_delta_s": None,
         "sample_max_gap_s": None,
         "error": error,
     }
+    elapsed = None
     if start_monotonic is not None and end_monotonic is not None:
         elapsed = max(end_monotonic - start_monotonic, 0.0)
-        stats["expected_samples"] = int(elapsed / sample_rate_s) + 1
+    sampling_duration = None
+    if len(monotonic_timestamps) >= 2:
+        sampling_duration = max(monotonic_timestamps[-1] - monotonic_timestamps[0], 0.0)
+    elif elapsed is not None:
+        sampling_duration = elapsed
+    if sampling_duration is not None:
+        stats["sampling_duration_seconds"] = sampling_duration
+        stats["expected_samples"] = int(sampling_duration / sample_rate_s) + 1
     if len(monotonic_timestamps) >= 2:
         deltas = [
             b - a for a, b in zip(monotonic_timestamps, monotonic_timestamps[1:], strict=False)

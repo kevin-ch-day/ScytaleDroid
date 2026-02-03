@@ -16,6 +16,8 @@ _DDL_STATEMENTS: list[str] = [
       scenario_id        VARCHAR(64)  DEFAULT NULL,
       tier               VARCHAR(32)  DEFAULT NULL,
       duration_seconds   INT          DEFAULT NULL,
+      sampling_duration_seconds DOUBLE DEFAULT NULL,
+      clock_alignment_delta_s DOUBLE DEFAULT NULL,
       sampling_rate_s    INT          DEFAULT NULL,
       started_at_utc     DATETIME     DEFAULT NULL,
       ended_at_utc       DATETIME     DEFAULT NULL,

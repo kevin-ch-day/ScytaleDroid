@@ -351,6 +351,50 @@ def ensure_dynamic_netstats_rows_columns(*, prompt_user: bool = True) -> bool:
     return True
 
 
+def ensure_dynamic_sampling_duration_columns(*, prompt_user: bool = True) -> bool:
+    """Ensure dynamic_sessions has sampling duration alignment columns."""
+
+    cfg = db_config.DB_CONFIG
+    backend = str(cfg.get("engine", "sqlite"))
+    if backend != "mysql":
+        print(
+            status_messages.status(
+                "sampling duration migrations are only supported for MySQL/MariaDB backends.",
+                level="warn",
+            )
+        )
+        return False
+
+    columns = diagnostics.get_table_columns("dynamic_sessions") or []
+    column_set = {col.lower() for col in columns}
+    needed = {"sampling_duration_seconds", "clock_alignment_delta_s"}
+    missing = sorted(needed - column_set)
+    if not missing:
+        print(status_messages.status("dynamic_sessions sampling duration columns already present.", level="success"))
+        return True
+
+    print(status_messages.status(f"Missing dynamic_sessions columns: {', '.join(missing)}.", level="warn"))
+    if prompt_user and not prompt_utils.prompt_yes_no(
+        "Apply migration now? (ALTER TABLE dynamic_sessions ADD COLUMN sampling duration)",
+        default=True,
+    ):
+        return False
+
+    if "sampling_duration_seconds" in missing:
+        core_q.run_sql_write(
+            "ALTER TABLE dynamic_sessions ADD COLUMN sampling_duration_seconds DOUBLE DEFAULT NULL",
+            query_name="db_utils.dynamic_sessions.add_sampling_duration_seconds",
+        )
+        print(status_messages.status("Added dynamic_sessions.sampling_duration_seconds column.", level="success"))
+    if "clock_alignment_delta_s" in missing:
+        core_q.run_sql_write(
+            "ALTER TABLE dynamic_sessions ADD COLUMN clock_alignment_delta_s DOUBLE DEFAULT NULL",
+            query_name="db_utils.dynamic_sessions.add_clock_alignment_delta_s",
+        )
+        print(status_messages.status("Added dynamic_sessions.clock_alignment_delta_s column.", level="success"))
+    return True
+
+
 def ensure_dynamic_tier_migrations(*, prompt_user: bool = True) -> bool:
     """Apply all Tier-1 dynamic schema migrations in one step."""
 
@@ -364,7 +408,8 @@ def ensure_dynamic_tier_migrations(*, prompt_user: bool = True) -> bool:
         quality_ok = ensure_dynamic_network_quality_column(prompt_user=prompt_user)
         netstats_ok = ensure_dynamic_netstats_rows_columns(prompt_user=prompt_user)
         pcap_ok = ensure_dynamic_pcap_columns(prompt_user=prompt_user)
-        success = tier_ok and quality_ok and netstats_ok and pcap_ok
+        sampling_ok = ensure_dynamic_sampling_duration_columns(prompt_user=prompt_user)
+        success = tier_ok and quality_ok and netstats_ok and pcap_ok and sampling_ok
         target_version = _tier1_schema_version()
         if success and schema_before != target_version:
             _record_schema_version(target_version)
@@ -386,7 +431,7 @@ def ensure_dynamic_tier_migrations(*, prompt_user: bool = True) -> bool:
 
 
 def _tier1_schema_version() -> str:
-    return "0.2.4"
+    return "0.2.5"
 
 
 def _ensure_db_ops_log_table() -> None:
@@ -494,6 +539,9 @@ __all__ = [
     "seed_paper_dataset_profile",
     "ensure_dynamic_tier_column",
     "ensure_dynamic_network_quality_column",
+    "ensure_dynamic_netstats_rows_columns",
+    "ensure_dynamic_pcap_columns",
+    "ensure_dynamic_sampling_duration_columns",
     "ensure_dynamic_tier_migrations",
     "log_db_op",
 ]

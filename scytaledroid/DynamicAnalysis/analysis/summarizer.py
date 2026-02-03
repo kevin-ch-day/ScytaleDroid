@@ -60,22 +60,21 @@ class DynamicRunSummarizer:
         tier = None
         if isinstance(manifest.operator, dict):
             tier = manifest.operator.get("tier")
-        network_signal_quality = None
+        stored_quality = None
         if isinstance(telemetry_stats, dict):
-            network_signal_quality = telemetry_stats.get("network_signal_quality")
-        if not network_signal_quality:
-            netstats_rows = int((telemetry_stats or {}).get("netstats_rows") or 0) if telemetry_stats else 0
-            netstats_missing = int((telemetry_stats or {}).get("netstats_missing_rows") or 0) if telemetry_stats else 0
-            netstats_in = (telemetry_stats or {}).get("netstats_bytes_in_total") if telemetry_stats else None
-            netstats_out = (telemetry_stats or {}).get("netstats_bytes_out_total") if telemetry_stats else None
-            network_signal_quality = evaluate_network_signal_quality(
-                netstats_rows=netstats_rows,
-                netstats_missing_rows=netstats_missing,
-                sum_bytes_in=_safe_int(netstats_in),
-                sum_bytes_out=_safe_int(netstats_out),
-                pcap_present=pcap_valid is True,
-                pcap_bytes=_safe_int(pcap_size_bytes),
-            )
+            stored_quality = telemetry_stats.get("network_signal_quality")
+        netstats_rows = int((telemetry_stats or {}).get("netstats_rows") or 0) if telemetry_stats else 0
+        netstats_missing = int((telemetry_stats or {}).get("netstats_missing_rows") or 0) if telemetry_stats else 0
+        netstats_in = (telemetry_stats or {}).get("netstats_bytes_in_total") if telemetry_stats else None
+        netstats_out = (telemetry_stats or {}).get("netstats_bytes_out_total") if telemetry_stats else None
+        network_signal_quality = evaluate_network_signal_quality(
+            netstats_rows=netstats_rows,
+            netstats_missing_rows=netstats_missing,
+            sum_bytes_in=_safe_int(netstats_in),
+            sum_bytes_out=_safe_int(netstats_out),
+            pcap_present=pcap_valid is True,
+            pcap_bytes=_safe_int(pcap_size_bytes),
+        )
         telemetry_quality = self._telemetry_quality(telemetry_stats)
         if isinstance(telemetry_stats, dict):
             netstats_available = telemetry_stats.get("netstats_available")
@@ -103,6 +102,14 @@ class DynamicRunSummarizer:
                 "stats": telemetry_stats,
                 "quality": telemetry_quality,
                 "network_signal_quality": network_signal_quality,
+                "network_signal_quality_stored": stored_quality,
+                "network_signal_quality_computed": network_signal_quality,
+                "network_quality_mismatch": bool(
+                    stored_quality
+                    and isinstance(stored_quality, str)
+                    and network_signal_quality
+                    and stored_quality != network_signal_quality
+                ),
             },
             "flags": {
                 "network_capture_present": network_present,
@@ -255,6 +262,7 @@ class DynamicRunSummarizer:
             ratio = None
         return {
             "capture_ratio": ratio,
+            "sampling_duration_seconds": stats.get("sampling_duration_seconds"),
             "max_gap_s": stats.get("sample_max_gap_s"),
             "avg_delta_s": stats.get("sample_avg_delta_s"),
         }
