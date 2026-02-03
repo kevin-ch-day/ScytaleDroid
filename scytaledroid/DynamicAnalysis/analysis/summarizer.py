@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from scytaledroid.DynamicAnalysis.core.evidence_pack import EvidencePackWriter
+from scytaledroid.Utils.network_quality import evaluate_network_signal_quality
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord, RunManifest
 
 
@@ -63,7 +64,18 @@ class DynamicRunSummarizer:
         if isinstance(telemetry_stats, dict):
             network_signal_quality = telemetry_stats.get("network_signal_quality")
         if not network_signal_quality:
-            network_signal_quality = self._network_signal_quality(telemetry_counts, pcap_valid)
+            netstats_rows = int((telemetry_stats or {}).get("netstats_rows") or 0) if telemetry_stats else 0
+            netstats_missing = int((telemetry_stats or {}).get("netstats_missing_rows") or 0) if telemetry_stats else 0
+            netstats_in = (telemetry_stats or {}).get("netstats_bytes_in_total") if telemetry_stats else None
+            netstats_out = (telemetry_stats or {}).get("netstats_bytes_out_total") if telemetry_stats else None
+            network_signal_quality = evaluate_network_signal_quality(
+                netstats_rows=netstats_rows,
+                netstats_missing_rows=netstats_missing,
+                sum_bytes_in=_safe_int(netstats_in),
+                sum_bytes_out=_safe_int(netstats_out),
+                pcap_present=pcap_valid is True,
+                pcap_bytes=_safe_int(pcap_size_bytes),
+            )
         telemetry_quality = self._telemetry_quality(telemetry_stats)
         if isinstance(telemetry_stats, dict):
             netstats_available = telemetry_stats.get("netstats_available")
@@ -71,6 +83,8 @@ class DynamicRunSummarizer:
                 telemetry_quality["netstats_available"] = bool(netstats_available)
         if telemetry_quality.get("netstats_available") is False:
             telemetry_quality["netstats_warning"] = "netstats_unavailable"
+        if network_signal_quality == "netstats_zero_bytes":
+            telemetry_quality["netstats_warning"] = "netstats_zero_bytes"
         return {
             "dynamic_run_id": manifest.dynamic_run_id,
             "status": manifest.status,
@@ -277,21 +291,6 @@ class DynamicRunSummarizer:
             except OSError:
                 continue
         return "false"
-
-    def _network_signal_quality(
-        self, telemetry_counts: dict[str, Any] | None, pcap_valid: object
-    ) -> str:
-        netstats_available = False
-        if isinstance(telemetry_counts, dict):
-            try:
-                netstats_available = int(telemetry_counts.get("network") or 0) > 0
-            except Exception:
-                netstats_available = False
-        if pcap_valid is True:
-            return "pcap_valid"
-        if netstats_available:
-            return "netstats_only"
-        return "none"
 
     def _load_pcap_meta(self, manifest: RunManifest) -> dict[str, Any]:
         meta_path = None

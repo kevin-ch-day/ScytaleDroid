@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from scytaledroid.Database.db_core import run_sql
 from scytaledroid.Database.db_utils import diagnostics
+from scytaledroid.Config import app_config
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
 from scytaledroid.Utils.DisplayUtils.terminal import get_terminal_width
 
@@ -951,6 +952,16 @@ def run_tier1_audit_report() -> None:
         detail=str(tier1_ready or 0),
     )
 
+    feature_health_status = _load_feature_health_status()
+    if feature_health_status:
+        _print_status_line(
+            "ok" if feature_health_status == "PASS" else "warn" if feature_health_status == "WARN" else "error",
+            "Feature Health",
+            detail=feature_health_status,
+        )
+    else:
+        _print_status_line("warn", "Feature Health", detail="missing (run export)")
+
     evidence_missing = _count_evidence_integrity_issues()
     _print_status_line(
         "ok" if evidence_missing == 0 else "warn",
@@ -1362,6 +1373,19 @@ def _fetch_netstats_missing_summary() -> list[dict[str, object]]:
             }
         )
     return summary
+
+
+def _load_feature_health_status() -> str | None:
+    export_dir = Path(app_config.OUTPUT_DIR) / "exports" / "scytaledroid_dyn_v1" / "analysis"
+    json_path = export_dir / "feature_health.json"
+    if not json_path.exists():
+        return None
+    try:
+        payload = json.loads(json_path.read_text())
+    except json.JSONDecodeError:
+        return None
+    status = payload.get("status")
+    return status if isinstance(status, str) else None
 
 
 def _fetch_pcap_audit_counts() -> dict[str, int]:

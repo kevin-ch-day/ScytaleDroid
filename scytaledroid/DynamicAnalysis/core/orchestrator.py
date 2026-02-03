@@ -172,6 +172,7 @@ class DynamicRunOrchestrator:
                 package_name=run_ctx.package_name,
                 sample_rate_s=self.config.sampling_rate_s,
                 allow_fallback_iface=self.config.tier != "dataset",
+                netstats_debug_dir=run_ctx.notes_dir,
             )
         self._emit_marker(run_ctx, "SCENARIO_START")
         if run_ctx.scenario_hint:
