@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import csv
 from pathlib import Path
 from typing import Iterable, List, Optional
 
@@ -219,7 +220,46 @@ def handle_tier1_export_pack() -> None:
                 level="success",
             )
         )
+    _print_export_validation(outputs)
     prompt_utils.press_enter_to_continue()
+
+
+def _print_export_validation(outputs: dict) -> None:
+    manifest_path = outputs.get("manifest")
+    telemetry_dir = outputs.get("telemetry_dir")
+    if not manifest_path:
+        return
+    total_rows = 0
+    included_rows = 0
+    net_included = 0
+    try:
+        with open(manifest_path, newline="", encoding="utf-8") as handle:
+            reader = csv.DictReader(handle)
+            for row in reader:
+                total_rows += 1
+                inclusion = (row.get("inclusion_status") or "").strip().lower()
+                if inclusion == "include":
+                    included_rows += 1
+                net_status = (row.get("network_inclusion_status") or "").strip().lower()
+                if net_status in {"netstats_ok", "netstats_partial"}:
+                    net_included += 1
+    except OSError:
+        return
+
+    network_files = 0
+    if telemetry_dir:
+        try:
+            network_files = sum(1 for _ in Path(telemetry_dir).glob("*-network.csv"))
+        except OSError:
+            network_files = 0
+
+    print(
+        status_messages.status(
+            f"Export validation: runs={total_rows}, included={included_rows}, "
+            f"network_eligible={net_included}, network_files={network_files}",
+            level="info",
+        )
+    )
 
 
 def handle_tier1_audit_report() -> None:
