@@ -36,6 +36,7 @@ def persist_dynamic_summary(
         "package_name": config.package_name,
         "device_serial": config.device_serial,
         "scenario_id": config.scenario_id,
+        "tier": config.tier,
         "duration_seconds": duration_seconds,
         "sampling_rate_s": sampling_rate_s,
         "started_at_utc": _fmt_dt(result.started_at),
@@ -57,6 +58,8 @@ def persist_dynamic_summary(
         "sample_max_gap_s": qa_stats.get("sample_max_gap_s"),
         "netstats_available": netstats_available,
     }
+    if not _dynamic_sessions_has_column("tier"):
+        session_row.pop("tier", None)
     if not _dynamic_sessions_has_column("netstats_available"):
         session_row.pop("netstats_available", None)
 
@@ -66,7 +69,7 @@ def persist_dynamic_summary(
     if issues:
         _insert_dynamic_issues(issues)
 
-    _persist_telemetry(dynamic_run_id, payload)
+    _persist_telemetry(dynamic_run_id, payload, tier=config.tier)
 
 
 def _require_dynamic_schema() -> None:
@@ -101,9 +104,11 @@ def _insert_dynamic_issues(rows: Iterable[Mapping[str, Any]]) -> None:
     core_q.run_sql_many(sql, data, query_name="dynamic.issues.insert")
 
 
-def _persist_telemetry(dynamic_run_id: str, payload: Mapping[str, Any]) -> None:
+def _persist_telemetry(dynamic_run_id: str, payload: Mapping[str, Any], *, tier: str | None = None) -> None:
     process_rows = payload.get("telemetry_process") or []
     network_rows = payload.get("telemetry_network") or []
+    if tier == "dataset":
+        network_rows = [row for row in network_rows if row.get("source") == "netstats"]
     if process_rows:
         _insert_process_rows(dynamic_run_id, process_rows)
     if network_rows:

@@ -53,7 +53,9 @@ def export_run_telemetry_csv(
 
 
 def _fetch_manifest_rows() -> list[dict[str, Any]]:
+    has_tier = _dynamic_sessions_has_column("tier")
     has_netstats = _dynamic_sessions_has_column("netstats_available")
+    tier_select = "ds.tier" if has_tier else "NULL AS tier"
     netstats_select = "ds.netstats_available" if has_netstats else "NULL AS netstats_available"
     netstats_gate = "WHEN ds.netstats_available = 0 THEN 'exclude_netstats'" if has_netstats else ""
     sql = f"""
@@ -66,6 +68,7 @@ def _fetch_manifest_rows() -> list[dict[str, Any]]:
           ds.artifact_set_hash,
           ds.scenario_id,
           ds.sampling_rate_s,
+          {tier_select},
           ds.started_at_utc,
           ds.ended_at_utc,
           ds.duration_seconds,

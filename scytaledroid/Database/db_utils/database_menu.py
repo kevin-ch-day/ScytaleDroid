@@ -14,6 +14,7 @@ from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
 
 from .menu_actions import (
+    ensure_dynamic_tier_column,
     maybe_clear_screen,
     seed_paper_dataset_profile,
     show_connection_and_config,
@@ -37,7 +38,8 @@ def database_menu() -> None:
         "8": health_checks.prompt_finalize_stale_runs,
         "9": health_checks.prompt_reset_static_data,
         "10": seed_paper_dataset_profile,
-        "11": _run_manifest_export,
+        "11": ensure_dynamic_tier_column,
+        "12": _run_manifest_export,
     }
 
     options: List[MenuOption] = [
@@ -83,6 +85,10 @@ def database_menu() -> None:
         ),
         MenuOption(
             "11",
+            "Add tier column to dynamic_sessions",
+        ),
+        MenuOption(
+            "12",
             "Export dynamic dataset manifest (CSV)",
         ),
     ]

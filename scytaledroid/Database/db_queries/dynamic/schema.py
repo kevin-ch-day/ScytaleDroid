@@ -14,6 +14,7 @@ _DDL_STATEMENTS: list[str] = [
       package_name       VARCHAR(255) NOT NULL,
       device_serial      VARCHAR(128) DEFAULT NULL,
       scenario_id        VARCHAR(64)  DEFAULT NULL,
+      tier               VARCHAR(32)  DEFAULT NULL,
       duration_seconds   INT          DEFAULT NULL,
       sampling_rate_s    INT          DEFAULT NULL,
       started_at_utc     DATETIME     DEFAULT NULL,

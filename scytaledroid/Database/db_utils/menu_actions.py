@@ -176,8 +176,41 @@ def seed_paper_dataset_profile() -> None:
     print(status_messages.status(f"Updated apps: {matched or 0}", level="success"))
     prompt_utils.press_enter_to_continue()
 
+
+def ensure_dynamic_tier_column(*, prompt_user: bool = True) -> bool:
+    """Ensure dynamic_sessions has a tier column (DB migration helper)."""
+
+    cfg = db_config.DB_CONFIG
+    backend = str(cfg.get("engine", "sqlite"))
+    if backend != "mysql":
+        print(
+            status_messages.status(
+                "Tier column migration is only supported for MySQL/MariaDB backends.",
+                level="warn",
+            )
+        )
+        return False
+
+    columns = diagnostics.get_table_columns("dynamic_sessions") or []
+    if "tier" in {col.lower() for col in columns}:
+        print(status_messages.status("dynamic_sessions.tier already present.", level="success"))
+        return True
+
+    print(status_messages.status("Missing dynamic_sessions.tier column.", level="warn"))
+    if prompt_user and not prompt_utils.prompt_yes_no(
+        "Apply migration now? (ALTER TABLE dynamic_sessions ADD COLUMN tier)",
+        default=True,
+    ):
+        return False
+
+    sql = "ALTER TABLE dynamic_sessions ADD COLUMN tier VARCHAR(32) DEFAULT NULL"
+    core_q.run_sql_write(sql, query_name="db_utils.dynamic_sessions.add_tier")
+    print(status_messages.status("Added dynamic_sessions.tier column.", level="success"))
+    return True
+
 __all__ = [
     "maybe_clear_screen",
     "show_connection_and_config",
     "seed_paper_dataset_profile",
+    "ensure_dynamic_tier_column",
 ]

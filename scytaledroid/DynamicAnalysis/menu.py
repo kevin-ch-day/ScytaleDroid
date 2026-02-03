@@ -89,7 +89,9 @@ def dynamic_analysis_menu() -> None:
                 scenario_choice,
                 "basic_usage",
             )
-            package_name = _select_dynamic_target()
+            selection = _select_dynamic_target()
+            package_name = selection[0] if selection else None
+            tier = selection[1] if selection else "exploration"
             if not package_name:
                 continue
             print()
@@ -183,6 +185,7 @@ def dynamic_analysis_menu() -> None:
                 observer_ids=tuple(observer_ids),
                 interactive=True,
                 plan_path=plan_path,
+                tier=tier,
                 static_run_id=static_run_id,
                 clear_logcat=clear_logcat,
                 proxy_port=proxy_port,
@@ -200,7 +203,7 @@ def dynamic_analysis_menu() -> None:
         prompt_utils.press_enter_to_continue()
 
 
-def _select_dynamic_target() -> str | None:
+def _select_dynamic_target() -> tuple[str, str] | None:
     print()
     menu_utils.print_header("Dynamic Run Target")
     target_options = [
@@ -218,16 +221,21 @@ def _select_dynamic_target() -> str | None:
     if choice == "1":
         package_name = _select_package_from_groups(groups, title="App selection")
         if package_name:
-            return package_name
-        return _prompt_custom_package()
+            return (package_name, "exploration")
+        package_name = _prompt_custom_package()
+        return (package_name, "exploration") if package_name else None
 
     if choice == "2":
-        package_name = _select_profile_package(groups)
-        if package_name:
-            return package_name
-        return _prompt_custom_package()
+        profile_selection = _select_profile_package(groups)
+        if profile_selection:
+            package_name, profile_key = profile_selection
+            tier = "dataset" if profile_key == "RESEARCH_DATASET_ALPHA" else "exploration"
+            return (package_name, tier)
+        package_name = _prompt_custom_package()
+        return (package_name, "exploration") if package_name else None
 
-    return _prompt_custom_package()
+    package_name = _prompt_custom_package()
+    return (package_name, "exploration") if package_name else None
 
 
 def _run_force_fail() -> None:
@@ -273,7 +281,7 @@ def _write_force_fail_plan(package_name: str) -> str:
     return str(plan_path)
 
 
-def _select_profile_package(groups) -> str | None:
+def _select_profile_package(groups) -> tuple[str, str | None] | None:
     categories = list_categories(groups)
     db_profiles = _load_db_profiles()
     if not categories and not db_profiles:
@@ -321,6 +329,18 @@ def _select_profile_package(groups) -> str | None:
     selected = profile_rows[index]
     profile_key = selected.get("key")
     if profile_key:
+        if profile_key == "RESEARCH_DATASET_ALPHA":
+            try:
+                from scytaledroid.Database.db_utils.menu_actions import ensure_dynamic_tier_column
+
+                ensure_dynamic_tier_column(prompt_user=True)
+            except Exception:
+                print(
+                    status_messages.status(
+                        "Unable to verify dynamic_sessions.tier column; dataset tagging may be unavailable.",
+                        level="warn",
+                    )
+                )
         packages = _load_profile_packages(profile_key)
         if not packages:
             print(status_messages.status("No apps found for that profile.", level="warn"))
@@ -335,7 +355,10 @@ def _select_profile_package(groups) -> str | None:
                 )
             )
             return None
-        return _select_package_from_groups(scoped_groups, title=f"{selected['label']} apps")
+        package_name = _select_package_from_groups(scoped_groups, title=f"{selected['label']} apps")
+        if not package_name:
+            return None
+        return (package_name, profile_key)
     category_name = selected["label"]
     profile_map = load_profile_map(groups)
     scoped_groups = tuple(
@@ -351,7 +374,10 @@ def _select_profile_package(groups) -> str | None:
     if not scoped_groups:
         print(status_messages.status("No apps found for that profile.", level="warn"))
         return None
-    return _select_package_from_groups(scoped_groups, title=f"{category_name} apps")
+    package_name = _select_package_from_groups(scoped_groups, title=f"{category_name} apps")
+    if not package_name:
+        return None
+    return (package_name, None)
 
 
 def _load_db_profiles() -> list[dict[str, object]]:
@@ -817,16 +843,28 @@ def _print_run_summary(result, duration_label: str) -> None:
             capture_info = summary_payload.get("capture") or {}
             pcap_valid = capture_info.get("pcap_valid")
             pcap_size = capture_info.get("pcap_size_bytes")
+            min_bytes = capture_info.get("min_pcap_bytes")
             capture_mode = capture_info.get("capture_mode")
             details = []
             if pcap_valid is not None:
                 details.append(f"pcap_valid: {pcap_valid}")
             if pcap_size is not None:
                 details.append(f"pcap_size: {pcap_size}B")
+            if min_bytes is not None:
+                details.append(f"min_bytes: {min_bytes}B")
             if capture_mode:
                 details.append(f"mode: {capture_mode}")
             if details:
                 _print_simple_list("PCAP", details)
+            if pcap_valid is False:
+                size_label = f"{pcap_size}B" if pcap_size is not None else "unknown size"
+                threshold_label = f"{min_bytes}B" if min_bytes is not None else "unknown threshold"
+                print(
+                    status_messages.status(
+                        f"PCAP invalid ({size_label} < {threshold_label}); treated as unavailable for Tier-1.",
+                        level="warn",
+                    )
+                )
 
         summary_paths = _summary_paths(manifest)
         if summary_paths:
