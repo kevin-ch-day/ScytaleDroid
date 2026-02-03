@@ -8,8 +8,10 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
+import os
 
 from scytaledroid.Utils.LoggingUtils import logging_engine
+from scytaledroid.Utils.DisplayUtils import status_messages
 
 from scytaledroid.DeviceAnalysis import adb_shell
 from scytaledroid.DynamicAnalysis.analysis.summarizer import DynamicRunSummarizer
@@ -30,6 +32,7 @@ from scytaledroid.DynamicAnalysis.core.target_manager import TargetManager
 from scytaledroid.DynamicAnalysis.observers.base import Observer, ObserverHandle
 from scytaledroid.DynamicAnalysis.scenarios import ManualScenarioRunner
 from scytaledroid.DynamicAnalysis.telemetry.sampler import TelemetrySampler
+from scytaledroid.DynamicAnalysis.monitor import RunMonitor, RunMonitorConfig
 
 
 class DynamicRunOrchestrator:
@@ -166,6 +169,7 @@ class DynamicRunOrchestrator:
         scenario_runner = ManualScenarioRunner()
         telemetry_payload: dict[str, object] = {}
         sampler = None
+        monitor = None
         if run_ctx.device_serial:
             sampler = TelemetrySampler(
                 device_serial=run_ctx.device_serial,
@@ -174,15 +178,40 @@ class DynamicRunOrchestrator:
                 allow_fallback_iface=self.config.tier != "dataset",
                 netstats_debug_dir=run_ctx.notes_dir,
             )
+            if os.environ.get("SCYTALEDROID_RUN_MONITOR") == "1":
+                verbose = os.environ.get("SCYTALEDROID_RUN_MONITOR_VERBOSE") == "1"
+                monitor = RunMonitor(
+                    RunMonitorConfig(
+                        device_serial=run_ctx.device_serial,
+                        run_id=run_ctx.dynamic_run_id,
+                        notes_dir=run_ctx.notes_dir,
+                        interactive=run_ctx.interactive,
+                        verbose=verbose,
+                    )
+                )
+                if run_ctx.interactive:
+                    print(
+                        status_messages.status(
+                            "Run monitor enabled (writing notes/run_monitor.jsonl). "
+                            "Set SCYTALEDROID_RUN_MONITOR_VERBOSE=1 for live output.",
+                            level="info",
+                        )
+                    )
         self._emit_marker(run_ctx, "SCENARIO_START")
         if run_ctx.scenario_hint:
             event_logger.log("scenario_hint", {"hint": run_ctx.scenario_hint})
         event_logger.log("scenario_started", {"scenario_id": run_ctx.scenario_id})
-        scenario_result = scenario_runner.run(
-            run_ctx,
-            on_start=sampler.start if sampler else None,
-            on_end=None,
-        )
+        try:
+            if monitor:
+                monitor.start()
+            scenario_result = scenario_runner.run(
+                run_ctx,
+                on_start=sampler.start if sampler else None,
+                on_end=None,
+            )
+        finally:
+            if monitor:
+                monitor.stop()
         if sampler:
             capture = sampler.stop()
             telemetry_payload = {
@@ -493,7 +522,10 @@ class DynamicRunOrchestrator:
 
     def _emit_plan_validation(self, validation) -> None:
         if self.config.interactive:
-            print(render_plan_validation_block(validation))
+            if getattr(validation, "is_pass", False):
+                print(status_messages.status("Plan validation: PASS (baseline shown above).", level="success"))
+            else:
+                print(render_plan_validation_block(validation))
         self._last_plan_validation = validation
         self.logger.info(
             "Dynamic plan validation",

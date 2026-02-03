@@ -411,6 +411,15 @@ def _collect_network_sample(
             row["conn_count"] = None
             return row, None
         if row["source"] == "netstats_missing":
+            if last_netstats:
+                cached_row = dict(row)
+                cached_row["bytes_in"] = last_netstats.get("bytes_in", "")
+                cached_row["bytes_out"] = last_netstats.get("bytes_out", "")
+                cached_row["conn_count"] = last_netstats.get("conn_count", "")
+                cached_row["source"] = "netstats_cached"
+                cached_row["best_effort"] = 1
+                cached_row["collector_status"] = "cached_after_missing"
+                return cached_row, None
             return row, None
     if last_netstats:
         row["bytes_in"] = last_netstats.get("bytes_in", "")

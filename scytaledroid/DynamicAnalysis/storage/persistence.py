@@ -8,11 +8,15 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping
 
 from scytaledroid.Database.db_core import db_queries as core_q
+from scytaledroid.Utils.LoggingUtils import logging_engine
+from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_evidence_path
 from scytaledroid.Database.db_queries.dynamic import schema as dynamic_schema
 from scytaledroid.DynamicAnalysis.plans.loader import extract_plan_identity
 from scytaledroid.Utils.network_quality import evaluate_network_signal_quality
 
 from ..core.session import DynamicSessionConfig, DynamicSessionResult
+
+_LOGGER = logging_engine.get_dynamic_logger()
 
 
 def persist_dynamic_summary(
@@ -32,6 +36,17 @@ def persist_dynamic_summary(
     netstats_rows = _extract_netstats_rows(payload)
     netstats_missing_rows = _extract_netstats_missing_rows(payload)
     pcap_meta = _extract_pcap_meta(payload, result.evidence_path)
+
+    _LOGGER.info(
+        "Dynamic persistence inputs",
+        extra={
+            "dynamic_run_id": dynamic_run_id,
+            "evidence_path": pcap_meta.get("pcap_evidence_path") or result.evidence_path,
+            "pcap_relpath": pcap_meta.get("pcap_relpath"),
+            "pcap_bytes": pcap_meta.get("pcap_bytes"),
+            "pcap_valid": pcap_meta.get("pcap_valid"),
+        },
+    )
 
     duration_seconds = config.duration_seconds
     if (not duration_seconds or int(duration_seconds) == 0) and result.started_at and result.ended_at:
@@ -260,6 +275,18 @@ def _collect_issue_rows(
     issues.extend(manifest_issues)
     telemetry_issue = _issues_from_telemetry(dynamic_run_id, payload)
     issues.extend(telemetry_issue)
+    diagnostics = payload.get("diagnostics_warnings")
+    if isinstance(diagnostics, list):
+        for warning in diagnostics:
+            if not warning:
+                continue
+            issues.append(
+                {
+                    "dynamic_run_id": dynamic_run_id,
+                    "issue_code": f"diagnostic_{warning}",
+                    "details_json": {"warning": warning},
+                }
+            )
     if result.status == "degraded" and not issues:
         issues.append(
             {
@@ -274,10 +301,25 @@ def _collect_issue_rows(
 def _issues_from_manifest(dynamic_run_id: str, evidence_path: str | None) -> list[dict[str, Any]]:
     if not evidence_path:
         return []
-    manifest_path = Path(evidence_path) / "run_manifest.json"
+    resolved = resolve_evidence_path(evidence_path)
+    if not resolved:
+        _LOGGER.warning(
+            "Dynamic manifest lookup failed (missing evidence path)",
+            extra={"dynamic_run_id": dynamic_run_id, "evidence_path": evidence_path},
+        )
+        return []
+    manifest_path = resolved / "run_manifest.json"
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError) as exc:
+        _LOGGER.warning(
+            "Dynamic manifest read failed while collecting issues",
+            extra={
+                "dynamic_run_id": dynamic_run_id,
+                "evidence_path": str(resolved),
+                "error": str(exc),
+            },
+        )
         return []
     observers = manifest.get("observers") or []
     issues: list[dict[str, Any]] = []
@@ -500,6 +542,7 @@ def _extract_pcap_meta(payload: Mapping[str, Any], evidence_path: str | None) ->
     if not isinstance(evidence, list):
         evidence = []
 
+    resolved_path = resolve_evidence_path(evidence_path)
     pcap_relpath = None
     meta_relpath = None
     pcap_sha256 = None
@@ -515,11 +558,22 @@ def _extract_pcap_meta(payload: Mapping[str, Any], evidence_path: str | None) ->
             pcap_bytes = entry.get("size_bytes")
             break
 
-    if pcap_relpath is None and evidence_path:
-        manifest_path = Path(evidence_path) / "run_manifest.json"
+    if pcap_relpath is None and resolved_path:
+        manifest_path = resolved_path / "run_manifest.json"
         try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+            if not manifest_path.exists():
+                _LOGGER.warning(
+                    "Dynamic manifest missing while extracting PCAP metadata",
+                    extra={"evidence_path": str(resolved_path)},
+                )
+                manifest = {}
+            else:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            _LOGGER.warning(
+                "Failed to read dynamic manifest while extracting PCAP metadata",
+                extra={"evidence_path": str(resolved_path), "error": str(exc)},
+            )
             manifest = {}
         capture_types = {"pcapdroid_capture", "network_capture", "proxy_capture"}
         meta_types = {"pcapdroid_capture_meta"}
@@ -553,8 +607,8 @@ def _extract_pcap_meta(payload: Mapping[str, Any], evidence_path: str | None) ->
                 if pcap_relpath:
                     break
 
-        if meta_relpath and evidence_path:
-            meta_path = Path(evidence_path) / meta_relpath
+        if meta_relpath and resolved_path:
+            meta_path = resolved_path / meta_relpath
             try:
                 meta_payload = json.loads(meta_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
@@ -567,12 +621,12 @@ def _extract_pcap_meta(payload: Mapping[str, Any], evidence_path: str | None) ->
                 meta_valid = meta_payload.get("pcap_valid")
                 if isinstance(meta_valid, bool):
                     pcap_valid = meta_valid
-            if not pcap_relpath:
+            if not pcap_relpath and resolved_path:
                 resolved_name = meta_payload.get("resolved_pcap_name") or meta_payload.get("pcap_name")
-                if isinstance(resolved_name, str) and resolved_name and evidence_path:
-                    candidate = Path(evidence_path) / "artifacts" / "pcapdroid_capture" / resolved_name
+                if isinstance(resolved_name, str) and resolved_name:
+                    candidate = resolved_path / "artifacts" / "pcapdroid_capture" / resolved_name
                     if candidate.exists():
-                        pcap_relpath = str(candidate.relative_to(Path(evidence_path)))
+                        pcap_relpath = str(candidate.relative_to(resolved_path))
 
     capture_valid = capture.get("pcap_valid")
     if capture_valid is not None:
@@ -581,8 +635,8 @@ def _extract_pcap_meta(payload: Mapping[str, Any], evidence_path: str | None) ->
     if pcap_bytes is None and isinstance(pcap_size, int):
         pcap_bytes = pcap_size
 
-    if pcap_relpath and evidence_path:
-        pcap_path = Path(evidence_path) / pcap_relpath
+    if pcap_relpath and resolved_path:
+        pcap_path = resolved_path / pcap_relpath
         try:
             if pcap_bytes is None and pcap_path.exists():
                 pcap_bytes = pcap_path.stat().st_size
@@ -601,7 +655,7 @@ def _extract_pcap_meta(payload: Mapping[str, Any], evidence_path: str | None) ->
         "pcap_sha256": pcap_sha256,
         "pcap_valid": 1 if pcap_valid is True else 0 if pcap_valid is False else None,
         "pcap_validated_at_utc": _fmt_dt(pcap_validated_at),
-        "pcap_evidence_path": evidence_path,
+        "pcap_evidence_path": str(resolved_path) if resolved_path else evidence_path,
     }
 
 

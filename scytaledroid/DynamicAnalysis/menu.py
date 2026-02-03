@@ -3,15 +3,20 @@
 from __future__ import annotations
 
 from scytaledroid.DeviceAnalysis import adb_devices, adb_shell, adb_status
+from scytaledroid.Database.db_core import run_sql
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
+from scytaledroid.DynamicAnalysis import plan_selection as _plan_selection
 from scytaledroid.DynamicAnalysis.plan_selection import (
     print_plan_selection_banner,
     resolve_plan_selection,
 )
 from scytaledroid.DynamicAnalysis.profile_loader import load_db_profiles, load_profile_packages
 from scytaledroid.DynamicAnalysis.run_summary import print_run_summary
+from scytaledroid.Config import app_config
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
-from scytaledroid.DynamicAnalysis.observers.pcapdroid_capture import PCAPDROID_PACKAGE
+from scytaledroid.DynamicAnalysis.controllers.guided_run import run_guided_dataset_run
+from scytaledroid.DynamicAnalysis.controllers.sandbox_run import run_sandbox_dynamic_run
+from scytaledroid.DynamicAnalysis.services.observer_service import select_observers as _service_select_observers
 from scytaledroid.StaticAnalysis.core.repository import group_artifacts, list_categories, list_packages, load_profile_map
 
 _DEVICE_STATUS_CACHE: dict[str, dict[str, str]] = {}
@@ -36,116 +41,12 @@ def dynamic_analysis_menu() -> None:
             break
 
         if choice == "1":
-            print()
-            menu_utils.print_header("Dynamic Run Device")
-            devices, warnings = adb_devices.scan_devices()
-            for warning in warnings:
-                print(status_messages.status(warning, level="warn"))
-            if not devices:
-                print(status_messages.status("No devices detected via adb.", level="error"))
-                prompt_utils.press_enter_to_continue()
-                continue
-            device_options = [
-                MenuOption(str(index + 1), adb_devices.get_device_label(device))
-                for index, device in enumerate(devices)
-            ]
-            device_spec = MenuSpec(items=device_options, exit_label="Cancel", show_exit=True)
-            menu_utils.render_menu(device_spec)
-            device_choice = prompt_utils.get_choice(
-                [option.key for option in device_options] + ["0"],
-                default="1",
+            run_sandbox_dynamic_run(
+                select_dynamic_target=_select_dynamic_target,
+                select_observers=_select_observers,
+                print_root_status=_print_root_status,
+                print_network_status=_print_network_status,
             )
-            if device_choice == "0":
-                continue
-            device_index = int(device_choice) - 1
-            device_serial = devices[device_index].get("serial")
-            if not device_serial:
-                print(status_messages.status("Selected device missing serial.", level="error"))
-                prompt_utils.press_enter_to_continue()
-                continue
-            is_rooted = _print_root_status(device_serial)
-            _print_network_status(device_serial)
-            print()
-            scenario_id = "basic_usage"
-            duration_seconds = 0
-            label = "Manual"
-            menu_utils.print_header("Dynamic Run Scenario")
-            print(status_messages.status("Tip: Basic usage is recommended for validation runs.", level="info"))
-            scenario_options = [
-                MenuOption("1", "Cold start"),
-                MenuOption("2", "Basic usage"),
-                MenuOption("3", "Permission trigger"),
-            ]
-            scenario_spec = MenuSpec(items=scenario_options, exit_label="Cancel", show_exit=True)
-            menu_utils.render_menu(scenario_spec)
-            scenario_choice = prompt_utils.get_choice(
-                [option.key for option in scenario_options] + ["0"],
-                default="2",
-            )
-            if scenario_choice == "0":
-                continue
-            scenario_id = {"1": "cold_start", "2": "basic_usage", "3": "permission_trigger"}.get(
-                scenario_choice,
-                "basic_usage",
-            )
-            selection = _select_dynamic_target()
-            package_name = selection[0] if selection else None
-            tier = selection[1] if selection else "exploration"
-            if tier == "dataset":
-                if prompt_utils.prompt_yes_no("Run as exploration instead of dataset?", default=False):
-                    tier = "exploration"
-            elif package_name == "com.zhiliaoapp.musically":
-                if prompt_utils.prompt_yes_no("Mark this run as calibration?", default=True):
-                    tier = "calibration"
-            if not package_name:
-                continue
-            print()
-            menu_utils.print_header("Dynamic Run Observers")
-            use_pcapdroid = _device_has_pcapdroid(device_serial)
-            if use_pcapdroid:
-                print(
-                    status_messages.status(
-                        "PCAPdroid scope: app-only traffic (UID). If traffic is missing, consider full-device "
-                        "capture for diagnostics.",
-                        level="info",
-                    )
-                )
-            else:
-                print(status_messages.status("PCAPdroid not installed; VPN capture unavailable.", level="warn"))
-            use_logs = True
-            observer_ids = []
-            if use_pcapdroid:
-                observer_ids.append("pcapdroid_capture")
-            if use_logs:
-                observer_ids.append("system_log_capture")
-            if not observer_ids:
-                print(status_messages.status("Select at least one observer.", level="error"))
-                prompt_utils.press_enter_to_continue()
-                continue
-            plan_selection = resolve_plan_selection(package_name)
-            if not plan_selection:
-                prompt_utils.press_enter_to_continue()
-                continue
-            plan_path = plan_selection["plan_path"]
-            static_run_id = plan_selection["static_run_id"]
-            print_plan_selection_banner(plan_selection)
-            clear_logcat = prompt_utils.prompt_yes_no("Clear logcat at run start?", default=True)
-            from .run_dynamic_analysis import run_dynamic_analysis
-
-            result = run_dynamic_analysis(
-                package_name,
-                duration_seconds=duration_seconds,
-                device_serial=device_serial,
-                scenario_id=scenario_id,
-                observer_ids=tuple(observer_ids),
-                interactive=True,
-                plan_path=plan_path,
-                tier=tier,
-                static_run_id=static_run_id,
-                clear_logcat=clear_logcat,
-            )
-            print_run_summary(result, label)
-            prompt_utils.press_enter_to_continue()
             continue
 
         if choice == "4":
@@ -213,140 +114,65 @@ def _select_dynamic_target() -> tuple[str, str] | None:
     return None
 
 
+def _resolve_plan_selection(package_name: str) -> dict[str, object] | None:
+    candidates, note = _plan_selection._load_plan_candidates(package_name)
+    if not candidates:
+        return _prompt_missing_baseline(package_name, note)
+
+    grouped: dict[str, list[dict[str, object]]] = {}
+    for candidate in candidates:
+        key = candidate["identity_key"]
+        grouped.setdefault(key, []).append(candidate)
+
+    if len(grouped) == 1:
+        only_key = next(iter(grouped))
+        selection = _plan_selection._pick_newest_candidate(grouped[only_key])
+        return _plan_selection._build_selection(selection)
+
+    return _prompt_baseline_selection(package_name, candidates)
+
+
 def _run_guided_dataset_run() -> None:
-    print()
-    menu_utils.print_header("Guided Dataset Run")
-    devices, warnings = adb_devices.scan_devices()
-    for warning in warnings:
-        print(status_messages.status(warning, level="warn"))
-    if not devices:
-        print(status_messages.status("No devices detected via adb.", level="error"))
-        return
-
-    device_options = [
-        MenuOption(str(index + 1), adb_devices.get_device_label(device))
-        for index, device in enumerate(devices)
-    ]
-    device_spec = MenuSpec(items=device_options, exit_label="Cancel", show_exit=True)
-    menu_utils.render_menu(device_spec)
-    device_choice = prompt_utils.get_choice(
-        [option.key for option in device_options] + ["0"],
-        default="1",
+    run_guided_dataset_run(
+        select_package_from_groups=_select_package_from_groups,
+        select_observers=_select_observers,
+        print_device_badge=_print_device_badge,
+        print_tier1_qa_result=_print_tier1_qa_result,
     )
-    if device_choice == "0":
-        return
-    device_index = int(device_choice) - 1
-    device_serial = devices[device_index].get("serial")
-    if not device_serial:
-        print(status_messages.status("Selected device missing serial.", level="error"))
-        return
 
-    is_rooted = _print_root_status(device_serial)
-    _print_network_status(device_serial)
 
-    scenario_id = "basic_usage"
-    duration_seconds = 0
-    label = "Dataset (guided)"
-
-    groups = group_artifacts()
-    dataset_pkgs = load_profile_packages("RESEARCH_DATASET_ALPHA")
-    if not dataset_pkgs:
-        print(status_messages.status("Research Dataset Alpha profile has no apps.", level="warn"))
-        return
-
-    available = {group.package_name.lower() for group in groups if group.package_name}
-    scoped_groups = tuple(
-        group for group in groups if group.package_name and group.package_name.lower() in available.intersection(dataset_pkgs)
-    )
-    if not scoped_groups:
+def _print_tier1_qa_result(dynamic_run_id: str) -> None:
+    try:
+        row = run_sql(
+            """
+            SELECT
+              ds.dynamic_run_id,
+              ds.status,
+              ds.tier,
+              ds.sampling_rate_s,
+              ds.expected_samples,
+              ds.captured_samples,
+              ds.sample_max_gap_s,
+              MAX(CASE WHEN i.issue_code = 'telemetry_partial_samples' THEN 1 ELSE 0 END) AS telemetry_partial
+            FROM dynamic_sessions ds
+            LEFT JOIN dynamic_session_issues i
+              ON i.dynamic_run_id = ds.dynamic_run_id
+            WHERE ds.dynamic_run_id = %s
+            GROUP BY ds.dynamic_run_id, ds.status, ds.tier, ds.sampling_rate_s,
+                     ds.expected_samples, ds.captured_samples, ds.sample_max_gap_s
+            """,
+            (dynamic_run_id,),
+            fetch="one",
+            dictionary=True,
+        )
+    except Exception as exc:  # noqa: BLE001
         print(
             status_messages.status(
-                "No APK artifacts available for Research Dataset Alpha. Pull APKs or use Custom package name.",
+                f"Tier-1 QA unavailable (DB error: {exc}).",
                 level="warn",
             )
         )
         return
-
-    package_name = _select_package_from_groups(scoped_groups, title="Research Dataset Alpha apps")
-    if not package_name:
-        return
-
-    tier = "dataset"
-
-    print()
-    menu_utils.print_header("Dynamic Run Observers")
-    observer_ids: list[str] = []
-    use_pcapdroid = _device_has_pcapdroid(device_serial)
-    if use_pcapdroid:
-        print(
-            status_messages.status(
-                "PCAPdroid scope: app-only traffic (UID). If traffic is missing, consider full-device "
-                "capture for diagnostics.",
-                level="info",
-            )
-        )
-    else:
-        print(status_messages.status("PCAPdroid not installed; VPN capture unavailable.", level="warn"))
-    use_logs = True
-    if use_pcapdroid:
-        observer_ids.append("pcapdroid_capture")
-    if use_logs:
-        observer_ids.append("system_log_capture")
-
-    if not observer_ids:
-        print(status_messages.status("Select at least one observer.", level="error"))
-        return
-
-    plan_selection = resolve_plan_selection(package_name)
-    if not plan_selection:
-        return
-    plan_path = plan_selection["plan_path"]
-    static_run_id = plan_selection["static_run_id"]
-    print_plan_selection_banner(plan_selection)
-    clear_logcat = prompt_utils.prompt_yes_no("Clear logcat at run start?", default=True)
-
-    from .run_dynamic_analysis import run_dynamic_analysis
-
-    result = run_dynamic_analysis(
-        package_name,
-        duration_seconds=duration_seconds,
-        device_serial=device_serial,
-        scenario_id=scenario_id,
-        observer_ids=tuple(observer_ids),
-        interactive=True,
-        plan_path=plan_path,
-        tier=tier,
-        static_run_id=static_run_id,
-        clear_logcat=clear_logcat,
-    )
-    print_run_summary(result, label)
-    if result.dynamic_run_id:
-        _print_tier1_qa_result(result.dynamic_run_id)
-
-
-def _print_tier1_qa_result(dynamic_run_id: str) -> None:
-    row = run_sql(
-        """
-        SELECT
-          ds.dynamic_run_id,
-          ds.status,
-          ds.tier,
-          ds.sampling_rate_s,
-          ds.expected_samples,
-          ds.captured_samples,
-          ds.sample_max_gap_s,
-          MAX(CASE WHEN i.issue_code = 'telemetry_partial_samples' THEN 1 ELSE 0 END) AS telemetry_partial
-        FROM dynamic_sessions ds
-        LEFT JOIN dynamic_session_issues i
-          ON i.dynamic_run_id = ds.dynamic_run_id
-        WHERE ds.dynamic_run_id = %s
-        GROUP BY ds.dynamic_run_id, ds.status, ds.tier, ds.sampling_rate_s,
-                 ds.expected_samples, ds.captured_samples, ds.sample_max_gap_s
-        """,
-        (dynamic_run_id,),
-        fetch="one",
-        dictionary=True,
-    )
     if not row:
         print(status_messages.status("Tier-1 QA check unavailable for this run.", level="warn"))
         return
@@ -554,12 +380,49 @@ def _prompt_custom_package() -> str:
     )
 
 
-def _device_has_pcapdroid(device_serial: str) -> bool:
+def _prompt_baseline_selection(
+    package_name: str,
+    candidates: list[dict[str, object]],
+) -> dict[str, object] | None:
+    return _plan_selection._prompt_baseline_selection(package_name, candidates)
+
+
+def _prompt_missing_baseline(package_name: str, note: str | None) -> dict[str, object] | None:
+    return _plan_selection._prompt_missing_baseline(package_name, note)
+
+
+def _select_observers(device_serial: str, *, mode: str) -> list[str]:
+    return _service_select_observers(device_serial, mode=mode)
+
+
+def _print_device_badge(device_serial: str, device_label: str) -> None:
+    stats = adb_status.get_device_stats(device_serial)
+    root_state = (stats.get("is_rooted") or "Unknown").strip().upper()
+    if root_state == "YES":
+        root_label = "yes"
+    elif root_state == "NO":
+        root_label = "no"
+    else:
+        root_label = "unknown"
+
+    net_label = "unknown"
     try:
-        output = adb_shell.run_shell(device_serial, ["pm", "path", PCAPDROID_PACKAGE]).strip()
+        status = adb_shell.run_shell(device_serial, ["dumpsys", "connectivity"]).lower()
+        if "not connected" in status:
+            net_label = "not_connected"
+        elif "not_vpn" in status or "not vpn" in status:
+            net_label = "not_vpn"
+        elif "validated" in status:
+            net_label = "validated"
     except Exception:
-        return False
-    return output.startswith("package:")
+        net_label = "unknown"
+
+    badge = f"Device: {device_label} | root: {root_label} | net: {net_label}"
+    cached = _DEVICE_STATUS_CACHE.get(device_serial, {})
+    if cached.get("badge") != badge:
+        print(status_messages.status(badge, level="info"))
+        cached["badge"] = badge
+        _DEVICE_STATUS_CACHE[device_serial] = cached
 
 
 def _print_root_status(device_serial: str, *, force: bool = False) -> bool:

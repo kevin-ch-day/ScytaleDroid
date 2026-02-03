@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import zoneinfo
 import json
 from pathlib import Path
 
@@ -10,6 +11,8 @@ from scytaledroid.Config import app_config
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
 from scytaledroid.Utils.evidence_store import filesystem_safe_slug
 from scytaledroid.DynamicAnalysis.plans.loader import extract_plan_identity, SUPPORTED_SIGNATURE_VERSIONS
+from scytaledroid.StaticAnalysis.core.repository import group_artifacts, load_display_name_map
+from scytaledroid.Utils.System.world_clock.display import format_display_time
 
 
 def resolve_plan_selection(package_name: str) -> dict[str, object] | None:
@@ -33,23 +36,28 @@ def resolve_plan_selection(package_name: str) -> dict[str, object] | None:
 def print_plan_selection_banner(selection: dict[str, object]) -> None:
     plan_path = selection.get("plan_path") or "unknown"
     package_name = selection.get("package_name") or "unknown"
+    display_name = _resolve_display_name(str(package_name))
+    app_label = (
+        f"{display_name} ({package_name})"
+        if display_name and display_name.lower() != str(package_name).lower()
+        else package_name
+    )
     version = _format_version(selection.get("version_name"), selection.get("version_code"))
     run_sig = selection.get("run_signature") or "unknown"
     artifact_hash = selection.get("artifact_set_hash") or "unknown"
     static_run_id = selection.get("static_run_id") or "unknown"
-    generated_at = selection.get("generated_at") or "unknown"
+    generated_at = _format_generated_at(selection.get("generated_at"))
 
     print()
-    menu_utils.print_header("Baseline selected")
     lines = [
-        ("App", package_name),
+        ("App", app_label),
         ("Version", version),
         ("Artifact", f"SHA256 {_prefix(selection.get('base_apk_sha256'))} | Bundle {_prefix(artifact_hash)}"),
         ("Signature", f"{selection.get('run_signature_version') or 'v?'} / {_prefix(run_sig)}"),
         ("Generated", generated_at),
         ("Static run", str(static_run_id)),
     ]
-    status_messages.print_strip("Baseline", lines, width=70)
+    status_messages.print_strip("Baseline selected", lines, width=70)
 
 
 def _load_plan_candidates(package_name: str) -> tuple[list[dict[str, object]], str | None]:
@@ -204,6 +212,30 @@ def _parse_generated_at(value: object) -> str | None:
     if isinstance(value, (int, float)):
         return datetime.fromtimestamp(float(value)).isoformat()
     return None
+
+
+def _format_generated_at(value: object) -> str:
+    raw = _parse_generated_at(value)
+    if not raw:
+        return "unknown"
+    try:
+        text = str(raw).replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(text)
+        tz_name = getattr(app_config, "UI_LOCAL_TIMEZONE", "Etc/UTC") or "Etc/UTC"
+        tz = zoneinfo.ZoneInfo(tz_name)
+        localized = parsed.astimezone(tz)
+        return format_display_time(localized)
+    except Exception:
+        return str(raw)
+
+
+def _resolve_display_name(package_name: str) -> str | None:
+    try:
+        groups = group_artifacts()
+        display_map = load_display_name_map(groups)
+        return display_map.get(package_name.lower())
+    except Exception:
+        return None
 
 
 def _identity_key(identity: dict[str, object]) -> str:

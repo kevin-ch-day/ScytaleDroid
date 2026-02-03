@@ -10,6 +10,7 @@ from typing import Any, Mapping
 import uuid
 
 from scytaledroid.Utils.LoggingUtils import logging_engine
+from scytaledroid.Utils.DisplayUtils import status_messages
 
 from scytaledroid.DynamicAnalysis.core import DynamicSessionConfig, DynamicSessionResult, run_dynamic_session
 from scytaledroid.DynamicAnalysis.core.evidence_pack import EvidencePackWriter
@@ -24,6 +25,7 @@ from scytaledroid.DynamicAnalysis.plans.loader import (
 )
 from scytaledroid.DynamicAnalysis.probes.registry import run_probe_set
 from scytaledroid.DynamicAnalysis.storage.persistence import persist_dynamic_summary
+from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_evidence_path
 
 
 @dataclass(frozen=True)
@@ -47,6 +49,17 @@ class DynamicAnalysisEngine:
         self.logger = logging_engine.get_dynamic_logger()
 
     def run(self) -> DynamicEngineResult:
+        self.logger.info(
+            "Dynamic engine run start",
+            extra={
+                "package_name": self.config.package_name,
+                "duration_seconds": self.config.duration_seconds,
+                "device_serial": self.config.device_serial,
+                "tier": self.config.tier,
+                "observer_ids": list(self.config.observer_ids or ()),
+                "plan_path": self.config.plan_path,
+            },
+        )
         plan_payload, validation = self._resolve_plan_payload()
         if validation and not validation.is_pass:
             now = datetime.now(timezone.utc)
@@ -97,6 +110,7 @@ class DynamicAnalysisEngine:
                 "network": len(session_result.telemetry_network),
             },
         }
+        summary_payload["diagnostics_warnings"] = self._collect_diagnostics_warnings(session_result)
         self._attach_engine_outputs(session_result, plan_payload, probe_summary, summary_payload)
         self._persist_summary(session_result, summary_payload)
         return DynamicEngineResult(
@@ -179,7 +193,10 @@ class DynamicAnalysisEngine:
 
     def _emit_plan_validation(self, validation) -> None:
         if self.config.interactive:
-            print(render_plan_validation_block(validation))
+            if getattr(validation, "is_pass", False):
+                print(status_messages.status("Plan validation: PASS (baseline shown above).", level="success"))
+            else:
+                print(render_plan_validation_block(validation))
         self.logger.info(
             "Dynamic plan validation",
             extra=build_plan_validation_event(validation),
@@ -239,6 +256,82 @@ class DynamicAnalysisEngine:
                 "Failed to update run manifest with engine outputs",
                 extra={"error": str(exc)},
             )
+
+    def _collect_diagnostics_warnings(
+        self,
+        session_result: DynamicSessionResult,
+    ) -> list[str]:
+        warnings: list[str] = []
+        stats = session_result.telemetry_stats or {}
+        if isinstance(stats, dict):
+            net_rows = stats.get("netstats_rows")
+            net_missing = stats.get("netstats_missing_rows")
+            if (net_rows == 0 or net_rows is None) and isinstance(net_missing, int) and net_missing > 0:
+                warnings.append("netstats_missing_rows_present")
+
+        run_dir = resolve_evidence_path(session_result.evidence_path)
+        if not run_dir:
+            return warnings
+        manifest_path = run_dir / "run_manifest.json"
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return warnings
+
+        observers = manifest.get("observers") or []
+        pcap_observer_ids = {"pcapdroid_capture", "network_capture", "proxy_capture"}
+        pcap_observer_success = any(
+            isinstance(obs, dict)
+            and obs.get("observer_id") in pcap_observer_ids
+            and obs.get("status") == "success"
+            for obs in observers
+        )
+        if not pcap_observer_success:
+            return warnings
+
+        artifacts = manifest.get("artifacts") or []
+        pcap_relpath = None
+        meta_relpath = None
+        for entry in artifacts:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("type") in pcap_observer_ids:
+                pcap_relpath = entry.get("relative_path")
+                break
+            if entry.get("type") == "pcapdroid_capture_meta":
+                meta_relpath = entry.get("relative_path")
+
+        if not pcap_relpath and meta_relpath:
+            meta_path = run_dir / meta_relpath
+            try:
+                meta_payload = json.loads(meta_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                meta_payload = {}
+            pcap_valid = meta_payload.get("pcap_valid")
+            pcap_size = meta_payload.get("pcap_size_bytes")
+            min_bytes = meta_payload.get("min_pcap_bytes")
+            if pcap_valid is False:
+                if isinstance(pcap_size, int) and isinstance(min_bytes, int):
+                    warnings.append("pcap_invalid_small")
+                else:
+                    warnings.append("pcap_invalid")
+                return warnings
+
+        if not pcap_relpath:
+            warnings.append("pcap_observer_success_without_artifact")
+            return warnings
+
+        pcap_path = run_dir / pcap_relpath
+        if not pcap_path.exists():
+            warnings.append("pcap_relpath_missing_on_disk")
+            return warnings
+        try:
+            if pcap_path.stat().st_size <= 0:
+                warnings.append("pcap_file_empty")
+        except OSError:
+            warnings.append("pcap_file_stat_failed")
+        return warnings
+
 
     def _output_record(
         self,

@@ -175,6 +175,7 @@ class PcapdroidCaptureObserver(Observer):
                     run_ctx.device_serial,
                     device_path,
                     local_path,
+                    min_bytes=MIN_PCAP_BYTES,
                 )
             if not local_path.exists():
                 fallback_path = _latest_pcapdroid_capture(
@@ -190,6 +191,7 @@ class PcapdroidCaptureObserver(Observer):
                         run_ctx.device_serial,
                         device_path,
                         local_path,
+                        min_bytes=MIN_PCAP_BYTES,
                     )
                     if meta_path.exists():
                         try:
@@ -364,6 +366,14 @@ def _device_file_exists(device_serial: str, path: str) -> bool:
     return True
 
 
+def _device_file_size(device_serial: str, path: str) -> int | None:
+    try:
+        output = adb_shell.run_shell(device_serial, ["stat", "-c", "%s", path]).strip()
+        return int(output)
+    except Exception:
+        return None
+
+
 def _pull_with_retries(
     device_serial: str,
     device_path: str,
@@ -371,15 +381,25 @@ def _pull_with_retries(
     *,
     retries: int = 3,
     delay_s: float = 0.5,
+    min_bytes: int | None = None,
 ) -> bool:
     for _ in range(max(retries, 1)):
         if not _device_file_exists(device_serial, device_path):
             time.sleep(delay_s)
             continue
+        device_size = _device_file_size(device_serial, device_path)
         adb_client.run_adb_command(
             ["-s", device_serial, "pull", device_path, str(local_path)],
         )
         if local_path.exists():
+            local_size = local_path.stat().st_size
+            if device_size is not None and local_size < device_size:
+                time.sleep(delay_s)
+                continue
+            if min_bytes is not None and device_size is not None:
+                if device_size >= min_bytes and local_size < min_bytes:
+                    time.sleep(delay_s)
+                    continue
             return True
         time.sleep(delay_s)
     return False
