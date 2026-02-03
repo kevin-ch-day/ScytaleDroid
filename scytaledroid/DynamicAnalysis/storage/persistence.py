@@ -27,6 +27,7 @@ def persist_dynamic_summary(
     sampling_rate_s = _safe_int(payload.get("sampling_rate_s"))
     qa_stats = _extract_qa_stats(payload)
     netstats_available = _extract_netstats_available(payload)
+    network_signal_quality = _extract_network_signal_quality(payload)
 
     duration_seconds = config.duration_seconds
     if (not duration_seconds or int(duration_seconds) == 0) and result.started_at and result.ended_at:
@@ -57,11 +58,14 @@ def persist_dynamic_summary(
         "sample_max_delta_s": qa_stats.get("sample_max_delta_s"),
         "sample_max_gap_s": qa_stats.get("sample_max_gap_s"),
         "netstats_available": netstats_available,
+        "network_signal_quality": network_signal_quality,
     }
     if not _dynamic_sessions_has_column("tier"):
         session_row.pop("tier", None)
     if not _dynamic_sessions_has_column("netstats_available"):
         session_row.pop("netstats_available", None)
+    if not _dynamic_sessions_has_column("network_signal_quality"):
+        session_row.pop("network_signal_quality", None)
 
     _insert_dynamic_session(session_row)
 
@@ -378,6 +382,25 @@ def _extract_netstats_available(payload: Mapping[str, Any]) -> int | None:
     if value is None:
         return None
     return 1 if bool(value) else 0
+
+
+def _extract_network_signal_quality(payload: Mapping[str, Any]) -> str | None:
+    stats = payload.get("telemetry_stats") or {}
+    if isinstance(stats, dict):
+        quality = stats.get("network_signal_quality")
+        if isinstance(quality, str) and quality:
+            return quality
+
+    rows = payload.get("telemetry_network") or []
+    if not isinstance(rows, list):
+        return None
+    netstats_rows = sum(1 for row in rows if row.get("source") == "netstats")
+    netstats_missing_rows = sum(1 for row in rows if row.get("source") == "netstats_missing")
+    if netstats_rows > 0 and netstats_missing_rows > 0:
+        return "netstats_partial"
+    if netstats_rows > 0:
+        return "netstats_only"
+    return "none"
 
 
 _DYN_SESSIONS_COLUMNS: set[str] | None = None

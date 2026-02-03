@@ -92,6 +92,12 @@ def dynamic_analysis_menu() -> None:
             selection = _select_dynamic_target()
             package_name = selection[0] if selection else None
             tier = selection[1] if selection else "exploration"
+            if tier == "dataset":
+                if prompt_utils.prompt_yes_no("Run as exploration instead of dataset?", default=False):
+                    tier = "exploration"
+            elif package_name == "com.zhiliaoapp.musically":
+                if prompt_utils.prompt_yes_no("Mark this run as calibration?", default=True):
+                    tier = "calibration"
             if not package_name:
                 continue
             print()

@@ -59,7 +59,11 @@ class DynamicRunSummarizer:
         tier = None
         if isinstance(manifest.operator, dict):
             tier = manifest.operator.get("tier")
-        network_signal_quality = self._network_signal_quality(telemetry_counts, pcap_valid)
+        network_signal_quality = None
+        if isinstance(telemetry_stats, dict):
+            network_signal_quality = telemetry_stats.get("network_signal_quality")
+        if not network_signal_quality:
+            network_signal_quality = self._network_signal_quality(telemetry_counts, pcap_valid)
         telemetry_quality = self._telemetry_quality(telemetry_stats)
         if isinstance(telemetry_stats, dict):
             netstats_available = telemetry_stats.get("netstats_available")

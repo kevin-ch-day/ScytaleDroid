@@ -55,8 +55,10 @@ def export_run_telemetry_csv(
 def _fetch_manifest_rows() -> list[dict[str, Any]]:
     has_tier = _dynamic_sessions_has_column("tier")
     has_netstats = _dynamic_sessions_has_column("netstats_available")
+    has_quality = _dynamic_sessions_has_column("network_signal_quality")
     tier_select = "ds.tier" if has_tier else "NULL AS tier"
     netstats_select = "ds.netstats_available" if has_netstats else "NULL AS netstats_available"
+    quality_select = "ds.network_signal_quality" if has_quality else "NULL AS network_signal_quality"
     netstats_gate = "WHEN ds.netstats_available = 0 THEN 'exclude_netstats'" if has_netstats else ""
     sql = f"""
         SELECT
@@ -69,6 +71,7 @@ def _fetch_manifest_rows() -> list[dict[str, Any]]:
           ds.scenario_id,
           ds.sampling_rate_s,
           {tier_select},
+          {quality_select},
           ds.started_at_utc,
           ds.ended_at_utc,
           ds.duration_seconds,
@@ -78,6 +81,7 @@ def _fetch_manifest_rows() -> list[dict[str, Any]]:
           ds.sample_max_gap_s,
           ds.status,
           CASE
+            WHEN ds.tier IS NOT NULL AND ds.tier <> 'dataset' THEN 'exclude_non_dataset'
             WHEN ds.duration_seconds IS NULL OR ds.duration_seconds < 90 THEN 'exclude_duration'
             WHEN ds.expected_samples IS NULL OR ds.captured_samples IS NULL THEN 'exclude_missing_stats'
             WHEN ds.captured_samples / NULLIF(ds.expected_samples,0) < 0.90 THEN 'exclude_low_capture'

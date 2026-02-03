@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import textwrap
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence
 
 from scytaledroid.Database.db_core import run_sql
+from scytaledroid.Database.db_utils import diagnostics
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 from scytaledroid.Utils.DisplayUtils.terminal import get_terminal_width
 
 from .sql_helpers import coerce_datetime, scalar, view_exists
+from ..menu_actions import log_db_op
 from ..reset_static import (
     HARVEST_TABLES,
     PROTECTED_TABLES,
@@ -804,12 +807,35 @@ def prompt_reset_static_data() -> None:
     if include_harvest:
         _print_table_list("Harvest tables scheduled", HARVEST_TABLES)
 
+    table_counts = _count_tables(STATIC_ANALYSIS_TABLES)
+    _print_table_counts("Static-analysis row counts", table_counts)
+    if include_harvest:
+        harvest_counts = _count_tables(HARVEST_TABLES)
+        _print_table_counts("Harvest row counts", harvest_counts)
+
     if not prompt_utils.prompt_yes_no("Proceed?", default=False):
         print(status_messages.status("Reset cancelled.", level="warn"))
         prompt_utils.press_enter_to_continue()
         return
+    confirmation = prompt_utils.prompt_text(
+        "Type RESET STATIC to confirm",
+        required=True,
+    ).strip()
+    if confirmation != "RESET STATIC":
+        print(status_messages.status("Confirmation mismatch. Reset cancelled.", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
 
+    started_at = datetime.now(timezone.utc)
     outcome = reset_static_analysis_data(include_harvest=include_harvest)
+    finished_at = datetime.now(timezone.utc)
+    log_db_op(
+        operation="reset_static_analysis",
+        started_at=started_at,
+        finished_at=finished_at,
+        success=True,
+        error_text=None,
+    )
 
     menu_utils.print_section("Reset summary")
     width = min(get_terminal_width(), 96)
@@ -846,6 +872,78 @@ def prompt_reset_static_data() -> None:
                 print(f"      {line}")
 
     print()
+    prompt_utils.press_enter_to_continue()
+
+
+def run_tier1_audit_report() -> None:
+    print()
+    menu_utils.print_header("Tier-1 Audit Report")
+
+    schema_version = diagnostics.get_schema_version() or "<unknown>"
+    print(f"Schema version : {schema_version}")
+    print()
+
+    required_tables = (
+        "dynamic_sessions",
+        "dynamic_telemetry_process",
+        "dynamic_telemetry_network",
+        "dynamic_session_issues",
+    )
+    missing_tables = [name for name in required_tables if not _table_exists(name)]
+    _print_status_line(
+        "ok" if not missing_tables else "error",
+        "required tables",
+        detail="ok" if not missing_tables else ", ".join(missing_tables),
+    )
+
+    required_columns = ("tier", "netstats_available", "network_signal_quality")
+    missing_columns = []
+    for column in required_columns:
+        if not _column_exists("dynamic_sessions", column):
+            missing_columns.append(column)
+    _print_status_line(
+        "ok" if not missing_columns else "warn",
+        "dynamic_sessions columns",
+        detail="ok" if not missing_columns else ", ".join(missing_columns),
+    )
+
+    stale_running = scalar(
+        """
+        SELECT COUNT(*)
+        FROM static_analysis_runs
+        WHERE status='RUNNING'
+          AND ended_at_utc IS NULL
+        """
+    ) or 0
+    _print_status_line(
+        "ok" if stale_running == 0 else "warn",
+        "stale RUNNING rows",
+        detail=str(stale_running),
+    )
+
+    tier1_ready = scalar(
+        """
+        SELECT COUNT(*)
+        FROM dynamic_sessions
+        WHERE tier='dataset'
+          AND status='success'
+          AND captured_samples / NULLIF(expected_samples,0) >= 0.90
+          AND sample_max_gap_s <= (sampling_rate_s * 2)
+        """
+    )
+    _print_status_line(
+        "ok" if tier1_ready and int(tier1_ready) > 0 else "warn",
+        "Tier-1 QA-pass runs",
+        detail=str(tier1_ready or 0),
+    )
+
+    evidence_missing = _count_evidence_integrity_issues()
+    _print_status_line(
+        "ok" if evidence_missing == 0 else "warn",
+        "evidence integrity (missing fields)",
+        detail=str(evidence_missing),
+    )
+
     prompt_utils.press_enter_to_continue()
 
 
@@ -908,6 +1006,7 @@ def prompt_finalize_stale_runs() -> None:
 __all__ = [
     "run_health_summary",
     "run_health_checks",
+    "run_tier1_audit_report",
     "prompt_finalize_stale_runs",
     "prompt_reset_static_data",
 ]
@@ -918,6 +1017,63 @@ def _print_table_list(title: str, tables: Sequence[str]) -> None:
         return
     menu_utils.print_section(title)
     _print_wrapped_table_block(list(tables))
+
+
+def _count_evidence_integrity_issues() -> int:
+    if _column_exists("permission_audit_snapshots", "evidence_relpath"):
+        missing_relpath = scalar(
+            """
+            SELECT COUNT(*)
+            FROM permission_audit_snapshots
+            WHERE evidence_relpath IS NULL OR evidence_relpath = ''
+            """
+        ) or 0
+        missing_hash = scalar(
+            """
+            SELECT COUNT(*)
+            FROM permission_audit_snapshots
+            WHERE evidence_sha256 IS NULL OR evidence_sha256 = ''
+            """
+        ) or 0
+        return int(missing_relpath) + int(missing_hash)
+    return 0
+
+
+def _count_tables(table_names: Sequence[str]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for table in table_names:
+        try:
+            count = scalar(f"SELECT COUNT(*) FROM {table}") or 0
+        except Exception:
+            count = 0
+        counts[table] = int(count)
+    return counts
+
+
+def _print_table_counts(title: str, counts: dict[str, int]) -> None:
+    menu_utils.print_section(title)
+    if not counts:
+        print("  (none)")
+        return
+    rows = [[name, str(count)] for name, count in counts.items()]
+    table_utils.render_table(["Table", "Rows"], rows)
+
+
+def _table_exists(table: str) -> bool:
+    try:
+        row = run_sql(
+            """
+            SELECT COUNT(*)
+            FROM information_schema.tables
+            WHERE table_schema = DATABASE()
+              AND table_name = %s
+            """,
+            (table,),
+            fetch="one",
+        )
+    except Exception:
+        return False
+    return bool(row and row[0])
 
 
 def _print_wrapped_table_block(tables: Sequence[str], width: int | None = None) -> None:

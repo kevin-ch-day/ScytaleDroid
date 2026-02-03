@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from scytaledroid.Database.db_core import run_sql
@@ -15,7 +16,7 @@ from .sql_helpers import coerce_datetime
 def run_query_menu() -> None:
     while True:
         print()
-        menu_utils.print_header("Run Database Queries")
+        menu_utils.print_header("Curated Read-only Queries")
 
         options: Sequence[Tuple[str, str, str]] = (
             ("1", "Latest session snapshot", "Show most recent session stamp and table counts."),
@@ -47,7 +48,7 @@ def run_query_menu() -> None:
 def show_latest_session() -> None:
     print()
     menu_utils.print_section("Latest session snapshot")
-    session = run_sql(
+    session = _run_read_only(
         """
         SELECT session_stamp, package_name, created_at
         FROM static_findings_summary
@@ -99,7 +100,7 @@ def prompt_runs_for_package() -> None:
         prompt_utils.press_enter_to_continue()
         return
 
-    rows = run_sql(
+    rows = _run_read_only(
         """
         SELECT r.run_id,
                r.session_stamp,
@@ -152,7 +153,7 @@ def prompt_harvest_for_package() -> None:
         prompt_utils.press_enter_to_continue()
         return
 
-    rows = run_sql(
+    rows = _run_read_only(
         """
         SELECT apk_id,
                file_name,
@@ -198,7 +199,7 @@ def prompt_masvs_by_package() -> None:
     print()
     menu_utils.print_section("Verify MASVS persistence")
     try:
-        latest_runs = run_sql(
+        latest_runs = _run_read_only(
             """
             SELECT package, MAX(run_id) AS run_id
             FROM runs
@@ -232,7 +233,7 @@ def prompt_masvs_by_package() -> None:
         return
 
     try:
-        run_row = run_sql(
+        run_row = _run_read_only(
             """
             SELECT run_id, session_stamp
             FROM runs
@@ -254,7 +255,7 @@ def prompt_masvs_by_package() -> None:
     run_id = int(run_row.get("run_id") or 0)
 
     try:
-        rows = run_sql(
+        rows = _run_read_only(
             """
             SELECT masvs,
                    SUM(CASE WHEN severity='High' THEN 1 ELSE 0 END) AS high,
@@ -377,7 +378,7 @@ def prompt_masvs_overview() -> None:
 def prompt_persistence_audit() -> None:
     print()
     menu_utils.print_section("Runs missing findings summaries")
-    rows = run_sql(
+    rows = _run_read_only(
         """
         SELECT r.run_id,
                r.package,
@@ -480,7 +481,7 @@ def render_session_digest(session_stamp: str | None, *, header: str | None = Non
 
 
 def _latest_session_stamp() -> Optional[str]:
-    row = run_sql(
+    row = _run_read_only(
         "SELECT session_stamp FROM static_analysis_runs ORDER BY id DESC LIMIT 1",
         fetch="one",
         dictionary=True,
@@ -488,6 +489,38 @@ def _latest_session_stamp() -> Optional[str]:
     if not row:
         return None
     return row.get("session_stamp")
+
+
+def _run_read_only(
+    sql: str,
+    params: Optional[Tuple[Any, ...]] = None,
+    *,
+    fetch: str = "all",
+    dictionary: bool = False,
+) -> Any:
+    try:
+        _ensure_read_only_sql(sql)
+    except RuntimeError as exc:
+        print(status_messages.status(str(exc), level="error"))
+        return None
+    return run_sql(sql, params, fetch=fetch, dictionary=dictionary)
+
+
+def _ensure_read_only_sql(sql: str) -> None:
+    cleaned = sql.strip()
+    cleaned = re.sub(r"(?s)^(?:\\s*(?:--.*?\\n|/\\*.*?\\*/))*", "", cleaned)
+    lowered = cleaned.lower().strip()
+    stripped = lowered.rstrip(";").strip()
+    if ";" in stripped:
+        raise RuntimeError("Read-only query rejected: multi-statement SQL is not allowed.")
+    if not stripped.startswith(("select", "with", "explain")):
+        raise RuntimeError("Read-only query rejected: only SELECT/WITH/EXPLAIN statements are allowed.")
+    forbidden = re.search(
+        r"\\b(insert|update|delete|drop|alter|create|truncate|rename|grant|revoke|call|set|use)\\b",
+        stripped,
+    )
+    if forbidden:
+        raise RuntimeError(f"Read-only query rejected: forbidden keyword '{forbidden.group(1)}' detected.")
 
 
 __all__ = [

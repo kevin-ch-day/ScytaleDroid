@@ -31,11 +31,13 @@ class TelemetrySampler:
         device_serial: str,
         package_name: str,
         sample_rate_s: int = 2,
+        allow_fallback_iface: bool = True,
     ) -> None:
         self.device_serial = device_serial
         self.package_name = package_name
         self.sample_rate_s = max(int(sample_rate_s), 1)
         self._netstats_interval_s = max(self.sample_rate_s * 3, 3)
+        self._allow_fallback_iface = allow_fallback_iface
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._error: str | None = None
@@ -80,6 +82,11 @@ class TelemetrySampler:
         stats["netstats_samples"] = self._netstats_samples
         stats["netstats_skipped"] = self._netstats_skipped
         stats["netstats_available"] = self._netstats_samples > 0
+        netstats_rows = sum(1 for row in self._network_rows if row.get("source") == "netstats")
+        netstats_missing_rows = sum(1 for row in self._network_rows if row.get("source") == "netstats_missing")
+        stats["netstats_rows"] = netstats_rows
+        stats["netstats_missing_rows"] = netstats_missing_rows
+        stats["network_signal_quality"] = _network_signal_quality(netstats_rows, netstats_missing_rows)
         stats["meminfo_interval_s"] = self._meminfo_interval_s
         stats["meminfo_samples"] = self._meminfo_samples
         stats["meminfo_skipped"] = self._meminfo_skipped
@@ -120,6 +127,7 @@ class TelemetrySampler:
                     ts,
                     use_netstats=use_netstats,
                     last_netstats=self._last_network_row,
+                    allow_fallback_iface=self._allow_fallback_iface,
                 )
                 network_row["sample_index"] = sample_index
                 network_row["timestamp_utc"] = ts
@@ -267,6 +275,7 @@ def _collect_network_sample(
     *,
     use_netstats: bool = True,
     last_netstats: dict[str, object] | None = None,
+    allow_fallback_iface: bool = True,
 ) -> dict[str, object]:
     row: dict[str, object] = {
         "uid": uid or "",
@@ -297,6 +306,14 @@ def _collect_network_sample(
                 return row
         except Exception:
             pass
+        if not allow_fallback_iface:
+            row["source"] = "netstats_missing"
+            row["collector_status"] = "missing_uid_stats"
+            row["best_effort"] = 0
+            row["bytes_in"] = None
+            row["bytes_out"] = None
+            row["conn_count"] = None
+            return row
     if last_netstats:
         row["bytes_in"] = last_netstats.get("bytes_in", "")
         row["bytes_out"] = last_netstats.get("bytes_out", "")
@@ -308,6 +325,14 @@ def _collect_network_sample(
     row["collector_status"] = "skipped"
     row["source"] = "unavailable"
     return row
+
+
+def _network_signal_quality(netstats_rows: int, netstats_missing_rows: int) -> str:
+    if netstats_rows > 0 and netstats_missing_rows > 0:
+        return "netstats_partial"
+    if netstats_rows > 0:
+        return "netstats_only"
+    return "none"
 
 
 def _maybe_parse_meminfo(serial: str, package: str) -> int | None:
