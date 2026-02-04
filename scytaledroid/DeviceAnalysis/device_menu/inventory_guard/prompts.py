@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from scytaledroid.DeviceAnalysis.inventory.runner import InventoryDelta
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
 
 from .constants import INVENTORY_STALE_SECONDS
@@ -19,15 +18,23 @@ class InventoryGuardMessage:
     long: str | None = None
 
 
+@dataclass
+class InventoryDeltaSummary:
+    new_count: int
+    removed_count: int
+    updated_count: int
+    changed_packages_count: int
+
+
 def describe_inventory_state(
     status: str,
-    delta: InventoryDelta | None,
+    delta: InventoryDeltaSummary | None,
     age: timedelta,
     threshold: timedelta,
 ) -> InventoryGuardMessage:
     # Normalize delta
     if delta is None:
-        delta = InventoryDelta(0, 0, 0, 0)
+        delta = InventoryDeltaSummary(0, 0, 0, 0)
 
     if status == "NONE":
         return InventoryGuardMessage(

@@ -166,7 +166,7 @@ def render_snapshot_block(
         device_count = None
         if serial:
             try:
-                from scytaledroid.DeviceAnalysis import adb_packages
+                from scytaledroid.DeviceAnalysis.adb import packages as adb_packages
 
                 device_count = len(adb_packages.list_packages(serial))
             except Exception:

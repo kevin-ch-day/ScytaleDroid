@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from scytaledroid.DeviceAnalysis import adb_shell
+from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 

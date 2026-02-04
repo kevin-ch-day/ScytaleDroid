@@ -8,7 +8,13 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from scytaledroid.DeviceAnalysis import adb_devices, device_manager, inventory_meta
+from scytaledroid.DeviceAnalysis import (
+    adb_devices,
+    adb_packages,
+    adb_status,
+    device_manager,
+    inventory_meta,
+)
 from scytaledroid.DeviceAnalysis.inventory import load_latest_inventory
 from scytaledroid.DeviceAnalysis.inventory import runner as inventory_runner
 from scytaledroid.DeviceAnalysis.services.models import InventoryStatus
@@ -26,9 +32,6 @@ def scan_devices(
 ]:
     """Return raw adb devices, warnings, enriched summaries, and a serial map."""
 
-    # Lazy import to avoid circular imports when used headless (e.g., measure_inventory_latency).
-    from scytaledroid.DeviceAnalysis.device_menu.dashboard import build_device_summaries
-
     devices, warnings = adb_devices.scan_devices()
     summary_cache = cache or {}
     summaries, serial_map = build_device_summaries(
@@ -39,9 +42,69 @@ def scan_devices(
     return devices, warnings, summaries, serial_map
 
 
+def build_device_summaries(
+    devices: list[dict[str, str | None]],
+    summary_cache: dict[str, dict[str, str | None]],
+    *,
+    refresh_threshold: int = 60,
+) -> tuple[list[dict[str, str | None]], dict[str, dict[str, str | None]]]:
+    """Return summarized device rows with caching for UI display."""
+    import time
+
+    summaries: list[dict[str, str | None]] = []
+    serial_map: dict[str, dict[str, str | None]] = {}
+
+    for device in devices:
+        serial = device.get("serial")
+        cached: dict[str, str | None | None] = None
+        cache_age = None
+        if serial and serial in summary_cache:
+            cached = summary_cache[serial]
+            cache_time_raw = cached.get("_cache_time")
+            try:
+                cache_age = time.time() - float(cache_time_raw) if cache_time_raw else None
+            except (TypeError, ValueError):
+                cache_age = None
+
+        if cached and cache_age is not None and cache_age <= refresh_threshold:
+            cached.update({k: v for k, v in device.items() if v is not None})
+            summary = cached
+        else:
+            summary = adb_devices.build_device_summary(device)
+            if serial:
+                summary["_cache_time"] = time.time()
+                summary_cache[serial] = summary
+
+        summaries.append(summary)
+        if serial:
+            serial_map[serial] = summary
+
+    return summaries, serial_map
+
+
 def get_active_serial() -> str | None:
     """Expose the active device serial."""
     return device_manager.get_active_serial()
+
+
+def get_last_serial() -> str | None:
+    """Expose the last active device serial for UI hints."""
+    return device_manager.get_last_serial()
+
+
+def get_device_stats(serial: str) -> dict[str, object]:
+    """Return device stats from adb for UI helpers."""
+    return adb_status.get_device_stats(serial)
+
+
+def get_basic_properties(serial: str) -> dict[str, str | None]:
+    """Return basic device properties for inventory guard metadata."""
+    return adb_devices.get_basic_properties(serial)
+
+
+def list_packages_with_versions(serial: str):
+    """Return package signatures for inventory guard metadata."""
+    return adb_packages.list_packages_with_versions(serial)
 
 
 def set_active_serial(serial: str) -> bool:

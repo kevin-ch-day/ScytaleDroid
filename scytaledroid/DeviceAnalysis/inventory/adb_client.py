@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import os
 
-from scytaledroid.DeviceAnalysis import adb_cache, adb_devices, adb_packages
+from scytaledroid.DeviceAnalysis.adb import cache as adb_cache
+from scytaledroid.DeviceAnalysis.adb import devices as adb_devices
+from scytaledroid.DeviceAnalysis.adb import packages as adb_packages
 from scytaledroid.DeviceAnalysis.modes.inventory import InventoryMode
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 

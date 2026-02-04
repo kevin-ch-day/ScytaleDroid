@@ -8,10 +8,9 @@ cards are discoverable via menu actions rather than always-on panels.
 
 from __future__ import annotations
 
-import time
 from datetime import UTC, datetime
 
-from scytaledroid.DeviceAnalysis import adb_devices, device_manager
+from scytaledroid.DeviceAnalysis.services import device_service
 from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.constants import (
     INVENTORY_STALE_SECONDS,
 )
@@ -341,39 +340,15 @@ def build_device_summaries(
     *,
     refresh_threshold: int = 60,
 ) -> tuple[list[dict[str, str | None]], dict[str, dict[str, str | None]]]:
-    summaries: list[dict[str, str | None]] = []
-    serial_map: dict[str, dict[str, str | None]] = {}
-
-    for device in devices:
-        serial = device.get("serial")
-        cached: dict[str, str | None | None] = None
-        cache_age = None
-        if serial and serial in summary_cache:
-            cached = summary_cache[serial]
-            cache_time_raw = cached.get("_cache_time")
-            try:
-                cache_age = time.time() - float(cache_time_raw) if cache_time_raw else None
-            except (TypeError, ValueError):
-                cache_age = None
-
-        if cached and cache_age is not None and cache_age <= refresh_threshold:
-            cached.update({k: v for k, v in device.items() if v is not None})
-            summary = cached
-        else:
-            summary = adb_devices.build_device_summary(device)
-            if serial:
-                summary["_cache_time"] = time.time()
-                summary_cache[serial] = summary
-
-        summaries.append(summary)
-        if serial:
-            serial_map[serial] = summary
-
+    summaries, serial_map = device_service.build_device_summaries(
+        devices,
+        summary_cache,
+        refresh_threshold=refresh_threshold,
+    )
     log.info(
         f"Refreshed device dashboard: {len(summaries)} device(s) detected.",
         category="device",
     )
-
     return summaries, serial_map
 
 
@@ -393,7 +368,7 @@ def print_dashboard(
 
     # One-line guidance when disconnected
     if not active_details:
-        last_serial = device_manager.get_last_serial()
+        last_serial = device_service.get_last_serial()
         last_summary = serial_map.get(last_serial) if last_serial else None
         last_seen = _last_seen_brief(last_summary, last_serial)
         line = _no_device_line(devices_found)
@@ -462,16 +437,7 @@ def print_dashboard(
 def resolve_active_device(
     devices: list[dict[str, str | None]]
 ) -> dict[str, str | None | None]:
-    serial = device_manager.get_active_serial()
-    if not serial:
-        return None
-
-    for device in devices:
-        if device.get("serial") == serial:
-            return device
-
-    device_manager.disconnect()
-    return None
+    return device_service.resolve_active_device(devices)
 
 
 __all__ = [
