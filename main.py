@@ -89,6 +89,17 @@ def main_menu() -> None:
     """Render the main menu loop using the shared menu framework."""
 
     ensure_db_ready()
+    from scytaledroid.Database.db_utils import schema_gate
+    ok, message, detail = schema_gate.check_base_schema()
+    if not ok:
+        status_messages.print_status(f"[ERROR] {message}", level="error")
+        if detail:
+            status_messages.print_status(detail, level="error")
+        status_messages.print_status(
+            "Fix: Verify database connection and schema. Then run Database Tools → Apply Tier-1 schema migrations (or import canonical DB export).",
+            level="error",
+        )
+        return
     api_state = start_api_server()
     if api_state.status == "running":
         status_messages.print_status(
@@ -226,6 +237,18 @@ def handle_dynamic() -> None:
 
 
 def handle_perm_catalog() -> None:
+    from scytaledroid.Database.db_utils import schema_gate
+    ok, message, detail = schema_gate.permissions_schema_gate()
+    if not ok:
+        status_messages.print_status(f"[ERROR] {message}", level="error")
+        if detail:
+            status_messages.print_status(detail, level="error")
+        status_messages.print_status(
+            "Fix: Database Tools → Apply Tier-1 schema migrations (or import canonical DB export), then retry.",
+            level="error",
+        )
+        return
+
     log.warning(
         "Permission catalog utilities have been removed; use governance import + dict tables.",
         category="application",

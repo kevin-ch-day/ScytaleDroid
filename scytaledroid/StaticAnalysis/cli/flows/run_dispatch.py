@@ -446,34 +446,6 @@ def _persist_session_run_links(session_stamp: str | None, run_map: dict | None) 
     try:
         from scytaledroid.Database.db_core import db_queries as core_q
 
-        def _table_columns(table: str) -> set[str]:
-            try:
-                rows = core_q.run_sql(f"SHOW COLUMNS FROM {table}", fetch="all")
-            except Exception:
-                return set()
-            columns: set[str] = set()
-            for row in rows or []:
-                if row and row[0]:
-                    columns.add(str(row[0]))
-            return columns
-
-        row = core_q.run_sql(
-            "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_schema = DATABASE() AND table_name = %s",
-            ("static_session_run_links",),
-            fetch="one",
-        )
-        if not row or int(row[0] or 0) == 0:
-            return
-        columns = _table_columns("static_session_run_links")
-        required = {"session_stamp", "package_name", "static_run_id"}
-        if not required.issubset(columns):
-            missing = ", ".join(sorted(required - columns))
-            raise RuntimeError(
-                "static_session_run_links schema missing required columns: "
-                f"{missing}. Apply migrations to update the table."
-            )
-
         static_ids = sorted(
             {
                 int(app.get("static_run_id"))

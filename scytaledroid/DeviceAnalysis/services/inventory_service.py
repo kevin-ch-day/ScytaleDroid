@@ -66,10 +66,6 @@ def run_full_sync(
         allow_fallbacks = allow_inventory_fallbacks()
     resolved_config.allow_fallbacks = bool(allow_fallbacks)
     mode = (mode or os.getenv("SCYTALEDROID_INVENTORY_MODE", "baseline")).lower().strip()
-    if mode == "legacy":
-        raise InventoryServiceError(
-            "Inventory mode 'legacy' has been removed. Use baseline/user_only/bulk."
-        )
     progress_cb = None
     if progress_sink == "cli":
         progress.render_snapshot_block(meta, ui_prefs=ui_prefs, mode=mode, serial=serial)

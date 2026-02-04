@@ -69,32 +69,31 @@ def _collect_delta_package_names(summary: Mapping[str, object]) -> set[str]:
 def _apply_delta_filter(
     selection: harvest.ScopeSelection,
     guard_metadata: Mapping[str, object] | None,
-) -> tuple[bool, int]:
-    """Filter the selection packages down to delta-only scope when appropriate.
-
-    Returns a tuple indicating whether a delta filter was applied, and how many packages remain.
-    """
+) -> tuple[harvest.ScopeSelection, bool, int]:
+    """Return a filtered selection based on the delta summary without mutating input."""
 
     summary = _extract_delta_summary(selection.metadata, guard_metadata)
     if not summary:
-        return (False, len(selection.packages))
+        return (selection, False, len(selection.packages))
 
     delta_packages = _collect_delta_package_names(summary)
     if not delta_packages:
-        return (False, len(selection.packages))
+        return (selection, False, len(selection.packages))
 
     filtered = [row for row in selection.packages if row.package_name in delta_packages]
-    selection.metadata["delta_filter_applied"] = True
-    selection.metadata["delta_filter_total"] = len(delta_packages)
-    selection.metadata["delta_filter_matched"] = len(filtered)
-    selection.metadata["delta_filter_packages"] = sorted(delta_packages)
+    new_metadata = dict(selection.metadata)
+    new_metadata["delta_filter_applied"] = True
+    new_metadata["delta_filter_total"] = len(delta_packages)
+    new_metadata["delta_filter_matched"] = len(filtered)
+    new_metadata["delta_filter_packages"] = sorted(delta_packages)
 
-    if not filtered:
-        selection.packages.clear()
-        return (True, 0)
-
-    selection.packages = filtered
-    return (True, len(filtered))
+    filtered_selection = harvest.ScopeSelection(
+        label=selection.label,
+        packages=filtered,
+        kind=selection.kind,
+        metadata=new_metadata,
+    )
+    return (filtered_selection, True, len(filtered))
 
 
 def pull_apks(serial: str | None) -> OperationResult:
@@ -255,7 +254,7 @@ def pull_apks(serial: str | None) -> OperationResult:
         if snapshot_captured_at:
             selection.metadata["inventory_snapshot_captured_at"] = snapshot_captured_at
 
-        delta_applied, delta_count = _apply_delta_filter(selection, guard_metadata)
+        selection, delta_applied, delta_count = _apply_delta_filter(selection, guard_metadata)
         if delta_applied:
             if delta_count == 0:
                 print(
@@ -705,9 +704,6 @@ def _render_plan_overview(
     if _harvest_simple_mode():
         candidate_count = selection.metadata.get("candidate_count")
         selected_count = selection.metadata.get("selected_count")
-        if selection.metadata.get("delta_filter_applied"):
-            candidate_count = selection.metadata.get("delta_filter_matched")
-            selected_count = len(selection.packages)
         if not candidate_count:
             candidate_count = len(selection.packages)
         if selected_count is None:

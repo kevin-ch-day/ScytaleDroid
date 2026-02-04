@@ -25,6 +25,18 @@ EXIT_TO_HUB = "hub"
 
 def device_menu(return_to: str = EXIT_TO_MAIN) -> str:
     """Render the Device Analysis menu until the user chooses to go back."""
+    from scytaledroid.Database.db_utils import schema_gate
+    ok, message, detail = schema_gate.inventory_schema_gate()
+    if not ok:
+        status_messages.print_status(f"[ERROR] {message}", level="error")
+        if detail:
+            status_messages.print_status(detail, level="error")
+        status_messages.print_status(
+            "Fix: Database Tools → Apply Tier-1 schema migrations (or import canonical DB export), then retry.",
+            level="error",
+        )
+        return return_to
+
     summary_cache: Dict[str, Dict[str, Optional[str]]] = {}
     surveyed_serials: set[str] = set()
 

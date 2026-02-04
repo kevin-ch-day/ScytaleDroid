@@ -27,8 +27,6 @@ def _ensure_schema_ready() -> bool:
 def _require_canonical_schema() -> None:
     if not _ensure_schema_ready():
         raise RuntimeError("DB schema is outdated; run migrations to use canonical schema.")
-    if _provider_schema_mode() == "legacy":
-        raise RuntimeError("Legacy provider schema detected; run migrations for canonical schema.")
 
 
 def _normalise_optional_str(value: object) -> Optional[str]:
@@ -286,34 +284,7 @@ __all__ = [
 ]
 
 
-_PROVIDER_SCHEMA: Optional[str] = None
 _PROVIDER_PARENT_CACHE: dict[int, dict[str, Optional[str]]] = {}
-_TABLE_COLUMN_CACHE: dict[str, set[str]] = {}
-
-
-def _table_has_column(table: str, column: str) -> bool:
-    cols = _TABLE_COLUMN_CACHE.get(table)
-    if cols is None:
-        try:
-            rows = core_q.run_sql(
-                f"SHOW COLUMNS FROM {table}",
-                fetch="all",
-            )
-        except Exception:
-            cols = set()
-        else:
-            try:
-                cols = {row[0] for row in rows}
-            except Exception:
-                cols = set()
-        _TABLE_COLUMN_CACHE[table] = cols
-    return column in cols
-
-
-def _prune_missing_columns(table: str, row: dict[str, Optional[object]]) -> None:
-    for column in list(row.keys()):
-        if not _table_has_column(table, column):
-            row.pop(column, None)
 
 
 def _persist_analysis_snapshot(app_version_id: int, payload: Mapping[str, object]) -> None:
@@ -482,7 +453,6 @@ def _create_run_row(
             "analysis_indicators": _serialise_json(analysis_indicators),
             "workload_profile": _serialise_json(workload_profile),
         }
-        _prune_missing_columns("static_analysis_runs", row_data)
         columns = list(row_data.keys())
         placeholders = ", ".join(["%s"] * len(columns))
         sql = f"INSERT INTO static_analysis_runs ({', '.join(columns)}) VALUES ({placeholders})"
@@ -529,16 +499,6 @@ def _persist_provider_acl(
                     _create_provider_acl_row(provider_id, rule)
 
 
-def _provider_schema_mode() -> str:
-    global _PROVIDER_SCHEMA
-    if _PROVIDER_SCHEMA is not None:
-        return _PROVIDER_SCHEMA
-    has_pkg = _table_has_column("static_fileproviders", "package_name")
-    has_pkg_acl = _table_has_column("static_provider_acl", "package_name")
-    _PROVIDER_SCHEMA = "legacy" if has_pkg or has_pkg_acl else "canonical"
-    return _PROVIDER_SCHEMA
-
-
 def _authority_from_entry(entry: Mapping[str, object]) -> Optional[str]:
     authorities = entry.get("authorities")
     if isinstance(authorities, Sequence) and not isinstance(authorities, (str, bytes)):
@@ -566,10 +526,6 @@ def _create_provider_row(run_id: int, entry: Mapping[str, object]) -> Optional[i
         component_name = _normalise_optional_str(entry.get("name"))
         authority = _authority_from_entry(entry) or component_name or f"provider_{run_id}"
         authority = _clamp_authority(authority)
-        schema_mode = _provider_schema_mode()
-        if schema_mode == "legacy":
-            raise RuntimeError("Legacy provider schema detected; run migrations.")
-
         row_data: dict[str, Optional[object]] = {
             "run_id": run_id,
             "component_name": component_name,
@@ -587,8 +543,6 @@ def _create_provider_row(run_id: int, entry: Mapping[str, object]) -> Optional[i
             "grant_uri_permissions": 1 if entry.get("grant_uri_permissions") else 0,
             "metrics": _serialise_json(metrics_payload),
         }
-
-        _prune_missing_columns("static_fileproviders", row_data)
 
         columns = list(row_data.keys())
         placeholders = ", ".join(["%s"] * len(columns))
@@ -645,7 +599,6 @@ def _create_provider_acl_row(provider_id: int, entry: Mapping[str, object]) -> N
         }
         row_data["path_type"] = path_type
 
-        _prune_missing_columns("static_provider_acl", row_data)
         columns = list(row_data.keys())
         placeholders = ", ".join(["%s"] * len(columns))
         sql = f"INSERT INTO static_provider_acl ({', '.join(columns)}) VALUES ({placeholders})"

@@ -97,34 +97,6 @@ def persist_dynamic_summary(
         "pcap_valid": pcap_meta.get("pcap_valid"),
         "pcap_validated_at_utc": pcap_meta.get("pcap_validated_at_utc"),
     }
-    if not _dynamic_sessions_has_column("tier"):
-        session_row.pop("tier", None)
-    if not _dynamic_sessions_has_column("sampling_duration_seconds"):
-        session_row.pop("sampling_duration_seconds", None)
-    if not _dynamic_sessions_has_column("clock_alignment_delta_s"):
-        session_row.pop("clock_alignment_delta_s", None)
-    if not _dynamic_sessions_has_column("netstats_available"):
-        session_row.pop("netstats_available", None)
-    if not _dynamic_sessions_has_column("network_signal_quality"):
-        session_row.pop("network_signal_quality", None)
-    if not _dynamic_sessions_has_column("sample_first_gap_s"):
-        session_row.pop("sample_first_gap_s", None)
-    if not _dynamic_sessions_has_column("sample_max_gap_excluding_first_s"):
-        session_row.pop("sample_max_gap_excluding_first_s", None)
-    if not _dynamic_sessions_has_column("netstats_rows"):
-        session_row.pop("netstats_rows", None)
-    if not _dynamic_sessions_has_column("netstats_missing_rows"):
-        session_row.pop("netstats_missing_rows", None)
-    if not _dynamic_sessions_has_column("pcap_relpath"):
-        session_row.pop("pcap_relpath", None)
-    if not _dynamic_sessions_has_column("pcap_bytes"):
-        session_row.pop("pcap_bytes", None)
-    if not _dynamic_sessions_has_column("pcap_sha256"):
-        session_row.pop("pcap_sha256", None)
-    if not _dynamic_sessions_has_column("pcap_valid"):
-        session_row.pop("pcap_valid", None)
-    if not _dynamic_sessions_has_column("pcap_validated_at_utc"):
-        session_row.pop("pcap_validated_at_utc", None)
 
     _insert_dynamic_session(session_row)
 
@@ -657,33 +629,6 @@ def _extract_pcap_meta(payload: Mapping[str, Any], evidence_path: str | None) ->
         "pcap_validated_at_utc": _fmt_dt(pcap_validated_at),
         "pcap_evidence_path": str(resolved_path) if resolved_path else evidence_path,
     }
-
-
-_DYN_SESSIONS_COLUMNS: set[str] | None = None
-
-
-def _refresh_dynamic_sessions_columns() -> set[str]:
-    try:
-        rows = core_q.run_sql(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_schema = DATABASE() AND table_name = 'dynamic_sessions'",
-            fetch="all",
-            dictionary=True,
-        )
-        return {str(row.get("column_name")).lower() for row in rows or [] if row.get("column_name")}
-    except Exception:
-        return set()
-
-
-def _dynamic_sessions_has_column(column_name: str) -> bool:
-    global _DYN_SESSIONS_COLUMNS
-    if _DYN_SESSIONS_COLUMNS is None:
-        _DYN_SESSIONS_COLUMNS = _refresh_dynamic_sessions_columns()
-    needle = column_name.lower()
-    if needle not in _DYN_SESSIONS_COLUMNS:
-        # Refresh once in case the schema changed during this process (migrations).
-        _DYN_SESSIONS_COLUMNS = _refresh_dynamic_sessions_columns()
-    return needle in _DYN_SESSIONS_COLUMNS
 
 
 def _fmt_dt(value: object | None) -> str | None:

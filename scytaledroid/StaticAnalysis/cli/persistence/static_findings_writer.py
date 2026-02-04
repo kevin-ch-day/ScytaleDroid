@@ -48,7 +48,7 @@ def persist_static_findings(
         if not _sf.ensure_tables():
             raise RuntimeError("static_findings tables unavailable (schema outdated; run migrations)")
         if static_run_id is None:
-            raise RuntimeError("static_run_id missing (legacy writes blocked; run migrations)")
+            raise RuntimeError("static_run_id missing; run migrations")
         summary_id = _sf.upsert_summary(
             package_name=package_name,
             session_stamp=session_stamp,
@@ -59,9 +59,7 @@ def persist_static_findings(
             static_run_id=static_run_id,
         )
         if summary_id is None:
-            raise RuntimeError(
-                "static findings summary write failed (legacy schema writes blocked; run migrations)"
-            )
+            raise RuntimeError("static findings summary write failed (schema mismatch; run migrations)")
         if findings:
             _sf.replace_findings(
                 summary_id, tuple(findings), run_id=None, static_run_id=static_run_id

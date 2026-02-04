@@ -23,6 +23,18 @@ _DEVICE_STATUS_CACHE: dict[str, dict[str, str]] = {}
 
 
 def dynamic_analysis_menu() -> None:
+    from scytaledroid.Database.db_utils import schema_gate
+    ok, message, detail = schema_gate.dynamic_schema_gate()
+    if not ok:
+        status_messages.print_status(f"[ERROR] {message}", level="error")
+        if detail:
+            status_messages.print_status(detail, level="error")
+        status_messages.print_status(
+            "Fix: Database Tools → Apply Tier-1 schema migrations (or import canonical DB export), then retry.",
+            level="error",
+        )
+        return
+
     options = [
         MenuOption("1", "Launch sandbox run"),
         MenuOption("2", "View recent dynamic sessions"),

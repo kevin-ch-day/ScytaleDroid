@@ -71,9 +71,9 @@ class RunMonitor:
         if size != self._last_size or (now - self._last_print) > 10:
             self._last_size = size if isinstance(size, int) else None
             self._last_print = now
-        size_label = f"{size}B" if isinstance(size, int) else "waiting"
-        pid = snapshot.get("pcapdroid_pid") or "n/a"
-        net = snapshot.get("net_state") or "unknown"
+            size_label = f"{size}B" if isinstance(size, int) else "waiting"
+            pid = snapshot.get("pcapdroid_pid") or "n/a"
+            net = snapshot.get("net_state") or "unknown"
             print(
                 status_messages.status(
                     f"Monitor: pcap={size_label} | pcapdroid={pid} | net={net}",

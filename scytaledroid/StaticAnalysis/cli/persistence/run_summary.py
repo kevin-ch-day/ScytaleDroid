@@ -964,15 +964,14 @@ def persist_run_summary(
             log.warning(
                 (
                     f"Could not resolve app_version_id for {package_for_run}; "
-                    "static_run_id will remain unset (legacy writes blocked; run migrations)."
+                    "static_run_id will remain unset; run migrations."
                 ),
                 category="static_analysis",
             )
 
     if static_run_id is None and not dry_run:
         message = (
-            "DB schema is outdated or static_run_id missing; legacy writes are blocked. "
-            "Run migrations and retry."
+            "DB schema is outdated or static_run_id missing. Run migrations and retry."
         )
         log.error(message, category="static_analysis")
         outcome.add_error(message)

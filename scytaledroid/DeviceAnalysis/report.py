@@ -19,6 +19,7 @@ from scytaledroid.Utils.DisplayUtils import (
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from . import adb_devices, package_profiles
+from scytaledroid.DeviceAnalysis.inventory import normalizer
 from scytaledroid.DeviceAnalysis.services import device_service
 
 
@@ -125,7 +126,7 @@ def _inventory_preview(packages: List[Dict[str, object]]) -> List[List[str]]:
         category = str(pkg.get("category") or "Unknown")
         source = str(pkg.get("source") or category)
         profile = str(pkg.get("profile_name") or "-")
-        split_flag = "Yes" if inventory._split_count(pkg) > 1 else "No"
+        split_flag = "Yes" if normalizer.split_count(pkg) > 1 else "No"
         preview_rows.append([package_name, app_label, version, category, source, profile, split_flag])
     return preview_rows
 
@@ -165,7 +166,7 @@ def _write_report(
             pkg.get("category") or "Unknown",
             pkg.get("source") or pkg.get("category") or "Unknown",
             pkg.get("profile_name") or "-",
-            "Yes" if inventory._split_count(pkg) > 1 else "No",
+            "Yes" if normalizer.split_count(pkg) > 1 else "No",
             (pkg.get("primary_path") or "?"),
         ]
         for pkg in packages

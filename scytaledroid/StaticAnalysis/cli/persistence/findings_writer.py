@@ -12,8 +12,6 @@ try:  # pragma: no cover - optional dependency
 except Exception:  # pragma: no cover - optional dependency
     yaml = None
 
-from functools import lru_cache
-
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
@@ -235,29 +233,26 @@ def persist_findings(run_id: int, rows: Sequence[Dict[str, Any]], *, static_run_
     """Persist normalized findings for a static run.
 
     Both run_id and static_run_id are written where supported so newer schemas
-    can key by static_analysis_runs.id while legacy consumers can still use
-    the generic run_id.
+    can key by static_analysis_runs.id while reports still include run_id.
     """
     require_canonical_schema()
-    has_static_col = _has_column("findings", "static_run_id")
+    if not _has_column("findings", "static_run_id"):
+        log.error(
+            "static_run_id column missing for findings; run migrations.",
+            category="db",
+        )
+        return False
     try:
-        if not has_static_col:
-            log.error(
-                "Legacy findings schema detected; writes are blocked. Run migrations to use canonical schema.",
-                category="db",
-            )
-            return False
         if static_run_id is None:
             log.error(
-                "static_run_id missing for findings; legacy writes are blocked. Run migrations.",
+                "static_run_id missing for findings; cannot persist normalized findings.",
                 category="db",
             )
             return False
-        if has_static_col:
-            core_q.run_sql(
-                "DELETE FROM findings WHERE run_id=%s OR static_run_id=%s",
-                (run_id, static_run_id if static_run_id is not None else run_id),
-            )
+        core_q.run_sql(
+            "DELETE FROM findings WHERE run_id=%s OR static_run_id=%s",
+            (run_id, static_run_id),
+        )
     except Exception as exc:  # pragma: no cover - defensive
         log.warning(
             f"Failed to prune findings for run_id={run_id}: {exc}",
@@ -265,48 +260,45 @@ def persist_findings(run_id: int, rows: Sequence[Dict[str, Any]], *, static_run_
         )
     try:
         for row in rows:
-            if has_static_col:
-                core_q.run_sql(
-                    """
-                    INSERT INTO findings (
-                        run_id, static_run_id, severity, masvs, cvss, kind, evidence, module_id,
-                        cvss_v40_b_score, cvss_v40_bt_score, cvss_v40_be_score, cvss_v40_bte_score,
-                        cvss_v40_b_vector, cvss_v40_bt_vector, cvss_v40_be_vector, cvss_v40_bte_vector,
-                        cvss_v40_meta, analyst_tag, evidence_path, evidence_offset, evidence_preview, rule_id
-                    ) VALUES (
-                        %s,%s,%s,%s,%s,%s,%s,%s,
-                        %s,%s,%s,%s,
-                        %s,%s,%s,%s,
-                        %s,%s,%s,%s,%s,%s
-                    )
-                    """,
-                    (
-                        run_id,
-                        static_run_id,
-                        row.get("severity"),
-                        row.get("masvs"),
-                        row.get("cvss"),
-                        row.get("kind"),
-                        row.get("evidence"),
-                        row.get("module_id"),
-                        row.get("cvss_v40_b_score"),
-                        row.get("cvss_v40_bt_score"),
-                        row.get("cvss_v40_be_score"),
-                        row.get("cvss_v40_bte_score"),
-                        row.get("cvss_v40_b_vector"),
-                        row.get("cvss_v40_bt_vector"),
-                        row.get("cvss_v40_be_vector"),
-                        row.get("cvss_v40_bte_vector"),
-                        row.get("cvss_v40_meta"),
-                        None,
-                        row.get("evidence_path"),
-                        row.get("evidence_offset"),
-                        row.get("evidence_preview"),
-                        row.get("rule_id"),
-                    ),
+            core_q.run_sql(
+                """
+                INSERT INTO findings (
+                    run_id, static_run_id, severity, masvs, cvss, kind, evidence, module_id,
+                    cvss_v40_b_score, cvss_v40_bt_score, cvss_v40_be_score, cvss_v40_bte_score,
+                    cvss_v40_b_vector, cvss_v40_bt_vector, cvss_v40_be_vector, cvss_v40_bte_vector,
+                    cvss_v40_meta, analyst_tag, evidence_path, evidence_offset, evidence_preview, rule_id
+                ) VALUES (
+                    %s,%s,%s,%s,%s,%s,%s,%s,
+                    %s,%s,%s,%s,
+                    %s,%s,%s,%s,
+                    %s,%s,%s,%s,%s,%s
                 )
-            else:
-                return False
+                """,
+                (
+                    run_id,
+                    static_run_id,
+                    row.get("severity"),
+                    row.get("masvs"),
+                    row.get("cvss"),
+                    row.get("kind"),
+                    row.get("evidence"),
+                    row.get("module_id"),
+                    row.get("cvss_v40_b_score"),
+                    row.get("cvss_v40_bt_score"),
+                    row.get("cvss_v40_be_score"),
+                    row.get("cvss_v40_bte_score"),
+                    row.get("cvss_v40_b_vector"),
+                    row.get("cvss_v40_bt_vector"),
+                    row.get("cvss_v40_be_vector"),
+                    row.get("cvss_v40_bte_vector"),
+                    row.get("cvss_v40_meta"),
+                    None,
+                    row.get("evidence_path"),
+                    row.get("evidence_offset"),
+                    row.get("evidence_preview"),
+                    row.get("rule_id"),
+                ),
+            )
         return True
     except Exception as exc:  # pragma: no cover - defensive
         message = (
@@ -318,17 +310,9 @@ def persist_findings(run_id: int, rows: Sequence[Dict[str, Any]], *, static_run_
         return False
 
 
-@lru_cache(maxsize=None)
-def _has_column(table: str, column: str) -> bool:
-    try:
-        row = core_q.run_sql(
-            f"SHOW COLUMNS FROM {table} LIKE %s",
-            (column,),
-            fetch="one",
-        )
-        return bool(row)
-    except Exception:
-        return False
+def _has_column(_table: str, _column: str) -> bool:
+    """Return True for canonical schema; kept for test overrides."""
+    return True
 
 
 def persist_masvs_controls(run_id: int, package: str, coverage: Mapping[str, Any]) -> None:

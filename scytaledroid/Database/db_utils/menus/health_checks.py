@@ -385,20 +385,8 @@ def _fetch_latest_run() -> Optional[Dict[str, Any]]:
             dictionary=True,
         )
     except Exception as exc:
-        # Fallback to legacy schema without session_stamp
-        try:
-            row = run_sql(
-                "SELECT run_id, package, version_name, target_sdk, ts FROM runs ORDER BY run_id DESC LIMIT 1",
-                fetch="one",
-                dictionary=True,
-            )
-            if row is None:
-                return None
-            row.setdefault("session_stamp", None)
-            return row
-        except Exception:
-            print(status_messages.status(f"Unable to query runs table: {exc}", level="error"))
-            return None
+        print(status_messages.status(f"Unable to query runs table: {exc}", level="error"))
+        return None
 
 
 def _fetch_latest_session() -> Optional[Dict[str, Any]]:
@@ -734,7 +722,7 @@ def _run_inventory_health_check() -> None:
     ) if latest_snapshot_id else 0
 
     if snapshot_headers_total:
-        legacy_orphans = orphan_headers - (1 if latest_is_orphan else 0)
+        non_latest_orphans = orphan_headers - (1 if latest_is_orphan else 0)
         if latest_snapshot_id and latest_rows == latest_expected and latest_expected:
             level = "ok" if orphan_headers == 0 else "warn"
         else:
@@ -744,7 +732,7 @@ def _run_inventory_health_check() -> None:
             "inventory snapshots",
             detail=(
                 f"headers={snapshot_headers_total} orphaned={orphan_headers} "
-                f"legacy={max(legacy_orphans, 0)}"
+                f"non_latest_orphans={max(non_latest_orphans, 0)}"
             ),
         )
     else:

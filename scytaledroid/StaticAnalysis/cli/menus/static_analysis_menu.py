@@ -43,6 +43,18 @@ def static_analysis_menu() -> None:
     from ..core.run_prompts import default_custom_tests, prompt_advanced_options
     from ..flows.selection import select_scope
     from scytaledroid.StaticAnalysis.services import static_service
+    from scytaledroid.Database.db_utils import schema_gate
+
+    ok, message, detail = schema_gate.static_schema_gate()
+    if not ok:
+        status_messages.print_status(f"[ERROR] {message}", level="error")
+        if detail:
+            status_messages.print_status(detail, level="error")
+        status_messages.print_status(
+            "Fix: Database Tools → Apply Tier-1 schema migrations (or import canonical DB export), then retry.",
+            level="error",
+        )
+        return
 
     base_dir = Path(app_config.DATA_DIR) / "device_apks"
     groups = tuple(group_artifacts(base_dir))

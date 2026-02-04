@@ -29,6 +29,21 @@ class ProgressCallback(Protocol):
 PackageRow = Dict[str, object]
 
 
+def _compose_inventory_entry(
+    package_name: str,
+    paths: List[str],
+    metadata: Dict[str, object],
+    canonical: Optional[Dict[str, object]] = None,
+) -> Dict[str, object]:
+    """Compatibility wrapper for tests and callers relying on legacy helper names."""
+    return normalizer.compose_inventory_entry(package_name, paths, metadata, canonical=canonical)
+
+
+def _split_count(entry: Dict[str, object]) -> int:
+    """Compatibility wrapper for tests and callers relying on legacy helper names."""
+    return normalizer.split_count(entry)
+
+
 @dataclass
 class CollectionStats:
     total_packages: int
@@ -221,8 +236,6 @@ def collect_inventory(
     return rows, stats
 
 
-# --- Helpers copied from legacy inventory.py (UI-free) ---
-
 def _emit_progress(
     callback: ProgressCallback | None,
     *,
@@ -238,18 +251,3 @@ def _emit_progress(
         callback(processed, total, elapsed, eta, split_apks)
     except Exception as exc:  # pragma: no cover - defensive logging
         log.warning(f"Progress callback raised {exc}", category="inventory")
-
-
-def _split_count(entry: Dict[str, object]) -> int:
-    """Compatibility wrapper around normalizer.split_count for tests."""
-    return normalizer.split_count(entry)
-
-
-def _compose_inventory_entry(
-    package_name: str,
-    paths: List[str],
-    metadata: Dict[str, Optional[str]],
-    canonical: Optional[Dict[str, object]] = None,
-) -> Dict[str, object]:
-    """Compatibility wrapper around normalizer.compose_inventory_entry for tests."""
-    return normalizer.compose_inventory_entry(package_name, paths, metadata, canonical)
