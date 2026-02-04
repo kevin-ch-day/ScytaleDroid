@@ -114,14 +114,26 @@ def select_package_scope(
             note="default",
             handler=lambda: _scope_default(rows, allow),
         )
+        updated_note = "updated-only"
+        filtered_non_user = updated_meta.get("filtered_non_user")
+        if filtered_non_user:
+            updated_note = f"{updated_note} (filtered_non_user={filtered_non_user})"
         _add_entry(
             "U",
             "Updated apps only",
             packages=len(updated_rows),
             files=estimated_files(updated_rows),
-            note="updated-only",
+            note=updated_note,
             handler=lambda: _scope_updated_only(rows, updated_rows, updated_meta),
         )
+        if filtered_non_user and not updated_rows:
+            print(
+                status_messages.status(
+                    f"Updated-only filtered out {filtered_non_user} system app(s) "
+                    "on non-root devices.",
+                    level="info",
+                )
+            )
 
         social_rows = profile_key_groups.get("SOCIAL")
         _add_entry(
@@ -328,7 +340,7 @@ def _render_scope_table(
     print(f"Device ({device_serial} • {mode_label})")
     candidates = len(rows)
     eligible = candidates if is_rooted else sum(
-        1 for row in rows if rules.is_user_path(row.primary_path)
+        1 for row in rows if any(rules.is_user_path(path) for path in row.apk_paths)
     )
     blocked = max(candidates - eligible, 0)
     policy = "none" if is_rooted else "non_root_paths"
@@ -412,7 +424,7 @@ def _scope_profiles(
     profile_menu["A"] = "All profiles"
 
     menu_utils.print_menu(profile_menu, is_main=False)
-    raw = input("Selection (e.g., 1,3 or A): ").strip()
+    raw = prompt_utils.prompt_text("Selection (e.g., 1,3 or A)", default="", required=False).strip()
     if not raw:
         print(status_messages.status("Profile selection cancelled.", level="warn"))
         return None

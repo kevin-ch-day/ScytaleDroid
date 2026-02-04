@@ -98,26 +98,6 @@ def run_apk_pull(
     )
 
     try:
-        if ui.is_harvest_simple_mode():
-            stats = resolution.stats
-            candidate_count = resolution.selection.metadata.get("candidate_count") or len(
-                resolution.selection.packages
-            )
-            selected_count = resolution.selection.metadata.get("selected_count") or len(
-                resolution.selection.packages
-            )
-            eligible = max(int(stats["scheduled_packages"]) + int(stats["policy_blocked"]), 0)
-            artifacts = sum(
-                len(pkg.artifacts) for pkg in resolution.plan.packages if not pkg.skip_reason
-            )
-            ui.report_harvest_started(
-                candidate_count=candidate_count,
-                selected_count=selected_count,
-                eligible=eligible,
-                scheduled=int(stats["scheduled_packages"]),
-                artifacts=artifacts,
-                policy=str(stats["policy"]),
-            )
         if resolution.pull_mode == "quick":
             results = harvest.quick_harvest(
                 resolution.plan.packages,
@@ -529,6 +509,27 @@ def resolve_harvest_plan(
         if refresh_requested:
             continue
         if active_plan and active_selection and pull_mode:
+            if ui.is_harvest_simple_mode():
+                candidate_count = active_selection.metadata.get("candidate_count") or len(
+                    active_selection.packages
+                )
+                selected_count = active_selection.metadata.get("selected_count") or len(
+                    active_selection.packages
+                )
+                eligible = max(int(stats["scheduled_packages"]) + int(stats["policy_blocked"]), 0)
+                artifacts = sum(
+                    len(pkg.artifacts)
+                    for pkg in active_plan.packages
+                    if not pkg.skip_reason
+                )
+                ui.report_harvest_started(
+                    candidate_count=candidate_count,
+                    selected_count=selected_count,
+                    eligible=eligible,
+                    scheduled=int(stats["scheduled_packages"]),
+                    artifacts=artifacts,
+                    policy=str(stats["policy"]),
+                )
             return planner.build_plan(
                 active_selection,
                 is_rooted=is_rooted,

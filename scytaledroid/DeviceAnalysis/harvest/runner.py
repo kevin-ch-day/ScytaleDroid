@@ -779,8 +779,11 @@ def _maybe_print_progress(
 ) -> None:
     if not _quiet_mode():
         return
-    total = display_total if isinstance(display_total, int) and display_total > 0 else package_total
-    index = display_index if isinstance(display_index, int) and display_index > 0 else package_index
+    use_display = isinstance(display_total, int) and display_total > 0
+    if use_display and not isinstance(display_index, int):
+        return
+    total = display_total if use_display else package_total
+    index = display_index if use_display else package_index
     if total <= 0:
         return
     if result.errors:
