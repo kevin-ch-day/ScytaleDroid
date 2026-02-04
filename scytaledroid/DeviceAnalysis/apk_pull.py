@@ -181,6 +181,32 @@ def pull_apks(serial: str | None, *, auto_scope: bool = False) -> OperationResul
     )
 
     try:
+        if _harvest_simple_mode():
+            policy_blocked = sum(
+                1 for pkg in resolution.plan.packages if pkg.skip_reason == "policy_non_root"
+            )
+            eligible_policy = max(
+                int(resolution.plan.packages and len([p for p in resolution.plan.packages if not p.skip_reason]) or 0)
+                + int(policy_blocked),
+                0,
+            )
+            policy = resolution.selection.metadata.get("policy")
+            if not policy:
+                policy = (
+                    ",".join(sorted(resolution.plan.policy_filtered.keys()))
+                    if resolution.plan.policy_filtered
+                    else "none"
+                )
+            line = (
+                "APK Harvest started • "
+                f"inventory={resolution.selection.metadata.get('candidate_count') or len(resolution.selection.packages)} "
+                f"• selected={resolution.selection.metadata.get('selected_count') or len(resolution.selection.packages)} "
+                f"• eligible={eligible_policy} "
+                f"• scheduled={sum(1 for p in resolution.plan.packages if not p.skip_reason)} "
+                f"• artifacts≈{sum(len(p.artifacts) for p in resolution.plan.packages if not p.skip_reason)} "
+                f"• policy={policy}"
+            )
+            print(status_messages.status(line, level="info"))
         if resolution.pull_mode == "quick":
             results = harvest.quick_harvest(
                 resolution.plan.packages,
@@ -435,12 +461,21 @@ def _render_plan_overview(
         if not policy:
             policy = ",".join(sorted(plan.policy_filtered.keys())) if plan.policy_filtered else "none"
         line = (
-            "APK Harvest started • "
+            "APK Harvest plan • "
             f"inventory={candidate_count} • selected={selected_count} • eligible={eligible_policy} • "
             f"scheduled={packages} • "
             f"artifacts≈{files} • policy={policy}"
         )
         print(status_messages.status(line, level="info"))
+        if blocked_packages:
+            from collections import Counter
+
+            reasons = Counter(
+                pkg.skip_reason or "unknown" for pkg in plan.packages if pkg.skip_reason
+            )
+            reason_text = ", ".join(f"{key}={value}" for key, value in reasons.items())
+            if reason_text:
+                print(status_messages.status(f"Preflight skips: {reason_text}", level="info"))
         if delta_line:
             print(status_messages.status(delta_line, level="info"))
         return
@@ -738,6 +773,22 @@ def _resolve_harvest_plan(
                     level="warn",
                 )
             )
+            skip_reasons: dict[str, list[str]] = {}
+            for pkg in plan.packages:
+                reason = pkg.skip_reason or "unknown"
+                skip_reasons.setdefault(reason, [])
+                if len(skip_reasons[reason]) < 3:
+                    skip_reasons[reason].append(pkg.inventory.display_name())
+            if skip_reasons:
+                for reason, samples in skip_reasons.items():
+                    sample_text = ", ".join(samples)
+                    print(
+                        status_messages.status(
+                            f"Skip reason: {reason} ({len([p for p in plan.packages if p.skip_reason==reason])}) "
+                            f"e.g., {sample_text}",
+                            level="info",
+                        )
+                    )
             options = {
                 "1": "Rescope",
                 "2": "Refresh inventory & rescope",

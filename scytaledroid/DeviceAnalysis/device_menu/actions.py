@@ -48,7 +48,7 @@ def handle_choice(
     elif choice == "1":
         _run_inventory_sync(active_device)
     elif choice == "2":
-        _run_apk_pull(active_device, auto_scope=True)
+        _run_apk_pull(active_device, auto_scope=False)
     elif choice in {"3", "4", "5", "6", "7"}:
         _forward_to_helper(choice, active_device)
     elif choice == "8":

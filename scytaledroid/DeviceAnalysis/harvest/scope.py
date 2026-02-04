@@ -60,6 +60,14 @@ def select_package_scope(
 
     default_rows, _ = apply_default_scope(rows, allow)
     updated_rows, updated_meta = filter_updated_only(rows)
+    if not is_rooted:
+        readable_updated = [
+            row for row in updated_rows if any(rules.is_user_path(path) for path in row.apk_paths)
+        ]
+        if len(readable_updated) != len(updated_rows):
+            updated_meta = dict(updated_meta)
+            updated_meta["filtered_non_user"] = len(updated_rows) - len(readable_updated)
+        updated_rows = readable_updated
 
     while True:
         _render_scope_table(rows, device_serial, is_rooted, context, default_rows)
@@ -279,6 +287,14 @@ def select_package_scope_auto(
 
     allow = set(google_allowlist or rules.GOOGLE_ALLOWLIST)
     updated_rows, updated_meta = filter_updated_only(rows)
+    if not is_rooted:
+        readable_updated = [
+            row for row in updated_rows if any(rules.is_user_path(path) for path in row.apk_paths)
+        ]
+        if len(readable_updated) != len(updated_rows):
+            updated_meta = dict(updated_meta)
+            updated_meta["filtered_non_user"] = len(updated_rows) - len(readable_updated)
+        updated_rows = readable_updated
 
     if updated_rows:
         selection = _scope_updated_only(rows, updated_rows, updated_meta)
