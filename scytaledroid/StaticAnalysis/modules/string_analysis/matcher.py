@@ -6,14 +6,14 @@ import math
 from collections import defaultdict
 from collections.abc import Callable, Collection, Iterable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Literal
 
 from .extractor import IndexedString, StringIndex
 from .patterns import DEFAULT_PATTERNS, StringPattern
 
 
-class MatchStatus(str, Enum):
+class MatchStatus(StrEnum):
     """Enumeration describing how a match should be treated."""
 
     ACCEPTED = "accepted"

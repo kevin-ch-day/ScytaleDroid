@@ -211,7 +211,7 @@ def _print_session_counts(session_stamp: str) -> None:
     for table, (count, status) in audit.counts.items():
         table_rows.append([table, str(count) if count is not None else "—", status])
 
-    table_utils.render_table(["Table", "Rows", "Status"], table_rows) 
+    table_utils.render_table(["Table", "Rows", "Status"], table_rows)
 
 
 def prompt_masvs_by_package() -> None:

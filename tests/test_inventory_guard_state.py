@@ -1,13 +1,13 @@
 from datetime import UTC, datetime, timedelta
 from importlib import import_module
 
+from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.prompts import (
+    describe_inventory_state,
+)
 from scytaledroid.DeviceAnalysis.inventory.runner import InventoryDelta
 
 guard_module = import_module(
     "scytaledroid.DeviceAnalysis.device_menu.inventory_guard.ensure_recent_inventory"
-)
-from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.prompts import (
-    describe_inventory_state,
 )
 
 

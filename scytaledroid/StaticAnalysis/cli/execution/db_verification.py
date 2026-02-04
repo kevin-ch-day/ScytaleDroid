@@ -318,15 +318,6 @@ def _render_persistence_footer(
     metrics = _audit_or("metrics") or _count_by_run("metrics")
     findings = _audit_or("findings") or _count_by_run("findings")
 
-    contributors = 0
-    if run_ids:
-        placeholders = ",".join(["%s"] * len(run_ids))
-        params = tuple(run_ids)
-        contributors = _count(
-            f"SELECT COUNT(*) FROM contributors WHERE run_id IN ({placeholders})",
-            params,
-        )
-
     snapshot_count = _audit_or(
         "permission_audit_snapshots",
         "SELECT COUNT(*) FROM permission_audit_snapshots WHERE snapshot_key = %s",
@@ -343,7 +334,6 @@ def _render_persistence_footer(
     buckets_total = _count_total("SELECT COUNT(*) FROM buckets")
     metrics_total = _count_total("SELECT COUNT(*) FROM metrics")
     findings_total = _count_total("SELECT COUNT(*) FROM findings")
-    contributors_total = _count_total("SELECT COUNT(*) FROM contributors")
     strings_summary_total = _count_total("SELECT COUNT(*) FROM static_string_summary")
     string_samples_raw_total = _count_total("SELECT COUNT(*) FROM static_string_samples")
     findings_summary_total = _count_total("SELECT COUNT(*) FROM static_findings_summary")

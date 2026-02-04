@@ -27,6 +27,7 @@ from .context_builders import (
     derive_run_id,
     resolve_relative_path,
 )
+from .detector_runner import PIPELINE_STAGES, PipelineStage, run_detector_pipeline
 from .errors import StaticAnalysisError
 from .findings import Badge, DetectorResult, EvidencePointer, Finding
 from .manifest_utils import (
@@ -223,9 +224,6 @@ def make_detector_result(
         subitems=subitems_payload,
         raw_debug=raw_debug,
     )
-
-
-from .detector_runner import PIPELINE_STAGES, PipelineStage, run_detector_pipeline
 
 
 def analyze_apk(

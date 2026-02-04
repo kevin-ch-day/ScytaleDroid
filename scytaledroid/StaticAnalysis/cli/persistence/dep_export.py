@@ -92,11 +92,9 @@ def export_dep_json(static_run_id: int) -> str | None:
         "custom_permissions",
         "permissions_total",
     ]
-    payload = dict(zip(columns, row))
+    payload = dict(zip(columns, row, strict=False))
 
     package_name = payload.get("package_name") or "unknown"
-    sha256 = payload.get("sha256") or payload.get("base_apk_sha256")
-    artifact_token = str(sha256) if sha256 else f"run_{static_run_id}"
     evidence_dir = Path("evidence") / "static_runs" / str(static_run_id)
     evidence_dir.mkdir(parents=True, exist_ok=True)
 

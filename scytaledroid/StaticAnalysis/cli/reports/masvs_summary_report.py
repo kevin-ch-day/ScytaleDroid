@@ -437,7 +437,7 @@ def fetch_masvs_matrix() -> dict[str, dict[str, object]]:
         }
 
     areas = ("NETWORK", "PLATFORM", "PRIVACY", "STORAGE")
-    for package, data in matrix.items():
+    for _package, data in matrix.items():
         statuses = data["status"]
         passed = 0
         for area in areas:

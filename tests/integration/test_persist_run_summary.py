@@ -255,6 +255,20 @@ def test_persist_run_summary_populates_canonical_tables():
     assert signature_count >= 0
     assert vendor_count >= 0
 
+    snapshot_row = core_q.run_sql(
+        """
+        SELECT snapshot_id
+        FROM permission_audit_snapshots
+        WHERE snapshot_key=%s
+        ORDER BY snapshot_id DESC
+        LIMIT 1
+        """,
+        (f"perm-audit:app:{session_stamp}",),
+        fetch="one",
+    )
+    snapshot_id = snapshot_row[0] if snapshot_row else None
+    assert snapshot_id is not None
+
     audit_row = core_q.run_sql(
         """
         SELECT dangerous_count, signature_count, vendor_count

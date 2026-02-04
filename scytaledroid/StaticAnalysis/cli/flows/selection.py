@@ -108,7 +108,7 @@ def select_app_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
     )
     rows: list[list[str]] = []
     lookup_labels: list[str] = []
-    for idx, (package, version, _count, app_label) in enumerate(packages, start=1):
+    for idx, (package, _version, _count, app_label) in enumerate(packages, start=1):
         display_app = app_label or package
         combined_label = f"{display_app} ({package})" if app_label else package
         rows.append([str(idx), combined_label])

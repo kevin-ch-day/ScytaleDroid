@@ -68,9 +68,7 @@ def static_analysis_menu() -> None:
         return
 
     workflow_commands = tuple(cmd for cmd in iter_commands("scan") if cmd.section == "workflow")
-    tool_commands = tuple(cmd for cmd in iter_commands("scan") if cmd.section == "tools")
     dev_commands = tuple(cmd for cmd in iter_commands("scan") if cmd.section == "dev")
-    insight_commands = tuple(cmd for cmd in iter_commands("readonly"))
     selectable_ids = [cmd.id for cmd in COMMANDS]
 
     if not selectable_ids:

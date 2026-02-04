@@ -1,15 +1,8 @@
 import os
-import pathlib
-import sys
 from collections.abc import Iterator
 
 import pymysql
 import pytest
-
-ROOT = pathlib.Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
 from scytaledroid.Database.db_core import db_config
 
 

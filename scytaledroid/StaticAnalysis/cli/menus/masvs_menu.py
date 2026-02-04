@@ -262,7 +262,13 @@ def render_masvs_matrix_menu() -> None:
         pass_rate = data["pass_rate"]
         top_lookup = data.get("top") or {}
 
-        def _fmt(area: str) -> str:
+        def _fmt(
+            area: str,
+            *,
+            statuses: dict[str, str] = statuses,
+            counts: dict[str, dict[str, int]] = counts,
+            top_lookup: dict[str, object] | object = top_lookup,
+        ) -> str:
             status = statuses.get(area, "–")
             area_counts = counts.get(area, {"high": 0, "medium": 0, "low": 0, "info": 0})
             top_entry = top_lookup.get(area, {}) if isinstance(top_lookup, dict) else {}

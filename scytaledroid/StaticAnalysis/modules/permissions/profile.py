@@ -26,6 +26,7 @@ from .analysis.profiles import PermissionProfile, build_profiles
 from .analysis.summarize import build_notes, format_summary
 from .analysis.tokens import (
     is_custom_permission,
+    is_special_access,
     normalize_tokens,
     score_tokens,
 )
@@ -170,7 +171,7 @@ def _build_protection_profiles(
         is_runtime = "dangerous" in tokens or name in dangerous_set
         is_signature = any(token.startswith("signature") for token in tokens)
         is_privileged = "privileged" in tokens
-        is_special = _is_special_access(tokens)
+        is_special = is_special_access(tokens)
         group = _extract_permission_group(detail_entry)
         description = _extract_permission_description(detail_entry)
         severity = _score_tokens(tokens, is_custom=_is_custom_permission(name))

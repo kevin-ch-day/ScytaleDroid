@@ -4,6 +4,20 @@ from __future__ import annotations
 
 import logging
 
+from .cli import static_analysis_menu
+from .core import (
+    AnalysisConfig,
+    DetectorContext,
+    DetectorResult,
+    EvidencePointer,
+    Finding,
+    MasvsCategory,
+    SeverityLevel,
+    StaticAnalysisError,
+    StaticAnalysisReport,
+    analyze_apk,
+)
+
 _ANDROGUARD_LOGGERS = (
     "androguard",
     "androguard.core",
@@ -21,20 +35,6 @@ for _logger_name in _ANDROGUARD_LOGGERS:
     _logger.addHandler(logging.NullHandler())
     _logger.setLevel(logging.CRITICAL)
     _logger.propagate = False
-
-from .cli import static_analysis_menu
-from .core import (
-    AnalysisConfig,
-    DetectorContext,
-    DetectorResult,
-    EvidencePointer,
-    Finding,
-    MasvsCategory,
-    SeverityLevel,
-    StaticAnalysisError,
-    StaticAnalysisReport,
-    analyze_apk,
-)
 
 __all__ = [
     "static_analysis_menu",

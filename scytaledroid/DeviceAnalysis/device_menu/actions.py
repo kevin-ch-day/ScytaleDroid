@@ -21,11 +21,7 @@ from .formatters import (
     format_battery,
     format_device_line,
 )
-from .inventory_guard import (
-    ensure_recent_inventory,
-    format_inventory_status,
-    format_pull_hint,
-)
+from .inventory_guard import ensure_recent_inventory
 
 # Keep menu routing aligned with handle_choice to avoid accidental swaps in the CLI.
 _HELPER_ROUTES = {

@@ -175,17 +175,7 @@ def _get_or_create_app(package_name: str, display_name: str | None = None) -> in
         apply_publisher_mapping([cleaned_package])
         return int(new_id) if new_id else None
     except Exception as exc:
-        _warn(f"provider insert failed: {exc}")
-        try:
-            row = core_q.run_sql(
-                "SELECT id FROM static_fileproviders WHERE package_name=%s AND authority=%s LIMIT 1",
-                (context.package_name, authority),
-                fetch="one",
-            )
-            if row and row[0]:
-                return int(row[0])
-        except Exception:
-            pass
+        log.warning(f"App insert failed: {exc}", category="static_ingest")
         return None
 
 
@@ -289,40 +279,8 @@ _PROVIDER_PARENT_CACHE: dict[int, dict[str, str | None]] = {}
 
 
 def _persist_analysis_snapshot(app_version_id: int, payload: Mapping[str, object]) -> None:
-    findings: Sequence[Mapping[str, object]] = _extract_findings(payload)
-
     metadata_raw = payload.get("metadata")
     metadata = metadata_raw if isinstance(metadata_raw, Mapping) else {}
-
-    hashes_raw = payload.get("hashes")
-    hashes_payload = hashes_raw if isinstance(hashes_raw, Mapping) else {}
-    sha256 = first_text(hashes_payload.get("sha256"))
-    analysis_version = first_text(
-        payload.get("analysis_version"),
-        hashes_payload.get("analysis_version"),
-    )
-    pipeline_version = first_text(
-        metadata.get("pipeline_version"),
-        payload.get("pipeline_version"),
-        analysis_version,
-    )
-    catalog_versions = first_text(
-        metadata.get("catalog_versions"),
-        payload.get("catalog_versions"),
-    )
-    config_hash = first_text(
-        metadata.get("config_hash"),
-        payload.get("config_hash"),
-    )
-    study_tag_value = first_text(
-        metadata.get("study_tag"),
-        payload.get("study_tag"),
-    )
-    run_started_utc = first_text(
-        metadata.get("run_started_utc"),
-        payload.get("run_started_utc"),
-        payload.get("generated_at"),
-    )
     profile = first_text(
         payload.get("scan_profile"),
         metadata.get("scan_profile"),
@@ -363,20 +321,6 @@ def _persist_analysis_snapshot(app_version_id: int, payload: Mapping[str, object
         if isinstance(baseline_section, Mapping):
             repro_bundle = baseline_section
 
-    analytics_section = payload.get("analytics")
-    matrices_payload: Mapping[str, object] | None = None
-    indicators_payload: Mapping[str, object] | None = None
-    workload_payload: Mapping[str, object] | None = None
-    if isinstance(analytics_section, Mapping):
-        matrices_candidate = analytics_section.get("matrices")
-        if isinstance(matrices_candidate, Mapping):
-            matrices_payload = matrices_candidate
-        indicators_candidate = analytics_section.get("indicators")
-        if isinstance(indicators_candidate, Mapping):
-            indicators_payload = indicators_candidate
-        workload_candidate = analytics_section.get("workload")
-        if isinstance(workload_candidate, Mapping):
-            workload_payload = workload_candidate
 
     static_run_id = None
     if session_stamp and profile:
@@ -567,7 +511,6 @@ def _create_provider_row(run_id: int, entry: Mapping[str, object]) -> int | None
 
 def _create_provider_acl_row(provider_id: int, entry: Mapping[str, object]) -> None:
     try:
-        parent = _PROVIDER_PARENT_CACHE.get(provider_id, {})
         path_value = _normalise_optional_str(entry.get("path")) or "*"
         path_type = _normalise_optional_str(entry.get("pathType")) or "base"
 

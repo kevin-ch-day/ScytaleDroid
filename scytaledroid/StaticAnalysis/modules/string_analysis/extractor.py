@@ -444,7 +444,7 @@ def _reconstruct_constant_hosts(entries: Sequence[IndexedString]) -> tuple[Index
                 if not _is_component_piece(last.value):
                     break
                 valid = True
-                for prev, current in zip(parts, parts[1:]):
+                for prev, current in zip(parts, parts[1:], strict=False):
                     if prev.byte_offset is None or current.byte_offset is None:
                         valid = False
                         break
@@ -513,10 +513,8 @@ def _normalise_entry(
         counter.noise_counts[noise_tag] = counter.noise_counts.get(noise_tag, 0) + 1
 
     base64_candidate = False
-    hex_candidate = False
     decoded_blob: DecodedBlob | None = None
     if _is_hex_candidate(stripped):
-        hex_candidate = True
         counter.hex_candidates += 1
         decoded_blob = _decode_hex_strict(stripped)
         if decoded_blob:

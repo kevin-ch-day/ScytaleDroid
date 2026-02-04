@@ -229,7 +229,6 @@ def _render_application_topology(
     else:
         lines.append("  —")
 
-    duration = integrity_result.duration_sec if integrity_result else 0.0
     status = integrity_result.status if integrity_result else Badge.SKIPPED
     # Suppress timing to keep output compact; status is still shown.
     lines.append(f"Status: {format_badge(status, glyphs)}")

@@ -237,7 +237,6 @@ def ensure_recent_inventory(
         return False
 
     battery_context = _resolve_battery_context(serial, device_context)
-    battery_level = battery_context.get("level")
     prompt_message = _build_sync_warning(battery_context, expected_duration)
 
     if prompt_message:

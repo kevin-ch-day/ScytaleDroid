@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from datetime import UTC, datetime
 from pathlib import Path
@@ -71,7 +72,6 @@ def execute_permission_scan(
 
     last_report = None
     last_category = None
-    permission_persist_failed = False
     audit_persist_failed = False
     if compact_output is None:
         env_override = os.getenv("SCYTALEDROID_PERM_SNAPSHOT_COMPACT")
@@ -111,7 +111,6 @@ def execute_permission_scan(
                 counts = persist_permissions_to_db(report)
                 render_permission_persisted(counts)
             except Exception:
-                permission_persist_failed = True
                 logging_engine.get_error_logger().exception(
                     "Permission analysis persistence failed",
                     extra=logging_engine.ensure_trace(

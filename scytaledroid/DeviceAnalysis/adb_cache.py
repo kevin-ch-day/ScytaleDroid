@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+
 CacheKey = tuple[str, str]
 
 DEFAULT_TTL_SECONDS = 300.0

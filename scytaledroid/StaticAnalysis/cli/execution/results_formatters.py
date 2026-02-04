@@ -67,8 +67,6 @@ def _format_highlight_tokens(
 def _format_masvs_cell(area_counts: Mapping[str, int]) -> str:
     high = int(area_counts.get("High", 0))
     medium = int(area_counts.get("Medium", 0))
-    low = int(area_counts.get("Low", 0))
-    info = int(area_counts.get("Info", 0))
     if high > 0:
         status = "FAIL"
         palette = colors.style("error")

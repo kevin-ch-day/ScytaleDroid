@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 
-class SeverityLevel(str, Enum):
+class SeverityLevel(StrEnum):
     """Severity gates used to prioritise remediation."""
 
     P0 = "P0"  # Blocker
@@ -16,7 +16,7 @@ class SeverityLevel(str, Enum):
     NOTE = "NOTE"  # Informational / context only
 
 
-class MasvsCategory(str, Enum):
+class MasvsCategory(StrEnum):
     """MASVS categories used for mapping findings to standards."""
 
     NETWORK = "NETWORK"
@@ -28,7 +28,7 @@ class MasvsCategory(str, Enum):
     OTHER = "OTHER"
 
 
-class Badge(str, Enum):
+class Badge(StrEnum):
     """Presentation badges for detector status."""
 
     OK = "OK"

@@ -1317,19 +1317,6 @@ def render_app_result(
         summary = _summarise_masvs_inline(report)
         lines.append("")
         lines.append("MASVS Summary")
-        headers = [
-            "Area",
-            "High",
-            "Med",
-            "Low",
-            "Info",
-            "Status",
-            "Risk",
-            "CVSS%",
-            "Worst CVSS",
-            "Avg",
-            "Bands",
-        ]
         table_rows: list[str] = []
         for area in ("NETWORK", "PLATFORM", "PRIVACY", "STORAGE"):
             data = summary.get(area) or {}

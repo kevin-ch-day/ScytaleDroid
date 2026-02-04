@@ -444,7 +444,9 @@ def _persist_session_run_links(session_stamp: str | None, run_map: dict | None) 
         return
     try:
         from scytaledroid.Database.db_core import db_queries as core_q
+        from scytaledroid.Database.db_utils import diagnostics
 
+        columns = diagnostics.get_table_columns("static_session_run_links") or []
         static_ids = sorted(
             {
                 int(app.get("static_run_id"))
@@ -578,10 +580,10 @@ def _write_run_map_atomic(session_stamp: str, run_map: dict) -> None:
     lock_fd = None
     try:
         lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    except FileExistsError:
+    except FileExistsError as exc:
         raise RuntimeError(
             f"run_map.json is locked for session {session_stamp}; another process may be writing it."
-        )
+        ) from exc
     try:
         tmp_path = session_dir / "run_map.json.tmp"
         final_path = session_dir / "run_map.json"

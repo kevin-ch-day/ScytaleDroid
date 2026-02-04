@@ -39,9 +39,6 @@ def print_permissions_block(
         target_sdk_val = int(target_sdk) if target_sdk not in (None, "-") else None
     except Exception:
         target_sdk_val = None
-    allow_backup_flag = None if sdk.get("allow_backup") is None else bool(sdk.get("allow_backup"))
-    legacy_ext_flag = None if sdk.get("legacy_external_storage") is None else bool(sdk.get("legacy_external_storage"))
-
     # Deduplicate declared names (ignore sdk-23 suffix for risk lookup)
     unique_declared: list[tuple[str, str]] = []
     seen: set[tuple[str, str]] = set()
@@ -208,22 +205,6 @@ def _footprint_bar(group_strength: Mapping[str, int]) -> str:
 
 def _footprint_multiline(groups: Mapping[str, int]) -> list[str]:
     """Return a multi-line footprint with short descriptors per capability."""
-    descriptors = {
-        "LOC": "location (precise/bg)",
-        "CAM": "camera",
-        "MIC": "microphone",
-        "CNT": "contacts/accounts",
-        "CAL": "calendar",
-        "PHN": "calls/phone state",
-        "SMS": "sms",
-        "STR": "media/storage",
-        "SENS": "sensors/health",
-        "ACT": "activity recognition",
-        "BT": "nearby/bluetooth",
-        "OVR": "overlay",
-        "NOT": "notifications",
-        "ADS": "ads/attribution",
-    }
     label_map = {
         "LOC": "Location",
         "CAM": "Camera",
@@ -252,7 +233,6 @@ def _footprint_multiline(groups: Mapping[str, int]) -> list[str]:
         else:
             bar = "░" * bar_width
         name = label_map.get(key, key)
-        desc = descriptors.get(key, key)
         rows.append([name, bar])
     # Print as a tiny table for alignment
     print("Footprint:")

@@ -170,7 +170,9 @@ def _pearson(values_a: Sequence[float], values_b: Sequence[float]) -> float:
         return 0.0
     mean_a = mean(values_a)
     mean_b = mean(values_b)
-    numerator = sum((a - mean_a) * (b - mean_b) for a, b in zip(values_a, values_b))
+    numerator = sum(
+        (a - mean_a) * (b - mean_b) for a, b in zip(values_a, values_b, strict=False)
+    )
     denom_a = math.sqrt(sum((a - mean_a) ** 2 for a in values_a))
     denom_b = math.sqrt(sum((b - mean_b) ** 2 for b in values_b))
     if denom_a == 0 or denom_b == 0:
@@ -429,7 +431,6 @@ class PermissionAuditAccumulator:
             apps_dir.mkdir(parents=True, exist_ok=True)
 
         if write_files:
-            app_failures = 0
             for app in self.apps:
                 record = {
                     "app": {
@@ -605,7 +606,7 @@ class PermissionAuditAccumulator:
             stddev = math.sqrt(variance)
             if stddev == 0:
                 continue
-            for app, score in zip(members, scores):
+            for app, score in zip(members, scores, strict=False):
                 z = (score - avg) / stddev
                 if z >= 1.5:
                     outliers.append(
@@ -815,7 +816,6 @@ class PermissionAuditAccumulator:
                     pass
 
                 evidence_base = Path("evidence") / "static_runs"
-                signal_write_failed = False
                 app_failures = 0
                 run_id_cache: dict[str, int | None] = {}
                 run_id_map: dict[str, int] = dict(static_run_id_map)

@@ -80,14 +80,12 @@ def ensure_inventory_survey(
     timestamp: datetime | None = None
     packages_changed = False
     scope_changed = False
-    state_changed = False
     fingerprint_changed = False
 
     if isinstance(metadata, dict):
         timestamp = metadata.get("timestamp") if isinstance(metadata.get("timestamp"), datetime) else None
         packages_changed = bool(metadata.get("packages_changed"))
         scope_changed = bool(metadata.get("scope_changed"))
-        state_changed = bool(metadata.get("state_changed"))
         fingerprint_changed = bool(metadata.get("build_fingerprint_changed"))
     else:
         # InventoryStatus dataclass case
