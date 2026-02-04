@@ -67,7 +67,20 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
                 )
             )
             params = replace(params, session_stamp=normalized)
+        try:
+            params = replace(params, session_stamp=_resolve_unique_session_stamp(params.session_stamp))
+        except RuntimeError as exc:
+            print(status_messages.status(str(exc), level="error"))
+            return None
+    else:
+        try:
+            params = replace(params, session_stamp=_resolve_unique_session_stamp(session_stamp))
+        except RuntimeError as exc:
+            print(status_messages.status(str(exc), level="error"))
+            return None
     output_prefs.set_verbose(bool(params.verbose_output))
+    if params.session_stamp:
+        os.environ["SCYTALEDROID_STATIC_SESSION"] = params.session_stamp
 
     persistence_ready, persistence_note = _check_static_persistence_readiness(params)
     os.environ["SCYTALEDROID_PERSISTENCE_READY"] = "1" if persistence_ready else "0"
@@ -431,6 +444,17 @@ def _check_static_persistence_readiness(params: RunParameters) -> tuple[bool, st
     return True, "OK"
 
 
+def _resolve_unique_session_stamp(session_stamp: str) -> str:
+    base_stamp = session_stamp
+    session_dir = Path(app_config.DATA_DIR) / "sessions"
+    final_path = session_dir / base_stamp / "run_map.json"
+    if not final_path.exists():
+        return base_stamp
+    raise RuntimeError(
+        f"Session label already used: {base_stamp}. Choose a new label to avoid run_map collisions."
+    )
+
+
 def _build_session_run_map(outcome: RunOutcome | None, session_stamp: str | None) -> dict | None:
     if outcome is None or not session_stamp:
         return None
@@ -637,7 +661,7 @@ def _write_run_map_atomic(session_stamp: str, run_map: dict) -> None:
     session_dir = Path(app_config.DATA_DIR) / "sessions" / session_stamp
     session_dir.mkdir(parents=True, exist_ok=True)
     final_path = session_dir / "run_map.json"
-    allow_overwrite = os.getenv("SCYTALEDROID_RUN_MAP_OVERWRITE", "1").strip().lower() in {
+    allow_overwrite = os.getenv("SCYTALEDROID_RUN_MAP_OVERWRITE", "0").strip().lower() in {
         "1",
         "true",
         "yes",

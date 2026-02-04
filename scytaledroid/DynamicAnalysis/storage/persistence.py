@@ -386,6 +386,10 @@ def _evaluate_grade(payload: Mapping[str, Any], pcap_meta: Mapping[str, Any]) ->
                 reasons.append({"code": "registry_artifact_unhashed", "artifact_type": row["artifact_type"]})
             if row.get("origin") == "device" and row.get("pull_status") != "pulled":
                 reasons.append({"code": "artifact_not_pulled", "artifact_type": row["artifact_type"]})
+            if row.get("origin") in {"unknown", None}:
+                reasons.append({"code": "artifact_origin_unknown", "artifact_type": row["artifact_type"]})
+            if row.get("pull_status") in {"unknown", None}:
+                reasons.append({"code": "artifact_pull_status_unknown", "artifact_type": row["artifact_type"]})
 
     if payload.get("pcap_required"):
         if not pcap_meta.get("pcap_relpath"):

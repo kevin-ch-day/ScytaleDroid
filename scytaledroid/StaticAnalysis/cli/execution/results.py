@@ -128,6 +128,26 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             width=90,
         )
     )
+    if not params.dry_run:
+        persistence_ready = os.getenv("SCYTALEDROID_PERSISTENCE_READY", "1").strip() != "0"
+        if not persistence_ready:
+            print(
+                status_messages.status(
+                    "Run grade: EXPERIMENTAL (persistence gate failed).",
+                    level="warn",
+                )
+            )
+        missing_ids = [res.package_name for res in outcome.results if not res.static_run_id]
+        if missing_ids:
+            preview = ", ".join(missing_ids[:5])
+            if len(missing_ids) > 5:
+                preview += f", +{len(missing_ids) - 5} more"
+            print(
+                status_messages.status(
+                    f"Run grade: EXPERIMENTAL (static_run_id missing for: {preview}).",
+                    level="warn",
+                )
+            )
     highlight_tokens = _format_highlight_tokens(
         highlight_stats,
         totals,

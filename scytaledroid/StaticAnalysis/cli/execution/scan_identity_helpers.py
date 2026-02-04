@@ -42,7 +42,11 @@ def _artifact_sha256_with_reason(artifact) -> tuple[str | None, str | None]:
             return sha.strip(), None
         return None, f"{_artifact_identity_label(artifact)}; missing sha256"
     except Exception as exc:
-        return None, f"{_artifact_identity_label(artifact)}; hash_error={exc.__class__.__name__}"
+        reason = f"{exc.__class__.__name__}"
+        detail = str(exc).strip()
+        if detail:
+            reason = f"{reason}:{detail}"
+        return None, f"{_artifact_identity_label(artifact)}; hash_error={reason}"
 
 
 def _split_name_for_artifact_with_reason(artifact) -> tuple[str | None, str | None]:
@@ -59,7 +63,7 @@ def _split_name_for_artifact_with_reason(artifact) -> tuple[str | None, str | No
         return stem.strip().lower(), None
     keys = sorted(str(key) for key in meta.keys()) if isinstance(meta, Mapping) else []
     keys_text = ",".join(keys[:6])
-    reason = f"{_artifact_identity_label(artifact)}; meta_keys=[{keys_text}]"
+    reason = f"{_artifact_identity_label(artifact)}; missing_split_name; meta_keys=[{keys_text}]"
     return None, reason
 
 

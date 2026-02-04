@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import json
 import os
 from collections import Counter
@@ -1493,6 +1494,12 @@ def _write_static_run_manifest(static_run_id: int) -> None:
         "tool_semver": tool_semver or app_config.APP_VERSION,
         "tool_git_commit": tool_git_commit or get_git_commit(),
         "schema_version": schema_version or (db_diagnostics.get_schema_version() or "<unknown>"),
+        "run_grade": "EXPERIMENTAL" if os.getenv("SCYTALEDROID_PERSISTENCE_READY") == "0" else "PAPER_GRADE",
+        "grade_reasons": (
+            ["persistence_gate_failed"]
+            if os.getenv("SCYTALEDROID_PERSISTENCE_READY") == "0"
+            else []
+        ),
         "artifacts": [],
     }
 

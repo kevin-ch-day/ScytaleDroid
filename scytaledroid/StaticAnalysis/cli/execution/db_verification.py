@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections import defaultdict
 from collections.abc import Mapping, MutableMapping, Sequence
 
@@ -10,7 +11,7 @@ from scytaledroid.Database.db_core.db_config import DB_CONFIG
 from scytaledroid.Database.db_scripts.static_run_audit import collect_static_run_counts
 from scytaledroid.Utils.DisplayUtils import status_messages, table_utils
 
-from ..reports.masvs_summary_report import fetch_db_masvs_summary
+from ..reports.masvs_summary_report import fetch_db_masvs_summary, fetch_db_masvs_summary_static
 from .results_formatters import _normalize_target_sdk
 from .static_run_map import extract_static_run_ids, load_run_map
 
@@ -132,13 +133,31 @@ def _render_db_severity_table(session_stamp: str) -> bool:
 
 def _render_db_masvs_summary() -> None:
     try:
-        summary = fetch_db_masvs_summary()
+        if os.getenv("SCYTALEDROID_PERSISTENCE_READY") == "0":
+            print()
+            print(
+                status_messages.status(
+                    "DB MASVS Summary unavailable (persistence gate failed).",
+                    level="warn",
+                )
+            )
+            return
+        summary = None
+        session_stamp = os.getenv("SCYTALEDROID_STATIC_SESSION")
+        if session_stamp:
+            run_map = load_run_map(session_stamp)
+            static_ids = extract_static_run_ids(run_map)
+            if static_ids:
+                summary = fetch_db_masvs_summary_static(static_ids[-1])
+        if summary is None:
+            summary = fetch_db_masvs_summary()
         if not summary:
             return
         run_id, rows = summary
         print()
         print(f"DB MASVS Summary (run_id={run_id})")
         print("Area       High  Med   Low   Info  Status  Worst CVSS                Avg  Bands")
+        no_data = True
         for area in ("NETWORK", "PLATFORM", "PRIVACY", "STORAGE"):
             entry = next((row for row in rows if row["area"] == area), None)
             if entry is None:
@@ -156,6 +175,8 @@ def _render_db_masvs_summary() -> None:
                     status = "WARN"
                 else:
                     status = "PASS"
+                if status != "NO DATA":
+                    no_data = False
                 cvss = entry.get("cvss") or {}
                 worst_score = cvss.get("worst_score")
                 worst_band = cvss.get("worst_severity") or ""
@@ -178,6 +199,8 @@ def _render_db_masvs_summary() -> None:
                     f"{area.title():<9}  {high:<5} {medium:<5} {entry['low']:<5} {entry['info']:<6}"
                     f"{status:<6} {worst_display:<24} {avg_display:<4} {band_display}"
                 )
+        if no_data:
+            print(status_messages.status("DB MASVS Summary has no data for this run.", level="warn"))
     except Exception:
         pass
 
