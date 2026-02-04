@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core import db_config
 from scytaledroid.Database.db_core import db_queries as core_q
+from scytaledroid.Database.db_core.session import database_session
 from scytaledroid.Database.db_utils import diagnostics
 from scytaledroid.Database.tools.bootstrap import bootstrap_database
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
@@ -95,6 +96,7 @@ def apply_canonical_schema_bootstrap(*, prompt_user: bool = True) -> bool:
     started_at = datetime.now(UTC)
     success = False
     error_text = None
+    snapshot_before = _schema_snapshot()
     try:
         if prompt_user and not prompt_utils.prompt_yes_no(
             "Apply canonical schema bootstrap now? (CREATE/ALTER missing tables/columns)",
@@ -103,6 +105,7 @@ def apply_canonical_schema_bootstrap(*, prompt_user: bool = True) -> bool:
             return False
         bootstrap_database()
         success = True
+        _render_schema_bootstrap_summary(schema_before, snapshot_before)
         return True
     except Exception as exc:
         error_text = str(exc)
@@ -119,6 +122,114 @@ def apply_canonical_schema_bootstrap(*, prompt_user: bool = True) -> bool:
             success=success,
             error_text=error_text,
         )
+
+
+def _schema_snapshot() -> dict[str, object]:
+    tables = diagnostics.list_tables()
+    columns = {table: set(diagnostics.get_table_columns(table) or []) for table in tables}
+    indexes = {table: _fetch_index_signatures(table) for table in tables}
+    return {"tables": set(tables), "columns": columns, "indexes": indexes}
+
+
+def _fetch_index_signatures(table: str) -> set[str]:
+    signatures: set[str] = set()
+    try:
+        with database_session(reuse_connection=False) as engine:
+            rows = engine.fetch_all(f"SHOW INDEX FROM `{table}`;")
+    except Exception:
+        return signatures
+    if not rows:
+        return signatures
+    index_map: dict[str, dict[str, object]] = {}
+    for row in rows:
+        if not row or len(row) < 5:
+            continue
+        name = str(row[2])
+        seq = int(row[3])
+        column = str(row[4])
+        unique = bool(int(row[1]) == 0)
+        entry = index_map.setdefault(name, {"unique": unique, "columns": {}})
+        entry["unique"] = entry["unique"] or unique
+        entry["columns"][seq] = column
+    for name, entry in index_map.items():
+        columns = [entry["columns"][idx] for idx in sorted(entry["columns"])]
+        unique = "unique" if entry["unique"] else "non_unique"
+        signatures.add(f"{name}|{unique}|{','.join(columns)}")
+    return signatures
+
+
+def _render_schema_bootstrap_summary(
+    schema_before: str,
+    snapshot_before: dict[str, object],
+) -> None:
+    schema_after = diagnostics.get_schema_version() or schema_before
+    snapshot_after = _schema_snapshot()
+
+    before_tables = snapshot_before["tables"]
+    after_tables = snapshot_after["tables"]
+    created_tables = sorted(after_tables - before_tables)
+    removed_tables = sorted(before_tables - after_tables)
+
+    before_columns: dict[str, set[str]] = snapshot_before["columns"]
+    after_columns: dict[str, set[str]] = snapshot_after["columns"]
+    column_additions: dict[str, list[str]] = {}
+    column_removals: dict[str, list[str]] = {}
+    for table in sorted(before_tables & after_tables):
+        added = sorted(after_columns.get(table, set()) - before_columns.get(table, set()))
+        removed = sorted(before_columns.get(table, set()) - after_columns.get(table, set()))
+        if added:
+            column_additions[table] = added
+        if removed:
+            column_removals[table] = removed
+
+    before_indexes: dict[str, set[str]] = snapshot_before["indexes"]
+    after_indexes: dict[str, set[str]] = snapshot_after["indexes"]
+    index_additions: dict[str, list[str]] = {}
+    index_removals: dict[str, list[str]] = {}
+    for table in sorted(before_tables & after_tables):
+        added = sorted(after_indexes.get(table, set()) - before_indexes.get(table, set()))
+        removed = sorted(before_indexes.get(table, set()) - after_indexes.get(table, set()))
+        if added:
+            index_additions[table] = added
+        if removed:
+            index_removals[table] = removed
+
+    print()
+    print("Schema bootstrap summary")
+    print("------------------------")
+    print(f"Schema version: {schema_before} -> {schema_after}")
+    print(f"Tables created: {len(created_tables)}")
+    if created_tables:
+        for table in created_tables:
+            print(f"  + {table}")
+    if removed_tables:
+        print(f"Tables removed: {len(removed_tables)}")
+        for table in removed_tables:
+            print(f"  - {table}")
+
+    if column_additions:
+        print("Columns added:")
+        for table, cols in column_additions.items():
+            print(f"  {table}: {', '.join(cols)}")
+    if column_removals:
+        print("Columns removed:")
+        for table, cols in column_removals.items():
+            print(f"  {table}: {', '.join(cols)}")
+
+    if index_additions:
+        print("Indexes added:")
+        for table, idxs in index_additions.items():
+            for entry in idxs:
+                print(f"  {table}: {entry}")
+    if index_removals:
+        print("Indexes removed:")
+        for table, idxs in index_removals.items():
+            for entry in idxs:
+                print(f"  {table}: {entry}")
+
+    if not created_tables and not removed_tables and not column_additions and not column_removals and not index_additions and not index_removals:
+        print("No schema changes detected.")
+    print()
 
 
 def maybe_clear_screen() -> None:

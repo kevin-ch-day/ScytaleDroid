@@ -106,12 +106,13 @@ def prompt_text(
     error_message: str = "Please provide a value.",
     error_hint: str | None = None,
     hint: str | None = None,
+    show_arrow: bool = True,
 ) -> str:
     """Prompt for free-form text, optionally validating the response."""
 
     palette = colors.get_palette()
     arrow_symbol = ">" if use_ascii_ui() else "›"
-    arrow = colors.apply(arrow_symbol, palette.option_key)
+    arrow = colors.apply(arrow_symbol, palette.option_key) if show_arrow else ""
     label = colors.apply(prompt, palette.prompt)
     default_hint = (
         f" {colors.apply(f'[{default}]', palette.muted)}" if default is not None else ""
@@ -119,7 +120,8 @@ def prompt_text(
     if hint:
         hint_text = colors.apply(hint, palette.hint)
         print(hint_text)
-    rendered_prompt = f"{arrow} {label}{default_hint} "
+    spacer = " " if arrow else ""
+    rendered_prompt = f"{arrow}{spacer}{label}{default_hint} "
 
     while True:
         response = input(rendered_prompt).strip()

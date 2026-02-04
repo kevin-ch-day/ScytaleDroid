@@ -329,7 +329,7 @@ def fetch_db_masvs_summary_static(static_run_id: int) -> tuple[int, list[dict[st
                    SUM(CASE WHEN severity='Medium' THEN 1 ELSE 0 END) AS medium,
                    SUM(CASE WHEN severity='Low' THEN 1 ELSE 0 END) AS low,
                    SUM(CASE WHEN severity='Info' THEN 1 ELSE 0 END) AS info
-            FROM static_findings
+            FROM findings
             WHERE static_run_id = %s
             GROUP BY masvs
             """,
@@ -344,7 +344,7 @@ def fetch_db_masvs_summary_static(static_run_id: int) -> tuple[int, list[dict[st
                    cvss,
                    COALESCE(NULLIF(kind, ''), 'unknown') AS identifier,
                    severity
-            FROM static_findings
+            FROM findings
             WHERE static_run_id = %s AND masvs IS NOT NULL
             """,
             (static_run_id,),
@@ -358,7 +358,7 @@ def fetch_db_masvs_summary_static(static_run_id: int) -> tuple[int, list[dict[st
                    severity,
                    COALESCE(NULLIF(kind, ''), 'unknown') AS identifier,
                    COUNT(*) AS occurrences
-            FROM static_findings
+            FROM findings
             WHERE static_run_id = %s
             GROUP BY masvs, severity, identifier
             ORDER BY
@@ -369,6 +369,55 @@ def fetch_db_masvs_summary_static(static_run_id: int) -> tuple[int, list[dict[st
             fetch="all",
             dictionary=True,
         ) or []
+
+        if not rows and not cvss_rows and not top_rows:
+            rows = core_q.run_sql(
+                """
+                SELECT masvs,
+                       SUM(CASE WHEN severity='High' THEN 1 ELSE 0 END) AS high,
+                       SUM(CASE WHEN severity='Medium' THEN 1 ELSE 0 END) AS medium,
+                       SUM(CASE WHEN severity='Low' THEN 1 ELSE 0 END) AS low,
+                       SUM(CASE WHEN severity='Info' THEN 1 ELSE 0 END) AS info
+                FROM static_findings
+                WHERE static_run_id = %s
+                GROUP BY masvs
+                """,
+                (static_run_id,),
+                fetch="all",
+                dictionary=True,
+            ) or []
+
+            cvss_rows = core_q.run_sql(
+                """
+                SELECT masvs,
+                       cvss,
+                       COALESCE(NULLIF(kind, ''), 'unknown') AS identifier,
+                       severity
+                FROM static_findings
+                WHERE static_run_id = %s AND masvs IS NOT NULL
+                """,
+                (static_run_id,),
+                fetch="all",
+                dictionary=True,
+            ) or []
+
+            top_rows = core_q.run_sql(
+                """
+                SELECT masvs,
+                       severity,
+                       COALESCE(NULLIF(kind, ''), 'unknown') AS identifier,
+                       COUNT(*) AS occurrences
+                FROM static_findings
+                WHERE static_run_id = %s
+                GROUP BY masvs, severity, identifier
+                ORDER BY
+                    CASE severity WHEN 'High' THEN 1 WHEN 'Medium' THEN 2 WHEN 'Low' THEN 3 ELSE 4 END,
+                    occurrences DESC
+                """,
+                (static_run_id,),
+                fetch="all",
+                dictionary=True,
+            ) or []
     except Exception:
         return None
 

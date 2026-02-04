@@ -373,6 +373,8 @@ class DynamicAnalysisEngine:
             sha256=digest,
             size_bytes=path.stat().st_size,
             produced_by="dynamic_engine",
+            origin="host",
+            pull_status="n/a",
         )
 
     def _update_manifest_outputs(

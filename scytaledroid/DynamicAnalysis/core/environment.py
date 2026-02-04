@@ -81,6 +81,8 @@ class EnvironmentManager:
             sha256=digest,
             size_bytes=path.stat().st_size,
             produced_by="environment_manager",
+            origin="host",
+            pull_status="n/a",
         )
 
 

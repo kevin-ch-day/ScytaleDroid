@@ -65,44 +65,61 @@ def render_reset_outcome(outcome: object) -> None:
     actions.render_reset_outcome(outcome)
 
 
-def collect_view_options(command: Command) -> tuple[bool, bool, bool]:
-    prompt = "View options: [D]etails  [S]plit breakdown  [A]rtifact detail  [Enter] continue"
-    response = prompt_utils.prompt_text(prompt, required=False).strip().lower()
-    want_details = "d" in response
-    want_splits = "s" in response
-    want_artifacts = "a" in response
-    if not want_details:
-        return want_details, want_splits, want_artifacts
-    print()
-    menu_utils.print_section("Details")
-    details_map = {
-        "1": [
-            "Runs all detectors",
-            "Resets caches when prompted",
-            "Persists results and verification digest",
-        ],
-        "2": [
-            "Runs the lightweight detector set",
-            "Persists results and verification digest",
-        ],
-        "3": [
-            "Uses the most recent static run package",
-            "Falls back to latest harvested APK if needed",
-        ],
-        "4": [
-            "Diffs latest two stored reports for the package",
-            "Same package only (Phase-C)",
-        ],
-        "5": [
-            "Runs full detector set without persisting results",
-            "Verbose output surfaces warnings/errors",
-            "Artifact detail requires [A]rtifact detail toggle",
-            "Intended for debugging pipeline issues",
-        ],
-    }
-    for line in details_map.get(command.id, ("No additional details.",)):
-        print(f"• {line}")
-    return want_details, want_splits, want_artifacts
+def collect_view_options(command: Command) -> tuple[bool, bool, bool, bool]:
+    print("View options")
+    print("------------------------")
+    print("[1] Details")
+    print("[2] Split breakdown")
+    print("[3] Artifact detail")
+    print("[0] Return to main menu")
+    print("[Enter] continue")
+    while True:
+        response = prompt_utils.prompt_text("Select option", required=False, show_arrow=False).strip().lower()
+        if response == "":
+            return False, False, False, False
+        if response == "0":
+            return False, False, False, True
+        if response == "1":
+            want_details, want_splits, want_artifacts = True, False, False
+            break
+        if response == "2":
+            want_details, want_splits, want_artifacts = False, True, False
+            break
+        if response == "3":
+            want_details, want_splits, want_artifacts = False, False, True
+            break
+        print(status_messages.status("Invalid selection.", level="warn"))
+    if want_details:
+        print()
+        menu_utils.print_section("Details")
+        details_map = {
+            "1": [
+                "Runs all detectors",
+                "Resets caches when prompted",
+                "Persists results and verification digest",
+            ],
+            "2": [
+                "Runs the lightweight detector set",
+                "Persists results and verification digest",
+            ],
+            "3": [
+                "Uses the most recent static run package",
+                "Falls back to latest harvested APK if needed",
+            ],
+            "4": [
+                "Diffs latest two stored reports for the package",
+                "Same package only (Phase-C)",
+            ],
+            "5": [
+                "Runs full detector set without persisting results",
+                "Verbose output surfaces warnings/errors",
+                "Artifact detail requires [A]rtifact detail toggle",
+                "Intended for debugging pipeline issues",
+            ],
+        }
+        for line in details_map.get(command.id, ("No additional details.",)):
+            print(f"• {line}")
+    return want_details, want_splits, want_artifacts, False
 
 
 def build_dev_selection(groups, shortcut_id):

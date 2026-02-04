@@ -124,6 +124,7 @@ def static_schema_gate() -> tuple[bool, str, str]:
         "static_analysis_runs",
         "static_session_run_links",
         "static_session_rollups",
+        "findings",
         "static_permission_matrix",
         "static_permission_risk",
         "static_findings",

@@ -89,6 +89,8 @@ class NetworkCaptureObserver(Observer):
                     sha256=digest,
                     size_bytes=error_path.stat().st_size,
                     produced_by=self.observer_id,
+                    origin="host",
+                    pull_status="n/a",
                 )
             )
             return ObserverResult(
@@ -120,6 +122,8 @@ class NetworkCaptureObserver(Observer):
                     sha256=summary_digest,
                     size_bytes=flow_summary_path.stat().st_size,
                     produced_by=self.observer_id,
+                    origin="host",
+                    pull_status="n/a",
                 )
             )
         return ObserverResult(

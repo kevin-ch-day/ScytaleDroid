@@ -90,10 +90,12 @@ def prompt_session_label(params: RunParameters) -> RunParameters:
     """Ask the user to override the generated session label."""
 
     current = params.session_stamp or ""
+    print()
     label = prompt_utils.prompt_text(
         "Session label (press Enter to keep auto-generated)",
         default=current,
         required=False,
+        show_arrow=False,
     ).strip()
     if not label or label == current:
         return params

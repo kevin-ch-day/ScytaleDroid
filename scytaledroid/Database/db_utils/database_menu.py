@@ -48,18 +48,18 @@ def database_menu() -> None:
         MenuOption("1", "Seed research dataset profile"),
         MenuOption("2", "Apply canonical schema bootstrap (static + registry + ML)"),
         MenuOption("3", "Apply Tier-1 schema migrations"),
-        MenuOption("4", "Check connection & show config"),
-        MenuOption("5", "Schema browser (tables, indexes)"),
-        MenuOption("6", "Health summary (one screen)"),
-        MenuOption("7", "App identity audit (duplicates, missing version)"),
-        MenuOption("8", "Evidence integrity check (missing/sha mismatch)"),
-        MenuOption("9", "Curated queries (read-only)"),
-        MenuOption("10", "Cleanup orphan snapshots (repair)"),
-        MenuOption("11", "Recover stale RUNNING runs (finalize)"),
-        MenuOption("13", "Delete orphan permission snapshots (repair)"),
-        MenuOption("14", "Backfill PCAP metadata (repair)"),
-        MenuOption("15", "Recompute network signal quality (repair)"),
-        MenuOption("12", "Reset static analysis data (DESTRUCTIVE)"),
+        MenuOption("4", "Connection & config"),
+        MenuOption("5", "Schema browser"),
+        MenuOption("6", "Health summary"),
+        MenuOption("7", "App identity audit"),
+        MenuOption("8", "Evidence integrity check"),
+        MenuOption("9", "Curated queries"),
+        MenuOption("10", "Cleanup orphan snapshots"),
+        MenuOption("11", "Recover stale RUNNING runs"),
+        MenuOption("13", "Delete orphan permission snapshots"),
+        MenuOption("14", "Backfill PCAP metadata"),
+        MenuOption("15", "Recompute network signal quality"),
+        MenuOption("12", "Reset"),
     ]
 
     while True:
@@ -92,37 +92,40 @@ def database_menu() -> None:
                 items=research_options,
                 exit_label=None,
                 show_exit=False,
-                padding=True,
+                padding=False,
                 show_descriptions=False,
             )
         )
+        print()
         menu_utils.print_section("Read-only Diagnostics")
         menu_utils.render_menu(
             MenuSpec(
                 items=read_only_options,
                 exit_label=None,
                 show_exit=False,
-                padding=True,
+                padding=False,
                 show_descriptions=False,
             )
         )
+        print()
         menu_utils.print_section("Maintenance / Repairs")
         menu_utils.render_menu(
             MenuSpec(
                 items=maintenance_options,
                 exit_label=None,
                 show_exit=False,
-                padding=True,
+                padding=False,
                 show_descriptions=False,
             )
         )
+        print()
         menu_utils.print_section("Danger Zone (Destructive)")
         menu_utils.render_menu(
             MenuSpec(
                 items=danger_options,
                 exit_label="Back",
                 show_exit=True,
-                padding=True,
+                padding=False,
                 show_descriptions=False,
             )
         )

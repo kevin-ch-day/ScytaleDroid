@@ -201,6 +201,8 @@ class DynamicRunSummarizer:
             sha256=sha256,
             size_bytes=path.stat().st_size,
             produced_by=produced_by,
+            origin="host",
+            pull_status="n/a",
         )
 
     def _load_destinations(self, manifest: RunManifest) -> list[str]:

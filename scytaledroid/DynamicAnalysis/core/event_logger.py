@@ -45,6 +45,8 @@ class RunEventLogger:
             sha256=digest,
             size_bytes=self.path.stat().st_size,
             produced_by="event_logger",
+            origin="host",
+            pull_status="n/a",
         )
 
     def _hash_file(self, path: Path) -> str:

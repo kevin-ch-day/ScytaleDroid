@@ -14,7 +14,7 @@ from scytaledroid.Config import app_config
 from scytaledroid.Database.db_utils import schema_gate
 from scytaledroid.StaticAnalysis.persistence import ingest as canonical_ingest
 from scytaledroid.StaticAnalysis.session import make_session_stamp, normalize_session_stamp
-from scytaledroid.Utils.DisplayUtils import status_messages
+from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
 from scytaledroid.Utils.LoggingUtils import logging_engine
 from scytaledroid.Utils.LoggingUtils import logging_events as log_events
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
@@ -450,9 +450,20 @@ def _resolve_unique_session_stamp(session_stamp: str) -> str:
     final_path = session_dir / base_stamp / "run_map.json"
     if not final_path.exists():
         return base_stamp
-    raise RuntimeError(
-        f"Session label already used: {base_stamp}. Choose a new label to avoid run_map collisions."
+    print(f"Session label already used: {base_stamp}.")
+    should_delete = prompt_utils.prompt_yes_no(
+        "Delete existing session metadata and continue?",
+        default=False,
     )
+    if not should_delete:
+        raise RuntimeError(
+            f"Session label already used: {base_stamp}. Choose a new label to avoid run_map collisions."
+        )
+    try:
+        shutil.rmtree(session_dir / base_stamp)
+    except Exception as exc:
+        raise RuntimeError(f"Failed to delete existing session metadata: {exc}") from exc
+    return base_stamp
 
 
 def _build_session_run_map(outcome: RunOutcome | None, session_stamp: str | None) -> dict | None:

@@ -123,6 +123,8 @@ class TargetManager:
             sha256=digest,
             size_bytes=path.stat().st_size,
             produced_by="target_manager",
+            origin="host",
+            pull_status="n/a",
         )
 
     def _extract_value(self, text: str, pattern: str) -> str | None:

@@ -142,6 +142,8 @@ class PcapdroidCaptureObserver(Observer):
                     sha256=digest,
                     size_bytes=meta_path.stat().st_size,
                     produced_by=self.observer_id,
+                    origin="host",
+                    pull_status="n/a",
                 )
             )
 
@@ -300,6 +302,8 @@ class PcapdroidCaptureObserver(Observer):
                     sha256=digest,
                     size_bytes=error_path.stat().st_size,
                     produced_by=self.observer_id,
+                    origin="host",
+                    pull_status="n/a",
                 )
             )
         elif error:
@@ -313,6 +317,8 @@ class PcapdroidCaptureObserver(Observer):
                     sha256=digest,
                     size_bytes=error_path.stat().st_size,
                     produced_by=self.observer_id,
+                    origin="host",
+                    pull_status="n/a",
                 )
             )
 

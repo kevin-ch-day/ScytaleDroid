@@ -223,6 +223,8 @@ def _artifact_entry(path: Path, *, artifact_type: str) -> Mapping[str, Any]:
         "sha256": digest,
         "size_bytes": path.stat().st_size,
         "created_at_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "origin": "host",
+        "pull_status": "n/a",
     }
 
 

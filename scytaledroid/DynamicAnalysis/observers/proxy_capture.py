@@ -112,6 +112,8 @@ class ProxyCaptureObserver(Observer):
                     sha256=digest,
                     size_bytes=meta_path.stat().st_size,
                     produced_by=self.observer_id,
+                    origin="host",
+                    pull_status="n/a",
                 )
             )
 
@@ -124,6 +126,8 @@ class ProxyCaptureObserver(Observer):
                     sha256=digest,
                     size_bytes=flow_log_path.stat().st_size,
                     produced_by=self.observer_id,
+                    origin="host",
+                    pull_status="n/a",
                 )
             )
             summary_path = _write_flow_summary(flow_log_path, flow_log_path.parent)
@@ -136,6 +140,8 @@ class ProxyCaptureObserver(Observer):
                         sha256=digest,
                         size_bytes=summary_path.stat().st_size,
                         produced_by=self.observer_id,
+                        origin="host",
+                        pull_status="n/a",
                     )
                 )
 
@@ -150,6 +156,8 @@ class ProxyCaptureObserver(Observer):
                     sha256=digest,
                     size_bytes=capture_path.stat().st_size,
                     produced_by=self.observer_id,
+                    origin="host",
+                    pull_status="n/a",
                 )
             )
         else:
@@ -165,6 +173,8 @@ class ProxyCaptureObserver(Observer):
                     sha256=digest,
                     size_bytes=error_path.stat().st_size,
                     produced_by=self.observer_id,
+                    origin="host",
+                    pull_status="n/a",
                 )
             )
 

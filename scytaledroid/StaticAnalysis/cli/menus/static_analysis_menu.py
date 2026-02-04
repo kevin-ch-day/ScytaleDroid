@@ -174,7 +174,9 @@ def static_analysis_menu() -> None:
                 print(status_messages.status("This workflow requires choosing a single app.", level="warn"))
                 continue
 
-        _, show_splits, show_artifacts = collect_view_options(command)
+        _show_details, show_splits, show_artifacts, return_to_menu = collect_view_options(command)
+        if return_to_menu:
+            continue
 
         params = RunParameters(
             profile=command.profile,

@@ -176,6 +176,16 @@ def _persist_static_sections_wrapper(
     )
 
 
+def _json_safe(value: object) -> object:
+    if isinstance(value, datetime):
+        return value.isoformat().replace("+00:00", "Z")
+    if isinstance(value, Mapping):
+        return {key: _json_safe(val) for key, val in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return [_json_safe(item) for item in value]
+    return value
+
+
 def _persist_correlation_results(rows: Sequence[Mapping[str, object]]) -> bool:
     if not rows:
         return True
@@ -1219,6 +1229,13 @@ def persist_run_summary(
     control_summary = summarise_controls(control_entries)
     outcome.runtime_findings = int(total_findings)
     outcome.persisted_findings = len(finding_rows)
+    missing_masvs = sum(1 for row in finding_rows if not row.get("masvs"))
+    if missing_masvs:
+        log.warning(
+            f"{missing_masvs} findings missing MASVS tags for {run_package}; "
+            "DB MASVS Summary may be incomplete.",
+            category="static_analysis",
+        )
 
     if severity_counter:
         severity_counts = canonical_severity_counts(severity_counter)
@@ -1514,6 +1531,8 @@ def _write_static_run_manifest(static_run_id: int) -> None:
             "size_bytes": None,
             "created_at_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
             "status_reason": "self_reference_unhashed",
+            "origin": "host",
+            "pull_status": "n/a",
         }
     )
     dep_path = run_root / "dep.json"
@@ -1525,6 +1544,8 @@ def _write_static_run_manifest(static_run_id: int) -> None:
                 "sha256": hashlib.sha256(dep_path.read_bytes()).hexdigest(),
                 "size_bytes": dep_path.stat().st_size,
                 "created_at_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+                "origin": "host",
+                "pull_status": "n/a",
             }
         )
     try:
@@ -1568,7 +1589,7 @@ def _write_static_run_manifest(static_run_id: int) -> None:
             }
         )
         seen_keys.add(key)
-    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True))
+    manifest_path.write_text(json.dumps(_json_safe(manifest), indent=2, sort_keys=True))
     record_artifacts(
         run_id=str(static_run_id),
         run_type="static",

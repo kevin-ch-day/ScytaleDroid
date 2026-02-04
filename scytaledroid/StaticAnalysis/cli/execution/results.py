@@ -435,6 +435,8 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                             "sha256": digest,
                             "size_bytes": path.stat().st_size,
                             "created_at_utc": now,
+                            "origin": "host",
+                            "pull_status": "n/a",
                         }
                     )
                 except Exception:
@@ -451,6 +453,8 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                                 "sha256": digest,
                                 "size_bytes": report_path.stat().st_size,
                                 "created_at_utc": now,
+                                "origin": "host",
+                                "pull_status": "n/a",
                             }
                         )
                     except Exception:

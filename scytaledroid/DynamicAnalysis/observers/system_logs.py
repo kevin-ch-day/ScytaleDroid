@@ -62,6 +62,8 @@ class SystemLogObserver(Observer):
             sha256=digest,
             size_bytes=path.stat().st_size,
             produced_by=self.observer_id,
+            origin="host",
+            pull_status="n/a",
         )
         return ObserverResult(
             observer_id=self.observer_id,
