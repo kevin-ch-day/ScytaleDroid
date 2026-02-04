@@ -11,7 +11,10 @@ from typing import Iterable
 import os
 
 from scytaledroid.Utils.LoggingUtils import logging_engine
+from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
+from scytaledroid.Config import app_config
 from scytaledroid.Utils.DisplayUtils import status_messages
+from scytaledroid.Utils.version_utils import get_git_commit
 
 from scytaledroid.DeviceAnalysis import adb_shell
 from scytaledroid.DynamicAnalysis.analysis.summarizer import DynamicRunSummarizer
@@ -33,6 +36,8 @@ from scytaledroid.DynamicAnalysis.observers.base import Observer, ObserverHandle
 from scytaledroid.DynamicAnalysis.scenarios import ManualScenarioRunner
 from scytaledroid.DynamicAnalysis.telemetry.sampler import TelemetrySampler
 from scytaledroid.DynamicAnalysis.monitor import RunMonitor, RunMonitorConfig
+from scytaledroid.Database.db_core import db_queries as core_q
+import shutil
 
 
 class DynamicRunOrchestrator:
@@ -170,6 +175,8 @@ class DynamicRunOrchestrator:
         telemetry_payload: dict[str, object] = {}
         sampler = None
         monitor = None
+        clock_start = None
+        clock_end = None
         if run_ctx.device_serial:
             sampler = TelemetrySampler(
                 device_serial=run_ctx.device_serial,
@@ -197,6 +204,8 @@ class DynamicRunOrchestrator:
                             level="info",
                         )
                     )
+            clock_start = self._capture_device_clock(run_ctx.device_serial)
+        host_start = datetime.now(timezone.utc)
         self._emit_marker(run_ctx, "SCENARIO_START")
         if run_ctx.scenario_hint:
             event_logger.log("scenario_hint", {"hint": run_ctx.scenario_hint})
@@ -228,6 +237,13 @@ class DynamicRunOrchestrator:
             manifest.operator["telemetry_schema_version"] = 1
             manifest.operator["sampling_rate_s"] = self.config.sampling_rate_s
             manifest.operator["tier"] = self.config.tier
+        if run_ctx.device_serial:
+            clock_end = self._capture_device_clock(run_ctx.device_serial)
+        host_end = datetime.now(timezone.utc)
+        clock_payload = self._format_clock_payload(host_start, host_end, clock_start, clock_end)
+        if clock_payload:
+            telemetry_payload.update(clock_payload)
+            manifest.environment.setdefault("clock", {}).update(clock_payload)
         self._emit_marker(run_ctx, "SCENARIO_END")
         event_logger.log("scenario_ended", {"notes": scenario_result.notes})
         manifest.scenario.update(
@@ -341,15 +357,25 @@ class DynamicRunOrchestrator:
                 size_bytes=plan_path.stat().st_size,
                 produced_by="dynamic_orchestrator",
             )
+        profile_key = None
+        if plan_payload and isinstance(plan_payload, dict):
+            profile_key = (
+                plan_payload.get("profile_key")
+                or plan_payload.get("profile")
+                or plan_payload.get("scope_label")
+            )
         manifest = RunManifest(
             run_manifest_version=1,
             dynamic_run_id=run_ctx.dynamic_run_id,
             created_at=created_at,
             target={
+                "run_type": "dynamic",
                 "package_name": run_ctx.package_name,
                 "duration_seconds": run_ctx.duration_seconds,
                 "static_run_id": self.config.static_run_id,
+                "dep_static_run_id": self.config.static_run_id,
                 "harvest_session_id": self.config.harvest_session_id,
+                "profile_key": profile_key,
                 "static_plan_path": plan_artifact.relative_path if plan_artifact else None,
                 "static_plan_summary": self._summarize_plan(plan_payload),
             },
@@ -370,11 +396,74 @@ class DynamicRunOrchestrator:
             operator={
                 "user": getpass.getuser(),
                 "host": platform.node(),
+                "tool_version": app_config.APP_VERSION,
+                "tool_semver": app_config.APP_VERSION,
+                "tool_git_commit": get_git_commit(),
+                "schema_version": db_diagnostics.get_schema_version() or "<unknown>",
             },
         )
         if plan_artifact:
             manifest.add_artifacts([plan_artifact])
+        dep_artifact = self._attach_dep_snapshot(run_ctx, writer, manifest)
+        if dep_artifact:
+            manifest.add_artifacts([dep_artifact])
+            manifest.target["dep_snapshot_path"] = dep_artifact.relative_path
         return manifest
+
+    def _attach_dep_snapshot(
+        self,
+        run_ctx: RunContext,
+        writer: EvidencePackWriter,
+        manifest: RunManifest,
+    ) -> ArtifactRecord | None:
+        if not run_ctx.static_run_id:
+            return None
+        try:
+            row = core_q.run_sql(
+                """
+                SELECT a.package_name, sar.sha256, sar.base_apk_sha256
+                FROM static_analysis_runs sar
+                JOIN app_versions av ON av.id = sar.app_version_id
+                JOIN apps a ON a.id = av.app_id
+                WHERE sar.id=%s
+                """,
+                (run_ctx.static_run_id,),
+                fetch="one",
+            )
+        except Exception:
+            row = None
+        package_name = run_ctx.package_name
+        sha256 = None
+        if row:
+            package_name = row[0] or package_name
+            sha256 = row[1] or row[2]
+        artifact_token = str(sha256) if sha256 else f"run_{run_ctx.static_run_id}"
+        dep_path = (
+            Path("evidence")
+            / "static_runs"
+            / str(run_ctx.static_run_id)
+            / str(package_name)
+            / artifact_token
+            / "dep.json"
+        )
+        if not dep_path.exists():
+            note = (
+                "DEP snapshot missing; expected "
+                f"{dep_path} for static_run_id={run_ctx.static_run_id}"
+            )
+            self.logger.warning(note)
+            manifest.notes.append(note)
+            return None
+        dest_path = writer.run_dir / "artifacts/dep/dep.json"
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(dep_path, dest_path)
+        return ArtifactRecord(
+            relative_path=str(dest_path.relative_to(writer.run_dir)),
+            type="dep_snapshot",
+            sha256=writer.hash_file(dest_path),
+            size_bytes=dest_path.stat().st_size,
+            produced_by="static_analysis",
+        )
 
     def _start_observers(self, run_ctx: RunContext) -> tuple[list[ObserverRecord], dict[str, object]]:
         handles: dict[str, object] = {}
@@ -492,6 +581,57 @@ class DynamicRunOrchestrator:
     @staticmethod
     def _now() -> str:
         return datetime.now(timezone.utc).isoformat()
+
+    def _capture_device_clock(self, serial: str | None) -> dict[str, object] | None:
+        if not serial:
+            return None
+        try:
+            device_epoch = adb_shell.run_shell(serial, ["date", "+%s"]).strip()
+            device_dt = datetime.fromtimestamp(float(device_epoch), tz=timezone.utc)
+        except Exception:
+            device_dt = None
+        try:
+            uptime_raw = adb_shell.run_shell(serial, ["cat", "/proc/uptime"]).strip().split()[0]
+            uptime_ms = int(float(uptime_raw) * 1000)
+        except Exception:
+            uptime_ms = None
+        if device_dt is None and uptime_ms is None:
+            return None
+        return {"device_time_utc": device_dt, "device_uptime_ms": uptime_ms}
+
+    @staticmethod
+    def _format_clock_payload(
+        host_start: datetime,
+        host_end: datetime,
+        clock_start: dict[str, object] | None,
+        clock_end: dict[str, object] | None,
+    ) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "host_time_utc_start": host_start.isoformat(),
+            "host_time_utc_end": host_end.isoformat(),
+        }
+        if clock_start:
+            if clock_start.get("device_time_utc"):
+                payload["device_time_utc_start"] = clock_start["device_time_utc"].isoformat()
+            if clock_start.get("device_uptime_ms") is not None:
+                payload["device_uptime_ms_start"] = clock_start["device_uptime_ms"]
+        if clock_end:
+            if clock_end.get("device_time_utc"):
+                payload["device_time_utc_end"] = clock_end["device_time_utc"].isoformat()
+            if clock_end.get("device_uptime_ms") is not None:
+                payload["device_uptime_ms_end"] = clock_end["device_uptime_ms"]
+        try:
+            if payload.get("device_time_utc_start"):
+                device_start = datetime.fromisoformat(str(payload["device_time_utc_start"]))
+                payload["drift_ms_start"] = int(
+                    (host_start - device_start).total_seconds() * 1000
+                )
+            if payload.get("device_time_utc_end"):
+                device_end = datetime.fromisoformat(str(payload["device_time_utc_end"]))
+                payload["drift_ms_end"] = int((host_end - device_end).total_seconds() * 1000)
+        except Exception:
+            pass
+        return payload
 
     def _load_plan_payload(self) -> dict[str, object] | None:
         if not self.config.plan_path:

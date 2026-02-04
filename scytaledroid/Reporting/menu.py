@@ -6,6 +6,7 @@ from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_mes
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
 
 from .menu_actions import (
+    handle_dataset_readiness_dashboard,
     handle_device_report,
     handle_recent_static_runs,
     handle_static_report,
@@ -24,6 +25,7 @@ def reporting_menu() -> None:
         "1": handle_tier1_export_pack,
         "2": handle_tier1_audit_report,
         "7": handle_tier1_qa_failures_report,
+        "8": handle_dataset_readiness_dashboard,
         "3": handle_device_report,
         "4": handle_static_report,
         "5": view_saved_reports,
@@ -34,6 +36,7 @@ def reporting_menu() -> None:
         MenuOption("1", "Export Tier-1 dataset pack (manifest + telemetry + summary)"),
         MenuOption("2", "Tier-1 audit report (dataset readiness)"),
         MenuOption("7", "Tier-1 QA failures (last 10 runs)"),
+        MenuOption("8", "Dataset readiness dashboard (app install/harvest/static/dynamic)"),
         MenuOption("3", "Generate device summary report"),
         MenuOption("4", "Generate static analysis report"),
         MenuOption("5", "View saved reports"),

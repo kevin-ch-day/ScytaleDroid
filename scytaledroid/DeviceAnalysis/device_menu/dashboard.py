@@ -436,29 +436,8 @@ def print_dashboard(
     # Device Analysis menu (sequential, no gaps)
     print()
     menu_utils.print_header("Device Analysis")
-    options = [
-        menu_utils.MenuOption(
-            "1",
-            "Inventory & database sync (full)",
-            hint="Refresh all packages and DB entries",
-        ),
-        menu_utils.MenuOption(
-            "2",
-            "Pull APKs",
-            hint="Fetch APKs to data/device_apks for static analysis",
-        ),
-        menu_utils.MenuOption("3", "Detailed device report"),
-        menu_utils.MenuOption("4", "Logcat"),
-        menu_utils.MenuOption("5", "Open ADB shell"),
-        menu_utils.MenuOption("6", "Export device dossier"),
-        menu_utils.MenuOption("7", "Manage harvest watchlists"),
-        menu_utils.MenuOption("8", "Open APK library (filtered)"),
-        menu_utils.MenuOption(
-            "9",
-            "Switch device (devices hub)",
-            description="List/switch devices in the Android devices hub",
-        ),
-    ]
+    from .actions import build_main_menu_options
+    options = build_main_menu_options(active_details)
     spec = menu_utils.MenuSpec(
         items=options,
         default="1",

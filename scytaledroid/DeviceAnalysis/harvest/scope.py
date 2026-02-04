@@ -52,7 +52,42 @@ def select_package_scope(
 
     if not rows:
         print(status_messages.status("No inventory data available for harvest.", level="warn"))
+    return None
+
+
+def select_package_scope_auto(
+    rows: Sequence[InventoryRow],
+    *,
+    device_serial: str,
+    is_rooted: bool,
+    google_allowlist: Optional[Iterable[str]] = None,
+) -> Optional[ScopeSelection]:
+    """Select a smart default scope without prompting (updated-only when possible)."""
+    if not rows:
+        print(status_messages.status("No inventory data available for harvest.", level="warn"))
         return None
+
+    allow = set(google_allowlist or rules.GOOGLE_ALLOWLIST)
+    updated_rows, updated_meta = filter_updated_only(rows)
+
+    if updated_rows:
+        selection = _scope_updated_only(rows, updated_rows, updated_meta)
+        selection.metadata["auto_scope_reason"] = "updated_only"
+        return selection
+
+    if _LAST_SCOPE is not None:
+        selection = ScopeSelection(
+            label=_LAST_SCOPE.label,
+            packages=list(_LAST_SCOPE.packages),
+            kind=_LAST_SCOPE.kind,
+            metadata=dict(_LAST_SCOPE.metadata),
+        )
+        selection.metadata["auto_scope_reason"] = "last_scope"
+        return selection
+
+    selection = _scope_default(rows, allow)
+    selection.metadata["auto_scope_reason"] = "default_scope"
+    return selection
 
     allow = set(google_allowlist or rules.GOOGLE_ALLOWLIST)
     context = build_scope_context(rows, allow)

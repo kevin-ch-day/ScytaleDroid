@@ -142,12 +142,7 @@ def run_full_sync(
                     level="warn",
                 )
             )
-        print(
-            status_messages.status(
-                'Next steps: choose "Pull APKs" from Device Analysis to harvest artifacts for static analysis.',
-                level="info",
-            )
-        )
+        # Keep CLI output minimal; follow-on actions are driven by menu flow.
 
     # Emit structured run summary to logs for reproducibility.
     try:

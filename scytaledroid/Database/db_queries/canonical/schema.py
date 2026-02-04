@@ -106,6 +106,15 @@ _DDL_STATEMENTS: list[str] = [
     """,
     """
     ALTER TABLE static_analysis_runs
+      ADD COLUMN IF NOT EXISTS profile_key VARCHAR(64) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS scenario_id VARCHAR(64) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS device_serial VARCHAR(128) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS tool_semver VARCHAR(32) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS tool_git_commit VARCHAR(40) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS schema_version VARCHAR(32) DEFAULT NULL;
+    """,
+    """
+    ALTER TABLE static_analysis_runs
       ADD COLUMN IF NOT EXISTS pipeline_version VARCHAR(32) DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS catalog_versions VARCHAR(128) DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS config_hash CHAR(64) DEFAULT NULL,
@@ -115,6 +124,64 @@ _DDL_STATEMENTS: list[str] = [
       ADD COLUMN IF NOT EXISTS ended_at_utc DATETIME DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS abort_reason VARCHAR(64) DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS abort_signal VARCHAR(16) DEFAULT NULL;
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS artifact_registry (
+      artifact_id   BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      run_id        VARCHAR(64)     NOT NULL,
+      run_type      VARCHAR(16)     NOT NULL,
+      artifact_type VARCHAR(64)     NOT NULL,
+      origin        VARCHAR(16)     NOT NULL,
+      device_path   TEXT            DEFAULT NULL,
+      host_path     TEXT            DEFAULT NULL,
+      pull_status   VARCHAR(16)     DEFAULT NULL,
+      sha256        CHAR(64)        DEFAULT NULL,
+      size_bytes    BIGINT          DEFAULT NULL,
+      created_at_utc DATETIME       DEFAULT NULL,
+      pulled_at_utc DATETIME        DEFAULT NULL,
+      status_reason VARCHAR(191)    DEFAULT NULL,
+      meta_json     JSON            DEFAULT NULL,
+      PRIMARY KEY (artifact_id),
+      KEY ix_artifact_run (run_id, run_type),
+      KEY ix_artifact_type (artifact_type)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS ml_feature_windows (
+      window_id     BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      run_id        VARCHAR(64)     NOT NULL,
+      run_type      VARCHAR(16)     NOT NULL DEFAULT 'dynamic',
+      window_idx    INT             NOT NULL,
+      start_utc     DATETIME        DEFAULT NULL,
+      end_utc       DATETIME        DEFAULT NULL,
+      features_json JSON            DEFAULT NULL,
+      feature_version VARCHAR(32)   DEFAULT NULL,
+      window_params_json JSON       DEFAULT NULL,
+      created_at    TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (window_id),
+      KEY ix_ml_windows_run (run_id, run_type),
+      KEY ix_ml_windows_idx (run_id, window_idx)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS ml_scores (
+      score_id      BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      run_id        VARCHAR(64)     NOT NULL,
+      run_type      VARCHAR(16)     NOT NULL DEFAULT 'dynamic',
+      model_name    VARCHAR(64)     NOT NULL,
+      model_version VARCHAR(32)     DEFAULT NULL,
+      window_id     BIGINT UNSIGNED DEFAULT NULL,
+      score         DOUBLE          DEFAULT NULL,
+      threshold     DOUBLE          DEFAULT NULL,
+      is_anomaly    TINYINT(1)      DEFAULT NULL,
+      params_json   JSON            DEFAULT NULL,
+      trained_on_ref VARCHAR(191)   DEFAULT NULL,
+      created_at    TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (score_id),
+      KEY ix_ml_scores_run (run_id, run_type),
+      KEY ix_ml_scores_model (model_name),
+      KEY ix_ml_scores_window (window_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
     """
     ALTER TABLE static_analysis_runs

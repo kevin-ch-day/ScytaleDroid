@@ -11,6 +11,9 @@ import uuid
 
 from scytaledroid.Utils.LoggingUtils import logging_engine
 from scytaledroid.Utils.DisplayUtils import status_messages
+from scytaledroid.Config import app_config
+from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
+from scytaledroid.Utils.version_utils import get_git_commit
 
 from scytaledroid.DynamicAnalysis.core import DynamicSessionConfig, DynamicSessionResult, run_dynamic_session
 from scytaledroid.DynamicAnalysis.core.evidence_pack import EvidencePackWriter
@@ -110,6 +113,20 @@ class DynamicAnalysisEngine:
                 "network": len(session_result.telemetry_network),
             },
         }
+        if isinstance(plan_payload, dict) and plan_payload.get("pcap_required") is not None:
+            summary_payload["pcap_required"] = bool(plan_payload.get("pcap_required"))
+        for key in (
+            "host_time_utc_start",
+            "host_time_utc_end",
+            "device_time_utc_start",
+            "device_time_utc_end",
+            "device_uptime_ms_start",
+            "device_uptime_ms_end",
+            "drift_ms_start",
+            "drift_ms_end",
+        ):
+            if key in (session_result.telemetry_stats or {}):
+                summary_payload[key] = session_result.telemetry_stats.get(key)
         summary_payload["diagnostics_warnings"] = self._collect_diagnostics_warnings(session_result)
         self._attach_engine_outputs(session_result, plan_payload, probe_summary, summary_payload)
         self._persist_summary(session_result, summary_payload)
@@ -182,8 +199,14 @@ class DynamicAnalysisEngine:
             target={
                 "package_name": self.config.package_name,
                 "static_run_id": self.config.static_run_id,
+                "run_type": "dynamic",
             },
             scenario={"id": self.config.scenario_id},
+            operator={
+                "tool_semver": app_config.APP_VERSION,
+                "tool_git_commit": get_git_commit(),
+                "schema_version": db_diagnostics.get_schema_version() or "<unknown>",
+            },
         )
         if event_artifact:
             manifest.add_artifacts([event_artifact])

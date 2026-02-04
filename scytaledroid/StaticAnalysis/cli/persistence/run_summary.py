@@ -11,6 +11,9 @@ from datetime import datetime
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
+from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
+from scytaledroid.Utils.version_utils import get_git_commit
+from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_core.db_queries import run_sql_write
 
@@ -30,6 +33,7 @@ from .findings_writer import (
 from .run_envelope import prepare_run_envelope
 from .permission_risk import persist_permission_risk
 from .permission_matrix import persist_permission_matrix
+from .dep_export import export_dep_json
 from .static_sections import (
     coerce_severity_counts,
     normalise_string_counts,
@@ -398,6 +402,12 @@ def _create_static_run(
     scope_label: str,
     category: str | None,
     profile: str,
+    profile_key: str | None,
+    scenario_id: str | None,
+    device_serial: str | None,
+    tool_semver: str | None,
+    tool_git_commit: str | None,
+    schema_version: str | None,
     findings_total: int,
     run_started_utc: str | None,
     status: str,
@@ -423,6 +433,9 @@ def _create_static_run(
                 session_stamp,
                 scope_label,
                 category,
+                profile_key,
+                scenario_id,
+                device_serial,
                 sha256,
                 base_apk_sha256,
                 artifact_set_hash,
@@ -436,16 +449,22 @@ def _create_static_run(
                 config_hash,
                 study_tag,
                 profile,
+                tool_semver,
+                tool_git_commit,
+                schema_version,
                 findings_total,
                 run_started_utc,
                 status
-            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             """,
             (
                 app_version_id,
                 session_stamp,
                 scope_label,
                 category,
+                profile_key,
+                scenario_id,
+                device_serial,
                 sha256,
                 base_apk_sha256,
                 artifact_set_hash,
@@ -459,6 +478,9 @@ def _create_static_run(
                 config_hash,
                 study_tag,
                 profile,
+                tool_semver,
+                tool_git_commit,
+                schema_version,
                 findings_total,
                 normalized_started_at,
                 status,
@@ -474,6 +496,9 @@ def _create_static_run(
                     app_version_id,
                     session_stamp,
                     scope_label,
+                    profile_key,
+                    scenario_id,
+                    device_serial,
                     sha256,
                     base_apk_sha256,
                     artifact_set_hash,
@@ -487,15 +512,21 @@ def _create_static_run(
                     config_hash,
                     study_tag,
                     profile,
+                    tool_semver,
+                    tool_git_commit,
+                    schema_version,
                     findings_total,
                     run_started_utc,
                     status
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 """,
                 (
                     app_version_id,
                     session_stamp,
                     scope_label,
+                    profile_key,
+                    scenario_id,
+                    device_serial,
                     sha256,
                     base_apk_sha256,
                     artifact_set_hash,
@@ -509,6 +540,9 @@ def _create_static_run(
                     config_hash,
                     study_tag,
                     profile,
+                    tool_semver,
+                    tool_git_commit,
+                    schema_version,
                     findings_total,
                     normalized_started_at,
                     status,
@@ -646,6 +680,12 @@ def create_static_run_ledger(
         scope_label=scope_label,
         category=category,
         profile=profile,
+        profile_key=profile,
+        scenario_id="static_default",
+        device_serial=None,
+        tool_semver=app_config.APP_VERSION,
+        tool_git_commit=get_git_commit(),
+        schema_version=db_diagnostics.get_schema_version() or "<unknown>",
         findings_total=0,
         run_started_utc=run_started_utc,
         status="RUNNING",
@@ -1344,6 +1384,14 @@ def persist_run_summary(
         outcome.string_samples_persisted = sample_total
         for err in static_errors:
             outcome.add_error(err)
+
+    if static_run_id and not dry_run:
+        dep_path = export_dep_json(static_run_id)
+        if dep_path:
+            log.info(
+                f"DEP snapshot written for static_run_id={static_run_id}",
+                category="static_analysis",
+            )
 
     if static_run_id and not dry_run:
         update_static_run_status(

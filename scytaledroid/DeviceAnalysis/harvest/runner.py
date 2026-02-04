@@ -230,8 +230,8 @@ def execute_harvest(
             _maybe_print_progress(
                 result=result,
                 stats=stats,
-                package_index=current_display_index or index,
-                package_total=display_total or total,
+                package_index=index,
+                package_total=total,
             )
     except Exception as exc:
         run_failed = True
@@ -797,11 +797,10 @@ def _print_progress_line(
     ok_count = int(stats.get("packages_clean", 0)) + int(stats.get("packages_partial", 0))
     err_count = int(stats.get("packages_failed", 0))
     skipped = int(stats.get("packages_skipped", 0))
-    last_pkg = result.plan.inventory.package_name
-    suffix = f"(last: {last_pkg})"
+    package_index = min(package_index, package_total)
     line = (
         f"Progress: {package_index}/{package_total} "
-        f"ok={ok_count} fail={err_count} skipped={skipped} {suffix}"
+        f"ok={ok_count} fail={err_count} skipped={skipped}"
     )
     level = "error" if err_count else "info"
     print(status_messages.status(line, level=level))

@@ -97,7 +97,7 @@ def _apply_delta_filter(
     return (filtered_selection, True, len(filtered))
 
 
-def pull_apks(serial: str | None) -> OperationResult:
+def pull_apks(serial: str | None, *, auto_scope: bool = False) -> OperationResult:
     """Pull APK files for the active device and upsert metadata into the repository."""
 
     if not serial:
@@ -140,6 +140,7 @@ def pull_apks(serial: str | None) -> OperationResult:
         is_rooted=is_rooted,
         snapshot_id=snapshot_ctx.snapshot_id,
         snapshot_captured_at=snapshot_ctx.snapshot_captured_at,
+        auto_scope=auto_scope,
     )
     if resolution is None:
         return OperationResult.failure(
@@ -619,6 +620,7 @@ def _resolve_harvest_plan(
     is_rooted: bool,
     snapshot_id: int | None,
     snapshot_captured_at: str | None,
+    auto_scope: bool = False,
 ) -> PlanResolution | None:
     active_plan = None
     active_selection = None
@@ -629,18 +631,38 @@ def _resolve_harvest_plan(
     )
     guard_decision = get_last_guard_decision()
     pull_mode: str | None = None
+    auto_selection = None
+    if auto_scope:
+        auto_selection = harvest.select_package_scope_auto(
+            rows,
+            device_serial=serial,
+            is_rooted=is_rooted,
+            google_allowlist=google_allowlist,
+        )
+        if auto_selection is None:
+            print(status_messages.status("APK pull cancelled by user.", level="warn"))
+            prompt_utils.press_enter_to_continue()
+            return None
 
     while True:
         active_plan = None
         active_selection = None
         pull_mode = None
         verbose = False
-        selection = harvest.select_package_scope(
-            rows,
-            device_serial=serial,
-            is_rooted=is_rooted,
-            google_allowlist=google_allowlist,
-        )
+        if auto_selection is not None:
+            selection = auto_selection
+            auto_selection = None
+            reason = selection.metadata.get("auto_scope_reason")
+            if reason:
+                # Auto-scope reason is kept in metadata for summaries; no CLI noise here.
+                pass
+        else:
+            selection = harvest.select_package_scope(
+                rows,
+                device_serial=serial,
+                is_rooted=is_rooted,
+                google_allowlist=google_allowlist,
+            )
         if selection is None:
             print(status_messages.status("APK pull cancelled by user.", level="warn"))
             prompt_utils.press_enter_to_continue()

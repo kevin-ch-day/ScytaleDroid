@@ -29,7 +29,7 @@ def generate_device_report(serial: Optional[str]) -> None:
         error_panels.print_error_panel(
             "Device Report",
             "No active device. Connect to a device first.",
-            hint="Use option 1 from the Device Analysis menu to select a device.",
+            hint="Use Device Analysis → Switch device to select a device.",
         )
         prompt_utils.press_enter_to_continue()
         return

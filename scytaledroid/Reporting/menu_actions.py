@@ -19,6 +19,135 @@ from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Database.db_core import db_queries as core_q
 
 
+def handle_dataset_readiness_dashboard() -> None:
+    """Print a compact dataset readiness dashboard for RESEARCH_DATASET_ALPHA."""
+
+    rows = core_q.run_sql(
+        """
+        WITH latest_snap AS (
+          SELECT snapshot_id
+          FROM device_inventory_snapshots
+          ORDER BY captured_at DESC
+          LIMIT 1
+        ),
+        repo_latest AS (
+          SELECT package_name,
+                 MAX(CAST(version_code AS UNSIGNED)) AS repo_version,
+                 MAX(harvested_at) AS harvested_at
+          FROM android_apk_repository
+          GROUP BY package_name
+        ),
+        static_latest AS (
+          SELECT a.package_name, MAX(sar.id) AS static_run_id
+          FROM static_analysis_runs sar
+          JOIN app_versions av ON av.id = sar.app_version_id
+          JOIN apps a ON a.id = av.app_id
+          GROUP BY a.package_name
+        ),
+        dyn_counts AS (
+          SELECT package_name,
+                 COUNT(*) AS total_runs,
+                 SUM(CASE WHEN grade = 'PAPER_GRADE' THEN 1 ELSE 0 END) AS paper_runs,
+                 MAX(CASE WHEN pcap_valid = 1 THEN 1 ELSE 0 END) AS pcap_valid
+          FROM dynamic_sessions
+          GROUP BY package_name
+        )
+        SELECT
+          a.display_name,
+          a.package_name,
+          CASE WHEN i.package_name IS NULL THEN 'N' ELSE 'Y' END AS installed,
+          i.version_code,
+          CASE WHEN r.package_name IS NULL THEN 'N' ELSE 'Y' END AS harvested,
+          r.repo_version,
+          r.harvested_at,
+          CASE WHEN s.static_run_id IS NULL THEN 'N' ELSE 'Y' END AS static_ready,
+          COALESCE(d.total_runs, 0) AS dyn_runs,
+          COALESCE(d.paper_runs, 0) AS paper_runs,
+          CASE
+            WHEN d.pcap_valid IS NULL THEN 'N/A'
+            WHEN d.pcap_valid = 1 THEN 'Y'
+            ELSE 'N'
+          END AS pcap_valid
+        FROM apps a
+        LEFT JOIN latest_snap ls ON 1=1
+        LEFT JOIN device_inventory i
+          ON LOWER(a.package_name) COLLATE utf8mb4_general_ci =
+             LOWER(i.package_name) COLLATE utf8mb4_general_ci
+         AND i.snapshot_id = ls.snapshot_id
+        LEFT JOIN repo_latest r
+          ON LOWER(r.package_name) COLLATE utf8mb4_general_ci =
+             LOWER(a.package_name) COLLATE utf8mb4_general_ci
+        LEFT JOIN static_latest s
+          ON LOWER(s.package_name) COLLATE utf8mb4_general_ci =
+             LOWER(a.package_name) COLLATE utf8mb4_general_ci
+        LEFT JOIN dyn_counts d
+          ON LOWER(d.package_name) COLLATE utf8mb4_general_ci =
+             LOWER(a.package_name) COLLATE utf8mb4_general_ci
+        WHERE a.profile_key = 'RESEARCH_DATASET_ALPHA'
+        ORDER BY a.display_name
+        """,
+        fetch="all",
+    ) or []
+
+    print()
+    menu_utils.print_header("Dataset readiness dashboard")
+    headers = [
+        "App",
+        "Package",
+        "Installed",
+        "Inst Ver",
+        "Harvested",
+        "Repo Ver",
+        "Static",
+        "Dyn Runs",
+        "Paper",
+        "PCAP",
+        "Status",
+    ]
+    table_rows: List[List[str]] = []
+    for row in rows:
+        (
+            display_name,
+            package_name,
+            installed,
+            inst_ver,
+            harvested,
+            repo_ver,
+            harvested_at,
+            static_ready,
+            dyn_runs,
+            paper_runs,
+            pcap_valid,
+        ) = row
+        status = "DATASET_READY"
+        if installed == "N":
+            status = "BLOCKED_NOT_INSTALLED"
+        elif harvested == "N":
+            status = "NEEDS_HARVEST"
+        elif static_ready == "N":
+            status = "NEEDS_STATIC"
+        elif int(paper_runs or 0) == 0:
+            status = "NEEDS_DYNAMIC"
+        table_rows.append(
+            [
+                str(display_name or "—"),
+                str(package_name or "—"),
+                str(installed),
+                str(inst_ver or "—"),
+                str(harvested),
+                str(repo_ver or "—"),
+                str(static_ready),
+                str(dyn_runs),
+                str(paper_runs),
+                str(pcap_valid),
+                status,
+            ]
+        )
+    table_utils.render_table(headers, table_rows)
+    print()
+    prompt_utils.press_enter_to_continue()
+
+
 def handle_device_report() -> None:
     """Generate a device report for the active or selected device."""
 

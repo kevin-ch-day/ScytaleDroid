@@ -14,7 +14,7 @@ from .models import (
 from .planner import build_harvest_plan
 from .quick_harvest import quick_harvest
 from .runner import execute_harvest
-from .scope import build_inventory_rows, reset_last_scope, select_package_scope
+from .scope import build_inventory_rows, reset_last_scope, select_package_scope, select_package_scope_auto
 from .summary import (
     HarvestRunMetrics,
     is_harvest_simple_mode,
@@ -56,6 +56,7 @@ __all__ = [
     "reset_last_scope",
     "rules",
     "select_package_scope",
+    "select_package_scope_auto",
     "Watchlist",
     "filter_rows_by_watchlist",
     "load_watchlists",

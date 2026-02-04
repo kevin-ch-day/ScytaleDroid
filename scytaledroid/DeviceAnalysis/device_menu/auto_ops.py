@@ -69,7 +69,7 @@ def ensure_inventory_survey(
     if not snapshot_present:
         surveyed_serials.add(serial)
         message = status_messages.status(
-            "No inventory snapshot found yet; run Inventory & database sync (option 1) to capture a baseline.",
+            "No inventory snapshot found yet; run Sync + Pull (option 1).",
             level="warn",
         )
         if emit:
@@ -115,10 +115,10 @@ def ensure_inventory_survey(
     if too_old or has_changes:
         reason: Optional[str] = None
         if age_seconds is None:
-            reason = "Inventory snapshot age unknown; run Inventory & database sync (option 1)."
+            reason = "Inventory snapshot age unknown; run Sync + Pull (option 1)."
         elif too_old:
             reason = (
-                "Inventory snapshot exceeds the freshness threshold—run Inventory & database sync (option 1) before pulling APKs."
+                "Inventory snapshot exceeds the freshness threshold—run Sync + Pull (option 1) before pulling APKs."
             )
         else:
             # Fresh by age but changed: do not emit a footer warning; gating will handle this.

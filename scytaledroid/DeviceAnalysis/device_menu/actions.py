@@ -38,11 +38,11 @@ from scytaledroid.DeviceAnalysis.services import info_service
 
 # Keep menu routing aligned with handle_choice to avoid accidental swaps in the CLI.
 _HELPER_ROUTES = {
-    "3": ("inventory", "run_device_summary", True, "Collect detailed device summary"),
-    "4": ("logcat", "stream_logcat", True, "Stream logcat output"),
-    "5": ("shell", "open_shell", True, "Open interactive adb shell"),
-    "6": ("report", "generate_device_report", True, "Export the device dossier"),
-    "7": ("watchlist_manager", "manage_watchlists", False, "Manage harvest watchlists"),
+    "2": ("inventory", "run_device_summary", True, "Collect detailed device summary"),
+    "3": ("logcat", "stream_logcat", True, "Stream logcat output"),
+    "4": ("shell", "open_shell", True, "Open interactive adb shell"),
+    "5": ("report", "generate_device_report", True, "Export the device dossier"),
+    "6": ("watchlist_manager", "manage_watchlists", False, "Manage harvest watchlists"),
 }
 
 
@@ -53,49 +53,16 @@ def handle_choice(
     active_device: Optional[Dict[str, Optional[str]]],
     active_details: Optional[Dict[str, Optional[str]]],
 ) -> bool:
-    if choice == "9":
+    if choice == "8":
         # Jump to the full devices hub for consistent list/switch UX.
         from scytaledroid.DeviceAnalysis.device_hub_menu import devices_hub
 
         devices_hub()
     elif choice == "1":
-        serial = active_device.get("serial") if active_device else device_manager.get_active_serial()
-        if not serial:
-            error_panels.print_error_panel(
-                "Inventory & database sync",
-                "No active device. Connect first to sync.",
-            )
-            prompt_utils.press_enter_to_continue()
-            return False
-        # Use service façade for sync (CLI path)
-        from scytaledroid.DeviceAnalysis.services import inventory_service
-        from scytaledroid.DeviceAnalysis.runtime_flags import set_allow_inventory_fallbacks
-        from .formatters import format_device_line
-
-        try:
-            print(text_blocks.headline("Inventory & database sync", width=70))
-            allow_fallbacks = prompt_utils.prompt_yes_no(
-                "Allow inventory fallback methods if needed? (recommended only for non-root devices)",
-                default=False,
-            )
-            set_allow_inventory_fallbacks(allow_fallbacks)
-            inventory_service.run_full_sync(
-                serial,
-                ui_prefs=None,
-                progress_sink="cli",
-                allow_fallbacks=allow_fallbacks,
-            )
-        except inventory_service.InventoryServiceError as exc:
-            error_panels.print_error_panel(
-                "Inventory & database sync",
-                str(exc),
-            )
-            prompt_utils.press_enter_to_continue()
-    elif choice == "2":
-        _run_apk_pull(active_device)
-    elif choice in {"3", "4", "5", "6", "7"}:
+        _run_sync_and_pull(active_device)
+    elif choice in {"2", "3", "4", "5", "6"}:
         _forward_to_helper(choice, active_device)
-    elif choice == "8":
+    elif choice == "7":
         _open_apk_library_filtered(active_device)
     else:
         error_panels.print_error_panel(
@@ -137,42 +104,36 @@ def build_main_menu_options(
     options: List[menu_utils.MenuOption] = [
         menu_utils.MenuOption(
             "1",
-            "Inventory & Database Sync (full)",
+            "Sync inventory + Pull APKs",
             badge=inv_badge or needs_active,
         ),
         menu_utils.MenuOption(
             "2",
-            "Pull APKs for static analysis",
-            disabled=not has_device,
-            badge=pull_badge or needs_active,
-        ),
-        menu_utils.MenuOption(
-            "3",
             "Detailed device report",
             disabled=not has_device,
             badge=needs_active,
         ),
         menu_utils.MenuOption(
-            "4",
+            "3",
             "Logcat",
             disabled=not has_device,
             badge=needs_active,
         ),
         menu_utils.MenuOption(
-            "5",
+            "4",
             "Open ADB shell",
             disabled=not has_device,
             badge=needs_active,
         ),
         menu_utils.MenuOption(
-            "6",
+            "5",
             "Export device dossier",
             disabled=not has_device,
             badge=needs_active,
         ),
-        menu_utils.MenuOption("7", "Manage harvest watchlists"),
-        menu_utils.MenuOption("8", "Open APK library (filtered)"),
-        menu_utils.MenuOption("9", "Switch device (devices hub)"),
+        menu_utils.MenuOption("6", "Manage harvest watchlists"),
+        menu_utils.MenuOption("7", "Open APK library (filtered)"),
+        menu_utils.MenuOption("8", "Switch device (devices hub)"),
     ]
 
     return options
@@ -320,7 +281,11 @@ def _forward_to_helper(option: str, active_device: Optional[Dict[str, Optional[s
     handler(serial=serial)  # type: ignore[arg-type,call-arg]
 
 
-def _run_apk_pull(active_device: Optional[Dict[str, Optional[str]]]) -> None:
+def _run_apk_pull(
+    active_device: Optional[Dict[str, Optional[str]]],
+    *,
+    auto_scope: bool = False,
+) -> None:
     serial = active_device.get("serial") if active_device else device_manager.get_active_serial()
     if not serial:
         error_panels.print_error_panel(
@@ -417,7 +382,7 @@ def _run_apk_pull(active_device: Optional[Dict[str, Optional[str]]]) -> None:
     try:
         from scytaledroid.DeviceAnalysis import apk_pull
 
-        result = apk_pull.pull_apks(serial)
+        result = apk_pull.pull_apks(serial, auto_scope=auto_scope)
         if hasattr(result, "ok") and not result.ok:
             error_panels.print_error_panel(
                 "Pull APKs",
@@ -442,6 +407,43 @@ def _run_apk_pull(active_device: Optional[Dict[str, Optional[str]]]) -> None:
             hint="See logs for traceback.",
         )
         prompt_utils.press_enter_to_continue()
+
+
+def _run_sync_and_pull(active_device: Optional[Dict[str, Optional[str]]]) -> None:
+    serial = active_device.get("serial") if active_device else device_manager.get_active_serial()
+    if not serial:
+        error_panels.print_error_panel(
+            "Sync + Pull APKs",
+            "No active device. Connect first to sync.",
+        )
+        prompt_utils.press_enter_to_continue()
+        return
+
+    from scytaledroid.DeviceAnalysis.services import inventory_service
+    from scytaledroid.DeviceAnalysis.runtime_flags import set_allow_inventory_fallbacks
+
+    try:
+        print(text_blocks.headline("Inventory & database sync", width=70))
+        allow_fallbacks = prompt_utils.prompt_yes_no(
+            "Allow inventory fallback methods if needed? (recommended only for non-root devices)",
+            default=False,
+        )
+        set_allow_inventory_fallbacks(allow_fallbacks)
+        inventory_service.run_full_sync(
+            serial,
+            ui_prefs=None,
+            progress_sink="cli",
+            allow_fallbacks=allow_fallbacks,
+        )
+    except inventory_service.InventoryServiceError as exc:
+        error_panels.print_error_panel(
+            "Inventory & database sync",
+            str(exc),
+        )
+        prompt_utils.press_enter_to_continue()
+        return
+
+    _run_apk_pull(active_device, auto_scope=True)
 
 
 __all__ = ["handle_choice", "build_main_menu_options"]

@@ -70,4 +70,16 @@ def run_dynamic_session(
         result.telemetry_process = list(telemetry_payload.get("telemetry_process") or [])
         result.telemetry_network = list(telemetry_payload.get("telemetry_network") or [])
         result.telemetry_stats = dict(telemetry_payload.get("telemetry_stats") or {})
+        for key in (
+            "host_time_utc_start",
+            "host_time_utc_end",
+            "device_time_utc_start",
+            "device_time_utc_end",
+            "device_uptime_ms_start",
+            "device_uptime_ms_end",
+            "drift_ms_start",
+            "drift_ms_end",
+        ):
+            if key in telemetry_payload:
+                result.telemetry_stats[key] = telemetry_payload[key]
     return result

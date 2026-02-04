@@ -13,6 +13,10 @@ from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_evidence_path
 from scytaledroid.Database.db_queries.dynamic import schema as dynamic_schema
 from scytaledroid.DynamicAnalysis.plans.loader import extract_plan_identity
 from scytaledroid.Utils.network_quality import evaluate_network_signal_quality
+from scytaledroid.Config import app_config
+from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
+from scytaledroid.Utils.version_utils import get_git_commit
+from scytaledroid.Database.db_utils.artifact_registry import record_artifacts
 
 from ..core.session import DynamicSessionConfig, DynamicSessionResult
 
@@ -36,6 +40,12 @@ def persist_dynamic_summary(
     netstats_rows = _extract_netstats_rows(payload)
     netstats_missing_rows = _extract_netstats_missing_rows(payload)
     pcap_meta = _extract_pcap_meta(payload, result.evidence_path)
+    profile_key = None
+    if isinstance(plan_payload, dict):
+        profile_key = plan_payload.get("profile_key") or plan_payload.get("profile")
+    tool_semver = app_config.APP_VERSION
+    tool_git_commit = get_git_commit()
+    schema_version = db_diagnostics.get_schema_version() or "<unknown>"
 
     _LOGGER.info(
         "Dynamic persistence inputs",
@@ -62,6 +72,7 @@ def persist_dynamic_summary(
         "dynamic_run_id": dynamic_run_id,
         "package_name": config.package_name,
         "device_serial": config.device_serial,
+        "profile_key": profile_key,
         "scenario_id": config.scenario_id,
         "tier": config.tier,
         "duration_seconds": duration_seconds,
@@ -70,12 +81,21 @@ def persist_dynamic_summary(
         "sampling_rate_s": sampling_rate_s,
         "started_at_utc": _fmt_dt(result.started_at),
         "ended_at_utc": _fmt_dt(result.ended_at),
+        "host_time_utc_start": _fmt_dt(payload.get("host_time_utc_start")),
+        "host_time_utc_end": _fmt_dt(payload.get("host_time_utc_end")),
+        "device_time_utc_start": _fmt_dt(payload.get("device_time_utc_start")),
+        "device_time_utc_end": _fmt_dt(payload.get("device_time_utc_end")),
+        "device_uptime_ms_start": _safe_int(payload.get("device_uptime_ms_start")),
+        "device_uptime_ms_end": _safe_int(payload.get("device_uptime_ms_end")),
+        "drift_ms_start": _safe_int(payload.get("drift_ms_start")),
+        "drift_ms_end": _safe_int(payload.get("drift_ms_end")),
         "status": result.status,
         "evidence_path": result.evidence_path,
         "static_run_id": _safe_int(plan_identity.get("static_run_id") or config.static_run_id),
         "run_signature": plan_identity.get("run_signature"),
         "run_signature_version": plan_identity.get("run_signature_version"),
         "base_apk_sha256": plan_identity.get("base_apk_sha256"),
+        "apk_sha256": plan_identity.get("base_apk_sha256"),
         "artifact_set_hash": plan_identity.get("artifact_set_hash"),
         "version_name": plan_identity.get("version_name"),
         "version_code": _safe_int(plan_identity.get("version_code")),
@@ -96,7 +116,14 @@ def persist_dynamic_summary(
         "pcap_sha256": pcap_meta.get("pcap_sha256"),
         "pcap_valid": pcap_meta.get("pcap_valid"),
         "pcap_validated_at_utc": pcap_meta.get("pcap_validated_at_utc"),
+        "tool_semver": tool_semver,
+        "tool_git_commit": tool_git_commit,
+        "schema_version": schema_version,
     }
+
+    grade, reasons = _evaluate_grade(payload, pcap_meta)
+    session_row["grade"] = grade
+    session_row["grade_reasons_json"] = json.dumps(reasons) if reasons else None
 
     _insert_dynamic_session(session_row)
 
@@ -105,6 +132,7 @@ def persist_dynamic_summary(
         _insert_dynamic_issues(issues)
 
     _persist_telemetry(dynamic_run_id, payload, tier=config.tier)
+    _register_manifest_artifacts(dynamic_run_id, result.evidence_path)
 
 
 def _require_dynamic_schema() -> None:
@@ -268,6 +296,82 @@ def _collect_issue_rows(
             }
         )
     return issues
+
+
+def _evaluate_grade(payload: Mapping[str, Any], pcap_meta: Mapping[str, Any]) -> tuple[str, list[object]]:
+    reasons: list[object] = []
+    status = str(payload.get("status") or "").lower()
+    if status == "blocked":
+        reasons.append({"code": "run_blocked"})
+        return "EXPERIMENTAL", reasons
+    process_rows = payload.get("telemetry_process") or []
+    network_rows = payload.get("telemetry_network") or []
+    if not process_rows:
+        reasons.append({"code": "process_telemetry_missing"})
+    if not network_rows:
+        reasons.append({"code": "network_telemetry_missing"})
+
+    stats = payload.get("telemetry_stats") or {}
+    expected = _safe_int(stats.get("expected_samples"))
+    captured = _safe_int(stats.get("captured_samples"))
+    if expected and captured is not None:
+        try:
+            ratio = float(captured) / float(expected)
+            missingness = 1.0 - ratio
+            if missingness > 0.10:
+                reasons.append(
+                    {
+                        "code": "telemetry_missingness",
+                        "captured": captured,
+                        "expected": expected,
+                        "missingness": round(missingness, 4),
+                    }
+                )
+        except Exception:
+            pass
+
+    evidence_path = payload.get("evidence_path")
+    if evidence_path:
+        manifest_path = resolve_evidence_path(evidence_path) / "run_manifest.json"
+        if not manifest_path.exists():
+            reasons.append({"code": "manifest_missing"})
+
+    if payload.get("pcap_required"):
+        if not pcap_meta.get("pcap_relpath"):
+            reasons.append({"code": "pcap_missing"})
+        elif pcap_meta.get("pcap_valid") in (0, False):
+            reasons.append({"code": "pcap_invalid"})
+
+    grade = "PAPER_GRADE" if not reasons else "EXPERIMENTAL"
+    return grade, reasons
+
+
+def _register_manifest_artifacts(dynamic_run_id: str, evidence_path: str | None) -> None:
+    if not evidence_path:
+        return
+    resolved = resolve_evidence_path(evidence_path)
+    manifest_path = resolved / "run_manifest.json"
+    if not manifest_path.exists():
+        return
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    artifacts: list[Mapping[str, Any]] = []
+    artifacts.extend(manifest.get("artifacts") or [])
+    artifacts.extend(manifest.get("outputs") or [])
+    for observer in manifest.get("observers") or []:
+        artifacts.extend(observer.get("artifacts") or [])
+    if not artifacts:
+        return
+    record_artifacts(
+        run_id=dynamic_run_id,
+        run_type="dynamic",
+        artifacts=artifacts,
+        origin="host",
+        base_path=resolved,
+        pull_status="n/a",
+    )
 
 
 def _issues_from_manifest(dynamic_run_id: str, evidence_path: str | None) -> list[dict[str, Any]]:
