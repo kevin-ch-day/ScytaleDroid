@@ -4,33 +4,26 @@ from __future__ import annotations
 
 import hashlib
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 from threading import Lock
 
 _SESSION_LOCK = Lock()
-_LAST_SESSION_TS: datetime | None = None
 _LAST_SESSION_LABEL: str | None = None
 
 
 def make_session_stamp(now: datetime | None = None) -> str:
-    """Return a monotonic session stamp string.
+    """Return a session stamp string.
 
-    Session stamps use ``YYYYMMDD-HHMMSS`` format and are guaranteed to be
-    strictly increasing for calls within the same process to avoid accidental
-    reuse when runs start within the same second.
+    Session stamps use ``YYYYMMDD`` format by default. They are intended to be
+    human-friendly and stable for a given day; callers may override labels if
+    they need per-run uniqueness.
     """
 
-    global _LAST_SESSION_TS, _LAST_SESSION_LABEL
+    global _LAST_SESSION_LABEL
 
     candidate = now or datetime.now()
     with _SESSION_LOCK:
-        if _LAST_SESSION_TS and candidate <= _LAST_SESSION_TS:
-            candidate = _LAST_SESSION_TS + timedelta(seconds=1)
-        stamp = candidate.strftime("%Y%m%d-%H%M%S")
-        if _LAST_SESSION_LABEL and stamp == _LAST_SESSION_LABEL:
-            candidate = candidate + timedelta(seconds=1)
-            stamp = candidate.strftime("%Y%m%d-%H%M%S")
-        _LAST_SESSION_TS = candidate
+        stamp = candidate.strftime("%Y%m%d")
         _LAST_SESSION_LABEL = stamp
         return stamp
 

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from scytaledroid.Config import app_config
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ..modules import resolve_category
 
@@ -113,6 +114,8 @@ class ArtifactGroup:
     version_display: str
     session_stamp: str | None
     artifacts: tuple[RepositoryArtifact, ...]
+    grouping_reason: str | None = None
+    grouping_confidence: str | None = None
 
     @property
     def base_artifact(self) -> RepositoryArtifact | None:
@@ -177,9 +180,11 @@ def group_artifacts(
 
     buckets: dict[str, list[RepositoryArtifact]] = {}
 
+    grouping_meta: dict[str, tuple[str, str]] = {}
     for artifact in artifacts:
-        group_key = _group_key_for_artifact(artifact)
+        group_key, reason, confidence = _group_key_for_artifact(artifact)
         buckets.setdefault(group_key, []).append(artifact)
+        grouping_meta.setdefault(group_key, (reason, confidence))
 
     groups: list[ArtifactGroup] = []
     for key, members in buckets.items():
@@ -187,15 +192,24 @@ def group_artifacts(
         package_name = members[0].package_name if members else "unknown"
         version = members[0].version_display if members else "-"
         session_stamp = members[0].session_stamp if members else None
+        reason, confidence = grouping_meta.get(key, ("unknown", "low"))
         group = ArtifactGroup(
             group_key=key,
             package_name=package_name,
             version_display=version,
             session_stamp=session_stamp,
             artifacts=tuple(members),
+            grouping_reason=reason,
+            grouping_confidence=confidence,
         )
         if predicate and not predicate(group):
             continue
+        if confidence == "low":
+            log.warning(
+                "Low-confidence artifact grouping used; verify split metadata.",
+                category="static",
+                extra={"group_key": key, "grouping_reason": reason},
+            )
         groups.append(group)
 
     groups.sort(
@@ -209,25 +223,27 @@ def group_artifacts(
     return groups
 
 
-def _group_key_for_artifact(artifact: RepositoryArtifact) -> str:
+def _group_key_for_artifact(
+    artifact: RepositoryArtifact,
+) -> tuple[str, str, str]:
     """Return a deterministic grouping key for an artifact."""
 
     if artifact.split_group_id:
         package = artifact.package_name.lower()
         if package:
-            return f"split-{package}-{artifact.split_group_id}"
-        return f"split-{artifact.split_group_id}"
+            return f"split-{package}-{artifact.split_group_id}", "split_group_id", "high"
+        return f"split-{artifact.split_group_id}", "split_group_id", "high"
     if artifact.apk_id:
         package = artifact.package_name.lower()
         if package:
-            return f"apk-{package}-{artifact.apk_id}"
-        return f"apk-{artifact.apk_id}"
+            return f"apk-{package}-{artifact.apk_id}", "apk_id", "high"
+        return f"apk-{artifact.apk_id}", "apk_id", "high"
     if artifact.sha256:
-        return f"sha256-{artifact.sha256}"
+        return f"sha256-{artifact.sha256}", "sha256", "high"
     path_group = _path_prefix_group_key(artifact)
     if path_group:
-        return path_group
-    return f"path-{artifact.display_path}"
+        return path_group, "pathgroup", "low"
+    return f"path-{artifact.display_path}", "path", "low"
 
 
 def _path_prefix_group_key(artifact: RepositoryArtifact) -> str | None:

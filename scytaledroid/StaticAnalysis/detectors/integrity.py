@@ -963,7 +963,9 @@ def _hash_zip_entry(archive: ZipFile, info: ZipInfo) -> str:
     return "#h:" + digest.hexdigest()[:8]
 
 
-def _manifest_hash(root: ElementTree.Element) -> str:
+def _manifest_hash(root: ElementTree.Element | None) -> str:
+    if root is None:
+        return "#h:missing"
     data = ElementTree.tostring(root, encoding="utf-8")
     digest = hashlib.sha256(data).hexdigest()[:8]
     return f"#h:{digest}"

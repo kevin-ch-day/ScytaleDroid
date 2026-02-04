@@ -41,11 +41,19 @@ def index_manifest_permissions(
 
 def manifest_pointer(
     apk_path: Path,
-    element: ElementTree.Element,
+    element: ElementTree.Element | None,
     tag: str,
     index: int,
     permission_name: str,
 ) -> EvidencePointer:
+    if element is None:
+        location = f"{apk_path.resolve().as_posix()}!AndroidManifest.xml:/manifest/{tag}[{index}]"
+        return EvidencePointer(
+            location=location,
+            hash_short="#h:missing",
+            description=permission_name,
+            extra={"tag": tag, "missing": True},
+        )
     location = (
         f"{apk_path.resolve().as_posix()}!AndroidManifest.xml:/manifest/{tag}[{index}]"
     )

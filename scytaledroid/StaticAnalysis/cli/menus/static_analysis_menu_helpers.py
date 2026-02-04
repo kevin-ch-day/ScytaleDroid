@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from functools import lru_cache
 from pathlib import Path
@@ -379,8 +380,12 @@ def render_version_diff(package_name):
 def inject_dev_session_label(params: RunParameters, selection) -> RunParameters:
     if not selection:
         return params
-    short = selection.label.split(".")[-1]
-    return replace(params, session_stamp=f"static-dev-{short}-{make_session_stamp()}")
+    label = selection.label or ""
+    display = label.split(" (", 1)[0].strip() if label else ""
+    if not display:
+        display = label.strip()
+    slug = re.sub(r"[^a-zA-Z0-9]+", "-", display).strip("-").lower() or "app"
+    return replace(params, session_stamp=f"static-{slug}-{make_session_stamp()}")
 
 
 __all__ = [

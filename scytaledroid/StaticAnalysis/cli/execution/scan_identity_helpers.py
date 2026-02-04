@@ -12,6 +12,13 @@ from scytaledroid.DeviceAnalysis.harvest.common import compute_hashes
 from ..core.models import RunParameters
 
 
+def _artifact_identity_label(artifact) -> str:
+    path = getattr(artifact, "display_path", None) or getattr(artifact, "path", None)
+    if path is not None:
+        return f"path={path}"
+    return f"artifact_id={id(artifact)}"
+
+
 def _artifact_sha256(artifact) -> str | None:
     sha = getattr(artifact, "sha256", None)
     if isinstance(sha, str) and sha.strip():
@@ -24,19 +31,36 @@ def _artifact_sha256(artifact) -> str | None:
         return None
 
 
-def _split_name_for_artifact(artifact) -> str | None:
+def _artifact_sha256_with_reason(artifact) -> tuple[str | None, str | None]:
+    sha = getattr(artifact, "sha256", None)
+    if isinstance(sha, str) and sha.strip():
+        return sha.strip(), None
+    try:
+        hashes = compute_hashes(Path(artifact.path))
+        sha = hashes.get("sha256")
+        if isinstance(sha, str) and sha.strip():
+            return sha.strip(), None
+        return None, f"{_artifact_identity_label(artifact)}; missing sha256"
+    except Exception as exc:
+        return None, f"{_artifact_identity_label(artifact)}; hash_error={exc.__class__.__name__}"
+
+
+def _split_name_for_artifact_with_reason(artifact) -> tuple[str | None, str | None]:
     meta = getattr(artifact, "metadata", {}) or {}
     if isinstance(meta, Mapping):
         name = meta.get("split_name") or meta.get("split") or meta.get("artifact")
         if isinstance(name, str) and name.strip():
-            return name.strip().lower()
+            return name.strip().lower(), None
     try:
         stem = Path(artifact.path).stem
     except Exception:
         stem = None
     if isinstance(stem, str) and stem.strip():
-        return stem.strip().lower()
-    return None
+        return stem.strip().lower(), None
+    keys = sorted(str(key) for key in meta.keys()) if isinstance(meta, Mapping) else []
+    keys_text = ",".join(keys[:6])
+    reason = f"{_artifact_identity_label(artifact)}; meta_keys=[{keys_text}]"
+    return None, reason
 
 
 def _compute_run_identity(group) -> dict:
@@ -52,20 +76,23 @@ def _compute_run_identity(group) -> dict:
         identity["identity_error_reason"] = "missing_base_artifact"
         return identity
 
-    base_sha = _artifact_sha256(base)
+    base_sha, base_reason = _artifact_sha256_with_reason(base)
     if not base_sha:
-        identity["identity_error_reason"] = "base_sha256_missing"
+        reason = base_reason or _artifact_identity_label(base)
+        identity["identity_error_reason"] = f"base_sha256_missing:{reason}"
         return identity
 
     entries = []
     for artifact in _dedupe_artifacts(group.artifacts):
-        sha = _artifact_sha256(artifact)
+        sha, sha_reason = _artifact_sha256_with_reason(artifact)
         if not sha:
-            identity["identity_error_reason"] = "artifact_sha256_missing"
+            reason = sha_reason or _artifact_identity_label(artifact)
+            identity["identity_error_reason"] = f"artifact_sha256_missing:{reason}"
             return identity
-        split_name = _split_name_for_artifact(artifact)
+        split_name, split_reason = _split_name_for_artifact_with_reason(artifact)
         if not split_name:
-            identity["identity_error_reason"] = "split_name_missing"
+            reason = split_reason or _artifact_identity_label(artifact)
+            identity["identity_error_reason"] = f"split_name_missing:{reason}"
             return identity
         is_base = artifact == base or not getattr(artifact, "is_split_member", True)
         entries.append({"split_name": split_name, "sha256": sha, "is_base": is_base})
@@ -204,5 +231,5 @@ __all__ = [
     "_dedupe_artifacts",
     "_normalise_digest",
     "_run_signature_sha256",
-    "_split_name_for_artifact",
+    "_split_name_for_artifact_with_reason",
 ]

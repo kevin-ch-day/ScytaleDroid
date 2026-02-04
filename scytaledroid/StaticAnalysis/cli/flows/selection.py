@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -298,6 +299,15 @@ def _resolve_index(prompt: str, labels: Sequence[str]) -> int:
         )
 
 
+def _allow_multiple_latest() -> bool:
+    return os.getenv("SCYTALEDROID_STATIC_ALLOW_MULTI_GROUPS", "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def _select_latest_groups(groups: Sequence[ArtifactGroup]) -> tuple[ArtifactGroup, ...]:
     if not groups:
         return tuple()
@@ -305,16 +315,20 @@ def _select_latest_groups(groups: Sequence[ArtifactGroup]) -> tuple[ArtifactGrou
         return (groups[0],)
 
     best_group = max(groups, key=_group_recency_key)
-    if best_group.session_stamp:
-        contemporaries = [group for group in groups if group.session_stamp == best_group.session_stamp]
+    if _allow_multiple_latest() and best_group.session_stamp:
+        contemporaries = [
+            group for group in groups if group.session_stamp == best_group.session_stamp
+        ]
         if contemporaries:
             return tuple(contemporaries)
 
     best_mtime = _group_latest_mtime(best_group)
-    contemporaries = [
-        group for group in groups if abs(_group_latest_mtime(group) - best_mtime) < 0.0001
-    ]
-    return tuple(contemporaries) if contemporaries else (best_group,)
+    if _allow_multiple_latest():
+        contemporaries = [
+            group for group in groups if abs(_group_latest_mtime(group) - best_mtime) < 0.0001
+        ]
+        return tuple(contemporaries) if contemporaries else (best_group,)
+    return (best_group,)
 
 
 def _group_recency_key(group: ArtifactGroup) -> tuple[int, str, float]:

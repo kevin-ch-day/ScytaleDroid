@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
-from scytaledroid.StaticAnalysis.session import make_session_stamp
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 
 try:  # optional DB access (offline mode)
@@ -109,11 +108,10 @@ def prompt_session_label(params: RunParameters) -> RunParameters:
                 fetch="one",
             )
             if exists:
-                suffix = make_session_stamp()
-                session_stamp = f"{label}-{suffix}"
+                session_stamp = label
                 print(
                     status_messages.status(
-                        f"Session label '{label}' already exists. Using '{session_stamp}' instead.",
+                        f"Session label '{label}' already exists. Reusing it.",
                         level="warn",
                     )
                 )
