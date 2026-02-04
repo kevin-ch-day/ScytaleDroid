@@ -48,7 +48,7 @@ def device_menu(*, return_to: str = "main") -> str:
             last_refresh_ts=last_refresh_ts,
             serial_map=serial_map,
             inventory_metadata=inventory_metadata,
-            context="menu",
+            context=None,
         )
 
         option_keys = [opt.key for opt in build_main_menu_options(active_details)]

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Mapping
 
-from scytaledroid.ui import formatter
 from .diagnostics import compute_inventory_metrics
 
 
@@ -29,85 +28,15 @@ def print_inventory_run_summary_from_result(result) -> None:
     """
     metrics = compute_inventory_metrics(result)
 
-    formatter.print_header("Inventory Sync · RUN SUMMARY")
-    print(
-        formatter.format_kv_block(
-            "[RUN]",
-            {
-                "Snapshot": str(getattr(result, "snapshot_path", "unknown")),
-                "Packages": str(metrics.total_packages),
-                "Split APK packages": str(metrics.split_apk_packages),
-            },
-        )
-    )
-    print()
-    print(
-        formatter.format_kv_block(
-            "[RESULT]",
-            {
-                "Delta vs previous": (
-                    f"new={metrics.delta_new}  removed={metrics.delta_removed}  updated={metrics.delta_updated}"
-                ),
-                "App defs synced": str(getattr(result, "synced_app_definitions", 0)),
-                "Scan duration": metrics.scan_duration,
-            },
-        )
-    )
-    print()
-
     snapshot_id = getattr(result, "snapshot_id", None)
-    expected_rows = getattr(result, "expected_rows", None)
-    persisted_rows = getattr(result, "persisted_rows", None)
-    if snapshot_id is not None and expected_rows is not None and persisted_rows is not None:
-        status = "OK" if expected_rows == persisted_rows else "FAIL"
-        print(
-            formatter.format_kv_block(
-                "[DB]",
-                {
-                    "Snapshot ID": str(snapshot_id),
-                    "Expected rows": str(expected_rows),
-                    "Persisted rows": str(persisted_rows),
-                    "Integrity": status,
-                },
-            )
-        )
-        print()
-
-    if metrics.by_install_source:
-        print("By install source (user apps only)")
-        print("----------------------------------")
-        print(
-            formatter.format_kv_block(
-                "[SRC]",
-                {k: str(v) for k, v in sorted(metrics.by_install_source.items())},
-            )
-        )
-        print()
-
-    if metrics.by_role:
-        print("By role / owner")
-        print("---------------")
-        print(
-            formatter.format_kv_block(
-                "[ROLE]", {k: str(v) for k, v in sorted(metrics.by_role.items())}
-            )
-        )
-        print()
-
-    if metrics.by_partition:
-        print("By partition")
-        print("------------")
-        print(
-            formatter.format_kv_block(
-                "[PART]", {k: str(v) for k, v in sorted(metrics.by_partition.items())}
-            )
-        )
-        print()
-
-    print(
-        formatter.format_kv_block(
-            "[RESULT]",
-            {"User apps (candidates)": str(metrics.user_scope_candidates)},
-        )
+    summary = (
+        f"Inventory sync complete · {metrics.total_packages} packages · "
+        f"snapshot id={snapshot_id if snapshot_id is not None else '—'} · "
+        f"{metrics.scan_duration}"
     )
+    print(f"✔ {summary}")
+    if metrics.delta_new or metrics.delta_removed or metrics.delta_updated:
+        print(
+            f"Delta: new={metrics.delta_new} removed={metrics.delta_removed} updated={metrics.delta_updated}"
+        )
     print()

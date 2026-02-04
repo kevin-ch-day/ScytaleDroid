@@ -80,6 +80,10 @@ def export_dep_json(static_run_id: int) -> str | None:
         "risk_signature",
         "risk_vendor",
         "exports_total",
+        "exports_activities",
+        "exports_services",
+        "exports_receivers",
+        "exports_providers",
         "masvs_total",
         "masvs_pass",
         "masvs_fail",
@@ -143,6 +147,10 @@ def export_dep_json(static_run_id: int) -> str | None:
         },
         "components": {
             "exported_total": payload.get("exports_total"),
+            "exported_activities": payload.get("exports_activities"),
+            "exported_services": payload.get("exports_services"),
+            "exported_receivers": payload.get("exports_receivers"),
+            "exported_providers": payload.get("exports_providers"),
         },
         "masvs": {
             "total": payload.get("masvs_total"),

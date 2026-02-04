@@ -37,6 +37,10 @@ SELECT
   rs.signature AS risk_signature,
   rs.vendor AS risk_vendor,
   mtr.exports_total,
+  mtr.exports_activities,
+  mtr.exports_services,
+  mtr.exports_receivers,
+  mtr.exports_providers,
   masvs.masvs_total,
   masvs.masvs_pass,
   masvs.masvs_fail,
@@ -51,7 +55,11 @@ JOIN apps a ON a.id = av.app_id
 LEFT JOIN (
   SELECT
     run_id,
-    MAX(CASE WHEN feature_key = 'exports.total' THEN value_num ELSE NULL END) AS exports_total
+    MAX(CASE WHEN feature_key = 'exports.total' THEN value_num ELSE NULL END) AS exports_total,
+    MAX(CASE WHEN feature_key = 'exports.activities' THEN value_num ELSE NULL END) AS exports_activities,
+    MAX(CASE WHEN feature_key = 'exports.services' THEN value_num ELSE NULL END) AS exports_services,
+    MAX(CASE WHEN feature_key = 'exports.receivers' THEN value_num ELSE NULL END) AS exports_receivers,
+    MAX(CASE WHEN feature_key = 'exports.providers' THEN value_num ELSE NULL END) AS exports_providers
   FROM metrics
   GROUP BY run_id
 ) mtr ON mtr.run_id = sar.id

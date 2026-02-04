@@ -125,6 +125,18 @@ def devices_hub() -> None:
                     age_display="unknown",
                 )
 
+        if live_count == 1:
+            chosen = summaries[0]
+            serial = chosen.get("serial")
+            if serial and device_service.set_active_serial(serial):
+                log.info(f"Auto-selected active device {serial}", category="device")
+                from scytaledroid.DeviceAnalysis.device_menu import device_menu
+
+                result = device_menu(return_to="main")
+                if str(result).lower() == "main":
+                    return
+                continue
+
         print()
         _render_header(adb_status, live_count)
         print(text_blocks.headline("Devices", width=96))

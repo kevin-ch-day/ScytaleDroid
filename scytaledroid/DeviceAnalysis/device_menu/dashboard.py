@@ -33,6 +33,8 @@ from .formatters import (
     format_device_line,
     format_timestamp_utc,
     format_wifi_state,
+    prettify_manufacturer,
+    prettify_model,
 )
 
 
@@ -81,6 +83,7 @@ def _state_badge(state: Optional[str]) -> str:
 
     normalised = (state or "unknown").strip().upper()
     if normalised in {"DEVICE", "ONLINE"}:
+        normalised = "READY"
         tone = "success"
     elif normalised in {"UNAUTHORIZED", "RECOVERY", "SIDELOAD"}:
         tone = "warning"
@@ -189,13 +192,20 @@ def _device_table_rows(
 ) -> List[Tuple[str, str, str, str, str, str]]:
     rows: List[Tuple[str, str, str, str, str, str]] = []
     for summary in summaries:
-        label = format_device_line(summary)
-        state = _state_badge(summary.get("state"))
+        model = prettify_model(summary.get("model") or summary.get("device"))
+        serial = summary.get("serial") or "Unknown"
+        label = f"{model} ({serial})" if model != "Unknown" else serial
+        device_type = summary.get("device_type")
+        if device_type:
+            label = f"{label} | {device_type}"
+        oem = prettify_manufacturer(summary.get("manufacturer") or summary.get("brand"))
         android = format_android_release(summary)
+        if android.startswith("Android "):
+            android = android.replace("Android ", "", 1)
         battery = format_battery(summary)
         wifi = format_wifi_state(summary.get("wifi_state"))
         root_badge = _root_badge(summary.get("is_rooted"))
-        rows.append((label, state, android, battery, wifi, root_badge))
+        rows.append((label, oem, android, battery, wifi, root_badge))
     return rows
 
 
@@ -380,28 +390,7 @@ def print_dashboard(
     context: Optional[str] = None,
 ) -> None:
     devices_found = len(summaries)
-    connection_status = device_manager.get_connection_status() or "Unknown"
-
-    refreshed = format_timestamp_utc(last_refresh_ts) if last_refresh_ts else "Unknown"
-
-    # Header
-    active_line = None
-    from scytaledroid.Utils.DisplayUtils.terminal import get_terminal_width
-    term_width = get_terminal_width()
-    if active_details:
-        active_line = _active_device_brief(active_details, width=term_width)
-    # Treat presence of active details as connected for header purposes
-    header = _compact_header(
-        refreshed=refreshed,
-        adb_status=(("CONNECTED" if active_details else connection_status) or "").upper(),
-        devices_found=devices_found,
-        active_line=active_line,
-        width=term_width,
-    )
     print()
-    print(header)
-    if context:
-        print(colors.apply(f"Context: {context}", colors.get_palette().hint))
 
     # One-line guidance when disconnected
     if not active_details:
@@ -413,29 +402,32 @@ def print_dashboard(
             line = f"{line} Last seen: {last_seen}"
         print(colors.apply(line, colors.get_palette().hint))
 
-    # Device table
+    # Device table (single row is fine)
     if show_device_table and summaries:
-        print()
-        print(text_blocks.headline("Detected devices", width=74))
         rows = _device_table_rows(summaries)
-        # Promote single device with a left margin indicator
-        if len(rows) == 1 and rows[0]:
-            label, *rest = rows[0]
-            rows[0] = (f"* {label}" if use_ascii_ui() else f"• {label}", *rest)
         table_utils.render_table(
-            ["Device", "State", "Android", "Battery", "Wi-Fi", "Root"],
+            ["Device", "OEM", "Android", "Battery", "Wi-Fi", "Root"],
             rows,
             padding=3,
             accent_first_column=True,
         )
 
-    # Inventory status / deltas for the active device
+    # Inventory status (inline)
     if active_details and inventory_metadata:
-        _render_inventory_status(inventory_metadata)
+        status_label = str(getattr(inventory_metadata, "status_label", "UNKNOWN")).upper()
+        age_display = getattr(inventory_metadata, "age_display", None) or "unknown"
+        pkg_count = getattr(inventory_metadata, "package_count", None)
+        pkg_text = f"{pkg_count}" if isinstance(pkg_count, int) else "—"
+        print()
+        print("Status")
+        print("------" if use_ascii_ui() else "----------------------------")
+        print(f"Inventory: {status_label}")
+        print(f"Last sync: {age_display} ago")
+        print(f"Device Packages: {pkg_text}")
 
     # Device Analysis menu (sequential, no gaps)
     print()
-    menu_utils.print_header("Device Analysis")
+    menu_utils.print_header("Device Actions")
     from .actions import build_main_menu_options
     options = build_main_menu_options(active_details)
     spec = menu_utils.MenuSpec(

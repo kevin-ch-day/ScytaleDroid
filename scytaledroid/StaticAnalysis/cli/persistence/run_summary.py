@@ -1313,10 +1313,21 @@ def persist_run_summary(
     flagged_normal_metric = float(perm_detail_map.get("flagged_normal_count", 0) or 0)
     weak_guard_metric = float(perm_detail_map.get("weak_guard_count", 0) or 0)
 
+    exported = getattr(br, "exported_components", None)
+    exp_total = float(getattr(exported, "total", lambda: 0)()) if exported else 0.0
+    exp_activities = float(len(getattr(exported, "activities", []) or [])) if exported else 0.0
+    exp_services = float(len(getattr(exported, "services", []) or [])) if exported else 0.0
+    exp_receivers = float(len(getattr(exported, "receivers", []) or [])) if exported else 0.0
+    exp_providers = float(len(getattr(exported, "providers", []) or [])) if exported else 0.0
+
     metrics_payload = {
         "network.code_http_hosts": (float(code_http_hosts), None),
         "network.asset_http_hosts": (float(asset_http_hosts), None),
-        "exports.total": (float(getattr(getattr(br, "exported_components", None), "total", lambda: 0)()), None),
+        "exports.total": (exp_total, None),
+        "exports.activities": (exp_activities, None),
+        "exports.services": (exp_services, None),
+        "exports.receivers": (exp_receivers, None),
+        "exports.providers": (exp_providers, None),
         "permissions.dangerous_count": (float(getattr(metrics_bundle, "dangerous_permissions", 0)), None),
         "permissions.signature_count": (float(getattr(metrics_bundle, "signature_permissions", 0)), None),
         "permissions.oem_count": (float(getattr(metrics_bundle, "oem_permissions", 0)), None),

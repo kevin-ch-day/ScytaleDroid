@@ -104,18 +104,18 @@ def build_main_menu_options(
     options: List[menu_utils.MenuOption] = [
         menu_utils.MenuOption(
             "1",
-            "Sync inventory + Pull APKs",
+            "Sync inventory & pull APKs",
             badge=inv_badge or needs_active,
         ),
         menu_utils.MenuOption(
             "2",
-            "Detailed device report",
+            "View device details",
             disabled=not has_device,
             badge=needs_active,
         ),
         menu_utils.MenuOption(
             "3",
-            "Logcat",
+            "View logcat",
             disabled=not has_device,
             badge=needs_active,
         ),
@@ -132,8 +132,8 @@ def build_main_menu_options(
             badge=needs_active,
         ),
         menu_utils.MenuOption("6", "Manage harvest watchlists"),
-        menu_utils.MenuOption("7", "Open APK library (filtered)"),
-        menu_utils.MenuOption("8", "Switch device (devices hub)"),
+        menu_utils.MenuOption("7", "Browse APK library"),
+        menu_utils.MenuOption("8", "Switch device"),
     ]
 
     return options
@@ -423,12 +423,10 @@ def _run_sync_and_pull(active_device: Optional[Dict[str, Optional[str]]]) -> Non
     from scytaledroid.DeviceAnalysis.runtime_flags import set_allow_inventory_fallbacks
 
     try:
-        print(text_blocks.headline("Inventory & database sync", width=70))
-        allow_fallbacks = prompt_utils.prompt_yes_no(
-            "Allow inventory fallback methods if needed? (recommended only for non-root devices)",
-            default=False,
-        )
+        root_state = (active_device or {}).get("is_rooted") or "Unknown"
+        allow_fallbacks = str(root_state).strip().lower() != "yes"
         set_allow_inventory_fallbacks(allow_fallbacks)
+        print()
         inventory_service.run_full_sync(
             serial,
             ui_prefs=None,

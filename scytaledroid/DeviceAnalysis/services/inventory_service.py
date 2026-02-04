@@ -100,13 +100,7 @@ def run_full_sync(
         inventory_logger = None
 
     if resolved_config.allow_fallbacks and progress_sink == "cli":
-        print(
-            status_messages.status(
-                "Inventory fallbacks enabled (explicit opt-in). "
-                "Fallbacks will be logged if invoked.",
-                level="warn",
-            )
-        )
+        print(status_messages.status("Fallbacks enabled (non-root).", level="warn"))
 
     try:
         result = runner.run_full_sync(
@@ -136,12 +130,7 @@ def run_full_sync(
     if progress_sink == "cli":
         views.print_inventory_run_summary_from_result(result)
         if getattr(result, "fallback_used", False):
-            print(
-                status_messages.status(
-                    "Inventory fallback used (allowed by flag). Results may be slower or lower fidelity.",
-                    level="warn",
-                )
-            )
+            print(status_messages.status("Fallbacks used (non-root).", level="warn"))
         # Keep CLI output minimal; follow-on actions are driven by menu flow.
 
     # Emit structured run summary to logs for reproducibility.
