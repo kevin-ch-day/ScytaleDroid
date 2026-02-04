@@ -91,6 +91,10 @@ def _normalize_artifact(entry: Mapping[str, Any], base_path: Path | None) -> Map
     pull_status = entry.get("pull_status")
     if pull_status is None and origin == "device":
         pull_status = "pending"
+    if origin is None and not device_path:
+        origin = "unknown"
+        if pull_status is None:
+            pull_status = "unknown"
     return {
         "artifact_type": artifact_type,
         "host_path": host_path,
@@ -102,7 +106,8 @@ def _normalize_artifact(entry: Mapping[str, Any], base_path: Path | None) -> Map
         "meta_json": entry.get("meta_json"),
         "origin": origin,
         "pull_status": pull_status,
-        "status_reason": entry.get("status_reason"),
+        "status_reason": entry.get("status_reason")
+        or ("manifest_missing_device_path" if origin == "unknown" else None),
     }
 
 

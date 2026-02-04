@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 from collections import Counter
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 
+from scytaledroid.Database.db_utils.artifact_registry import record_artifacts
 from scytaledroid.Utils.DisplayUtils import (
     prompt_utils,
     severity,
@@ -371,6 +374,53 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             message = f"Saved dynamic plan → {dynamic_plan_path.name}"
             if not compact_mode:
                 print(message)
+
+        if persist_enabled and app_result.static_run_id:
+            artifacts: list[dict[str, object]] = []
+            now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+            for path, artifact_type in (
+                (saved_path, "static_baseline_json"),
+                (dynamic_plan_path, "static_dynamic_plan_json"),
+            ):
+                if not path:
+                    continue
+                try:
+                    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+                    artifacts.append(
+                        {
+                            "path": str(path),
+                            "type": artifact_type,
+                            "sha256": digest,
+                            "size_bytes": path.stat().st_size,
+                            "created_at_utc": now,
+                        }
+                    )
+                except Exception:
+                    continue
+            if base_artifact and base_artifact.saved_path:
+                report_path = Path(base_artifact.saved_path)
+                if report_path.exists():
+                    try:
+                        digest = hashlib.sha256(report_path.read_bytes()).hexdigest()
+                        artifacts.append(
+                            {
+                                "path": str(report_path),
+                                "type": "static_report",
+                                "sha256": digest,
+                                "size_bytes": report_path.stat().st_size,
+                                "created_at_utc": now,
+                            }
+                        )
+                    except Exception:
+                        pass
+            if artifacts:
+                record_artifacts(
+                    run_id=str(app_result.static_run_id),
+                    run_type="static",
+                    artifacts=artifacts,
+                    origin="host",
+                    pull_status="n/a",
+                )
 
         if report_reference:
             report_reference_count += 1

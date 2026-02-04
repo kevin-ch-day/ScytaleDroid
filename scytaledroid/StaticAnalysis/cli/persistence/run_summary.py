@@ -1502,6 +1502,17 @@ def _write_static_run_manifest(static_run_id: int) -> None:
 
     run_root = Path("evidence") / "static_runs" / str(static_run_id)
     run_root.mkdir(parents=True, exist_ok=True)
+    manifest_path = run_root / "run_manifest.json"
+    manifest["artifacts"].append(
+        {
+            "path": str(manifest_path),
+            "type": "static_run_manifest",
+            "sha256": None,
+            "size_bytes": None,
+            "created_at_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            "status_reason": "self_reference_unhashed",
+        }
+    )
     dep_path = run_root / "dep.json"
     if dep_path.exists():
         manifest["artifacts"].append(
@@ -1513,7 +1524,47 @@ def _write_static_run_manifest(static_run_id: int) -> None:
                 "created_at_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
             }
         )
-    manifest_path = run_root / "run_manifest.json"
+    try:
+        registry_rows = core_q.run_sql(
+            """
+            SELECT artifact_type, host_path, device_path, origin, pull_status,
+                   sha256, size_bytes, created_at_utc, pulled_at_utc
+            FROM artifact_registry
+            WHERE run_id=%s AND run_type='static'
+            """,
+            (str(static_run_id),),
+            fetch="all",
+        )
+    except Exception:
+        registry_rows = []
+    seen_keys: set[tuple[str, str]] = set()
+    for artifact in manifest.get("artifacts", []):
+        key = (str(artifact.get("type")), str(artifact.get("path")))
+        seen_keys.add(key)
+    for row in registry_rows or []:
+        if not row:
+            continue
+        artifact_type, host_path, device_path, origin, pull_status, sha256, size_bytes, created_at_utc, pulled_at_utc = row
+        path_value = host_path or device_path
+        if not path_value:
+            continue
+        key = (str(artifact_type), str(path_value))
+        if key in seen_keys:
+            continue
+        manifest["artifacts"].append(
+            {
+                "path": str(path_value),
+                "type": str(artifact_type),
+                "sha256": sha256,
+                "size_bytes": size_bytes,
+                "created_at_utc": created_at_utc,
+                "origin": origin,
+                "device_path": device_path,
+                "pull_status": pull_status,
+                "pulled_at_utc": pulled_at_utc,
+            }
+        )
+        seen_keys.add(key)
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True))
     record_artifacts(
         run_id=str(static_run_id),

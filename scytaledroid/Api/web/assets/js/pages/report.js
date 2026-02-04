@@ -11,14 +11,22 @@ async function reportLoad() {
   const params = new URLSearchParams(window.location.search);
   const session = params.get("session");
   const appVersionId = params.get("app_version_id");
+  const reportHashParam = params.get("report_hash");
   let sessionStamp = session;
-  let reportHash = null;
+  let reportHash = reportHashParam || null;
   if (!sessionStamp && appVersionId) {
     try {
       const latest = await apiGet(`/app_version/${appVersionId}/latest_run`);
       if (latest.status === "ok") {
         sessionStamp = latest.session_stamp || null;
         reportHash = latest.report_hash || null;
+        if (!sessionStamp && !reportHash) {
+          setText(
+            "reportStatus",
+            "No report hash or session stamp is available for this app version."
+          );
+          return;
+        }
       } else {
         setText("reportStatus", latest.message || "No completed runs for this app version.");
         return;
@@ -29,7 +37,7 @@ async function reportLoad() {
     }
   }
   if (!sessionStamp && !reportHash) {
-    setText("reportStatus", "Missing session or app_version_id parameter.");
+    setText("reportStatus", "Missing session, report_hash, or app_version_id parameter.");
     return;
   }
   try {

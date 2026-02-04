@@ -288,11 +288,22 @@ def build_api_app() -> FastAPI:
         return {"jobs": [_serialize_job(job) for job in jobs]}
 
     @app.get("/runs")
-    def runs_list(limit: int = 25) -> dict[str, Any]:
+    def runs_list(limit: int = 25, q: str | None = None, profile: str | None = None) -> dict[str, Any]:
         if core_q is None:
             return {"runs": []}
+        where = []
+        params: list[Any] = []
+        if q:
+            where.append("(a.package_name LIKE %s OR a.display_name LIKE %s)")
+            like = f"%{q}%"
+            params.extend([like, like])
+        if profile:
+            where.append("a.profile_key = %s")
+            params.append(profile)
+        clause = f"WHERE {' AND '.join(where)}" if where else ""
+        params.append(limit)
         rows = core_q.run_sql(
-            """
+            f"""
             SELECT sar.session_stamp,
                    sar.status,
                    a.package_name,
@@ -303,10 +314,11 @@ def build_api_app() -> FastAPI:
             FROM static_analysis_runs sar
             JOIN app_versions av ON av.id = sar.app_version_id
             JOIN apps a ON a.id = av.app_id
+            {clause}
             ORDER BY sar.id DESC
             LIMIT %s
             """,
-            (limit,),
+            tuple(params),
             fetch="all",
         )
         runs = [
@@ -324,11 +336,22 @@ def build_api_app() -> FastAPI:
         return {"runs": runs}
 
     @app.get("/apps")
-    def apps_list(limit: int = 25) -> dict[str, Any]:
+    def apps_list(limit: int = 25, q: str | None = None, profile: str | None = None) -> dict[str, Any]:
         if core_q is None:
             return {"apps": []}
+        where = []
+        params: list[Any] = []
+        if q:
+            where.append("(a.package_name LIKE %s OR a.display_name LIKE %s)")
+            like = f"%{q}%"
+            params.extend([like, like])
+        if profile:
+            where.append("a.profile_key = %s")
+            params.append(profile)
+        clause = f"WHERE {' AND '.join(where)}" if where else ""
+        params.append(limit)
         rows = core_q.run_sql(
-            """
+            f"""
             SELECT av.id AS app_version_id,
                    a.package_name,
                    a.display_name,
@@ -349,10 +372,11 @@ def build_api_app() -> FastAPI:
                 GROUP BY app_version_id
               ) x ON x.app_version_id = r1.app_version_id AND x.max_id = r1.id
             ) r ON r.app_version_id = av.id
+            {clause}
             ORDER BY r.ended_at_utc DESC
             LIMIT %s
             """,
-            (limit,),
+            tuple(params),
             fetch="all",
         )
         apps = [
@@ -370,6 +394,22 @@ def build_api_app() -> FastAPI:
             for row in (rows or [])
         ]
         return {"apps": apps}
+
+    @app.get("/profiles")
+    def profile_list() -> dict[str, Any]:
+        if core_q is None:
+            return {"profiles": []}
+        rows = core_q.run_sql(
+            """
+            SELECT DISTINCT profile_key
+            FROM apps
+            WHERE profile_key IS NOT NULL AND profile_key <> ''
+            ORDER BY profile_key
+            """,
+            fetch="all",
+        )
+        profiles = [row[0] for row in (rows or []) if row and row[0]]
+        return {"profiles": profiles}
 
     @app.get("/apps/recent")
     def apps_recent(limit: int = 25) -> dict[str, Any]:
@@ -436,6 +476,8 @@ def build_api_app() -> FastAPI:
             return {"status": "not_found"}
         report_path = _find_report_for_session(row[0]) if row[0] else None
         report_hash = report_path.stem if report_path else None
+        if not report_hash and row[3]:
+            report_hash = str(row[3])
         return {
             "status": "ok",
             "session_stamp": row[0],

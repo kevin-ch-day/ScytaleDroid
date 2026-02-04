@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
@@ -315,7 +316,9 @@ def _evaluate_grade(payload: Mapping[str, Any], pcap_meta: Mapping[str, Any]) ->
     stats = payload.get("telemetry_stats") or {}
     expected = _safe_int(stats.get("expected_samples"))
     captured = _safe_int(stats.get("captured_samples"))
-    if expected and captured is not None:
+    if expected is None or captured is None:
+        reasons.append({"code": "telemetry_stats_missing"})
+    elif expected:
         try:
             ratio = float(captured) / float(expected)
             missingness = 1.0 - ratio
@@ -402,10 +405,27 @@ def _register_manifest_artifacts(dynamic_run_id: str, evidence_path: str | None)
     if not manifest_path.exists():
         return
     try:
+        manifest_digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+        manifest_size = manifest_path.stat().st_size
+    except Exception:
+        manifest_digest = None
+        manifest_size = None
+    try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except Exception:
         return
     artifacts: list[Mapping[str, Any]] = []
+    artifacts.append(
+        {
+            "path": str(manifest_path),
+            "type": "dynamic_run_manifest",
+            "sha256": manifest_digest,
+            "size_bytes": manifest_size,
+            "created_at_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            "origin": "host",
+            "pull_status": "n/a",
+        }
+    )
     artifacts.extend(manifest.get("artifacts") or [])
     artifacts.extend(manifest.get("outputs") or [])
     for observer in manifest.get("observers") or []:
@@ -416,9 +436,7 @@ def _register_manifest_artifacts(dynamic_run_id: str, evidence_path: str | None)
         run_id=dynamic_run_id,
         run_type="dynamic",
         artifacts=artifacts,
-        origin="host",
         base_path=resolved,
-        pull_status="n/a",
     )
 
 

@@ -585,6 +585,25 @@ def _detect_duplicate_packages(results: list[AppRunResult]) -> set[str]:
 def _write_run_map_atomic(session_stamp: str, run_map: dict) -> None:
     session_dir = Path(app_config.DATA_DIR) / "sessions" / session_stamp
     session_dir.mkdir(parents=True, exist_ok=True)
+    final_path = session_dir / "run_map.json"
+    allow_overwrite = os.getenv("SCYTALEDROID_RUN_MAP_OVERWRITE", "1").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if final_path.exists():
+        if not allow_overwrite:
+            raise RuntimeError(
+                f"run_map.json already exists for session {session_stamp}; "
+                "set SCYTALEDROID_RUN_MAP_OVERWRITE=1 to overwrite."
+            )
+        print(
+            status_messages.status(
+                f"Overwriting existing run_map.json for session {session_stamp}.",
+                level="warn",
+            )
+        )
     lock_path = session_dir / ".run_map.lock"
     lock_fd = None
     try:
@@ -595,7 +614,6 @@ def _write_run_map_atomic(session_stamp: str, run_map: dict) -> None:
         ) from exc
     try:
         tmp_path = session_dir / "run_map.json.tmp"
-        final_path = session_dir / "run_map.json"
         payload = json.dumps(run_map, indent=2, sort_keys=True)
         with open(tmp_path, "w", encoding="utf-8") as handle:
             handle.write(payload)
