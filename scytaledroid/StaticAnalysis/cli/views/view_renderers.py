@@ -26,6 +26,8 @@ from ..core.cvss_v4 import score_vector, severity_band
 from .renderers.dynamic_plan import _build_modernization_guidance
 from .renderers.dynamic_plan import build_dynamic_plan, write_baseline_json, write_dynamic_plan_json
 from .renderers.exploratory import render_exploratory_summary
+from .renderers.permissions_payload import permission_payload
+from .renderers.permissions_renderer import render_declared_permissions
 
 _WIDTH = 78
 
@@ -347,24 +349,6 @@ def _export_counts(report: StaticAnalysisReport) -> Mapping[str, int]:
         "services": len(exported.services),
         "receivers": len(exported.receivers),
         "providers": len(exported.providers),
-    }
-
-
-def _permission_payload(report: StaticAnalysisReport) -> Mapping[str, object]:
-    declared = sorted(set(report.permissions.declared))
-    dangerous = sorted(set(report.permissions.dangerous))
-    custom = sorted(set(report.permissions.custom))
-    signature = sorted(set(declared) - set(dangerous) - set(custom))
-    return {
-        "declared": declared,
-        "dangerous": dangerous,
-        "signature": signature,
-        "custom": custom,
-        "counts": {
-            "dangerous": len(dangerous),
-            "signature": len(signature),
-            "custom": len(custom),
-        },
     }
 
 
@@ -1251,7 +1235,7 @@ def render_app_result(
     """Return printable lines, JSON payload, and severity totals."""
 
     exports = _export_counts(report)
-    permissions = _permission_payload(report)
+    permissions = permission_payload(report)
     nsc = _extract_nsc(report)
     rn_payload = _extract_react_native(report)
     string_payload = _normalise_string_data(string_data)
@@ -1303,36 +1287,7 @@ def render_app_result(
     lines.append(counts_line)
 
     lines.append("")
-    lines.append("Permissions (declared)")
-    declared = list(permissions["declared"]) if isinstance(permissions.get("declared"), Sequence) else []
-    counts = permissions["counts"]
-    lines.append(
-        f"  Counts: dangerous={counts['dangerous']}  signature={counts['signature']}  custom={counts['custom']}"
-    )
-    # Compact high-signal preview; full list only when verbose mode is set
-    try:
-        verbose = output_prefs.get().verbose
-    except Exception:
-        verbose = False
-    if declared:
-        # Extract high-signal subset
-        high_keys = {
-            "android.permission.CAMERA",
-            "android.permission.RECORD_AUDIO",
-            "android.permission.READ_CONTACTS",
-            "android.permission.ACCESS_FINE_LOCATION",
-            "android.permission.SYSTEM_ALERT_WINDOW",
-            "android.permission.READ_PHONE_STATE",
-            "android.permission.READ_MEDIA_IMAGES",
-            "android.permission.READ_MEDIA_VIDEO",
-        }
-        top = [name.split(".")[-1] for name in declared if name in high_keys]
-        if top:
-            top_line = ", ".join(sorted(set(top)))
-            lines.append("  High-signal: " + top_line)
-        if verbose:
-            full = ", ".join(declared)
-            lines.extend(_wrap_lines("  " + full, indent=0, subsequent_indent=2))
+    render_declared_permissions(lines, permissions, _wrap_lines, output_prefs)
 
     lines.append("")
     lines.extend(_string_lines(string_payload))

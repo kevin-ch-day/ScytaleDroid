@@ -19,6 +19,7 @@ from .scope_context import (
     build_scope_context,
     collect_exclusion_samples,
     estimated_files,
+    filter_updated_only,
     in_default_scope,
     maybe_str,
     sample_names,
@@ -61,6 +62,7 @@ def select_package_scope(
     watchlist_entries: List[_WatchlistEntry] = context.get("watchlists", [])  # type: ignore[assignment]
 
     default_rows, _ = apply_default_scope(rows, allow)
+    updated_rows, updated_meta = filter_updated_only(rows)
 
     while True:
         status_line = _render_scope_table(rows, device_serial, is_rooted, context, default_rows)
@@ -104,6 +106,14 @@ def select_package_scope(
             files=context["default_counts"].get("files"),
             note="default",
             handler=lambda: _scope_default(rows, allow),
+        )
+        _add_entry(
+            "U",
+            "Updated apps only",
+            packages=len(updated_rows),
+            files=estimated_files(updated_rows),
+            note="updated-only",
+            handler=lambda: _scope_updated_only(rows, updated_rows, updated_meta),
         )
 
         social_rows = profile_key_groups.get("SOCIAL")
@@ -311,6 +321,23 @@ def _scope_default(rows: Sequence[InventoryRow], allow: Set[str]) -> ScopeSelect
         "selected_count": len(selected),
     }
     return ScopeSelection("Play Store & user-installed", selected, "default", metadata)
+
+
+def _scope_updated_only(
+    rows: Sequence[InventoryRow],
+    updated_rows: Sequence[InventoryRow],
+    meta: Dict[str, int],
+) -> ScopeSelection:
+    metadata = {
+        "estimated_files": estimated_files(updated_rows),
+        "candidate_count": len(rows),
+        "selected_count": len(updated_rows),
+        "updated_only": True,
+        "updated_missing_repo": meta.get("missing_repo", 0),
+        "updated_version_mismatch": meta.get("version_mismatch", 0),
+        "updated_version_match": meta.get("version_match", 0),
+    }
+    return ScopeSelection("Updated apps only", list(updated_rows), "updated_only", metadata)
 
 
 def _scope_profiles(

@@ -128,30 +128,6 @@ def export_run_telemetry_csv(
 
 
 def _fetch_manifest_rows() -> list[dict[str, Any]]:
-    has_tier = _dynamic_sessions_has_column("tier")
-    has_netstats = _dynamic_sessions_has_column("netstats_available")
-    has_quality = _dynamic_sessions_has_column("network_signal_quality")
-    has_netstats_rows = _dynamic_sessions_has_column("netstats_rows")
-    has_netstats_missing = _dynamic_sessions_has_column("netstats_missing_rows")
-    has_pcap_relpath = _dynamic_sessions_has_column("pcap_relpath")
-    has_pcap_bytes = _dynamic_sessions_has_column("pcap_bytes")
-    has_pcap_sha256 = _dynamic_sessions_has_column("pcap_sha256")
-    has_pcap_valid = _dynamic_sessions_has_column("pcap_valid")
-    has_pcap_validated = _dynamic_sessions_has_column("pcap_validated_at_utc")
-    tier_select = "ds.tier" if has_tier else "NULL AS tier"
-    netstats_select = "ds.netstats_available" if has_netstats else "NULL AS netstats_available"
-    quality_select = "ds.network_signal_quality" if has_quality else "NULL AS network_signal_quality"
-    netstats_rows_select = "ds.netstats_rows" if has_netstats_rows else "NULL AS netstats_rows"
-    netstats_missing_select = (
-        "ds.netstats_missing_rows" if has_netstats_missing else "NULL AS netstats_missing_rows"
-    )
-    pcap_relpath_select = "ds.pcap_relpath" if has_pcap_relpath else "NULL AS pcap_relpath"
-    pcap_bytes_select = "ds.pcap_bytes" if has_pcap_bytes else "NULL AS pcap_bytes"
-    pcap_sha256_select = "ds.pcap_sha256" if has_pcap_sha256 else "NULL AS pcap_sha256"
-    pcap_valid_select = "ds.pcap_valid" if has_pcap_valid else "NULL AS pcap_valid"
-    pcap_validated_select = (
-        "ds.pcap_validated_at_utc" if has_pcap_validated else "NULL AS pcap_validated_at_utc"
-    )
     sql = f"""
         SELECT
           ds.dynamic_run_id,
@@ -162,27 +138,27 @@ def _fetch_manifest_rows() -> list[dict[str, Any]]:
           ds.artifact_set_hash,
           ds.scenario_id,
           ds.sampling_rate_s,
-          {tier_select},
-          {quality_select},
+          ds.tier,
+          ds.network_signal_quality,
           ds.started_at_utc,
           ds.ended_at_utc,
           ds.duration_seconds,
           ds.sampling_duration_seconds,
           ds.clock_alignment_delta_s,
-          {netstats_select},
+          ds.netstats_available,
           ds.expected_samples,
           ds.captured_samples,
           ds.sample_max_gap_s,
           ds.sample_first_gap_s,
           ds.sample_max_gap_excluding_first_s,
           ds.status,
-          {netstats_rows_select},
-          {netstats_missing_select},
-          {pcap_relpath_select},
-          {pcap_bytes_select},
-          {pcap_sha256_select},
-          {pcap_valid_select},
-          {pcap_validated_select},
+          ds.netstats_rows,
+          ds.netstats_missing_rows,
+          ds.pcap_relpath,
+          ds.pcap_bytes,
+          ds.pcap_sha256,
+          ds.pcap_valid,
+          ds.pcap_validated_at_utc,
           CASE
             WHEN ds.tier IS NULL THEN 'exclude_missing_tier'
             WHEN ds.tier <> 'dataset' THEN 'exclude_non_dataset'
@@ -478,27 +454,6 @@ def _write_csv(path: Path, rows: Iterable[Mapping[str, Any]]) -> None:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0].keys()))
         writer.writeheader()
         writer.writerows(rows)
-
-
-_DYN_SESSIONS_COLUMNS: set[str] | None = None
-
-
-def _dynamic_sessions_has_column(column_name: str) -> bool:
-    global _DYN_SESSIONS_COLUMNS
-    if _DYN_SESSIONS_COLUMNS is None:
-        try:
-            rows = core_q.run_sql(
-                "SELECT column_name FROM information_schema.columns "
-                "WHERE table_schema = DATABASE() AND table_name = 'dynamic_sessions'",
-                fetch="all",
-                dictionary=True,
-            )
-            _DYN_SESSIONS_COLUMNS = {
-                str(row.get("column_name")).lower() for row in rows or [] if row.get("column_name")
-            }
-        except Exception:
-            _DYN_SESSIONS_COLUMNS = set()
-    return column_name.lower() in _DYN_SESSIONS_COLUMNS
 
 
 def _fetch_netstats_totals(run_ids: list[str]) -> dict[str, dict[str, int]]:

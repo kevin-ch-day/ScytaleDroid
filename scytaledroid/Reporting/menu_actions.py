@@ -203,6 +203,19 @@ def preview_report_file(path: Path) -> None:
 def handle_tier1_export_pack() -> None:
     """Export the Tier-1 dataset pack (manifest + telemetry + summary)."""
 
+    from scytaledroid.Database.db_utils import schema_gate
+
+    ok, message, detail = schema_gate.dynamic_schema_gate()
+    if not ok:
+        status_messages.print_status(f"[ERROR] {message}", level="error")
+        if detail:
+            status_messages.print_status(detail, level="error")
+        status_messages.print_status(
+            "Fix: Database Tools → Apply Tier-1 schema migrations (or import canonical DB export), then retry.",
+            level="error",
+        )
+        return
+
     default_dir = Path(app_config.OUTPUT_DIR) / "exports" / "scytaledroid_dyn_v1"
     print(status_messages.status(f"Export directory: {default_dir}", level="info"))
     if not prompt_utils.prompt_yes_no("Generate Tier-1 export pack now?", default=True):

@@ -16,6 +16,8 @@ from scytaledroid.Utils.DisplayUtils.terminal import get_terminal_width
 
 from .sql_helpers import coerce_datetime, scalar, view_exists
 from ..menu_actions import log_db_op
+from ..health_checks import fetch_latest_run, fetch_latest_session
+from ..health_checks.inventory_checks import run_inventory_snapshot_checks
 from ..reset_static import (
     HARVEST_TABLES,
     PROTECTED_TABLES,
@@ -158,8 +160,8 @@ def run_health_checks() -> None:
     print()
     menu_utils.print_header("Data Health Checks")
 
-    latest_run = _fetch_latest_run()
-    latest_session = _fetch_latest_session()
+    latest_run = fetch_latest_run(run_sql)
+    latest_session = fetch_latest_session(run_sql)
 
     if latest_run is None and latest_session is None:
         print(status_messages.status("No runs or summaries recorded yet.", level="warn"))
@@ -375,34 +377,6 @@ def run_evidence_integrity_check() -> None:
         print("permission_audit_snapshots evidence fields not tracked.")
 
     prompt_utils.press_enter_to_continue()
-
-
-def _fetch_latest_run() -> Optional[Dict[str, Any]]:
-    try:
-        return run_sql(
-            "SELECT run_id, package, version_name, target_sdk, ts, session_stamp FROM runs ORDER BY run_id DESC LIMIT 1",
-            fetch="one",
-            dictionary=True,
-        )
-    except Exception as exc:
-        print(status_messages.status(f"Unable to query runs table: {exc}", level="error"))
-        return None
-
-
-def _fetch_latest_session() -> Optional[Dict[str, Any]]:
-    try:
-        return run_sql(
-            """
-            SELECT session_stamp, package_name
-            FROM static_findings_summary
-            ORDER BY created_at DESC
-            LIMIT 1
-            """,
-            fetch="one",
-            dictionary=True,
-        )
-    except Exception:
-        return None
 
 
 def _render_scoring_checks() -> None:
@@ -662,121 +636,16 @@ def _run_inventory_health_check() -> None:
         ) or 0
         latest_is_orphan = latest_rows == 0
 
-    bad_pkg_count = scalar(
-        """
-        SELECT COUNT(*)
-        FROM device_inventory
-        WHERE package_name LIKE '%/%'
-           OR package_name LIKE '%=%'
-           OR package_name LIKE '%base.apk%'
-           OR package_name LIKE '% %'
-        """
-    ) or 0
-
-    case_variants = scalar(
-        """
-        SELECT COUNT(*)
-        FROM (
-            SELECT LOWER(a.package_name) AS pkg_lower,
-                   COUNT(DISTINCT a.package_name) AS variants_in_apps,
-                   COUNT(DISTINCT i.package_name) AS variants_in_inventory
-            FROM apps a
-            LEFT JOIN device_inventory i
-              ON LOWER(i.package_name) = LOWER(a.package_name)
-            GROUP BY LOWER(a.package_name)
-            HAVING COUNT(DISTINCT a.package_name) > 1
-                OR COUNT(DISTINCT i.package_name) > 1
-        ) v
-        """
-    ) or 0
-
-    vendor_misc_remaining = scalar(
-        "SELECT COUNT(*) FROM apps WHERE publisher_key = 'VENDOR_MISC'"
-    ) or 0
-
-    label_is_package = scalar(
-        """
-        SELECT COUNT(*)
-        FROM device_inventory
-        WHERE snapshot_id = %s
-          AND LOWER(CONVERT(app_label USING utf8mb4)) COLLATE utf8mb4_unicode_ci
-              = LOWER(CONVERT(package_name USING utf8mb4)) COLLATE utf8mb4_unicode_ci
-        """,
-        (latest_snapshot_id,),
-    ) if latest_snapshot_id else 0
-
-    label_mismatch = scalar(
-        """
-        SELECT COUNT(*)
-        FROM device_inventory i
-        JOIN apps a
-          ON LOWER(CONVERT(i.package_name USING utf8mb4)) COLLATE utf8mb4_unicode_ci
-             = LOWER(CONVERT(a.package_name USING utf8mb4)) COLLATE utf8mb4_unicode_ci
-        WHERE i.snapshot_id = %s
-          AND i.app_label IS NOT NULL
-          AND i.app_label <> ''
-          AND LOWER(CONVERT(i.app_label USING utf8mb4)) COLLATE utf8mb4_unicode_ci
-              <> LOWER(CONVERT(a.display_name USING utf8mb4)) COLLATE utf8mb4_unicode_ci
-        """,
-        (latest_snapshot_id,),
-    ) if latest_snapshot_id else 0
-
-    if snapshot_headers_total:
-        non_latest_orphans = orphan_headers - (1 if latest_is_orphan else 0)
-        if latest_snapshot_id and latest_rows == latest_expected and latest_expected:
-            level = "ok" if orphan_headers == 0 else "warn"
-        else:
-            level = "fail" if orphan_headers else "warn"
-        _print_status_line(
-            level,
-            "inventory snapshots",
-            detail=(
-                f"headers={snapshot_headers_total} orphaned={orphan_headers} "
-                f"non_latest_orphans={max(non_latest_orphans, 0)}"
-            ),
-        )
-    else:
-        _print_status_line("warn", "inventory snapshots", detail="no snapshots recorded")
-
-    if latest_snapshot_id:
-        level = "ok" if latest_rows == latest_expected and latest_expected else "fail"
-        _print_status_line(
-            level,
-            "latest snapshot row count",
-            detail=f"id={latest_snapshot_id} rows={latest_rows} expected={latest_expected}",
-        )
-    else:
-        _print_status_line("warn", "latest snapshot", detail="no snapshot headers recorded")
-
-    _print_status_line(
-        "ok" if bad_pkg_count == 0 else "warn",
-        "suspicious package_name",
-        detail=str(bad_pkg_count),
+    run_inventory_snapshot_checks(
+        scalar=scalar,
+        latest_snapshot_id=latest_snapshot_id,
+        snapshot_headers_total=snapshot_headers_total,
+        orphan_headers=orphan_headers,
+        latest_is_orphan=latest_is_orphan,
+        latest_rows=latest_rows,
+        latest_expected=latest_expected,
+        print_status_line=_print_status_line,
     )
-
-    _print_status_line(
-        "ok" if case_variants == 0 else "warn",
-        "case drift (apps ↔ inventory)",
-        detail=str(case_variants),
-    )
-
-    _print_status_line(
-        "ok" if vendor_misc_remaining == 0 else "warn",
-        "vendor_misc publishers",
-        detail=str(vendor_misc_remaining),
-    )
-
-    if latest_snapshot_id:
-        _print_status_line(
-            "ok" if label_is_package == 0 else "warn",
-            "inventory labels equal package",
-            detail=str(label_is_package),
-        )
-        _print_status_line(
-            "ok" if label_mismatch == 0 else "warn",
-            "inventory label mismatch vs apps",
-            detail=str(label_mismatch),
-        )
 
 
 def prompt_reset_static_data() -> None:

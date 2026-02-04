@@ -290,6 +290,74 @@ def estimated_files(rows: Sequence[InventoryRow]) -> int:
     return total
 
 
+def _safe_int(value: object | None) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _fetch_latest_harvest_versions(package_names: Sequence[str]) -> Dict[str, Dict[str, object]]:
+    if not package_names:
+        return {}
+    placeholders = ", ".join(["%s"] * len(package_names))
+    query = (
+        "SELECT package_name, MAX(CAST(version_code AS UNSIGNED)) AS latest_version_code, "
+        "MAX(version_name) AS latest_version_name "
+        "FROM android_apk_repository "
+        f"WHERE package_name IN ({placeholders}) "
+        "GROUP BY package_name"
+    )
+    rows = db_queries.run_sql(query, tuple(package_names), fetch="all", dictionary=True) or []
+    mapping: Dict[str, Dict[str, object]] = {}
+    for row in rows:
+        pkg = maybe_str(row.get("package_name"))
+        if not pkg:
+            continue
+        mapping[pkg] = {
+            "version_code": _safe_int(row.get("latest_version_code")),
+            "version_name": maybe_str(row.get("latest_version_name")),
+        }
+    return mapping
+
+
+def filter_updated_only(rows: Sequence[InventoryRow]) -> tuple[list[InventoryRow], Dict[str, int]]:
+    """Return rows with new or updated versions compared to repository."""
+    package_names = [row.package_name for row in rows]
+    latest = _fetch_latest_harvest_versions(package_names)
+    filtered: list[InventoryRow] = []
+    meta = {
+        "missing_repo": 0,
+        "version_mismatch": 0,
+        "version_match": 0,
+    }
+    for row in rows:
+        entry = latest.get(row.package_name)
+        if not entry:
+            filtered.append(row)
+            meta["missing_repo"] += 1
+            continue
+        inv_code = _safe_int(row.version_code)
+        latest_code = entry.get("version_code")
+        if inv_code is not None and latest_code is not None:
+            if inv_code > latest_code:
+                filtered.append(row)
+                meta["version_mismatch"] += 1
+            else:
+                meta["version_match"] += 1
+            continue
+        inv_name = row.version_name
+        latest_name = entry.get("version_name")
+        if inv_name and latest_name and inv_name != latest_name:
+            filtered.append(row)
+            meta["version_mismatch"] += 1
+        else:
+            meta["version_match"] += 1
+    return filtered, meta
+
+
 def sample_names(rows: Sequence[InventoryRow], limit: int = 3) -> List[str]:
     names: List[str] = []
     for row in rows:

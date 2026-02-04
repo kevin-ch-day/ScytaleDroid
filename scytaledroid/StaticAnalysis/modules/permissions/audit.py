@@ -22,102 +22,7 @@ from scytaledroid.Utils.ops.operation_result import OperationResult
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.LoggingUtils import logging_engine
 from scytaledroid.Utils.evidence_store import filesystem_safe_slug
-
-
-_SIGNAL_OBSERVATION_CONFIG: Mapping[str, Dict[str, object]] = {
-    "sms": {
-        "severity_band": "WARN",
-        "score": 8,
-        "rationale": "SMS permissions requested.",
-        "permissions": (
-            "READ_SMS",
-            "SEND_SMS",
-            "RECEIVE_SMS",
-            "RECEIVE_MMS",
-            "RECEIVE_WAP_PUSH",
-            "READ_CELL_BROADCASTS",
-        ),
-    },
-    "calls": {
-        "severity_band": "WARN",
-        "score": 6,
-        "rationale": "Call log or phone permissions requested.",
-        "permissions": (
-            "READ_CALL_LOG",
-            "WRITE_CALL_LOG",
-            "CALL_PHONE",
-            "READ_PHONE_STATE",
-            "PROCESS_OUTGOING_CALLS",
-            "ANSWER_PHONE_CALLS",
-        ),
-    },
-    "contacts": {
-        "severity_band": "WARN",
-        "score": 6,
-        "rationale": "Contacts permissions requested.",
-        "permissions": ("READ_CONTACTS", "WRITE_CONTACTS", "GET_ACCOUNTS"),
-    },
-    "calendar": {
-        "severity_band": "WARN",
-        "score": 5,
-        "rationale": "Calendar permissions requested.",
-        "permissions": ("READ_CALENDAR", "WRITE_CALENDAR"),
-    },
-    "sensors": {
-        "severity_band": "WARN",
-        "score": 6,
-        "rationale": "Body sensors or health data permissions requested.",
-        "permissions": ("BODY_SENSORS", "BODY_SENSORS_BACKGROUND", "HEALTH_CONNECT"),
-    },
-    "activity_recognition": {
-        "severity_band": "WARN",
-        "score": 5,
-        "rationale": "Activity recognition permission requested.",
-        "permissions": ("ACTIVITY_RECOGNITION",),
-    },
-    "background_location": {
-        "severity_band": "WARN",
-        "score": 7,
-        "rationale": "Background location requested.",
-        "permissions": ("ACCESS_BACKGROUND_LOCATION",),
-    },
-    "storage_broad": {
-        "severity_band": "WARN",
-        "score": 6,
-        "rationale": "Broad external storage access requested.",
-        "permissions": ("READ_EXTERNAL_STORAGE", "WRITE_EXTERNAL_STORAGE", "MANAGE_EXTERNAL_STORAGE"),
-    },
-    "overlay": {
-        "severity_band": "WARN",
-        "score": 5,
-        "rationale": "System overlay permission requested.",
-        "permissions": ("SYSTEM_ALERT_WINDOW",),
-    },
-    "accessibility_binding": {
-        "severity_band": "FAIL",
-        "score": 9,
-        "rationale": "Accessibility service binding requested.",
-        "permissions": ("BIND_ACCESSIBILITY_SERVICE",),
-    },
-    "query_all_packages": {
-        "severity_band": "WARN",
-        "score": 5,
-        "rationale": "QUERY_ALL_PACKAGES requested.",
-        "permissions": ("QUERY_ALL_PACKAGES",),
-    },
-    "usage_stats": {
-        "severity_band": "WARN",
-        "score": 5,
-        "rationale": "Usage stats access requested.",
-        "permissions": ("PACKAGE_USAGE_STATS",),
-    },
-    "ads_attr": {
-        "severity_band": "INFO",
-        "score": 2,
-        "rationale": "Advertising ID / attribution permission requested.",
-        "permissions": ("ACCESS_ADSERVICES_AD_ID", "com.google.android.gms.permission.AD_ID"),
-    },
-}
+from .signal_evidence import persist_signal_observations
 
 
 @dataclass
@@ -257,33 +162,6 @@ def _combo_definitions() -> Mapping[str, Any]:
         "camera_plus_mic": lambda g: g.get("CAM", 0) >= 1 and g.get("MIC", 0) >= 1,
         "contacts_plus_sms": lambda g: g.get("CNT", 0) >= 1 and g.get("SMS", 0) >= 1,
     }
-
-
-def _normalize_perm_token(value: str) -> str:
-    token = str(value or "").strip()
-    if not token:
-        return ""
-    if token.startswith("android.permission."):
-        return token.split(".", maxsplit=2)[-1]
-    return token
-
-
-def _match_permissions(
-    declared: Sequence[str],
-    candidates: Sequence[str],
-) -> list[str]:
-    if not declared:
-        return []
-    normalized = {perm: _normalize_perm_token(perm).upper() for perm in declared}
-    candidate_set = {str(candidate).upper() for candidate in candidates}
-    matches = [perm for perm, short in normalized.items() if short in candidate_set]
-    if "AD_ID" in candidate_set:
-        matches.extend(
-            perm
-            for perm in declared
-            if "AD_ID" in perm.upper() and perm not in matches
-        )
-    return matches
 
 
 def _pearson(values_a: Sequence[float], values_b: Sequence[float]) -> float:
@@ -1092,113 +970,13 @@ class PermissionAuditAccumulator:
                         continue
 
                     if app_static_run_id is not None:
-                        for signal_key, meta in _SIGNAL_OBSERVATION_CONFIG.items():
-                            if not app.signals.get(signal_key, False):
-                                continue
-                            rule = dict(meta)
-                            perms = rule.get("trigger_permissions") or []
-                            primary = rule.get("primary_permission")
-                            severity = rule.get("severity_band") or "INFO"
-                            score = int(rule.get("score") or 0)
-                            rationale = rule.get("rationale") or ""
-                            evidence_path = None
-                            trigger_permissions: tuple[str, ...] = ()
-                            if evidence_base and app.package:
-                                candidates = tuple(meta.get("permissions") or perms or ())
-                                trigger_permissions = _match_permissions(
-                                    app.declared_permissions, candidates
-                                )
-                                artifact_token = f"run_{app_static_run_id}"
-                                try:
-                                    row = core_q.run_sql(
-                                        "SELECT sha256 FROM static_analysis_runs WHERE id=%s",
-                                        (app_static_run_id,),
-                                        fetch="one",
-                                    )
-                                    if row and row[0]:
-                                        artifact_token = str(row[0])
-                                except Exception:
-                                    pass
-                                signal_dir = (
-                                    evidence_base
-                                    / str(app_static_run_id)
-                                    / app.package
-                                    / artifact_token
-                                )
-                                try:
-                                    signal_dir.mkdir(parents=True, exist_ok=True)
-                                except Exception:
-                                    log.warning(
-                                        f"Failed to create signal evidence folder for {app.package}",
-                                        category="db",
-                                    )
-                                    signal_dir = None
-                                if signal_dir:
-                                    signal_file = signal_dir / f"signal_{signal_key}.json"
-                                    try:
-                                        signal_payload = {
-                                            "static_run_id": app_static_run_id,
-                                            "package_name": app.package,
-                                            "signal_key": signal_key,
-                                            "severity_band": severity,
-                                            "score": score,
-                                            "trigger_permissions": list(trigger_permissions or ()),
-                                            "rationale": rationale,
-                                        }
-                                        signal_file.write_text(
-                                            json.dumps(signal_payload, ensure_ascii=True, indent=2),
-                                            encoding="utf-8",
-                                        )
-                                        evidence_path = str(
-                                            Path("evidence")
-                                            / "static_runs"
-                                            / str(app_static_run_id)
-                                            / app.package
-                                            / artifact_token
-                                            / signal_file.name
-                                        )
-                                    except Exception:
-                                        log.warning(
-                                            f"Failed to write signal evidence for {app.package} ({signal_key})",
-                                            category="db",
-                                        )
-
-                            payload = {
-                                "static_run_id": app_static_run_id,
-                                "package_name": app.package,
-                                "signal_key": signal_key,
-                                "severity_band": severity,
-                                "score": score,
-                                "trigger_permissions_json": json.dumps(trigger_permissions or perms),
-                                "primary_permission": primary,
-                                "rationale": rationale,
-                                "evidence_path": evidence_path,
-                            }
-                            columns = ", ".join(payload.keys())
-                            placeholders = ", ".join([f"%({key})s" for key in payload])
-                            updates = ", ".join(
-                                f"{key}=VALUES({key})"
-                                for key in payload.keys()
-                                if key not in {"static_run_id", "package_name", "signal_key"}
-                            )
-                            sql = (
-                                "INSERT INTO permission_signal_observations ("
-                                + columns
-                                + ") VALUES ("
-                                + placeholders
-                                + ")"
-                                + (" ON DUPLICATE KEY UPDATE " + updates if updates else "")
-                            )
-                            try:
-                                core_q.run_sql(sql, payload)
-                            except Exception:
-                                if not signal_write_failed:
-                                    log.warning(
-                                        "Failed to persist permission signal observations.",
-                                        category="db",
-                                    )
-                                signal_write_failed = True
-                                continue
+                        persist_signal_observations(
+                            core_q=core_q,
+                            log=log,
+                            evidence_base=evidence_base,
+                            app=app,
+                            app_static_run_id=app_static_run_id,
+                        )
 
 
                 try:

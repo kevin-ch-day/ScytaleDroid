@@ -340,6 +340,50 @@ def render_harvest_summary(
 
     quiet_mode = _harvest_quiet_mode()
 
+    if simple_mode:
+        print()
+        status = "success"
+        if metrics.packages_failed or metrics.packages_with_partial_errors:
+            status = "partial"
+        print(status_messages.status(f"status: {status}", level="success" if status == "success" else "warn"))
+        print(
+            status_messages.status(
+                (
+                    "packages: "
+                    f"{metrics.total_packages} "
+                    f"(clean={metrics.packages_successful} "
+                    f"partial={metrics.packages_with_partial_errors} "
+                    f"failed={metrics.packages_failed})"
+                ),
+                level="info",
+            )
+        )
+        print(
+            status_messages.status(
+                (
+                    "artifacts: "
+                    f"{metrics.planned_artifacts} planned / "
+                    f"{metrics.artifacts_written} written / "
+                    f"{metrics.artifacts_failed} failed"
+                ),
+                level="info",
+            )
+        )
+        output_root = _run_output_root(harvest_result)
+        if output_root:
+            print(status_messages.status(f"output: {output_root}", level="info"))
+        if metadata.get("delta_filter_applied"):
+            delta_total = metadata.get("delta_filter_total")
+            delta_matched = metadata.get("delta_filter_matched")
+            parts: list[str] = []
+            if delta_total is not None:
+                parts.append(f"changed={delta_total}")
+            if delta_matched is not None:
+                parts.append(f"matched_in_scope={delta_matched}")
+            detail = f" ({', '.join(parts)})" if parts else ""
+            print(status_messages.status(f"delta: applied{detail}", level="info"))
+        return
+
     if not simple_mode:
         print(text_blocks.boxed(summary_lines, width=70))
 
@@ -430,37 +474,6 @@ def render_harvest_summary(
             )
         )
         _print_package_delta_summary(delta_summary)
-
-    if simple_mode:
-        print()
-        print(status_messages.status("APK Harvest complete ✓", level="success"))
-        print(
-            status_messages.status(
-                (
-                    "packages: "
-                    f"{metrics.total_packages} "
-                    f"(clean={metrics.packages_successful} "
-                    f"partial={metrics.packages_with_partial_errors} "
-                    f"failed={metrics.packages_failed})"
-                ),
-                level="info",
-            )
-        )
-        print(
-            status_messages.status(
-                f"artifacts: {metrics.artifacts_written}/{metrics.planned_artifacts} written",
-                level="info",
-            )
-        )
-        if output_root:
-            print(status_messages.status(f"output: {output_root}", level="info"))
-        print(
-            status_messages.status(
-                "next: Static Analysis → Run on harvested APKs",
-                level="info",
-            )
-        )
-        return
 
     # Structured forensic-style summary (non-boxed) for transcripts/screenshots.
     if not quiet_mode:
@@ -752,6 +765,7 @@ __all__ = [
     "print_package_result",
     "render_harvest_summary",
     "render_plan_summary",
+    "is_harvest_simple_mode",
 ]
 
 
@@ -992,6 +1006,10 @@ def _harvest_simple_mode() -> bool:
         "yes",
         "on",
     }
+
+
+def is_harvest_simple_mode() -> bool:
+    return _harvest_simple_mode()
 
 
 
