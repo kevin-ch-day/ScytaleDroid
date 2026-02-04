@@ -25,11 +25,11 @@ from .inventory_guard import ensure_recent_inventory
 
 # Keep menu routing aligned with handle_choice to avoid accidental swaps in the CLI.
 _HELPER_ROUTES = {
-    "2": ("inventory", "run_device_summary", True, "Collect detailed device summary"),
-    "3": ("logcat", "stream_logcat", True, "Stream logcat output"),
-    "4": ("shell", "open_shell", True, "Open interactive adb shell"),
-    "5": ("report", "generate_device_report", True, "Export the device dossier"),
-    "6": ("watchlist_manager", "manage_watchlists", False, "Manage harvest watchlists"),
+    "3": ("inventory", "run_device_summary", True, "Collect detailed device summary"),
+    "4": ("logcat", "stream_logcat", True, "Stream logcat output"),
+    "5": ("shell", "open_shell", True, "Open interactive adb shell"),
+    "6": ("report", "generate_device_report", True, "Export the device dossier"),
+    "7": ("watchlist_manager", "manage_watchlists", False, "Manage harvest watchlists"),
 }
 
 
@@ -40,16 +40,18 @@ def handle_choice(
     active_device: dict[str, str | None | None],
     active_details: dict[str, str | None | None],
 ) -> bool:
-    if choice == "8":
+    if choice == "9":
         # Jump to the full devices hub for consistent list/switch UX.
         from scytaledroid.DeviceAnalysis.device_hub_menu import devices_hub
 
         devices_hub()
     elif choice == "1":
-        _run_sync_and_pull(active_device)
-    elif choice in {"2", "3", "4", "5", "6"}:
+        _run_inventory_sync(active_device)
+    elif choice == "2":
+        _run_apk_pull(active_device, auto_scope=True)
+    elif choice in {"3", "4", "5", "6", "7"}:
         _forward_to_helper(choice, active_device)
-    elif choice == "7":
+    elif choice == "8":
         _open_apk_library_filtered(active_device)
     else:
         error_panels.print_error_panel(
@@ -86,36 +88,42 @@ def build_main_menu_options(
     options: list[menu_utils.MenuOption] = [
         menu_utils.MenuOption(
             "1",
-            "Sync inventory & pull APKs",
+            "Sync inventory",
             badge=inv_badge or needs_active,
         ),
         menu_utils.MenuOption(
             "2",
-            "View device details",
+            "Pull APKs",
             disabled=not has_device,
             badge=needs_active,
         ),
         menu_utils.MenuOption(
             "3",
-            "View logcat",
+            "View device details",
             disabled=not has_device,
             badge=needs_active,
         ),
         menu_utils.MenuOption(
             "4",
-            "Open ADB shell",
+            "View logcat",
             disabled=not has_device,
             badge=needs_active,
         ),
         menu_utils.MenuOption(
             "5",
+            "Open ADB shell",
+            disabled=not has_device,
+            badge=needs_active,
+        ),
+        menu_utils.MenuOption(
+            "6",
             "Export device dossier",
             disabled=not has_device,
             badge=needs_active,
         ),
-        menu_utils.MenuOption("6", "Manage harvest watchlists"),
-        menu_utils.MenuOption("7", "Browse APK library"),
-        menu_utils.MenuOption("8", "Switch device"),
+        menu_utils.MenuOption("7", "Manage harvest watchlists"),
+        menu_utils.MenuOption("8", "Browse APK library"),
+        menu_utils.MenuOption("9", "Switch device"),
     ]
 
     return options
@@ -285,9 +293,12 @@ def _run_apk_pull(
         from scytaledroid.DeviceAnalysis.services import inventory_service
         try:
             inventory_service.run_full_sync(serial=serial, ui_prefs=text_blocks.UI_PREFS)
+            status = device_service.fetch_inventory_metadata(serial)
         except Exception as exc:
             print(status_messages.status(f"Inventory sync failed: {exc}", level="error"))
-        return
+            return
+        if status is None or status.status_label.upper() == "NONE":
+            return
     # Detect change vs snapshot (if metadata carries change flags) or age-based staleness
     # Defer change-based gating to inventory_guard to avoid duplicate/noisy prompts.
     changed = False
@@ -391,11 +402,11 @@ def _run_apk_pull(
         prompt_utils.press_enter_to_continue()
 
 
-def _run_sync_and_pull(active_device: dict[str, str | None | None]) -> None:
+def _run_inventory_sync(active_device: dict[str, str | None | None]) -> None:
     serial = active_device.get("serial") if active_device else device_manager.get_active_serial()
     if not serial:
         error_panels.print_error_panel(
-            "Sync + Pull APKs",
+            "Inventory Sync",
             "No active device. Connect first to sync.",
         )
         prompt_utils.press_enter_to_continue()
@@ -403,6 +414,19 @@ def _run_sync_and_pull(active_device: dict[str, str | None | None]) -> None:
 
     from scytaledroid.DeviceAnalysis.runtime_flags import set_allow_inventory_fallbacks
     from scytaledroid.DeviceAnalysis.services import inventory_service
+
+    status = device_service.fetch_inventory_metadata(serial)
+    if status and status.status_label.upper() == "FRESH" and not status.is_stale:
+        response = prompt_utils.prompt_text(
+            "Inventory is fresh. Press F to force sync, or Enter to return",
+            required=False,
+            default="",
+        ).strip()
+        if not response:
+            return
+        if response.lower() != "f":
+            print(status_messages.status("Sync cancelled (fresh inventory).", level="info"))
+            return
 
     try:
         root_state = (active_device or {}).get("is_rooted") or "Unknown"
@@ -422,8 +446,5 @@ def _run_sync_and_pull(active_device: dict[str, str | None | None]) -> None:
         )
         prompt_utils.press_enter_to_continue()
         return
-
-    _run_apk_pull(active_device, auto_scope=True)
-
 
 __all__ = ["handle_choice", "build_main_menu_options"]

@@ -232,6 +232,8 @@ def execute_harvest(
                 stats=stats,
                 package_index=index,
                 package_total=total,
+                display_index=current_display_index,
+                display_total=display_total,
             )
     except Exception as exc:
         run_failed = True
@@ -771,17 +773,22 @@ def _maybe_print_progress(
     stats: Mapping[str, int],
     package_index: int,
     package_total: int,
+    *,
+    display_index: int | None = None,
+    display_total: int | None = None,
 ) -> None:
     if not _quiet_mode():
         return
-    if package_total <= 0:
+    total = display_total if isinstance(display_total, int) and display_total > 0 else package_total
+    index = display_index if isinstance(display_index, int) and display_index > 0 else package_index
+    if total <= 0:
         return
     if result.errors:
-        _print_progress_line(result, stats, package_index, package_total, force=True)
+        _print_progress_line(result, stats, index, total, force=True)
         return
     every = _progress_every()
-    if package_index % every == 0 or package_index == package_total:
-        _print_progress_line(result, stats, package_index, package_total, force=False)
+    if index % every == 0 or index == total:
+        _print_progress_line(result, stats, index, total, force=False)
 
 
 def _print_progress_line(

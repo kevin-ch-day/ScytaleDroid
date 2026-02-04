@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core import run_sql
 from scytaledroid.DeviceAnalysis import adb_shell, adb_status
 from scytaledroid.DynamicAnalysis import plan_selection as _plan_selection

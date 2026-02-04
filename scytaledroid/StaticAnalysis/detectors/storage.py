@@ -15,7 +15,7 @@ from ..core.findings import (
     MasvsCategory,
     SeverityLevel,
 )
-from ..core.pipeline import make_detector_result
+from ..core.results_builder import make_detector_result
 from .base import BaseDetector, register_detector
 
 _SENSITIVE_KEY = re.compile(r"(token|secret|auth|session|cookie|credential)", re.IGNORECASE)

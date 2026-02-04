@@ -14,7 +14,7 @@ from ..core.findings import (
     MasvsCategory,
     SeverityLevel,
 )
-from ..core.pipeline import make_detector_result
+from ..core.results_builder import make_detector_result
 from .base import BaseDetector, register_detector
 
 _RN_LIB_MARKERS = (

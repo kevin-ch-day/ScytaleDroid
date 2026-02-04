@@ -49,42 +49,7 @@ def select_package_scope(
 
     if not rows:
         print(status_messages.status("No inventory data available for harvest.", level="warn"))
-    return None
-
-
-def select_package_scope_auto(
-    rows: Sequence[InventoryRow],
-    *,
-    device_serial: str,
-    is_rooted: bool,
-    google_allowlist: Iterable[str | None] = None,
-) -> ScopeSelection | None:
-    """Select a smart default scope without prompting (updated-only when possible)."""
-    if not rows:
-        print(status_messages.status("No inventory data available for harvest.", level="warn"))
         return None
-
-    allow = set(google_allowlist or rules.GOOGLE_ALLOWLIST)
-    updated_rows, updated_meta = filter_updated_only(rows)
-
-    if updated_rows:
-        selection = _scope_updated_only(rows, updated_rows, updated_meta)
-        selection.metadata["auto_scope_reason"] = "updated_only"
-        return selection
-
-    if _LAST_SCOPE is not None:
-        selection = ScopeSelection(
-            label=_LAST_SCOPE.label,
-            packages=list(_LAST_SCOPE.packages),
-            kind=_LAST_SCOPE.kind,
-            metadata=dict(_LAST_SCOPE.metadata),
-        )
-        selection.metadata["auto_scope_reason"] = "last_scope"
-        return selection
-
-    selection = _scope_default(rows, allow)
-    selection.metadata["auto_scope_reason"] = "default_scope"
-    return selection
 
     allow = set(google_allowlist or rules.GOOGLE_ALLOWLIST)
     context = build_scope_context(rows, allow)
@@ -97,7 +62,7 @@ def select_package_scope_auto(
     updated_rows, updated_meta = filter_updated_only(rows)
 
     while True:
-        status_line = _render_scope_table(rows, device_serial, is_rooted, context, default_rows)
+        _render_scope_table(rows, device_serial, is_rooted, context, default_rows)
 
         option_handlers: dict[str, Callable[[], ScopeSelection | None]] = {}
         entries: list[dict[str, object]] = []
@@ -275,7 +240,7 @@ def select_package_scope_auto(
             table_rows.append([key, label, pkg_cell, files_cell, note])
 
         table_utils.render_table(headers, table_rows, compact=True)
-        print(status_line)
+        print("0 back")
 
         choice = prompt_utils.get_choice(
             [str(entry["key"]) for entry in entries] + ["0"],
@@ -300,6 +265,41 @@ def select_package_scope_auto(
         return selection
 
 
+def select_package_scope_auto(
+    rows: Sequence[InventoryRow],
+    *,
+    device_serial: str,
+    is_rooted: bool,
+    google_allowlist: Iterable[str | None] = None,
+) -> ScopeSelection | None:
+    """Select a smart default scope without prompting (updated-only when possible)."""
+    if not rows:
+        print(status_messages.status("No inventory data available for harvest.", level="warn"))
+        return None
+
+    allow = set(google_allowlist or rules.GOOGLE_ALLOWLIST)
+    updated_rows, updated_meta = filter_updated_only(rows)
+
+    if updated_rows:
+        selection = _scope_updated_only(rows, updated_rows, updated_meta)
+        selection.metadata["auto_scope_reason"] = "updated_only"
+        return selection
+
+    if _LAST_SCOPE is not None:
+        selection = ScopeSelection(
+            label=_LAST_SCOPE.label,
+            packages=list(_LAST_SCOPE.packages),
+            kind=_LAST_SCOPE.kind,
+            metadata=dict(_LAST_SCOPE.metadata),
+        )
+        selection.metadata["auto_scope_reason"] = "last_scope"
+        return selection
+
+    selection = _scope_default(rows, allow)
+    selection.metadata["auto_scope_reason"] = "default_scope"
+    return selection
+
+
 def _render_scope_table(
     rows: Sequence[InventoryRow],
     device_serial: str,
@@ -308,19 +308,19 @@ def _render_scope_table(
     default_rows: Sequence[InventoryRow],
 ) -> None:
     mode_label = "root" if is_rooted else "non-root"
-    print(f"Pull APKs · Scope ({device_serial} • {mode_label})")
-    print("-" * 86)
+    print("Pull APKs")
+    print(f"Device ({device_serial} • {mode_label})")
     candidates = len(rows)
     eligible = candidates if is_rooted else sum(
         1 for row in rows if rules.is_user_path(row.primary_path)
     )
     blocked = max(candidates - eligible, 0)
     policy = "none" if is_rooted else "non_root_paths"
-    status = (
+    print(
         f"Status: candidates {candidates} | eligible (policy) {eligible} | "
-        f"blocked {blocked} | policy {policy}   [0] back"
+        f"blocked {blocked} | policy {policy}"
     )
-    return status
+    print("-" * 86)
 
 
 def _format_rerun_label(selection: ScopeSelection) -> str:

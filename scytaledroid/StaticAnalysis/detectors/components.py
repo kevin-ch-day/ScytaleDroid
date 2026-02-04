@@ -17,7 +17,7 @@ from ..core.findings import (
     MasvsCategory,
     SeverityLevel,
 )
-from ..core.pipeline import make_detector_result
+from ..core.results_builder import make_detector_result
 from ..modules.permissions import classify_permission, load_permission_catalog
 from .base import BaseDetector, register_detector
 

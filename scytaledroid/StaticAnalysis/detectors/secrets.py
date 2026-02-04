@@ -17,7 +17,7 @@ from ..core.findings import (
     MasvsCategory,
     SeverityLevel,
 )
-from ..core.pipeline import make_detector_result
+from ..core.results_builder import make_detector_result
 from ..modules.string_analysis.matcher import (
     DEFAULT_SECRET_FILTERS,
     EvaluatedMatch,

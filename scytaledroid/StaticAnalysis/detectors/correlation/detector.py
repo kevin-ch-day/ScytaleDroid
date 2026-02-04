@@ -6,7 +6,7 @@ from time import perf_counter
 
 from ...core.context import DetectorContext
 from ...core.findings import Badge, DetectorResult, EvidencePointer
-from ...core.pipeline import make_detector_result
+from ...core.results_builder import make_detector_result
 from ..base import BaseDetector, register_detector
 from .diffing import build_diff_bundle, diff_findings
 from .network import current_network_snapshot

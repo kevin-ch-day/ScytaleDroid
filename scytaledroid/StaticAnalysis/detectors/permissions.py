@@ -6,7 +6,7 @@ from time import perf_counter
 
 from ..core.context import DetectorContext
 from ..core.findings import Badge, DetectorResult
-from ..core.pipeline import make_detector_result
+from ..core.results_builder import make_detector_result
 from ..modules.permissions import build_permission_analysis
 from .base import BaseDetector, register_detector
 

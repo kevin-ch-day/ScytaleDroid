@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import logging
-
-from .cli import static_analysis_menu
 from .core import (
     AnalysisConfig,
     DetectorContext,
@@ -37,7 +35,6 @@ for _logger_name in _ANDROGUARD_LOGGERS:
     _logger.propagate = False
 
 __all__ = [
-    "static_analysis_menu",
     "AnalysisConfig",
     "DetectorContext",
     "analyze_apk",

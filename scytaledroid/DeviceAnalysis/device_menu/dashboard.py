@@ -429,9 +429,14 @@ def print_dashboard(
     menu_utils.print_header("Device Actions")
     from .actions import build_main_menu_options
     options = build_main_menu_options(active_details)
+    default_choice = "1"
+    if inventory_metadata:
+        status_label = str(getattr(inventory_metadata, "status_label", "")).upper()
+        if status_label == "FRESH":
+            default_choice = "2"
     spec = menu_utils.MenuSpec(
         items=options,
-        default="1",
+        default=default_choice,
         exit_label="Back",
         show_exit=True,
         show_descriptions=True,

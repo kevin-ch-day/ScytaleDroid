@@ -9,6 +9,7 @@ from scytaledroid.DeviceAnalysis import adb_status
 from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.prompts import (
     describe_inventory_state,
 )
+from scytaledroid.DeviceAnalysis import inventory as inventory_module
 from scytaledroid.DeviceAnalysis.inventory.runner import InventoryDelta
 from scytaledroid.DeviceAnalysis.services import inventory_service
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages, text_blocks

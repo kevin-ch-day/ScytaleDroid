@@ -122,6 +122,8 @@ def persist_dynamic_summary(
     }
 
     payload["static_run_id"] = session_row.get("static_run_id")
+    payload["dynamic_run_id"] = dynamic_run_id
+    _register_manifest_artifacts(dynamic_run_id, result.evidence_path)
     grade, reasons = _evaluate_grade(payload, pcap_meta)
     session_row["grade"] = grade
     session_row["grade_reasons_json"] = json.dumps(reasons) if reasons else None
@@ -133,7 +135,6 @@ def persist_dynamic_summary(
         _insert_dynamic_issues(issues)
 
     _persist_telemetry(dynamic_run_id, payload, tier=config.tier)
-    _register_manifest_artifacts(dynamic_run_id, result.evidence_path)
 
 
 def _require_dynamic_schema() -> None:
@@ -364,6 +365,25 @@ def _evaluate_grade(payload: Mapping[str, Any], pcap_meta: Mapping[str, Any]) ->
             if artifact_type in required_types and not artifact.get("sha256"):
                 reasons.append({"code": "artifact_unhashed", "artifact_type": artifact_type})
 
+    registry_rows = _load_artifact_registry(payload.get("dynamic_run_id"))
+    if registry_rows:
+        required_types = {"system_log_capture"}
+        if payload.get("pcap_required"):
+            required_types.update({"pcapdroid_capture", "network_capture", "proxy_capture"})
+        if payload.get("static_run_id"):
+            required_types.add("dep_snapshot")
+        present_types = {row["artifact_type"] for row in registry_rows}
+        for required in sorted(required_types):
+            if required not in present_types:
+                reasons.append({"code": "registry_artifact_missing", "artifact_type": required})
+        for row in registry_rows:
+            if row["artifact_type"] not in required_types:
+                continue
+            if not row.get("sha256"):
+                reasons.append({"code": "registry_artifact_unhashed", "artifact_type": row["artifact_type"]})
+            if row.get("origin") == "device" and row.get("pull_status") != "pulled":
+                reasons.append({"code": "artifact_not_pulled", "artifact_type": row["artifact_type"]})
+
     if payload.get("pcap_required"):
         if not pcap_meta.get("pcap_relpath"):
             reasons.append({"code": "pcap_missing"})
@@ -400,6 +420,34 @@ def _register_manifest_artifacts(dynamic_run_id: str, evidence_path: str | None)
         base_path=resolved,
         pull_status="n/a",
     )
+
+
+def _load_artifact_registry(dynamic_run_id: str | None) -> list[dict[str, Any]]:
+    if not dynamic_run_id:
+        return []
+    try:
+        rows = core_q.run_sql(
+            """
+            SELECT artifact_type, origin, pull_status, sha256, host_path
+            FROM artifact_registry
+            WHERE run_id=%s AND run_type='dynamic'
+            """,
+            (dynamic_run_id,),
+            fetch="all",
+        )
+    except Exception:
+        return []
+    return [
+        {
+            "artifact_type": str(row[0]),
+            "origin": row[1],
+            "pull_status": row[2],
+            "sha256": row[3],
+            "host_path": row[4],
+        }
+        for row in rows
+        if row
+    ]
 
 
 def _issues_from_manifest(dynamic_run_id: str, evidence_path: str | None) -> list[dict[str, Any]]:

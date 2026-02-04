@@ -20,6 +20,7 @@ from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.utils import (
 )
 from scytaledroid.Utils.DisplayUtils import (
     error_panels,
+    menu_utils,
     prompt_utils,
     status_messages,
     text_blocks,
@@ -105,7 +106,6 @@ def pull_apks(serial: str | None, *, auto_scope: bool = False) -> OperationResul
             "APK Pull",
             "No active device. Connect first to pull APKs.",
         )
-        prompt_utils.press_enter_to_continue()
         return OperationResult.failure(
             status="FAILED",
             user_message="APK pull failed: no active device.",
@@ -118,7 +118,6 @@ def pull_apks(serial: str | None, *, auto_scope: bool = False) -> OperationResul
             "adb binary not found on PATH.",
             hint="Ensure the Android platform tools are installed and exported in PATH.",
         )
-        prompt_utils.press_enter_to_continue()
         return OperationResult.failure(
             status="FAILED",
             user_message="APK pull failed: adb not available.",
@@ -156,7 +155,6 @@ def pull_apks(serial: str | None, *, auto_scope: bool = False) -> OperationResul
             "adb binary not found on PATH.",
             hint="Install platform-tools and ensure adb is accessible.",
         )
-        prompt_utils.press_enter_to_continue()
         return OperationResult.failure(
             status="FAILED",
             user_message="APK pull failed: adb not available.",
@@ -304,7 +302,6 @@ def pull_apks(serial: str | None, *, auto_scope: bool = False) -> OperationResul
         )
     _maybe_save_watchlist(resolution.selection)
     log.close_harvest_adapter(run_id)
-    prompt_utils.press_enter_to_continue()
     return OperationResult.success(
         context={"run_id": run_id, "device_serial": serial, "packages": len(resolution.plan.packages)}
     )
@@ -582,7 +579,6 @@ def _ensure_inventory_snapshot(serial: str) -> SnapshotContext | None:
                 prompt_utils.press_enter_to_continue()
                 return None
         else:
-            prompt_utils.press_enter_to_continue()
             return None
 
     if not snapshot or not snapshot.get("packages"):
@@ -641,7 +637,6 @@ def _resolve_harvest_plan(
         )
         if auto_selection is None:
             print(status_messages.status("APK pull cancelled by user.", level="warn"))
-            prompt_utils.press_enter_to_continue()
             return None
 
     while True:
@@ -665,7 +660,6 @@ def _resolve_harvest_plan(
             )
         if selection is None:
             print(status_messages.status("APK pull cancelled by user.", level="warn"))
-            prompt_utils.press_enter_to_continue()
             return None
         if not selection.packages:
             print(status_messages.status("Selection contains no packages. Nothing to pull.", level="warn"))
@@ -718,7 +712,6 @@ def _resolve_harvest_plan(
                         level="info",
                     )
                 )
-                prompt_utils.press_enter_to_continue()
                 continue
             print(
                 status_messages.status(
@@ -745,6 +738,31 @@ def _resolve_harvest_plan(
                     level="warn",
                 )
             )
+            options = {
+                "1": "Rescope",
+                "2": "Refresh inventory & rescope",
+                "0": "Cancel",
+            }
+            menu_utils.print_menu(options, show_exit=False, show_descriptions=False)
+            choice = prompt_utils.get_choice(list(options) + ["0"], default="1")
+            if choice == "0":
+                return None
+            if choice == "2":
+                from scytaledroid.DeviceAnalysis.services import inventory_service
+
+                try:
+                    inventory_service.run_full_sync(
+                        serial=serial,
+                        ui_prefs=text_blocks.UI_PREFS,
+                        progress_sink="cli",
+                    )
+                except Exception as exc:
+                    print(
+                        status_messages.status(
+                            f"Inventory sync cancelled or failed: {exc}",
+                            level="warn",
+                        )
+                    )
             continue
 
         _render_plan_overview(selection, plan, scheduled_packages, scheduled_files, blocked_packages)
@@ -760,7 +778,6 @@ def _resolve_harvest_plan(
                 break
             if action == "cancel":
                 print(status_messages.status("APK pull cancelled by user.", level="warn"))
-                prompt_utils.press_enter_to_continue()
                 return None
             if action == "use_snapshot":
                 print(
@@ -769,7 +786,6 @@ def _resolve_harvest_plan(
                         level="warn",
                     )
                 )
-                prompt_utils.press_enter_to_continue()
                 return None
             if action == "refresh_subset":
                 if _run_scope_refresh(serial, selection.packages):

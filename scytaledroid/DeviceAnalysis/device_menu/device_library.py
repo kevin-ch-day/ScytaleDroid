@@ -96,7 +96,10 @@ def browse_saved_apk_library() -> None:
             )
         table_utils.render_table(headers, rows)
 
-        raw = input("Select a device number to inspect, or press Enter to return: ").strip()
+        raw = prompt_utils.prompt_text(
+            "Select a device number to inspect, or press Enter to return",
+            required=False,
+        ).strip()
         if not raw:
             break
         if not raw.isdigit():
@@ -267,7 +270,10 @@ def _show_device_library_detail(summary: _DeviceLibrarySummary) -> None:
             )
         )
     while True:
-        choice = input("Select session number for package details (Enter to return): ").strip()
+        choice = prompt_utils.prompt_text(
+            "Select session number for package details (Enter to return)",
+            required=False,
+        ).strip()
         if not choice:
             break
         session = session_map.get(choice)

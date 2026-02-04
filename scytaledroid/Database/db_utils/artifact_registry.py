@@ -84,17 +84,24 @@ def _normalize_artifact(entry: Mapping[str, Any], base_path: Path | None) -> Map
     size_bytes = entry.get("size_bytes")
     sha256 = entry.get("sha256")
     created_at = entry.get("created_at_utc")
+    origin = entry.get("origin")
+    device_path = entry.get("device_path")
+    if origin is None and device_path:
+        origin = "device"
+    pull_status = entry.get("pull_status")
+    if pull_status is None and origin == "device":
+        pull_status = "pending"
     return {
         "artifact_type": artifact_type,
         "host_path": host_path,
-        "device_path": entry.get("device_path"),
+        "device_path": device_path,
         "sha256": sha256,
         "size_bytes": size_bytes,
         "created_at_utc": created_at,
         "pulled_at_utc": entry.get("pulled_at_utc"),
         "meta_json": entry.get("meta_json"),
-        "origin": entry.get("origin"),
-        "pull_status": entry.get("pull_status"),
+        "origin": origin,
+        "pull_status": pull_status,
         "status_reason": entry.get("status_reason"),
     }
 
