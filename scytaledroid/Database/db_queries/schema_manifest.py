@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import re
-from typing import Iterable, List
+from collections.abc import Iterable
 
 from .canonical import schema as canonical_schema
+from .dynamic import schema as dynamic_schema
+from .harvest import device_inventory, dynamic_loading
 from .permissions import governance_snapshot, permission_support
 from .static_analysis import (
     risk_scores,
@@ -14,10 +16,7 @@ from .static_analysis import (
     static_permission_risk,
     string_analysis,
 )
-from .harvest import device_inventory, dynamic_loading
-from .dynamic import schema as dynamic_schema
 from .web import tables as web_tables
-
 
 _CREATE_TABLE_RE = re.compile(
     r"CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+`?([a-zA-Z0-9_]+)`?",

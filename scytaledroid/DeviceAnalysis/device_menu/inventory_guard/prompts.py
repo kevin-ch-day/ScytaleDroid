@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Optional
 
+from scytaledroid.DeviceAnalysis.inventory.runner import InventoryDelta
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
 
-from .utils import humanize_seconds
 from .constants import INVENTORY_STALE_SECONDS
-from scytaledroid.DeviceAnalysis.inventory.runner import InventoryDelta
+from .utils import humanize_seconds
 
 
 @dataclass
@@ -61,13 +60,13 @@ def describe_inventory_state(
 
 def prompt_inventory_decision(
     *,
-    timestamp: Optional[datetime],
-    age_seconds: Optional[float],
+    timestamp: datetime | None,
+    age_seconds: float | None,
     state_changed: bool,
     stale_level: str,
     default_choice: str = "1",
-    quick_hint: Optional[str] = None,
-    changes_total: Optional[int] = None,
+    quick_hint: str | None = None,
+    changes_total: int | None = None,
 ) -> str:
     """Return the preferred inventory handling strategy.
 

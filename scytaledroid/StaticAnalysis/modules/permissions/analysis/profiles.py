@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
-from typing import Iterable, Mapping, MutableMapping, Sequence
 
 from .tokens import (
-    normalize_tokens,
-    tokens_from_db,
-    is_special_access,
     is_custom_permission,
+    is_special_access,
+    normalize_tokens,
     score_tokens,
+    tokens_from_db,
 )
 
 
@@ -89,4 +89,3 @@ def build_profiles(
 
 
 __all__ = ["PermissionProfile", "build_profiles"]
-

@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
 import hashlib
 import re
+from datetime import datetime, timedelta
 from threading import Lock
-
 
 _SESSION_LOCK = Lock()
 _LAST_SESSION_TS: datetime | None = None

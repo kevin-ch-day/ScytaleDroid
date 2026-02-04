@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from typing import Callable, Optional
+from collections.abc import Callable
 
 
 def run_inventory_snapshot_checks(
     *,
-    scalar: Callable[..., Optional[int]],
-    latest_snapshot_id: Optional[int],
+    scalar: Callable[..., int | None],
+    latest_snapshot_id: int | None,
     snapshot_headers_total: int,
     orphan_headers: int,
     latest_is_orphan: bool,

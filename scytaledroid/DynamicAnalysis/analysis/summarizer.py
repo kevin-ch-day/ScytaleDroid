@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
 import json
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 from scytaledroid.DynamicAnalysis.core.evidence_pack import EvidencePackWriter
-from scytaledroid.Utils.network_quality import evaluate_network_signal_quality
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord, RunManifest
+from scytaledroid.Utils.network_quality import evaluate_network_signal_quality
 
 
 class DynamicRunSummarizer:

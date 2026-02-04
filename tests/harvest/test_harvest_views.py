@@ -1,8 +1,17 @@
 from pathlib import Path
 
-from scytaledroid.DeviceAnalysis.harvest.models import HarvestPlan, PackagePlan, ScopeSelection, InventoryRow, ArtifactPlan
+from scytaledroid.DeviceAnalysis.harvest.models import (
+    ArtifactPlan,
+    HarvestPlan,
+    InventoryRow,
+    PackagePlan,
+    ScopeSelection,
+)
 from scytaledroid.DeviceAnalysis.harvest.summary import HarvestRunMetrics
-from scytaledroid.DeviceAnalysis.harvest.views import render_scope_overview, render_harvest_summary_structured
+from scytaledroid.DeviceAnalysis.harvest.views import (
+    render_harvest_summary_structured,
+    render_scope_overview,
+)
 
 
 def _dummy_selection() -> ScopeSelection:

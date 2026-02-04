@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from scytaledroid.Database.db_core import db_engine
 
 ABORT_REASONS = {
@@ -26,7 +24,7 @@ _ALIASES = {
 }
 
 
-def normalize_abort_reason(reason: Optional[str]) -> Optional[str]:
+def normalize_abort_reason(reason: str | None) -> str | None:
     if not reason:
         return None
     token = str(reason).strip()

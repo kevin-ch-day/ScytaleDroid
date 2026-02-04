@@ -12,21 +12,20 @@ from __future__ import annotations
 import argparse
 import json
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Dict, Optional, Tuple
 
 from scytaledroid.Database.db_core import db_config
 from scytaledroid.Database.db_core.db_engine import DatabaseEngine
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
-def _gather_status() -> Tuple[int, Dict[str, object]]:
+def _gather_status() -> tuple[int, dict[str, object]]:
     cfg = db_config.DB_CONFIG
     backend = str(cfg.get("engine", "sqlite"))
     host = str(cfg.get("host", "<unknown>"))
     port = str(cfg.get("port", "<unknown>"))
     database = str(cfg.get("database", "<unknown>"))
     user = str(cfg.get("user", "<unknown>"))
-    schema_version: Optional[str] = None
+    schema_version: str | None = None
 
     try:
         engine = DatabaseEngine()
@@ -90,7 +89,7 @@ class _StatusHandler(BaseHTTPRequestHandler):
         return
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="DB status HTTP endpoint")
     parser.add_argument("--host", default="127.0.0.1", help="Listen host")
     parser.add_argument("--port", type=int, default=8080, help="Listen port")

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from typing import Optional, Tuple
 
 from scytaledroid.DeviceAnalysis import adb_shell
 from scytaledroid.DeviceAnalysis.adb_errors import AdbError
@@ -17,7 +16,7 @@ def _shell(serial: str, cmd: list[str], timeout: float = 5.0) -> tuple[int, str,
     return proc.returncode, proc.stdout or "", proc.stderr or ""
 
 
-def resolve_pid_uid(serial: str, package: str) -> Tuple[Optional[str], Optional[str]]:
+def resolve_pid_uid(serial: str, package: str) -> tuple[str | None, str | None]:
     uid = None
     rc, out, _ = _shell(serial, ["dumpsys", "package", package])
     if rc == 0:
@@ -57,7 +56,7 @@ def parse_top_output(output: str, target_pid: str) -> dict[str, object]:
     return result
 
 
-def parse_meminfo_total(output: str) -> Optional[int]:
+def parse_meminfo_total(output: str) -> int | None:
     match = re.search(r"TOTAL\s+(\d+)", output)
     if match:
         try:

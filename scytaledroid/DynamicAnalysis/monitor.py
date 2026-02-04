@@ -11,7 +11,6 @@ from pathlib import Path
 from scytaledroid.DeviceAnalysis import adb_shell
 from scytaledroid.Utils.DisplayUtils import status_messages
 
-
 PCAPDROID_PACKAGE = "com.emanuelef.remote_capture"
 PCAPDROID_DIR = "/sdcard/Download/PCAPdroid"
 

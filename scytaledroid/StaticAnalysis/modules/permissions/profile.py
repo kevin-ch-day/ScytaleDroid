@@ -14,17 +14,21 @@ PermissionAnalysis suitable for detectors and reporting.
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from collections.abc import Iterable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
-from typing import Iterable, Mapping, MutableMapping, Sequence
 
 from scytaledroid.StaticAnalysis.core.context import DetectorContext
 from scytaledroid.StaticAnalysis.core.findings import EvidencePointer
 
 from .analysis.db import fetch_framework_protections
-from .analysis.tokens import normalize_tokens, tokenise_protection, is_special_access, is_custom_permission, score_tokens
+from .analysis.evidence import collect_evidence, index_manifest_permissions
 from .analysis.profiles import PermissionProfile, build_profiles
-from .analysis.evidence import index_manifest_permissions, collect_evidence
-from .analysis.summarize import format_summary, build_notes
+from .analysis.summarize import build_notes, format_summary
+from .analysis.tokens import (
+    is_custom_permission,
+    normalize_tokens,
+    score_tokens,
+)
 
 
 @dataclass(frozen=True)

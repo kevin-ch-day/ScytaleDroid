@@ -10,10 +10,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from scytaledroid.DeviceAnalysis import adb_shell
-from scytaledroid.Utils.process_parsers import parse_meminfo_total, parse_top_output
 from scytaledroid.Utils.netstats_collector import NetstatsCollector
 from scytaledroid.Utils.netstats_parser import NetstatsParser
 from scytaledroid.Utils.network_quality import evaluate_network_signal_quality
+from scytaledroid.Utils.process_parsers import parse_meminfo_total, parse_top_output
 
 
 @dataclass

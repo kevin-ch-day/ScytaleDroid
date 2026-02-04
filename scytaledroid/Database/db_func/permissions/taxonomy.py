@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Mapping
+from collections.abc import Mapping
+
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ...db_core import run_sql
 from ...db_queries.permissions import taxonomy as queries
-from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
 def ensure_tables() -> bool:

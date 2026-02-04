@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
 from html import escape
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 from scytaledroid.Config import app_config
 
 from ..core import StaticAnalysisReport
-
 from .view import build_report_view
-
 
 CSS_BLOCK = """
 :root{--bg:#0b0c0f;--card:#12141a;--muted:#9aa4af;--ok:#2ea043;--warn:#e3b341;--fail:#f85149;--hi:#00bcd4;--acc:#7c3aed}
@@ -296,13 +295,12 @@ def _first_non_empty(*candidates: Any) -> Any:
 
 def _coerce_timestamp(timestamp: str | None) -> str:
     if not timestamp:
-        return datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        return datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     try:
         parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
     except ValueError:
-        return datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    return parsed.astimezone(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        return datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+    return parsed.astimezone(UTC).strftime("%Y%m%d-%H%M%S")
 
 
 __all__ = ["render_html_report", "save_html_report"]
-

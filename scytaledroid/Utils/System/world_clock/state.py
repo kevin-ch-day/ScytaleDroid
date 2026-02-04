@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
+import zoneinfo
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, Optional
-
-import zoneinfo
 
 from scytaledroid.Config import app_config
 
@@ -33,7 +31,7 @@ class ClockReference:
 
     mode: str
     label: str
-    timezone: Optional[str]
+    timezone: str | None
     utc: datetime
 
 
@@ -41,11 +39,11 @@ class ClockReference:
 class WorldClockState:
     """Snapshot of the persisted world clock configuration."""
 
-    clocks: Dict[str, str]
-    defaults: Dict[str, str]
+    clocks: dict[str, str]
+    defaults: dict[str, str]
     max_clocks: int
-    primary: Optional[str]
-    primary_timezone: Optional[str]
+    primary: str | None
+    primary_timezone: str | None
     reference: ClockReference
 
 

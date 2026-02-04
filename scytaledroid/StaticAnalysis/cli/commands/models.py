@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Optional
 
 CommandHandler = Callable[[], None]
 
@@ -16,8 +16,8 @@ class Command:
     title: str
     description: str
     kind: str  # "scan" or "readonly"
-    profile: Optional[str] = None
-    handler: Optional[CommandHandler] = None
+    profile: str | None = None
+    handler: CommandHandler | None = None
     section: str = "workflow"
     persist: bool = True
     dry_run: bool = False

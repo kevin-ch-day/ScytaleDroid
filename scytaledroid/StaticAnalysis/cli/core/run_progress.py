@@ -8,12 +8,13 @@ import shutil
 import subprocess
 import sys
 from collections import Counter
+from collections.abc import Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from importlib import metadata as importlib_metadata
 from importlib.metadata import PackageNotFoundError
 from shutil import which
-from typing import Any, Mapping, MutableMapping, Sequence, TextIO
+from typing import Any, TextIO
 
 try:  # pragma: no cover - optional timezone data
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -26,14 +27,14 @@ from scytaledroid.Config.app_config import APP_VERSION
 from ...core import StaticAnalysisReport
 from ...core.findings import Badge, DetectorResult, Finding
 from ...core.repository import ArtifactGroup
-from .glyphs import GlyphSet
-from .options import ScanDisplayOptions, describe_cli_flags
 from ..views.view_sections import (
     SECTION_DEFINITIONS,
     extract_integrity_profiles,
     format_badge,
     render_sections,
 )
+from .glyphs import GlyphSet
+from .options import ScanDisplayOptions, describe_cli_flags
 
 _DEFAULT_TIMEZONE_LABEL = "America/Chicago"
 if ZoneInfo is not None:
@@ -41,10 +42,10 @@ if ZoneInfo is not None:
         _LOCAL_TIMEZONE = ZoneInfo(_DEFAULT_TIMEZONE_LABEL)
         _TIMEZONE_LABEL = _DEFAULT_TIMEZONE_LABEL
     except ZoneInfoNotFoundError:  # pragma: no cover - environment dependent
-        _LOCAL_TIMEZONE = timezone.utc
+        _LOCAL_TIMEZONE = UTC
         _TIMEZONE_LABEL = "UTC"
 else:  # pragma: no cover - Python < 3.9 fallback
-    _LOCAL_TIMEZONE = timezone.utc
+    _LOCAL_TIMEZONE = UTC
     _TIMEZONE_LABEL = "UTC"
 _SECTION_NAME_LOOKUP = {definition.key: definition.title for definition in SECTION_DEFINITIONS}
 
@@ -826,7 +827,7 @@ def _short_digest(value: object | None) -> str:
 
 def format_timestamp(dt: datetime) -> str:
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     local = dt.astimezone(_LOCAL_TIMEZONE)
     hour = local.hour % 12 or 12
     minute = local.minute

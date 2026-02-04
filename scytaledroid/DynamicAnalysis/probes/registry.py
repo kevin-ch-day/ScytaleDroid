@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping, Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 from scytaledroid.DynamicAnalysis.core.session import DynamicSessionConfig
 from scytaledroid.DynamicAnalysis.probes.baseline import run_baseline_probes

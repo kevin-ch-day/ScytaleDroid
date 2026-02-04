@@ -6,14 +6,15 @@ This module mirrors the schema documented in
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import os
+from collections.abc import Iterable, Mapping, MutableMapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Mapping, MutableMapping, Sequence, Union
 
-from ...db_core import database_session, run_sql, run_sql_many, db_config
-from ...db_queries.static_analysis import string_analysis as queries
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
+
+from ...db_core import database_session, db_config, run_sql, run_sql_many
+from ...db_queries.static_analysis import string_analysis as queries
 
 _IS_SQLITE = str(db_config.DB_CONFIG.get("engine", "sqlite")).lower() == "sqlite"
 _SAMPLE_BATCH_SIZE = int(os.getenv("SCYTALEDROID_STRING_SAMPLE_BATCH_SIZE", "250"))
@@ -130,8 +131,8 @@ class StringSample:
     scheme: str | None = None
 
 
-SummaryRow = Union[StringSummaryRecord, Mapping[str, object]]
-SampleRow = Union[StringSample, Mapping[str, object]]
+SummaryRow = StringSummaryRecord | Mapping[str, object]
+SampleRow = StringSample | Mapping[str, object]
 
 def _table_has_column(table: str, column: str) -> bool:
     try:
@@ -569,7 +570,7 @@ def seed_doc_hosts_from_config(path: str | Path | None = None) -> int:
 
     if path is None:
         try:
-            from scytaledroid.StaticAnalysis.modules.string_analysis.allowlist import (  # noqa: WPS433
+            from scytaledroid.StaticAnalysis.modules.string_analysis.allowlist import (
                 DEFAULT_POLICY_ROOT,
             )
 
@@ -585,7 +586,7 @@ def seed_doc_hosts_from_config(path: str | Path | None = None) -> int:
 def _default_doc_hosts(path: str | Path | None = None) -> tuple[str, ...]:
     if path is None:
         try:
-            from scytaledroid.StaticAnalysis.modules.string_analysis.allowlist import (  # noqa: WPS433
+            from scytaledroid.StaticAnalysis.modules.string_analysis.allowlist import (
                 DEFAULT_POLICY_ROOT,
             )
 
@@ -593,7 +594,7 @@ def _default_doc_hosts(path: str | Path | None = None) -> tuple[str, ...]:
         except Exception:
             return tuple()
     try:
-        from scytaledroid.StaticAnalysis.modules.string_analysis.allowlist import (  # noqa: WPS433
+        from scytaledroid.StaticAnalysis.modules.string_analysis.allowlist import (
             load_noise_policy,
         )
     except Exception:

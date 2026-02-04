@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable, List, Optional
 
 
 @dataclass(frozen=True)
@@ -18,7 +18,7 @@ class PackageProfile:
     pull_strategy: Iterable[str]
 
 
-PROFILES: List[PackageProfile] = [
+PROFILES: list[PackageProfile] = [
     PackageProfile(
         id="SOCIAL",
         name="Social Media",
@@ -103,7 +103,7 @@ PROFILES: List[PackageProfile] = [
 ]
 
 
-def lookup_profile(package_name: str) -> Optional[PackageProfile]:
+def lookup_profile(package_name: str) -> PackageProfile | None:
     """Return the first matching profile for the package, if any."""
     package_name = package_name.lower()
     for profile in PROFILES:

@@ -4,10 +4,16 @@ from __future__ import annotations
 
 import math
 import time
-from typing import Dict, List
 
 from ..core.context import DetectorContext
-from ..core.findings import Badge, DetectorResult, EvidencePointer, Finding, MasvsCategory, SeverityLevel
+from ..core.findings import (
+    Badge,
+    DetectorResult,
+    EvidencePointer,
+    Finding,
+    MasvsCategory,
+    SeverityLevel,
+)
 from .base import BaseDetector, register_detector
 
 _SUSPICIOUS_TOKENS = (
@@ -53,7 +59,7 @@ class NativeHardeningDetector(BaseDetector):
             entry.pop("blob", None)
         entropy_samples = sorted(libs, key=lambda item: item["entropy"], reverse=True)[:5]
 
-        evidence: List[EvidencePointer] = []
+        evidence: list[EvidencePointer] = []
         for entry in entropy_samples:
             evidence.append(
                 EvidencePointer(
@@ -63,7 +69,7 @@ class NativeHardeningDetector(BaseDetector):
                 )
             )
 
-        findings: List[Finding] = []
+        findings: list[Finding] = []
         status = Badge.OK
         if suspicious_hits:
             status = Badge.WARN
@@ -101,8 +107,8 @@ class NativeHardeningDetector(BaseDetector):
         )
 
 
-def _collect_native_libraries(apk) -> List[Dict[str, object]]:
-    libs: List[Dict[str, object]] = []
+def _collect_native_libraries(apk) -> list[dict[str, object]]:
+    libs: list[dict[str, object]] = []
     try:
         files = apk.get_files() or []
     except Exception:
@@ -128,8 +134,8 @@ def _collect_native_libraries(apk) -> List[Dict[str, object]]:
     return libs
 
 
-def _scan_suspicious_tokens(libs: List[Dict[str, object]]) -> List[Dict[str, object]]:
-    hits: List[Dict[str, object]] = []
+def _scan_suspicious_tokens(libs: list[dict[str, object]]) -> list[dict[str, object]]:
+    hits: list[dict[str, object]] = []
     for lib in libs:
         blob = lib.get("blob")
         if not isinstance(blob, (bytes, bytearray)):
@@ -145,7 +151,7 @@ def _short_hash(blob: bytes) -> str:
     return f"{sum(blob) % 65536:04x}"
 
 
-def _calc_jni_density(libs: List[Dict[str, object]]) -> float:
+def _calc_jni_density(libs: list[dict[str, object]]) -> float:
     total_size = sum(int(entry.get("size_bytes") or 0) for entry in libs)
     return round(total_size / max(len(libs), 1), 2)
 

@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, MutableMapping
 from functools import lru_cache
 from pathlib import Path
-from typing import Mapping, MutableMapping
 
 from scytaledroid.Config import app_config
 

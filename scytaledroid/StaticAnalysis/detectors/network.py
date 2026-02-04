@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from time import perf_counter
-from typing import Dict, Mapping, Optional, Sequence, Tuple
 
 from ..core.context import DetectorContext
 from ..core.findings import (
@@ -27,7 +27,6 @@ from ..modules import (
 from ..modules.network_security import DomainPolicy, NetworkSecurityPolicy
 from .base import BaseDetector, register_detector
 
-
 _ALLOWLIST_HOST_SUFFIXES = (
     "schemas.android.com",
     "developer.android.com",
@@ -41,7 +40,7 @@ def _is_allowlisted_host(host: str) -> bool:
     return any(host.endswith(suffix) for suffix in _ALLOWLIST_HOST_SUFFIXES)
 
 
-def _nsc_allows_cleartext(policy: Optional[NetworkSecurityPolicy], host: str) -> bool:
+def _nsc_allows_cleartext(policy: NetworkSecurityPolicy | None, host: str) -> bool:
     if policy is None:
         return True
     if policy.base_cleartext is False:
@@ -72,8 +71,8 @@ def _nsc_allows_cleartext(policy: Optional[NetworkSecurityPolicy], host: str) ->
 
 def _filter_http_matches(
     matches: Sequence[EndpointMatch],
-    policy: Optional[NetworkSecurityPolicy],
-) -> tuple[Sequence[EndpointMatch], Tuple[str, ...], Tuple[str, ...]]:
+    policy: NetworkSecurityPolicy | None,
+) -> tuple[Sequence[EndpointMatch], tuple[str, ...], tuple[str, ...]]:
     allowed: list[EndpointMatch] = []
     suppressed: set[str] = set()
     allowlisted: set[str] = set()
@@ -137,7 +136,7 @@ def _summarise_surface(
     *,
     suppressed_hosts: Sequence[str] = (),
     allowlisted_hosts: Sequence[str] = (),
-) -> tuple[Dict[str, object], str]:
+) -> tuple[dict[str, object], str]:
     endpoints_line = f"http={len(http_matches)}  https={len(https_matches)}"
 
     uses_cleartext = _fmt_bool_flag(manifest_flags.uses_cleartext_traffic)
@@ -149,14 +148,14 @@ def _summarise_surface(
         f"Pinning={_fmt_bool_flag(True if pinning_present else None)}"
     )
 
-    metrics: Dict[str, object] = {
+    metrics: dict[str, object] = {
         "Endpoints": endpoints_line,
         "Policy": policy_line,
     }
 
     http_hosts = sorted({match.host for match in http_matches})
     https_hosts = sorted({match.host for match in https_matches})
-    host_hashes: Dict[str, Sequence[str]] = {}
+    host_hashes: dict[str, Sequence[str]] = {}
     if http_hosts:
         host_hashes["http"] = [f"#h:{_hash_host(host)}" for host in http_hosts]
     if https_hosts:
@@ -164,7 +163,7 @@ def _summarise_surface(
     if host_hashes:
         metrics["Host hashes"] = host_hashes
 
-    surface_payload: Dict[str, object] = {
+    surface_payload: dict[str, object] = {
         "counts": {"http": len(http_matches), "https": len(https_matches), "ws": 0},
         "hosts": {"http": http_hosts, "https": https_hosts},
         "urls": {
@@ -197,7 +196,7 @@ def _summarise_surface(
 
 
 def _build_policy_graph(
-    policy: Optional[NetworkSecurityPolicy],
+    policy: NetworkSecurityPolicy | None,
 ) -> Mapping[str, object]:
     if policy is None:
         return {}
@@ -205,7 +204,7 @@ def _build_policy_graph(
     nodes: list[Mapping[str, object]] = []
     edges: list[Mapping[str, object]] = []
 
-    base_node: Dict[str, object] = {
+    base_node: dict[str, object] = {
         "id": "base",
         "type": "base",
         "cleartext": bool(policy.base_cleartext),
@@ -225,7 +224,7 @@ def _build_policy_graph(
 
     for domain, domain_policy in sorted(domain_entries, key=lambda item: item[0]):
         domain_id = f"domain:{domain}"
-        node: Dict[str, object] = {
+        node: dict[str, object] = {
             "id": domain_id,
             "type": "domain",
             "label": domain,
@@ -251,14 +250,14 @@ def _build_policy_graph(
     ):
         return {}
 
-    payload: Dict[str, object] = {"nodes": nodes, "edges": edges}
+    payload: dict[str, object] = {"nodes": nodes, "edges": edges}
     payload["hash"] = hashlib.sha256(
         json.dumps(payload, sort_keys=True).encode("utf-8")
     ).hexdigest()
     return payload
 
 
-def _fmt_bool_flag(value: Optional[bool]) -> str:
+def _fmt_bool_flag(value: bool | None) -> str:
     if value is True:
         return "Yes"
     if value is False:
@@ -274,13 +273,13 @@ def _fmt_value(value: object) -> str:
 
 def _summarise_tls_hits(
     tls_hits: Mapping[str, Sequence[IndexedString]]
-) -> Dict[str, Sequence[str]]:
+) -> dict[str, Sequence[str]]:
     mapping = {
         "trust_manager": "Trust manager override",
         "hostname_verifier": "Hostname verifier override",
         "certificate_pinning": "Certificate pinning",
     }
-    summary: Dict[str, Sequence[str]] = {}
+    summary: dict[str, Sequence[str]] = {}
     for key, label in mapping.items():
         entries = tls_hits.get(key, ())
         if not entries:
@@ -289,7 +288,7 @@ def _summarise_tls_hits(
     return summary
 
 
-def _assess_policy(policy: Optional[NetworkSecurityPolicy], *, has_code_http: bool) -> tuple[Finding, ...]:
+def _assess_policy(policy: NetworkSecurityPolicy | None, *, has_code_http: bool) -> tuple[Finding, ...]:
     if policy is None or policy.source_path is None:
         return tuple()
 
@@ -360,7 +359,7 @@ def _assess_policy(policy: Optional[NetworkSecurityPolicy], *, has_code_http: bo
 
 
 def _policy_evidence(
-    policy: Optional[NetworkSecurityPolicy],
+    policy: NetworkSecurityPolicy | None,
     apk_path: Path,
 ) -> tuple[EvidencePointer, ...]:
     if policy is None or policy.source_path is None:
@@ -376,13 +375,13 @@ def _policy_evidence(
 
 def _attach_policy_metrics(
     metrics: Mapping[str, object],
-    policy: Optional[NetworkSecurityPolicy],
+    policy: NetworkSecurityPolicy | None,
 ) -> Mapping[str, object]:
     payload = dict(metrics)
     if policy is None:
         return payload
 
-    nsc_payload: Dict[str, object] = dict(payload.get("NSC", {}))
+    nsc_payload: dict[str, object] = dict(payload.get("NSC", {}))
     if policy.source_path:
         nsc_payload["source"] = policy.source_path
     nsc_payload["base_cleartext"] = policy.base_cleartext

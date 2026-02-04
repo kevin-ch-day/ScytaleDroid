@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import is_dataclass
-from typing import Any, Dict, Iterable, Mapping, Optional
+from typing import Any
 
 from scytaledroid.Database.db_queries.canonical import schema as canonical_schema
 
@@ -15,7 +16,7 @@ def require_canonical_schema() -> None:
         raise RuntimeError("DB schema is outdated; run migrations to use canonical schema.")
 
 
-def truncate(value: Optional[str], limit: int) -> Optional[str]:
+def truncate(value: str | None, limit: int) -> str | None:
     """Trim ``value`` to at most *limit* characters, preserving None."""
 
     if value is None:
@@ -30,7 +31,7 @@ def truncate(value: Optional[str], limit: int) -> Optional[str]:
     return text[: limit - 3].rstrip() + "..."
 
 
-def coerce_mapping(obj: Any) -> Dict[str, Any]:
+def coerce_mapping(obj: Any) -> dict[str, Any]:
     """Best-effort conversion of ``obj`` into a plain dict."""
 
     if obj is None:
@@ -40,7 +41,7 @@ def coerce_mapping(obj: Any) -> Dict[str, Any]:
     if hasattr(obj, "__dict__"):
         return {k: v for k, v in vars(obj).items() if not k.startswith("_")}
     if hasattr(obj, "__slots__"):
-        data: Dict[str, Any] = {}
+        data: dict[str, Any] = {}
         for attr in getattr(obj, "__slots__", ()):  # type: ignore[attr-defined]
             if attr.startswith("_"):
                 continue
@@ -57,7 +58,7 @@ def coerce_mapping(obj: Any) -> Dict[str, Any]:
             return {k: getattr(obj, k) for k in obj.__dataclass_fields__}  # type: ignore[attr-defined]
         except Exception:
             return {}
-    data: Dict[str, Any] = {}
+    data: dict[str, Any] = {}
     for attr in dir(obj):
         if attr.startswith("_"):
             continue
@@ -104,7 +105,7 @@ def normalise_severity_token(value: object | None) -> str | None:
     return None
 
 
-def canonical_severity_counts(counter: Mapping[str, int]) -> Dict[str, int]:
+def canonical_severity_counts(counter: Mapping[str, int]) -> dict[str, int]:
     """Return canonical totals for ``High/Medium/Low/Info``."""
 
     return {
@@ -126,7 +127,7 @@ def safe_int(value: object) -> int | None:
         return None
 
 
-def first_text(*values: object | None) -> Optional[str]:
+def first_text(*values: object | None) -> str | None:
     """Return the first non-empty string representation from ``values``."""
 
     for value in values:

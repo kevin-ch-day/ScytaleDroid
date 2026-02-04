@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Mapping, Sequence, Tuple
 
-from scytaledroid.StaticAnalysis.cli.persistence.utils import first_text, require_canonical_schema
-from scytaledroid.StaticAnalysis.cli.persistence.static_findings_writer import persist_static_findings
+from scytaledroid.StaticAnalysis.cli.persistence import (
+    static_findings_writer as sf_writer,  # backwards compat
+)
+from scytaledroid.StaticAnalysis.cli.persistence import (
+    strings_writer as str_writer,  # backwards compat
+)
+from scytaledroid.StaticAnalysis.cli.persistence.static_findings_writer import (
+    persist_static_findings,
+)
 from scytaledroid.StaticAnalysis.cli.persistence.strings_writer import persist_string_summary
-from scytaledroid.StaticAnalysis.cli.persistence import static_findings_writer as sf_writer  # backwards compat
-from scytaledroid.StaticAnalysis.cli.persistence import strings_writer as str_writer  # backwards compat
+from scytaledroid.StaticAnalysis.cli.persistence.utils import first_text, require_canonical_schema
 
 # export for existing imports
 coerce_severity_counts = sf_writer.coerce_severity_counts  # re-export
@@ -64,7 +70,7 @@ def persist_static_sections(
     app_metadata: Mapping[str, object] | object,
     run_id: int | None,
     static_run_id: int | None = None,
-) -> Tuple[list[str], bool, int]:
+) -> tuple[list[str], bool, int]:
     errors: list[str] = []
     baseline_written = False
     try:

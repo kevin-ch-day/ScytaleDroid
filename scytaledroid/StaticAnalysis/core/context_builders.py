@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping, Sequence
 from hashlib import sha256
 from pathlib import Path
-from typing import Iterable, Mapping, Optional, Sequence, TYPE_CHECKING
+from typing import TYPE_CHECKING
 from xml.etree import ElementTree
 
 from scytaledroid.Config import app_config
@@ -20,9 +21,10 @@ from .models import (
 
 if TYPE_CHECKING:  # pragma: no cover - typing aid without runtime import
     from scytaledroid.StaticAnalysis._androguard import APK  # noqa: F401
-    from ..modules.string_analysis.extractor import StringIndex  # noqa: F401
+
     from ..modules.network_security.models import NetworkSecurityPolicy  # noqa: F401
     from ..modules.permissions import PermissionCatalog  # noqa: F401
+    from ..modules.string_analysis.extractor import StringIndex  # noqa: F401
 
 
 _DEF_SEVERITY_TOKEN = "dangerous"
@@ -71,7 +73,7 @@ def derive_run_id(apk_sha256: str, config: AnalysisConfig) -> str:
     return sha256(seed.encode("utf-8")).hexdigest()[:12]
 
 
-def resolve_relative_path(apk_path: Path, storage_root: Optional[Path]) -> Optional[str]:
+def resolve_relative_path(apk_path: Path, storage_root: Path | None) -> str | None:
     """Resolve *apk_path* relative to *storage_root* if possible."""
 
     if storage_root is None:
@@ -117,7 +119,7 @@ def collect_dangerous_permissions(
 def build_detector_context(
     *,
     apk_path: Path,
-    apk: "APK",
+    apk: APK,
     manifest_root: ElementTree.Element,
     manifest: ManifestSummary,
     manifest_flags: ManifestFlags,
@@ -130,9 +132,9 @@ def build_detector_context(
     metadata: Mapping[str, object],
     hashes: Mapping[str, str],
     config: AnalysisConfig,
-    string_index: Optional["StringIndex"],
-    network_security_policy: Optional["NetworkSecurityPolicy"],
-    permission_catalog: Optional["PermissionCatalog"],
+    string_index: StringIndex | None,
+    network_security_policy: NetworkSecurityPolicy | None,
+    permission_catalog: PermissionCatalog | None,
 ) -> DetectorContext:
     """Build a detector context shared across all pipeline stages."""
 

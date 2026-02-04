@@ -3,17 +3,17 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 import os
+from collections.abc import Mapping, Sequence
 
 from .analysis.capability_signal_classifier import (
+    _GROUP_ORDER,
     compute_group_strengths,
     iter_group_hits,
-    _GROUP_ORDER,
 )
 from .analysis.risk_scoring_engine import (
-    permission_risk_score_detail,
     permission_risk_grade,
+    permission_risk_score_detail,
 )
 from .permission_manifest_extract import _format_permission
 from .permission_protection_lookup import _fetch_protections
@@ -22,9 +22,9 @@ from .permission_protection_lookup import _fetch_protections
 def print_permissions_block(
     package_name: str,
     artifact_label: str,
-    declared: Sequence[Tuple[str, str]],
-    defined: Sequence[Dict[str, str | None]],
-    sdk: Dict[str, str | None],
+    declared: Sequence[tuple[str, str]],
+    defined: Sequence[dict[str, str | None]],
+    sdk: dict[str, str | None],
 ) -> None:
     """Print a narrow permission summary directly to stdout."""
 
@@ -43,8 +43,8 @@ def print_permissions_block(
     legacy_ext_flag = None if sdk.get("legacy_external_storage") is None else bool(sdk.get("legacy_external_storage"))
 
     # Deduplicate declared names (ignore sdk-23 suffix for risk lookup)
-    unique_declared: List[Tuple[str, str]] = []
-    seen: set[Tuple[str, str]] = set()
+    unique_declared: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
     for name, element_type in declared:
         key = (name, element_type)
         if key not in seen:
@@ -56,9 +56,9 @@ def print_permissions_block(
     shorts_only = [n.split(".")[-1].upper() for n, _ in unique_declared if n.startswith("android.")]
     protection_map = _fetch_protections(shorts_only, target_sdk=target_sdk_val)
 
-    android_perms: List[str] = []
-    custom_perms: List[str] = []
-    risk_counts: Dict[str, int] = {"dangerous": 0, "signature": 0, "normal": 0, "other": 0}
+    android_perms: list[str] = []
+    custom_perms: list[str] = []
+    risk_counts: dict[str, int] = {"dangerous": 0, "signature": 0, "normal": 0, "other": 0}
     for name, element_type in unique_declared:
         if name.startswith("android."):
             # Framework: show short, uppercase (strip android.permission.)
@@ -115,9 +115,9 @@ def print_permissions_block(
 
 
 def _classify_permissions(
-    declared: Sequence[Tuple[str, str]],
-    protection_map: Mapping[str, Optional[str]],
-) -> Tuple[Dict[str, int], Dict[str, int], Dict[str, int], set[str], set[str]]:
+    declared: Sequence[tuple[str, str]],
+    protection_map: Mapping[str, str | None],
+) -> tuple[dict[str, int], dict[str, int], dict[str, int], set[str], set[str]]:
     """Return counts per class and group signals.
 
     Returns (risk_counts, group_strength, oem_counts)
@@ -126,9 +126,9 @@ def _classify_permissions(
     - oem_counts: count of OEM/custom permissions overall and by group
     """
 
-    risk_counts: Dict[str, int] = {"dangerous": 0, "signature": 0, "normal": 0, "other": 0}
+    risk_counts: dict[str, int] = {"dangerous": 0, "signature": 0, "normal": 0, "other": 0}
     group_strength, fw_ds = compute_group_strengths(declared, protection_map)
-    oem_counts: Dict[str, int] = {"ADS": 0}
+    oem_counts: dict[str, int] = {"ADS": 0}
     oem_names: set[str] = set()
 
     for name, _tag in declared:
@@ -156,8 +156,8 @@ def _normalize_permission_key(name: str) -> str:
 
 
 def _collect_declared_tokens(
-    declared_sources: Mapping[str, Sequence[Tuple[str, str]]],
-) -> List[str]:
+    declared_sources: Mapping[str, Sequence[tuple[str, str]]],
+) -> list[str]:
     tokens: set[str] = set()
     for perms in declared_sources.values():
         for perm_name, _ in perms:
@@ -166,11 +166,11 @@ def _collect_declared_tokens(
 
 
 def _build_declared_origins(
-    declared_sources: Mapping[str, Sequence[Tuple[str, str]]],
+    declared_sources: Mapping[str, Sequence[tuple[str, str]]],
     fw_ds: Sequence[str],
     oem_names: Sequence[str],
-) -> Dict[str, str]:
-    origins: Dict[str, str] = {}
+) -> dict[str, str]:
+    origins: dict[str, str] = {}
     fw_set = {key.upper() for key in fw_ds}
     vendor_set = set(oem_names)
     for artifact_label, perms in declared_sources.items():
@@ -193,7 +193,7 @@ def _risk_bar(score: float, width: int = 8) -> str:
 
 
 def _footprint_bar(group_strength: Mapping[str, int]) -> str:
-    parts: List[str] = []
+    parts: list[str] = []
     for key in _GROUP_ORDER:
         val = group_strength.get(key, 0)
         if val >= 2:
@@ -206,7 +206,7 @@ def _footprint_bar(group_strength: Mapping[str, int]) -> str:
     return " | ".join(parts)
 
 
-def _footprint_multiline(groups: Mapping[str, int]) -> List[str]:
+def _footprint_multiline(groups: Mapping[str, int]) -> list[str]:
     """Return a multi-line footprint with short descriptors per capability."""
     descriptors = {
         "LOC": "location (precise/bg)",
@@ -242,7 +242,7 @@ def _footprint_multiline(groups: Mapping[str, int]) -> List[str]:
     }
     bar_width = 4
     from scytaledroid.Utils.DisplayUtils import table_utils
-    rows: List[List[str]] = []
+    rows: list[list[str]] = []
     for key in _GROUP_ORDER:
         val = groups.get(key, 0)
         if val >= 2:
@@ -260,8 +260,8 @@ def _footprint_multiline(groups: Mapping[str, int]) -> List[str]:
     return []
 
 
-def _high_signal_tags(groups: Mapping[str, int]) -> List[str]:
-    tags: List[str] = []
+def _high_signal_tags(groups: Mapping[str, int]) -> list[str]:
+    tags: list[str] = []
     mapping = {
         "LOC": "location",
         "CAM": "camera",
@@ -294,15 +294,15 @@ def _persona(groups: Mapping[str, int]) -> str:
 
 
 def _group_trigger_debug(
-    declared: Sequence[Tuple[str, str]],
-    protection_map: Mapping[str, Optional[str]],
-) -> Dict[str, Dict[str, List[str]]]:
+    declared: Sequence[tuple[str, str]],
+    protection_map: Mapping[str, str | None],
+) -> dict[str, dict[str, list[str]]]:
     """Return group -> {strong: [...], weak: [...]} for debugging footprint.
 
     Mirrors the mapping rules in analysis/signals.py to show which permissions
     contributed to each capability and with what strength.
     """
-    out: Dict[str, Dict[str, List[str]]] = {k: {"strong": [], "weak": []} for k in _GROUP_ORDER}
+    out: dict[str, dict[str, list[str]]] = {k: {"strong": [], "weak": []} for k in _GROUP_ORDER}
 
     def _tag(key: str, short: str, strong: bool) -> None:
         bucket = "strong" if strong else "weak"
@@ -323,14 +323,14 @@ def _group_trigger_debug(
 def render_permission_postcard(
     package_name: str,
     app_label: str,
-    declared: Sequence[Tuple[str, str]],
-    defined: Sequence[Dict[str, str | None]],
-    sdk: Dict[str, str | None] | None = None,
+    declared: Sequence[tuple[str, str]],
+    defined: Sequence[dict[str, str | None]],
+    sdk: dict[str, str | None] | None = None,
     *,
     index: int,
     total: int,
     compact: bool = False,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     """Analyze and print a compact permission-first postcard.
 
     Returns a profile dict for summary usage.
@@ -609,6 +609,7 @@ def render_permission_matrix(
     show: int = 4,
 ) -> None:
     from datetime import datetime
+
     from scytaledroid.Utils.DisplayUtils import text_blocks
 
     if not profiles:

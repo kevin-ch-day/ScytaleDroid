@@ -3,8 +3,7 @@ from __future__ import annotations
 from collections import Counter
 
 import pytest
-
-from scytaledroid.StaticAnalysis.cli.execution import analytics, results_formatters, results
+from scytaledroid.StaticAnalysis.cli.execution import analytics, results, results_formatters
 
 
 @pytest.mark.unit

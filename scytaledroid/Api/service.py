@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from hashlib import sha256
 import io
 import json
-from pathlib import Path
 import threading
 import time
 import uuid
-from typing import Any, Optional
+from dataclasses import dataclass
+from hashlib import sha256
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from scytaledroid.Config import app_config
 from scytaledroid.StaticAnalysis.cli.core.models import RunParameters, ScopeSelection
@@ -28,6 +28,9 @@ try:  # optional database access for status queries
 except Exception:  # pragma: no cover - offline mode
     core_q = None
 
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from fastapi import FastAPI
+
 WEB_DIR = Path(__file__).resolve().parent / "web"
 
 
@@ -38,7 +41,7 @@ class JobRecord:
     created_at: float
     session_stamp: str
     package_name: str
-    detail: Optional[str] = None
+    detail: str | None = None
 
 
 _jobs: dict[str, JobRecord] = {}
@@ -50,7 +53,7 @@ def _record_job(job: JobRecord) -> None:
         _jobs[job.job_id] = job
 
 
-def _update_job(job_id: str, *, state: str, detail: Optional[str] = None) -> None:
+def _update_job(job_id: str, *, state: str, detail: str | None = None) -> None:
     with _jobs_lock:
         existing = _jobs.get(job_id)
         if not existing:
@@ -76,7 +79,7 @@ def _serialize_job(job: JobRecord) -> dict[str, Any]:
     }
 
 
-def _find_report_for_session(session_stamp: str) -> Optional[Path]:
+def _find_report_for_session(session_stamp: str) -> Path | None:
     for stored in list_reports():
         meta = stored.report.metadata
         if str(meta.get("session_stamp", "")).strip() == session_stamp:
@@ -84,7 +87,7 @@ def _find_report_for_session(session_stamp: str) -> Optional[Path]:
     return None
 
 
-def _find_report_by_hash(report_hash: str) -> Optional[Path]:
+def _find_report_by_hash(report_hash: str) -> Path | None:
     report_hash = report_hash.strip()
     if not report_hash:
         return None
@@ -145,9 +148,9 @@ def _collect_run_status(session_stamp: str) -> dict[str, Any]:
     }
 
 
-def build_api_app() -> "FastAPI":
+def build_api_app() -> FastAPI:
     from fastapi import FastAPI, File, HTTPException, UploadFile
-    from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
+    from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
     from fastapi.staticfiles import StaticFiles
     from pydantic import BaseModel
 
@@ -156,13 +159,15 @@ def build_api_app() -> "FastAPI":
 
     class ScanRequest(BaseModel):
         apk_path: str
-        session_stamp: Optional[str] = None
+        session_stamp: str | None = None
         profile: str = "full"
-        scope_label: Optional[str] = None
+        scope_label: str | None = None
         allow_session_reuse: bool = True
 
+    upload_file = File(...)
+
     @app.post("/upload")
-    def upload_apk(file: UploadFile = File(...)) -> dict[str, Any]:
+    def upload_apk(file: UploadFile = upload_file) -> dict[str, Any]:
         upload_dir = Path(app_config.DATA_DIR) / "device_apks" / "repo_uploads"
         upload_dir.mkdir(parents=True, exist_ok=True)
         suffix = Path(file.filename or "upload.apk").suffix or ".apk"

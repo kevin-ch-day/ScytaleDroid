@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, Mapping, MutableMapping, Sequence
 from urllib.parse import urlsplit
 
 from .parsing.host_normalizer import registrable_domain
@@ -66,7 +66,7 @@ class RuleCondition:
     source_exact_not_in: str | None = None
     scheme: str | None = None
 
-    def matches(self, context: PolicyContext, policy: "NoisePolicy") -> bool:
+    def matches(self, context: PolicyContext, policy: NoisePolicy) -> bool:
         if self.scheme is not None:
             if context.scheme is None or context.scheme != self.scheme:
                 return False
@@ -121,7 +121,7 @@ class PolicyRule:
     note: str | None = None
     severity: str | None = None
 
-    def evaluate(self, context: PolicyContext, policy: "NoisePolicy") -> PolicyDecision | None:
+    def evaluate(self, context: PolicyContext, policy: NoisePolicy) -> PolicyDecision | None:
         if not self.conditions.matches(context, policy):
             return None
         return PolicyDecision(

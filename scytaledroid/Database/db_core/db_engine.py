@@ -13,11 +13,11 @@ import re
 import sqlite3
 import time
 import uuid
-from collections.abc import Iterable, Mapping, Sequence
-from contextlib import contextmanager, closing
+from collections.abc import Iterable, Iterator, Mapping, MutableMapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterator, MutableMapping, Optional, Tuple
+from typing import Any
 
 import pymysql
 from pymysql import err
@@ -67,9 +67,9 @@ class IntegrityDbError(DatabaseError):
 @dataclass(slots=True)
 class _NormalisedStatement:
     sql: str
-    params: Optional[Sequence[Any]]
+    params: Sequence[Any] | None
     detected_style: str
-    batch_size: Optional[int] = None
+    batch_size: int | None = None
 
 
 def _redact(value: Any) -> Any:
@@ -86,7 +86,7 @@ def _redact(value: Any) -> Any:
     return value
 
 
-def _normalise_single(sql: str, params: Optional[Any]) -> _NormalisedStatement:
+def _normalise_single(sql: str, params: Any | None) -> _NormalisedStatement:
     has_named = bool(NAMED_PARAM_PATTERN.search(sql))
     has_positional = "%s" in sql and not has_named
 
@@ -163,13 +163,13 @@ def _normalise_many(sql: str, rows: Sequence[Any]) -> _NormalisedStatement:
     )
 
 
-def _summarise_params(params: Any, *, many: bool) -> Dict[str, Any]:
+def _summarise_params(params: Any, *, many: bool) -> dict[str, Any]:
     if params is None:
         return {"params_present": False}
     if many:
         if isinstance(params, Sequence):
             size = len(params)
-            summary: Dict[str, Any] = {
+            summary: dict[str, Any] = {
                 "params_present": bool(size),
                 "batch_size": size,
             }
@@ -291,15 +291,15 @@ def connect() -> Iterator[Any]:
 def _execute(
     cursor: Cursor,
     sql: str,
-    params: Optional[Any],
+    params: Any | None,
     *,
     query_name: str,
-    context: Optional[Mapping[str, Any]],
+    context: Mapping[str, Any] | None,
     many: bool,
 ) -> _NormalisedStatement:
     dialect = "sqlite" if isinstance(cursor, sqlite3.Cursor) else "mysql"
     trace_id = uuid.uuid4().hex[:8]
-    base_extra: Dict[str, Any] = {
+    base_extra: dict[str, Any] = {
         "event": "db.exec",
         "query": query_name or "sql",
         "trace_id": trace_id,
@@ -313,7 +313,7 @@ def _execute(
             if many
             else _normalise_single(sql, params)
         )
-    except ParamStyleError as exc:
+    except ParamStyleError:
         summary = _summarise_params(params, many=many)
         _LOG.error(
             "db.exec.paramstyle",
@@ -439,7 +439,7 @@ class DatabaseEngine:
 
     def __init__(self) -> None:
         self._dialect = str(DB_CONFIG.get("engine", "sqlite")).lower()
-        self._connection: Optional[Any] = self._connect_any()
+        self._connection: Any | None = self._connect_any()
         self._read_only = False
 
     def _connect_any(self) -> Any:
@@ -493,7 +493,7 @@ class DatabaseEngine:
     # ------------------------------------------------------------------
     # Role helpers
     # ------------------------------------------------------------------
-    def as_reader(self) -> "DatabaseEngine":
+    def as_reader(self) -> DatabaseEngine:
         self._read_only = True
         return self
 
@@ -516,7 +516,7 @@ class DatabaseEngine:
     # Transaction context
     # ------------------------------------------------------------------
     @contextmanager
-    def transaction(self) -> Iterator["DatabaseEngine"]:
+    def transaction(self) -> Iterator[DatabaseEngine]:
         connection = self._ensure_connection()
         if self._dialect == "mysql":
             prev_autocommit = connection.get_autocommit()
@@ -543,10 +543,10 @@ class DatabaseEngine:
     def execute(
         self,
         sql: str,
-        params: Optional[Any] = None,
+        params: Any | None = None,
         *,
         query_name: str | None = None,
-        context: Optional[Mapping[str, Any]] = None,
+        context: Mapping[str, Any] | None = None,
     ) -> None:
         self._guard_write(sql)
         connection = self._ensure_connection()
@@ -561,7 +561,7 @@ class DatabaseEngine:
         param_rows: Iterable[Any],
         *,
         query_name: str | None = None,
-        context: Optional[Mapping[str, Any]] = None,
+        context: Mapping[str, Any] | None = None,
     ) -> None:
         rows = list(param_rows)
         if not rows:
@@ -576,10 +576,10 @@ class DatabaseEngine:
     def execute_with_lastrowid(
         self,
         sql: str,
-        params: Optional[Any] = None,
+        params: Any | None = None,
         *,
         query_name: str | None = None,
-        context: Optional[Mapping[str, Any]] = None,
+        context: Mapping[str, Any] | None = None,
     ) -> int:
         self._guard_write(sql)
         connection = self._ensure_connection()
@@ -593,11 +593,11 @@ class DatabaseEngine:
     def fetch_one(
         self,
         sql: str,
-        params: Optional[Any] = None,
+        params: Any | None = None,
         *,
         query_name: str | None = None,
-        context: Optional[Mapping[str, Any]] = None,
-    ) -> Optional[Tuple[Any, ...]]:
+        context: Mapping[str, Any] | None = None,
+    ) -> tuple[Any, ...] | None:
         connection = self._ensure_connection()
         with _cursor_ctx(connection) as cursor:
             _execute(cursor, sql, params, query_name=query_name or "fetch_one", context=context, many=False)
@@ -611,11 +611,11 @@ class DatabaseEngine:
     def fetch_all(
         self,
         sql: str,
-        params: Optional[Any] = None,
+        params: Any | None = None,
         *,
         query_name: str | None = None,
-        context: Optional[Mapping[str, Any]] = None,
-    ) -> list[Tuple[Any, ...]]:
+        context: Mapping[str, Any] | None = None,
+    ) -> list[tuple[Any, ...]]:
         connection = self._ensure_connection()
         with _cursor_ctx(connection) as cursor:
             _execute(cursor, sql, params, query_name=query_name or "fetch_all", context=context, many=False)
@@ -631,11 +631,11 @@ class DatabaseEngine:
     def fetch_one_dict(
         self,
         sql: str,
-        params: Optional[Any] = None,
+        params: Any | None = None,
         *,
         query_name: str | None = None,
-        context: Optional[Mapping[str, Any]] = None,
-    ) -> Optional[Dict[str, Any]]:
+        context: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
         connection = self._ensure_connection()
         if self._dialect == "mysql":
             with _cursor_ctx(connection, dict_mode=True) as cursor:
@@ -654,11 +654,11 @@ class DatabaseEngine:
     def fetch_all_dict(
         self,
         sql: str,
-        params: Optional[Any] = None,
+        params: Any | None = None,
         *,
         query_name: str | None = None,
-        context: Optional[Mapping[str, Any]] = None,
-    ) -> list[Dict[str, Any]]:
+        context: Mapping[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         connection = self._ensure_connection()
         if self._dialect == "mysql":
             with _cursor_ctx(connection, dict_mode=True) as cursor:
@@ -721,7 +721,7 @@ def ensure_db_ready(*, require_schema: bool = True) -> None:
             f"Database connection failed for configured MariaDB backend "
             f"({DB_CONFIG.get('user', '<unknown>')}@{_fmt_cfg('host')}:{_fmt_cfg('port')}/{_fmt_cfg('database')}): {exc}\n"
             "Fix credentials/host or unset SCYTALEDROID_DB_URL to use SQLite."
-        )
+        ) from exc
 
     if not require_schema:
         return
@@ -735,4 +735,4 @@ def ensure_db_ready(*, require_schema: bool = True) -> None:
         raise SystemExit(
             f"Database schema missing or incompatible for {DB_CONFIG.get('database')}: {exc}\n"
             "Run: python -m scytaledroid.Database.tools.bootstrap (or db migrate/init) against your MariaDB."
-        )
+        ) from exc

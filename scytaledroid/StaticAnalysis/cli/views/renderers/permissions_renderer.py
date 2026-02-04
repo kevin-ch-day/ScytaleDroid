@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 
 def render_declared_permissions(lines, permissions, wrap_lines, output_prefs) -> None:

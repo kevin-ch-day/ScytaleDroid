@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Iterable, Mapping
+from collections.abc import Iterable, Mapping
+
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ...db_core import run_sql
 from ...db_queries.harvest import storage_surface as q
-from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
 def ensure_tables() -> bool:

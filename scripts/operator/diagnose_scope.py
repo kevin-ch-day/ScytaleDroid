@@ -14,13 +14,13 @@ If no serial is provided, the active device (if any) is used.
 from __future__ import annotations
 
 import sys
-from typing import Dict, Iterable, List, Sequence, Set, Tuple
+from collections.abc import Sequence
 
 from scytaledroid.DeviceAnalysis import device_manager
-from scytaledroid.DeviceAnalysis.inventory import snapshot_io
+from scytaledroid.DeviceAnalysis.harvest import rules
 from scytaledroid.DeviceAnalysis.harvest import scope as scope_mod
 from scytaledroid.DeviceAnalysis.harvest.scope import InventoryRow
-from scytaledroid.DeviceAnalysis.harvest import rules
+from scytaledroid.DeviceAnalysis.inventory import snapshot_io
 
 
 def _load_serial(arg_serial: str | None) -> str | None:
@@ -32,7 +32,7 @@ def _load_serial(arg_serial: str | None) -> str | None:
     return None
 
 
-def _fetch_rows(serial: str) -> List[InventoryRow]:
+def _fetch_rows(serial: str) -> list[InventoryRow]:
     snapshot = snapshot_io.load_latest_inventory(serial)
     if not snapshot:
         print(f"[WARN] No inventory snapshot found for {serial}.")
@@ -47,9 +47,9 @@ def _fetch_rows(serial: str) -> List[InventoryRow]:
 def _counts_by_reason(
     rows: Sequence[InventoryRow],
     kept: Sequence[InventoryRow],
-    allow: Set[str],
-) -> Tuple[int, int, Dict[str, int], Dict[str, List[str]]]:
-    excluded_counts: Dict[str, int] = {}
+    allow: set[str],
+) -> tuple[int, int, dict[str, int], dict[str, list[str]]]:
+    excluded_counts: dict[str, int] = {}
     kept_names = {row.package_name for row in kept}
     excluded_samples = scope_mod._collect_exclusion_samples(rows, kept, allow)  # type: ignore[attr-defined]
     for row in rows:
@@ -62,7 +62,7 @@ def _counts_by_reason(
     return len(rows), len(kept), excluded_counts, excluded_samples
 
 
-def _describe_exclusions(excluded: Dict[str, int]) -> str:
+def _describe_exclusions(excluded: dict[str, int]) -> str:
     from scytaledroid.DeviceAnalysis.harvest.summary import _EXCLUSION_LABELS  # type: ignore
 
     parts = []
@@ -72,7 +72,7 @@ def _describe_exclusions(excluded: Dict[str, int]) -> str:
     return "; ".join(parts) if parts else "none"
 
 
-def _print_scope(label: str, rows: Sequence[InventoryRow], allow: Set[str]) -> None:
+def _print_scope(label: str, rows: Sequence[InventoryRow], allow: set[str]) -> None:
     filtered, excluded = scope_mod._apply_default_scope(rows, allow)  # type: ignore[attr-defined]
     candidates, kept, excluded_counts, excluded_samples = _counts_by_reason(rows, filtered, allow)
     filtered_total = max(candidates - kept, 0)
@@ -88,9 +88,9 @@ def _print_scope(label: str, rows: Sequence[InventoryRow], allow: Set[str]) -> N
             print(f"  {reason}: {', '.join(names)}")
 
 
-def _category_group(rows: Sequence[InventoryRow]) -> Dict[str, List[InventoryRow]]:
+def _category_group(rows: Sequence[InventoryRow]) -> dict[str, list[InventoryRow]]:
     category_map = scope_mod._fetch_category_map([row.package_name for row in rows])  # type: ignore[attr-defined]
-    groups: Dict[str, List[InventoryRow]] = {}
+    groups: dict[str, list[InventoryRow]] = {}
     for row in rows:
         category_name = category_map.get(row.package_name) or row.profile
         if category_name:

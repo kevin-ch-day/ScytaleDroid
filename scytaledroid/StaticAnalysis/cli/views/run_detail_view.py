@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Dict, Iterable, Mapping, Sequence, Set
+from collections.abc import Iterable, Mapping, Sequence
 
-from scytaledroid.Utils.DisplayUtils import status_messages, table_utils, prompt_utils
+from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages, table_utils
 
 from ...core.findings import EvidencePointer, SeverityLevel
 from ..core.models import AppRunResult
@@ -128,7 +128,7 @@ def app_detail_loop(
     finding_limit: int,
     detail_renderer,
 ) -> None:
-    active: Set[str] = set(active_levels)
+    active: set[str] = set(active_levels)
     current_evidence = evidence_lines
     while True:
         detail_renderer(app_result, current_evidence, active, finding_limit)
@@ -187,8 +187,8 @@ def render_app_detail(
                 print(f"      fix: {entry['fix']}")
 
 
-def collect_findings(app_result: AppRunResult, evidence_lines: int) -> Dict[str, list[Dict[str, str]]]:
-    grouped: Dict[str, list[Dict[str, str]]] = defaultdict(list)
+def collect_findings(app_result: AppRunResult, evidence_lines: int) -> dict[str, list[dict[str, str]]]:
+    grouped: dict[str, list[dict[str, str]]] = defaultdict(list)
     seen: set[tuple[str, str, str]] = set()
     for artifact in app_result.artifacts:
         for result in artifact.report.detector_results:

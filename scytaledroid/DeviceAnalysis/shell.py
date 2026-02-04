@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from . import adb_client
 
 
-def open_shell(serial: Optional[str]) -> None:
+def open_shell(serial: str | None) -> None:
     """Launch an interactive adb shell for the active device."""
     if not serial:
         print(status_messages.status("No active device. Connect first to open a shell.", level="warn"))

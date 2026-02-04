@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import pytest
-
 from scytaledroid.StaticAnalysis.cli.core.models import AppRunResult
 from scytaledroid.StaticAnalysis.cli.execution import diagnostics
 

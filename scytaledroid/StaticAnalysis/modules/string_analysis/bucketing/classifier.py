@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Tuple
 
 from ..parsing.host_normalizer import NormalizedHost
 from ..parsing.url_tokenizer import Candidate
-from ..parsing.validators import is_ip, is_localhost, is_placeholder, is_real_host
-from ..parsing.validators import is_private_ip
+from ..parsing.validators import is_ip, is_localhost, is_placeholder, is_private_ip, is_real_host
 
 
 @dataclass(frozen=True)

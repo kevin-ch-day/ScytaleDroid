@@ -8,14 +8,14 @@ Usage:
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
-from typing import Iterable, List
+from collections.abc import Iterable
+from datetime import UTC, datetime
 
-from scytaledroid.Database.db_core import db_engine
 from scytaledroid.Database.db_core.db_config import DB_CONFIG
 from scytaledroid.Database.db_core.db_queries import run_sql
 from scytaledroid.Database.db_queries import schema_manifest
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
+
 
 def _normalize_sqlite(sql: str) -> str:
     """Translate MySQL-ish DDL to SQLite-friendly syntax."""
@@ -85,7 +85,7 @@ def _execute_statements(statements: Iterable[str], *, dialect: str) -> None:
 
 def bootstrap_database() -> None:
     dialect = str(DB_CONFIG.get("engine", "sqlite")).lower()
-    ddl_blocks: List[str] = []
+    ddl_blocks: list[str] = []
 
     if dialect == "sqlite":
         log.warning(
@@ -110,7 +110,7 @@ def bootstrap_database() -> None:
                 "INSERT INTO schema_version (version, applied_at_utc) VALUES (%s, %s)",
                 (
                     "0.3.0-bootstrap",
-                    datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    datetime.now(UTC).isoformat().replace("+00:00", "Z"),
                 ),
             )
     except Exception as exc:  # pragma: no cover

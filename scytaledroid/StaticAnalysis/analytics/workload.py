@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
+from collections.abc import Mapping, MutableMapping, Sequence
 from statistics import mean, median
-from typing import Mapping, MutableMapping, Sequence
 
 from ..core.findings import DetectorResult
 

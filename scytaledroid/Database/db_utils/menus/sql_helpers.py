@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
-from typing import Any, Optional, Sequence
+from typing import Any
 
 from scytaledroid.Database.db_core import run_sql
 
 
-def scalar(query: str, params: Sequence[Any] | None = None) -> Optional[int]:
+def scalar(query: str, params: Sequence[Any] | None = None) -> int | None:
     try:
         row = run_sql(query, params, fetch="one")
     except Exception:
@@ -35,7 +36,7 @@ def view_exists(name: str) -> bool:
     return bool(row and row[0])
 
 
-def coerce_datetime(value: Any) -> Optional[datetime]:
+def coerce_datetime(value: Any) -> datetime | None:
     if isinstance(value, datetime):
         return value
     if isinstance(value, str):
@@ -54,7 +55,7 @@ def coerce_datetime(value: Any) -> Optional[datetime]:
     return None
 
 
-def format_session_stamp(ts: Optional[datetime]) -> Optional[str]:
+def format_session_stamp(ts: datetime | None) -> str | None:
     if ts is None:
         return None
     return ts.strftime("%Y%m%d-%H%M%S")

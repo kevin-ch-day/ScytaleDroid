@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple
-
 from scytaledroid.DeviceAnalysis import package_info, package_inventory
 
 
-def list_packages(serial: str) -> List[str]:
+def list_packages(serial: str) -> list[str]:
     """Return package names via pm list packages."""
     return package_inventory.list_packages(serial)
 
@@ -16,7 +14,7 @@ def list_packages_with_versions(
     serial: str,
     *,
     allow_fallbacks: bool = False,
-) -> List[Tuple[str, Optional[str], Optional[str]]]:
+) -> list[tuple[str, str | None, str | None]]:
     """Return package identifiers with version metadata."""
     return package_inventory.list_packages_with_versions(serial, allow_fallbacks=allow_fallbacks)
 
@@ -27,7 +25,7 @@ def get_package_paths(
     refresh: bool = False,
     *,
     allow_fallbacks: bool = False,
-) -> List[str]:
+) -> list[str]:
     """Return canonical APK paths for a package using pm path."""
     return package_info.get_package_paths(
         serial,
@@ -41,7 +39,7 @@ def get_package_metadata(
     serial: str,
     package_name: str,
     refresh: bool = False,
-) -> Dict[str, Optional[str]]:
+) -> dict[str, str | None]:
     """Return metadata for a package via pm dump (cached)."""
     return package_info.get_package_metadata(serial, package_name, refresh=refresh)
 

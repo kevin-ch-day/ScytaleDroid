@@ -198,7 +198,7 @@ def resolve_mitmdump_path() -> tuple[str | None, str | None]:
 
     local_bin = Path.home() / ".local" / "bin" / "mitmdump"
     if local_bin.exists():
-        hint = f"Add to PATH: export PATH=\"$HOME/.local/bin:$PATH\""
+        hint = "Add to PATH: export PATH=\"$HOME/.local/bin:$PATH\""
         return str(local_bin), hint
 
     return None, "Install mitmproxy or set MITMDUMP_PATH"

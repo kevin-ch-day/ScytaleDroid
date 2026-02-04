@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import os
+
 from scytaledroid.DeviceAnalysis import adb_shell
-from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
 from scytaledroid.DynamicAnalysis.observers.pcapdroid_capture import PCAPDROID_PACKAGE
+from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
 
 _OBSERVER_PREFS: dict[tuple[str, str], dict[str, bool]] = {}
 

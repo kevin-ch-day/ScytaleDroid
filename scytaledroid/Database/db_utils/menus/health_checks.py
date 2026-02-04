@@ -4,26 +4,28 @@ from __future__ import annotations
 
 import json
 import textwrap
-from datetime import datetime, timezone
+from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any
 
+from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core import run_sql
 from scytaledroid.Database.db_utils import diagnostics
-from scytaledroid.Config import app_config
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
 from scytaledroid.Utils.DisplayUtils.terminal import get_terminal_width
 
-from .sql_helpers import coerce_datetime, scalar, view_exists
-from ..menu_actions import log_db_op
 from ..health_checks import fetch_latest_run, fetch_latest_session
 from ..health_checks.inventory_checks import run_inventory_snapshot_checks
+from ..menu_actions import log_db_op
 from ..reset_static import (
     HARVEST_TABLES,
     PROTECTED_TABLES,
     STATIC_ANALYSIS_TABLES,
     reset_static_analysis_data,
 )
+from .sql_helpers import coerce_datetime, scalar
+
 
 def _column_exists(table: str, column: str) -> bool:
     try:
@@ -450,7 +452,7 @@ def _render_scoring_checks() -> None:
         _print_status_line(level, table, detail=detail)
 
 
-def _render_integrity_checks(session_stamp: Optional[str]) -> None:
+def _render_integrity_checks(session_stamp: str | None) -> None:
     _print_status_line(
         "warn",
         "latest APK ↔ summary",
@@ -489,7 +491,7 @@ def _render_integrity_checks(session_stamp: Optional[str]) -> None:
         )
 
 
-def _fetch_findings_detail(session_stamp: str) -> Optional[str]:
+def _fetch_findings_detail(session_stamp: str) -> str | None:
     try:
         row = run_sql(
             """
@@ -511,7 +513,7 @@ def _fetch_findings_detail(session_stamp: str) -> Optional[str]:
     )
 
 
-def _fetch_string_summary_detail(session_stamp: str) -> Optional[str]:
+def _fetch_string_summary_detail(session_stamp: str) -> str | None:
     try:
         row = run_sql(
             """
@@ -536,7 +538,7 @@ def _fetch_string_summary_detail(session_stamp: str) -> Optional[str]:
     )
 
 
-def _fetch_metrics_summary(run_id: int) -> Optional[List[Dict[str, Any]]]:
+def _fetch_metrics_summary(run_id: int) -> list[dict[str, Any]] | None:
     try:
         rows = run_sql(
             """
@@ -555,7 +557,7 @@ def _fetch_metrics_summary(run_id: int) -> Optional[List[Dict[str, Any]]]:
     return rows or None
 
 
-def _print_status_line(level: str, label: str, *, detail: Optional[str] = None) -> None:
+def _print_status_line(level: str, label: str, *, detail: str | None = None) -> None:
     icons = {"ok": "✅", "warn": "⚠️", "fail": "❌"}
     prefix = icons.get(level, "•")
     line = f"  {prefix} {label}"
@@ -606,7 +608,6 @@ def _run_inventory_health_check() -> None:
     menu_utils.print_section("Inventory DB health")
 
     snapshot_headers_total = scalar("SELECT COUNT(*) FROM device_inventory_snapshots") or 0
-    inventory_rows_total = scalar("SELECT COUNT(*) FROM device_inventory") or 0
     orphan_headers = scalar(
         """
         SELECT COUNT(*)
@@ -686,9 +687,9 @@ def prompt_reset_static_data() -> None:
         prompt_utils.press_enter_to_continue()
         return
 
-    started_at = datetime.now(timezone.utc)
+    started_at = datetime.now(UTC)
     outcome = reset_static_analysis_data(include_harvest=include_harvest)
-    finished_at = datetime.now(timezone.utc)
+    finished_at = datetime.now(UTC)
     log_db_op(
         operation="reset_static_analysis",
         started_at=started_at,
@@ -1043,7 +1044,7 @@ def prompt_delete_orphan_permission_snapshots() -> None:
         prompt_utils.press_enter_to_continue()
         return
 
-    started_at = datetime.now(timezone.utc)
+    started_at = datetime.now(UTC)
     run_sql(
         """
         DELETE FROM permission_audit_snapshots
@@ -1052,7 +1053,7 @@ def prompt_delete_orphan_permission_snapshots() -> None:
         """,
         fetch=None,
     )
-    finished_at = datetime.now(timezone.utc)
+    finished_at = datetime.now(UTC)
     deleted_rows = int(count or 0)
     log_db_op(
         operation="delete_orphan_permission_snapshots",
@@ -1110,7 +1111,7 @@ def prompt_backfill_pcap_metadata() -> None:
         return
 
     updated = 0
-    started_at = datetime.now(timezone.utc)
+    started_at = datetime.now(UTC)
     for row in rows:
         run_id = row.get("dynamic_run_id")
         evidence_path = row.get("evidence_path")
@@ -1139,7 +1140,7 @@ def prompt_backfill_pcap_metadata() -> None:
         if pcap_bytes is None and isinstance(capture, dict):
             pcap_bytes = capture.get("pcap_size_bytes")
         pcap_valid = capture.get("pcap_valid")
-        pcap_validated_at = datetime.now(timezone.utc) if pcap_valid is not None else None
+        pcap_validated_at = datetime.now(UTC) if pcap_valid is not None else None
         run_sql(
             """
             UPDATE dynamic_sessions
@@ -1162,7 +1163,7 @@ def prompt_backfill_pcap_metadata() -> None:
         )
         updated += 1
 
-    finished_at = datetime.now(timezone.utc)
+    finished_at = datetime.now(UTC)
     log_db_op(
         operation="backfill_pcap_metadata",
         started_at=started_at,
@@ -1200,7 +1201,7 @@ def prompt_recompute_network_signal_quality() -> None:
         prompt_utils.press_enter_to_continue()
         return
 
-    started_at = datetime.now(timezone.utc)
+    started_at = datetime.now(UTC)
     run_sql(
         """
         UPDATE dynamic_sessions ds
@@ -1225,7 +1226,7 @@ def prompt_recompute_network_signal_quality() -> None:
         """,
         fetch=None,
     )
-    finished_at = datetime.now(timezone.utc)
+    finished_at = datetime.now(UTC)
     log_db_op(
         operation="recompute_network_signal_quality",
         started_at=started_at,

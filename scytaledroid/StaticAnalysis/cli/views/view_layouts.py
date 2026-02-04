@@ -6,7 +6,7 @@ forensic formatter so downstream code does not duplicate text/layout.
 
 from __future__ import annotations
 
-from typing import Mapping, Sequence
+from collections.abc import Mapping, Sequence
 
 from scytaledroid.Utils.DisplayUtils import status_messages
 

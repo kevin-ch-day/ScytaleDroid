@@ -13,6 +13,7 @@ from .aggregates import (
     summarise_endpoint_roots,
     summarise_entropy,
 )
+from .allowlist import DEFAULT_POLICY_ROOT, NoisePolicy, load_noise_policy
 from .bucket_meta import BUCKET_LABELS, BUCKET_METADATA, BUCKET_ORDER, BucketMetadata
 from .bucket_overview import build_bucket_overview
 from .extractor import (
@@ -26,7 +27,6 @@ from .extractor import (
     normalise_index,
 )
 from .hit_record import StringHit
-from .allowlist import DEFAULT_POLICY_ROOT, NoisePolicy, load_noise_policy
 from .matcher import (
     DEFAULT_SECRET_FILTERS,
     MatchBatch,

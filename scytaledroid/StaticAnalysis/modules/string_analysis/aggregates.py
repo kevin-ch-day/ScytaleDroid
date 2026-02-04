@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from typing import Mapping, MutableMapping, Sequence
+from collections.abc import Mapping, MutableMapping, Sequence
 
 from .hit_record import StringHit
 

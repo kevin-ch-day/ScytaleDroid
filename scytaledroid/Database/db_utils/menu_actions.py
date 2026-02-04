@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
+import getpass
 import os
 import socket
-import getpass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from scytaledroid.Database.db_utils import diagnostics
-from scytaledroid.Database.db_core import db_config, db_queries as core_q
-from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
 from scytaledroid.Config import app_config
+from scytaledroid.Database.db_core import db_config
+from scytaledroid.Database.db_core import db_queries as core_q
+from scytaledroid.Database.db_utils import diagnostics
+from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
 
 
 def show_connection_and_config() -> None:
@@ -448,7 +449,7 @@ def ensure_dynamic_tier_migrations(*, prompt_user: bool = True) -> bool:
 
     _ensure_db_ops_log_table()
     schema_before = diagnostics.get_schema_version() or "<unknown>"
-    started_at = datetime.now(timezone.utc)
+    started_at = datetime.now(UTC)
     success = False
     error_text = None
     try:
@@ -467,7 +468,7 @@ def ensure_dynamic_tier_migrations(*, prompt_user: bool = True) -> bool:
         error_text = str(exc)
         raise
     finally:
-        finished_at = datetime.now(timezone.utc)
+        finished_at = datetime.now(UTC)
         _log_db_op(
             operation="tier1_schema_migrations",
             schema_before=schema_before,
@@ -513,7 +514,7 @@ def _record_schema_version(version: str) -> None:
     sql = "INSERT INTO schema_version (version, applied_at_utc) VALUES (%s, %s)"
     core_q.run_sql_write(
         sql,
-        (version, datetime.now(timezone.utc)),
+        (version, datetime.now(UTC)),
         query_name="db_utils.schema_version.insert",
     )
 

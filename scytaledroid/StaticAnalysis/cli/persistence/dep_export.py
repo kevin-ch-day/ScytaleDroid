@@ -4,19 +4,18 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
+from collections.abc import Mapping
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
-from scytaledroid.Database.db_core import db_queries as core_q
-from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
 from scytaledroid.Config import app_config
+from scytaledroid.Database.db_core import db_queries as core_q
+from scytaledroid.Database.db_utils.artifact_registry import record_artifacts
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.version_utils import get_git_commit
 
 from .dep_view import ensure_dep_view
-from scytaledroid.Database.db_utils.artifact_registry import record_artifacts
-
 
 _WATCH_PERMISSIONS = {
     "ACCESS_FINE_LOCATION": "location",
@@ -98,20 +97,35 @@ def export_dep_json(static_run_id: int) -> str | None:
     package_name = payload.get("package_name") or "unknown"
     sha256 = payload.get("sha256") or payload.get("base_apk_sha256")
     artifact_token = str(sha256) if sha256 else f"run_{static_run_id}"
-    evidence_dir = (
-        Path("evidence")
-        / "static_runs"
-        / str(static_run_id)
-        / str(package_name)
-        / artifact_token
-    )
+    evidence_dir = Path("evidence") / "static_runs" / str(static_run_id)
     evidence_dir.mkdir(parents=True, exist_ok=True)
 
     watchlist = _build_watchlist(static_run_id)
+    dep_warnings: list[str] = []
+
+    def _coerce_int(value: Any, *, key: str) -> int:
+        if value is None:
+            dep_warnings.append(f"missing_metrics_defaulted:{key}")
+            return 0
+        try:
+            return int(value)
+        except Exception:
+            dep_warnings.append(f"missing_metrics_defaulted:{key}")
+            return 0
+
+    exports_total = _coerce_int(payload.get("exports_total"), key="exports_total")
+    exports_activities = _coerce_int(payload.get("exports_activities"), key="exports_activities")
+    exports_services = _coerce_int(payload.get("exports_services"), key="exports_services")
+    exports_receivers = _coerce_int(payload.get("exports_receivers"), key="exports_receivers")
+    exports_providers = _coerce_int(payload.get("exports_providers"), key="exports_providers")
+    masvs_total = _coerce_int(payload.get("masvs_total"), key="masvs_total")
+    masvs_pass = _coerce_int(payload.get("masvs_pass"), key="masvs_pass")
+    masvs_fail = _coerce_int(payload.get("masvs_fail"), key="masvs_fail")
+    masvs_inconclusive = _coerce_int(payload.get("masvs_inconclusive"), key="masvs_inconclusive")
 
     dep_payload: dict[str, Any] = {
         "schema": "dep_v1",
-        "generated_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "generated_at_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "static_run_id": payload.get("static_run_id"),
         "package_name": package_name,
         "display_name": payload.get("display_name"),
@@ -146,27 +160,27 @@ def export_dep_json(static_run_id: int) -> str | None:
             "total": payload.get("permissions_total"),
         },
         "components": {
-            "exported_total": payload.get("exports_total"),
-            "exported_activities": payload.get("exports_activities"),
-            "exported_services": payload.get("exports_services"),
-            "exported_receivers": payload.get("exports_receivers"),
-            "exported_providers": payload.get("exports_providers"),
+            "exported_total": exports_total,
+            "exported_activities": exports_activities,
+            "exported_services": exports_services,
+            "exported_receivers": exports_receivers,
+            "exported_providers": exports_providers,
         },
         "masvs": {
-            "total": payload.get("masvs_total"),
-            "pass": payload.get("masvs_pass"),
-            "fail": payload.get("masvs_fail"),
-            "inconclusive": payload.get("masvs_inconclusive"),
+            "total": masvs_total,
+            "pass": masvs_pass,
+            "fail": masvs_fail,
+            "inconclusive": masvs_inconclusive,
         },
         "pcap_required": _derive_pcap_required(payload),
         "expected_background_activity": _derive_expected_background(payload),
         "watchlist": watchlist,
+        "dep_complete": not dep_warnings,
+        "dep_warnings": dep_warnings,
     }
 
     dep_path = evidence_dir / "dep.json"
     dep_path.write_text(json.dumps(dep_payload, indent=2, sort_keys=True))
-
-    _write_static_manifest(static_run_id, dep_path, dep_payload)
     record_artifacts(
         run_id=str(static_run_id),
         run_type="static",
@@ -174,38 +188,33 @@ def export_dep_json(static_run_id: int) -> str | None:
         origin="host",
         pull_status="n/a",
     )
+    _update_static_manifest(static_run_id, dep_path, dep_payload)
     return str(dep_path)
 
 
-def _write_static_manifest(
+def _update_static_manifest(
     static_run_id: int,
     dep_path: Path,
     dep_payload: Mapping[str, Any],
 ) -> None:
     package_name = dep_payload.get("package_name") or "unknown"
-    schema_version = db_diagnostics.get_schema_version() or "<unknown>"
-    manifest = {
-        "run_manifest_version": 1,
-        "static_run_id": static_run_id,
-        "run_type": "static",
-        "package_name": package_name,
-        "display_name": dep_payload.get("display_name"),
-        "version_code": dep_payload.get("version_code"),
-        "version_name": dep_payload.get("version_name"),
-        "session_stamp": dep_payload.get("session_stamp"),
-        "scope_label": dep_payload.get("scope_label"),
-        "category": dep_payload.get("category"),
-        "profile": dep_payload.get("profile"),
-        "profile_key": dep_payload.get("profile_key"),
-        "schema_version": schema_version,
-        "tool_semver": app_config.APP_VERSION,
-        "tool_git_commit": get_git_commit(),
-        "artifacts": [
-            _artifact_entry(dep_path, artifact_type="dep_snapshot"),
-        ],
-    }
-    manifest_path = dep_path.parent / "run_manifest.json"
-    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True))
+    manifest_path = Path("evidence") / "static_runs" / str(static_run_id) / "run_manifest.json"
+    if not manifest_path.exists():
+        return
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception:
+        manifest = {}
+    artifacts = manifest.get("artifacts") if isinstance(manifest, dict) else None
+    if not isinstance(artifacts, list):
+        artifacts = []
+    artifacts.append(_artifact_entry(dep_path, artifact_type="dep_snapshot"))
+    if isinstance(manifest, dict):
+        manifest["artifacts"] = artifacts
+        manifest["package_name"] = manifest.get("package_name") or package_name
+        manifest["tool_semver"] = manifest.get("tool_semver") or app_config.APP_VERSION
+        manifest["tool_git_commit"] = manifest.get("tool_git_commit") or get_git_commit()
+        manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True))
 
 
 def _artifact_entry(path: Path, *, artifact_type: str) -> Mapping[str, Any]:
@@ -215,7 +224,7 @@ def _artifact_entry(path: Path, *, artifact_type: str) -> Mapping[str, Any]:
         "type": artifact_type,
         "sha256": digest,
         "size_bytes": path.stat().st_size,
-        "created_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "created_at_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
     }
 
 

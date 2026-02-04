@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Iterable, Pattern, Tuple
+from re import Pattern
 
 _PRINTABLE_FRAGMENT = re.compile(rb"[\x09\x0a\x0d\x20-\x7e]{4,}")
 _UTF16_LE_FRAGMENT = re.compile(rb"(?:[\x20-\x7e]\x00){4,}")
@@ -74,7 +74,7 @@ def strings_from_utf16(blob: bytes) -> tuple[StringFragment, ...]:
         return tuple()
 
     results: list[StringFragment] = []
-    seen: set[Tuple[int, int]] = set()
+    seen: set[tuple[int, int]] = set()
 
     for pattern, codec in (
         (_UTF16_LE_FRAGMENT, "utf-16-le"),
@@ -104,7 +104,7 @@ def strings_from_utf32(blob: bytes) -> tuple[StringFragment, ...]:
         return tuple()
 
     results: list[StringFragment] = []
-    seen: set[Tuple[int, int]] = set()
+    seen: set[tuple[int, int]] = set()
 
     for pattern, codec in (
         (_UTF32_LE_FRAGMENT, "utf-32-le"),
@@ -132,7 +132,7 @@ def _extract_fragments(blob: bytes, *, minimum: int) -> tuple[StringFragment, ..
         return tuple()
 
     results: list[StringFragment] = []
-    seen: set[Tuple[int, int]] = set()
+    seen: set[tuple[int, int]] = set()
 
     for match in _PRINTABLE_FRAGMENT.finditer(blob):
         start, end = match.span()

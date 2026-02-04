@@ -6,12 +6,13 @@ mirrored by :class:`RiskScoreRecord`.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping, MutableMapping
 from dataclasses import dataclass
-from typing import Iterable, Mapping, MutableMapping, Union
+
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ...db_core import database_session, run_sql
 from ...db_queries.static_analysis import risk_scores as queries
-from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
 @dataclass(slots=True)
@@ -42,7 +43,7 @@ class RiskScoreRecord:
         }
 
 
-RiskRow = Union[RiskScoreRecord, Mapping[str, object]]
+RiskRow = RiskScoreRecord | Mapping[str, object]
 
 
 def ensure_table() -> bool:

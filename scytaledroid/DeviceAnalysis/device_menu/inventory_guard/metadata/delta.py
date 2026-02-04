@@ -2,21 +2,21 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Sequence, Tuple
+from collections.abc import Sequence
 
 from .normalizers import display_version, normalise_version_code
 
 
 def build_package_delta_summary(
-    snapshot_packages: Sequence[Dict[str, object]] | None,
-    current_signatures: Sequence[Tuple[str, Optional[str], Optional[str]]],
+    snapshot_packages: Sequence[dict[str, object]] | None,
+    current_signatures: Sequence[tuple[str, str | None, str | None]],
     *,
-    limit: Optional[int] = 5,
-) -> Optional[Dict[str, object]]:
+    limit: int | None = 5,
+) -> dict[str, object | None]:
     if not snapshot_packages:
         return None
 
-    previous_map: Dict[str, Dict[str, Optional[str]]] = {}
+    previous_map: dict[str, dict[str, str | None]] = {}
     for entry in snapshot_packages:
         if not isinstance(entry, dict):
             continue
@@ -28,7 +28,7 @@ def build_package_delta_summary(
             "version_name": entry.get("version_name") if isinstance(entry.get("version_name"), str) else None,
         }
 
-    current_map: Dict[str, Dict[str, Optional[str]]] = {}
+    current_map: dict[str, dict[str, str | None]] = {}
     for name, version_code, version_name in current_signatures:
         if not isinstance(name, str) or not name:
             continue
@@ -45,7 +45,7 @@ def build_package_delta_summary(
 
     added = sorted(current_names - previous_names)
     removed = sorted(previous_names - current_names)
-    updated: List[Dict[str, Optional[str]]] = []
+    updated: list[dict[str, str | None]] = []
     for name in sorted(previous_names & current_names):
         previous_entry = previous_map.get(name) or {}
         current_entry = current_map.get(name) or {}
@@ -72,7 +72,7 @@ def build_package_delta_summary(
     if total_changed == 0:
         return None
 
-    summary: Dict[str, object] = {
+    summary: dict[str, object] = {
         "total_added": total_added,
         "total_removed": total_removed,
         "total_updated": total_updated,
@@ -92,4 +92,3 @@ def build_package_delta_summary(
             summary["updated"] = updated[:limit]
 
     return summary
-

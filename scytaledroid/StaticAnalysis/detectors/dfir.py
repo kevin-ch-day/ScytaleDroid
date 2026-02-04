@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from pathlib import Path
 from time import perf_counter
-from typing import Dict, List, Mapping, Tuple
 
 from ..core.context import DetectorContext
 from ..core.findings import (
@@ -24,7 +24,7 @@ _PREF_PATTERN = re.compile(r"shared_prefs/([\w\-\.]+\.xml)", re.IGNORECASE)
 _DB_PATTERN = re.compile(r"databases/([\w\-\.]+\.db)", re.IGNORECASE)
 _FILE_PATTERN = re.compile(r"files/([\w\-\.]+\.(?:log|json|txt))", re.IGNORECASE)
 
-_PERMISSION_HINTS: Mapping[str, Tuple[str, str]] = {
+_PERMISSION_HINTS: Mapping[str, tuple[str, str]] = {
     "android.permission.READ_SMS": ("sms.db", "databases"),
     "android.permission.READ_CONTACTS": ("contacts2.db", "databases"),
     "android.permission.READ_CALL_LOG": ("calllog.db", "databases"),
@@ -35,9 +35,9 @@ _PERMISSION_HINTS: Mapping[str, Tuple[str, str]] = {
 
 def _string_hints(
     index: StringIndex, package: str, apk_path: Path
-) -> Tuple[List[Dict[str, object]], List[EvidencePointer]]:
-    hints: List[Dict[str, object]] = []
-    evidence: List[EvidencePointer] = []
+) -> tuple[list[dict[str, object]], list[EvidencePointer]]:
+    hints: list[dict[str, object]] = []
+    evidence: list[EvidencePointer] = []
     seen_targets: set[str] = set()
 
     for entry in index.strings:
@@ -89,9 +89,9 @@ def _string_hints(
     return hints, evidence
 
 
-def _permission_hints(context: DetectorContext) -> List[Dict[str, object]]:
+def _permission_hints(context: DetectorContext) -> list[dict[str, object]]:
     package = context.manifest_summary.package_name or context.apk_path.stem
-    hints: List[Dict[str, object]] = []
+    hints: list[dict[str, object]] = []
     for permission, (filename, location) in _PERMISSION_HINTS.items():
         if permission not in context.permissions.declared:
             continue
@@ -114,14 +114,14 @@ class DfirHintsDetector(BaseDetector):
         package = context.manifest_summary.package_name or context.apk_path.stem
         index = context.string_index
 
-        path_hints: List[Dict[str, object]] = []
-        evidence: List[EvidencePointer] = []
+        path_hints: list[dict[str, object]] = []
+        evidence: list[EvidencePointer] = []
         if index is not None and not index.is_empty():
             path_hints, evidence = _string_hints(index, package, context.apk_path)
 
         permission_hints = _permission_hints(context)
 
-        findings: List[Finding] = []
+        findings: list[Finding] = []
         if path_hints:
             findings.append(
                 Finding(

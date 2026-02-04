@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from importlib import import_module
-from typing import Dict, List, Optional
 
+from scytaledroid.DeviceAnalysis import device_manager
+from scytaledroid.DeviceAnalysis.services import device_service, info_service
 from scytaledroid.Utils.DisplayUtils import (
     error_panels,
     menu_utils,
@@ -13,28 +14,18 @@ from scytaledroid.Utils.DisplayUtils import (
     table_utils,
     text_blocks,
 )
-from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.LoggingUtils import logging_engine
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
-from scytaledroid.DeviceAnalysis import device_manager
 from .formatters import (
-    format_android_release,
-    format_build_tags,
     format_battery,
     format_device_line,
-    format_emulator_flag,
-    format_wifi_state,
-    prettify_manufacturer,
-    prettify_model,
 )
 from .inventory_guard import (
     ensure_recent_inventory,
     format_inventory_status,
     format_pull_hint,
 )
-from scytaledroid.DeviceAnalysis.services import apk_library_service, device_service
-from scytaledroid.DeviceAnalysis.services import info_service
-
 
 # Keep menu routing aligned with handle_choice to avoid accidental swaps in the CLI.
 _HELPER_ROUTES = {
@@ -48,10 +39,10 @@ _HELPER_ROUTES = {
 
 def handle_choice(
     choice: str,
-    devices: List[Dict[str, Optional[str]]],
-    summaries: List[Dict[str, Optional[str]]],
-    active_device: Optional[Dict[str, Optional[str]]],
-    active_details: Optional[Dict[str, Optional[str]]],
+    devices: list[dict[str, str | None]],
+    summaries: list[dict[str, str | None]],
+    active_device: dict[str, str | None | None],
+    active_details: dict[str, str | None | None],
 ) -> bool:
     if choice == "8":
         # Jump to the full devices hub for consistent list/switch UX.
@@ -76,8 +67,8 @@ def handle_choice(
 
 
 def build_main_menu_options(
-    active_details: Optional[Dict[str, Optional[str]]]
-) -> List[menu_utils.MenuOption]:
+    active_details: dict[str, str | None | None]
+) -> list[menu_utils.MenuOption]:
     """
     Single source of truth for the Device Analysis menu.
     Any change to menu ordering/labels must be reflected here and in handlers.
@@ -86,22 +77,17 @@ def build_main_menu_options(
     has_device = bool(serial)
 
     inv_status_obj = device_service.fetch_inventory_metadata(serial) if serial else None
-    inventory_status = format_inventory_status(serial)
-    pull_hint = format_pull_hint(serial)
-
     # Derive compact badges from status strings
-    inv_badge: Optional[str] = None
+    inv_badge: str | None = None
     if inv_status_obj:
         if inv_status_obj.is_stale:
             inv_badge = "recommended"
         elif inv_status_obj.status_label == "NONE":
             inv_badge = "not run"
 
-    pull_badge: Optional[str] = None
-
     needs_active = None if has_device else "needs active"
 
-    options: List[menu_utils.MenuOption] = [
+    options: list[menu_utils.MenuOption] = [
         menu_utils.MenuOption(
             "1",
             "Sync inventory & pull APKs",
@@ -139,7 +125,7 @@ def build_main_menu_options(
     return options
 
 
-def _list_devices(summaries: List[Dict[str, Optional[str]]]) -> None:
+def _list_devices(summaries: list[dict[str, str | None]]) -> None:
     # Instead of an inline list + extra prompt, jump to the full devices hub.
     from scytaledroid.DeviceAnalysis.device_hub_menu import devices_hub
 
@@ -147,8 +133,8 @@ def _list_devices(summaries: List[Dict[str, Optional[str]]]) -> None:
 
 
 def _connect_to_device(
-    devices: List[Dict[str, Optional[str]]],
-    summaries: List[Dict[str, Optional[str]]],
+    devices: list[dict[str, str | None]],
+    summaries: list[dict[str, str | None]],
 ) -> None:
     if not devices:
         error_panels.print_info_panel(
@@ -200,8 +186,8 @@ def _connect_to_device(
 
 
 def _show_device_info(
-    active_device: Optional[Dict[str, Optional[str]]],
-    active_details: Optional[Dict[str, Optional[str]]],
+    active_device: dict[str, str | None | None],
+    active_details: dict[str, str | None | None],
 ) -> None:
     info_rows = info_service.fetch_device_info(active_details)
     if not info_rows:
@@ -229,7 +215,7 @@ def _disconnect_device() -> None:
     devices_hub()
 
 
-def _open_apk_library_filtered(active_device: Optional[Dict[str, Optional[str]]]) -> None:
+def _open_apk_library_filtered(active_device: dict[str, str | None | None]) -> None:
     serial = active_device.get("serial") if active_device else device_manager.get_active_serial()
     if not serial:
         print(status_messages.status("No active device. Select a device first.", level="warn"))
@@ -246,7 +232,7 @@ def _open_apk_library_filtered(active_device: Optional[Dict[str, Optional[str]]]
         prompt_utils.press_enter_to_continue()
 
 
-def _forward_to_helper(option: str, active_device: Optional[Dict[str, Optional[str]]]) -> None:
+def _forward_to_helper(option: str, active_device: dict[str, str | None | None]) -> None:
     module_name, func_name, requires_device, description = _HELPER_ROUTES[option]
 
     if requires_device and not active_device:
@@ -282,7 +268,7 @@ def _forward_to_helper(option: str, active_device: Optional[Dict[str, Optional[s
 
 
 def _run_apk_pull(
-    active_device: Optional[Dict[str, Optional[str]]],
+    active_device: dict[str, str | None | None],
     *,
     auto_scope: bool = False,
 ) -> None:
@@ -409,7 +395,7 @@ def _run_apk_pull(
         prompt_utils.press_enter_to_continue()
 
 
-def _run_sync_and_pull(active_device: Optional[Dict[str, Optional[str]]]) -> None:
+def _run_sync_and_pull(active_device: dict[str, str | None | None]) -> None:
     serial = active_device.get("serial") if active_device else device_manager.get_active_serial()
     if not serial:
         error_panels.print_error_panel(
@@ -419,8 +405,8 @@ def _run_sync_and_pull(active_device: Optional[Dict[str, Optional[str]]]) -> Non
         prompt_utils.press_enter_to_continue()
         return
 
-    from scytaledroid.DeviceAnalysis.services import inventory_service
     from scytaledroid.DeviceAnalysis.runtime_flags import set_allow_inventory_fallbacks
+    from scytaledroid.DeviceAnalysis.services import inventory_service
 
     try:
         root_state = (active_device or {}).get("is_rooted") or "Unknown"

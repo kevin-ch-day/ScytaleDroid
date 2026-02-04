@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Iterable, List, Set
+from collections.abc import Iterable
 
 from scytaledroid.StaticAnalysis.core.repository import ArtifactGroup
 
@@ -11,12 +11,12 @@ class StaticScopeService:
     """Placeholder selection store for APKs to be scanned."""
 
     def __init__(self) -> None:
-        self._selected: Set[str] = set()  # store unique apk paths
+        self._selected: set[str] = set()  # store unique apk paths
 
     def clear(self) -> None:
         self._selected.clear()
 
-    def select_groups(self, groups: List[ArtifactGroup]) -> None:
+    def select_groups(self, groups: list[ArtifactGroup]) -> None:
         for group in groups:
             for artifact in group.artifacts:
                 self._selected.add(str(artifact.path))
@@ -42,10 +42,10 @@ class StaticScopeService:
     def is_group_selected(self, group: ArtifactGroup) -> bool:
         return any(str(artifact.path) in self._selected for artifact in group.artifacts)
 
-    def get_selected(self) -> List[str]:
+    def get_selected(self) -> list[str]:
         return sorted(self._selected)
 
-    def selected_set(self) -> Set[str]:
+    def selected_set(self) -> set[str]:
         return set(self._selected)
 
     def count(self) -> int:

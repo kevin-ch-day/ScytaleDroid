@@ -4,21 +4,21 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass, field
+import os
 import socket
-from datetime import datetime, timezone
+from collections.abc import Mapping, MutableMapping
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Dict, Mapping, MutableMapping, Optional, Tuple
 
 from scytaledroid.Config import app_config
-import os
-from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.DeviceAnalysis import adb_client, adb_packages
+from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .models import ArtifactError, InventoryRow
 
-DEFAULT_META_FIELDS: Tuple[str, ...] = (
+DEFAULT_META_FIELDS: tuple[str, ...] = (
     "package_name",
     "app_label",
     "installer",
@@ -78,7 +78,7 @@ class HarvestOptions:
     keep_last: int = 1
     write_db: bool = True
     write_meta: bool = True
-    meta_fields: Tuple[str, ...] = DEFAULT_META_FIELDS
+    meta_fields: tuple[str, ...] = DEFAULT_META_FIELDS
     pull_mode: str = "inventory"
 
 
@@ -106,7 +106,7 @@ def load_options(config: object, *, pull_mode: str) -> HarvestOptions:
         candidates = []
 
     if candidates:
-        fields: Tuple[str, ...] = tuple(field for field in candidates if field)
+        fields: tuple[str, ...] = tuple(field for field in candidates if field)
         meta_fields = fields or DEFAULT_META_FIELDS
     else:
         meta_fields = DEFAULT_META_FIELDS
@@ -129,7 +129,7 @@ class DedupeTracker:
     counts: MutableMapping[str, int] = field(default_factory=dict)
     skipped: int = 0
 
-    def register(self, sha256: str) -> Tuple[bool, int]:
+    def register(self, sha256: str) -> tuple[bool, int]:
         """Record *sha256* and return (keep, occurrence_index)."""
 
         current = self.counts.get(sha256, 0) + 1
@@ -142,7 +142,7 @@ class DedupeTracker:
         return False, current
 
 
-def compute_hashes(dest_path: Path) -> Dict[str, str]:
+def compute_hashes(dest_path: Path) -> dict[str, str]:
     """Return md5/sha1/sha256 digests for *dest_path*."""
 
     hashers = {
@@ -166,15 +166,15 @@ def write_metadata_sidecar(
     serial: str,
     session_stamp: str,
     options: HarvestOptions,
-    extra: Optional[Mapping[str, object]] = None,
-) -> Optional[Path]:
+    extra: Mapping[str, object | None] = None,
+) -> Path | None:
     """Write a ``*.meta.json`` sidecar next to *dest_path* when enabled."""
 
     if not options.write_meta:
         return None
 
-    captured_at = datetime.now(timezone.utc).isoformat()
-    payload: Dict[str, object] = {
+    captured_at = datetime.now(UTC).isoformat()
+    payload: dict[str, object] = {
         "package_name": inventory.get("package_name"),
         "app_label": inventory.get("app_label"),
         "installer": inventory.get("installer"),
@@ -316,7 +316,7 @@ def print_artifact_status(
     *,
     index: int,
     total: int,
-    suffix: Optional[str] = None,
+    suffix: str | None = None,
     level: str = "info",
 ) -> None:
     compact = os.getenv("SCYTALEDROID_HARVEST_COMPACT", "1").strip().lower() in {
@@ -341,7 +341,7 @@ def print_artifact_status(
     )
 
 
-def inventory_payload(inventory: InventoryRow) -> Dict[str, Optional[str]]:
+def inventory_payload(inventory: InventoryRow) -> dict[str, str | None]:
     """Return a serialisable view of key inventory attributes."""
 
     return {

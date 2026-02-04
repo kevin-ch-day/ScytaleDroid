@@ -2,24 +2,25 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from datetime import datetime, timezone
 import json
-from pathlib import Path
-from typing import Any, Mapping
 import uuid
+from collections.abc import Mapping
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 
-from scytaledroid.Utils.LoggingUtils import logging_engine
-from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Config import app_config
 from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
-from scytaledroid.Utils.version_utils import get_git_commit
-
-from scytaledroid.DynamicAnalysis.core import DynamicSessionConfig, DynamicSessionResult, run_dynamic_session
+from scytaledroid.DynamicAnalysis.core import (
+    DynamicSessionConfig,
+    DynamicSessionResult,
+    run_dynamic_session,
+)
+from scytaledroid.DynamicAnalysis.core.event_logger import RunEventLogger
 from scytaledroid.DynamicAnalysis.core.evidence_pack import EvidencePackWriter
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord, RunManifest
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
-from scytaledroid.DynamicAnalysis.core.event_logger import RunEventLogger
 from scytaledroid.DynamicAnalysis.plans.loader import (
     build_plan_validation_event,
     load_dynamic_plan,
@@ -29,6 +30,9 @@ from scytaledroid.DynamicAnalysis.plans.loader import (
 from scytaledroid.DynamicAnalysis.probes.registry import run_probe_set
 from scytaledroid.DynamicAnalysis.storage.persistence import persist_dynamic_summary
 from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_evidence_path
+from scytaledroid.Utils.DisplayUtils import status_messages
+from scytaledroid.Utils.LoggingUtils import logging_engine
+from scytaledroid.Utils.version_utils import get_git_commit
 
 
 @dataclass(frozen=True)
@@ -65,7 +69,7 @@ class DynamicAnalysisEngine:
         )
         plan_payload, validation = self._resolve_plan_payload()
         if validation and not validation.is_pass:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             dynamic_run_id, evidence_path = self._write_blocked_event(validation)
             blocked = DynamicSessionResult(
                 package_name=self.config.package_name,
@@ -194,7 +198,7 @@ class DynamicAnalysisEngine:
         manifest = RunManifest(
             run_manifest_version=1,
             dynamic_run_id=dynamic_run_id,
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
             status="blocked",
             target={
                 "package_name": self.config.package_name,

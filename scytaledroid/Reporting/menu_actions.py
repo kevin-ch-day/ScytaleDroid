@@ -2,21 +2,21 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 import csv
+from collections.abc import Iterable
+from datetime import datetime
 from pathlib import Path
-from typing import Iterable, List, Optional
 
 from scytaledroid.Config import app_config
+from scytaledroid.Database.db_core import db_queries as core_q
+from scytaledroid.Database.db_utils.menus import health_checks
 from scytaledroid.DeviceAnalysis import adb_devices, device_manager
 from scytaledroid.DeviceAnalysis.report import generate_device_report
-from scytaledroid.Reporting.generator import export_static_analysis_markdown
 from scytaledroid.DynamicAnalysis.exports.dataset_export import export_tier1_pack
-from scytaledroid.Database.db_utils.menus import health_checks
+from scytaledroid.Reporting.generator import export_static_analysis_markdown
 from scytaledroid.StaticAnalysis.persistence import list_reports
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
-from scytaledroid.Database.db_core import db_queries as core_q
 
 
 def handle_dataset_readiness_dashboard() -> None:
@@ -104,7 +104,7 @@ def handle_dataset_readiness_dashboard() -> None:
         "PCAP",
         "Status",
     ]
-    table_rows: List[List[str]] = []
+    table_rows: list[list[str]] = []
     for row in rows:
         (
             display_name,
@@ -179,7 +179,7 @@ def handle_static_report() -> None:
     print()
     menu_utils.print_header("Static analysis reports", "Select a report to export")
 
-    rows: List[List[str]] = []
+    rows: list[list[str]] = []
     for index, entry in enumerate(stored, start=1):
         manifest = entry.report.manifest
         package = (
@@ -245,7 +245,7 @@ def view_saved_reports() -> None:
     print()
     menu_utils.print_header("Saved reports", f"Showing {len(visible)} of {len(files)}")
 
-    rows: List[List[str]] = []
+    rows: list[list[str]] = []
     for index, path in enumerate(visible, start=1):
         report_type = classify_report(path, base_dir)
         modified = datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
@@ -640,7 +640,7 @@ def format_timestamp(value: str) -> str:
     return parsed.strftime("%Y-%m-%d %H:%M UTC")
 
 
-def _select_device_serial() -> Optional[str]:
+def _select_device_serial() -> str | None:
     devices, warnings = adb_devices.scan_devices()
     for message in warnings:
         print(status_messages.status(message, level="warn"))
@@ -652,7 +652,7 @@ def _select_device_serial() -> Optional[str]:
 
     print()
     menu_utils.print_header("Device selection", "Choose a connected device")
-    rows: List[List[str]] = []
+    rows: list[list[str]] = []
     for index, device in enumerate(devices, start=1):
         serial = device.get("serial") or "?"
         model = device.get("model") or device.get("device") or "Unknown"
@@ -696,7 +696,7 @@ def handle_recent_static_runs() -> None:
         return
 
     headers = ["ID", "Started (UTC)", "Scope", "Findings", "Pipeline", "Catalogs", "Config", "Study"]
-    table_rows: List[List[str]] = []
+    table_rows: list[list[str]] = []
     for row in rows:
         (
             run_id,

@@ -9,9 +9,13 @@ cards are discoverable via menu actions rather than always-on panels.
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple
+from datetime import UTC, datetime
 
+from scytaledroid.DeviceAnalysis import adb_devices, device_manager
+from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.constants import (
+    INVENTORY_STALE_SECONDS,
+)
+from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.utils import humanize_seconds
 from scytaledroid.Utils.DisplayUtils import (
     colors,
     error_panels,
@@ -22,11 +26,6 @@ from scytaledroid.Utils.DisplayUtils import (
 from scytaledroid.Utils.DisplayUtils.terminal import use_ascii_ui
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
-from scytaledroid.DeviceAnalysis import adb_devices, device_manager
-from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.constants import (
-    INVENTORY_STALE_SECONDS,
-)
-from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.utils import humanize_seconds
 from .formatters import (
     format_android_release,
     format_battery,
@@ -65,7 +64,7 @@ def _status_badge(label: str, tone: str = "info") -> str:
     return colors.apply(token, style, bold=True)
 
 
-def _connection_badge(status: Optional[str]) -> str:
+def _connection_badge(status: str | None) -> str:
     """Colour-code the aggregate connection status."""
 
     normalised = (status or "Unknown").strip().upper()
@@ -78,7 +77,7 @@ def _connection_badge(status: Optional[str]) -> str:
     return _status_badge(normalised, tone)
 
 
-def _state_badge(state: Optional[str]) -> str:
+def _state_badge(state: str | None) -> str:
     """Colour-code individual device states."""
 
     normalised = (state or "unknown").strip().upper()
@@ -94,7 +93,7 @@ def _state_badge(state: Optional[str]) -> str:
     return _status_badge(normalised, tone)
 
 
-def _root_badge(root_state: Optional[str]) -> str:
+def _root_badge(root_state: str | None) -> str:
     """Return a badge for the root detection result."""
 
     normalised = (root_state or "Unknown").strip().upper()
@@ -122,8 +121,8 @@ def _compact_header(
     refreshed: str,
     adb_status: str,
     devices_found: int,
-    active_line: Optional[str],
-    width: Optional[int] = None,
+    active_line: str | None,
+    width: int | None = None,
 ) -> str:
     """Render a single-line dashboard header within the terminal width.
 
@@ -162,7 +161,7 @@ def _no_device_line(devices_found: int) -> str:
     return "No devices detected. Attach a device and press Enter to refresh."
 
 
-def _styled_value(value: Optional[str], *, highlight: bool = False) -> str:
+def _styled_value(value: str | None, *, highlight: bool = False) -> str:
     palette = colors.get_palette()
     text = value or "Unknown"
     if not value or value.strip().lower() == "unknown":
@@ -171,15 +170,15 @@ def _styled_value(value: Optional[str], *, highlight: bool = False) -> str:
     return colors.apply(text, style, bold=highlight)
 
 
-def _active_device_brief(details: Dict[str, Optional[str]], *, width: int) -> str:
+def _active_device_brief(details: dict[str, str | None], *, width: int) -> str:
     """Return a concise active device line suitable for the header."""
     label = format_device_line(details, include_release=False)
     return text_blocks.truncate_visible(label, max(10, width // 3))
 
 
 def _last_seen_brief(
-    last_summary: Optional[Dict[str, Optional[str]]], last_serial: Optional[str]
-) -> Optional[str]:
+    last_summary: dict[str, str | None | None], last_serial: str | None
+) -> str | None:
     if last_summary:
         return format_device_line(last_summary, include_release=True)
     if last_serial:
@@ -188,9 +187,9 @@ def _last_seen_brief(
 
 
 def _device_table_rows(
-    summaries: List[Dict[str, Optional[str]]]
-) -> List[Tuple[str, str, str, str, str, str]]:
-    rows: List[Tuple[str, str, str, str, str, str]] = []
+    summaries: list[dict[str, str | None]]
+) -> list[tuple[str, str, str, str, str, str]]:
+    rows: list[tuple[str, str, str, str, str, str]] = []
     for summary in summaries:
         model = prettify_model(summary.get("model") or summary.get("device"))
         serial = summary.get("serial") or "Unknown"
@@ -290,10 +289,10 @@ def _render_inventory_status(metadata: object) -> None:
 
     timestamp_display = "Unknown"
     if isinstance(ts, datetime):
-        ts_utc = ts.astimezone(timezone.utc)
+        ts_utc = ts.astimezone(UTC)
         timestamp_display = format_timestamp_utc(ts_utc)
         if age_text is None:
-            age_seconds = max(0, (datetime.now(timezone.utc) - ts_utc).total_seconds())
+            age_seconds = max(0, (datetime.now(UTC) - ts_utc).total_seconds())
             age_text = humanize_seconds(age_seconds)
             stale = stale or age_seconds > INVENTORY_STALE_SECONDS
 
@@ -309,7 +308,7 @@ def _render_inventory_status(metadata: object) -> None:
 
     palette = colors.get_palette()
     status_chip = _status_badge("STALE" if stale else "FRESH", "warning" if stale else "success")
-    lines: List[str] = []
+    lines: list[str] = []
     lines.append(
         f"{status_chip} Last run: {timestamp_display}"
         + (f" ({age_text} ago)" if age_text else "")
@@ -337,17 +336,17 @@ def _render_inventory_status(metadata: object) -> None:
 
 
 def build_device_summaries(
-    devices: List[Dict[str, Optional[str]]],
-    summary_cache: Dict[str, Dict[str, Optional[str]]],
+    devices: list[dict[str, str | None]],
+    summary_cache: dict[str, dict[str, str | None]],
     *,
     refresh_threshold: int = 60,
-) -> Tuple[List[Dict[str, Optional[str]]], Dict[str, Dict[str, Optional[str]]]]:
-    summaries: List[Dict[str, Optional[str]]] = []
-    serial_map: Dict[str, Dict[str, Optional[str]]] = {}
+) -> tuple[list[dict[str, str | None]], dict[str, dict[str, str | None]]]:
+    summaries: list[dict[str, str | None]] = []
+    serial_map: dict[str, dict[str, str | None]] = {}
 
     for device in devices:
         serial = device.get("serial")
-        cached: Optional[Dict[str, Optional[str]]] = None
+        cached: dict[str, str | None | None] = None
         cache_age = None
         if serial and serial in summary_cache:
             cached = summary_cache[serial]
@@ -379,15 +378,15 @@ def build_device_summaries(
 
 
 def print_dashboard(
-    summaries: List[Dict[str, Optional[str]]],
-    active_details: Optional[Dict[str, Optional[str]]],
-    warnings: List[str],
-    last_refresh_ts: Optional[float],
-    serial_map: Dict[str, Dict[str, Optional[str]]],
+    summaries: list[dict[str, str | None]],
+    active_details: dict[str, str | None | None],
+    warnings: list[str],
+    last_refresh_ts: float | None,
+    serial_map: dict[str, dict[str, str | None]],
     *,
     show_device_table: bool = True,
-    inventory_metadata: Optional[Dict[str, object]] = None,
-    context: Optional[str] = None,
+    inventory_metadata: dict[str, object | None] = None,
+    context: str | None = None,
 ) -> None:
     devices_found = len(summaries)
     print()
@@ -456,8 +455,8 @@ def print_dashboard(
 
 
 def resolve_active_device(
-    devices: List[Dict[str, Optional[str]]]
-) -> Optional[Dict[str, Optional[str]]]:
+    devices: list[dict[str, str | None]]
+) -> dict[str, str | None | None]:
     serial = device_manager.get_active_serial()
     if not serial:
         return None

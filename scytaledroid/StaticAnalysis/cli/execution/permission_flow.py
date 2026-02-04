@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from pathlib import Path
 
 from scytaledroid.Config import app_config
 from scytaledroid.Utils.DisplayUtils import status_messages
@@ -12,19 +12,19 @@ from scytaledroid.Utils.LoggingUtils import logging_engine
 
 from ...modules.permissions import collect_permissions_and_sdk
 from ...modules.permissions.audit import PermissionAuditAccumulator
-from ..core.models import RunParameters, ScopeSelection
-from ..persistence.run_summary import create_static_run_ledger
-from ..core.run_lifecycle import finalize_static_run
-from ..core.abort_reasons import classify_exception, normalize_abort_reason
 from ...session import make_session_stamp, normalize_session_stamp
-from .static_run_map import load_run_map, validate_run_map
-from .scan_flow import generate_report
+from ..core.abort_reasons import classify_exception, normalize_abort_reason
+from ..core.models import RunParameters, ScopeSelection
+from ..core.run_lifecycle import finalize_static_run
+from ..persistence.run_summary import create_static_run_ledger
 from .permission_view import (
     render_compact_notice,
-    render_permission_profile,
-    render_permission_persisted,
     render_permission_persist_failed,
+    render_permission_persisted,
+    render_permission_profile,
 )
+from .scan_flow import generate_report
+from .static_run_map import load_run_map, validate_run_map
 
 
 def execute_permission_scan(
@@ -104,7 +104,9 @@ def execute_permission_scan(
 
         if persist_detections and report is not None:
             try:
-                from scytaledroid.StaticAnalysis.persistence.permissions_db import persist_permissions_to_db
+                from scytaledroid.StaticAnalysis.persistence.permissions_db import (
+                    persist_permissions_to_db,
+                )
 
                 counts = persist_permissions_to_db(report)
                 render_permission_persisted(counts)
@@ -261,7 +263,7 @@ def execute_permission_scan(
                     version_code=getattr(manifest, "version_code", None) if manifest else None,
                     min_sdk=getattr(manifest, "min_sdk", None) if manifest else None,
                     target_sdk=getattr(manifest, "target_sdk", None) if manifest else None,
-                    run_started_utc=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    run_started_utc=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
                     dry_run=not persist_detections,
                 )
             except Exception:

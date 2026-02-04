@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping, MutableMapping
 from dataclasses import dataclass
-from typing import Any, Iterable, List, Mapping, MutableMapping, Optional
+from typing import Any
 
 __all__ = ["NormalisedEvidence", "normalize_evidence"]
 
@@ -10,11 +11,11 @@ __all__ = ["NormalisedEvidence", "normalize_evidence"]
 class NormalisedEvidence:
     """Canonicalised evidence payload emitted by detectors/persistence."""
 
-    detail: Optional[str]
-    path: Optional[str]
-    offset: Optional[str]
-    dex_sid: Optional[str]
-    entries: List[Mapping[str, Any]]
+    detail: str | None
+    path: str | None
+    offset: str | None
+    dex_sid: str | None
+    entries: list[Mapping[str, Any]]
 
     def as_payload(self) -> Mapping[str, Any]:
         payload: MutableMapping[str, Any] = {}
@@ -31,7 +32,7 @@ class NormalisedEvidence:
         return payload
 
 
-def _truncate(value: Optional[str], limit: int) -> Optional[str]:
+def _truncate(value: str | None, limit: int) -> str | None:
     if value is None:
         return None
     text = str(value).strip()
@@ -67,18 +68,18 @@ _DEX_KEYS = ("dex_sid", "dexSid", "dex", "dex_id")
 def normalize_evidence(
     evidence: Any,
     *,
-    detail_hint: Optional[str] = None,
-    path_hint: Optional[str] = None,
-    offset_hint: Optional[str] = None,
-    dex_hint: Optional[str] = None,
+    detail_hint: str | None = None,
+    path_hint: str | None = None,
+    offset_hint: str | None = None,
+    dex_hint: str | None = None,
 ) -> NormalisedEvidence:
     """Normalise detector evidence for DB persistence."""
 
-    chosen_path: Optional[str] = None
-    chosen_offset: Optional[str] = None
-    chosen_detail: Optional[str] = None
-    chosen_dex: Optional[str] = None
-    entries: List[Mapping[str, Any]] = []
+    chosen_path: str | None = None
+    chosen_offset: str | None = None
+    chosen_detail: str | None = None
+    chosen_dex: str | None = None
+    entries: list[Mapping[str, Any]] = []
 
     for raw in _iter_evidence(evidence):
         if isinstance(raw, Mapping):

@@ -15,9 +15,9 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, Iterable, Optional, Tuple
 
 from scytaledroid.Database.db_core import db_engine
 
@@ -27,7 +27,7 @@ def _fetch_columns(cursor, table: str) -> set[str]:
     return {row[0] for row in cursor.fetchall()}
 
 
-def _derive_package(scope_label: Optional[str]) -> Optional[str]:
+def _derive_package(scope_label: str | None) -> str | None:
     if not scope_label:
         return None
     scope_label = scope_label.strip()
@@ -43,9 +43,9 @@ def _derive_package(scope_label: Optional[str]) -> Optional[str]:
 
 def _resolve_run(
     cursor,
-    session_stamp: Optional[str],
-    static_run_id: Optional[int],
-) -> Tuple[Optional[int], Optional[str], Optional[str], Optional[str], Optional[datetime], Optional[int]]:
+    session_stamp: str | None,
+    static_run_id: int | None,
+) -> tuple[int | None, str | None, str | None, str | None, datetime | None, int | None]:
     resolved_session = session_stamp
     scope_label = None
     created_at = None
@@ -80,7 +80,7 @@ def _resolve_run(
         return None, None, None, None, None, None
 
     derived_package = _derive_package(scope_label)
-    resolved_run_id: Optional[int] = None
+    resolved_run_id: int | None = None
     if resolved_session and derived_package:
         cursor.execute(
             """
@@ -102,12 +102,12 @@ def _resolve_run(
 def _count_for_table(
     cursor,
     table: str,
-    run_id: Optional[int],
-    static_run_id: Optional[int],
-    session: Optional[str],
-    static_run_ids: Optional[Iterable[int]] = None,
+    run_id: int | None,
+    static_run_id: int | None,
+    session: str | None,
+    static_run_ids: Iterable[int] | None = None,
     is_group_scope: bool = False,
-) -> Tuple[str, Optional[int], str]:
+) -> tuple[str, int | None, str]:
     if is_group_scope and session:
         if table == "permission_audit_snapshots":
             try:
@@ -170,21 +170,21 @@ def _count_for_table(
 @dataclass
 class RunAudit:
     static_run_id: int
-    run_id: Optional[int]
-    session_stamp: Optional[str]
-    scope_label: Optional[str]
-    derived_package: Optional[str]
-    created_at: Optional[datetime]
+    run_id: int | None
+    session_stamp: str | None
+    scope_label: str | None
+    derived_package: str | None
+    created_at: datetime | None
     is_group_scope: bool
     is_legacy: bool
     is_orphan: bool
-    counts: Dict[str, Tuple[Optional[int], str]]
-    severity_rows: Iterable[Tuple[str, str, int]]
+    counts: dict[str, tuple[int | None, str]]
+    severity_rows: Iterable[tuple[str, str, int]]
 
 
 def collect_static_run_counts(
-    *, session_stamp: Optional[str] = None, static_run_id: Optional[int] = None
-) -> Optional[RunAudit]:
+    *, session_stamp: str | None = None, static_run_id: int | None = None
+) -> RunAudit | None:
     with db_engine.connect() as conn:
         cur = conn.cursor()
         (
@@ -225,7 +225,7 @@ def collect_static_run_counts(
             "permission_audit_snapshots",
             "permission_audit_apps",
         ]
-        counts: Dict[str, Tuple[Optional[int], str]] = {}
+        counts: dict[str, tuple[int | None, str]] = {}
         for table in tables:
             table_name, count, status = _count_for_table(
                 cur,
@@ -288,7 +288,7 @@ def collect_static_run_counts(
     )
 
 
-def audit_run(session_stamp: Optional[str], run_id: Optional[int]) -> int:
+def audit_run(session_stamp: str | None, run_id: int | None) -> int:
     audit = collect_static_run_counts(session_stamp=session_stamp, static_run_id=run_id)
     if audit is None:
         print("Resolved run: id=None session=None")

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from collections import Counter
+from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
-
-from collections import Counter
 
 from scytaledroid.Config import app_config
+from scytaledroid.DeviceAnalysis.inventory import normalizer
+from scytaledroid.DeviceAnalysis.services import device_service
 from scytaledroid.Utils.DisplayUtils import (
     error_panels,
     prompt_utils,
@@ -19,11 +20,9 @@ from scytaledroid.Utils.DisplayUtils import (
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from . import adb_devices, package_profiles
-from scytaledroid.DeviceAnalysis.inventory import normalizer
-from scytaledroid.DeviceAnalysis.services import device_service
 
 
-def generate_device_report(serial: Optional[str]) -> None:
+def generate_device_report(serial: str | None) -> None:
     """Create a markdown report for the active device."""
     if not serial:
         error_panels.print_error_panel(
@@ -63,7 +62,7 @@ def generate_device_report(serial: Optional[str]) -> None:
     table_utils.render_key_value_pairs(overview_pairs)
 
     package_count = inventory_payload.get("package_count", 0)
-    packages: List[Dict[str, object]] = inventory_payload.get("packages", [])  # type: ignore[assignment]
+    packages: list[dict[str, object]] = inventory_payload.get("packages", [])  # type: ignore[assignment]
     if packages:
         print()
         print(text_blocks.headline(f"Installed packages ({package_count})", width=70))
@@ -94,7 +93,7 @@ def generate_device_report(serial: Optional[str]) -> None:
     prompt_utils.press_enter_to_continue("Press Enter to return to the Device Analysis menu...")
 
 
-def _get_device_entry(serial: str) -> Optional[Dict[str, Optional[str]]]:
+def _get_device_entry(serial: str) -> dict[str, str | None | None]:
     devices = adb_devices.list_devices()
     for device in devices:
         if device.get("serial") == serial:
@@ -102,7 +101,7 @@ def _get_device_entry(serial: str) -> Optional[Dict[str, Optional[str]]]:
     return None
 
 
-def _summary_pairs(summary: Dict[str, Optional[str]]) -> List[tuple[str, str]]:
+def _summary_pairs(summary: dict[str, str | None]) -> list[tuple[str, str]]:
     return [
         ("Serial", summary.get("serial") or "Unknown"),
         ("Model", summary.get("model") or summary.get("device") or "Unknown"),
@@ -116,9 +115,9 @@ def _summary_pairs(summary: Dict[str, Optional[str]]) -> List[tuple[str, str]]:
     ]
 
 
-def _inventory_preview(packages: List[Dict[str, object]]) -> List[List[str]]:
+def _inventory_preview(packages: list[dict[str, object]]) -> list[list[str]]:
     max_preview = 15
-    preview_rows: List[List[str]] = []
+    preview_rows: list[list[str]] = []
     for pkg in packages[:max_preview]:
         package_name = str(pkg.get("package_name") or "?")
         app_label = str(pkg.get("app_label") or package_name)
@@ -133,8 +132,8 @@ def _inventory_preview(packages: List[Dict[str, object]]) -> List[List[str]]:
 
 def _write_report(
     serial: str,
-    summary: Dict[str, Optional[str]],
-    inventory_payload: Dict[str, object],
+    summary: dict[str, str | None],
+    inventory_payload: dict[str, object],
 ) -> Path:
     report_dir = Path(app_config.OUTPUT_DIR) / "reports" / serial
     report_dir.mkdir(parents=True, exist_ok=True)
@@ -142,7 +141,7 @@ def _write_report(
     timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
     report_path = report_dir / f"device_report_{timestamp}.md"
 
-    lines: List[str] = []
+    lines: list[str] = []
     model = summary.get("model") or summary.get("device") or "Unknown"
     lines.append(f"# Device Report — {model} ({serial})")
     lines.append("")
@@ -154,7 +153,7 @@ def _write_report(
     lines.extend(_markdown_table(["Field", "Value"], _summary_pairs(summary)))
     lines.append("")
 
-    packages: List[Dict[str, object]] = inventory_payload.get("packages", [])  # type: ignore[assignment]
+    packages: list[dict[str, object]] = inventory_payload.get("packages", [])  # type: ignore[assignment]
     package_count = inventory_payload.get("package_count", len(packages))
     lines.append(f"## Installed Packages ({package_count})")
     lines.append("")
@@ -202,12 +201,12 @@ def _write_report(
     return report_path
 
 
-def _profile_guidance(packages: List[Dict[str, object]]) -> List[str]:
+def _profile_guidance(packages: list[dict[str, object]]) -> list[str]:
     if not packages:
         return []
 
     counts = Counter(str(pkg.get("profile_key") or pkg.get("profile_id") or "") for pkg in packages)
-    blocks: List[str] = []
+    blocks: list[str] = []
     for profile in package_profiles.PROFILES:
         count = counts.get(profile.id, 0)
         if count == 0:
@@ -226,7 +225,7 @@ def _profile_guidance(packages: List[Dict[str, object]]) -> List[str]:
     return blocks
 
 
-def _markdown_table(headers: List[str], rows: List[Iterable[str]]) -> List[str]:
+def _markdown_table(headers: list[str], rows: list[Iterable[str]]) -> list[str]:
     if not rows:
         return ["| " + " | ".join(headers) + " |", "| " + " | ".join(["---"] * len(headers)) + " |", "| *(no data)* |"]
 

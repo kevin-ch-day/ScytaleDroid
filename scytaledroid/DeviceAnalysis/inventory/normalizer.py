@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple
-
 from scytaledroid.Database.db_utils.package_utils import normalize_package_name
 
 from .. import package_profiles
@@ -11,10 +9,10 @@ from .. import package_profiles
 
 def compose_inventory_entry(
     package_name: str,
-    paths: List[str],
-    metadata: Dict[str, Optional[str]],
-    canonical: Optional[Dict[str, object]] = None,
-) -> Dict[str, object]:
+    paths: list[str],
+    metadata: dict[str, str | None],
+    canonical: dict[str, object | None] = None,
+) -> dict[str, object]:
     cleaned_package = normalize_package_name(package_name, context="inventory") or package_name.strip()
     primary_path = paths[0] if paths else ""
     fallback_category, partition = _derive_category(primary_path)
@@ -81,7 +79,7 @@ def compose_inventory_entry(
     split_count = len(paths)
     apk_dirs = sorted({path.rsplit("/", 1)[0] for path in paths if "/" in path})
 
-    entry: Dict[str, object] = {
+    entry: dict[str, object] = {
         "package_name": cleaned_package,
         "app_label": app_label,
         "version_name": version_name,
@@ -129,7 +127,7 @@ _CATEGORY_ORDER = {
 }
 
 
-def _derive_category(primary_path: str) -> Tuple[str, str]:
+def _derive_category(primary_path: str) -> tuple[str, str]:
     if primary_path.startswith("/data/"):
         return "User", "Data (/data)"
     if primary_path.startswith("/product/"):
@@ -145,7 +143,7 @@ def _derive_category(primary_path: str) -> Tuple[str, str]:
     return "Unknown", "Unknown"
 
 
-def _derive_source(category: str, installer: Optional[str]) -> str:
+def _derive_source(category: str, installer: str | None) -> str:
     if category == "User":
         if installer == "com.android.vending":
             return "Play Store"
@@ -163,13 +161,13 @@ def _derive_source(category: str, installer: Optional[str]) -> str:
     return category
 
 
-def _normalise_installer(installer: Optional[str]) -> Optional[str]:
+def _normalise_installer(installer: str | None) -> str | None:
     if not installer or installer.lower() in {"null", "none", ""}:
         return None
     return installer
 
 
-def split_count(entry: Dict[str, object]) -> int:
+def split_count(entry: dict[str, object]) -> int:
     value = entry.get("split_count")
     if isinstance(value, int):
         return value

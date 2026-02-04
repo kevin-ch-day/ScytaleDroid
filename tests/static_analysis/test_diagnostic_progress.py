@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 from scytaledroid.StaticAnalysis.cli.execution import scan_flow
 
 

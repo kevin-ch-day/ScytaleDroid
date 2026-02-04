@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable, List
 from urllib.parse import urlsplit
 
 from ..constants import ENDPOINT_PATTERN
 from .punctuation import strip_wrap_punct
-from .validators import is_ip, looks_like_domain, is_placeholder
+from .validators import is_ip, is_placeholder, looks_like_domain
 
 _TOKEN_PATTERN = re.compile(r"[^\s]+")
 _SCHEME_ONLY_RE = re.compile(r"^(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*):(?P<rest>.+)$")
@@ -120,7 +120,7 @@ def _iter_tokens(value: str) -> Iterable[re.Match[str]]:
 def extract_candidates(value: str) -> list[Candidate]:
     """Return URL/host candidates discovered within *value*."""
 
-    candidates: List[Candidate] = []
+    candidates: list[Candidate] = []
     seen_offsets: set[tuple[int, str]] = set()
 
     for match in ENDPOINT_PATTERN.finditer(value):

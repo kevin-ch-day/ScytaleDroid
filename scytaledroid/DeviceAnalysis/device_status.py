@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Dict, Optional
-
 from scytaledroid.DeviceAnalysis import adb_client
 
 
-def get_device_stats(serial: str) -> Dict[str, Optional[str]]:
+def get_device_stats(serial: str) -> dict[str, str | None]:
     """Collect live telemetry for the provided device."""
-    stats: Dict[str, Optional[str]] = {}
+    stats: dict[str, str | None] = {}
 
     battery = _get_battery_info(serial)
     stats.update(battery)
@@ -25,9 +23,9 @@ def get_device_stats(serial: str) -> Dict[str, Optional[str]]:
     return stats
 
 
-def get_device_capabilities(serial: str) -> Dict[str, Optional[str]]:
+def get_device_capabilities(serial: str) -> dict[str, str | None]:
     """Return a capability snapshot for dynamic analysis decisions."""
-    capabilities: Dict[str, Optional[str]] = {}
+    capabilities: dict[str, str | None] = {}
 
     root_state = _check_root_status(serial)
     if root_state:
@@ -43,7 +41,7 @@ def get_device_capabilities(serial: str) -> Dict[str, Optional[str]]:
     return capabilities
 
 
-def _get_battery_info(serial: str) -> Dict[str, Optional[str]]:
+def _get_battery_info(serial: str) -> dict[str, str | None]:
     try:
         completed = adb_client.run_shell_command(serial, ["dumpsys", "battery"])
     except RuntimeError:
@@ -51,9 +49,9 @@ def _get_battery_info(serial: str) -> Dict[str, Optional[str]]:
     if completed.returncode != 0:
         return {}
 
-    level: Optional[str] = None
-    status: Optional[str] = None
-    charging: Optional[str] = None
+    level: str | None = None
+    status: str | None = None
+    charging: str | None = None
 
     for line in completed.stdout.splitlines():
         stripped = line.strip()
@@ -79,7 +77,7 @@ def _get_battery_info(serial: str) -> Dict[str, Optional[str]]:
     if charging and charging not in (status or ""):
         status = charging if charging else status
 
-    result: Dict[str, Optional[str]] = {}
+    result: dict[str, str | None] = {}
     if level is not None and level.isdigit():
         result["battery_level"] = f"{level}%"
     if status:
@@ -88,7 +86,7 @@ def _get_battery_info(serial: str) -> Dict[str, Optional[str]]:
     return result
 
 
-def _get_wifi_state(serial: str) -> Optional[str]:
+def _get_wifi_state(serial: str) -> str | None:
     try:
         completed = adb_client.run_shell_command(serial, ["settings", "get", "global", "wifi_on"])
     except RuntimeError:
@@ -104,7 +102,7 @@ def _get_wifi_state(serial: str) -> Optional[str]:
     return value or None
 
 
-def _check_root_status(serial: str) -> Optional[str]:
+def _check_root_status(serial: str) -> str | None:
     try:
         completed = adb_client.run_shell_command(serial, ["id", "-u"])
     except RuntimeError:
@@ -117,7 +115,7 @@ def _check_root_status(serial: str) -> Optional[str]:
     return None
 
 
-def _find_tcpdump(serial: str) -> Optional[str]:
+def _find_tcpdump(serial: str) -> str | None:
     try:
         output = adb_client.run_shell(serial, ["which", "tcpdump"], timeout=10)
     except RuntimeError:

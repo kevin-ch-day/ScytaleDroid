@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Iterator, MutableMapping
 from contextlib import contextmanager
-from typing import Iterable, Iterator, MutableMapping
 
 from .environment import detect_palette_name
 from .models import Palette

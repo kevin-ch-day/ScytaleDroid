@@ -2,25 +2,20 @@
 
 from __future__ import annotations
 
-import time
-from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from datetime import UTC, datetime
 
+from scytaledroid.DeviceAnalysis.device_menu.formatters import format_timestamp_utc
+from scytaledroid.DeviceAnalysis.services import device_service
+from scytaledroid.DeviceAnalysis.services.models import InventoryStatus
 from scytaledroid.Utils.DisplayUtils import (
     colors,
     display_settings,
-    menu_utils,
     prompt_utils,
     status_messages,
     table_utils,
     text_blocks,
 )
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
-
-from scytaledroid.DeviceAnalysis import device_manager
-from scytaledroid.DeviceAnalysis.services import device_service
-from scytaledroid.DeviceAnalysis.device_menu.formatters import format_timestamp_utc
-from scytaledroid.DeviceAnalysis.services.models import InventoryStatus
 
 
 def _inventory_badge(status: InventoryStatus | None) -> str:
@@ -33,7 +28,7 @@ def _inventory_badge(status: InventoryStatus | None) -> str:
 
 
 def _render_header(adb_status: str, live_count: int) -> None:
-    ts = format_timestamp_utc(datetime.now(timezone.utc))
+    ts = format_timestamp_utc(datetime.now(UTC))
     status_messages.print_strip(
         "Android Device Analysis",
         [
@@ -46,14 +41,14 @@ def _render_header(adb_status: str, live_count: int) -> None:
 
 
 def _render_live_devices(
-    summaries: List[Dict[str, Optional[str]]],
-    inventory_lookup: Dict[str, InventoryStatus],
+    summaries: list[dict[str, str | None]],
+    inventory_lookup: dict[str, InventoryStatus],
 ) -> None:
     if not summaries:
         print(status_messages.status("No live devices detected. Plug in a device and refresh.", level="warn"))
         return
 
-    rows: List[List[str]] = []
+    rows: list[list[str]] = []
     palette = colors.get_palette()
     use_color = colors.colors_enabled()
     for idx, summary in enumerate(summaries, start=1):
@@ -110,9 +105,8 @@ def devices_hub() -> None:
     while True:
         devices, warnings, summaries, serial_map = device_service.scan_devices()
         live_count = len(summaries)
-        historical_count = 0  # placeholder for future DB-backed historical listing
         adb_status = "CONNECTED" if devices else "DISCONNECTED"
-        inv_lookup: Dict[str, InventoryStatus] = {}
+        inv_lookup: dict[str, InventoryStatus] = {}
         for summary in summaries:
             serial = summary.get("serial")
             if serial:

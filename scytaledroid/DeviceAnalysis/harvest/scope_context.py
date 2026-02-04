@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import re
 from collections import Counter
-from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from collections.abc import Sequence
 
 from scytaledroid.Database.db_core import db_queries
-from scytaledroid.Utils.DisplayUtils import status_messages
 
-from .models import InventoryRow, ScopeSelection
 from . import rules
+from .models import InventoryRow
 from .watchlists import Watchlist, filter_rows_by_watchlist, load_watchlists
 
 # Human-friendly labels for why packages are filtered out of scope.
@@ -21,17 +19,17 @@ EXCLUSION_LABELS = {
     "non_root_paths": "Non-user partition path",
 }
 
-_APP_NAME_CACHE: Dict[str, str] = {}
+_APP_NAME_CACHE: dict[str, str] = {}
 
 
-def maybe_str(value: object) -> Optional[str]:
+def maybe_str(value: object) -> str | None:
     if value is None:
         return None
     text = str(value).strip()
     return text or None
 
 
-def load_app_names(package_names: Sequence[str]) -> Dict[str, str]:
+def load_app_names(package_names: Sequence[str]) -> dict[str, str]:
     missing = [name for name in package_names if name not in _APP_NAME_CACHE]
     if missing:
         placeholders = ", ".join(["%s"] * len(missing))
@@ -52,11 +50,11 @@ def load_app_names(package_names: Sequence[str]) -> Dict[str, str]:
     return {name: _APP_NAME_CACHE.get(name) for name in package_names if name in _APP_NAME_CACHE}
 
 
-def build_inventory_rows(packages: Sequence[Dict[str, object]]) -> List[InventoryRow]:
+def build_inventory_rows(packages: Sequence[dict[str, object]]) -> list[InventoryRow]:
     """Normalise raw inventory package dictionaries into ``InventoryRow`` entries."""
 
-    rows: List[InventoryRow] = []
-    package_names: List[str] = []
+    rows: list[InventoryRow] = []
+    package_names: list[str] = []
     for pkg in packages:
         package_name = str(pkg.get("package_name") or "").strip()
         if not package_name:
@@ -99,7 +97,7 @@ def build_inventory_rows(packages: Sequence[Dict[str, object]]) -> List[Inventor
     return rows
 
 
-def _normalize_profile_key(profile_key: Optional[str], profile_name: Optional[str]) -> Optional[str]:
+def _normalize_profile_key(profile_key: str | None, profile_name: str | None) -> str | None:
     if profile_key and profile_key.strip():
         return profile_key.strip().upper()
     name = (profile_name or "").strip().lower()
@@ -130,16 +128,16 @@ def _normalize_profile_key(profile_key: Optional[str], profile_name: Optional[st
     return None
 
 
-def in_default_scope(row: InventoryRow, allow: Set[str]) -> bool:
+def in_default_scope(row: InventoryRow, allow: set[str]) -> bool:
     include, _ = _default_scope_decision(row, allow)
     return include
 
 
 def apply_default_scope(
-    rows: Sequence[InventoryRow], allow: Set[str]
-) -> Tuple[List[InventoryRow], Dict[str, int]]:
-    selected: List[InventoryRow] = []
-    excluded: Dict[str, int] = {}
+    rows: Sequence[InventoryRow], allow: set[str]
+) -> tuple[list[InventoryRow], dict[str, int]]:
+    selected: list[InventoryRow] = []
+    excluded: dict[str, int] = {}
     for row in rows:
         include, reason = _default_scope_decision(row, allow)
         if include:
@@ -149,8 +147,8 @@ def apply_default_scope(
     return selected, dict(sorted(excluded.items()))
 
 
-def build_scope_context(rows: Sequence[InventoryRow], allow: Set[str]) -> Dict[str, object]:
-    def estimate(selection: Sequence[InventoryRow]) -> Dict[str, int]:
+def build_scope_context(rows: Sequence[InventoryRow], allow: set[str]) -> dict[str, object]:
+    def estimate(selection: Sequence[InventoryRow]) -> dict[str, int]:
         return {"packages": len(selection), "files": estimated_files(selection)}
 
     target_profiles = {"SOCIAL", "MESSAGING", "MEDIA", "BROWSER", "PRODUCTIVITY", "SHOPPING", "NEWS"}
@@ -169,7 +167,7 @@ def build_scope_context(rows: Sequence[InventoryRow], allow: Set[str]) -> Dict[s
     google_user_rows = [row for row in rows if rules.is_google_user_app(row.package_name)]
     google_user_filtered, _ = apply_default_scope(google_user_rows, allow)
 
-    watchlist_entries: List[_WatchlistEntry] = []
+    watchlist_entries: list[_WatchlistEntry] = []
     watchlist_totals = {"packages": 0, "files": 0}
     for watchlist in load_watchlists():
         watch_rows = filter_rows_by_watchlist(rows, watchlist.packages)
@@ -207,7 +205,7 @@ def build_scope_context(rows: Sequence[InventoryRow], allow: Set[str]) -> Dict[s
         ):
             return "Communication"
         return cleaned
-    category_groups: Dict[str, List[InventoryRow]] = {}
+    category_groups: dict[str, list[InventoryRow]] = {}
     for row in rows:
         category_name = category_map.get(row.package_name) or row.profile
         if not category_name:
@@ -236,7 +234,7 @@ def build_scope_context(rows: Sequence[InventoryRow], allow: Set[str]) -> Dict[s
     }
 
 
-def _default_scope_decision(row: InventoryRow, allow: Set[str]) -> Tuple[bool, Optional[str]]:
+def _default_scope_decision(row: InventoryRow, allow: set[str]) -> tuple[bool, str | None]:
     is_play = row.installer == rules.PLAY_STORE_INSTALLER
     is_user = rules.is_user_path(row.primary_path)
 
@@ -258,7 +256,7 @@ def _default_scope_decision(row: InventoryRow, allow: Set[str]) -> Tuple[bool, O
     return True, None
 
 
-def _fetch_category_map(package_names: Sequence[str]) -> Dict[str, str]:
+def _fetch_category_map(package_names: Sequence[str]) -> dict[str, str]:
     if not package_names:
         return {}
     placeholders = ", ".join(["%s"] * len(package_names))
@@ -270,7 +268,7 @@ def _fetch_category_map(package_names: Sequence[str]) -> Dict[str, str]:
     )
 
     rows = db_queries.run_sql(query, tuple(package_names), fetch="all", dictionary=True)
-    mapping: Dict[str, str] = {}
+    mapping: dict[str, str] = {}
     if rows:
         for row in rows:
             pkg = str(row.get("package_name") or "").strip()
@@ -299,7 +297,7 @@ def _safe_int(value: object | None) -> int | None:
         return None
 
 
-def _fetch_latest_harvest_versions(package_names: Sequence[str]) -> Dict[str, Dict[str, object]]:
+def _fetch_latest_harvest_versions(package_names: Sequence[str]) -> dict[str, dict[str, object]]:
     if not package_names:
         return {}
     placeholders = ", ".join(["%s"] * len(package_names))
@@ -311,7 +309,7 @@ def _fetch_latest_harvest_versions(package_names: Sequence[str]) -> Dict[str, Di
         "GROUP BY package_name"
     )
     rows = db_queries.run_sql(query, tuple(package_names), fetch="all", dictionary=True) or []
-    mapping: Dict[str, Dict[str, object]] = {}
+    mapping: dict[str, dict[str, object]] = {}
     for row in rows:
         pkg = maybe_str(row.get("package_name"))
         if not pkg:
@@ -323,7 +321,7 @@ def _fetch_latest_harvest_versions(package_names: Sequence[str]) -> Dict[str, Di
     return mapping
 
 
-def filter_updated_only(rows: Sequence[InventoryRow]) -> tuple[list[InventoryRow], Dict[str, int]]:
+def filter_updated_only(rows: Sequence[InventoryRow]) -> tuple[list[InventoryRow], dict[str, int]]:
     """Return rows with new or updated versions compared to repository."""
     package_names = [row.package_name for row in rows]
     latest = _fetch_latest_harvest_versions(package_names)
@@ -358,8 +356,8 @@ def filter_updated_only(rows: Sequence[InventoryRow]) -> tuple[list[InventoryRow
     return filtered, meta
 
 
-def sample_names(rows: Sequence[InventoryRow], limit: int = 3) -> List[str]:
-    names: List[str] = []
+def sample_names(rows: Sequence[InventoryRow], limit: int = 3) -> list[str]:
+    names: list[str] = []
     for row in rows:
         if len(names) >= limit:
             break
@@ -368,9 +366,9 @@ def sample_names(rows: Sequence[InventoryRow], limit: int = 3) -> List[str]:
 
 
 def collect_exclusion_samples(
-    rows: Sequence[InventoryRow], filtered: Sequence[InventoryRow], allow: Set[str]
-) -> Dict[str, List[str]]:
-    samples: Dict[str, List[str]] = {}
+    rows: Sequence[InventoryRow], filtered: Sequence[InventoryRow], allow: set[str]
+) -> dict[str, list[str]]:
+    samples: dict[str, list[str]] = {}
     filtered_set = {row.package_name for row in filtered}
     for row in rows:
         if row.package_name in filtered_set:
@@ -388,9 +386,9 @@ class _WatchlistEntry:
     def __init__(
         self,
         watchlist: Watchlist,
-        filtered: List[InventoryRow],
-        excluded: Dict[str, int],
-        counts: Dict[str, int],
+        filtered: list[InventoryRow],
+        excluded: dict[str, int],
+        counts: dict[str, int],
         preview: str,
     ) -> None:
         self.watchlist = watchlist
@@ -399,7 +397,7 @@ class _WatchlistEntry:
         self.counts = counts
         self.preview = preview
 
-    def summary_row(self) -> Tuple[str, str, str, str]:
+    def summary_row(self) -> tuple[str, str, str, str]:
         return (
             self.watchlist.name,
             str(self.counts.get("packages", 0)),

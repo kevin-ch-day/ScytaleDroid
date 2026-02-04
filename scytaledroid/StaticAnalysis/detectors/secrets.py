@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import base64
 import json
+from collections.abc import Callable, Mapping, MutableMapping, Sequence
 from pathlib import Path
 from time import perf_counter
-from typing import Callable, Dict, Mapping, MutableMapping, Sequence
 
 from ..core.context import DetectorContext, SecretsSamplerConfig
 from ..core.findings import (
@@ -37,7 +37,7 @@ def _string_pointer(
     base_location = apk_path.resolve().as_posix()
     entry = match.string_entry
     pattern = match.pattern
-    extra: Dict[str, object] = {
+    extra: dict[str, object] = {
         "origin": entry.origin,
         "origin_type": entry.origin_type,
         "pattern": pattern.name,
@@ -207,7 +207,7 @@ def _prepare_group_insights(
                 suppressed.extend(reasons)
         if not validated:
             continue
-        info: Dict[str, object] = {
+        info: dict[str, object] = {
             "group": group,
             "matches": tuple(validated),
             "validator_dropped": group.accepted_count - len(validated),
@@ -265,7 +265,7 @@ def _build_findings(
         if confidence == "low":
             continue
 
-        metrics_payload: Dict[str, object] = {
+        metrics_payload: dict[str, object] = {
             "hashes": supporting_hashes,
             "filtered": group.filtered_count,
             "origin_types": origin_types,
@@ -313,8 +313,8 @@ def _build_findings(
 def _build_metrics(
     batch: MatchBatch,
     prepared: Mapping[str, Mapping[str, object]],
-) -> Dict[str, object]:
-    secret_types: Dict[str, Dict[str, object]] = {}
+) -> dict[str, object]:
+    secret_types: dict[str, dict[str, object]] = {}
     validated_total = 0
 
     for pattern_name, group in sorted(batch.groups.items()):
@@ -332,7 +332,7 @@ def _build_metrics(
             }
         )
 
-        entry_metrics: Dict[str, object] = {
+        entry_metrics: dict[str, object] = {
             "found": group.accepted_count,
             "filtered": group.filtered_count,
             "accepted_after_validation": accepted_after_validation,

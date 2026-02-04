@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import MutableMapping
 from dataclasses import dataclass
-from typing import MutableMapping
 
 from . import logging_engine
 

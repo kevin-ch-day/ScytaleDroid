@@ -12,9 +12,9 @@ from scytaledroid.StaticAnalysis.session import make_session_stamp
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 
 if TYPE_CHECKING:
+
     from ..commands.models import Command
     from ..core.models import RunParameters
-    from scytaledroid.StaticAnalysis.core.repository import ArtifactGroup
 
 try:  # optional DB access (offline mode)
     from scytaledroid.Database.db_core import db_queries as core_q
@@ -37,9 +37,9 @@ def _load_menu_actions():  # pragma: no cover - simple cache wrapper
 
 
 def apply_command_overrides(
-    params: "RunParameters",
-    command: "Command",
-) -> "RunParameters":
+    params: RunParameters,
+    command: Command,
+) -> RunParameters:
     actions = _load_menu_actions()
     return actions.apply_command_overrides(params, command)
 
@@ -54,7 +54,7 @@ def confirm_reset() -> bool:
     return actions.confirm_reset()
 
 
-def prompt_session_label(params: "RunParameters") -> "RunParameters":
+def prompt_session_label(params: RunParameters) -> RunParameters:
     actions = _load_menu_actions()
     return actions.prompt_session_label(params)
 
@@ -64,7 +64,7 @@ def render_reset_outcome(outcome: object) -> None:
     actions.render_reset_outcome(outcome)
 
 
-def collect_view_options(command: "Command") -> tuple[bool, bool, bool]:
+def collect_view_options(command: Command) -> tuple[bool, bool, bool]:
     prompt = "View options: [D]etails  [S]plit breakdown  [A]rtifact detail  [Enter] continue"
     response = prompt_utils.prompt_text(prompt, required=False).strip().lower()
     want_details = "d" in response
@@ -319,12 +319,12 @@ def _sort_report_key(stored):
 
 
 def render_version_diff(package_name):
-    from scytaledroid.StaticAnalysis.persistence.reports import list_reports
     from scytaledroid.StaticAnalysis.detectors.correlation.diffing import (
         compare_components,
         compare_flags,
         compare_permissions,
     )
+    from scytaledroid.StaticAnalysis.persistence.reports import list_reports
 
     reports = [stored for stored in list_reports() if stored.report.manifest.package_name == package_name]
     if len(reports) < 2:
@@ -376,7 +376,7 @@ def render_version_diff(package_name):
     print()
 
 
-def inject_dev_session_label(params: "RunParameters", selection) -> "RunParameters":
+def inject_dev_session_label(params: RunParameters, selection) -> RunParameters:
     if not selection:
         return params
     short = selection.label.split(".")[-1]

@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections import defaultdict
 from glob import glob
 from pathlib import Path
-from collections import defaultdict
 
 
 def main() -> None:
@@ -36,7 +36,7 @@ def main() -> None:
     for pattern in patterns:
         for path in glob(pattern):
             try:
-                with open(path, "r", encoding="utf-8") as fh:
+                with open(path, encoding="utf-8") as fh:
                     for line in fh:
                         if not line.strip():
                             continue

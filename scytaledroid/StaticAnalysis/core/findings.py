@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Mapping, MutableMapping, Optional, Sequence
 
 
 class SeverityLevel(str, Enum):
@@ -43,8 +43,8 @@ class EvidencePointer:
     """Lightweight pointer describing where evidence for a finding lives."""
 
     location: str
-    hash_short: Optional[str] = None
-    description: Optional[str] = None
+    hash_short: str | None = None
+    description: str | None = None
     extra: Mapping[str, object] = field(default_factory=dict)
 
     def to_dict(self) -> MutableMapping[str, object]:
@@ -57,7 +57,7 @@ class EvidencePointer:
         return payload
 
     @classmethod
-    def from_dict(cls, payload: Mapping[str, object]) -> "EvidencePointer":
+    def from_dict(cls, payload: Mapping[str, object]) -> EvidencePointer:
         location = _coerce_optional_str(payload.get("location")) or ""
         return cls(
             location=location,
@@ -78,7 +78,7 @@ class Finding:
     status: Badge
     because: str
     evidence: Sequence[EvidencePointer] = field(default_factory=tuple)
-    remediate: Optional[str] = None
+    remediate: str | None = None
     metrics: Mapping[str, object] = field(default_factory=dict)
     tags: Sequence[str] = field(default_factory=tuple)
 
@@ -98,7 +98,7 @@ class Finding:
         return payload
 
     @classmethod
-    def from_dict(cls, payload: Mapping[str, object]) -> "Finding":
+    def from_dict(cls, payload: Mapping[str, object]) -> Finding:
         severity_raw = payload.get("severity_gate") or SeverityLevel.NOTE.value
         try:
             severity = SeverityLevel(severity_raw)
@@ -165,8 +165,8 @@ class DetectorResult:
     evidence: Sequence[EvidencePointer] = field(default_factory=tuple)
     notes: Sequence[str] = field(default_factory=tuple)
     findings: Sequence[Finding] = field(default_factory=tuple)
-    subitems: Optional[Sequence[Mapping[str, object]]] = None
-    raw_debug: Optional[str] = None
+    subitems: Sequence[Mapping[str, object | None]] = None
+    raw_debug: str | None = None
 
     def to_dict(self) -> MutableMapping[str, object]:
         return {
@@ -183,7 +183,7 @@ class DetectorResult:
         }
 
     @classmethod
-    def from_dict(cls, payload: Mapping[str, object]) -> "DetectorResult":
+    def from_dict(cls, payload: Mapping[str, object]) -> DetectorResult:
         detector_id = _coerce_optional_str(payload.get("detector_id")) or ""
         section_key = _coerce_optional_str(payload.get("section_key")) or ""
 
@@ -265,7 +265,7 @@ class DetectorResult:
         )
 
 
-def _coerce_optional_str(value: object) -> Optional[str]:
+def _coerce_optional_str(value: object) -> str | None:
     if value is None:
         return None
     if isinstance(value, str):

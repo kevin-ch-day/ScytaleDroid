@@ -3,56 +3,54 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Tuple
 
 
 @dataclass(frozen=True)
 class Palette:
     """ANSI colour palette tuned for text-based user interfaces."""
 
-    text: Tuple[str, ...]
-    info: Tuple[str, ...]
-    success: Tuple[str, ...]
-    warning: Tuple[str, ...]
-    error: Tuple[str, ...]
-    accent: Tuple[str, ...]
-    muted: Tuple[str, ...]
-    header: Tuple[str, ...]
-    divider: Tuple[str, ...]
-    option_key: Tuple[str, ...]
-    option_default: Tuple[str, ...]
-    option_text: Tuple[str, ...]
-    hint: Tuple[str, ...]
-    highlight: Tuple[str, ...]
-    badge: Tuple[str, ...]
-    disabled: Tuple[str, ...]
-    prompt: Tuple[str, ...]
-    error_panel_border: Tuple[str, ...]
-    error_panel_title: Tuple[str, ...]
-    error_panel_message: Tuple[str, ...]
-    error_panel_hint: Tuple[str, ...]
-    info_panel_border: Tuple[str, ...]
-    info_panel_title: Tuple[str, ...]
-    info_panel_message: Tuple[str, ...]
-    info_panel_hint: Tuple[str, ...]
-    warning_panel_border: Tuple[str, ...]
-    warning_panel_title: Tuple[str, ...]
-    warning_panel_message: Tuple[str, ...]
-    warning_panel_hint: Tuple[str, ...]
-    success_panel_border: Tuple[str, ...]
-    success_panel_title: Tuple[str, ...]
-    success_panel_message: Tuple[str, ...]
-    success_panel_hint: Tuple[str, ...]
-    banner_primary: Tuple[str, ...] = field(default_factory=tuple)
-    banner_secondary: Tuple[str, ...] = field(default_factory=tuple)
-    progress: Tuple[str, ...] = field(default_factory=tuple)
-    emphasis: Tuple[str, ...] = field(default_factory=tuple)
-    severity_critical: Tuple[str, ...] = field(default_factory=tuple)
-    severity_high: Tuple[str, ...] = field(default_factory=tuple)
-    severity_medium: Tuple[str, ...] = field(default_factory=tuple)
-    severity_low: Tuple[str, ...] = field(default_factory=tuple)
-    severity_info: Tuple[str, ...] = field(default_factory=tuple)
+    text: tuple[str, ...]
+    info: tuple[str, ...]
+    success: tuple[str, ...]
+    warning: tuple[str, ...]
+    error: tuple[str, ...]
+    accent: tuple[str, ...]
+    muted: tuple[str, ...]
+    header: tuple[str, ...]
+    divider: tuple[str, ...]
+    option_key: tuple[str, ...]
+    option_default: tuple[str, ...]
+    option_text: tuple[str, ...]
+    hint: tuple[str, ...]
+    highlight: tuple[str, ...]
+    badge: tuple[str, ...]
+    disabled: tuple[str, ...]
+    prompt: tuple[str, ...]
+    error_panel_border: tuple[str, ...]
+    error_panel_title: tuple[str, ...]
+    error_panel_message: tuple[str, ...]
+    error_panel_hint: tuple[str, ...]
+    info_panel_border: tuple[str, ...]
+    info_panel_title: tuple[str, ...]
+    info_panel_message: tuple[str, ...]
+    info_panel_hint: tuple[str, ...]
+    warning_panel_border: tuple[str, ...]
+    warning_panel_title: tuple[str, ...]
+    warning_panel_message: tuple[str, ...]
+    warning_panel_hint: tuple[str, ...]
+    success_panel_border: tuple[str, ...]
+    success_panel_title: tuple[str, ...]
+    success_panel_message: tuple[str, ...]
+    success_panel_hint: tuple[str, ...]
+    banner_primary: tuple[str, ...] = field(default_factory=tuple)
+    banner_secondary: tuple[str, ...] = field(default_factory=tuple)
+    progress: tuple[str, ...] = field(default_factory=tuple)
+    emphasis: tuple[str, ...] = field(default_factory=tuple)
+    severity_critical: tuple[str, ...] = field(default_factory=tuple)
+    severity_high: tuple[str, ...] = field(default_factory=tuple)
+    severity_medium: tuple[str, ...] = field(default_factory=tuple)
+    severity_low: tuple[str, ...] = field(default_factory=tuple)
+    severity_info: tuple[str, ...] = field(default_factory=tuple)
 
 
 __all__ = ["Palette"]
-

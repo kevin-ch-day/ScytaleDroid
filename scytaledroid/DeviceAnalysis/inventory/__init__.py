@@ -7,8 +7,6 @@ Notes for new code:
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
-
 from scytaledroid.Utils.DisplayUtils import (
     error_panels,
     prompt_utils,
@@ -28,7 +26,7 @@ from .snapshot_io import (
 from .views import print_inventory_run_summary_from_result
 
 
-def _owner_role(entry: Dict[str, object]) -> str:
+def _owner_role(entry: dict[str, object]) -> str:
     role = str(entry.get("owner_role") or "").strip()
     if role:
         return role
@@ -40,8 +38,8 @@ def _owner_role(entry: Dict[str, object]) -> str:
     return "Unknown"
 
 
-def _preview_rows(packages: List[Dict[str, object]], *, role: str, limit: int) -> List[List[str]]:
-    rows: List[List[str]] = []
+def _preview_rows(packages: list[dict[str, object]], *, role: str, limit: int) -> list[list[str]]:
+    rows: list[list[str]] = []
     for entry in packages:
         if _owner_role(entry) != role:
             continue
@@ -59,7 +57,7 @@ def _preview_rows(packages: List[Dict[str, object]], *, role: str, limit: int) -
     return rows
 
 
-def run_device_summary(serial: Optional[str]) -> None:
+def run_device_summary(serial: str | None) -> None:
     """Display the latest inventory snapshot with highlighted insights."""
 
     if not serial:
@@ -87,7 +85,7 @@ def run_device_summary(serial: Optional[str]) -> None:
                 prompt_utils.press_enter_to_continue()
         return
 
-    packages: List[Dict[str, object]] = snapshot.get("packages", [])  # type: ignore[assignment]
+    packages: list[dict[str, object]] = snapshot.get("packages", [])  # type: ignore[assignment]
     generated_at = snapshot.get("generated_at")
 
     print()
@@ -124,7 +122,7 @@ def run_device_summary(serial: Optional[str]) -> None:
     prompt_utils.press_enter_to_continue()
 
 
-def _render_inventory_summary(packages: List[Dict[str, object]]) -> None:
+def _render_inventory_summary(packages: list[dict[str, object]]) -> None:
     """Compatibility wrapper for tests; delegates to summary renderer."""
     from .summary import render_inventory_summary
 

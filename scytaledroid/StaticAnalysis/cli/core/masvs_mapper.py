@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Mapping, Tuple
 
 __all__ = [
     "ControlEvidence",
@@ -12,7 +12,7 @@ __all__ = [
     "rule_to_area",
 ]
 
-RULE_TO_CONTROL: Dict[str, Tuple[str, str]] = {
+RULE_TO_CONTROL: dict[str, tuple[str, str]] = {
     "BASE-IPC-COMP-NO-ACL": ("PLATFORM-IPC-1", "FAIL"),
     "BASE-IPC-PROVIDER-NO-ACL": ("PLATFORM-IPC-1", "FAIL"),
     "BASE-IPC-EXPORTED-WITH-PERM": ("PLATFORM-IPC-1", "PASS"),
@@ -37,10 +37,10 @@ STATUS_PRECEDENCE = {"FAIL": 3, "INCONCLUSIVE": 2, "PASS": 1}
 class ControlEvidence:
     control_id: str
     status: str
-    evidence: List[Mapping[str, object]] = field(default_factory=list)
+    evidence: list[Mapping[str, object]] = field(default_factory=list)
     rubric: Mapping[str, object] = field(default_factory=dict)
 
-    def merge(self, other: "ControlEvidence") -> "ControlEvidence":
+    def merge(self, other: ControlEvidence) -> ControlEvidence:
         if STATUS_PRECEDENCE[other.status] > STATUS_PRECEDENCE[self.status]:
             self.status = other.status
         if other.evidence:
@@ -57,8 +57,8 @@ class ControlEvidence:
         }
 
 
-def summarise_controls(entries: Iterable[Tuple[str, Mapping[str, object]]]) -> Dict[str, ControlEvidence]:
-    summary: Dict[str, ControlEvidence] = {}
+def summarise_controls(entries: Iterable[tuple[str, Mapping[str, object]]]) -> dict[str, ControlEvidence]:
+    summary: dict[str, ControlEvidence] = {}
     for rule_id, evidence in entries:
         mapping = RULE_TO_CONTROL.get(rule_id)
         if not mapping:
@@ -78,7 +78,7 @@ def summarise_controls(entries: Iterable[Tuple[str, Mapping[str, object]]]) -> D
     return summary
 
 
-def rule_to_control(rule_id: str) -> Tuple[str, str] | None:
+def rule_to_control(rule_id: str) -> tuple[str, str] | None:
     return RULE_TO_CONTROL.get(rule_id)
 
 

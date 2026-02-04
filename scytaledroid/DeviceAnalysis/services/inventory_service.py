@@ -2,19 +2,18 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
-import os
 
 from scytaledroid.DeviceAnalysis import device_manager
-from scytaledroid.DeviceAnalysis.inventory import runner, snapshot_io, progress, views
+from scytaledroid.DeviceAnalysis.inventory import progress, runner, snapshot_io, views
 from scytaledroid.DeviceAnalysis.inventory.errors import InventoryCollectionError
 from scytaledroid.DeviceAnalysis.modes.inventory import InventoryConfig
 from scytaledroid.DeviceAnalysis.runtime_flags import allow_inventory_fallbacks
 from scytaledroid.Utils.DisplayUtils import status_messages
-from scytaledroid.Utils.LoggingUtils.logging_context import RunContext, get_run_logger
 from scytaledroid.Utils.LoggingUtils import logging_events as log_events
+from scytaledroid.Utils.LoggingUtils.logging_context import RunContext, get_run_logger
 
 
 @dataclass
@@ -22,14 +21,14 @@ class InventorySnapshotInfo:
     status_label: str
     age_seconds: float
     total_packages: int
-    last_sync_utc: Optional[datetime]
+    last_sync_utc: datetime | None
 
 
 class InventoryServiceError(Exception):
     """Raised when an inventory operation fails at the service boundary."""
 
 
-def get_latest_snapshot_info(serial: str) -> Optional[InventorySnapshotInfo]:
+def get_latest_snapshot_info(serial: str) -> InventorySnapshotInfo | None:
     meta = snapshot_io.load_latest_snapshot_meta(serial)
     if meta is None:
         return None
@@ -46,8 +45,8 @@ def run_full_sync(
     ui_prefs,
     *,
     progress_sink: str = "cli",
-    mode: Optional[str] = None,
-    allow_fallbacks: Optional[bool] = None,
+    mode: str | None = None,
+    allow_fallbacks: bool | None = None,
 ) -> runner.InventoryResult:
     """
     High-level entry point for a full inventory sync.

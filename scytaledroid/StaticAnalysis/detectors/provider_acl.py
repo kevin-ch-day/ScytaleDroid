@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from time import perf_counter
-from typing import List, Mapping, Optional, Sequence
 from xml.etree import ElementTree
 
 from ..core.context import DetectorContext
@@ -18,8 +18,8 @@ from ..core.findings import (
     SeverityLevel,
 )
 from ..core.pipeline import make_detector_result
-from .base import BaseDetector, register_detector
 from ..modules.permissions import classify_permission, load_permission_catalog
+from .base import BaseDetector, register_detector
 
 _ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
 
@@ -30,9 +30,9 @@ class ProviderRecord:
 
     name: str
     exported: bool
-    read_permission: Optional[str]
-    write_permission: Optional[str]
-    general_permission: Optional[str]
+    read_permission: str | None
+    write_permission: str | None
+    general_permission: str | None
     grant_uri_permissions: bool
     authorities: tuple[str, ...]
     path_permissions: tuple[Mapping[str, str], ...]
@@ -49,7 +49,7 @@ _GUARD_PRIORITY = {
 
 
 def _resolve_strength(
-    permission: Optional[str],
+    permission: str | None,
     *,
     protection_levels: Mapping[str, Sequence[str]],
     catalog,
@@ -66,7 +66,7 @@ def _resolve_strength(
     return strength, tuple(levels)
 
 
-def _select_worst_guard(*guards: Optional[str]) -> str:
+def _select_worst_guard(*guards: str | None) -> str:
     selected = "none"
     selected_rank = 99
     for guard in guards:
@@ -83,7 +83,7 @@ def _collect_providers(manifest_root: ElementTree.Element) -> Sequence[ProviderR
     if application is None:
         return tuple()
 
-    records: List[ProviderRecord] = []
+    records: list[ProviderRecord] = []
 
     for element in application.findall("provider"):
         name = element.get(f"{_ANDROID_NS}name")
@@ -110,7 +110,7 @@ def _collect_providers(manifest_root: ElementTree.Element) -> Sequence[ProviderR
             if token:
                 authorities.append(token)
 
-        path_permissions: List[Mapping[str, str]] = []
+        path_permissions: list[Mapping[str, str]] = []
         for path_node in element.findall("path-permission"):
             entry: dict[str, str] = {}
             for attr in ("path", "pathPrefix", "pathPattern"):
@@ -162,7 +162,7 @@ def _classify_provider(
     *,
     protection_levels: Mapping[str, Sequence[str]],
     catalog,
-) -> Optional[Finding]:
+) -> Finding | None:
     if not provider.exported:
         return None
 
@@ -346,8 +346,8 @@ class ProviderAclDetector(BaseDetector):
     def run(self, context: DetectorContext) -> DetectorResult:
         started = perf_counter()
         providers = _collect_providers(context.manifest_root)
-        findings: List[Finding] = []
-        evidence: List[EvidencePointer] = []
+        findings: list[Finding] = []
+        evidence: list[EvidencePointer] = []
         catalog = getattr(context, "permission_catalog", None) or load_permission_catalog()
         protection_levels = getattr(context.permissions, "protection_levels", {})
 

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Iterable, Mapping, Optional
+from collections.abc import Iterable, Mapping
 
 
-def fetch_framework_protections(short_names: Iterable[str]) -> Mapping[str, Optional[str]]:
+def fetch_framework_protections(short_names: Iterable[str]) -> Mapping[str, str | None]:
     """Return mapping of permission SHORT name -> protection from DB, if available.
 
     Falls back to an empty mapping when DB is not configured or query fails.

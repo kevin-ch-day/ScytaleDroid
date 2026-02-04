@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 SELECT_AOSP_BY_VALUE = """
 SELECT constant_value,
        name,

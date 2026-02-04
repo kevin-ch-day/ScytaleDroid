@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import re
+from collections.abc import Iterable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
-from typing import Iterable, Mapping, MutableMapping, Sequence
 from urllib.parse import urlsplit
 
 from .constants import HTTP_URL_PATTERN

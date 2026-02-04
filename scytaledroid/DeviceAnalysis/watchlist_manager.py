@@ -2,19 +2,18 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
 
 from scytaledroid.Database.db_core import db_queries
 from scytaledroid.DeviceAnalysis import harvest
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, text_blocks
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuSpec
 
+_APP_NAME_CACHE: dict[str, str] = {}
 
-_APP_NAME_CACHE: Dict[str, str] = {}
 
-
-def manage_watchlists(serial: Optional[str] = None) -> None:
+def manage_watchlists(serial: str | None = None) -> None:
     """Entry point for the watchlist management console."""
 
     while True:
@@ -66,7 +65,7 @@ def _format_watchlist_location(path: Path) -> str:
 
 def _render_watchlist_table(watchlists: Iterable[harvest.Watchlist]) -> None:
     headers = ("Slug", "Name", "Packages", "Location")
-    rows: List[List[str]] = []
+    rows: list[list[str]] = []
     for watchlist in watchlists:
         rows.append(
             [
@@ -86,7 +85,7 @@ def _view_watchlist(watchlists: Iterable[harvest.Watchlist]) -> None:
         return
 
     package_info = _resolve_app_names(watchlist.packages)
-    rows: List[List[str]] = []
+    rows: list[list[str]] = []
     for package in watchlist.packages:
         app_name = package_info.get(package, "<unknown>")
         rows.append([app_name, package])
@@ -121,14 +120,14 @@ def _delete_watchlist(watchlists: Iterable[harvest.Watchlist]) -> None:
 
 def _prompt_watchlist_choice(
     watchlists: Iterable[harvest.Watchlist],
-) -> Optional[harvest.Watchlist]:
+) -> harvest.Watchlist | None:
     watchlists = list(watchlists)
     if not watchlists:
         print(status_messages.status("No watchlists available.", level="warn"))
         prompt_utils.press_enter_to_continue()
         return None
 
-    slug_map: Dict[str, harvest.Watchlist] = {watchlist.slug: watchlist for watchlist in watchlists}
+    slug_map: dict[str, harvest.Watchlist] = {watchlist.slug: watchlist for watchlist in watchlists}
     print()
     menu_utils.print_header("Select watchlist")
     options = {str(index): wl.slug for index, wl in enumerate(watchlists, start=1)}
@@ -146,7 +145,7 @@ def _prompt_watchlist_choice(
     return slug_map.get(slug)
 
 
-def _resolve_app_names(packages: Iterable[str]) -> Dict[str, str]:
+def _resolve_app_names(packages: Iterable[str]) -> dict[str, str]:
     package_list = []
     seen = set()
     for package in packages:

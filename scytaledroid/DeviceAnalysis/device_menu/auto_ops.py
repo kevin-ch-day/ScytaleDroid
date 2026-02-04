@@ -2,25 +2,24 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from collections.abc import Callable, Sequence
+from datetime import UTC, datetime
 
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
-from .. import device_manager, inventory, inventory_meta
+from .. import device_manager, inventory_meta
 from .dashboard import resolve_active_device
 from .inventory_guard.constants import INVENTORY_STALE_SECONDS
-from .inventory_guard.utils import humanize_seconds
 
 
 def ensure_active_device(
-    devices: Sequence[Dict[str, Optional[str]]],
-    active_device: Optional[Dict[str, Optional[str]]],
-) -> Tuple[Optional[Dict[str, Optional[str]]], List[str]]:
+    devices: Sequence[dict[str, str | None]],
+    active_device: dict[str, str | None | None],
+) -> tuple[dict[str, str | None | None], list[str]]:
     """Auto-select a single connected device when no active device is set."""
 
-    messages: List[str] = []
+    messages: list[str] = []
     if active_device or len(devices) != 1:
         return active_device, messages
 
@@ -53,11 +52,11 @@ def ensure_active_device(
 
 
 def ensure_inventory_survey(
-    serial: Optional[str],
+    serial: str | None,
     *,
-    metadata: Optional[Dict[str, object]],
+    metadata: dict[str, object | None],
     surveyed_serials: set[str],
-    emit: Optional[Callable[[str], None]] = None,
+    emit: Callable[[str | None, None]] = None,
 ) -> None:
     """Run a silent inventory survey once per session when the snapshot is fresh."""
 
@@ -78,7 +77,7 @@ def ensure_inventory_survey(
 
     # Normalise metadata into primitives we can reason about (support dict or InventoryStatus).
     metadata = metadata or {}
-    timestamp: Optional[datetime] = None
+    timestamp: datetime | None = None
     packages_changed = False
     scope_changed = False
     state_changed = False
@@ -96,15 +95,14 @@ def ensure_inventory_survey(
         # These flags may not exist on InventoryStatus; default to False
         packages_changed = bool(getattr(metadata, "packages_changed", False))
         scope_changed = bool(getattr(metadata, "scope_changed", False))
-        state_changed = bool(getattr(metadata, "state_changed", False))
         fingerprint_changed = bool(getattr(metadata, "build_fingerprint_changed", False))
 
     if timestamp is None and snapshot_meta is not None:
         timestamp = snapshot_meta.captured_at
 
-    age_seconds: Optional[float] = None
+    age_seconds: float | None = None
     if timestamp is not None:
-        age_seconds = max((datetime.now(timezone.utc) - timestamp).total_seconds(), 0.0)
+        age_seconds = max((datetime.now(UTC) - timestamp).total_seconds(), 0.0)
 
     too_old = age_seconds is None or age_seconds > INVENTORY_STALE_SECONDS
     # Only flag changes when current-state deltas are actually reported.
@@ -113,7 +111,7 @@ def ensure_inventory_survey(
     surveyed_serials.add(serial)
 
     if too_old or has_changes:
-        reason: Optional[str] = None
+        reason: str | None = None
         if age_seconds is None:
             reason = "Inventory snapshot age unknown; run Sync + Pull (option 1)."
         elif too_old:

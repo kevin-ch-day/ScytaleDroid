@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Iterable, Mapping, Dict, Sequence, List
+from collections.abc import Mapping, Sequence
 
-
-SIGNAL_OBSERVATION_CONFIG: Mapping[str, Dict[str, object]] = {
+SIGNAL_OBSERVATION_CONFIG: Mapping[str, dict[str, object]] = {
     "sms": {
         "severity_band": "WARN",
         "score": 8,
@@ -110,7 +109,7 @@ def _normalize_perm_token(value: str) -> str:
     return token
 
 
-def match_permissions(declared: Sequence[str], candidates: Sequence[str]) -> List[str]:
+def match_permissions(declared: Sequence[str], candidates: Sequence[str]) -> list[str]:
     if not declared:
         return []
     normalized = {perm: _normalize_perm_token(perm).upper() for perm in declared}

@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
-from typing import Mapping, Sequence
+from collections.abc import Mapping, Sequence
 
-from ...db_core import database_session, run_sql
-from ...db_core import db_config
-from ...db_queries.static_analysis import static_findings as queries
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
+
+from ...db_core import database_session, db_config, run_sql
+from ...db_queries.static_analysis import static_findings as queries
 
 _IS_SQLITE = str(db_config.DB_CONFIG.get("engine", "sqlite")).lower() == "sqlite"
 

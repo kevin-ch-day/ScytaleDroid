@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Iterable, Optional, Sequence, Set
+from collections.abc import Iterable, Sequence
 
 from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core import db_queries
@@ -52,7 +52,7 @@ _DEFAULT_GOOGLE_ALLOWLIST = {
 }
 
 
-def _coerce_allowlist(value: object) -> Set[str]:
+def _coerce_allowlist(value: object) -> set[str]:
     if not value:
         return set()
     if isinstance(value, (str, bytes)):
@@ -62,7 +62,7 @@ def _coerce_allowlist(value: object) -> Set[str]:
     return set()
 
 
-def _base_google_allowlist() -> Set[str]:
+def _base_google_allowlist() -> set[str]:
     config_value = getattr(app_config, "DEVICE_ANALYSIS_GOOGLE_ALLOWLIST", None)
     config_allowlist = _coerce_allowlist(config_value)
     if config_allowlist:
@@ -70,7 +70,7 @@ def _base_google_allowlist() -> Set[str]:
     return set(_DEFAULT_GOOGLE_ALLOWLIST)
 
 
-def load_google_allowlist(candidates: Optional[Sequence[str]] = None) -> Set[str]:
+def load_google_allowlist(candidates: Sequence[str | None] = None) -> set[str]:
     """Return Google packages that should bypass the default family exclusion.
 
     The allow-list is derived from the database when available so analysts can
@@ -113,15 +113,15 @@ def load_google_allowlist(candidates: Optional[Sequence[str]] = None) -> Set[str
     return discovered | (baseline - discovered)
 
 
-GOOGLE_ALLOWLIST: Set[str] = load_google_allowlist()
+GOOGLE_ALLOWLIST: set[str] = load_google_allowlist()
 
 
-def _base_google_user_apps() -> Set[str]:
+def _base_google_user_apps() -> set[str]:
     config_value = getattr(app_config, "DEVICE_ANALYSIS_GOOGLE_USER_APPS", None)
     return _coerce_allowlist(config_value) or set(_GOOGLE_USER_APP_DEFAULTS)
 
 
-GOOGLE_USER_APPS: Set[str] = _base_google_user_apps()
+GOOGLE_USER_APPS: set[str] = _base_google_user_apps()
 
 
 def is_google_user_app(package_name: str) -> bool:
@@ -138,7 +138,7 @@ def canonical_filename(package_name: str, version_code: str, artifact: str) -> s
     return f"{safe_package}_{safe_version}__{artifact}.apk"
 
 
-def family(package_name: str) -> Optional[str]:
+def family(package_name: str) -> str | None:
     """Return the family identifier for the provided package name."""
 
     for label, prefix in FAMILY_PREFIXES.items():
@@ -147,13 +147,13 @@ def family(package_name: str) -> Optional[str]:
     return None
 
 
-def is_user_path(path: Optional[str]) -> bool:
+def is_user_path(path: str | None) -> bool:
     """Return ``True`` when the path resides on the user data partition."""
 
     return bool(path and path.startswith("/data/"))
 
 
-def is_system_path(path: Optional[str]) -> bool:
+def is_system_path(path: str | None) -> bool:
     """Return ``True`` for system/vendor/mainline partitions."""
 
     if not path:

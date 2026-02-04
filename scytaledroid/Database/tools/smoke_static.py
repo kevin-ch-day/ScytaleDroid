@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
 from scytaledroid.Database.tools.bootstrap import bootstrap_database
 from scytaledroid.Utils.LoggingUtils import logging_utils as log

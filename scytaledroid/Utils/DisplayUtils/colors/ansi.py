@@ -5,18 +5,18 @@ from __future__ import annotations
 import os
 import re
 import sys
+from collections.abc import Iterable
 from functools import lru_cache
-from typing import Iterable, Tuple
 
-from .models import Palette
 from .. import ui_prefs
+from .models import Palette
 from .palette import get_palette
 
 RESET = "\033[0m"
 _ANSI_PATTERN = re.compile(r"\033\[[0-9;]*m")
 
 
-def _flatten(styles: Iterable[Iterable[str] | str]) -> Tuple[str, ...]:
+def _flatten(styles: Iterable[Iterable[str] | str]) -> tuple[str, ...]:
     """Normalise nested style definitions into a tuple of ANSI codes."""
 
     parts: list[str] = []
@@ -77,7 +77,7 @@ def highlight(text: str) -> str:
     return apply(text, palette.highlight)
 
 
-def style(*names: str, palette: Palette | None = None) -> Tuple[str, ...]:
+def style(*names: str, palette: Palette | None = None) -> tuple[str, ...]:
     """Return ANSI codes for the palette attribute names in *names*."""
 
     palette = palette or get_palette()

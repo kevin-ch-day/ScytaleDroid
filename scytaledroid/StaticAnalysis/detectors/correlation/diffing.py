@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, Mapping, Optional, Sequence
+from collections.abc import Mapping, Sequence
 
 from ...core.context import DetectorContext
 from ...core.findings import Badge, EvidencePointer, Finding, MasvsCategory, SeverityLevel
@@ -13,7 +13,7 @@ from .network import compare_network_snapshots, current_network_snapshot, previo
 from .utils import report_pointer
 
 
-def load_previous_report(context: DetectorContext) -> Optional[StoredReport]:
+def load_previous_report(context: DetectorContext) -> StoredReport | None:
     package = context.manifest_summary.package_name or ""
     if not package:
         return None
@@ -75,7 +75,7 @@ def load_previous_report(context: DetectorContext) -> Optional[StoredReport]:
 def compare_components(
     current: ComponentSummary, previous: ComponentSummary
 ) -> Mapping[str, Sequence[str]]:
-    diffs: Dict[str, Sequence[str]] = {}
+    diffs: dict[str, Sequence[str]] = {}
     for attr in ("activities", "services", "receivers", "providers"):
         current_set = set(getattr(current, attr, ()))
         previous_set = set(getattr(previous, attr, ()))
@@ -96,7 +96,7 @@ def compare_permissions(
 def compare_flags(
     current_flags: Mapping[str, object], previous_flags: Mapping[str, object]
 ) -> Mapping[str, tuple[object, object]]:
-    deltas: Dict[str, tuple[object, object]] = {}
+    deltas: dict[str, tuple[object, object]] = {}
     for key, current_value in current_flags.items():
         prev_value = previous_flags.get(key)
         if current_value != prev_value:

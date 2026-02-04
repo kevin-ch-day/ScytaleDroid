@@ -1,15 +1,5 @@
 """Persistence helpers used by the CLI."""
 
-from .run_envelope import RunEnvelope, extract_run_profiles, first_non_empty_str, prepare_run_envelope
-from .metrics_writer import (
-    MetricsBundle,
-    compute_metrics_bundle,
-    write_buckets,
-    write_metrics,
-    write_contributors,
-)
-from .static_findings_writer import coerce_severity_counts, persist_static_findings
-from .strings_writer import normalise_string_counts, persist_string_summary
 from .findings_writer import (
     compute_cvss_base,
     derive_masvs_tag,
@@ -17,9 +7,24 @@ from .findings_writer import (
     persist_findings,
     persist_masvs_controls,
 )
+from .metrics_writer import (
+    MetricsBundle,
+    compute_metrics_bundle,
+    write_buckets,
+    write_contributors,
+    write_metrics,
+)
 from .permission_risk import persist_permission_risk
+from .run_envelope import (
+    RunEnvelope,
+    extract_run_profiles,
+    first_non_empty_str,
+    prepare_run_envelope,
+)
+from .run_summary import PersistenceOutcome, persist_run_summary
+from .static_findings_writer import coerce_severity_counts, persist_static_findings
 from .static_sections import persist_static_sections, persist_storage_surface_data
-from .run_summary import persist_run_summary, PersistenceOutcome
+from .strings_writer import normalise_string_counts, persist_string_summary
 
 __all__ = [
     "RunEnvelope",

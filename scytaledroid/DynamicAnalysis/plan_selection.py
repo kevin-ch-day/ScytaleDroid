@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-import zoneinfo
 import json
+import zoneinfo
+from datetime import datetime
 from pathlib import Path
 
 from scytaledroid.Config import app_config
+from scytaledroid.DynamicAnalysis.plans.loader import (
+    SUPPORTED_SIGNATURE_VERSIONS,
+    extract_plan_identity,
+)
+from scytaledroid.StaticAnalysis.core.repository import group_artifacts, load_display_name_map
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
 from scytaledroid.Utils.evidence_store import filesystem_safe_slug
-from scytaledroid.DynamicAnalysis.plans.loader import extract_plan_identity, SUPPORTED_SIGNATURE_VERSIONS
-from scytaledroid.StaticAnalysis.core.repository import group_artifacts, load_display_name_map
 from scytaledroid.Utils.System.world_clock.display import format_display_time
 
 
@@ -34,7 +37,6 @@ def resolve_plan_selection(package_name: str) -> dict[str, object] | None:
 
 
 def print_plan_selection_banner(selection: dict[str, object]) -> None:
-    plan_path = selection.get("plan_path") or "unknown"
     package_name = selection.get("package_name") or "unknown"
     display_name = _resolve_display_name(str(package_name))
     app_label = (

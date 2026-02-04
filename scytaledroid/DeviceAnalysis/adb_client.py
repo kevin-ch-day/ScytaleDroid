@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-from typing import Optional, Sequence
+from collections.abc import Sequence
 
 from scytaledroid.DeviceAnalysis.adb_errors import AdbBinaryNotFoundError
 
 
-def _resolve_adb() -> Optional[str]:
+def _resolve_adb() -> str | None:
     """Return the adb binary path when available."""
     return shutil.which("adb")
 
@@ -19,7 +19,7 @@ def is_available() -> bool:
     return _resolve_adb() is not None
 
 
-def get_adb_binary() -> Optional[str]:
+def get_adb_binary() -> str | None:
     """Expose the adb binary path for other helpers."""
     return _resolve_adb()
 
@@ -28,7 +28,7 @@ def run_shell_command(
     serial: str,
     command: Sequence[str],
     *,
-    timeout: Optional[float] = None,
+    timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Execute an arbitrary ``adb shell`` command for the selected device."""
     adb_bin = _resolve_adb()
@@ -53,7 +53,7 @@ def run_shell_command(
 def run_adb_command(
     args: Sequence[str],
     *,
-    timeout: Optional[float] = None,
+    timeout: float | None = None,
     capture_output: bool = True,
     text: bool = True,
     check: bool = False,
@@ -103,7 +103,7 @@ def run_shell(
     serial: str,
     command: Sequence[str],
     *,
-    timeout: Optional[float] = None,
+    timeout: float | None = None,
     check: bool = False,
 ) -> str:
     """

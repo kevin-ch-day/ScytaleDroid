@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterable, Sequence
 from time import perf_counter
-from typing import Dict, Iterable, List, Sequence, Tuple, Type, TypeVar
+from typing import TypeVar
 
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
@@ -20,9 +21,9 @@ class _DetectorRegistry:
     """Internal registry tracking available detector classes."""
 
     def __init__(self) -> None:
-        self._registry: Dict[str, Type[BaseDetector]] = {}
+        self._registry: dict[str, type[BaseDetector]] = {}
 
-    def register(self, detector_cls: Type["BaseDetector"]) -> Type["BaseDetector"]:
+    def register(self, detector_cls: type[BaseDetector]) -> type[BaseDetector]:
         detector_id = detector_cls.detector_id
         if not detector_id:
             raise DetectorRegistrationError("Detector must declare a detector_id")
@@ -37,9 +38,9 @@ class _DetectorRegistry:
 
     def get_active_detectors(
         self, config: AnalysisConfig
-    ) -> Tuple["BaseDetector", ...]:
+    ) -> tuple[BaseDetector, ...]:
         enabled = set(config.enabled_detectors or [])
-        detectors: List[BaseDetector] = []
+        detectors: list[BaseDetector] = []
         for detector_cls in self._registry.values():
             if enabled and detector_cls.detector_id not in enabled:
                 continue
@@ -74,17 +75,17 @@ class BaseDetector(ABC):
 DetectorType = TypeVar("DetectorType", bound=BaseDetector)
 
 
-def register_detector(detector_cls: Type[DetectorType]) -> Type[DetectorType]:
+def register_detector(detector_cls: type[DetectorType]) -> type[DetectorType]:
     """Class decorator used to register detectors automatically."""
 
     return _REGISTRY.register(detector_cls)
 
 
-def execute_detectors(context: DetectorContext) -> Tuple[DetectorResult, ...]:
+def execute_detectors(context: DetectorContext) -> tuple[DetectorResult, ...]:
     """Execute all detectors applicable to the provided context."""
 
     detectors = _REGISTRY.get_active_detectors(context.config)
-    results: List[DetectorResult] = []
+    results: list[DetectorResult] = []
 
     for detector in detectors:
         started = perf_counter()

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping, MutableMapping, Sequence
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Iterable, Mapping, MutableMapping, Optional, Sequence
 
 from .findings import DetectorResult, Finding
 from .utils import coerce_optional_str, subset
@@ -15,16 +15,16 @@ from .utils import coerce_optional_str, subset
 class ManifestSummary:
     """Key manifest attributes extracted from the APK."""
 
-    package_name: Optional[str] = None
-    version_name: Optional[str] = None
-    version_code: Optional[str] = None
-    min_sdk: Optional[str] = None
-    target_sdk: Optional[str] = None
-    compile_sdk: Optional[str] = None
-    app_label: Optional[str] = None
-    main_activity: Optional[str] = None
+    package_name: str | None = None
+    version_name: str | None = None
+    version_code: str | None = None
+    min_sdk: str | None = None
+    target_sdk: str | None = None
+    compile_sdk: str | None = None
+    app_label: str | None = None
+    main_activity: str | None = None
 
-    def to_dict(self) -> MutableMapping[str, Optional[str]]:
+    def to_dict(self) -> MutableMapping[str, str | None]:
         return asdict(self)
 
 
@@ -83,12 +83,12 @@ class PermissionSummary:
 class ManifestFlags:
     """Notable manifest booleans converted to python primitives."""
 
-    uses_cleartext_traffic: Optional[bool] = None
-    debuggable: Optional[bool] = None
-    allow_backup: Optional[bool] = None
-    request_legacy_external_storage: Optional[bool] = None
-    full_backup_content: Optional[str] = None
-    network_security_config: Optional[str] = None
+    uses_cleartext_traffic: bool | None = None
+    debuggable: bool | None = None
+    allow_backup: bool | None = None
+    request_legacy_external_storage: bool | None = None
+    full_backup_content: str | None = None
+    network_security_config: str | None = None
 
     def to_dict(self) -> MutableMapping[str, object]:
         return asdict(self)
@@ -99,7 +99,7 @@ class StaticAnalysisReport:
     """Static analysis artefact captured for an APK."""
 
     file_path: str
-    relative_path: Optional[str]
+    relative_path: str | None
     file_name: str
     file_size: int
     hashes: Mapping[str, str]
@@ -112,7 +112,7 @@ class StaticAnalysisReport:
     libraries: tuple[str, ...] = ()
     signatures: tuple[str, ...] = ()
     metadata: Mapping[str, object] = field(default_factory=dict)
-    scan_profile: Optional[str] = None
+    scan_profile: str | None = None
     analysis_version: str = "2.0.0-alpha"
     findings: tuple[Finding, ...] = ()
     detector_metrics: Mapping[str, object] = field(default_factory=dict)
@@ -123,7 +123,7 @@ class StaticAnalysisReport:
     analysis_indicators: Mapping[str, float] = field(default_factory=dict)
     workload_profile: Mapping[str, object] = field(default_factory=dict)
     generated_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+        default_factory=lambda: datetime.now(UTC).isoformat()
     )
 
     def to_dict(self) -> dict[str, object]:
@@ -159,7 +159,7 @@ class StaticAnalysisReport:
         return payload
 
     @classmethod
-    def from_dict(cls, payload: Mapping[str, object]) -> "StaticAnalysisReport":
+    def from_dict(cls, payload: Mapping[str, object]) -> StaticAnalysisReport:
         """Reconstruct a report from its dictionary representation."""
 
         manifest = ManifestSummary(**subset(payload.get("manifest", {}), ManifestSummary))
@@ -316,7 +316,7 @@ class StaticAnalysisReport:
             analysis_indicators=analysis_indicators,
             workload_profile=workload_profile,
             generated_at=str(
-                payload.get("generated_at") or datetime.now(timezone.utc).isoformat()
+                payload.get("generated_at") or datetime.now(UTC).isoformat()
             ),
         )
 

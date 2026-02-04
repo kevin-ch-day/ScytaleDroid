@@ -26,14 +26,14 @@ from .cli import static_analysis_menu
 from .core import (
     AnalysisConfig,
     DetectorContext,
-    analyze_apk,
-    StaticAnalysisReport,
-    StaticAnalysisError,
-    SeverityLevel,
-    MasvsCategory,
+    DetectorResult,
     EvidencePointer,
     Finding,
-    DetectorResult,
+    MasvsCategory,
+    SeverityLevel,
+    StaticAnalysisError,
+    StaticAnalysisReport,
+    analyze_apk,
 )
 
 __all__ = [

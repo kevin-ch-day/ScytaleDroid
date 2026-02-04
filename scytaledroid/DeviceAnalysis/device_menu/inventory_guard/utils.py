@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional, Tuple
-
 
 def humanize_seconds(seconds: float) -> str:
     """Render durations with explicit labels (Days Hrs Mins)."""
@@ -52,7 +50,7 @@ def coarse_time_range(seconds: float) -> str:
     return "~hours"
 
 
-def coerce_float(value: object) -> Optional[float]:
+def coerce_float(value: object) -> float | None:
     if value is None:
         return None
     if isinstance(value, (int, float)):
@@ -65,7 +63,7 @@ def coerce_float(value: object) -> Optional[float]:
     return None
 
 
-def coerce_int(value: object) -> Optional[int]:
+def coerce_int(value: object) -> int | None:
     if value is None:
         return None
     if isinstance(value, int):

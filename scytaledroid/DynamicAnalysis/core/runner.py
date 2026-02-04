@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
-from scytaledroid.Utils.LoggingUtils import logging_engine
+from datetime import UTC, datetime
 
 from scytaledroid.DynamicAnalysis.core.orchestrator import DynamicRunOrchestrator
-from scytaledroid.DynamicAnalysis.plans.loader import PlanValidationError, build_plan_validation_event
 from scytaledroid.DynamicAnalysis.observers import (
     NetworkCaptureObserver,
     PcapdroidCaptureObserver,
     ProxyCaptureObserver,
     SystemLogObserver,
 )
+from scytaledroid.DynamicAnalysis.plans.loader import (
+    PlanValidationError,
+    build_plan_validation_event,
+)
+from scytaledroid.Utils.LoggingUtils import logging_engine
 
 from .session import DynamicSessionConfig, DynamicSessionResult, make_session_result
 
@@ -52,7 +54,7 @@ def run_dynamic_session(
         result.status = "blocked"
         result.errors = list(exc.outcome.reasons) if exc.outcome.reasons else ["dynamic plan validation failed"]
         result.notes = "Dynamic execution blocked by plan validation."
-        result.ended_at = datetime.now(timezone.utc)
+        result.ended_at = datetime.now(UTC)
         logger.warning(
             "Dynamic plan validation blocked run",
             extra=build_plan_validation_event(exc.outcome),
@@ -62,7 +64,7 @@ def run_dynamic_session(
     if manifest.ended_at:
         result.ended_at = datetime.fromisoformat(manifest.ended_at)
     else:
-        result.ended_at = datetime.now(timezone.utc)
+        result.ended_at = datetime.now(UTC)
     result.notes = f"Dynamic run captured at {run_dir}."
     result.dynamic_run_id = manifest.dynamic_run_id
     result.evidence_path = str(run_dir)

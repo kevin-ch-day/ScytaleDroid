@@ -6,8 +6,7 @@ This centralizes the mapping used by renderers and scoring.
 
 from __future__ import annotations
 
-from typing import Iterable, Mapping, Optional, Tuple, Dict
-
+from collections.abc import Iterable, Mapping
 
 _GROUP_ORDER = (
     "LOC",  # Location
@@ -28,9 +27,9 @@ _GROUP_ORDER = (
 
 
 def compute_group_strengths(
-    declared: Iterable[Tuple[str, str]],
-    protection_map: Mapping[str, Optional[str]] | None = None,
-) -> Tuple[Dict[str, int], set[str]]:
+    declared: Iterable[tuple[str, str]],
+    protection_map: Mapping[str, str | None] | None = None,
+) -> tuple[dict[str, int], set[str]]:
     """Return (group_strengths, fw_ds) from manifest declared permissions.
 
     group_strengths: mapping of group key -> 0/1/2 (none/present/strong)
@@ -38,7 +37,7 @@ def compute_group_strengths(
     """
 
     protection_map = protection_map or {}
-    groups: Dict[str, int] = {key: 0 for key in _GROUP_ORDER}
+    groups: dict[str, int] = {key: 0 for key in _GROUP_ORDER}
     fw_ds: set[str] = set()
 
     def _bump(key: str, strong: bool) -> None:

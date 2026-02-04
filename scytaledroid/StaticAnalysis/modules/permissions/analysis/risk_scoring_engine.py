@@ -2,6 +2,6 @@
 
 from __future__ import annotations
 
-from .scoring import permission_risk_score, permission_risk_score_detail, permission_risk_grade
+from .scoring import permission_risk_grade, permission_risk_score, permission_risk_score_detail
 
 __all__ = ["permission_risk_score", "permission_risk_score_detail", "permission_risk_grade"]

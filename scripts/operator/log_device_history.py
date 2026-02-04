@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections import defaultdict
 from glob import glob
 from pathlib import Path
-from collections import defaultdict
 
 
 def _collect(logs_dir: Path, device_serial: str):
@@ -23,7 +23,7 @@ def _collect(logs_dir: Path, device_serial: str):
     for pattern in patterns:
         for path in glob(pattern):
             try:
-                with open(path, "r", encoding="utf-8") as fh:
+                with open(path, encoding="utf-8") as fh:
                     for line in fh:
                         if not line.strip():
                             continue
@@ -32,7 +32,6 @@ def _collect(logs_dir: Path, device_serial: str):
                             continue
                         subsystem = obj.get("subsystem") or obj.get("logger") or "unknown"
                         run_id = obj.get("run_id") or "unknown"
-                        event = obj.get("event") or ""
                         runs[(subsystem, run_id)].append(obj)
             except Exception:
                 continue

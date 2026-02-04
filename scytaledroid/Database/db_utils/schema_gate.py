@@ -3,21 +3,21 @@
 from __future__ import annotations
 
 import re
-from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from collections.abc import Mapping, Sequence
 
 from scytaledroid.Database.db_utils import diagnostics
 
 MIN_SCHEMA_VERSION = "0.2.6"
 
 
-def _parse_version(value: Optional[str]) -> Tuple[int, ...]:
+def _parse_version(value: str | None) -> tuple[int, ...]:
     if not value:
         return ()
     parts = re.findall(r"\d+", value)
     return tuple(int(part) for part in parts) if parts else ()
 
 
-def _version_gte(current: Optional[str], minimum: str) -> bool:
+def _version_gte(current: str | None, minimum: str) -> bool:
     current_tuple = _parse_version(current)
     minimum_tuple = _parse_version(minimum)
     if not current_tuple:
@@ -28,8 +28,8 @@ def _version_gte(current: Optional[str], minimum: str) -> bool:
     return current_tuple >= minimum_tuple
 
 
-def _missing_columns(required: Mapping[str, Sequence[str]]) -> Dict[str, List[str]]:
-    missing: Dict[str, List[str]] = {}
+def _missing_columns(required: Mapping[str, Sequence[str]]) -> dict[str, list[str]]:
+    missing: dict[str, list[str]] = {}
     for table, columns in required.items():
         actual = diagnostics.get_table_columns(table)
         if actual is None:
@@ -41,7 +41,7 @@ def _missing_columns(required: Mapping[str, Sequence[str]]) -> Dict[str, List[st
     return missing
 
 
-def check_base_schema() -> Tuple[bool, str, str]:
+def check_base_schema() -> tuple[bool, str, str]:
     """Global base check: DB reachable, schema_version and apps exist."""
     if not diagnostics.check_connection():
         return False, "Database connection failed.", "Check DB URL/credentials."
@@ -61,8 +61,8 @@ def check_module_schema(
     *,
     min_version: str = MIN_SCHEMA_VERSION,
     required_tables: Sequence[str],
-    required_columns: Optional[Mapping[str, Sequence[str]]] = None,
-) -> Tuple[bool, str, str]:
+    required_columns: Mapping[str, Sequence[str]] | None = None,
+) -> tuple[bool, str, str]:
     schema_version = diagnostics.get_schema_version()
     if not _version_gte(schema_version, min_version):
         return (
@@ -95,7 +95,7 @@ def check_module_schema(
     return True, "OK", ""
 
 
-def inventory_schema_gate() -> Tuple[bool, str, str]:
+def inventory_schema_gate() -> tuple[bool, str, str]:
     required_tables = [
         "device_inventory_snapshots",
         "device_inventory",
@@ -119,7 +119,7 @@ def inventory_schema_gate() -> Tuple[bool, str, str]:
     )
 
 
-def static_schema_gate() -> Tuple[bool, str, str]:
+def static_schema_gate() -> tuple[bool, str, str]:
     required_tables = [
         "static_analysis_runs",
         "static_session_run_links",
@@ -143,7 +143,7 @@ def static_schema_gate() -> Tuple[bool, str, str]:
     )
 
 
-def dynamic_schema_gate() -> Tuple[bool, str, str]:
+def dynamic_schema_gate() -> tuple[bool, str, str]:
     required_tables = [
         "dynamic_sessions",
         "dynamic_session_issues",
@@ -180,7 +180,7 @@ def dynamic_schema_gate() -> Tuple[bool, str, str]:
     )
 
 
-def permissions_schema_gate() -> Tuple[bool, str, str]:
+def permissions_schema_gate() -> tuple[bool, str, str]:
     required_tables = [
         "android_permission_dict_aosp",
         "android_permission_dict_oem",

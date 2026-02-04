@@ -6,7 +6,6 @@ import sys
 
 from scytaledroid.Database.db_core import db_config
 from scytaledroid.Database.db_core.db_engine import DatabaseEngine
-from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
 def main() -> int:

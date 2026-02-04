@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from scytaledroid.DynamicAnalysis import menu
 from scytaledroid.Utils.evidence_store import filesystem_safe_slug
 

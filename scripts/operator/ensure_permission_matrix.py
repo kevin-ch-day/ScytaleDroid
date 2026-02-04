@@ -15,11 +15,11 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scytaledroid.Database.db_func.static_analysis import static_permission_matrix
-from scytaledroid.Database.db_core import run_sql
-
 
 def main() -> int:
+    from scytaledroid.Database.db_core import run_sql
+    from scytaledroid.Database.db_func.static_analysis import static_permission_matrix
+
     if static_permission_matrix.ensure_table():
         print("static_permission_matrix table is ready.")
     else:

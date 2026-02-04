@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from scytaledroid.DynamicAnalysis.core.session import DynamicSessionConfig, DynamicSessionResult
@@ -12,8 +12,8 @@ def _make_result(tmp_path: Path, status: str) -> DynamicSessionResult:
     return DynamicSessionResult(
         package_name="com.example.app",
         duration_seconds=30,
-        started_at=datetime.now(timezone.utc),
-        ended_at=datetime.now(timezone.utc),
+        started_at=datetime.now(UTC),
+        ended_at=datetime.now(UTC),
         status=status,
         notes="test",
         dynamic_run_id="run-123",

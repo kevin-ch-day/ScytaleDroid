@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Dict, Iterable, Iterator, Mapping, Optional, Sequence, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from scytaledroid.Config import app_config
 
@@ -26,26 +27,26 @@ class InventoryMeta:
     serial: str
     captured_at: datetime
     package_count: int
-    package_list_hash: Optional[str] = None
-    package_signature_hash: Optional[str] = None
-    build_fingerprint: Optional[str] = None
-    duration_seconds: Optional[float] = None
-    snapshot_type: Optional[str] = None
-    scope_hash: Optional[str] = None
-    scope_size: Optional[int] = None
-    scope_hashes: Optional[Dict[str, str]] = None
-    snapshot_id: Optional[int] = None
+    package_list_hash: str | None = None
+    package_signature_hash: str | None = None
+    build_fingerprint: str | None = None
+    duration_seconds: float | None = None
+    snapshot_type: str | None = None
+    scope_hash: str | None = None
+    scope_size: int | None = None
+    scope_hashes: dict[str, str | None] = None
+    snapshot_id: int | None = None
     # Optional diff metadata (populated by runner)
-    delta_new: Optional[int] = None
-    delta_removed: Optional[int] = None
-    delta_updated: Optional[int] = None
-    delta_changed_count: Optional[int] = None
-    delta_split_delta: Optional[int] = None
-    delta_details: Optional["InventoryDelta"] = None
+    delta_new: int | None = None
+    delta_removed: int | None = None
+    delta_updated: int | None = None
+    delta_changed_count: int | None = None
+    delta_split_delta: int | None = None
+    delta_details: InventoryDelta | None = None
 
     def to_payload(self) -> dict:
         payload = asdict(self)
-        payload["captured_at"] = self.captured_at.astimezone(timezone.utc).isoformat()
+        payload["captured_at"] = self.captured_at.astimezone(UTC).isoformat()
         snapshot_type = payload.pop("snapshot_type", None)
         if snapshot_type:
             payload["type"] = snapshot_type
@@ -80,7 +81,7 @@ class InventoryMeta:
         return payload
 
     @staticmethod
-    def from_payload(payload: dict) -> "InventoryMeta | None":
+    def from_payload(payload: dict) -> InventoryMeta | None:
         serial = payload.get("serial")
         timestamp = payload.get("captured_at")
         count = payload.get("package_count")
@@ -116,9 +117,9 @@ class InventoryMeta:
             duration_value = None
 
         scope_hashes_payload = payload.get("scope_hashes")
-        scope_hashes: Optional[Dict[str, str]] = None
+        scope_hashes: dict[str, str | None] = None
         if isinstance(scope_hashes_payload, dict):
-            filtered: Dict[str, str] = {}
+            filtered: dict[str, str] = {}
             for key, value in scope_hashes_payload.items():
                 if isinstance(key, str) and isinstance(value, str):
                     filtered[key] = value
@@ -150,7 +151,7 @@ class InventoryMeta:
             snapshot_id = None
 
         # Optional delta fields (may be absent on older snapshots)
-        def _coerce_int(value: object) -> Optional[int]:
+        def _coerce_int(value: object) -> int | None:
             if isinstance(value, (int, float)):
                 return int(value)
             if isinstance(value, str) and value.isdigit():
@@ -204,7 +205,7 @@ class InventoryMeta:
             delta_details=delta_details,
         )
 
-    def write_files(self, timestamp: str, *, suffix: Optional[str] = None) -> None:
+    def write_files(self, timestamp: str, *, suffix: str | None = None) -> None:
         base_dir = _state_root() / self.serial / "inventory"
         base_dir.mkdir(parents=True, exist_ok=True)
 
@@ -222,7 +223,7 @@ class InventoryMeta:
             history_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
-def load_latest(serial: str) -> Optional[InventoryMeta]:
+def load_latest(serial: str) -> InventoryMeta | None:
     base_dir = _state_root() / serial / "inventory"
     latest_path = base_dir / "latest.meta.json"
     if not latest_path.exists():
@@ -239,7 +240,7 @@ def load_latest(serial: str) -> Optional[InventoryMeta]:
     return InventoryMeta.from_payload(payload)
 
 
-def compute_name_hash(package_names: Iterable[str]) -> Optional[str]:
+def compute_name_hash(package_names: Iterable[str]) -> str | None:
     tokens = [name for name in package_names if isinstance(name, str) and name]
     if not tokens:
         return None
@@ -252,8 +253,8 @@ def compute_name_hash(package_names: Iterable[str]) -> Optional[str]:
 
 
 def compute_signature_hash(
-    signatures: Iterable[Tuple[str, Optional[str], Optional[str]]]
-) -> Optional[str]:
+    signatures: Iterable[tuple[str, str | None, str | None]]
+) -> str | None:
     tokens = [_signature_token(name, version_code, version_name) for name, version_code, version_name in signatures]
     filtered = [token for token in tokens if token]
     if not filtered:
@@ -266,7 +267,7 @@ def compute_signature_hash(
     return digest.hexdigest()
 
 
-def compute_scope_hash(packages: Sequence[Mapping[str, object]]) -> Optional[str]:
+def compute_scope_hash(packages: Sequence[Mapping[str, object]]) -> str | None:
     tokens = []
     for entry in packages:
         if not isinstance(entry, Mapping):
@@ -293,7 +294,7 @@ def compute_scope_hash(packages: Sequence[Mapping[str, object]]) -> Optional[str
     return digest.hexdigest()
 
 
-def update_scope_hash(serial: str, scope_id: str, scope_hash: Optional[str]) -> Optional[Dict[str, str]]:
+def update_scope_hash(serial: str, scope_id: str, scope_hash: str | None) -> dict[str, str | None]:
     base_dir = _state_root() / serial / "inventory"
     latest_path = base_dir / "latest.meta.json"
     if not latest_path.exists():
@@ -308,7 +309,7 @@ def update_scope_hash(serial: str, scope_id: str, scope_hash: Optional[str]) -> 
         return None
 
     existing = payload.get("scope_hashes")
-    scope_hashes: Dict[str, str] = {}
+    scope_hashes: dict[str, str] = {}
     if isinstance(existing, dict):
         for key, value in existing.items():
             if isinstance(key, str) and isinstance(value, str):
@@ -328,7 +329,7 @@ def update_scope_hash(serial: str, scope_id: str, scope_hash: Optional[str]) -> 
     return scope_hashes or None
 
 
-def snapshot_signatures(rows: Sequence[dict]) -> Iterator[Tuple[str, Optional[str], Optional[str]]]:
+def snapshot_signatures(rows: Sequence[dict]) -> Iterator[tuple[str, str | None, str | None]]:
     for row in rows:
         if not isinstance(row, dict):
             continue
@@ -345,9 +346,9 @@ def snapshot_signatures(rows: Sequence[dict]) -> Iterator[Tuple[str, Optional[st
 
 
 def _signature_token(
-    package_name: Optional[str],
-    version_code: Optional[str],
-    version_name: Optional[str],
+    package_name: str | None,
+    version_code: str | None,
+    version_name: str | None,
 ) -> str:
     if not package_name:
         return ""
@@ -362,7 +363,7 @@ def _signature_token(
     return f"{package_name}:{version_part}" if version_part else package_name
 
 
-def _stringify(value: Optional[object]) -> Optional[str]:
+def _stringify(value: object | None) -> str | None:
     if value is None:
         return None
     if isinstance(value, str):
@@ -370,12 +371,12 @@ def _stringify(value: Optional[object]) -> Optional[str]:
     return str(value)
 
 
-def _parse_timestamp(raw: Optional[str]) -> Optional[datetime]:
+def _parse_timestamp(raw: str | None) -> datetime | None:
     if not isinstance(raw, str):
         return None
 
     try:
-        return datetime.fromisoformat(raw.replace("Z", "+00:00")).astimezone(timezone.utc)
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).astimezone(UTC)
     except ValueError:
         return None
 

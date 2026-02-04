@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Iterable, List, Sequence, Tuple
 
 from scytaledroid.Database.db_core import database_session
 from scytaledroid.Database.db_core.db_engine import DatabaseEngine
@@ -53,11 +53,11 @@ HARVEST_TABLES: Sequence[str] = (
 
 @dataclass(slots=True)
 class ResetOutcome:
-    truncated: List[str]
-    cleared: List[str]
-    skipped_protected: List[str]
-    skipped_missing: List[str]
-    failed: List[tuple[str, str]]
+    truncated: list[str]
+    cleared: list[str]
+    skipped_protected: list[str]
+    skipped_missing: list[str]
+    failed: list[tuple[str, str]]
 
     def as_lines(self) -> Iterable[str]:
         if self.truncated:
@@ -84,13 +84,13 @@ def reset_static_analysis_data(
     if extra_exclusions:
         exclusions.update(extra_exclusions)
 
-    candidate_tables: List[str] = list(STATIC_ANALYSIS_TABLES)
+    candidate_tables: list[str] = list(STATIC_ANALYSIS_TABLES)
     if include_harvest:
         candidate_tables.extend(HARVEST_TABLES)
 
     # Preserve original ordering while removing duplicates
     seen: set[str] = set()
-    ordered_candidates: List[str] = []
+    ordered_candidates: list[str] = []
     for table in candidate_tables:
         if table in seen:
             continue
@@ -100,13 +100,13 @@ def reset_static_analysis_data(
     protected = [table for table in ordered_candidates if table in exclusions]
     to_truncate = [table for table in ordered_candidates if table not in exclusions]
 
-    truncated: List[str] = []
-    cleared: List[str] = []
-    skipped_missing: List[str] = []
-    failed: List[tuple[str, str]] = []
+    truncated: list[str] = []
+    cleared: list[str] = []
+    skipped_missing: list[str] = []
+    failed: list[tuple[str, str]] = []
 
     with database_session(reuse_connection=False) as engine:
-        foreign_key_reset_error: Tuple[str, str] | None = None
+        foreign_key_reset_error: tuple[str, str] | None = None
         try:
             engine.execute("SET FOREIGN_KEY_CHECKS=0")
         except RuntimeError as exc:  # pragma: no cover - defensive

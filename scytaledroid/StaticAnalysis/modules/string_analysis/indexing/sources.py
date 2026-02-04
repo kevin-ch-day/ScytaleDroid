@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import hashlib
-import zipfile
 import os
 import re
-from typing import Iterable, Mapping
+import zipfile
+from collections.abc import Iterable, Mapping
 
 from scytaledroid.StaticAnalysis._androguard import APK, FileNotPresent
 

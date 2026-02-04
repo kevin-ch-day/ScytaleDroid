@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Sequence as SequenceABC
+from collections.abc import Iterable, Sequence
+from collections.abc import Sequence as SequenceABC
 from dataclasses import dataclass
-from typing import Sequence, Tuple
 
 from . import colors
 from .terminal import get_terminal_width, use_ascii_ui
@@ -113,8 +113,8 @@ def _coerce_items(items: Sequence[SummaryCardItem] | Iterable[SummaryCardItem | 
 
 def format_summary_card(
     title: str,
-    items: Sequence[SummaryCardItem | Tuple[str, object]]
-    | Iterable[SummaryCardItem | Tuple[str, object]],
+    items: Sequence[SummaryCardItem | tuple[str, object]]
+    | Iterable[SummaryCardItem | tuple[str, object]],
     *,
     subtitle: str | None = None,
     footer: str | None = None,
@@ -207,8 +207,8 @@ def format_summary_card(
 
 def print_summary_card(
     title: str,
-    items: Sequence[SummaryCardItem | Tuple[str, object]]
-    | Iterable[SummaryCardItem | Tuple[str, object]],
+    items: Sequence[SummaryCardItem | tuple[str, object]]
+    | Iterable[SummaryCardItem | tuple[str, object]],
     *,
     subtitle: str | None = None,
     footer: str | None = None,

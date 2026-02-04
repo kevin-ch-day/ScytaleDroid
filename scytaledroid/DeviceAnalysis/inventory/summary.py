@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import os
-from typing import Dict, List
-
-from scytaledroid.Utils.DisplayUtils import status_messages, table_utils, text_blocks
 from scytaledroid.ui import formatter
+from scytaledroid.Utils.DisplayUtils import table_utils, text_blocks
 
 
 def _format_duration(seconds: float | None) -> str:
@@ -37,11 +34,9 @@ def render_sync_summary_box(result) -> None:
     """Render the completion summary for a sync (plain text, forensic style)."""
     delta = getattr(result, "delta", None)
     first_snapshot = bool(getattr(result, "first_snapshot", False))
-    split_delta = result.stats.split_packages - (result.previous_split or 0)
     new_count = getattr(delta, "new_count", 0) if delta else 0
     removed_count = getattr(delta, "removed_count", 0) if delta else 0
     updated_count = getattr(delta, "updated_count", 0) if delta else 0
-    changed_total = getattr(delta, "changed_packages_count", 0) if delta else 0
     net_count_delta = result.stats.total_packages - (result.previous_total or 0)
 
     formatter.print_header("Inventory Sync · RUN SUMMARY")
@@ -103,14 +98,14 @@ def render_inventory_summary(result) -> None:
     total = len(rows)
     from collections import Counter
 
-    def _get_owner_role(entry: Dict[str, object]) -> str:
+    def _get_owner_role(entry: dict[str, object]) -> str:
         value = entry.get("owner_role")
         if value not in {None, ""}:
             return str(value)
         # Fall back to partition-derived label if owner_role is missing
         return _partition_label(entry)
 
-    def _partition_label(entry: Dict[str, object]) -> str:
+    def _partition_label(entry: dict[str, object]) -> str:
         primary_path = str(entry.get("primary_path") or "")
         if primary_path.startswith("/data/"):
             return "Data (/data)"

@@ -2,28 +2,25 @@
 
 from __future__ import annotations
 
-from time import perf_counter
-from pathlib import Path
-from typing import Mapping, Optional, Sequence
-
-import io
 import os
+import shutil
 import sys
 import tempfile
-import shlex
-import shutil
-import subprocess
-from contextlib import redirect_stderr, redirect_stdout
+from collections.abc import Mapping, Sequence
+from pathlib import Path
+from time import perf_counter
 
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis.harvest.common import compute_hashes
-from scytaledroid.Utils.LoggingUtils.logging_engine import configure_third_party_loggers
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
+from scytaledroid.Utils.LoggingUtils.logging_engine import configure_third_party_loggers
 
 from .._androguard import APK
 from ..engine import aapt2_fallback
-from .resource_fallback import open_apk_with_fallback, merge_metadata
-from .context import AnalysisConfig, DetectorContext
+from ..modules import build_string_index
+from ..modules.network_security import extract_network_security_policy
+from ..modules.permissions import load_permission_catalog
+from .context import AnalysisConfig
 from .context_builders import (
     build_detector_context,
     collect_dangerous_permissions,
@@ -47,9 +44,7 @@ from .models import (
     StaticAnalysisReport,
 )
 from .pipeline_artifacts import assemble_pipeline_artifacts
-from ..modules import build_string_index
-from ..modules.permissions import load_permission_catalog
-from ..modules.network_security import extract_network_security_policy
+from .resource_fallback import merge_metadata, open_apk_with_fallback
 
 # -----------------------
 # Small, focused helpers
@@ -90,7 +85,7 @@ def _safe_get_app_label(apk: APK, pkg_name: str, meta: dict) -> str:
     return pkg_name
 
 
-def _safe_get_main_activity(apk: APK, meta: dict) -> Optional[str]:
+def _safe_get_main_activity(apk: APK, meta: dict) -> str | None:
     try:
         result, _ = _run_with_fd_capture(apk.get_main_activity)
         return result
@@ -207,7 +202,7 @@ def make_detector_result(
     evidence: Sequence[EvidencePointer] | None = None,
     notes: Sequence[str] | None = None,
     subitems: Sequence[Mapping[str, object]] | None = None,
-    raw_debug: Optional[str] = None,
+    raw_debug: str | None = None,
 ) -> DetectorResult:
     """Build a deterministic :class:`DetectorResult` instance."""
     duration = max(0.0, round(perf_counter() - started_at, 1))
@@ -236,9 +231,9 @@ from .detector_runner import PIPELINE_STAGES, PipelineStage, run_detector_pipeli
 def analyze_apk(
     apk_path: Path,
     *,
-    metadata: Optional[Mapping[str, object]] = None,
-    storage_root: Optional[Path] = None,
-    config: Optional[AnalysisConfig] = None,
+    metadata: Mapping[str, object | None] = None,
+    storage_root: Path | None = None,
+    config: AnalysisConfig | None = None,
 ) -> StaticAnalysisReport:
     """Run resilient static analysis on *apk_path* and return a report."""
 

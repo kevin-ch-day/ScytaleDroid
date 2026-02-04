@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Mapping, MutableMapping
+from collections.abc import Mapping, MutableMapping
 
 from scytaledroid.Database.db_func.static_analysis import string_analysis as _sa
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .utils import require_canonical_schema
+
 _STRING_COUNT_KEYS: tuple[str, ...] = (
     "endpoints",
     "http_cleartext",

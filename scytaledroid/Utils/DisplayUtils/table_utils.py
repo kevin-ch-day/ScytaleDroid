@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Iterable, List, Sequence
+from collections.abc import Iterable, Sequence
 
 from . import colors, text_blocks
 from .terminal import get_terminal_width
@@ -66,7 +66,7 @@ def render_table(
     rows = list(rows)
     total_rows = len(rows)
     column_count = len(headers)
-    widths: List[int] = [max(1, text_blocks.visible_width(str(header))) for header in headers]
+    widths: list[int] = [max(1, text_blocks.visible_width(str(header))) for header in headers]
 
     if max_rows is not None and max_rows > 0:
         rows = rows[:max_rows]

@@ -7,9 +7,9 @@ from .catalog import (
     classify_permission,
     load_permission_catalog,
 )
-from .profile import PermissionAnalysis, build_permission_analysis
-from .permission_manifest_extract import collect_permissions_and_sdk
 from .permission_console_rendering import print_permissions_block
+from .permission_manifest_extract import collect_permissions_and_sdk
+from .profile import PermissionAnalysis, build_permission_analysis
 
 __all__ = [
     "PermissionCatalog",

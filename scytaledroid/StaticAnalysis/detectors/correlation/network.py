@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Mapping, Optional, Sequence
+from collections.abc import Mapping, Sequence
 
 from ...core.context import DetectorContext
 from ...modules.network_security.models import DomainPolicy, NetworkSecurityPolicy
@@ -53,13 +53,13 @@ def policy_from_payload(payload: Mapping[str, object]) -> NetworkSecurityPolicy:
 
 def network_snapshot_from_metrics(
     metrics: Mapping[str, object] | None,
-    policy: Optional[NetworkSecurityPolicy],
+    policy: NetworkSecurityPolicy | None,
 ) -> NetworkSnapshot:
     """Build a :class:`NetworkSnapshot` from detector metrics and NSC policy."""
 
     http_hosts: set[str] = set()
     https_hosts: set[str] = set()
-    policy_hash: Optional[str] = None
+    policy_hash: str | None = None
     if isinstance(metrics, Mapping):
         surface = metrics.get("surface")
         if isinstance(surface, Mapping):
@@ -203,7 +203,7 @@ def previous_network_snapshot(report) -> NetworkSnapshot:
     if isinstance(detector_metrics, Mapping):
         metrics_payload = detector_metrics.get("network_surface")
 
-    policy_payload: Optional[Mapping[str, object]] = None
+    policy_payload: Mapping[str, object | None] = None
     metadata = getattr(report, "metadata", {})
     if isinstance(metadata, Mapping):
         bundle = metadata.get("repro_bundle")

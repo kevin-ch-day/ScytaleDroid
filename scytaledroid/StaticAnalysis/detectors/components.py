@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from time import perf_counter
-from typing import Iterable, List, Mapping, Optional, Sequence
 from xml.etree import ElementTree
 
 from ..core.context import DetectorContext
@@ -18,8 +18,8 @@ from ..core.findings import (
     SeverityLevel,
 )
 from ..core.pipeline import make_detector_result
-from .base import BaseDetector, register_detector
 from ..modules.permissions import classify_permission, load_permission_catalog
+from .base import BaseDetector, register_detector
 
 _ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
 _COMPONENT_TAGS = {
@@ -38,10 +38,10 @@ class ComponentRecord:
     component_type: str
     name: str
     exported: bool
-    permission: Optional[str]
+    permission: str | None
     authorities: tuple[str, ...] = ()
     grant_uri_permissions: bool = False
-    process: Optional[str] = None
+    process: str | None = None
 
 
 def iter_manifest_components(
@@ -51,7 +51,7 @@ def iter_manifest_components(
     if application is None:
         return tuple()
 
-    records: List[ComponentRecord] = []
+    records: list[ComponentRecord] = []
 
     for element in application:
         tag = element.tag.rsplit("}", 1)[-1] if "}" in element.tag else element.tag
@@ -75,7 +75,7 @@ def iter_manifest_components(
             )
 
         permission = element.get(f"{_ANDROID_NS}permission")
-        authorities: List[str] = []
+        authorities: list[str] = []
         if tag == "provider":
             auth_value = element.get(f"{_ANDROID_NS}authorities") or ""
             for token in auth_value.split(","):
@@ -142,7 +142,7 @@ def _classify_component(
     *,
     protection_levels: Mapping[str, Sequence[str]],
     catalog,
-) -> Optional[Finding]:
+) -> Finding | None:
     if not component.exported:
         return None
 
@@ -341,8 +341,8 @@ class IpcExposureDetector(BaseDetector):
     def run(self, context: DetectorContext) -> DetectorResult:
         started = perf_counter()
         components = iter_manifest_components(context.manifest_root)
-        findings: List[Finding] = []
-        evidence: List[EvidencePointer] = []
+        findings: list[Finding] = []
+        evidence: list[EvidencePointer] = []
         protection_levels = getattr(context.permissions, "protection_levels", {})
         catalog = getattr(context, "permission_catalog", None) or load_permission_catalog()
 
@@ -392,7 +392,7 @@ class IpcExposureDetector(BaseDetector):
 
 def _build_metrics(
     components: Sequence[ComponentRecord],
-    shared_user_id: Optional[str],
+    shared_user_id: str | None,
     *,
     protection_levels: Mapping[str, Sequence[str]],
     catalog,

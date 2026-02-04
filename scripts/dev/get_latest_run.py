@@ -10,10 +10,10 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scytaledroid.Database.db_core import run_sql
-
 
 def main() -> int:
+    from scytaledroid.Database.db_core import run_sql
+
     row = run_sql(
         """
         SELECT sar.id,

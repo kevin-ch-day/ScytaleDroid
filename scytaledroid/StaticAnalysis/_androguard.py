@@ -6,9 +6,9 @@ import io
 import os
 import sys
 import tempfile
+from collections.abc import Mapping, Sequence
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
-from typing import Mapping, Sequence, Tuple
 
 try:  # pragma: no cover - prefer modern androguard layout
     from androguard.core.apk import APK, FileNotPresent
@@ -52,7 +52,7 @@ def _run_with_fd_capture(callable_obj):
     return result, raw.decode("utf-8", errors="replace")
 
 
-def open_apk_safely(apk_path: str | Path) -> tuple["APK", list[str]]:
+def open_apk_safely(apk_path: str | Path) -> tuple[APK, list[str]]:
     """Open APK while capturing resource parser warnings."""
     buffer = io.StringIO()
     with redirect_stdout(buffer), redirect_stderr(buffer):

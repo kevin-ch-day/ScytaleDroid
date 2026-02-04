@@ -12,8 +12,8 @@ import math
 import os
 import re
 import zlib
+from collections.abc import Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
-from typing import Iterable, Mapping, MutableMapping, Sequence
 from urllib.parse import urlsplit
 
 from .allowlist import NoisePolicy
@@ -31,20 +31,17 @@ from .constants import (
     GOOGLE_API_KEY_PATTERN,
     GRAPHQL_HINT,
     GRPC_HINT,
-    HOST_COMPONENT_PATTERN,
-    HOST_PATTERN,
     INTERNAL_HOST_SUFFIXES,
     JWT_PATTERN,
     REDIRECTOR_HOSTS,
     SCHEME_PREFIXES,
 )
+from .indexing import IndexedString, StringIndex, build_string_index
 from .parsing.host_normalizer import NormalizedHost, normalize_host
 from .parsing.punctuation import strip_wrap_punct
 from .parsing.url_tokenizer import Candidate, extract_candidates
 from .parsing.validators import is_private_ip
 from .policy.evaluator import evaluate as evaluate_policy
-from .indexing import IndexedString, StringIndex, build_string_index
-
 
 logger = logging.getLogger(__name__)
 

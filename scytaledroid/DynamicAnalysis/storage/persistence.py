@@ -2,21 +2,21 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import json
-from pathlib import Path
-from typing import Any, Dict, Iterable, Mapping
+from collections.abc import Iterable, Mapping
+from datetime import UTC, datetime
+from typing import Any
 
-from scytaledroid.Database.db_core import db_queries as core_q
-from scytaledroid.Utils.LoggingUtils import logging_engine
-from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_evidence_path
-from scytaledroid.Database.db_queries.dynamic import schema as dynamic_schema
-from scytaledroid.DynamicAnalysis.plans.loader import extract_plan_identity
-from scytaledroid.Utils.network_quality import evaluate_network_signal_quality
 from scytaledroid.Config import app_config
+from scytaledroid.Database.db_core import db_queries as core_q
+from scytaledroid.Database.db_queries.dynamic import schema as dynamic_schema
 from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
-from scytaledroid.Utils.version_utils import get_git_commit
 from scytaledroid.Database.db_utils.artifact_registry import record_artifacts
+from scytaledroid.DynamicAnalysis.plans.loader import extract_plan_identity
+from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_evidence_path
+from scytaledroid.Utils.LoggingUtils import logging_engine
+from scytaledroid.Utils.network_quality import evaluate_network_signal_quality
+from scytaledroid.Utils.version_utils import get_git_commit
 
 from ..core.session import DynamicSessionConfig, DynamicSessionResult
 
@@ -24,7 +24,7 @@ _LOGGER = logging_engine.get_dynamic_logger()
 
 
 def persist_dynamic_summary(
-    config: DynamicSessionConfig, result: DynamicSessionResult, payload: Dict[str, Any]
+    config: DynamicSessionConfig, result: DynamicSessionResult, payload: dict[str, Any]
 ) -> None:
     _require_dynamic_schema()
     dynamic_run_id = result.dynamic_run_id or payload.get("dynamic_run_id")
@@ -121,6 +121,7 @@ def persist_dynamic_summary(
         "schema_version": schema_version,
     }
 
+    payload["static_run_id"] = session_row.get("static_run_id")
     grade, reasons = _evaluate_grade(payload, pcap_meta)
     session_row["grade"] = grade
     session_row["grade_reasons_json"] = json.dumps(reasons) if reasons else None
@@ -153,7 +154,6 @@ def _insert_dynamic_session(row: Mapping[str, Any]) -> None:
 
 
 def _insert_dynamic_issues(rows: Iterable[Mapping[str, Any]]) -> None:
-    columns = ["dynamic_run_id", "issue_code", "details_json"]
     sql = """
         INSERT INTO dynamic_session_issues (dynamic_run_id, issue_code, details_json)
         VALUES (%s, %s, %s)
@@ -330,11 +330,39 @@ def _evaluate_grade(payload: Mapping[str, Any], pcap_meta: Mapping[str, Any]) ->
         except Exception:
             pass
 
+    manifest_artifacts: list[Mapping[str, Any]] = []
     evidence_path = payload.get("evidence_path")
+    manifest_path = None
     if evidence_path:
         manifest_path = resolve_evidence_path(evidence_path) / "run_manifest.json"
         if not manifest_path.exists():
             reasons.append({"code": "manifest_missing"})
+        else:
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except Exception:
+                manifest = {}
+            artifacts = []
+            artifacts.extend(manifest.get("artifacts") or [])
+            artifacts.extend(manifest.get("outputs") or [])
+            for observer in manifest.get("observers") or []:
+                artifacts.extend(observer.get("artifacts") or [])
+            manifest_artifacts = [a for a in artifacts if isinstance(a, Mapping)]
+
+    if manifest_artifacts:
+        required_types = {"system_log_capture"}
+        if payload.get("pcap_required"):
+            required_types.update({"pcapdroid_capture", "network_capture", "proxy_capture"})
+        if payload.get("static_run_id"):
+            required_types.add("dep_snapshot")
+        present_types = {str(a.get("type")) for a in manifest_artifacts if a.get("type")}
+        for required in sorted(required_types):
+            if required not in present_types:
+                reasons.append({"code": "required_artifact_missing", "artifact_type": required})
+        for artifact in manifest_artifacts:
+            artifact_type = artifact.get("type")
+            if artifact_type in required_types and not artifact.get("sha256"):
+                reasons.append({"code": "artifact_unhashed", "artifact_type": artifact_type})
 
     if payload.get("pcap_required"):
         if not pcap_meta.get("pcap_relpath"):
@@ -723,7 +751,7 @@ def _extract_pcap_meta(payload: Mapping[str, Any], evidence_path: str | None) ->
 
     pcap_validated_at = None
     if pcap_valid is not None:
-        pcap_validated_at = datetime.now(timezone.utc)
+        pcap_validated_at = datetime.now(UTC)
 
     return {
         "pcap_relpath": pcap_relpath,
@@ -737,7 +765,7 @@ def _extract_pcap_meta(payload: Mapping[str, Any], evidence_path: str | None) ->
 
 def _fmt_dt(value: object | None) -> str | None:
     if isinstance(value, datetime):
-        return value.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        return value.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S")
     if isinstance(value, str) and value:
         return value
     return None

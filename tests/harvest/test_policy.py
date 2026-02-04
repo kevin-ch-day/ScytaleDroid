@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from scytaledroid.DeviceAnalysis.harvest import planner, scope
+from scytaledroid.DeviceAnalysis.harvest import planner, rules, scope
 from scytaledroid.DeviceAnalysis.harvest.models import InventoryRow
-from scytaledroid.DeviceAnalysis.harvest import rules
 
 
 def _row(

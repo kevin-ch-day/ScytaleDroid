@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import json
 import math
-from typing import Any, Mapping, Optional, Sequence, Union
-
-from functools import lru_cache
+from collections.abc import Mapping, Sequence
+from functools import cache
+from typing import Any
 
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
@@ -68,18 +68,18 @@ def ensure_schema(*, raise_on_error: bool = False) -> bool:
 def create_run(
     *,
     package: str,
-    app_label: Optional[str],
-    version_code: Optional[int],
-    version_name: Optional[str],
-    target_sdk: Optional[int],
+    app_label: str | None,
+    version_code: int | None,
+    version_name: str | None,
+    target_sdk: int | None,
     schema_version: str = "v1",
-    prefs_hash: Optional[str] = None,
-    installer: Optional[str] = None,
-    confidence: Optional[str] = None,
-    session_stamp: Optional[str] = None,
+    prefs_hash: str | None = None,
+    installer: str | None = None,
+    confidence: str | None = None,
+    session_stamp: str | None = None,
     threat_profile: str = "Unknown",
     env_profile: str = "consumer",
-) -> Optional[int]:
+) -> int | None:
     try:
         ensure_schema(raise_on_error=True)
         run_id = core_q.run_sql(
@@ -119,10 +119,10 @@ def create_run(
 
 def write_metrics(
     run_id: int,
-    entries: Mapping[str, tuple[Optional[float], Optional[str]]],
-    module_id: Optional[str] = None,
+    entries: Mapping[str, tuple[float | None, str | None]],
+    module_id: str | None = None,
     *,
-    static_run_id: Optional[int] = None,
+    static_run_id: int | None = None,
 ) -> bool:
     has_static = _has_column("metrics", "static_run_id")
     try:
@@ -167,9 +167,9 @@ def write_metrics(
 
 def write_buckets(
     run_id: int,
-    buckets: Mapping[str, tuple[float, Optional[float]]],
+    buckets: Mapping[str, tuple[float, float | None]],
     *,
-    static_run_id: Optional[int] = None,
+    static_run_id: int | None = None,
 ) -> bool:
     has_static = _has_column("buckets", "static_run_id")
     try:
@@ -229,11 +229,11 @@ def write_correlations(run_id: int, rows: Sequence[tuple[str, float, str]]) -> b
         return False
 
 
-FindingRow = Union[
-    tuple[str, str, str, str, Union[str, Mapping[str, Any]]],
-    tuple[str, str, str, str, Union[str, Mapping[str, Any]], Optional[str]],
-    Mapping[str, Any],
-]
+FindingRow = (
+    tuple[str, str, str, str, str | Mapping[str, Any]]
+    | tuple[str, str, str, str, str | Mapping[str, Any], str | None]
+    | Mapping[str, Any]
+)
 
 
 def write_findings(run_id: int, rows: Sequence[FindingRow]) -> bool:
@@ -272,7 +272,7 @@ def write_findings(run_id: int, rows: Sequence[FindingRow]) -> bool:
         return False
 
 
-def _serialise_evidence(payload: Any) -> Optional[str]:
+def _serialise_evidence(payload: Any) -> str | None:
     if payload is None:
         return None
     if isinstance(payload, str):
@@ -310,11 +310,11 @@ __all__ = [
 ]
 
 
-@lru_cache(maxsize=None)
+@cache
 def _has_column(table: str, column: str) -> bool:
     try:
         row = core_q.run_sql(
-            "SHOW COLUMNS FROM {} LIKE %s".format(table),
+            f"SHOW COLUMNS FROM {table} LIKE %s",
             (column,),
             fetch="one",
         )

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, Iterable, List, Mapping, Optional, Sequence
 
 
 @dataclass
@@ -28,7 +28,7 @@ class InventorySnapshot:
     device_serial: str
     created_at: datetime
     mode_key: str
-    packages: List[PackageRecord]
+    packages: list[PackageRecord]
 
     def total_packages(self) -> int:
         return len(self.packages)
@@ -36,11 +36,11 @@ class InventorySnapshot:
     def split_apk_packages(self) -> int:
         return sum(1 for p in self.packages if p.is_split)
 
-    def user_scope_candidates(self) -> List[PackageRecord]:
+    def user_scope_candidates(self) -> list[PackageRecord]:
         return [p for p in self.packages if p.is_user_scope_candidate]
 
-    def by_field_counts(self, attr: str) -> Dict[str, int]:
-        counts: Dict[str, int] = {}
+    def by_field_counts(self, attr: str) -> dict[str, int]:
+        counts: dict[str, int] = {}
         for pkg in self.packages:
             key = getattr(pkg, attr, None) or "Unknown"
             counts[str(key)] = counts.get(str(key), 0) + 1
@@ -52,7 +52,7 @@ class InventoryDelta:
     """Delta between two snapshots."""
 
     current: InventorySnapshot
-    previous: Optional[InventorySnapshot]
+    previous: InventorySnapshot | None
     new_packages: Sequence[PackageRecord]
     removed_packages: Sequence[PackageRecord]
     updated_packages: Sequence[PackageRecord]
@@ -61,14 +61,14 @@ class InventoryDelta:
     def from_snapshots(
         cls,
         current: InventorySnapshot,
-        previous: Optional[InventorySnapshot],
+        previous: InventorySnapshot | None,
     ) -> InventoryDelta:
         prev_map = {p.package_name: p for p in (previous.packages if previous else [])}
         curr_map = {p.package_name: p for p in current.packages}
 
-        new: List[PackageRecord] = []
-        removed: List[PackageRecord] = []
-        updated: List[PackageRecord] = []
+        new: list[PackageRecord] = []
+        removed: list[PackageRecord] = []
+        updated: list[PackageRecord] = []
 
         for name, pkg in curr_map.items():
             prev = prev_map.get(name)
@@ -89,7 +89,7 @@ class InventoryDelta:
             updated_packages=updated,
         )
 
-    def summary_counts(self) -> Dict[str, int]:
+    def summary_counts(self) -> dict[str, int]:
         return {
             "new": len(self.new_packages),
             "removed": len(self.removed_packages),

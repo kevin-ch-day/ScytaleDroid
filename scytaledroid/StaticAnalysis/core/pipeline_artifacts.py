@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 from collections import Counter
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from hashlib import sha256
-from typing import Mapping, Sequence, TYPE_CHECKING
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 from ..analytics import build_finding_matrices, build_workload_profile
@@ -204,7 +205,7 @@ def build_pipeline_summary(results: Sequence[DetectorResult]) -> Mapping[str, ob
 
 
 def build_reproducibility_bundle(
-    context: "DetectorContext",
+    context: DetectorContext,
 ) -> Mapping[str, object]:
     """Construct a reproducibility bundle based on the detector context."""
 
@@ -257,7 +258,7 @@ def build_reproducibility_bundle(
     return bundle
 
 
-def build_diff_basis(context: "DetectorContext") -> Mapping[str, object]:
+def build_diff_basis(context: DetectorContext) -> Mapping[str, object]:
     """Generate a deterministic basis for report diffing."""
 
     basis: dict[str, object] = {
@@ -366,7 +367,7 @@ def build_diff_basis(context: "DetectorContext") -> Mapping[str, object]:
 
 
 def assemble_pipeline_artifacts(
-    context: "DetectorContext",
+    context: DetectorContext,
 ) -> PipelineArtifacts:
     """Derive reusable metadata from the pipeline results stored on *context*."""
 

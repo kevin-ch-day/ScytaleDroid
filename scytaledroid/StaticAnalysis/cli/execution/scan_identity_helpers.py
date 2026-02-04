@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence
 from hashlib import sha256
 from pathlib import Path
-from typing import Mapping, Optional, Sequence
 
 from scytaledroid.DeviceAnalysis.harvest.common import compute_hashes
 
@@ -166,7 +166,7 @@ def _dedupe_artifacts(artifacts: Sequence) -> list:
     return [item[0] for item in ordered]
 
 
-def _normalise_digest(sha: Optional[str], artifact) -> str:
+def _normalise_digest(sha: str | None, artifact) -> str:
     if isinstance(sha, str) and sha.strip():
         return sha.strip().lower()
     alt = None

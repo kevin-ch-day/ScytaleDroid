@@ -2,40 +2,37 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Dict, List, Optional, Sequence, Tuple
+from collections.abc import Sequence
+from datetime import datetime
 
-from scytaledroid.DeviceAnalysis import adb_devices, adb_packages
-from scytaledroid.DeviceAnalysis.services import device_service
+from scytaledroid.DeviceAnalysis import adb_devices, adb_packages, inventory_meta
 from scytaledroid.DeviceAnalysis import inventory as inventory_module
-from scytaledroid.DeviceAnalysis import inventory_meta
 
-from ..constants import INVENTORY_STALE_SECONDS
-from ..utils import coerce_float, coerce_int, humanize_seconds
-from .normalizers import normalize_scope_entries
+from ..utils import coerce_float, coerce_int
 from .delta import build_package_delta_summary
+from .normalizers import normalize_scope_entries
 
 
 def get_latest_inventory_metadata(
-    serial: Optional[str],
+    serial: str | None,
     *,
     with_current_state: bool = False,
-    scope_packages: Optional[Sequence[object]] = None,
+    scope_packages: Sequence[object | None] = None,
     scope_id: str = "last_scope",
-) -> Optional[Dict[str, object]]:
+) -> dict[str, object | None]:
     if not serial:
         return None
 
     snapshot_meta = inventory_meta.load_latest(serial)
-    snapshot_payload: Optional[Dict[str, object]] = None
-    snapshot_packages: Optional[List[Dict[str, object]]] = None
+    snapshot_payload: dict[str, object | None] = None
+    snapshot_packages: list[dict[str, object | None]] = None
 
-    package_count: Optional[int]
-    scope_hashes: Optional[Dict[str, str]] = None
-    snapshot_type: Optional[str] = None
-    snapshot_scope_hash: Optional[str] = None
-    snapshot_scope_size: Optional[int] = None
-    snapshot_id: Optional[int] = None
+    package_count: int | None
+    scope_hashes: dict[str, str | None] = None
+    snapshot_type: str | None = None
+    snapshot_scope_hash: str | None = None
+    snapshot_scope_size: int | None = None
+    snapshot_id: int | None = None
     if snapshot_meta:
         timestamp = snapshot_meta.captured_at
         package_count = snapshot_meta.package_count
@@ -90,7 +87,7 @@ def get_latest_inventory_metadata(
             else None
         )
 
-        packages_list: Optional[List[Dict[str, object]]] = None
+        packages_list: list[dict[str, object | None]] = None
         if snapshot_payload:
             packages_candidate = snapshot_payload.get("packages")
             if isinstance(packages_candidate, list):
@@ -131,7 +128,7 @@ def get_latest_inventory_metadata(
         elif isinstance(scope_size_value, str) and scope_size_value.isdigit():
             snapshot_scope_size = int(scope_size_value)
 
-    metadata: Dict[str, object] = {"timestamp": timestamp}
+    metadata: dict[str, object] = {"timestamp": timestamp}
     if snapshot_id is not None:
         metadata["snapshot_id"] = snapshot_id
     if package_count is not None:
@@ -169,14 +166,14 @@ def get_latest_inventory_metadata(
 
     normalized_scope = normalize_scope_entries(scope_packages) if scope_packages else []
     resolved_scope_id = scope_id
-    expected_scope_hash: Optional[str] = None
+    expected_scope_hash: str | None = None
 
     if normalized_scope:
         expected_scope_hash = inventory_meta.compute_scope_hash(normalized_scope)
         if expected_scope_hash and scope_id == "last_scope":
             resolved_scope_id = f"scope:{expected_scope_hash[:12]}"
 
-    previous_scope_hash: Optional[str] = None
+    previous_scope_hash: str | None = None
     scope_hash_changed = False
     subset_scope_match = False
     if normalized_scope:
@@ -287,7 +284,7 @@ def get_latest_inventory_metadata(
     current_scope_hash = None
     if normalized_scope and expected_scope_hash:
         scope_names = {entry["package_name"] for entry in normalized_scope}
-        filtered_scope: List[Dict[str, object]] = []
+        filtered_scope: list[dict[str, object]] = []
         for name, version_code, _ in current_signatures:
             if name in scope_names:
                 filtered_scope.append(

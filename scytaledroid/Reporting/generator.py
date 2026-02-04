@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import re
+from collections.abc import Iterable, Mapping, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Iterable, Mapping, Optional, Sequence
 
 from scytaledroid.Config import app_config
 from scytaledroid.StaticAnalysis.core import (
@@ -14,15 +14,14 @@ from scytaledroid.StaticAnalysis.core import (
     StaticAnalysisReport,
 )
 
-
 _SLUG_PATTERN = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 def export_static_analysis_markdown(
     report: StaticAnalysisReport,
     *,
-    source_path: Optional[Path] = None,
-    output_root: Optional[Path] = None,
+    source_path: Path | None = None,
+    output_root: Path | None = None,
 ) -> Path:
     """Render *report* to a markdown file and return the created path."""
 
@@ -38,7 +37,7 @@ def export_static_analysis_markdown(
     destination = root / slug
     destination.mkdir(parents=True, exist_ok=True)
 
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     path = destination / f"static_analysis_{timestamp}.md"
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
@@ -47,9 +46,9 @@ def export_static_analysis_markdown(
 def _build_static_markdown(
     report: StaticAnalysisReport,
     *,
-    source_path: Optional[Path] = None,
+    source_path: Path | None = None,
 ) -> list[str]:
-    now_label = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now_label = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     metadata = report.metadata or {}
     manifest = report.manifest
@@ -274,7 +273,7 @@ def _markdown_table(headers: Sequence[str], rows: Iterable[Sequence[str]]) -> li
     return table_lines
 
 
-def _bullet_list(items: Sequence[str], *, limit: Optional[int] = None) -> list[str]:
+def _bullet_list(items: Sequence[str], *, limit: int | None = None) -> list[str]:
     entries = [item for item in items if item]
     if limit is not None:
         shown = entries[:limit]
@@ -286,7 +285,7 @@ def _bullet_list(items: Sequence[str], *, limit: Optional[int] = None) -> list[s
     return lines or ["- None"]
 
 
-def _format_flag(value: Optional[bool]) -> str:
+def _format_flag(value: bool | None) -> str:
     if value is True:
         return "Yes"
     if value is False:

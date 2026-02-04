@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Optional
 
 from scytaledroid.DeviceAnalysis import adb_cache, adb_client
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
@@ -15,7 +14,7 @@ def get_package_paths(
     refresh: bool = False,
     *,
     allow_fallbacks: bool = False,
-) -> List[str]:
+) -> list[str]:
     """Return canonical APK paths for a package using ``pm path``."""
     cache_key = (serial, package_name)
     if not refresh:
@@ -23,7 +22,7 @@ def get_package_paths(
         if cached is not None:
             return cached
 
-    paths: List[str] = []
+    paths: list[str] = []
     completed = adb_client.run_shell_command(serial, ["pm", "path", package_name], timeout=15)
     if completed.returncode == 0:
         for line in completed.stdout.splitlines():
@@ -78,7 +77,7 @@ def get_package_metadata(
     serial: str,
     package_name: str,
     refresh: bool = False,
-) -> Dict[str, Optional[str]]:
+) -> dict[str, str | None]:
     """Return metadata for a package via ``pm dump`` (cached)."""
     cache_key = (serial, package_name)
     if not refresh:
@@ -94,7 +93,7 @@ def get_package_metadata(
     if completed.returncode != 0:
         return {}
 
-    metadata: Dict[str, Optional[str]] = {"package_name": package_name}
+    metadata: dict[str, str | None] = {"package_name": package_name}
     version_code_pattern = re.compile(r"versionCode=(\d+)")
     version_name_pattern = re.compile(r"versionName=([^\s]+)")
 

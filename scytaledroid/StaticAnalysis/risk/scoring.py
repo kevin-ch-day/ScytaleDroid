@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, MutableSequence, Sequence
 from dataclasses import dataclass
-from typing import Mapping, MutableSequence, Sequence
 
 from scytaledroid.StaticAnalysis.core.findings import SeverityLevel
 from scytaledroid.StaticAnalysis.core.models import StaticAnalysisReport
@@ -179,4 +179,3 @@ __all__ = [
     "RiskFactor",
     "compute_risk_assessment",
 ]
-

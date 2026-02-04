@@ -5,7 +5,7 @@ Helpers for building structured bucket summaries for reporting."""
 from __future__ import annotations
 
 from collections import Counter
-from typing import Mapping, Sequence
+from collections.abc import Mapping, Sequence
 
 from .hit_record import StringHit
 

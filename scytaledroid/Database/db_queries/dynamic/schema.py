@@ -6,7 +6,6 @@ import re
 
 from ...db_core import db_queries as core_q
 
-
 _DDL_STATEMENTS: list[str] = [
     """
     CREATE TABLE IF NOT EXISTS dynamic_sessions (

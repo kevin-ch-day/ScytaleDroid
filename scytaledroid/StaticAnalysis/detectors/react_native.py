@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from collections.abc import Iterable, Sequence
 from time import perf_counter
-from typing import Iterable, Sequence
 
 from ..core.context import DetectorContext
-from ..core.findings import Badge, DetectorResult, EvidencePointer, Finding, MasvsCategory, SeverityLevel
+from ..core.findings import (
+    Badge,
+    DetectorResult,
+    EvidencePointer,
+    Finding,
+    MasvsCategory,
+    SeverityLevel,
+)
 from ..core.pipeline import make_detector_result
 from .base import BaseDetector, register_detector
-
 
 _RN_LIB_MARKERS = (
     "libhermes.so",

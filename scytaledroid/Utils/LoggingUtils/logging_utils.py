@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping, MutableMapping
 from datetime import datetime
-from typing import Mapping, MutableMapping, Optional
 
 from . import logging_engine
 
 
-def _coerce_extra(extra: Optional[Mapping[str, object]]) -> MutableMapping[str, object]:
+def _coerce_extra(extra: Mapping[str, object] | None) -> MutableMapping[str, object]:
     payload = logging_engine.ensure_trace(extra)
     return payload
 
@@ -23,21 +23,21 @@ def _get_logger(category: str) -> logging.Logger:
         return logging_engine.get_app_logger()
 
 
-def debug(message: str, category: str = "application", *, extra: Optional[Mapping[str, object]] = None) -> None:
+def debug(message: str, category: str = "application", *, extra: Mapping[str, object] | None = None) -> None:
     """Log a DEBUG message with optional structured context."""
 
     logger = _get_logger(category)
     logger.debug(message, extra=_coerce_extra(extra))
 
 
-def info(message: str, category: str = "application", *, extra: Optional[Mapping[str, object]] = None) -> None:
+def info(message: str, category: str = "application", *, extra: Mapping[str, object] | None = None) -> None:
     """Log an INFO message with optional structured context."""
 
     logger = _get_logger(category)
     logger.info(message, extra=_coerce_extra(extra))
 
 
-def warning(message: str, category: str = "application", *, extra: Optional[Mapping[str, object]] = None) -> None:
+def warning(message: str, category: str = "application", *, extra: Mapping[str, object] | None = None) -> None:
     """Log a WARNING message with optional structured context."""
 
     payload = _coerce_extra(extra)
@@ -51,7 +51,7 @@ def warning(message: str, category: str = "application", *, extra: Optional[Mapp
         err_logger.warning(f"[{category.upper()}] {message}", extra=err_payload)
 
 
-def error(message: str, category: str = "application", *, extra: Optional[Mapping[str, object]] = None) -> None:
+def error(message: str, category: str = "application", *, extra: Mapping[str, object] | None = None) -> None:
     """Log an ERROR message and also send it to error.log."""
 
     payload = _coerce_extra(extra)
@@ -65,7 +65,7 @@ def error(message: str, category: str = "application", *, extra: Optional[Mappin
         err_logger.error(f"[{category.upper()}] {message}", extra=err_payload)
 
 
-def critical(message: str, category: str = "application", *, extra: Optional[Mapping[str, object]] = None) -> None:
+def critical(message: str, category: str = "application", *, extra: Mapping[str, object] | None = None) -> None:
     """Log a CRITICAL message and also send it to error.log."""
 
     payload = _coerce_extra(extra)
@@ -88,8 +88,8 @@ def bind(category: str = "application", **context: object) -> logging_engine.Con
 def harvest_adapter(
     run_id: str,
     *,
-    started_at: Optional[datetime] = None,
-    context: Optional[Mapping[str, object]] = None,
+    started_at: datetime | None = None,
+    context: Mapping[str, object] | None = None,
 ) -> logging_engine.ContextAdapter:
     """Return a per-run harvest logger bound to ``run_id``."""
 

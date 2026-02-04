@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import fields
-from typing import Mapping, Optional, Type
 
 
-def subset(source: object, model: Type) -> dict[str, object]:
+def subset(source: object, model: type) -> dict[str, object]:
     """Return mapping of dataclass field names in *model* from *source*."""
 
     if not isinstance(source, Mapping):
@@ -20,7 +20,7 @@ def subset(source: object, model: Type) -> dict[str, object]:
     return {name: source.get(name) for name in names}
 
 
-def coerce_bool(value: Optional[str]) -> Optional[bool]:
+def coerce_bool(value: str | None) -> bool | None:
     """Best-effort conversion of string values to booleans."""
 
     if value is None:
@@ -34,7 +34,7 @@ def coerce_bool(value: Optional[str]) -> Optional[bool]:
     return None
 
 
-def coerce_optional_str(value: object) -> Optional[str]:
+def coerce_optional_str(value: object) -> str | None:
     """Return a trimmed string representation or ``None`` when empty."""
 
     if value is None:

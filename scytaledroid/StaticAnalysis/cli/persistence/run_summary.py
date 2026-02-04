@@ -2,27 +2,30 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
-from pathlib import Path
 from collections import Counter
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 
-from scytaledroid.Utils.LoggingUtils import logging_utils as log
-from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
-from scytaledroid.Utils.version_utils import get_git_commit
 from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_core.db_queries import run_sql_write
+from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
+from scytaledroid.Database.db_utils.artifact_registry import record_artifacts
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
+from scytaledroid.Utils.version_utils import get_git_commit
 
-from ..core.cvss_v4 import apply_profiles
 from ...core.findings import Badge, Finding
-from ..reports.evidence_report import normalize_evidence
-from ..core.masvs_mapper import summarise_controls, rule_to_area
+from ..core.cvss_v4 import apply_profiles
+from ..core.masvs_mapper import rule_to_area, summarise_controls
 from ..core.rule_ids import derive_rule_id
-from .metrics_writer import compute_metrics_bundle, write_buckets, write_contributors, write_metrics
+from ..reports.evidence_report import normalize_evidence
+from .dep_export import export_dep_json
 from .findings_writer import (
     compute_cvss_base,
     derive_masvs_tag,
@@ -30,19 +33,17 @@ from .findings_writer import (
     persist_findings,
     persist_masvs_controls,
 )
-from .run_envelope import prepare_run_envelope
-from .permission_risk import persist_permission_risk
+from .metrics_writer import compute_metrics_bundle, write_buckets, write_contributors, write_metrics
 from .permission_matrix import persist_permission_matrix
-from .dep_export import export_dep_json
+from .permission_risk import persist_permission_risk
+from .run_envelope import prepare_run_envelope
 from .static_sections import (
     coerce_severity_counts,
-    normalise_string_counts,
     persist_static_sections,
     persist_storage_surface_data,
 )
 from .utils import (
     canonical_severity_counts,
-    coerce_mapping,
     first_text,
     normalise_severity_token,
     require_canonical_schema,
@@ -95,11 +96,11 @@ def _correlation_rows_from_result(
     *,
     static_run_id: int,
     package_name: str,
-) -> list[Dict[str, object]]:
+) -> list[dict[str, object]]:
     findings = getattr(result, "findings", None)
     if not isinstance(findings, Sequence):
         return []
-    rows: list[Dict[str, object]] = []
+    rows: list[dict[str, object]] = []
     for finding in findings:
         if not isinstance(finding, Finding):
             continue
@@ -159,7 +160,7 @@ def _persist_static_sections_wrapper(
     app_metadata: Mapping[str, object] | object,
     run_id: int | None,
     static_run_id: int | None = None,
-) -> Tuple[list[str], bool, int]:
+) -> tuple[list[str], bool, int]:
     return persist_static_sections(
         package_name=package_name,
         session_stamp=session_stamp,
@@ -1088,9 +1089,9 @@ def persist_run_summary(
     severity_counter: Counter[str] = Counter()
     downgraded_high = 0
 
-    finding_rows: list[Dict[str, Any]] = []
-    control_entries: list[Tuple[str, Mapping[str, Any]]] = []
-    correlation_rows: list[Dict[str, object]] = []
+    finding_rows: list[dict[str, Any]] = []
+    control_entries: list[tuple[str, Mapping[str, Any]]] = []
+    correlation_rows: list[dict[str, object]] = []
     total_findings = 0
     rule_assigned = 0
     base_vector_count = 0
@@ -1171,7 +1172,7 @@ def persist_run_summary(
                 ) = apply_profiles(base_vector, envelope.threat_profile, envelope.env_profile)
                 if bte_vector:
                     bte_vector_count += 1
-                meta_combined: Dict[str, Any] = {}
+                meta_combined: dict[str, Any] = {}
                 if base_meta:
                     meta_combined.update(base_meta)
                 if profile_meta:
@@ -1412,8 +1413,110 @@ def persist_run_summary(
             abort_reason=abort_reason,
             abort_signal=abort_signal,
         )
+        _write_static_run_manifest(static_run_id)
 
     return outcome
+
+
+def _write_static_run_manifest(static_run_id: int) -> None:
+    try:
+        row = core_q.run_sql(
+            """
+            SELECT
+              sar.id,
+              sar.run_started_utc,
+              sar.ended_at_utc,
+              sar.profile_key,
+              sar.scenario_id,
+              sar.sha256,
+              sar.base_apk_sha256,
+              av.version_code,
+              av.version_name,
+              a.package_name,
+              a.display_name,
+              sar.tool_semver,
+              sar.tool_git_commit,
+              sar.schema_version
+            FROM static_analysis_runs sar
+            JOIN app_versions av ON av.id = sar.app_version_id
+            JOIN apps a ON a.id = av.app_id
+            WHERE sar.id=%s
+            """,
+            (static_run_id,),
+            fetch="one",
+        )
+    except Exception as exc:
+        log.warning(f"Failed to read static run for manifest: {exc}", category="static_analysis")
+        return
+    if not row:
+        return
+    (
+        run_id,
+        run_started_utc,
+        ended_at_utc,
+        profile_key,
+        scenario_id,
+        sha256,
+        base_apk_sha256,
+        version_code,
+        version_name,
+        package_name,
+        display_name,
+        tool_semver,
+        tool_git_commit,
+        schema_version,
+    ) = row
+
+    manifest = {
+        "run_manifest_version": 1,
+        "run_id": int(run_id) if run_id is not None else None,
+        "run_type": "static",
+        "package_name": package_name,
+        "display_name": display_name,
+        "profile_key": profile_key,
+        "scenario_id": scenario_id,
+        "version_code": version_code,
+        "version_name": version_name,
+        "apk_sha256": sha256,
+        "base_apk_sha256": base_apk_sha256,
+        "start_utc": run_started_utc,
+        "end_utc": ended_at_utc,
+        "tool_semver": tool_semver or app_config.APP_VERSION,
+        "tool_git_commit": tool_git_commit or get_git_commit(),
+        "schema_version": schema_version or (db_diagnostics.get_schema_version() or "<unknown>"),
+        "artifacts": [],
+    }
+
+    run_root = Path("evidence") / "static_runs" / str(static_run_id)
+    run_root.mkdir(parents=True, exist_ok=True)
+    dep_path = run_root / "dep.json"
+    if dep_path.exists():
+        manifest["artifacts"].append(
+            {
+                "path": str(dep_path),
+                "type": "dep_snapshot",
+                "sha256": hashlib.sha256(dep_path.read_bytes()).hexdigest(),
+                "size_bytes": dep_path.stat().st_size,
+                "created_at_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            }
+        )
+    manifest_path = run_root / "run_manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True))
+    record_artifacts(
+        run_id=str(static_run_id),
+        run_type="static",
+        artifacts=[
+            {
+                "path": str(manifest_path),
+                "type": "static_run_manifest",
+                "sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+                "size_bytes": manifest_path.stat().st_size,
+                "created_at_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            }
+        ],
+        origin="host",
+        pull_status="n/a",
+    )
 
 
 __all__ = [

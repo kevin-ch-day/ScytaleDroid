@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Dict, Iterable
 
 
 @dataclass(frozen=True)
@@ -16,7 +16,7 @@ class ClockProfile:
     locale_summary: str
 
 
-_PROFILE_BY_KEY: Dict[str, ClockProfile] = {
+_PROFILE_BY_KEY: dict[str, ClockProfile] = {
     "minneapolis, usa": ClockProfile(
         city="Minneapolis",
         country="United States",
@@ -62,7 +62,7 @@ _PROFILE_BY_KEY: Dict[str, ClockProfile] = {
 }
 
 
-_PREFIX_REGION: Dict[str, str] = {
+_PREFIX_REGION: dict[str, str] = {
     "africa": "Africa",
     "america": "North / South America",
     "antarctica": "Antarctica",

@@ -2,18 +2,16 @@
 
 from __future__ import annotations
 
-from collections import Counter
-from dataclasses import dataclass
 import os
+from collections import Counter
+from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
 
 from scytaledroid.Config import app_config
 from scytaledroid.Utils.DisplayUtils import status_messages, text_blocks
-from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.LoggingUtils import logging_engine
-from scytaledroid.Utils.LoggingUtils.logging_context import RunContext, get_run_logger
-from scytaledroid.Utils.LoggingUtils import logging_events as log_events
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .common import normalise_local_path
 from .models import (
@@ -25,7 +23,6 @@ from .models import (
     ScopeSelection,
 )
 from .views import render_harvest_summary_structured, render_scope_overview
-
 
 _EXCLUSION_LABELS = {
     "family_excluded": "Family excluded (com.android./com.motorola. not Play)",
@@ -101,7 +98,7 @@ class HarvestRunMetrics:
         plan: HarvestPlan,
         harvest_result: HarvestResult,
         results: Sequence[PullResult],
-    ) -> "HarvestRunMetrics":
+    ) -> HarvestRunMetrics:
         """Compute aggregate statistics from the executed harvest."""
 
         total_packages = len(plan.packages)
@@ -226,7 +223,7 @@ def render_plan_summary(
 def preview_plan(plan: HarvestPlan, *, limit: int = 10) -> None:
     """Display a short preview of package/artifact combinations."""
 
-    samples: List[str] = []
+    samples: list[str] = []
     for package in plan.packages:
         if package.skip_reason:
             continue
@@ -300,11 +297,11 @@ def render_harvest_summary(
     *,
     selection: ScopeSelection,
     pull_mode: str = "inventory",
-    serial: Optional[str] = None,
-    run_timestamp: Optional[str] = None,
-    guard_brief: Optional[str] = None,
-    run_id: Optional[str] = None,
-    harvest_logger: Optional[logging_engine.ContextAdapter] = None,
+    serial: str | None = None,
+    run_timestamp: str | None = None,
+    guard_brief: str | None = None,
+    run_id: str | None = None,
+    harvest_logger: logging_engine.ContextAdapter | None = None,
     log_summary: bool = True,
 ) -> None:
     """Render the end-of-run summary with diagnostics."""
@@ -491,8 +488,8 @@ def render_harvest_summary(
     # Emit policy.filter details for scope shrinking
     if plan.policy_filtered:
         try:
-            from scytaledroid.Utils.LoggingUtils.logging_context import RunContext, get_run_logger
             from scytaledroid.Utils.LoggingUtils import logging_events as log_events
+            from scytaledroid.Utils.LoggingUtils.logging_context import RunContext, get_run_logger
 
             run_ctx = RunContext(
                 subsystem="harvest",
@@ -574,11 +571,11 @@ def _build_summary_card_lines(
     *,
     selection_label: str,
     pull_mode: str,
-    metadata: Dict[str, object],
-    guard_brief: Optional[str],
+    metadata: dict[str, object],
+    guard_brief: str | None,
     metrics: HarvestRunMetrics,
     pull_errors: int,
-) -> List[str]:
+) -> list[str]:
     pull_label = {
         "quick": "Quick pull",
         "inventory": "Snapshot pull",
@@ -607,7 +604,7 @@ def _build_summary_card_lines(
     else:
         artifact_value = f"{metrics.artifacts_written} saved"
 
-    artifact_pairs: List[tuple[int, str]] = []
+    artifact_pairs: list[tuple[int, str]] = []
     if metrics.artifacts_failed:
         artifact_pairs.append((metrics.artifacts_failed, "failed"))
     if metrics.dedupe_skips:
@@ -678,8 +675,8 @@ def _build_summary_card_lines(
 
 def _harvest_highlights(
     metrics: HarvestRunMetrics, pull_errors: int
-) -> List[Tuple[str, str]]:
-    highlights: List[Tuple[str, str]] = []
+) -> list[tuple[str, str]]:
+    highlights: list[tuple[str, str]] = []
 
     if metrics.packages_successful:
         highlights.append(
@@ -820,7 +817,7 @@ def _print_scope_filtering(selection: ScopeSelection) -> None:
     print(status_messages.status(msg, level="info"))
 
 
-def _describe_reason(code: str, mapping: Dict[str, str]) -> str:
+def _describe_reason(code: str, mapping: dict[str, str]) -> str:
     return mapping.get(code, code)
 
 
@@ -830,7 +827,7 @@ def _compact_label(label: str) -> str:
     return label.split(" (", 1)[0]
 
 
-def _format_card_line(label: str, value: str, breakdown: Optional[Sequence[str]] = None) -> str:
+def _format_card_line(label: str, value: str, breakdown: Sequence[str | None] = None) -> str:
     line = f"{label:<8}: {value}"
     if breakdown:
         line = f"{line} ({' • '.join(breakdown)})"
@@ -846,8 +843,8 @@ def _format_breakdown_pairs(
     pairs: Sequence[tuple[int, str]],
     *,
     limit: int = 4,
-) -> List[str]:
-    formatted: List[str] = []
+) -> list[str]:
+    formatted: list[str] = []
     for count, label in sorted(pairs, key=lambda item: (-item[0], item[1])):
         if not count:
             continue
@@ -857,7 +854,7 @@ def _format_breakdown_pairs(
     return formatted
 
 
-def _format_policy_details(policy_counts: Dict[str, int]) -> str:
+def _format_policy_details(policy_counts: dict[str, int]) -> str:
     parts = []
     for reason, count in sorted(policy_counts.items()):
         label = _describe_reason(reason, _POLICY_LABELS)
@@ -886,9 +883,9 @@ def _build_harvest_result(
     results: Sequence[PullResult],
     selection: ScopeSelection,
     *,
-    serial: Optional[str],
-    run_timestamp: Optional[str],
-    guard_brief: Optional[str],
+    serial: str | None,
+    run_timestamp: str | None,
+    guard_brief: str | None,
 ) -> HarvestResult:
     metadata = selection.metadata or {}
     harvest_result = HarvestResult(
@@ -936,7 +933,7 @@ def _build_harvest_result(
     return harvest_result
 
 
-def _package_dest_dir(package: PackageHarvestResult) -> Optional[str]:
+def _package_dest_dir(package: PackageHarvestResult) -> str | None:
     for artifact in package.artifacts:
         if artifact.dest_path:
             dest = Path(artifact.dest_path)
@@ -944,7 +941,7 @@ def _package_dest_dir(package: PackageHarvestResult) -> Optional[str]:
     return None
 
 
-def _run_output_root(result: HarvestResult) -> Optional[str]:
+def _run_output_root(result: HarvestResult) -> str | None:
     if not (result.serial and result.run_timestamp):
         return None
     base = Path(app_config.DATA_DIR) / "device_apks" / result.serial / result.run_timestamp
@@ -953,8 +950,8 @@ def _run_output_root(result: HarvestResult) -> Optional[str]:
 
 def _packages_without_writes(
     harvest_result: HarvestResult,
-) -> List[tuple[PackageHarvestResult, Optional[str]]]:
-    packages: List[tuple[PackageHarvestResult, Optional[str]]] = []
+) -> list[tuple[PackageHarvestResult, str | None]]:
+    packages: list[tuple[PackageHarvestResult, str | None]] = []
     for package in harvest_result.packages:
         has_written = any(artifact.status == "written" for artifact in package.artifacts)
         if has_written:
@@ -1013,7 +1010,7 @@ def is_harvest_simple_mode() -> bool:
 
 
 
-def _print_no_new_summary(no_new: List[tuple[PackageHarvestResult, Optional[str]]]) -> None:
+def _print_no_new_summary(no_new: list[tuple[PackageHarvestResult, str | None]]) -> None:
     """
     Summarize packages with no new artifacts, grouped by skip reason, with small samples.
     """
@@ -1023,7 +1020,7 @@ def _print_no_new_summary(no_new: List[tuple[PackageHarvestResult, Optional[str]
     print(text_blocks.headline("No new artifacts", width=70))
 
     # Group by reason
-    grouped: Dict[str, List[str]] = {}
+    grouped: dict[str, list[str]] = {}
     for package, reason in no_new:
         key = reason or "Skipped"
         grouped.setdefault(key, []).append(package.display_name())
@@ -1040,7 +1037,7 @@ def _print_no_new_summary(no_new: List[tuple[PackageHarvestResult, Optional[str]
         )
 
 
-def _print_package_delta_summary(summary: Dict[str, object], *, limit: int = 10) -> None:
+def _print_package_delta_summary(summary: dict[str, object], *, limit: int = 10) -> None:
     updated = summary.get("updated") or []
     added = summary.get("added") or []
     removed = summary.get("removed") or []
@@ -1068,15 +1065,15 @@ def _print_package_delta_summary(summary: Dict[str, object], *, limit: int = 10)
 
 def _log_harvest_summary(
     harvest_result: HarvestResult,
-    no_new: List[tuple[PackageHarvestResult, Optional[str]]],
-    output_root: Optional[str],
-    metadata: Dict[str, object],
+    no_new: list[tuple[PackageHarvestResult, str | None]],
+    output_root: str | None,
+    metadata: dict[str, object],
     pull_mode: str,
     total_packages: int,
     files_written: int,
     *,
-    harvest_logger: Optional[logging_engine.ContextAdapter] = None,
-    run_id: Optional[str] = None,
+    harvest_logger: logging_engine.ContextAdapter | None = None,
+    run_id: str | None = None,
 ) -> None:
     payload = {
         "serial": harvest_result.serial,

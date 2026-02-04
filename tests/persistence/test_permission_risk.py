@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import types
-from typing import Mapping
+from collections.abc import Mapping
 
 import pytest
-
-from scytaledroid.StaticAnalysis.cli.persistence.permission_risk import persist_permission_risk
 from scytaledroid.StaticAnalysis.cli.persistence.metrics_writer import MetricsBundle
+from scytaledroid.StaticAnalysis.cli.persistence.permission_risk import persist_permission_risk
 
 
 class DummyReport:

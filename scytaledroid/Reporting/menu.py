@@ -6,6 +6,7 @@ from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_mes
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
 
 from .menu_actions import (
+    fetch_tier1_status,
     handle_dataset_readiness_dashboard,
     handle_device_report,
     handle_recent_static_runs,
@@ -13,7 +14,6 @@ from .menu_actions import (
     handle_tier1_audit_report,
     handle_tier1_export_pack,
     handle_tier1_qa_failures_report,
-    fetch_tier1_status,
     view_saved_reports,
 )
 

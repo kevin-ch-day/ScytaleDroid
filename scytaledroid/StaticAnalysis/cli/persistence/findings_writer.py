@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
+from typing import Any
 
 try:  # pragma: no cover - optional dependency
     import yaml
@@ -22,7 +23,7 @@ _CVSS_BASE_ORDER = ("AV", "AC", "AT", "PR", "UI", "VC", "VI", "VA", "SC", "SI", 
 _LOGGED_MISSING_CONFIG = False
 
 
-def extract_rule_hint(finding: Any) -> Optional[str]:
+def extract_rule_hint(finding: Any) -> str | None:
     for attr in ("rule_id_hint", "rule_id", "rule"):
         value = getattr(finding, attr, None)
         if isinstance(value, str) and value.strip():
@@ -35,14 +36,14 @@ def extract_rule_hint(finding: Any) -> Optional[str]:
     return None
 
 
-def _normalise_masvs_value(value: object) -> Optional[str]:
+def _normalise_masvs_value(value: object) -> str | None:
     if value is None:
         return None
     if isinstance(value, Mapping):
         value = value.get("value")
     if hasattr(value, "value"):
         try:
-            value = getattr(value, "value")
+            value = value.value
         except Exception:  # pragma: no cover - defensive
             return None
     text = str(value or "").strip()
@@ -55,7 +56,7 @@ def _normalise_masvs_value(value: object) -> Optional[str]:
     return parts[0].upper()
 
 
-def derive_masvs_tag(finding: Any, rule_id: Optional[str], *, lookup_rule_area) -> Optional[str]:
+def derive_masvs_tag(finding: Any, rule_id: str | None, *, lookup_rule_area) -> str | None:
     for attr in ("category_masvs", "masvs", "category", "masvs_category"):
         candidate = _normalise_masvs_value(getattr(finding, attr, None))
         if candidate:
@@ -68,7 +69,7 @@ def derive_masvs_tag(finding: Any, rule_id: Optional[str], *, lookup_rule_area) 
 
 
 @lru_cache(maxsize=1)
-def _load_cvss_v4_config() -> Optional[Dict[str, Any]]:
+def _load_cvss_v4_config() -> dict[str, Any | None]:
     global _LOGGED_MISSING_CONFIG
     path = Path("config/cvss_v4_map.yaml")
     if not path.exists() or yaml is None:
@@ -98,7 +99,7 @@ def _load_cvss_v4_config() -> Optional[Dict[str, Any]]:
             _LOGGED_MISSING_CONFIG = True
         return None
     defaults = data.get("defaults") or {}
-    rule_entries: Dict[str, Any] = {}
+    rule_entries: dict[str, Any] = {}
     for entry in data.get("rules", []):
         if not isinstance(entry, dict):
             continue
@@ -109,7 +110,7 @@ def _load_cvss_v4_config() -> Optional[Dict[str, Any]]:
     return {"defaults": defaults, "rules": rule_entries}
 
 
-def build_cvss_vector(metrics: Mapping[str, str]) -> Optional[str]:
+def build_cvss_vector(metrics: Mapping[str, str]) -> str | None:
     entries = []
     for key in _CVSS_BASE_ORDER:
         value = metrics.get(key)
@@ -120,7 +121,7 @@ def build_cvss_vector(metrics: Mapping[str, str]) -> Optional[str]:
     return "CVSS:4.0/" + "/".join(entries)
 
 
-_FALLBACK_RULE_CVSS: Dict[str, Dict[str, object]] = {
+_FALLBACK_RULE_CVSS: dict[str, dict[str, object]] = {
     "BASE-IPC-COMP-NO-ACL": {
         "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:L/VA:L/SC:N/SI:N/SA:N",
         "score": 8.0,
@@ -189,7 +190,7 @@ _FALLBACK_RULE_CVSS: Dict[str, Dict[str, object]] = {
 }
 
 
-def compute_cvss_base(rule_id: Optional[str]) -> Tuple[Optional[str], Optional[float], Dict[str, Any]]:
+def compute_cvss_base(rule_id: str | None) -> tuple[str | None, float | None, dict[str, Any]]:
     if not rule_id:
         return None, None, {}
     config = _load_cvss_v4_config()
@@ -215,7 +216,7 @@ def compute_cvss_base(rule_id: Optional[str]) -> Tuple[Optional[str], Optional[f
         score = float(fallback["score"])
     if vector and score is None:
         score = score_vector(vector)
-    meta: Dict[str, Any] = {
+    meta: dict[str, Any] = {
         "base": {
             "metrics": base_metrics,
             "rationale": rule_cfg.get("rationale") or (fallback and fallback.get("rationale")),
@@ -229,7 +230,7 @@ def compute_cvss_base(rule_id: Optional[str]) -> Tuple[Optional[str], Optional[f
     return vector, score, meta
 
 
-def persist_findings(run_id: int, rows: Sequence[Dict[str, Any]], *, static_run_id: int | None = None) -> bool:
+def persist_findings(run_id: int, rows: Sequence[dict[str, Any]], *, static_run_id: int | None = None) -> bool:
     """Persist normalized findings for a static run.
 
     Both run_id and static_run_id are written where supported so newer schemas

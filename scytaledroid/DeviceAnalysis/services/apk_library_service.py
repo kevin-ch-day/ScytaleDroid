@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Iterable, List, Optional, Sequence
 
 from scytaledroid.Config import app_config
 from scytaledroid.StaticAnalysis.core.repository import ArtifactGroup, group_artifacts
@@ -11,10 +11,10 @@ from scytaledroid.StaticAnalysis.core.repository import ArtifactGroup, group_art
 
 def list_groups(
     *,
-    base_dir: Optional[Path] = None,
-    device_filter: Optional[Sequence[str]] = None,
-    session_filter: Optional[Sequence[str]] = None,
-) -> List[ArtifactGroup]:
+    base_dir: Path | None = None,
+    device_filter: Sequence[str | None] = None,
+    session_filter: Sequence[str | None] = None,
+) -> list[ArtifactGroup]:
     """Return grouped APK artifacts with optional device/session filters."""
 
     resolved_dir = base_dir or Path(app_config.DATA_DIR) / "device_apks"
@@ -41,7 +41,7 @@ def list_groups(
     return list(group_artifacts(resolved_dir, predicate=_predicate))
 
 
-def list_sessions(groups: Iterable[ArtifactGroup]) -> List[str]:
+def list_sessions(groups: Iterable[ArtifactGroup]) -> list[str]:
     """Return unique session stamps from artifact groups."""
     sessions = []
     seen = set()

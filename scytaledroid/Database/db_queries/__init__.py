@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .dynamic import schema as dynamic_schema
 from .harvest import apk_repository, dynamic_loading, storage_surface
 from .permissions import (
     permission_dicts,
@@ -13,7 +14,6 @@ from .static_analysis import (
     static_permission_risk,
     string_analysis,
 )
-from .dynamic import schema as dynamic_schema
 
 __all__ = [
     "apk_repository",

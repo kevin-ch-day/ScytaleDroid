@@ -3,4 +3,3 @@
 
 class StaticAnalysisError(Exception):
     """Raised when an APK cannot be processed by the pipeline."""
-

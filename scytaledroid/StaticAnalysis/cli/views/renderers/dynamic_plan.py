@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 import json
+from collections.abc import Mapping, Sequence
+from datetime import datetime
 from pathlib import Path
-from typing import Mapping, Sequence
 
 from scytaledroid.Config import app_config
-from scytaledroid.Utils.evidence_store import filesystem_safe_slug
-
 from scytaledroid.StaticAnalysis.core import ManifestFlags, StaticAnalysisReport
+from scytaledroid.Utils.evidence_store import filesystem_safe_slug
 
 
 def _build_modernization_guidance(

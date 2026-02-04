@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 
 from ...core.context import DetectorContext
 from ...core.findings import Badge, EvidencePointer, Finding, MasvsCategory, SeverityLevel
@@ -41,7 +41,7 @@ def split_findings_and_metrics(
     current_sha = context.hashes.get("sha256")
     related_reports = _collect_related_reports(context, split_id, current_sha)
 
-    metrics: Dict[str, object] = {
+    metrics: dict[str, object] = {
         "group_id": split_id,
         "members": [str(metadata.get("artifact") or context.apk_path.name)],
     }
@@ -75,7 +75,7 @@ def split_findings_and_metrics(
 
     metrics["union_exported"] = {key: sorted(values) for key, values in component_union.items()}
 
-    extra_components: Dict[str, tuple[str, ...]] = {}
+    extra_components: dict[str, tuple[str, ...]] = {}
     for key, values in component_union.items():
         current_values = set(getattr(context.exported_components, key))
         extras = tuple(sorted(values - current_values))

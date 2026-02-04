@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 
-class HarvestPullMode(str, Enum):
+class HarvestPullMode(StrEnum):
     QUICK = "quick"
     FULL = "full"
     TEST = "test"
@@ -39,7 +39,7 @@ class HarvestModeConfig:
     mode: HarvestPullMode
 
     @classmethod
-    def from_menu_choice(cls, choice: str) -> "HarvestModeConfig":
+    def from_menu_choice(cls, choice: str) -> HarvestModeConfig:
         return {
             "1": cls(HarvestPullMode.QUICK),
             "2": cls(HarvestPullMode.FULL),

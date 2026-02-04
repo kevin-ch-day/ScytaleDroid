@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping, Sequence
 from time import perf_counter
-from typing import Mapping, Sequence
 
 from ..core.context import DetectorContext
 from ..core.findings import (

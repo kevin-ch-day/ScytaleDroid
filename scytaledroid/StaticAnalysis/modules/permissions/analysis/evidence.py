@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import hashlib
 from collections import defaultdict
+from collections.abc import Mapping, MutableMapping, Sequence
 from pathlib import Path
-from typing import Mapping, MutableMapping, Sequence
 from xml.etree import ElementTree
 
 from scytaledroid.StaticAnalysis.core.findings import EvidencePointer
@@ -88,4 +88,3 @@ __all__ = [
     "collect_evidence",
     "manifest_pointer",
 ]
-

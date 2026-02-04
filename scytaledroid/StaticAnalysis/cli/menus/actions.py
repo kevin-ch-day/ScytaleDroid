@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
-from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 from scytaledroid.StaticAnalysis.session import make_session_stamp
+from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 
 try:  # optional DB access (offline mode)
     from scytaledroid.Database.db_core import db_queries as core_q

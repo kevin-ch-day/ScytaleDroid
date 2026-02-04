@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import csv
 import json
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 from scytaledroid.Database.db_core import db_queries as core_q
-from scytaledroid.DynamicAnalysis.exports.feature_health import build_feature_health_report
 from scytaledroid.DynamicAnalysis.analysis.privacy_manifest import write_privacy_manifest
-
+from scytaledroid.DynamicAnalysis.exports.feature_health import build_feature_health_report
 
 DATASET_NAME = "ScytaleDroid-Dyn-v1"
 NETSTATS_MISSING_RATIO_MAX = 0.25
@@ -128,7 +128,7 @@ def export_run_telemetry_csv(
 
 
 def _fetch_manifest_rows() -> list[dict[str, Any]]:
-    sql = f"""
+    sql = """
         SELECT
           ds.dynamic_run_id,
           ds.package_name,

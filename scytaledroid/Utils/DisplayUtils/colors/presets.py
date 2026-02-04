@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from .models import Palette
 
-
 DEFAULT_PRESETS: dict[str, Palette] = {
     "aurora": Palette(
         text=("38;5;252",),

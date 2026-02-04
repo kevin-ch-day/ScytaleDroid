@@ -7,7 +7,6 @@ from scytaledroid.StaticAnalysis.modules.string_analysis.bucketing.classifier im
     classify,
 )
 from scytaledroid.StaticAnalysis.modules.string_analysis.parsing.host_normalizer import (
-    NormalizedHost,
     normalize_host,
 )
 from scytaledroid.StaticAnalysis.modules.string_analysis.parsing.punctuation import (

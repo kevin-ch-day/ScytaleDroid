@@ -2,12 +2,6 @@
 
 from __future__ import annotations
 
-from .scoring import (
-    RiskAssessment,
-    RiskConfig,
-    RiskFactor,
-    compute_risk_assessment,
-)
 from .permission import (
     ScoringParams,
     get_scoring_params,
@@ -15,6 +9,12 @@ from .permission import (
     permission_risk_grade,
     permission_risk_score,
     permission_risk_score_detail,
+)
+from .scoring import (
+    RiskAssessment,
+    RiskConfig,
+    RiskFactor,
+    compute_risk_assessment,
 )
 
 __all__ = [

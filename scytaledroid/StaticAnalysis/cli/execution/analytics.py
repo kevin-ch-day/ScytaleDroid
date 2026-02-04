@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from collections import Counter, defaultdict
 import statistics
-from typing import Dict, Mapping, Optional, Sequence
+from collections import Counter, defaultdict
+from collections.abc import Mapping, Sequence
 
 from scytaledroid.Database.db_core import db_queries as core_q
-from scytaledroid.Utils.DisplayUtils import colors, table_utils
 from scytaledroid.StaticAnalysis.modules.permissions.permission_console_rendering import (
     _classify_permissions as _perm_classify,
+)
+from scytaledroid.StaticAnalysis.modules.permissions.permission_console_rendering import (
     render_permission_matrix,
 )
 from scytaledroid.StaticAnalysis.modules.permissions.permission_protection_lookup import (
@@ -20,6 +21,7 @@ from scytaledroid.StaticAnalysis.risk.permission import (
     permission_risk_grade,
     permission_risk_score_detail,
 )
+from scytaledroid.Utils.DisplayUtils import colors, table_utils
 
 from ...core import StaticAnalysisReport
 from ..core.models import RunOutcome
@@ -74,7 +76,7 @@ def _derive_highlight_stats(outcome: RunOutcome) -> dict[str, int]:
     return stats
 
 
-def _build_permission_profile(report, app_result) -> Optional[dict[str, object]]:
+def _build_permission_profile(report, app_result) -> dict[str, object | None]:
     try:
         declared = list(report.permissions.declared or ())
     except Exception:
@@ -185,17 +187,17 @@ def _build_permission_profile(report, app_result) -> Optional[dict[str, object]]
 
 def _collect_masvs_profile(report) -> dict[str, object]:
     severity_map = {"P0": "High", "P1": "Medium", "P2": "Low", "NOTE": "Info"}
-    counts: Dict[str, Dict[str, int]] = {
+    counts: dict[str, dict[str, int]] = {
         area: {"High": 0, "Medium": 0, "Low": 0, "Info": 0} for area in ("NETWORK", "PLATFORM", "PRIVACY", "STORAGE")
     }
-    highlights: Dict[str, Counter[str]] = {area: Counter() for area in counts}
+    highlights: dict[str, Counter[str]] = {area: Counter() for area in counts}
     has_values = False
     for result in getattr(report, "detector_results", []) or []:
         for finding in getattr(result, "findings", []) or []:
             area_obj = getattr(finding, "category_masvs", None)
             area_value = None
             if hasattr(area_obj, "value"):
-                area_value = getattr(area_obj, "value")
+                area_value = area_obj.value
             elif area_obj is not None:
                 area_value = str(area_obj)
             if not area_value:
@@ -250,9 +252,9 @@ def _code_http_counts(string_data: Mapping[str, object]) -> tuple[int, int]:
 def _build_static_risk_row(
     report,
     string_data: Mapping[str, object],
-    permission_profile: Optional[dict],
+    permission_profile: dict | None,
     app_result,
-) -> Optional[dict[str, object]]:
+) -> dict[str, object | None]:
     try:
         total_exports = report.exported_components.total()
     except Exception:
@@ -381,7 +383,7 @@ def _compute_trend_delta(
     package_name: str,
     session_stamp: str | None,
     finding_totals: Counter[str],
-) -> Optional[dict[str, object]]:
+) -> dict[str, object | None]:
     if not session_stamp:
         return None
     try:

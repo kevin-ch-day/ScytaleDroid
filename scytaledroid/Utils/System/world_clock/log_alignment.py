@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
+import zoneinfo
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Iterable, List
-
-import zoneinfo
 
 from scytaledroid.Utils.DisplayUtils import (
     colors,
@@ -127,7 +126,7 @@ def _format_delta_minutes(minutes: int) -> str:
     sign = "+" if minutes > 0 else "-"
     minutes = abs(minutes)
     hours, remainder = divmod(minutes, 60)
-    parts: List[str] = []
+    parts: list[str] = []
     if hours:
         parts.append(f"{hours}h")
     if remainder:
@@ -154,7 +153,7 @@ def _render_alignment_table(
     )
     featured = featured_snapshots(reference)
 
-    snapshots: List[ClockSnapshot] = list(configured)
+    snapshots: list[ClockSnapshot] = list(configured)
     configured_labels = {snap.label for snap in configured}
     snapshots.extend(snap for snap in featured if snap.label not in configured_labels)
 
@@ -175,7 +174,7 @@ def _render_alignment_table(
         "DST",
     ]
 
-    rows: List[List[str]] = []
+    rows: list[list[str]] = []
 
     log_row = [
         colors.apply("Log source", colors.style("accent")) if use_color else "Log source",

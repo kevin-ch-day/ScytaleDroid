@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass
-from typing import Mapping, MutableMapping, Optional
 
 
 @dataclass(frozen=True)
@@ -12,11 +12,11 @@ class DomainPolicy:
 
     domains: tuple[str, ...]
     include_subdomains: bool
-    cleartext_permitted: Optional[bool]
+    cleartext_permitted: bool | None
     user_certificates_allowed: bool
     pinned_certificates: tuple[Mapping[str, object], ...] = ()
     trust_anchors: tuple[str, ...] = ()
-    source: Optional[str] = None
+    source: str | None = None
 
     def to_dict(self) -> MutableMapping[str, object]:
         payload: MutableMapping[str, object] = {
@@ -38,13 +38,13 @@ class DomainPolicy:
 class NetworkSecurityPolicy:
     """Resolved network security configuration information."""
 
-    source_path: Optional[str]
-    base_cleartext: Optional[bool]
-    debug_overrides_cleartext: Optional[bool]
+    source_path: str | None
+    base_cleartext: bool | None
+    debug_overrides_cleartext: bool | None
     trust_user_certificates: bool
     base_trust_anchors: tuple[str, ...] = ()
     domain_policies: tuple[DomainPolicy, ...] = ()
-    raw_xml_hash: Optional[str] = None
+    raw_xml_hash: str | None = None
 
     def to_dict(self) -> MutableMapping[str, object]:
         payload: MutableMapping[str, object] = {
@@ -61,7 +61,7 @@ class NetworkSecurityPolicy:
         return payload
 
     @classmethod
-    def empty(cls) -> "NetworkSecurityPolicy":
+    def empty(cls) -> NetworkSecurityPolicy:
         return cls(
             source_path=None,
             base_cleartext=None,

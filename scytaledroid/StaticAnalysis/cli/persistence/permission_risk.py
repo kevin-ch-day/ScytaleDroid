@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Mapping, Optional
+from collections.abc import Mapping
 
 from scytaledroid.Database.db_core import db_queries as core_q
-from scytaledroid.Database.db_func.static_analysis import static_permission_risk as permission_risk_db
+from scytaledroid.Database.db_func.static_analysis import (
+    static_permission_risk as permission_risk_db,
+)
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
-from .utils import first_text, safe_int, require_canonical_schema
+from .utils import first_text, require_canonical_schema, safe_int
 
 _PERMISSION_TABLE_READY = False
 
@@ -92,7 +94,7 @@ def persist_permission_risk(
         log.debug(f"Skipping permission risk persistence for {package_name}: missing sha256", category="static_analysis")
         return
 
-    app_id: Optional[int] = None
+    app_id: int | None = None
     try:
         row = core_q.run_sql(
             "SELECT av.app_id FROM static_analysis_runs r JOIN app_versions av ON av.id = r.app_version_id WHERE r.id = %s",

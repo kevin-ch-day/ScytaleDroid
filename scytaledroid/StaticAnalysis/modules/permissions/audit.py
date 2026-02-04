@@ -8,20 +8,21 @@ before changing any weighting configuration.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-import os
-import traceback
-from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Sequence
-
 import json
 import math
+import os
+import traceback
+from collections.abc import Iterable, Mapping, MutableMapping, Sequence
+from dataclasses import dataclass, field
+from pathlib import Path
 from statistics import mean
+from typing import Any
 
-from scytaledroid.Utils.ops.operation_result import OperationResult
-from scytaledroid.Utils.LoggingUtils import logging_utils as log
-from scytaledroid.Utils.LoggingUtils import logging_engine
 from scytaledroid.Utils.evidence_store import filesystem_safe_slug
+from scytaledroid.Utils.LoggingUtils import logging_engine
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
+from scytaledroid.Utils.ops.operation_result import OperationResult
+
 from .signal_evidence import persist_signal_observations
 
 
@@ -53,7 +54,7 @@ class AppSignals:
     request_install: bool = False
     clipboard_bg: bool = False
 
-    def as_dict(self) -> Dict[str, bool]:
+    def as_dict(self) -> dict[str, bool]:
         return self.__dict__.copy()
 
 
@@ -116,7 +117,7 @@ def _percentile(sorted_values: Sequence[float], pct: float) -> float:
     return float(sorted_values[low] * (1 - weight) + sorted_values[high] * weight)
 
 
-def _percentile_summary(values: Sequence[float]) -> Dict[str, float]:
+def _percentile_summary(values: Sequence[float]) -> dict[str, float]:
     ordered = sorted(float(v) for v in values if v is not None)
     if not ordered:
         return {key: 0.0 for key in ("p10", "p25", "p50", "p75", "p90", "p95", "max")}
@@ -177,7 +178,7 @@ def _pearson(values_a: Sequence[float], values_b: Sequence[float]) -> float:
     return numerator / (denom_a * denom_b)
 
 
-def _rank(values: Sequence[float]) -> List[float]:
+def _rank(values: Sequence[float]) -> list[float]:
     pairs = sorted((value, index) for index, value in enumerate(values))
     ranks = [0.0] * len(values)
     i = 0
@@ -213,7 +214,7 @@ class _AppAccumulator:
     signals: SignalMapping
     declared_in: Mapping[str, str]
     declared_permissions: Sequence[str]
-    score_detail: Dict[str, Any]
+    score_detail: dict[str, Any]
     combos: Sequence[Mapping[str, Any]]
     contributions: Mapping[str, float]
 
@@ -227,20 +228,20 @@ class PermissionAuditAccumulator:
     total_groups: int
     snapshot_id: str
     base_output_dir: Path = Path("data/audit")
-    apps: List[_AppAccumulator] = field(default_factory=list)
+    apps: list[_AppAccumulator] = field(default_factory=list)
     cohort_counts: MutableMapping[str, int] = field(default_factory=dict)
-    permission_presence: MutableMapping[str, Dict[str, Any]] = field(default_factory=dict)
-    signal_presence: MutableMapping[str, Dict[str, Any]] = field(default_factory=dict)
-    combo_presence: MutableMapping[str, Dict[str, Any]] = field(default_factory=dict)
-    grade_counts: MutableMapping[str, Dict[str, int]] = field(default_factory=dict)
+    permission_presence: MutableMapping[str, dict[str, Any]] = field(default_factory=dict)
+    signal_presence: MutableMapping[str, dict[str, Any]] = field(default_factory=dict)
+    combo_presence: MutableMapping[str, dict[str, Any]] = field(default_factory=dict)
+    grade_counts: MutableMapping[str, dict[str, int]] = field(default_factory=dict)
     sdk_histogram: MutableMapping[str, int] = field(default_factory=dict)
     legacy_counters: MutableMapping[str, int] = field(default_factory=dict)
-    dangerous_counts: List[int] = field(default_factory=list)
-    signature_counts: List[int] = field(default_factory=list)
-    oem_counts: List[int] = field(default_factory=list)
-    score_raws: List[float] = field(default_factory=list)
-    score_cappeds: List[float] = field(default_factory=list)
-    feature_shares_by_cohort: MutableMapping[str, List[Mapping[str, float]]] = field(default_factory=dict)
+    dangerous_counts: list[int] = field(default_factory=list)
+    signature_counts: list[int] = field(default_factory=list)
+    oem_counts: list[int] = field(default_factory=list)
+    score_raws: list[float] = field(default_factory=list)
+    score_cappeds: list[float] = field(default_factory=list)
+    feature_shares_by_cohort: MutableMapping[str, list[Mapping[str, float]]] = field(default_factory=dict)
 
     def add_app(
         self,
@@ -253,7 +254,7 @@ class PermissionAuditAccumulator:
         groups: Mapping[str, int],
         declared_in: Mapping[str, str],
         declared_permissions: Sequence[str],
-        score_detail: Dict[str, Any],
+        score_detail: dict[str, Any],
         vendor_present: bool,
     ) -> None:
         """Register an app profile for audit output."""
@@ -383,7 +384,7 @@ class PermissionAuditAccumulator:
         cohort_shares = self.feature_shares_by_cohort.setdefault(cohort, [])
         cohort_shares.append(contributions)
 
-    def _evaluate_combos(self, groups: Mapping[str, int]) -> List[Dict[str, Any]]:
+    def _evaluate_combos(self, groups: Mapping[str, int]) -> list[dict[str, Any]]:
         combos = []
         for name, predicate in _combo_definitions().items():
             try:
@@ -394,7 +395,7 @@ class PermissionAuditAccumulator:
                 combos.append({"name": name, "bonus": 0.0})
         return combos
 
-    def _compute_component_shares(self, score_detail: Mapping[str, Any]) -> Dict[str, float]:
+    def _compute_component_shares(self, score_detail: Mapping[str, Any]) -> dict[str, float]:
         score = float(score_detail.get("score_capped") or score_detail.get("score_raw") or 0.0)
         if score <= 0:
             return {"signals": 0.0, "combos": 0.0, "surprises": 0.0, "legacy": 0.0, "oem": 0.0, "credit": 0.0}
@@ -411,7 +412,7 @@ class PermissionAuditAccumulator:
     # Finalisation and output
     # ------------------------------
 
-    def finalize(self) -> Dict[str, Any]:
+    def finalize(self) -> dict[str, Any]:
         apps_in_scope = len(self.apps)
         signal_expectations = self._compute_signal_expectations()
         for app in self.apps:
@@ -476,7 +477,7 @@ class PermissionAuditAccumulator:
     # Snapshot builders
     # ------------------------------
 
-    def _build_snapshot_payload(self, apps_in_scope: int) -> Dict[str, Any]:
+    def _build_snapshot_payload(self, apps_in_scope: int) -> dict[str, Any]:
         session_value = self.snapshot_id
         if isinstance(self.snapshot_id, str) and self.snapshot_id.startswith("perm-audit:app:"):
             session_value = self.snapshot_id[len("perm-audit:app:") :]
@@ -571,17 +572,17 @@ class PermissionAuditAccumulator:
         }
         return payload
 
-    def _signal_rarity(self, signals: List[Dict[str, Any]], apps_in_scope: int) -> Dict[str, float]:
+    def _signal_rarity(self, signals: list[dict[str, Any]], apps_in_scope: int) -> dict[str, float]:
         if not apps_in_scope or not signals:
             return {}
         sorted_signals = sorted(signals, key=lambda item: item.get("prevalence_pct", 0))
-        rarity: Dict[str, float] = {}
+        rarity: dict[str, float] = {}
         for index, item in enumerate(sorted_signals):
             rarity[item["name"]] = round(_safe_div(index, len(sorted_signals) - 1) * 100 if len(sorted_signals) > 1 else 0.0, 2)
         return rarity
 
-    def _compute_signal_expectations(self) -> Dict[str, Dict[str, Dict[str, float]]]:
-        expectations: Dict[str, Dict[str, Dict[str, float]]] = {}
+    def _compute_signal_expectations(self) -> dict[str, dict[str, dict[str, float]]]:
+        expectations: dict[str, dict[str, dict[str, float]]] = {}
         for cohort, total in self.cohort_counts.items():
             cohort_signals = {}
             for signal_name, stats in self.signal_presence.items():
@@ -590,9 +591,9 @@ class PermissionAuditAccumulator:
             expectations[cohort] = {"expected": cohort_signals}
         return expectations
 
-    def _cohort_outliers(self) -> List[Dict[str, Any]]:
-        outliers: List[Dict[str, Any]] = []
-        by_cohort: Dict[str, List[_AppAccumulator]] = {}
+    def _cohort_outliers(self) -> list[dict[str, Any]]:
+        outliers: list[dict[str, Any]] = []
+        by_cohort: dict[str, list[_AppAccumulator]] = {}
         for app in self.apps:
             by_cohort.setdefault(app.cohort, []).append(app)
         for cohort, members in by_cohort.items():
@@ -623,7 +624,7 @@ class PermissionAuditAccumulator:
         if not self.apps:
             destination.write_text("", encoding="utf-8")
             return
-        feature_vectors: Dict[str, List[float]] = {
+        feature_vectors: dict[str, list[float]] = {
             "score_capped": [float(app.score_detail.get("score_capped", 0.0)) for app in self.apps],
             "dangerous": [float(app.counts.get("dangerous", 0)) for app in self.apps],
             "signature": [float(app.counts.get("signature", 0)) for app in self.apps],
@@ -657,14 +658,14 @@ class PermissionAuditAccumulator:
     # Optional DB persistence
     # ------------------------------
 
-    def persist_to_db(self, snapshot_payload: Dict[str, Any]) -> OperationResult:
+    def persist_to_db(self, snapshot_payload: dict[str, Any]) -> OperationResult:
         """Persist snapshot + per-app audit data into DB.
 
         Returns an OperationResult containing the snapshot_id on success.
         """
         try:
-            from scytaledroid.Database.db_core import db_queries as core_q
             from scytaledroid.Database.db_core import database_session
+            from scytaledroid.Database.db_core import db_queries as core_q
 
             inventory = snapshot_payload.get("inventory", {}) if isinstance(snapshot_payload, dict) else {}
             apps_total = int(inventory.get("apps_in_scope") or self.total_groups or 0)

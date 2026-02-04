@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from scytaledroid.Database.db_func.harvest import apk_repository as repo
 from scytaledroid.Utils.DisplayUtils import status_messages
-from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.LoggingUtils import logging_engine
-from scytaledroid.Utils.LoggingUtils.logging_context import RunContext, get_run_logger
 from scytaledroid.Utils.LoggingUtils import logging_events as log_events
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
+from scytaledroid.Utils.LoggingUtils.logging_context import RunContext, get_run_logger
 
 from . import common
 from .common import (
@@ -42,12 +42,12 @@ def execute_harvest(
     *,
     verbose: bool = False,
     pull_mode: str = "inventory",
-    run_id: Optional[str] = None,
-    harvest_logger: Optional[logging_engine.ContextAdapter] = None,
-    scope_label: Optional[str] = None,
-    snapshot_id: Optional[int] = None,
-    snapshot_captured_at: Optional[str] = None,
-) -> List[PullResult]:
+    run_id: str | None = None,
+    harvest_logger: logging_engine.ContextAdapter | None = None,
+    scope_label: str | None = None,
+    snapshot_id: int | None = None,
+    snapshot_captured_at: str | None = None,
+) -> list[PullResult]:
     """Execute the provided harvest plan and return per-package results."""
 
     options = load_options(config, pull_mode=pull_mode)
@@ -55,7 +55,7 @@ def execute_harvest(
     tracker = DedupeTracker(options)
     resolved_serial = serial or dest_root.name
     run_identifier = run_id or f"{resolved_serial}-{session_stamp}"
-    base_context: Dict[str, object] = {
+    base_context: dict[str, object] = {
         "run_id": run_identifier,
         "device_serial": resolved_serial,
         "session_stamp": session_stamp,
@@ -102,8 +102,8 @@ def execute_harvest(
     def _emit(
         level: str,
         event: str,
-        extra: Optional[Mapping[str, object]] = None,
-        message: Optional[str] = None,
+        extra: Mapping[str, object | None] = None,
+        message: str | None = None,
     ) -> None:
         if log_adapter is None:
             return
@@ -117,7 +117,7 @@ def execute_harvest(
         log_method = getattr(log_adapter, level)
         log_method(record_message, extra=logging_engine.ensure_trace(payload))
 
-    stats: Dict[str, int] = {
+    stats: dict[str, int] = {
         "packages_total": len(plans),
         "packages_skipped": 0,
         "packages_clean": 0,
@@ -147,7 +147,7 @@ def execute_harvest(
         },
     )
 
-    storage_root_id: Optional[int]
+    storage_root_id: int | None
     if options.write_db:
         host_name, data_root = resolve_storage_root()
         try:
@@ -191,12 +191,12 @@ def execute_harvest(
     else:
         storage_root_id = None
 
-    results: List[PullResult] = []
+    results: list[PullResult] = []
     total = len(plans)
     display_total = sum(1 for plan in plans if not plan.skip_reason)
     display_index = 0
     run_failed = False
-    run_error: Optional[str] = None
+    run_error: str | None = None
 
     try:
         for index, plan in enumerate(plans, start=1):
@@ -289,17 +289,17 @@ def _execute_package_plan(
     verbose: bool,
     options: HarvestOptions,
     tracker: DedupeTracker,
-    storage_root_id: Optional[int],
+    storage_root_id: int | None,
     package_index: int,
     package_total: int,
     compact_mode: bool,
-    display_index: Optional[int],
+    display_index: int | None,
     display_total: int,
     base_context: Mapping[str, object],
-    emit: Callable[[str, str, Optional[Mapping[str, object]], Optional[str]], None],
-    stats: Dict[str, int],
-    snapshot_id: Optional[int],
-    snapshot_captured_at: Optional[str],
+    emit: Callable[[str, str, Mapping[str, object | None], str | None], None],
+    stats: dict[str, int],
+    snapshot_id: int | None,
+    snapshot_captured_at: str | None,
 ) -> PullResult:
     result = PullResult(plan=plan)
 
@@ -323,7 +323,7 @@ def _execute_package_plan(
     package_dir = dest_root / package_name
     package_dir.mkdir(parents=True, exist_ok=True)
 
-    app_id: Optional[int] = None
+    app_id: int | None = None
     if options.write_db:
         try:
             app_id = repo.ensure_app_definition(
@@ -349,7 +349,7 @@ def _execute_package_plan(
             result.skipped.append("app_definition_failed")
             return result
 
-    group_id: Optional[int] = None
+    group_id: int | None = None
     if options.write_db and len(plan.artifacts) > 1:
         try:
             group_id = repo.ensure_split_group(
@@ -455,22 +455,22 @@ def _pull_and_record(
     package_dir: Path,
     plan: PackagePlan,
     artifact: ArtifactPlan,
-    app_id: Optional[int],
-    group_id: Optional[int],
+    app_id: int | None,
+    group_id: int | None,
     verbose: bool,
     options: HarvestOptions,
     tracker: DedupeTracker,
     session_stamp: str,
-    storage_root_id: Optional[int],
+    storage_root_id: int | None,
     artifact_index: int,
     artifact_total: int,
     verbose_output: bool,
     base_context: Mapping[str, object],
-    emit: Callable[[str, str, Optional[Mapping[str, object]], Optional[str]], None],
-    stats: Dict[str, int],
-    snapshot_id: Optional[int],
-    snapshot_captured_at: Optional[str],
-) -> Tuple[ArtifactResult | ArtifactError | None, Optional[str]]:
+    emit: Callable[[str, str, Mapping[str, object | None], str | None], None],
+    stats: dict[str, int],
+    snapshot_id: int | None,
+    snapshot_captured_at: str | None,
+) -> tuple[ArtifactResult | ArtifactError | None, str | None]:
     dest_path = package_dir / artifact.file_name
     pull_result = adb_pull(
         adb_path=adb_path,
@@ -531,7 +531,7 @@ def _pull_and_record(
 
     local_rel_path = normalise_local_path(dest_path)
 
-    apk_id: Optional[int] = None
+    apk_id: int | None = None
     if options.write_db:
         record = repo.ApkRecord(
             package_name=plan.inventory.package_name,
@@ -755,7 +755,7 @@ def _progress_every() -> int:
         return 5
 
 
-def _update_package_outcome(stats: Dict[str, int], result: PullResult) -> None:
+def _update_package_outcome(stats: dict[str, int], result: PullResult) -> None:
     if result.skipped and not result.ok and not result.errors:
         return
     if result.errors and result.ok:

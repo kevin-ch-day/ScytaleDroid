@@ -7,11 +7,14 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Tuple
 
 from scytaledroid.Config import app_config
-from scytaledroid.StaticAnalysis.core.repository import RepositoryArtifact, ArtifactGroup, _load_metadata
-from scytaledroid.StaticAnalysis.cli.core.models import ScopeSelection, RunParameters
+from scytaledroid.StaticAnalysis.cli.core.models import RunParameters, ScopeSelection
+from scytaledroid.StaticAnalysis.core.repository import (
+    ArtifactGroup,
+    RepositoryArtifact,
+    _load_metadata,
+)
 from scytaledroid.StaticAnalysis.services import static_service
 from scytaledroid.StaticAnalysis.session import normalize_session_stamp
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
@@ -96,11 +99,11 @@ def main(argv: list[str] | None = None) -> int:
         normalized = normalize_session_stamp(params.session_stamp)
         if normalized != params.session_stamp:
             print(
-                (
+                
                     "⚠ Session label normalized for cross-table compatibility "
                     f"({len(params.session_stamp)}→{len(normalized)} chars): "
                     f"'{params.session_stamp}' → '{normalized}'."
-                )
+                
             )
             params = params.__class__(**{**params.__dict__, "session_stamp": normalized})
 

@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Dict, List, Optional, Union
+from datetime import UTC, datetime
 
 
-def prettify_model(value: Optional[str]) -> str:
+def prettify_model(value: str | None) -> str:
     if not value:
         return "Unknown"
     cleaned = (
@@ -18,7 +17,7 @@ def prettify_model(value: Optional[str]) -> str:
     return cleaned if cleaned else "Unknown"
 
 
-def prettify_manufacturer(value: Optional[str]) -> str:
+def prettify_manufacturer(value: str | None) -> str:
     if not value:
         return "Unknown"
     cleaned = " ".join(value.replace("_", " ").split())
@@ -26,7 +25,7 @@ def prettify_manufacturer(value: Optional[str]) -> str:
 
 
 def format_android_release(
-    properties: Dict[str, Optional[str]],
+    properties: dict[str, str | None],
     *,
     include_sdk: bool = False,
 ) -> str:
@@ -52,7 +51,7 @@ def format_android_release(
     return "Unknown"
 
 
-def format_battery(properties: Dict[str, Optional[str]]) -> str:
+def format_battery(properties: dict[str, str | None]) -> str:
     level = properties.get("battery_level")
     status = properties.get("battery_status")
     if level and status:
@@ -66,7 +65,7 @@ def format_battery(properties: Dict[str, Optional[str]]) -> str:
     return "Unknown"
 
 
-def format_wifi_state(value: Optional[str]) -> str:
+def format_wifi_state(value: str | None) -> str:
     if not value:
         return "Unknown"
     normalized = value.strip().lower()
@@ -77,7 +76,7 @@ def format_wifi_state(value: Optional[str]) -> str:
     return value
 
 
-def format_build_tags(value: Optional[str]) -> str:
+def format_build_tags(value: str | None) -> str:
     if not value:
         return "Unknown"
     spaced = value.replace(",", ", ")
@@ -86,7 +85,7 @@ def format_build_tags(value: Optional[str]) -> str:
     return spaced.strip()
 
 
-def format_emulator_flag(value: Optional[str]) -> str:
+def format_emulator_flag(value: str | None) -> str:
     if not value:
         return "No"
     lowered = value.strip().lower()
@@ -94,14 +93,14 @@ def format_emulator_flag(value: Optional[str]) -> str:
 
 
 def format_device_line(
-    device: Dict[str, Optional[str]],
+    device: dict[str, str | None],
     *,
     include_release: bool = False,
 ) -> str:
     model = prettify_model(device.get("model") or device.get("device"))
     serial = device.get("serial") or "Unknown"
     label = f"{model} ({serial})" if model != "Unknown" else serial
-    extras: List[str] = []
+    extras: list[str] = []
 
     device_type = device.get("device_type")
     if device_type:
@@ -136,20 +135,20 @@ __all__ = [
 ]
 
 
-def format_timestamp_utc(value: Union[datetime, float, int, None]) -> str:
+def format_timestamp_utc(value: datetime | float | int | None) -> str:
     """Return a consistent, human-readable UTC timestamp string."""
 
     if value is None:
         return "Unknown"
 
     if isinstance(value, (int, float)):
-        dt = datetime.fromtimestamp(value, tz=timezone.utc)
+        dt = datetime.fromtimestamp(value, tz=UTC)
     elif isinstance(value, datetime):
         dt = value
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
+            dt = dt.replace(tzinfo=UTC)
         else:
-            dt = dt.astimezone(timezone.utc)
+            dt = dt.astimezone(UTC)
     else:
         return "Unknown"
 

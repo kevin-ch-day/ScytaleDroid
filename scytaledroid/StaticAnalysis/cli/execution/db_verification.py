@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Mapping, MutableMapping, Optional, Sequence
+from collections.abc import Mapping, MutableMapping, Sequence
+
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_core.db_config import DB_CONFIG
 from scytaledroid.Database.db_scripts.static_run_audit import collect_static_run_counts
 from scytaledroid.Utils.DisplayUtils import status_messages, table_utils
 
 from ..reports.masvs_summary_report import fetch_db_masvs_summary
-
 from .results_formatters import _normalize_target_sdk
 from .static_run_map import extract_static_run_ids, load_run_map
 
@@ -186,7 +186,7 @@ def _render_persistence_footer(
     session_stamp: str,
     *,
     had_errors: bool = False,
-    canonical_failures: Optional[list[str]] = None,
+    canonical_failures: list[str | None] = None,
     run_status: str | None = None,
     abort_reason: str | None = None,
     abort_signal: str | None = None,
@@ -246,7 +246,7 @@ def _render_persistence_footer(
     )
     snapshot_id = int(snapshot_row[0]) if snapshot_row and snapshot_row[0] is not None else None
 
-    def _from_audit(table: str) -> Optional[int]:
+    def _from_audit(table: str) -> int | None:
         if table in audit_counts:
             value, status = audit_counts[table]
             if isinstance(status, str) and status.startswith("SKIP"):
@@ -384,7 +384,7 @@ def _render_persistence_footer(
     else:
         scope_note = "run_id=" + ",".join(str(r) for r in latest_run_ids) if latest_run_ids else "run_id=<none>"
         if latest_static_run_ids:
-            scope_note += f" static_run_id=" + ",".join(str(r) for r in latest_static_run_ids)
+            scope_note += " static_run_id=" + ",".join(str(r) for r in latest_static_run_ids)
     run_count = len(run_ids) if (audit and audit.is_group_scope) else len(latest_run_ids)
     lines = [
         ("run_scope", scope_note),

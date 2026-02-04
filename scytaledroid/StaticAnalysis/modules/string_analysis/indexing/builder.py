@@ -12,7 +12,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from scytaledroid.StaticAnalysis._androguard import APK
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
-from .models import IndexedString, StringIndex
+from .models import StringIndex
 from .sources import collect_file_strings
 
 _BOUNDS_WARNING_SEEN: set[str] = set()

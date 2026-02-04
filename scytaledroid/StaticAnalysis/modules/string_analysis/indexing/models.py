@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable, Collection, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, field
-from typing import Callable, Collection, Mapping, MutableMapping, Optional, Pattern, Sequence, Tuple
+from re import Pattern
 
 from .utils import ensure_pattern
 
@@ -27,7 +28,7 @@ class IndexedString:
     dex_id: int | None = None
     locale_qualifier: str | None = None
     synthetic: bool = False
-    derived_from: Tuple[str, ...] | None = None
+    derived_from: tuple[str, ...] | None = None
     sha256: str = field(init=False)
 
     def __post_init__(self) -> None:  # pragma: no cover - simple hashing
@@ -56,8 +57,8 @@ class IndexedString:
         *,
         byte_offset: int | None = None,
         context: str | None = None,
-        derived_from: Tuple[str, ...] | None = None,
-    ) -> "IndexedString":
+        derived_from: tuple[str, ...] | None = None,
+    ) -> IndexedString:
         """Return a new :class:`IndexedString` sharing provenance but a new value."""
 
         return IndexedString(
@@ -100,7 +101,7 @@ class StringIndex:
     def is_empty(self) -> bool:
         return not self.strings
 
-    def get_by_hash(self, sha256: str) -> Optional[IndexedString]:
+    def get_by_hash(self, sha256: str) -> IndexedString | None:
         return self._hash_lookup.get(sha256)
 
     def values(self) -> Sequence[str]:
@@ -144,7 +145,7 @@ class StringIndex:
         return dict(counts)
 
     @classmethod
-    def empty(cls) -> "StringIndex":
+    def empty(cls) -> StringIndex:
         return cls(strings=tuple())
 
 

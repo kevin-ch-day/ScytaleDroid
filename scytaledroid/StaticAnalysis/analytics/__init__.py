@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping, Tuple
+from collections.abc import Mapping
+from typing import Any
 
 __all__ = ["build_finding_matrices", "build_workload_profile"]
 
 
-def build_finding_matrices(*args: Any, **kwargs: Any) -> Tuple[Mapping[str, Mapping[str, Mapping[str, int]]], Mapping[str, float]]:
+def build_finding_matrices(*args: Any, **kwargs: Any) -> tuple[Mapping[str, Mapping[str, Mapping[str, int]]], Mapping[str, float]]:
     from .matrices import build_finding_matrices as _impl
 
     return _impl(*args, **kwargs)

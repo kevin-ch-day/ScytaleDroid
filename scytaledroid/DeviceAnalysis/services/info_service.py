@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Dict, Optional
-
 from scytaledroid.DeviceAnalysis import adb_devices, device_manager
 from scytaledroid.DeviceAnalysis.device_menu.formatters import (
     format_android_release,
@@ -16,7 +14,7 @@ from scytaledroid.DeviceAnalysis.device_menu.formatters import (
 )
 
 
-def fetch_device_info(active_details: Optional[Dict[str, Optional[str]]]) -> Dict[str, str]:
+def fetch_device_info(active_details: dict[str, str | None | None]) -> dict[str, str]:
     """Return a formatted info dict for the active device."""
     serial = active_details.get("serial") if active_details else device_manager.get_active_serial()
     if not serial:

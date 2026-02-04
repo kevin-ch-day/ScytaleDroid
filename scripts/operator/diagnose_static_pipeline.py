@@ -5,12 +5,10 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
 import mysql.connector
-
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 ENV_FILE = Path(os.environ.get("SCYTALEDROID_ENV_FILE", ROOT_DIR / ".env"))

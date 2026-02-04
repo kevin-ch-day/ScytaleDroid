@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import os
-from typing import Mapping, MutableMapping
+from collections.abc import Mapping, MutableMapping
 
-from scytaledroid.Utils.LoggingUtils import logging_utils as log
-from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Database.db_core import db_queries as core_q
+from scytaledroid.Utils.DisplayUtils import status_messages
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ...core import StaticAnalysisReport
 from ..core.models import RunParameters

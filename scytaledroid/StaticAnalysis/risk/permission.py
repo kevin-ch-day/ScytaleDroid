@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Optional
-import os
+from typing import Any
 
 try:  # Python 3.11+
     import tomllib as _toml

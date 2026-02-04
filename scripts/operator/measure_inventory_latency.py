@@ -19,12 +19,12 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from scytaledroid.DeviceAnalysis.services import inventory_service
-from scytaledroid.DeviceAnalysis import device_manager
-from scytaledroid.Utils.LoggingUtils import logging_utils as log
-
 
 def main() -> int:
+    from scytaledroid.DeviceAnalysis import device_manager
+    from scytaledroid.DeviceAnalysis.services import inventory_service
+    from scytaledroid.Utils.LoggingUtils import logging_utils as log
+
     parser = ArgumentParser(description="Measure inventory sync timing headlessly.")
     parser.add_argument(
         "--serial",

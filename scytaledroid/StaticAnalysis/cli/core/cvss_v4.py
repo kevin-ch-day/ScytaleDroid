@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from typing import Dict, Mapping, Optional
+from collections.abc import Mapping
 
 __all__ = [
     "parse_vector",
@@ -34,10 +34,10 @@ _IMPACT_WEIGHTS: Mapping[str, Mapping[str, float]] = {
 _EXPLOITABILITY_CONSTANT = 4.58
 
 
-def parse_vector(vector: Optional[str]) -> Dict[str, str]:
+def parse_vector(vector: str | None) -> dict[str, str]:
     if not vector or "CVSS:4.0/" not in vector:
         return {}
-    metrics: Dict[str, str] = {}
+    metrics: dict[str, str] = {}
     for segment in vector.split("/"):
         if ":" not in segment or segment.startswith("CVSS"):
             continue
@@ -57,7 +57,7 @@ def _round_up(score: float) -> float:
     return math.ceil(score * 10.0) / 10.0
 
 
-def score_vector(vector: Optional[str]) -> Optional[float]:
+def score_vector(vector: str | None) -> float | None:
     metrics = parse_vector(vector)
     if not metrics:
         return None
@@ -84,7 +84,7 @@ def score_vector(vector: Optional[str]) -> Optional[float]:
     return _round_up(total)
 
 
-def severity_band(score: Optional[float]) -> Optional[str]:
+def severity_band(score: float | None) -> str | None:
     """Return the CVSS 4.0 qualitative band for ``score``.
 
     The band mapping follows the CVSS v4.0 guidance:
@@ -109,7 +109,7 @@ def severity_band(score: Optional[float]) -> Optional[str]:
     return "None"
 
 
-def resolve_threat_code(threat_profile: Optional[str]) -> str:
+def resolve_threat_code(threat_profile: str | None) -> str:
     profile = (threat_profile or "Unknown").strip()
     return {
         "Unknown": "U",
@@ -122,7 +122,7 @@ def resolve_threat_code(threat_profile: Optional[str]) -> str:
     }.get(profile, "U")
 
 
-def resolve_env_metrics(env_profile: Optional[str]) -> Mapping[str, str]:
+def resolve_env_metrics(env_profile: str | None) -> Mapping[str, str]:
     profile = (env_profile or "consumer").strip().lower()
     mapping = {
         "consumer": {"CR": "M", "IR": "M", "AR": "M"},
@@ -132,10 +132,10 @@ def resolve_env_metrics(env_profile: Optional[str]) -> Mapping[str, str]:
 
 
 def apply_profiles(
-    base_vector: Optional[str],
-    threat_profile: Optional[str],
-    env_profile: Optional[str],
-) -> tuple[Optional[str], Optional[float], Optional[str], Optional[float], Optional[str], Optional[float], Dict[str, object]]:
+    base_vector: str | None,
+    threat_profile: str | None,
+    env_profile: str | None,
+) -> tuple[str | None, float | None, str | None, float | None, str | None, float | None, dict[str, object]]:
     if not base_vector:
         return None, None, None, None, None, None, {}
 

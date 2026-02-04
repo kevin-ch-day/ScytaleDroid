@@ -6,10 +6,10 @@ Text renderer for baseline static-analysis output.
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from textwrap import fill
-from typing import Mapping, MutableMapping, Optional, Sequence
 
 from scytaledroid.StaticAnalysis.analytics.masvs_quality import (
     compute_quality_metrics,
@@ -21,10 +21,14 @@ from scytaledroid.StaticAnalysis.modules.string_analysis import (
 )
 from scytaledroid.Utils.System import output_prefs
 
-from ...core import ManifestFlags, StaticAnalysisReport
+from ...core import StaticAnalysisReport
 from ..core.cvss_v4 import score_vector, severity_band
-from .renderers.dynamic_plan import _build_modernization_guidance
-from .renderers.dynamic_plan import build_dynamic_plan, write_baseline_json, write_dynamic_plan_json
+from .renderers.dynamic_plan import (
+    _build_modernization_guidance,
+    build_dynamic_plan,
+    write_baseline_json,
+    write_dynamic_plan_json,
+)
 from .renderers.exploratory import render_exploratory_summary
 from .renderers.permissions_payload import permission_payload
 from .renderers.permissions_renderer import render_declared_permissions
@@ -43,14 +47,14 @@ def _short_number(value: int) -> str:
     return str(n)
 
 
-def _extract_cvss_from_metrics(metrics: Mapping[str, object]) -> tuple[Optional[str], Optional[float]]:
+def _extract_cvss_from_metrics(metrics: Mapping[str, object]) -> tuple[str | None, float | None]:
     """Return (vector, score) pair extracted from a finding's metrics mapping."""
 
     if not isinstance(metrics, Mapping):
         return None, None
 
-    vector: Optional[str] = None
-    score: Optional[float] = None
+    vector: str | None = None
+    score: float | None = None
 
     vector_candidates = (
         metrics.get("cvss_v40_b_vector"),
@@ -975,6 +979,8 @@ def _string_lines(string_payload: Mapping[str, object]) -> list[str]:
         try:
             from scytaledroid.StaticAnalysis.modules.string_analysis.allowlist import (
                 DEFAULT_POLICY_ROOT as _POLICY_ROOT,
+            )
+            from scytaledroid.StaticAnalysis.modules.string_analysis.allowlist import (
                 load_noise_policy as _load_policy,
             )
 

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 
-def fetch_latest_run(run_sql) -> Optional[Dict[str, Any]]:
+def fetch_latest_run(run_sql) -> dict[str, Any] | None:
     try:
         return run_sql(
             "SELECT run_id, package, version_name, target_sdk, ts, session_stamp FROM runs ORDER BY run_id DESC LIMIT 1",
@@ -16,7 +16,7 @@ def fetch_latest_run(run_sql) -> Optional[Dict[str, Any]]:
         return None
 
 
-def fetch_latest_session(run_sql) -> Optional[Dict[str, Any]]:
+def fetch_latest_session(run_sql) -> dict[str, Any] | None:
     try:
         return run_sql(
             """

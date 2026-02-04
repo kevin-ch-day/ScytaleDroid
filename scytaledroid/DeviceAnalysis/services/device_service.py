@@ -6,25 +6,23 @@ can stay focused on rendering and prompting.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from scytaledroid.DeviceAnalysis import adb_devices, device_manager
-from scytaledroid.DeviceAnalysis.services.models import InventoryStatus
-from scytaledroid.DeviceAnalysis import inventory_meta
+from scytaledroid.DeviceAnalysis import adb_devices, device_manager, inventory_meta
 from scytaledroid.DeviceAnalysis.inventory import load_latest_inventory
 from scytaledroid.DeviceAnalysis.inventory import runner as inventory_runner
+from scytaledroid.DeviceAnalysis.services.models import InventoryStatus
 
 
 def scan_devices(
     *,
-    cache: Optional[Dict[str, Dict[str, Optional[str]]]] = None,
+    cache: dict[str, dict[str, str | None | None]] = None,
     refresh_threshold: int = 60,
-) -> Tuple[
-    List[Dict[str, Optional[str]]],
-    List[str],
-    List[Dict[str, Optional[str]]],
-    Dict[str, Dict[str, Optional[str]]],
+) -> tuple[
+    list[dict[str, str | None]],
+    list[str],
+    list[dict[str, str | None]],
+    dict[str, dict[str, str | None]],
 ]:
     """Return raw adb devices, warnings, enriched summaries, and a serial map."""
 
@@ -41,7 +39,7 @@ def scan_devices(
     return devices, warnings, summaries, serial_map
 
 
-def get_active_serial() -> Optional[str]:
+def get_active_serial() -> str | None:
     """Expose the active device serial."""
     return device_manager.get_active_serial()
 
@@ -56,7 +54,7 @@ def disconnect() -> None:
     device_manager.disconnect()
 
 
-def resolve_active_device(devices: List[Dict[str, Optional[str]]]) -> Optional[Dict[str, Optional[str]]]:
+def resolve_active_device(devices: list[dict[str, str | None]]) -> dict[str, str | None | None]:
     """Return the active device entry if it is still present; otherwise clear it."""
     serial = device_manager.get_active_serial()
     if not serial:
@@ -69,8 +67,8 @@ def resolve_active_device(devices: List[Dict[str, Optional[str]]]) -> Optional[D
 
 
 def _compute_inventory_status(
-    meta: Optional[dict],
-    snapshot_meta: Optional[inventory_meta.InventoryMeta],
+    meta: dict | None,
+    snapshot_meta: inventory_meta.InventoryMeta | None,
 ) -> InventoryStatus:
     """Compute a unified InventoryStatus from metadata or snapshot."""
     # Local import to avoid circular dependency when services are used headless.
@@ -97,14 +95,14 @@ def _compute_inventory_status(
         ts = snapshot_meta.captured_at
         pkg_count = snapshot_meta.package_count
 
-    age_seconds: Optional[int] = None
+    age_seconds: int | None = None
     if isinstance(ts, datetime):
         try:
             if ts.tzinfo is None:
-                ts_utc = ts.replace(tzinfo=timezone.utc)
+                ts_utc = ts.replace(tzinfo=UTC)
             else:
-                ts_utc = ts.astimezone(timezone.utc)
-            now_utc = datetime.now(timezone.utc)
+                ts_utc = ts.astimezone(UTC)
+            now_utc = datetime.now(UTC)
             age_seconds = max(0, int((now_utc - ts_utc).total_seconds()))
         except Exception:
             age_seconds = None
@@ -135,12 +133,12 @@ def _compute_inventory_status(
 
 
 def fetch_inventory_metadata(
-    serial: Optional[str],
+    serial: str | None,
     *,
     with_current_state: bool = False,
-    scope_packages: Optional[List[object]] = None,
+    scope_packages: list[object | None] = None,
     scope_id: str = "last_scope",
-) -> Optional[InventoryStatus]:
+) -> InventoryStatus | None:
     """Return the latest inventory metadata (and optional current-state diff) as InventoryStatus."""
     from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.metadata import (
         get_latest_inventory_metadata,
@@ -160,8 +158,8 @@ def fetch_inventory_metadata(
 def sync_inventory(
     serial: str,
     *,
-    filter_name: Optional[str] = None,
-    filter_fn: Optional[callable] = None,
+    filter_name: str | None = None,
+    filter_fn: callable | None = None,
 ) -> InventoryStatus:
     """
     Run an inventory sync for the given device serial and return updated status.
@@ -181,7 +179,7 @@ def sync_inventory(
     )
 
 
-def fetch_raw_inventory(serial: Optional[str]) -> Optional[dict]:
+def fetch_raw_inventory(serial: str | None) -> dict | None:
     """Return the latest inventory payload from disk."""
     if not serial:
         return None

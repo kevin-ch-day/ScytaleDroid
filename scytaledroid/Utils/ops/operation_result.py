@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass, field
-from typing import Mapping, MutableMapping, Optional
 
 
 @dataclass(slots=True)
@@ -21,8 +21,8 @@ class OperationResult:
         *,
         status: str = "OK",
         user_message: str = "",
-        context: Optional[Mapping[str, object]] = None,
-    ) -> "OperationResult":
+        context: Mapping[str, object] | None = None,
+    ) -> OperationResult:
         return cls(
             ok=True,
             status=status,
@@ -38,8 +38,8 @@ class OperationResult:
         user_message: str,
         log_hint: str = "See logs for traceback.",
         error_code: str = "",
-        context: Optional[Mapping[str, object]] = None,
-    ) -> "OperationResult":
+        context: Mapping[str, object] | None = None,
+    ) -> OperationResult:
         return cls(
             ok=False,
             status=status,
@@ -56,8 +56,8 @@ class OperationResult:
         user_message: str,
         log_hint: str = "See logs for traceback.",
         error_code: str = "",
-        context: Optional[Mapping[str, object]] = None,
-    ) -> "OperationResult":
+        context: Mapping[str, object] | None = None,
+    ) -> OperationResult:
         return cls.failure(
             status="PARTIAL",
             user_message=user_message,

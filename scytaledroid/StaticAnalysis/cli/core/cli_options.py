@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import argparse
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Sequence
 
 _DEFAULT_PROFILE = "full"
 _DEFAULT_VERBOSITY = "summary"

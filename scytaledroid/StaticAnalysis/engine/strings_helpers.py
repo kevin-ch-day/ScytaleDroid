@@ -7,7 +7,7 @@ import ipaddress
 import math
 import os
 import re
-from typing import MutableMapping
+from collections.abc import MutableMapping
 
 from ..modules.string_analysis.constants import INTERNAL_HOST_SUFFIXES, JWT_FULLMATCH_PATTERN
 

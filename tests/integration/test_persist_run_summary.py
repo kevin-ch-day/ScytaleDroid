@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Dict, List, Mapping
+from typing import Any
 
 import pytest
-
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.StaticAnalysis.cli.core.run_persistence import persist_run_summary
 from scytaledroid.StaticAnalysis.persistence import ingest
@@ -19,10 +19,10 @@ class _Flags:
 
 @dataclass
 class _ExportedComponents:
-    activities: List[str]
-    services: List[str]
-    receivers: List[str]
-    providers: List[str]
+    activities: list[str]
+    services: list[str]
+    receivers: list[str]
+    providers: list[str]
 
     def total(self) -> int:
         return len(self.activities) + len(self.services) + len(self.receivers) + len(self.providers)
@@ -94,7 +94,7 @@ class _Report:
         )
         self.permissions = _Permissions()
         self.detector_results = [_DetectorResult()]
-        base_metadata: Dict[str, Any] = {
+        base_metadata: dict[str, Any] = {
             "run_profile": "full",
             "run_scope_label": "Integration Test",
             "session_stamp": "",

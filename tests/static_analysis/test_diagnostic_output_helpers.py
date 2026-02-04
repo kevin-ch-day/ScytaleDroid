@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC
+
 from scytaledroid.StaticAnalysis.cli.execution import diagnostics, results_formatters
 
 
@@ -34,7 +36,7 @@ def test_plan_provenance_requires_runids():
 
 
 def test_diagnostic_summary_populates_runid_for_db_lookup(monkeypatch):
-    from datetime import datetime, timezone
+    from datetime import datetime
     from pathlib import Path
 
     from scytaledroid.StaticAnalysis.cli.core.models import AppRunResult, RunOutcome, ScopeSelection
@@ -52,8 +54,8 @@ def test_diagnostic_summary_populates_runid_for_db_lookup(monkeypatch):
 
     outcome = RunOutcome(
         results=[app],
-        started_at=datetime.now(timezone.utc),
-        finished_at=datetime.now(timezone.utc),
+        started_at=datetime.now(UTC),
+        finished_at=datetime.now(UTC),
         scope=ScopeSelection("profile", "Test", tuple()),
         base_dir=Path("."),
     )

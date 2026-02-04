@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any, Iterable, Mapping, MutableMapping, Sequence
+from collections.abc import Iterable, Mapping, MutableMapping, Sequence
+from datetime import UTC, datetime
+from typing import Any
 
 from scytaledroid.Config import app_config
 
 from ..core import Finding, SeverityLevel, StaticAnalysisReport
 from ..detectors.permissions import PermissionsProfileDetector
 from ..risk import compute_risk_assessment
-
 
 _DEFAULT_TIME_FORMAT = "%Y-%m-%d %H:%M"
 
@@ -534,12 +534,12 @@ def _collect_secret_rows(report: StaticAnalysisReport) -> list[Mapping[str, Any]
     return entries
 def _format_generated_timestamp(timestamp: str | None) -> str:
     if not timestamp:
-        return datetime.now(timezone.utc).strftime(_DEFAULT_TIME_FORMAT)
+        return datetime.now(UTC).strftime(_DEFAULT_TIME_FORMAT)
     try:
         parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
     except ValueError:
-        return datetime.now(timezone.utc).strftime(_DEFAULT_TIME_FORMAT)
-    return parsed.astimezone(timezone.utc).strftime(_DEFAULT_TIME_FORMAT)
+        return datetime.now(UTC).strftime(_DEFAULT_TIME_FORMAT)
+    return parsed.astimezone(UTC).strftime(_DEFAULT_TIME_FORMAT)
 
 
 def _normalise_toolchain(payload: Any) -> Mapping[str, str]:

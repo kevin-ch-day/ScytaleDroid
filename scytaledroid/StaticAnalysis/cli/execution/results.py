@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from collections import Counter
 import os
+from collections import Counter
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Mapping, Sequence
+
 from scytaledroid.Utils.DisplayUtils import (
     prompt_utils,
     severity,
@@ -14,6 +15,7 @@ from scytaledroid.Utils.DisplayUtils import (
 )
 
 from ...engine.strings import analyse_strings
+from ...persistence.ingest import ingest_baseline_payload
 from ..core.models import RunOutcome, RunParameters
 from ..core.run_lifecycle import finalize_static_run
 from ..core.run_persistence import persist_run_summary, update_static_run_status
@@ -28,12 +30,11 @@ from ..views.view_renderers import (
     write_baseline_json,
     write_dynamic_plan_json,
 )
-from ...persistence.ingest import ingest_baseline_payload
 from .analytics import (
     _build_permission_profile,
     _build_static_risk_row,
-    _collect_component_stats,
     _bulk_trend_deltas,
+    _collect_component_stats,
     _collect_finding_signatures,
     _collect_masvs_profile,
     _collect_secret_stats,

@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
-from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
-from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
 
-from .models import InventoryRow, ScopeSelection
 from . import rules
+from .models import InventoryRow, ScopeSelection
 from .scope_context import (
     EXCLUSION_LABELS,
     apply_default_scope,
@@ -20,13 +19,11 @@ from .scope_context import (
     collect_exclusion_samples,
     estimated_files,
     filter_updated_only,
-    in_default_scope,
-    maybe_str,
     sample_names,
 )
-from .watchlists import Watchlist, filter_rows_by_watchlist, load_watchlists
+from .watchlists import Watchlist
 
-_LAST_SCOPE: Optional[ScopeSelection] = None
+_LAST_SCOPE: ScopeSelection | None = None
 
 def _append_non_root_note(label: str) -> str:
     return label
@@ -35,9 +32,9 @@ def _append_non_root_note(label: str) -> str:
 @dataclass(frozen=True)
 class _WatchlistEntry:
     watchlist: Watchlist
-    filtered: List[InventoryRow]
-    excluded: Dict[str, int]
-    counts: Dict[str, int]
+    filtered: list[InventoryRow]
+    excluded: dict[str, int]
+    counts: dict[str, int]
     preview: str
 
 
@@ -46,8 +43,8 @@ def select_package_scope(
     *,
     device_serial: str,
     is_rooted: bool,
-    google_allowlist: Optional[Iterable[str]] = None,
-) -> Optional[ScopeSelection]:
+    google_allowlist: Iterable[str | None] = None,
+) -> ScopeSelection | None:
     """Prompt the analyst to choose a harvesting scope and return the filtered list."""
 
     if not rows:
@@ -60,8 +57,8 @@ def select_package_scope_auto(
     *,
     device_serial: str,
     is_rooted: bool,
-    google_allowlist: Optional[Iterable[str]] = None,
-) -> Optional[ScopeSelection]:
+    google_allowlist: Iterable[str | None] = None,
+) -> ScopeSelection | None:
     """Select a smart default scope without prompting (updated-only when possible)."""
     if not rows:
         print(status_messages.status("No inventory data available for harvest.", level="warn"))
@@ -94,7 +91,7 @@ def select_package_scope_auto(
     profile_counts = context["profile_counts"]  # type: ignore[assignment]
     profile_key_groups = _group_by_profile_key(rows)
 
-    watchlist_entries: List[_WatchlistEntry] = context.get("watchlists", [])  # type: ignore[assignment]
+    watchlist_entries: list[_WatchlistEntry] = context.get("watchlists", [])  # type: ignore[assignment]
 
     default_rows, _ = apply_default_scope(rows, allow)
     updated_rows, updated_meta = filter_updated_only(rows)
@@ -102,17 +99,19 @@ def select_package_scope_auto(
     while True:
         status_line = _render_scope_table(rows, device_serial, is_rooted, context, default_rows)
 
-        option_handlers: Dict[str, Callable[[], Optional[ScopeSelection]]] = {}
-        entries: List[Dict[str, object]] = []
+        option_handlers: dict[str, Callable[[], ScopeSelection | None]] = {}
+        entries: list[dict[str, object]] = []
 
         def _add_entry(
             key: str,
             label: str,
             *,
-            packages: Optional[int] = None,
-            files: Optional[int] = None,
-            note: Optional[str] = None,
-            handler: Callable[[], Optional[ScopeSelection]] | None = None,
+            packages: int | None = None,
+            files: int | None = None,
+            note: str | None = None,
+            handler: Callable[[], ScopeSelection | None] | None = None,
+            entries: list[dict[str, object]] = entries,
+            option_handlers: dict[str, Callable[[], ScopeSelection | None]] = option_handlers,
         ) -> None:
             entries.append(
                 {
@@ -305,7 +304,7 @@ def _render_scope_table(
     rows: Sequence[InventoryRow],
     device_serial: str,
     is_rooted: bool,
-    context: Dict[str, object],
+    context: dict[str, object],
     default_rows: Sequence[InventoryRow],
 ) -> None:
     mode_label = "root" if is_rooted else "non-root"
@@ -329,13 +328,13 @@ def _format_rerun_label(selection: ScopeSelection) -> str:
     return f"Re-run last scope ({selection.label} – {pkg_count} pkg(s))"
 
 
-def _format_menu_count(stats: Dict[str, int]) -> str:
+def _format_menu_count(stats: dict[str, int]) -> str:
     packages = stats.get("packages", 0)
     files = stats.get("files", 0)
     return f"{packages} pkg(s) · ~{files} file(s)"
 
 
-def _format_watchlist_hint(entry: _WatchlistEntry) -> Optional[str]:
+def _format_watchlist_hint(entry: _WatchlistEntry) -> str | None:
     if not entry.preview:
         return None
     if len(entry.filtered) > 3:
@@ -343,7 +342,7 @@ def _format_watchlist_hint(entry: _WatchlistEntry) -> Optional[str]:
     return f"Preview: {entry.preview}"
 
 
-def _scope_default(rows: Sequence[InventoryRow], allow: Set[str]) -> ScopeSelection:
+def _scope_default(rows: Sequence[InventoryRow], allow: set[str]) -> ScopeSelection:
     selected, excluded = apply_default_scope(rows, allow)
     excluded_samples = collect_exclusion_samples(rows, selected, allow)
     metadata = {
@@ -361,7 +360,7 @@ def _scope_default(rows: Sequence[InventoryRow], allow: Set[str]) -> ScopeSelect
 def _scope_updated_only(
     rows: Sequence[InventoryRow],
     updated_rows: Sequence[InventoryRow],
-    meta: Dict[str, int],
+    meta: dict[str, int],
 ) -> ScopeSelection:
     metadata = {
         "estimated_files": estimated_files(updated_rows),
@@ -378,8 +377,8 @@ def _scope_updated_only(
 def _scope_profiles(
     rows: Sequence[InventoryRow],
     profile_counts: Counter[str],
-    allow: Set[str],
-) -> Optional[ScopeSelection]:
+    allow: set[str],
+) -> ScopeSelection | None:
     if not profile_counts:
         print(status_messages.status("No profiled packages available.", level="warn"))
         return None
@@ -391,7 +390,7 @@ def _scope_profiles(
         [(name, count) for name, count in profile_counts.items() if name in target_profiles],
         key=lambda item: (-item[1], item[0].lower()),
     )
-    profile_menu: Dict[str, str] = {}
+    profile_menu: dict[str, str] = {}
     for index, (profile, count) in enumerate(sorted_profiles, start=1):
         profile_menu[str(index)] = f"{profile} ({count})"
     profile_menu["A"] = "All profiles"
@@ -406,7 +405,7 @@ def _scope_profiles(
         selected = {name for name, _ in sorted_profiles}
     else:
         tokens = {token.strip() for token in re.split(r"[,\s]+", raw) if token.strip()}
-        selected: Set[str] = set()
+        selected: set[str] = set()
         for token in tokens:
             if token in profile_menu and token.isdigit():
                 idx = int(token) - 1
@@ -458,8 +457,8 @@ def _scope_profiles(
 
 
 def _scope_google_user_apps(
-    rows: Sequence[InventoryRow], allow: Set[str]
-) -> Optional[ScopeSelection]:
+    rows: Sequence[InventoryRow], allow: set[str]
+) -> ScopeSelection | None:
     candidates = [row for row in rows if rules.is_google_user_app(row.package_name)]
     if not candidates:
         print(status_messages.status("No Google user apps present on device.", level="warn"))
@@ -486,11 +485,11 @@ def _scope_google_user_apps(
 
 def _scope_profile_subset(
     rows: Sequence[InventoryRow],
-    allow: Set[str],
-    profiles: Set[str],
+    allow: set[str],
+    profiles: set[str],
     *,
     label: str,
-) -> Optional[ScopeSelection]:
+) -> ScopeSelection | None:
     normalized = {profile.lower() for profile in profiles}
     subset = [row for row in rows if row.profile and row.profile.lower() in normalized]
     if not subset:
@@ -524,11 +523,11 @@ def _scope_profile_subset(
 
 def _scope_profile_key_subset(
     rows: Sequence[InventoryRow],
-    allow: Set[str],
-    profiles: Set[str],
+    allow: set[str],
+    profiles: set[str],
     *,
     label: str,
-) -> Optional[ScopeSelection]:
+) -> ScopeSelection | None:
     normalized = {profile.upper() for profile in profiles}
     subset = [row for row in rows if (row.profile_key or "").upper() in normalized]
     if not subset:
@@ -561,13 +560,13 @@ def _scope_profile_key_subset(
 
 
 def _scope_category_subset(
-    category_groups: Dict[str, List[InventoryRow]],
-    allow: Set[str],
-    categories: Set[str],
+    category_groups: dict[str, list[InventoryRow]],
+    allow: set[str],
+    categories: set[str],
     *,
-    label: Optional[str] = None,
-) -> Optional[ScopeSelection]:
-    combined: List[InventoryRow] = []
+    label: str | None = None,
+) -> ScopeSelection | None:
+    combined: list[InventoryRow] = []
     for category in categories:
         combined.extend(category_groups.get(category, []))
     if not combined:
@@ -602,8 +601,8 @@ def _scope_category_subset(
     )
 
 
-def _group_by_profile_key(rows: Sequence[InventoryRow]) -> Dict[str, List[InventoryRow]]:
-    grouped: Dict[str, List[InventoryRow]] = {}
+def _group_by_profile_key(rows: Sequence[InventoryRow]) -> dict[str, list[InventoryRow]]:
+    grouped: dict[str, list[InventoryRow]] = {}
     for row in rows:
         key = (row.profile_key or "").strip().upper()
         if not key:
@@ -612,7 +611,7 @@ def _group_by_profile_key(rows: Sequence[InventoryRow]) -> Dict[str, List[Invent
     return grouped
 
 
-def _scope_watchlist(entry: _WatchlistEntry) -> Optional[ScopeSelection]:
+def _scope_watchlist(entry: _WatchlistEntry) -> ScopeSelection | None:
     if not entry.filtered:
         print(status_messages.status("Watchlist contains no packages in scope.", level="warn"))
         return None
@@ -634,8 +633,8 @@ def _scope_watchlist(entry: _WatchlistEntry) -> Optional[ScopeSelection]:
 
 
 def _scope_google_allowlist(
-    rows: Sequence[InventoryRow], allow: Set[str]
-) -> Optional[ScopeSelection]:
+    rows: Sequence[InventoryRow], allow: set[str]
+) -> ScopeSelection | None:
     candidates = [row for row in rows if row.package_name in allow]
     if not candidates:
         print(status_messages.status("No Google allow-list packages found in inventory.", level="warn"))
@@ -661,12 +660,12 @@ def _scope_google_allowlist(
     return ScopeSelection("Google exceptions", filtered, "google_allow", metadata)
 
 
-def _scope_families(rows: Sequence[InventoryRow]) -> Optional[ScopeSelection]:
+def _scope_families(rows: Sequence[InventoryRow]) -> ScopeSelection | None:
     filtered = [row for row in rows if rules.family(row.package_name) in {"android", "google", "motorola"}]
     if not filtered:
         print(status_messages.status("No Android/Google/Motorola packages found.", level="warn"))
         return None
-    excluded_samples: Dict[str, List[str]] = {}
+    excluded_samples: dict[str, list[str]] = {}
     metadata = {
         "estimated_files": estimated_files(filtered),
         "sample_names": sample_names(filtered),
@@ -678,7 +677,7 @@ def _scope_families(rows: Sequence[InventoryRow]) -> Optional[ScopeSelection]:
     return ScopeSelection("System families", filtered, "families", metadata)
 
 
-def _scope_custom(rows: Sequence[InventoryRow], allow: Set[str]) -> Optional[ScopeSelection]:
+def _scope_custom(rows: Sequence[InventoryRow], allow: set[str]) -> ScopeSelection | None:
     print()
     print(
         status_messages.status(
@@ -696,7 +695,7 @@ def _scope_custom(rows: Sequence[InventoryRow], allow: Set[str]) -> Optional[Sco
         print(status_messages.status("No valid package identifiers provided.", level="warn"))
         return None
 
-    matches: List[InventoryRow] = []
+    matches: list[InventoryRow] = []
     for row in rows:
         name = row.package_name.lower()
         if any(_pattern_matches(pattern, name) for pattern in patterns):
@@ -747,7 +746,7 @@ def _format_count(stats: object, key: str, *, prefix: str = "") -> str:
     return f"{prefix}{value} {unit}"
 
 
-def _format_count_summary(rows: Optional[Sequence[InventoryRow]]) -> str:
+def _format_count_summary(rows: Sequence[InventoryRow | None]) -> str:
     if not rows:
         return "0 pkg(s)"
     return f"{len(rows)} pkg(s)"
@@ -784,12 +783,12 @@ def _print_selection_diagnostics(selection: ScopeSelection) -> None:
 def _scope_option_label(
     title: str,
     *,
-    packages: Optional[int] = None,
-    files: Optional[int] = None,
-    note: Optional[str] = None,
+    packages: int | None = None,
+    files: int | None = None,
+    note: str | None = None,
 ) -> str:
-    parts: List[str] = [title]
-    metrics: List[str] = []
+    parts: list[str] = [title]
+    metrics: list[str] = []
     if packages is not None:
         metrics.append(f"{packages} pkg(s)")
     if files is not None:
@@ -814,7 +813,7 @@ def _print_scope_overview(
     rows: Sequence[InventoryRow],
     device_serial: str,
     is_rooted: bool,
-    context: Dict[str, object],
+    context: dict[str, object],
 ) -> None:
     print()
     menu_utils.print_header(
@@ -822,7 +821,7 @@ def _print_scope_overview(
         subtitle=f"{device_serial} · {'root' if is_rooted else 'non-root'}",
     )
     headers = ("Subset", "Packages", "Artifacts", "Notes")
-    rows_summary: List[Tuple[str, str, str, str]] = [
+    rows_summary: list[tuple[str, str, str, str]] = [
         (
             "Play & user",
             _format_count(context["default_counts"], "packages"),

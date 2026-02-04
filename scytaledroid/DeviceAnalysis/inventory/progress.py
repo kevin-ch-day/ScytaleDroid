@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
-from typing import Optional, Dict
+from datetime import UTC, datetime
 
 from scytaledroid.Utils.DisplayUtils import colors, status_messages, terminal, text_blocks
 
 # Avoid pulling in the entire device_menu stack when running headless (e.g., measure_inventory_latency).
 try:
-    from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.constants import INVENTORY_STALE_SECONDS
+    from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.constants import (
+        INVENTORY_STALE_SECONDS,
+    )
     from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.utils import humanize_seconds
 except Exception:  # pragma: no cover - headless fall-back
     INVENTORY_STALE_SECONDS = 24 * 60 * 60
@@ -33,7 +34,7 @@ except Exception:  # pragma: no cover - headless fall-back
         return " ".join(parts)
 
 
-def _format_duration(seconds: Optional[float]) -> str:
+def _format_duration(seconds: float | None) -> str:
     """Return a human-friendly duration like 8 mins 49 sec."""
     if seconds is None:
         return ""
@@ -47,9 +48,9 @@ def _format_progress_lines(
     processed: int,
     total: int,
     elapsed_seconds: float,
-    eta_seconds: Optional[float],
+    eta_seconds: float | None,
     split_processed: int,
-    phase_label: Optional[str] = None,
+    phase_label: str | None = None,
 ) -> tuple[str, str]:
     percentage = (processed / total) * 100 if total else 0.0
     eta_text = _format_duration(eta_seconds)
@@ -101,10 +102,10 @@ def make_cli_progress_printer(ui_prefs=None):
 
     last_line1 = 0
     last_line2 = 0
-    current_phase_label: Optional[str] = None
+    current_phase_label: str | None = None
     last_elapsed: float = 0.0
 
-    def _printer(event: Dict[str, object]) -> bool | None:
+    def _printer(event: dict[str, object]) -> bool | None:
         nonlocal last_line1, last_line2, current_phase_label, last_elapsed
         phase = event.get("phase")
         if phase == "start":
@@ -145,9 +146,9 @@ def make_cli_progress_printer(ui_prefs=None):
 def render_snapshot_block(
     previous_meta,
     ui_prefs=None,
-    mode: Optional[str] = None,
+    mode: str | None = None,
     *,
-    serial: Optional[str] = None,
+    serial: str | None = None,
 ) -> None:
     """Render a stable snapshot info block before sync starts."""
     status_text = "UNKNOWN"
@@ -156,7 +157,7 @@ def render_snapshot_block(
 
     if previous_meta and getattr(previous_meta, "captured_at", None):
         age_seconds = max(
-            (datetime.now(timezone.utc) - previous_meta.captured_at).total_seconds(), 0.0
+            (datetime.now(UTC) - previous_meta.captured_at).total_seconds(), 0.0
         )
         is_stale = age_seconds >= INVENTORY_STALE_SECONDS
         status_text = "STALE" if is_stale else "FRESH"

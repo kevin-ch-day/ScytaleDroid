@@ -9,7 +9,6 @@ import subprocess
 from pathlib import Path
 
 from scytaledroid.DeviceAnalysis import adb_client, adb_shell
-
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
 from scytaledroid.DynamicAnalysis.observers.base import Observer, ObserverHandle, ObserverResult
@@ -106,6 +105,9 @@ class NetworkCaptureObserver(Observer):
                 sha256=digest,
                 size_bytes=path.stat().st_size,
                 produced_by=self.observer_id,
+                origin="device",
+                device_path=device_path,
+                pull_status="pulled",
             )
         )
         flow_summary_path = self._write_flow_summary(path, run_ctx)

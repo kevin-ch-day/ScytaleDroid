@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
 import os
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from dataclasses import dataclass
 
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis import adb_client, adb_shell, harvest, inventory

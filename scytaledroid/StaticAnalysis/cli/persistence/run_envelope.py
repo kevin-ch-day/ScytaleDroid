@@ -2,25 +2,26 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Mapping, Optional, Sequence, Tuple
+from typing import Any
 
-from scytaledroid.Persistence import db_writer as _dw
-from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_queries.canonical import schema as canonical_schema
+from scytaledroid.Persistence import db_writer as _dw
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
 @dataclass(slots=True)
 class RunEnvelope:
     run_id: int | None
-    app_label: Optional[str]
-    target_sdk: Optional[int]
+    app_label: str | None
+    target_sdk: int | None
     threat_profile: str
     env_profile: str
 
 
-def first_non_empty_str(*values: object) -> Optional[str]:
+def first_non_empty_str(*values: object) -> str | None:
     for value in values:
         if isinstance(value, str):
             candidate = value.strip()
@@ -36,7 +37,7 @@ def first_non_empty_str(*values: object) -> Optional[str]:
 def _extract_from_sources(
     sources: Sequence[Mapping[str, Any]],
     paths: Sequence[Sequence[str]],
-) -> Optional[str]:
+) -> str | None:
     for source in sources:
         if not isinstance(source, Mapping):
             continue
@@ -56,7 +57,7 @@ def _extract_from_sources(
 def extract_run_profiles(
     report: Any,
     baseline_payload: Mapping[str, object],
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
     metadata = getattr(report, "metadata", None)
     metadata_map: Mapping[str, Any] = metadata if isinstance(metadata, Mapping) else {}
     baseline_map: Mapping[str, Any] = baseline_payload if isinstance(baseline_payload, Mapping) else {}

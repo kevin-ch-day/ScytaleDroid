@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
-from scytaledroid.DynamicAnalysis.analysis.contrastive_testing import js_divergence, wasserstein_distance
+from scytaledroid.DynamicAnalysis.analysis.contrastive_testing import (
+    js_divergence,
+    wasserstein_distance,
+)
 
 
 @dataclass(frozen=True)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from typing import List, Mapping, Optional, Sequence
+from collections.abc import Mapping, Sequence
 from xml.etree import ElementTree
 
 from scytaledroid.StaticAnalysis._androguard import APK
@@ -16,7 +16,7 @@ _ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
 def extract_network_security_policy(
     apk: APK,
     *,
-    manifest_reference: Optional[str],
+    manifest_reference: str | None,
 ) -> NetworkSecurityPolicy:
     """Return the resolved network security configuration, if present."""
 
@@ -63,7 +63,7 @@ def extract_network_security_policy(
     trust_user_certificates = False
     base_trust_anchors: tuple[str, ...] = tuple()
 
-    domain_configs: List[DomainPolicy] = []
+    domain_configs: list[DomainPolicy] = []
 
     base_config = root.find("base-config")
     if base_config is not None:
@@ -113,7 +113,7 @@ def extract_network_security_policy(
     )
 
 
-def _resolve_resource_path(reference: Optional[str]) -> Optional[str]:
+def _resolve_resource_path(reference: str | None) -> str | None:
     if not reference:
         return None
     reference = reference.strip()
@@ -132,7 +132,7 @@ def _resolve_resource_path(reference: Optional[str]) -> Optional[str]:
     return None
 
 
-def _coerce_bool(value: Optional[str], *, default: Optional[bool] = None) -> Optional[bool]:
+def _coerce_bool(value: str | None, *, default: bool | None = None) -> bool | None:
     if value is None:
         return default
     value = value.strip().lower()
@@ -166,9 +166,9 @@ def _anchors_allow_user(anchors: Sequence[str]) -> bool:
 
 def _parse_domain_config(
     element: ElementTree.Element,
-    base_cleartext: Optional[bool],
+    base_cleartext: bool | None,
     inherited_anchors: Sequence[str],
-) -> List[DomainPolicy]:
+) -> list[DomainPolicy]:
     cleartext = _coerce_bool(
         element.get(f"{_ANDROID_NS}cleartextTrafficPermitted"),
         default=base_cleartext,
@@ -179,7 +179,7 @@ def _parse_domain_config(
     user_certificates = _anchors_allow_user(anchors)
     pin_sets = _collect_pin_sets(element)
 
-    domains: List[str] = []
+    domains: list[str] = []
     include_subdomains = False
     for domain in element.findall("domain"):
         name = (domain.text or "").strip()
@@ -190,7 +190,7 @@ def _parse_domain_config(
             domain.get(f"{_ANDROID_NS}includeSubdomains"), default=False
         )
 
-    policies: List[DomainPolicy] = []
+    policies: list[DomainPolicy] = []
     if domains:
         policies.append(
             DomainPolicy(
@@ -209,8 +209,8 @@ def _parse_domain_config(
     return policies
 
 
-def _collect_pin_sets(element: ElementTree.Element) -> List[Mapping[str, object]]:
-    pin_sets: List[Mapping[str, object]] = []
+def _collect_pin_sets(element: ElementTree.Element) -> list[Mapping[str, object]]:
+    pin_sets: list[Mapping[str, object]] = []
     for pin_set in element.findall("pin-set"):
         entry: dict[str, object] = {}
         expiration = (pin_set.get(f"{_ANDROID_NS}expiration") or "").strip()

@@ -6,12 +6,9 @@ records keyed by app version.
 
 from __future__ import annotations
 
-from typing import Iterable
-
 import re
 
 from ...db_core import db_queries as core_q
-
 
 _DDL_STATEMENTS: list[str] = [
     # Apps and Versions

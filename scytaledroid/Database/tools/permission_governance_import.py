@@ -6,13 +6,12 @@ import argparse
 import csv
 import hashlib
 import sys
+from collections.abc import Iterable, Mapping
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, Mapping
 
 from scytaledroid.Database.db_core import run_sql
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
-
 
 REQUIRED_COLUMNS = {
     "permission_string",

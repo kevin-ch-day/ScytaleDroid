@@ -2,19 +2,17 @@
 
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
-
 from scytaledroid.DeviceAnalysis import adb_client
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
-def list_packages(serial: str) -> List[str]:
+def list_packages(serial: str) -> list[str]:
     """Return package names via ``pm list packages``."""
     completed = adb_client.run_shell_command(serial, ["pm", "list", "packages"], timeout=15)
     if completed.returncode != 0:
         return []
 
-    packages: List[str] = []
+    packages: list[str] = []
     for line in completed.stdout.splitlines():
         stripped = line.strip()
         if stripped.startswith("package:"):
@@ -26,7 +24,7 @@ def list_packages_with_versions(
     serial: str,
     *,
     allow_fallbacks: bool = False,
-) -> List[Tuple[str, Optional[str], Optional[str]]]:
+) -> list[tuple[str, str | None, str | None]]:
     """Return package identifiers along with version metadata when available."""
 
     attempts = [
@@ -75,16 +73,16 @@ def list_packages_with_versions(
     return [(package, None, None) for package in list_packages(serial)]
 
 
-def _parse_package_listing(output: str) -> List[Tuple[str, Optional[str], Optional[str]]]:
-    packages: List[Tuple[str, Optional[str], Optional[str]]] = []
+def _parse_package_listing(output: str) -> list[tuple[str, str | None, str | None]]:
+    packages: list[tuple[str, str | None, str | None]] = []
     for raw_line in output.splitlines():
         line = raw_line.strip()
         if not line.startswith("package:"):
             continue
 
-        package_name: Optional[str] = None
-        version_code: Optional[str] = None
-        version_name: Optional[str] = None
+        package_name: str | None = None
+        version_code: str | None = None
+        version_name: str | None = None
 
         for token in line.split():
             if token.startswith("package:"):

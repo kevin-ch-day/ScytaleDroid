@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
-
 _SUSPICIOUS_TOKENS = ("/", "\\", "=", "base.apk")
 
 

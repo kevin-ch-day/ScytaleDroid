@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping, Optional, Protocol, Sequence
+from typing import Any, Protocol
 
 from ..core.models import StaticAnalysisReport
 
@@ -17,25 +18,25 @@ class AppModuleContext:
     package_name: str
     apk_path: Path
     metadata: Mapping[str, object] = field(default_factory=dict)
-    session_stamp: Optional[str] = None
-    scope_label: Optional[str] = None
+    session_stamp: str | None = None
+    scope_label: str | None = None
 
     @property
-    def app_id(self) -> Optional[str]:
+    def app_id(self) -> str | None:
         value = self.metadata.get("app_id")
         if value is None:
             return None
         return str(value)
 
     @property
-    def apk_id(self) -> Optional[str]:
+    def apk_id(self) -> str | None:
         value = self.metadata.get("apk_id")
         if value is None:
             return None
         return str(value)
 
     @property
-    def sha256(self) -> Optional[str]:
+    def sha256(self) -> str | None:
         hashes = self.report.hashes or {}
         value = hashes.get("sha256")
         if isinstance(value, str) and value.strip():
@@ -71,4 +72,3 @@ class StaticModule(Protocol):
 
     def summarize(self, result: ModuleResult) -> Mapping[str, Any]:
         """Return a lightweight summary suitable for console output."""
-

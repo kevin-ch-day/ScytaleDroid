@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Iterable, List, Mapping, Optional, Sequence
 
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
@@ -46,7 +46,7 @@ def _publisher_rules_table_exists() -> bool:
         return False
 
 
-def load_publisher_rules() -> List[PublisherRule]:
+def load_publisher_rules() -> list[PublisherRule]:
     """Return DB-driven publisher rules or a minimal fallback list."""
 
     if not _publisher_rules_table_exists():
@@ -74,7 +74,7 @@ def load_publisher_rules() -> List[PublisherRule]:
         )
         return list(_FALLBACK_RULES)
 
-    rules: List[PublisherRule] = []
+    rules: list[PublisherRule] = []
     for row in rows or []:
         publisher_key = str(row.get("publisher_key") or "").strip()
         match_type = str(row.get("match_type") or "").strip().upper()
@@ -92,7 +92,7 @@ def load_publisher_rules() -> List[PublisherRule]:
     return rules
 
 
-def resolve_publisher_key(package_name: str, rules: Sequence[PublisherRule]) -> Optional[str]:
+def resolve_publisher_key(package_name: str, rules: Sequence[PublisherRule]) -> str | None:
     """Return the first matching publisher key for the supplied package."""
 
     if not package_name:
@@ -124,7 +124,7 @@ def ensure_vendor_misc() -> None:
 def apply_publisher_mapping(
     package_names: Iterable[str],
     *,
-    context: Optional[Mapping[str, object]] = None,
+    context: Mapping[str, object] | None = None,
 ) -> None:
     """Apply publisher rules to the provided package names."""
 

@@ -1,7 +1,6 @@
 import re
 from pathlib import Path
 
-
 ALLOWLIST = {
     "scytaledroid/DeviceAnalysis/adb_client.py",
 }

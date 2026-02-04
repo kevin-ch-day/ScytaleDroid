@@ -5,13 +5,13 @@ Quick mode now delegates to the shared harvest executor to avoid drift.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
-from typing import List, Optional, Sequence
 
 from scytaledroid.Utils.LoggingUtils import logging_engine
 
-from .runner import execute_harvest
 from .models import PackagePlan, PullResult
+from .runner import execute_harvest
 
 
 def quick_harvest(
@@ -21,13 +21,13 @@ def quick_harvest(
     dest_root: Path,
     session_stamp: str,
     config: object,
-    serial: Optional[str] = None,
+    serial: str | None = None,
     verbose: bool = False,
-    run_id: Optional[str] = None,
-    harvest_logger: Optional[logging_engine.ContextAdapter] = None,
-    snapshot_id: Optional[int] = None,
-    snapshot_captured_at: Optional[str] = None,
-) -> List[PullResult]:
+    run_id: str | None = None,
+    harvest_logger: logging_engine.ContextAdapter | None = None,
+    snapshot_id: int | None = None,
+    snapshot_captured_at: str | None = None,
+) -> list[PullResult]:
     """Execute quick harvest using the shared executor."""
 
     resolved_serial = serial or dest_root.name

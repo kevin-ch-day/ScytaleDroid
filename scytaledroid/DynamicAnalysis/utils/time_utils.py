@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 
 def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
-def format_seconds(value: Optional[int]) -> str:
+def format_seconds(value: int | None) -> str:
     if value is None:
         return "—"
     mins, secs = divmod(int(value), 60)

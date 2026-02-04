@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence
 from datetime import datetime
-from typing import Mapping, Optional, Sequence
+
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ...db_core import run_sql, run_sql_many
 from ...db_queries.harvest import device_inventory as queries
-from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from ...db_utils.package_utils import is_suspicious_package_name, normalize_package_name
-
 
 _TABLES_READY = False
 
@@ -50,24 +50,24 @@ def create_snapshot(
     *,
     captured_at: datetime,
     package_count: int,
-    duration_seconds: Optional[float],
-    package_hash: Optional[str],
-    package_list_hash: Optional[str],
-    package_signature_hash: Optional[str],
-    build_fingerprint: Optional[str],
-    scope_hash: Optional[str],
-    snapshot_type: Optional[str],
-    scope_variant: Optional[str],
-    scope_size: Optional[int],
-    extras: Optional[Mapping[str, object]] = None,
-) -> Optional[int]:
+    duration_seconds: float | None,
+    package_hash: str | None,
+    package_list_hash: str | None,
+    package_signature_hash: str | None,
+    build_fingerprint: str | None,
+    scope_hash: str | None,
+    snapshot_type: str | None,
+    scope_variant: str | None,
+    scope_size: int | None,
+    extras: Mapping[str, object] | None = None,
+) -> int | None:
     """Insert a snapshot header and return its snapshot_id."""
 
     if not ensure_tables():
         return None
 
     captured_naive = captured_at.replace(tzinfo=None) if captured_at.tzinfo else captured_at
-    extras_payload: Optional[str]
+    extras_payload: str | None
     if extras:
         try:
             extras_payload = json.dumps(extras, ensure_ascii=False, sort_keys=True)
@@ -165,16 +165,16 @@ def _bind_package(
     snapshot_id: int,
     device_serial: str,
     entry: Mapping[str, object],
-) -> Optional[tuple[object, ...]]:
+) -> tuple[object, ...] | None:
     """Coerce a package entry into the SQL parameter tuple."""
 
-    def _text(value: object) -> Optional[str]:
+    def _text(value: object) -> str | None:
         if value is None:
             return None
         text = str(value).strip()
         return text or None
 
-    def _int(value: object) -> Optional[int]:
+    def _int(value: object) -> int | None:
         if value is None:
             return None
         try:
@@ -193,7 +193,6 @@ def _bind_package(
     apk_paths = _serialise_json(entry.get("apk_paths"))
 
     extras = _prepare_extras(entry)
-    extras_payload = _serialise_json(extras)
 
     raw_package = _text(entry.get("package_name"))
     if not raw_package:
@@ -244,7 +243,7 @@ def _bind_package(
     )
 
 
-def _serialise_json(value: object) -> Optional[str]:
+def _serialise_json(value: object) -> str | None:
     if value is None:
         return None
     try:
@@ -253,7 +252,7 @@ def _serialise_json(value: object) -> Optional[str]:
         return None
 
 
-def _prepare_extras(entry: Mapping[str, object]) -> Optional[dict]:
+def _prepare_extras(entry: Mapping[str, object]) -> dict | None:
     """Return lightweight auxiliary fields that lack dedicated columns."""
     extras = {}
     if "category" in entry and entry.get("category") != entry.get("category_name"):
@@ -274,12 +273,12 @@ def _prepare_extras(entry: Mapping[str, object]) -> Optional[dict]:
 
 
 def _merge_extras(
-    extras: Optional[dict],
+    extras: dict | None,
     *,
     raw_package: str,
     cleaned_package: str,
     suspicious: bool,
-) -> Optional[dict]:
+) -> dict | None:
     merged = dict(extras or {})
     if raw_package != cleaned_package:
         merged.setdefault("raw_package_name", raw_package)

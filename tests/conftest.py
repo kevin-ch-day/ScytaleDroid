@@ -1,7 +1,7 @@
 import os
 import pathlib
 import sys
-from typing import Iterator
+from collections.abc import Iterator
 
 import pymysql
 import pytest

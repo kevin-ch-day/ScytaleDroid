@@ -4,14 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
 
 
 @dataclass(frozen=True)
 class InventoryStatus:
-    last_run_ts: Optional[datetime]
-    package_count: Optional[int]
-    age_seconds: Optional[int]
+    last_run_ts: datetime | None
+    package_count: int | None
+    age_seconds: int | None
     is_stale: bool
     status_label: str
     age_display: str

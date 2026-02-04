@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any, Optional
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
 import os
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 
 from scytaledroid.StaticAnalysis.cli.flows.run_dispatch import launch_scan_flow
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
@@ -19,12 +19,12 @@ class StaticServiceError(RuntimeError):
 @dataclass(frozen=True)
 class RunResult:
     outcome: Any
-    pipeline_version: Optional[str]
-    catalog_versions: Optional[str]
-    config_hash: Optional[str]
-    study_tag: Optional[str]
+    pipeline_version: str | None
+    catalog_versions: str | None
+    config_hash: str | None
+    study_tag: str | None
     run_started_utc: datetime = field(
-        default_factory=lambda: datetime.now(timezone.utc)
+        default_factory=lambda: datetime.now(UTC)
     )
 
 
@@ -33,10 +33,10 @@ def run_scan(
     params: Any,
     base_dir: Path,
     *,
-    study_tag: Optional[str] = None,
-    pipeline_version: Optional[str] = None,
-    catalog_versions: Optional[str] = None,
-    config_hash: Optional[str] = None,
+    study_tag: str | None = None,
+    pipeline_version: str | None = None,
+    catalog_versions: str | None = None,
+    config_hash: str | None = None,
 ) -> RunResult:
     """
     Run the static analysis scan flow and return the outcome with metadata.
@@ -61,12 +61,12 @@ def run_scan(
     # Attach study tag to params when supported.
     if study_tag and hasattr(params, "study_tag"):
         try:
-            setattr(params, "study_tag", study_tag)
+            params.study_tag = study_tag
         except Exception:
             pass
     if pipeline_version and hasattr(params, "analysis_version"):
         try:
-            setattr(params, "analysis_version", pipeline_version)
+            params.analysis_version = pipeline_version
         except Exception:
             pass
     # Default metadata fallbacks (env vars allow overrides)

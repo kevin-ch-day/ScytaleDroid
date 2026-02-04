@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from time import perf_counter
-from typing import Tuple, Type
 
-from .findings import Badge, DetectorResult
 from ..detectors.base import BaseDetector
 from ..detectors.components import IpcExposureDetector
 from ..detectors.correlation import CorrelationDetector
@@ -28,13 +26,14 @@ from ..detectors.sdks import SdkInventoryDetector
 from ..detectors.secrets import SecretsDetector
 from ..detectors.storage import StorageBackupDetector
 from ..detectors.webview import WebViewDetector
+from .findings import Badge, DetectorResult
 
 
 @dataclass(frozen=True)
 class PipelineStage:
     """Represents a detector invocation in the ordered pipeline."""
 
-    detector_cls: Type[BaseDetector]
+    detector_cls: type[BaseDetector]
     section_key: str
     include_in_quick: bool = True
 
@@ -42,7 +41,7 @@ class PipelineStage:
         return self.detector_cls()
 
 
-PIPELINE_STAGES: Tuple[PipelineStage, ...] = (
+PIPELINE_STAGES: tuple[PipelineStage, ...] = (
     PipelineStage(IntegrityIdentityDetector, "integrity"),
     PipelineStage(ManifestBaselineDetector, "manifest_hygiene"),
     PipelineStage(PermissionsProfileDetector, "permissions"),
@@ -66,7 +65,7 @@ PIPELINE_STAGES: Tuple[PipelineStage, ...] = (
 )
 
 
-def run_detector_pipeline(context) -> Tuple[DetectorResult, ...]:
+def run_detector_pipeline(context) -> tuple[DetectorResult, ...]:
     """Execute registered detectors in the fixed pipeline order."""
 
     results: list[DetectorResult] = []

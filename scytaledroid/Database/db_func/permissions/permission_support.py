@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable, Mapping
 from math import isclose
-from typing import Callable, Iterable, Mapping
+
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ...db_core import run_sql
-from ...db_queries.permissions import permission_support as queries
-from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 _ALLOWED_BANDS = {"critical", "high", "medium", "low", "none"}
 _ALLOWED_STAGES = {"declared", "runtime", "policy"}

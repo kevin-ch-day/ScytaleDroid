@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Iterable, Mapping
+from collections.abc import Iterable, Mapping
+
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ...db_core import db_config, run_sql
 from ...db_queries.static_analysis import static_permission_risk as queries
-from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 _IS_SQLITE = str(db_config.DB_CONFIG.get("engine", "sqlite")).lower() == "sqlite"
 

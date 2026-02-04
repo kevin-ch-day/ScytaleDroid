@@ -8,10 +8,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from scytaledroid.Config import app_config
+from scytaledroid.DeviceAnalysis.services.static_scope_service import static_scope_service
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuItemSpec, MenuSpec
-from scytaledroid.DeviceAnalysis.services.static_scope_service import static_scope_service
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
+
 from .static_analysis_menu_helpers import (
     DEV_TARGETS,
     apply_command_overrides,
@@ -29,21 +30,19 @@ from .static_analysis_menu_helpers import (
 
 if TYPE_CHECKING:
     from ..commands.models import Command
-    from ..core.models import RunParameters
 
 
 
 def static_analysis_menu() -> None:
+    from scytaledroid.Database.db_utils import schema_gate
     from scytaledroid.Database.db_utils.menus import query_runner
     from scytaledroid.Database.db_utils.reset_static import reset_static_analysis_data
-
     from scytaledroid.StaticAnalysis.core.repository import group_artifacts
+    from scytaledroid.StaticAnalysis.services import static_service
+
     from ..commands import COMMANDS, get_command, iter_commands
     from ..core.models import RunParameters
     from ..core.run_prompts import default_custom_tests, prompt_advanced_options
-    from ..flows.selection import select_scope
-    from scytaledroid.StaticAnalysis.services import static_service
-    from scytaledroid.Database.db_utils import schema_gate
 
     ok, message, detail = schema_gate.static_schema_gate()
     if not ok:

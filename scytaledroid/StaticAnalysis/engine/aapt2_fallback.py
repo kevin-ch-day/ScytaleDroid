@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-from typing import Dict, List
 
 
 def has_aapt2() -> bool:
@@ -26,8 +25,8 @@ def dump_badging(apk_path: str) -> str | None:
         return None
 
 
-def parse_badging(text: str) -> Dict[str, object]:
-    data: Dict[str, object] = {
+def parse_badging(text: str) -> dict[str, object]:
+    data: dict[str, object] = {
         "package_name": None,
         "version_code": None,
         "version_name": None,
@@ -36,7 +35,7 @@ def parse_badging(text: str) -> Dict[str, object]:
         "app_label": None,
         "permissions": [],
     }
-    perms: List[str] = []
+    perms: list[str] = []
     for line in text.splitlines():
         line = line.strip()
         if line.startswith("package:"):
@@ -62,7 +61,7 @@ def parse_badging(text: str) -> Dict[str, object]:
     return data
 
 
-def extract_metadata(apk_path: str) -> Dict[str, object] | None:
+def extract_metadata(apk_path: str) -> dict[str, object] | None:
     text = dump_badging(apk_path)
     if not text:
         return None

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Mapping
+from collections.abc import Mapping
 
 HTTP_URL_PATTERN = re.compile(r"https?://[^\s'\"<>]{1,2048}", re.IGNORECASE)
 ENDPOINT_PATTERN = re.compile(r"(?P<url>(?:https?|wss?)://[^\s'\"<>]{1,2048})", re.IGNORECASE)

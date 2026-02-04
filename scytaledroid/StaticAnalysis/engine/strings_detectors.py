@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 from urllib.parse import urlsplit
 
 from ..modules.string_analysis.constants import (

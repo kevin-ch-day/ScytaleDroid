@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from collections.abc import Mapping, MutableMapping, Sequence
 from math import log2
-from typing import Mapping, MutableMapping, Sequence
 
 from ..core.findings import Badge, DetectorResult, MasvsCategory
 

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Iterable, Mapping, MutableMapping, Optional, Sequence
 from xml.etree import ElementTree
 
 import yaml
@@ -32,10 +32,10 @@ class PermissionDescriptor:
     name: str
     protection: tuple[str, ...]
     source: str = "catalog"
-    deprecated_api: Optional[int] = None
-    added_api: Optional[int] = None
+    deprecated_api: int | None = None
+    added_api: int | None = None
 
-    def base_level(self) -> Optional[str]:
+    def base_level(self) -> str | None:
         for token in self.protection:
             lowered = token.lower()
             if lowered in {
@@ -70,7 +70,7 @@ class PermissionCatalog:
         self._entries = {name.lower(): descriptor for name, descriptor in entries.items()}
         self.version = version
 
-    def describe(self, name: str) -> Optional[PermissionDescriptor]:
+    def describe(self, name: str) -> PermissionDescriptor | None:
         return self._entries.get(name.lower())
 
     def guard_strength(self, name: str) -> str:
@@ -95,7 +95,7 @@ class PermissionCatalog:
         return snapshot
 
 
-def _load_yaml_catalog(path: Path, *, origin: Optional[str] = None) -> Mapping[str, PermissionDescriptor]:
+def _load_yaml_catalog(path: Path, *, origin: str | None = None) -> Mapping[str, PermissionDescriptor]:
     data = yaml.safe_load(path.read_text())
     if not isinstance(data, list):
         raise ValueError("framework_permissions.yaml must be a list")
@@ -158,7 +158,7 @@ def _load_db_catalog() -> tuple[Mapping[str, PermissionDescriptor], str]:
     return entries, version
 
 
-def _coerce_int(value: object) -> Optional[int]:
+def _coerce_int(value: object) -> int | None:
     try:
         if value is None or value == "":
             return None
@@ -245,7 +245,7 @@ def build_catalog_from_permissions_xml(xml_path: Path) -> PermissionCatalog:
 
 
 def classify_permission(
-    name: Optional[str],
+    name: str | None,
     *,
     manifest_levels: Mapping[str, Sequence[str]] | None = None,
     catalog: PermissionCatalog | None = None,

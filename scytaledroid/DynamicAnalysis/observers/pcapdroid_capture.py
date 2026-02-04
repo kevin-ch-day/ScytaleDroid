@@ -239,6 +239,9 @@ class PcapdroidCaptureObserver(Observer):
                             sha256=digest,
                             size_bytes=local_path.stat().st_size,
                             produced_by=self.observer_id,
+                            origin="device",
+                            device_path=device_path,
+                            pull_status="pulled",
                         )
                     )
                     if meta_path.exists():

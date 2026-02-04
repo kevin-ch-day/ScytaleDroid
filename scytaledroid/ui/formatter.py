@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Dict
-
 from scytaledroid.Utils.DisplayUtils import colors, text_blocks
 
 
@@ -17,7 +15,7 @@ def print_header(title: str, subtitle: str | None = None) -> None:
     print()
 
 
-def format_kv_block(prefix: str, pairs: Dict[str, str]) -> str:
+def format_kv_block(prefix: str, pairs: dict[str, str]) -> str:
     """
     Return a block of key/value lines with a common prefix.
 

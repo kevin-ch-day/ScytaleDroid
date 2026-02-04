@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
-import time
 import os
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Protocol
+from typing import Protocol
 
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
+
 from .. import inventory_meta
-from . import snapshot_io
-from . import adb_client, normalizer
+from . import adb_client, normalizer, snapshot_io
 from .errors import InventoryCollectionError
+
 
 class ProgressCallback(Protocol):
     def __call__(
@@ -19,27 +21,27 @@ class ProgressCallback(Protocol):
         processed: int,
         total: int,
         elapsed_seconds: float,
-        eta_seconds: Optional[float],
+        eta_seconds: float | None,
         split_apks: int,
     ) -> None:
         ...
 
 
 # Keep PackageRow as a loose alias for the normalized dict shape used throughout
-PackageRow = Dict[str, object]
+PackageRow = dict[str, object]
 
 
 def _compose_inventory_entry(
     package_name: str,
-    paths: List[str],
-    metadata: Dict[str, object],
-    canonical: Optional[Dict[str, object]] = None,
-) -> Dict[str, object]:
+    paths: list[str],
+    metadata: dict[str, object],
+    canonical: dict[str, object | None] = None,
+) -> dict[str, object]:
     """Compatibility wrapper for tests and callers relying on legacy helper names."""
     return normalizer.compose_inventory_entry(package_name, paths, metadata, canonical=canonical)
 
 
-def _split_count(entry: Dict[str, object]) -> int:
+def _split_count(entry: dict[str, object]) -> int:
     """Compatibility wrapper for tests and callers relying on legacy helper names."""
     return normalizer.split_count(entry)
 
@@ -51,21 +53,21 @@ class CollectionStats:
     new_packages: int
     removed_packages: int
     elapsed_seconds: float
-    package_hash: Optional[str] = None
-    package_list_hash: Optional[str] = None
-    package_signature_hash: Optional[str] = None
-    build_fingerprint: Optional[str] = None
+    package_hash: str | None = None
+    package_list_hash: str | None = None
+    package_signature_hash: str | None = None
+    build_fingerprint: str | None = None
     fallback_used: bool = False
 
 
 def collect_inventory(
     serial: str,
     *,
-    filter_fn: Optional[Callable[[Dict[str, object]], bool]] = None,
-    progress_cb: Optional[ProgressCallback] = None,
-    use_bulk: Optional[bool] = None,
+    filter_fn: Callable[[dict[str, object | None], bool]] = None,
+    progress_cb: ProgressCallback | None = None,
+    use_bulk: bool | None = None,
     allow_fallbacks: bool = False,
-) -> Tuple[List[PackageRow], CollectionStats]:
+) -> tuple[list[PackageRow], CollectionStats]:
     """
     Collect inventory rows from ADB and enrich them with canonical metadata.
 
@@ -105,7 +107,7 @@ def collect_inventory(
     fingerprint = device_properties.get("build_fingerprint") if device_properties else None
 
     # Load canonical metadata from DB so category/profile tagging and scopes work.
-    canonical_metadata: Dict[str, Dict[str, object]] = {}
+    canonical_metadata: dict[str, dict[str, object]] = {}
     try:
         if package_names:
             canonical_metadata = snapshot_io.load_canonical_metadata(package_names) or {}
@@ -113,15 +115,15 @@ def collect_inventory(
         log.warning(f"Failed to load canonical metadata: {exc}", category="inventory")
         canonical_metadata = {}
 
-    rows: List[Dict[str, object]] = []
-    package_definitions: Dict[str, Optional[str]] = {}
+    rows: list[dict[str, object]] = []
+    package_definitions: dict[str, str | None] = {}
     progress_interval = max(20, total // 20 or 1)
     scan_start = time.time()
     split_processed = 0
     profile_enabled = os.getenv("SCYTALEDROID_INVENTORY_PROFILE", "0").strip() in {"1", "true", "yes", "on"}
     profile_calls_paths = 0
     profile_calls_meta = 0
-    profile_pkg_timings: List[Dict[str, object]] = []
+    profile_pkg_timings: list[dict[str, object]] = []
 
     for index, package_name in enumerate(package_names, start=1):
         # For correctness, always fetch full metadata/paths per package for now.
@@ -242,7 +244,7 @@ def _emit_progress(
     processed: int,
     total: int,
     elapsed: float,
-    eta: Optional[float],
+    eta: float | None,
     split_apks: int,
 ) -> None:
     if not callback:

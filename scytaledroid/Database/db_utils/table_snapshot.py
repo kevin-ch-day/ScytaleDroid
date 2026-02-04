@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, List, Optional, Sequence
+from typing import Any
 
 
 @dataclass
@@ -13,9 +14,9 @@ class ColumnInfo:
     name: str
     data_type: str
     is_nullable: bool
-    default: Optional[str]
+    default: str | None
     is_primary: bool
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 @dataclass
@@ -32,19 +33,19 @@ class TableSnapshot:
     """Container for a rendered snapshot of a database table."""
 
     name: str
-    table_type: Optional[str]
-    row_count: Optional[int]
-    max_timestamp: Optional[str]
-    timestamp_column: Optional[str]
+    table_type: str | None
+    row_count: int | None
+    max_timestamp: str | None
+    timestamp_column: str | None
     columns: Sequence[ColumnInfo]
     example_rows: Sequence[dict[str, Any]]
     indexes: Sequence[IndexInfo]
-    order_column: Optional[str]
+    order_column: str | None
 
     def render_markdown(self) -> str:
         """Return a Markdown representation of the snapshot."""
 
-        parts: List[str] = []
+        parts: list[str] = []
         parts.append(f"## table: {self.name}\n")
 
         row_count_text = str(self.row_count) if self.row_count is not None else "unknown"
@@ -85,7 +86,7 @@ class TableSnapshot:
         header_line = "| " + " | ".join(headers) + " |"
         separator_line = "| " + " | ".join(["------"] * len(headers)) + " |"
 
-        rendered_lines: List[str] = [header_line, separator_line]
+        rendered_lines: list[str] = [header_line, separator_line]
         for column in self.columns:
             default_value = column.default if column.default is not None else ""
             notes_value = column.notes or ""
@@ -121,18 +122,18 @@ class TableSnapshot:
             rendered_rows.append("| " + " | ".join(rendered) + " |")
         return "\n".join([header, separator, *rendered_rows])
 
-    def _render_indexes(self) -> List[str]:
+    def _render_indexes(self) -> list[str]:
         if not self.indexes:
             return ["- (none)"]
 
-        entries: List[str] = []
+        entries: list[str] = []
         for index in self.indexes:
             cols = ", ".join(index.columns) if index.columns else "<no columns>"
             unique_text = "yes" if index.unique else "no"
             entries.append(f"- {index.name} ON ({cols}) [unique? {unique_text}]")
         return entries
 
-    def _render_sample_queries(self) -> List[str]:
+    def _render_sample_queries(self) -> list[str]:
         table_name = self.name
         queries = [f"- `SELECT COUNT(*) FROM {table_name};`"]
         if self.order_column:

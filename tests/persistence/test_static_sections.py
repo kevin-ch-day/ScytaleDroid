@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-from typing import Mapping
-
 import pytest
-
 from scytaledroid.StaticAnalysis.cli.persistence.static_sections import persist_static_sections
 
 

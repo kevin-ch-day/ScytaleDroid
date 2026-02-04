@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
-
 from scytaledroid.StaticAnalysis.cli.flows import selection as scope
 
 
@@ -25,7 +24,7 @@ def test_select_category_scope_keeps_newest_session(monkeypatch):
         FakeGroup("pkg.beta", "Social media", "20251026-202635", artifacts=tuple()),
     )
 
-    mtimes: Dict[tuple[str, str], float] = {
+    mtimes: dict[tuple[str, str], float] = {
         ("pkg.alpha", "20251025-000000"): 1.0,
         ("pkg.alpha", "20251026-202635"): 5.0,
         ("pkg.beta", "20251026-202635"): 3.0,
@@ -40,7 +39,7 @@ def test_select_category_scope_keeps_newest_session(monkeypatch):
     monkeypatch.setattr(scope.menu_utils, "print_header", lambda *args, **kwargs: None)
     monkeypatch.setattr(scope.table_utils, "render_table", lambda *args, **kwargs: None)
 
-    logged: List[str] = []
+    logged: list[str] = []
 
     def fake_status(message: str, *, level: str = "info", **_: Any) -> str:
         logged.append(message)

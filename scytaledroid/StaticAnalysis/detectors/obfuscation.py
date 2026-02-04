@@ -5,10 +5,17 @@ from __future__ import annotations
 import re
 import struct
 import time
-from typing import Dict, Iterable, List, Tuple
+from collections.abc import Iterable
 
 from ..core.context import DetectorContext
-from ..core.findings import Badge, DetectorResult, EvidencePointer, Finding, MasvsCategory, SeverityLevel
+from ..core.findings import (
+    Badge,
+    DetectorResult,
+    EvidencePointer,
+    Finding,
+    MasvsCategory,
+    SeverityLevel,
+)
 from .base import BaseDetector, register_detector
 
 _CLASS_DESC_PATTERN = re.compile(r"L[a-zA-Z0-9_/\\$]{3,};")
@@ -52,7 +59,7 @@ class ObfuscationDetector(BaseDetector):
             "obfuscation_score": round(obfuscation_score, 3),
         }
 
-        evidence: List[EvidencePointer] = []
+        evidence: list[EvidencePointer] = []
         for entry in class_stats.get("samples", []):
             evidence.append(
                 EvidencePointer(
@@ -61,7 +68,7 @@ class ObfuscationDetector(BaseDetector):
                 )
             )
 
-        findings: List[Finding] = []
+        findings: list[Finding] = []
         status = Badge.OK
         if obfuscation_hint:
             status = Badge.WARN
@@ -98,8 +105,8 @@ class ObfuscationDetector(BaseDetector):
         )
 
 
-def _collect_dex_metrics(apk) -> List[Dict[str, object]]:
-    metrics: List[Dict[str, object]] = []
+def _collect_dex_metrics(apk) -> list[dict[str, object]]:
+    metrics: list[dict[str, object]] = []
     try:
         files = apk.get_files() or []
     except Exception:
@@ -136,10 +143,10 @@ def _read_u32(blob: bytes, offset: int) -> int:
         return 0
 
 
-def _collect_class_name_stats(index) -> Dict[str, object]:
+def _collect_class_name_stats(index) -> dict[str, object]:
     if index is None or index.is_empty():
         return {"total": 0, "short_ratio": 0.0, "samples": []}
-    candidates: List[Tuple[str, str]] = []
+    candidates: list[tuple[str, str]] = []
     for entry in index.strings:
         if entry.origin_type not in {"dex", "code"}:
             continue
@@ -149,7 +156,7 @@ def _collect_class_name_stats(index) -> Dict[str, object]:
 
     total_segments = 0
     short_segments = 0
-    samples: List[Dict[str, object]] = []
+    samples: list[dict[str, object]] = []
     for value, origin in candidates[:200]:
         cleaned = value.strip("L;")
         parts = re.split(r"[./]", cleaned)
@@ -176,8 +183,8 @@ def _count_dynamic_load_hits(index) -> int:
 
 
 def _score_obfuscation(
-    dex_metrics: Iterable[Dict[str, object]],
-    class_stats: Dict[str, object],
+    dex_metrics: Iterable[dict[str, object]],
+    class_stats: dict[str, object],
     dynamic_hits: int,
 ) -> float:
     dex_count = len(list(dex_metrics))

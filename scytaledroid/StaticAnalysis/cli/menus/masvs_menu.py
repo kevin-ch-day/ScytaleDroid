@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from statistics import median
-from typing import Optional, Dict, Mapping
 
-from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils, colors
 from scytaledroid.Database.db_core import db_queries as core_q
+from scytaledroid.Utils.DisplayUtils import (
+    colors,
+    menu_utils,
+    prompt_utils,
+    status_messages,
+    table_utils,
+)
 
 from ..reports.masvs_summary_report import fetch_db_masvs_summary, fetch_masvs_matrix
 
@@ -43,7 +49,7 @@ def _format_descriptor(entry: Mapping[str, object] | None, severity: str) -> str
     return descriptor
 
 
-def _format_cvss(entry: Dict[str, object]) -> tuple[str, str, str]:
+def _format_cvss(entry: dict[str, object]) -> tuple[str, str, str]:
     cvss = entry.get("cvss") if isinstance(entry, dict) else None
     if not isinstance(cvss, dict):
         return "—", "—", "—"
@@ -178,7 +184,7 @@ def render_masvs_summary_menu() -> None:
     prompt_utils.press_enter_to_continue()
 
 
-def _select_run_id() -> Optional[int]:
+def _select_run_id() -> int | None:
     try:
         rows = core_q.run_sql("SELECT run_id FROM runs ORDER BY run_id DESC LIMIT 10", fetch="all") or []
     except Exception:
@@ -204,7 +210,9 @@ def render_scoring_explainer_menu() -> None:
     print()
     menu_utils.print_header("Risk Scoring", "Explainer")
     try:
-        from scytaledroid.StaticAnalysis.modules.permissions.permission_console_rendering import render_scoring_legend
+        from scytaledroid.StaticAnalysis.modules.permissions.permission_console_rendering import (
+            render_scoring_legend,
+        )
         render_scoring_legend()
     except Exception as exc:
         print(status_messages.status(f"Unable to render scoring legend: {exc}", level="warn"))
@@ -229,7 +237,7 @@ def render_masvs_matrix_menu() -> None:
     warn_packages = 0
     aggregate_pass = 0
     pass_rates: list[int] = []
-    area_pass_totals: Dict[str, int] = {area: 0 for area in areas}
+    area_pass_totals: dict[str, int] = {area: 0 for area in areas}
     score_values: list[float] = []
 
     def _clip(text: str, limit: int = 44) -> str:
@@ -242,15 +250,15 @@ def render_masvs_matrix_menu() -> None:
         key=lambda item: (str(item[1].get("label") or item[0]).lower(), item[0].lower()),
     )
 
-    display_lookup: Dict[str, str] = {}
-    alias_lookup: Dict[str, str] = {}
+    display_lookup: dict[str, str] = {}
+    alias_lookup: dict[str, str] = {}
 
     for package, data in ordered_items:
         display_name = str(data.get("label") or package)
         display_lookup[package] = display_name
         alias_lookup.setdefault(display_name.lower(), package)
-        statuses: Dict[str, str] = data["status"]
-        counts: Dict[str, Dict[str, int]] = data["counts"]
+        statuses: dict[str, str] = data["status"]
+        counts: dict[str, dict[str, int]] = data["counts"]
         pass_rate = data["pass_rate"]
         top_lookup = data.get("top") or {}
 

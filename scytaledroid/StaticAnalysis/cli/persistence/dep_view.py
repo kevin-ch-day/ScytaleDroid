@@ -5,7 +5,6 @@ from __future__ import annotations
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
-
 CREATE_DEP_VIEW = """
 CREATE OR REPLACE VIEW v_dep_static_profile AS
 SELECT

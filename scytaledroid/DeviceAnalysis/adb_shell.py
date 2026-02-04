@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import subprocess
-from typing import Optional, Sequence
+from collections.abc import Sequence
 
 from scytaledroid.DeviceAnalysis import adb_client
 from scytaledroid.DeviceAnalysis.adb_errors import (
@@ -23,7 +23,7 @@ def run_shell_command(
     serial: str,
     command: Sequence[str],
     *,
-    timeout: Optional[float] = None,
+    timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Execute an adb shell command and return CompletedProcess."""
     try:
@@ -37,7 +37,7 @@ def run_shell(
     serial: str,
     command: Sequence[str],
     *,
-    timeout: Optional[float] = None,
+    timeout: float | None = None,
     check: bool = False,
 ) -> str:
     """Execute an adb shell command and return stdout."""

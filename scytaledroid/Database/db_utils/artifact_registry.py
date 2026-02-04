@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from collections.abc import Iterable, Mapping
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 from scytaledroid.Database.db_core import db_queries as core_q
 
@@ -21,25 +22,28 @@ def record_artifacts(
     status_reason: str | None = None,
 ) -> None:
     rows = []
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for entry in artifacts:
         normalized = _normalize_artifact(entry, base_path)
         if not normalized:
             continue
+        entry_origin = normalized.get("origin") or origin
+        entry_pull_status = normalized.get("pull_status") or pull_status
+        entry_status_reason = normalized.get("status_reason") or status_reason
         rows.append(
             (
                 run_id,
                 run_type,
                 normalized.get("artifact_type"),
-                origin,
+                entry_origin,
                 normalized.get("device_path"),
                 normalized.get("host_path"),
-                pull_status,
+                entry_pull_status,
                 normalized.get("sha256"),
                 normalized.get("size_bytes"),
                 normalized.get("created_at_utc") or now,
                 normalized.get("pulled_at_utc"),
-                status_reason,
+                entry_status_reason,
                 json.dumps(normalized.get("meta_json")) if normalized.get("meta_json") else None,
             )
         )
@@ -89,6 +93,9 @@ def _normalize_artifact(entry: Mapping[str, Any], base_path: Path | None) -> Map
         "created_at_utc": created_at,
         "pulled_at_utc": entry.get("pulled_at_utc"),
         "meta_json": entry.get("meta_json"),
+        "origin": entry.get("origin"),
+        "pull_status": entry.get("pull_status"),
+        "status_reason": entry.get("status_reason"),
     }
 
 

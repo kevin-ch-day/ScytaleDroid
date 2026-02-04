@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from collections.abc import Sequence
+from typing import Any
 
 from scytaledroid.Database.db_core import run_sql
 from scytaledroid.Database.db_scripts.static_run_audit import collect_static_run_counts
-from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
 from scytaledroid.StaticAnalysis.cli.reports.masvs_summary_report import fetch_masvs_matrix
+from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
 
 from .sql_helpers import coerce_datetime
 
@@ -18,7 +19,7 @@ def run_query_menu() -> None:
         print()
         menu_utils.print_header("Curated Read-only Queries")
 
-        options: Sequence[Tuple[str, str, str]] = (
+        options: Sequence[tuple[str, str, str]] = (
             ("1", "Latest session snapshot", "Show most recent session stamp and table counts."),
             ("2", "Session table counts", "Enter a session stamp to validate static tables."),
             ("3", "Runs and buckets by package", "List run metadata and scoring buckets."),
@@ -128,7 +129,7 @@ def prompt_runs_for_package() -> None:
         prompt_utils.press_enter_to_continue()
         return
 
-    table_rows: List[List[str]] = []
+    table_rows: list[list[str]] = []
     for row in rows:
         table_rows.append(
             [
@@ -178,7 +179,7 @@ def prompt_harvest_for_package() -> None:
         prompt_utils.press_enter_to_continue()
         return
 
-    table_rows: List[List[str]] = []
+    table_rows: list[list[str]] = []
     for row in rows:
         table_rows.append(
             [
@@ -193,6 +194,24 @@ def prompt_harvest_for_package() -> None:
     headers = ["APK ID", "File", "Version", "Code", "SHA256 (16)", "Harvested"]
     table_utils.render_table(headers, table_rows)
     prompt_utils.press_enter_to_continue()
+
+
+def _print_session_counts(session_stamp: str) -> None:
+    audit = collect_static_run_counts(session_stamp=session_stamp)
+    if not audit:
+        print(status_messages.status("No matching session found.", level="warn"))
+        return
+
+    print(f"Static run id : {audit.static_run_id}")
+    print(f"Run id        : {audit.run_id or '—'}")
+    print(f"Scope label   : {audit.scope_label or '—'}")
+    print()
+
+    table_rows: list[list[str]] = []
+    for table, (count, status) in audit.counts.items():
+        table_rows.append([table, str(count) if count is not None else "—", status])
+
+    table_utils.render_table(["Table", "Rows", "Status"], table_rows) 
 
 
 def prompt_masvs_by_package() -> None:
@@ -480,7 +499,7 @@ def render_session_digest(session_stamp: str | None, *, header: str | None = Non
     print(status_line)
 
 
-def _latest_session_stamp() -> Optional[str]:
+def _latest_session_stamp() -> str | None:
     row = _run_read_only(
         "SELECT session_stamp FROM static_analysis_runs ORDER BY id DESC LIMIT 1",
         fetch="one",
@@ -493,7 +512,7 @@ def _latest_session_stamp() -> Optional[str]:
 
 def _run_read_only(
     sql: str,
-    params: Optional[Tuple[Any, ...]] = None,
+    params: tuple[Any, ...] | None = None,
     *,
     fetch: str = "all",
     dictionary: bool = False,

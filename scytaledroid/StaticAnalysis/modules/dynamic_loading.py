@@ -4,16 +4,15 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping
 
 from scytaledroid.Database.db_func.harvest import dynamic_loading as dyn_db
-from scytaledroid.StaticAnalysis._androguard import APK, open_apk_safely, merge_bounds_warnings
+from scytaledroid.StaticAnalysis._androguard import merge_bounds_warnings, open_apk_safely
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .module_api import AppModuleContext, ModuleResult, StaticModule
 from .string_analysis.indexing.builder import build_string_index
-
 
 _CLASSLOADER_TOKENS: tuple[str, ...] = (
     "DexClassLoader",

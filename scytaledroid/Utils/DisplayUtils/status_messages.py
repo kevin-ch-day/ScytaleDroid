@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from . import colors, text_blocks
 from .terminal import use_ascii_ui
 

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Callable, Dict, List
+from collections.abc import Callable
 
+from scytaledroid.Database.db_core import db_config
+from scytaledroid.Database.db_utils import diagnostics
 from scytaledroid.Database.db_utils.menus import (
     health_checks,
     query_runner,
@@ -17,16 +19,13 @@ from .menu_actions import (
     maybe_clear_screen,
     seed_paper_dataset_profile,
     show_connection_and_config,
-    show_db_status,
 )
-from scytaledroid.Database.db_utils import diagnostics
-from scytaledroid.Database.db_core import db_config
 
 
 def database_menu() -> None:
     """Render the database utilities menu and dispatch to sub-menus."""
 
-    actions: Dict[str, Callable[[], None]] = {
+    actions: dict[str, Callable[[], None]] = {
         "1": seed_paper_dataset_profile,
         "2": ensure_dynamic_tier_migrations,
         "3": show_connection_and_config,
@@ -43,7 +42,7 @@ def database_menu() -> None:
         "11": health_checks.prompt_reset_static_data,
     }
 
-    options: List[MenuOption] = [
+    options: list[MenuOption] = [
         MenuOption("1", "Seed research dataset profile"),
         MenuOption("2", "Apply Tier-1 schema migrations"),
         MenuOption("3", "Check connection & show config"),

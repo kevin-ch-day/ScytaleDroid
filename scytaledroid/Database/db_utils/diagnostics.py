@@ -12,9 +12,10 @@ between the docs and code when validating deployments.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from contextlib import contextmanager
 from datetime import datetime
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
+from typing import Any
 
 from scytaledroid.Database.db_core import DatabaseEngine, database_session
 
@@ -41,7 +42,7 @@ def check_connection() -> bool:
         return False
 
 
-def get_schema_version() -> Optional[str]:
+def get_schema_version() -> str | None:
     """Return the schema version string if available."""
 
     try:
@@ -52,10 +53,10 @@ def get_schema_version() -> Optional[str]:
         return None
 
 
-def get_server_info() -> Dict[str, Any]:
+def get_server_info() -> dict[str, Any]:
     """Return a mapping with ``database``, ``version``, and ``user`` details."""
 
-    info: Dict[str, Any] = {}
+    info: dict[str, Any] = {}
     try:
         with _connected_engine() as engine:
             result = engine.fetch_one("SELECT DATABASE();")
@@ -71,10 +72,10 @@ def get_server_info() -> Dict[str, Any]:
     return info
 
 
-def check_required_tables(required_tables: list[str]) -> Dict[str, bool]:
+def check_required_tables(required_tables: list[str]) -> dict[str, bool]:
     """Return a mapping of table name → existence flag for *required_tables*."""
 
-    status: Dict[str, bool] = {}
+    status: dict[str, bool] = {}
     try:
         with _connected_engine() as engine:
             for table in required_tables:
@@ -91,7 +92,7 @@ def check_required_tables(required_tables: list[str]) -> Dict[str, bool]:
     return status
 
 
-def list_tables() -> List[str]:
+def list_tables() -> list[str]:
     """Return a sorted list of table names for the active schema."""
 
     try:
@@ -101,17 +102,17 @@ def list_tables() -> List[str]:
         print(f"[DB_UTILS] Failed to list tables: {exc}")
         return []
 
-    tables: List[str] = []
+    tables: list[str] = []
     for row in rows or []:
         if isinstance(row, (list, tuple)) and row:
             tables.append(str(row[0]))
     return sorted(tables)
 
 
-def table_counts(table_names: list[str]) -> Dict[str, Optional[int]]:
+def table_counts(table_names: list[str]) -> dict[str, int | None]:
     """Return a mapping of table name → row count (or ``None`` on failure)."""
 
-    counts: Dict[str, Optional[int]] = {}
+    counts: dict[str, int | None] = {}
     try:
         with _connected_engine() as engine:
             for table in table_names:
@@ -128,7 +129,7 @@ def table_counts(table_names: list[str]) -> Dict[str, Optional[int]]:
     return counts
 
 
-def get_table_columns(table_name: str) -> List[str] | None:
+def get_table_columns(table_name: str) -> list[str] | None:
     """Return column names for *table_name* or ``None`` if inspection fails."""
 
     try:
@@ -146,7 +147,7 @@ def get_table_columns(table_name: str) -> List[str] | None:
     return [str(row[0]) for row in rows] if rows else []
 
 
-def compare_columns(table_name: str, expected: Set[str]) -> Dict[str, List[str]]:
+def compare_columns(table_name: str, expected: set[str]) -> dict[str, list[str]]:
     """Compare actual vs *expected* columns for *table_name*."""
 
     actual = get_table_columns(table_name)
@@ -159,7 +160,7 @@ def compare_columns(table_name: str, expected: Set[str]) -> Dict[str, List[str]]
     return {"actual": actual, "unexpected": unexpected, "missing": missing}
 
 
-def build_table_snapshot(table_name: str) -> Optional[TableSnapshot]:
+def build_table_snapshot(table_name: str) -> TableSnapshot | None:
     """Collect metadata, example rows, and index info for *table_name*."""
 
     safe_name = _quote_identifier(table_name)
@@ -192,14 +193,14 @@ def build_table_snapshot(table_name: str) -> Optional[TableSnapshot]:
     )
 
 
-def _fetch_columns(db: DatabaseEngine, table_name: str) -> List[ColumnInfo]:
+def _fetch_columns(db: DatabaseEngine, table_name: str) -> list[ColumnInfo]:
     query = (
         "SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, COLUMN_KEY, "
         "EXTRA, COLUMN_COMMENT FROM information_schema.columns "
         "WHERE table_schema = DATABASE() AND table_name = %s ORDER BY ORDINAL_POSITION;"
     )
     rows = db.fetch_all_dict(query, (table_name,))
-    columns: List[ColumnInfo] = []
+    columns: list[ColumnInfo] = []
     for raw in rows:
         row = {str(key).lower(): value for key, value in raw.items()}
         default_value = row.get("column_default")
@@ -221,8 +222,8 @@ def _fetch_columns(db: DatabaseEngine, table_name: str) -> List[ColumnInfo]:
     return columns
 
 
-def _combine_notes(extra: Any, comment: Any) -> Optional[str]:
-    parts: List[str] = []
+def _combine_notes(extra: Any, comment: Any) -> str | None:
+    parts: list[str] = []
     if extra:
         parts.append(str(extra))
     if comment:
@@ -232,7 +233,7 @@ def _combine_notes(extra: Any, comment: Any) -> Optional[str]:
     return "; ".join(part for part in parts if part)
 
 
-def _fetch_row_count(db: DatabaseEngine, safe_name: str) -> Optional[int]:
+def _fetch_row_count(db: DatabaseEngine, safe_name: str) -> int | None:
     try:
         row = db.fetch_one(f"SELECT COUNT(*) FROM {safe_name};")
     except Exception as exc:  # pragma: no cover - relies on external MySQL
@@ -246,14 +247,14 @@ def _fetch_row_count(db: DatabaseEngine, safe_name: str) -> Optional[int]:
         return None
 
 
-def _fetch_indexes(db: DatabaseEngine, safe_name: str) -> List[IndexInfo]:
+def _fetch_indexes(db: DatabaseEngine, safe_name: str) -> list[IndexInfo]:
     try:
         rows = db.fetch_all_dict(f"SHOW INDEX FROM {safe_name};")
     except Exception as exc:  # pragma: no cover - relies on external MySQL
         print(f"[DB_UTILS] Failed to read indexes for {safe_name}: {exc}")
         return []
 
-    grouped: Dict[str, Dict[str, Any]] = {}
+    grouped: dict[str, dict[str, Any]] = {}
     for raw in rows:
         row = {str(key).lower(): value for key, value in raw.items()}
         key_name = str(row.get("key_name", ""))
@@ -265,7 +266,7 @@ def _fetch_indexes(db: DatabaseEngine, safe_name: str) -> List[IndexInfo]:
         column_name = str(row.get("column_name", ""))
         entry["columns"].append((seq, column_name))
 
-    indexes: List[IndexInfo] = []
+    indexes: list[IndexInfo] = []
     for name, info in grouped.items():
         columns_sorted = [col for _, col in sorted(info["columns"], key=lambda item: item[0])]
         indexes.append(IndexInfo(name=name or "<unnamed>", columns=columns_sorted, unique=info["unique"]))
@@ -273,7 +274,7 @@ def _fetch_indexes(db: DatabaseEngine, safe_name: str) -> List[IndexInfo]:
     return indexes
 
 
-def _select_order_column(columns: Sequence[ColumnInfo]) -> Optional[str]:
+def _select_order_column(columns: Sequence[ColumnInfo]) -> str | None:
     preferred = [
         "updated_at",
         "observed_at",
@@ -295,14 +296,14 @@ def _select_order_column(columns: Sequence[ColumnInfo]) -> Optional[str]:
     return None
 
 
-def _select_timestamp_column(columns: Sequence[ColumnInfo]) -> Optional[str]:
+def _select_timestamp_column(columns: Sequence[ColumnInfo]) -> str | None:
     for column in columns:
         if column.name.lower() == "updated_at":
             return column.name
     return None
 
 
-def _fetch_max_timestamp(db: DatabaseEngine, safe_name: str, column_name: str) -> Optional[str]:
+def _fetch_max_timestamp(db: DatabaseEngine, safe_name: str, column_name: str) -> str | None:
     try:
         column_expr = _quote_identifier(column_name)
         row = db.fetch_one(f"SELECT MAX({column_expr}) FROM {safe_name};")
@@ -319,7 +320,7 @@ def _fetch_max_timestamp(db: DatabaseEngine, safe_name: str, column_name: str) -
     return str(value)
 
 
-def _fetch_table_type(db: DatabaseEngine, table_name: str) -> Optional[str]:
+def _fetch_table_type(db: DatabaseEngine, table_name: str) -> str | None:
     try:
         row = db.fetch_one(
             "SELECT TABLE_TYPE FROM information_schema.tables "
@@ -336,8 +337,8 @@ def _fetch_table_type(db: DatabaseEngine, table_name: str) -> Optional[str]:
 
 
 def _fetch_example_rows(
-    db: DatabaseEngine, safe_name: str, order_column: Optional[str]
-) -> List[dict[str, Any]]:
+    db: DatabaseEngine, safe_name: str, order_column: str | None
+) -> list[dict[str, Any]]:
     if order_column:
         order_expr = _quote_identifier(order_column)
         query = f"SELECT * FROM {safe_name} ORDER BY {order_expr} DESC LIMIT 3;"
@@ -349,7 +350,7 @@ def _fetch_example_rows(
     except Exception as exc:  # pragma: no cover - relies on external MySQL
         print(f"[DB_UTILS] Failed to fetch sample rows for {safe_name}: {exc}")
         return []
-    sanitized: List[dict[str, Any]] = []
+    sanitized: list[dict[str, Any]] = []
     for row in rows:
         sanitized.append({str(key): value for key, value in row.items()})
     return sanitized

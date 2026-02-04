@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 
 def _sorted_artifacts(artifacts: list[ArtifactRecord]) -> list[ArtifactRecord]:
@@ -16,14 +16,17 @@ class ArtifactRecord:
     type: str
     sha256: str
     produced_by: str
-    size_bytes: Optional[int] = None
+    size_bytes: int | None = None
+    origin: str | None = None
+    device_path: str | None = None
+    pull_status: str | None = None
 
 
 @dataclass
 class ObserverRecord:
     observer_id: str
     status: str
-    error: Optional[str] = None
+    error: str | None = None
     artifacts: list[ArtifactRecord] = field(default_factory=list)
 
     def finalize(self) -> None:
@@ -35,8 +38,8 @@ class RunManifest:
     run_manifest_version: int
     dynamic_run_id: str
     created_at: str
-    started_at: Optional[str] = None
-    ended_at: Optional[str] = None
+    started_at: str | None = None
+    ended_at: str | None = None
     status: str = "pending"
     target: dict[str, Any] = field(default_factory=dict)
     environment: dict[str, Any] = field(default_factory=dict)
@@ -83,6 +86,9 @@ def manifest_to_dict(manifest: RunManifest) -> dict[str, Any]:
                         "sha256": artifact.sha256,
                         "size_bytes": artifact.size_bytes,
                         "produced_by": artifact.produced_by,
+                        "origin": artifact.origin,
+                        "device_path": artifact.device_path,
+                        "pull_status": artifact.pull_status,
                     }
                     for artifact in observer.artifacts
                 ],
@@ -96,6 +102,9 @@ def manifest_to_dict(manifest: RunManifest) -> dict[str, Any]:
                 "sha256": artifact.sha256,
                 "size_bytes": artifact.size_bytes,
                 "produced_by": artifact.produced_by,
+                "origin": artifact.origin,
+                "device_path": artifact.device_path,
+                "pull_status": artifact.pull_status,
             }
             for artifact in manifest.artifacts
         ],
@@ -106,6 +115,9 @@ def manifest_to_dict(manifest: RunManifest) -> dict[str, Any]:
                 "sha256": artifact.sha256,
                 "size_bytes": artifact.size_bytes,
                 "produced_by": artifact.produced_by,
+                "origin": artifact.origin,
+                "device_path": artifact.device_path,
+                "pull_status": artifact.pull_status,
             }
             for artifact in manifest.outputs
         ],

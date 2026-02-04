@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
-from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
+from scytaledroid.DynamicAnalysis.controllers.device_select import select_device
 from scytaledroid.DynamicAnalysis.plan_selection import (
     print_plan_selection_banner,
     resolve_plan_selection,
 )
 from scytaledroid.DynamicAnalysis.run_summary import print_run_summary
-from scytaledroid.DynamicAnalysis.controllers.device_select import select_device
+from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 
 
 def run_sandbox_dynamic_run(

@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import time
-from typing import Dict, Optional
-
-from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
-from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from scytaledroid.DeviceAnalysis import adb_devices
 from scytaledroid.DeviceAnalysis.services import device_service
+from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .actions import build_main_menu_options, handle_choice
 from .dashboard import (
@@ -22,8 +20,8 @@ from .dashboard import (
 def device_menu(*, return_to: str = "main") -> str:
     """Main device menu loop; returns a routing token (e.g., 'main')."""
 
-    summary_cache: Dict[str, Dict[str, Optional[str]]] = {}
-    last_refresh_ts: Optional[float] = None
+    summary_cache: dict[str, dict[str, str | None]] = {}
+    last_refresh_ts: float | None = None
 
     while True:
         devices, warnings = adb_devices.scan_devices()

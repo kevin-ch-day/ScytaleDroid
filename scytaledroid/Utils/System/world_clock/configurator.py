@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 import zoneinfo
-from typing import Callable, Dict
+from collections.abc import Callable
+from datetime import datetime
 
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 
@@ -340,7 +340,7 @@ def _handle_refresh_menu(state: WorldClockState) -> None:
         _handle_dst_schedule(state)
 
 
-_ACTION_HANDLERS: Dict[str, Callable[[WorldClockState], None]] = {
+_ACTION_HANDLERS: dict[str, Callable[[WorldClockState], None]] = {
     "1": _handle_add_or_update,
     "2": _handle_remove,
     "3": _handle_set_primary,

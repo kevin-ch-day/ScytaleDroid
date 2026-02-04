@@ -1,7 +1,8 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from importlib import import_module
 
 from scytaledroid.DeviceAnalysis.inventory.runner import InventoryDelta
+
 guard_module = import_module(
     "scytaledroid.DeviceAnalysis.device_menu.inventory_guard.ensure_recent_inventory"
 )
@@ -47,7 +48,7 @@ def test_stale_by_age_is_warn_even_with_no_changes():
 
 
 def test_guard_allows_pull_when_fresh_and_no_changes(monkeypatch):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     def _fake_inventory(_serial):
         return {"packages": []}
@@ -83,7 +84,7 @@ def test_guard_allows_pull_when_fresh_and_no_changes(monkeypatch):
 
 
 def test_guard_handles_dict_delta_without_prompt(monkeypatch):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     def _fake_inventory(_serial):
         return {"packages": []}

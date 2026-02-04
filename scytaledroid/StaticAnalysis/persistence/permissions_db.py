@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from typing import Iterable
+import re
+from collections.abc import Iterable
 
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
-import re
 
 
 def _normalize_permission_token(raw_value: str) -> tuple[str, str, bool]:

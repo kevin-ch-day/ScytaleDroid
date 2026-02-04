@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import os
 import threading
 import time
-from typing import Optional
+from dataclasses import dataclass
 
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
@@ -22,11 +21,11 @@ class ApiRuntimeState:
     detail: str | None = None
 
 
-_api_thread: Optional[threading.Thread] = None
-_api_server: Optional[object] = None
+_api_thread: threading.Thread | None = None
+_api_server: object | None = None
 _api_host = "127.0.0.1"
 _api_port = 8765
-_api_error: Optional[str] = None
+_api_error: str | None = None
 
 
 def _env_flag(name: str, default: str = "1") -> bool:
@@ -138,7 +137,7 @@ def stop_api_server() -> ApiRuntimeState:
         return api_status()
 
     try:
-        setattr(_api_server, "should_exit", True)
+        _api_server.should_exit = True
     except Exception:  # pragma: no cover - defensive
         pass
 

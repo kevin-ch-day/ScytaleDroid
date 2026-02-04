@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
 
 from . import rules
 from .models import ArtifactPlan, HarvestPlan, InventoryRow, PackagePlan
@@ -17,12 +17,12 @@ def build_harvest_plan(
 ) -> HarvestPlan:
     """Construct the harvest plan and capture policy filtering diagnostics."""
 
-    planned_packages: List[PackagePlan] = []
-    policy_filtered: Dict[str, int] = defaultdict(int)
+    planned_packages: list[PackagePlan] = []
+    policy_filtered: dict[str, int] = defaultdict(int)
     plan_logger = None
     try:
-        from scytaledroid.Utils.LoggingUtils.logging_context import RunContext, get_run_logger
         from scytaledroid.Utils.LoggingUtils import logging_events as log_events
+        from scytaledroid.Utils.LoggingUtils.logging_context import RunContext, get_run_logger
 
         run_ctx = RunContext(
             subsystem="harvest",
@@ -73,9 +73,9 @@ def _build_package_plan(
     row: InventoryRow,
     include_system_partitions: bool,
 ) -> PackagePlan:
-    readable_paths: List[str] = []
+    readable_paths: list[str] = []
     filtered = 0
-    policy_reason: Optional[str] = None
+    policy_reason: str | None = None
     for path in row.apk_paths:
         if include_system_partitions or rules.is_user_path(path):
             readable_paths.append(path)

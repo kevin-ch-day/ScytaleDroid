@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from scytaledroid.Config import app_config
+
 from ..modules import resolve_category
 
 try:  # optional dependency (CLI can run without DB)
@@ -54,14 +55,14 @@ class RepositoryArtifact:
         return "-"
 
     @property
-    def split_group_id(self) -> Optional[str]:
+    def split_group_id(self) -> str | None:
         value = self.metadata.get("split_group_id")
         if value is None:
             return None
         return str(value)
 
     @property
-    def sha256(self) -> Optional[str]:
+    def sha256(self) -> str | None:
         value = self.metadata.get("sha256")
         if isinstance(value, str) and value.strip():
             return value
@@ -84,14 +85,14 @@ class RepositoryArtifact:
         return "artifact"
 
     @property
-    def session_stamp(self) -> Optional[str]:
+    def session_stamp(self) -> str | None:
         value = self.metadata.get("session_stamp")
         if isinstance(value, str) and value.strip():
             return value
         return None
 
     @property
-    def apk_id(self) -> Optional[str]:
+    def apk_id(self) -> str | None:
         value = self.metadata.get("apk_id")
         if value is None:
             return None
@@ -110,11 +111,11 @@ class ArtifactGroup:
     group_key: str
     package_name: str
     version_display: str
-    session_stamp: Optional[str]
-    artifacts: Tuple[RepositoryArtifact, ...]
+    session_stamp: str | None
+    artifacts: tuple[RepositoryArtifact, ...]
 
     @property
-    def base_artifact(self) -> Optional[RepositoryArtifact]:
+    def base_artifact(self) -> RepositoryArtifact | None:
         for artifact in self.artifacts:
             if not artifact.is_split_member:
                 return artifact
@@ -141,7 +142,7 @@ def _load_metadata(apk_path: Path) -> Mapping[str, object]:
     return {}
 
 
-def discover_repository_artifacts(base_dir: Optional[Path] = None) -> List[RepositoryArtifact]:
+def discover_repository_artifacts(base_dir: Path | None = None) -> list[RepositoryArtifact]:
     """Return every APK artifact tracked within the repository."""
 
     if base_dir is None:
@@ -149,7 +150,7 @@ def discover_repository_artifacts(base_dir: Optional[Path] = None) -> List[Repos
     else:
         base_dir = base_dir.resolve()
 
-    artifacts: List[RepositoryArtifact] = []
+    artifacts: list[RepositoryArtifact] = []
     if not base_dir.exists():
         return artifacts
 
@@ -164,23 +165,23 @@ def discover_repository_artifacts(base_dir: Optional[Path] = None) -> List[Repos
 
 
 def group_artifacts(
-    base_dir: Optional[Path] = None,
+    base_dir: Path | None = None,
     *,
-    predicate: Optional[Callable[[ArtifactGroup], bool]] = None,
-) -> List[ArtifactGroup]:
+    predicate: Callable[[ArtifactGroup | None, bool]] = None,
+) -> list[ArtifactGroup]:
     """Group repository artifacts by split group id (base + splits)."""
 
     artifacts = discover_repository_artifacts(base_dir)
     if not artifacts:
         return []
 
-    buckets: Dict[str, List[RepositoryArtifact]] = {}
+    buckets: dict[str, list[RepositoryArtifact]] = {}
 
     for artifact in artifacts:
         group_key = _group_key_for_artifact(artifact)
         buckets.setdefault(group_key, []).append(artifact)
 
-    groups: List[ArtifactGroup] = []
+    groups: list[ArtifactGroup] = []
     for key, members in buckets.items():
         members.sort(key=lambda item: (item.is_split_member, item.display_path))
         package_name = members[0].package_name if members else "unknown"
@@ -229,10 +230,10 @@ def _group_key_for_artifact(artifact: RepositoryArtifact) -> str:
     return f"path-{artifact.display_path}"
 
 
-def _path_prefix_group_key(artifact: RepositoryArtifact) -> Optional[str]:
+def _path_prefix_group_key(artifact: RepositoryArtifact) -> str | None:
     """Best-effort grouping based on common filename prefixes (base + splits)."""
 
-    def _coerce_prefix(token: str) -> Optional[str]:
+    def _coerce_prefix(token: str) -> str | None:
         normalised = token.replace("\\", "/")
         parent, _, name = normalised.rpartition("/")
         if not name or "__" not in name:
@@ -260,7 +261,7 @@ def _path_prefix_group_key(artifact: RepositoryArtifact) -> Optional[str]:
     return None
 
 
-def _extract_app_label(group: ArtifactGroup) -> Optional[str]:
+def _extract_app_label(group: ArtifactGroup) -> str | None:
     for artifact in group.artifacts:
         label = artifact.metadata.get("app_label")
         if isinstance(label, str) and label.strip():
@@ -279,7 +280,7 @@ def _extract_app_label(group: ArtifactGroup) -> Optional[str]:
     return None
 
 
-def _hydrate_app_labels(packages: Dict[str, Dict[str, object]]) -> None:
+def _hydrate_app_labels(packages: dict[str, dict[str, object]]) -> None:
     if run_sql is None:
         return
     missing = [name for name, data in packages.items() if not data.get("app_label")]
@@ -304,10 +305,10 @@ def _hydrate_app_labels(packages: Dict[str, Dict[str, object]]) -> None:
             packages[package]["app_label"] = label.strip()
 
 
-def list_packages(groups: Sequence[ArtifactGroup]) -> List[tuple[str, str, int, Optional[str]]]:
+def list_packages(groups: Sequence[ArtifactGroup]) -> list[tuple[str, str, int, str | None]]:
     """Return sorted unique package names with representative versions and labels."""
 
-    snapshot: Dict[str, Dict[str, object]] = {}
+    snapshot: dict[str, dict[str, object]] = {}
     for group in groups:
         entry = snapshot.setdefault(
             group.package_name,
@@ -325,7 +326,7 @@ def list_packages(groups: Sequence[ArtifactGroup]) -> List[tuple[str, str, int, 
 
     _hydrate_app_labels(snapshot)
 
-    packages: List[tuple[str, str, int, Optional[str]]] = []
+    packages: list[tuple[str, str, int, str | None]] = []
     for package_name, data in snapshot.items():
         versions = data.get("versions") or set()
         if isinstance(versions, set) and versions:
@@ -336,7 +337,7 @@ def list_packages(groups: Sequence[ArtifactGroup]) -> List[tuple[str, str, int, 
             version_label = fallback if isinstance(fallback, str) else "-"
         app_label = data.get("app_label")
         if isinstance(app_label, str) and app_label.strip():
-            label_value: Optional[str] = app_label.strip()
+            label_value: str | None = app_label.strip()
         else:
             label_value = None
         packages.append((package_name, version_label, int(data.get("count", 0)), label_value))
@@ -345,7 +346,7 @@ def list_packages(groups: Sequence[ArtifactGroup]) -> List[tuple[str, str, int, 
     return packages
 
 
-def load_profile_map(groups: Sequence[ArtifactGroup]) -> Dict[str, str]:
+def load_profile_map(groups: Sequence[ArtifactGroup]) -> dict[str, str]:
     """Return package -> profile label map for the provided artifact groups."""
 
     if not run_sql or not groups:
@@ -368,7 +369,7 @@ def load_profile_map(groups: Sequence[ArtifactGroup]) -> Dict[str, str]:
     except Exception:
         return {}
 
-    profile_map: Dict[str, str] = {}
+    profile_map: dict[str, str] = {}
     for row in rows or []:
         pkg = str(row.get("package_name") or "").strip().lower()
         label = str(row.get("display_name") or "").strip()
@@ -377,7 +378,7 @@ def load_profile_map(groups: Sequence[ArtifactGroup]) -> Dict[str, str]:
     return profile_map
 
 
-def load_display_name_map(groups: Sequence[ArtifactGroup]) -> Dict[str, str]:
+def load_display_name_map(groups: Sequence[ArtifactGroup]) -> dict[str, str]:
     """Return package -> display name map for the provided artifact groups."""
 
     if not run_sql or not groups:
@@ -398,7 +399,7 @@ def load_display_name_map(groups: Sequence[ArtifactGroup]) -> Dict[str, str]:
     except Exception:
         return {}
 
-    display_map: Dict[str, str] = {}
+    display_map: dict[str, str] = {}
     for row in rows or []:
         pkg = str(row.get("package_name") or "").strip().lower()
         label = str(row.get("display_name") or "").strip()
@@ -407,11 +408,11 @@ def load_display_name_map(groups: Sequence[ArtifactGroup]) -> Dict[str, str]:
     return display_map
 
 
-def list_categories(groups: Sequence[ArtifactGroup]) -> List[tuple[str, int]]:
+def list_categories(groups: Sequence[ArtifactGroup]) -> list[tuple[str, int]]:
     """Return sorted unique categories with unique package counts."""
 
     profile_map = load_profile_map(groups)
-    tally: Dict[str, set[str]] = {}
+    tally: dict[str, set[str]] = {}
     for group in groups:
         label = (
             profile_map.get(group.package_name.lower())

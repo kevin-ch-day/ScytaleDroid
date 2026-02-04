@@ -3,23 +3,19 @@
 from __future__ import annotations
 
 import time
-from typing import Dict, Generic, Optional, Tuple, TypeVar
-
-
-T = TypeVar("T")
-CacheKey = Tuple[str, str]
+CacheKey = tuple[str, str]
 
 DEFAULT_TTL_SECONDS = 300.0
 
 
-class TTLCache(Generic[T]):
+class TTLCache[T]:
     """Simple TTL cache keyed by (serial, package)."""
 
     def __init__(self, ttl_seconds: float = DEFAULT_TTL_SECONDS) -> None:
         self._ttl_seconds = ttl_seconds
-        self._entries: Dict[CacheKey, Tuple[float, T]] = {}
+        self._entries: dict[CacheKey, tuple[float, T]] = {}
 
-    def get(self, key: CacheKey) -> Optional[T]:
+    def get(self, key: CacheKey) -> T | None:
         entry = self._entries.get(key)
         if entry is None:
             return None
@@ -32,7 +28,7 @@ class TTLCache(Generic[T]):
     def set(self, key: CacheKey, value: T) -> None:
         self._entries[key] = (time.monotonic(), value)
 
-    def clear(self, serial: Optional[str] = None) -> None:
+    def clear(self, serial: str | None = None) -> None:
         if serial is None:
             self._entries.clear()
             return
@@ -42,4 +38,4 @@ class TTLCache(Generic[T]):
 
 
 PACKAGE_PATH_CACHE: TTLCache[list[str]] = TTLCache()
-PACKAGE_META_CACHE: TTLCache[dict[str, Optional[str]]] = TTLCache()
+PACKAGE_META_CACHE: TTLCache[dict[str, str | None]] = TTLCache()

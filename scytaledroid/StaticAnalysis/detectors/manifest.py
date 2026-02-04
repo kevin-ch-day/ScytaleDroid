@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from time import perf_counter
-from typing import Mapping, Sequence
 from xml.etree import ElementTree
 
 from ..core.context import DetectorContext
@@ -559,4 +559,3 @@ class ManifestBaselineDetector(BaseDetector):
 
 
 __all__ = ["ManifestBaselineDetector"]
-

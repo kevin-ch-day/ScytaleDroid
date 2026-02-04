@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple
-
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis import adb_client
 from scytaledroid.DeviceAnalysis.adb_shell import ADB_TIMEOUT_DISCOVERY
 
 
-def scan_devices() -> Tuple[List[Dict[str, Optional[str]]], List[str]]:
+def scan_devices() -> tuple[list[dict[str, str | None]], list[str]]:
     """Return devices and any informational warnings gathered during discovery."""
     adb_bin = adb_client.get_adb_binary()
-    warnings: List[str] = []
+    warnings: list[str] = []
     if adb_bin is None:
         warnings.append(
             "adb binary not found on PATH. Install Android platform tools or update PATH."
@@ -44,7 +42,7 @@ def scan_devices() -> Tuple[List[Dict[str, Optional[str]]], List[str]]:
             "ADB reports 'no permissions' – ensure udev rules or USB debugging permissions are granted."
         )
 
-    devices: List[Dict[str, Optional[str]]] = []
+    devices: list[dict[str, str | None]] = []
     for line in stdout.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("List of devices"):
@@ -53,7 +51,7 @@ def scan_devices() -> Tuple[List[Dict[str, Optional[str]]], List[str]]:
         parts = stripped.split()
         serial = parts[0]
         state = parts[1] if len(parts) > 1 else "unknown"
-        details: Dict[str, Optional[str]] = {
+        details: dict[str, str | None] = {
             "serial": serial,
             "state": state,
             "model": None,
@@ -81,13 +79,13 @@ def scan_devices() -> Tuple[List[Dict[str, Optional[str]]], List[str]]:
     return devices, warnings
 
 
-def list_devices() -> List[Dict[str, Optional[str]]]:
+def list_devices() -> list[dict[str, str | None]]:
     """Return the list of devices reported by ``adb devices -l``."""
     devices, _ = scan_devices()
     return devices
 
 
-def get_device_label(device: Dict[str, Optional[str]]) -> str:
+def get_device_label(device: dict[str, str | None]) -> str:
     """Return a short human-readable label for a device entry."""
     model = device.get("model") or device.get("device")
     state = device.get("state", "unknown")
@@ -97,7 +95,7 @@ def get_device_label(device: Dict[str, Optional[str]]) -> str:
     return f"{serial} - {state.upper()}"
 
 
-def _fetch_all_properties(serial: str) -> Dict[str, str]:
+def _fetch_all_properties(serial: str) -> dict[str, str]:
     """Return the full ``getprop`` dictionary for the provided device."""
     try:
         completed = adb_client.run_shell_command(serial, ["getprop"])
@@ -107,7 +105,7 @@ def _fetch_all_properties(serial: str) -> Dict[str, str]:
     if completed.returncode != 0:
         return {}
 
-    props: Dict[str, str] = {}
+    props: dict[str, str] = {}
     for raw_line in completed.stdout.splitlines():
         line = raw_line.strip()
         if not line.startswith("[") or "]" not in line:
@@ -123,7 +121,7 @@ def _fetch_all_properties(serial: str) -> Dict[str, str]:
     return props
 
 
-def _is_emulator(props: Dict[str, str]) -> bool:
+def _is_emulator(props: dict[str, str]) -> bool:
     """Attempt to determine whether the device is an emulator."""
     flag = props.get("ro.boot.qemu", "").strip().lower()
     if flag in {"1", "true", "yes"}:
@@ -145,7 +143,7 @@ def _is_emulator(props: Dict[str, str]) -> bool:
     return False
 
 
-def get_basic_properties(serial: str) -> Dict[str, str]:
+def get_basic_properties(serial: str) -> dict[str, str]:
     """Return curated device properties plus derived metadata."""
     props = _fetch_all_properties(serial)
     if not props:
@@ -161,7 +159,7 @@ def get_basic_properties(serial: str) -> Dict[str, str]:
             "ro.build.version.security_patch": "security_patch_level",
         }
 
-    result: Dict[str, str] = {}
+    result: dict[str, str] = {}
     for prop, label in mapping.items():
         value = props.get(prop)
         if value:
@@ -203,7 +201,7 @@ def get_play_services_version(serial: str) -> str | None:
     return None
 
 
-def build_device_summary(device: Dict[str, Optional[str]]) -> Dict[str, Optional[str]]:
+def build_device_summary(device: dict[str, str | None]) -> dict[str, str | None]:
     """Attach basic properties and derived metadata to a device listing."""
     from scytaledroid.DeviceAnalysis.device_status import get_device_stats
 

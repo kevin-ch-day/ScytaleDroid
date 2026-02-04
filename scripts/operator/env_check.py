@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
-import shutil, sys, json, subprocess
 import importlib
+import json
+import shutil
+import subprocess
+import sys
+
 
 def which(cmd):
     p = shutil.which(cmd)

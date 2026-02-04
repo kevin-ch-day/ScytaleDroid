@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Mapping, Optional
+from collections.abc import Mapping
 from xml.etree import ElementTree
 
 from scytaledroid.StaticAnalysis._androguard import APK
@@ -63,7 +63,7 @@ def build_manifest_flags(root: ElementTree.Element) -> ManifestFlags:
     )
 
 
-def extract_compile_sdk(root: ElementTree.Element) -> Optional[str]:
+def extract_compile_sdk(root: ElementTree.Element) -> str | None:
     """Best-effort extraction of compile SDK metadata from the manifest."""
 
     value = root.get(f"{_ANDROID_NS}compileSdkVersion") or root.get("platformBuildVersionCode")

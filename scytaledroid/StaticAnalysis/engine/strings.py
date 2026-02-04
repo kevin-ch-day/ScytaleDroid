@@ -5,14 +5,15 @@ Lightweight helpers for extracting and summarising string-analysis signals.
 
 from __future__ import annotations
 
-from collections import Counter, defaultdict
-from contextlib import redirect_stderr, redirect_stdout
 import io
 import math
 import os
-from typing import Dict, Iterable, List, Mapping, MutableMapping
+from collections import Counter, defaultdict
+from collections.abc import Mapping, MutableMapping
+from contextlib import redirect_stderr, redirect_stdout
 
-from scytaledroid.StaticAnalysis._androguard import APK, open_apk_safely
+from scytaledroid.StaticAnalysis._androguard import open_apk_safely
+from scytaledroid.Utils.LoggingUtils import logging_engine
 
 from ..modules.string_analysis import (
     BUCKET_ORDER,
@@ -27,13 +28,21 @@ from ..modules.string_analysis.constants import (
     DOCUMENTARY_ROOTS,
     FILE_URI_PATTERN,
 )
-from scytaledroid.Utils.LoggingUtils import logging_engine
-from .strings_capture import _extract_bounds_warnings, _run_with_fd_capture, _summarize_bounds_warnings
-from .strings_detectors import _classify_analytics, _classify_token, _detect_cloud_refs, _detect_endpoints
+from .strings_capture import (
+    _extract_bounds_warnings,
+    _run_with_fd_capture,
+    _summarize_bounds_warnings,
+)
+from .strings_detectors import (
+    _classify_analytics,
+    _classify_token,
+    _detect_cloud_refs,
+    _detect_endpoints,
+)
 from .strings_helpers import (
     _detect_jwt,
-    _env_flag,
     _entropy_bucket,
+    _env_flag,
     _mask_value,
     _normalise_src,
     _short_hash,
@@ -175,10 +184,10 @@ def analyse_strings(
             "SCYTALEDROID_STRINGS_INCLUDE_HTTPS_RISK", False
         )
 
-    counts: Dict[str, int] = {bucket: 0 for bucket in BUCKET_ORDER}
+    counts: dict[str, int] = {bucket: 0 for bucket in BUCKET_ORDER}
     counts.setdefault("trailing_punct_trimmed", 0)
     extra_counts: Counter[str] = Counter()
-    samples: Dict[str, List[StringHit]] = defaultdict(list)
+    samples: dict[str, list[StringHit]] = defaultdict(list)
     noise_counts: Counter[str] = Counter()
     regex_skipped = 0
 
@@ -419,13 +428,13 @@ def analyse_strings(
             counts["api_keys"] += 1
             extra_counts["jwt_candidate"] += 1
 
-    raw_samples: Dict[str, List[StringHit]] = {
+    raw_samples: dict[str, list[StringHit]] = {
         bucket: list(samples.get(bucket, []))
         for bucket in BUCKET_ORDER
         if samples.get(bucket)
     }
 
-    ordered_samples: Dict[str, List[Mapping[str, object]]] = {}
+    ordered_samples: dict[str, list[Mapping[str, object]]] = {}
     for bucket in BUCKET_ORDER:
         hits = samples.get(bucket)
         if not hits:

@@ -3,13 +3,12 @@
 
 from __future__ import annotations
 
-from xml.etree import ElementTree as ET
-from typing import Dict, List, Tuple
 import re
+from xml.etree import ElementTree as ET
 
 from scytaledroid.StaticAnalysis._androguard import APK, open_apk_safely
-from scytaledroid.StaticAnalysis.engine.strings_capture import _run_with_fd_capture
 from scytaledroid.StaticAnalysis.engine import aapt2_fallback
+from scytaledroid.StaticAnalysis.engine.strings_capture import _run_with_fd_capture
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 _ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
@@ -23,7 +22,7 @@ def _silent_apk_call(callable_obj, default):
         return default
 
 
-def _extract_declared_permissions(apk: APK) -> List[Tuple[str, str]]:
+def _extract_declared_permissions(apk: APK) -> list[tuple[str, str]]:
     """Return manifest declared permissions with their element type."""
 
     try:
@@ -36,7 +35,7 @@ def _extract_declared_permissions(apk: APK) -> List[Tuple[str, str]]:
         names = sorted(set(_silent_apk_call(apk.get_permissions, []) or []))
         return [(name, "uses-permission") for name in names]
 
-    declared: List[Tuple[str, str]] = []
+    declared: list[tuple[str, str]] = []
     for element in root.iter():
         tag = element.tag.split("}")[-1]
         if tag not in ("uses-permission", "uses-permission-sdk-23"):
@@ -46,7 +45,7 @@ def _extract_declared_permissions(apk: APK) -> List[Tuple[str, str]]:
             declared.append((name, tag))
 
     seen = set()
-    ordered: List[Tuple[str, str]] = []
+    ordered: list[tuple[str, str]] = []
     for item in declared:
         if item not in seen:
             seen.add(item)
@@ -57,7 +56,7 @@ def _extract_declared_permissions(apk: APK) -> List[Tuple[str, str]]:
 
 def collect_permissions_and_sdk(
     apk_path: str,
-) -> Tuple[List[Tuple[str, str]], List[Dict[str, str | None]], Dict[str, str | None]]:
+) -> tuple[list[tuple[str, str]], list[dict[str, str | None]], dict[str, str | None]]:
     """Collect declared permissions, custom definitions and SDK info."""
 
     fallback_used = False
@@ -103,7 +102,7 @@ def collect_permissions_and_sdk(
     except Exception:
         declared = []
 
-    defined: List[Dict[str, str | None]] = []
+    defined: list[dict[str, str | None]] = []
     try:
         for entry in _silent_apk_call(apk.get_declared_permissions, ()) or ():
             name = entry.get("name") or entry.get("android:name")

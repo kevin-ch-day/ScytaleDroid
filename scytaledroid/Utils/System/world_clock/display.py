@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
+import zoneinfo
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
-
-import zoneinfo
 
 from scytaledroid.Utils.DisplayUtils import colors, status_messages, table_utils
 
@@ -28,8 +26,8 @@ class ClockSnapshot:
     utc_offset_minutes: int
     category: str
     dst_status: str
-    dst_next_change: Optional[datetime]
-    dst_offset_change: Optional[int]
+    dst_next_change: datetime | None
+    dst_offset_change: int | None
 
 
 def format_offset(dt: datetime) -> tuple[str, str, int]:
@@ -50,9 +48,9 @@ def format_offset(dt: datetime) -> tuple[str, str, int]:
 
 
 def compute_dst_details(
-    tz: Optional[zoneinfo.ZoneInfo],
+    tz: zoneinfo.ZoneInfo | None,
     reference_utc: datetime,
-) -> tuple[str, Optional[datetime], Optional[int]]:
+) -> tuple[str, datetime | None, int | None]:
     if tz is None:
         return "unknown", None, None
 
@@ -69,8 +67,8 @@ def compute_dst_details(
     active = bool(dst_delta and dst_delta.total_seconds())
     status = "daylight" if active else "standard"
 
-    next_change: Optional[datetime] = None
-    offset_change: Optional[int] = None
+    next_change: datetime | None = None
+    offset_change: int | None = None
     for hours in range(1, 24 * 366 + 1):
         candidate_utc = reference_utc + timedelta(hours=hours)
         candidate_local = candidate_utc.astimezone(tz)
@@ -87,14 +85,14 @@ def compute_dst_details(
 
 
 def snapshot_clocks(
-    clocks: Dict[str, str],
+    clocks: dict[str, str],
     *,
-    primary: Optional[str],
+    primary: str | None,
     category: str,
     reference: ClockReference,
-) -> List[ClockSnapshot]:
+) -> list[ClockSnapshot]:
     anchor_utc = reference.utc
-    snapshots: List[ClockSnapshot] = []
+    snapshots: list[ClockSnapshot] = []
 
     for label, timezone_name in sorted(
         clocks.items(),
@@ -136,7 +134,7 @@ def snapshot_clocks(
     return snapshots
 
 
-def featured_snapshots(reference: ClockReference) -> List[ClockSnapshot]:
+def featured_snapshots(reference: ClockReference) -> list[ClockSnapshot]:
     featured = {label: tz for label, tz in featured_timezones()}
     return snapshot_clocks(
         featured,
@@ -182,11 +180,11 @@ def friendly_zone_label(timezone_name: str) -> str:
 
 
 def collect_snapshot_sets(
-    clocks: Dict[str, str],
+    clocks: dict[str, str],
     *,
-    primary: Optional[str],
+    primary: str | None,
     reference: ClockReference,
-) -> Tuple[List[ClockSnapshot], List[ClockSnapshot], List[ClockSnapshot]]:
+) -> tuple[list[ClockSnapshot], list[ClockSnapshot], list[ClockSnapshot]]:
     configured = snapshot_clocks(
         clocks,
         primary=primary,
@@ -196,7 +194,7 @@ def collect_snapshot_sets(
     featured = featured_snapshots(reference)
 
     configured_labels = {snapshot.label for snapshot in configured}
-    combined: List[ClockSnapshot] = list(configured)
+    combined: list[ClockSnapshot] = list(configured)
     combined.extend(
         snapshot for snapshot in featured if snapshot.label not in configured_labels
     )
@@ -218,8 +216,8 @@ def collect_snapshot_sets(
 
 def format_dst_status_text(
     status: str,
-    next_change: Optional[datetime],
-    offset_change: Optional[int],
+    next_change: datetime | None,
+    offset_change: int | None,
     *,
     use_color: bool = False,
 ) -> str:
@@ -264,10 +262,10 @@ def format_display_time(dt: datetime) -> str:
 
 
 def render_clock_overview(
-    clocks: Dict[str, str],
+    clocks: dict[str, str],
     *,
-    primary: Optional[str],
-    primary_timezone: Optional[str],
+    primary: str | None,
+    primary_timezone: str | None,
     reference: ClockReference,
 ) -> None:
     """Render the configured clocks in a professional table with context."""
@@ -306,8 +304,8 @@ def render_clock_overview(
             return "Primary"
         return "Configured"
 
-    rows: List[List[str]] = []
-    primary_snapshot: Optional[ClockSnapshot] = None
+    rows: list[list[str]] = []
+    primary_snapshot: ClockSnapshot | None = None
     for snapshot in combined:
         if snapshot.is_primary and snapshot.category == "configured":
             primary_snapshot = snapshot
@@ -333,9 +331,9 @@ def render_clock_overview(
 
 
 def _print_primary_details(
-    primary_label: Optional[str],
-    primary_timezone: Optional[str],
-    snapshot: Optional[ClockSnapshot],
+    primary_label: str | None,
+    primary_timezone: str | None,
+    snapshot: ClockSnapshot | None,
 ) -> None:
     if not primary_label or not primary_timezone:
         return
@@ -394,7 +392,7 @@ def _print_reference_details(reference: ClockReference) -> None:
 
 
 def _render_snapshot_summary(
-    snapshots: List[ClockSnapshot], *, use_color: bool = False
+    snapshots: list[ClockSnapshot], *, use_color: bool = False
 ) -> None:
     if not snapshots:
         return
@@ -415,9 +413,9 @@ def _render_snapshot_summary(
 
 
 def render_dst_schedule(
-    clocks: Dict[str, str],
+    clocks: dict[str, str],
     *,
-    primary: Optional[str],
+    primary: str | None,
     reference: ClockReference,
 ) -> None:
     snapshots = snapshot_clocks(
@@ -433,7 +431,7 @@ def render_dst_schedule(
 
     use_color = colors.colors_enabled()
     headers = ["City", "Country", "Zone", "DST status"]
-    rows: List[List[str]] = []
+    rows: list[list[str]] = []
 
     for snapshot in snapshots:
         zone_label = friendly_zone_label(snapshot.timezone)
@@ -457,7 +455,7 @@ def render_dst_schedule(
     _print_dst_transitions(snapshots)
 
 
-def _print_dst_transitions(snapshots: List[ClockSnapshot]) -> None:
+def _print_dst_transitions(snapshots: list[ClockSnapshot]) -> None:
     upcoming = [
         snap
         for snap in snapshots

@@ -4,20 +4,19 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from typing import Dict, Iterable, List, Mapping, Optional, Tuple
+from collections.abc import Iterable, Mapping
 
+from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.StaticAnalysis.analytics.masvs_quality import (
     compute_quality_metrics,
 )
-
-from scytaledroid.Database.db_core import db_queries as core_q
 
 from ..core.cvss_v4 import parse_vector, score_vector, severity_band
 
 _AREA_ORDER = ("NETWORK", "PLATFORM", "PRIVACY", "STORAGE")
 
 
-def _empty_area(area: str) -> Dict[str, object]:
+def _empty_area(area: str) -> dict[str, object]:
     return {
         "area": area,
         "high": 0,
@@ -45,7 +44,7 @@ def _empty_area(area: str) -> Dict[str, object]:
     }
 
 
-def _finalise_cvss(entry: Mapping[str, object]) -> Dict[str, object]:
+def _finalise_cvss(entry: Mapping[str, object]) -> dict[str, object]:
     cvss = dict(entry)
     score_sum = float(cvss.pop("_score_sum", 0.0))
     score_count = int(cvss.pop("_score_count", 0))
@@ -56,7 +55,7 @@ def _finalise_cvss(entry: Mapping[str, object]) -> Dict[str, object]:
     cvss["scored_count"] = score_count
     cvss["total"] = score_count + int(cvss.get("missing", 0))
     band_counts = cvss.get("band_counts")
-    distribution: Dict[str, float] = {}
+    distribution: dict[str, float] = {}
     if isinstance(band_counts, Counter):
         band_counts = dict(band_counts)
     if isinstance(band_counts, Mapping):
@@ -75,7 +74,7 @@ def _finalise_cvss(entry: Mapping[str, object]) -> Dict[str, object]:
     return cvss
 
 
-def _cvss_band_rank(band: Optional[str]) -> int:
+def _cvss_band_rank(band: str | None) -> int:
     band_order = {
         "Critical": 5,
         "High": 4,
@@ -87,7 +86,7 @@ def _cvss_band_rank(band: Optional[str]) -> int:
     return band_order.get(band or "", 0)
 
 
-def _cvss_scope_rank(vector: Optional[str]) -> int:
+def _cvss_scope_rank(vector: str | None) -> int:
     if not vector:
         return 0
     metrics = parse_vector(vector)
@@ -98,7 +97,7 @@ def _cvss_scope_rank(vector: Optional[str]) -> int:
     return max(values) if values else 0
 
 
-def _cvss_impact_tuple(vector: Optional[str]) -> tuple[int, int]:
+def _cvss_impact_tuple(vector: str | None) -> tuple[int, int]:
     if not vector:
         return (0, 0)
     metrics = parse_vector(vector)
@@ -111,11 +110,11 @@ def _cvss_impact_tuple(vector: Optional[str]) -> tuple[int, int]:
 
 def _cvss_candidate_key(
     score: float,
-    band: Optional[str],
+    band: str | None,
     scope_rank: int,
     impact: tuple[int, int],
-    vector: Optional[str],
-    identifier: Optional[str],
+    vector: str | None,
+    identifier: str | None,
 ) -> tuple:
     impact_high, impact_medium = impact
     return (
@@ -130,7 +129,7 @@ def _cvss_candidate_key(
     )
 
 
-def _merge_counts(entry: Dict[str, object], row: Mapping[str, object]) -> None:
+def _merge_counts(entry: dict[str, object], row: Mapping[str, object]) -> None:
     high = int(row.get("high") or 0)
     medium = int(row.get("medium") or 0)
     low = int(row.get("low") or 0)
@@ -143,13 +142,13 @@ def _merge_counts(entry: Dict[str, object], row: Mapping[str, object]) -> None:
     entry["control_count"] = high + medium + low + info
 
 
-def _merge_top(top_lookup: Mapping[str, Mapping[str, object]], area: str, entry: Dict[str, object]) -> None:
+def _merge_top(top_lookup: Mapping[str, Mapping[str, object]], area: str, entry: dict[str, object]) -> None:
     top = top_lookup.get(area, {})
     entry["top_high"] = top.get("High") if isinstance(top, Mapping) else None
     entry["top_medium"] = top.get("Medium") if isinstance(top, Mapping) else None
 
 
-def _integrate_cvss(cvss_rows: Iterable[Mapping[str, object]], summary: Dict[str, Dict[str, object]]) -> None:
+def _integrate_cvss(cvss_rows: Iterable[Mapping[str, object]], summary: dict[str, dict[str, object]]) -> None:
     for row in cvss_rows:
         area = (row.get("masvs") or "").upper()
         if not area:
@@ -205,10 +204,10 @@ def _build_summary(
     counts_rows: Iterable[Mapping[str, object]],
     top_rows: Iterable[Mapping[str, object]],
     cvss_rows: Iterable[Mapping[str, object]],
-) -> List[Dict[str, object]]:
-    summary: Dict[str, Dict[str, object]] = {}
+) -> list[dict[str, object]]:
+    summary: dict[str, dict[str, object]] = {}
 
-    top_lookup: Dict[str, Dict[str, Dict[str, object]]] = {}
+    top_lookup: dict[str, dict[str, dict[str, object]]] = {}
     for row in top_rows:
         area = (row.get("masvs") or "").upper()
         if not area:
@@ -244,7 +243,7 @@ def _build_summary(
             entry["cvss"] = _finalise_cvss(cvss_meta)
         entry["quality"] = compute_quality_metrics(entry)
 
-    ordered: List[Dict[str, object]] = []
+    ordered: list[dict[str, object]] = []
     for area in _AREA_ORDER:
         if area in summary:
             ordered.append(summary[area])
@@ -256,7 +255,7 @@ def _build_summary(
     return ordered
 
 
-def fetch_db_masvs_summary(run_id: Optional[int] = None) -> Optional[Tuple[int, List[Dict[str, object]]]]:
+def fetch_db_masvs_summary(run_id: int | None = None) -> tuple[int, list[dict[str, object | None]]]:
     try:
         if run_id is None:
             row = core_q.run_sql("SELECT MAX(run_id) FROM runs", fetch="one")
@@ -321,7 +320,7 @@ def fetch_db_masvs_summary(run_id: Optional[int] = None) -> Optional[Tuple[int, 
     return run_id, summary
 
 
-def fetch_masvs_matrix() -> Dict[str, Dict[str, object]]:
+def fetch_masvs_matrix() -> dict[str, dict[str, object]]:
     """Return MASVS pass/fail matrix keyed by package using latest run per package."""
 
     try:
@@ -381,7 +380,7 @@ def fetch_masvs_matrix() -> Dict[str, Dict[str, object]]:
     except Exception:
         return {}
 
-    top_lookup: Dict[tuple[str, str], Dict[str, Dict[str, object]]] = {}
+    top_lookup: dict[tuple[str, str], dict[str, dict[str, object]]] = {}
     for row in top_rows:
         package = row.get("package")
         area = (row.get("masvs") or "").upper()
@@ -400,7 +399,7 @@ def fetch_masvs_matrix() -> Dict[str, Dict[str, object]]:
             },
         )
 
-    matrix: Dict[str, Dict[str, object]] = {}
+    matrix: dict[str, dict[str, object]] = {}
     for row in rows:
         package = row.get("package")
         area = (row.get("masvs") or "").upper()
@@ -461,7 +460,7 @@ def fetch_masvs_matrix() -> Dict[str, Dict[str, object]]:
         }
 
     run_ids = [int(data.get("run_id") or 0) for data in matrix.values() if data.get("run_id")]
-    metadata_map: Dict[int, Mapping[str, object]] = {}
+    metadata_map: dict[int, Mapping[str, object]] = {}
     if run_ids:
         placeholders = ",".join(["%s"] * len(run_ids))
         try:

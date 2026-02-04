@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
-from typing import Dict, Iterable, Mapping, Pattern, Sequence, Tuple
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
+from re import Pattern
 
 
 @dataclass(frozen=True)
@@ -21,7 +22,7 @@ class StringPattern:
     preferred_origins: tuple[str, ...] | None = None
     context_keywords: tuple[str, ...] = ()
 
-    def iter_matches(self, value: str) -> Tuple[str, ...]:
+    def iter_matches(self, value: str) -> tuple[str, ...]:
         """Return de-duplicated regex matches for *value*."""
 
         if not value or (self.min_length and len(value) < self.min_length):
@@ -60,7 +61,7 @@ def categorize_patterns(
 ) -> Mapping[str, tuple[StringPattern, ...]]:
     """Organize patterns by category for quick lookups."""
 
-    buckets: Dict[str, list[StringPattern]] = {}
+    buckets: dict[str, list[StringPattern]] = {}
     for pattern in patterns:
         buckets.setdefault(pattern.category, []).append(pattern)
     return {name: tuple(sorted(bucket, key=lambda item: item.name)) for name, bucket in buckets.items()}

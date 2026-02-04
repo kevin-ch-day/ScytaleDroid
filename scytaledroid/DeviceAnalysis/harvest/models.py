@@ -2,26 +2,26 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 @dataclass(frozen=True)
 class InventoryRow:
     """Lightweight representation of an inventory entry used for planning."""
 
-    raw: Dict[str, object]
+    raw: dict[str, object]
     package_name: str
-    app_label: Optional[str]
-    installer: Optional[str]
-    category: Optional[str]
-    primary_path: Optional[str]
-    profile_key: Optional[str]
-    profile: Optional[str]
-    version_name: Optional[str]
-    version_code: Optional[str]
-    apk_paths: List[str] = field(default_factory=list)
+    app_label: str | None
+    installer: str | None
+    category: str | None
+    primary_path: str | None
+    profile_key: str | None
+    profile: str | None
+    version_name: str | None
+    version_code: str | None
+    apk_paths: list[str] = field(default_factory=list)
     split_count: int = 0
 
     def display_name(self) -> str:
@@ -35,7 +35,7 @@ class InventoryRow:
         """Heuristic: /data path indicates user-app scope."""
         return bool(self.primary_path and str(self.primary_path).startswith("/data/"))
 
-    def to_dict(self) -> Dict[str, object]:
+    def to_dict(self) -> dict[str, object]:
         """Shallow dict for logging/serialization."""
         return asdict(self)
 
@@ -55,17 +55,17 @@ class PackagePlan:
     """Harvest operations planned for a single package."""
 
     inventory: InventoryRow
-    artifacts: List[ArtifactPlan]
+    artifacts: list[ArtifactPlan]
     total_paths: int
     policy_filtered_count: int = 0
-    policy_filtered_reason: Optional[str] = None
-    skip_reason: Optional[str] = None
+    policy_filtered_reason: str | None = None
+    skip_reason: str | None = None
 
     def is_policy_blocked(self) -> bool:
         """True when all paths are filtered by policy."""
         return bool(self.skip_reason) or (self.policy_filtered_count and not self.artifacts)
 
-    def to_dict(self) -> Dict[str, object]:
+    def to_dict(self) -> dict[str, object]:
         return {
             "inventory": self.inventory.to_dict(),
             "artifacts": [asdict(a) for a in self.artifacts],
@@ -80,9 +80,9 @@ class PackagePlan:
 class HarvestPlan:
     """Complete plan ready for execution."""
 
-    packages: List[PackagePlan]
-    policy_filtered: Dict[str, int]
-    failures: List[str]
+    packages: list[PackagePlan]
+    policy_filtered: dict[str, int]
+    failures: list[str]
 
 
 @dataclass
@@ -90,12 +90,12 @@ class ArtifactResult:
     """Successful artifact harvest result."""
 
     file_name: str
-    apk_id: Optional[int]
+    apk_id: int | None
     dest_path: Path
     source_path: str
-    sha256: Optional[str] = None
+    sha256: str | None = None
     status: str = "written"
-    skip_reason: Optional[str] = None
+    skip_reason: str | None = None
 
 
 @dataclass
@@ -111,9 +111,9 @@ class PullResult:
     """Execution result for a package plan."""
 
     plan: PackagePlan
-    ok: List[ArtifactResult] = field(default_factory=list)
-    errors: List[ArtifactError] = field(default_factory=list)
-    skipped: List[str] = field(default_factory=list)
+    ok: list[ArtifactResult] = field(default_factory=list)
+    errors: list[ArtifactError] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -122,9 +122,9 @@ class ArtifactSummary:
 
     file_name: str
     status: str
-    dest_path: Optional[str] = None
-    sha256: Optional[str] = None
-    skip_reason: Optional[str] = None
+    dest_path: str | None = None
+    sha256: str | None = None
+    skip_reason: str | None = None
 
 
 @dataclass
@@ -133,9 +133,9 @@ class PackageHarvestResult:
 
     package_name: str
     app_label: str
-    artifacts: List[ArtifactSummary] = field(default_factory=list)
-    errors: List[ArtifactError] = field(default_factory=list)
-    skipped_reasons: List[str] = field(default_factory=list)
+    artifacts: list[ArtifactSummary] = field(default_factory=list)
+    errors: list[ArtifactError] = field(default_factory=list)
+    skipped_reasons: list[str] = field(default_factory=list)
 
     def display_name(self) -> str:
         return (self.app_label or self.package_name).strip()
@@ -146,7 +146,7 @@ class PackageHarvestResult:
     def has_errors(self) -> bool:
         return bool(self.errors)
 
-    def to_dict(self) -> Dict[str, object]:
+    def to_dict(self) -> dict[str, object]:
         return {
             "package_name": self.package_name,
             "app_label": self.app_label,
@@ -160,14 +160,14 @@ class PackageHarvestResult:
 class HarvestResult:
     """Aggregated harvest run context for summaries/logging."""
 
-    serial: Optional[str] = None
-    run_timestamp: Optional[str] = None
-    scope_name: Optional[str] = None
-    guard_brief: Optional[str] = None
-    packages: List[PackageHarvestResult] = field(default_factory=list)
-    meta: Dict[str, Any] = field(default_factory=dict)
+    serial: str | None = None
+    run_timestamp: str | None = None
+    scope_name: str | None = None
+    guard_brief: str | None = None
+    packages: list[PackageHarvestResult] = field(default_factory=list)
+    meta: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, object]:
+    def to_dict(self) -> dict[str, object]:
         return {
             "serial": self.serial,
             "run_timestamp": self.run_timestamp,
@@ -183,11 +183,11 @@ class ScopeSelection:
     """Scope selection metadata preserved for reruns and summaries."""
 
     label: str
-    packages: List[InventoryRow]
+    packages: list[InventoryRow]
     kind: str
-    metadata: Dict[str, object] = field(default_factory=dict)
+    metadata: dict[str, object] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, object]:
+    def to_dict(self) -> dict[str, object]:
         return {
             "label": self.label,
             "kind": self.kind,

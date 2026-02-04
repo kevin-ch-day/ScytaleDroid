@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from scytaledroid.DeviceAnalysis.services import device_service
-from scytaledroid.DeviceAnalysis import inventory as inventory_module
 
 
-def format_inventory_status(serial: Optional[str]) -> str:
+def format_inventory_status(serial: str | None) -> str:
     if not serial:
         return "connect device"
     status = device_service.fetch_inventory_metadata(serial)
@@ -24,7 +21,7 @@ def format_inventory_status(serial: Optional[str]) -> str:
     return text
 
 
-def format_pull_hint(serial: Optional[str]) -> str:
+def format_pull_hint(serial: str | None) -> str:
     if not serial:
         return "requires device"
     status = device_service.fetch_inventory_metadata(serial)
@@ -35,4 +32,3 @@ def format_pull_hint(serial: Optional[str]) -> str:
     if isinstance(count, int):
         return f"{prefix} ({count} packages)"
     return prefix
-

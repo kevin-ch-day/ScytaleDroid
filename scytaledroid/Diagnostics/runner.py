@@ -6,10 +6,9 @@ import json
 import re
 import subprocess
 import sys
-import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC_ROOT = REPO_ROOT / "scytaledroid"
@@ -134,7 +133,7 @@ def _scan_dead_modules(root: Path) -> list[str]:
         contents.append((path, data))
 
     dead: list[str] = []
-    for path, text in contents:
+    for path, _text in contents:
         if path.name == "__init__.py":
             continue
         module_name = ".".join(path.relative_to(root).with_suffix("").parts)

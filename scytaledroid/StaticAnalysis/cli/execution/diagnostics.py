@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Mapping
+from collections.abc import Mapping
+
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
 from scytaledroid.Utils.DisplayUtils import table_utils

@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Sequence, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
-
 
 if TYPE_CHECKING:  # pragma: no cover - import for type checkers only
     from .models import InventoryRow
@@ -23,7 +23,7 @@ class Watchlist:
     """Curated list of packages used to seed harvest scopes."""
 
     name: str
-    packages: List[str]
+    packages: list[str]
     path: Path
 
     @property
@@ -31,7 +31,7 @@ class Watchlist:
         return re.sub(r"[^a-zA-Z0-9_-]+", "_", self.name.lower()).strip("_") or "watchlist"
 
 
-_CACHE: List[Watchlist] | None = None
+_CACHE: list[Watchlist] | None = None
 
 
 def reset_watchlist_cache() -> None:
@@ -41,14 +41,14 @@ def reset_watchlist_cache() -> None:
     _CACHE = None
 
 
-def load_watchlists() -> List[Watchlist]:
+def load_watchlists() -> list[Watchlist]:
     """Return all watchlists discovered under ``data/watchlists``."""
 
     global _CACHE
     if _CACHE is not None:
         return list(_CACHE)
 
-    watchlists: List[Watchlist] = []
+    watchlists: list[Watchlist] = []
     for path in WATCHLIST_DIR.glob("*.json"):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
@@ -94,8 +94,8 @@ def save_watchlist(name: str, packages: Sequence[str], *, overwrite: bool = Fals
 
 
 def filter_rows_by_watchlist(
-    rows: Sequence["InventoryRow"], packages: Iterable[str]
-) -> List["InventoryRow"]:
+    rows: Sequence[InventoryRow], packages: Iterable[str]
+) -> list[InventoryRow]:
     package_set = {pkg.lower() for pkg in packages}
     return [row for row in rows if row.package_name.lower() in package_set]
 

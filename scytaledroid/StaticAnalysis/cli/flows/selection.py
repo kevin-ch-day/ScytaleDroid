@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence, Tuple
 
 from scytaledroid.Utils.DisplayUtils import (
     menu_utils,
@@ -298,7 +298,7 @@ def _resolve_index(prompt: str, labels: Sequence[str]) -> int:
         )
 
 
-def _select_latest_groups(groups: Sequence[ArtifactGroup]) -> Tuple[ArtifactGroup, ...]:
+def _select_latest_groups(groups: Sequence[ArtifactGroup]) -> tuple[ArtifactGroup, ...]:
     if not groups:
         return tuple()
     if len(groups) == 1:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from typing import Mapping
+from collections.abc import Mapping
 
 from scytaledroid.StaticAnalysis.modules.string_analysis import (
     CollectionSummary,

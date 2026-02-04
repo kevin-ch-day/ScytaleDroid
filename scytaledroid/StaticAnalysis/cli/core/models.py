@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from collections import Counter
-from dataclasses import dataclass, field
 import os
+from collections import Counter
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Mapping, Optional, Tuple
 
 from ...core import StaticAnalysisReport
 from ...core.repository import ArtifactGroup
@@ -20,7 +20,7 @@ class ScopeSelection:
 
     scope: str
     label: str
-    groups: Tuple[ArtifactGroup, ...]
+    groups: tuple[ArtifactGroup, ...]
 
 
 def _env_flag(name: str, default: bool) -> bool:
@@ -50,7 +50,7 @@ class RunParameters:
     analysis_version: str = field(
         default_factory=lambda: os.getenv("SCYTALEDROID_PIPELINE_VERSION") or "2.0.0-alpha"
     )
-    selected_tests: Tuple[str, ...] = tuple()
+    selected_tests: tuple[str, ...] = tuple()
     evidence_lines: int = 2
     finding_limit: int = 25
     secrets_entropy: float = 4.8
@@ -64,7 +64,7 @@ class RunParameters:
     workers: str = "auto"
     reuse_cache: bool = False
     log_level: str = "info"
-    trace_detectors: Tuple[str, ...] = tuple()
+    trace_detectors: tuple[str, ...] = tuple()
     dry_run: bool = False
     session_stamp: str | None = field(default_factory=make_session_stamp)
     verbose_output: bool = False
@@ -109,7 +109,7 @@ class ArtifactOutcome:
     report: StaticAnalysisReport
     severity: Counter[str]
     duration_seconds: float
-    saved_path: Optional[str]
+    saved_path: str | None
     started_at: datetime
     finished_at: datetime
     metadata: Mapping[str, object] | None = None
@@ -120,25 +120,25 @@ class AppRunResult:
     package_name: str
     category: str
     artifacts: list[ArtifactOutcome] = field(default_factory=list)
-    signer: Optional[str] = None
-    static_run_id: Optional[int] = None
-    app_label: Optional[str] = None
-    version_name: Optional[str] = None
-    version_code: Optional[int] = None
-    min_sdk: Optional[int] = None
-    target_sdk: Optional[int] = None
+    signer: str | None = None
+    static_run_id: int | None = None
+    app_label: str | None = None
+    version_name: str | None = None
+    version_code: int | None = None
+    min_sdk: int | None = None
+    target_sdk: int | None = None
     discovered_artifacts: int = 0
     executed_artifacts: int = 0
     persisted_artifacts: int = 0
     failed_artifacts: int = 0
     persistence_skipped: int = 0
     duration_seconds: float = 0.0
-    identity_valid: Optional[bool] = None
-    identity_error_reason: Optional[str] = None
-    base_apk_sha256: Optional[str] = None
-    artifact_set_hash: Optional[str] = None
-    run_signature: Optional[str] = None
-    run_signature_version: Optional[str] = None
+    identity_valid: bool | None = None
+    identity_error_reason: str | None = None
+    base_apk_sha256: str | None = None
+    artifact_set_hash: str | None = None
+    run_signature: str | None = None
+    run_signature_version: str | None = None
 
     def severity_totals(self) -> Counter[str]:
         totals: Counter[str] = Counter()
@@ -146,7 +146,7 @@ class AppRunResult:
             totals.update(artifact.severity)
         return totals
 
-    def base_artifact_outcome(self) -> Optional[ArtifactOutcome]:
+    def base_artifact_outcome(self) -> ArtifactOutcome | None:
         from ..views.view_sections import extract_integrity_profiles  # localized import
 
         for artifact in self.artifacts:
@@ -156,7 +156,7 @@ class AppRunResult:
                 return artifact
         return self.artifacts[0] if self.artifacts else None
 
-    def base_report(self) -> Optional[StaticAnalysisReport]:
+    def base_report(self) -> StaticAnalysisReport | None:
         base_artifact = self.base_artifact_outcome()
         return base_artifact.report if base_artifact else None
 
@@ -171,8 +171,8 @@ class RunOutcome:
     warnings: list[str] = field(default_factory=list)
     failures: list[str] = field(default_factory=list)
     aborted: bool = False
-    abort_reason: Optional[str] = None
-    abort_signal: Optional[str] = None
+    abort_reason: str | None = None
+    abort_signal: str | None = None
     completed_artifacts: int = 0
     total_artifacts: int = 0
     dry_run_skipped: int = 0

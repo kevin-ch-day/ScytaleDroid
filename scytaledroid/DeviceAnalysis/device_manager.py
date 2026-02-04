@@ -4,19 +4,17 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Dict, Optional
 
 from scytaledroid.Config import app_config
 
 from . import adb_devices
 
-
 _STATE_DIR = Path(app_config.DATA_DIR) / app_config.DEVICE_STATE_DIR
 _STATE_DIR.mkdir(parents=True, exist_ok=True)
 _STATE_FILE = _STATE_DIR / app_config.DEVICE_STATE_FILE
 
-_ACTIVE_SERIAL: Optional[str] = None
-_LAST_SERIAL: Optional[str] = None
+_ACTIVE_SERIAL: str | None = None
+_LAST_SERIAL: str | None = None
 
 
 def _load_state() -> None:
@@ -69,12 +67,12 @@ def get_connection_status() -> str:
     return "CONNECTED" if _ACTIVE_SERIAL else "DISCONNECTED"
 
 
-def get_active_serial() -> Optional[str]:
+def get_active_serial() -> str | None:
     """Return the serial for the active device, if any."""
     return _ACTIVE_SERIAL
 
 
-def get_active_device() -> Optional[Dict[str, Optional[str]]]:
+def get_active_device() -> dict[str, str | None | None]:
     """Return metadata for the active device or ``None`` when disconnected."""
     serial = _ACTIVE_SERIAL
     if not serial:
@@ -124,6 +122,6 @@ def describe_active_device() -> str:
     return adb_devices.get_device_label(active)
 
 
-def get_last_serial() -> Optional[str]:
+def get_last_serial() -> str | None:
     """Return the most recently active device serial, if tracked."""
     return _LAST_SERIAL

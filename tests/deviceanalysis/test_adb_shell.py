@@ -1,7 +1,6 @@
 import subprocess
 
 import pytest
-
 from scytaledroid.DeviceAnalysis import adb_shell
 from scytaledroid.DeviceAnalysis.adb_errors import (
     AdbBinaryNotFoundError,

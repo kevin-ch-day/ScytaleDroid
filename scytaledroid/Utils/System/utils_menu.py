@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Callable, Dict
+from collections.abc import Callable
 
 from scytaledroid.Config import app_config
 from scytaledroid.Utils.DisplayUtils import (
@@ -19,7 +19,7 @@ from .world_clock.configurator import configure_world_clocks
 def utils_menu() -> None:
     """Render the utilities submenu and dispatch the selected action."""
 
-    actions: Dict[str, Callable[[], None]] = {
+    actions: dict[str, Callable[[], None]] = {
         "1": util_actions.clear_screen,
         "2": util_actions.show_log_locations,
         "3": configure_world_clocks,
@@ -80,7 +80,7 @@ def utils_menu() -> None:
 
 def _open_output_prefs_menu() -> None:
     try:
-        from .output_prefs_menu import output_prefs_menu  # noqa: WPS433
+        from .output_prefs_menu import output_prefs_menu
 
         output_prefs_menu()
     except Exception as exc:

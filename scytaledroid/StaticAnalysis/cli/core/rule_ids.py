@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Iterable, Optional
+from collections.abc import Iterable
 
 __all__ = ["derive_rule_id"]
 
@@ -34,7 +34,7 @@ _RULE_FORCE_PHRASES: tuple[tuple[str, str], ...] = (
 )
 
 
-def _iter_tokens(*values: Optional[str]) -> Iterable[str]:
+def _iter_tokens(*values: str | None) -> Iterable[str]:
     for value in values:
         if not value:
             continue
@@ -44,13 +44,13 @@ def _iter_tokens(*values: Optional[str]) -> Iterable[str]:
 
 
 def derive_rule_id(
-    kind: Optional[str],
-    module_id: Optional[str],
-    evidence_path: Optional[str],
-    detail: Optional[str],
+    kind: str | None,
+    module_id: str | None,
+    evidence_path: str | None,
+    detail: str | None,
     *,
-    rule_id_hint: Optional[str] = None,
-) -> Optional[str]:
+    rule_id_hint: str | None = None,
+) -> str | None:
     """Best-effort rule identifier inference."""
 
     if rule_id_hint:

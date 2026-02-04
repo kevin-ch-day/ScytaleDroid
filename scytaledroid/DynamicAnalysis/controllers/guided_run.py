@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
-from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
+from scytaledroid.DynamicAnalysis.controllers.device_select import select_device
 from scytaledroid.DynamicAnalysis.plan_selection import (
     print_plan_selection_banner,
     resolve_plan_selection,
@@ -12,7 +12,7 @@ from scytaledroid.DynamicAnalysis.plan_selection import (
 from scytaledroid.DynamicAnalysis.profile_loader import load_profile_packages
 from scytaledroid.DynamicAnalysis.run_summary import print_run_summary
 from scytaledroid.StaticAnalysis.core.repository import group_artifacts
-from scytaledroid.DynamicAnalysis.controllers.device_select import select_device
+from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 
 
 def run_guided_dataset_run(

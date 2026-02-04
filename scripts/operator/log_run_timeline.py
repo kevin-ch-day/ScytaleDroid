@@ -12,11 +12,10 @@ import argparse
 import json
 from glob import glob
 from pathlib import Path
-from typing import Dict, List
 
 
-def _collect_records(run_id: str, logs_dir: Path) -> List[Dict[str, object]]:
-    records: List[Dict[str, object]] = []
+def _collect_records(run_id: str, logs_dir: Path) -> list[dict[str, object]]:
+    records: list[dict[str, object]] = []
     patterns = [
         str(logs_dir / "*.jsonl"),
         str(logs_dir / "harvest_runs" / "*.jsonl"),
@@ -25,7 +24,7 @@ def _collect_records(run_id: str, logs_dir: Path) -> List[Dict[str, object]]:
     for pattern in patterns:
         for path in glob(pattern):
             try:
-                with open(path, "r", encoding="utf-8") as fh:
+                with open(path, encoding="utf-8") as fh:
                     for line in fh:
                         line = line.strip()
                         if not line:

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
-from scytaledroid.DeviceAnalysis.inventory.package_collection import PackageRow
 from scytaledroid.Database.db_func.harvest.apk_repository import ensure_app_definition
+from scytaledroid.DeviceAnalysis.inventory.package_collection import PackageRow
 
 
 def sync_app_definitions(rows: Sequence[PackageRow]) -> int:

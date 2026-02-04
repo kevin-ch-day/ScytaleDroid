@@ -3,22 +3,22 @@
 from __future__ import annotations
 
 import os
-from typing import Dict, List, Optional, Tuple
 
 from scytaledroid.DeviceAnalysis import adb_cache, adb_devices, adb_packages
-from scytaledroid.Utils.LoggingUtils import logging_utils as log
-from . import adb_bulk
 from scytaledroid.DeviceAnalysis.modes.inventory import InventoryMode
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
+
+from . import adb_bulk
 
 
 def list_packages(
     serial: str,
-    use_bulk: Optional[bool],
+    use_bulk: bool | None,
     *,
     allow_fallbacks: bool = False,
-) -> Tuple[List[Tuple[str, Optional[str], Optional[str]]], List[str], bool, bool]:
+) -> tuple[list[tuple[str, str | None, str | None]], list[str], bool, bool]:
     """Return (packages_with_versions, package_names, bulk_used, fallback_used)."""
-    packages_with_versions: List[Tuple[str, Optional[str], Optional[str]]] = []
+    packages_with_versions: list[tuple[str, str | None, str | None]] = []
     bulk_used = False
     fallback_used = False
 
@@ -83,7 +83,7 @@ def get_package_paths(
     package_name: str,
     *,
     allow_fallbacks: bool = False,
-) -> List[str]:
+) -> list[str]:
     return adb_packages.get_package_paths(
         serial,
         package_name,
@@ -91,9 +91,9 @@ def get_package_paths(
     )
 
 
-def get_package_metadata(serial: str, package_name: str) -> Dict[str, Optional[str]]:
+def get_package_metadata(serial: str, package_name: str) -> dict[str, str | None]:
     return adb_packages.get_package_metadata(serial, package_name)
 
 
-def get_device_properties(serial: str) -> Dict[str, str]:
+def get_device_properties(serial: str) -> dict[str, str]:
     return adb_devices.get_basic_properties(serial)

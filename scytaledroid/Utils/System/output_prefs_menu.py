@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuSpec
+
 from . import output_prefs as prefs
 
 

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from time import perf_counter
-from typing import Dict
 
 from ...core.context import DetectorContext
 from ...core.findings import Badge, DetectorResult, EvidencePointer
@@ -63,7 +62,7 @@ class CorrelationDetector(BaseDetector):
                 )
             )
 
-        metrics: Dict[str, object] = {
+        metrics: dict[str, object] = {
             "risk_profile": risk_profile,
             "diff": {
                 "exported": bundle.new_exported,

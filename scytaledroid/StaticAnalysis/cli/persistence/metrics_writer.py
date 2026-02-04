@@ -2,24 +2,30 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Iterable, Mapping, MutableMapping, Sequence
+from typing import Any
 
 from scytaledroid.Persistence import db_writer as _dw
-from scytaledroid.StaticAnalysis.risk.permission import (
-    permission_points_0_20 as _perm_pts,
-    permission_risk_grade as _perm_grade,
-    permission_risk_score_detail as _perm_detail,
-)
 from scytaledroid.StaticAnalysis.modules.permissions.permission_console_rendering import (
     _classify_permissions as _classify,
 )
 from scytaledroid.StaticAnalysis.modules.permissions.permission_protection_lookup import (
     _fetch_protections as _prot_map,
 )
+from scytaledroid.StaticAnalysis.risk.permission import (
+    permission_points_0_20 as _perm_pts,
+)
+from scytaledroid.StaticAnalysis.risk.permission import (
+    permission_risk_grade as _perm_grade,
+)
+from scytaledroid.StaticAnalysis.risk.permission import (
+    permission_risk_score_detail as _perm_detail,
+)
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .utils import require_canonical_schema
+
 _SUPPRESSED_RISK_TAGS = {
     "policy_drift",
     "dev_placeholder",

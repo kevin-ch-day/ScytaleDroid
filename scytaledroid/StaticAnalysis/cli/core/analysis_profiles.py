@@ -27,4 +27,3 @@ def run_modules_for_profile(profile: str) -> tuple[str, ...]:
 
 
 __all__ = ["PROFILE_BASELINE", "PROFILE_FULL", "run_modules_for_profile"]
-

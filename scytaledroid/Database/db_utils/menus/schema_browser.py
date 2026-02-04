@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Dict, Iterable, List, Sequence
+from collections.abc import Iterable, Sequence
 
 from scytaledroid.Database.db_utils import diagnostics
 from scytaledroid.Database.db_utils.table_snapshot import TableSnapshot
@@ -97,7 +97,7 @@ def show_schema_browser() -> None:
             break
 
 
-def _prompt_render_options(*, default_include_indexes: bool) -> Dict[str, object]:
+def _prompt_render_options(*, default_include_indexes: bool) -> dict[str, object]:
     include_indexes = prompt_utils.prompt_yes_no(
         "Show indexes?",
         default=default_include_indexes,
@@ -183,7 +183,7 @@ def _render_table_snapshot(
     header = f"table: {snapshot.name}"
     if type_token:
         header += f"   [{type_token}]"
-    meta_bits: List[str] = [f"rows={row_count}"]
+    meta_bits: list[str] = [f"rows={row_count}"]
     if snapshot.max_timestamp and snapshot.timestamp_column:
         meta_bits.append(f"max({snapshot.timestamp_column})={snapshot.max_timestamp}")
     header += "   " + " · ".join(meta_bits)
@@ -225,9 +225,9 @@ def _render_table_snapshot(
             print("  (none)")
 
 
-def _filter_existing_tables(tables: Iterable[str]) -> List[str]:
+def _filter_existing_tables(tables: Iterable[str]) -> list[str]:
     existing = set(diagnostics.list_tables())
-    filtered: List[str] = []
+    filtered: list[str] = []
     for table in tables:
         if table in existing:
             filtered.append(table)

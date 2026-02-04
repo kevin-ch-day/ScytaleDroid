@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
-from typing import Mapping
+from collections.abc import Mapping
 
 from scytaledroid.Database.db_func.static_analysis import static_permission_matrix as matrix_db
 from scytaledroid.StaticAnalysis.modules.permissions import load_permission_catalog
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .utils import require_canonical_schema
+
 
 def _coerce_source(permission: str) -> str:
     if permission.startswith("android."):

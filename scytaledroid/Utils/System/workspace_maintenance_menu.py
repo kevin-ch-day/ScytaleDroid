@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List
 
 from scytaledroid.Utils.DisplayUtils import (
     display_settings,
@@ -52,7 +51,7 @@ def _show_summary() -> None:
     print()
     print(text_blocks.headline("Workspace usage summary", width=display_settings.default_width(80)))
 
-    rows: List[List[str]] = []
+    rows: list[list[str]] = []
     rows.append(["APK storage", str(apks_dir)])
     rows.append(["APK files", f"{len(apk_files)} file(s)"])
     rows.append(["APK size", _humanize_bytes(apks_size)])

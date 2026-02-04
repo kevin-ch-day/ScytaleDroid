@@ -3,20 +3,21 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Iterable, Mapping, Optional, Sequence, Tuple, Union
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Any
 
 from .db_engine import DatabaseEngine
 from .session import database_session, get_current_engine
 
-ParamsType = Optional[Union[Sequence[Any], Mapping[str, Any]]]
-ParamRow = Tuple[Any, ...]
+ParamsType = Sequence[Any] | Mapping[str, Any] | None
+ParamRow = tuple[Any, ...]
 
 _PLACEHOLDER_SCAN_RE = re.compile("%")
 
 
 def _prepare_params(
-    params: Union[Tuple[Any, ...], Mapping[str, Any]]
-) -> Optional[Union[Tuple[Any, ...], Mapping[str, Any]]]:
+    params: tuple[Any, ...] | Mapping[str, Any]
+) -> tuple[Any, ...] | Mapping[str, Any] | None:
     """Return None when the parameter payload is empty; otherwise the original."""
 
     if isinstance(params, tuple) and not params:
@@ -26,7 +27,7 @@ def _prepare_params(
     return params
 
 
-def _normalise_params(params: ParamsType) -> Union[Tuple[Any, ...], Mapping[str, Any]]:
+def _normalise_params(params: ParamsType) -> tuple[Any, ...] | Mapping[str, Any]:
     """Coerce params to a tuple or mapping suitable for the database engine."""
     if params is None:
         return ()
@@ -74,7 +75,7 @@ def _detect_placeholder_style(query: str) -> str:
     return "none"
 
 
-def _validate_placeholder_style(query: str, params: Union[Tuple[Any, ...], Mapping[str, Any]]) -> None:
+def _validate_placeholder_style(query: str, params: tuple[Any, ...] | Mapping[str, Any]) -> None:
     """Ensure SQL placeholders and provided params are compatible."""
 
     style = _detect_placeholder_style(query)
@@ -115,8 +116,8 @@ def run_sql(
     fetch: str = "none",
     dictionary: bool = False,
     return_lastrowid: bool = False,
-    query_name: Optional[str] = None,
-    context: Optional[Mapping[str, Any]] = None,
+    query_name: str | None = None,
+    context: Mapping[str, Any] | None = None,
 ) -> Any:
     """Execute SQL and return results based on the requested fetch mode.
 
@@ -174,12 +175,12 @@ def run_sql(
 def _dispatch_single(
     db: DatabaseEngine,
     query: str,
-    params: Union[Tuple[Any, ...], Mapping[str, Any]],
+    params: tuple[Any, ...] | Mapping[str, Any],
     fetch_mode: str,
     return_lastrowid: bool,
     *,
-    query_name: Optional[str],
-    context: Optional[Mapping[str, Any]],
+    query_name: str | None,
+    context: Mapping[str, Any] | None,
 ) -> Any:
     """Route to the appropriate DatabaseEngine method for single-statement exec."""
     exec_params = _prepare_params(params)
@@ -206,8 +207,8 @@ def run_sql_many(
     query: str,
     param_rows: Iterable[ParamRow],
     *,
-    query_name: Optional[str] = None,
-    context: Optional[Mapping[str, Any]] = None,
+    query_name: str | None = None,
+    context: Mapping[str, Any] | None = None,
 ) -> None:
     """Execute a batched DML statement with many parameter rows.
 
@@ -245,8 +246,8 @@ def run_sql_write(
     query: str,
     params: ParamsType = None,
     *,
-    query_name: Optional[str] = None,
-    context: Optional[Mapping[str, Any]] = None,
+    query_name: str | None = None,
+    context: Mapping[str, Any] | None = None,
 ) -> None:
     """Execute an idempotent write statement with centralized retry handling."""
 

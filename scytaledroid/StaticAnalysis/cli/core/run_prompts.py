@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import replace
-from typing import Dict, Sequence, Tuple
 
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
 
 from .models import RunParameters
 
-MICRO_TESTS: Tuple[Tuple[str, str], ...] = (
+MICRO_TESTS: tuple[tuple[str, str], ...] = (
     ("manifest", "Manifest-only"),
     ("provider_acl", "Provider ACL only"),
     ("nsc", "NSC only"),
@@ -20,7 +20,7 @@ MICRO_TESTS: Tuple[Tuple[str, str], ...] = (
 EVIDENCE_STEPS = (1, 2, 4)
 
 
-def default_custom_tests() -> Tuple[str, ...]:
+def default_custom_tests() -> tuple[str, ...]:
     return tuple(key for key, _ in MICRO_TESTS)
 
 
@@ -130,7 +130,7 @@ def prompt_advanced_options(base_params: RunParameters) -> RunParameters:
     )
 
 
-def _summarise_params(params: RunParameters) -> Tuple[tuple[str, object], ...]:
+def _summarise_params(params: RunParameters) -> tuple[tuple[str, object], ...]:
     pairs: list[tuple[str, object]] = [
         ("Profile", params.profile_label),
         ("Scope", params.scope_label),
@@ -184,7 +184,7 @@ def _format_bool(value: bool) -> str:
     return "Yes" if value else "No"
 
 
-def _describe_custom_tests(selected: Tuple[str, ...]) -> str:
+def _describe_custom_tests(selected: tuple[str, ...]) -> str:
     if not selected:
         return "All micro-tests"
     labels = {key: label for key, label in MICRO_TESTS}
@@ -192,7 +192,7 @@ def _describe_custom_tests(selected: Tuple[str, ...]) -> str:
     return ", ".join(ordered)
 
 
-def prompt_custom_tests(selected: Tuple[str, ...]) -> Tuple[str, ...]:
+def prompt_custom_tests(selected: tuple[str, ...]) -> tuple[str, ...]:
     rows = []
     for idx, (key, label) in enumerate(MICRO_TESTS, start=1):
         marker = "x" if key in selected else " "
@@ -249,7 +249,7 @@ def prompt_float(label: str, default: float, *, minimum: float = 0.0) -> float:
             print(status_messages.status("Invalid number.", level="warn"))
 
 
-def prompt_choice(label: str, options: Dict[str, str], *, default: str) -> str:
+def prompt_choice(label: str, options: dict[str, str], *, default: str) -> str:
     print(f"{label}:")
     for key, text in options.items():
         print(f"  {key}) {text}")

@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import copy
 import textwrap
+from collections.abc import Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Mapping, MutableMapping, Sequence
+from typing import Any
 
 from ...core import StaticAnalysisReport
 from ...core.findings import Badge, DetectorResult, EvidencePointer, Finding, SeverityLevel
-from ..core.ui_glyphs import GlyphSet
 from ..core.cli_options import ScanDisplayOptions
+from ..core.ui_glyphs import GlyphSet
 
 
 @dataclass(frozen=True)

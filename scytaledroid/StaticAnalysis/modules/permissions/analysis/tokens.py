@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Iterable, Sequence
+from collections.abc import Sequence
 
 _SPECIAL_ACCESS_TOKENS = frozenset({"appop", "preinstalled", "development"})
 
@@ -87,4 +87,3 @@ __all__ = [
     "is_custom_permission",
     "score_tokens",
 ]
-

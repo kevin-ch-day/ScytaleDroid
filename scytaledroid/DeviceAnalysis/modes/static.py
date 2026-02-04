@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
-from typing import List
+from enum import StrEnum
 
 
-class StaticProfile(str, Enum):
+class StaticProfile(StrEnum):
     FULL = "full"
     LIGHTWEIGHT = "lightweight"
 
@@ -30,12 +29,12 @@ class StaticRunConfig:
     reset_schema: bool = False
 
     @classmethod
-    def from_menu_choice(cls, choice: str) -> "StaticRunConfig":
+    def from_menu_choice(cls, choice: str) -> StaticRunConfig:
         if choice == "2":
             return cls(profile=StaticProfile.LIGHTWEIGHT)
         return cls(profile=StaticProfile.FULL)
 
-    def detectors(self) -> List[str]:
+    def detectors(self) -> list[str]:
         if self.profile is StaticProfile.FULL:
             return [
                 "permissions",

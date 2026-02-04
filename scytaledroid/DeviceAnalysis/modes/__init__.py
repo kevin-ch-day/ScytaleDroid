@@ -1,7 +1,7 @@
 """Centralized mode definitions for DeviceAnalysis subsystems."""
 
-from .inventory import InventoryMode, InventoryConfig
-from .harvest import HarvestPullMode, HarvestModeConfig
+from .harvest import HarvestModeConfig, HarvestPullMode
+from .inventory import InventoryConfig, InventoryMode
 from .static import StaticProfile, StaticRunConfig
 
 __all__ = [

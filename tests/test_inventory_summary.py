@@ -1,7 +1,7 @@
-import sys
-from io import StringIO
 import contextlib
+import sys
 import types
+from io import StringIO
 
 
 def _fake_pkg(pkg_name, partition, category=None, source=None, split=1):

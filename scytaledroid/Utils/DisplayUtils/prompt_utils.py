@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Callable, Iterable, Optional
+from collections.abc import Callable, Iterable
 
 from . import colors, status_messages
-from .terminal import use_ascii_ui
 from .error_panels import print_error_panel
+from .terminal import use_ascii_ui
 
 
-def _build_prompt(default: Optional[str]) -> str:
+def _build_prompt(default: str | None) -> str:
     palette = colors.get_palette()
     arrow_symbol = ">" if use_ascii_ui() else "›"
     arrow = colors.apply(arrow_symbol, palette.option_key)
@@ -23,10 +23,10 @@ def get_choice(
     valid: Iterable[str],
     *,
     prompt: str = "> ",
-    default: Optional[str] = None,
+    default: str | None = None,
     casefold: bool = False,
     invalid_message: str = "Invalid choice. Please try again.",
-    disabled: Optional[Iterable[str]] = None,
+    disabled: Iterable[str] | None = None,
 ) -> str:
     """Prompt the user to select a value from *valid* and return it."""
 
@@ -42,7 +42,7 @@ def get_choice(
     if not value_map:
         raise ValueError("No selectable menu entries provided")
 
-    effective_default: Optional[str] = None
+    effective_default: str | None = None
     if default is not None:
         default_key = default.lower() if casefold else default
         effective_default = value_map.get(default_key)
@@ -91,12 +91,12 @@ def press_enter_to_continue(message: str = "Press Enter to continue...") -> None
 def prompt_text(
     prompt: str,
     *,
-    default: Optional[str] = None,
+    default: str | None = None,
     required: bool = True,
-    validator: Optional[Callable[[str], bool]] = None,
+    validator: Callable[[str], bool] | None = None,
     error_message: str = "Please provide a value.",
-    error_hint: Optional[str] = None,
-    hint: Optional[str] = None,
+    error_hint: str | None = None,
+    hint: str | None = None,
 ) -> str:
     """Prompt for free-form text, optionally validating the response."""
 

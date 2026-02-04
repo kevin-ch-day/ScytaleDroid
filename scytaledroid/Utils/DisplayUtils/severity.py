@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Mapping
-from typing import Iterable
+from collections.abc import Iterable, Mapping
 
 from . import colors
 from .summary_cards import SummaryCardItem, summary_item

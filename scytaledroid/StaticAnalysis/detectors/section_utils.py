@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 
 from ..core.findings import Badge, DetectorResult, EvidencePointer
 
@@ -17,7 +17,7 @@ def placeholder_result(
 ) -> DetectorResult:
     """Build a deterministic placeholder result for unfinished detectors."""
 
-    metrics: Dict[str, object] = {
+    metrics: dict[str, object] = {
         "summary": summary,
         "status": status.value,
     }
@@ -36,10 +36,10 @@ def placeholder_result(
 def merge_metrics(
     base: Mapping[str, object],
     overrides: Mapping[str, object],
-) -> Dict[str, object]:
+) -> dict[str, object]:
     """Return a merged copy of *base* with keys from *overrides* applied."""
 
-    result: Dict[str, object] = dict(base)
+    result: dict[str, object] = dict(base)
     for key, value in overrides.items():
         result[key] = value
     return result

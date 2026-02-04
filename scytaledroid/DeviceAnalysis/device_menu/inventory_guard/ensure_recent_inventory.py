@@ -2,19 +2,18 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Sequence, Tuple
-
-from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages, text_blocks
-from scytaledroid.Utils.LoggingUtils import logging_utils as log
+from collections.abc import Sequence
+from datetime import UTC, datetime, timedelta
 
 from scytaledroid.DeviceAnalysis import adb_status
-from scytaledroid.DeviceAnalysis.services import inventory_service
-from scytaledroid.DeviceAnalysis import inventory as inventory_module
-from scytaledroid.DeviceAnalysis.inventory.runner import InventoryDelta
 from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.prompts import (
     describe_inventory_state,
 )
+from scytaledroid.DeviceAnalysis.inventory.runner import InventoryDelta
+from scytaledroid.DeviceAnalysis.services import inventory_service
+from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages, text_blocks
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
+
 from .constants import (
     INVENTORY_DELTA_SUPPRESS_SECONDS,
     INVENTORY_STALE_SECONDS,
@@ -22,15 +21,14 @@ from .constants import (
     LOW_BATTERY_THRESHOLD,
 )
 from .metadata import get_latest_inventory_metadata
-from .utils import coerce_float, humanize_seconds, coarse_time_range
-
+from .utils import coarse_time_range, coerce_float, humanize_seconds
 
 RECENT_CHANGE_WINDOW_SECONDS = 3600
 RECENT_CHANGE_SOFT_LIMIT = 3
 PACKAGE_DELTA_DISPLAY_LIMIT = 3
 
 
-_LAST_GUARD_DECISION: Dict[str, object] = {
+_LAST_GUARD_DECISION: dict[str, object] = {
     "policy": None,
     "stale_level": "unknown",
     "reason": "",
@@ -49,7 +47,7 @@ def _format_snapshot_reference(snapshot_id: object, timestamp: object) -> str:
     if snapshot_id is not None:
         snapshot_label = f"id={snapshot_id}"
     if isinstance(timestamp, datetime):
-        stamp = timestamp.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        stamp = timestamp.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
         return f"{snapshot_label} captured_at={stamp}".strip()
     return snapshot_label
 
@@ -57,8 +55,8 @@ def _format_snapshot_reference(snapshot_id: object, timestamp: object) -> str:
 def ensure_recent_inventory(
     serial: str,
     *,
-    device_context: Optional[Dict[str, Optional[str]]] = None,
-    scope_packages: Optional[Sequence[object]] = None,
+    device_context: dict[str, str | None | None] = None,
+    scope_packages: Sequence[object | None] = None,
 ) -> bool:
     global _LAST_GUARD_DECISION
 
@@ -91,7 +89,7 @@ def ensure_recent_inventory(
 
     age_seconds = None
     if timestamp:
-        age_seconds = (datetime.now(timezone.utc) - timestamp).total_seconds()
+        age_seconds = (datetime.now(UTC) - timestamp).total_seconds()
 
     threshold = timedelta(seconds=INVENTORY_STALE_SECONDS)
     age_delta = timedelta(seconds=age_seconds or 0)
@@ -224,7 +222,6 @@ def ensure_recent_inventory(
 
     choice = prompt_utils.get_choice(options, default="1", prompt="Select option [1]: ")
     if choice == "2":
-        snapshot_age_text = humanize_seconds(age_seconds) if age_seconds is not None else None
         snapshot_stamp = _format_snapshot_reference(snapshot_id, timestamp)
         warning = (
             f"Proceeding with selected snapshot ({snapshot_stamp}); device state may differ."
@@ -241,12 +238,6 @@ def ensure_recent_inventory(
 
     battery_context = _resolve_battery_context(serial, device_context)
     battery_level = battery_context.get("level")
-    low_battery = (
-        isinstance(battery_level, int)
-        and battery_level < LOW_BATTERY_THRESHOLD
-        and not battery_context.get("is_charging")
-    )
-
     prompt_message = _build_sync_warning(battery_context, expected_duration)
 
     if prompt_message:
@@ -265,14 +256,14 @@ def ensure_recent_inventory(
     else:
         abort_on_long_running = True
 
-    def _execute_sync(abort_on_threshold: bool) -> Tuple[bool, Optional[float]]:
+    def _execute_sync(abort_on_threshold: bool) -> tuple[bool, float | None]:
         nonlocal expected_duration
 
         aborted = False
         latest_estimate = expected_duration
         last_reported = -5.0
 
-        def _handle_progress(event: Dict[str, object]) -> bool:
+        def _handle_progress(event: dict[str, object]) -> bool:
             nonlocal aborted, latest_estimate, last_reported
 
             phase = event.get("phase")
@@ -375,17 +366,17 @@ def ensure_recent_inventory(
     return True
 
 
-def get_last_guard_decision() -> Dict[str, object]:
+def get_last_guard_decision() -> dict[str, object]:
     """Return a copy of the most recent guard decision context."""
 
     return dict(_LAST_GUARD_DECISION)
 
 
 def _build_sync_warning(
-    battery_context: Dict[str, Optional[object]],
-    expected_duration: Optional[float],
-) -> Optional[str]:
-    reasons: List[str] = []
+    battery_context: dict[str, object | None],
+    expected_duration: float | None,
+) -> str | None:
+    reasons: list[str] = []
 
     level = battery_context.get("level")
     is_charging = bool(battery_context.get("is_charging"))
@@ -405,13 +396,13 @@ def _build_sync_warning(
     return f"Estimated: {joined}."
 
 
-def _build_long_running_warning(estimate: Optional[float]) -> str:
+def _build_long_running_warning(estimate: float | None) -> str:
     if estimate and estimate > 0:
         return f"Estimated: {coarse_time_range(estimate)}."
     return "Estimated: longer than usual."
 
 
-def _parse_battery_level(raw: Optional[str]) -> Optional[int]:
+def _parse_battery_level(raw: str | None) -> int | None:
     if not raw:
         return None
     digits = "".join(ch for ch in raw if ch.isdigit())
@@ -425,10 +416,10 @@ def _parse_battery_level(raw: Optional[str]) -> Optional[int]:
 
 def _resolve_battery_context(
     serial: str,
-    device_context: Optional[Dict[str, Optional[str]]],
-) -> Dict[str, Optional[object]]:
-    level: Optional[int] = None
-    status: Optional[str] = None
+    device_context: dict[str, str | None | None],
+) -> dict[str, object | None]:
+    level: int | None = None
+    status: str | None = None
 
     if device_context:
         level = _parse_battery_level(device_context.get("battery_level"))
@@ -458,9 +449,9 @@ def _set_guard_context(
     scope_changed: bool,
     scope_hash_changed: bool,
     packages_changed: bool,
-    age_seconds: Optional[float],
-    package_delta: Optional[Dict[str, object]],
-    package_delta_brief: Optional[str],
+    age_seconds: float | None,
+    package_delta: dict[str, object | None],
+    package_delta_brief: str | None,
 ) -> None:
     _LAST_GUARD_DECISION.update(
         {
@@ -477,7 +468,7 @@ def _set_guard_context(
     )
 
 
-def _record_guard_policy(policy: Optional[str]) -> None:
+def _record_guard_policy(policy: str | None) -> None:
     _LAST_GUARD_DECISION["policy"] = policy
     if policy:
         log.info(
@@ -493,11 +484,11 @@ def _record_guard_policy(policy: Optional[str]) -> None:
 
 
 def _format_package_delta_brief(
-    summary: Dict[str, object], *, limit: int = PACKAGE_DELTA_DISPLAY_LIMIT
-) -> Optional[str]:
-    parts: List[str] = []
+    summary: dict[str, object], *, limit: int = PACKAGE_DELTA_DISPLAY_LIMIT
+) -> str | None:
+    parts: list[str] = []
 
-    def _format_names(key: str, total_key: str) -> Optional[str]:
+    def _format_names(key: str, total_key: str) -> str | None:
         items = summary.get(key)
         if not isinstance(items, list) or not items:
             return None
@@ -512,7 +503,7 @@ def _format_package_delta_brief(
 
     updated_items = summary.get("updated")
     if isinstance(updated_items, list) and updated_items:
-        formatted_updates: List[str] = []
+        formatted_updates: list[str] = []
         for entry in updated_items[:limit]:
             if not isinstance(entry, dict):
                 continue
@@ -545,8 +536,8 @@ def _format_package_delta_brief(
 
 
 def _format_package_delta_hint(
-    summary: Dict[str, object], *, limit: int = PACKAGE_DELTA_DISPLAY_LIMIT
-) -> Optional[str]:
+    summary: dict[str, object], *, limit: int = PACKAGE_DELTA_DISPLAY_LIMIT
+) -> str | None:
     total = _safe_int(summary.get("total_changed"))
     brief = _format_package_delta_brief(summary, limit=limit)
     if brief:

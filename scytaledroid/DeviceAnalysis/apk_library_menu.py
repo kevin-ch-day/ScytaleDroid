@@ -3,22 +3,20 @@
 from __future__ import annotations
 
 import math
-from typing import Iterable, List, Optional, Sequence
+from collections.abc import Iterable, Sequence
 
+from scytaledroid.DeviceAnalysis.services import apk_library_service
+from scytaledroid.DeviceAnalysis.services.static_scope_service import static_scope_service
+from scytaledroid.StaticAnalysis.core.repository import ArtifactGroup
 from scytaledroid.Utils.DisplayUtils import (
     display_settings,
     menu_utils,
     prompt_utils,
     status_messages,
     table_utils,
-    text_blocks,
     terminal,
+    text_blocks,
 )
-from scytaledroid.Utils.LoggingUtils import logging_utils as log
-
-from scytaledroid.DeviceAnalysis.services import apk_library_service
-from scytaledroid.DeviceAnalysis.services.static_scope_service import static_scope_service
-from scytaledroid.StaticAnalysis.core.repository import ArtifactGroup
 
 
 def _group_selected(group: ArtifactGroup) -> bool:
@@ -28,7 +26,7 @@ def _group_selected(group: ArtifactGroup) -> bool:
 
 
 def _render_group_table(groups: Iterable[ArtifactGroup], *, show_selection: bool = False) -> None:
-    rows: List[List[str]] = []
+    rows: list[list[str]] = []
     for idx, group in enumerate(groups, start=1):
         selected = _group_selected(group)
         bullet = "●" if not terminal.use_ascii_ui() else "*"
@@ -93,7 +91,7 @@ def _selection_help() -> str:
 
 def _browse_by_device() -> None:
     groups = apk_library_service.list_groups()
-    by_device: dict[str, List[ArtifactGroup]] = {}
+    by_device: dict[str, list[ArtifactGroup]] = {}
     for group in groups:
         serials = set()
         for artifact in group.artifacts:
@@ -353,7 +351,7 @@ def _selection_manager() -> None:
         static_analysis_menu()
 
 
-def apk_library_menu(device_filter: Optional[str] = None) -> None:
+def apk_library_menu(device_filter: str | None = None) -> None:
     """Entry point for APK library & archives."""
 
     all_groups = apk_library_service.list_groups(device_filter=[device_filter] if device_filter else None)

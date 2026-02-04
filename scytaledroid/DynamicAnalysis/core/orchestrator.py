@@ -3,26 +3,28 @@
 from __future__ import annotations
 
 import getpass
-import platform
-import uuid
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Iterable
 import os
+import platform
+import shutil
+import uuid
+from collections.abc import Iterable
+from datetime import UTC, datetime
+from pathlib import Path
 
-from scytaledroid.Utils.LoggingUtils import logging_engine
-from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
 from scytaledroid.Config import app_config
-from scytaledroid.Utils.DisplayUtils import status_messages
-from scytaledroid.Utils.version_utils import get_git_commit
-
+from scytaledroid.Database.db_core import db_queries as core_q
+from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
 from scytaledroid.DeviceAnalysis import adb_shell
 from scytaledroid.DynamicAnalysis.analysis.summarizer import DynamicRunSummarizer
-from scytaledroid.DynamicAnalysis.core.event_logger import RunEventLogger
 from scytaledroid.DynamicAnalysis.core.environment import EnvironmentManager
+from scytaledroid.DynamicAnalysis.core.event_logger import RunEventLogger
 from scytaledroid.DynamicAnalysis.core.evidence_pack import EvidencePackWriter
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord, ObserverRecord, RunManifest
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
+from scytaledroid.DynamicAnalysis.core.session import DynamicSessionConfig
+from scytaledroid.DynamicAnalysis.core.target_manager import TargetManager
+from scytaledroid.DynamicAnalysis.monitor import RunMonitor, RunMonitorConfig
+from scytaledroid.DynamicAnalysis.observers.base import Observer, ObserverHandle
 from scytaledroid.DynamicAnalysis.plans.loader import (
     PlanValidationError,
     build_plan_validation_event,
@@ -30,14 +32,11 @@ from scytaledroid.DynamicAnalysis.plans.loader import (
     render_plan_validation_block,
     validate_dynamic_plan,
 )
-from scytaledroid.DynamicAnalysis.core.session import DynamicSessionConfig
-from scytaledroid.DynamicAnalysis.core.target_manager import TargetManager
-from scytaledroid.DynamicAnalysis.observers.base import Observer, ObserverHandle
 from scytaledroid.DynamicAnalysis.scenarios import ManualScenarioRunner
 from scytaledroid.DynamicAnalysis.telemetry.sampler import TelemetrySampler
-from scytaledroid.DynamicAnalysis.monitor import RunMonitor, RunMonitorConfig
-from scytaledroid.Database.db_core import db_queries as core_q
-import shutil
+from scytaledroid.Utils.DisplayUtils import status_messages
+from scytaledroid.Utils.LoggingUtils import logging_engine
+from scytaledroid.Utils.version_utils import get_git_commit
 
 
 class DynamicRunOrchestrator:
@@ -205,7 +204,7 @@ class DynamicRunOrchestrator:
                         )
                     )
             clock_start = self._capture_device_clock(run_ctx.device_serial)
-        host_start = datetime.now(timezone.utc)
+        host_start = datetime.now(UTC)
         self._emit_marker(run_ctx, "SCENARIO_START")
         if run_ctx.scenario_hint:
             event_logger.log("scenario_hint", {"hint": run_ctx.scenario_hint})
@@ -239,7 +238,7 @@ class DynamicRunOrchestrator:
             manifest.operator["tier"] = self.config.tier
         if run_ctx.device_serial:
             clock_end = self._capture_device_clock(run_ctx.device_serial)
-        host_end = datetime.now(timezone.utc)
+        host_end = datetime.now(UTC)
         clock_payload = self._format_clock_payload(host_start, host_end, clock_start, clock_end)
         if clock_payload:
             telemetry_payload.update(clock_payload)
@@ -438,7 +437,8 @@ class DynamicRunOrchestrator:
             package_name = row[0] or package_name
             sha256 = row[1] or row[2]
         artifact_token = str(sha256) if sha256 else f"run_{run_ctx.static_run_id}"
-        dep_path = (
+        dep_path = Path("evidence") / "static_runs" / str(run_ctx.static_run_id) / "dep.json"
+        legacy_dep_path = (
             Path("evidence")
             / "static_runs"
             / str(run_ctx.static_run_id)
@@ -446,6 +446,8 @@ class DynamicRunOrchestrator:
             / artifact_token
             / "dep.json"
         )
+        if not dep_path.exists() and legacy_dep_path.exists():
+            dep_path = legacy_dep_path
         if not dep_path.exists():
             note = (
                 "DEP snapshot missing; expected "
@@ -580,14 +582,14 @@ class DynamicRunOrchestrator:
 
     @staticmethod
     def _now() -> str:
-        return datetime.now(timezone.utc).isoformat()
+        return datetime.now(UTC).isoformat()
 
     def _capture_device_clock(self, serial: str | None) -> dict[str, object] | None:
         if not serial:
             return None
         try:
             device_epoch = adb_shell.run_shell(serial, ["date", "+%s"]).strip()
-            device_dt = datetime.fromtimestamp(float(device_epoch), tz=timezone.utc)
+            device_dt = datetime.fromtimestamp(float(device_epoch), tz=UTC)
         except Exception:
             device_dt = None
         try:

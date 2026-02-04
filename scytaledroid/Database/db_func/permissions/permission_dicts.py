@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Iterable, Mapping, Optional
+from datetime import UTC, datetime
 
 from ...db_core import run_sql
 from ...db_queries.permissions import permission_dicts as queries
@@ -18,7 +18,7 @@ class VendorHint:
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def fetch_aosp_entries(values: Iterable[str], *, case_insensitive: bool = False) -> dict[str, Mapping[str, object]]:
@@ -53,14 +53,14 @@ def fetch_aosp_entries(values: Iterable[str], *, case_insensitive: bool = False)
     return out
 
 
-def fetch_aosp_protection_map(short_names: Iterable[str], target_sdk: Optional[int] = None) -> dict[str, Optional[str]]:
+def fetch_aosp_protection_map(short_names: Iterable[str], target_sdk: int | None = None) -> dict[str, str | None]:
     names = [n for n in set(short_names) if isinstance(n, str) and n]
     if not names:
         return {}
     placeholders = ",".join(["%s"] * len(names))
     sql = queries.SELECT_AOSP_BY_NAME.format(placeholders=placeholders)
     rows = run_sql(sql, tuple(names), fetch="all") or []
-    out: dict[str, Optional[str]] = {}
+    out: dict[str, str | None] = {}
     for row in rows:
         if not row:
             continue

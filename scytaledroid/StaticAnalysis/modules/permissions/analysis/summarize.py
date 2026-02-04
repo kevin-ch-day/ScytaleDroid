@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Iterable, Sequence
-
 
 def format_summary(*, total: int, dangerous: int, signature: int, custom: int) -> str:
     if total == 0:
@@ -31,4 +29,3 @@ def build_notes(*, total: int, dangerous: int, signature: int, privileged: int, 
 
 
 __all__ = ["format_summary", "build_notes"]
-

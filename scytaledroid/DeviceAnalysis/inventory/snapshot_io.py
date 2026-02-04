@@ -2,23 +2,23 @@
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
+from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, TYPE_CHECKING
-from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from scytaledroid.Config import app_config
-from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.DeviceAnalysis import inventory_meta
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 if TYPE_CHECKING:  # pragma: no cover
-    from scytaledroid.DeviceAnalysis.inventory.runner import InventoryDelta
+    pass
 from scytaledroid.Database.db_core import database_session, run_sql
-from scytaledroid.Database.db_utils.package_utils import normalize_package_name
 from scytaledroid.Database.db_func.harvest import device_inventory as inventory_repo
-
+from scytaledroid.Database.db_utils.package_utils import normalize_package_name
 
 _STATE_ROOT = Path(app_config.DATA_DIR) / app_config.DEVICE_STATE_DIR
 
@@ -33,7 +33,7 @@ def _normalise_hash_token(*values: object) -> str:
     return "|".join(parts)
 
 
-def hash_rows(rows: Iterable[Dict[str, object]]) -> str:
+def hash_rows(rows: Iterable[dict[str, object]]) -> str:
     digest = hashlib.sha256()
     tokens = []
     for row in rows:
@@ -51,7 +51,7 @@ def hash_rows(rows: Iterable[Dict[str, object]]) -> str:
     return digest.hexdigest()
 
 
-def load_latest_inventory(serial: str) -> Optional[Dict[str, object]]:
+def load_latest_inventory(serial: str) -> dict[str, object | None]:
     """Return the most recently persisted inventory snapshot payload if available."""
     latest_file = _STATE_ROOT / serial / "inventory" / "latest.json"
     if not latest_file.exists():
@@ -67,12 +67,12 @@ def load_latest_inventory(serial: str) -> Optional[Dict[str, object]]:
         return None
 
 
-def load_latest_snapshot_meta(serial: str) -> Optional[inventory_meta.InventoryMeta]:
+def load_latest_snapshot_meta(serial: str) -> inventory_meta.InventoryMeta | None:
     """Return lightweight metadata for the most recent inventory snapshot."""
     return inventory_meta.load_latest(serial)
 
 
-def load_canonical_metadata(package_names: Iterable[str]) -> Dict[str, Dict[str, object]]:
+def load_canonical_metadata(package_names: Iterable[str]) -> dict[str, dict[str, object]]:
     """Fetch canonical definitions keyed by package name."""
 
     normalised = sorted({str(name).lower() for name in package_names if name})
@@ -107,7 +107,7 @@ def load_canonical_metadata(package_names: Iterable[str]) -> Dict[str, Dict[str,
 {profile_join}            WHERE LOWER(d.package_name) IN ({placeholders})
         """
 
-    rows: List[Dict[str, object]]
+    rows: list[dict[str, object]]
     query = _build_query(include_profiles=True)
     try:
         rows = run_sql(query, tuple(normalised), fetch="all", dictionary=True) or []
@@ -120,7 +120,7 @@ def load_canonical_metadata(package_names: Iterable[str]) -> Dict[str, Dict[str,
         )
         fallback_query = _build_query(include_profiles=False)
         rows = run_sql(fallback_query, tuple(normalised), fetch="all", dictionary=True) or []
-    canonical: Dict[str, Dict[str, object]] = {}
+    canonical: dict[str, dict[str, object]] = {}
     for row in rows:
         key = str(row.get("package_key") or "").lower()
         if not key:
@@ -146,26 +146,26 @@ class PersistedSnapshot:
 
 def persist_snapshot(
     serial: str,
-    rows: List[Dict[str, object]],
+    rows: list[dict[str, object]],
     *,
-    package_hash: Optional[str] = None,
-    package_list_hash: Optional[str] = None,
-    package_signature_hash: Optional[str] = None,
-    build_fingerprint: Optional[str] = None,
-    duration_seconds: Optional[float] = None,
+    package_hash: str | None = None,
+    package_list_hash: str | None = None,
+    package_signature_hash: str | None = None,
+    build_fingerprint: str | None = None,
+    duration_seconds: float | None = None,
     snapshot_type: str = "full",
-    scope_hash: Optional[str] = None,
-    filename_suffix: Optional[str] = None,
-    collection_stats: Optional[object] = None,
-    delta: Optional[object] = None,
+    scope_hash: str | None = None,
+    filename_suffix: str | None = None,
+    collection_stats: object | None = None,
+    delta: object | None = None,
 ) -> PersistedSnapshot:
     """Persist inventory information under the state directory and database."""
-    captured_at = datetime.utcnow().replace(tzinfo=timezone.utc)
+    captured_at = datetime.utcnow().replace(tzinfo=UTC)
     timestamp = captured_at.strftime("%Y%m%d-%H%M%S")
     device_dir = _STATE_ROOT / serial / "inventory"
     device_dir.mkdir(parents=True, exist_ok=True)
 
-    normalized_rows: List[Dict[str, object]] = []
+    normalized_rows: list[dict[str, object]] = []
     for entry in rows:
         if not isinstance(entry, dict):
             continue
@@ -178,7 +178,7 @@ def persist_snapshot(
                 entry["package_name"] = cleaned
         normalized_rows.append(entry)
 
-    payload: Dict[str, object] = {
+    payload: dict[str, object] = {
         "generated_at": captured_at.isoformat().replace("+00:00", "Z"),
         "device_serial": serial,
         "package_count": len(normalized_rows),
@@ -211,7 +211,7 @@ def persist_snapshot(
     latest_file = device_dir / "latest.json"
     latest_file.write_text(payload_text, encoding="utf-8")
 
-    latest_suffix_file: Optional[Path] = None
+    latest_suffix_file: Path | None = None
     if filename_suffix:
         latest_suffix_file = device_dir / f"latest{suffix_segment}.json"
         latest_suffix_file.write_text(payload_text, encoding="utf-8")
@@ -222,7 +222,7 @@ def persist_snapshot(
     except ValueError:
         display_path = resolved_path
 
-    snapshot_id: Optional[int] = None
+    snapshot_id: int | None = None
     persisted = 0
     try:
         with database_session() as engine:

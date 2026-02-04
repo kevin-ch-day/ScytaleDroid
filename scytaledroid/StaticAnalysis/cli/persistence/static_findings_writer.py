@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Mapping, MutableMapping, Sequence
+from collections.abc import Mapping, MutableMapping, Sequence
 
 from scytaledroid.Database.db_func.static_analysis import static_findings as _sf
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .utils import require_canonical_schema
+
 
 def coerce_severity_counts(totals: Mapping[str, int]) -> MutableMapping[str, int]:
     """Normalise severity counters coming from CLI payloads."""

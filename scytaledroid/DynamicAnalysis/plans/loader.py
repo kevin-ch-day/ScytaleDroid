@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import json
+from collections.abc import Iterable
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable
+from typing import Any
 
 from scytaledroid.Database.db_core import db_queries as core_q
 
@@ -33,7 +34,7 @@ class PlanValidationError(RuntimeError):
         self.outcome = outcome
 
 
-def load_dynamic_plan(path: str | Path) -> Dict[str, Any]:
+def load_dynamic_plan(path: str | Path) -> dict[str, Any]:
     plan_path = Path(path)
     data = json.loads(plan_path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
@@ -42,7 +43,7 @@ def load_dynamic_plan(path: str | Path) -> Dict[str, Any]:
 
 
 def validate_dynamic_plan(
-    plan: Dict[str, Any],
+    plan: dict[str, Any],
     *,
     package_name: str,
     static_run_id: int | None = None,
@@ -186,7 +187,7 @@ def build_plan_validation_event(outcome: PlanValidationOutcome) -> dict[str, obj
     }
 
 
-def _normalize_plan(plan: Dict[str, Any]) -> dict[str, object]:
+def _normalize_plan(plan: dict[str, Any]) -> dict[str, object]:
     identity = plan.get("run_identity") if isinstance(plan.get("run_identity"), dict) else {}
     return {
         "package": plan.get("package_name") or plan.get("package"),
@@ -200,7 +201,7 @@ def _normalize_plan(plan: Dict[str, Any]) -> dict[str, object]:
     }
 
 
-def extract_plan_identity(plan: Dict[str, Any]) -> dict[str, object]:
+def extract_plan_identity(plan: dict[str, Any]) -> dict[str, object]:
     """Expose normalized identity fields for plan selection."""
     return _normalize_plan(plan)
 
@@ -208,16 +209,16 @@ def extract_plan_identity(plan: Dict[str, Any]) -> dict[str, object]:
 def _missing_required_fields(plan: dict[str, object]) -> list[str]:
     required = ("package", "static_run_id", "run_signature", "run_signature_version", "artifact_set_hash")
     missing = []
-    for field in required:
-        value = plan.get(field)
+    for req_field in required:
+        value = plan.get(req_field)
         if value is None or value == "":
-            missing.append(field)
+            missing.append(req_field)
     return missing
 
 
 def _missing_db_fields(row: dict[str, object]) -> list[str]:
     required = ("run_signature", "run_signature_version", "artifact_set_hash")
-    return [field for field in required if not row.get(field)]
+    return [req_field for req_field in required if not row.get(req_field)]
 
 
 def _fetch_static_run_row(static_run_id: object | None) -> dict[str, object]:
@@ -278,20 +279,22 @@ def _compare_required_fields(
     required_fields: Iterable[str],
 ) -> list[dict[str, str]]:
     mismatches: list[dict[str, str]] = []
-    for field in required_fields:
-        plan_value = plan.get(field)
-        db_value = db.get(field)
+    for req_field in required_fields:
+        plan_value = plan.get(req_field)
+        db_value = db.get(req_field)
         if plan_value is None or db_value is None:
             mismatches.append(
                 _mismatch(
-                    field,
+                    req_field,
                     expected=str(db_value or "missing"),
                     actual=str(plan_value or "missing"),
                 )
             )
             continue
         if str(plan_value) != str(db_value):
-            mismatches.append(_mismatch(field, expected=str(db_value), actual=str(plan_value)))
+            mismatches.append(
+                _mismatch(req_field, expected=str(db_value), actual=str(plan_value))
+            )
     return mismatches
 
 

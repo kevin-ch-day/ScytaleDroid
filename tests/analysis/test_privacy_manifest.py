@@ -1,6 +1,9 @@
 from pathlib import Path
 
-from scytaledroid.DynamicAnalysis.analysis.privacy_manifest import write_privacy_manifest, validate_privacy_manifest
+from scytaledroid.DynamicAnalysis.analysis.privacy_manifest import (
+    validate_privacy_manifest,
+    write_privacy_manifest,
+)
 
 
 def test_privacy_manifest_roundtrip(tmp_path: Path):

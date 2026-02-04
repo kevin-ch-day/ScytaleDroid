@@ -9,7 +9,8 @@ errors where appropriate.
 from __future__ import annotations
 
 import json
-from typing import Any, Iterable, Mapping, MutableMapping, Optional, Sequence
+from collections.abc import Iterable, Mapping, MutableMapping, Sequence
+from typing import Any
 
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_queries.canonical import schema as canonical_schema
@@ -29,20 +30,20 @@ def _require_canonical_schema() -> None:
         raise RuntimeError("DB schema is outdated; run migrations to use canonical schema.")
 
 
-def _normalise_optional_str(value: object) -> Optional[str]:
+def _normalise_optional_str(value: object) -> str | None:
     if value is None:
         return None
     candidate = value
     if hasattr(candidate, "value"):
         try:
-            candidate = getattr(candidate, "value")
+            candidate = candidate.value
         except Exception:
             candidate = value
     text = str(candidate).strip()
     return text or None
 
 
-def _serialise_json(value: object) -> Optional[str]:
+def _serialise_json(value: object) -> str | None:
     if value is None:
         return None
     try:
@@ -51,7 +52,7 @@ def _serialise_json(value: object) -> Optional[str]:
         return None
 
 
-def _loads_json(value: object) -> Optional[object]:
+def _loads_json(value: object) -> object | None:
     if value is None:
         return None
     if isinstance(value, (bytes, bytearray)):
@@ -69,7 +70,7 @@ def _loads_json(value: object) -> Optional[object]:
     return None
 
 
-def _prepare_tags(value: object) -> Optional[object]:
+def _prepare_tags(value: object) -> object | None:
     if isinstance(value, Mapping):
         return {str(key): val for key, val in value.items()}
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
@@ -82,7 +83,7 @@ def _prepare_tags(value: object) -> Optional[object]:
     return None
 
 
-def _prepare_evidence(value: object) -> Optional[Mapping[str, Any]]:
+def _prepare_evidence(value: object) -> Mapping[str, Any | None]:
     if isinstance(value, Mapping):
         return {str(key): val for key, val in value.items()}
     return None
@@ -151,7 +152,7 @@ def _build_finding_context(
     return context
 
 
-def _get_or_create_app(package_name: str, display_name: Optional[str] = None) -> Optional[int]:
+def _get_or_create_app(package_name: str, display_name: str | None = None) -> int | None:
     try:
         from scytaledroid.Database.db_utils.package_utils import normalize_package_name
         from scytaledroid.Database.db_utils.publisher_rules import apply_publisher_mapping
@@ -191,11 +192,11 @@ def _get_or_create_app(package_name: str, display_name: Optional[str] = None) ->
 def _get_or_create_version(
     app_id: int,
     *,
-    version_name: Optional[str],
-    version_code: Optional[int],
-    min_sdk: Optional[int],
-    target_sdk: Optional[int],
-) -> Optional[int]:
+    version_name: str | None,
+    version_code: int | None,
+    min_sdk: int | None,
+    target_sdk: int | None,
+) -> int | None:
     try:
         row = core_q.run_sql(
             "SELECT id FROM app_versions WHERE app_id = %s AND version_name <=> %s AND version_code <=> %s",
@@ -284,7 +285,7 @@ __all__ = [
 ]
 
 
-_PROVIDER_PARENT_CACHE: dict[int, dict[str, Optional[str]]] = {}
+_PROVIDER_PARENT_CACHE: dict[int, dict[str, str | None]] = {}
 
 
 def _persist_analysis_snapshot(app_version_id: int, payload: Mapping[str, object]) -> None:
@@ -351,7 +352,7 @@ def _persist_analysis_snapshot(app_version_id: int, payload: Mapping[str, object
         if isinstance(detector_metrics_raw, Mapping)
         else {}
     )
-    repro_bundle: Optional[Mapping[str, object]]
+    repro_bundle: Mapping[str, object | None]
     repro_bundle = (
         metadata.get("repro_bundle")
         if isinstance(metadata, Mapping)
@@ -431,7 +432,7 @@ def _create_run_row(
     analysis_matrices: Mapping[str, object] | None,
     analysis_indicators: Mapping[str, object] | None,
     workload_profile: Mapping[str, object] | None,
-) -> Optional[int]:
+) -> int | None:
     try:
         row_data: dict[str, object] = {
             "app_version_id": app_version_id,
@@ -499,7 +500,7 @@ def _persist_provider_acl(
                     _create_provider_acl_row(provider_id, rule)
 
 
-def _authority_from_entry(entry: Mapping[str, object]) -> Optional[str]:
+def _authority_from_entry(entry: Mapping[str, object]) -> str | None:
     authorities = entry.get("authorities")
     if isinstance(authorities, Sequence) and not isinstance(authorities, (str, bytes)):
         for candidate in authorities:
@@ -509,14 +510,14 @@ def _authority_from_entry(entry: Mapping[str, object]) -> Optional[str]:
     return _clamp_authority(_normalise_optional_str(authorities))
 
 
-def _clamp_authority(value: Optional[str], limit: int = 191) -> Optional[str]:
+def _clamp_authority(value: str | None, limit: int = 191) -> str | None:
     if not value:
         return value
     text = str(value)
     return text[:limit]
 
 
-def _create_provider_row(run_id: int, entry: Mapping[str, object]) -> Optional[int]:
+def _create_provider_row(run_id: int, entry: Mapping[str, object]) -> int | None:
     try:
         metrics_payload = {
             key: value
@@ -526,7 +527,7 @@ def _create_provider_row(run_id: int, entry: Mapping[str, object]) -> Optional[i
         component_name = _normalise_optional_str(entry.get("name"))
         authority = _authority_from_entry(entry) or component_name or f"provider_{run_id}"
         authority = _clamp_authority(authority)
-        row_data: dict[str, Optional[object]] = {
+        row_data: dict[str, object | None] = {
             "run_id": run_id,
             "component_name": component_name,
             "provider_name": component_name,
@@ -570,7 +571,7 @@ def _create_provider_acl_row(provider_id: int, entry: Mapping[str, object]) -> N
         path_value = _normalise_optional_str(entry.get("path")) or "*"
         path_type = _normalise_optional_str(entry.get("pathType")) or "base"
 
-        row_data: dict[str, Optional[object]] = {
+        row_data: dict[str, object | None] = {
             "provider_id": provider_id,
             "path": path_value,
             "path_prefix": _normalise_optional_str(entry.get("pathPrefix")),
@@ -655,14 +656,14 @@ def _provider_evidence(row: Mapping[str, object]) -> Mapping[str, object]:
     }
 
 
-def upsert_base002_for_session(session_stamp: Optional[str]) -> int:
+def upsert_base002_for_session(session_stamp: str | None) -> int:
     """Promote provider exposure candidates into canonical findings."""
 
     # Phase-B: legacy static_analysis_findings writes removed.
     return 0
 
 
-def build_session_string_view(session_stamp: Optional[str]) -> int:
+def build_session_string_view(session_stamp: str | None) -> int:
     """Return the row count for session-scoped string samples (no DB views)."""
 
     if not _ensure_schema_ready():

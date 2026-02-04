@@ -35,7 +35,7 @@ class GlyphSet:
         supports_unicode: bool = True,
         use_color: bool = False,
         line_width: int = 64,
-    ) -> "GlyphSet":
+    ) -> GlyphSet:
         """Return a glyph configuration tuned to the active terminal."""
 
         clamped_width = max(40, min(line_width, 120))

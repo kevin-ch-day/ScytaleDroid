@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from collections import Counter
-from dataclasses import dataclass
 import hashlib
+from collections import Counter
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
-from typing import Iterable, Optional, Sequence
 from xml.etree import ElementTree
 from zipfile import BadZipFile, ZipFile, ZipInfo
 
-from scytaledroid.StaticAnalysis._androguard import APK, open_apk_safely, merge_bounds_warnings
+from scytaledroid.StaticAnalysis._androguard import APK, merge_bounds_warnings, open_apk_safely
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ..core.context import DetectorContext
@@ -40,23 +40,23 @@ class ModuleProfile:
 
     path: Path
     role: str
-    split_name: Optional[str]
-    config_for: Optional[str]
-    config_category: Optional[str]
-    install_mode: Optional[str]
+    split_name: str | None
+    config_for: str | None
+    config_category: str | None
+    install_mode: str | None
     is_instant: bool
     required_split_types: Sequence[str]
     multi_dex_count: int
     signatures: Sequence[str]
     manifest_pointer: str
-    manifest_hash: Optional[str]
+    manifest_hash: str | None
     payloads: Sequence[PayloadIndicator]
 
 
 def _looks_like_config_split(
     apk_path: Path,
-    split_name: Optional[str],
-    config_for: Optional[str],
+    split_name: str | None,
+    config_for: str | None,
 ) -> bool:
     if not split_name:
         return False
@@ -293,14 +293,14 @@ def _profile_module(
 def _build_topology_lines(
     *,
     context: DetectorContext,
-    current_module: Optional[ModuleProfile],
+    current_module: ModuleProfile | None,
     feature_modules: Sequence[ModuleProfile],
     config_modules: Sequence[ModuleProfile],
     instant_modules: Sequence[ModuleProfile],
     required_summary: str,
     multi_dex_total: int,
     payloads: Sequence[PayloadIndicator],
-    signatures_consistent: Optional[bool],
+    signatures_consistent: bool | None,
     debug_cert_state: str,
 ) -> list[str]:
     role_label = _describe_role(current_module)
@@ -312,7 +312,7 @@ def _build_topology_lines(
 
     required_text = required_summary or "—"
 
-    if hasattr(context.apk, "is_signed_v4") and callable(getattr(context.apk, "is_signed_v4")):
+    if hasattr(context.apk, "is_signed_v4") and callable(context.apk.is_signed_v4):
         v4_signed = bool(context.apk.is_signed_v4())  # type: ignore[attr-defined]
     else:
         v4_signed = False
@@ -394,7 +394,7 @@ def _build_presentation_payload(
     *,
     context: DetectorContext,
     modules: Sequence[ModuleProfile],
-    current_module: Optional[ModuleProfile],
+    current_module: ModuleProfile | None,
     feature_modules: Sequence[ModuleProfile],
     config_modules: Sequence[ModuleProfile],
     instant_modules: Sequence[ModuleProfile],
@@ -402,7 +402,7 @@ def _build_presentation_payload(
     missing_required: Sequence[str],
     payloads: Sequence[PayloadIndicator],
     multi_dex_total: int,
-    signatures_consistent: Optional[bool],
+    signatures_consistent: bool | None,
     debug_cert_state: str,
 ) -> dict[str, object]:
     delivery_summary = _build_delivery_summary(feature_modules, config_modules)
@@ -503,11 +503,11 @@ def _build_presentation_payload(
 
 def _summarise_required_types(
     *,
-    current_module: Optional[ModuleProfile],
+    current_module: ModuleProfile | None,
     required_types: Sequence[str],
     missing_required: Sequence[str],
     config_modules: Sequence[ModuleProfile],
-) -> tuple[str, Optional[str]]:
+) -> tuple[str, str | None]:
     """Return display text and optional note for required split types."""
 
     if current_module is None or current_module.role != "base":
@@ -569,12 +569,12 @@ def _build_signing_profile(
     *,
     apk: APK,
     modules: Sequence[ModuleProfile],
-    signatures_consistent: Optional[bool],
+    signatures_consistent: bool | None,
     debug_cert_state: str,
 ) -> dict[str, object]:
     v2_signed = bool(getattr(apk, "is_signed_v2", lambda: False)())  # type: ignore[attr-defined]
     v3_signed = bool(getattr(apk, "is_signed_v3", lambda: False)())  # type: ignore[attr-defined]
-    if hasattr(apk, "is_signed_v4") and callable(getattr(apk, "is_signed_v4")):
+    if hasattr(apk, "is_signed_v4") and callable(apk.is_signed_v4):
         v4_signed = bool(apk.is_signed_v4())  # type: ignore[attr-defined]
     else:
         v4_signed = False
@@ -618,7 +618,7 @@ def _detect_notable_payloads(payloads: Sequence[PayloadIndicator]) -> list[str]:
 
 def _build_scan_plan_profile(
     *,
-    current_module: Optional[ModuleProfile],
+    current_module: ModuleProfile | None,
     feature_modules: Sequence[ModuleProfile],
     config_modules: Sequence[ModuleProfile],
     instant_modules: Sequence[ModuleProfile],
@@ -664,7 +664,7 @@ def _build_scan_plan_profile(
     }
 
 
-def _count_signer_sets(modules: Sequence[ModuleProfile]) -> Optional[int]:
+def _count_signer_sets(modules: Sequence[ModuleProfile]) -> int | None:
     signer_sets: set[frozenset[str]] = set()
     for module in modules:
         if not module.signatures:
@@ -675,7 +675,7 @@ def _count_signer_sets(modules: Sequence[ModuleProfile]) -> Optional[int]:
     return len(signer_sets)
 
 
-def _debug_cert_to_bool(state: str) -> Optional[bool]:
+def _debug_cert_to_bool(state: str) -> bool | None:
     if not state:
         return None
     lowered = state.strip().lower()
@@ -701,7 +701,7 @@ def _describe_config_categories(modules: Sequence[ModuleProfile]) -> str:
 
 def _format_payload_summary(
     payloads: Sequence[PayloadIndicator],
-    current_module: Optional[ModuleProfile],
+    current_module: ModuleProfile | None,
 ) -> str:
     if current_module and current_module.role == "config":
         return "—"
@@ -738,7 +738,7 @@ def _format_payload_summary(
 
 
 def _format_multidex_value(
-    current_module: Optional[ModuleProfile],
+    current_module: ModuleProfile | None,
     multi_dex_total: int,
 ) -> str:
     if current_module and current_module.role == "config":
@@ -749,7 +749,7 @@ def _format_multidex_value(
 
 
 def _format_scan_scope(
-    current_module: Optional[ModuleProfile],
+    current_module: ModuleProfile | None,
     feature_modules: Sequence[ModuleProfile],
     config_modules: Sequence[ModuleProfile],
     instant_modules: Sequence[ModuleProfile],
@@ -784,7 +784,7 @@ def _determine_status(
     *,
     modules: Sequence[ModuleProfile],
     missing_required: Sequence[str],
-    signatures_consistent: Optional[bool],
+    signatures_consistent: bool | None,
 ) -> Badge:
     if missing_required or signatures_consistent is False:
         return Badge.WARN
@@ -822,8 +822,8 @@ def _select_evidence(
     return tuple(pointers[:2])
 
 
-def _signature_consistency(modules: Sequence[ModuleProfile]) -> Optional[bool]:
-    reference: Optional[set[str]] = None
+def _signature_consistency(modules: Sequence[ModuleProfile]) -> bool | None:
+    reference: set[str | None] = None
     for module in modules:
         if module.signatures:
             reference = set(module.signatures)
@@ -857,7 +857,7 @@ def _aggregate_debug_certificate_state(modules: Sequence[ModuleProfile]) -> str:
     return "—"
 
 
-def _describe_role(module: Optional[ModuleProfile]) -> str:
+def _describe_role(module: ModuleProfile | None) -> str:
     if module is None:
         return "unknown"
     if module.role == "base":
@@ -870,7 +870,7 @@ def _describe_role(module: Optional[ModuleProfile]) -> str:
     return module.role
 
 
-def _describe_consistency(value: Optional[bool]) -> str:
+def _describe_consistency(value: bool | None) -> str:
     if value is True:
         return "Yes"
     if value is False:
@@ -878,7 +878,7 @@ def _describe_consistency(value: Optional[bool]) -> str:
     return "—"
 
 
-def _normalise_mode(value: Optional[str]) -> str:
+def _normalise_mode(value: str | None) -> str:
     if not value:
         return "unknown"
     value_normalised = value.strip().lower().replace("_", "-")
@@ -905,7 +905,7 @@ def _detect_payloads(apk_path: Path) -> tuple[PayloadIndicator, ...]:
             entry = info.filename
             lower_entry = entry.lower()
 
-            payload_type: Optional[str] = None
+            payload_type: str | None = None
             if lower_entry.startswith("assetpack/"):
                 payload_type = "assetpack"
             elif lower_entry.startswith("assets/"):
@@ -971,8 +971,8 @@ def _manifest_hash(root: ElementTree.Element) -> str:
 
 def _build_manifest_pointer(
     apk_path: Path,
-    split_name: Optional[str],
-    config_for: Optional[str],
+    split_name: str | None,
+    config_for: str | None,
 ) -> str:
     attrs: list[str] = []
     if split_name:
@@ -985,7 +985,7 @@ def _build_manifest_pointer(
     return f"{apk_path.resolve().as_posix()}!AndroidManifest.xml{suffix}"
 
 
-def _extract_delivery_info(root: ElementTree.Element) -> tuple[Optional[str], bool]:
+def _extract_delivery_info(root: ElementTree.Element) -> tuple[str | None, bool]:
     module = root.find(f".//{_DIST_NS}module")
     if module is None:
         return None, False
@@ -994,7 +994,7 @@ def _extract_delivery_info(root: ElementTree.Element) -> tuple[Optional[str], bo
     on_demand_attr = module.get(f"{_DIST_NS}onDemand")
 
     delivery = module.find(f"{_DIST_NS}delivery")
-    mode: Optional[str] = None
+    mode: str | None = None
     if delivery is not None:
         if delivery.find(f"{_DIST_NS}install-time") is not None:
             mode = "install-time"
@@ -1009,7 +1009,7 @@ def _extract_delivery_info(root: ElementTree.Element) -> tuple[Optional[str], bo
     return mode, (instant or "").lower() == "true"
 
 
-def _infer_config_category(split_name: str) -> Optional[str]:
+def _infer_config_category(split_name: str) -> str | None:
     label = split_name.split(".", 1)[-1].lower()
     tokens = {token.replace("-", "_") for token in label.split(".")}
     abi_tokens = {
@@ -1089,7 +1089,7 @@ def _normalise_signature_names(names: Iterable[str]) -> Iterable[str]:
         yield name.strip()
 
 
-def _coerce_optional_str(value: object) -> Optional[str]:
+def _coerce_optional_str(value: object) -> str | None:
     if value is None:
         return None
     if isinstance(value, str):

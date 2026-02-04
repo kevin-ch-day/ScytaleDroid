@@ -1,5 +1,6 @@
 """Database package initialiser exposing core components."""
 
+from . import db_queries
 from .db_core import (
     DatabaseEngine,
     DatabaseError,
@@ -12,7 +13,6 @@ from .db_core import (
     run_sql_many,
     sanity_probe,
 )
-from . import db_queries
 
 __all__ = [
     "DatabaseEngine",

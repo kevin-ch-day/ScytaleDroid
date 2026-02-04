@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, Optional, Protocol
+from typing import Protocol
 
 from scytaledroid.DeviceAnalysis.inventory import db_sync, package_collection, snapshot_io
 from scytaledroid.DeviceAnalysis.modes.inventory import InventoryConfig, InventoryMode
@@ -15,7 +16,7 @@ from scytaledroid.Utils.LoggingUtils import logging_utils as log
 class ProgressCallback(Protocol):
     """Receives progress events as dicts (phase/progress/complete)."""
 
-    def __call__(self, event: Dict[str, object]) -> None:
+    def __call__(self, event: dict[str, object]) -> None:
         ...
 
 
@@ -39,14 +40,14 @@ class InventoryDelta:
 class InventoryResult:
     serial: str
     snapshot_path: Path
-    snapshot_id: Optional[int]
+    snapshot_id: int | None
     expected_rows: int
     persisted_rows: int
     rows: list
     stats: InventorySyncStats
     fallback_used: bool
-    previous_total: Optional[int]
-    previous_split: Optional[int]
+    previous_total: int | None
+    previous_split: int | None
     synced_app_definitions: int
     elapsed_seconds: float
     delta: InventoryDelta
@@ -55,10 +56,10 @@ class InventoryResult:
 
 def run_full_sync(
     serial: str,
-    filter_fn: Optional[Callable[[Dict[str, object]], bool]] = None,
-    progress_cb: Optional[ProgressCallback] = None,
-    mode: Optional[str] = None,
-    config: Optional[InventoryConfig] = None,
+    filter_fn: Callable[[dict[str, object | None], bool]] = None,
+    progress_cb: ProgressCallback | None = None,
+    mode: str | None = None,
+    config: InventoryConfig | None = None,
 ) -> InventoryResult:
     """
     Run a full inventory sync for *serial* and return a UI-free result.
@@ -66,7 +67,7 @@ def run_full_sync(
     prev_meta = snapshot_io.load_latest_snapshot_meta(serial)
     prev_snapshot = snapshot_io.load_latest_inventory(serial)
     prev_packages: set[str] = set()
-    prev_rows_map: Dict[str, Dict[str, object]] = {}
+    prev_rows_map: dict[str, dict[str, object]] = {}
     prev_split = 0
     if prev_snapshot:
         pkgs = prev_snapshot.get("packages") or []
@@ -89,7 +90,7 @@ def run_full_sync(
         processed: int,
         total: int,
         elapsed_seconds: float,
-        eta_seconds: Optional[float],
+        eta_seconds: float | None,
         split_apks: int,
     ) -> None:
         if progress_cb:
@@ -113,7 +114,7 @@ def run_full_sync(
     mode = (mode or resolved_config.mode.value).lower().strip()
     effective_filter = filter_fn
     if mode == InventoryMode.USER_ONLY.value:
-        def _user_only(entry: Dict[str, object]) -> bool:
+        def _user_only(entry: dict[str, object]) -> bool:
             primary_path = str(entry.get("primary_path") or "")
             return primary_path.startswith("/data/")
         effective_filter = _user_only if filter_fn is None else lambda entry: filter_fn(entry) and _user_only(entry)
@@ -130,7 +131,7 @@ def run_full_sync(
     # Build package name maps for delta computation.
     current_pkg_names: set[str] = set()
     split_count = 0
-    current_map: Dict[str, Dict[str, object]] = {}
+    current_map: dict[str, dict[str, object]] = {}
     for item in rows:
         if isinstance(item, dict):
             name = item.get("package_name")

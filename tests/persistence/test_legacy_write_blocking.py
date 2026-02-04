@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from scytaledroid.StaticAnalysis.cli.persistence import static_findings_writer
-from scytaledroid.StaticAnalysis.cli.persistence import findings_writer
-from scytaledroid.StaticAnalysis.cli.persistence import strings_writer
+from scytaledroid.StaticAnalysis.cli.persistence import (
+    findings_writer,
+    static_findings_writer,
+    strings_writer,
+)
 
 
 def test_static_findings_requires_static_run_id(monkeypatch):

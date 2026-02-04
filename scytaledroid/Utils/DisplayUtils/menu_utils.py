@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import textwrap
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Iterable, Mapping, Optional, Sequence, Tuple
 
 from . import colors, table_utils, text_blocks
 from .terminal import get_terminal_width, use_ascii_ui
@@ -14,10 +14,10 @@ class MenuOption:
 
     key: str
     label: str
-    description: Optional[str] = None
-    badge: Optional[str] = None
+    description: str | None = None
+    badge: str | None = None
     disabled: bool = False
-    hint: Optional[str] = None
+    hint: str | None = None
 
 
 @dataclass(frozen=True)
@@ -26,23 +26,23 @@ class MenuItemSpec:
 
     key: str
     label: str
-    description: Optional[str] = None
-    badge: Optional[str] = None
+    description: str | None = None
+    badge: str | None = None
     disabled: bool = False
-    hint: Optional[str] = None
+    hint: str | None = None
 
 
 @dataclass(frozen=True)
 class MenuSpec:
     """Declarative menu definition for data-driven rendering."""
 
-    items: Sequence[MenuItemSpec | MenuOption | Tuple[str, str] | Tuple[str, str, str]]  # noqa: WPS110
-    default: Optional[str] = None
-    exit_label: Optional[str] = None
+    items: Sequence[MenuItemSpec | MenuOption | tuple[str, str] | tuple[str, str, str]]
+    default: str | None = None
+    exit_label: str | None = None
     show_exit: bool = True
     show_descriptions: bool = True
     boxed: bool = False
-    width: Optional[int] = None
+    width: int | None = None
     padding: bool = False
     compact: bool = False
 
@@ -50,11 +50,11 @@ class MenuSpec:
 def _coerce_option(
     key: object,
     label: object,
-    description: Optional[object],
+    description: object | None,
     *,
-    badge: Optional[object] = None,
+    badge: object | None = None,
     disabled: bool = False,
-    hint: Optional[object] = None,
+    hint: object | None = None,
 ) -> MenuOption:
     return MenuOption(
         str(key),
@@ -69,11 +69,11 @@ def _coerce_option(
 def _normalise_options(
     options: Mapping[str, str]
     | Sequence[
-        Tuple[str, str]
-        | Tuple[str, str, str]
+        tuple[str, str]
+        | tuple[str, str, str]
         | MenuOption
         | MenuItemSpec
-        | Tuple[str, str, str, str]
+        | tuple[str, str, str, str]
     ]
 ) -> list[MenuOption]:
     if isinstance(options, Mapping):
@@ -123,7 +123,7 @@ def _wrap_text(text: str, width: int) -> list[str]:
 
 
 def _format_kv_lines(
-    items: Sequence[Tuple[str, object]],
+    items: Sequence[tuple[str, object]],
     *,
     label_style: tuple[str, ...],
     value_style: tuple[str, ...],
@@ -165,7 +165,7 @@ def print_main_banner(
     *,
     menu_title: str | None = None,
     menu_subtitle: str | None = None,
-    metrics: Sequence[Tuple[str, object]] = (),
+    metrics: Sequence[tuple[str, object]] = (),
     hint: str | None = None,
     hero_lines: Sequence[str] = (),
     width: int | None = None,
@@ -218,7 +218,7 @@ def print_main_banner(
         print_header(menu_title, subtitle=menu_subtitle)
 
 
-def print_header(title: str, subtitle: Optional[str] = None) -> None:
+def print_header(title: str, subtitle: str | None = None) -> None:
     """Print a simple menu header suitable for plain terminals."""
 
     heading = title.strip()
@@ -232,7 +232,7 @@ def print_header(title: str, subtitle: Optional[str] = None) -> None:
             print(colors.apply(subheading, palette.muted))
 
 
-def print_hint(message: str, *, icon: Optional[str] = None) -> None:
+def print_hint(message: str, *, icon: str | None = None) -> None:
     """Render a hint line without relying on complex glyphs."""
 
     text = message.strip()
@@ -243,7 +243,7 @@ def print_hint(message: str, *, icon: Optional[str] = None) -> None:
     print(f"{prefix} {text}")
 
 
-def print_metrics(metrics: Sequence[Tuple[str, object]]) -> None:
+def print_metrics(metrics: Sequence[tuple[str, object]]) -> None:
     """Display key metrics as a short bulleted list."""
 
     for label, value in metrics:
@@ -252,18 +252,18 @@ def print_metrics(metrics: Sequence[Tuple[str, object]]) -> None:
 
 def print_menu(
     options: Mapping[str, str]
-    | Sequence[Tuple[str, str]
-              | Tuple[str, str, str]
+    | Sequence[tuple[str, str]
+              | tuple[str, str, str]
               | MenuOption
               | MenuItemSpec],
     *,
     is_main: bool = False,
-    default: Optional[str] = None,
-    exit_label: Optional[str] = None,
+    default: str | None = None,
+    exit_label: str | None = None,
     show_exit: bool = True,
     show_descriptions: bool = True,
     boxed: bool = False,
-    width: Optional[int] = None,
+    width: int | None = None,
     padding: bool = False,
     compact: bool = False,
 ) -> None:
@@ -343,12 +343,12 @@ def print_menu(
 def format_menu_panel(
     title: str,
     options: Mapping[str, str]
-    | Sequence[Tuple[str, str]
-              | Tuple[str, str, str]
+    | Sequence[tuple[str, str]
+              | tuple[str, str, str]
               | MenuOption
               | MenuItemSpec],
     *,
-    width: Optional[int] = None,
+    width: int | None = None,
     default_keys: Sequence[str] = (),
     compact: bool = False,
 ) -> str:
@@ -386,7 +386,7 @@ def format_menu_panel(
         )
         lines.append(header_line)
 
-        def _append_wrapped(text: Optional[str], style) -> None:
+        def _append_wrapped(text: str | None, style) -> None:
             if not text:
                 return
             for entry in _wrap_text(text, body_width):
@@ -407,15 +407,15 @@ def format_menu_panel(
 
 def print_menu_panels(
     sections: Sequence[
-        Tuple[
+        tuple[
             str,
             Mapping[str, str]
-            | Sequence[Tuple[str, str] | Tuple[str, str, str] | MenuOption],
+            | Sequence[tuple[str, str] | tuple[str, str, str] | MenuOption],
         ]
     ],
     *,
     columns: int = 2,
-    width: Optional[int] = None,
+    width: int | None = None,
     default_keys: Sequence[str] = (),
     gap: int = 4,
     compact: bool = False,

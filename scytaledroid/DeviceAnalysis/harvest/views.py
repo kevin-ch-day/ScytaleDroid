@@ -7,7 +7,8 @@ metrics/selection objects and render readable summaries with the `[RUN]`,
 
 from __future__ import annotations
 
-from typing import Mapping, Sequence, TYPE_CHECKING
+from collections.abc import Mapping
+from typing import TYPE_CHECKING
 
 from scytaledroid.ui import formatter
 
@@ -63,7 +64,7 @@ def render_scope_overview(
 def render_harvest_summary_structured(
     *,
     selection_label: str,
-    metrics: "HarvestRunMetrics",
+    metrics: HarvestRunMetrics,
     pull_mode: str,
     output_root: str | None = None,
     preflight_skips: Mapping[str, int] | None = None,

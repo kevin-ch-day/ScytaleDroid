@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from .permission_console_rendering import (
+    _abbr_from_name,
     print_permissions_block,
     render_after_run_summary,
     render_barcode_line,
@@ -12,7 +13,6 @@ from .permission_console_rendering import (
     render_permission_postcard,
     render_scoring_legend,
     render_signal_matrix,
-    _abbr_from_name,
 )
 from .permission_manifest_extract import collect_permissions_and_sdk
 

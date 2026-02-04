@@ -2,18 +2,15 @@
 
 from __future__ import annotations
 
-import json
 import os
 import re
-import textwrap
 import time
 from collections import Counter
+from collections.abc import Mapping, MutableMapping
 from datetime import datetime
 from pathlib import Path
-from typing import Mapping, MutableMapping, Optional, Sequence, Tuple
 
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
-from scytaledroid.Utils.DisplayUtils import status_messages
 
 from ...core import (
     AnalysisConfig,
@@ -23,8 +20,8 @@ from ...core import (
     analyze_apk,
 )
 from ...core.findings import SeverityLevel
-from ...modules import resolve_category
 from ...core.repository import load_display_name_map
+from ...modules import resolve_category
 from ...persistence import ReportStorageError, save_report
 from ..core.models import AppRunResult, ArtifactOutcome, RunOutcome, RunParameters, ScopeSelection
 from ..persistence.run_summary import create_static_run_ledger
@@ -35,17 +32,16 @@ from .scan_identity_helpers import (
     _dedupe_artifacts,
     _run_signature_sha256,
 )
-from .scan_progress_display import _PipelineProgress, _format_elapsed
+from .scan_progress_display import _PipelineProgress
 from .scan_view import (
     render_app_completion,
     render_app_start,
     render_resource_warnings,
 )
 
-
 _abort_requested = False
-_abort_reason: Optional[str] = None
-_abort_signal: Optional[str] = None
+_abort_reason: str | None = None
+_abort_signal: str | None = None
 
 
 def request_abort(reason: str = "SIGINT", signal: str = "SIGINT") -> None:
@@ -57,7 +53,7 @@ def request_abort(reason: str = "SIGINT", signal: str = "SIGINT") -> None:
     _abort_signal = signal
 
 
-def _abort_state() -> tuple[bool, Optional[str], Optional[str]]:
+def _abort_state() -> tuple[bool, str | None, str | None]:
     return _abort_requested, _abort_reason, _abort_signal
 
 
@@ -120,7 +116,7 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
         if not display_name or str(display_name).strip().lower() == group.package_name.lower():
             display_name = display_name_map.get(group.package_name.lower()) or display_name
 
-        def _coerce_int(value: object) -> Optional[int]:
+        def _coerce_int(value: object) -> int | None:
             try:
                 if value is None or value == "":
                     return None
@@ -408,7 +404,7 @@ def _show_split_breakdown() -> bool:
 
 
 
-def _artifact_label(artifact, *, display_name: Optional[str] = None) -> str:
+def _artifact_label(artifact, *, display_name: str | None = None) -> str:
     label = getattr(artifact, "artifact_label", None) or getattr(artifact, "display_path", None)
     if isinstance(label, str) and label.strip():
         split_label = label.strip()
@@ -433,7 +429,7 @@ def _artifact_label(artifact, *, display_name: Optional[str] = None) -> str:
     return split_label
 
 
-def _summarize_artifact(artifact, report: StaticAnalysisReport, json_path: Optional[Path], duration: float) -> ArtifactOutcome:
+def _summarize_artifact(artifact, report: StaticAnalysisReport, json_path: Path | None, duration: float) -> ArtifactOutcome:
     severity = Counter[str]()
     for result in report.detector_results:
         for finding in result.findings:
@@ -535,7 +531,7 @@ def build_analysis_config(params: RunParameters) -> AnalysisConfig:
     )
 
 
-def _map_tests_to_detectors(params: RunParameters) -> Tuple[str, ...]:
+def _map_tests_to_detectors(params: RunParameters) -> tuple[str, ...]:
     if params.profile == "metadata":
         return ("integrity_identity",)
     if params.profile == "permissions":

@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import re
 from collections import Counter, defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Set
-import re
 
 from scytaledroid.Config import app_config
 from scytaledroid.Utils.DisplayUtils import (
@@ -22,7 +22,7 @@ from scytaledroid.Utils.DisplayUtils import (
 @dataclass
 class _SessionSummary:
     stamp: str
-    packages: Set[str]
+    packages: set[str]
     artifacts: int
     package_counts: Counter[str]
 
@@ -30,7 +30,7 @@ class _SessionSummary:
 @dataclass
 class _DeviceLibrarySummary:
     serial: str
-    sessions: List[_SessionSummary]
+    sessions: list[_SessionSummary]
     total_packages: int
     total_artifacts: int
     base_path: Path
@@ -42,7 +42,7 @@ class _DeviceLibrarySummary:
         return len(self.sessions)
 
     @property
-    def latest_stamp(self) -> Optional[str]:
+    def latest_stamp(self) -> str | None:
         if not self.sessions:
             return None
         return max(session.stamp for session in self.sessions)
@@ -82,7 +82,7 @@ def browse_saved_apk_library() -> None:
         menu_utils.print_header("Saved APK Library")
 
         headers = ["#", "Device", "Sessions", "Packages", "Artifacts", "Last run"]
-        rows: List[List[str]] = []
+        rows: list[list[str]] = []
         for index, summary in enumerate(summaries, start=1):
             rows.append(
                 [
@@ -116,18 +116,18 @@ def browse_saved_apk_library() -> None:
             break
 
 
-def _scan_saved_apks(base_dir: Path) -> List[_DeviceLibrarySummary]:
-    summaries: List[_DeviceLibrarySummary] = []
+def _scan_saved_apks(base_dir: Path) -> list[_DeviceLibrarySummary]:
+    summaries: list[_DeviceLibrarySummary] = []
     date_dir_pattern = re.compile(r"^\d{8}$")
     for serial_dir in sorted(p for p in base_dir.iterdir() if p.is_dir()):
         child_dirs = [p for p in serial_dir.iterdir() if p.is_dir()]
         has_date_dirs = any(date_dir_pattern.match(p.name) for p in child_dirs)
         layout = "date_first" if has_date_dirs else "package_first"
-        session_packages: Dict[str, Dict[str, object]] = defaultdict(
+        session_packages: dict[str, dict[str, object]] = defaultdict(
             lambda: {"packages": set(), "artifacts": 0, "package_counts": Counter()}
         )
         package_counts: Counter[str] = Counter()
-        packages_seen: Set[str] = set()
+        packages_seen: set[str] = set()
         total_artifacts = 0
 
         if layout == "date_first":
@@ -184,7 +184,7 @@ def _scan_saved_apks(base_dir: Path) -> List[_DeviceLibrarySummary]:
         if not session_packages:
             continue
 
-        sessions: List[_SessionSummary] = []
+        sessions: list[_SessionSummary] = []
         for stamp, stats in session_packages.items():
             packages_set = set(stats["packages"]) if isinstance(stats["packages"], set) else set()
             package_counter = (
@@ -223,7 +223,7 @@ def _show_device_library_detail(summary: _DeviceLibrarySummary) -> None:
     )
 
     headers = ["#", "Session", "Packages", "Artifacts"]
-    rows: List[List[str]] = [
+    rows: list[list[str]] = [
         [
             str(idx + 1),
             session.stamp,
@@ -284,7 +284,7 @@ def _show_session_packages(summary: _DeviceLibrarySummary, session: _SessionSumm
         subtitle=f"{len(session.packages)} package(s) · {session.artifacts} artifact(s)",
     )
 
-    rows: List[List[str]] = []
+    rows: list[list[str]] = []
     for package, count in session.package_counts.most_common():
         if summary.layout == "date_first":
             path = summary.base_path / session.stamp / package

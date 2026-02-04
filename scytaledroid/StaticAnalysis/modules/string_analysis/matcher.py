@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
-from dataclasses import dataclass, field
 import math
+from collections import defaultdict
+from collections.abc import Callable, Collection, Iterable, Mapping, MutableMapping, Sequence
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Callable, Collection, Iterable, Mapping, MutableMapping, Sequence, Tuple
 from typing import Literal
 
 from .extractor import IndexedString, StringIndex
@@ -21,7 +21,7 @@ class MatchStatus(str, Enum):
 
 
 FilterOutcome = Literal["accept", "filter", "reject"]
-FilterResult = Tuple[FilterOutcome, Tuple[str, ...]]
+FilterResult = tuple[FilterOutcome, tuple[str, ...]]
 FilterFunc = Callable[["MatchRecord"], FilterResult]
 
 
@@ -40,7 +40,7 @@ class EvaluatedMatch:
 
     record: MatchRecord
     status: MatchStatus
-    reasons: Tuple[str, ...] = ()
+    reasons: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -48,8 +48,8 @@ class MatchGroup:
     """Bundle of matches for the same pattern."""
 
     pattern: StringPattern
-    accepted: Tuple[EvaluatedMatch, ...]
-    filtered: Tuple[EvaluatedMatch, ...]
+    accepted: tuple[EvaluatedMatch, ...]
+    filtered: tuple[EvaluatedMatch, ...]
     accepted_count: int = field(init=False)
     filtered_count: int = field(init=False)
 
@@ -66,7 +66,7 @@ class MatchGroup:
 class MatchBatch:
     """Aggregate result produced by :class:`StringMatcher`."""
 
-    evaluated: Tuple[EvaluatedMatch, ...]
+    evaluated: tuple[EvaluatedMatch, ...]
     groups: Mapping[str, MatchGroup]
     accepted_total: int = field(init=False)
     filtered_total: int = field(init=False)
@@ -128,7 +128,7 @@ class StringMatcher:
         groups = _group_by_pattern(evaluated)
         return MatchBatch(evaluated=evaluated, groups=groups)
 
-    def _evaluate_matches(self) -> Tuple[EvaluatedMatch, ...]:
+    def _evaluate_matches(self) -> tuple[EvaluatedMatch, ...]:
         seen: set[tuple[str, str, str]] = set()
         evaluated: list[EvaluatedMatch] = []
 
@@ -231,7 +231,7 @@ def _apply_sampler_policy(
     allowed_origin_types: Collection[str] | None,
     max_hits_per_pattern: int | None,
     min_entropy: float | None,
-) -> Tuple[EvaluatedMatch, ...]:
+) -> tuple[EvaluatedMatch, ...]:
     if not matches:
         return tuple()
 
@@ -346,4 +346,3 @@ __all__ = [
     "MatchStatus",
     "StringMatcher",
 ]
-

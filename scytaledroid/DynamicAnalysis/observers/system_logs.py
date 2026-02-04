@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-
 import subprocess
 
 from scytaledroid.DeviceAnalysis import adb_client

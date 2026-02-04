@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from contextlib import contextmanager
 from threading import local
-from typing import Iterator, Optional
 
 from .db_engine import DatabaseEngine
 
@@ -14,14 +14,14 @@ class _SessionState(local):
 
     def __init__(self) -> None:
         super().__init__()
-        self.engine: Optional[DatabaseEngine] = None
+        self.engine: DatabaseEngine | None = None
         self.depth: int = 0
 
 
 _STATE = _SessionState()
 
 
-def get_current_engine() -> Optional[DatabaseEngine]:
+def get_current_engine() -> DatabaseEngine | None:
     """Return the active session-bound :class:`DatabaseEngine`, if any."""
 
     engine = _STATE.engine

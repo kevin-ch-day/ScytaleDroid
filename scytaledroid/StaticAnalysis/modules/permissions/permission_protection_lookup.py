@@ -3,20 +3,20 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Dict, Mapping, Optional
 
 import yaml
 
-_FALLBACK_PROTECTION_CACHE: Dict[str, Dict[str, object]] | None = None
+_FALLBACK_PROTECTION_CACHE: dict[str, dict[str, object]] | None = None
 
 
-def _load_fallback_protections() -> Dict[str, Dict[str, object]]:
+def _load_fallback_protections() -> dict[str, dict[str, object]]:
     global _FALLBACK_PROTECTION_CACHE
     if _FALLBACK_PROTECTION_CACHE is not None:
         return _FALLBACK_PROTECTION_CACHE
 
-    mapping: Dict[str, Dict[str, object]] = {}
+    mapping: dict[str, dict[str, object]] = {}
     path = Path("config/framework_permissions.yaml")
     if path.exists():
         try:
@@ -38,8 +38,8 @@ def _load_fallback_protections() -> Dict[str, Dict[str, object]]:
 
 def _fetch_protections(
     names: list[str],
-    target_sdk: Optional[int] = None,
-) -> Mapping[str, Optional[str]]:
+    target_sdk: int | None = None,
+) -> Mapping[str, str | None]:
     """Best-effort DB lookup of framework protection levels for given names.
 
     Returns a mapping of perm_name -> protection or None. On any error, returns
@@ -55,7 +55,7 @@ def _fetch_protections(
         db_map = {}
 
     names_upper = {str(name).upper() for name in names}
-    results: Dict[str, Optional[str]] = {
+    results: dict[str, str | None] = {
         key.upper(): value for key, value in (db_map or {}).items()
     }
 

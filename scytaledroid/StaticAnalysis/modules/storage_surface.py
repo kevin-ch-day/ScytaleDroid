@@ -4,16 +4,15 @@ from __future__ import annotations
 
 import json
 import zipfile
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, Sequence
 from xml.etree import ElementTree
 
-from scytaledroid.StaticAnalysis._androguard import APK, open_apk_safely, merge_bounds_warnings
+from scytaledroid.StaticAnalysis._androguard import merge_bounds_warnings, open_apk_safely
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .module_api import AppModuleContext, ModuleResult, StaticModule
-
 
 _ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
 _FILE_PROVIDER_META_NAMES = {

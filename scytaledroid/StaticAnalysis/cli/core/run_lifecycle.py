@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from ..persistence.run_summary import finalize_open_static_runs, update_static_run_status
 
@@ -19,7 +19,7 @@ def finalize_static_run(
         return
     ended_at = ended_at_utc
     if not ended_at:
-        ended_at = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+        ended_at = datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
     update_static_run_status(
         static_run_id=static_run_id,
         status=status,

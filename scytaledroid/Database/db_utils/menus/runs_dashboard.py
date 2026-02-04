@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from scytaledroid.Database.db_core import run_sql
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
@@ -30,7 +30,7 @@ def show_recent_runs_dashboard(limit: int = 5) -> None:
     prompt_utils.press_enter_to_continue()
 
 
-def _fetch_recent_runs(limit: int) -> Optional[list[Dict[str, Any]]]:
+def _fetch_recent_runs(limit: int) -> list[dict[str, Any]] | None:
     try:
         return run_sql(
             "SELECT run_id, package, version_name, version_code, target_sdk, ts, session_stamp FROM runs ORDER BY run_id DESC LIMIT %s",
@@ -43,7 +43,7 @@ def _fetch_recent_runs(limit: int) -> Optional[list[Dict[str, Any]]]:
         return None
 
 
-def _render_run_entry(run: Dict[str, Any]) -> None:
+def _render_run_entry(run: dict[str, Any]) -> None:
     run_id = int(run.get("run_id") or 0)
     package = run.get("package") or "<unknown>"
     version_name = run.get("version_name") or "—"

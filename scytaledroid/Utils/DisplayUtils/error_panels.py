@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import textwrap
 import traceback
-from typing import Iterable, Optional
+from collections.abc import Iterable
 
 from . import colors
 from .terminal import get_terminal_width, use_ascii_ui
 from .text_blocks import divider
-
 
 _TONES = ("info", "warning", "success", "error")
 
@@ -61,9 +60,9 @@ def format_panel(
     title: str,
     message: str,
     *,
-    details: Optional[Iterable[str]] = None,
-    hint: Optional[str] = None,
-    width: Optional[int] = None,
+    details: Iterable[str] | None = None,
+    hint: str | None = None,
+    width: int | None = None,
     tone: str = "info",
 ) -> str:
     """Return a coloured panel containing *message* and optional extras."""
@@ -118,9 +117,9 @@ def print_panel(
     title: str,
     message: str,
     *,
-    details: Optional[Iterable[str]] = None,
-    hint: Optional[str] = None,
-    width: Optional[int] = None,
+    details: Iterable[str] | None = None,
+    hint: str | None = None,
+    width: int | None = None,
     tone: str = "info",
 ) -> None:
     """Print a formatted panel."""
@@ -134,9 +133,9 @@ def print_panel(
 def print_exception(
     exc: BaseException,
     *,
-    context: Optional[str] = None,
-    hint: Optional[str] = None,
-    width: Optional[int] = None,
+    context: str | None = None,
+    hint: str | None = None,
+    width: int | None = None,
 ) -> None:
     """Render an exception using the standard error tone."""
 
@@ -150,9 +149,9 @@ def format_error_panel(
     title: str,
     message: str,
     *,
-    details: Optional[Iterable[str]] = None,
-    hint: Optional[str] = None,
-    width: Optional[int] = None,
+    details: Iterable[str] | None = None,
+    hint: str | None = None,
+    width: int | None = None,
 ) -> str:
     return format_panel(title, message, details=details, hint=hint, width=width, tone="error")
 
@@ -161,9 +160,9 @@ def print_error_panel(
     title: str,
     message: str,
     *,
-    details: Optional[Iterable[str]] = None,
-    hint: Optional[str] = None,
-    width: Optional[int] = None,
+    details: Iterable[str] | None = None,
+    hint: str | None = None,
+    width: int | None = None,
 ) -> None:
     print_panel(title, message, details=details, hint=hint, width=width, tone="error")
 
@@ -172,9 +171,9 @@ def print_info_panel(
     title: str,
     message: str,
     *,
-    details: Optional[Iterable[str]] = None,
-    hint: Optional[str] = None,
-    width: Optional[int] = None,
+    details: Iterable[str] | None = None,
+    hint: str | None = None,
+    width: int | None = None,
 ) -> None:
     print_panel(title, message, details=details, hint=hint, width=width, tone="info")
 
@@ -183,9 +182,9 @@ def print_warning_panel(
     title: str,
     message: str,
     *,
-    details: Optional[Iterable[str]] = None,
-    hint: Optional[str] = None,
-    width: Optional[int] = None,
+    details: Iterable[str] | None = None,
+    hint: str | None = None,
+    width: int | None = None,
 ) -> None:
     print_panel(title, message, details=details, hint=hint, width=width, tone="warning")
 
@@ -194,9 +193,9 @@ def print_success_panel(
     title: str,
     message: str,
     *,
-    details: Optional[Iterable[str]] = None,
-    hint: Optional[str] = None,
-    width: Optional[int] = None,
+    details: Iterable[str] | None = None,
+    hint: str | None = None,
+    width: int | None = None,
 ) -> None:
     print_panel(title, message, details=details, hint=hint, width=width, tone="success")
 

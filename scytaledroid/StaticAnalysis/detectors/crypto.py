@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from time import perf_counter
-from typing import Dict, Sequence
 
 from ..core.context import DetectorContext
 from ..core.findings import (
@@ -154,7 +154,7 @@ class CryptoHygieneDetector(BaseDetector):
             )
 
         findings: list[Finding] = []
-        metrics: Dict[str, object] = {}
+        metrics: dict[str, object] = {}
 
         for pattern in _CRYPTO_PATTERNS:
             matches = _scan_pattern(pattern, index.strings)

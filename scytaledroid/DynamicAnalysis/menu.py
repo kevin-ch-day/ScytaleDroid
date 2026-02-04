@@ -2,22 +2,23 @@
 
 from __future__ import annotations
 
-from scytaledroid.DeviceAnalysis import adb_devices, adb_shell, adb_status
 from scytaledroid.Database.db_core import run_sql
-from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
+from scytaledroid.DeviceAnalysis import adb_shell, adb_status
 from scytaledroid.DynamicAnalysis import plan_selection as _plan_selection
-from scytaledroid.DynamicAnalysis.plan_selection import (
-    print_plan_selection_banner,
-    resolve_plan_selection,
-)
-from scytaledroid.DynamicAnalysis.profile_loader import load_db_profiles, load_profile_packages
-from scytaledroid.DynamicAnalysis.run_summary import print_run_summary
-from scytaledroid.Config import app_config
-from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
 from scytaledroid.DynamicAnalysis.controllers.guided_run import run_guided_dataset_run
 from scytaledroid.DynamicAnalysis.controllers.sandbox_run import run_sandbox_dynamic_run
-from scytaledroid.DynamicAnalysis.services.observer_service import select_observers as _service_select_observers
-from scytaledroid.StaticAnalysis.core.repository import group_artifacts, list_categories, list_packages, load_profile_map
+from scytaledroid.DynamicAnalysis.profile_loader import load_db_profiles, load_profile_packages
+from scytaledroid.DynamicAnalysis.services.observer_service import (
+    select_observers as _service_select_observers,
+)
+from scytaledroid.StaticAnalysis.core.repository import (
+    group_artifacts,
+    list_categories,
+    list_packages,
+    load_profile_map,
+)
+from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
+from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
 
 _DEVICE_STATUS_CACHE: dict[str, dict[str, str]] = {}
 

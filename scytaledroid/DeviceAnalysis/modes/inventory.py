@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from enum import Enum
-from typing import Optional
+from enum import StrEnum
 
 
-class InventoryMode(str, Enum):
+class InventoryMode(StrEnum):
     BASELINE = "baseline"
     USER_ONLY = "user_only"
     BULK = "bulk"
@@ -31,7 +30,7 @@ class InventoryMode(str, Enum):
         }[self]
 
     @classmethod
-    def from_str(cls, raw: str) -> "InventoryMode":
+    def from_str(cls, raw: str) -> InventoryMode:
         raw_norm = (raw or "").strip().lower()
         try:
             return cls(raw_norm)
@@ -42,11 +41,11 @@ class InventoryMode(str, Enum):
 @dataclass
 class InventoryConfig:
     mode: InventoryMode = InventoryMode.BASELINE
-    user_handle: Optional[int] = None
+    user_handle: int | None = None
     allow_fallbacks: bool = False
 
     @classmethod
-    def from_env(cls) -> "InventoryConfig":
+    def from_env(cls) -> InventoryConfig:
         raw_mode = os.getenv("SCYTALEDROID_INVENTORY_MODE", InventoryMode.BASELINE.value)
         return cls(mode=InventoryMode.from_str(raw_mode), allow_fallbacks=False)
 

@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping, Sequence
 from itertools import chain
-from typing import Iterable, Mapping, Sequence
 
 from .ai import PATTERNS as AI_PATTERNS
 from .analytics import PATTERNS as ANALYTICS_PATTERNS
 from .base import (
     DEFAULT_ORIGINS,
     StringPattern,
+)
+from .base import (
     categorize_patterns as _categorize_patterns,
+)
+from .base import (
     lookup_pattern as _lookup_pattern,
 )
 from .cloud import PATTERNS as CLOUD_PATTERNS

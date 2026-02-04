@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
 import os
 import select
 import sys
 import time
-from typing import Callable
-
-from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
+from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
 
 
 @dataclass(frozen=True)
@@ -42,7 +41,7 @@ class ManualScenarioRunner:
             if run_ctx.scenario_hint:
                 print(status_messages.status(run_ctx.scenario_hint, level="info"))
             prompt_utils.press_enter_to_continue("Press Enter to begin (timer starts)...")
-            started_at = datetime.now(timezone.utc)
+            started_at = datetime.now(UTC)
             if on_start:
                 on_start()
             duration_seconds = max(int(run_ctx.duration_seconds or 0), 0)
@@ -56,11 +55,11 @@ class ManualScenarioRunner:
             elapsed = int((ended_at - started_at).total_seconds())
             print(status_messages.status(f"Scenario elapsed time: {_format_duration(elapsed)}.", level="info"))
         else:
-            started_at = datetime.now(timezone.utc)
+            started_at = datetime.now(UTC)
             if on_start:
                 on_start()
             time.sleep(max(run_ctx.duration_seconds, 0))
-            ended_at = datetime.now(timezone.utc)
+            ended_at = datetime.now(UTC)
             if on_end:
                 on_end()
         return ScenarioResult(started_at=started_at, ended_at=ended_at)
@@ -69,7 +68,7 @@ class ManualScenarioRunner:
 def _run_countdown(duration_seconds: int) -> datetime:
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         time.sleep(max(duration_seconds, 0))
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
     start = time.monotonic()
     line_width = 32
     last_rendered = None
@@ -93,13 +92,13 @@ def _run_countdown(duration_seconds: int) -> datetime:
             _ = sys.stdin.readline()
             print()
             break
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _run_stopwatch() -> datetime:
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         prompt_utils.press_enter_to_continue("Press Enter when finished (timer stops)...")
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
     if os.environ.get("SCYTALEDROID_RUN_MONITOR") == "1":
         print(status_messages.status("Press Enter when finished (timer stops).", level="info"))
         start = time.monotonic()
@@ -114,7 +113,7 @@ def _run_stopwatch() -> datetime:
                 _ = sys.stdin.readline()
                 print()
                 break
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
     start = time.monotonic()
     line_width = 32
     print(status_messages.status("Press Enter when finished (timer stops).", level="info"))
@@ -132,7 +131,7 @@ def _run_stopwatch() -> datetime:
             _ = sys.stdin.readline()
             print()
             break
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _format_duration(seconds: int) -> str:

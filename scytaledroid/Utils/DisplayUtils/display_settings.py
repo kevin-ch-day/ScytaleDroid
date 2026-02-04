@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from . import ui_prefs
 
 
-def default_width(provided: Optional[int] = None) -> int:
+def default_width(provided: int | None = None) -> int:
     """Return a safe width based on provided value or ui_prefs."""
     if provided is not None:
         return provided

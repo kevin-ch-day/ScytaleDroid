@@ -2,25 +2,27 @@
 
 from __future__ import annotations
 
-import os
 import json
-from pathlib import Path
+import os
 import shutil
 import signal
-from datetime import datetime, timezone
 from dataclasses import replace
+from datetime import UTC, datetime
+from pathlib import Path
 
 from scytaledroid.Config import app_config
-from scytaledroid.Utils.DisplayUtils import summary_cards, status_messages
-from scytaledroid.Utils.System import output_prefs
 from scytaledroid.StaticAnalysis.persistence import ingest as canonical_ingest
 from scytaledroid.StaticAnalysis.session import make_session_stamp, normalize_session_stamp
-from scytaledroid.ui import formatter
-from ..views.view_layouts import render_run_start, render_run_summary
-from scytaledroid.Utils.LoggingUtils.logging_context import RunContext, get_run_logger
+from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_engine
 from scytaledroid.Utils.LoggingUtils import logging_events as log_events
+from scytaledroid.Utils.LoggingUtils.logging_context import RunContext, get_run_logger
+from scytaledroid.Utils.System import output_prefs
 
+from ..core.abort_reasons import classify_exception, normalize_abort_reason
+from ..core.analysis_profiles import run_modules_for_profile
+from ..core.models import AppRunResult, RunOutcome, RunParameters, ScopeSelection
+from ..core.run_lifecycle import finalize_open_runs
 from ..execution import (
     build_analysis_config,
     configure_logging_for_cli,
@@ -28,14 +30,11 @@ from ..execution import (
     execute_scan,
     format_duration,
     generate_report,
-    request_abort,
     render_run_results,
+    request_abort,
 )
-from ..core.models import RunParameters, RunOutcome, ScopeSelection, AppRunResult
-from ..core.run_lifecycle import finalize_open_runs
-from ..core.abort_reasons import classify_exception, normalize_abort_reason
-from ..core.analysis_profiles import run_modules_for_profile
 from ..execution.static_run_map import REQUIRED_FIELDS, validate_run_map
+from ..views.view_layouts import render_run_start, render_run_summary
 from .selection import format_scope_target
 
 
@@ -174,7 +173,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
         signal.signal(signal.SIGINT, previous_handler)
     try:
         if outcome is not None:
-            setattr(outcome, "session_stamp", params.session_stamp)
+            outcome.session_stamp = params.session_stamp
     except Exception:
         pass
     try:
@@ -404,7 +403,7 @@ def _build_session_run_map(outcome: RunOutcome | None, session_stamp: str | None
             origin_map = {}
     apps = []
     by_package = {}
-    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     for res in results:
         static_run_id = res.static_run_id
         base_report = res.base_report()

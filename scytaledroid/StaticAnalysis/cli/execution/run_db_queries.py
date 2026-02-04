@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Mapping, MutableMapping, Sequence
+from collections.abc import Mapping, MutableMapping, Sequence
 
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Utils.DisplayUtils import status_messages

@@ -9,7 +9,6 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from typing import Dict, Union
 from urllib.parse import urlparse
 
 from scytaledroid.Config import app_config
@@ -58,7 +57,7 @@ def _sqlite_allow_write() -> bool:
     return raw in {"1", "true", "yes", "on"}
 
 
-def _load_from_env() -> Dict[str, Union[str, int]]:
+def _load_from_env() -> dict[str, str | int]:
     loaded_dotenv = _load_dotenv()
     # When running tests via pytest, force default SQLite to avoid hitting real DBs.
     if any("pytest" in arg for arg in sys.argv[:1]) or "PYTEST_CURRENT_TEST" in os.environ:
@@ -120,7 +119,7 @@ def _load_from_env() -> Dict[str, Union[str, int]]:
     raise ValueError(f"Unsupported DB scheme in SCYTALEDROID_DB_URL: {scheme}")
 
 
-DB_CONFIG: Dict[str, Union[str, int]] = _load_from_env()
+DB_CONFIG: dict[str, str | int] = _load_from_env()
 DB_CONFIG_SOURCE: str = "env:SCYTALEDROID_DB_URL" if os.environ.get("SCYTALEDROID_DB_URL") else "default-sqlite"
 
 _DEFAULT_DATABASE = DB_CONFIG.get("database", "")
