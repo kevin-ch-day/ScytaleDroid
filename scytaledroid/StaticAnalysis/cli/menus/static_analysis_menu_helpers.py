@@ -113,7 +113,16 @@ def build_dev_selection(groups, shortcut_id):
     _, package = DEV_TARGETS[shortcut_id]
     for group in groups:
         if getattr(group, "package_name", None) == package:
-            return ScopeSelection(scope="app", label=package, groups=(group,))
+            display_name = ""
+            for artifact in group.artifacts:
+                label = artifact.metadata.get("app_label")
+                if isinstance(label, str) and label.strip():
+                    display_name = label.strip()
+                    break
+            selection_label = (
+                f"{display_name} ({package})" if display_name else package
+            )
+            return ScopeSelection(scope="app", label=selection_label, groups=(group,))
     return None
 
 
