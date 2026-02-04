@@ -5,15 +5,18 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
 import mysql.connector
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
+ROOT_DIR = Path(__file__).resolve().parents[2]
 ENV_FILE = Path(os.environ.get("SCYTALEDROID_ENV_FILE", ROOT_DIR / ".env"))
-DATA_DIR = ROOT_DIR / "data"
-SESSIONS_DIR = DATA_DIR / "sessions"
+SESSIONS_DIR: Path | None = None
+
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 
 def _load_env() -> None:
@@ -66,6 +69,8 @@ def _table_exists(cur, name: str) -> bool:
 
 
 def _load_run_map(session_stamp: str) -> tuple[dict | None, str]:
+    if SESSIONS_DIR is None:
+        return None, "sessions directory not initialised"
     run_map_path = SESSIONS_DIR / session_stamp / "run_map.json"
     if not run_map_path.exists():
         return None, f"missing run_map.json at {run_map_path}"
@@ -180,6 +185,10 @@ def _compare_packages(cur, session_stamp: str, run_map: dict | None) -> list[str
 
 def main() -> int:
     _load_env()
+    from scytaledroid.Config import app_config
+
+    global SESSIONS_DIR
+    SESSIONS_DIR = Path(app_config.DATA_DIR) / "sessions"
     conn = _db_connect()
     cur = conn.cursor()
     rows = _fetchall(

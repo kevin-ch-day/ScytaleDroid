@@ -158,8 +158,16 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
     baseline_written_count = 0
     plan_written_count = 0
     report_reference_count = 0
-    persist_enabled = not params.dry_run
+    persistence_ready = os.getenv("SCYTALEDROID_PERSISTENCE_READY", "1").strip() != "0"
+    persist_enabled = (not params.dry_run) and persistence_ready
     compact_mode = not params.verbose_output
+    if not persistence_ready and not params.dry_run:
+        print(
+            status_messages.status(
+                "Persistence gate failed; evidence outputs will be suppressed for this run.",
+                level="warn",
+            )
+        )
 
     for index, app_result in enumerate(outcome.results, start=1):
         base_report = app_result.base_report()
@@ -242,7 +250,14 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             for line in compact_block:
                 print(line)
 
-        if persist_enabled:
+        if persist_enabled and not app_result.static_run_id:
+            print(
+                status_messages.status(
+                    f"Skipping persistence for {app_result.package_name}: static_run_id missing.",
+                    level="warn",
+                )
+            )
+        if persist_enabled and app_result.static_run_id:
             try:
                 outcome_status = persist_run_summary(
                     base_report,
@@ -321,7 +336,14 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
 
         saved_path = None
         dynamic_plan_path = None
-        if persist_enabled:
+        if persist_enabled and not app_result.static_run_id:
+            print(
+                status_messages.status(
+                    f"Skipping evidence outputs for {app_result.package_name}: static_run_id missing.",
+                    level="warn",
+                )
+            )
+        if persist_enabled and app_result.static_run_id:
             try:
                 saved_path = write_baseline_json(
                     payload,

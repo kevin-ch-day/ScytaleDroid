@@ -7,15 +7,21 @@ function bindHandlers() {
   if (scanBtn && typeof uploadHandleScan === "function") {
     scanBtn.addEventListener("click", uploadHandleScan);
   }
-  if (document.getElementById("runsTable") && typeof runsStartRefresh === "function") {
-    runsStartRefresh();
+  if (document.getElementById("runsTable")) {
+    if (typeof runsInit === "function") {
+      runsInit();
+    } else if (typeof runsStartRefresh === "function") {
+      runsStartRefresh();
+    }
   }
   if (document.getElementById("jobsTable") && typeof jobsStartRefresh === "function") {
     jobsStartRefresh();
   }
   if (document.getElementById("appsTable") && document.getElementById("appsStatus")) {
     if (document.body.dataset.pageTitle === "Apps") {
-      if (typeof appsLoadAll === "function") {
+      if (typeof appsInit === "function") {
+        appsInit();
+      } else if (typeof appsLoadAll === "function") {
         appsLoadAll();
       }
     } else if (typeof appsLoadRecent === "function") {

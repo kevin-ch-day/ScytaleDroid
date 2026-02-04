@@ -23,29 +23,41 @@ def render_run_start(
     perm_cache_desc: str,
     trace_ids: Sequence[str] | None = None,
 ) -> None:
-    status_messages.print_strip(
-        "Static Analysis · Configuration",
-        [
-            ("Type", "static"),
-            ("Target", target),
-            ("Profile", profile_label),
-            ("Run ID", run_id),
-        ],
-    )
-    print()
+    target_label = "Target"
+    if target and not target.startswith("Profile:") and target != "All apps":
+        target_label = "App"
 
-    meta_pairs = [
-        ("Workers", workers_desc),
-        ("Cache", cache_desc),
-        ("Log level", log_level.upper()),
-        ("Perm cache", perm_cache_desc),
-    ]
+    header_pairs = [("Scan Type", "Static Analysis")]
     if modules:
-        meta_pairs.append(("Detectors", ", ".join(modules)))
-    if trace_ids:
-        meta_pairs.append(("Trace IDs", ", ".join(trace_ids)))
+        header_pairs.append(("Detectors", ", ".join(modules)))
 
-    status_messages.print_strip("Static Analysis · Settings", meta_pairs)
+    app_name = target
+    package_name = None
+    if target_label == "App" and " (" in target and target.endswith(")"):
+        app_name, package_name = target.rsplit(" (", 1)
+        package_name = package_name.rstrip(")")
+    app_pairs = [
+        (target_label, app_name),
+    ]
+    if package_name:
+        app_pairs.append(("Package", package_name))
+    app_pairs.extend(
+        [
+            ("Profile", profile_label),
+            ("Workers", workers_desc),
+            ("Cache", cache_desc),
+            ("Log level", log_level.upper()),
+            ("Perm cache", perm_cache_desc),
+        ]
+    )
+    if trace_ids:
+        app_pairs.append(("Trace IDs", ", ".join(trace_ids)))
+
+    status_messages.print_strip("Static Analysis · Settings", header_pairs)
+    print()
+    max_label = max((len(str(label)) for label, _ in app_pairs), default=0)
+    for label, value in app_pairs:
+        print(f"{str(label):<{max_label}} : {value}")
     print()
 
 

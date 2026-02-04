@@ -15,6 +15,7 @@ from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
 
 from .menu_actions import (
+    apply_canonical_schema_bootstrap,
     ensure_dynamic_tier_migrations,
     maybe_clear_screen,
     seed_paper_dataset_profile,
@@ -27,36 +28,38 @@ def database_menu() -> None:
 
     actions: dict[str, Callable[[], None]] = {
         "1": seed_paper_dataset_profile,
-        "2": ensure_dynamic_tier_migrations,
-        "3": show_connection_and_config,
-        "4": schema_browser.show_schema_browser,
-        "5": health_checks.run_health_summary,
-        "6": health_checks.run_app_identity_audit,
-        "7": health_checks.run_evidence_integrity_check,
-        "8": query_runner.run_query_menu,
-        "9": health_checks.prompt_cleanup_orphan_inventory,
-        "10": health_checks.prompt_finalize_stale_runs,
-        "12": health_checks.prompt_delete_orphan_permission_snapshots,
-        "13": health_checks.prompt_backfill_pcap_metadata,
-        "14": health_checks.prompt_recompute_network_signal_quality,
-        "11": health_checks.prompt_reset_static_data,
+        "2": apply_canonical_schema_bootstrap,
+        "3": ensure_dynamic_tier_migrations,
+        "4": show_connection_and_config,
+        "5": schema_browser.show_schema_browser,
+        "6": health_checks.run_health_summary,
+        "7": health_checks.run_app_identity_audit,
+        "8": health_checks.run_evidence_integrity_check,
+        "9": query_runner.run_query_menu,
+        "10": health_checks.prompt_cleanup_orphan_inventory,
+        "11": health_checks.prompt_finalize_stale_runs,
+        "13": health_checks.prompt_delete_orphan_permission_snapshots,
+        "14": health_checks.prompt_backfill_pcap_metadata,
+        "15": health_checks.prompt_recompute_network_signal_quality,
+        "12": health_checks.prompt_reset_static_data,
     }
 
     options: list[MenuOption] = [
         MenuOption("1", "Seed research dataset profile"),
-        MenuOption("2", "Apply Tier-1 schema migrations"),
-        MenuOption("3", "Check connection & show config"),
-        MenuOption("4", "Schema browser (tables, indexes)"),
-        MenuOption("5", "Health summary (one screen)"),
-        MenuOption("6", "App identity audit (duplicates, missing version)"),
-        MenuOption("7", "Evidence integrity check (missing/sha mismatch)"),
-        MenuOption("8", "Curated queries (read-only)"),
-        MenuOption("9", "Cleanup orphan snapshots (repair)"),
-        MenuOption("10", "Recover stale RUNNING runs (finalize)"),
-        MenuOption("12", "Delete orphan permission snapshots (repair)"),
-        MenuOption("13", "Backfill PCAP metadata (repair)"),
-        MenuOption("14", "Recompute network signal quality (repair)"),
-        MenuOption("11", "Reset static analysis data (DESTRUCTIVE)"),
+        MenuOption("2", "Apply canonical schema bootstrap (static + registry + ML)"),
+        MenuOption("3", "Apply Tier-1 schema migrations"),
+        MenuOption("4", "Check connection & show config"),
+        MenuOption("5", "Schema browser (tables, indexes)"),
+        MenuOption("6", "Health summary (one screen)"),
+        MenuOption("7", "App identity audit (duplicates, missing version)"),
+        MenuOption("8", "Evidence integrity check (missing/sha mismatch)"),
+        MenuOption("9", "Curated queries (read-only)"),
+        MenuOption("10", "Cleanup orphan snapshots (repair)"),
+        MenuOption("11", "Recover stale RUNNING runs (finalize)"),
+        MenuOption("13", "Delete orphan permission snapshots (repair)"),
+        MenuOption("14", "Backfill PCAP metadata (repair)"),
+        MenuOption("15", "Recompute network signal quality (repair)"),
+        MenuOption("12", "Reset static analysis data (DESTRUCTIVE)"),
     ]
 
     while True:
@@ -73,15 +76,15 @@ def database_menu() -> None:
         print(f"Host: {host}")
         if schema_ver != expected_schema and schema_ver != "<unknown>":
             print(f"Schema: {schema_ver} (Tier-1 expects {expected_schema}) [OUTDATED]")
-            print("Tip: Run option (2) Apply Tier-1 schema migrations")
+            print("Tip: Run option (2) Apply canonical schema bootstrap")
         else:
             print(f"Schema: {schema_ver}")
         print()
 
-        research_options = options[:2]
-        read_only_options = options[2:8]
-        maintenance_options = [options[8], options[9], options[10], options[11], options[12]]
-        danger_options = [options[13]]
+        research_options = options[:3]
+        read_only_options = options[3:9]
+        maintenance_options = [options[9], options[10], options[11], options[12], options[13]]
+        danger_options = [options[14]]
 
         menu_utils.print_section("Research / Tier-1")
         menu_utils.render_menu(

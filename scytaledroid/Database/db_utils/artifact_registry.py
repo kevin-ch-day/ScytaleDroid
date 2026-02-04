@@ -30,6 +30,8 @@ def record_artifacts(
         entry_origin = normalized.get("origin") or origin
         entry_pull_status = normalized.get("pull_status") or pull_status
         entry_status_reason = normalized.get("status_reason") or status_reason
+        created_at = _coerce_datetime(normalized.get("created_at_utc")) or now
+        pulled_at = _coerce_datetime(normalized.get("pulled_at_utc"))
         rows.append(
             (
                 run_id,
@@ -41,8 +43,8 @@ def record_artifacts(
                 entry_pull_status,
                 normalized.get("sha256"),
                 normalized.get("size_bytes"),
-                normalized.get("created_at_utc") or now,
-                normalized.get("pulled_at_utc"),
+                _format_datetime(created_at),
+                _format_datetime(pulled_at) if pulled_at else None,
                 entry_status_reason,
                 json.dumps(normalized.get("meta_json")) if normalized.get("meta_json") else None,
             )
@@ -109,6 +111,26 @@ def _normalize_artifact(entry: Mapping[str, Any], base_path: Path | None) -> Map
         "status_reason": entry.get("status_reason")
         or ("manifest_missing_device_path" if origin == "unknown" else None),
     }
+
+
+def _coerce_datetime(value: Any) -> datetime | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        if text.endswith("Z"):
+            text = text.replace("Z", "+00:00")
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def _format_datetime(value: datetime) -> str:
+    return value.strftime("%Y-%m-%d %H:%M:%S")
 
 
 __all__ = ["record_artifacts"]

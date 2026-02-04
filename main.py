@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from scytaledroid.Api import start_api_server
 from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core.db_engine import ensure_db_ready
-from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, summary_cards
+from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuSpec
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.LoggingUtils.logging_core import LOG_DIR
@@ -102,10 +102,7 @@ def main_menu() -> None:
         return
     api_state = start_api_server()
     if api_state.status == "running":
-        status_messages.print_status(
-            f"API server running at {api_state.host}:{api_state.port} (http://{api_state.host}:{api_state.port}/).",
-            level="info",
-        )
+        print(f"API Server Running at {api_state.host}:{api_state.port} (http://{api_state.host}:{api_state.port}/)")
     elif api_state.status in {"unavailable", "disabled"}:
         status_messages.print_status(
             "API server unavailable (install fastapi/uvicorn/python-multipart).",
@@ -137,8 +134,9 @@ def main_menu() -> None:
     default_choice = "1"
     while True:
         print()
-        menu_utils.print_header("Main Menu")
         _print_tier1_status_banner()
+        print()
+        menu_utils.print_header("Main Menu")
         spec = MenuSpec(
             items=[menu_utils.MenuOption(key, label) for key, label, _ in menu_actions],
             default=None,
@@ -155,7 +153,7 @@ def main_menu() -> None:
 
         if choice == "0":
             log.info("Application shutting down", category="application")
-            shutdown_time = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+            shutdown_time = datetime.now().astimezone().strftime("%-m/%-d/%Y %-I:%M %p")
             status_messages.print_strip(
                 "Session End",
                 [
@@ -179,7 +177,7 @@ def main_menu() -> None:
 
 
 def _print_tier1_status_banner() -> None:
-    """Render a compact Tier-1 status banner for the main menu."""
+    """Render a compact dataset readiness summary for the main menu."""
 
     try:
         from scytaledroid.Reporting.menu_actions import fetch_tier1_status
@@ -197,22 +195,13 @@ def _print_tier1_status_banner() -> None:
     badge = "✅" if tier1_ready and int(tier1_ready) > 0 else "⚠️"
     schema_outdated = schema_ver != expected
     schema_label = (
-        f"{schema_ver} (expects {expected}) [OUTDATED]" if schema_outdated else str(schema_ver)
+        f"{schema_ver} (expects {expected})" if schema_outdated else str(schema_ver)
     )
-    schema_style = "severity_high" if schema_outdated else "severity_info"
-    summary_items = [
-        summary_cards.summary_item("Schema", schema_label, value_style=schema_style),
-        summary_cards.summary_item(f"Tier-1 ready runs {badge}", str(tier1_ready), value_style="progress"),
-    ]
-    footer = None
-    if schema_outdated:
-        footer = "Next step: Database Tools → Apply Tier-1 schema migrations"
-    summary_cards.print_summary_card(
-        "Tier-1 Snapshot",
-        summary_items,
-        subtitle="Dataset readiness at a glance",
-        footer=footer,
-    )
+    print("Dataset readiness")
+    print("─────────────────────")
+    print("• Tier-1 Snapshot")
+    print(f"• Schema: {schema_label}")
+    print(f"• Tier-1 ready runs {badge}: {tier1_ready}")
 
 
 # --- Handlers for each menu option ---

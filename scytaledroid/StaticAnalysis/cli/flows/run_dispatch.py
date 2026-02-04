@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from scytaledroid.Config import app_config
+from scytaledroid.Database.db_utils import schema_gate
 from scytaledroid.StaticAnalysis.persistence import ingest as canonical_ingest
 from scytaledroid.StaticAnalysis.session import make_session_stamp, normalize_session_stamp
 from scytaledroid.Utils.DisplayUtils import status_messages
@@ -67,6 +68,14 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
             )
             params = replace(params, session_stamp=normalized)
     output_prefs.set_verbose(bool(params.verbose_output))
+
+    persistence_ready, persistence_note = _check_static_persistence_readiness(params)
+    os.environ["SCYTALEDROID_PERSISTENCE_READY"] = "1" if persistence_ready else "0"
+    if not persistence_ready:
+        level = "error" if _strict_persistence_enabled() else "warn"
+        print(status_messages.status(persistence_note, level=level))
+        if _strict_persistence_enabled() and not params.dry_run:
+            return None
 
     try:
         canonical_ingest.ensure_provider_plumbing()
@@ -171,7 +180,10 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
                 f"Scope: {params.scope_label or params.scope}"
             )
         print()
+    from scytaledroid.Utils.DisplayUtils import text_blocks
+
     print("Starting Static Analysis pipeline")
+    print(text_blocks.divider("─"))
     outcome: RunOutcome | None = None
     run_status: str | None = None
     abort_reason: str | None = None
@@ -283,38 +295,54 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
             pass
 
     run_map = None
-    if outcome is not None and params.session_stamp:
-        try:
-            run_map = _build_session_run_map(outcome, params.session_stamp)
-            if run_map and not params.dry_run:
-                for entry in run_map.get("apps", []):
-                    missing = [
-                        field
-                        for field in ("static_run_id", *REQUIRED_FIELDS)
-                        if entry.get(field) in (None, "")
-                    ]
-                    if missing:
-                        raise RuntimeError(
-                            "run_map incomplete for package "
-                            f"{entry.get('package')}: missing {', '.join(missing)}"
-                        )
-                validate_run_map(run_map, params.session_stamp)
-            if run_map and not params.dry_run:
-                _persist_session_run_links(params.session_stamp, run_map)
-        except Exception as exc:
-            print(
-                status_messages.status(
-                    f"Failed to build run map for session {params.session_stamp}: {exc}",
-                    level="error",
-                )
+    linkage_blocked_reason = None
+    if os.getenv("SCYTALEDROID_PERSISTENCE_READY") == "0":
+        linkage_blocked_reason = "Persistence gate failed; skipping run_map and permission refresh."
+    elif outcome is not None and not params.dry_run:
+        missing_ids = [res.package_name for res in outcome.results if not res.static_run_id]
+        if missing_ids:
+            linkage_blocked_reason = (
+                "static_run_id missing for one or more apps; skipping run_map and permission refresh."
             )
-            run_map = None
+    if outcome is not None and params.session_stamp:
+        if linkage_blocked_reason:
+            print(status_messages.status(linkage_blocked_reason, level="warn"))
+        else:
+            try:
+                run_map = _build_session_run_map(outcome, params.session_stamp)
+                if run_map and not params.dry_run:
+                    for entry in run_map.get("apps", []):
+                        missing = [
+                            field
+                            for field in ("static_run_id", *REQUIRED_FIELDS)
+                            if entry.get(field) in (None, "")
+                        ]
+                        if missing:
+                            raise RuntimeError(
+                                "run_map incomplete for package "
+                                f"{entry.get('package')}: missing {', '.join(missing)}"
+                            )
+                    validate_run_map(run_map, params.session_stamp)
+                if run_map and not params.dry_run:
+                    _persist_session_run_links(params.session_stamp, run_map)
+            except Exception as exc:
+                print(
+                    status_messages.status(
+                        f"Failed to build run map for session {params.session_stamp}: {exc}",
+                        level="error",
+                    )
+                )
+                run_map = None
 
     if (
         params.permission_snapshot_refresh
         and params.profile in {"full", "lightweight"}
         and not params.dry_run
     ):
+        if linkage_blocked_reason:
+            print()
+            print(status_messages.status(linkage_blocked_reason, level="warn"))
+            return outcome
         try:
             print()
             print(
@@ -378,6 +406,29 @@ def _purge_run_cache() -> None:
                 shutil.rmtree(root)
         except OSError:
             continue
+
+
+def _strict_persistence_enabled() -> bool:
+    return os.getenv("SCYTALEDROID_STRICT_PERSISTENCE", "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _check_static_persistence_readiness(params: RunParameters) -> tuple[bool, str]:
+    if params.dry_run:
+        return True, "dry-run: persistence gate skipped"
+    ok_base, msg_base, detail_base = schema_gate.check_base_schema()
+    if not ok_base:
+        detail = f" {detail_base}" if detail_base else ""
+        return False, f"{msg_base}{detail}"
+    ok_static, msg_static, detail_static = schema_gate.static_schema_gate()
+    if not ok_static:
+        detail = f" {detail_static}" if detail_static else ""
+        return False, f"{msg_static}{detail}"
+    return True, "OK"
 
 
 def _build_session_run_map(outcome: RunOutcome | None, session_stamp: str | None) -> dict | None:

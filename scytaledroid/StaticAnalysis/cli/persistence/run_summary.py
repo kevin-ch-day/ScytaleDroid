@@ -426,43 +426,103 @@ def _create_static_run(
     study_tag: str | None = None,
 ) -> int | None:
     normalized_started_at = _normalize_datetime_value(run_started_utc)
+    def _insert_run(columns: list[str], values: list[object]) -> int | None:
+        placeholders = ", ".join(["%s"] * len(columns))
+        sql = f"INSERT INTO static_analysis_runs ({', '.join(columns)}) VALUES ({placeholders})"
+        run_id = core_q.run_sql(sql, tuple(values), return_lastrowid=True)
+        return int(run_id) if run_id else None
+
+    full_columns = [
+        "app_version_id",
+        "session_stamp",
+        "scope_label",
+        "category",
+        "profile_key",
+        "scenario_id",
+        "device_serial",
+        "sha256",
+        "base_apk_sha256",
+        "artifact_set_hash",
+        "run_signature",
+        "run_signature_version",
+        "identity_valid",
+        "identity_error_reason",
+        "analysis_version",
+        "pipeline_version",
+        "catalog_versions",
+        "config_hash",
+        "study_tag",
+        "profile",
+        "tool_semver",
+        "tool_git_commit",
+        "schema_version",
+        "findings_total",
+        "run_started_utc",
+        "status",
+    ]
+    full_values: list[object] = [
+        app_version_id,
+        session_stamp,
+        scope_label,
+        category,
+        profile_key,
+        scenario_id,
+        device_serial,
+        sha256,
+        base_apk_sha256,
+        artifact_set_hash,
+        run_signature,
+        run_signature_version,
+        identity_valid,
+        identity_error_reason,
+        analysis_version,
+        pipeline_version,
+        catalog_versions,
+        config_hash,
+        study_tag,
+        profile,
+        tool_semver,
+        tool_git_commit,
+        schema_version,
+        findings_total,
+        normalized_started_at,
+        status,
+    ]
     try:
-        run_id = core_q.run_sql(
-            """
-            INSERT INTO static_analysis_runs (
+        return _insert_run(full_columns, full_values)
+    except Exception:
+        try:
+            legacy_columns = [
+                "app_version_id",
+                "session_stamp",
+                "scope_label",
+                "profile_key",
+                "scenario_id",
+                "device_serial",
+                "sha256",
+                "base_apk_sha256",
+                "artifact_set_hash",
+                "run_signature",
+                "run_signature_version",
+                "identity_valid",
+                "identity_error_reason",
+                "analysis_version",
+                "pipeline_version",
+                "catalog_versions",
+                "config_hash",
+                "study_tag",
+                "profile",
+                "tool_semver",
+                "tool_git_commit",
+                "schema_version",
+                "findings_total",
+                "run_started_utc",
+                "status",
+            ]
+            legacy_values = [
                 app_version_id,
                 session_stamp,
                 scope_label,
-                category,
-                profile_key,
-                scenario_id,
-                device_serial,
-                sha256,
-                base_apk_sha256,
-                artifact_set_hash,
-                run_signature,
-                run_signature_version,
-                identity_valid,
-                identity_error_reason,
-                analysis_version,
-                pipeline_version,
-                catalog_versions,
-                config_hash,
-                study_tag,
-                profile,
-                tool_semver,
-                tool_git_commit,
-                schema_version,
-                findings_total,
-                run_started_utc,
-                status
-            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            """,
-            (
-                app_version_id,
-                session_stamp,
-                scope_label,
-                category,
                 profile_key,
                 scenario_id,
                 device_serial,
@@ -485,72 +545,8 @@ def _create_static_run(
                 findings_total,
                 normalized_started_at,
                 status,
-            ),
-            return_lastrowid=True,
-        )
-        return int(run_id) if run_id else None
-    except Exception:
-        try:
-            run_id = core_q.run_sql(
-                """
-                INSERT INTO static_analysis_runs (
-                    app_version_id,
-                    session_stamp,
-                    scope_label,
-                    profile_key,
-                    scenario_id,
-                    device_serial,
-                    sha256,
-                    base_apk_sha256,
-                    artifact_set_hash,
-                    run_signature,
-                    run_signature_version,
-                    identity_valid,
-                    identity_error_reason,
-                    analysis_version,
-                    pipeline_version,
-                    catalog_versions,
-                    config_hash,
-                    study_tag,
-                    profile,
-                    tool_semver,
-                    tool_git_commit,
-                    schema_version,
-                    findings_total,
-                    run_started_utc,
-                    status
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                """,
-                (
-                    app_version_id,
-                    session_stamp,
-                    scope_label,
-                    profile_key,
-                    scenario_id,
-                    device_serial,
-                    sha256,
-                    base_apk_sha256,
-                    artifact_set_hash,
-                    run_signature,
-                    run_signature_version,
-                    identity_valid,
-                    identity_error_reason,
-                    analysis_version,
-                    pipeline_version,
-                    catalog_versions,
-                    config_hash,
-                    study_tag,
-                    profile,
-                    tool_semver,
-                    tool_git_commit,
-                    schema_version,
-                    findings_total,
-                    normalized_started_at,
-                    status,
-                ),
-                return_lastrowid=True,
-            )
-            return int(run_id) if run_id else None
+            ]
+            return _insert_run(legacy_columns, legacy_values)
         except Exception as exc:  # pragma: no cover - defensive
             log.error(
                 f"Failed to create static_analysis_runs row for session={session_stamp}: {exc}",

@@ -15,11 +15,21 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Sequence
+from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 from scytaledroid.DeviceAnalysis import device_manager
 from scytaledroid.DeviceAnalysis.harvest import rules
-from scytaledroid.DeviceAnalysis.harvest import scope as scope_mod
 from scytaledroid.DeviceAnalysis.harvest.scope import InventoryRow
+from scytaledroid.DeviceAnalysis.harvest.scope_context import (
+    apply_default_scope,
+    build_inventory_rows,
+    build_scope_context,
+    collect_exclusion_samples,
+)
 from scytaledroid.DeviceAnalysis.inventory import snapshot_io
 
 
@@ -41,25 +51,7 @@ def _fetch_rows(serial: str) -> list[InventoryRow]:
     if not isinstance(packages, list):
         print(f"[WARN] Snapshot for {serial} contains no package list.")
         return []
-    return scope_mod.build_inventory_rows(packages)
-
-
-def _counts_by_reason(
-    rows: Sequence[InventoryRow],
-    kept: Sequence[InventoryRow],
-    allow: set[str],
-) -> tuple[int, int, dict[str, int], dict[str, list[str]]]:
-    excluded_counts: dict[str, int] = {}
-    kept_names = {row.package_name for row in kept}
-    excluded_samples = scope_mod._collect_exclusion_samples(rows, kept, allow)  # type: ignore[attr-defined]
-    for row in rows:
-        if row.package_name in kept_names:
-            continue
-        include, reason = scope_mod._default_scope_decision(row, allow)  # type: ignore[attr-defined]
-        if include or not reason:
-            continue
-        excluded_counts[reason] = excluded_counts.get(reason, 0) + 1
-    return len(rows), len(kept), excluded_counts, excluded_samples
+    return build_inventory_rows(packages)
 
 
 def _describe_exclusions(excluded: dict[str, int]) -> str:
@@ -73,8 +65,10 @@ def _describe_exclusions(excluded: dict[str, int]) -> str:
 
 
 def _print_scope(label: str, rows: Sequence[InventoryRow], allow: set[str]) -> None:
-    filtered, excluded = scope_mod._apply_default_scope(rows, allow)  # type: ignore[attr-defined]
-    candidates, kept, excluded_counts, excluded_samples = _counts_by_reason(rows, filtered, allow)
+    filtered, excluded_counts = apply_default_scope(rows, allow)
+    candidates = len(rows)
+    kept = len(filtered)
+    excluded_samples = collect_exclusion_samples(rows, filtered, allow)
     filtered_total = max(candidates - kept, 0)
     print(f"\n{label}")
     print("-" * len(label))
@@ -89,13 +83,8 @@ def _print_scope(label: str, rows: Sequence[InventoryRow], allow: set[str]) -> N
 
 
 def _category_group(rows: Sequence[InventoryRow]) -> dict[str, list[InventoryRow]]:
-    category_map = scope_mod._fetch_category_map([row.package_name for row in rows])  # type: ignore[attr-defined]
-    groups: dict[str, list[InventoryRow]] = {}
-    for row in rows:
-        category_name = category_map.get(row.package_name) or row.profile
-        if category_name:
-            groups.setdefault(category_name, []).append(row)
-    return groups
+    context = build_scope_context(rows, set(rules.GOOGLE_ALLOWLIST))
+    return context.get("category_groups", {}) or {}
 
 
 def main(serial: str | None) -> int:

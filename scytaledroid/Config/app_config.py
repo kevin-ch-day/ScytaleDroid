@@ -1,12 +1,11 @@
-# Application metadata
-APP_NAME        = "ScytaleDroid"
-APP_VERSION     = "1.1.0"
-APP_RELEASE     = "Beta"
-APP_DESCRIPTION = "Android Security Research Platform"
-APP_AUTHOR      = "Kevin Day"
-
-#Github
-GITHUB_REPO = "https://github.com/kevin-ch-day/ScytaleDroid"
+from .version import (
+    APP_AUTHOR,
+    APP_DESCRIPTION,
+    APP_NAME,
+    APP_RELEASE,
+    APP_VERSION,
+    GITHUB_REPO,
+)
 
 # Paths
 DATA_DIR   = "data"

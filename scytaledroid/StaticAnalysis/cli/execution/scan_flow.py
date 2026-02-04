@@ -85,6 +85,12 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
     pipeline_version = os.getenv("SCYTALEDROID_PIPELINE_VERSION") or getattr(
         params, "analysis_version", None
     )
+    persistence_ready = os.getenv("SCYTALEDROID_PERSISTENCE_READY", "1").strip() != "0"
+    if not persistence_ready and not params.dry_run:
+        log.warning(
+            "Static persistence gate failed; running in exploratory mode (no static_run_id, no evidence writes).",
+            category="static_analysis",
+        )
 
     for group in selection.groups:
         app_result = AppRunResult(group.package_name, getattr(group, "category", "Uncategorized"))
@@ -145,7 +151,7 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
             failures.append(message)
             log.warning(message, category="static")
             continue
-        if params.session_stamp:
+        if params.session_stamp and persistence_ready:
             static_run_id = create_static_run_ledger(
                 package_name=group.package_name,
                 session_stamp=params.session_stamp,
@@ -169,6 +175,20 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
                 run_started_utc=started_at.isoformat(timespec="seconds") + "Z",
                 dry_run=params.dry_run,
             )
+            if not static_run_id and not params.dry_run:
+                message = (
+                    "static_run_id creation failed; aborting static analysis to avoid orphaned evidence."
+                )
+                failures.append(message)
+                log.error(message, category="static_analysis")
+                raise RuntimeError(message)
+            if static_run_id:
+                log.info(
+                    f"static_run_id={static_run_id} created for package={group.package_name}",
+                    category="static_analysis",
+                )
+        elif not params.dry_run and not persistence_ready:
+            app_result.persistence_skipped += 1
         app_result.static_run_id = static_run_id
         results.append(app_result)
         abort_requested, _, _ = _abort_state()
@@ -507,6 +527,10 @@ def generate_report(
 
     if params.dry_run:
         return report, None, "dry-run (not persisted)", True
+
+    persistence_ready = os.getenv("SCYTALEDROID_PERSISTENCE_READY", "1").strip() != "0"
+    if not persistence_ready:
+        return report, None, None, False
 
     try:
         saved_paths = save_report(report)

@@ -11,6 +11,7 @@ from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core import db_config
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_utils import diagnostics
+from scytaledroid.Database.tools.bootstrap import bootstrap_database
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
 
 
@@ -84,6 +85,40 @@ def show_db_status() -> None:
     print(f"    SCYTALEDROID_DB_URL set: {bool(db_url_env)}")
     print()
     prompt_utils.press_enter_to_continue()
+
+
+def apply_canonical_schema_bootstrap(*, prompt_user: bool = True) -> bool:
+    """Apply canonical schema statements (CREATE/ALTER) for missing tables/columns."""
+
+    _ensure_db_ops_log_table()
+    schema_before = diagnostics.get_schema_version() or "<unknown>"
+    started_at = datetime.now(UTC)
+    success = False
+    error_text = None
+    try:
+        if prompt_user and not prompt_utils.prompt_yes_no(
+            "Apply canonical schema bootstrap now? (CREATE/ALTER missing tables/columns)",
+            default=True,
+        ):
+            return False
+        bootstrap_database()
+        success = True
+        return True
+    except Exception as exc:
+        error_text = str(exc)
+        print(status_messages.status(f"Canonical schema bootstrap failed: {exc}", level="error"))
+        return False
+    finally:
+        finished_at = datetime.now(UTC)
+        _log_db_op(
+            operation="canonical_schema_bootstrap",
+            schema_before=schema_before,
+            schema_after=diagnostics.get_schema_version() or schema_before,
+            started_at=started_at,
+            finished_at=finished_at,
+            success=success,
+            error_text=error_text,
+        )
 
 
 def maybe_clear_screen() -> None:
@@ -587,6 +622,7 @@ __all__ = [
     "maybe_clear_screen",
     "show_connection_and_config",
     "seed_paper_dataset_profile",
+    "apply_canonical_schema_bootstrap",
     "ensure_dynamic_tier_column",
     "ensure_dynamic_network_quality_column",
     "ensure_dynamic_netstats_rows_columns",

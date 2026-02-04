@@ -17,7 +17,27 @@
       <div class="app-main">
         <div id="pageHeader" class="page-header"></div>
         <main class="container">
-          <div class="card">
+      <div class="card">
+        <div class="row">
+          <div class="field">
+            <label for="runsSearch">Search</label>
+            <input id="runsSearch" type="text" placeholder="Package or display name" />
+          </div>
+          <div class="field">
+            <label for="runsProfile">Profile</label>
+            <select id="runsProfile">
+              <option value="">All profiles</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="runsLimit">Limit</label>
+            <input id="runsLimit" type="number" min="1" max="500" value="25" />
+          </div>
+          <div class="field">
+            <label>&nbsp;</label>
+            <button id="runsApply" class="btn">Apply</button>
+          </div>
+        </div>
         <div id="runsStatus" class="muted">Loading...</div>
         <table>
           <thead>

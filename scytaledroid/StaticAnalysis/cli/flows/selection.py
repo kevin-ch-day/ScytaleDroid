@@ -25,9 +25,9 @@ from ..core.models import ScopeSelection
 
 def format_scope_target(selection: ScopeSelection) -> str:
     if selection.scope == "app":
-        return f"App={selection.label}"
+        return selection.label
     if selection.scope == "profile":
-        return f"Profile={selection.label}"
+        return f"Profile: {selection.label}"
     return "All apps"
 
 
