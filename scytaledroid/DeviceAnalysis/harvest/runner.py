@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
@@ -275,6 +276,14 @@ def execute_harvest(
             category="device",
             extra={**summary, **base_context},
         )
+        if _quiet_mode() and stats.get("packages_skipped", 0):
+            skip_reasons: Counter[str] = Counter()
+            for result in results:
+                skip_reasons.update(result.skipped)
+            if skip_reasons:
+                top = skip_reasons.most_common(2)
+                reason_text = ", ".join(f"{reason}={count}" for reason, count in top)
+                print(status_messages.status(f"Skip summary: {reason_text}", level="info"))
         if close_logger:
             log.close_harvest_adapter(run_identifier)
 

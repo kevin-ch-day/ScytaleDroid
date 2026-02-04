@@ -6,12 +6,10 @@ from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
 from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.prompts import (
-    describe_inventory_state,
     InventoryDeltaSummary,
+    describe_inventory_state,
 )
 from scytaledroid.DeviceAnalysis.services import device_service, inventory_service
-
-inventory_module = inventory_service
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages, text_blocks
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
@@ -23,6 +21,8 @@ from .constants import (
 )
 from .metadata import get_latest_inventory_metadata
 from .utils import coarse_time_range, coerce_float, humanize_seconds
+
+inventory_module = inventory_service
 
 RECENT_CHANGE_WINDOW_SECONDS = 3600
 RECENT_CHANGE_SOFT_LIMIT = 3

@@ -116,7 +116,6 @@ def run_scope_refresh(serial: str, packages: Sequence[object]) -> bool:
 
 def render_plan_overview(resolution: PlanResolution) -> None:
     selection = resolution.selection
-    plan = resolution.plan
     stats = resolution.stats
     print()
     delta_line = None
@@ -147,24 +146,6 @@ def render_plan_overview(resolution: PlanResolution) -> None:
     policy = str(stats["policy"])
     eligible_policy = max(scheduled_packages + policy_blocked, 0)
     if is_harvest_simple_mode():
-        line = (
-            "APK Harvest plan • "
-            f"inventory={candidate_count} • selected={selected_count} • eligible={eligible_policy} • "
-            f"scheduled={scheduled_packages} • "
-            f"artifacts≈{scheduled_files} • policy={policy}"
-        )
-        print(status_messages.status(line, level="info"))
-        if blocked_packages:
-            from collections import Counter
-
-            reasons = Counter(
-                pkg.skip_reason or "unknown" for pkg in plan.packages if pkg.skip_reason
-            )
-            reason_text = ", ".join(f"{key}={value}" for key, value in reasons.items())
-            if reason_text:
-                print(status_messages.status(f"Preflight skips: {reason_text}", level="info"))
-        if delta_line:
-            print(status_messages.status(delta_line, level="info"))
         return
 
     print("APK Harvest Plan")
@@ -350,11 +331,21 @@ def report_plan_no_artifacts() -> None:
 
 
 def report_skip_reasons(skip_reasons: dict[str, tuple[int, list[str]]]) -> None:
-    for reason, (count, samples) in skip_reasons.items():
+    sorted_items = sorted(skip_reasons.items(), key=lambda item: item[1][0], reverse=True)
+    top_items = sorted_items[:3]
+    for reason, (count, samples) in top_items:
         sample_text = ", ".join(samples)
         print(
             status_messages.status(
                 f"Skip reason: {reason} ({count}) e.g., {sample_text}",
+                level="info",
+            )
+        )
+    if len(sorted_items) > len(top_items):
+        remainder = len(sorted_items) - len(top_items)
+        print(
+            status_messages.status(
+                f"Skip reasons: +{remainder} more",
                 level="info",
             )
         )

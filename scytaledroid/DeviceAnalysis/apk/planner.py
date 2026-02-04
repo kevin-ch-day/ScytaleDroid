@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from scytaledroid.DeviceAnalysis import harvest
 from collections.abc import Mapping
 from typing import Any
 
+from scytaledroid.DeviceAnalysis import harvest
 from scytaledroid.DeviceAnalysis.apk.models import PlanResolution
 
 

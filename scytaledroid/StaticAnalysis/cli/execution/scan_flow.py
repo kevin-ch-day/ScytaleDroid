@@ -138,10 +138,13 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
 
         static_run_id = None
         if not identity["identity_valid"] and not params.dry_run:
-            raise RuntimeError(
-                "Run identity invalid; cannot proceed with static analysis. "
+            message = (
+                "Run identity invalid; skipping static analysis. "
                 f"Package={group.package_name}; reason={identity['identity_error_reason']}"
             )
+            failures.append(message)
+            log.warning(message, category="static")
+            continue
         if params.session_stamp:
             static_run_id = create_static_run_ledger(
                 package_name=group.package_name,
@@ -174,6 +177,11 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
 
         artifacts = _dedupe_artifacts(group.artifacts)
         app_result.discovered_artifacts = len(artifacts)
+        if not artifacts:
+            message = f"No artifacts available for {group.package_name}; skipping."
+            failures.append(message)
+            log.warning(message, category="static")
+            continue
         last_report_for_app: StaticAnalysisReport | None = None
         if display_name or group.package_name:
             progress.flush_line()
@@ -189,23 +197,35 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
                 break
             artifact_label = _artifact_label(artifact, display_name=display_name)
             progress.start(artifact_index, artifact_label)
-            report, summary, timings, error_message, skipped = _execute_single_artifact(
-                artifact,
-                params,
-                selection,
-                base_dir,
-                extra_metadata={
-                    "artifact_manifest_sha256": manifest_sha256,
-                    "config_hash": config_hash,
-                    "pipeline_version": pipeline_version,
-                    "base_apk_sha256": identity["base_apk_sha256"],
-                    "artifact_set_hash": identity["artifact_set_hash"],
-                    "run_signature": run_signature,
-                    "run_signature_version": identity["run_signature_version"],
-                    "identity_valid": identity["identity_valid"],
-                    "identity_error_reason": identity["identity_error_reason"],
-                },
-            )
+            try:
+                report, summary, timings, error_message, skipped = _execute_single_artifact(
+                    artifact,
+                    params,
+                    selection,
+                    base_dir,
+                    extra_metadata={
+                        "artifact_manifest_sha256": manifest_sha256,
+                        "config_hash": config_hash,
+                        "pipeline_version": pipeline_version,
+                        "base_apk_sha256": identity["base_apk_sha256"],
+                        "artifact_set_hash": identity["artifact_set_hash"],
+                        "run_signature": run_signature,
+                        "run_signature_version": identity["run_signature_version"],
+                        "identity_valid": identity["identity_valid"],
+                        "identity_error_reason": identity["identity_error_reason"],
+                    },
+                )
+            except Exception as exc:
+                message = f"Artifact scan failed for {artifact.display_path}: {exc}"
+                failures.append(message)
+                app_result.failed_artifacts += 1
+                completed_artifacts += 1
+                app_result.executed_artifacts += 1
+                log.warning(message, category="static")
+                progress.error(completed_artifacts, artifact_label, str(exc))
+                if _abort_state()[0]:
+                    break
+                continue
             if skipped:
                 index_for_progress = completed_artifacts + 1
                 if error_message:

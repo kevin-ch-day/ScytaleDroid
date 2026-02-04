@@ -116,7 +116,9 @@ def select_package_scope(
         )
         updated_note = "updated-only"
         filtered_non_user = updated_meta.get("filtered_non_user")
-        if filtered_non_user:
+        if filtered_non_user and not updated_rows:
+            updated_note = f"0 eligible; filtered_non_user={filtered_non_user}"
+        elif filtered_non_user:
             updated_note = f"{updated_note} (filtered_non_user={filtered_non_user})"
         _add_entry(
             "U",
@@ -126,14 +128,6 @@ def select_package_scope(
             note=updated_note,
             handler=lambda: _scope_updated_only(rows, updated_rows, updated_meta),
         )
-        if filtered_non_user and not updated_rows:
-            print(
-                status_messages.status(
-                    f"Updated-only filtered out {filtered_non_user} system app(s) "
-                    "on non-root devices.",
-                    level="info",
-                )
-            )
 
         social_rows = profile_key_groups.get("SOCIAL")
         _add_entry(
@@ -424,24 +418,35 @@ def _scope_profiles(
     profile_menu["A"] = "All profiles"
 
     menu_utils.print_menu(profile_menu, is_main=False)
-    raw = prompt_utils.prompt_text("Selection (e.g., 1,3 or A)", default="", required=False).strip()
-    if not raw:
-        print(status_messages.status("Profile selection cancelled.", level="warn"))
-        return None
+    while True:
+        raw = prompt_utils.prompt_text(
+            "Selection (e.g., 1,3 or A)",
+            default="",
+            required=False,
+        ).strip()
+        if not raw:
+            print(status_messages.status("Profile selection cancelled.", level="warn"))
+            return None
 
-    if raw.upper() == "A":
-        selected = {name for name, _ in sorted_profiles}
-    else:
-        tokens = {token.strip() for token in re.split(r"[,\s]+", raw) if token.strip()}
-        selected: set[str] = set()
-        for token in tokens:
-            if token in profile_menu and token.isdigit():
-                idx = int(token) - 1
-                if 0 <= idx < len(sorted_profiles):
-                    selected.add(sorted_profiles[idx][0])
-            else:
-                selected.add(token)
-        selected = {name for name in selected if name}
+        if raw.upper() == "A":
+            selected = {name for name, _ in sorted_profiles}
+            break
+
+        tokens = [token.strip() for token in re.split(r"[,\s]+", raw) if token.strip()]
+        if not tokens:
+            print(status_messages.status("No profiles selected.", level="warn"))
+            continue
+        if not all(token.isdigit() for token in tokens):
+            print(status_messages.status("Use numeric selections or A for all.", level="warn"))
+            continue
+
+        indices = {int(token) for token in tokens}
+        if any(idx < 1 or idx > len(sorted_profiles) for idx in indices):
+            print(status_messages.status("Selection out of range. Try again.", level="warn"))
+            continue
+
+        selected = {sorted_profiles[idx - 1][0] for idx in indices}
+        break
 
     if not selected:
         print(status_messages.status("No valid profiles selected.", level="warn"))
@@ -480,8 +485,8 @@ def _scope_profiles(
         label=f"Profiles: {', '.join(sorted(selected))}",
         packages=filtered,
         kind="profiles",
-            metadata=metadata,
-        )
+        metadata=metadata,
+    )
 
 
 def _scope_google_user_apps(
@@ -713,7 +718,7 @@ def _scope_custom(rows: Sequence[InventoryRow], allow: set[str]) -> ScopeSelecti
             level="info",
         )
     )
-    raw = input("Packages: ").strip()
+    raw = prompt_utils.prompt_text("Packages", default="", required=False).strip()
     if not raw:
         print(status_messages.status("Custom selection cancelled.", level="warn"))
         return None

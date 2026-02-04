@@ -31,7 +31,7 @@ class RepositoryArtifact:
         if isinstance(meta_value, str) and meta_value.strip():
             return meta_value.strip().lower()
         try:
-            package_dir = self.path.parent.parent.name
+            package_dir = self.path.parent.name
             if package_dir:
                 return package_dir.lower()
         except Exception:  # pragma: no cover - defensive

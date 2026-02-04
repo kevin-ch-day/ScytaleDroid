@@ -417,15 +417,7 @@ def _run_inventory_sync(active_device: dict[str, str | None | None]) -> None:
 
     status = device_service.fetch_inventory_metadata(serial)
     if status and status.status_label.upper() == "FRESH" and not status.is_stale:
-        response = prompt_utils.prompt_text(
-            "Inventory is fresh. Press F to force sync, or Enter to return",
-            required=False,
-            default="",
-        ).strip()
-        if not response:
-            return
-        if response.lower() != "f":
-            print(status_messages.status("Sync cancelled (fresh inventory).", level="info"))
+        if not prompt_utils.prompt_yes_no("Perform Android inventory sync?", default=False):
             return
 
     try:

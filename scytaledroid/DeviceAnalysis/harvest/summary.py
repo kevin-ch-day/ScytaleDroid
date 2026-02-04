@@ -379,6 +379,20 @@ def render_harvest_summary(
                 parts.append(f"matched_in_scope={delta_matched}")
             detail = f" ({', '.join(parts)})" if parts else ""
             print(status_messages.status(f"delta: applied{detail}", level="info"))
+        if metrics.preflight_skips or metrics.runtime_skips:
+            skip_parts: list[str] = []
+            if metrics.preflight_skips:
+                total = sum(metrics.preflight_skips.values())
+                skip_parts.append(f"preflight={total}")
+            if metrics.runtime_skips:
+                total = sum(metrics.runtime_skips.values())
+                skip_parts.append(f"runtime={total}")
+            print(
+                status_messages.status(
+                    f"skips: {', '.join(skip_parts)}",
+                    level="info",
+                )
+            )
         return
 
     if not simple_mode:

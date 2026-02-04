@@ -15,6 +15,7 @@ from scytaledroid.StaticAnalysis.persistence import ingest as canonical_ingest
 from scytaledroid.StaticAnalysis.session import make_session_stamp, normalize_session_stamp
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_engine
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.LoggingUtils import logging_events as log_events
 from scytaledroid.Utils.LoggingUtils.logging_context import RunContext, get_run_logger
 from scytaledroid.Utils.System import output_prefs
@@ -71,8 +72,9 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
         canonical_ingest.ensure_provider_plumbing()
         if params.session_stamp:
             canonical_ingest.build_session_string_view(params.session_stamp)
-    except Exception:
-        pass
+    except Exception as exc:
+        log.warning(f"Static analysis setup warning: {exc}", category="static")
+        print(status_messages.status(f"Static analysis setup warning: {exc}", level="warn"))
 
     workers = _resolve_workers(params.workers)
     if not params.reuse_cache:

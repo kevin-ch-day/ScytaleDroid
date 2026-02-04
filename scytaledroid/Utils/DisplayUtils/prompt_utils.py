@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable, Iterable
 
 from . import colors, status_messages
@@ -80,9 +81,17 @@ def prompt_yes_no(prompt: str, *, default: bool = False) -> bool:
         print(status_messages.status("Please respond with yes or no.", level="warn"))
 
 
-def press_enter_to_continue(message: str = "Press Enter to continue...") -> None:
+def press_enter_to_continue(
+    message: str = "Press Enter to continue...",
+    *,
+    force: bool = False,
+) -> None:
     """Pause execution until the user presses Enter."""
 
+    if not force:
+        pause = os.getenv("SCYTALEDROID_PAUSE", "0").strip().lower()
+        if pause not in {"1", "true", "yes", "on"}:
+            return
     palette = colors.get_palette()
     prompt_text = colors.apply(message, palette.muted)
     input(f"\n{prompt_text}\n")

@@ -8,7 +8,6 @@ import sys
 import tempfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from time import perf_counter
 
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis.harvest.common import compute_hashes
@@ -29,7 +28,6 @@ from .context_builders import (
 )
 from .detector_runner import PIPELINE_STAGES, PipelineStage, run_detector_pipeline
 from .errors import StaticAnalysisError
-from .findings import Badge, DetectorResult, EvidencePointer, Finding
 from .manifest_utils import (
     build_manifest_flags,
     collect_custom_permission_definitions,
@@ -37,7 +35,6 @@ from .manifest_utils import (
     extract_compile_sdk,
     load_manifest_root,
 )
-from .results_builder import make_detector_result
 from .models import (
     ComponentSummary,
     ManifestFlags,
@@ -47,6 +44,7 @@ from .models import (
 )
 from .pipeline_artifacts import assemble_pipeline_artifacts
 from .resource_fallback import merge_metadata, open_apk_with_fallback
+from .results_builder import make_detector_result
 
 # -----------------------
 # Small, focused helpers
