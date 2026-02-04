@@ -290,9 +290,9 @@ def _run_apk_pull(
         print("\nPull APKs")
         print("=========")
         print(status_messages.status("No inventory snapshot found. Run a full inventory & DB sync first.", level="warn"))
-        from scytaledroid.DeviceAnalysis.services import inventory_service
+        from scytaledroid.DeviceAnalysis.workflows import inventory_workflow
         try:
-            inventory_service.run_full_sync(serial=serial, ui_prefs=text_blocks.UI_PREFS)
+            inventory_workflow.run_inventory_sync(serial=serial, ui_prefs=text_blocks.UI_PREFS)
             status = device_service.fetch_inventory_metadata(serial)
         except Exception as exc:
             print(status_messages.status(f"Inventory sync failed: {exc}", level="error"))
@@ -327,9 +327,9 @@ def _run_apk_pull(
         if choice == "0":
             return
         if choice == "1":
-            from scytaledroid.DeviceAnalysis.services import inventory_service
+            from scytaledroid.DeviceAnalysis.workflows import inventory_workflow
             try:
-                inventory_service.run_full_sync(serial=serial, ui_prefs=text_blocks.UI_PREFS)
+                inventory_workflow.run_inventory_sync(serial=serial, ui_prefs=text_blocks.UI_PREFS)
                 status = device_service.fetch_inventory_metadata(serial)
             except Exception as exc:
                 print(status_messages.status(f"Inventory sync failed: {exc}", level="error"))
@@ -360,9 +360,9 @@ def _run_apk_pull(
         if choice == "0":
             return
         if choice == "1":
-            from scytaledroid.DeviceAnalysis.services import inventory_service
+            from scytaledroid.DeviceAnalysis.workflows import inventory_workflow
             try:
-                inventory_service.run_full_sync(serial=serial, ui_prefs=text_blocks.UI_PREFS)
+                inventory_workflow.run_inventory_sync(serial=serial, ui_prefs=text_blocks.UI_PREFS)
                 status = device_service.fetch_inventory_metadata(serial)
             except Exception as exc:
                 print(status_messages.status(f"Inventory sync failed: {exc}", level="error"))
@@ -373,9 +373,9 @@ def _run_apk_pull(
 
     # Proceed to APK harvesting flow.
     try:
-        from scytaledroid.DeviceAnalysis import apk_pull
+        from scytaledroid.DeviceAnalysis.workflows import apk_pull_workflow
 
-        result = apk_pull.pull_apks(serial, auto_scope=auto_scope)
+        result = apk_pull_workflow.run_apk_pull(serial, auto_scope=auto_scope)
         if hasattr(result, "ok") and not result.ok:
             error_panels.print_error_panel(
                 "Pull APKs",
@@ -413,7 +413,7 @@ def _run_inventory_sync(active_device: dict[str, str | None | None]) -> None:
         return
 
     from scytaledroid.DeviceAnalysis.runtime_flags import set_allow_inventory_fallbacks
-    from scytaledroid.DeviceAnalysis.services import inventory_service
+    from scytaledroid.DeviceAnalysis.workflows import inventory_workflow
 
     status = device_service.fetch_inventory_metadata(serial)
     if status and status.status_label.upper() == "FRESH" and not status.is_stale:
@@ -433,13 +433,13 @@ def _run_inventory_sync(active_device: dict[str, str | None | None]) -> None:
         allow_fallbacks = str(root_state).strip().lower() != "yes"
         set_allow_inventory_fallbacks(allow_fallbacks)
         print()
-        inventory_service.run_full_sync(
+        inventory_workflow.run_inventory_sync(
             serial,
             ui_prefs=None,
             progress_sink="cli",
             allow_fallbacks=allow_fallbacks,
         )
-    except inventory_service.InventoryServiceError as exc:
+    except Exception as exc:
         error_panels.print_error_panel(
             "Inventory & database sync",
             str(exc),

@@ -4,17 +4,12 @@ from __future__ import annotations
 
 import time
 
-from scytaledroid.DeviceAnalysis import adb_devices
 from scytaledroid.DeviceAnalysis.services import device_service
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .actions import build_main_menu_options, handle_choice
-from .dashboard import (
-    build_device_summaries,
-    print_dashboard,
-    resolve_active_device,
-)
+from .dashboard import print_dashboard
 
 
 def device_menu(*, return_to: str = "main") -> str:
@@ -24,10 +19,11 @@ def device_menu(*, return_to: str = "main") -> str:
     last_refresh_ts: float | None = None
 
     while True:
-        devices, warnings = adb_devices.scan_devices()
+        devices, warnings, summaries, serial_map = device_service.scan_devices(
+            cache=summary_cache
+        )
         last_refresh_ts = time.time()
-        summaries, serial_map = build_device_summaries(devices, summary_cache)
-        active_device = resolve_active_device(devices)
+        active_device = device_service.resolve_active_device(devices)
         active_details = None
         if active_device:
             active_details = serial_map.get(active_device.get("serial")) or active_device

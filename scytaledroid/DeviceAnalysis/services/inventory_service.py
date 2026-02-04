@@ -6,7 +6,7 @@ import os
 from dataclasses import dataclass
 from datetime import datetime
 
-from scytaledroid.DeviceAnalysis import device_manager
+from scytaledroid.DeviceAnalysis import device_manager, inventory_meta
 from scytaledroid.DeviceAnalysis.inventory import progress, runner, snapshot_io, views
 from scytaledroid.DeviceAnalysis.inventory.errors import InventoryCollectionError
 from scytaledroid.DeviceAnalysis.modes.inventory import InventoryConfig
@@ -38,6 +38,41 @@ def get_latest_snapshot_info(serial: str) -> InventorySnapshotInfo | None:
         total_packages=getattr(meta, "package_count", 0),
         last_sync_utc=getattr(meta, "captured_at", None),
     )
+
+
+def load_latest_inventory(serial: str) -> dict[str, object | None]:
+    """Return the latest inventory snapshot payload for a device."""
+    return snapshot_io.load_latest_inventory(serial)
+
+
+def load_latest_snapshot_meta(serial: str):
+    """Return the latest inventory snapshot metadata."""
+    return snapshot_io.load_latest_snapshot_meta(serial)
+
+
+def compute_name_hash(names: list[str]) -> str | None:
+    """Return a stable hash for a list of package names."""
+    return inventory_meta.compute_name_hash(names)
+
+
+def snapshot_signatures(packages: list[dict[str, object | None]]):
+    """Return signature tuples for the provided snapshot packages."""
+    return inventory_meta.snapshot_signatures(packages)
+
+
+def compute_signature_hash(signatures) -> str | None:
+    """Return a stable hash for package signatures."""
+    return inventory_meta.compute_signature_hash(signatures)
+
+
+def compute_scope_hash(entries: list[dict[str, object]]) -> str | None:
+    """Return a stable hash for scope entries."""
+    return inventory_meta.compute_scope_hash(entries)
+
+
+def update_scope_hash(serial: str, scope_id: str, scope_hash: str | None):
+    """Persist scope hash metadata for the device."""
+    return inventory_meta.update_scope_hash(serial, scope_id, scope_hash)
 
 
 def run_full_sync(

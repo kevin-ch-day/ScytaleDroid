@@ -5,8 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import datetime
 
-from scytaledroid.DeviceAnalysis import adb_devices, adb_packages, inventory_meta
-from scytaledroid.DeviceAnalysis import inventory as inventory_module
+from scytaledroid.DeviceAnalysis.services import device_service, inventory_service
 
 from ..utils import coerce_float, coerce_int
 from .delta import build_package_delta_summary
@@ -23,7 +22,7 @@ def get_latest_inventory_metadata(
     if not serial:
         return None
 
-    snapshot_meta = inventory_meta.load_latest(serial)
+    snapshot_meta = inventory_service.load_latest_snapshot_meta(serial)
     snapshot_payload: dict[str, object | None] = None
     snapshot_packages: list[dict[str, object | None]] = None
 
@@ -46,13 +45,13 @@ def get_latest_inventory_metadata(
         snapshot_scope_hash = snapshot_meta.scope_hash
         snapshot_scope_size = snapshot_meta.scope_size
         if with_current_state:
-            snapshot_payload_candidate = inventory_module.load_latest_inventory(serial)
+            snapshot_payload_candidate = inventory_service.load_latest_inventory(serial)
             if isinstance(snapshot_payload_candidate, dict):
                 packages_candidate = snapshot_payload_candidate.get("packages")
                 if isinstance(packages_candidate, list):
                     snapshot_packages = packages_candidate  # type: ignore[assignment]
     else:
-        snapshot = inventory_module.load_latest_inventory(serial)
+        snapshot = inventory_service.load_latest_inventory(serial)
         if not snapshot:
             return None
 
@@ -100,11 +99,11 @@ def get_latest_inventory_metadata(
                 for entry in packages_list
                 if isinstance(entry, dict) and entry.get("package_name")
             ]
-            package_list_hash = inventory_meta.compute_name_hash(names)
+            package_list_hash = inventory_service.compute_name_hash(names)
 
         if not package_signature_hash and packages_list:
-            package_signature_hash = inventory_meta.compute_signature_hash(
-                inventory_meta.snapshot_signatures(packages_list)
+            package_signature_hash = inventory_service.compute_signature_hash(
+                inventory_service.snapshot_signatures(packages_list)
             )
 
         build_fingerprint_value = snapshot.get("build_fingerprint")
@@ -169,7 +168,7 @@ def get_latest_inventory_metadata(
     expected_scope_hash: str | None = None
 
     if normalized_scope:
-        expected_scope_hash = inventory_meta.compute_scope_hash(normalized_scope)
+        expected_scope_hash = inventory_service.compute_scope_hash(normalized_scope)
         if expected_scope_hash and scope_id == "last_scope":
             resolved_scope_id = f"scope:{expected_scope_hash[:12]}"
 
@@ -202,13 +201,13 @@ def get_latest_inventory_metadata(
             and scope_hashes
             and scope_id in scope_hashes
         ):
-            removed_map = inventory_meta.update_scope_hash(serial, scope_id, None)
+            removed_map = inventory_service.update_scope_hash(serial, scope_id, None)
             if removed_map is not None:
                 scope_hashes = removed_map
                 metadata["scope_hashes"] = removed_map
 
         if serial and expected_scope_hash:
-            updated = inventory_meta.update_scope_hash(
+            updated = inventory_service.update_scope_hash(
                 serial, resolved_scope_id, expected_scope_hash
             )
             if updated is not None:
@@ -222,13 +221,13 @@ def get_latest_inventory_metadata(
     if not with_current_state:
         return metadata
 
-    current_signatures = adb_packages.list_packages_with_versions(serial)
+    current_signatures = device_service.list_packages_with_versions(serial)
     current_names = [name for name, _, _ in current_signatures]
     current_count = len(current_signatures)
-    current_hash = inventory_meta.compute_name_hash(current_names)
-    current_signature_hash = inventory_meta.compute_signature_hash(current_signatures)
+    current_hash = inventory_service.compute_name_hash(current_names)
+    current_signature_hash = inventory_service.compute_signature_hash(current_signatures)
 
-    device_props = adb_devices.get_basic_properties(serial)
+    device_props = device_service.get_basic_properties(serial)
     current_fingerprint = None
     if device_props:
         current_fingerprint = device_props.get("build_fingerprint")
@@ -291,7 +290,7 @@ def get_latest_inventory_metadata(
                     {"package_name": name, "version_code": version_code}
                 )
 
-        current_scope_hash = inventory_meta.compute_scope_hash(filtered_scope)
+        current_scope_hash = inventory_service.compute_scope_hash(filtered_scope)
         if current_scope_hash:
             metadata["current_scope_hash"] = current_scope_hash
 

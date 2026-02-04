@@ -5,13 +5,13 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
-from scytaledroid.DeviceAnalysis import adb_status
 from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.prompts import (
     describe_inventory_state,
+    InventoryDeltaSummary,
 )
-from scytaledroid.DeviceAnalysis import inventory as inventory_module
-from scytaledroid.DeviceAnalysis.inventory.runner import InventoryDelta
-from scytaledroid.DeviceAnalysis.services import inventory_service
+from scytaledroid.DeviceAnalysis.services import device_service, inventory_service
+
+inventory_module = inventory_service
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages, text_blocks
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
@@ -97,7 +97,7 @@ def ensure_recent_inventory(
 
     delta_obj = metadata.get("delta") if metadata else None
     if isinstance(delta_obj, dict):
-        delta_obj = InventoryDelta(
+        delta_obj = InventoryDeltaSummary(
             new_count=int(delta_obj.get("new") or 0),
             removed_count=int(delta_obj.get("removed") or 0),
             updated_count=int(delta_obj.get("updated") or 0),
@@ -111,14 +111,14 @@ def ensure_recent_inventory(
             ),
         )
     elif delta_obj is None and metadata:
-        delta_obj = InventoryDelta(
+        delta_obj = InventoryDeltaSummary(
             new_count=int(metadata.get("delta_new") or 0),
             removed_count=int(metadata.get("delta_removed") or 0),
             updated_count=int(metadata.get("delta_updated") or 0),
             changed_packages_count=int(metadata.get("delta_changed_count") or 0),
         )
     else:
-        delta_obj = delta_obj or InventoryDelta(0, 0, 0, 0)
+        delta_obj = delta_obj or InventoryDeltaSummary(0, 0, 0, 0)
 
     if timestamp is None:
         status = "NONE"
@@ -201,7 +201,9 @@ def ensure_recent_inventory(
                 )
             )
             try:
-                inventory_service.run_full_sync(serial=serial, ui_prefs=text_blocks.UI_PREFS)
+                from scytaledroid.DeviceAnalysis.workflows import inventory_workflow
+
+                inventory_workflow.run_inventory_sync(serial=serial, ui_prefs=text_blocks.UI_PREFS)
                 _record_guard_policy("quick")
                 return True
             except Exception as exc:
@@ -335,8 +337,9 @@ def ensure_recent_inventory(
             return True
 
         try:
-            from scytaledroid.DeviceAnalysis.services import inventory_service
-            inventory_service.run_full_sync(
+            from scytaledroid.DeviceAnalysis.workflows import inventory_workflow
+
+            inventory_workflow.run_inventory_sync(
                 serial=serial,
                 ui_prefs=None,
                 progress_sink="cli",
@@ -428,7 +431,7 @@ def _resolve_battery_context(
             status = status_value
 
     if level is None or status is None:
-        stats = adb_status.get_device_stats(serial)
+        stats = device_service.get_device_stats(serial)
         if level is None:
             level = _parse_battery_level(stats.get("battery_level"))
         if status is None:

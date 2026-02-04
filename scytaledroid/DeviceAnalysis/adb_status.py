@@ -1,18 +1,3 @@
-"""Device status + capability helpers."""
+"""Deprecated shim for adb status helpers."""
 
-from __future__ import annotations
-
-from scytaledroid.DeviceAnalysis import device_status
-
-
-def get_device_stats(serial: str) -> dict[str, str | None]:
-    """Collect live telemetry for the provided device."""
-    return device_status.get_device_stats(serial)
-
-
-def get_device_capabilities(serial: str) -> dict[str, str | None]:
-    """Return capability snapshot for dynamic analysis."""
-    return device_status.get_device_capabilities(serial)
-
-
-__all__ = ["get_device_stats", "get_device_capabilities"]
+from scytaledroid.DeviceAnalysis.adb.status import *  # noqa: F401,F403
