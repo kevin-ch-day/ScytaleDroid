@@ -29,6 +29,7 @@ pytest_cache/
 # Local runtime artifacts
 logs/
 output/
+.env
 data/state/
 data/watchlists/
 data/apks/

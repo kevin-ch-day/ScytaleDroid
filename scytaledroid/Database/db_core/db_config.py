@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from scytaledroid.Config import app_config
 
@@ -57,6 +57,45 @@ def _sqlite_allow_write() -> bool:
     return raw in {"1", "true", "yes", "on"}
 
 
+def _validate_db_parts() -> None:
+    name = os.environ.get("SCYTALEDROID_DB_NAME")
+    if not name:
+        return
+    user = (os.environ.get("SCYTALEDROID_DB_USER") or "").strip()
+    passwd = (os.environ.get("SCYTALEDROID_DB_PASSWD") or "").strip()
+    port = os.environ.get("SCYTALEDROID_DB_PORT", "").strip()
+    if port and not port.isdigit():
+        raise RuntimeError("SCYTALEDROID_DB_PORT must be numeric.")
+    if passwd and not user:
+        raise RuntimeError("SCYTALEDROID_DB_USER is required when SCYTALEDROID_DB_PASSWD is set.")
+    for key in ("SCYTALEDROID_DB_NAME", "SCYTALEDROID_DB_USER", "SCYTALEDROID_DB_PASSWD", "SCYTALEDROID_DB_HOST"):
+        value = os.environ.get(key)
+        if value and any(ch in value for ch in ("\n", "\r", "\x00")):
+            raise RuntimeError(f"{key} contains an invalid control character.")
+
+
+def _compose_db_url_from_parts() -> str | None:
+    _validate_db_parts()
+    name = (os.environ.get("SCYTALEDROID_DB_NAME") or "").strip()
+    if not name:
+        return None
+    user = (os.environ.get("SCYTALEDROID_DB_USER") or "").strip()
+    passwd = (os.environ.get("SCYTALEDROID_DB_PASSWD") or "").strip()
+    host = (os.environ.get("SCYTALEDROID_DB_HOST") or "").strip() or "localhost"
+    port = (os.environ.get("SCYTALEDROID_DB_PORT") or "").strip() or "3306"
+    scheme = (os.environ.get("SCYTALEDROID_DB_SCHEME") or "mysql").strip().lower()
+    if scheme not in {"mysql", "mariadb"}:
+        scheme = "mysql"
+    safe_user = quote(user, safe="") if user else ""
+    safe_passwd = quote(passwd, safe="") if passwd else ""
+    auth = safe_user
+    if passwd:
+        auth = f"{safe_user}:{safe_passwd}" if safe_user else f":{safe_passwd}"
+    if auth:
+        return f"{scheme}://{auth}@{host}:{port}/{name}"
+    return f"{scheme}://{host}:{port}/{name}"
+
+
 def _load_from_env() -> dict[str, str | int]:
     loaded_dotenv = _load_dotenv()
     # When running tests via pytest, force default SQLite to avoid hitting real DBs.
@@ -66,14 +105,17 @@ def _load_from_env() -> dict[str, str | int]:
         raw_url = os.environ.get("SCYTALEDROID_DB_URL")
         if raw_url is not None:
             raw_url = raw_url.strip()
+        if not raw_url:
+            raw_url = _compose_db_url_from_parts()
         if not raw_url and not os.environ.get("SCYTALEDROID_ALLOW_SQLITE"):
             env_path = Path(os.environ.get("SCYTALEDROID_ENV_FILE") or _DOTENV_DEFAULT)
             source = "missing"
             if env_path.exists():
                 source = "empty" if loaded_dotenv else "missing_key"
             raise RuntimeError(
-                "SCYTALEDROID_DB_URL is required for non-test runs "
+                "Database configuration is required for non-test runs. "
                 f"({source} in .env). Set SCYTALEDROID_DB_URL or set "
+                "SCYTALEDROID_DB_NAME/USER/PASSWD/HOST/PORT, or set "
                 "SCYTALEDROID_ALLOW_SQLITE=1 to use the local SQLite fallback."
             )
     if not raw_url:
@@ -120,7 +162,11 @@ def _load_from_env() -> dict[str, str | int]:
 
 
 DB_CONFIG: dict[str, str | int] = _load_from_env()
-DB_CONFIG_SOURCE: str = "env:SCYTALEDROID_DB_URL" if os.environ.get("SCYTALEDROID_DB_URL") else "default-sqlite"
+DB_CONFIG_SOURCE: str = (
+    "env:SCYTALEDROID_DB_URL"
+    if os.environ.get("SCYTALEDROID_DB_URL")
+    else ("env:SCYTALEDROID_DB_*" if os.environ.get("SCYTALEDROID_DB_NAME") else "default-sqlite")
+)
 
 _DEFAULT_DATABASE = DB_CONFIG.get("database", "")
 _DEFAULT_ENGINE = DB_CONFIG.get("engine", "sqlite")

@@ -74,6 +74,7 @@ def database_menu() -> None:
         print(f"Backend: {backend}")
         print(f"Database: {database}")
         print(f"Host: {host}")
+        print(f"Config: {db_config.DB_CONFIG_SOURCE}")
         if schema_ver != expected_schema and schema_ver != "<unknown>":
             print(f"Schema: {schema_ver} (Tier-1 expects {expected_schema}) [OUTDATED]")
             print("Tip: Run option (2) Apply canonical schema bootstrap")

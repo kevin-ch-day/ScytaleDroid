@@ -136,6 +136,7 @@ def static_schema_gate() -> tuple[bool, str, str]:
     required_columns = {
         "static_analysis_runs": ["id", "app_version_id", "session_stamp"],
         "static_session_run_links": ["session_stamp", "package_name", "static_run_id"],
+        "findings": ["static_run_id"],
     }
     return check_module_schema(
         "Static Analysis",

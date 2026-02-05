@@ -436,6 +436,14 @@ _DDL_STATEMENTS: list[str] = [
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
     """
+    ALTER TABLE findings
+      ADD COLUMN IF NOT EXISTS static_run_id BIGINT UNSIGNED DEFAULT NULL;
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_findings_static_run
+    ON findings (static_run_id);
+    """,
+    """
     CREATE OR REPLACE VIEW v_provider_exposure AS
     SELECT
       fp.id AS provider_id,
