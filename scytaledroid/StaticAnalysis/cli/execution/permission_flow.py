@@ -254,6 +254,8 @@ def execute_permission_scan(
                 static_run_id = create_static_run_ledger(
                     package_name=package_name,
                     session_stamp=session_stamp,
+                    session_label=params.session_label or session_stamp,
+                    canonical_action=params.canonical_action,
                     scope_label=params.scope_label or selection.label,
                     category=last_category,
                     profile=params.profile_label,

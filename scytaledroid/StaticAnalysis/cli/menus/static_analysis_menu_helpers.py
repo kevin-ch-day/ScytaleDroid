@@ -68,15 +68,27 @@ def render_reset_outcome(outcome: object) -> None:
 def collect_view_options(command: Command) -> tuple[bool, bool, bool, bool]:
     print("View options")
     print("------------------------")
-    print("[1] Details")
+    print("[1] Summary details")
+    print("    High-level findings, risk grades, and key signals.")
+    print("    Best starting point for review or demo.")
+    print()
     print("[2] Split breakdown")
+    print("    Per-APK split/module analysis (features, ABI, resources).")
+    print("    Useful for large apps with dynamic feature splits.")
+    print()
     print("[3] Artifact detail")
+    print("    Deep dive into a specific artifact (manifest, strings, native libs).")
+    print("    Advanced / forensic view.")
+    print()
     print("[0] Return to main menu")
-    print("[Enter] continue")
+    print("    Exit results view without modifying data.")
+    print()
+    print("[Enter] Continue with defaults")
+    print("    Opens Summary details.")
     while True:
         response = prompt_utils.prompt_text("Select option", required=False, show_arrow=False).strip().lower()
         if response == "":
-            return False, False, False, False
+            return True, False, False, False
         if response == "0":
             return False, False, False, True
         if response == "1":

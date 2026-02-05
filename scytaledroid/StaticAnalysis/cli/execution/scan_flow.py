@@ -80,6 +80,7 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
         show_splits=show_splits,
         show_artifacts=show_artifacts,
         show_checkpoints=not params.dry_run,
+        progress_every=int(os.getenv("SCYTALEDROID_STATIC_PROGRESS_EVERY", "5").strip() or "5"),
     )
     config_hash = _compute_config_hash(params)
     pipeline_version = os.getenv("SCYTALEDROID_PIPELINE_VERSION") or getattr(
@@ -155,6 +156,8 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
             static_run_id = create_static_run_ledger(
                 package_name=group.package_name,
                 session_stamp=params.session_stamp,
+                session_label=params.session_label or params.session_stamp,
+                canonical_action=params.canonical_action,
                 scope_label=params.scope_label,
                 category=group.category,
                 profile=params.profile_label,

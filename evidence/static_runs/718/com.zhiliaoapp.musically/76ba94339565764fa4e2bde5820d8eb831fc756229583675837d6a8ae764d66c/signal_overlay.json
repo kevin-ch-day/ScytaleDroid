@@ -1,0 +1,11 @@
+{
+  "static_run_id": 718,
+  "package_name": "com.zhiliaoapp.musically",
+  "signal_key": "overlay",
+  "severity_band": "WARN",
+  "score": 5,
+  "trigger_permissions": [
+    "android.permission.SYSTEM_ALERT_WINDOW"
+  ],
+  "rationale": "System overlay permission requested."
+}

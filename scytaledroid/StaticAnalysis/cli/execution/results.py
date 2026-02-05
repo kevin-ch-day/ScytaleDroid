@@ -16,6 +16,7 @@ from scytaledroid.Utils.DisplayUtils import (
     status_messages,
     summary_cards,
 )
+from scytaledroid.Database.db_core import db_queries as core_q
 
 from ...engine.strings import analyse_strings
 from ...persistence.ingest import ingest_baseline_payload
@@ -128,6 +129,17 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             width=90,
         )
     )
+    if len(outcome.results) == 1:
+        app = outcome.results[0]
+        version_name = app.version_name or "?"
+        version_code = app.version_code if app.version_code is not None else "?"
+        sha256 = app.base_apk_sha256 or "?"
+        print(
+            status_messages.status(
+                f"Version: {version_name} ({version_code}) • SHA-256: {sha256}",
+                level="info",
+            )
+        )
     if not params.dry_run:
         persistence_ready = os.getenv("SCYTALEDROID_PERSISTENCE_READY", "1").strip() != "0"
         if not persistence_ready:
@@ -148,6 +160,61 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                     level="warn",
                 )
             )
+        if params.canonical_action == "replace" and params.session_label and len(outcome.results) == 1:
+            current_static_run_id = outcome.results[0].static_run_id
+            if current_static_run_id:
+                try:
+                    row = core_q.run_sql(
+                        """
+                        SELECT id, base_apk_sha256, sha256
+                        FROM static_analysis_runs
+                        WHERE session_label=%s AND id<>%s
+                        ORDER BY id DESC
+                        LIMIT 1
+                        """,
+                        (params.session_label, current_static_run_id),
+                        fetch="one",
+                    )
+                    if row and row[0]:
+                        prev_id = int(row[0])
+                        prev_sha = row[1] or row[2] or "?"
+                        curr_sha = outcome.results[0].base_apk_sha256 or "?"
+                        def _counts(run_id: int) -> dict[str, int]:
+                            rows = core_q.run_sql(
+                                """
+                                SELECT severity, COUNT(*)
+                                FROM findings
+                                WHERE static_run_id=%s
+                                GROUP BY severity
+                                """,
+                                (run_id,),
+                                fetch="all",
+                            )
+                            totals = {"high": 0, "medium": 0, "low": 0}
+                            for sev, cnt in rows or []:
+                                key = (sev or "").lower()
+                                if key in totals:
+                                    totals[key] = int(cnt)
+                            return totals
+                        prev_counts = _counts(prev_id)
+                        curr_counts = _counts(current_static_run_id)
+                        print(
+                            status_messages.status(
+                                "Daily rerun compare (previous canonical → new canonical)",
+                                level="info",
+                            )
+                        )
+                        print(f"  APK SHA-256: {prev_sha} → {curr_sha}")
+                        print(
+                            "  Findings: High "
+                            f"{prev_counts['high']} → {curr_counts['high']}, "
+                            "Medium "
+                            f"{prev_counts['medium']} → {curr_counts['medium']}, "
+                            "Low "
+                            f"{prev_counts['low']} → {curr_counts['low']}"
+                        )
+                except Exception:
+                    pass
     highlight_tokens = _format_highlight_tokens(
         highlight_stats,
         totals,

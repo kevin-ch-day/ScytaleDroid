@@ -70,6 +70,8 @@ class RunParameters:
     verbose_output: bool = False
     artifact_detail: bool = False
     permission_snapshot_refresh: bool = field(default_factory=_default_permission_refresh)
+    session_label: str | None = None
+    canonical_action: str | None = None
 
     @property
     def profile_label(self) -> str:

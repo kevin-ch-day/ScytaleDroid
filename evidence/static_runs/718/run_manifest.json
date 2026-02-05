@@ -1,0 +1,98 @@
+{
+  "apk_sha256": "76ba94339565764fa4e2bde5820d8eb831fc756229583675837d6a8ae764d66c",
+  "artifacts": [
+    {
+      "created_at_utc": "2026-02-05T06:50:28.288755Z",
+      "origin": "host",
+      "path": "evidence/static_runs/718/run_manifest.json",
+      "pull_status": "n/a",
+      "sha256": null,
+      "size_bytes": null,
+      "status_reason": "self_reference_unhashed",
+      "type": "static_run_manifest"
+    },
+    {
+      "created_at_utc": "2026-02-05T06:13:53",
+      "device_path": null,
+      "origin": "unknown",
+      "path": "/home/secadmin/Documents/CARS2025/Dev/ScytaleDroid/evidence/static_runs/718/run_manifest.json",
+      "pull_status": "unknown",
+      "pulled_at_utc": null,
+      "sha256": "ef8c6d7e991392352ba6f3a5b31343ebd874e3048d664f4e50df345e6f73d0f3",
+      "size_bytes": 991,
+      "type": "static_run_manifest"
+    },
+    {
+      "created_at_utc": "2026-02-05T06:13:53",
+      "device_path": null,
+      "origin": "host",
+      "path": "/home/secadmin/Documents/CARS2025/Dev/ScytaleDroid/data/static_analysis/baseline/com.zhiliaoapp.musically-full-app-20260205T061353Z.json",
+      "pull_status": "n/a",
+      "pulled_at_utc": null,
+      "sha256": "94d1eebc44ef81217355723c7762b373267165b763c3722aac74b9026c39257f",
+      "size_bytes": 293953,
+      "type": "static_baseline_json"
+    },
+    {
+      "created_at_utc": "2026-02-05T06:13:53",
+      "device_path": null,
+      "origin": "host",
+      "path": "/home/secadmin/Documents/CARS2025/Dev/ScytaleDroid/data/static_analysis/dynamic_plan/com.zhiliaoapp.musically-full-app-sr718-20260205T061353Z.json",
+      "pull_status": "n/a",
+      "pulled_at_utc": null,
+      "sha256": "f0ede7657943cb87952e1bd908cf19bfb1069ed56004f25b53216cf8b6e24171",
+      "size_bytes": 9405,
+      "type": "static_dynamic_plan_json"
+    },
+    {
+      "created_at_utc": "2026-02-05T06:13:53",
+      "device_path": null,
+      "origin": "host",
+      "path": "/home/secadmin/Documents/CARS2025/Dev/ScytaleDroid/data/static_analysis/reports/76ba94339565764fa4e2bde5820d8eb831fc756229583675837d6a8ae764d66c.json",
+      "pull_status": "n/a",
+      "pulled_at_utc": null,
+      "sha256": "513a268aa3d6354a11c87622ef6eae8c2c52a71ff9734b30bae2a36a1cde1ede",
+      "size_bytes": 926314,
+      "type": "static_report"
+    },
+    {
+      "created_at_utc": "2026-02-05T06:22:28",
+      "device_path": null,
+      "origin": "host",
+      "path": "/home/secadmin/Documents/CARS2025/Dev/ScytaleDroid/data/static_analysis/baseline/com.zhiliaoapp.musically-full-app-20260205T062228Z.json",
+      "pull_status": "n/a",
+      "pulled_at_utc": null,
+      "sha256": "9d62cc9485266943af5349d21f23e75dd0dfe87ac07f0838b27bdc3b7c4e1b09",
+      "size_bytes": 293957,
+      "type": "static_baseline_json"
+    },
+    {
+      "created_at_utc": "2026-02-05T06:22:28",
+      "device_path": null,
+      "origin": "host",
+      "path": "/home/secadmin/Documents/CARS2025/Dev/ScytaleDroid/data/static_analysis/dynamic_plan/com.zhiliaoapp.musically-full-app-sr718-20260205T062228Z.json",
+      "pull_status": "n/a",
+      "pulled_at_utc": null,
+      "sha256": "cc3b6d85bb3af87a6c0635af34d45fc930803b38f8aeb2dfe292be16fdb6493f",
+      "size_bytes": 9405,
+      "type": "static_dynamic_plan_json"
+    }
+  ],
+  "base_apk_sha256": "76ba94339565764fa4e2bde5820d8eb831fc756229583675837d6a8ae764d66c",
+  "display_name": "TikTok",
+  "end_utc": "2026-02-05T06:50:24",
+  "grade_reasons": [],
+  "package_name": "com.zhiliaoapp.musically",
+  "profile_key": "Full",
+  "run_grade": "PAPER_GRADE",
+  "run_id": 718,
+  "run_manifest_version": 1,
+  "run_type": "static",
+  "scenario_id": "static_default",
+  "schema_version": "0.2.6",
+  "start_utc": "2026-02-05 06:09:11",
+  "tool_git_commit": "cc62df7a4a4c",
+  "tool_semver": "1.2.0",
+  "version_code": 2024307030,
+  "version_name": "43.7.3"
+}

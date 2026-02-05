@@ -2,7 +2,7 @@
   "apk_sha256": "76ba94339565764fa4e2bde5820d8eb831fc756229583675837d6a8ae764d66c",
   "artifacts": [
     {
-      "created_at_utc": "2026-02-05T04:22:38.536037Z",
+      "created_at_utc": "2026-02-05T05:17:58.248139Z",
       "origin": "host",
       "path": "evidence/static_runs/716/run_manifest.json",
       "pull_status": "n/a",
@@ -87,11 +87,44 @@
       "sha256": "e87496cf31cfa03e1c29d56d1f6b72ce81090e2c6456629108c7441a4d3acba8",
       "size_bytes": 9405,
       "type": "static_dynamic_plan_json"
+    },
+    {
+      "created_at_utc": "2026-02-05T04:22:38",
+      "device_path": null,
+      "origin": "unknown",
+      "path": "/home/secadmin/Documents/CARS2025/Dev/ScytaleDroid/evidence/static_runs/716/run_manifest.json",
+      "pull_status": "unknown",
+      "pulled_at_utc": null,
+      "sha256": "aa8b9a46cfcfb001d17270ec2829a2998b247fa0677d7b3332b4b2b3dfc9cfdc",
+      "size_bytes": 4365,
+      "type": "static_run_manifest"
+    },
+    {
+      "created_at_utc": "2026-02-05T04:22:38",
+      "device_path": null,
+      "origin": "host",
+      "path": "/home/secadmin/Documents/CARS2025/Dev/ScytaleDroid/data/static_analysis/baseline/com.zhiliaoapp.musically-full-app-20260205T042238Z.json",
+      "pull_status": "n/a",
+      "pulled_at_utc": null,
+      "sha256": "d79fca184ec32fdcb1348bb9a35eff64db25dde2afb45e2291cf125d419ab1f3",
+      "size_bytes": 293955,
+      "type": "static_baseline_json"
+    },
+    {
+      "created_at_utc": "2026-02-05T04:22:38",
+      "device_path": null,
+      "origin": "host",
+      "path": "/home/secadmin/Documents/CARS2025/Dev/ScytaleDroid/data/static_analysis/dynamic_plan/com.zhiliaoapp.musically-full-app-sr716-20260205T042238Z.json",
+      "pull_status": "n/a",
+      "pulled_at_utc": null,
+      "sha256": "59b43230e4534c7dd49751e9a3afae1499fb40eae4d7e961d3a2b21fb9c82ec6",
+      "size_bytes": 9405,
+      "type": "static_dynamic_plan_json"
     }
   ],
   "base_apk_sha256": "76ba94339565764fa4e2bde5820d8eb831fc756229583675837d6a8ae764d66c",
   "display_name": "TikTok",
-  "end_utc": "2026-02-05T04:22:34",
+  "end_utc": "2026-02-05T05:17:54",
   "grade_reasons": [],
   "package_name": "com.zhiliaoapp.musically",
   "profile_key": "Full",

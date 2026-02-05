@@ -68,13 +68,27 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
             )
             params = replace(params, session_stamp=normalized)
         try:
-            params = replace(params, session_stamp=_resolve_unique_session_stamp(params.session_stamp))
+            resolved_stamp, session_label, canonical_action = _resolve_unique_session_stamp(
+                params.session_stamp
+            )
+            params = replace(
+                params,
+                session_stamp=resolved_stamp,
+                session_label=session_label,
+                canonical_action=canonical_action,
+            )
         except RuntimeError as exc:
             print(status_messages.status(str(exc), level="error"))
             return None
     else:
         try:
-            params = replace(params, session_stamp=_resolve_unique_session_stamp(session_stamp))
+            resolved_stamp, session_label, canonical_action = _resolve_unique_session_stamp(session_stamp)
+            params = replace(
+                params,
+                session_stamp=resolved_stamp,
+                session_label=session_label,
+                canonical_action=canonical_action,
+            )
         except RuntimeError as exc:
             print(status_messages.status(str(exc), level="error"))
             return None
@@ -444,26 +458,102 @@ def _check_static_persistence_readiness(params: RunParameters) -> tuple[bool, st
     return True, "OK"
 
 
-def _resolve_unique_session_stamp(session_stamp: str) -> str:
+def _resolve_unique_session_stamp(session_stamp: str) -> tuple[str, str, str]:
     base_stamp = session_stamp
     session_dir = Path(app_config.DATA_DIR) / "sessions"
     final_path = session_dir / base_stamp / "run_map.json"
     if not final_path.exists():
-        return base_stamp
-    print(f"Session label already used: {base_stamp}.")
-    should_delete = prompt_utils.prompt_yes_no(
-        "Delete existing session metadata and continue?",
-        default=False,
+        return base_stamp, base_stamp, "first_run"
+    attempts = None
+    canonical_id = None
+    try:
+        from scytaledroid.Database.db_core import db_queries as core_q
+
+        row = core_q.run_sql(
+            """
+            SELECT COUNT(*)
+            FROM static_analysis_runs
+            WHERE session_label=%s
+            """,
+            (base_stamp,),
+            fetch="one",
+        )
+        attempts = int(row[0]) if row and row[0] is not None else 0
+        row = core_q.run_sql(
+            """
+            SELECT id
+            FROM static_analysis_runs
+            WHERE session_label=%s AND is_canonical=1
+            ORDER BY canonical_set_at_utc DESC
+            LIMIT 1
+            """,
+            (base_stamp,),
+            fetch="one",
+        )
+        if row and row[0] is not None:
+            canonical_id = int(row[0])
+    except Exception:
+        attempts = None
+        canonical_id = None
+    print(f"Session label already exists for today: {base_stamp}")
+    if attempts is not None:
+        canonical_text = f" (canonical: static_run_id={canonical_id})" if canonical_id else ""
+        print(f"Existing attempts: {attempts}{canonical_text}")
+    print()
+    print("Action options:")
+    print("  [1] Replace today's run        (overwrite local artifacts, DB history preserved)")
+    print("  [2] Append as another attempt  (keep prior attempts, new suffix)")
+    print("  [0] Cancel")
+    choice = prompt_utils.get_choice(
+        ["1", "2", "0"],
+        default=None,
+        casefold=False,
+        prompt="Choice: ",
     )
-    if not should_delete:
+    if choice == "0":
+        raise RuntimeError(
+            f"Session label already used: {base_stamp}. Choose a new label to avoid run_map collisions."
+        )
+    if choice == "2":
+        counter = 1
+        while True:
+            candidate = f"{base_stamp}-{counter:02d}"
+            candidate_path = session_dir / candidate / "run_map.json"
+            if not candidate_path.exists():
+                return candidate, base_stamp, "append"
+            counter += 1
+    print("You selected: Replace today's run")
+    print(f"This will overwrite local output artifacts for {base_stamp}.")
+    print("Database history will be preserved.")
+    confirm = prompt_utils.prompt_yes_no("Continue?", default=False)
+    if not confirm:
         raise RuntimeError(
             f"Session label already used: {base_stamp}. Choose a new label to avoid run_map collisions."
         )
     try:
+        archive_dir = session_dir / "_archive"
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        if final_path.exists():
+            timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+            archive_path = archive_dir / f"{base_stamp}-{timestamp}.run_map.json"
+            shutil.copy2(final_path, archive_path)
+        print(
+            status_messages.status(
+                "Replace mode: deleting local session folder only (DB history preserved).",
+                level="info",
+            )
+        )
+        if canonical_id:
+            print(
+                status_messages.status(
+                    f"Previous canonical attempt: static_run_id={canonical_id}",
+                    level="info",
+                )
+            )
         shutil.rmtree(session_dir / base_stamp)
     except Exception as exc:
-        raise RuntimeError(f"Failed to delete existing session metadata: {exc}") from exc
-    return base_stamp
+        raise RuntimeError(f"Failed to replace existing session metadata: {exc}") from exc
+    return base_stamp, base_stamp, "replace"
 
 
 def _build_session_run_map(outcome: RunOutcome | None, session_stamp: str | None) -> dict | None:

@@ -35,7 +35,23 @@ def _resolve_static_run_ids(session_stamp: str) -> list[int]:
         run_map = load_run_map(session_stamp)
     except Exception:
         return []
-    return extract_static_run_ids(run_map)
+    static_ids = extract_static_run_ids(run_map)
+    if static_ids:
+        return static_ids
+    try:
+        rows = core_q.run_sql(
+            """
+            SELECT id
+            FROM static_analysis_runs
+            WHERE session_stamp = %s
+            ORDER BY id DESC
+            """,
+            (session_stamp,),
+            fetch="all",
+        )
+    except Exception:
+        return []
+    return [int(row[0]) for row in rows or [] if row and row[0] is not None]
 
 
 def _per_app_severity_from_findings(
@@ -346,11 +362,23 @@ def _render_persistence_footer(
         "SELECT COUNT(*) FROM permission_audit_snapshots WHERE snapshot_key = %s",
         (snapshot_key,),
     )
+    if snapshot_count == 0 and latest_static_run_ids:
+        placeholders = ",".join(["%s"] * len(latest_static_run_ids))
+        snapshot_count = _count(
+            f"SELECT COUNT(*) FROM permission_audit_snapshots WHERE static_run_id IN ({placeholders})",
+            tuple(latest_static_run_ids),
+        )
     snapshot_apps = _audit_or("permission_audit_apps")
     if snapshot_apps == 0 and snapshot_id is not None:
         snapshot_apps = _count(
             "SELECT COUNT(*) FROM permission_audit_apps WHERE snapshot_id = %s",
             (snapshot_id,),
+        )
+    if snapshot_apps == 0 and latest_static_run_ids:
+        placeholders = ",".join(["%s"] * len(latest_static_run_ids))
+        snapshot_apps = _count(
+            f"SELECT COUNT(*) FROM permission_audit_apps WHERE static_run_id IN ({placeholders})",
+            tuple(latest_static_run_ids),
         )
 
     runs_total = _count_total("SELECT COUNT(*) FROM runs")
@@ -454,6 +482,54 @@ def _render_persistence_footer(
             else "Multiple runs for session; this_run reflects latest run only."
         )
         lines.append(("note", note))
+    session_label = None
+    try:
+        row = core_q.run_sql(
+            """
+            SELECT session_label
+            FROM static_analysis_runs
+            WHERE session_stamp=%s
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (session_stamp,),
+            fetch="one",
+        )
+        if row and row[0]:
+            session_label = str(row[0])
+    except Exception:
+        session_label = None
+    if session_label:
+        try:
+            row = core_q.run_sql(
+                """
+                SELECT COUNT(*)
+                FROM static_analysis_runs
+                WHERE session_label=%s
+                """,
+                (session_label,),
+                fetch="one",
+            )
+            attempts = int(row[0]) if row and row[0] is not None else 0
+            lines.append(("attempts", str(attempts)))
+        except Exception:
+            pass
+        try:
+            row = core_q.run_sql(
+                """
+                SELECT id
+                FROM static_analysis_runs
+                WHERE session_label=%s AND is_canonical=1
+                ORDER BY canonical_set_at_utc DESC
+                LIMIT 1
+                """,
+                (session_label,),
+                fetch="one",
+            )
+            if row and row[0]:
+                lines.append(("canonical", f"static_run_id={int(row[0])}"))
+        except Exception:
+            pass
     width = max(len(name) for name, _ in lines) if lines else 0
     for name, detail in lines:
         print(f"  {name.ljust(width)} : {detail}")

@@ -1,0 +1,11 @@
+{
+  "static_run_id": 718,
+  "package_name": "com.zhiliaoapp.musically",
+  "signal_key": "contacts",
+  "severity_band": "WARN",
+  "score": 6,
+  "trigger_permissions": [
+    "android.permission.READ_CONTACTS"
+  ],
+  "rationale": "Contacts permissions requested."
+}

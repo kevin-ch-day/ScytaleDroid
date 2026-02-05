@@ -123,6 +123,21 @@ _DDL_STATEMENTS: list[str] = [
       ADD COLUMN IF NOT EXISTS abort_signal VARCHAR(16) DEFAULT NULL;
     """,
     """
+    ALTER TABLE static_analysis_runs
+      ADD COLUMN IF NOT EXISTS session_label VARCHAR(128) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS is_canonical TINYINT(1) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS canonical_set_at_utc DATETIME DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS canonical_reason VARCHAR(64) DEFAULT NULL;
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_static_runs_session_label
+      ON static_analysis_runs (session_label);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_static_runs_canonical
+      ON static_analysis_runs (session_label, is_canonical);
+    """,
+    """
     CREATE TABLE IF NOT EXISTS artifact_registry (
       artifact_id   BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
       run_id        VARCHAR(64)     NOT NULL,

@@ -411,6 +411,7 @@ def _create_static_run(
     *,
     app_version_id: int,
     session_stamp: str,
+    session_label: str,
     scope_label: str,
     category: str | None,
     profile: str,
@@ -423,6 +424,9 @@ def _create_static_run(
     findings_total: int,
     run_started_utc: str | None,
     status: str,
+    is_canonical: bool | None = None,
+    canonical_set_at_utc: str | None = None,
+    canonical_reason: str | None = None,
     sha256: str | None = None,
     base_apk_sha256: str | None = None,
     artifact_set_hash: str | None = None,
@@ -446,6 +450,7 @@ def _create_static_run(
     full_columns = [
         "app_version_id",
         "session_stamp",
+        "session_label",
         "scope_label",
         "category",
         "profile_key",
@@ -470,10 +475,14 @@ def _create_static_run(
         "findings_total",
         "run_started_utc",
         "status",
+        "is_canonical",
+        "canonical_set_at_utc",
+        "canonical_reason",
     ]
     full_values: list[object] = [
         app_version_id,
         session_stamp,
+        session_label,
         scope_label,
         category,
         profile_key,
@@ -498,6 +507,9 @@ def _create_static_run(
         findings_total,
         normalized_started_at,
         status,
+        1 if is_canonical else 0 if is_canonical is not None else None,
+        _normalize_datetime_value(canonical_set_at_utc) if canonical_set_at_utc else None,
+        canonical_reason,
     ]
     try:
         return _insert_run(full_columns, full_values)
@@ -570,6 +582,7 @@ def create_static_run_ledger(
     *,
     package_name: str,
     session_stamp: str,
+    session_label: str,
     scope_label: str,
     category: str | None = None,
     profile: str,
@@ -591,6 +604,7 @@ def create_static_run_ledger(
     catalog_versions: str | None = None,
     study_tag: str | None = None,
     run_started_utc: str | None = None,
+    canonical_action: str | None = None,
     dry_run: bool = False,
 ) -> int | None:
     """Create a RUNNING static_analysis_runs row before scanning begins."""
@@ -682,9 +696,10 @@ def create_static_run_ledger(
     run_started_utc = _normalize_datetime_value(
         run_started_utc or datetime.utcnow().isoformat(timespec="seconds") + "Z"
     )
-    return _create_static_run(
+    static_run_id = _create_static_run(
         app_version_id=app_version_id,
         session_stamp=session_stamp,
+        session_label=session_label,
         scope_label=scope_label,
         category=category,
         profile=profile,
@@ -697,6 +712,11 @@ def create_static_run_ledger(
         findings_total=0,
         run_started_utc=run_started_utc,
         status="RUNNING",
+        is_canonical=True if (canonical_action in {"first_run", "replace"}) else False
+        if canonical_action
+        else None,
+        canonical_set_at_utc=run_started_utc if canonical_action in {"first_run", "replace"} else None,
+        canonical_reason=canonical_action if canonical_action in {"first_run", "replace"} else None,
         sha256=sha256,
         base_apk_sha256=base_apk_sha256,
         artifact_set_hash=artifact_set_hash,
@@ -710,6 +730,13 @@ def create_static_run_ledger(
         catalog_versions=catalog_versions,
         study_tag=study_tag,
     )
+    if static_run_id and session_label:
+        _maybe_set_canonical_static_run(
+            session_label=session_label,
+            static_run_id=static_run_id,
+            canonical_action=canonical_action or "first_run",
+        )
+    return static_run_id
 
 
 def _update_static_run_metadata(
@@ -781,6 +808,61 @@ def _update_static_run_metadata(
     except Exception as exc:  # pragma: no cover - defensive
         log.warning(
             f"Failed to update static_analysis_runs metadata for id={static_run_id}: {exc}",
+            category="db",
+        )
+
+
+def _maybe_set_canonical_static_run(
+    *,
+    session_label: str,
+    static_run_id: int,
+    canonical_action: str,
+) -> None:
+    if canonical_action not in {"first_run", "replace"}:
+        return
+    now = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    try:
+        prev = core_q.run_sql(
+            """
+            SELECT id
+            FROM static_analysis_runs
+            WHERE session_label=%s AND is_canonical=1 AND id<>%s
+            ORDER BY canonical_set_at_utc DESC
+            LIMIT 1
+            """,
+            (session_label, static_run_id),
+            fetch="one",
+        )
+        prev_id = int(prev[0]) if prev and prev[0] else None
+    except Exception:
+        prev_id = None
+    try:
+        run_sql_write(
+            """
+            UPDATE static_analysis_runs
+            SET is_canonical=0
+            WHERE session_label=%s AND is_canonical=1 AND id<>%s
+            """,
+            (session_label, static_run_id),
+        )
+        run_sql_write(
+            """
+            UPDATE static_analysis_runs
+            SET is_canonical=1,
+                canonical_set_at_utc=%s,
+                canonical_reason=%s
+            WHERE id=%s
+            """,
+            ( _normalize_datetime_value(now), canonical_action, static_run_id),
+        )
+        if prev_id is not None:
+            log.info(
+                f"canonical updated for {session_label}: {prev_id} -> {static_run_id}",
+                category="static_analysis",
+            )
+    except Exception as exc:
+        log.warning(
+            f"Failed to update canonical static run for {session_label}: {exc}",
             category="db",
         )
 
@@ -996,6 +1078,7 @@ def persist_run_summary(
             static_run_id = _create_static_run(
                 app_version_id=app_version_id,
                 session_stamp=session_stamp,
+                session_label=session_stamp,
                 scope_label=scope_label,
                 category=category_token,
                 profile=profile_token,
@@ -1494,6 +1577,37 @@ def _write_static_run_manifest(static_run_id: int) -> None:
         schema_version,
     ) = row
 
+    def _permission_audit_present(run_id: int) -> bool:
+        try:
+            row = core_q.run_sql(
+                "SELECT COUNT(*) FROM permission_audit_apps WHERE static_run_id=%s",
+                (run_id,),
+                fetch="one",
+            )
+            if row and int(row[0] or 0) > 0:
+                return True
+        except Exception:
+            return False
+        try:
+            row = core_q.run_sql(
+                "SELECT COUNT(*) FROM permission_audit_snapshots WHERE static_run_id=%s",
+                (run_id,),
+                fetch="one",
+            )
+            return bool(row and int(row[0] or 0) > 0)
+        except Exception:
+            return False
+
+    grade = "EXPERIMENTAL" if os.getenv("SCYTALEDROID_PERSISTENCE_READY") == "0" else "PAPER_GRADE"
+    reasons = (
+        ["persistence_gate_failed"]
+        if os.getenv("SCYTALEDROID_PERSISTENCE_READY") == "0"
+        else []
+    )
+    if grade == "PAPER_GRADE" and not _permission_audit_present(static_run_id):
+        grade = "EXPERIMENTAL"
+        reasons.append("permission_audit_missing")
+
     manifest = {
         "run_manifest_version": 1,
         "run_id": int(run_id) if run_id is not None else None,
@@ -1511,12 +1625,8 @@ def _write_static_run_manifest(static_run_id: int) -> None:
         "tool_semver": tool_semver or app_config.APP_VERSION,
         "tool_git_commit": tool_git_commit or get_git_commit(),
         "schema_version": schema_version or (db_diagnostics.get_schema_version() or "<unknown>"),
-        "run_grade": "EXPERIMENTAL" if os.getenv("SCYTALEDROID_PERSISTENCE_READY") == "0" else "PAPER_GRADE",
-        "grade_reasons": (
-            ["persistence_gate_failed"]
-            if os.getenv("SCYTALEDROID_PERSISTENCE_READY") == "0"
-            else []
-        ),
+        "run_grade": grade,
+        "grade_reasons": reasons,
         "artifacts": [],
     }
 

@@ -17,6 +17,11 @@ def _truncate_label(value: str, max_len: int) -> str:
         return value
     return f"{value[: max_len - 3].rstrip()}..."
 
+def _clean_artifact_label(label: str) -> str:
+    if " • " in label:
+        return label.split(" • ", 1)[-1].strip()
+    return label.strip()
+
 
 class _PipelineProgress:
     def __init__(
@@ -25,6 +30,7 @@ class _PipelineProgress:
         show_splits: bool,
         show_artifacts: bool,
         show_checkpoints: bool,
+        progress_every: int = 5,
     ) -> None:
         self.total = max(1, int(total))
         self.show_splits = show_splits
@@ -33,6 +39,8 @@ class _PipelineProgress:
         self._start = time.monotonic()
         self._last_len = 0
         self._last_checkpoint = 0
+        self._ended = False
+        self._progress_every = max(1, int(progress_every))
 
     def start(self, index: int, label: str) -> None:
         if self.show_splits:
@@ -48,14 +56,11 @@ class _PipelineProgress:
             return
         if not self.show_checkpoints:
             return
-        if index == self.total or (index - self._last_checkpoint) >= 5:
+        if index == self.total or (index - self._last_checkpoint) >= self._progress_every:
             self._last_checkpoint = index
-            elapsed = _format_elapsed(time.monotonic() - self._start)
             self._clear_line()
-            tail = _truncate_label(label, 48)
-            print(
-                f"Completed {index}/{self.total} artifacts ({elapsed} elapsed) | last: {tail}"
-            )
+            tail = _truncate_label(_clean_artifact_label(label), 48)
+            print(f"Completed {index}/{self.total} artifacts | {tail}")
 
     def error(self, index: int, label: str, message: str) -> None:
         if not self.show_artifacts:
@@ -75,11 +80,15 @@ class _PipelineProgress:
             print(f"SKIP Artifact {index}/{self.total}: {tail} - {message}")
 
     def end(self) -> None:
-        if self.show_splits or not self.show_artifacts:
+        if self.show_splits or not self.show_artifacts or self._ended:
             return
+        self._ended = True
         if self._last_len:
             self._clear_line()
             print()
+        if self.show_checkpoints:
+            elapsed = _format_elapsed(time.monotonic() - self._start)
+            print(f"Time Elapsed: {elapsed}")
 
     def flush_line(self) -> None:
         """Clear the in-place progress line before printing multiline output."""

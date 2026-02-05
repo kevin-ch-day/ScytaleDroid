@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, unquote, urlparse
 
 from scytaledroid.Config import app_config
 
@@ -152,8 +152,8 @@ def _load_from_env() -> dict[str, str | int]:
             "engine": "mysql",
             "host": parsed.hostname or "localhost",
             "port": int(parsed.port or 3306),
-            "user": parsed.username or "",
-            "password": parsed.password or "",
+            "user": unquote(parsed.username or ""),
+            "password": unquote(parsed.password or ""),
             "database": (parsed.path or "").lstrip("/") or "",
             "charset": "utf8mb4",
         }
