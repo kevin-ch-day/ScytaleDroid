@@ -432,11 +432,11 @@ def _render_persistence_footer(
         ("runs", f"this_run={run_count}  db_total={runs_total}"),
         ("findings", f"this_run={findings}  db_total={findings_total}"),
         (
-            "static_findings_summary",
+            "baseline_summary_rows",
             f"this_run={findings_summary}  db_total={findings_summary_total}",
         ),
         (
-            "static_findings",
+            "baseline_rule_hits",
             f"this_run={findings_detail}  db_total={findings_detail_total}",
         ),
         (
@@ -479,7 +479,7 @@ def _render_persistence_footer(
         note = (
             "Multiple runs for session; this_run aggregates group scope."
             if audit and audit.is_group_scope
-            else "Multiple runs for session; this_run reflects latest run only."
+            else "Multiple runs for session; see canonical/latest below."
         )
         lines.append(("note", note))
     session_label = None
@@ -530,9 +530,52 @@ def _render_persistence_footer(
                 lines.append(("canonical", f"static_run_id={int(row[0])}"))
         except Exception:
             pass
+        try:
+            row = core_q.run_sql(
+                """
+                SELECT id
+                FROM static_analysis_runs
+                WHERE session_label=%s
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (session_label,),
+                fetch="one",
+            )
+            if row and row[0]:
+                lines.append(("latest", f"static_run_id={int(row[0])}"))
+        except Exception:
+            pass
     width = max(len(name) for name, _ in lines) if lines else 0
     for name, detail in lines:
         print(f"  {name.ljust(width)} : {detail}")
+
+    if session_label:
+        try:
+            rows = core_q.run_sql(
+                """
+                SELECT id, COALESCE(run_started_utc, ended_at_utc, created_at) AS ts, is_canonical
+                FROM static_analysis_runs
+                WHERE session_label=%s
+                ORDER BY id DESC
+                LIMIT 5
+                """,
+                (session_label,),
+                fetch="all",
+            )
+        except Exception:
+            rows = None
+        if rows:
+            print()
+            print("Attempts (latest first)")
+            for row in rows:
+                try:
+                    attempt_id = int(row[0])
+                except Exception:
+                    attempt_id = row[0]
+                timestamp = row[1] or "—"
+                canonical_flag = "canonical" if int(row[2] or 0) else "archived"
+                print(f"  - {attempt_id} ({canonical_flag}) {timestamp}")
 
     stale_runs = _count_total(
         """

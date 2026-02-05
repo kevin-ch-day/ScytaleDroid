@@ -79,6 +79,42 @@ def render_app_completion(
         status_line += f" · {duration:.1f}s"
     print(status_line)
 
+    policy_failures = summary.get("policy_fail_detectors")
+    if fail_count and isinstance(policy_failures, Sequence) and policy_failures:
+        def _policy_label(section: str) -> str:
+            lookup = {
+                "integrity": "Integrity identity",
+                "manifest_hygiene": "Manifest baseline",
+                "permissions": "Permissions profile",
+                "ipc_components": "IPC components",
+                "provider_acl": "Provider ACL",
+                "network_surface": "Network surface",
+                "react_native": "React Native",
+                "domain_verification": "Domain verification",
+                "secrets": "Secrets",
+                "storage_backup": "Storage backup",
+                "dfir_hints": "DFIR hints",
+                "webview": "WebView",
+                "crypto_hygiene": "Crypto hygiene",
+                "dynamic_loading": "Dynamic loading",
+                "file_io_sinks": "File I/O sinks",
+                "interaction_risks": "Interaction risks",
+                "sdk_inventory": "SDK inventory",
+                "native_jni": "Native hardening",
+                "obfuscation": "Obfuscation",
+                "correlation_findings": "Correlation findings",
+            }
+            return lookup.get(section, section.replace("_", " ").title())
+
+        print("Policy gates")
+        for entry in policy_failures:
+            if not isinstance(entry, Mapping):
+                continue
+            section = str(entry.get("section") or "unknown")
+            detector = str(entry.get("detector") or "unknown")
+            label = _policy_label(section)
+            print(f"  FAIL: {label} ({section}/{detector})")
+
     error_detectors = summary.get("error_detectors")
     if params.verbose_output and isinstance(error_detectors, Sequence) and error_detectors:
         for entry in error_detectors:

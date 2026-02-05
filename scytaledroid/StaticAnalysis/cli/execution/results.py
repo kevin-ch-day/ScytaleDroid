@@ -94,10 +94,12 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
     abort_reason = outcome.abort_reason
     abort_signal = outcome.abort_signal
     normalized_findings_total = 0
-    baseline_summary_total = 0
+    baseline_rule_hits_total = 0
     string_samples_persisted_total = 0
+    detail_output: list[str] = []
+    def _emit_detail(line: str = "") -> None:
+        detail_output.append(line)
     overview_items = [
-        summary_cards.summary_item("Duration", format_duration(outcome.duration_seconds), value_style="emphasis"),
         summary_cards.summary_item("Applications", len(outcome.results)),
         summary_cards.summary_item("Artifacts", artifact_count),
     ]
@@ -117,8 +119,60 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
     subtitle_parts = [params.profile_label]
     if params.scope_label:
         subtitle_parts.append(f"Scope: {params.scope_label}")
-    if params.session_stamp:
-        subtitle_parts.append(f"Session: {params.session_stamp}")
+    session_label = params.session_label or params.session_stamp
+    session_meta: dict[str, int | None] = {"attempts": None, "canonical": None, "latest": None}
+    if session_label and not params.dry_run:
+        try:
+            row = core_q.run_sql(
+                "SELECT COUNT(*) FROM static_analysis_runs WHERE session_label=%s",
+                (session_label,),
+                fetch="one",
+            )
+            session_meta["attempts"] = int(row[0]) if row and row[0] is not None else None
+        except Exception:
+            session_meta["attempts"] = None
+        try:
+            row = core_q.run_sql(
+                """
+                SELECT id
+                FROM static_analysis_runs
+                WHERE session_label=%s AND is_canonical=1
+                ORDER BY canonical_set_at_utc DESC
+                LIMIT 1
+                """,
+                (session_label,),
+                fetch="one",
+            )
+            session_meta["canonical"] = int(row[0]) if row and row[0] is not None else None
+        except Exception:
+            session_meta["canonical"] = None
+        try:
+            row = core_q.run_sql(
+                """
+                SELECT id
+                FROM static_analysis_runs
+                WHERE session_label=%s
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (session_label,),
+                fetch="one",
+            )
+            session_meta["latest"] = int(row[0]) if row and row[0] is not None else None
+        except Exception:
+            session_meta["latest"] = None
+    if session_label:
+        session_note = f"Session: {session_label}"
+        canonical_id = session_meta.get("canonical")
+        latest_id = session_meta.get("latest")
+        if canonical_id or latest_id:
+            parts: list[str] = []
+            if canonical_id:
+                parts.append(f"canonical: {canonical_id}")
+            if latest_id:
+                parts.append(f"latest: {latest_id}")
+            session_note += f" ({', '.join(parts)})"
+        subtitle_parts.append(session_note)
     subtitle = " • ".join(subtitle_parts)
     print(
         summary_cards.format_summary_card(
@@ -140,6 +194,7 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                 level="info",
             )
         )
+    show_details = True
     if not params.dry_run:
         persistence_ready = os.getenv("SCYTALEDROID_PERSISTENCE_READY", "1").strip() != "0"
         if not persistence_ready:
@@ -215,6 +270,22 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                         )
                 except Exception:
                     pass
+    p0_count = 0
+    example_provider = None
+    for app_result in outcome.results:
+        base_report = app_result.base_report()
+        if base_report is None:
+            continue
+        if example_provider is None:
+            providers = getattr(base_report.exported_components, "providers", ())
+            if providers:
+                example_provider = str(providers[0])
+        for result in getattr(base_report, "detector_results", ()) or []:
+            for finding in getattr(result, "findings", ()) or []:
+                sev = getattr(getattr(finding, "severity_gate", None), "value", None)
+                if str(sev) == "P0":
+                    p0_count += 1
+
     highlight_tokens = _format_highlight_tokens(
         highlight_stats,
         totals,
@@ -222,6 +293,13 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
     )
     if highlight_tokens:
         print(status_messages.highlight("; ".join(highlight_tokens), show_icon=True))
+    if p0_count and example_provider:
+        print()
+        print("Top issue (P0)")
+        providers_count = highlight_stats.get("providers", 0)
+        print(f"  Exported providers without strong guards: {providers_count}")
+        print(f"  Example: {example_provider} (exported, no read/write permission)")
+        print("  Next: View options → [1] Summary details → Exported components")
     if params.dry_run:
         executed = outcome.completed_artifacts
         discovered = outcome.total_artifacts
@@ -318,6 +396,16 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             duration_seconds=total_duration,
         )
         finding_totals_by_package[app_result.package_name] = finding_totals
+        baseline_hits = 0
+        if isinstance(payload, Mapping):
+            baseline_payload = payload.get("baseline")
+            if isinstance(baseline_payload, Mapping):
+                findings_payload = baseline_payload.get("findings")
+                if isinstance(findings_payload, Sequence) and not isinstance(
+                    findings_payload, (str, bytes)
+                ):
+                    baseline_hits = len(findings_payload)
+        baseline_rule_hits_total += baseline_hits
 
         if compact_mode:
             if manifest and manifest.app_label:
@@ -335,7 +423,7 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                 ),
             ]
             for line in compact_block:
-                print(line)
+                _emit_detail(line)
 
         if persist_enabled and not app_result.static_run_id:
             print(
@@ -363,8 +451,6 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                 )
                 if outcome_status:
                     normalized_findings_total += int(outcome_status.persisted_findings)
-                    if outcome_status.baseline_written:
-                        baseline_summary_total += 1
                     string_samples_persisted_total += int(outcome_status.string_samples_persisted)
                 if outcome_status and not outcome_status.success:
                     persistence_errors.extend(outcome_status.errors)
@@ -419,7 +505,7 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
 
         if not compact_mode:
             for line in lines:
-                print(line)
+                _emit_detail(line)
 
         saved_path = None
         dynamic_plan_path = None
@@ -477,12 +563,12 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             baseline_written_count += 1
             message = f"Saved baseline JSON → {saved_path.name}"
             if not compact_mode:
-                print(message)
+                _emit_detail(message)
         if dynamic_plan_path:
             plan_written_count += 1
             message = f"Saved dynamic plan → {dynamic_plan_path.name}"
             if not compact_mode:
-                print(message)
+                _emit_detail(message)
 
         if persist_enabled and app_result.static_run_id:
             artifacts: list[dict[str, object]] = []
@@ -539,10 +625,47 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             report_reference_count += 1
             message = f"Report reference    → {report_reference}"
             if not compact_mode:
-                print(message)
+                _emit_detail(message)
+
+        canonical_change = params.canonical_action in {"replace", "first_run"}
+        if (
+            canonical_change
+            and params.session_label
+            and len(outcome.results) == 1
+            and (saved_path or dynamic_plan_path)
+        ):
+            alias_base = params.session_label
+            try:
+                if saved_path:
+                    alias = saved_path.parent / f"{alias_base}_baseline.json"
+                    alias.write_bytes(saved_path.read_bytes())
+                    latest_alias = saved_path.parent / "latest_baseline.json"
+                    latest_alias.write_bytes(saved_path.read_bytes())
+                if dynamic_plan_path:
+                    alias = dynamic_plan_path.parent / f"{alias_base}_plan.json"
+                    alias.write_bytes(dynamic_plan_path.read_bytes())
+                    latest_alias = dynamic_plan_path.parent / "latest_plan.json"
+                    latest_alias.write_bytes(dynamic_plan_path.read_bytes())
+                if params.canonical_action == "replace":
+                    prior = session_meta.get("canonical")
+                    if prior and app_result.static_run_id:
+                        print(
+                            status_messages.status(
+                                f"Canonical updated: static_run_id={prior} → {app_result.static_run_id}",
+                                level="info",
+                            )
+                        )
+                print(
+                    status_messages.status(
+                        "Daily aliases updated (baseline/plan).",
+                        level="info",
+                    )
+                )
+            except Exception:
+                pass
 
         if index < len(outcome.results):
-            print()
+            _emit_detail("")
 
     permission_profiles = _dedupe_profile_entries(permission_profiles)
     component_profiles = _dedupe_profile_entries(component_profiles)
@@ -553,17 +676,16 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
     _apply_display_names(permission_profiles)
 
     if persist_enabled:
+        print("Findings accounting")
+        print(f"  Raw detector hits (runtime): {runtime_findings_total}")
+        print(f"  Normalized (deduped):        {normalized_findings_total}")
+        print(f"  Baseline rule hits:          {baseline_rule_hits_total}")
         print(
-            status_messages.status(
-                f"findings (normalized): {normalized_findings_total}",
-                level="info",
-            )
-        )
-        print(
-            status_messages.status(
-                f"static_findings (baseline): {baseline_summary_total}",
-                level="info",
-            )
+            "  MASVS totals:               "
+            f"H{totals.get('high', 0)} "
+            f"M{totals.get('medium', 0)} "
+            f"L{totals.get('low', 0)} "
+            f"I{totals.get('info', 0)}"
         )
         print(
             status_messages.status(
@@ -632,7 +754,21 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
     print()
 
     session_stamp = params.session_stamp
-    if outcome.results:
+    if not params.dry_run:
+        print()
+        print("Next view")
+        print("---------")
+        print("[1] Continue to tables/diagnostics")
+        print("[2] Return to main menu")
+        resp = prompt_utils.prompt_text("Choice", default="1", required=False).strip()
+        if resp in {"2", "0"}:
+            show_details = False
+
+    if show_details:
+        for line in detail_output:
+            print(line)
+
+    if outcome.results and show_details:
         if canonical_failures:
             unique_failures = sorted(set(canonical_failures))
             preview_limit = 5
