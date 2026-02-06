@@ -716,19 +716,15 @@ def persist_run_summary(
                 manifest_sha = None
         config_hash = first_text(
             metadata_map.get("config_hash") if isinstance(metadata_map, Mapping) else None,
-            os.getenv("SCYTALEDROID_CONFIG_HASH"),
         )
         pipeline_version = first_text(
             metadata_map.get("pipeline_version") if isinstance(metadata_map, Mapping) else None,
-            os.getenv("SCYTALEDROID_PIPELINE_VERSION"),
         )
         catalog_versions = first_text(
             metadata_map.get("catalog_versions") if isinstance(metadata_map, Mapping) else None,
-            os.getenv("SCYTALEDROID_CATALOG_VERSIONS"),
         )
         study_tag = first_text(
             metadata_map.get("study_tag") if isinstance(metadata_map, Mapping) else None,
-            os.getenv("SCYTALEDROID_STUDY_TAG"),
         )
         analysis_version = first_text(getattr(br, "analysis_version", None))
         _update_static_run_metadata(
@@ -1126,11 +1122,10 @@ def persist_run_summary(
     if static_run_id and not dry_run:
         if persistence_failed:
             run_status = "FAILED"
-        if (
-            not persistence_failed
-            and session_stamp
-            and os.getenv("SCYTALEDROID_PAPER_GRADE", "1").strip().lower() in {"1", "true", "yes", "on"}
-        ):
+        from scytaledroid.Utils.System import output_prefs
+        ctx = output_prefs.get_run_context()
+        paper_grade_requested = bool(ctx.paper_grade_requested) if ctx else True
+        if not persistence_failed and session_stamp and paper_grade_requested:
             try:
                 row = core_q.run_sql(
                     """

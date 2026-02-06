@@ -95,11 +95,31 @@ def _governance_ready() -> tuple[bool, str | None]:
 
 
 def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
-    """Pretty-print run results and optionally drill into per-app details."""
+    """Persist and (optionally) render run results.
+
+    Batch mode must remain deterministic and non-interactive:
+    we still write required artifacts (baseline JSON, dynamic plan, registry),
+    but suppress all console rendering in quiet batch.
+    """
 
     prefs = output_prefs.get()
-    if prefs.quiet and prefs.batch:
+    silent_output = bool(prefs.quiet and prefs.batch)
+    if silent_output:
+        import contextlib
+        import io
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(buffer):
+            _render_run_results_impl(outcome, params)
         return
+
+    _render_run_results_impl(outcome, params)
+
+
+def _render_run_results_impl(outcome: RunOutcome, params: RunParameters) -> None:
+    """Internal implementation for render_run_results (may print)."""
+
+    prefs = output_prefs.get()
 
     aggregated: Counter[str] = Counter()
     artifact_count = 0
@@ -216,7 +236,7 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
     grade_label = "PAPER_GRADE"
     grade_reasons: list[str] = []
     if not params.dry_run:
-        persistence_ready = os.getenv("SCYTALEDROID_PERSISTENCE_READY", "1").strip() != "0"
+        persistence_ready = bool(params.persistence_ready)
         if not persistence_ready:
             grade_label = "EXPERIMENTAL"
             grade_reasons.append("persistence gate failed")
@@ -371,7 +391,7 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
     baseline_written_count = 0
     plan_written_count = 0
     report_reference_count = 0
-    persistence_ready = os.getenv("SCYTALEDROID_PERSISTENCE_READY", "1").strip() != "0"
+    persistence_ready = bool(params.persistence_ready)
     persist_enabled = (not params.dry_run) and persistence_ready
     compact_mode = not params.verbose_output
     if not persistence_ready and not params.dry_run:
@@ -610,10 +630,15 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                         )
                     )
                 else:
+                    # Freeze provenance into the plan at build time; dynamic must not do
+                    # ad-hoc DB lookups to understand the static snapshot.
+                    from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
+
                     plan_payload = build_dynamic_plan(
                         base_report,
                         payload,
                         static_run_id=app_result.static_run_id,
+                        schema_version=db_diagnostics.get_schema_version() or "<unknown>",
                     )
                     dynamic_plan_path = write_dynamic_plan_json(
                         plan_payload,
@@ -641,12 +666,7 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             artifacts: list[dict[str, object]] = []
             now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
             manifest_evidence_path = None
-            paper_grade_requested = os.getenv("SCYTALEDROID_PAPER_GRADE", "1").strip().lower() in {
-                "1",
-                "true",
-                "yes",
-                "on",
-            }
+            paper_grade_requested = bool(params.paper_grade_requested)
             grade = "PAPER_GRADE" if paper_grade_requested else "EXPERIMENTAL"
             grade_reasons: list[str] = []
             if paper_grade_requested:
@@ -953,13 +973,18 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
     session_stamp = params.session_stamp
     if not params.dry_run:
         print()
-        print("Next view")
-        print("---------")
-        print("[1] Continue to tables/diagnostics")
-        print("[2] Return to main menu")
-        resp = prompt_utils.prompt_text("Choice", default="1", required=False).strip()
-        if resp in {"2", "0"}:
+        prefs = output_prefs.get()
+        if prefs.batch or prefs.noninteractive:
+            # Batch/noninteractive runs must not block on UI prompts.
             show_details = False
+        else:
+            print("Next view")
+            print("---------")
+            print("[1] Continue to tables/diagnostics")
+            print("[2] Return to main menu")
+            resp = prompt_utils.prompt_text("Choice", default="1", required=False).strip()
+            if resp in {"2", "0"}:
+                show_details = False
 
     if show_details:
         for line in detail_output:
@@ -1036,9 +1061,7 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                 for line in grouped_warnings[:5]:
                     print(status_messages.status(line, level="warn"))
             actionable: list[str] = []
-            pipeline_version = os.getenv("SCYTALEDROID_PIPELINE_VERSION") or getattr(
-                params, "analysis_version", None
-            )
+            pipeline_version = getattr(params, "analysis_version", None)
             guard_ok, guard_detail = _schema_guard_status()
             guard_label = f"Schema guard: {'OK' if guard_ok else 'FAIL'}"
             if guard_detail:
@@ -1061,7 +1084,7 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             for line in _plan_provenance_lines(run_id_states, run_signature_ok, artifact_set_ok):
                 print(line)
             if not pipeline_version:
-                actionable.append("Set SCYTALEDROID_PIPELINE_VERSION (or analysis_version) to enable linkage checks.")
+                actionable.append("Set analysis_version to enable linkage checks.")
             if not identity_ok:
                 actionable.append("Identity invalid: verify artifact_set_hash/run_signature generation and rerun.")
             if run_id_states and not all(run_id_states):
@@ -1159,7 +1182,12 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                 trend_deltas,
                 scope_label=params.scope_label,
             )
-        if params.verbose_output and len(outcome.results) <= 5:
+        prefs = output_prefs.get()
+        if (
+            params.verbose_output
+            and len(outcome.results) <= 5
+            and not (prefs.batch or prefs.noninteractive)
+        ):
             _interactive_detail_loop(outcome, params)
 
     if persistence_errors and not params.dry_run:
@@ -1197,6 +1225,9 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
 
 
 def _interactive_detail_loop(outcome: RunOutcome, params: RunParameters) -> None:
+    prefs = output_prefs.get()
+    if prefs.batch or prefs.noninteractive:
+        return
     while True:
         resp = prompt_utils.prompt_text(
             "View details for app # (Enter to skip)", default="", required=False

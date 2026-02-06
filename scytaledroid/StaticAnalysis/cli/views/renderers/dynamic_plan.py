@@ -11,6 +11,80 @@ from scytaledroid.Config import app_config
 from scytaledroid.StaticAnalysis.core import ManifestFlags, StaticAnalysisReport
 from scytaledroid.Utils.evidence_store import filesystem_safe_slug
 
+PLAN_SCHEMA_VERSION = "v1"
+
+
+def _normalize_domain(value: object) -> str:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return ""
+    raw = raw.strip(" \t\r\n\"'()[]{}<>")
+    raw = raw.rstrip(").,;")
+    if raw.startswith("*."):
+        raw = raw[2:]
+    if "%" in raw or " " in raw:
+        return ""
+    if "://" in raw:
+        raw = raw.split("://", 1)[1]
+    raw = raw.split("/", 1)[0]
+    raw = raw.split("?", 1)[0]
+    raw = raw.split("#", 1)[0]
+    if ":" in raw:
+        host, maybe_port = raw.rsplit(":", 1)
+        if maybe_port.isdigit():
+            raw = host
+    if "." not in raw or ".." in raw:
+        return ""
+    allowed = set("abcdefghijklmnopqrstuvwxyz0123456789.-")
+    if any(ch not in allowed for ch in raw):
+        return ""
+    if raw.startswith(".") or raw.endswith(".") or raw.startswith("-") or raw.endswith("-"):
+        return ""
+    return raw
+
+
+def _validate_plan_schema(plan: Mapping[str, object]) -> None:
+    """Fail fast if the plan is missing required keys/types.
+
+    Empty arrays are acceptable; missing fields are not.
+    """
+
+    required_top = ("plan_schema_version", "schema_version", "generated_at", "run_identity", "network_targets")
+    missing = [key for key in required_top if key not in plan]
+    if missing:
+        raise RuntimeError(f"dynamic plan schema missing required keys: {', '.join(missing)}")
+
+    if plan.get("plan_schema_version") != PLAN_SCHEMA_VERSION:
+        raise RuntimeError(f"dynamic plan schema_version unsupported: {plan.get('plan_schema_version')}")
+
+    identity = plan.get("run_identity")
+    if not isinstance(identity, Mapping):
+        raise RuntimeError("dynamic plan run_identity must be an object")
+    identity_fields = (
+        "base_apk_sha256",
+        "artifact_set_hash",
+        "run_signature",
+        "run_signature_version",
+        "identity_valid",
+        "identity_error_reason",
+    )
+    missing_ident = [field for field in identity_fields if field not in identity]
+    if missing_ident:
+        raise RuntimeError(f"dynamic plan run_identity missing fields: {', '.join(missing_ident)}")
+
+    network = plan.get("network_targets")
+    if not isinstance(network, Mapping):
+        raise RuntimeError("dynamic plan network_targets must be an object")
+    net_fields = ("domains", "cleartext_domains", "domain_sources", "domain_sources_note")
+    missing_net = [field for field in net_fields if field not in network]
+    if missing_net:
+        raise RuntimeError(f"dynamic plan network_targets missing fields: {', '.join(missing_net)}")
+    for field in ("domains", "cleartext_domains", "domain_sources"):
+        if not isinstance(network.get(field), list):
+            raise RuntimeError(f"dynamic plan network_targets.{field} must be an array")
+    if not isinstance(network.get("domain_sources_note"), str):
+        raise RuntimeError("dynamic plan network_targets.domain_sources_note must be a string")
+
 
 def _build_modernization_guidance(
     report: StaticAnalysisReport,
@@ -231,6 +305,7 @@ def build_dynamic_plan(
     payload: Mapping[str, object],
     *,
     static_run_id: int | None = None,
+    schema_version: str | None = None,
 ) -> Mapping[str, object]:
     metadata = payload.get("app", {}) if isinstance(payload, Mapping) else {}
     baseline = payload.get("baseline", {}) if isinstance(payload, Mapping) else {}
@@ -239,8 +314,12 @@ def build_dynamic_plan(
 
     exported = report.exported_components
     permissions = report.permissions
-    string_domains, string_cleartext = _extract_domains(string_payload)
-    nsc_domains, nsc_cleartext = _extract_nsc_domains(report)
+    string_domains_raw, string_cleartext_raw = _extract_domains(string_payload)
+    nsc_domains_raw, nsc_cleartext_raw = _extract_nsc_domains(report)
+    string_domains = sorted({d for d in (_normalize_domain(item) for item in string_domains_raw) if d})
+    string_cleartext = sorted({d for d in (_normalize_domain(item) for item in string_cleartext_raw) if d})
+    nsc_domains = sorted({d for d in (_normalize_domain(item) for item in nsc_domains_raw) if d})
+    nsc_cleartext = sorted({d for d in (_normalize_domain(item) for item in nsc_cleartext_raw) if d})
     domains, domain_sources = _merge_domain_sources(
         string_domains=string_domains,
         nsc_domains=nsc_domains,
@@ -260,8 +339,15 @@ def build_dynamic_plan(
     if webview_summary:
         suggested_probes.append("webview_observation")
 
+    # Contract note: the plan JSON is the "static snapshot" consumed by dynamic runs.
+    # Keep a dedicated schema version so we can evolve the plan format without relying
+    # on DB schema versions or implicit assumptions.
+    generated_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
     plan = {
-        "generated_at": datetime.now(timezone.utc).isoformat() + "Z",
+        "plan_schema_version": PLAN_SCHEMA_VERSION,
+        "schema_version": schema_version,
+        "generated_at": generated_at,
         "package_name": metadata.get("package"),
         "version_name": metadata.get("version_name"),
         "version_code": metadata.get("version_code"),
@@ -304,6 +390,7 @@ def build_dynamic_plan(
     }
     if static_run_id is not None:
         plan["static_run_id"] = static_run_id
+    _validate_plan_schema(plan)
     return plan
 
 
@@ -315,6 +402,7 @@ def write_dynamic_plan_json(
     scope: str,
     static_run_id: int | None = None,
 ) -> Path:
+    _validate_plan_schema(plan)
     base_dir = Path(app_config.DATA_DIR) / "static_analysis" / "dynamic_plan"
     base_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")

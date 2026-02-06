@@ -344,11 +344,11 @@ def normalise_index(
     """Enrich *index* entries with tags and compute run metrics."""
 
     if include_https_for_risk is None:
-        include_https_for_risk = _env_flag(
-            "SCYTALEDROID_STRINGS_INCLUDE_HTTPS_RISK", False
-        )
+        from scytaledroid.StaticAnalysis.engine.strings_runtime import get_config
+        include_https_for_risk = bool(get_config().include_https_risk)
     if debug is None:
-        debug = _env_flag("SCYTALEDROID_STRINGS_DEBUG", False)
+        from scytaledroid.StaticAnalysis.engine.strings_runtime import get_config
+        debug = bool(get_config().debug)
 
     policy = noise_policy or NoisePolicy(frozenset(), frozenset())
     counter = _MetricsCounter(include_https_for_risk=include_https_for_risk)
@@ -1181,8 +1181,10 @@ def _shannon_entropy(value: str) -> float:
 
 def _should_skip_regex(value: str) -> bool:
     length = len(value)
-    min_length = _env_int("SCYTALEDROID_STRINGS_LONG_STRING_LENGTH", _LOW_ENTROPY_LENGTH)
-    min_entropy = _env_float("SCYTALEDROID_STRINGS_LOW_ENTROPY_THRESHOLD", _LOW_ENTROPY_THRESHOLD)
+    from scytaledroid.StaticAnalysis.engine.strings_runtime import get_config
+    cfg = get_config()
+    min_length = cfg.long_string_length
+    min_entropy = cfg.low_entropy_threshold
     if length < min_length:
         return False
     return _shannon_entropy(value) < min_entropy

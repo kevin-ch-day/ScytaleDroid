@@ -10,6 +10,7 @@ from pathlib import Path
 from scytaledroid.Config import app_config
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_engine
+from scytaledroid.Utils.System import output_prefs
 
 from ...modules.permissions import collect_permissions_and_sdk
 from ...modules.permissions.audit import PermissionAuditAccumulator
@@ -51,16 +52,17 @@ def execute_permission_scan(
         session_stamp = make_session_stamp()
     normalized = normalize_session_stamp(session_stamp)
     if normalized != session_stamp:
-        print(
-            status_messages.status(
-                (
-                    "Session label normalized for cross-table safety "
-                    f"({len(session_stamp)}→{len(normalized)} chars): "
-                    f"'{session_stamp}' → '{normalized}'."
-                ),
-                level="warn",
+        if not output_prefs.get().batch:
+            print(
+                status_messages.status(
+                    (
+                        "Session label normalized for cross-table safety "
+                        f"({len(session_stamp)}→{len(normalized)} chars): "
+                        f"'{session_stamp}' → '{normalized}'."
+                    ),
+                    level="warn",
+                )
             )
-        )
         session_stamp = normalized
     snapshot_id = f"perm-audit:app:{session_stamp}"
     accumulator = PermissionAuditAccumulator(
@@ -74,13 +76,13 @@ def execute_permission_scan(
     last_category = None
     audit_persist_failed = False
     if compact_output is None:
-        env_override = os.getenv("SCYTALEDROID_PERM_SNAPSHOT_COMPACT")
-        if env_override is not None:
-            compact_output = env_override.strip().lower() not in {"0", "false", "no"}
+        if params.perm_snapshot_compact is not None:
+            compact_output = params.perm_snapshot_compact
         else:
             compact_output = selection.scope == "all" or len(scope_groups) > 15
     if compact_output:
-        render_compact_notice()
+        if not output_prefs.get().batch:
+            render_compact_notice()
 
     for group in scope_groups:
         artifacts = group.artifacts
@@ -100,6 +102,7 @@ def execute_permission_scan(
             defined=defined,
             sdk=sdk,
             compact=bool(compact_output),
+            silent=bool(output_prefs.get().batch),
         )
 
         if persist_detections and report is not None:
@@ -109,7 +112,8 @@ def execute_permission_scan(
                 )
 
                 counts = persist_permissions_to_db(report)
-                render_permission_persisted(counts)
+                if not output_prefs.get().batch:
+                    render_permission_persisted(counts)
             except Exception:
                 logging_engine.get_error_logger().exception(
                     "Permission analysis persistence failed",
@@ -122,7 +126,8 @@ def execute_permission_scan(
                         }
                     ),
                 )
-                render_permission_persist_failed()
+                if not output_prefs.get().batch:
+                    render_permission_persist_failed()
 
         declared_permissions = [name for name, _tag in permissions]
         declared_in = {name.split(".")[-1].upper(): tag for name, tag in permissions if name}

@@ -5,6 +5,12 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
+from pathlib import Path
+from datetime import datetime, timezone
+
+from scytaledroid.Config import app_config
+from scytaledroid.StaticAnalysis.session import normalize_session_stamp
+
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 
 try:  # optional DB access (offline mode)
@@ -100,26 +106,60 @@ def prompt_session_label(params: RunParameters) -> RunParameters:
     if not label or label == current:
         return params
 
-    # Enforce unique session labels: if already present, auto-suffix to avoid run bleed.
-    session_stamp = label
-    if core_q is not None:
-        try:
-            exists = core_q.run_sql(
-                "SELECT id FROM runs WHERE session_stamp = %s LIMIT 1",
-                (session_stamp,),
-                fetch="one",
-            )
-            if exists:
-                session_stamp = label
-                print(
-                    status_messages.status(
-                        f"Session label '{label}' already exists. Reusing it.",
-                        level="warn",
-                    )
+    session_stamp = normalize_session_stamp(label)
+
+    # Collision handling must live in the menu (UI) layer. Execution paths are
+    # prompt-free and require a resolved stamp/action for reproducibility.
+    sessions_dir = Path(app_config.DATA_DIR) / "sessions"
+    run_map_path = sessions_dir / session_stamp / "run_map.json"
+    if run_map_path.exists():
+        attempts = None
+        canonical_id = None
+        if core_q is not None:
+            try:
+                row = core_q.run_sql(
+                    "SELECT COUNT(*) FROM static_analysis_runs WHERE session_label=%s",
+                    (session_stamp,),
+                    fetch="one",
                 )
-        except Exception:
-            # If the check fails, fall back to the user-provided label.
-            session_stamp = label
+                attempts = int(row[0]) if row and row[0] is not None else 0
+                row = core_q.run_sql(
+                    """
+                    SELECT id FROM static_analysis_runs
+                    WHERE session_label=%s AND is_canonical=1
+                    ORDER BY canonical_set_at_utc DESC
+                    LIMIT 1
+                    """,
+                    (session_stamp,),
+                    fetch="one",
+                )
+                canonical_id = int(row[0]) if row and row[0] is not None else None
+            except Exception:
+                attempts = None
+                canonical_id = None
+
+        print(status_messages.status(f"Session label already exists for today: {session_stamp}", level="warn"))
+        if attempts is not None:
+            canonical_text = f" (canonical: static_run_id={canonical_id})" if canonical_id else ""
+            print(status_messages.status(f"Existing attempts: {attempts}{canonical_text}", level="info"))
+        print()
+        print("Action options:")
+        print("  [1] Replace today's run        (overwrite local artifacts, DB history preserved)")
+        print("  [2] Append as another attempt  (keep prior attempts, new suffix)")
+        print("  [0] Cancel (keep previous label)")
+        choice = prompt_utils.get_choice(["1", "2", "0"], default="1", prompt="Choice: ")
+        if choice == "0":
+            return params
+        if choice == "1":
+            return replace(params, session_stamp=session_stamp, canonical_action="replace")
+        # Append: generate a new, collision-free stamp now so execution is deterministic.
+        suffix = None
+        if isinstance(attempts, int) and attempts >= 0:
+            suffix = str(attempts + 1)
+        if not suffix:
+            suffix = datetime.now(timezone.utc).strftime("%H%M%S")
+        session_stamp = normalize_session_stamp(f"{session_stamp}-{suffix}")
+        return replace(params, session_stamp=session_stamp, canonical_action="append")
 
     return replace(params, session_stamp=session_stamp)
 

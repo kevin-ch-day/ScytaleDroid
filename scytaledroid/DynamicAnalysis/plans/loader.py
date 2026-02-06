@@ -11,6 +11,7 @@ from typing import Any
 from scytaledroid.Database.db_core import db_queries as core_q
 
 SUPPORTED_SIGNATURE_VERSIONS = {"v1"}
+SUPPORTED_PLAN_SCHEMA_VERSIONS = {"v1"}
 
 
 @dataclass(frozen=True)
@@ -52,6 +53,15 @@ def validate_dynamic_plan(
     reasons: list[str] = []
     warnings: list[str] = []
     mismatches: list[dict[str, str]] = []
+
+    schema_issues = _plan_schema_issues(plan)
+    if schema_issues:
+        reasons.append(f"invalid plan schema: {', '.join(schema_issues)}")
+
+    identity = plan.get("run_identity") if isinstance(plan.get("run_identity"), dict) else {}
+    identity_valid = identity.get("identity_valid")
+    if identity_valid is False:
+        reasons.append("run_identity invalid (identity_valid=false)")
 
     missing_fields = _missing_required_fields(normalized_plan)
     if missing_fields:
@@ -214,6 +224,44 @@ def _missing_required_fields(plan: dict[str, object]) -> list[str]:
         if value is None or value == "":
             missing.append(req_field)
     return missing
+
+
+def _plan_schema_issues(plan: dict[str, Any]) -> list[str]:
+    issues: list[str] = []
+    # These keys must always exist for dataset-tier runs.
+    for key in ("plan_schema_version", "schema_version", "generated_at", "run_identity", "network_targets"):
+        if key not in plan:
+            issues.append(f"missing:{key}")
+    schema_version = plan.get("plan_schema_version")
+    if schema_version is not None and schema_version not in SUPPORTED_PLAN_SCHEMA_VERSIONS:
+        issues.append(f"unsupported:plan_schema_version={schema_version}")
+    identity = plan.get("run_identity")
+    if "run_identity" in plan and not isinstance(identity, dict):
+        issues.append("invalid:run_identity_not_object")
+    if isinstance(identity, dict):
+        for field in (
+            "base_apk_sha256",
+            "artifact_set_hash",
+            "run_signature",
+            "run_signature_version",
+            "identity_valid",
+            "identity_error_reason",
+        ):
+            if field not in identity:
+                issues.append(f"missing:run_identity.{field}")
+    network = plan.get("network_targets")
+    if "network_targets" in plan and not isinstance(network, dict):
+        issues.append("invalid:network_targets_not_object")
+    if isinstance(network, dict):
+        for field in ("domains", "cleartext_domains", "domain_sources", "domain_sources_note"):
+            if field not in network:
+                issues.append(f"missing:network_targets.{field}")
+        for field in ("domains", "cleartext_domains", "domain_sources"):
+            if field in network and not isinstance(network.get(field), list):
+                issues.append(f"invalid:network_targets.{field}_not_array")
+        if "domain_sources_note" in network and not isinstance(network.get("domain_sources_note"), str):
+            issues.append("invalid:network_targets.domain_sources_note_not_string")
+    return issues
 
 
 def _missing_db_fields(row: dict[str, object]) -> list[str]:

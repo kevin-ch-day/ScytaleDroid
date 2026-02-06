@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 
 from scytaledroid.Utils.DisplayUtils import status_messages
+from scytaledroid.Utils.System import output_prefs
 
 
 def _format_elapsed(seconds: float) -> str:
@@ -38,6 +39,12 @@ class _PipelineProgress:
         self.show_splits = show_splits
         self.show_artifacts = show_artifacts
         self.show_checkpoints = show_checkpoints
+        prefs = output_prefs.get()
+        self._silent = bool(prefs.quiet and prefs.batch)
+        if self._silent:
+            # Hard guard: batch quiet must not emit per-artifact output.
+            self.show_artifacts = False
+            self.show_checkpoints = False
         self._start = time.monotonic()
         self._last_len = 0
         self._last_checkpoint = 0
@@ -45,11 +52,15 @@ class _PipelineProgress:
         self._progress_every = max(1, int(progress_every))
 
     def start(self, index: int, label: str) -> None:
+        if self._silent:
+            return
         if self.show_splits:
             return
         return
 
     def finish(self, index: int, label: str) -> None:
+        if self._silent:
+            return
         if not self.show_artifacts:
             return
         if self.show_splits:
@@ -64,6 +75,8 @@ class _PipelineProgress:
             print(f"Completed {index}/{self.total} artifacts")
 
     def app_complete(self, artifact_count: int, elapsed_seconds: float) -> None:
+        if self._silent:
+            return
         if not self.show_artifacts:
             return
         elapsed = _format_elapsed(elapsed_seconds)
@@ -75,6 +88,8 @@ class _PipelineProgress:
         )
 
     def error(self, index: int, label: str, message: str) -> None:
+        if self._silent:
+            return
         if not self.show_artifacts:
             return
         self._clear_line()
@@ -82,6 +97,8 @@ class _PipelineProgress:
         print(f"ERROR Artifact {index}/{self.total}: {tail} - {message}")
 
     def skip(self, index: int, label: str, message: str) -> None:
+        if self._silent:
+            return
         if not self.show_artifacts:
             return
         self._clear_line()
@@ -92,6 +109,8 @@ class _PipelineProgress:
             print(f"SKIP Artifact {index}/{self.total}: {tail} - {message}")
 
     def end(self, elapsed_seconds: float | None = None) -> None:
+        if self._silent:
+            return
         if self.show_splits or not self.show_artifacts or self._ended:
             return
         self._ended = True
@@ -102,11 +121,15 @@ class _PipelineProgress:
 
     def flush_line(self) -> None:
         """Clear the in-place progress line before printing multiline output."""
+        if self._silent:
+            return
         if self.show_splits:
             return
         self._clear_line()
 
     def _render_line(self, text: str) -> None:
+        if self._silent:
+            return
         truncated = _truncate_label(text, 96)
         padded = truncated.ljust(self._last_len)
         self._last_len = max(self._last_len, len(truncated))

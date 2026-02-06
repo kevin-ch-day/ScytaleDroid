@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import io
 import math
-import os
 from collections import Counter, defaultdict
 from collections.abc import Mapping, MutableMapping
 from contextlib import redirect_stderr, redirect_stdout
@@ -15,6 +14,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from scytaledroid.StaticAnalysis._androguard import open_apk_safely
 from scytaledroid.Utils.LoggingUtils import logging_engine
 
+from .strings_runtime import get_config
 from ..modules.string_analysis import (
     BUCKET_ORDER,
     StringHit,
@@ -43,36 +43,11 @@ from .strings_detectors import (
 from .strings_helpers import (
     _detect_jwt,
     _entropy_bucket,
-    _env_flag,
     _mask_value,
     _normalise_src,
     _short_hash,
     _source_type_for,
 )
-
-_LOW_ENTROPY_LENGTH_DEFAULT = 256
-_LOW_ENTROPY_THRESHOLD_DEFAULT = 3.2
-
-
-def _env_int(name: str, default: int) -> int:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    try:
-        return int(value)
-    except ValueError:
-        return default
-
-
-def _env_float(name: str, default: float) -> float:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    try:
-        return float(value)
-    except ValueError:
-        return default
-
 
 def _shannon_entropy(value: str) -> float:
     if not value:
@@ -85,9 +60,10 @@ def _shannon_entropy(value: str) -> float:
 
 
 def _should_skip_regex(value: str) -> bool:
+    config = get_config()
     length = len(value)
-    min_length = _env_int("SCYTALEDROID_STRINGS_LONG_STRING_LENGTH", _LOW_ENTROPY_LENGTH_DEFAULT)
-    min_entropy = _env_float("SCYTALEDROID_STRINGS_LOW_ENTROPY_THRESHOLD", _LOW_ENTROPY_THRESHOLD_DEFAULT)
+    min_length = config.long_string_length
+    min_entropy = config.low_entropy_threshold
     if length < min_length:
         return False
     return _shannon_entropy(value) < min_entropy
@@ -129,7 +105,8 @@ def analyse_strings(
     bounds_warnings: list[str] = []
     if initial_warnings:
         bounds_warnings.extend(initial_warnings)
-    skip_resources_on_warn = _env_flag("SCYTALEDROID_STRINGS_SKIP_RES_ON_ARSC_WARN", False)
+    config = get_config()
+    skip_resources_on_warn = bool(config.skip_resources_on_arsc_warn)
     include_resources = not (skip_resources_on_warn and bool(initial_warnings))
     try:
         buffer = io.StringIO()
@@ -181,9 +158,7 @@ def analyse_strings(
         ]
 
     if include_https_risk is None:
-        include_https_risk = _env_flag(
-            "SCYTALEDROID_STRINGS_INCLUDE_HTTPS_RISK", False
-        )
+        include_https_risk = bool(config.include_https_risk)
 
     counts: dict[str, int] = {bucket: 0 for bucket in BUCKET_ORDER}
     counts.setdefault("trailing_punct_trimmed", 0)

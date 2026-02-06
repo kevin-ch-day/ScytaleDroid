@@ -40,6 +40,69 @@ def _default_permission_refresh() -> bool:
     return _env_flag("SCYTALEDROID_STATIC_REFRESH_PERMISSION_SNAPSHOT", True)
 
 
+def _default_run_signature_version() -> str:
+    return os.getenv("SCYTALEDROID_RUN_SIGNATURE_VERSION") or "v1"
+
+
+def _default_persistence_ready() -> bool:
+    return _env_flag("SCYTALEDROID_PERSISTENCE_READY", True)
+
+
+def _default_paper_grade_requested() -> bool:
+    return _env_flag("SCYTALEDROID_PAPER_GRADE", True)
+
+
+def _default_strict_persistence() -> bool:
+    return _env_flag("SCYTALEDROID_STRICT_PERSISTENCE", False)
+
+
+def _default_run_map_overwrite() -> bool:
+    return _env_flag("SCYTALEDROID_RUN_MAP_OVERWRITE", False)
+
+
+def _default_show_splits() -> bool:
+    return _env_flag("SCYTALEDROID_STATIC_SHOW_SPLITS", False)
+
+
+def _default_long_string_length() -> int:
+    try:
+        value = int(os.getenv("SCYTALEDROID_STRINGS_LONG_STRING_LENGTH", "256").strip())
+        return value if value > 0 else 256
+    except Exception:
+        return 256
+
+
+def _default_low_entropy_threshold() -> float:
+    try:
+        value = float(os.getenv("SCYTALEDROID_STRINGS_LOW_ENTROPY_THRESHOLD", "3.2").strip())
+        return value if value > 0 else 3.2
+    except Exception:
+        return 3.2
+
+
+def _default_string_debug() -> bool:
+    return _env_flag("SCYTALEDROID_STRINGS_DEBUG", False)
+
+
+def _default_skip_resources_on_warn() -> bool:
+    return _env_flag("SCYTALEDROID_STRINGS_SKIP_RES_ON_ARSC_WARN", False)
+
+
+def _default_perm_snapshot_compact() -> bool | None:
+    value = os.getenv("SCYTALEDROID_PERM_SNAPSHOT_COMPACT")
+    if value is None:
+        return None
+    return value.strip().lower() not in {"0", "false", "no"}
+
+
+def _default_progress_every() -> int:
+    try:
+        value = int(os.getenv("SCYTALEDROID_STATIC_PROGRESS_EVERY", "5").strip())
+        return value if value > 0 else 5
+    except Exception:
+        return 5
+
+
 @dataclass(frozen=True)
 class RunParameters:
     """User-facing configuration for an analysis run."""
@@ -50,6 +113,22 @@ class RunParameters:
     analysis_version: str = field(
         default_factory=lambda: os.getenv("SCYTALEDROID_PIPELINE_VERSION") or "2.0.0-alpha"
     )
+    catalog_versions: str | None = field(
+        default_factory=lambda: os.getenv("SCYTALEDROID_CATALOG_VERSIONS")
+    )
+    config_hash: str | None = field(
+        default_factory=lambda: os.getenv("SCYTALEDROID_CONFIG_HASH")
+    )
+    study_tag: str | None = field(
+        default_factory=lambda: os.getenv("SCYTALEDROID_STUDY_TAG")
+    )
+    run_signature_version: str = field(default_factory=_default_run_signature_version)
+    persistence_ready: bool = field(default_factory=_default_persistence_ready)
+    paper_grade_requested: bool = field(default_factory=_default_paper_grade_requested)
+    strict_persistence: bool = field(default_factory=_default_strict_persistence)
+    run_map_overwrite: bool = field(default_factory=_default_run_map_overwrite)
+    show_split_summaries: bool = field(default_factory=_default_show_splits)
+    progress_every: int = field(default_factory=_default_progress_every)
     selected_tests: tuple[str, ...] = tuple()
     evidence_lines: int = 2
     finding_limit: int = 25
@@ -61,6 +140,10 @@ class RunParameters:
     string_min_entropy: float = 4.8
     string_cleartext_only: bool = False
     string_include_https_risk: bool = field(default_factory=_default_https_risk)
+    string_long_string_length: int = field(default_factory=_default_long_string_length)
+    string_low_entropy_threshold: float = field(default_factory=_default_low_entropy_threshold)
+    string_debug: bool = field(default_factory=_default_string_debug)
+    string_skip_resources_on_warn: bool = field(default_factory=_default_skip_resources_on_warn)
     workers: str = "auto"
     reuse_cache: bool = False
     log_level: str = "info"
@@ -70,6 +153,7 @@ class RunParameters:
     verbose_output: bool = False
     artifact_detail: bool = False
     permission_snapshot_refresh: bool = field(default_factory=_default_permission_refresh)
+    perm_snapshot_compact: bool | None = field(default_factory=_default_perm_snapshot_compact)
     session_label: str | None = None
     canonical_action: str | None = None
 

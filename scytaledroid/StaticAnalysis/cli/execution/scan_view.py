@@ -35,6 +35,9 @@ def render_app_start(
 def render_resource_warnings(lines: Sequence[str]) -> None:
     if not lines:
         return
+    prefs = output_prefs.get()
+    if prefs.quiet and prefs.batch:
+        return
     print()
     for line in lines:
         print(status_messages.status(line, level="warn"))

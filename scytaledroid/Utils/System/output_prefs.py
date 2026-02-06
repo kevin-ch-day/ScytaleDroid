@@ -18,13 +18,25 @@ class OutputPrefs:
     quiet: bool = False
     batch: bool = False
     run_mode: str = "interactive"
+    noninteractive: bool = False
+    show_splits: bool = False
 
 
 _PREFS = OutputPrefs()
+_RUN_CONTEXT = None
 
 
 def get() -> OutputPrefs:
     return _PREFS
+
+
+def get_run_context():
+    return _RUN_CONTEXT
+
+
+def set_run_context(ctx) -> None:
+    global _RUN_CONTEXT
+    _RUN_CONTEXT = ctx
 
 
 def set_verbose(enabled: bool) -> None:
@@ -70,6 +82,18 @@ def set_run_mode(mode: str) -> None:
     _PREFS.run_mode = mode or "interactive"
 
 
+def set_noninteractive(enabled: bool) -> None:
+    _PREFS.noninteractive = bool(enabled)
+
+
+def set_show_splits(enabled: bool) -> None:
+    _PREFS.show_splits = bool(enabled)
+
+
+def is_compact_mode() -> bool:
+    return not _PREFS.verbose
+
+
 def toggle_cleartext_only() -> bool:
     _PREFS.cleartext_only = not _PREFS.cleartext_only
     return _PREFS.cleartext_only
@@ -87,4 +111,9 @@ __all__ = [
     "set_quiet",
     "set_batch",
     "set_run_mode",
+    "set_noninteractive",
+    "set_show_splits",
+    "is_compact_mode",
+    "get_run_context",
+    "set_run_context",
 ]

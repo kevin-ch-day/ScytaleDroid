@@ -25,6 +25,7 @@ def render_permission_profile(
     defined,
     sdk,
     compact: bool,
+    silent: bool = False,
 ):
     return render_permission_postcard(
         package_name,
@@ -35,6 +36,7 @@ def render_permission_profile(
         index=1,
         total=1,
         compact=compact,
+        silent=silent,
     )
 
 

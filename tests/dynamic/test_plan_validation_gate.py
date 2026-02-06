@@ -16,12 +16,25 @@ def _fake_run_sql_factory(db_row, link_row=None):
 
 def _base_plan():
     return {
+        "plan_schema_version": "v1",
+        "schema_version": "0.2.6",
+        "generated_at": "2026-02-06T00:00:00Z",
         "package_name": "com.example.app",
         "static_run_id": 101,
-        "run_signature": "abc123",
-        "run_signature_version": "v1",
-        "artifact_set_hash": "hash123",
-        "base_apk_sha256": "base123",
+        "run_identity": {
+            "base_apk_sha256": "base123",
+            "artifact_set_hash": "hash123",
+            "run_signature": "abc123",
+            "run_signature_version": "v1",
+            "identity_valid": True,
+            "identity_error_reason": None,
+        },
+        "network_targets": {
+            "domains": [],
+            "cleartext_domains": [],
+            "domain_sources": [],
+            "domain_sources_note": "Sources are advisory signals (strings, nsc) and are not ground truth.",
+        },
     }
 
 
@@ -54,7 +67,8 @@ def test_plan_validation_package_mismatch(monkeypatch):
 def test_plan_validation_missing_required_fields(monkeypatch):
     monkeypatch.setattr(loader.core_q, "run_sql", _fake_run_sql_factory(_db_row()))
     plan = _base_plan()
-    plan.pop("run_signature")
+    # run_signature is nested under run_identity in v1 plans.
+    plan["run_identity"].pop("run_signature")
     outcome = loader.validate_dynamic_plan(plan, package_name="com.example.app")
     assert outcome.status == "FAIL"
     assert any("missing required fields" in reason for reason in outcome.reasons)
@@ -63,7 +77,8 @@ def test_plan_validation_missing_required_fields(monkeypatch):
 def test_plan_validation_unsupported_signature_version(monkeypatch):
     monkeypatch.setattr(loader.core_q, "run_sql", _fake_run_sql_factory(_db_row()))
     plan = _base_plan()
-    plan["run_signature_version"] = "v2"
+    # run_signature_version is nested under run_identity in v1 plans.
+    plan["run_identity"]["run_signature_version"] = "v2"
     outcome = loader.validate_dynamic_plan(plan, package_name="com.example.app")
     assert outcome.status == "FAIL"
     assert any("unsupported run_signature_version" in reason for reason in outcome.reasons)

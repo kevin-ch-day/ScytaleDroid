@@ -133,15 +133,13 @@ def _build_ingest_payload(
     if params.scope and not metadata_map.get("run_scope"):
         metadata_map["run_scope"] = params.scope
     if not metadata_map.get("pipeline_version"):
-        metadata_map["pipeline_version"] = getattr(params, "analysis_version", None) or os.getenv(
-            "SCYTALEDROID_PIPELINE_VERSION"
-        )
+        metadata_map["pipeline_version"] = getattr(params, "analysis_version", None)
     if not metadata_map.get("catalog_versions"):
-        metadata_map["catalog_versions"] = os.getenv("SCYTALEDROID_CATALOG_VERSIONS")
+        metadata_map["catalog_versions"] = getattr(params, "catalog_versions", None)
     if not metadata_map.get("config_hash"):
-        metadata_map["config_hash"] = os.getenv("SCYTALEDROID_CONFIG_HASH")
+        metadata_map["config_hash"] = getattr(params, "config_hash", None)
     if not metadata_map.get("study_tag"):
-        metadata_map["study_tag"] = getattr(params, "study_tag", None) or os.getenv("SCYTALEDROID_STUDY_TAG")
+        metadata_map["study_tag"] = getattr(params, "study_tag", None)
     if payload.get("generated_at") and not metadata_map.get("run_started_utc"):
         metadata_map["run_started_utc"] = payload.get("generated_at")
 

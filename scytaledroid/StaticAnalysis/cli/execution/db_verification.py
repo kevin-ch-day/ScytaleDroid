@@ -151,7 +151,9 @@ def _render_db_severity_table(session_stamp: str) -> bool:
 
 def _render_db_masvs_summary() -> None:
     try:
-        if os.getenv("SCYTALEDROID_PERSISTENCE_READY") == "0":
+        from scytaledroid.Utils.System import output_prefs
+        ctx = output_prefs.get_run_context()
+        if ctx and not ctx.persistence_ready:
             print()
             print(
                 status_messages.status(
@@ -161,7 +163,7 @@ def _render_db_masvs_summary() -> None:
             )
             return
         summary = None
-        session_stamp = os.getenv("SCYTALEDROID_STATIC_SESSION")
+        session_stamp = ctx.session_stamp if ctx and ctx.session_stamp else os.getenv("SCYTALEDROID_STATIC_SESSION")
         if session_stamp:
             run_map = load_run_map(session_stamp)
             static_ids = extract_static_run_ids(run_map)

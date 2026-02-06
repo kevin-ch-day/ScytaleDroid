@@ -84,15 +84,13 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
         show_splits=show_splits,
         show_artifacts=show_artifacts,
         show_checkpoints=not params.dry_run and show_artifacts,
-        progress_every=int(os.getenv("SCYTALEDROID_STATIC_PROGRESS_EVERY", "5").strip() or "5"),
+        progress_every=getattr(params, "progress_every", 5),
     )
     config_hash = _compute_config_hash(params)
-    pipeline_version = os.getenv("SCYTALEDROID_PIPELINE_VERSION") or getattr(
-        params, "analysis_version", None
-    )
-    persistence_ready = os.getenv("SCYTALEDROID_PERSISTENCE_READY", "1").strip() != "0"
+    pipeline_version = getattr(params, "analysis_version", None)
+    persistence_ready = bool(getattr(params, "persistence_ready", True))
     if not persistence_ready and not params.dry_run:
-        if os.getenv("SCYTALEDROID_PAPER_GRADE", "1").strip().lower() in {"1", "true", "yes", "on"}:
+        if bool(getattr(params, "paper_grade_requested", True)):
             raise RuntimeError(
                 "Static persistence gate failed; paper-grade runs require canonical schema readiness."
             )
@@ -447,13 +445,7 @@ def _execute_single_artifact(
 
 
 def _show_split_breakdown() -> bool:
-    return os.getenv("SCYTALEDROID_STATIC_SHOW_SPLITS", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-        "y",
-    }
+    return output_prefs.get().show_splits
 
 
 
@@ -542,7 +534,7 @@ def generate_report(
     if params.dry_run:
         return report, None, "dry-run (not persisted)", True
 
-    persistence_ready = os.getenv("SCYTALEDROID_PERSISTENCE_READY", "1").strip() != "0"
+    persistence_ready = bool(getattr(params, "persistence_ready", True))
     if not persistence_ready:
         return report, None, None, False
 

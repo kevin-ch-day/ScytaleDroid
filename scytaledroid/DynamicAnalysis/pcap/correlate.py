@@ -33,7 +33,7 @@ def write_static_dynamic_overlap(
     except (OSError, json.JSONDecodeError):
         _log(event_logger, "static_dynamic_overlap_skip", {"reason": "pcap_report_invalid"})
         return None
-    static_domains, static_sources = _static_domains(manifest)
+    static_domains, static_sources = _static_domains(manifest, run_dir)
     dynamic_domains = _dynamic_domains(report)
     overlap = sorted(static_domains.intersection(dynamic_domains))
     dynamic_only = sorted(dynamic_domains.difference(static_domains))
@@ -73,25 +73,109 @@ def write_static_dynamic_overlap(
     )
 
 
-def _static_domains(manifest: RunManifest) -> tuple[set[str], dict[str, set[str]]]:
-    static_plan = manifest.target.get("static_plan_summary") if isinstance(manifest.target, dict) else None
-    if not isinstance(static_plan, dict):
-        return set(), {}
-    domains = static_plan.get("network_targets_all")
-    if not isinstance(domains, list):
-        domains = static_plan.get("network_targets_sample") or []
-    normalized = {str(item).strip() for item in domains if str(item).strip()}
+def _static_domains(manifest: RunManifest, run_dir: Path) -> tuple[set[str], dict[str, set[str]]]:
+    # Canonical static snapshot for dynamic runs is the embedded plan JSON inside the
+    # evidence pack, not the lossy summary block.
+    embedded_plan = _load_static_plan(manifest, run_dir=run_dir)
+    if embedded_plan is None:
+        # Fallback to the summary if the plan is missing (should be rare).
+        static_plan = (
+            manifest.target.get("static_plan_summary") if isinstance(manifest.target, dict) else None
+        )
+        if not isinstance(static_plan, dict):
+            return set(), {}
+        domains = static_plan.get("network_targets_all")
+        if not isinstance(domains, list):
+            domains = static_plan.get("network_targets_sample") or []
+        normalized = {_normalize_domain(item) for item in domains}
+        normalized.discard("")
+        sources: dict[str, set[str]] = {}
+        for entry in static_plan.get("domain_sources") or []:
+            if not isinstance(entry, dict):
+                continue
+            domain = _normalize_domain(entry.get("domain"))
+            if not domain:
+                continue
+            tags = entry.get("sources") or []
+            if isinstance(tags, list):
+                sources[domain] = {str(tag) for tag in tags if str(tag)}
+        return normalized, sources
+
+    network = embedded_plan.get("network_targets") if isinstance(embedded_plan.get("network_targets"), dict) else {}
+    domains = network.get("domains") if isinstance(network.get("domains"), list) else []
+    domain_sources = network.get("domain_sources") if isinstance(network.get("domain_sources"), list) else []
+
+    normalized = {_normalize_domain(item) for item in domains}
+    normalized.discard("")
     sources: dict[str, set[str]] = {}
-    for entry in static_plan.get("domain_sources") or []:
+    for entry in domain_sources:
         if not isinstance(entry, dict):
             continue
-        domain = str(entry.get("domain") or "").strip()
+        domain = _normalize_domain(entry.get("domain"))
         if not domain:
             continue
         tags = entry.get("sources") or []
         if isinstance(tags, list):
             sources[domain] = {str(tag) for tag in tags if str(tag)}
     return normalized, sources
+
+
+def _normalize_domain(value: object) -> str:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return ""
+    # Strip common punctuation noise from string extraction.
+    raw = raw.strip(" \t\r\n\"'()[]{}<>")
+    raw = raw.rstrip(").,;")
+    if raw.startswith("*."):
+        raw = raw[2:]
+    if "%" in raw or " " in raw:
+        return ""
+    # Drop scheme if present.
+    if "://" in raw:
+        raw = raw.split("://", 1)[1]
+    # Strip path/query fragments.
+    raw = raw.split("/", 1)[0]
+    raw = raw.split("?", 1)[0]
+    raw = raw.split("#", 1)[0]
+    # Strip port if present.
+    if ":" in raw:
+        host, maybe_port = raw.rsplit(":", 1)
+        if maybe_port.isdigit():
+            raw = host
+    if "." not in raw or ".." in raw:
+        return ""
+    # Simple hostname charset guard.
+    allowed = set("abcdefghijklmnopqrstuvwxyz0123456789.-")
+    if any(ch not in allowed for ch in raw):
+        return ""
+    if raw.startswith(".") or raw.endswith(".") or raw.startswith("-") or raw.endswith("-"):
+        return ""
+    return raw
+
+
+def _load_static_plan(manifest: RunManifest, run_dir: Path | None) -> dict[str, Any] | None:
+    """Load the embedded static plan JSON if possible.
+
+    When run_dir is None we can only load via the target-relative path stored in the
+    manifest if it's an absolute path (not expected). The orchestrator passes run_dir
+    when it calls overlap writer; other callers may not.
+    """
+    if not isinstance(manifest.target, dict):
+        return None
+    rel = manifest.target.get("static_plan_path")
+    if not rel:
+        return None
+    if run_dir is None:
+        # Best-effort: don't guess paths without run_dir.
+        return None
+    plan_path = run_dir / str(rel)
+    if not plan_path.exists():
+        return None
+    try:
+        return json.loads(plan_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
 
 
 def _dynamic_domains(report: dict[str, Any]) -> set[str]:

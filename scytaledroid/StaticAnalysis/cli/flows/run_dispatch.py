@@ -14,7 +14,7 @@ from scytaledroid.Config import app_config
 from scytaledroid.Database.db_utils import schema_gate
 from scytaledroid.StaticAnalysis.persistence import ingest as canonical_ingest
 from scytaledroid.StaticAnalysis.session import make_session_stamp, normalize_session_stamp
-from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
+from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_engine
 from scytaledroid.Utils.LoggingUtils import logging_events as log_events
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
@@ -58,14 +58,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
             reason = "character safety"
             if len(normalized) != len(params.session_stamp):
                 reason = "length safety"
-            quiet = os.getenv("SCYTALEDROID_STATIC_QUIET", "").strip().lower() in {
-                "1",
-                "true",
-                "yes",
-                "y",
-                "on",
-            }
-            if not quiet:
+            if not output_prefs.get().quiet:
                 print(
                     status_messages.status(
                         (
@@ -79,7 +72,11 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
             params = replace(params, session_stamp=normalized)
         try:
             resolved_stamp, session_label, canonical_action = _resolve_unique_session_stamp(
-                params.session_stamp
+                params.session_stamp,
+                run_mode=output_prefs.get().run_mode,
+                noninteractive=output_prefs.get().noninteractive,
+                quiet=output_prefs.get().quiet,
+                canonical_action=params.canonical_action,
             )
             params = replace(
                 params,
@@ -92,7 +89,13 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
             return None
     else:
         try:
-            resolved_stamp, session_label, canonical_action = _resolve_unique_session_stamp(session_stamp)
+            resolved_stamp, session_label, canonical_action = _resolve_unique_session_stamp(
+                session_stamp,
+                run_mode=output_prefs.get().run_mode,
+                noninteractive=output_prefs.get().noninteractive,
+                quiet=output_prefs.get().quiet,
+                canonical_action=params.canonical_action,
+            )
             params = replace(
                 params,
                 session_stamp=resolved_stamp,
@@ -110,9 +113,9 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
     persistence_ready, persistence_note = _check_static_persistence_readiness(params)
     os.environ["SCYTALEDROID_PERSISTENCE_READY"] = "1" if persistence_ready else "0"
     if not persistence_ready:
-        level = "error" if _strict_persistence_enabled() or _paper_grade_required() else "warn"
+        level = "error" if params.strict_persistence or params.paper_grade_requested else "warn"
         print(status_messages.status(persistence_note, level=level))
-        if (_strict_persistence_enabled() or _paper_grade_required()) and not params.dry_run:
+        if (params.strict_persistence or params.paper_grade_requested) and not params.dry_run:
             print(
                 status_messages.status(
                     (
@@ -136,12 +139,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
         if params.session_stamp:
             canonical_ingest.build_session_string_view(params.session_stamp)
     except Exception as exc:
-        if os.getenv("SCYTALEDROID_STRICT_PERSISTENCE", "0").strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }:
+        if params.strict_persistence:
             raise RuntimeError(f"Static analysis setup failed: {exc}") from exc
         log.warning(f"Static analysis setup warning: {exc}", category="static")
         print(status_messages.status(f"Static analysis setup warning: {exc}", level="warn"))
@@ -154,17 +152,19 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
     scope_target = format_scope_target(selection)
 
     workers_label = f"auto ({workers})" if isinstance(params.workers, str) else str(workers)
-    render_run_start(
-        run_id=params.session_stamp,
-        profile_label=params.profile_label,
-        target=scope_target,
-        modules=modules,
-        workers_desc=workers_label,
-        cache_desc="purge" if not params.reuse_cache else "reuse",
-        log_level=params.log_level,
-        perm_cache_desc="refresh" if params.permission_snapshot_refresh else "skip",
-        trace_ids=params.trace_detectors,
-    )
+    prefs = output_prefs.get()
+    if not (prefs.quiet and prefs.batch):
+        render_run_start(
+            run_id=params.session_stamp,
+            profile_label=params.profile_label,
+            target=scope_target,
+            modules=modules,
+            workers_desc=workers_label,
+            cache_desc="purge" if not params.reuse_cache else "reuse",
+            log_level=params.log_level,
+            perm_cache_desc="refresh" if params.permission_snapshot_refresh else "skip",
+            trace_ids=params.trace_detectors,
+        )
 
     # Structured RUN_START log with context
     run_ctx = RunContext(
@@ -191,6 +191,20 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
                 "cache": "purge" if not params.reuse_cache else "reuse",
                 "perm_cache": "refresh" if params.permission_snapshot_refresh else "skip",
                 "dry_run": params.dry_run,
+                "run_context": (
+                    output_prefs.get_run_context().__dict__
+                    if output_prefs.get_run_context()
+                    else {
+                        "run_mode": output_prefs.get().run_mode,
+                        "quiet": output_prefs.get().quiet,
+                        "batch": output_prefs.get().batch,
+                        "noninteractive": output_prefs.get().noninteractive,
+                        "show_splits": output_prefs.get().show_splits,
+                        "session_stamp": params.session_stamp,
+                        "persistence_ready": params.persistence_ready,
+                        "paper_grade_requested": params.paper_grade_requested,
+                    }
+                ),
             },
         )
     except Exception:
@@ -218,10 +232,8 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
         return None
 
     if params.dry_run:
-        pipeline_version = os.getenv("SCYTALEDROID_PIPELINE_VERSION") or getattr(
-            params, "analysis_version", None
-        )
-        run_sig_version = os.getenv("SCYTALEDROID_RUN_SIGNATURE_VERSION") or "v1"
+        pipeline_version = getattr(params, "analysis_version", None)
+        run_sig_version = getattr(params, "run_signature_version", "v1")
         print("DIAGNOSTIC MODE (dry run)")
         print("────────────────────────────────")
         print("persist=no  evidence_pack=no  plan_generation=no")
@@ -236,8 +248,9 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
         print()
     from scytaledroid.Utils.DisplayUtils import text_blocks
 
-    print("Starting Static Analysis pipeline")
-    print(text_blocks.divider("─"))
+    if not (prefs.quiet and prefs.batch):
+        print("Starting Static Analysis pipeline")
+        print(text_blocks.divider("─"))
     outcome: RunOutcome | None = None
     run_status: str | None = None
     abort_reason: str | None = None
@@ -253,7 +266,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
         pass
     run_map = None
     linkage_blocked_reason = None
-    if os.getenv("SCYTALEDROID_PERSISTENCE_READY") == "0":
+    if not params.persistence_ready:
         linkage_blocked_reason = "Persistence gate failed; skipping run_map and permission refresh."
     elif outcome is not None and not params.dry_run:
         missing_ids = [res.package_name for res in outcome.results if not res.static_run_id]
@@ -301,13 +314,14 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
             print(status_messages.status(linkage_blocked_reason, level="warn"))
         else:
             try:
-                print()
-                print(
-                    status_messages.step(
-                        "Re-rendering permission snapshot for parity",
-                        label="Static Analysis",
+                if not (prefs.quiet and prefs.batch):
+                    print()
+                    print(
+                        status_messages.step(
+                            "Re-rendering permission snapshot for parity",
+                            label="Static Analysis",
+                        )
                     )
-                )
                 execute_permission_scan(
                     selection,
                     params,
@@ -398,7 +412,8 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
                     pass
 
     # Structured RUN SUMMARY (formatter-based) for transcripts/screenshots.
-    if outcome and getattr(outcome, "summary", None):
+    # Batch mode must stay quiet and deterministic (no per-app blocks).
+    if outcome and getattr(outcome, "summary", None) and not output_prefs.get().batch:
         summary = outcome.summary
         sev_counts = {
             "high": getattr(summary, "high", 0),
@@ -437,39 +452,41 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
 def execute_run_spec(spec: StaticRunSpec) -> RunOutcome | None:
     """Execute a prepared run spec without prompting."""
 
-    prev_quiet = os.environ.get("SCYTALEDROID_STATIC_QUIET")
-    prev_batch = os.environ.get("SCYTALEDROID_STATIC_BATCH")
-    prev_noninteractive = os.environ.get("SCYTALEDROID_STATIC_NONINTERACTIVE")
     prev_pref_quiet = output_prefs.get().quiet
     prev_pref_batch = output_prefs.get().batch
     prev_pref_mode = output_prefs.get().run_mode
+    prev_pref_noninteractive = output_prefs.get().noninteractive
+    prev_pref_show_splits = output_prefs.get().show_splits
+    prev_ctx = output_prefs.get_run_context()
+    from scytaledroid.StaticAnalysis.engine.strings_runtime import get_config as _get_strings_cfg
+    from scytaledroid.StaticAnalysis.engine.strings_runtime import set_config as _set_strings_cfg
+    prev_strings_cfg = _get_strings_cfg()
     output_prefs.set_quiet(spec.quiet)
     output_prefs.set_batch(spec.run_mode == "batch" or spec.noninteractive)
     output_prefs.set_run_mode(spec.run_mode)
-    if spec.quiet:
-        os.environ["SCYTALEDROID_STATIC_QUIET"] = "1"
-    if spec.run_mode == "batch" or spec.noninteractive:
-        os.environ["SCYTALEDROID_STATIC_BATCH"] = "1"
-        os.environ["SCYTALEDROID_STATIC_NONINTERACTIVE"] = "1"
-
+    output_prefs.set_noninteractive(spec.noninteractive)
+    output_prefs.set_show_splits(bool(spec.params.show_split_summaries))
+    from ..core.run_context import build_static_run_context
+    output_prefs.set_run_context(build_static_run_context(spec))
+    _set_strings_cfg(
+        _get_strings_cfg().__class__(
+            include_https_risk=bool(spec.params.string_include_https_risk),
+            debug=bool(spec.params.string_debug),
+            skip_resources_on_arsc_warn=bool(spec.params.string_skip_resources_on_warn),
+            long_string_length=int(spec.params.string_long_string_length),
+            low_entropy_threshold=float(spec.params.string_low_entropy_threshold),
+        )
+    )
     try:
         return launch_scan_flow(spec.selection, spec.params, spec.base_dir)
     finally:
         output_prefs.set_quiet(prev_pref_quiet)
         output_prefs.set_batch(prev_pref_batch)
         output_prefs.set_run_mode(prev_pref_mode)
-        if prev_quiet is None:
-            os.environ.pop("SCYTALEDROID_STATIC_QUIET", None)
-        else:
-            os.environ["SCYTALEDROID_STATIC_QUIET"] = prev_quiet
-        if prev_batch is None:
-            os.environ.pop("SCYTALEDROID_STATIC_BATCH", None)
-        else:
-            os.environ["SCYTALEDROID_STATIC_BATCH"] = prev_batch
-        if prev_noninteractive is None:
-            os.environ.pop("SCYTALEDROID_STATIC_NONINTERACTIVE", None)
-        else:
-            os.environ["SCYTALEDROID_STATIC_NONINTERACTIVE"] = prev_noninteractive
+        output_prefs.set_noninteractive(prev_pref_noninteractive)
+        output_prefs.set_show_splits(prev_pref_show_splits)
+        output_prefs.set_run_context(prev_ctx)
+        _set_strings_cfg(prev_strings_cfg)
 
 
 def _modules_for_run(params: RunParameters) -> tuple[str, ...]:
@@ -500,24 +517,6 @@ def _purge_run_cache() -> None:
             continue
 
 
-def _strict_persistence_enabled() -> bool:
-    return os.getenv("SCYTALEDROID_STRICT_PERSISTENCE", "0").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-
-
-def _paper_grade_required() -> bool:
-    return os.getenv("SCYTALEDROID_PAPER_GRADE", "1").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-
-
 def _check_static_persistence_readiness(params: RunParameters) -> tuple[bool, str]:
     if params.dry_run:
         return True, "dry-run: persistence gate skipped"
@@ -532,7 +531,14 @@ def _check_static_persistence_readiness(params: RunParameters) -> tuple[bool, st
     return True, "OK"
 
 
-def _resolve_unique_session_stamp(session_stamp: str) -> tuple[str, str, str]:
+def _resolve_unique_session_stamp(
+    session_stamp: str,
+    *,
+    run_mode: str,
+    noninteractive: bool,
+    quiet: bool,
+    canonical_action: str | None,
+) -> tuple[str, str, str]:
     base_stamp = session_stamp
     session_dir = Path(app_config.DATA_DIR) / "sessions"
     final_path = session_dir / base_stamp / "run_map.json"
@@ -569,15 +575,7 @@ def _resolve_unique_session_stamp(session_stamp: str) -> tuple[str, str, str]:
     except Exception:
         attempts = None
         canonical_id = None
-    batch_mode = os.getenv("SCYTALEDROID_STATIC_BATCH", "").strip().lower() in {"1", "true", "yes", "y", "on"}
-    noninteractive = os.getenv("SCYTALEDROID_STATIC_NONINTERACTIVE", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "y",
-        "on",
-    }
-    quiet = os.getenv("SCYTALEDROID_STATIC_QUIET", "").strip().lower() in {"1", "true", "yes", "y", "on"}
+    batch_mode = (run_mode == "batch")
     if batch_mode or noninteractive:
         suffix = None
         if attempts is not None and attempts >= 0:
@@ -586,44 +584,47 @@ def _resolve_unique_session_stamp(session_stamp: str) -> tuple[str, str, str]:
             suffix = datetime.now(UTC).strftime("%H%M%S")
         new_stamp = normalize_session_stamp(f"{base_stamp}-{suffix}")
         return new_stamp, new_stamp, "auto_suffix"
-    if not quiet:
-        print(f"Session label already exists for today: {base_stamp}")
-        if attempts is not None:
-            canonical_text = f" (canonical: static_run_id={canonical_id})" if canonical_id else ""
-            print(f"Existing attempts: {attempts}{canonical_text}")
-        print()
-    confirm = prompt_utils.prompt_yes_no(
-        f"Replace today's run and overwrite local output artifacts for {base_stamp}?",
-        default=True,
-    )
-    if not confirm:
-        raise RuntimeError(
-            f"Session label already used: {base_stamp}. Choose a new label to avoid run_map collisions."
-        )
-    try:
-        archive_dir = session_dir / "_archive"
-        archive_dir.mkdir(parents=True, exist_ok=True)
-        if final_path.exists():
-            timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-            archive_path = archive_dir / f"{base_stamp}-{timestamp}.run_map.json"
-            shutil.copy2(final_path, archive_path)
-        print(
-            status_messages.status(
-                "Replace mode: deleting local session folder only (DB history preserved).",
-                level="info",
-            )
-        )
-        if canonical_id:
-            print(
-                status_messages.status(
-                    f"Previous canonical attempt: static_run_id={canonical_id}",
-                    level="info",
+    # Interactive mode must not prompt inside execution. The menu layer should
+    # resolve collisions into a canonical_action and/or a unique session_stamp.
+    action = (canonical_action or "").strip().lower()
+    if action in {"append", "auto_suffix"}:
+        suffix = f"{attempts + 1}" if isinstance(attempts, int) else datetime.now(UTC).strftime("%H%M%S")
+        new_stamp = normalize_session_stamp(f"{base_stamp}-{suffix}")
+        return new_stamp, new_stamp, "append"
+    if action in {"replace", "overwrite"}:
+        try:
+            archive_dir = session_dir / "_archive"
+            archive_dir.mkdir(parents=True, exist_ok=True)
+            if final_path.exists():
+                timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+                archive_path = archive_dir / f"{base_stamp}-{timestamp}.run_map.json"
+                shutil.copy2(final_path, archive_path)
+            if not quiet:
+                print(
+                    status_messages.status(
+                        "Replace mode: deleting local session folder only (DB history preserved).",
+                        level="info",
+                    )
                 )
-            )
-        shutil.rmtree(session_dir / base_stamp)
-    except Exception as exc:
-        raise RuntimeError(f"Failed to replace existing session metadata: {exc}") from exc
-    return base_stamp, base_stamp, "replace"
+                if canonical_id:
+                    print(
+                        status_messages.status(
+                            f"Previous canonical attempt: static_run_id={canonical_id}",
+                            level="info",
+                        )
+                    )
+            shutil.rmtree(session_dir / base_stamp)
+        except Exception as exc:
+            raise RuntimeError(f"Failed to replace existing session metadata: {exc}") from exc
+        return base_stamp, base_stamp, "replace"
+    if action in {"cancel", "abort"}:
+        raise RuntimeError(f"Session label already used: {base_stamp}. Cancelled by caller.")
+    raise RuntimeError(
+        (
+            f"Session label already used: {base_stamp}. "
+            "Resolve this in the menu layer (replace or append) before execution."
+        )
+    )
 
 
 def _build_session_run_map(outcome: RunOutcome | None, session_stamp: str | None) -> dict | None:
@@ -690,7 +691,7 @@ def _build_session_run_map(outcome: RunOutcome | None, session_stamp: str | None
         "apps": apps,
         "by_package": by_package,
     }
-    _write_run_map_atomic(session_stamp, run_map)
+    _write_run_map_atomic(session_stamp, run_map, allow_overwrite=params.run_map_overwrite)
     return run_map
 
 
@@ -828,16 +829,10 @@ def _detect_duplicate_packages(results: list[AppRunResult]) -> set[str]:
     return duplicates
 
 
-def _write_run_map_atomic(session_stamp: str, run_map: dict) -> None:
+def _write_run_map_atomic(session_stamp: str, run_map: dict, *, allow_overwrite: bool) -> None:
     session_dir = Path(app_config.DATA_DIR) / "sessions" / session_stamp
     session_dir.mkdir(parents=True, exist_ok=True)
     final_path = session_dir / "run_map.json"
-    allow_overwrite = os.getenv("SCYTALEDROID_RUN_MAP_OVERWRITE", "0").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
     if final_path.exists():
         if not allow_overwrite:
             raise RuntimeError(

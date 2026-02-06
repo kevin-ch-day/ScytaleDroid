@@ -179,7 +179,7 @@ def static_analysis_menu() -> None:
         )
         if show_artifacts:
             params = replace(params, artifact_detail=True)
-        os.environ["SCYTALEDROID_STATIC_SHOW_SPLITS"] = "1" if show_splits else "0"
+        params = replace(params, show_split_summaries=show_splits)
 
         while True:
             action = ask_run_controls()
@@ -270,10 +270,6 @@ def _run_dataset_batch(
         return
 
     quiet = True
-    prev_quiet = os.environ.get("SCYTALEDROID_STATIC_QUIET")
-    os.environ["SCYTALEDROID_STATIC_QUIET"] = "1" if quiet else "0"
-    prev_batch = os.environ.get("SCYTALEDROID_STATIC_BATCH")
-    os.environ["SCYTALEDROID_STATIC_BATCH"] = "1"
 
     failures = []
     total = len(batch_groups)
@@ -304,6 +300,7 @@ def _run_dataset_batch(
             scope_label=selection.label,
             selected_tests=tuple(),
             session_stamp=session_stamp,
+            show_split_summaries=False,
         )
         effective_params = apply_command_overrides(params, command)
 
@@ -362,15 +359,6 @@ def _run_dataset_batch(
                 session_key = effective_params.session_stamp
             if session_key:
                 query_runner.render_session_digest(session_key)
-
-    if prev_quiet is None:
-        os.environ.pop("SCYTALEDROID_STATIC_QUIET", None)
-    else:
-        os.environ["SCYTALEDROID_STATIC_QUIET"] = prev_quiet
-    if prev_batch is None:
-        os.environ.pop("SCYTALEDROID_STATIC_BATCH", None)
-    else:
-        os.environ["SCYTALEDROID_STATIC_BATCH"] = prev_batch
 
     if failures:
         print()
