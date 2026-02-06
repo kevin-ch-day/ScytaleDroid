@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Iterable
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from scytaledroid.Config import app_config
@@ -139,14 +139,14 @@ def _write_report(
     report_dir = Path(app_config.OUTPUT_DIR) / "reports" / serial
     report_dir.mkdir(parents=True, exist_ok=True)
 
-    timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     report_path = report_dir / f"device_report_{timestamp}.md"
 
     lines: list[str] = []
     model = summary.get("model") or summary.get("device") or "Unknown"
     lines.append(f"# Device Report — {model} ({serial})")
     lines.append("")
-    lines.append(f"Generated: {datetime.utcnow().isoformat()}Z")
+    lines.append(f"Generated: {datetime.now(timezone.utc).isoformat()}Z")
     lines.append("")
 
     lines.append("## Device Overview")

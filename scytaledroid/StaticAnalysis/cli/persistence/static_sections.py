@@ -150,6 +150,19 @@ def persist_static_sections(
             )
         except Exception:
             selected_samples = {}
+    elif not isinstance(selection_params, Mapping):
+        try:
+            options = string_payload.get("options") if isinstance(string_payload, Mapping) else {}
+            max_samples = int(options.get("max_samples", 2)) if isinstance(options, Mapping) else 2
+            min_entropy = float(options.get("min_entropy", 0)) if isinstance(options, Mapping) else None
+            selection_params = {
+                "selection_version": "v1",
+                "max_samples": max_samples,
+                "min_entropy": min_entropy,
+                "policy_root": "fallback",
+            }
+        except Exception:
+            selection_params = None
     sample_total = 0
     for values in samples.values():
         if isinstance(values, Sequence):

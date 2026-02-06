@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from collections.abc import Sequence
 from typing import Any
 
@@ -28,6 +28,10 @@ def _normalize_datetime_value(value: str | None) -> str | None:
         except ValueError:
             return candidate
     return candidate
+
+
+def _utc_now_dbstr() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _ensure_app_version(
@@ -404,9 +408,7 @@ def _maybe_set_canonical_static_run(
     session_label: str,
     canonical_reason: str | None = None,
 ) -> None:
-    now = _normalize_datetime_value(datetime.utcnow().isoformat(timespec="seconds") + "Z") or datetime.utcnow().strftime(
-        "%Y-%m-%d %H:%M:%S"
-    )
+    now = _utc_now_dbstr()
     canonical_reason = canonical_reason or "replace"
     try:
         core_q.run_sql(
@@ -456,7 +458,7 @@ def update_static_run_status(
     abort_reason: str | None = None,
     abort_signal: str | None = None,
 ) -> None:
-    now = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    now = _utc_now_dbstr()
     ended_at = _normalize_datetime_value(ended_at_utc) or now
     try:
         run_sql_write(
@@ -485,7 +487,7 @@ def finalize_open_static_runs(
     abort_reason: str | None = None,
     abort_signal: str | None = None,
 ) -> int:
-    now = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    now = _utc_now_dbstr()
     try:
         normalized_ended_at = _normalize_datetime_value(ended_at_utc) or now
         params = [status, normalized_ended_at, abort_reason, abort_signal]

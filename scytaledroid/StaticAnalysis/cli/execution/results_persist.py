@@ -79,10 +79,10 @@ def _persist_cohort_rollup(session_stamp: str | None, scope_label: str | None) -
         )
         return
 
-    level = "info" if failed == 0 and aborted == 0 else "warn"
+    level = "info"
     print(
         status_messages.status(
-            f"Apps: {total} | Completed: {completed} | Failed: {failed} | Aborted: {aborted}",
+            f"Session history (attempt rollup): Apps {total} | Completed {completed} | Failed {failed} | Aborted {aborted}",
             level=level,
         )
     )

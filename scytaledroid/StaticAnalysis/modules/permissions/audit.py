@@ -9,7 +9,7 @@ before changing any weighting configuration.
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import math
 import os
@@ -841,7 +841,7 @@ class PermissionAuditAccumulator:
                                             "type": "permission_audit_snapshot",
                                             "sha256": sha256,
                                             "size_bytes": snap_path.stat().st_size,
-                                            "created_at_utc": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+                                            "created_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds") + "Z",
                                             "origin": "host",
                                             "pull_status": "n/a",
                                         }

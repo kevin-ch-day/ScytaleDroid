@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from scytaledroid.Config import app_config
@@ -95,7 +95,7 @@ def write_baseline_json(
 
     base_dir = Path(app_config.DATA_DIR) / "static_analysis" / "baseline"
     base_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     safe_package = filesystem_safe_slug(package)
     safe_profile = filesystem_safe_slug(profile)
     safe_scope = filesystem_safe_slug(scope)
@@ -205,7 +205,7 @@ def build_dynamic_plan(
         suggested_probes.append("webview_observation")
 
     plan = {
-        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "generated_at": datetime.now(timezone.utc).isoformat() + "Z",
         "package_name": metadata.get("package"),
         "version_name": metadata.get("version_name"),
         "version_code": metadata.get("version_code"),
@@ -259,7 +259,7 @@ def write_dynamic_plan_json(
 ) -> Path:
     base_dir = Path(app_config.DATA_DIR) / "static_analysis" / "dynamic_plan"
     base_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     safe_package = filesystem_safe_slug(package)
     safe_profile = filesystem_safe_slug(profile)
     safe_scope = filesystem_safe_slug(scope)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from scytaledroid.Database.db_func.harvest import apk_repository as repo
@@ -93,7 +93,7 @@ def execute_harvest(
     if log_adapter is None:
         log_adapter = log.harvest_adapter(
             run_identifier,
-            started_at=datetime.utcnow(),
+            started_at=datetime.now(timezone.utc),
             context={**base_context, "scope_label": scope_label},
         )
         close_logger = True
@@ -557,7 +557,7 @@ def _pull_and_record(
             sha1=hashes["sha1"],
             sha256=hashes["sha256"],
             device_serial=serial,
-            harvested_at=datetime.utcnow(),
+            harvested_at=datetime.now(timezone.utc),
             is_split_member=artifact.is_split_member,
             split_group_id=group_id,
         )

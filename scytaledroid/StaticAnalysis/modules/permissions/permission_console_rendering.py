@@ -607,6 +607,7 @@ def render_permission_matrix(
     now = datetime.now().strftime("%Y-%m-%d %-I:%M %p") if hasattr(datetime.now(), "strftime") else datetime.now().strftime("%Y-%m-%d %I:%M %p")
 
     print("\nApplication Permission Matrix")
+    print("High-signal matrix (governance-mapped)")
     print(f"Scope: {scope_label}")
     print(f"Snapshot: {now}")
     print(f"View: Apps 1–{len(top)}/{len(profiles)}")

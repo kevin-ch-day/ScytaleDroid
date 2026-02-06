@@ -160,7 +160,7 @@ def persist_snapshot(
     delta: object | None = None,
 ) -> PersistedSnapshot:
     """Persist inventory information under the state directory and database."""
-    captured_at = datetime.utcnow().replace(tzinfo=UTC)
+    captured_at = datetime.now(UTC)
     timestamp = captured_at.strftime("%Y%m%d-%H%M%S")
     device_dir = _STATE_ROOT / serial / "inventory"
     device_dir.mkdir(parents=True, exist_ok=True)

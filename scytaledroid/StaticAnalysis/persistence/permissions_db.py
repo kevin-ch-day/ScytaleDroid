@@ -200,7 +200,7 @@ def persist_declared_permissions(
     return counts
 
 
-def persist_permissions_to_db(report) -> None:
+def persist_permissions_to_db(report) -> dict:
     """Wrapper to persist declared permissions using a full report object."""
     try:
         package_name = getattr(report.manifest, "package_name", None)
@@ -216,7 +216,7 @@ def persist_permissions_to_db(report) -> None:
     artifact_label = getattr(report, "file_name", None)
     declared = tuple(getattr(report.permissions, "declared", ()) or ())
     custom = tuple(getattr(report.permissions, "custom", ()) or ())
-    persist_declared_permissions(
+    counts = persist_declared_permissions(
         package_name=package_name,
         version_name=version_name,
         version_code=version_code,
@@ -226,6 +226,7 @@ def persist_permissions_to_db(report) -> None:
         declared=declared,
         custom_declared=custom,
     )
+    return counts
 
 
 __all__ = ["persist_permissions_to_db"]

@@ -7,7 +7,7 @@ import os
 import shutil
 import signal
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 
 from scytaledroid.Config import app_config
@@ -656,7 +656,7 @@ def _persist_session_run_links(session_stamp: str | None, run_map: dict | None) 
                     f"static_run_id(s) missing from static_analysis_runs: {', '.join(map(str, missing_ids))}"
                 )
 
-        now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         insert_columns = ["session_stamp", "package_name", "static_run_id"]
         if "run_origin" in columns:
             insert_columns.append("run_origin")

@@ -98,12 +98,7 @@ class _PipelineProgress:
         if self._last_len:
             self._clear_line()
             print()
-        if self.show_checkpoints:
-            elapsed_value = elapsed_seconds
-            if elapsed_value is None:
-                elapsed_value = time.monotonic() - self._start
-            elapsed = _format_elapsed(elapsed_value)
-            print(f"Time Elapsed: {elapsed}")
+        # Time Elapsed line intentionally omitted (Completed scan line is sufficient).
 
     def flush_line(self) -> None:
         """Clear the in-place progress line before printing multiline output."""

@@ -141,12 +141,12 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
     else:
         overview_items.append(
             summary_cards.summary_item(
-                "Findings (runtime)",
+                "Detector hits (raw)",
                 runtime_findings_total,
                 value_style="severity_high" if totals.get("high") or totals.get("critical") else "emphasis",
             )
         )
-    overview_items.extend(severity.severity_summary_items(totals))
+    # Remove duplicate severity counters from the summary card (shown in accounting below).
     subtitle_parts = [params.profile_label]
     if params.scope_label:
         subtitle_parts.append(f"Scope: {params.scope_label}")
@@ -208,12 +208,30 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             session_note += f" ({', '.join(parts)})"
         subtitle_parts.append(session_note)
     subtitle = " • ".join(subtitle_parts)
+    grade_label = "PAPER_GRADE"
+    grade_reasons: list[str] = []
+    if not params.dry_run:
+        persistence_ready = os.getenv("SCYTALEDROID_PERSISTENCE_READY", "1").strip() != "0"
+        if not persistence_ready:
+            grade_label = "EXPERIMENTAL"
+            grade_reasons.append("persistence gate failed")
+        missing_ids = [res.package_name for res in outcome.results if not res.static_run_id]
+        if missing_ids:
+            grade_label = "EXPERIMENTAL"
+            preview = ", ".join(missing_ids[:5])
+            if len(missing_ids) > 5:
+                preview += f", +{len(missing_ids) - 5} more"
+            grade_reasons.append(f"static_run_id missing for: {preview}")
+    grade_text = f"Grade: {grade_label}"
+    if grade_reasons:
+        grade_text += f" ({'; '.join(grade_reasons)})"
+    footer = f"{grade_text}  |  Use the prompts below to drill into per-app findings."
     print(
         summary_cards.format_summary_card(
             "Static analysis summary",
             overview_items,
             subtitle=subtitle,
-            footer="Use the prompts below to drill into per-app findings.",
+            footer=footer,
             width=90,
         )
     )
@@ -229,26 +247,8 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             )
         )
     show_details = True
+    run_notes: list[str] = []
     if not params.dry_run:
-        persistence_ready = os.getenv("SCYTALEDROID_PERSISTENCE_READY", "1").strip() != "0"
-        if not persistence_ready:
-            print(
-                status_messages.status(
-                    "Run grade: EXPERIMENTAL (persistence gate failed).",
-                    level="warn",
-                )
-            )
-        missing_ids = [res.package_name for res in outcome.results if not res.static_run_id]
-        if missing_ids:
-            preview = ", ".join(missing_ids[:5])
-            if len(missing_ids) > 5:
-                preview += f", +{len(missing_ids) - 5} more"
-            print(
-                status_messages.status(
-                    f"Run grade: EXPERIMENTAL (static_run_id missing for: {preview}).",
-                    level="warn",
-                )
-            )
         if params.canonical_action == "replace" and params.session_label and len(outcome.results) == 1:
             current_static_run_id = outcome.results[0].static_run_id
             if current_static_run_id:
@@ -288,21 +288,30 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                             return totals
                         prev_counts = _counts(prev_id)
                         curr_counts = _counts(current_static_run_id)
-                        print(
-                            status_messages.status(
-                                "Daily rerun compare (previous canonical → new canonical)",
-                                level="info",
+                        # If DB counts are missing for the current run, fall back to runtime totals.
+                        if sum(curr_counts.values()) == 0 and totals:
+                            curr_counts = {
+                                "high": int(totals.get("high", 0)),
+                                "medium": int(totals.get("medium", 0)),
+                                "low": int(totals.get("low", 0)),
+                            }
+                        has_diff = (prev_sha != curr_sha) or (prev_counts != curr_counts)
+                        if has_diff:
+                            print(
+                                status_messages.status(
+                                    "Daily rerun compare (previous canonical → new canonical)",
+                                    level="info",
+                                )
                             )
-                        )
-                        print(f"  APK SHA-256: {prev_sha} → {curr_sha}")
-                        print(
-                            "  Findings: High "
-                            f"{prev_counts['high']} → {curr_counts['high']}, "
-                            "Medium "
-                            f"{prev_counts['medium']} → {curr_counts['medium']}, "
-                            "Low "
-                            f"{prev_counts['low']} → {curr_counts['low']}"
-                        )
+                            print(f"  APK SHA-256: {prev_sha} → {curr_sha}")
+                            print(
+                                "  Findings: High "
+                                f"{prev_counts['high']} → {curr_counts['high']}, "
+                                "Medium "
+                                f"{prev_counts['medium']} → {curr_counts['medium']}, "
+                                "Low "
+                                f"{prev_counts['low']} → {curr_counts['low']}"
+                            )
                 except Exception:
                     pass
     p0_count = 0
@@ -834,18 +843,10 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                 if params.canonical_action == "replace":
                     prior = session_meta.get("canonical")
                     if prior and app_result.static_run_id:
-                        print(
-                            status_messages.status(
-                                f"Canonical updated: static_run_id={prior} → {app_result.static_run_id}",
-                                level="info",
-                            )
+                        run_notes.append(
+                            f"Canonical updated: static_run_id={prior} → {app_result.static_run_id}"
                         )
-                print(
-                    status_messages.status(
-                        "Daily aliases updated (baseline/plan).",
-                        level="info",
-                    )
-                )
+                run_notes.append("Daily aliases updated (baseline/plan).")
             except Exception:
                 pass
 
@@ -860,13 +861,18 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
     static_risk_rows = _dedupe_profile_entries(static_risk_rows)
     _apply_display_names(permission_profiles)
 
+    if run_notes:
+        print(status_messages.status("Run notes", level="info"))
+        for note in run_notes:
+            print(f"  - {note}")
+
     if persist_enabled:
-        print("Findings accounting")
-        print(f"  Raw detector hits (runtime): {runtime_findings_total}")
-        print(f"  Normalized (deduped):        {normalized_findings_total}")
+        print("Accounting (raw vs normalized)")
+        print(f"  Detector hits (raw):           {runtime_findings_total}")
+        print(f"  Normalized findings (deduped): {normalized_findings_total}")
         print(f"  Baseline rule hits:          {baseline_rule_hits_total}")
         print(
-            "  MASVS totals:               "
+            "  MASVS totals (severity across all detectors): "
             f"H{totals.get('high', 0)} "
             f"M{totals.get('medium', 0)} "
             f"L{totals.get('low', 0)} "

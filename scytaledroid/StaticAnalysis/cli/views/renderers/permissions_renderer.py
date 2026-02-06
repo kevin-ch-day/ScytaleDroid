@@ -4,7 +4,7 @@ from collections.abc import Sequence
 
 
 def render_declared_permissions(lines, permissions, wrap_lines, output_prefs) -> None:
-    lines.append("Permissions (declared)")
+    lines.append("Declared permissions (raw manifest list)")
     declared = (
         list(permissions["declared"])
         if isinstance(permissions.get("declared"), Sequence)
@@ -14,7 +14,7 @@ def render_declared_permissions(lines, permissions, wrap_lines, output_prefs) ->
     lines.append(
         f"  Counts: dangerous={counts['dangerous']}  signature={counts['signature']}  custom={counts['custom']}"
     )
-    # Compact high-signal preview; full list only when verbose mode is set
+    # Compact high-signal preview; top-N raw list only when verbose mode is set
     try:
         verbose = output_prefs.get().verbose
     except Exception:
@@ -38,3 +38,11 @@ def render_declared_permissions(lines, permissions, wrap_lines, output_prefs) ->
         if verbose:
             full = ", ".join(declared)
             lines.extend(wrap_lines("  " + full, indent=0, subsequent_indent=2))
+        else:
+            preview_limit = 10
+            preview = ", ".join(declared[:preview_limit])
+            if preview:
+                lines.append(f"  Preview: {preview}")
+            remaining = len(declared) - preview_limit
+            if remaining > 0:
+                lines.append(f"  (+{remaining} more; enable verbose to show all)")

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Mapping, MutableMapping, Sequence
-from datetime import datetime
+from datetime import datetime, timezone
 from textwrap import fill
 
 from scytaledroid.StaticAnalysis.modules.string_analysis import (
@@ -498,6 +498,7 @@ def _normalise_string_data(raw: Mapping[str, object]) -> Mapping[str, object]:
     if not samples_payload:
         samples_payload = raw.get("samples") if isinstance(raw, Mapping) else {}
     selected_payload = raw.get("selected_samples") if isinstance(raw, Mapping) else {}
+    selection_params_payload = raw.get("selection_params") if isinstance(raw, Mapping) else None
     extra_counts_payload = raw.get("extra_counts") if isinstance(raw, Mapping) else {}
     noise_counts_payload = raw.get("noise_counts") if isinstance(raw, Mapping) else {}
     regex_skipped_payload = raw.get("regex_skipped") if isinstance(raw, Mapping) else 0
@@ -553,6 +554,11 @@ def _normalise_string_data(raw: Mapping[str, object]) -> Mapping[str, object]:
     structured = dict(structured_payload) if isinstance(structured_payload, Mapping) else {}
     options_payload = raw.get("options") if isinstance(raw, Mapping) else {}
     options = options_payload if isinstance(options_payload, Mapping) else {}
+    selection_params = (
+        dict(selection_params_payload)
+        if isinstance(selection_params_payload, Mapping)
+        else None
+    )
 
     buckets_struct = structured.get("buckets")
     if isinstance(buckets_struct, Mapping):
@@ -579,6 +585,7 @@ def _normalise_string_data(raw: Mapping[str, object]) -> Mapping[str, object]:
         "counts": counts,
         "samples": samples,
         "selected_samples": selected_samples,
+        "selection_params": selection_params,
         "extra_counts": extra_counts,
         "noise_counts": noise_counts,
         "regex_skipped": regex_skipped,
@@ -1213,7 +1220,7 @@ def render_app_result(
         webview_summary = None
 
     payload = {
-        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "generated_at": datetime.now(timezone.utc).isoformat() + "Z",
         "app": metadata,
         "baseline": {
             "manifest_flags": {

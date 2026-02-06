@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from scytaledroid.Database.tools.bootstrap import bootstrap_database
@@ -12,7 +12,7 @@ from scytaledroid.Utils.LoggingUtils import logging_utils as log
 def _write_dummy_report(output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     report = output_dir / "smoke_static_report.md"
-    timestamp = datetime.utcnow().isoformat() + "Z"
+    timestamp = datetime.now(timezone.utc).isoformat() + "Z"
     content = f"""# Static Analysis Smoke Report
 
 - Status: success

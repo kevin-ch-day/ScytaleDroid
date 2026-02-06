@@ -454,14 +454,18 @@ def render_session_digest(session_stamp: str | None, *, header: str | None = Non
     if audit.is_orphan:
         print(status_messages.status("Orphan static run (runs row missing).", level="warn"))
 
+    optional_tables = {
+        "static_string_selected_samples",
+        "static_string_sample_sets",
+    }
     canonical = [
         ("findings (normalized)", "findings"),
         ("static_findings (baseline)", "static_findings"),
         ("static_findings_summary", "static_findings_summary"),
         ("static_string_summary", "static_string_summary"),
         ("static_string_samples", "static_string_samples"),
-        ("static_string_selected_samples", "static_string_selected_samples"),
-        ("static_string_sample_sets", "static_string_sample_sets"),
+        ("static_string_selected_samples (optional)", "static_string_selected_samples"),
+        ("static_string_sample_sets (optional)", "static_string_sample_sets"),
         ("Risk buckets", "buckets"),
         ("Metrics", "metrics"),
         ("Permission audit snapshots", "permission_audit_snapshots"),
@@ -471,6 +475,8 @@ def render_session_digest(session_stamp: str | None, *, header: str | None = Non
     rows = []
     for label, key in canonical:
         count, status = audit.counts.get(key, (None, "SKIP"))
+        if key in optional_tables and (status.startswith("SKIP") or count in (None, 0)):
+            status = "SKIP (optional)"
         rows.append([label, str(count or 0), status])
 
     table_utils.render_table(["Table", "Rows", "Status"], rows)
@@ -479,8 +485,6 @@ def render_session_digest(session_stamp: str | None, *, header: str | None = Non
         "findings",
         "static_string_summary",
         "static_string_samples",
-        "static_string_selected_samples",
-        "static_string_sample_sets",
         "buckets",
         "metrics",
         "permission_audit_snapshots",

@@ -141,6 +141,7 @@ def _render_db_severity_table(session_stamp: str) -> bool:
         )
 
     print()
+    print("Normalized findings (deduped) — per package")
     table_utils.render_table(
         ["#", "Package", "targetSdk", "High", "Medium", "Low", "Info"],
         table_rows,
@@ -173,6 +174,7 @@ def _render_db_masvs_summary() -> None:
         run_id, rows = summary
         print()
         print(f"DB MASVS Summary (run_id={run_id})")
+        print("MASVS matrix totals (area rollup)")
         print("Area       High  Med   Low   Info  Status  Worst CVSS                Avg  Bands")
         no_data = True
         for area in ("NETWORK", "PLATFORM", "PRIVACY", "STORAGE"):
@@ -633,6 +635,13 @@ def _render_persistence_footer(
                 except Exception:
                     attempt_id = row[0]
                 timestamp = row[1] or "—"
+                if timestamp != "—":
+                    try:
+                        ts_str = str(timestamp)
+                        parsed = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                        timestamp = parsed.strftime("%Y-%m-%d %H:%M:%S")
+                    except Exception:
+                        pass
                 canonical_flag = "canonical" if int(row[2] or 0) else "archived"
                 print(f"  - {attempt_id} ({canonical_flag}) {timestamp}")
 
@@ -656,7 +665,6 @@ def _render_persistence_footer(
         "findings": findings,
         "static_string_summary": strings_summary,
         "static_string_samples": string_samples_raw,
-        "static_string_selected_samples": string_samples_selected,
         "buckets": buckets,
         "metrics": metrics,
         "permission_audit_snapshots": snapshot_count,
