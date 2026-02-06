@@ -215,6 +215,7 @@ class PcapdroidCaptureObserver(Observer):
                         f"PCAPdroid capture file empty/too small "
                         f"({file_size}B < {MIN_PCAP_BYTES}B)."
                     )
+                    status = "failed"
                     if meta_path.exists():
                         try:
                             meta_payload = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -259,8 +260,7 @@ class PcapdroidCaptureObserver(Observer):
                             encoding="utf-8",
                         )
             else:
-                # Keep run usable even if PCAP is missing; mark PCAP invalid instead of degrading.
-                status = "success"
+                status = "failed"
                 error = "PCAPdroid capture file missing after pull."
                 if meta_path.exists():
                     try:
@@ -421,7 +421,10 @@ def _latest_pcapdroid_capture(device_serial: str, *, min_epoch: float | None = N
             [
                 "sh",
                 "-c",
-                f"ls -t {PCAPDROID_DOWNLOAD_DIR}/*.pcap* 2>/dev/null | head -n 1",
+                (
+                    f"ls -t {PCAPDROID_DOWNLOAD_DIR}/*.pcap* "
+                    f"{PCAPDROID_DOWNLOAD_DIR}/.trashed-*.pcap* 2>/dev/null | head -n 1"
+                ),
             ],
         ).strip()
     except Exception:
