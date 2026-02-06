@@ -42,11 +42,6 @@ class PermissionAnalysis:
     notes: tuple[str, ...]
 
 
-@dataclass(frozen=True)
-class _PermissionProfile(PermissionProfile):  # Back-compat alias
-    pass
-
-
 def _infer_permission_source(permission: str) -> str:
     if permission.startswith("android."):
         return "framework"
@@ -162,20 +157,20 @@ def _build_protection_profiles(
     declared: Iterable[str],
     details: Mapping[str, Sequence[object]],
     dangerous_declared: Iterable[str],
-) -> MutableMapping[str, _PermissionProfile]:
+) -> MutableMapping[str, PermissionProfile]:
     dangerous_set = set(dangerous_declared)
-    profiles: MutableMapping[str, _PermissionProfile] = {}
+    profiles: MutableMapping[str, PermissionProfile] = {}
     for name in declared:
         detail_entry = details.get(name, ())
-        tokens = _normalise_protection_tokens(detail_entry)
+        tokens = normalize_tokens(detail_entry)
         is_runtime = "dangerous" in tokens or name in dangerous_set
         is_signature = any(token.startswith("signature") for token in tokens)
         is_privileged = "privileged" in tokens
         is_special = is_special_access(tokens)
         group = _extract_permission_group(detail_entry)
         description = _extract_permission_description(detail_entry)
-        severity = _score_tokens(tokens, is_custom=_is_custom_permission(name))
-        profiles[name] = _PermissionProfile(
+        severity = score_tokens(tokens, is_custom=is_custom_permission(name))
+        profiles[name] = PermissionProfile(
             name=name,
             protection_label="|".join(tokens) if tokens else "unknown",
             protection_tokens=tokens,
@@ -188,10 +183,6 @@ def _build_protection_profiles(
             severity=severity,
         )
     return profiles
-
-
-def _normalise_protection_tokens(detail_entry: Sequence[object]) -> tuple[str, ...]:  # Back-compat
-    return normalize_tokens(detail_entry)
 
 
 def _extract_permission_group(detail_entry: Sequence[object]) -> str | None:
@@ -216,32 +207,6 @@ def _extract_permission_description(detail_entry: Sequence[object]) -> str | Non
     return None
 
 
-def _score_tokens(tokens: Sequence[str], *, is_custom: bool) -> int:  # Back-compat
-    return score_tokens(tokens, is_custom=is_custom)
-
-
-def _is_custom_permission(name: str) -> bool:  # Back-compat
-    return is_custom_permission(name)
-
-
-def _index_manifest_permissions(manifest_root):  # Back-compat
-    return index_manifest_permissions(manifest_root)
-
-
-def _collect_evidence(*, profiles, manifest_nodes, apk_path, limit=2):  # Back-compat
-    profile_sev = {k: v.severity for k, v in profiles.items()}
-    return collect_evidence(profile_severities=profile_sev, manifest_nodes=manifest_nodes, apk_path=apk_path, limit=limit)
-
-
-def _manifest_pointer(*args, **kwargs):  # Back-compat shim
-    from .analysis.evidence import manifest_pointer
-    return manifest_pointer(*args, **kwargs)
-
-
-def _format_summary(*, total: int, dangerous: int, signature: int, custom: int) -> str:  # Back-compat
-    return format_summary(total=total, dangerous=dangerous, signature=signature, custom=custom)
-
-
 def _build_metrics(
     *,
     total: int,
@@ -253,7 +218,7 @@ def _build_metrics(
     token_histogram: Mapping[str, int],
     group_summary: Mapping[str, Sequence[str]],
     special_permissions: Iterable[str],
-    profiles: Mapping[str, _PermissionProfile],
+    profiles: Mapping[str, PermissionProfile],
     summary: str,
     catalog_snapshot: Mapping[str, Mapping[str, object]],
     protection_levels: Mapping[str, Sequence[str]],
@@ -338,7 +303,7 @@ def _build_metrics(
 
         declared_in = declared_map.get(name)
         source = _infer_permission_source(name)
-        is_custom = _is_custom_permission(name)
+        is_custom = is_custom_permission(name)
         is_flagged_normal = bool(not profile.is_runtime_dangerous and profile.severity > 0)
         if is_flagged_normal:
             flagged_normals.add(name)
@@ -370,14 +335,14 @@ def _build_metrics(
     return metrics
 
 
-def _build_token_histogram(profiles: Mapping[str, _PermissionProfile]) -> Counter[str]:
+def _build_token_histogram(profiles: Mapping[str, PermissionProfile]) -> Counter[str]:
     tokens = Counter()
     for profile in profiles.values():
         tokens.update(profile.protection_tokens)
     return tokens
 
 
-def _group_permissions(profiles: Mapping[str, _PermissionProfile]) -> Mapping[str, list[str]]:
+def _group_permissions(profiles: Mapping[str, PermissionProfile]) -> Mapping[str, list[str]]:
     groups: MutableMapping[str, list[str]] = defaultdict(list)
     for profile in profiles.values():
         if not profile.permission_group:

@@ -453,8 +453,6 @@ def render_session_digest(session_stamp: str | None, *, header: str | None = Non
         print(status_messages.status("Group scope detected; per-package mapping not applicable.", level="info"))
     if audit.is_orphan:
         print(status_messages.status("Orphan static run (runs row missing).", level="warn"))
-    elif audit.is_legacy:
-        print(status_messages.status("Legacy static run (pre-ledger era).", level="info"))
 
     canonical = [
         ("findings (normalized)", "findings"),

@@ -25,7 +25,6 @@ CREATE TABLE IF NOT EXISTS static_string_summary (
   package_name TEXT NOT NULL,
   session_stamp TEXT NOT NULL,
   scope_label TEXT NOT NULL,
-  run_id INTEGER NULL,
   static_run_id INTEGER NULL,
   endpoints INTEGER NOT NULL DEFAULT 0,
   http_cleartext INTEGER NOT NULL DEFAULT 0,
@@ -123,7 +122,6 @@ class StringSummaryRecord:
             "package_name": self.package_name,
             "session_stamp": self.session_stamp,
             "scope_label": self.scope_label,
-            "run_id": None,
             "static_run_id": int(self.static_run_id) if self.static_run_id is not None else None,
             "endpoints": int(counts.get("endpoints", 0)),
             "http_cleartext": int(counts.get("http_cleartext", 0)),
@@ -342,18 +340,17 @@ def upsert_summary(summary: SummaryRow) -> int | None:
         _require_static_run_id(payload, table="static_string_summary")
         stmt = """
         INSERT INTO static_string_summary (
-          package_name, session_stamp, scope_label, run_id, static_run_id,
+          package_name, session_stamp, scope_label, static_run_id,
           endpoints, http_cleartext, api_keys, analytics_ids, cloud_refs, ipc, uris, flags, certs,
           high_entropy, placeholders_downgraded, placeholders_suppressed, doc_hosts_suppressed,
           doc_cdns_suppressed, trailing_punct_trimmed, ws_wss_seen, ipv6_seen
         ) VALUES (
-          %(package_name)s, %(session_stamp)s, %(scope_label)s, %(run_id)s, %(static_run_id)s,
+          %(package_name)s, %(session_stamp)s, %(scope_label)s, %(static_run_id)s,
           %(endpoints)s, %(http_cleartext)s, %(api_keys)s, %(analytics_ids)s, %(cloud_refs)s, %(ipc)s, %(uris)s, %(flags)s, %(certs)s,
           %(high_entropy)s, %(placeholders_downgraded)s, %(placeholders_suppressed)s, %(doc_hosts_suppressed)s,
           %(doc_cdns_suppressed)s, %(trailing_punct_trimmed)s, %(ws_wss_seen)s, %(ipv6_seen)s
         )
         ON CONFLICT(package_name, session_stamp, scope_label) DO UPDATE SET
-          run_id=excluded.run_id,
           static_run_id=excluded.static_run_id,
           endpoints=excluded.endpoints,
           http_cleartext=excluded.http_cleartext,
@@ -380,12 +377,12 @@ def upsert_summary(summary: SummaryRow) -> int | None:
                 except Exception:
                     fallback_stmt = """
                     INSERT INTO static_string_summary (
-                      package_name, session_stamp, scope_label, run_id, static_run_id,
+                      package_name, session_stamp, scope_label, static_run_id,
                       endpoints, http_cleartext, api_keys, analytics_ids, cloud_refs, ipc, uris, flags, certs,
                       high_entropy, placeholders_downgraded, placeholders_suppressed, doc_hosts_suppressed,
                       doc_cdns_suppressed, trailing_punct_trimmed, ws_wss_seen, ipv6_seen
                     ) VALUES (
-                      %(package_name)s, %(session_stamp)s, %(scope_label)s, %(run_id)s, %(static_run_id)s,
+                      %(package_name)s, %(session_stamp)s, %(scope_label)s, %(static_run_id)s,
                       %(endpoints)s, %(http_cleartext)s, %(api_keys)s, %(analytics_ids)s, %(cloud_refs)s, %(ipc)s, %(uris)s, %(flags)s, %(certs)s,
                       %(high_entropy)s, %(placeholders_downgraded)s, %(placeholders_suppressed)s, %(doc_hosts_suppressed)s,
                       %(doc_cdns_suppressed)s, %(trailing_punct_trimmed)s, %(ws_wss_seen)s, %(ipv6_seen)s

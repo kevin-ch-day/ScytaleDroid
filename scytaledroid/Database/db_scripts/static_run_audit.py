@@ -176,7 +176,6 @@ class RunAudit:
     derived_package: str | None
     created_at: datetime | None
     is_group_scope: bool
-    is_legacy: bool
     is_orphan: bool
     counts: dict[str, tuple[int | None, str]]
     severity_rows: Iterable[tuple[str, str, int]]
@@ -199,9 +198,7 @@ def collect_static_run_counts(
             return None
 
         is_group_scope = derived_package is None
-        cutoff = datetime(2026, 1, 22)
-        is_legacy = bool(created_at and created_at < cutoff)
-        is_orphan = bool(derived_package and resolved_run_id is None and not is_legacy)
+        is_orphan = bool(derived_package and resolved_run_id is None)
         static_run_ids: list[int] = []
         if resolved_session:
             try:
@@ -281,7 +278,6 @@ def collect_static_run_counts(
         derived_package=derived_package,
         created_at=created_at,
         is_group_scope=is_group_scope,
-        is_legacy=is_legacy,
         is_orphan=is_orphan,
         counts=counts,
         severity_rows=severity_rows,
@@ -303,8 +299,6 @@ def audit_run(session_stamp: str | None, run_id: int | None) -> int:
         print("Note: Group scope detected; per-package run mapping not applicable.")
     if audit.is_orphan:
         print("Note: ORPHAN static run (runs row missing).")
-    elif audit.is_legacy:
-        print("Note: LEGACY static run (pre-ledger era).")
 
     required = {
         "findings",

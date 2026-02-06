@@ -9,7 +9,6 @@ CREATE TABLE IF NOT EXISTS static_string_summary (
   package_name VARCHAR(191) NOT NULL,
   session_stamp VARCHAR(64) NOT NULL,
   scope_label VARCHAR(191) NOT NULL,
-  run_id BIGINT UNSIGNED NULL,
   static_run_id BIGINT UNSIGNED NULL,
   endpoints INT UNSIGNED NOT NULL DEFAULT 0,
   http_cleartext INT UNSIGNED NOT NULL DEFAULT 0,
@@ -31,13 +30,8 @@ CREATE TABLE IF NOT EXISTS static_string_summary (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY ux_string_summary (package_name, session_stamp, scope_label),
-  UNIQUE KEY ux_string_summary_run_scope (run_id, scope_label),
   KEY ix_string_summary_static_run (static_run_id, scope_label),
   KEY ix_string_summary_session (session_stamp),
-  KEY ix_string_summary_run (run_id),
-  CONSTRAINT fk_string_summary_run FOREIGN KEY (run_id)
-    REFERENCES runs (run_id)
-    ON DELETE SET NULL,
   CONSTRAINT fk_string_summary_static_run FOREIGN KEY (static_run_id)
     REFERENCES static_analysis_runs (id)
     ON DELETE SET NULL
@@ -133,18 +127,17 @@ CREATE TABLE IF NOT EXISTS static_string_sample_sets (
 
 INSERT_STRING_SUMMARY = """
 INSERT INTO static_string_summary (
-  package_name, session_stamp, scope_label, run_id, static_run_id,
+  package_name, session_stamp, scope_label, static_run_id,
   endpoints, http_cleartext, api_keys, analytics_ids, cloud_refs, ipc, uris, flags, certs, high_entropy,
   placeholders_downgraded, placeholders_suppressed, doc_hosts_suppressed, doc_cdns_suppressed,
   trailing_punct_trimmed, ws_wss_seen, ipv6_seen
 ) VALUES (
-  %(package_name)s, %(session_stamp)s, %(scope_label)s, %(run_id)s, %(static_run_id)s,
+  %(package_name)s, %(session_stamp)s, %(scope_label)s, %(static_run_id)s,
   %(endpoints)s, %(http_cleartext)s, %(api_keys)s, %(analytics_ids)s, %(cloud_refs)s, %(ipc)s, %(uris)s, %(flags)s, %(certs)s, %(high_entropy)s,
   %(placeholders_downgraded)s, %(placeholders_suppressed)s, %(doc_hosts_suppressed)s, %(doc_cdns_suppressed)s,
   %(trailing_punct_trimmed)s, %(ws_wss_seen)s, %(ipv6_seen)s
 )
 ON DUPLICATE KEY UPDATE
-  run_id=VALUES(run_id),
   static_run_id=VALUES(static_run_id),
   endpoints=VALUES(endpoints),
   http_cleartext=VALUES(http_cleartext),

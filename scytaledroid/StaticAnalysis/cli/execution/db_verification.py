@@ -529,8 +529,6 @@ def _render_persistence_footer(
             lines.append(("run_linkage", "Group scope (run_id not required)"))
         elif audit.is_orphan:
             lines.append(("run_linkage", "ORPHAN (run_id missing)"))
-        elif audit.is_legacy:
-            lines.append(("run_linkage", "LEGACY (run_id missing)"))
         else:
             lines.append(("run_linkage", "run_id missing"))
     if run_status == "ABORTED":
@@ -691,8 +689,6 @@ def _render_persistence_footer(
         elif audit.run_id is None:
             if audit.is_orphan:
                 db_verification_status = "ORPHAN (run_id missing)"
-            elif audit.is_legacy:
-                db_verification_status = "LEGACY (run_id missing)"
             else:
                 db_verification_status = "SKIPPED (run_id missing)"
         elif missing:
@@ -711,8 +707,6 @@ def _render_persistence_footer(
     elif audit and audit.run_id is None and not audit.is_group_scope:
         if audit.is_orphan:
             print(f"  {'status'.ljust(width)} : WARN (orphan run_id missing)")
-        elif audit.is_legacy:
-            print(f"  {'status'.ljust(width)} : WARN (legacy run_id missing)")
         else:
             print(f"  {'status'.ljust(width)} : WARN (run_id missing)")
     elif canonical_failures:
