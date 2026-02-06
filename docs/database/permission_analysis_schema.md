@@ -60,6 +60,9 @@ If you want full explainability and dashboard parity, add the following:
 
 1) Rationale per app (why a score was assigned)
 
+Note: `cohort_json` is reserved/legacy. The v1 CLI no longer exposes the
+permission cohort menu; most runs will leave this field empty.
+
 ```
 CREATE TABLE IF NOT EXISTS `risk_rationales` (
   `id`            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -163,4 +166,3 @@ Fetching data later
   WHERE c.session_stamp = ? AND c.scope_label = ?
   ORDER BY a.abbr, p.row_order;
   ```
-

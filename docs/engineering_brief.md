@@ -15,14 +15,14 @@
   - Cleartext or weak network configs
 - ScytaleDroid’s job: industrialize these methods and make them extensible to new app sets and studies.
 
-## Current State (Phase 2: device/inventory/harvest – effectively done)
+## Current State (legacy phase labels; see sprint tracker)
 - **Inventory engine:** `DeviceAnalysis/inventory/*` + `inventory_service` collect packages, persist snapshots, sync app definitions, compute a single InventoryDelta reused across UI (summary cards, dashboard, gating).
 - **Staleness/gating:** 24h age semantics; “fresh + diff” surfaces a single dialog; stale forces sync prompt.
 - **Harvesting:** Menu → Pull APKs → scope selection → clean handling of multi-split APKs; per-package summaries; artifacts under `data/apks/device_apks/...`.
 - **Menu/UX:** Device Analysis menu stable; shortcuts (`r`, `c`, `i`, `s`, `l`, `q/0`) consistent.
 - **Classification sanity:** Inventory summary shows user-scope candidates, Play vs sideload vs unknown for user apps, roles by partition (User/OEM/System/Mainline/Vendor).
 
-## What’s Next (Phases 3 & 4)
+## What’s Next (legacy phase labels; see sprint tracker)
 ### Phase 3 – Research-complete, reproducible engine
 - **Static run metadata + DB:** `static_service.run_scan` as the only entry; stamp pipeline_version, catalog_versions, config_hash, study_tag, run_started_utc; persist to `static_analysis_runs` (run_id, started_utc, scope/app_count, pipeline_version, catalog_versions, config_hash, study_tag).
 - **Analyzers for paper issue classes:** Implement checks (manifest/components, permissions, legacy storage, network config, secrets) in `StaticAnalysis/checks/*`; normalize findings with app identity, MASVS control, CVSS v4 vector/severity into `static_analysis_findings`.

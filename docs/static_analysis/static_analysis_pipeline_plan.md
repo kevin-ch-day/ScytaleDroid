@@ -9,7 +9,7 @@
 ## 1.1 Implementation status (FY26 tightening pass)
 
 - ✅ Detector runner and modular detectors are in place for manifest hygiene,
-  permissions (catalog-backed protection levels), IPC exposure, provider ACLs,
+  permissions (catalog + governance-backed protection levels), IPC exposure, provider ACLs,
   network surface (with NSC policy graphs), secrets (validator-backed),
   storage/backup, DFIR hints, WebView hardening, crypto misuse, dynamic
   loading, file I/O sinks, interaction surfaces, SDK inventory, native
@@ -215,13 +215,13 @@ the CLI and manual helper snippets rely on direct table queries.
 - Establish deterministic container or virtual environment configuration for CI/regression runs.
 
 ## 12. Implementation Roadmap
-### Phase P0 – Infrastructure Readiness *(✅ delivered)*
+### Phase P0 – Infrastructure Readiness *(legacy label)*
 - Finalized detector interface, context, and finding schema.
 - Implemented string-analysis extractor prototype and cache.
 - Landed JSON persistence (reports with `pipeline_trace` + `repro_bundle`).
 - CLI exposes quick/full profiles and evidence controls.
 
-### Phase P1 – Core Detectors & Correlation v1 *(✅ delivered)*
+### Phase P1 – Core Detectors & Correlation v1 *(legacy label)*
 - Manifest baseline refactor, detector runner integration, and drift-aware
   correlation helpers shipped.
 - Network surface/TLS, secrets, storage/backup, provider ACL, and permission
@@ -230,7 +230,7 @@ the CLI and manual helper snippets rely on direct table queries.
   credentials, backup exposure, crypto misuse, dynamic loading, and provider
   grant gaps.
 
-### Phase P2 – Feature Expansion *(🚧 current focus)*
+### Phase P2 – Feature Expansion *(legacy label)*
 - Implement OEM sensitivity scoring, signer lineage timeline, endpoint role
   classifier, and consent lint based on the research backlog.
 - Extend DFIR/export hints with minimal collection playbooks.
@@ -238,14 +238,14 @@ the CLI and manual helper snippets rely on direct table queries.
 - Enhance CLI report views with severity breakdown, drift diff, and
   reproducibility hash surface area.
 
-### Phase P3 – Hardening & Advanced Signals
+### Phase P3 – Hardening & Advanced Signals *(legacy label)*
 - Add declarative rulepacks (Rego-lite), anomaly scoring (permission vector vs
-  cohort), and anti-analysis fingerprinting.
+  baseline profiles), and anti-analysis fingerprinting.
 - Optimize performance (parallel detector execution, caching) and add override
   workflow + FP analytics once DB mode lands.
 - Document integration points for future UI/API consumers.
 
-### Phase P4 – Validation & Release Prep
+### Phase P4 – Validation & Release Prep *(legacy label)*
 - Run gold corpus regression harness, tune rules, finalize severity policy.
 - Complete developer/analyst documentation (how-to, schema references).
 - Decide on default persistence mode and rollout strategy.

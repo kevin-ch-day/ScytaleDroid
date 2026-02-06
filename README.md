@@ -45,8 +45,8 @@ baseline linkage.
   manifest hygiene, IPC exposure, provider ACLs, network posture, secrets,
   storage/backup hygiene, WebView hardening, crypto misuse, DFIR hints, and a
   correlation layer that synthesizes P0/P1 risk stories from the detector
-  output. Permissions are grouped and scored using a refreshed Android
-  permission catalog—no hard-coded lists.
+  output. Permissions are grouped and scored using governance snapshots plus
+  catalog metadata (no hard-coded lists).
 - **Canonical persistence & analytics.** Every run lands in the relational
   schema (`static_analysis_runs`, `static_analysis_findings`, provider ACL
   tables) with severity/category matrices, novelty indicators, workload
@@ -70,9 +70,6 @@ baseline linkage.
   and grade model.
 - **DB snapshots for trust.** Risk snapshots (per app, per run) are written to
   the database (when configured) for longitudinal analysis and dashboards.
-- **Housekeeping shortcuts.** The Utilities menu exposes a static-analysis
-  housekeeping action that prunes JSON/HTML exports older than 30 days and
-  resets cache/temp directories so local runs stay lean.
 
 ## Quick start
 

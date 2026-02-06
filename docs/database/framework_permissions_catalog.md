@@ -1,5 +1,9 @@
 # Android Framework Permissions Catalog – Scope & Parser Notes
 
+Note: This catalog supports permission guard-strength lookups during static
+analysis. Paper-grade gating is governed separately by the governance snapshot
+CSV import; the catalog remains a supplemental metadata source.
+
 The framework permissions catalog now composes multiple documentation feeds
 before seeding `android_framework_permissions`:
 

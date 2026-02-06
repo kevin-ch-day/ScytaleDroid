@@ -14,7 +14,7 @@ Purpose: avoid write collisions as the web app comes online by documenting which
   - `static_string_summary`, `static_string_samples`, `static_string_match_cache`, `static_doc_hosts`
   - Note: legacy summary tables should be keyed by `static_run_id` when present;
     `runs.run_id` is compatibility-only.
-- Harvest/scopes: `harvest_*`, permission cohort tables
+- Harvest/scopes: `harvest_*`, permission audit + governance tables
 - Dynamic (new): dynamic session outputs if/when persisted
 
 ## Web-owned (planned)
@@ -24,7 +24,7 @@ Purpose: avoid write collisions as the web app comes online by documenting which
 - Any web-side task queues or background job metadata
 
 ## Shared / background
-- Reference data reused by both (e.g., permission catalogs, mappings)
+- Reference data reused by both (e.g., governance snapshots, permission catalogs, mappings)
 - Future background worker state (if added)
 
 Guidance:

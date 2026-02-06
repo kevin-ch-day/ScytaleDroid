@@ -1,4 +1,4 @@
-# DeviceAnalysis Architecture Contract (Phase 0)
+# DeviceAnalysis Architecture Contract (Status Matrix)
 
 ## Layering rules
 - **UI-only printing/prompting:** Any `print()`, prompts, panels, or progress UI must live in the UI layer.
@@ -28,7 +28,7 @@ No new modules should be added at the `DeviceAnalysis/` root. New work must go i
 
 Legacy root files should be treated as compatibility shims until migrated.
 
-## Migration tracker
+## Migration tracker (legacy status, not current sprint)
 | Phase | Scope | Status |
 | --- | --- | --- |
 | Phase 0 | Architecture contract + import rules | **In progress** |

@@ -1,6 +1,6 @@
-# Project Status — Phase 2C (Tier-1 Readiness)
+# Project Status — Phase 2C (Legacy Snapshot)
 
-## Phase / Sprint Status
+## Phase / Sprint Status (historic)
 - **Phase 2C (telemetry stabilization + Tier-1 readiness):** complete.
 - Sampling stability, QA gates, and dataset export are functional and verified.
 - Remaining work is **post-sprint polish**, not system stability.
