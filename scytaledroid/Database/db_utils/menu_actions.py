@@ -104,8 +104,11 @@ def apply_canonical_schema_bootstrap(*, prompt_user: bool = True) -> bool:
         ):
             return False
         bootstrap_database()
+        _drop_legacy_string_run_id_columns()
+        _ensure_canonical_triggers()
         success = True
         _render_schema_bootstrap_summary(schema_before, snapshot_before)
+        _render_schema_bootstrap_verification()
         return True
     except Exception as exc:
         error_text = str(exc)
@@ -129,6 +132,115 @@ def _schema_snapshot() -> dict[str, object]:
     columns = {table: set(diagnostics.get_table_columns(table) or []) for table in tables}
     indexes = {table: _fetch_index_signatures(table) for table in tables}
     return {"tables": set(tables), "columns": columns, "indexes": indexes}
+
+
+def _drop_legacy_string_run_id_columns() -> None:
+    tables = (
+        "static_string_summary",
+        "static_string_samples",
+        "static_string_selected_samples",
+        "static_string_sample_sets",
+    )
+    try:
+        with database_session(reuse_connection=False) as engine:
+            if getattr(engine, "_dialect", "sqlite") != "mysql":
+                return
+            for table in tables:
+                columns = diagnostics.get_table_columns(table) or []
+                if "run_id" not in columns:
+                    continue
+                # Drop foreign keys referencing run_id if present.
+                rows = engine.fetch_all(
+                    """
+                    SELECT CONSTRAINT_NAME
+                    FROM information_schema.KEY_COLUMN_USAGE
+                    WHERE table_schema = DATABASE()
+                      AND table_name = %s
+                      AND column_name = 'run_id'
+                      AND REFERENCED_TABLE_NAME IS NOT NULL
+                    """,
+                    (table,),
+                )
+                for row in rows or []:
+                    fk_name = str(row[0])
+                    try:
+                        engine.execute(f"ALTER TABLE `{table}` DROP FOREIGN KEY `{fk_name}`;")
+                    except Exception:
+                        continue
+                # Drop indexes on run_id.
+                idx_rows = engine.fetch_all(f"SHOW INDEX FROM `{table}`;")
+                for row in idx_rows or []:
+                    if len(row) < 5:
+                        continue
+                    index_name = str(row[2])
+                    column_name = str(row[4])
+                    if column_name == "run_id" and index_name != "PRIMARY":
+                        try:
+                            engine.execute(f"ALTER TABLE `{table}` DROP INDEX `{index_name}`;")
+                        except Exception:
+                            continue
+                # Drop the legacy column.
+                try:
+                    engine.execute(f"ALTER TABLE `{table}` DROP COLUMN run_id;")
+                except Exception:
+                    continue
+    except Exception:
+        return
+
+
+def _ensure_canonical_triggers() -> None:
+    try:
+        with database_session(reuse_connection=False) as engine:
+            if getattr(engine, "_dialect", "sqlite") != "mysql":
+                return
+            for name in ("trg_static_runs_canonical_insert", "trg_static_runs_canonical_update"):
+                try:
+                    engine.execute(f"DROP TRIGGER IF EXISTS `{name}`;")
+                except Exception:
+                    pass
+            engine.execute(
+                """
+                CREATE TRIGGER trg_static_runs_canonical_insert
+                BEFORE INSERT ON static_analysis_runs
+                FOR EACH ROW
+                BEGIN
+                  IF NEW.is_canonical = 1 THEN
+                    IF EXISTS (
+                      SELECT 1
+                      FROM static_analysis_runs
+                      WHERE session_label = NEW.session_label
+                        AND is_canonical = 1
+                    ) THEN
+                      SIGNAL SQLSTATE '45000'
+                        SET MESSAGE_TEXT = 'canonical constraint violated (session_label already has canonical)';
+                    END IF;
+                  END IF;
+                END;
+                """
+            )
+            engine.execute(
+                """
+                CREATE TRIGGER trg_static_runs_canonical_update
+                BEFORE UPDATE ON static_analysis_runs
+                FOR EACH ROW
+                BEGIN
+                  IF NEW.is_canonical = 1 THEN
+                    IF EXISTS (
+                      SELECT 1
+                      FROM static_analysis_runs
+                      WHERE session_label = NEW.session_label
+                        AND is_canonical = 1
+                        AND id <> NEW.id
+                    ) THEN
+                      SIGNAL SQLSTATE '45000'
+                        SET MESSAGE_TEXT = 'canonical constraint violated (session_label already has canonical)';
+                    END IF;
+                  END IF;
+                END;
+                """
+            )
+    except Exception:
+        return
 
 
 def _fetch_index_signatures(table: str) -> set[str]:
@@ -229,6 +341,77 @@ def _render_schema_bootstrap_summary(
 
     if not created_tables and not removed_tables and not column_additions and not column_removals and not index_additions and not index_removals:
         print("No schema changes detected.")
+    print()
+
+
+def _render_schema_bootstrap_verification() -> None:
+    print("Schema bootstrap verification")
+    print("-----------------------------")
+    try:
+        with database_session(reuse_connection=False) as engine:
+            if getattr(engine, "_dialect", "sqlite") == "mysql":
+                trigger_rows = engine.fetch_all(
+                    """
+                    SELECT TRIGGER_NAME, ACTION_TIMING, ACTION_STATEMENT
+                    FROM information_schema.TRIGGERS
+                    WHERE TRIGGER_SCHEMA = DATABASE()
+                      AND EVENT_OBJECT_TABLE = 'static_analysis_runs'
+                      AND TRIGGER_NAME IN ('trg_static_runs_canonical_insert', 'trg_static_runs_canonical_update')
+                    ORDER BY TRIGGER_NAME
+                    """
+                )
+            else:
+                trigger_rows = []
+    except Exception:
+        trigger_rows = []
+
+    if trigger_rows:
+        for row in trigger_rows:
+            name = str(row[0]) if row and row[0] is not None else "<unknown>"
+            timing = str(row[1]) if row and row[1] is not None else "?"
+            body = str(row[2]) if row and row[2] is not None else ""
+            has_signal = "SIGNAL" in body.upper()
+            print(f"Trigger {name}: timing={timing} signal={'yes' if has_signal else 'no'}")
+    else:
+        print("Trigger check: not available (non-mysql or no triggers found).")
+
+    try:
+        row = core_q.run_sql(
+            """
+            SELECT COUNT(*)
+            FROM (
+              SELECT session_label
+              FROM static_analysis_runs
+              WHERE is_canonical=1
+              GROUP BY session_label
+              HAVING COUNT(*) > 1
+            ) x
+            """,
+            fetch="one",
+        )
+        dup_count = int(row[0] or 0) if row else 0
+        print(f"Canonical duplicates: {dup_count}")
+    except Exception:
+        print("Canonical duplicates: <error>")
+
+    try:
+        columns = diagnostics.get_table_columns("static_string_summary") or []
+        run_id_present = "run_id" in columns
+        print(f"static_string_summary.run_id present: {'yes' if run_id_present else 'no'}")
+    except Exception:
+        print("static_string_summary.run_id present: <error>")
+
+    required_tables = [
+        "static_string_sample_sets",
+        "static_string_selected_samples",
+        "v_base002_candidates",
+        "v_provider_exposure",
+    ]
+    missing_tables = [name for name in required_tables if name not in (diagnostics.list_tables() or [])]
+    if missing_tables:
+        print(f"Required tables missing: {', '.join(missing_tables)}")
+    else:
+        print("Required tables present: yes")
     print()
 
 

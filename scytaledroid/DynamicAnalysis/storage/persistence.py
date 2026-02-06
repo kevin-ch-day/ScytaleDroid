@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from typing import Any
 
 from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core import db_queries as core_q
+from scytaledroid.Database.db_core.session import database_session
 from scytaledroid.Database.db_queries.dynamic import schema as dynamic_schema
 from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
 from scytaledroid.Database.db_utils.artifact_registry import record_artifacts
@@ -27,7 +29,8 @@ _LOGGER = logging_engine.get_dynamic_logger()
 def persist_dynamic_summary(
     config: DynamicSessionConfig, result: DynamicSessionResult, payload: dict[str, Any]
 ) -> None:
-    _require_dynamic_schema()
+    if not _require_dynamic_schema():
+        return
     dynamic_run_id = result.dynamic_run_id or payload.get("dynamic_run_id")
     if not dynamic_run_id:
         raise RuntimeError("dynamic_run_id missing; cannot persist dynamic session")
@@ -124,23 +127,36 @@ def persist_dynamic_summary(
 
     payload["static_run_id"] = session_row.get("static_run_id")
     payload["dynamic_run_id"] = dynamic_run_id
-    _register_manifest_artifacts(dynamic_run_id, result.evidence_path)
-    grade, reasons = _evaluate_grade(payload, pcap_meta)
-    session_row["grade"] = grade
-    session_row["grade_reasons_json"] = json.dumps(reasons) if reasons else None
+    try:
+        with database_session() as db:
+            with db.transaction():
+                _register_manifest_artifacts(dynamic_run_id, result.evidence_path)
+                grade, reasons = _evaluate_grade(payload, pcap_meta)
+                session_row["grade"] = grade
+                session_row["grade_reasons_json"] = json.dumps(reasons) if reasons else None
 
-    _insert_dynamic_session(session_row)
+                _insert_dynamic_session(session_row)
 
-    issues = _collect_issue_rows(dynamic_run_id, result, payload, plan_payload)
-    if issues:
-        _insert_dynamic_issues(issues)
+                issues = _collect_issue_rows(dynamic_run_id, result, payload, plan_payload)
+                if issues:
+                    _insert_dynamic_issues(issues)
 
-    _persist_telemetry(dynamic_run_id, payload, tier=config.tier)
+                _persist_telemetry(dynamic_run_id, payload, tier=config.tier)
+    except Exception as exc:  # noqa: BLE001
+        _LOGGER.warning(
+            "Dynamic persistence transaction failed",
+            extra={"dynamic_run_id": dynamic_run_id, "error": str(exc)},
+        )
+        raise
 
 
-def _require_dynamic_schema() -> None:
-    if not dynamic_schema.ensure_all():
+def _require_dynamic_schema() -> bool:
+    if dynamic_schema.ensure_all():
+        return True
+    if os.getenv("SCYTALEDROID_PAPER_GRADE", "1").strip().lower() in {"1", "true", "yes", "on"}:
         raise RuntimeError("DB schema is outdated; run migrations to use dynamic schema.")
+    _LOGGER.warning("Dynamic schema missing; persistence skipped (experimental mode).")
+    return False
 
 
 def _insert_dynamic_session(row: Mapping[str, Any]) -> None:

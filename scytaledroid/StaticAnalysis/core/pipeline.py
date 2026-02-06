@@ -222,6 +222,8 @@ def analyze_apk(
         raise StaticAnalysisError(f"Failed to open APK: {exc}") from exc
 
     report_metadata.setdefault("toolchain", _resolve_toolchain_versions())
+    report_metadata.setdefault("manifest_source", "androguard")
+    report_metadata.setdefault("manifest_semantics_source", "androguard")
 
     # Manifest & flags (best-effort)
     manifest_root = load_manifest_root(apk)  # internal code handles its own exceptions

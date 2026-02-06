@@ -88,6 +88,10 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
     )
     persistence_ready = os.getenv("SCYTALEDROID_PERSISTENCE_READY", "1").strip() != "0"
     if not persistence_ready and not params.dry_run:
+        if os.getenv("SCYTALEDROID_PAPER_GRADE", "1").strip().lower() in {"1", "true", "yes", "on"}:
+            raise RuntimeError(
+                "Static persistence gate failed; paper-grade runs require canonical schema readiness."
+            )
         log.warning(
             "Static persistence gate failed; running in exploratory mode (no static_run_id, no evidence writes).",
             category="static_analysis",

@@ -1122,6 +1122,33 @@ def persist_run_summary(
     if static_run_id and not dry_run:
         if persistence_failed:
             run_status = "FAILED"
+        if (
+            not persistence_failed
+            and session_stamp
+            and os.getenv("SCYTALEDROID_PAPER_GRADE", "1").strip().lower() in {"1", "true", "yes", "on"}
+        ):
+            try:
+                row = core_q.run_sql(
+                    """
+                    SELECT COUNT(*)
+                    FROM static_analysis_runs
+                    WHERE session_label=%s AND is_canonical=1
+                    """,
+                    (session_stamp,),
+                    fetch="one",
+                )
+                canonical_count = int(row[0] or 0) if row else 0
+            except Exception:
+                canonical_count = 0
+            if canonical_count != 1:
+                persistence_failed = True
+                run_status = "FAILED"
+                message = (
+                    "Canonical enforcement failed: expected exactly one canonical row "
+                    f"for session_label={session_stamp}, found {canonical_count}."
+                )
+                log.warning(message, category="static_analysis")
+                outcome.add_error(message)
         update_static_run_status(
             static_run_id=static_run_id,
             status=run_status,
@@ -1129,18 +1156,17 @@ def persist_run_summary(
             abort_reason=abort_reason,
             abort_signal=abort_signal,
         )
-        if not persistence_failed:
-            _write_static_run_manifest(static_run_id)
+        # Manifest publication is deferred until artifacts are registered.
 
     return outcome
 
 
-def _write_static_run_manifest(static_run_id: int) -> None:
-    _manifest_writer.write_static_run_manifest(static_run_id)
+def _write_static_run_manifest(static_run_id: int) -> bool:
+    return _manifest_writer.write_static_run_manifest(static_run_id)
 
 
-def refresh_static_run_manifest(static_run_id: int) -> None:
-    _manifest_writer.refresh_static_run_manifest(static_run_id)
+def refresh_static_run_manifest(static_run_id: int) -> bool:
+    return _manifest_writer.refresh_static_run_manifest(static_run_id)
 
 
 __all__ = [

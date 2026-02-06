@@ -25,9 +25,9 @@ def render_run_start(
 ) -> None:
     target_label = "Target"
     if target and not target.startswith("Profile:") and target != "All apps":
-        target_label = "App"
+        target_label = "Target App"
 
-    header_pairs = [("Scan Type", "Static Analysis")]
+    header_pairs = []
     if modules:
         header_pairs.append(("Detectors", ", ".join(modules)))
 
@@ -36,11 +36,12 @@ def render_run_start(
     if target_label == "App" and " (" in target and target.endswith(")"):
         app_name, package_name = target.rsplit(" (", 1)
         package_name = package_name.rstrip(")")
-    app_pairs = [
-        (target_label, app_name),
-    ]
+    app_value = app_name
     if package_name:
-        app_pairs.append(("Package", package_name))
+        app_value = f"{app_name} ({package_name})"
+    app_pairs = [
+        (target_label, app_value),
+    ]
     app_pairs.extend(
         [
             ("Profile", profile_label),

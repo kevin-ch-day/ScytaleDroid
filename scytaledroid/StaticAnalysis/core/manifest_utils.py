@@ -109,7 +109,12 @@ def collect_exported_components(manifest_root: ElementTree.Element) -> Component
     )
 
 
-def build_manifest_evidence(manifest_root: ElementTree.Element) -> list[dict[str, object]]:
+def build_manifest_evidence(
+    manifest_root: ElementTree.Element,
+    *,
+    source_manifest: str = "androguard",
+    source_semantics: str = "androguard",
+) -> list[dict[str, object]]:
     """Return explicit vs effective export evidence for manifest components."""
 
     application = manifest_root.find("application")
@@ -163,6 +168,8 @@ def build_manifest_evidence(manifest_root: ElementTree.Element) -> list[dict[str
             "exported_explicit_state": exported_state,
             "exported_effective": exported_effective,
             "export_reason": export_reason,
+            "source_manifest": source_manifest,
+            "source_semantics": source_semantics,
             "permission": coerce_optional_str(element.get(f"{_ANDROID_NS}permission")),
             "process": coerce_optional_str(element.get(f"{_ANDROID_NS}process")),
             "target_sdk": target_sdk,

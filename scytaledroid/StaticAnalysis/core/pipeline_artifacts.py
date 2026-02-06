@@ -210,13 +210,28 @@ def build_reproducibility_bundle(
 ) -> Mapping[str, object]:
     """Construct a reproducibility bundle based on the detector context."""
 
+    manifest_source = "androguard"
+    semantics_source = "androguard"
+    meta = context.metadata or {}
+    if isinstance(meta, Mapping):
+        manifest_source = str(meta.get("manifest_source") or manifest_source)
+        semantics_source = str(meta.get("manifest_semantics_source") or semantics_source)
+
     bundle: dict[str, object] = {
         "manifest": context.manifest_summary.to_dict(),
         "manifest_flags": context.manifest_flags.to_dict(),
         "permissions": context.permissions.to_dict(),
         "components": context.components.to_dict(),
         "exported_components": context.exported_components.to_dict(),
-        "manifest_evidence": {"components": build_manifest_evidence(context.manifest_root)},
+        "manifest_evidence": {
+            "source_manifest": manifest_source,
+            "source_semantics": semantics_source,
+            "components": build_manifest_evidence(
+                context.manifest_root,
+                source_manifest=manifest_source,
+                source_semantics=semantics_source,
+            ),
+        },
         "hashes": dict(context.hashes),
         "features": list(context.features),
         "libraries": list(context.libraries),

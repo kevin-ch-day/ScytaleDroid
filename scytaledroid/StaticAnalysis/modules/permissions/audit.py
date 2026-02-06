@@ -9,6 +9,7 @@ before changing any weighting configuration.
 from __future__ import annotations
 
 import hashlib
+from datetime import datetime
 import json
 import math
 import os
@@ -667,7 +668,6 @@ class PermissionAuditAccumulator:
         """
         try:
             from scytaledroid.Database.db_core import database_session
-            from scytaledroid.Database.db_core import db_queries as core_q
 
             inventory = snapshot_payload.get("inventory", {}) if isinstance(snapshot_payload, dict) else {}
             apps_total = int(inventory.get("apps_in_scope") or self.total_groups or 0)
@@ -829,6 +829,24 @@ class PermissionAuditAccumulator:
                                 """,
                                 (relpath, sha256, sid),
                             )
+                            if static_run_id_local is not None:
+                                record_artifacts(
+                                    run_id=str(static_run_id_local),
+                                    run_type="static",
+                                    artifacts=[
+                                        {
+                                            "path": str(snap_path),
+                                            "type": "permission_audit_snapshot",
+                                            "sha256": sha256,
+                                            "size_bytes": snap_path.stat().st_size,
+                                            "created_at_utc": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+                                            "origin": "host",
+                                            "pull_status": "n/a",
+                                        }
+                                    ],
+                                    origin="host",
+                                    pull_status="n/a",
+                                )
                     except Exception:
                         log.warning(
                             "Failed to update permission audit snapshot evidence metadata",

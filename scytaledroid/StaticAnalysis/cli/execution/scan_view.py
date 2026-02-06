@@ -20,10 +20,11 @@ def render_app_start(
     if not (title or package_name):
         return
     print()
-    print(f"Scanning App: {title or package_name}")
-    print(f"Package: {package_name}")
+    display = title or package_name
+    if title and package_name and title != package_name:
+        display = f"{title} ({package_name})"
+    print(f"Scanning App: {display}")
     print(f"Checks: {len(PIPELINE_STAGES)} stages · Profile: {profile_label}")
-    print("Status: running")
 
 
 def render_resource_warnings(lines: Sequence[str]) -> None:

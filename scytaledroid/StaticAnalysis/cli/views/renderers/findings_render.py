@@ -120,7 +120,10 @@ def baseline_findings(
     return findings, totals
 
 
-def finding_lines(findings: Sequence[BaselineFinding]) -> list[str]:
+def finding_lines(
+    findings: Sequence[BaselineFinding],
+    totals: Counter[str] | None = None,
+) -> list[str]:
     lines = ["Findings (baseline)"]
     if not findings:
         lines.append("  (none)")

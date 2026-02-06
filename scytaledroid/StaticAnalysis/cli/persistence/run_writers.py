@@ -259,7 +259,7 @@ def create_static_run_ledger(
     analysis_version: str | None = None,
     catalog_versions: str | None = None,
     study_tag: str | None = None,
-) -> tuple[int | None, int | None]:
+) -> int | None:
     app_version_id = _ensure_app_version(
         package_for_run=package_name,
         display_name=display_name,
@@ -269,7 +269,7 @@ def create_static_run_ledger(
         target_sdk=target_sdk,
     )
     if app_version_id is None:
-        return None, None
+        return None
     static_run_id = _create_static_run(
         app_version_id=app_version_id,
         session_stamp=session_stamp,
@@ -303,7 +303,7 @@ def create_static_run_ledger(
         study_tag=study_tag,
     )
     if static_run_id is None:
-        return None, None
+        return None
     if canonical_reason:
         _maybe_set_canonical_static_run(
             static_run_id=static_run_id,
@@ -321,7 +321,7 @@ def create_static_run_ledger(
         )
     except Exception:
         run_id = None
-    return (int(run_id) if run_id else None, static_run_id)
+    return static_run_id
 
 
 def _update_static_run_metadata(
@@ -335,6 +335,10 @@ def _update_static_run_metadata(
     base_apk_sha256: str | None,
     sha256: str | None,
     config_hash: str | None,
+    pipeline_version: str | None = None,
+    analysis_version: str | None = None,
+    catalog_versions: str | None = None,
+    study_tag: str | None = None,
 ) -> None:
     try:
         run_sql_write(
@@ -347,7 +351,11 @@ def _update_static_run_metadata(
                 artifact_set_hash=%s,
                 base_apk_sha256=%s,
                 sha256=%s,
-                config_hash=%s
+                config_hash=%s,
+                pipeline_version=%s,
+                analysis_version=%s,
+                catalog_versions=%s,
+                study_tag=%s
             WHERE id=%s
             """,
             (
@@ -359,6 +367,10 @@ def _update_static_run_metadata(
                 base_apk_sha256,
                 sha256,
                 config_hash,
+                pipeline_version,
+                analysis_version,
+                catalog_versions,
+                study_tag,
                 static_run_id,
             ),
         )
@@ -394,11 +406,27 @@ def _maybe_set_canonical_static_run(
             """,
             (now, canonical_reason, static_run_id),
         )
+        row = core_q.run_sql(
+            """
+            SELECT COUNT(*)
+            FROM static_analysis_runs
+            WHERE session_label=%s AND is_canonical=1
+            """,
+            (session_label,),
+            fetch="one",
+        )
+        canonical_count = int(row[0] or 0) if row else 0
+        if canonical_count != 1:
+            raise RuntimeError(
+                "canonical enforcement failed "
+                f"(session_label={session_label}, count={canonical_count})"
+            )
     except Exception as exc:
         log.warning(
             f"Failed to set canonical static run {static_run_id}: {exc}",
             category="static_analysis",
         )
+        raise
 
 
 def update_static_run_status(

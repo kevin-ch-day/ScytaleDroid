@@ -10,6 +10,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
+from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_utils.artifact_registry import record_artifacts
 from scytaledroid.Utils.DisplayUtils import (
     prompt_utils,
@@ -168,12 +169,15 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
         session_note = f"Session: {session_label}"
         canonical_id = session_meta.get("canonical")
         latest_id = session_meta.get("latest")
+        attempts = session_meta.get("attempts")
         if canonical_id or latest_id:
             parts: list[str] = []
             if canonical_id:
                 parts.append(f"canonical: {canonical_id}")
             if latest_id:
                 parts.append(f"latest: {latest_id}")
+            if attempts is not None:
+                parts.append(f"attempts: {attempts}")
             session_note += f" ({', '.join(parts)})"
         subtitle_parts.append(session_note)
     subtitle = " • ".join(subtitle_parts)
@@ -584,6 +588,12 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             artifacts: list[dict[str, object]] = []
             now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
             manifest_evidence_path = None
+            paper_grade = os.getenv("SCYTALEDROID_PAPER_GRADE", "1").strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
             try:
                 metadata_map = base_report.metadata if isinstance(base_report.metadata, Mapping) else {}
                 repro_bundle = (
@@ -616,6 +626,19 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                     )
             except Exception:
                 manifest_evidence_path = None
+            report_path = None
+            if base_artifact and base_artifact.saved_path:
+                report_path = Path(base_artifact.saved_path)
+            missing_required: list[str] = []
+            if paper_grade:
+                if not saved_path or not saved_path.exists():
+                    missing_required.append("static_baseline_json")
+                if not dynamic_plan_path or not dynamic_plan_path.exists():
+                    missing_required.append("static_dynamic_plan_json")
+                if not report_path or not report_path.exists():
+                    missing_required.append("static_report")
+                if not manifest_evidence_path or not manifest_evidence_path.exists():
+                    missing_required.append("manifest_evidence")
             for path, artifact_type in (
                 (saved_path, "static_baseline_json"),
                 (dynamic_plan_path, "static_dynamic_plan_json"),
@@ -653,24 +676,22 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                     )
                 except Exception:
                     pass
-            if base_artifact and base_artifact.saved_path:
-                report_path = Path(base_artifact.saved_path)
-                if report_path.exists():
-                    try:
-                        digest = hashlib.sha256(report_path.read_bytes()).hexdigest()
-                        artifacts.append(
-                            {
-                                "path": str(report_path),
-                                "type": "static_report",
-                                "sha256": digest,
-                                "size_bytes": report_path.stat().st_size,
-                                "created_at_utc": now,
-                                "origin": "host",
-                                "pull_status": "n/a",
-                            }
-                        )
-                    except Exception:
-                        pass
+            if report_path and report_path.exists():
+                try:
+                    digest = hashlib.sha256(report_path.read_bytes()).hexdigest()
+                    artifacts.append(
+                        {
+                            "path": str(report_path),
+                            "type": "static_report",
+                            "sha256": digest,
+                            "size_bytes": report_path.stat().st_size,
+                            "created_at_utc": now,
+                            "origin": "host",
+                            "pull_status": "n/a",
+                        }
+                    )
+                except Exception:
+                    pass
             if artifacts:
                 record_artifacts(
                     run_id=str(app_result.static_run_id),
@@ -679,7 +700,53 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                     origin="host",
                     pull_status="n/a",
                 )
-                refresh_static_run_manifest(app_result.static_run_id)
+            if paper_grade:
+                try:
+                    rows = core_q.run_sql(
+                        """
+                        SELECT DISTINCT artifact_type
+                        FROM artifact_registry
+                        WHERE run_id=%s AND run_type='static'
+                        """,
+                        (str(app_result.static_run_id),),
+                        fetch="all",
+                    )
+                    registry_types = {str(row[0]) for row in rows or [] if row and row[0]}
+                except Exception:
+                    registry_types = set()
+                if "dep_snapshot" not in registry_types:
+                    missing_required.append("dep_snapshot")
+                if "permission_audit_snapshot" not in registry_types:
+                    missing_required.append("permission_audit_snapshot")
+                if missing_required:
+                    warning = (
+                        f"Paper-grade artifacts missing for static_run_id={app_result.static_run_id}: "
+                        + ", ".join(missing_required)
+                    )
+                    print(status_messages.status(warning, level="warn"))
+                    persistence_errors.append(warning)
+                    finalize_static_run(
+                        static_run_id=app_result.static_run_id,
+                        status="FAILED",
+                        ended_at_utc=ended_at_utc,
+                        abort_reason="missing_required_artifacts",
+                        abort_signal=abort_signal,
+                    )
+                    continue
+                manifest_ok = refresh_static_run_manifest(app_result.static_run_id)
+                if not manifest_ok:
+                    warning = (
+                        f"Failed to publish run_manifest.json for static_run_id={app_result.static_run_id}"
+                    )
+                    print(status_messages.status(warning, level="warn"))
+                    persistence_errors.append(warning)
+                    finalize_static_run(
+                        static_run_id=app_result.static_run_id,
+                        status="FAILED",
+                        ended_at_utc=ended_at_utc,
+                        abort_reason="manifest_write_failed",
+                        abort_signal=abort_signal,
+                    )
 
         if report_reference:
             report_reference_count += 1
@@ -690,6 +757,7 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
         canonical_change = params.canonical_action in {"replace", "first_run"}
         if (
             canonical_change
+            and not persistence_errors
             and params.session_label
             and len(outcome.results) == 1
             and (saved_path or dynamic_plan_path)
@@ -972,6 +1040,10 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             )
         if params.verbose_output and len(outcome.results) <= 5:
             _interactive_detail_loop(outcome, params)
+
+    if persistence_errors and not params.dry_run:
+        if not any("persistence" in str(item).lower() for item in outcome.failures):
+            outcome.failures.append("persistence_failed")
 
     if outcome.aborted:
         completed = outcome.completed_artifacts

@@ -1135,7 +1135,7 @@ def render_app_result(
     lines.extend(_string_lines(string_payload))
 
     lines.append("")
-    lines.extend(_finding_lines(findings, finding_totals))
+    lines.extend(_finding_lines(findings))
 
     analytics_lines = _analytics_summary_lines(report)
     if analytics_lines:

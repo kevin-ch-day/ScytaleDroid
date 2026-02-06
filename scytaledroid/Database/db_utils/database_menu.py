@@ -23,19 +23,19 @@ def database_menu() -> None:
 
     actions: dict[str, Callable[[], None]] = {
         "1": apply_canonical_schema_bootstrap,
-        "2": ensure_dynamic_tier_migrations,
-        "3": show_connection_and_config,
-        "4": health_checks.run_health_summary,
-        "5": health_checks.run_evidence_integrity_check,
+        "2": health_checks.run_health_summary,
+        "3": health_checks.run_evidence_integrity_check,
+        "4": show_connection_and_config,
+        "5": ensure_dynamic_tier_migrations,
         "6": health_checks.prompt_reset_static_data,
     }
 
     options: list[MenuOption] = [
-        MenuOption("1", "Initialize/repair canonical schema (static + registry + ML)"),
-        MenuOption("2", "Apply Tier-1 migrations (dynamic + ML)"),
-        MenuOption("3", "Connection & config"),
-        MenuOption("4", "Health summary"),
-        MenuOption("5", "Evidence integrity check"),
+        MenuOption("1", "Apply canonical schema updates (required for paper-grade)"),
+        MenuOption("2", "Health summary (paper-grade readiness)"),
+        MenuOption("3", "Evidence integrity check (required artifacts)"),
+        MenuOption("4", "Connection & config (diagnostic)"),
+        MenuOption("5", "Tier-1 migrations (dynamic/ML; optional)"),
         MenuOption("6", "Reset static analysis data (destructive)"),
     ]
 
@@ -47,12 +47,12 @@ def database_menu() -> None:
         menu_utils.print_header("Database Tools")
         if schema_ver != expected_schema and schema_ver != "<unknown>":
             print(f"Schema: {schema_ver} (Tier-1 expects {expected_schema}) [OUTDATED]")
-            print("Tip: Run option (2) Apply canonical schema bootstrap")
+            print("Tip: Run option (1) Apply canonical schema updates")
         else:
             print(f"Schema: {schema_ver}")
         print()
 
-        menu_utils.print_section("Research / Tier-1")
+        menu_utils.print_section("Paper-Grade Readiness")
         menu_utils.render_menu(
             MenuSpec(
                 items=options,

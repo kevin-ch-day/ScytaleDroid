@@ -49,7 +49,28 @@ def _permission_audit_present(run_id: int) -> bool:
         return False
 
 
-def write_static_run_manifest(static_run_id: int) -> None:
+_REQUIRED_PAPER_ARTIFACTS: tuple[str, ...] = (
+    "static_baseline_json",
+    "static_dynamic_plan_json",
+    "static_report",
+    "manifest_evidence",
+    "dep_snapshot",
+    "permission_audit_snapshot",
+)
+
+
+def _missing_required_artifacts(
+    *,
+    grade: str,
+    registry_rows: Sequence[Sequence[object]] | None,
+) -> list[str]:
+    if grade != "PAPER_GRADE":
+        return []
+    present = {str(row[0]) for row in registry_rows or [] if row and row[0]}
+    return [artifact for artifact in _REQUIRED_PAPER_ARTIFACTS if artifact not in present]
+
+
+def write_static_run_manifest(static_run_id: int) -> bool:
     try:
         row = core_q.run_sql(
             """
@@ -78,9 +99,9 @@ def write_static_run_manifest(static_run_id: int) -> None:
         )
     except Exception as exc:
         log.warning(f"Failed to read static run for manifest: {exc}", category="static_analysis")
-        return
+        return False
     if not row:
-        return
+        return False
     (
         run_id,
         run_started_utc,
@@ -187,6 +208,16 @@ def write_static_run_manifest(static_run_id: int) -> None:
         )
     except Exception:
         registry_rows = []
+    missing_required = _missing_required_artifacts(grade=grade, registry_rows=registry_rows)
+    if missing_required:
+        log.warning(
+            (
+                "Required artifacts missing for paper-grade manifest; "
+                f"static_run_id={static_run_id} missing={missing_required}"
+            ),
+            category="static_analysis",
+        )
+        return False
     seen_keys: set[tuple[str, str]] = set()
     for artifact in manifest.get("artifacts", []):
         key = (str(artifact.get("type")), str(artifact.get("path")))
@@ -231,10 +262,11 @@ def write_static_run_manifest(static_run_id: int) -> None:
         origin="host",
         pull_status="n/a",
     )
+    return True
 
 
-def refresh_static_run_manifest(static_run_id: int) -> None:
-    write_static_run_manifest(static_run_id)
+def refresh_static_run_manifest(static_run_id: int) -> bool:
+    return write_static_run_manifest(static_run_id)
 
 
 __all__ = ["write_static_run_manifest", "refresh_static_run_manifest"]

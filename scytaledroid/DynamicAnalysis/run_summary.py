@@ -6,14 +6,13 @@ import json
 from pathlib import Path
 
 from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_evidence_path
-from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
+from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
 
 
 def print_run_summary(result, duration_label: str) -> None:
     status = result.status or "unknown"
     duration_seconds = result.elapsed_seconds or result.duration_seconds
     print()
-    menu_utils.print_header("Dynamic run summary")
     lines = [
         ("Package", result.package_name or "unknown"),
         ("Run ID", result.dynamic_run_id or "unknown"),

@@ -6,6 +6,7 @@ from collections.abc import Mapping, MutableMapping
 import json
 
 from scytaledroid.Database.db_func.static_analysis import string_analysis as _sa
+from scytaledroid.Database.db_core.session import database_session
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .utils import require_canonical_schema
@@ -62,43 +63,45 @@ def persist_string_summary(
                 "static_run_id missing for string persistence; "
                 "run migrations or regenerate static outputs."
             )
-        summary_record = _sa.StringSummaryRecord(
-            package_name=package_name,
-            session_stamp=session_stamp,
-            scope_label=scope_label,
-            static_run_id=static_run_id,
-            counts=counts,
-        )
-        summary_id = _sa.upsert_summary(summary_record)
-        if summary_id is None:
-            raise RuntimeError(
-                f"upsert_summary returned None "
-                f"(package={package_name}, session={session_stamp}, scope={scope_label}, "
-                f"static_run_id={static_run_id})"
-            )
-        _sa.replace_samples_full(
-            summary_id,
-            samples,
-            static_run_id=static_run_id,
-        )
-        _sa.replace_selected_samples(
-            summary_id,
-            selected_samples or samples,
-            static_run_id=static_run_id,
-        )
-        if selection_params is not None:
-            params_payload = selection_params
-            if not isinstance(selection_params, str):
-                try:
-                    params_payload = json.dumps(selection_params, sort_keys=True)
-                except Exception:
-                    params_payload = str(selection_params)
-            _sa.upsert_sample_set(
-                summary_id,
-                selection_params=params_payload if isinstance(params_payload, str) else str(params_payload),
-                selection_version=str(selection_params.get("selection_version")) if isinstance(selection_params, Mapping) else None,
-                static_run_id=static_run_id,
-            )
+        with database_session() as db:
+            with db.transaction():
+                summary_record = _sa.StringSummaryRecord(
+                    package_name=package_name,
+                    session_stamp=session_stamp,
+                    scope_label=scope_label,
+                    static_run_id=static_run_id,
+                    counts=counts,
+                )
+                summary_id = _sa.upsert_summary(summary_record)
+                if summary_id is None:
+                    raise RuntimeError(
+                        f"upsert_summary returned None "
+                        f"(package={package_name}, session={session_stamp}, scope={scope_label}, "
+                        f"static_run_id={static_run_id})"
+                    )
+                _sa.replace_samples_full(
+                    summary_id,
+                    samples,
+                    static_run_id=static_run_id,
+                )
+                _sa.replace_selected_samples(
+                    summary_id,
+                    selected_samples or samples,
+                    static_run_id=static_run_id,
+                )
+                if selection_params is not None:
+                    params_payload = selection_params
+                    if not isinstance(selection_params, str):
+                        try:
+                            params_payload = json.dumps(selection_params, sort_keys=True)
+                        except Exception:
+                            params_payload = str(selection_params)
+                    _sa.upsert_sample_set(
+                        summary_id,
+                        selection_params=params_payload if isinstance(params_payload, str) else str(params_payload),
+                        selection_version=str(selection_params.get("selection_version")) if isinstance(selection_params, Mapping) else None,
+                        static_run_id=static_run_id,
+                    )
     except Exception as exc:  # pragma: no cover - defensive
         message = (
             f"Failed to persist string analysis summary for {package_name}: {exc}"

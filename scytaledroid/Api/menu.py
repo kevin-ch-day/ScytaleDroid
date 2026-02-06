@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
+from scytaledroid.ui import formatter
 
 from .runtime import api_status, start_api_server, stop_api_server
 
@@ -14,15 +15,16 @@ def api_menu() -> None:
         status = api_status()
         print()
         menu_utils.print_header("API Server")
-        status_messages.print_strip(
-            "Status",
-            [
-                ("State", status.status),
-                ("Host", status.host),
-                ("Port", str(status.port)),
-                ("Detail", status.detail or "-"),
-            ],
-            width=70,
+        print(
+            formatter.format_kv_block(
+                "Status",
+                {
+                    "State": status.status,
+                    "Host": status.host,
+                    "Port": str(status.port),
+                    "Detail": status.detail or "-",
+                },
+            )
         )
 
         print()
