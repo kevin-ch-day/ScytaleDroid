@@ -178,7 +178,7 @@ def export_dep_json(static_run_id: int) -> str | None:
     }
 
     dep_path = evidence_dir / "dep.json"
-    dep_path.write_text(json.dumps(dep_payload, indent=2, sort_keys=True))
+    dep_path.write_text(json.dumps(dep_payload, indent=2, sort_keys=True, default=str))
     record_artifacts(
         run_id=str(static_run_id),
         run_type="static",
@@ -212,7 +212,7 @@ def _update_static_manifest(
         manifest["package_name"] = manifest.get("package_name") or package_name
         manifest["tool_semver"] = manifest.get("tool_semver") or app_config.APP_VERSION
         manifest["tool_git_commit"] = manifest.get("tool_git_commit") or get_git_commit()
-        manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True))
+        manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True, default=str))
 
 
 def _artifact_entry(path: Path, *, artifact_type: str) -> Mapping[str, Any]:

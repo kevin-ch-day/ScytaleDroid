@@ -93,7 +93,7 @@ def persist_string_summary(
                     params_payload = selection_params
                     if not isinstance(selection_params, str):
                         try:
-                            params_payload = json.dumps(selection_params, sort_keys=True)
+                            params_payload = json.dumps(selection_params, sort_keys=True, default=str)
                         except Exception:
                             params_payload = str(selection_params)
                     _sa.upsert_sample_set(

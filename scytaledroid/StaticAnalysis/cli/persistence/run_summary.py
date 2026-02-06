@@ -976,7 +976,7 @@ def persist_run_summary(
                                 (
                                     f"Dry-run persistence payload for {run_package}: "
                                     f"findings={total_findings} "
-                                    f"sample={json.dumps(sample_view, ensure_ascii=False)}"
+                                    f"sample={json.dumps(sample_view, ensure_ascii=False, default=str)}"
                                 ),
                                 category="static_analysis",
                             )
@@ -1097,7 +1097,7 @@ def persist_run_summary(
                 (
                     f"Dry-run persistence payload for {run_package}: "
                     f"findings={total_findings} "
-                    f"sample={json.dumps(sample_view, ensure_ascii=False)}"
+                    f"sample={json.dumps(sample_view, ensure_ascii=False, default=str)}"
                 ),
                 category="static_analysis",
             )

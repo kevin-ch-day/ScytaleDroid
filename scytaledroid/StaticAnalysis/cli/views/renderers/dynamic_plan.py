@@ -102,7 +102,7 @@ def write_baseline_json(
     filename = f"{safe_package}-{safe_profile}-{safe_scope}-{timestamp}.json"
     path = base_dir / filename
     with path.open("w", encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=2, sort_keys=True)
+        json.dump(payload, handle, indent=2, sort_keys=True, default=str)
     return path
 
 
@@ -267,7 +267,7 @@ def write_dynamic_plan_json(
     filename = f"{safe_package}-{safe_profile}-{safe_scope}{run_segment}-{timestamp}.json"
     path = base_dir / filename
     with path.open("w", encoding="utf-8") as handle:
-        json.dump(plan, handle, indent=2, sort_keys=True)
+        json.dump(plan, handle, indent=2, sort_keys=True, default=str)
     return path
 
 

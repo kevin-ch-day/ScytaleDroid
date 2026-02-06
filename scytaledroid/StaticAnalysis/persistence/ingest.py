@@ -47,7 +47,7 @@ def _serialise_json(value: object) -> str | None:
     if value is None:
         return None
     try:
-        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
     except (TypeError, ValueError):
         return None
 

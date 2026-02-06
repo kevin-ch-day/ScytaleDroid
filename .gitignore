@@ -41,6 +41,7 @@ data/audit/
 data/sessions/
 data/
 data/db/scytaledroid.sqlite
+evidence/
 scripts/db/**
 !scripts/db/
 !scripts/db/*.sql

@@ -673,7 +673,7 @@ class PermissionAuditAccumulator:
 
             inventory = snapshot_payload.get("inventory", {}) if isinstance(snapshot_payload, dict) else {}
             apps_total = int(inventory.get("apps_in_scope") or self.total_groups or 0)
-            meta_str = json.dumps(snapshot_payload)
+            meta_str = json.dumps(snapshot_payload, default=str)
             run_id = snapshot_payload.get("run_id") if isinstance(snapshot_payload, dict) else None
             static_run_id = snapshot_payload.get("static_run_id") if isinstance(snapshot_payload, dict) else None
             session_stamp = (
@@ -915,7 +915,7 @@ class PermissionAuditAccumulator:
                         "contributions": dict(app.contributions or {}),
                         "combos": list(app.combos or ()),
                     }
-                    details = json.dumps(details_obj)
+                    details = json.dumps(details_obj, default=str)
 
                     # Explicit column order to avoid misalignment/truncation errors.
                     # Column order must match permission_audit_apps schema:

@@ -525,32 +525,10 @@ def _resolve_unique_session_stamp(session_stamp: str) -> tuple[str, str, str]:
         canonical_text = f" (canonical: static_run_id={canonical_id})" if canonical_id else ""
         print(f"Existing attempts: {attempts}{canonical_text}")
     print()
-    print("Action options:")
-    print("  [1] Replace today's run        (overwrite local artifacts, DB history preserved)")
-    print("  [2] Append as another attempt  (keep prior attempts, new suffix)")
-    print("  [0] Cancel")
-    choice = prompt_utils.get_choice(
-        ["1", "2", "0"],
-        default=None,
-        casefold=False,
-        prompt="Choice: ",
+    confirm = prompt_utils.prompt_yes_no(
+        f"Replace today's run and overwrite local output artifacts for {base_stamp}?",
+        default=True,
     )
-    if choice == "0":
-        raise RuntimeError(
-            f"Session label already used: {base_stamp}. Choose a new label to avoid run_map collisions."
-        )
-    if choice == "2":
-        counter = 1
-        while True:
-            candidate = f"{base_stamp}-{counter:02d}"
-            candidate_path = session_dir / candidate / "run_map.json"
-            if not candidate_path.exists():
-                return candidate, base_stamp, "append"
-            counter += 1
-    print("You selected: Replace today's run")
-    print(f"This will overwrite local output artifacts for {base_stamp}.")
-    print("Database history will be preserved.")
-    confirm = prompt_utils.prompt_yes_no("Continue?", default=False)
     if not confirm:
         raise RuntimeError(
             f"Session label already used: {base_stamp}. Choose a new label to avoid run_map collisions."

@@ -67,7 +67,7 @@ def persist_signal_observations(
                         "rationale": rationale,
                     }
                     signal_file.write_text(
-                        json.dumps(signal_payload, ensure_ascii=True, indent=2),
+                        json.dumps(signal_payload, ensure_ascii=True, indent=2, default=str),
                         encoding="utf-8",
                     )
                     evidence_path = str(
@@ -90,7 +90,7 @@ def persist_signal_observations(
             "signal_key": signal_key,
             "severity_band": severity,
             "score": score,
-            "trigger_permissions_json": json.dumps(trigger_permissions or perms),
+            "trigger_permissions_json": json.dumps(trigger_permissions or perms, default=str),
             "primary_permission": primary,
             "rationale": rationale,
             "evidence_path": evidence_path,

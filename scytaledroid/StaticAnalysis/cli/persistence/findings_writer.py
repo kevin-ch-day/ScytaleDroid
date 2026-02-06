@@ -330,8 +330,8 @@ def persist_masvs_controls(run_id: int, package: str, coverage: Mapping[str, Any
                 payload_map = dict(entry)
             else:
                 continue
-            evidence = json.dumps(payload_map.get("evidence") or [], ensure_ascii=False)
-            rubric = json.dumps(payload_map.get("rubric") or {}, ensure_ascii=False)
+            evidence = json.dumps(payload_map.get("evidence") or [], ensure_ascii=False, default=str)
+            rubric = json.dumps(payload_map.get("rubric") or {}, ensure_ascii=False, default=str)
             core_q.run_sql(
                 """
                 INSERT INTO masvs_control_coverage (run_id, package, control_id, status, evidence, rubric)

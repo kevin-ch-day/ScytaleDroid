@@ -57,7 +57,7 @@ def save_report(report: StaticAnalysisReport) -> SavedReportPaths:
     payload["view"] = view_payload
     try:
         with path.open("w", encoding="utf-8") as handle:
-            json.dump(payload, handle, indent=2, sort_keys=True)
+            json.dump(payload, handle, indent=2, sort_keys=True, default=str)
     except OSError as exc:  # pragma: no cover - filesystem errors
         raise ReportStorageError(f"Unable to write report to {path}: {exc}") from exc
 

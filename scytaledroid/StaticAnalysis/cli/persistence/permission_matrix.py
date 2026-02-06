@@ -88,7 +88,7 @@ def persist_permission_matrix(
                 else:
                     flag_map["protection_levels"] = protection_levels
 
-            flags = json.dumps(flag_map) if flag_map else None
+            flags = json.dumps(flag_map, default=str) if flag_map else None
 
             severity = profile.get("severity") if isinstance(profile, Mapping) else 0
             try:

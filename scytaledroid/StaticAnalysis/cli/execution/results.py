@@ -507,6 +507,17 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             except Exception as exc:
                 warning = f"Failed to persist run summary for {app_result.package_name}: {exc}"
                 print(status_messages.status(warning, level="warn"))
+                logging_engine.get_error_logger().exception(
+                    "Run summary persistence failed",
+                    extra=logging_engine.ensure_trace(
+                        {
+                            "event": "static.persist_run_summary_failed",
+                            "package": app_result.package_name,
+                            "session_stamp": params.session_stamp,
+                            "static_run_id": app_result.static_run_id,
+                        }
+                    ),
+                )
                 persistence_errors.append(str(exc))
                 if app_result.static_run_id and persist_enabled:
                     fail_status = "ABORTED" if outcome.aborted else "FAILED"
@@ -665,7 +676,7 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                         "components": components,
                     }
                     manifest_evidence_path.write_text(
-                        json.dumps(manifest_payload, indent=2, sort_keys=True)
+                        json.dumps(manifest_payload, indent=2, sort_keys=True, default=str)
                     )
             except Exception:
                 manifest_evidence_path = None
@@ -1013,14 +1024,15 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                 print("\nTop warnings/anomalies")
                 for line in grouped_warnings[:5]:
                     print(status_messages.status(line, level="warn"))
+            actionable: list[str] = []
+            pipeline_version = os.getenv("SCYTALEDROID_PIPELINE_VERSION") or getattr(
+                params, "analysis_version", None
+            )
             guard_ok, guard_detail = _schema_guard_status()
             guard_label = f"Schema guard: {'OK' if guard_ok else 'FAIL'}"
             if guard_detail:
                 guard_label += f" ({guard_detail})"
             print("\n" + guard_label)
-            pipeline_version = os.getenv("SCYTALEDROID_PIPELINE_VERSION") or getattr(
-                params, "analysis_version", None
-            )
             identity_ok = all(app.identity_valid for app in outcome.results)
             linkage_ok = all(state.startswith("VALID") for state in linkage_states) if linkage_states else False
             print("\nDYNAMIC-READY CHECKS (diagnostic)")
@@ -1028,6 +1040,7 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             print(f"{'OK' if linkage_ok else 'FAIL'} linkage resolvable (run_map/session links)")
             if not linkage_ok:
                 print("    Fix: ensure run_map.json is written or static_session_run_links rows exist.")
+                actionable.append("Ensure run_map.json is written or session links exist (rerun Full analysis once).")
             print(f"{'OK' if identity_ok else 'FAIL'} identity valid (artifact_set_hash computed)")
             ready = pipeline_version and linkage_ok and identity_ok
             print(f"Result: {'READY' if ready else 'NOT READY'}")
@@ -1036,6 +1049,57 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             print("\nPLAN PROVENANCE (preview)")
             for line in _plan_provenance_lines(run_id_states, run_signature_ok, artifact_set_ok):
                 print(line)
+            if not pipeline_version:
+                actionable.append("Set SCYTALEDROID_PIPELINE_VERSION (or analysis_version) to enable linkage checks.")
+            if not identity_ok:
+                actionable.append("Identity invalid: verify artifact_set_hash/run_signature generation and rerun.")
+            if run_id_states and not all(run_id_states):
+                actionable.append("Run a persisting scan to establish static_run_id for plan provenance.")
+            if grouped_warnings:
+                if any("run_map" in line or "static_run_id/pipeline_version" in line for line in grouped_warnings):
+                    actionable.append("Rebuild run_map.json (missing static_run_id/pipeline_version).")
+            if actionable:
+                print("\nActionable fixes")
+                for item in actionable[:5]:
+                    print(f"  - {item}")
+            if session_stamp:
+                try:
+                    report_dir = Path("evidence") / "diagnostics"
+                    report_dir.mkdir(parents=True, exist_ok=True)
+                    report_path = report_dir / f"{session_stamp}.json"
+                    report_payload = {
+                        "session": session_stamp,
+                        "package_count": len(outcome.results),
+                        "schema_guard_ok": guard_ok,
+                        "schema_guard_detail": guard_detail,
+                        "pipeline_version": pipeline_version or None,
+                        "identity_ok": identity_ok,
+                        "linkage_ok": linkage_ok,
+                        "run_id_ok": all(run_id_states) if run_id_states else False,
+                        "dynamic_ready": bool(ready),
+                        "warnings": grouped_warnings,
+                        "actionable_fixes": actionable[:5],
+                        "generated_at_utc": datetime.now(UTC)
+                        .isoformat()
+                        .replace("+00:00", "Z"),
+                    }
+                    report_path.write_text(
+                        json.dumps(report_payload, indent=2, sort_keys=True, default=str),
+                        encoding="utf-8",
+                    )
+                    print(
+                        status_messages.status(
+                            f"Diagnostic report saved: {report_path}",
+                            level="info",
+                        )
+                    )
+                except Exception as exc:
+                    print(
+                        status_messages.status(
+                            f"Failed to write diagnostic report: {exc}",
+                            level="warn",
+                        )
+                    )
         if session_stamp and persist_enabled:
             _render_persistence_footer(
                 session_stamp,

@@ -298,7 +298,7 @@ def execute_permission_scan(
             )
             if snapshot_path:
                 Path(snapshot_path).write_text(
-                    json.dumps(snapshot_payload, indent=2, sort_keys=True),
+                    json.dumps(snapshot_payload, indent=2, sort_keys=True, default=str),
                     encoding="utf-8",
                 )
         except Exception:

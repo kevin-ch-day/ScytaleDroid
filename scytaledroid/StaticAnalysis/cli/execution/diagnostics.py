@@ -278,6 +278,37 @@ def _render_diagnostic_app_summary(
         if verbose_mode and trace_note:
             trace_rows.append([label_map[app.package_name], trace_note])
     if rows:
+        total_discovered = sum(app.discovered_artifacts for app in outcome.results)
+        total_executed = sum(app.executed_artifacts for app in outcome.results)
+        total_persisted = sum(app.persisted_artifacts for app in outcome.results)
+        linkage_ok = all(state.startswith("VALID") for state in linkage_states) if linkage_states else False
+        run_id_ok = all(run_id_states) if run_id_states else False
+        identity_ok = all(app.identity_valid for app in outcome.results)
+        warn_count = len(warnings)
+
+        def _icon(ok: bool, *, warn: bool = False) -> str:
+            if ok:
+                return "✅"
+            return "⚠️" if warn else "❌"
+
+        print("\nDiagnostic — Summary")
+        print(
+            "Apps: "
+            f"{len(outcome.results)}  "
+            f"Artifacts: discovered={total_discovered} executed={total_executed} "
+            f"persisted={total_persisted}"
+        )
+        print(
+            f"Linkage: {_icon(linkage_ok)} "
+            f"{'OK' if linkage_ok else 'UNAVAILABLE'}  "
+            f"RunID: {_icon(run_id_ok)} {'OK' if run_id_ok else 'MISSING'}  "
+            f"Identity: {_icon(identity_ok)} {'OK' if identity_ok else 'INVALID'}"
+        )
+        if warn_count:
+            print(f"Warnings: {_icon(False, warn=True)} {warn_count}")
+        else:
+            print("Warnings: ✅ 0")
+
         print("\nDiagnostic — Per-app summary")
         table_utils.render_table(headers, rows)
     if compact_mode and issue_rows:

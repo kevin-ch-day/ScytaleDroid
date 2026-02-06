@@ -93,7 +93,7 @@ class StorageSurfaceModule(StaticModule):
                         "read_perm": read_perm,
                         "write_perm": write_perm,
                         "base_perm": record.base_permission,
-                        "path_globs": json.dumps(paths),
+                        "path_globs": json.dumps(paths, default=str),
                         "risk": risk,
                     }
                 )
