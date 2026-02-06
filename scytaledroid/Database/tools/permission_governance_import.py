@@ -21,6 +21,27 @@ REQUIRED_COLUMNS = {
     "triage_status",
 }
 
+_NAMESPACE_TYPE_MAP = {
+    "framework": "AOSP",
+    "aosp": "AOSP",
+    "google": "GMS",
+    "gms": "GMS",
+    "oem": "OEM",
+    "app": "APP_DEFINED",
+    "app_defined": "APP_DEFINED",
+    "custom": "APP_DEFINED",
+    "third_party_sdk": "THIRD_PARTY_SDK",
+    "sdk": "THIRD_PARTY_SDK",
+}
+
+_RISK_CLASS_MAP = {
+    "high": "A",
+    "medium": "B",
+    "low": "C",
+    "unknown": "U",
+    "unreviewed": "U",
+}
+
 
 def _sha256(path: Path) -> str:
     h = hashlib.sha256()
@@ -77,7 +98,7 @@ def _summarize_rows(rows: Iterable[Mapping[str, object]]) -> dict[str, object]:
         for key in REQUIRED_COLUMNS:
             if not str(row.get(key) or "").strip():
                 missing_required[key] += 1
-        namespace = str(row.get("namespace_type") or "").strip().lower() or "<missing>"
+        namespace = _normalize_namespace_type(row.get("namespace_type")) or "<missing>"
         triage = str(row.get("triage_status") or "").strip().lower() or "<missing>"
         namespace_counts[namespace] = namespace_counts.get(namespace, 0) + 1
         triage_counts[triage] = triage_counts.get(triage, 0) + 1
@@ -89,6 +110,34 @@ def _summarize_rows(rows: Iterable[Mapping[str, object]]) -> dict[str, object]:
         "namespace_counts": dict(sorted(namespace_counts.items())),
         "triage_counts": dict(sorted(triage_counts.items())),
     }
+
+
+def _normalize_namespace_type(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    key = text.lower()
+    if key in _NAMESPACE_TYPE_MAP:
+        return _NAMESPACE_TYPE_MAP[key]
+    upper = text.upper()
+    if upper in {"AOSP", "GMS", "OEM", "APP_DEFINED", "THIRD_PARTY_SDK", "UNKNOWN"}:
+        return upper
+    return "UNKNOWN"
+
+
+def _normalize_risk_class(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "U"
+    key = text.lower()
+    if key in _RISK_CLASS_MAP:
+        return _RISK_CLASS_MAP[key]
+    upper = text.upper()
+    if upper in {"A", "B", "C", "U"}:
+        return upper
+    return "U"
 
 
 def _upsert_snapshot(version: str, snapshot_hash: str, source: str | None) -> str:
@@ -109,10 +158,10 @@ def _insert_entries(snapshot_id: str, rows: Iterable[Mapping[str, object]]) -> i
         payload = {
             "governance_version": snapshot_id,
             "permission_string": (row.get("permission_string") or "").strip(),
-            "namespace_type": (row.get("namespace_type") or "").strip(),
+            "namespace_type": _normalize_namespace_type(row.get("namespace_type")) or "UNKNOWN",
             "theme_primary": (row.get("theme_primary") or "").strip(),
             "theme_tags_json": row.get("theme_tags_json"),
-            "risk_class": (row.get("risk_class") or "").strip(),
+            "risk_class": _normalize_risk_class(row.get("risk_class")),
             "triage_status": (row.get("triage_status") or "UNREVIEWED").strip(),
             "last_reviewed_at_utc": _parse_datetime(row.get("last_reviewed_at_utc") or row.get("last_reviewed_at")),
             "reviewer_id": (row.get("reviewer_id") or "").strip() or None,

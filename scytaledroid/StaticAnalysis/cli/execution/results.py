@@ -344,7 +344,7 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             status_messages.status(
                 "Diagnostic dry-run — no persistence; "
                 f"discovered={discovered} executed={executed} persisted={persisted} "
-                f"failed={failed} persistence_skipped={outcome.dry_run_skipped}",
+                f"failed={failed} skipped={outcome.dry_run_skipped}",
                 level="info",
             )
         )

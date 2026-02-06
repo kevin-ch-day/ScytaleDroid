@@ -234,7 +234,7 @@ def _persist_correlation_results(rows: Sequence[Mapping[str, object]]) -> bool:
                     "governance_sha256": gov_sha,
                 }
                 corr_file.write_text(
-                    json.dumps(corr_payload, ensure_ascii=True, indent=2),
+                    json.dumps(corr_payload, ensure_ascii=True, indent=2, default=str),
                     encoding="utf-8",
                 )
                 wrote_evidence = True
@@ -811,7 +811,7 @@ def persist_run_summary(
                     path_hint=getattr(f, "path", None),
                     offset_hint=getattr(f, "offset", None),
                 )
-                evidence_payload = json.dumps(evidence.as_payload(), ensure_ascii=False)
+                evidence_payload = json.dumps(evidence.as_payload(), ensure_ascii=False, default=str)
                 evidence_path = evidence.path
                 evidence_offset = evidence.offset
                 evidence_preview = evidence.detail
@@ -868,7 +868,11 @@ def persist_run_summary(
                         "cvss_v40_be_score": be_score,
                         "cvss_v40_bte_vector": bte_vector,
                         "cvss_v40_bte_score": bte_score,
-                        "cvss_v40_meta": json.dumps(meta_combined, ensure_ascii=False) if meta_combined else None,
+                        "cvss_v40_meta": (
+                            json.dumps(meta_combined, ensure_ascii=False, default=str)
+                            if meta_combined
+                            else None
+                        ),
                     }
                 )
                 control_entries.extend(getattr(result, "masvs_coverage", []))
@@ -904,6 +908,51 @@ def persist_run_summary(
     else:
         severity_counts = baseline_counts
         persisted_totals = Counter(severity_counts)
+
+    perm_detail_map: Mapping[str, object] = (
+        metrics_bundle.permission_detail
+        if isinstance(metrics_bundle.permission_detail, Mapping)
+        else {}
+    )
+    flagged_normal_metric = float(perm_detail_map.get("flagged_normal_count", 0) or 0)
+    weak_guard_metric = float(perm_detail_map.get("weak_guard_count", 0) or 0)
+
+    exported = getattr(br, "exported_components", None)
+    exp_total = float(getattr(exported, "total", lambda: 0)()) if exported else 0.0
+    exp_activities = float(len(getattr(exported, "activities", []) or [])) if exported else 0.0
+    exp_services = float(len(getattr(exported, "services", []) or [])) if exported else 0.0
+    exp_receivers = float(len(getattr(exported, "receivers", []) or [])) if exported else 0.0
+    exp_providers = float(len(getattr(exported, "providers", []) or [])) if exported else 0.0
+
+    metrics_payload = {
+        "network.code_http_hosts": (float(code_http_hosts), None),
+        "network.asset_http_hosts": (float(asset_http_hosts), None),
+        "exports.total": (exp_total, None),
+        "exports.activities": (exp_activities, None),
+        "exports.services": (exp_services, None),
+        "exports.receivers": (exp_receivers, None),
+        "exports.providers": (exp_providers, None),
+        "permissions.dangerous_count": (float(getattr(metrics_bundle, "dangerous_permissions", 0)), None),
+        "permissions.signature_count": (float(getattr(metrics_bundle, "signature_permissions", 0)), None),
+        "permissions.oem_count": (float(getattr(metrics_bundle, "oem_permissions", 0)), None),
+        "permissions.flagged_normal_count": (flagged_normal_metric, None),
+        "permissions.weak_guard_count": (weak_guard_metric, None),
+        "permissions.risk_score": (float(getattr(metrics_bundle, "permission_score", 0.0)), None),
+        "permissions.risk_grade": (None, getattr(metrics_bundle, "permission_grade", "")),
+    }
+    metrics_payload["findings.total"] = (float(total_findings), None)
+    if downgraded_high:
+        metrics_payload["findings.high_downgraded"] = (float(downgraded_high), None)
+    rule_cov_pct = (float(rule_assigned) / float(total_findings) * 100.0) if total_findings else 0.0
+    base_cov_pct = (float(base_vector_count) / float(total_findings) * 100.0) if total_findings else 0.0
+    bte_cov_pct = (float(bte_vector_count) / float(total_findings) * 100.0) if total_findings else 0.0
+    preview_cov_pct = (float(preview_assigned) / float(total_findings) * 100.0) if total_findings else 0.0
+    path_cov_pct = (float(path_assigned) / float(total_findings) * 100.0) if total_findings else 0.0
+    metrics_payload["findings.ruleid_coverage_pct"] = (rule_cov_pct, None)
+    metrics_payload["findings.preview_coverage_pct"] = (preview_cov_pct, None)
+    metrics_payload["findings.path_coverage_pct"] = (path_cov_pct, None)
+    metrics_payload["cvss.base_vector_coverage_pct"] = (base_cov_pct, None)
+    metrics_payload["cvss.bte_vector_coverage_pct"] = (bte_cov_pct, None)
 
     persistence_failed = False
     if not dry_run:
@@ -1053,51 +1102,6 @@ def persist_run_summary(
                 category="static_analysis",
             )
 
-    perm_detail_map: Mapping[str, object] = (
-        metrics_bundle.permission_detail
-        if isinstance(metrics_bundle.permission_detail, Mapping)
-        else {}
-    )
-    flagged_normal_metric = float(perm_detail_map.get("flagged_normal_count", 0) or 0)
-    weak_guard_metric = float(perm_detail_map.get("weak_guard_count", 0) or 0)
-
-    exported = getattr(br, "exported_components", None)
-    exp_total = float(getattr(exported, "total", lambda: 0)()) if exported else 0.0
-    exp_activities = float(len(getattr(exported, "activities", []) or [])) if exported else 0.0
-    exp_services = float(len(getattr(exported, "services", []) or [])) if exported else 0.0
-    exp_receivers = float(len(getattr(exported, "receivers", []) or [])) if exported else 0.0
-    exp_providers = float(len(getattr(exported, "providers", []) or [])) if exported else 0.0
-
-    metrics_payload = {
-        "network.code_http_hosts": (float(code_http_hosts), None),
-        "network.asset_http_hosts": (float(asset_http_hosts), None),
-        "exports.total": (exp_total, None),
-        "exports.activities": (exp_activities, None),
-        "exports.services": (exp_services, None),
-        "exports.receivers": (exp_receivers, None),
-        "exports.providers": (exp_providers, None),
-        "permissions.dangerous_count": (float(getattr(metrics_bundle, "dangerous_permissions", 0)), None),
-        "permissions.signature_count": (float(getattr(metrics_bundle, "signature_permissions", 0)), None),
-        "permissions.oem_count": (float(getattr(metrics_bundle, "oem_permissions", 0)), None),
-        "permissions.flagged_normal_count": (flagged_normal_metric, None),
-        "permissions.weak_guard_count": (weak_guard_metric, None),
-        "permissions.risk_score": (float(getattr(metrics_bundle, "permission_score", 0.0)), None),
-        "permissions.risk_grade": (None, getattr(metrics_bundle, "permission_grade", "")),
-    }
-    metrics_payload["findings.total"] = (float(total_findings), None)
-    if downgraded_high:
-        metrics_payload["findings.high_downgraded"] = (float(downgraded_high), None)
-    rule_cov_pct = (float(rule_assigned) / float(total_findings) * 100.0) if total_findings else 0.0
-    base_cov_pct = (float(base_vector_count) / float(total_findings) * 100.0) if total_findings else 0.0
-    bte_cov_pct = (float(bte_vector_count) / float(total_findings) * 100.0) if total_findings else 0.0
-    preview_cov_pct = (float(preview_assigned) / float(total_findings) * 100.0) if total_findings else 0.0
-    path_cov_pct = (float(path_assigned) / float(total_findings) * 100.0) if total_findings else 0.0
-    metrics_payload["findings.ruleid_coverage_pct"] = (rule_cov_pct, None)
-    metrics_payload["findings.preview_coverage_pct"] = (preview_cov_pct, None)
-    metrics_payload["findings.path_coverage_pct"] = (path_cov_pct, None)
-    metrics_payload["cvss.base_vector_coverage_pct"] = (base_cov_pct, None)
-    metrics_payload["cvss.bte_vector_coverage_pct"] = (bte_cov_pct, None)
-
     summary_run_id = run_id if run_id is not None else "dry-run"
     log.info(
         (
@@ -1111,7 +1115,7 @@ def persist_run_summary(
         category="static_analysis",
     )
 
-    if static_run_id and not dry_run and not persistence_failed:
+    if static_run_id and not dry_run:
         dep_path = export_dep_json(static_run_id)
         if dep_path:
             log.info(

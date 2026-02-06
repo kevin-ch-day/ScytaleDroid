@@ -107,9 +107,9 @@ def _risk_join() -> str:
     if _table_exists("risk_scores"):
         return """
 LEFT JOIN risk_scores rs
-  ON rs.package_name = a.package_name
- AND rs.session_stamp = sar.session_stamp
- AND rs.scope_label = sar.scope_label
+  ON rs.package_name COLLATE utf8mb4_general_ci = a.package_name COLLATE utf8mb4_general_ci
+ AND rs.session_stamp COLLATE utf8mb4_general_ci = sar.session_stamp COLLATE utf8mb4_general_ci
+ AND rs.scope_label COLLATE utf8mb4_general_ci = sar.scope_label COLLATE utf8mb4_general_ci
 """
     return """
 LEFT JOIN (

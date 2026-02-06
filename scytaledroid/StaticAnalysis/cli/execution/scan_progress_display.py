@@ -61,8 +61,7 @@ class _PipelineProgress:
         if index == self.total or (index - self._last_checkpoint) >= self._progress_every:
             self._last_checkpoint = index
             self._clear_line()
-            tail = _truncate_label(_clean_artifact_label(label), 48)
-            print(f"Completed {index}/{self.total} artifacts | {tail}")
+            print(f"Completed {index}/{self.total} artifacts")
 
     def app_complete(self, artifact_count: int, elapsed_seconds: float) -> None:
         if not self.show_artifacts:

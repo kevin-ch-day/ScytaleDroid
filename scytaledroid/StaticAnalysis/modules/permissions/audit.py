@@ -22,6 +22,8 @@ from typing import Any
 
 from scytaledroid.Utils.evidence_store import filesystem_safe_slug
 from scytaledroid.Utils.LoggingUtils import logging_engine
+from scytaledroid.Database.db_core import db_queries as core_q
+from scytaledroid.Database.db_utils.artifact_registry import record_artifacts
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.ops.operation_result import OperationResult
 

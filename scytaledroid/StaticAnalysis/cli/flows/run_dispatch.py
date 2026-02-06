@@ -211,11 +211,11 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
             params, "analysis_version", None
         )
         run_sig_version = os.getenv("SCYTALEDROID_RUN_SIGNATURE_VERSION") or "v1"
-        print("DIAGNOSTIC MODE (non-persisting)")
+        print("DIAGNOSTIC MODE (dry run)")
         print("────────────────────────────────")
-        print("persist=false  evidence_pack=false  plan_generation=false")
-        print("identity_required=true  linkage_required=true")
-        print("metadata_mode=partial  linkage_sources=run_map,db_link")
+        print("persist=no  evidence_pack=no  plan_generation=no")
+        print("identity_required=yes  linkage_required=yes")
+        print("metadata=partial  linkage_sources=run_map,db_link")
         print(f"pipeline_version={pipeline_version or '—'}  run_signature_version={run_sig_version}")
         if params.session_stamp:
             print(
@@ -240,6 +240,89 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
             outcome.session_stamp = params.session_stamp
     except Exception:
         pass
+    run_map = None
+    linkage_blocked_reason = None
+    if os.getenv("SCYTALEDROID_PERSISTENCE_READY") == "0":
+        linkage_blocked_reason = "Persistence gate failed; skipping run_map and permission refresh."
+    elif outcome is not None and not params.dry_run:
+        missing_ids = [res.package_name for res in outcome.results if not res.static_run_id]
+        if missing_ids:
+            linkage_blocked_reason = (
+                "static_run_id missing for one or more apps; skipping run_map and permission refresh."
+            )
+    if outcome is not None and params.session_stamp:
+        if linkage_blocked_reason:
+            print(status_messages.status(linkage_blocked_reason, level="warn"))
+        else:
+            try:
+                run_map = _build_session_run_map(outcome, params.session_stamp)
+                if run_map and not params.dry_run:
+                    for entry in run_map.get("apps", []):
+                        missing = [
+                            field
+                            for field in ("static_run_id", *REQUIRED_FIELDS)
+                            if entry.get(field) in (None, "")
+                        ]
+                        if missing:
+                            raise RuntimeError(
+                                "run_map incomplete for package "
+                                f"{entry.get('package')}: missing {', '.join(missing)}"
+                            )
+                    validate_run_map(run_map, params.session_stamp)
+                if run_map and not params.dry_run:
+                    _persist_session_run_links(params.session_stamp, run_map)
+            except Exception as exc:
+                print(
+                    status_messages.status(
+                        f"Failed to build run map for session {params.session_stamp}: {exc}",
+                        level="error",
+                    )
+                )
+                run_map = None
+
+    if (
+        params.permission_snapshot_refresh
+        and params.profile in {"full", "lightweight"}
+        and not params.dry_run
+    ):
+        if linkage_blocked_reason:
+            print()
+            print(status_messages.status(linkage_blocked_reason, level="warn"))
+        else:
+            try:
+                print()
+                print(
+                    status_messages.step(
+                        "Re-rendering permission snapshot for parity",
+                        label="Static Analysis",
+                    )
+                )
+                execute_permission_scan(
+                    selection,
+                    params,
+                    persist_detections=True,
+                    run_map=run_map,
+                    require_run_map=True,
+                )
+            except Exception:
+                print(
+                    status_messages.status(
+                        "Permission snapshot refresh failed — see logs for details.",
+                        level="error",
+                    )
+                )
+    elif params.profile in {"full", "lightweight"} and not params.dry_run:
+        print()
+        print(
+            status_messages.status(
+                (
+                    "Post-run permission refresh skipped. Enable it in Advanced options "
+                    "or set SCYTALEDROID_STATIC_REFRESH_PERMISSION_SNAPSHOT=1."
+                ),
+                level="info",
+            )
+        )
+
     try:
         if outcome is not None:
             render_run_results(outcome, params)
@@ -336,89 +419,6 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
             canonical_ingest.build_session_string_view(params.session_stamp)
         except Exception:
             pass
-
-    run_map = None
-    linkage_blocked_reason = None
-    if os.getenv("SCYTALEDROID_PERSISTENCE_READY") == "0":
-        linkage_blocked_reason = "Persistence gate failed; skipping run_map and permission refresh."
-    elif outcome is not None and not params.dry_run:
-        missing_ids = [res.package_name for res in outcome.results if not res.static_run_id]
-        if missing_ids:
-            linkage_blocked_reason = (
-                "static_run_id missing for one or more apps; skipping run_map and permission refresh."
-            )
-    if outcome is not None and params.session_stamp:
-        if linkage_blocked_reason:
-            print(status_messages.status(linkage_blocked_reason, level="warn"))
-        else:
-            try:
-                run_map = _build_session_run_map(outcome, params.session_stamp)
-                if run_map and not params.dry_run:
-                    for entry in run_map.get("apps", []):
-                        missing = [
-                            field
-                            for field in ("static_run_id", *REQUIRED_FIELDS)
-                            if entry.get(field) in (None, "")
-                        ]
-                        if missing:
-                            raise RuntimeError(
-                                "run_map incomplete for package "
-                                f"{entry.get('package')}: missing {', '.join(missing)}"
-                            )
-                    validate_run_map(run_map, params.session_stamp)
-                if run_map and not params.dry_run:
-                    _persist_session_run_links(params.session_stamp, run_map)
-            except Exception as exc:
-                print(
-                    status_messages.status(
-                        f"Failed to build run map for session {params.session_stamp}: {exc}",
-                        level="error",
-                    )
-                )
-                run_map = None
-
-    if (
-        params.permission_snapshot_refresh
-        and params.profile in {"full", "lightweight"}
-        and not params.dry_run
-    ):
-        if linkage_blocked_reason:
-            print()
-            print(status_messages.status(linkage_blocked_reason, level="warn"))
-            return outcome
-        try:
-            print()
-            print(
-                status_messages.step(
-                    "Re-rendering permission snapshot for parity",
-                    label="Static Analysis",
-                )
-            )
-            execute_permission_scan(
-                selection,
-                params,
-                persist_detections=False,
-                run_map=run_map,
-                require_run_map=True,
-            )
-        except Exception:
-            print(
-                status_messages.status(
-                    "Permission snapshot refresh failed — see logs for details.",
-                    level="error",
-                )
-            )
-    elif params.profile in {"full", "lightweight"} and not params.dry_run:
-        print()
-        print(
-            status_messages.status(
-                (
-                    "Post-run permission refresh skipped. Enable it in Advanced options "
-                    "or set SCYTALEDROID_STATIC_REFRESH_PERMISSION_SNAPSHOT=1."
-                ),
-                level="info",
-            )
-        )
 
     return outcome
 
