@@ -18,6 +18,7 @@ from scytaledroid.Utils.DisplayUtils import (
     status_messages,
     summary_cards,
 )
+from scytaledroid.Utils.System import output_prefs
 from ...engine.strings import analyse_strings
 from ...persistence.ingest import ingest_baseline_payload
 from ..core.models import RunOutcome, RunParameters
@@ -95,6 +96,10 @@ def _governance_ready() -> tuple[bool, str | None]:
 
 def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
     """Pretty-print run results and optionally drill into per-app details."""
+
+    prefs = output_prefs.get()
+    if prefs.quiet and prefs.batch:
+        return
 
     aggregated: Counter[str] = Counter()
     artifact_count = 0

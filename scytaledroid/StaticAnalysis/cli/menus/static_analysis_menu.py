@@ -111,6 +111,8 @@ def static_analysis_menu() -> None:
         menu_utils.render_menu(back_spec)
         choice_pool = selectable_ids + ["0"]
         choice = prompt_utils.get_choice(choice_pool, default=default_choice)
+        if choice == "6" and "5" in selectable_ids:
+            choice = "5"
 
         if choice == "0":
             break
@@ -294,6 +296,7 @@ def _run_dataset_batch(
                 level="info",
             )
         )
+        print(status_messages.status("Status: running (quiet batch mode)", level="info"))
 
         params = RunParameters(
             profile=command.profile,
@@ -324,6 +327,23 @@ def _run_dataset_batch(
             print(status_messages.status(f"Static analysis failed: {exc}", level="error"))
             log.error(f"Static analysis run failed: {exc}", category="static")
             continue
+        duration = None
+        status_label = "ok"
+        if outcome is None:
+            status_label = "unknown"
+        else:
+            duration = getattr(outcome, "duration_seconds", None)
+            if getattr(outcome, "failures", None):
+                status_label = "failed"
+            elif getattr(outcome, "aborted", False):
+                status_label = "aborted"
+        duration_label = f"{duration:.1f}s" if isinstance(duration, (int, float)) else "n/a"
+        print(
+            status_messages.status(
+                f"Completed: {selection_label} | status={status_label} | duration={duration_label}",
+                level="success" if status_label == "ok" else "warn",
+            )
+        )
         completed += 1
         elapsed = time.monotonic() - batch_start
         avg = elapsed / completed if completed else 0.0
