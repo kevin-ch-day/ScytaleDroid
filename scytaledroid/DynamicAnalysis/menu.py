@@ -7,7 +7,6 @@ from scytaledroid.Database.db_core import run_sql
 from scytaledroid.DeviceAnalysis.adb import shell as adb_shell, status as adb_status
 from scytaledroid.DynamicAnalysis import plan_selection as _plan_selection
 from scytaledroid.DynamicAnalysis.controllers.guided_run import run_guided_dataset_run
-from scytaledroid.DynamicAnalysis.controllers.sandbox_run import run_sandbox_dynamic_run
 from scytaledroid.DynamicAnalysis.profile_loader import load_db_profiles, load_profile_packages
 from scytaledroid.DynamicAnalysis.services.observer_service import (
     select_observers as _service_select_observers,

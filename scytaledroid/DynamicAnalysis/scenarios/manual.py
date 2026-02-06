@@ -99,21 +99,6 @@ def _run_stopwatch() -> datetime:
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         prompt_utils.press_enter_to_continue("Press Enter when finished (timer stops)...")
         return datetime.now(UTC)
-    if os.environ.get("SCYTALEDROID_RUN_MONITOR") == "1":
-        print(status_messages.status("Press Enter when finished (timer stops).", level="info"))
-        start = time.monotonic()
-        last_tick = 0
-        while True:
-            elapsed = int(time.monotonic() - start)
-            if elapsed - last_tick >= 5:
-                print(f"Elapsed time: {_format_duration(elapsed)}")
-                last_tick = elapsed
-            readable, _, _ = select.select([sys.stdin], [], [], 1.0)
-            if readable:
-                _ = sys.stdin.readline()
-                print()
-                break
-        return datetime.now(UTC)
     start = time.monotonic()
     line_width = 32
     print(status_messages.status("Press Enter when finished (timer stops).", level="info"))

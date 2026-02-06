@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
+from dataclasses import replace
+from pathlib import Path
+
 from collections.abc import Callable
 
 from scytaledroid.DynamicAnalysis.controllers.device_select import select_device
 from scytaledroid.DynamicAnalysis.plan_selection import (
     print_plan_selection_banner,
-    resolve_plan_selection,
+    resolve_plan_selection_noninteractive,
 )
 from scytaledroid.DynamicAnalysis.profile_loader import load_profile_packages
 from scytaledroid.DynamicAnalysis.core.run_specs import build_dynamic_run_spec
@@ -15,6 +20,52 @@ from scytaledroid.DynamicAnalysis.run_dynamic_analysis import execute_dynamic_ru
 from scytaledroid.DynamicAnalysis.run_summary import print_run_summary
 from scytaledroid.StaticAnalysis.core.repository import group_artifacts
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
+
+
+def _auto_run_static_for_package(package_name: str) -> bool:
+    """Dataset-mode helper: run static analysis quietly to produce a dynamic plan.
+
+    This is non-interactive and intended only to unblock dataset collection.
+    """
+
+    from scytaledroid.Config import app_config
+    from scytaledroid.StaticAnalysis.cli.core.models import RunParameters, ScopeSelection
+    from scytaledroid.StaticAnalysis.cli.core.run_specs import build_static_run_spec
+    from scytaledroid.StaticAnalysis.cli.flows.run_dispatch import execute_run_spec
+    from scytaledroid.StaticAnalysis.session import make_session_stamp, normalize_session_stamp
+
+    groups = group_artifacts()
+    group = next((g for g in groups if (g.package_name or "").lower() == package_name.lower()), None)
+    if not group:
+        print(status_messages.status("No APK artifacts found locally for this package.", level="error"))
+        return False
+
+    session_stamp = normalize_session_stamp(f"{make_session_stamp()}-{group.package_name}")
+    selection = ScopeSelection(scope="app", label=group.package_name, groups=(group,))
+    params = RunParameters(
+        profile="full",
+        scope=selection.scope,
+        scope_label=selection.label,
+        session_stamp=session_stamp,
+        show_split_summaries=False,
+        # Noninteractive run: never prompt on collisions.
+        canonical_action="append",
+    )
+    base_dir = Path(app_config.DATA_DIR) / "device_apks"
+
+    buffer_out = io.StringIO()
+    buffer_err = io.StringIO()
+    with contextlib.redirect_stdout(buffer_out), contextlib.redirect_stderr(buffer_err):
+        spec = build_static_run_spec(
+            selection=selection,
+            params=params,
+            base_dir=base_dir,
+            run_mode="batch",
+            quiet=True,
+            noninteractive=True,
+        )
+        execute_run_spec(spec)
+    return True
 
 
 def run_guided_dataset_run(
@@ -72,9 +123,26 @@ def run_guided_dataset_run(
         print(status_messages.status("Select at least one observer.", level="error"))
         return
 
-    plan_selection = resolve_plan_selection(package_name)
+    # Dataset mode is deterministic about plan choice, but interactive about gating:
+    # if no plan exists yet, offer a single prompt to run static now.
+    plan_selection = resolve_plan_selection_noninteractive(package_name)
     if not plan_selection:
-        return
+        print(status_messages.status("No dynamic plans found for package.", level="warn"))
+        run_static = prompt_utils.prompt_yes_no("Run static analysis now for this app to generate a plan?", default=True)
+        if not run_static:
+            return
+        print(status_messages.status("Running static analysis (quiet) to generate a baseline plan…", level="info"))
+        if not _auto_run_static_for_package(package_name):
+            return
+        plan_selection = resolve_plan_selection_noninteractive(package_name)
+        if not plan_selection:
+            print(
+                status_messages.status(
+                    "Static analysis completed but no plan was generated. Re-run static analysis interactively to diagnose.",
+                    level="error",
+                )
+            )
+            return
     plan_path = plan_selection["plan_path"]
     static_run_id = plan_selection["static_run_id"]
     print_plan_selection_banner(plan_selection)

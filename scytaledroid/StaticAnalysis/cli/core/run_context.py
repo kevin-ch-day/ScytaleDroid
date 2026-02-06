@@ -17,6 +17,7 @@ class StaticRunContext:
     session_stamp: str | None
     persistence_ready: bool
     paper_grade_requested: bool
+    batch_id: str | None = None
 
 
 def build_static_run_context(spec: StaticRunSpec) -> StaticRunContext:
@@ -30,6 +31,7 @@ def build_static_run_context(spec: StaticRunSpec) -> StaticRunContext:
         session_stamp=spec.params.session_stamp,
         persistence_ready=bool(spec.params.persistence_ready),
         paper_grade_requested=bool(spec.params.paper_grade_requested),
+        batch_id=spec.batch_id,
     )
 
 

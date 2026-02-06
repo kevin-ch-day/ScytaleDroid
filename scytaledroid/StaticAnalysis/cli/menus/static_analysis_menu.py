@@ -251,6 +251,10 @@ def _run_dataset_batch(
     from scytaledroid.StaticAnalysis.cli.core.run_specs import build_static_run_spec
     from scytaledroid.StaticAnalysis.cli.flows.run_dispatch import execute_run_spec
     from scytaledroid.StaticAnalysis.session import make_session_stamp, normalize_session_stamp
+    from datetime import datetime, timezone
+    import json
+    import sys
+    import threading
 
     dataset_pkgs = {pkg.lower() for pkg in load_profile_packages("RESEARCH_DATASET_ALPHA")}
     if not dataset_pkgs:
@@ -258,7 +262,55 @@ def _run_dataset_batch(
         prompt_utils.press_enter_to_continue()
         return
 
-    batch_groups = [group for group in groups if group.package_name and group.package_name.lower() in dataset_pkgs]
+    # Batch determinism: select one "best" artifact group per package (newest by session stamp + mtime).
+    # We explicitly avoid env-driven selection here to keep batch behavior stable and reviewable.
+    def _artifact_mtime(artifact) -> float:
+        path_obj = getattr(artifact, "path", None)
+        if isinstance(path_obj, Path):
+            target = path_obj
+        elif isinstance(path_obj, str):
+            target = Path(path_obj)
+        else:
+            return 0.0
+        try:
+            return float(target.stat().st_mtime)
+        except (OSError, ValueError):
+            return 0.0
+
+    def _group_latest_mtime(group) -> float:
+        return max((_artifact_mtime(a) for a in getattr(group, "artifacts", []) or []), default=0.0)
+
+    def _group_recency_key(group) -> tuple[int, str, float]:
+        stamp = str(getattr(group, "session_stamp", None) or "")
+        return (1 if stamp else 0, stamp, _group_latest_mtime(group))
+
+    def _group_has_any_existing_artifact(group) -> bool:
+        for artifact in getattr(group, "artifacts", []) or []:
+            path_obj = getattr(artifact, "path", None)
+            try:
+                if isinstance(path_obj, Path) and path_obj.exists():
+                    return True
+                if isinstance(path_obj, str) and Path(path_obj).exists():
+                    return True
+            except Exception:
+                continue
+        return False
+
+    by_pkg: dict[str, object] = {}
+    for group in groups:
+        pkg = getattr(group, "package_name", None)
+        if not pkg:
+            continue
+        pkg_l = str(pkg).lower()
+        if pkg_l not in dataset_pkgs:
+            continue
+        if not _group_has_any_existing_artifact(group):
+            continue
+        cur = by_pkg.get(pkg_l)
+        if cur is None or _group_recency_key(group) > _group_recency_key(cur):
+            by_pkg[pkg_l] = group
+
+    batch_groups = list(by_pkg.values())
     if not batch_groups:
         print(
             status_messages.status(
@@ -271,12 +323,21 @@ def _run_dataset_batch(
 
     quiet = True
 
+    batch_id = datetime.now(timezone.utc).strftime("static-batch-%Y%m%dT%H%M%SZ")
+    batch_out_dir = Path("output") / "batches" / "static"
+    batch_out_dir.mkdir(parents=True, exist_ok=True)
+    batch_summary_path = batch_out_dir / f"{batch_id}.json"
+    batch_rows: list[dict[str, object]] = []
+
     failures = []
     total = len(batch_groups)
     completed = 0
     batch_start = time.monotonic()
     for group in batch_groups:
-        session_stamp = normalize_session_stamp(f"{make_session_stamp()}-{group.package_name}")
+        app_started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        # Batch determinism + canonical correctness:
+        # Use a batch-unique session stamp so rerunning batch does not collide on session_label/canonical rows.
+        session_stamp = normalize_session_stamp(f"{batch_id}-{group.package_name}")
         display_name = ""
         for artifact in group.artifacts:
             label = artifact.metadata.get("app_label")
@@ -300,6 +361,8 @@ def _run_dataset_batch(
             scope_label=selection.label,
             selected_tests=tuple(),
             session_stamp=session_stamp,
+            session_label=session_stamp,
+            canonical_action="first_run",
             show_split_summaries=False,
         )
         effective_params = apply_command_overrides(params, command)
@@ -307,6 +370,27 @@ def _run_dataset_batch(
         # Batch mode: no reset prompts; keep state deterministic.
 
         try:
+            # Heartbeat: keep operators confident the batch is still making progress even in quiet mode.
+            # Print to sys.__stdout__ so it stays visible even when stdout is redirected for per-app quieting.
+            hb_stop = threading.Event()
+            hb_started = time.monotonic()
+
+            def _heartbeat() -> None:
+                while not hb_stop.wait(15.0):
+                    elapsed = time.monotonic() - hb_started
+                    msg = status_messages.status(
+                        f"Heartbeat: {selection_label} | elapsed={elapsed:.0f}s",
+                        level="info",
+                    )
+                    try:
+                        sys.__stdout__.write(msg + "\n")
+                        sys.__stdout__.flush()
+                    except Exception:
+                        pass
+
+            hb_thread = threading.Thread(target=_heartbeat, name="static-batch-heartbeat", daemon=True)
+            hb_thread.start()
+
             buffer_out = io.StringIO()
             buffer_err = io.StringIO()
             with contextlib.redirect_stdout(buffer_out), contextlib.redirect_stderr(buffer_err):
@@ -317,29 +401,97 @@ def _run_dataset_batch(
                     run_mode="batch",
                     quiet=True,
                     noninteractive=True,
+                    batch_id=batch_id,
                 )
                 outcome = execute_run_spec(spec)
+            hb_stop.set()
+            hb_thread.join(timeout=1.0)
         except static_service.StaticServiceError as exc:
+            try:
+                hb_stop.set()
+            except Exception:
+                pass
             failures.append(f"{selection.label}: {exc}")
             print(status_messages.status(f"Static analysis failed: {exc}", level="error"))
             log.error(f"Static analysis run failed: {exc}", category="static")
+            batch_rows.append(
+                {
+                    "package_name": group.package_name,
+                    "selection_label": selection_label,
+                    "session_stamp": session_stamp,
+                    "static_run_id": None,
+                    "status": "error",
+                    "error": str(exc),
+                    "started_at": app_started_at,
+                    "ended_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                }
+            )
             continue
+        except Exception:
+            try:
+                hb_stop.set()
+                hb_thread.join(timeout=1.0)
+            except Exception:
+                pass
+            raise
         duration = None
         status_label = "ok"
+        failure_note: str | None = None
         if outcome is None:
             status_label = "unknown"
+            failure_note = "no outcome returned"
+            failures.append(f"{selection.label}: {failure_note}")
         else:
             duration = getattr(outcome, "duration_seconds", None)
-            if getattr(outcome, "failures", None):
-                status_label = "failed"
-            elif getattr(outcome, "aborted", False):
+            if getattr(outcome, "aborted", False):
                 status_label = "aborted"
+                abort_reason = getattr(outcome, "abort_reason", None)
+                failure_note = f"aborted: {abort_reason}" if abort_reason else "aborted"
+                failures.append(f"{selection.label}: {failure_note}")
+            elif getattr(outcome, "failures", None):
+                status_label = "failed"
+                first_failure = None
+                try:
+                    first_failure = outcome.failures[0] if outcome.failures else None  # type: ignore[attr-defined]
+                except Exception:
+                    first_failure = None
+                if first_failure:
+                    failure_note = f"{len(outcome.failures)} failure(s): {first_failure}"  # type: ignore[arg-type]
+                else:
+                    failure_note = "failures recorded (details unavailable)"
+                failures.append(f"{selection.label}: {failure_note}")
         duration_label = f"{duration:.1f}s" if isinstance(duration, (int, float)) else "n/a"
+        static_run_id = None
+        try:
+            if outcome and getattr(outcome, "results", None):
+                first = outcome.results[0]
+                static_run_id = getattr(first, "static_run_id", None)
+        except Exception:
+            static_run_id = None
         print(
             status_messages.status(
-                f"Completed: {selection_label} | status={status_label} | duration={duration_label}",
+                (
+                    f"Completed: {selection_label} | status={status_label} | duration={duration_label}"
+                    + (f" | static_run_id={static_run_id}" if static_run_id is not None else " | static_run_id=—")
+                    + (f" | note={failure_note}" if failure_note and status_label != "ok" else "")
+                ),
                 level="success" if status_label == "ok" else "warn",
             )
+        )
+        batch_rows.append(
+            {
+                "package_name": group.package_name,
+                "selection_label": selection_label,
+                "session_stamp": session_stamp,
+                "static_run_id": static_run_id,
+                "status": status_label,
+                "failures_count": len(getattr(outcome, "failures", []) or []) if outcome else 0,
+                "failures_sample": (getattr(outcome, "failures", []) or [])[:3] if outcome else [],
+                "aborted": bool(getattr(outcome, "aborted", False)) if outcome else False,
+                "abort_reason": getattr(outcome, "abort_reason", None) if outcome else None,
+                "started_at": app_started_at,
+                "ended_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            }
         )
         completed += 1
         elapsed = time.monotonic() - batch_start
@@ -352,6 +504,23 @@ def _run_dataset_batch(
                 level="info",
             )
         )
+        # Persist an incremental batch summary so an interrupted batch still leaves an audit trail.
+        try:
+            incremental_payload = {
+                "batch_id": batch_id,
+                "started_at": batch_rows[0]["started_at"] if batch_rows else None,
+                "ended_at": None,
+                "apps_total": total,
+                "apps_completed": completed,
+                "apps_failed": len(failures),
+                "rows": batch_rows,
+            }
+            batch_summary_path.write_text(
+                json.dumps(incremental_payload, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
 
         if command.auto_verify and not effective_params.dry_run and not quiet:
             session_key = getattr(outcome, "session_stamp", None) if outcome else None
@@ -370,5 +539,20 @@ def _run_dataset_batch(
         menu_utils.print_section("Batch summary")
         print(status_messages.status("All batch runs completed.", level="success"))
     elapsed = time.monotonic() - batch_start
+    batch_payload = {
+        "batch_id": batch_id,
+        "started_at": batch_rows[0]["started_at"] if batch_rows else None,
+        "ended_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "apps_total": total,
+        "apps_completed": completed,
+        "apps_failed": len(failures),
+        "rows": batch_rows,
+    }
+    try:
+        batch_summary_path.write_text(json.dumps(batch_payload, indent=2, sort_keys=True), encoding="utf-8")
+    except Exception as exc:
+        print(status_messages.status(f"Failed to write batch summary: {exc}", level="warn"))
     print(status_messages.status(f"Completed {completed}/{total} apps in {elapsed:.1f}s.", level="info"))
-    prompt_utils.press_enter_to_continue("Press Enter to continue…")
+    print(status_messages.status(f"Batch summary → {batch_summary_path}", level="info"))
+    # Batch mode should return to the menu without blocking on an extra prompt.
+    return

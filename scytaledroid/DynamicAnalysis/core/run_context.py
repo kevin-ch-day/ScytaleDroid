@@ -24,6 +24,7 @@ class RunContext:
     static_plan: dict[str, object] | None = None
     proxy_port: int = 8890
     scenario_hint: str | None = None
+    batch_id: str | None = None
 
 
 __all__ = ["RunContext"]

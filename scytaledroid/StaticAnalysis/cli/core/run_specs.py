@@ -16,6 +16,7 @@ class StaticRunSpec:
     run_mode: str = "interactive"  # interactive | batch | diagnostic
     quiet: bool = False
     noninteractive: bool = False
+    batch_id: str | None = None
 
 
 def build_static_run_spec(
@@ -26,6 +27,7 @@ def build_static_run_spec(
     run_mode: str = "interactive",
     quiet: bool = False,
     noninteractive: bool = False,
+    batch_id: str | None = None,
 ) -> StaticRunSpec:
     return StaticRunSpec(
         selection=selection,
@@ -34,6 +36,7 @@ def build_static_run_spec(
         run_mode=run_mode,
         quiet=quiet,
         noninteractive=noninteractive,
+        batch_id=batch_id,
     )
 
 

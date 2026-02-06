@@ -311,6 +311,7 @@ def render_permission_postcard(
     total: int,
     compact: bool = False,
     silent: bool = False,
+    debug: bool = False,
 ) -> dict[str, object]:
     """Analyze and print a compact permission-first postcard.
 
@@ -386,8 +387,9 @@ def render_permission_postcard(
             print(f"High-signal:  {tags}")
         if not compact:
             _footprint_multiline(groups)
-            # Optional debug block to explain footprint composition
-            if os.environ.get("SCY_PERM_DEBUG") == "1":
+            # Optional debug block to explain footprint composition.
+            # Debug must be driven by explicit config, not environment reads mid-run.
+            if debug:
                 debug = _group_trigger_debug(declared, protection_map)
                 print("Debug — group triggers (strong/weak):")
                 for key in _GROUP_ORDER:

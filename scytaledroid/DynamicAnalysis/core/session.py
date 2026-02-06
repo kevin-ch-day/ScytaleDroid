@@ -25,6 +25,9 @@ class DynamicSessionConfig:
     output_root: str | None = None
     clear_logcat: bool = True
     proxy_port: int = 8890
+    enable_monitor: bool = False
+    monitor_verbose: bool = False
+    batch_id: str | None = None
 
 
 @dataclass

@@ -18,6 +18,7 @@ class DynamicRunSpec:
     static_run_id: int | None
     clear_logcat: bool
     interactive: bool = True
+    batch_id: str | None = None
 
 
 def build_dynamic_run_spec(
@@ -32,6 +33,7 @@ def build_dynamic_run_spec(
     static_run_id: int | None,
     clear_logcat: bool,
     interactive: bool = True,
+    batch_id: str | None = None,
 ) -> DynamicRunSpec:
     return DynamicRunSpec(
         package_name=package_name,
@@ -44,6 +46,7 @@ def build_dynamic_run_spec(
         static_run_id=static_run_id,
         clear_logcat=clear_logcat,
         interactive=interactive,
+        batch_id=batch_id,
     )
 
 

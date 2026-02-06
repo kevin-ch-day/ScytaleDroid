@@ -85,6 +85,7 @@ class DynamicRunOrchestrator:
                 static_plan=None,
                 proxy_port=self.config.proxy_port,
                 scenario_hint=None,
+                batch_id=self.config.batch_id,
             )
             event_logger = RunEventLogger(run_ctx)
             event_logger.log("plan.validation", build_plan_validation_event(exc.outcome))
@@ -121,6 +122,7 @@ class DynamicRunOrchestrator:
             static_plan=plan_payload,
             proxy_port=self.config.proxy_port,
             scenario_hint=scenario_hint,
+            batch_id=self.config.batch_id,
         )
 
         manifest = self._build_manifest(run_ctx, plan_payload, writer)
@@ -189,8 +191,8 @@ class DynamicRunOrchestrator:
                 allow_fallback_iface=self.config.tier != "dataset",
                 netstats_debug_dir=run_ctx.notes_dir,
             )
-            if os.environ.get("SCYTALEDROID_RUN_MONITOR") == "1":
-                verbose = os.environ.get("SCYTALEDROID_RUN_MONITOR_VERBOSE") == "1"
+            if self.config.enable_monitor:
+                verbose = bool(getattr(self.config, "monitor_verbose", False))
                 monitor = RunMonitor(
                     RunMonitorConfig(
                         device_serial=run_ctx.device_serial,
@@ -203,8 +205,7 @@ class DynamicRunOrchestrator:
                 if run_ctx.interactive:
                     print(
                         status_messages.status(
-                            "Run monitor enabled (writing notes/run_monitor.jsonl). "
-                            "Set SCYTALEDROID_RUN_MONITOR_VERBOSE=1 for live output.",
+                            "Run monitor enabled (writing notes/run_monitor.jsonl).",
                             level="info",
                         )
                     )
@@ -390,6 +391,7 @@ class DynamicRunOrchestrator:
             run_manifest_version=1,
             dynamic_run_id=run_ctx.dynamic_run_id,
             created_at=created_at,
+            batch_id=getattr(run_ctx, "batch_id", None),
             target={
                 "run_type": "dynamic",
                 "package_name": run_ctx.package_name,
@@ -422,6 +424,19 @@ class DynamicRunOrchestrator:
                 "tool_semver": app_config.APP_VERSION,
                 "tool_git_commit": get_git_commit(),
                 "schema_version": db_diagnostics.get_schema_version() or "<unknown>",
+                # RunContext snapshot: immutable execution context for reproducibility.
+                "run_context": {
+                    "interactive": bool(run_ctx.interactive),
+                    "tier": self.config.tier,
+                    "sampling_rate_s": self.config.sampling_rate_s,
+                    "duration_seconds": run_ctx.duration_seconds,
+                    "scenario_id": run_ctx.scenario_id,
+                    "device_serial": run_ctx.device_serial,
+                    "observer_ids": [observer.observer_id for observer in self.observers],
+                    "enable_monitor": bool(getattr(self.config, "enable_monitor", False)),
+                    "monitor_verbose": bool(getattr(self.config, "monitor_verbose", False)),
+                    "batch_id": getattr(run_ctx, "batch_id", None),
+                },
             },
         )
         if plan_artifact:

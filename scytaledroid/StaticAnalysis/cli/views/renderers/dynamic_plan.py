@@ -306,6 +306,7 @@ def build_dynamic_plan(
     *,
     static_run_id: int | None = None,
     schema_version: str | None = None,
+    batch_id: str | None = None,
 ) -> Mapping[str, object]:
     metadata = payload.get("app", {}) if isinstance(payload, Mapping) else {}
     baseline = payload.get("baseline", {}) if isinstance(payload, Mapping) else {}
@@ -348,6 +349,7 @@ def build_dynamic_plan(
         "plan_schema_version": PLAN_SCHEMA_VERSION,
         "schema_version": schema_version,
         "generated_at": generated_at,
+        "batch_id": batch_id,
         "package_name": metadata.get("package"),
         "version_name": metadata.get("version_name"),
         "version_code": metadata.get("version_code"),

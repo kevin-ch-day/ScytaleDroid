@@ -163,7 +163,7 @@ def _render_db_masvs_summary() -> None:
             )
             return
         summary = None
-        session_stamp = ctx.session_stamp if ctx and ctx.session_stamp else os.getenv("SCYTALEDROID_STATIC_SESSION")
+        session_stamp = ctx.session_stamp if ctx and ctx.session_stamp else None
         if session_stamp:
             run_map = load_run_map(session_stamp)
             static_ids = extract_static_run_ids(run_map)

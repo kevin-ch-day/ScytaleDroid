@@ -38,6 +38,7 @@ class RunManifest:
     run_manifest_version: int
     dynamic_run_id: str
     created_at: str
+    batch_id: str | None = None
     started_at: str | None = None
     ended_at: str | None = None
     status: str = "pending"
@@ -68,6 +69,7 @@ def manifest_to_dict(manifest: RunManifest) -> dict[str, Any]:
         "run_manifest_version": manifest.run_manifest_version,
         "dynamic_run_id": manifest.dynamic_run_id,
         "created_at": manifest.created_at,
+        "batch_id": manifest.batch_id,
         "started_at": manifest.started_at,
         "ended_at": manifest.ended_at,
         "status": manifest.status,

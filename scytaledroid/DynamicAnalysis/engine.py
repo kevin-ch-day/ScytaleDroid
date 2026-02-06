@@ -191,6 +191,7 @@ class DynamicAnalysisEngine:
             harvest_session_id=self.config.harvest_session_id,
             static_plan=None,
             proxy_port=self.config.proxy_port,
+            batch_id=self.config.batch_id,
         )
         event_logger = RunEventLogger(run_ctx)
         event_logger.log("plan.validation", build_plan_validation_event(validation))
@@ -199,6 +200,7 @@ class DynamicAnalysisEngine:
             run_manifest_version=1,
             dynamic_run_id=dynamic_run_id,
             created_at=datetime.now(UTC).isoformat(),
+            batch_id=self.config.batch_id,
             status="blocked",
             target={
                 "package_name": self.config.package_name,

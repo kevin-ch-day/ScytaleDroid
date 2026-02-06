@@ -36,6 +36,29 @@ def resolve_plan_selection(package_name: str) -> dict[str, object] | None:
     return _prompt_baseline_selection(package_name, candidates)
 
 
+def load_plan_candidates(package_name: str) -> tuple[list[dict[str, object]], str | None]:
+    """Load plan candidates without prompting.
+
+    This is used by dataset-mode flows that must be deterministic and non-interactive.
+    """
+
+    return _load_plan_candidates(package_name)
+
+
+def resolve_plan_selection_noninteractive(package_name: str) -> dict[str, object] | None:
+    """Deterministically pick the newest valid plan candidate without prompting.
+
+    If multiple identities exist, we still pick the newest generated plan overall.
+    Dataset-mode runs must not prompt (operator variance).
+    """
+
+    candidates, _note = _load_plan_candidates(package_name)
+    if not candidates:
+        return None
+    selection = _pick_newest_candidate(candidates)
+    return _build_selection(selection)
+
+
 def print_plan_selection_banner(selection: dict[str, object]) -> None:
     package_name = selection.get("package_name") or "unknown"
     display_name = _resolve_display_name(str(package_name))
@@ -252,3 +275,9 @@ def _identity_key(identity: dict[str, object]) -> str:
 
 
 __all__ = ["resolve_plan_selection", "print_plan_selection_banner"]
+__all__ = [
+    "resolve_plan_selection",
+    "resolve_plan_selection_noninteractive",
+    "load_plan_candidates",
+    "print_plan_selection_banner",
+]

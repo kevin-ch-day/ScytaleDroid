@@ -107,8 +107,6 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
             return None
     # Honor output prefs when execute_run_spec has already set them.
     output_prefs.set_verbose(bool(params.verbose_output))
-    if params.session_stamp:
-        os.environ["SCYTALEDROID_STATIC_SESSION"] = params.session_stamp
 
     persistence_ready, persistence_note = _check_static_persistence_readiness(params)
     os.environ["SCYTALEDROID_PERSISTENCE_READY"] = "1" if persistence_ready else "0"

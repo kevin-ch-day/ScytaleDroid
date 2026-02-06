@@ -24,6 +24,7 @@ def run_dynamic_analysis(
     clear_logcat: bool = True,
     proxy_port: int = 8890,
     sampling_rate_s: int = 2,
+    batch_id: str | None = None,
 ) -> DynamicSessionResult:
     config = DynamicSessionConfig(
         package_name=package_name,
@@ -41,6 +42,7 @@ def run_dynamic_analysis(
         clear_logcat=clear_logcat,
         proxy_port=proxy_port,
         sampling_rate_s=sampling_rate_s,
+        batch_id=batch_id,
     )
     engine_result = run_dynamic_engine(config)
     return engine_result.session
@@ -58,6 +60,7 @@ def execute_dynamic_run_spec(spec: DynamicRunSpec) -> DynamicSessionResult:
         tier=spec.tier,
         static_run_id=spec.static_run_id,
         clear_logcat=spec.clear_logcat,
+        batch_id=getattr(spec, "batch_id", None),
     )
 
 

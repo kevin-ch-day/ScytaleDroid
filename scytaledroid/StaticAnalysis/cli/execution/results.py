@@ -639,6 +639,11 @@ def _render_run_results_impl(outcome: RunOutcome, params: RunParameters) -> None
                         payload,
                         static_run_id=app_result.static_run_id,
                         schema_version=db_diagnostics.get_schema_version() or "<unknown>",
+                        batch_id=(
+                            getattr(output_prefs.get_run_context(), "batch_id", None)
+                            if output_prefs.get_run_context()
+                            else None
+                        ),
                     )
                     dynamic_plan_path = write_dynamic_plan_json(
                         plan_payload,
