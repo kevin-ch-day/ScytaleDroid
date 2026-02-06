@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import re
 
-from scytaledroid.DeviceAnalysis import adb_shell
-from scytaledroid.DeviceAnalysis.adb_errors import AdbError
+from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
+from scytaledroid.DeviceAnalysis.adb.errors import AdbError
 
 
 def _shell(serial: str, cmd: list[str], timeout: float = 5.0) -> tuple[int, str, str]:

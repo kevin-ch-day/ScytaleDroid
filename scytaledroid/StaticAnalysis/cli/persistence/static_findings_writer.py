@@ -40,7 +40,6 @@ def persist_static_findings(
     severity_counts: Mapping[str, int],
     details: Mapping[str, object],
     findings: Sequence[object] | None,
-    run_id: int | None,
     static_run_id: int | None = None,
 ) -> list[str]:
     errors: list[str] = []

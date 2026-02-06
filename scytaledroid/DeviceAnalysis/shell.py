@@ -5,7 +5,7 @@ from __future__ import annotations
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
-from . import adb_client
+from .adb import client as adb_client
 
 
 def open_shell(serial: str | None) -> None:

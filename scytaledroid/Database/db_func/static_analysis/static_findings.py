@@ -321,10 +321,9 @@ def lookup_summary_id(
     package_name: str,
     session_stamp: str,
     scope_label: str,
-    run_id: int | None = None,
     static_run_id: int | None = None,
 ) -> int | None:
-    """Best-effort fetch of a summary id even on legacy schemas."""
+    """Fetch a summary id for the canonical schema."""
     if _IS_SQLITE:
         try:
             row = run_sql(
@@ -335,21 +334,11 @@ def lookup_summary_id(
             return int(row[0]) if row else None
         except Exception:
             return None
-    has_run_column = _table_has_column("static_findings_summary", "run_id")
-    has_static_column = _table_has_column("static_findings_summary", "static_run_id")
     try:
-        if static_run_id is not None and has_static_column:
+        if static_run_id is not None:
             row = run_sql(
                 queries.SELECT_FINDINGS_SUMMARY_ID_BY_STATIC_RUN,
                 (int(static_run_id), scope_label),
-                fetch="one",
-            )
-            if row:
-                return int(row[0])
-        if run_id is not None and has_run_column:
-            row = run_sql(
-                queries.SELECT_FINDINGS_SUMMARY_ID_BY_RUN,
-                (int(run_id), scope_label),
                 fetch="one",
             )
             if row:

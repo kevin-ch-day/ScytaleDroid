@@ -99,9 +99,25 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
     persistence_ready, persistence_note = _check_static_persistence_readiness(params)
     os.environ["SCYTALEDROID_PERSISTENCE_READY"] = "1" if persistence_ready else "0"
     if not persistence_ready:
-        level = "error" if _strict_persistence_enabled() else "warn"
+        level = "error" if _strict_persistence_enabled() or _paper_grade_required() else "warn"
         print(status_messages.status(persistence_note, level=level))
-        if _strict_persistence_enabled() and not params.dry_run:
+        if (_strict_persistence_enabled() or _paper_grade_required()) and not params.dry_run:
+            print(
+                status_messages.status(
+                    (
+                        "Paper-grade runs require canonical schema readiness. "
+                        "Run schema bootstrap or set SCYTALEDROID_PAPER_GRADE=0 "
+                        "to allow experimental runs."
+                    ),
+                    level="error",
+                )
+            )
+            print(
+                status_messages.status(
+                    "Menu path: Database tools → Apply canonical schema bootstrap",
+                    level="info",
+                )
+            )
             return None
 
     try:
@@ -437,6 +453,15 @@ def _purge_run_cache() -> None:
 
 def _strict_persistence_enabled() -> bool:
     return os.getenv("SCYTALEDROID_STRICT_PERSISTENCE", "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _paper_grade_required() -> bool:
+    return os.getenv("SCYTALEDROID_PAPER_GRADE", "1").strip().lower() in {
         "1",
         "true",
         "yes",

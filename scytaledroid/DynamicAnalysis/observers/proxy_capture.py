@@ -11,7 +11,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from scytaledroid.DeviceAnalysis import adb_client, adb_shell
+from scytaledroid.DeviceAnalysis.adb import client as adb_client, shell as adb_shell
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
 from scytaledroid.DynamicAnalysis.observers.base import Observer, ObserverHandle, ObserverResult

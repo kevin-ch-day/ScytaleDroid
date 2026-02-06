@@ -140,13 +140,13 @@ def _summarise_component_guards(
         guard_histogram[strength] += 1
         type_counter = by_type.setdefault(component.component_type, Counter())
         type_counter[strength] += 1
-        if strength in {"none", "weak"}:
+        if strength in {"none", "weak", "unknown", "dangerous"}:
             weak_exports.append(component.name)
-        elif strength == "dangerous":
+        if strength == "dangerous":
             dangerous_exports.append(component.name)
         elif strength == "signature":
             signature_exports.append(component.name)
-        else:
+        elif strength == "unknown":
             unknown_exports.append(component.name)
 
     return {

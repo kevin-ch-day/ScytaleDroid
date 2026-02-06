@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from scytaledroid.DeviceAnalysis import adb_devices, adb_shell
+from scytaledroid.DeviceAnalysis.adb import devices as adb_devices, shell as adb_shell
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
 

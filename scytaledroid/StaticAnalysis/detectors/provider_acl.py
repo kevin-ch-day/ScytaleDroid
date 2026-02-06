@@ -30,6 +30,8 @@ class ProviderRecord:
 
     name: str
     exported: bool
+    exported_explicit: bool | None
+    export_reason: str | None
     read_permission: str | None
     write_permission: str | None
     general_permission: str | None
@@ -63,6 +65,10 @@ def _resolve_strength(
     )
     if strength == "none":
         return "none", tuple(levels)
+    if strength == "signature":
+        return "signature", tuple(levels)
+    if strength in {"dangerous", "weak", "unknown", "custom"}:
+        return "weak", tuple(levels)
     return strength, tuple(levels)
 
 
@@ -91,10 +97,15 @@ def _collect_providers(manifest_root: ElementTree.Element) -> Sequence[ProviderR
             continue
 
         exported_attr = element.get(f"{_ANDROID_NS}exported")
+        exported_explicit: bool | None = None
+        export_reason = None
         if exported_attr is not None:
-            exported = exported_attr.strip().lower() == "true"
+            exported_explicit = exported_attr.strip().lower() == "true"
+            exported = exported_explicit
+            export_reason = "explicit_flag"
         else:
             exported = False
+            export_reason = "provider_default_false"
 
         read_perm = (element.get(f"{_ANDROID_NS}readPermission") or "").strip() or None
         write_perm = (element.get(f"{_ANDROID_NS}writePermission") or "").strip() or None
@@ -133,6 +144,8 @@ def _collect_providers(manifest_root: ElementTree.Element) -> Sequence[ProviderR
             ProviderRecord(
                 name=name,
                 exported=exported,
+                exported_explicit=exported_explicit,
+                export_reason=export_reason,
                 read_permission=read_perm or permission,
                 write_permission=write_perm or permission,
                 general_permission=permission,
@@ -149,6 +162,9 @@ def _build_provider_evidence(provider: ProviderRecord, *, apk_path) -> EvidenceP
     location = f"{apk_path.resolve().as_posix()}!AndroidManifest.xml::provider:{provider.name}"
     description = f"provider {provider.name}"
     extra = {
+        "exported": provider.exported,
+        "exported_explicit": provider.exported_explicit,
+        "export_reason": provider.export_reason,
         "authorities": provider.authorities,
         "read_permission": provider.read_permission,
         "write_permission": provider.write_permission,
@@ -282,6 +298,8 @@ def _build_provider_snapshot(
     return {
         "name": provider.name,
         "exported": provider.exported,
+        "exported_explicit": provider.exported_explicit,
+        "export_reason": provider.export_reason,
         "authorities": provider.authorities,
         "grant_uri_permissions": provider.grant_uri_permissions,
         "base_permission": provider.general_permission,

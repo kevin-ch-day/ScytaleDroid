@@ -19,7 +19,8 @@ from scytaledroid.Utils.DisplayUtils import (
 )
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
-from . import adb_devices, package_profiles
+from .adb import devices as adb_devices
+from . import package_profiles
 
 
 def generate_device_report(serial: str | None) -> None:

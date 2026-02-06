@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Mapping, MutableMapping, Sequence
 
 from scytaledroid.Database.db_core import db_queries as core_q
-from scytaledroid.Utils.DisplayUtils import status_messages
 
 
 def _apply_display_names(entries: Sequence[dict[str, object]]) -> None:
@@ -60,35 +59,4 @@ def _apply_display_names(entries: Sequence[dict[str, object]]) -> None:
         entry["label"] = label
 
 
-def _warn_legacy_running_rows() -> None:
-    try:
-        row = core_q.run_sql(
-            """
-            SELECT COUNT(*)
-            FROM static_analysis_runs
-            WHERE status='RUNNING'
-              AND ended_at_utc IS NULL
-              AND TIMESTAMPDIFF(HOUR, created_at, UTC_TIMESTAMP()) > 24
-            """,
-            fetch="one",
-        )
-    except Exception:
-        return
-    if not row:
-        return
-    value = row[0] if not isinstance(row, dict) else next(iter(row.values()), 0)
-    try:
-        count = int(value or 0)
-    except (TypeError, ValueError):
-        return
-    if count <= 0:
-        return
-    print(
-        status_messages.status(
-            f"Detected {count} legacy RUNNING rows older than 24h (pre-finalization). No action required.",
-            level="warn",
-        )
-    )
-
-
-__all__ = ["_apply_display_names", "_warn_legacy_running_rows"]
+__all__ = ["_apply_display_names"]

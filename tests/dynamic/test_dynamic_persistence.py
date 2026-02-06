@@ -48,8 +48,16 @@ def test_persist_dynamic_summary_inserts_plan_validation_issue(monkeypatch, tmp_
 
     assert captured["writes"]
     assert captured["many"]
-    issue_args = captured["many"][0][0]
-    inserted = issue_args[1]
+    issue_call = next(
+        (
+            entry
+            for entry in captured["many"]
+            if "dynamic_session_issues" in str(entry[0][0])
+        ),
+        None,
+    )
+    assert issue_call is not None
+    inserted = issue_call[0][1]
     assert any(row[1] == "plan_validation_fail" for row in inserted)
 
 
@@ -87,8 +95,16 @@ def test_persist_dynamic_summary_extracts_observer_issues(monkeypatch, tmp_path)
     persistence.persist_dynamic_summary(config, result, payload)
 
     assert captured["many"]
-    issue_args = captured["many"][0][0]
-    inserted = issue_args[1]
+    issue_call = next(
+        (
+            entry
+            for entry in captured["many"]
+            if "dynamic_session_issues" in str(entry[0][0])
+        ),
+        None,
+    )
+    assert issue_call is not None
+    inserted = issue_call[0][1]
     codes = {row[1] for row in inserted}
     assert "proxy_capture_failed" in codes
     assert "tcpdump_unavailable_nonroot" in codes

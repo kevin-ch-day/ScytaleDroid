@@ -7,7 +7,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from scytaledroid.Config import app_config
-from scytaledroid.DeviceAnalysis import adb_client, adb_shell, harvest, inventory
+from scytaledroid.DeviceAnalysis.adb import client as adb_client
+from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
+from scytaledroid.DeviceAnalysis import harvest, inventory
 from scytaledroid.DeviceAnalysis.apk import delta, planner, ui
 from scytaledroid.DeviceAnalysis.apk.models import PlanResolution, SnapshotContext
 from scytaledroid.DeviceAnalysis.device_menu.inventory_guard import (

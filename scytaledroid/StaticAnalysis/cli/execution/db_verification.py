@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from collections import defaultdict
 from collections.abc import Mapping, MutableMapping, Sequence
@@ -352,7 +353,58 @@ def _render_persistence_footer(
         """,
         (session_stamp,),
     )
+    string_samples_selected = _audit_or(
+        "static_string_selected_samples",
+        """
+        SELECT COUNT(*)
+        FROM static_string_selected_samples x
+        JOIN static_findings_summary s ON s.id = x.summary_id
+        WHERE s.session_stamp = %s
+        """,
+        (session_stamp,),
+    )
 
+    def _sample_selection_meta(static_ids: Sequence[int]) -> tuple[str | None, str | None]:
+        if not static_ids:
+            return None, None
+        placeholders = ",".join(["%s"] * len(static_ids))
+        try:
+            row = core_q.run_sql(
+                f"""
+                SELECT selection_version, selection_params
+                FROM static_string_sample_sets
+                WHERE static_run_id IN ({placeholders})
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                tuple(static_ids),
+                fetch="one",
+            )
+        except Exception:
+            return None, None
+        if not row:
+            return None, None
+        if isinstance(row, dict):
+            selection_version = row.get("selection_version")
+            params_payload = row.get("selection_params")
+        else:
+            selection_version, params_payload = row
+        policy_version = None
+        if params_payload:
+            if isinstance(params_payload, str):
+                try:
+                    params_payload = json.loads(params_payload)
+                except Exception:
+                    params_payload = None
+            if isinstance(params_payload, Mapping):
+                policy_version = params_payload.get("policy_version")
+        if selection_version is not None:
+            selection_version = str(selection_version)
+        if policy_version is not None:
+            policy_version = str(policy_version)
+        return selection_version, policy_version
+
+    selection_version, policy_version = _sample_selection_meta(latest_static_run_ids)
     buckets = _audit_or("buckets") or _count_by_run("buckets")
     metrics = _audit_or("metrics") or _count_by_run("metrics")
     findings = _audit_or("findings") or _count_by_run("findings")
@@ -387,6 +439,7 @@ def _render_persistence_footer(
     findings_total = _count_total("SELECT COUNT(*) FROM findings")
     strings_summary_total = _count_total("SELECT COUNT(*) FROM static_string_summary")
     string_samples_raw_total = _count_total("SELECT COUNT(*) FROM static_string_samples")
+    string_samples_selected_total = _count_total("SELECT COUNT(*) FROM static_string_selected_samples")
     findings_summary_total = _count_total("SELECT COUNT(*) FROM static_findings_summary")
     findings_detail_total = _count_total("SELECT COUNT(*) FROM static_findings")
     snapshot_total = _count_total("SELECT COUNT(*) FROM permission_audit_snapshots")
@@ -446,6 +499,14 @@ def _render_persistence_footer(
         (
             "static_string_samples",
             f"this_run={string_samples_raw}  db_total={string_samples_raw_total}",
+        ),
+        (
+            "static_string_selected",
+            f"this_run={string_samples_selected}  db_total={string_samples_selected_total}",
+        ),
+        (
+            "string_sample_policy",
+            f"version={selection_version or '—'}  policy={policy_version or '—'}",
         ),
         ("buckets", f"this_run={buckets}  db_total={buckets_total}"),
         ("metrics", f"this_run={metrics}  db_total={metrics_total}"),
@@ -597,6 +658,7 @@ def _render_persistence_footer(
         "findings": findings,
         "static_string_summary": strings_summary,
         "static_string_samples": string_samples_raw,
+        "static_string_selected_samples": string_samples_selected,
         "buckets": buckets,
         "metrics": metrics,
         "permission_audit_snapshots": snapshot_count,

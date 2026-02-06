@@ -15,6 +15,7 @@ from scytaledroid.StaticAnalysis.cli.persistence.static_findings_writer import (
     persist_static_findings,
 )
 from scytaledroid.StaticAnalysis.cli.persistence.strings_writer import persist_string_summary
+from scytaledroid.StaticAnalysis.modules.string_analysis.selection import select_samples
 from scytaledroid.StaticAnalysis.cli.persistence.utils import first_text, require_canonical_schema
 
 # export for existing imports
@@ -68,7 +69,6 @@ def persist_static_sections(
     string_payload: Mapping[str, object],
     manifest: object | None,
     app_metadata: Mapping[str, object] | object,
-    run_id: int | None,
     static_run_id: int | None = None,
 ) -> tuple[list[str], bool, int]:
     errors: list[str] = []
@@ -125,7 +125,6 @@ def persist_static_sections(
         severity_counts=severity_counts,
         details=details,
         findings=findings_seq,
-        run_id=run_id,
         static_run_id=static_run_id,
     )
     if baseline_errors:
@@ -136,19 +135,35 @@ def persist_static_sections(
     counts = str_writer.normalise_string_counts(string_payload.get("counts"))
     samples_payload = string_payload.get("samples")
     samples = samples_payload if isinstance(samples_payload, Mapping) else {}
+    selected_payload = string_payload.get("selected_samples")
+    selected_samples = selected_payload if isinstance(selected_payload, Mapping) else None
+    selection_params = string_payload.get("selection_params") if isinstance(string_payload, Mapping) else None
+    if selected_samples is None:
+        try:
+            options = string_payload.get("options") if isinstance(string_payload, Mapping) else {}
+            max_samples = int(options.get("max_samples", 2)) if isinstance(options, Mapping) else 2
+            min_entropy = float(options.get("min_entropy", 0)) if isinstance(options, Mapping) else None
+            selected_samples, selection_params = select_samples(
+                samples,
+                max_samples=max_samples,
+                min_entropy=min_entropy,
+            )
+        except Exception:
+            selected_samples = {}
     sample_total = 0
     for values in samples.values():
         if isinstance(values, Sequence):
             sample_total += len(values)
-    string_errors = persist_string_summary(
-        package_name=package_name,
-        session_stamp=session_stamp,
-        scope_label=scope_label,
-        counts=counts,
-        samples=samples,
-        run_id=run_id,
-        static_run_id=static_run_id,
-    )
+        string_errors = persist_string_summary(
+            package_name=package_name,
+            session_stamp=session_stamp,
+            scope_label=scope_label,
+            counts=counts,
+            samples=samples,
+            selected_samples=selected_samples,
+            selection_params=selection_params if isinstance(selection_params, Mapping) else None,
+            static_run_id=static_run_id,
+        )
     if string_errors:
         errors.extend(string_errors)
         sample_total = 0

@@ -10,7 +10,8 @@ from pathlib import Path
 from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_utils.menus import health_checks
-from scytaledroid.DeviceAnalysis import adb_devices, device_manager
+from scytaledroid.DeviceAnalysis.adb import devices as adb_devices
+from scytaledroid.DeviceAnalysis import device_manager
 from scytaledroid.DeviceAnalysis.report import generate_device_report
 from scytaledroid.DynamicAnalysis.exports.dataset_export import export_tier1_pack
 from scytaledroid.Reporting.generator import export_static_analysis_markdown

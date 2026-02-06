@@ -72,6 +72,40 @@ CREATE TABLE IF NOT EXISTS static_string_samples (
 );
 """
 
+SQLITE_CREATE_SELECTED_SAMPLES = """
+CREATE TABLE IF NOT EXISTS static_string_selected_samples (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  summary_id INTEGER NOT NULL,
+  static_run_id INTEGER NULL,
+  bucket TEXT NOT NULL,
+  value_masked TEXT NULL,
+  src TEXT NULL,
+  tag TEXT NULL,
+  rank INTEGER NOT NULL DEFAULT 1,
+  source_type TEXT NULL,
+  finding_type TEXT NULL,
+  provider TEXT NULL,
+  risk_tag TEXT NULL,
+  confidence TEXT NULL,
+  sample_hash TEXT NULL,
+  root_domain TEXT NULL,
+  resource_name TEXT NULL,
+  scheme TEXT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
+SQLITE_CREATE_SAMPLE_SETS = """
+CREATE TABLE IF NOT EXISTS static_string_sample_sets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  summary_id INTEGER NOT NULL,
+  static_run_id INTEGER NULL,
+  selection_params TEXT NULL,
+  selection_version TEXT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
 
 @dataclass(slots=True)
 class StringSummaryRecord:
@@ -81,7 +115,6 @@ class StringSummaryRecord:
     session_stamp: str
     scope_label: str
     counts: Mapping[str, int]
-    run_id: int | None = None  # legacy FK to runs (read-only compatibility)
     static_run_id: int | None = None  # FK to static_analysis_runs
 
     def to_parameters(self) -> dict[str, object]:
@@ -90,8 +123,7 @@ class StringSummaryRecord:
             "package_name": self.package_name,
             "session_stamp": self.session_stamp,
             "scope_label": self.scope_label,
-            # Keep run_id nullable for legacy read-only compatibility.
-            "run_id": int(self.run_id) if self.run_id is not None else None,
+            "run_id": None,
             "static_run_id": int(self.static_run_id) if self.static_run_id is not None else None,
             "endpoints": int(counts.get("endpoints", 0)),
             "http_cleartext": int(counts.get("http_cleartext", 0)),
@@ -176,10 +208,18 @@ def ensure_tables() -> bool:
                 fetch="one",
             )
             row3 = run_sql(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='static_string_selected_samples'",
+                fetch="one",
+            )
+            row4 = run_sql(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='static_string_sample_sets'",
+                fetch="one",
+            )
+            row5 = run_sql(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='doc_hosts'",
                 fetch="one",
             )
-            ok = bool(row1 and row2 and row3)
+            ok = bool(row1 and row2 and row3 and row4 and row5)
         except Exception:
             return False
     else:
@@ -187,6 +227,8 @@ def ensure_tables() -> bool:
         for name in (
             "static_string_summary",
             "static_string_samples",
+            "static_string_selected_samples",
+            "static_string_sample_sets",
             "doc_hosts",
         ):
             row = run_sql(
@@ -208,9 +250,54 @@ def tables_exist() -> bool:
     try:
         row1 = run_sql(queries.TABLE_EXISTS_SUMMARY, fetch="one")
         row2 = run_sql(queries.TABLE_EXISTS_SAMPLES, fetch="one")
-        return bool(row1 and int(row1[0]) > 0 and row2 and int(row2[0]) > 0)
+        row3 = run_sql(queries.TABLE_EXISTS_SELECTED_SAMPLES, fetch="one")
+        row4 = run_sql(queries.TABLE_EXISTS_SAMPLE_SETS, fetch="one")
+        return bool(
+            row1
+            and int(row1[0]) > 0
+            and row2
+            and int(row2[0]) > 0
+            and row3
+            and int(row3[0]) > 0
+            and row4
+            and int(row4[0]) > 0
+        )
     except Exception:
         return False
+
+
+def upsert_sample_set(
+    summary_id: int,
+    *,
+    selection_params: str | None,
+    selection_version: str | None,
+    static_run_id: int | None = None,
+) -> None:
+    if _IS_SQLITE:
+        _require_static_run_id({"static_run_id": static_run_id}, table="static_string_sample_sets")
+        try:
+            with database_session():
+                run_sql("DELETE FROM static_string_sample_sets WHERE summary_id=%s", (summary_id,))
+                run_sql(
+                    """
+                    INSERT INTO static_string_sample_sets (
+                      summary_id, static_run_id, selection_params, selection_version
+                    ) VALUES (%s, %s, %s, %s)
+                    """,
+                    (summary_id, static_run_id, selection_params, selection_version),
+                )
+        except Exception:
+            return
+        return
+    _require_static_run_id({"static_run_id": static_run_id}, table="static_string_sample_sets")
+    try:
+        with database_session():
+            run_sql(
+                queries.UPSERT_SAMPLE_SET,
+                (summary_id, static_run_id, selection_params, selection_version),
+            )
+    except Exception:
+        return
 
 
 def _summary_params(summary: SummaryRow) -> MutableMapping[str, object]:
@@ -245,11 +332,6 @@ def _summary_params(summary: SummaryRow) -> MutableMapping[str, object]:
             "ws_wss_seen": int(base.get("ws_wss_seen", 0)),
             "ipv6_seen": int(base.get("ipv6_seen", 0)),
         },
-        run_id=(
-            int(base["run_id"])
-            if base.get("run_id") is not None and str(base.get("run_id")).strip() != ""
-            else None
-        ),
         static_run_id=static_run,
     ).to_parameters()
 
@@ -376,14 +458,13 @@ def upsert_summary(summary: SummaryRow) -> int | None:
         return None
 
 
-def replace_top_samples(
+def replace_samples_full(
     summary_id: int,
     samples: Mapping[str, Sequence[SampleRow]],
     *,
-    top_n: int = 3,
     static_run_id: int | None = None,
 ) -> tuple[int, int]:
-    """Replace samples for summary_id with top N per bucket.
+    """Replace samples for summary_id with the full set (uncapped).
 
     Returns (deleted, inserted).
     """
@@ -400,7 +481,7 @@ def replace_top_samples(
                     if not entries:
                         continue
                     rank = 1
-                    for sample in list(entries)[: int(top_n)]:
+                    for sample in list(entries):
                         record = _sample_to_mapping(sample)
                         value_masked = record.get("value_masked") or record.get("value")
                         src = record.get("src")
@@ -466,7 +547,7 @@ def replace_top_samples(
                 if not entries:
                     continue
                 rank = 1
-                for sample in list(entries)[: int(top_n)]:
+                for sample in list(entries):
                     record = _sample_to_mapping(sample)
                     value_masked = record.get("value_masked") or record.get("value")
                     src = record.get("src")
@@ -523,6 +604,140 @@ def replace_top_samples(
             )
         except Exception:
             pass
+    return deleted, inserted
+
+
+def replace_selected_samples(
+    summary_id: int,
+    samples: Mapping[str, Sequence[SampleRow]],
+    *,
+    static_run_id: int | None = None,
+) -> tuple[int, int]:
+    """Replace immutable selected samples for summary_id (paper-grade snapshot)."""
+    if _IS_SQLITE:
+        _require_static_run_id({"static_run_id": static_run_id}, table="static_string_selected_samples")
+        deleted = 0
+        inserted = 0
+        try:
+            with database_session():
+                run_sql(
+                    "DELETE FROM static_string_selected_samples WHERE summary_id=%s",
+                    (summary_id,),
+                )
+                deleted = 1
+                rows: list[tuple[object, ...]] = []
+                for bucket, entries in samples.items():
+                    if not entries:
+                        continue
+                    rank = 1
+                    for sample in list(entries):
+                        record = _sample_to_mapping(sample)
+                        value_masked = record.get("value_masked") or record.get("value")
+                        src = record.get("src")
+                        tag = record.get("tag")
+                        source_type = record.get("source_type")
+                        finding_type = record.get("finding_type")
+                        provider = record.get("provider")
+                        risk_tag = record.get("risk_tag")
+                        confidence = record.get("confidence")
+                        sample_hash = record.get("sample_hash")
+                        root_domain = record.get("root_domain")
+                        resource_name = record.get("resource_name")
+                        scheme = record.get("scheme")
+                        rows.append(
+                            (
+                                summary_id,
+                                static_run_id,
+                                bucket,
+                                str(value_masked)[:512] if value_masked is not None else None,
+                                str(src)[:512] if src is not None else None,
+                                (str(tag)[:64] if tag is not None else None),
+                                rank,
+                                (str(source_type)[:16] if source_type else None),
+                                (str(finding_type)[:32] if finding_type else None),
+                                (str(provider)[:64] if provider else None),
+                                (str(risk_tag)[:32] if risk_tag else None),
+                                (str(confidence)[:16] if confidence else None),
+                                (str(sample_hash)[:40] if sample_hash else None),
+                                (str(root_domain)[:191] if root_domain else None),
+                                (str(resource_name)[:191] if resource_name else None),
+                                (str(scheme)[:32] if scheme else None),
+                            )
+                        )
+                        rank += 1
+                if rows:
+                    stmt = """
+                    INSERT INTO static_string_selected_samples (
+                      summary_id, static_run_id, bucket, value_masked, src, tag, rank,
+                      source_type, finding_type, provider, risk_tag, confidence,
+                      sample_hash, root_domain, resource_name, scheme
+                    ) VALUES (
+                      %s, %s, %s, %s, %s, %s, %s,
+                      %s, %s, %s, %s, %s,
+                      %s, %s, %s, %s
+                    )
+                    """
+                    batch_size = max(_SAMPLE_BATCH_SIZE, 1)
+                    for idx in range(0, len(rows), batch_size):
+                        run_sql_many(stmt, rows[idx : idx + batch_size])
+                    inserted = len(rows)
+        except Exception:
+            pass
+        return deleted, inserted
+    _require_static_run_id({"static_run_id": static_run_id}, table="static_string_selected_samples")
+    deleted = 0
+    inserted = 0
+    try:
+        with database_session():
+            run_sql(queries.DELETE_SELECTED_SAMPLES_FOR_SUMMARY, (summary_id,))
+            deleted = 1
+            rows: list[tuple[object, ...]] = []
+            for bucket, entries in samples.items():
+                if not entries:
+                    continue
+                rank = 1
+                for sample in list(entries):
+                    record = _sample_to_mapping(sample)
+                    value_masked = record.get("value_masked") or record.get("value")
+                    src = record.get("src")
+                    tag = record.get("tag")
+                    source_type = record.get("source_type")
+                    finding_type = record.get("finding_type")
+                    provider = record.get("provider")
+                    risk_tag = record.get("risk_tag")
+                    confidence = record.get("confidence")
+                    sample_hash = record.get("sample_hash")
+                    root_domain = record.get("root_domain")
+                    resource_name = record.get("resource_name")
+                    scheme = record.get("scheme")
+                    rows.append(
+                        (
+                            summary_id,
+                            static_run_id,
+                            bucket,
+                            str(value_masked)[:512] if value_masked is not None else None,
+                            str(src)[:512] if src is not None else None,
+                            (str(tag)[:64] if tag is not None else None),
+                            rank,
+                            (str(source_type)[:16] if source_type else None),
+                            (str(finding_type)[:32] if finding_type else None),
+                            (str(provider)[:64] if provider else None),
+                            (str(risk_tag)[:32] if risk_tag else None),
+                            (str(confidence)[:16] if confidence else None),
+                            (str(sample_hash)[:40] if sample_hash else None),
+                            (str(root_domain)[:191] if root_domain else None),
+                            (str(resource_name)[:191] if resource_name else None),
+                            (str(scheme)[:32] if scheme else None),
+                        )
+                    )
+                    rank += 1
+            if rows:
+                batch_size = max(_SAMPLE_BATCH_SIZE, 1)
+                for idx in range(0, len(rows), batch_size):
+                    run_sql_many(queries.INSERT_SELECTED_SAMPLE, rows[idx : idx + batch_size])
+                inserted = len(rows)
+    except Exception:
+        return deleted, inserted
     return deleted, inserted
 
 
@@ -620,7 +835,9 @@ __all__ = [
     "ensure_tables",
     "tables_exist",
     "upsert_summary",
-    "replace_top_samples",
+    "replace_samples_full",
+    "replace_selected_samples",
+    "upsert_sample_set",
     "seed_doc_hosts",
     "seed_doc_hosts_from_config",
 ]

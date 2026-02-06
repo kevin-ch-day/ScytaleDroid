@@ -39,6 +39,8 @@ class ComponentRecord:
     name: str
     exported: bool
     permission: str | None
+    exported_explicit: bool | None = None
+    export_reason: str | None = None
     authorities: tuple[str, ...] = ()
     grant_uri_permissions: bool = False
     process: str | None = None
@@ -51,6 +53,8 @@ def iter_manifest_components(
     if application is None:
         return tuple()
 
+    target_sdk = _extract_target_sdk_int(manifest_root)
+
     records: list[ComponentRecord] = []
 
     for element in application:
@@ -62,17 +66,28 @@ def iter_manifest_components(
             continue
 
         exported_attr = element.get(f"{_ANDROID_NS}exported")
+        exported_explicit: bool | None = None
+        export_reason = None
         if exported_attr is not None:
-            exported = exported_attr.strip().lower() == "true"
-        elif tag == "provider":
-            exported = False
+            exported_explicit = exported_attr.strip().lower() == "true"
+            exported = exported_explicit
+            export_reason = "explicit_flag"
         else:
-            exported = any(
+            has_intent_filter = any(
                 child.tag.rsplit("}", 1)[-1] == "intent-filter"
                 if "}" in child.tag
                 else child.tag == "intent-filter"
                 for child in element
             )
+            if target_sdk is not None and target_sdk >= 31 and has_intent_filter:
+                exported = False
+                export_reason = "sdk31_requires_explicit"
+            elif tag == "provider":
+                exported = False
+                export_reason = "provider_default_false"
+            else:
+                exported = bool(has_intent_filter)
+                export_reason = "intent_filter_present" if has_intent_filter else "default_false"
 
         permission = element.get(f"{_ANDROID_NS}permission")
         authorities: list[str] = []
@@ -94,6 +109,8 @@ def iter_manifest_components(
                 component_type=tag,
                 name=name,
                 exported=exported,
+                exported_explicit=exported_explicit,
+                export_reason=export_reason,
                 permission=permission,
                 authorities=tuple(authorities),
                 grant_uri_permissions=grant_uri,
@@ -104,11 +121,26 @@ def iter_manifest_components(
     return tuple(records)
 
 
+def _extract_target_sdk_int(manifest_root: ElementTree.Element) -> int | None:
+    uses_sdk = manifest_root.find("uses-sdk")
+    if uses_sdk is None:
+        return None
+    raw_value = uses_sdk.get(f"{_ANDROID_NS}targetSdkVersion")
+    if not raw_value:
+        return None
+    try:
+        return int(str(raw_value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
 def _build_evidence(component: ComponentRecord, *, apk_path) -> EvidencePointer:
     location = f"{apk_path.resolve().as_posix()}!AndroidManifest.xml::{component.component_type}:{component.name}"
     description = f"{component.component_type} {component.name}"
     extra = {
         "exported": component.exported,
+        "exported_explicit": component.exported_explicit,
+        "export_reason": component.export_reason,
         "permission": component.permission,
         "authorities": component.authorities,
         "grant_uri_permissions": component.grant_uri_permissions,
@@ -134,6 +166,10 @@ def _permission_strength(
     )
     if strength == "none":
         return "none", levels
+    if strength == "signature":
+        return "strong", tuple(levels)
+    if strength in {"dangerous", "weak", "unknown"}:
+        return "weak", tuple(levels)
     return strength, tuple(levels)
 
 

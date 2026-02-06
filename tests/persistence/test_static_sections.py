@@ -62,7 +62,6 @@ def test_persist_static_sections_persists_baseline_and_strings():
         },
         manifest=DummyManifest("Example App"),
         app_metadata={},
-        run_id=1,
         static_run_id=1,
     )
 

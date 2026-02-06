@@ -14,7 +14,7 @@ from pathlib import Path
 from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
-from scytaledroid.DeviceAnalysis import adb_shell
+from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
 from scytaledroid.DynamicAnalysis.analysis.summarizer import DynamicRunSummarizer
 from scytaledroid.DynamicAnalysis.core.environment import EnvironmentManager
 from scytaledroid.DynamicAnalysis.core.event_logger import RunEventLogger
@@ -436,18 +436,7 @@ class DynamicRunOrchestrator:
         if row:
             package_name = row[0] or package_name
             sha256 = row[1] or row[2]
-        artifact_token = str(sha256) if sha256 else f"run_{run_ctx.static_run_id}"
         dep_path = Path("evidence") / "static_runs" / str(run_ctx.static_run_id) / "dep.json"
-        legacy_dep_path = (
-            Path("evidence")
-            / "static_runs"
-            / str(run_ctx.static_run_id)
-            / str(package_name)
-            / artifact_token
-            / "dep.json"
-        )
-        if not dep_path.exists() and legacy_dep_path.exists():
-            dep_path = legacy_dep_path
         if not dep_path.exists():
             note = (
                 "DEP snapshot missing; expected "

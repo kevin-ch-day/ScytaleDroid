@@ -270,6 +270,11 @@ def classify_permission(
     if descriptor is None:
         return "unknown", tuple()
     strength = descriptor.guard_strength()
+    try:
+        from .guard_policy import apply_guard_policy
+        strength = apply_guard_policy(lookup_name, strength)
+    except Exception:
+        pass
     return strength, descriptor.protection
 
 

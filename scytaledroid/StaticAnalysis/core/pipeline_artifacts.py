@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 from ..analytics import build_finding_matrices, build_workload_profile
+from .manifest_utils import build_manifest_evidence
 from .findings import Badge, DetectorResult
 
 if TYPE_CHECKING:  # pragma: no cover - typing imports only
@@ -215,6 +216,7 @@ def build_reproducibility_bundle(
         "permissions": context.permissions.to_dict(),
         "components": context.components.to_dict(),
         "exported_components": context.exported_components.to_dict(),
+        "manifest_evidence": {"components": build_manifest_evidence(context.manifest_root)},
         "hashes": dict(context.hashes),
         "features": list(context.features),
         "libraries": list(context.libraries),

@@ -23,6 +23,8 @@ PROTECTED_TABLES: Sequence[str] = (
 STATIC_ANALYSIS_TABLES: Sequence[str] = (
     # Static analysis result tables
     "static_string_samples",
+    "static_string_selected_samples",
+    "static_string_sample_sets",
     "static_string_summary",
     "static_provider_acl",
     "static_fileproviders",

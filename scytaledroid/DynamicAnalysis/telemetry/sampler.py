@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from scytaledroid.DeviceAnalysis import adb_shell
+from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
 from scytaledroid.Utils.netstats_collector import NetstatsCollector
 from scytaledroid.Utils.netstats_parser import NetstatsParser
 from scytaledroid.Utils.network_quality import evaluate_network_signal_quality

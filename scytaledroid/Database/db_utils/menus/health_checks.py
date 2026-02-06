@@ -16,6 +16,7 @@ from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_mes
 from scytaledroid.Utils.DisplayUtils.terminal import get_terminal_width
 
 from ..health_checks import fetch_latest_run, fetch_latest_session
+from ..health_checks.summary import fetch_health_summary
 from ..health_checks.inventory_checks import run_inventory_snapshot_checks
 from ..menu_actions import log_db_op
 from ..reset_static import (
@@ -50,83 +51,34 @@ def run_health_summary() -> None:
     print()
     menu_utils.print_header("DB Health Summary")
 
-    running_total = scalar(
-        """
-        SELECT COUNT(*)
-        FROM static_analysis_runs
-        WHERE status='RUNNING' AND ended_at_utc IS NULL
-        """
-    )
-    running_recent = scalar(
-        """
-        SELECT COUNT(*)
-        FROM static_analysis_runs
-        WHERE status='RUNNING' AND ended_at_utc IS NULL
-          AND COALESCE(
-            STR_TO_DATE(REPLACE(REPLACE(run_started_utc,'T',' '),'Z',''), '%Y-%m-%d %H:%i:%s.%f'),
-            STR_TO_DATE(REPLACE(REPLACE(run_started_utc,'T',' '),'Z',''), '%Y-%m-%d %H:%i:%s')
-          ) >= (UTC_TIMESTAMP() - INTERVAL 1 DAY)
-        """
-    )
-    ok_recent = scalar(
-        """
-        SELECT COUNT(*)
-        FROM static_analysis_runs
-        WHERE status IN ('COMPLETED','OK')
-          AND ended_at_utc >= (UTC_TIMESTAMP() - INTERVAL 1 DAY)
-        """
-    )
-    failed_recent = scalar(
-        """
-        SELECT COUNT(*)
-        FROM static_analysis_runs
-        WHERE status='FAILED'
-          AND ended_at_utc >= (UTC_TIMESTAMP() - INTERVAL 1 DAY)
-        """
-    )
-    aborted_recent = scalar(
-        """
-        SELECT COUNT(*)
-        FROM static_analysis_runs
-        WHERE status='ABORTED'
-          AND ended_at_utc >= (UTC_TIMESTAMP() - INTERVAL 1 DAY)
-        """
-    )
+    summary = fetch_health_summary()
     menu_utils.print_section("Run status")
-    print(f"RUNNING (total)   : {running_total if running_total is not None else '—'}")
-    print(f"RUNNING (last 24h): {running_recent if running_recent is not None else '—'}")
-    print(f"OK (last 24h)     : {ok_recent if ok_recent is not None else '—'}")
-    print(f"FAILED (last 24h) : {failed_recent if failed_recent is not None else '—'}")
-    print(f"ABORTED (last 24h): {aborted_recent if aborted_recent is not None else '—'}")
+    print(f"RUNNING (total)   : {summary.running_total if summary.running_total is not None else '—'}")
+    print(f"RUNNING (last 24h): {summary.running_recent if summary.running_recent is not None else '—'}")
+    print(f"OK (last 24h)     : {summary.ok_recent if summary.ok_recent is not None else '—'}")
+    print(f"FAILED (last 24h) : {summary.failed_recent if summary.failed_recent is not None else '—'}")
+    print(f"ABORTED (last 24h): {summary.aborted_recent if summary.aborted_recent is not None else '—'}")
 
     menu_utils.print_section("Orphan checks")
-    orphan_findings = scalar(
-        """
-        SELECT COUNT(*)
-        FROM static_findings f
-        LEFT JOIN static_findings_summary s ON s.id = f.summary_id
-        WHERE s.id IS NULL
-        """
+    print(
+        f"orphan_findings        : {summary.orphan_findings if summary.orphan_findings is not None else '—'}"
     )
-    orphan_samples = scalar(
-        """
-        SELECT COUNT(*)
-        FROM static_string_samples x
-        LEFT JOIN static_string_summary s ON s.id = x.summary_id
-        WHERE s.id IS NULL
-        """
+    print(
+        "orphan_string_samples  : "
+        f"{summary.orphan_samples if summary.orphan_samples is not None else '—'}"
     )
-    orphan_audit = scalar(
-        """
-        SELECT COUNT(*)
-        FROM permission_audit_apps a
-        LEFT JOIN permission_audit_snapshots s ON s.snapshot_id = a.snapshot_id
-        WHERE s.snapshot_id IS NULL
-        """
+    print(
+        "orphan_string_selected : "
+        f"{summary.orphan_selected_samples if summary.orphan_selected_samples is not None else '—'}"
     )
-    print(f"orphan_findings        : {orphan_findings if orphan_findings is not None else '—'}")
-    print(f"orphan_string_samples  : {orphan_samples if orphan_samples is not None else '—'}")
-    print(f"orphan_audit_apps      : {orphan_audit if orphan_audit is not None else '—'}")
+    print(
+        "orphan_string_sets     : "
+        f"{summary.orphan_sample_sets if summary.orphan_sample_sets is not None else '—'}"
+    )
+    print(
+        "orphan_audit_apps      : "
+        f"{summary.orphan_audit_apps if summary.orphan_audit_apps is not None else '—'}"
+    )
 
     menu_utils.print_section("Evidence integrity")
     if _column_exists("permission_audit_snapshots", "evidence_relpath"):
@@ -254,11 +206,26 @@ def run_health_checks() -> None:
             """,
             (session_stamp,),
         )
+        selected_total = scalar(
+            """
+            SELECT COUNT(*)
+            FROM static_string_selected_samples x
+            JOIN static_findings_summary s ON s.id = x.summary_id
+            WHERE s.session_stamp = %s
+            """,
+            (session_stamp,),
+        )
         if samples_total is not None:
             _print_status_line(
                 "ok" if samples_total else "warn",
                 "static_string_samples (raw)",
                 detail=str(samples_total or 0),
+            )
+        if selected_total is not None:
+            _print_status_line(
+                "ok" if selected_total else "warn",
+                "static_string_selected",
+                detail=str(selected_total or 0),
             )
 
     else:
@@ -306,49 +273,6 @@ def run_health_checks() -> None:
     print()
     print("Integrity")
     _render_integrity_checks(session_stamp)
-
-    prompt_utils.press_enter_to_continue()
-
-
-def run_app_identity_audit() -> None:
-    """Audit app identity consistency (duplicates, missing version info)."""
-    print()
-    menu_utils.print_header("App Identity Audit")
-
-    duplicates = run_sql(
-        """
-        SELECT a.package_name, av.version_code, COUNT(*) AS n
-        FROM app_versions av
-        JOIN apps a ON a.id = av.app_id
-        GROUP BY a.package_name, av.version_code
-        HAVING COUNT(*) > 1
-        ORDER BY n DESC
-        LIMIT 20
-        """,
-        fetch="all",
-        dictionary=True,
-    ) or []
-
-    missing_version_code = scalar(
-        "SELECT COUNT(*) FROM app_versions WHERE version_code IS NULL"
-    )
-    missing_version_name = scalar(
-        "SELECT COUNT(*) FROM app_versions WHERE version_name IS NULL OR version_name = ''"
-    )
-
-    menu_utils.print_section("Missing version fields")
-    print(f"version_code missing  : {missing_version_code if missing_version_code is not None else '—'}")
-    print(f"version_name missing  : {missing_version_name if missing_version_name is not None else '—'}")
-
-    menu_utils.print_section("Duplicates (package + version_code)")
-    if not duplicates:
-        print("None detected.")
-    else:
-        for row in duplicates:
-            package = row.get("package_name")
-            version_code = row.get("version_code")
-            count = row.get("n")
-            print(f"{package} v{version_code} -> {count} rows")
 
     prompt_utils.press_enter_to_continue()
 
@@ -473,6 +397,20 @@ def _render_integrity_checks(session_stamp: str | None) -> None:
         fetch="all",
         dictionary=True,
     ) or []
+    selected_rows = run_sql(
+        """
+        SELECT s.id AS summary_id, COUNT(x.id) AS samples
+        FROM static_findings_summary s
+        LEFT JOIN static_string_selected_samples x ON x.summary_id = s.id
+        WHERE %s IS NULL OR s.session_stamp = %s
+        GROUP BY s.id
+        ORDER BY s.created_at DESC
+        LIMIT 5
+        """,
+        (session_stamp, session_stamp),
+        fetch="all",
+        dictionary=True,
+    ) or []
     if sample_rows:
         zero_samples = [row["summary_id"] for row in sample_rows if not row.get("samples")]
         if zero_samples:
@@ -483,6 +421,16 @@ def _render_integrity_checks(session_stamp: str | None) -> None:
             )
         else:
             _print_status_line("ok", "summary ↔ string samples", detail=f"{len(sample_rows)} summaries inspected")
+        if selected_rows:
+            zero_selected = [row["summary_id"] for row in selected_rows if not row.get("samples")]
+            if zero_selected:
+                _print_status_line(
+                    "warn",
+                    "summary ↔ selected samples",
+                    detail=f"missing selected samples for summary_id(s) {', '.join(map(str, zero_selected))}",
+                )
+            else:
+                _print_status_line("ok", "summary ↔ selected samples", detail=f"{len(selected_rows)} summaries inspected")
     else:
         _print_status_line(
             "warn",

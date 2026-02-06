@@ -466,7 +466,14 @@ def _create_provider_row(run_id: int, entry: Mapping[str, object]) -> int | None
         metrics_payload = {
             key: value
             for key, value in entry.items()
-            if key in {"base_levels", "read_levels", "write_levels"}
+            if key
+            in {
+                "base_levels",
+                "read_levels",
+                "write_levels",
+                "exported_explicit",
+                "export_reason",
+            }
         }
         component_name = _normalise_optional_str(entry.get("name"))
         authority = _authority_from_entry(entry) or component_name or f"provider_{run_id}"
@@ -618,11 +625,12 @@ def build_session_string_view(session_stamp: str | None) -> int:
         clause = " WHERE session_stamp = %s"
         params = (session_stamp,)
 
+    row = None
     try:
         row = core_q.run_sql(
             (
                 "SELECT COUNT(*) "
-                "FROM static_string_samples x "
+                "FROM static_string_selected_samples x "
                 "JOIN static_string_summary s ON s.id = x.summary_id"
                 f"{clause}"
             ),
@@ -630,7 +638,21 @@ def build_session_string_view(session_stamp: str | None) -> int:
             fetch="one",
         )
     except Exception:
-        return 0
+        row = None
+    if row is None:
+        try:
+            row = core_q.run_sql(
+                (
+                    "SELECT COUNT(*) "
+                    "FROM static_string_samples x "
+                    "JOIN static_string_summary s ON s.id = x.summary_id"
+                    f"{clause}"
+                ),
+                params,
+                fetch="one",
+            )
+        except Exception:
+            return 0
 
     if not row:
         return 0

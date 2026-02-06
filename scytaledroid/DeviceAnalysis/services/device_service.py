@@ -8,13 +8,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from scytaledroid.DeviceAnalysis import (
-    adb_devices,
-    adb_packages,
-    adb_status,
-    device_manager,
-    inventory_meta,
-)
+from scytaledroid.DeviceAnalysis.adb import devices as adb_devices
+from scytaledroid.DeviceAnalysis.adb import packages as adb_packages
+from scytaledroid.DeviceAnalysis.adb import status as adb_status
+from scytaledroid.DeviceAnalysis import device_manager, inventory_meta
 from scytaledroid.DeviceAnalysis.inventory import load_latest_inventory
 from scytaledroid.DeviceAnalysis.inventory import runner as inventory_runner
 from scytaledroid.DeviceAnalysis.services.models import InventoryStatus

@@ -541,7 +541,7 @@ _DDL_STATEMENTS: list[str] = [
               ABS(TIMESTAMPDIFF(SECOND, s.created_at, r.created_at)) <= 3600
           )
         )
-    JOIN static_string_samples sm ON sm.summary_id = s.id;
+    JOIN static_string_selected_samples sm ON sm.summary_id = s.id;
     """,
     """
     CREATE OR REPLACE VIEW v_static_run_category_summary AS

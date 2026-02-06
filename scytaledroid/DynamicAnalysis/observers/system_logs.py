@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import subprocess
 
-from scytaledroid.DeviceAnalysis import adb_client
+from scytaledroid.DeviceAnalysis.adb import client as adb_client
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
 from scytaledroid.DynamicAnalysis.observers.base import Observer, ObserverHandle, ObserverResult

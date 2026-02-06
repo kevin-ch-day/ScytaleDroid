@@ -6,11 +6,7 @@ from collections.abc import Callable
 
 from scytaledroid.Database.db_core import db_config
 from scytaledroid.Database.db_utils import diagnostics
-from scytaledroid.Database.db_utils.menus import (
-    health_checks,
-    query_runner,
-    schema_browser,
-)
+from scytaledroid.Database.db_utils.menus import health_checks
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
 
@@ -18,7 +14,6 @@ from .menu_actions import (
     apply_canonical_schema_bootstrap,
     ensure_dynamic_tier_migrations,
     maybe_clear_screen,
-    seed_paper_dataset_profile,
     show_connection_and_config,
 )
 
@@ -27,15 +22,11 @@ def database_menu() -> None:
     """Render the database utilities menu and dispatch to sub-menus."""
 
     actions: dict[str, Callable[[], None]] = {
-        "1": seed_paper_dataset_profile,
-        "2": apply_canonical_schema_bootstrap,
-        "3": ensure_dynamic_tier_migrations,
-        "4": show_connection_and_config,
-        "5": schema_browser.show_schema_browser,
+        "1": apply_canonical_schema_bootstrap,
+        "2": ensure_dynamic_tier_migrations,
+        "3": show_connection_and_config,
         "6": health_checks.run_health_summary,
-        "7": health_checks.run_app_identity_audit,
         "8": health_checks.run_evidence_integrity_check,
-        "9": query_runner.run_query_menu,
         "10": health_checks.prompt_cleanup_orphan_inventory,
         "11": health_checks.prompt_finalize_stale_runs,
         "13": health_checks.prompt_delete_orphan_permission_snapshots,
@@ -45,15 +36,11 @@ def database_menu() -> None:
     }
 
     options: list[MenuOption] = [
-        MenuOption("1", "Seed research dataset profile"),
-        MenuOption("2", "Apply canonical schema bootstrap (static + registry + ML)"),
-        MenuOption("3", "Apply Tier-1 schema migrations"),
-        MenuOption("4", "Connection & config"),
-        MenuOption("5", "Schema browser"),
+        MenuOption("1", "Apply canonical schema bootstrap (static + registry + ML)"),
+        MenuOption("2", "Apply Tier-1 schema migrations"),
+        MenuOption("3", "Connection & config"),
         MenuOption("6", "Health summary"),
-        MenuOption("7", "App identity audit"),
         MenuOption("8", "Evidence integrity check"),
-        MenuOption("9", "Curated queries"),
         MenuOption("10", "Cleanup orphan snapshots"),
         MenuOption("11", "Recover stale RUNNING runs"),
         MenuOption("13", "Delete orphan permission snapshots"),
@@ -82,10 +69,10 @@ def database_menu() -> None:
             print(f"Schema: {schema_ver}")
         print()
 
-        research_options = options[:3]
-        read_only_options = options[3:9]
-        maintenance_options = [options[9], options[10], options[11], options[12], options[13]]
-        danger_options = [options[14]]
+        research_options = options[:2]
+        read_only_options = [options[2], options[3], options[4]]
+        maintenance_options = [options[5], options[6], options[7], options[8], options[9]]
+        danger_options = [options[10]]
 
         menu_utils.print_section("Research / Tier-1")
         menu_utils.render_menu(

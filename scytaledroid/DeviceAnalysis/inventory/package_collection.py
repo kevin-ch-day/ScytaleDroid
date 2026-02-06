@@ -31,21 +31,6 @@ class ProgressCallback(Protocol):
 PackageRow = dict[str, object]
 
 
-def _compose_inventory_entry(
-    package_name: str,
-    paths: list[str],
-    metadata: dict[str, object],
-    canonical: dict[str, object | None] = None,
-) -> dict[str, object]:
-    """Compatibility wrapper for tests and callers relying on legacy helper names."""
-    return normalizer.compose_inventory_entry(package_name, paths, metadata, canonical=canonical)
-
-
-def _split_count(entry: dict[str, object]) -> int:
-    """Compatibility wrapper for tests and callers relying on legacy helper names."""
-    return normalizer.split_count(entry)
-
-
 @dataclass
 class CollectionStats:
     total_packages: int

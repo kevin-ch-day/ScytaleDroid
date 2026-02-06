@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import os
 import json
-import os
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -15,6 +14,7 @@ from typing import Any
 
 from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core import db_queries as core_q
+from scytaledroid.Database.db_core.session import database_session
 from scytaledroid.Database.db_core.db_queries import run_sql_write
 from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
 from scytaledroid.Database.db_utils.artifact_registry import record_artifacts
@@ -51,45 +51,21 @@ from .utils import (
     safe_int,
     truncate,
 )
+from . import run_writers as _run_writers
+from . import manifest_writer as _manifest_writer
+from . import assembly as _assembly
 
 
 def _normalize_datetime_value(value: str | None) -> str | None:
-    if not value:
-        return None
-    candidate = value.strip()
-    if not candidate:
-        return None
-    if "T" in candidate or candidate.endswith("Z"):
-        try:
-            parsed = datetime.fromisoformat(candidate.replace("Z", "+00:00"))
-            return parsed.strftime("%Y-%m-%d %H:%M:%S")
-        except ValueError:
-            return candidate
-    return candidate
+    return _run_writers._normalize_datetime_value(value)
 
 
 def _severity_band_from_badge(badge: Badge) -> str:
-    if badge is Badge.FAIL:
-        return "FAIL"
-    if badge is Badge.WARN:
-        return "WARN"
-    return "INFO"
+    return _assembly.severity_band_from_badge(badge)
 
 
 def _score_from_finding(finding: Finding) -> int:
-    metrics = finding.metrics
-    if isinstance(metrics, Mapping):
-        value = metrics.get("score")
-        try:
-            return safe_int(value, default=0)
-        except (TypeError, ValueError):
-            pass
-    try:
-        from scytaledroid.StaticAnalysis.detectors.correlation.scoring import finding_weight
-
-        return safe_int(finding_weight(finding), default=0)
-    except Exception:
-        return 0
+    return _assembly.score_from_finding(finding)
 
 
 def _correlation_rows_from_result(
@@ -98,37 +74,11 @@ def _correlation_rows_from_result(
     static_run_id: int,
     package_name: str,
 ) -> list[dict[str, object]]:
-    findings = getattr(result, "findings", None)
-    if not isinstance(findings, Sequence):
-        return []
-    rows: list[dict[str, object]] = []
-    for finding in findings:
-        if not isinstance(finding, Finding):
-            continue
-        band = _severity_band_from_badge(finding.status)
-        score = _score_from_finding(finding)
-        rationale = finding.because or finding.title
-        evidence_path = None
-        evidence_preview = None
-        if finding.evidence:
-            pointer = finding.evidence[0]
-            evidence_path = getattr(pointer, "location", None)
-            evidence_preview = getattr(pointer, "description", None)
-        if not evidence_preview:
-            evidence_preview = rationale
-        rows.append(
-            {
-                "static_run_id": static_run_id,
-                "package_name": package_name,
-                "correlation_key": finding.finding_id,
-                "severity_band": band,
-                "score": score,
-                "rationale": truncate(rationale, 512),
-                "evidence_path": truncate(evidence_path, 1024),
-                "evidence_preview": truncate(evidence_preview, 1024),
-            }
-        )
-    return rows
+    return _assembly.correlation_rows_from_result(
+        result,
+        static_run_id=static_run_id,
+        package_name=package_name,
+    )
 
 
 @dataclass(slots=True)
@@ -171,19 +121,12 @@ def _persist_static_sections_wrapper(
         string_payload=string_payload,
         manifest=manifest,
         app_metadata=app_metadata,
-        run_id=run_id,
         static_run_id=static_run_id,
     )
 
 
 def _json_safe(value: object) -> object:
-    if isinstance(value, datetime):
-        return value.isoformat().replace("+00:00", "Z")
-    if isinstance(value, Mapping):
-        return {key: _json_safe(val) for key, val in value.items()}
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return [_json_safe(item) for item in value]
-    return value
+    return _manifest_writer._json_safe(value)
 
 
 def _persist_correlation_results(rows: Sequence[Mapping[str, object]]) -> bool:
@@ -340,71 +283,14 @@ def _ensure_app_version(
     target_sdk: int | None,
 ) -> int | None:
     """Fetch or create an app_version row for static_analysis_runs."""
-    try:
-        from scytaledroid.Database.db_utils.package_utils import normalize_package_name
-        from scytaledroid.Database.db_utils.publisher_rules import apply_publisher_mapping
-
-        cleaned_package = normalize_package_name(package_for_run, context="database")
-        if not cleaned_package:
-            return None
-        app_id = None
-        row = core_q.run_sql(
-            "SELECT id, display_name FROM apps WHERE package_name=%s",
-            (cleaned_package,),
-            fetch="one",
-        )
-        if row and row[0]:
-            app_id = int(row[0])
-            existing_name = row[1] if len(row) > 1 else None
-            if (
-                isinstance(display_name, str)
-                and display_name.strip()
-                and display_name != package_for_run
-                and (existing_name is None or existing_name == "" or existing_name == package_for_run)
-            ):
-                core_q.run_sql(
-                    "UPDATE apps SET display_name=%s WHERE id=%s",
-                    (display_name, app_id),
-                )
-        else:
-            app_id = core_q.run_sql(
-                "INSERT INTO apps (package_name, display_name) VALUES (%s,%s)",
-                (cleaned_package, display_name),
-                return_lastrowid=True,
-            )
-            app_id = int(app_id) if app_id else None
-            apply_publisher_mapping([cleaned_package])
-        if app_id is None:
-            return None
-
-        params = (app_id, version_name, version_code)
-        row = core_q.run_sql(
-            """
-            SELECT id FROM app_versions
-            WHERE app_id=%s AND version_name<=>%s AND version_code<=>%s
-            ORDER BY id DESC LIMIT 1
-            """,
-            params,
-            fetch="one",
-        )
-        if row and row[0]:
-            return int(row[0])
-
-        av_id = core_q.run_sql(
-            """
-            INSERT INTO app_versions (app_id, version_name, version_code, min_sdk, target_sdk)
-            VALUES (%s,%s,%s,%s,%s)
-            """,
-            (app_id, version_name, version_code, min_sdk, target_sdk),
-            return_lastrowid=True,
-        )
-        return int(av_id) if av_id else None
-    except Exception as exc:  # pragma: no cover - defensive
-        log.warning(
-            f"Failed to resolve/create app_version for {package_for_run}: {exc}",
-            category="static_analysis",
-        )
-        return None
+    return _run_writers._ensure_app_version(
+        package_for_run=package_for_run,
+        display_name=display_name,
+        version_name=version_name,
+        version_code=version_code,
+        min_sdk=min_sdk,
+        target_sdk=target_sdk,
+    )
 
 
 def _create_static_run(
@@ -440,142 +326,38 @@ def _create_static_run(
     catalog_versions: str | None = None,
     study_tag: str | None = None,
 ) -> int | None:
-    normalized_started_at = _normalize_datetime_value(run_started_utc)
-    def _insert_run(columns: list[str], values: list[object]) -> int | None:
-        placeholders = ", ".join(["%s"] * len(columns))
-        sql = f"INSERT INTO static_analysis_runs ({', '.join(columns)}) VALUES ({placeholders})"
-        run_id = core_q.run_sql(sql, tuple(values), return_lastrowid=True)
-        return int(run_id) if run_id else None
-
-    full_columns = [
-        "app_version_id",
-        "session_stamp",
-        "session_label",
-        "scope_label",
-        "category",
-        "profile_key",
-        "scenario_id",
-        "device_serial",
-        "sha256",
-        "base_apk_sha256",
-        "artifact_set_hash",
-        "run_signature",
-        "run_signature_version",
-        "identity_valid",
-        "identity_error_reason",
-        "analysis_version",
-        "pipeline_version",
-        "catalog_versions",
-        "config_hash",
-        "study_tag",
-        "profile",
-        "tool_semver",
-        "tool_git_commit",
-        "schema_version",
-        "findings_total",
-        "run_started_utc",
-        "status",
-        "is_canonical",
-        "canonical_set_at_utc",
-        "canonical_reason",
-    ]
-    full_values: list[object] = [
-        app_version_id,
-        session_stamp,
-        session_label,
-        scope_label,
-        category,
-        profile_key,
-        scenario_id,
-        device_serial,
-        sha256,
-        base_apk_sha256,
-        artifact_set_hash,
-        run_signature,
-        run_signature_version,
-        identity_valid,
-        identity_error_reason,
-        analysis_version,
-        pipeline_version,
-        catalog_versions,
-        config_hash,
-        study_tag,
-        profile,
-        tool_semver,
-        tool_git_commit,
-        schema_version,
-        findings_total,
-        normalized_started_at,
-        status,
-        1 if is_canonical else 0 if is_canonical is not None else None,
-        _normalize_datetime_value(canonical_set_at_utc) if canonical_set_at_utc else None,
-        canonical_reason,
-    ]
-    try:
-        return _insert_run(full_columns, full_values)
-    except Exception:
-        try:
-            legacy_columns = [
-                "app_version_id",
-                "session_stamp",
-                "scope_label",
-                "profile_key",
-                "scenario_id",
-                "device_serial",
-                "sha256",
-                "base_apk_sha256",
-                "artifact_set_hash",
-                "run_signature",
-                "run_signature_version",
-                "identity_valid",
-                "identity_error_reason",
-                "analysis_version",
-                "pipeline_version",
-                "catalog_versions",
-                "config_hash",
-                "study_tag",
-                "profile",
-                "tool_semver",
-                "tool_git_commit",
-                "schema_version",
-                "findings_total",
-                "run_started_utc",
-                "status",
-            ]
-            legacy_values = [
-                app_version_id,
-                session_stamp,
-                scope_label,
-                profile_key,
-                scenario_id,
-                device_serial,
-                sha256,
-                base_apk_sha256,
-                artifact_set_hash,
-                run_signature,
-                run_signature_version,
-                identity_valid,
-                identity_error_reason,
-                analysis_version,
-                pipeline_version,
-                catalog_versions,
-                config_hash,
-                study_tag,
-                profile,
-                tool_semver,
-                tool_git_commit,
-                schema_version,
-                findings_total,
-                normalized_started_at,
-                status,
-            ]
-            return _insert_run(legacy_columns, legacy_values)
-        except Exception as exc:  # pragma: no cover - defensive
-            log.error(
-                f"Failed to create static_analysis_runs row for session={session_stamp}: {exc}",
-                category="db",
-            )
-            return None
+    return _run_writers._create_static_run(
+        app_version_id=app_version_id,
+        session_stamp=session_stamp,
+        session_label=session_label,
+        scope_label=scope_label,
+        category=category,
+        profile=profile,
+        profile_key=profile_key,
+        scenario_id=scenario_id,
+        device_serial=device_serial,
+        tool_semver=tool_semver,
+        tool_git_commit=tool_git_commit,
+        schema_version=schema_version,
+        findings_total=findings_total,
+        run_started_utc=run_started_utc,
+        status=status,
+        is_canonical=is_canonical,
+        canonical_set_at_utc=canonical_set_at_utc,
+        canonical_reason=canonical_reason,
+        sha256=sha256,
+        base_apk_sha256=base_apk_sha256,
+        artifact_set_hash=artifact_set_hash,
+        run_signature=run_signature,
+        run_signature_version=run_signature_version,
+        identity_valid=identity_valid,
+        identity_error_reason=identity_error_reason,
+        config_hash=config_hash,
+        pipeline_version=pipeline_version,
+        analysis_version=analysis_version,
+        catalog_versions=catalog_versions,
+        study_tag=study_tag,
+    )
 
 
 def create_static_run_ledger(
@@ -608,96 +390,13 @@ def create_static_run_ledger(
     dry_run: bool = False,
 ) -> int | None:
     """Create a RUNNING static_analysis_runs row before scanning begins."""
-    if dry_run:
-        return None
-
-    try:
-        row = core_q.run_sql(
-            """
-            SELECT sar.id
-            FROM static_analysis_runs sar
-            JOIN app_versions av ON av.id = sar.app_version_id
-            JOIN apps a ON a.id = av.app_id
-            WHERE sar.session_stamp = %s
-              AND a.package_name = %s
-            ORDER BY sar.id DESC
-            LIMIT 1
-            """,
-            (session_stamp, package_name),
-            fetch="one",
-        )
-        if row and row[0]:
-            log.warning(
-                (
-                    f"static_analysis_runs already exists for session={session_stamp} "
-                    f"package={package_name}; reusing static_run_id={row[0]}"
-                ),
-                category="static_analysis",
-            )
-            return int(row[0])
-    except Exception:
-        pass
-
-    display_name = display_name or package_name
-    app_version_id = _ensure_app_version(
-        package_for_run=package_name,
-        display_name=display_name,
+    return _run_writers.create_static_run_ledger(
+        package_name=package_name,
+        display_name=display_name or package_name,
         version_name=version_name,
         version_code=version_code,
         min_sdk=min_sdk,
         target_sdk=target_sdk,
-    )
-    if app_version_id is None:
-        return None
-    if sha256 and config_hash and pipeline_version:
-        try:
-            row = core_q.run_sql(
-                """
-                SELECT id, status
-                FROM static_analysis_runs
-                WHERE app_version_id=%s
-                  AND base_apk_sha256=%s
-                  AND artifact_set_hash=%s
-                  AND config_hash=%s
-                  AND profile=%s
-                  AND (pipeline_version<=>%s)
-                  AND (run_signature_version<=>%s)
-                  AND (identity_valid=1)
-                ORDER BY id DESC
-                LIMIT 1
-                """,
-                (
-                    app_version_id,
-                    base_apk_sha256 or sha256,
-                    artifact_set_hash,
-                    config_hash,
-                    profile,
-                    pipeline_version,
-                    run_signature_version,
-                ),
-                fetch="one",
-            )
-            if row and row[0] and str(row[1] or "").upper() == "COMPLETED":
-                log.info(
-                    (
-                        f"Reusing static_run_id={row[0]} for {package_name} "
-                        f"(sha256/config_hash match)."
-                    ),
-                    category="static_analysis",
-                )
-                return int(row[0])
-        except Exception:
-            pass
-    elif sha256 and config_hash and not pipeline_version:
-        log.warning(
-            "pipeline_version missing; static run reuse disabled for this scan.",
-            category="static_analysis",
-        )
-    run_started_utc = _normalize_datetime_value(
-        run_started_utc or datetime.utcnow().isoformat(timespec="seconds") + "Z"
-    )
-    static_run_id = _create_static_run(
-        app_version_id=app_version_id,
         session_stamp=session_stamp,
         session_label=session_label,
         scope_label=scope_label,
@@ -730,13 +429,6 @@ def create_static_run_ledger(
         catalog_versions=catalog_versions,
         study_tag=study_tag,
     )
-    if static_run_id and session_label:
-        _maybe_set_canonical_static_run(
-            session_label=session_label,
-            static_run_id=static_run_id,
-            canonical_action=canonical_action or "first_run",
-        )
-    return static_run_id
 
 
 def _update_static_run_metadata(
@@ -755,61 +447,21 @@ def _update_static_run_metadata(
     catalog_versions: str | None = None,
     study_tag: str | None = None,
 ) -> None:
-    updates: list[str] = []
-    params: list[object] = []
-    if sha256_value:
-        updates.append("sha256=%s")
-        params.append(sha256_value)
-    if base_apk_sha256:
-        updates.append("base_apk_sha256=%s")
-        params.append(base_apk_sha256)
-    if artifact_set_hash:
-        updates.append("artifact_set_hash=%s")
-        params.append(artifact_set_hash)
-    if run_signature:
-        updates.append("run_signature=%s")
-        params.append(run_signature)
-    if run_signature_version:
-        updates.append("run_signature_version=%s")
-        params.append(run_signature_version)
-    if identity_valid is not None:
-        updates.append("identity_valid=%s")
-        params.append(1 if identity_valid else 0)
-    if identity_error_reason:
-        updates.append("identity_error_reason=%s")
-        params.append(identity_error_reason)
-    if config_hash:
-        updates.append("config_hash=%s")
-        params.append(config_hash)
-    if pipeline_version:
-        updates.append("pipeline_version=%s")
-        params.append(pipeline_version)
-    if analysis_version:
-        updates.append("analysis_version=%s")
-        params.append(analysis_version)
-    if catalog_versions:
-        updates.append("catalog_versions=%s")
-        params.append(catalog_versions)
-    if study_tag:
-        updates.append("study_tag=%s")
-        params.append(study_tag)
-    if not updates:
-        return
-    params.append(static_run_id)
-    try:
-        run_sql_write(
-            f"""
-            UPDATE static_analysis_runs
-            SET {', '.join(updates)}
-            WHERE id=%s
-            """,
-            tuple(params),
-        )
-    except Exception as exc:  # pragma: no cover - defensive
-        log.warning(
-            f"Failed to update static_analysis_runs metadata for id={static_run_id}: {exc}",
-            category="db",
-        )
+    _run_writers.update_static_run_metadata(
+        static_run_id=static_run_id,
+        sha256=sha256_value,
+        base_apk_sha256=base_apk_sha256,
+        artifact_set_hash=artifact_set_hash,
+        run_signature=run_signature,
+        run_signature_version=run_signature_version,
+        identity_valid=identity_valid,
+        identity_error_reason=identity_error_reason,
+        config_hash=config_hash,
+        pipeline_version=pipeline_version,
+        analysis_version=analysis_version,
+        catalog_versions=catalog_versions,
+        study_tag=study_tag,
+    )
 
 
 def _maybe_set_canonical_static_run(
@@ -820,51 +472,11 @@ def _maybe_set_canonical_static_run(
 ) -> None:
     if canonical_action not in {"first_run", "replace"}:
         return
-    now = datetime.utcnow().isoformat(timespec="seconds") + "Z"
-    try:
-        prev = core_q.run_sql(
-            """
-            SELECT id
-            FROM static_analysis_runs
-            WHERE session_label=%s AND is_canonical=1 AND id<>%s
-            ORDER BY canonical_set_at_utc DESC
-            LIMIT 1
-            """,
-            (session_label, static_run_id),
-            fetch="one",
-        )
-        prev_id = int(prev[0]) if prev and prev[0] else None
-    except Exception:
-        prev_id = None
-    try:
-        run_sql_write(
-            """
-            UPDATE static_analysis_runs
-            SET is_canonical=0
-            WHERE session_label=%s AND is_canonical=1 AND id<>%s
-            """,
-            (session_label, static_run_id),
-        )
-        run_sql_write(
-            """
-            UPDATE static_analysis_runs
-            SET is_canonical=1,
-                canonical_set_at_utc=%s,
-                canonical_reason=%s
-            WHERE id=%s
-            """,
-            ( _normalize_datetime_value(now), canonical_action, static_run_id),
-        )
-        if prev_id is not None:
-            log.info(
-                f"canonical updated for {session_label}: {prev_id} -> {static_run_id}",
-                category="static_analysis",
-            )
-    except Exception as exc:
-        log.warning(
-            f"Failed to update canonical static run for {session_label}: {exc}",
-            category="db",
-        )
+    _run_writers.maybe_set_canonical_static_run(
+        session_label=session_label,
+        static_run_id=static_run_id,
+        canonical_reason=canonical_action,
+    )
 
 
 def update_static_run_status(
@@ -875,33 +487,13 @@ def update_static_run_status(
     abort_reason: str | None = None,
     abort_signal: str | None = None,
 ) -> None:
-    normalized_ended_at = _normalize_datetime_value(ended_at_utc)
-    from ..core.abort_reasons import normalize_abort_reason
-
-    normalized_abort_reason = normalize_abort_reason(abort_reason)
-    try:
-        run_sql_write(
-            """
-            UPDATE static_analysis_runs
-            SET status=%s,
-                ended_at_utc=%s,
-                abort_reason=%s,
-                abort_signal=%s
-            WHERE id=%s
-            """,
-            (
-                status,
-                normalized_ended_at,
-                normalized_abort_reason,
-                abort_signal,
-                static_run_id,
-            ),
-        )
-    except Exception as exc:  # pragma: no cover - defensive
-        log.warning(
-            f"Failed to update static_analysis_runs status for id={static_run_id}: {exc}",
-            category="db",
-        )
+    _run_writers.update_static_run_status(
+        static_run_id=static_run_id,
+        status=status,
+        ended_at_utc=ended_at_utc,
+        abort_reason=abort_reason,
+        abort_signal=abort_signal,
+    )
 
 
 def finalize_open_static_runs(
@@ -914,37 +506,13 @@ def finalize_open_static_runs(
 ) -> None:
     if not static_run_ids:
         return
-    normalized_ended_at = _normalize_datetime_value(ended_at_utc)
-    from ..core.abort_reasons import normalize_abort_reason
-
-    normalized_abort_reason = normalize_abort_reason(abort_reason)
-    placeholders = ", ".join(["%s"] * len(static_run_ids))
-    params = (
-        status,
-        normalized_ended_at,
-        normalized_abort_reason,
-        abort_signal,
-        *static_run_ids,
+    _run_writers.finalize_open_static_runs(
+        static_run_ids,
+        status=status,
+        ended_at_utc=ended_at_utc,
+        abort_reason=abort_reason,
+        abort_signal=abort_signal,
     )
-    try:
-        run_sql_write(
-            f"""
-            UPDATE static_analysis_runs
-            SET status=%s,
-                ended_at_utc=%s,
-                abort_reason=%s,
-                abort_signal=%s
-            WHERE status='RUNNING'
-              AND ended_at_utc IS NULL
-              AND id IN ({placeholders})
-            """,
-            params,
-        )
-    except Exception as exc:  # pragma: no cover - defensive
-        log.warning(
-            f"Failed to finalize open static runs for ids={static_run_ids}: {exc}",
-            category="db",
-        )
 
 def persist_run_summary(
     base_report,
@@ -1182,11 +750,11 @@ def persist_run_summary(
     code_http_hosts = metrics_bundle.code_http_hosts
     asset_http_hosts = metrics_bundle.asset_http_hosts
 
-    if run_id is not None:
-        if not write_buckets(int(run_id), metrics_bundle.buckets, static_run_id=static_run_id):
-            message = f"Failed to persist scoring buckets for run_id={run_id}"
-            log.warning(message, category="static_analysis")
-            outcome.add_error(message)
+    db_errors: list[str] = []
+
+    def _note_db_error(message: str) -> None:
+        outcome.add_error(message)
+        db_errors.append(message)
 
     baseline_counts = coerce_severity_counts(finding_totals)
     severity_counter: Counter[str] = Counter()
@@ -1337,8 +905,140 @@ def persist_run_summary(
         severity_counts = baseline_counts
         persisted_totals = Counter(severity_counts)
 
-    if finding_rows:
-        if run_id is None:
+    persistence_failed = False
+    if not dry_run:
+        try:
+            with database_session() as db:
+                with db.transaction():
+                    if run_id is not None:
+                        if not write_buckets(int(run_id), metrics_bundle.buckets, static_run_id=static_run_id):
+                            message = f"Failed to persist scoring buckets for run_id={run_id}"
+                            log.warning(message, category="static_analysis")
+                            _note_db_error(message)
+
+                    if finding_rows:
+                        if run_id is None:
+                            sample = finding_rows[0] if finding_rows else {}
+                            sample_view = {
+                                key: sample.get(key)
+                                for key in ("rule_id", "evidence_path", "evidence_preview", "severity")
+                            }
+                            log.info(
+                                (
+                                    f"Dry-run persistence payload for {run_package}: "
+                                    f"findings={total_findings} "
+                                    f"sample={json.dumps(sample_view, ensure_ascii=False)}"
+                                ),
+                                category="static_analysis",
+                            )
+                        elif not persist_findings(int(run_id), finding_rows, static_run_id=static_run_id):
+                            message = (
+                                f"Failed to persist findings for run_id={run_id} "
+                                f"static_run_id={static_run_id}"
+                            )
+                            log.warning(message, category="static_analysis")
+                            _note_db_error(message)
+
+                    if static_run_id and correlation_rows:
+                        if not _persist_correlation_results(correlation_rows):
+                            message = (
+                                f"Correlation results persistence failed for static_run_id={static_run_id}"
+                            )
+                            log.warning(message, category="static_analysis")
+                            _note_db_error(message)
+
+                    if run_id is not None:
+                        if control_summary:
+                            persist_masvs_controls(
+                                int(run_id),
+                                package_for_run,
+                                control_summary,
+                            )
+                        else:
+                            log.info(
+                                (
+                                    f"No MASVS control coverage derived for {run_package}; "
+                                    f"total_findings={total_findings} entries={len(control_entries)}"
+                                ),
+                                category="static_analysis",
+                            )
+                        persist_storage_surface_data(br, session_stamp, scope_label)
+                        apk_identifier = safe_int(metadata_map.get("apk_id")) if metadata_map else None
+                        if apk_identifier is None and metadata_map:
+                            apk_identifier = safe_int(metadata_map.get("apkId"))
+                        if apk_identifier is None:
+                            apk_identifier = safe_int(metadata_map.get("android_apk_id"))
+                        if apk_identifier is None:
+                            apk_identifier = int(run_id)
+
+                        permission_profiles_map: Mapping[str, Mapping[str, object]] | None = None
+                        detector_metrics = getattr(br, "detector_metrics", None)
+                        if isinstance(detector_metrics, Mapping):
+                            permission_metrics = detector_metrics.get("permissions_profile")
+                            if isinstance(permission_metrics, Mapping):
+                                profiles = permission_metrics.get("permission_profiles")
+                                if isinstance(profiles, Mapping):
+                                    permission_profiles_map = profiles
+
+                        persist_permission_matrix(
+                            static_run_id=int(static_run_id) if static_run_id is not None else None,
+                            package_name=package_for_run,
+                            apk_id=apk_identifier,
+                            permission_profiles=permission_profiles_map,
+                        )
+                        persist_permission_risk(
+                            run_id=int(run_id),
+                            report=br,
+                            package_name=package_for_run,
+                            session_stamp=session_stamp,
+                            scope_label=scope_label,
+                            metrics_bundle=metrics_bundle,
+                            baseline_payload=baseline_payload,
+                        )
+
+                    if run_id is not None and not write_metrics(int(run_id), metrics_payload, static_run_id=static_run_id):
+                        message = f"Failed to persist metrics for run_id={run_id}"
+                        log.warning(message, category="static_analysis")
+                        _note_db_error(message)
+
+                    contributors = metrics_bundle.contributors
+                    if contributors and run_id is not None:
+                        if not write_contributors(int(run_id), contributors):
+                            message = f"Failed to persist contributor breakdown for run_id={run_id}"
+                            log.warning(message, category="static_analysis")
+                            _note_db_error(message)
+
+                    if run_id is not None:
+                        baseline_section = baseline_payload.get("baseline") if isinstance(baseline_payload, Mapping) else {}
+                        string_payload = baseline_section.get("string_analysis") if isinstance(baseline_section, Mapping) else {}
+                        static_errors, baseline_written, sample_total = _persist_static_sections_wrapper(
+                            package_name=package_for_run,
+                            session_stamp=session_stamp,
+                            scope_label=scope_label,
+                            finding_totals=persisted_totals,
+                            baseline_section=baseline_section if isinstance(baseline_section, Mapping) else {},
+                            string_payload=string_payload if isinstance(string_payload, Mapping) else {},
+                            manifest=br.manifest,
+                            app_metadata=baseline_payload.get("app") if isinstance(baseline_payload, Mapping) else {},
+                            run_id=run_id,
+                            static_run_id=static_run_id,
+                        )
+                        if baseline_written:
+                            outcome.baseline_written = True
+                        outcome.string_samples_persisted = sample_total
+                        for err in static_errors:
+                            _note_db_error(err)
+
+                    if db_errors:
+                        raise RuntimeError("Static persistence failed for one or more tables.")
+        except Exception as exc:
+            persistence_failed = True
+            message = f"Static persistence transaction failed for {run_package}: {exc}"
+            log.warning(message, category="static_analysis")
+            if message not in outcome.errors:
+                outcome.add_error(message)
+    else:
+        if finding_rows:
             sample = finding_rows[0] if finding_rows else {}
             sample_view = {
                 key: sample.get(key)
@@ -1352,69 +1052,6 @@ def persist_run_summary(
                 ),
                 category="static_analysis",
             )
-        elif not persist_findings(int(run_id), finding_rows, static_run_id=static_run_id):
-            message = (
-                f"Failed to persist findings for run_id={run_id} "
-                f"static_run_id={static_run_id}"
-            )
-            log.warning(message, category="static_analysis")
-            outcome.add_error(message)
-
-    if static_run_id and correlation_rows and not dry_run:
-        if not _persist_correlation_results(correlation_rows):
-            log.warning(
-                f"Correlation results persistence failed for static_run_id={static_run_id}",
-                category="static_analysis",
-            )
-
-    if run_id is not None:
-        if control_summary:
-            persist_masvs_controls(
-                int(run_id),
-                package_for_run,
-                control_summary,
-            )
-        else:
-            log.info(
-                (
-                    f"No MASVS control coverage derived for {run_package}; "
-                    f"total_findings={total_findings} entries={len(control_entries)}"
-                ),
-                category="static_analysis",
-            )
-        persist_storage_surface_data(br, session_stamp, scope_label)
-        apk_identifier = safe_int(metadata_map.get("apk_id")) if metadata_map else None
-        if apk_identifier is None and metadata_map:
-            apk_identifier = safe_int(metadata_map.get("apkId"))
-        if apk_identifier is None:
-            apk_identifier = safe_int(metadata_map.get("android_apk_id"))
-        if apk_identifier is None:
-            apk_identifier = int(run_id)
-
-        permission_profiles_map: Mapping[str, Mapping[str, object]] | None = None
-        detector_metrics = getattr(br, "detector_metrics", None)
-        if isinstance(detector_metrics, Mapping):
-            permission_metrics = detector_metrics.get("permissions_profile")
-            if isinstance(permission_metrics, Mapping):
-                profiles = permission_metrics.get("permission_profiles")
-                if isinstance(profiles, Mapping):
-                    permission_profiles_map = profiles
-
-        persist_permission_matrix(
-            static_run_id=int(static_run_id) if static_run_id is not None else None,
-            package_name=package_for_run,
-            apk_id=apk_identifier,
-            permission_profiles=permission_profiles_map,
-        )
-        persist_permission_risk(
-            run_id=int(run_id),
-            report=br,
-            package_name=package_for_run,
-            session_stamp=session_stamp,
-            scope_label=scope_label,
-            metrics_bundle=metrics_bundle,
-            baseline_payload=baseline_payload,
-        )
 
     perm_detail_map: Mapping[str, object] = (
         metrics_bundle.permission_detail
@@ -1461,11 +1098,6 @@ def persist_run_summary(
     metrics_payload["cvss.base_vector_coverage_pct"] = (base_cov_pct, None)
     metrics_payload["cvss.bte_vector_coverage_pct"] = (bte_cov_pct, None)
 
-    if run_id is not None and not write_metrics(int(run_id), metrics_payload, static_run_id=static_run_id):
-        message = f"Failed to persist metrics for run_id={run_id}"
-        log.warning(message, category="static_analysis")
-        outcome.add_error(message)
-
     summary_run_id = run_id if run_id is not None else "dry-run"
     log.info(
         (
@@ -1479,35 +1111,7 @@ def persist_run_summary(
         category="static_analysis",
     )
 
-    contributors = metrics_bundle.contributors
-    if contributors and run_id is not None:
-        if not write_contributors(int(run_id), contributors):
-            message = f"Failed to persist contributor breakdown for run_id={run_id}"
-            log.warning(message, category="static_analysis")
-            outcome.add_error(message)
-
-    if run_id is not None:
-        baseline_section = baseline_payload.get("baseline") if isinstance(baseline_payload, Mapping) else {}
-        string_payload = baseline_section.get("string_analysis") if isinstance(baseline_section, Mapping) else {}
-        static_errors, baseline_written, sample_total = _persist_static_sections_wrapper(
-            package_name=package_for_run,
-            session_stamp=session_stamp,
-            scope_label=scope_label,
-            finding_totals=persisted_totals,
-            baseline_section=baseline_section if isinstance(baseline_section, Mapping) else {},
-            string_payload=string_payload if isinstance(string_payload, Mapping) else {},
-            manifest=br.manifest,
-            app_metadata=baseline_payload.get("app") if isinstance(baseline_payload, Mapping) else {},
-            run_id=run_id,
-            static_run_id=static_run_id,
-        )
-        if baseline_written:
-            outcome.baseline_written = True
-        outcome.string_samples_persisted = sample_total
-        for err in static_errors:
-            outcome.add_error(err)
-
-    if static_run_id and not dry_run:
+    if static_run_id and not dry_run and not persistence_failed:
         dep_path = export_dep_json(static_run_id)
         if dep_path:
             log.info(
@@ -1516,6 +1120,8 @@ def persist_run_summary(
             )
 
     if static_run_id and not dry_run:
+        if persistence_failed:
+            run_status = "FAILED"
         update_static_run_status(
             static_run_id=static_run_id,
             status=run_status,
@@ -1523,198 +1129,18 @@ def persist_run_summary(
             abort_reason=abort_reason,
             abort_signal=abort_signal,
         )
-        _write_static_run_manifest(static_run_id)
+        if not persistence_failed:
+            _write_static_run_manifest(static_run_id)
 
     return outcome
 
 
 def _write_static_run_manifest(static_run_id: int) -> None:
-    try:
-        row = core_q.run_sql(
-            """
-            SELECT
-              sar.id,
-              sar.run_started_utc,
-              sar.ended_at_utc,
-              sar.profile_key,
-              sar.scenario_id,
-              sar.sha256,
-              sar.base_apk_sha256,
-              av.version_code,
-              av.version_name,
-              a.package_name,
-              a.display_name,
-              sar.tool_semver,
-              sar.tool_git_commit,
-              sar.schema_version
-            FROM static_analysis_runs sar
-            JOIN app_versions av ON av.id = sar.app_version_id
-            JOIN apps a ON a.id = av.app_id
-            WHERE sar.id=%s
-            """,
-            (static_run_id,),
-            fetch="one",
-        )
-    except Exception as exc:
-        log.warning(f"Failed to read static run for manifest: {exc}", category="static_analysis")
-        return
-    if not row:
-        return
-    (
-        run_id,
-        run_started_utc,
-        ended_at_utc,
-        profile_key,
-        scenario_id,
-        sha256,
-        base_apk_sha256,
-        version_code,
-        version_name,
-        package_name,
-        display_name,
-        tool_semver,
-        tool_git_commit,
-        schema_version,
-    ) = row
+    _manifest_writer.write_static_run_manifest(static_run_id)
 
-    def _permission_audit_present(run_id: int) -> bool:
-        try:
-            row = core_q.run_sql(
-                "SELECT COUNT(*) FROM permission_audit_apps WHERE static_run_id=%s",
-                (run_id,),
-                fetch="one",
-            )
-            if row and int(row[0] or 0) > 0:
-                return True
-        except Exception:
-            return False
-        try:
-            row = core_q.run_sql(
-                "SELECT COUNT(*) FROM permission_audit_snapshots WHERE static_run_id=%s",
-                (run_id,),
-                fetch="one",
-            )
-            return bool(row and int(row[0] or 0) > 0)
-        except Exception:
-            return False
 
-    grade = "EXPERIMENTAL" if os.getenv("SCYTALEDROID_PERSISTENCE_READY") == "0" else "PAPER_GRADE"
-    reasons = (
-        ["persistence_gate_failed"]
-        if os.getenv("SCYTALEDROID_PERSISTENCE_READY") == "0"
-        else []
-    )
-    if grade == "PAPER_GRADE" and not _permission_audit_present(static_run_id):
-        grade = "EXPERIMENTAL"
-        reasons.append("permission_audit_missing")
-
-    manifest = {
-        "run_manifest_version": 1,
-        "run_id": int(run_id) if run_id is not None else None,
-        "run_type": "static",
-        "package_name": package_name,
-        "display_name": display_name,
-        "profile_key": profile_key,
-        "scenario_id": scenario_id,
-        "version_code": version_code,
-        "version_name": version_name,
-        "apk_sha256": sha256,
-        "base_apk_sha256": base_apk_sha256,
-        "start_utc": run_started_utc,
-        "end_utc": ended_at_utc,
-        "tool_semver": tool_semver or app_config.APP_VERSION,
-        "tool_git_commit": tool_git_commit or get_git_commit(),
-        "schema_version": schema_version or (db_diagnostics.get_schema_version() or "<unknown>"),
-        "run_grade": grade,
-        "grade_reasons": reasons,
-        "artifacts": [],
-    }
-
-    run_root = Path("evidence") / "static_runs" / str(static_run_id)
-    run_root.mkdir(parents=True, exist_ok=True)
-    manifest_path = run_root / "run_manifest.json"
-    manifest["artifacts"].append(
-        {
-            "path": str(manifest_path),
-            "type": "static_run_manifest",
-            "sha256": None,
-            "size_bytes": None,
-            "created_at_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-            "status_reason": "self_reference_unhashed",
-            "origin": "host",
-            "pull_status": "n/a",
-        }
-    )
-    dep_path = run_root / "dep.json"
-    if dep_path.exists():
-        manifest["artifacts"].append(
-            {
-                "path": str(dep_path),
-                "type": "dep_snapshot",
-                "sha256": hashlib.sha256(dep_path.read_bytes()).hexdigest(),
-                "size_bytes": dep_path.stat().st_size,
-                "created_at_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-                "origin": "host",
-                "pull_status": "n/a",
-            }
-        )
-    try:
-        registry_rows = core_q.run_sql(
-            """
-            SELECT artifact_type, host_path, device_path, origin, pull_status,
-                   sha256, size_bytes, created_at_utc, pulled_at_utc
-            FROM artifact_registry
-            WHERE run_id=%s AND run_type='static'
-            """,
-            (str(static_run_id),),
-            fetch="all",
-        )
-    except Exception:
-        registry_rows = []
-    seen_keys: set[tuple[str, str]] = set()
-    for artifact in manifest.get("artifacts", []):
-        key = (str(artifact.get("type")), str(artifact.get("path")))
-        seen_keys.add(key)
-    for row in registry_rows or []:
-        if not row:
-            continue
-        artifact_type, host_path, device_path, origin, pull_status, sha256, size_bytes, created_at_utc, pulled_at_utc = row
-        path_value = host_path or device_path
-        if not path_value:
-            continue
-        key = (str(artifact_type), str(path_value))
-        if key in seen_keys:
-            continue
-        manifest["artifacts"].append(
-            {
-                "path": str(path_value),
-                "type": str(artifact_type),
-                "sha256": sha256,
-                "size_bytes": size_bytes,
-                "created_at_utc": created_at_utc,
-                "origin": origin,
-                "device_path": device_path,
-                "pull_status": pull_status,
-                "pulled_at_utc": pulled_at_utc,
-            }
-        )
-        seen_keys.add(key)
-    manifest_path.write_text(json.dumps(_json_safe(manifest), indent=2, sort_keys=True))
-    record_artifacts(
-        run_id=str(static_run_id),
-        run_type="static",
-        artifacts=[
-            {
-                "path": str(manifest_path),
-                "type": "static_run_manifest",
-                "sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
-                "size_bytes": manifest_path.stat().st_size,
-                "created_at_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-            }
-        ],
-        origin="host",
-        pull_status="n/a",
-    )
+def refresh_static_run_manifest(static_run_id: int) -> None:
+    _manifest_writer.refresh_static_run_manifest(static_run_id)
 
 
 __all__ = [
@@ -1722,5 +1148,6 @@ __all__ = [
     "create_static_run_ledger",
     "update_static_run_status",
     "finalize_open_static_runs",
+    "refresh_static_run_manifest",
     "PersistenceOutcome",
 ]

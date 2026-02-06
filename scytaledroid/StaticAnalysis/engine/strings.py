@@ -22,6 +22,7 @@ from ..modules.string_analysis import (
     build_bucket_overview,
     build_string_index,
 )
+from ..modules.string_analysis.selection import select_samples
 from ..modules.string_analysis.allowlist import DEFAULT_POLICY_ROOT, load_noise_policy
 from ..modules.string_analysis.constants import (
     CONTENT_URI_PATTERN,
@@ -478,10 +479,18 @@ def analyse_strings(
     )
 
     counts["trailing_punct_trimmed"] = extra_counts.get("trailing_punct_trimmed", 0)
+    max_selected = max_samples if isinstance(max_samples, int) and max_samples > 0 else 2
+    selected_samples, selection_params = select_samples(
+        ordered_samples,
+        max_samples=max_selected,
+        min_entropy=min_entropy,
+    )
 
     return {
         "counts": counts,
         "samples": ordered_samples,
+        "selected_samples": selected_samples,
+        "selection_params": selection_params,
         "extra_counts": dict(extra_counts),
         "regex_skipped": regex_skipped,
         "noise_counts": dict(noise_counts),

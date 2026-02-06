@@ -224,7 +224,9 @@ def _collect_masvs_profile(report) -> dict[str, object]:
 
 def _code_http_counts(string_data: Mapping[str, object]) -> tuple[int, int]:
     try:
-        samples = string_data.get("samples", {}) if isinstance(string_data, Mapping) else {}
+        samples = string_data.get("selected_samples") if isinstance(string_data, Mapping) else None
+        if not samples:
+            samples = string_data.get("samples", {}) if isinstance(string_data, Mapping) else {}
         http_samples = (samples.get("http_cleartext") or []) + (samples.get("endpoints") or [])
         code_hosts: set[str] = set()
         asset_hosts: set[str] = set()
@@ -336,7 +338,9 @@ def _collect_secret_stats(string_payload: Mapping[str, object], report: StaticAn
     counts = string_payload.get("counts", {}) if isinstance(string_payload, Mapping) else {}
     api_keys = int(counts.get("api_keys", 0) or 0)
     high_entropy = int(counts.get("high_entropy", 0) or 0)
-    samples = string_payload.get("samples", {}) if isinstance(string_payload, Mapping) else {}
+    samples = string_payload.get("selected_samples") if isinstance(string_payload, Mapping) else None
+    if not samples:
+        samples = string_payload.get("samples", {}) if isinstance(string_payload, Mapping) else {}
     risk_counter: Counter[str] = Counter()
     for bucket in ("api_keys", "high_entropy"):
         entries = samples.get(bucket) if isinstance(samples, Mapping) else None

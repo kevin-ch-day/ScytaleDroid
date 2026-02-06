@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from scytaledroid.Config import app_config  # noqa: F401 - re-exported for tests
 from scytaledroid.Database.db_core import run_sql
-from scytaledroid.DeviceAnalysis import adb_shell, adb_status
+from scytaledroid.DeviceAnalysis.adb import shell as adb_shell, status as adb_status
 from scytaledroid.DynamicAnalysis import plan_selection as _plan_selection
 from scytaledroid.DynamicAnalysis.controllers.guided_run import run_guided_dataset_run
 from scytaledroid.DynamicAnalysis.controllers.sandbox_run import run_sandbox_dynamic_run

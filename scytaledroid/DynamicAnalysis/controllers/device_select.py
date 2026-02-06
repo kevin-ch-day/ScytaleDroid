@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from scytaledroid.DeviceAnalysis import adb_devices
+from scytaledroid.DeviceAnalysis.adb import devices as adb_devices
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 
 

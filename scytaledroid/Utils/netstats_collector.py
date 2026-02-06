@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from scytaledroid.DeviceAnalysis import adb_shell
-from scytaledroid.DeviceAnalysis.adb_errors import AdbError
+from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
+from scytaledroid.DeviceAnalysis.adb.errors import AdbError
 
 
 @dataclass(frozen=True)

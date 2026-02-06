@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, MutableMapping
+import json
 
 from scytaledroid.Database.db_func.static_analysis import string_analysis as _sa
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
@@ -47,7 +48,8 @@ def persist_string_summary(
     scope_label: str,
     counts: Mapping[str, int],
     samples: Mapping[str, object],
-    run_id: int | None,
+    selected_samples: Mapping[str, object] | None = None,
+    selection_params: Mapping[str, object] | None = None,
     static_run_id: int | None = None,
 ) -> list[str]:
     errors: list[str] = []
@@ -64,7 +66,6 @@ def persist_string_summary(
             package_name=package_name,
             session_stamp=session_stamp,
             scope_label=scope_label,
-            run_id=run_id,
             static_run_id=static_run_id,
             counts=counts,
         )
@@ -73,14 +74,31 @@ def persist_string_summary(
             raise RuntimeError(
                 f"upsert_summary returned None "
                 f"(package={package_name}, session={session_stamp}, scope={scope_label}, "
-                f"run_id={run_id}, static_run_id={static_run_id})"
+                f"static_run_id={static_run_id})"
             )
-        _sa.replace_top_samples(
+        _sa.replace_samples_full(
             summary_id,
             samples,
-            top_n=3,
             static_run_id=static_run_id,
         )
+        _sa.replace_selected_samples(
+            summary_id,
+            selected_samples or samples,
+            static_run_id=static_run_id,
+        )
+        if selection_params is not None:
+            params_payload = selection_params
+            if not isinstance(selection_params, str):
+                try:
+                    params_payload = json.dumps(selection_params, sort_keys=True)
+                except Exception:
+                    params_payload = str(selection_params)
+            _sa.upsert_sample_set(
+                summary_id,
+                selection_params=params_payload if isinstance(params_payload, str) else str(params_payload),
+                selection_version=str(selection_params.get("selection_version")) if isinstance(selection_params, Mapping) else None,
+                static_run_id=static_run_id,
+            )
     except Exception as exc:  # pragma: no cover - defensive
         message = (
             f"Failed to persist string analysis summary for {package_name}: {exc}"
@@ -91,7 +109,6 @@ def persist_string_summary(
             category="db",
             extra={
                 "package": package_name,
-                "run_id": run_id,
                 "static_run_id": static_run_id,
                 "counts_keys": list(counts.keys()),
                 "exception": str(exc),

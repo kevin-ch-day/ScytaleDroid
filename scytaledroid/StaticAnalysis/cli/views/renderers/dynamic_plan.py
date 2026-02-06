@@ -108,7 +108,9 @@ def write_baseline_json(
 
 def _extract_domains(string_payload: Mapping[str, object]) -> tuple[list[str], list[str]]:
     aggregates = string_payload.get("aggregates", {}) if isinstance(string_payload, Mapping) else {}
-    samples = string_payload.get("samples", {}) if isinstance(string_payload, Mapping) else {}
+    samples = string_payload.get("selected_samples") if isinstance(string_payload, Mapping) else None
+    if not samples:
+        samples = string_payload.get("samples", {}) if isinstance(string_payload, Mapping) else {}
     domains: set[str] = set()
     cleartext_domains: set[str] = set()
 

@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import pytest
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.StaticAnalysis.cli.core.run_persistence import persist_run_summary
+from scytaledroid.StaticAnalysis.cli.persistence.run_summary import refresh_static_run_manifest
+from scytaledroid.Database.db_utils.artifact_registry import record_artifacts
 from scytaledroid.StaticAnalysis.persistence import ingest
 
 
@@ -280,6 +283,80 @@ def test_persist_run_summary_populates_canonical_tables():
     )
     assert audit_row is not None
     assert audit_row == (dangerous_count, signature_count, vendor_count)
+
+
+@pytest.mark.integration
+def test_run_manifest_includes_manifest_evidence(tmp_path):
+    session_stamp = "20251030-000999"
+    scope_label = "Integration Manifest Evidence"
+    package = "com.example.manifest"
+
+    manifest = _Manifest(
+        package_name=package,
+        app_label="Manifest App",
+        version_name="1.0.0",
+        version_code=123,
+        target_sdk=33,
+        min_sdk=24,
+    )
+    report = _Report(
+        manifest,
+        metadata={
+            "session_stamp": session_stamp,
+            "apk_id": 987654321,
+            "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        },
+    )
+    string_data = {"counts": {"high_entropy": 1}, "samples": {}}
+    baseline_payload = {
+        "app": {"package": package, "session_stamp": session_stamp, "scope_label": scope_label},
+        "baseline": {"findings": [], "string_analysis": {"counts": {"endpoints": 0}, "samples": {}}},
+    }
+    finding_totals = {"High": 0, "Medium": 0, "Low": 0, "Info": 0}
+
+    outcome = persist_run_summary(
+        report,
+        string_data,
+        package,
+        session_stamp=session_stamp,
+        scope_label=scope_label,
+        finding_totals=finding_totals,
+        baseline_payload=baseline_payload,
+        dry_run=False,
+    )
+    if outcome.static_run_id is None:
+        pytest.skip("Persistence did not yield a static_run_id; skipping manifest assertions.")
+
+    run_root = Path("evidence") / "static_runs" / str(outcome.static_run_id)
+    run_root.mkdir(parents=True, exist_ok=True)
+    manifest_evidence_path = run_root / "manifest_evidence.json"
+    manifest_evidence_path.write_text(
+        '{"schema":"manifest_evidence_v1","components":[]}', encoding="utf-8"
+    )
+    record_artifacts(
+        run_id=str(outcome.static_run_id),
+        run_type="static",
+        artifacts=[
+            {
+                "path": str(manifest_evidence_path),
+                "type": "manifest_evidence",
+                "sha256": "dummy",
+                "size_bytes": 1,
+                "created_at_utc": "2025-10-30T00:00:00Z",
+                "origin": "host",
+                "pull_status": "n/a",
+            }
+        ],
+        origin="host",
+        pull_status="n/a",
+    )
+    refresh_static_run_manifest(outcome.static_run_id)
+
+    manifest_path = run_root / "run_manifest.json"
+    assert manifest_path.exists()
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    artifact_types = {entry.get("type") for entry in payload.get("artifacts", [])}
+    assert "manifest_evidence" in artifact_types
 
 
 @pytest.mark.integration

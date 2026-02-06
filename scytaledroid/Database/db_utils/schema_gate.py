@@ -130,6 +130,8 @@ def static_schema_gate() -> tuple[bool, str, str]:
         "static_findings",
         "static_findings_summary",
         "static_string_samples",
+        "static_string_selected_samples",
+        "static_string_sample_sets",
         "static_string_summary",
         "static_correlation_results",
     ]

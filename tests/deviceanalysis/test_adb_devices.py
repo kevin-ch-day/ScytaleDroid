@@ -1,6 +1,6 @@
 import pytest
-from scytaledroid.DeviceAnalysis import adb_devices
-from scytaledroid.DeviceAnalysis.adb_errors import (
+from scytaledroid.DeviceAnalysis.adb import devices as adb_devices
+from scytaledroid.DeviceAnalysis.adb.errors import (
     AdbDeviceNotFoundError,
     AdbDeviceSelectionError,
 )

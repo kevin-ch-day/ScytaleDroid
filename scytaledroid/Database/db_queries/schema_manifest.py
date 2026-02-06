@@ -86,6 +86,8 @@ def ordered_schema_statements() -> list[str]:
             static_findings.CREATE_FINDINGS,
             string_analysis.CREATE_STRING_SUMMARY,
             string_analysis.CREATE_STRING_SAMPLES,
+            string_analysis.CREATE_STRING_SELECTED_SAMPLES,
+            string_analysis.CREATE_STRING_SAMPLE_SETS,
             string_analysis.CREATE_DOC_HOSTS_TABLE,
             static_permission_matrix.CREATE_TABLE,
             static_permission_risk.CREATE_TABLE,

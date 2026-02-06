@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS static_string_summary (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 """
 
-# Top-N samples for selected buckets
+# Full samples captured for selected buckets (uncapped).
 CREATE_STRING_SAMPLES = """
 CREATE TABLE IF NOT EXISTS static_string_samples (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -72,6 +72,60 @@ CREATE TABLE IF NOT EXISTS static_string_samples (
     REFERENCES static_string_summary (id)
     ON DELETE CASCADE,
   CONSTRAINT fk_samples_static_run FOREIGN KEY (static_run_id)
+    REFERENCES static_analysis_runs (id)
+    ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+"""
+
+# Immutable selected samples (paper-grade report snapshot).
+CREATE_STRING_SELECTED_SAMPLES = """
+CREATE TABLE IF NOT EXISTS static_string_selected_samples (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  summary_id BIGINT UNSIGNED NOT NULL,
+  static_run_id BIGINT UNSIGNED NULL,
+  bucket VARCHAR(32) NOT NULL,
+  value_masked VARCHAR(512) NULL,
+  src VARCHAR(512) NULL,
+  tag VARCHAR(64) NULL,
+  source_type VARCHAR(16) NULL,
+  finding_type VARCHAR(32) NULL,
+  provider VARCHAR(64) NULL,
+  risk_tag VARCHAR(32) NULL,
+  confidence VARCHAR(16) NULL,
+  sample_hash CHAR(40) NULL,
+  root_domain VARCHAR(191) NULL,
+  resource_name VARCHAR(191) NULL,
+  scheme VARCHAR(32) NULL,
+  rank INT UNSIGNED NOT NULL DEFAULT 0,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY ix_selected_samples_summary (summary_id),
+  KEY ix_selected_samples_static_run (static_run_id),
+  CONSTRAINT fk_selected_samples_summary FOREIGN KEY (summary_id)
+    REFERENCES static_string_summary (id)
+    ON DELETE CASCADE,
+  CONSTRAINT fk_selected_samples_static_run FOREIGN KEY (static_run_id)
+    REFERENCES static_analysis_runs (id)
+    ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+"""
+
+# Snapshot metadata for selected samples.
+CREATE_STRING_SAMPLE_SETS = """
+CREATE TABLE IF NOT EXISTS static_string_sample_sets (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  summary_id BIGINT UNSIGNED NOT NULL,
+  static_run_id BIGINT UNSIGNED NULL,
+  selection_params JSON DEFAULT NULL,
+  selection_version VARCHAR(32) DEFAULT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY ux_sample_set_summary (summary_id),
+  KEY ix_sample_set_static_run (static_run_id),
+  CONSTRAINT fk_sample_set_summary FOREIGN KEY (summary_id)
+    REFERENCES static_string_summary (id)
+    ON DELETE CASCADE,
+  CONSTRAINT fk_sample_set_static_run FOREIGN KEY (static_run_id)
     REFERENCES static_analysis_runs (id)
     ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -125,6 +179,14 @@ DELETE_SAMPLES_FOR_SUMMARY = """
 DELETE FROM static_string_samples WHERE summary_id=%s
 """
 
+DELETE_SELECTED_SAMPLES_FOR_SUMMARY = """
+DELETE FROM static_string_selected_samples WHERE summary_id=%s
+"""
+
+DELETE_SAMPLE_SET_FOR_SUMMARY = """
+DELETE FROM static_string_sample_sets WHERE summary_id=%s
+"""
+
 INSERT_SAMPLE = """
 INSERT INTO static_string_samples (
   summary_id,
@@ -145,6 +207,42 @@ INSERT INTO static_string_samples (
   scheme
 )
 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+"""
+
+INSERT_SELECTED_SAMPLE = """
+INSERT INTO static_string_selected_samples (
+  summary_id,
+  static_run_id,
+  bucket,
+  value_masked,
+  src,
+  tag,
+  rank,
+  source_type,
+  finding_type,
+  provider,
+  risk_tag,
+  confidence,
+  sample_hash,
+  root_domain,
+  resource_name,
+  scheme
+)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+"""
+
+UPSERT_SAMPLE_SET = """
+INSERT INTO static_string_sample_sets (
+  summary_id,
+  static_run_id,
+  selection_params,
+  selection_version
+)
+VALUES (%s, %s, %s, %s)
+ON DUPLICATE KEY UPDATE
+  static_run_id=VALUES(static_run_id),
+  selection_params=VALUES(selection_params),
+  selection_version=VALUES(selection_version)
 """
 
 CREATE_DOC_HOSTS_TABLE = """
@@ -236,13 +334,27 @@ TABLE_EXISTS_SAMPLES = """
 SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name='static_string_samples'
 """
 
+TABLE_EXISTS_SELECTED_SAMPLES = """
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name='static_string_selected_samples'
+"""
+
+TABLE_EXISTS_SAMPLE_SETS = """
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name='static_string_sample_sets'
+"""
+
 __all__ = [
     "CREATE_STRING_SUMMARY",
     "CREATE_STRING_SAMPLES",
+    "CREATE_STRING_SELECTED_SAMPLES",
+    "CREATE_STRING_SAMPLE_SETS",
     "INSERT_STRING_SUMMARY",
     "SELECT_SUMMARY_ID",
     "DELETE_SAMPLES_FOR_SUMMARY",
+    "DELETE_SELECTED_SAMPLES_FOR_SUMMARY",
+    "DELETE_SAMPLE_SET_FOR_SUMMARY",
     "INSERT_SAMPLE",
+    "INSERT_SELECTED_SAMPLE",
+    "UPSERT_SAMPLE_SET",
     "CREATE_DOC_HOSTS_TABLE",
     "INSERT_DOC_HOST",
     "CREATE_STRINGS_NORMALIZED_VIEW",
@@ -252,4 +364,6 @@ __all__ = [
     "CREATE_STRING_FINDINGS_VIEW",
     "TABLE_EXISTS_SUMMARY",
     "TABLE_EXISTS_SAMPLES",
+    "TABLE_EXISTS_SELECTED_SAMPLES",
+    "TABLE_EXISTS_SAMPLE_SETS",
 ]

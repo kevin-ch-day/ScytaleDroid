@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from scytaledroid.DeviceAnalysis import adb_client
+from scytaledroid.DeviceAnalysis.adb import client as adb_client
 
 
 def get_device_stats(serial: str) -> dict[str, str | None]:

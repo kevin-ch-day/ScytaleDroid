@@ -7,7 +7,7 @@ from pathlib import Path
 
 from scytaledroid.Config import app_config
 
-from . import adb_devices
+from .adb import devices as adb_devices
 
 _STATE_DIR = Path(app_config.DATA_DIR) / app_config.DEVICE_STATE_DIR
 _STATE_DIR.mkdir(parents=True, exist_ok=True)

@@ -14,8 +14,8 @@ def test_render_run_start(capsys):
         trace_ids=("det1",),
     )
     out = capsys.readouterr().out
-    assert "Static Analysis · Configuration" in out
-    assert "Target" in out
+    assert "Static Analysis · Settings" in out
+    assert "App" in out
     assert "permissions, strings" in out
     assert "Workers" in out
 

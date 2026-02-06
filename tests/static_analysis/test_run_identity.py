@@ -49,4 +49,4 @@ def test_compute_run_identity_missing_split_name():
     group = FakeGroup(base, [base])
     identity = scan_flow._compute_run_identity(group)
     assert identity["identity_valid"] is False
-    assert identity["identity_error_reason"] == "split_name_missing"
+    assert identity["identity_error_reason"].startswith("split_name_missing")

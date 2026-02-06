@@ -2,7 +2,7 @@ import re
 from pathlib import Path
 
 ALLOWLIST = {
-    "scytaledroid/DeviceAnalysis/adb_client.py",
+    "scytaledroid/DeviceAnalysis/adb/client.py",
 }
 
 ADB_SUBPROCESS_RE = re.compile(r"subprocess\.(run|Popen|call)\([^)]*['\"]adb['\"]", re.S)

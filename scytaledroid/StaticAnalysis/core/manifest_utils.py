@@ -75,6 +75,8 @@ def extract_compile_sdk(root: ElementTree.Element) -> str | None:
 def collect_exported_components(manifest_root: ElementTree.Element) -> ComponentSummary:
     """Derive exported component lists by inspecting manifest nodes."""
 
+    target_sdk = _extract_target_sdk_int(manifest_root)
+
     def exported_names(tags: tuple[str, ...], *, default_exported: bool = False) -> tuple[str, ...]:
         names: set[str] = set()
         for tag in tags:
@@ -86,11 +88,15 @@ def collect_exported_components(manifest_root: ElementTree.Element) -> Component
                 if exported_attr is not None:
                     is_exported = exported_attr.strip().lower() == "true"
                 else:
-                    is_exported = (
-                        default_exported
-                        if tag == "provider"
-                        else _element_has_intent_filter(element)
-                    )
+                    has_intent_filter = _element_has_intent_filter(element)
+                    if target_sdk is not None and target_sdk >= 31 and has_intent_filter:
+                        is_exported = False
+                    else:
+                        is_exported = (
+                            default_exported
+                            if tag == "provider"
+                            else has_intent_filter
+                        )
                 if is_exported:
                     names.add(name)
         return tuple(sorted(names))
@@ -103,6 +109,99 @@ def collect_exported_components(manifest_root: ElementTree.Element) -> Component
     )
 
 
+def build_manifest_evidence(manifest_root: ElementTree.Element) -> list[dict[str, object]]:
+    """Return explicit vs effective export evidence for manifest components."""
+
+    application = manifest_root.find("application")
+    if application is None:
+        return []
+
+    target_sdk = _extract_target_sdk_int(manifest_root)
+
+    records: list[dict[str, object]] = []
+    component_tags = {
+        "activity",
+        "activity-alias",
+        "service",
+        "receiver",
+        "provider",
+    }
+
+    for element in application:
+        tag = element.tag.rsplit("}", 1)[-1] if "}" in element.tag else element.tag
+        if tag not in component_tags:
+            continue
+        name = element.get(f"{_ANDROID_NS}name")
+        if not name:
+            continue
+
+        exported_attr = element.get(f"{_ANDROID_NS}exported")
+        exported_explicit: bool | None = None
+        exported_state = "absent"
+        export_reason = None
+        if exported_attr is not None:
+            exported_explicit = exported_attr.strip().lower() == "true"
+            exported_state = "true" if exported_explicit else "false"
+            exported_effective = exported_explicit
+            export_reason = "explicit_flag"
+        else:
+            has_intent_filter = _element_has_intent_filter(element)
+            if target_sdk is not None and target_sdk >= 31 and has_intent_filter:
+                exported_effective = False
+                export_reason = "sdk31_requires_explicit"
+            elif tag == "provider":
+                exported_effective = False
+                export_reason = "provider_default_false"
+            else:
+                exported_effective = bool(has_intent_filter)
+                export_reason = "intent_filter_present" if has_intent_filter else "default_false"
+
+        record: dict[str, object] = {
+            "component_type": tag,
+            "name": name,
+            "exported_explicit": exported_explicit,
+            "exported_explicit_state": exported_state,
+            "exported_effective": exported_effective,
+            "export_reason": export_reason,
+            "permission": coerce_optional_str(element.get(f"{_ANDROID_NS}permission")),
+            "process": coerce_optional_str(element.get(f"{_ANDROID_NS}process")),
+            "target_sdk": target_sdk,
+        }
+
+        if tag == "provider":
+            authorities = element.get(f"{_ANDROID_NS}authorities") or ""
+            authority_list = [
+                token.strip()
+                for token in authorities.split(",")
+                if token.strip()
+            ]
+            grant_uri = (
+                element.get(f"{_ANDROID_NS}grantUriPermissions") or ""
+            ).strip().lower() in {"true", "1"}
+            record.update(
+                {
+                    "authorities": authority_list,
+                    "read_permission": coerce_optional_str(
+                        element.get(f"{_ANDROID_NS}readPermission")
+                    ),
+                    "write_permission": coerce_optional_str(
+                        element.get(f"{_ANDROID_NS}writePermission")
+                    ),
+                    "grant_uri_permissions": grant_uri,
+                }
+            )
+
+        records.append(record)
+
+    records.sort(
+        key=lambda item: (
+            str(item.get("component_type") or ""),
+            str(item.get("name") or ""),
+        )
+    )
+    return records
+
+
 def _element_has_intent_filter(element: ElementTree.Element) -> bool:
     """Return True if the manifest element declares an intent-filter child."""
 
@@ -113,6 +212,19 @@ def _element_has_intent_filter(element: ElementTree.Element) -> bool:
         if tag == "intent-filter":
             return True
     return False
+
+
+def _extract_target_sdk_int(manifest_root: ElementTree.Element) -> int | None:
+    uses_sdk = manifest_root.find("uses-sdk")
+    if uses_sdk is None:
+        return None
+    raw_value = uses_sdk.get(f"{_ANDROID_NS}targetSdkVersion")
+    if not raw_value:
+        return None
+    try:
+        return int(str(raw_value).strip())
+    except (TypeError, ValueError):
+        return None
 
 
 def collect_custom_permission_definitions(
@@ -149,5 +261,6 @@ __all__ = [
     "build_manifest_flags",
     "extract_compile_sdk",
     "collect_exported_components",
+    "build_manifest_evidence",
     "collect_custom_permission_definitions",
 ]

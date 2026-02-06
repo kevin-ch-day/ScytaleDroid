@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC
 
-from scytaledroid.StaticAnalysis.cli.execution import diagnostics, results_formatters
+from scytaledroid.StaticAnalysis.cli.execution import db_verification, diagnostics, results_formatters
 
 
 def test_hash_prefix_short_value():
@@ -94,3 +94,35 @@ def test_diagnostic_summary_populates_runid_for_db_lookup(monkeypatch):
     assert headers[-2:] == ["RunID", "Sig"]
     assert rows[0][-2] == "42"
     assert rows[0][-1] == "sig"
+
+
+def test_render_persistence_footer_prints_canonical_and_latest(monkeypatch, capsys):
+    def fake_run_sql(query, params=None, fetch=None):
+        sql = " ".join(str(query).split()).lower()
+        if "select run_id from runs where session_stamp" in sql:
+            return [(1,)]
+        if "select id, coalesce" in sql:
+            return [
+                (719, "2026-02-05 00:00:00", 1),
+                (718, "2026-02-05 00:00:00", 0),
+            ]
+        if "select session_label" in sql:
+            return ("static-tiktok-20260205",)
+        if "count(*) from static_analysis_runs" in sql:
+            return (3,)
+        if "where session_label" in sql and "is_canonical=1" in sql:
+            return (718,)
+        if "where session_label" in sql and "order by id desc" in sql:
+            return (719,)
+        return (0,)
+
+    monkeypatch.setattr(db_verification.core_q, "run_sql", fake_run_sql)
+    monkeypatch.setattr(db_verification, "_resolve_static_run_ids", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(db_verification, "collect_static_run_counts", lambda *_args, **_kwargs: None)
+
+    db_verification._render_persistence_footer("20260205-000000")
+    out = capsys.readouterr().out
+    assert "canonical" in out
+    assert "static_run_id=718" in out
+    assert "latest" in out
+    assert "static_run_id=719" in out

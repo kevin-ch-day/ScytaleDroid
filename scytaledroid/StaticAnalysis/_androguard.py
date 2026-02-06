@@ -10,10 +10,7 @@ from collections.abc import Mapping, Sequence
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
-try:  # pragma: no cover - prefer modern androguard layout
-    from androguard.core.apk import APK, FileNotPresent
-except ImportError:  # pragma: no cover - legacy androguard (<4)
-    from androguard.core.bytecodes.apk import APK, FileNotPresent  # type: ignore[attr-defined]
+from androguard.core.apk import APK, FileNotPresent
 
 def _extract_bounds_warnings(text: str) -> list[str]:
     if not text:

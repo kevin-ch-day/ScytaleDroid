@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from scytaledroid.Config import app_config
-from scytaledroid.DeviceAnalysis import adb_client
-from scytaledroid.DeviceAnalysis.adb_shell import ADB_TIMEOUT_DISCOVERY
+from scytaledroid.DeviceAnalysis.adb import client as adb_client
+from scytaledroid.DeviceAnalysis.adb.shell import ADB_TIMEOUT_DISCOVERY
 
 
 def scan_devices() -> tuple[list[dict[str, str | None]], list[str]]:

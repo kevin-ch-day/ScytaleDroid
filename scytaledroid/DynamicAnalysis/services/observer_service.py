@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from scytaledroid.DeviceAnalysis import adb_shell
+from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
 from scytaledroid.DynamicAnalysis.observers.pcapdroid_capture import PCAPDROID_PACKAGE
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
 

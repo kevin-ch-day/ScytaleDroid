@@ -8,6 +8,7 @@ before changing any weighting configuration.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -803,6 +804,36 @@ class PermissionAuditAccumulator:
                             "static_run_id": static_run_id_local,
                         },
                     )
+
+                # Populate evidence metadata once snapshot.json exists.
+                snapshot_path = None
+                if isinstance(snapshot_payload, dict):
+                    paths = snapshot_payload.get("paths", {})
+                    if isinstance(paths, dict):
+                        snapshot_path = paths.get("snapshot")
+                if snapshot_path:
+                    try:
+                        snap_path = Path(snapshot_path)
+                        if snap_path.is_file():
+                            sha256 = hashlib.sha256(snap_path.read_bytes()).hexdigest()
+                            relpath: str
+                            try:
+                                relpath = str(snap_path.resolve().relative_to(Path.cwd().resolve()))
+                            except Exception:
+                                relpath = str(snap_path)
+                            core_q.run_sql(
+                                """
+                                UPDATE permission_audit_snapshots
+                                SET evidence_relpath=%s, evidence_sha256=%s
+                                WHERE snapshot_id=%s
+                                """,
+                                (relpath, sha256, sid),
+                            )
+                    except Exception:
+                        log.warning(
+                            "Failed to update permission audit snapshot evidence metadata",
+                            category="db",
+                        )
 
                 try:
                     row = core_q.run_sql(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from collections import Counter
 from collections.abc import Mapping, Sequence
@@ -23,6 +24,7 @@ from ...persistence.ingest import ingest_baseline_payload
 from ..core.models import RunOutcome, RunParameters
 from ..core.run_lifecycle import finalize_static_run
 from ..core.run_persistence import persist_run_summary, update_static_run_status
+from ..persistence.run_summary import refresh_static_run_manifest
 from ..views.run_detail_view import (
     SEVERITY_TOKEN_ORDER,
     app_detail_loop,
@@ -59,7 +61,7 @@ from .diagnostics import (
 )
 from .results_formatters import _format_highlight_tokens
 from .results_persist import _build_ingest_payload, _persist_cohort_rollup
-from .run_db_queries import _apply_display_names, _warn_legacy_running_rows
+from .run_db_queries import _apply_display_names
 from .scan_flow import format_duration
 
 
@@ -96,6 +98,7 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
     normalized_findings_total = 0
     baseline_rule_hits_total = 0
     string_samples_persisted_total = 0
+    string_samples_selected_total = 0
     detail_output: list[str] = []
     def _emit_detail(line: str = "") -> None:
         detail_output.append(line)
@@ -315,7 +318,6 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
         )
     print()
 
-    _warn_legacy_running_rows()
 
     persistence_errors: list[str] = []
     canonical_failures: list[str] = []
@@ -395,6 +397,14 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             string_data=string_data,
             duration_seconds=total_duration,
         )
+        if isinstance(string_data, Mapping):
+            selected_payload = string_data.get("selected_samples")
+            if isinstance(selected_payload, Mapping):
+                selected_count = 0
+                for values in selected_payload.values():
+                    if isinstance(values, Sequence) and not isinstance(values, (str, bytes)):
+                        selected_count += len(values)
+                string_samples_selected_total += selected_count
         finding_totals_by_package[app_result.package_name] = finding_totals
         baseline_hits = 0
         if isinstance(payload, Mapping):
@@ -573,6 +583,39 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
         if persist_enabled and app_result.static_run_id:
             artifacts: list[dict[str, object]] = []
             now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+            manifest_evidence_path = None
+            try:
+                metadata_map = base_report.metadata if isinstance(base_report.metadata, Mapping) else {}
+                repro_bundle = (
+                    metadata_map.get("repro_bundle")
+                    if isinstance(metadata_map, Mapping)
+                    else None
+                )
+                manifest_evidence = (
+                    repro_bundle.get("manifest_evidence")
+                    if isinstance(repro_bundle, Mapping)
+                    else None
+                )
+                components = (
+                    manifest_evidence.get("components")
+                    if isinstance(manifest_evidence, Mapping)
+                    else manifest_evidence
+                )
+                if isinstance(components, list):
+                    evidence_dir = Path("evidence") / "static_runs" / str(app_result.static_run_id)
+                    evidence_dir.mkdir(parents=True, exist_ok=True)
+                    manifest_evidence_path = evidence_dir / "manifest_evidence.json"
+                    manifest_payload = {
+                        "schema": "manifest_evidence_v1",
+                        "generated_at_utc": now,
+                        "package_name": app_result.package_name,
+                        "components": components,
+                    }
+                    manifest_evidence_path.write_text(
+                        json.dumps(manifest_payload, indent=2, sort_keys=True)
+                    )
+            except Exception:
+                manifest_evidence_path = None
             for path, artifact_type in (
                 (saved_path, "static_baseline_json"),
                 (dynamic_plan_path, "static_dynamic_plan_json"),
@@ -594,6 +637,22 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                     )
                 except Exception:
                     continue
+            if manifest_evidence_path and manifest_evidence_path.exists():
+                try:
+                    digest = hashlib.sha256(manifest_evidence_path.read_bytes()).hexdigest()
+                    artifacts.append(
+                        {
+                            "path": str(manifest_evidence_path),
+                            "type": "manifest_evidence",
+                            "sha256": digest,
+                            "size_bytes": manifest_evidence_path.stat().st_size,
+                            "created_at_utc": now,
+                            "origin": "host",
+                            "pull_status": "n/a",
+                        }
+                    )
+                except Exception:
+                    pass
             if base_artifact and base_artifact.saved_path:
                 report_path = Path(base_artifact.saved_path)
                 if report_path.exists():
@@ -620,6 +679,7 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                     origin="host",
                     pull_status="n/a",
                 )
+                refresh_static_run_manifest(app_result.static_run_id)
 
         if report_reference:
             report_reference_count += 1
@@ -690,9 +750,10 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
         print(
             status_messages.status(
                 (
-                    "String samples captured (pre-cap): "
+                    "String samples stored (full): "
                     f"{string_samples_persisted_total} "
-                    f"(cap={params.string_max_samples} per bucket; entropy ≥ {params.string_min_entropy:.2f})"
+                    f"(selected={string_samples_selected_total}) "
+                    f"(selected cap={params.string_max_samples} per bucket; entropy ≥ {params.string_min_entropy:.2f})"
                 ),
                 level="info",
             )

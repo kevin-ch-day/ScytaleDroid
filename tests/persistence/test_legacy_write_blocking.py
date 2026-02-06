@@ -16,7 +16,6 @@ def test_static_findings_requires_static_run_id(monkeypatch):
         severity_counts={"High": 1},
         details={},
         findings=None,
-        run_id=1,
         static_run_id=None,
     )
     assert errors
@@ -37,7 +36,6 @@ def test_string_writer_requires_static_run_id(monkeypatch):
         scope_label="test",
         counts={"endpoints": 1},
         samples={},
-        run_id=1,
         static_run_id=None,
     )
     assert errors

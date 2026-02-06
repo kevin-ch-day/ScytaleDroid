@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from scytaledroid.DeviceAnalysis import adb_devices, device_manager
+from scytaledroid.DeviceAnalysis.adb import devices as adb_devices
+from scytaledroid.DeviceAnalysis import device_manager
 from scytaledroid.DeviceAnalysis.device_menu.formatters import (
     format_android_release,
     format_battery,

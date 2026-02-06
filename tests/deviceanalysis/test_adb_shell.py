@@ -1,8 +1,8 @@
 import subprocess
 
 import pytest
-from scytaledroid.DeviceAnalysis import adb_shell
-from scytaledroid.DeviceAnalysis.adb_errors import (
+from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
+from scytaledroid.DeviceAnalysis.adb.errors import (
     AdbBinaryNotFoundError,
     AdbCommandError,
     AdbTimeoutError,
