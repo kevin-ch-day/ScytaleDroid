@@ -188,7 +188,7 @@ def _print_tier1_qa_result(dynamic_run_id: str) -> None:
         )
         return
     if not row:
-        print(status_messages.status("Tier-1 QA check unavailable for this run.", level="warn"))
+        print(status_messages.status("Tier-1 QA gate: NOT ENFORCED (dynamic).", level="warn"))
         return
 
     failures = []

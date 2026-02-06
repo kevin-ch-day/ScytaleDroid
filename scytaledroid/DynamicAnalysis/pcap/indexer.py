@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 from dataclasses import dataclass
@@ -29,6 +30,12 @@ def index_pcap_by_app(
     event_logger: RunEventLogger | None = None,
 ) -> Path | None:
     cfg = config or PcapIndexConfig()
+    tier = None
+    if isinstance(manifest.operator, dict):
+        tier = manifest.operator.get("tier")
+    if tier and str(tier).lower() != "dataset":
+        _log(event_logger, "pcap_index_skip_tier", {"tier": tier})
+        return None
     pcap_artifact = _find_pcap_artifact(manifest)
     if not pcap_artifact:
         _log(event_logger, "pcap_index_skip_missing", {"reason": "pcap_artifact_missing"})
@@ -58,9 +65,10 @@ def index_pcap_by_app(
         package = "_unknown"
     scenario_id = manifest.scenario.get("id") or "scenario"
     scenario_slug = _slugify(str(scenario_id), cfg.max_scenario_len)
+    capture_scope = _capture_scope(manifest, run_dir) or "app_only"
     timestamp = _format_timestamp(manifest.scenario.get("started_at") or manifest.started_at)
     run_short = (manifest.dynamic_run_id or "run")[:6]
-    filename = f"{timestamp}__{scenario_slug}__run-{run_short}.pcap"
+    filename = f"{timestamp}__{scenario_slug}__pcap-{capture_scope}__run-{run_short}.pcap"
     dest_dir = Path(app_config.DATA_DIR) / "archive" / "pcap" / "by_app" / package
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest_path = dest_dir / filename
@@ -81,6 +89,23 @@ def _find_pcap_artifact(manifest: RunManifest):
     for artifact in manifest.artifacts:
         if artifact.type == "pcapdroid_capture":
             return artifact
+    return None
+
+
+def _capture_scope(manifest: RunManifest, run_dir: Path) -> str | None:
+    for artifact in manifest.artifacts:
+        if artifact.type != "pcapdroid_capture_meta":
+            continue
+        if not artifact.relative_path:
+            continue
+        meta_path = run_dir / artifact.relative_path
+        try:
+            payload = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+        capture_mode = payload.get("capture_mode")
+        if isinstance(capture_mode, str) and capture_mode:
+            return _slugify(capture_mode, 16)
     return None
 
 

@@ -55,7 +55,16 @@ def write_pcap_report(
         return None
     capinfos_path = shutil.which("capinfos")
     tshark_path = shutil.which("tshark")
+    missing_tools: list[str] = []
+    report_status = "ok"
     if not capinfos_path:
+        missing_tools.append("capinfos")
+        report_status = "skip"
+    if not tshark_path:
+        missing_tools.append("tshark")
+        if report_status == "ok":
+            report_status = "partial"
+    if report_status == "skip":
         _log(event_logger, "pcap_report_skip", {"reason": "capinfos_missing"})
         return None
     report = {
@@ -63,6 +72,8 @@ def write_pcap_report(
         "pcap_path": str(pcap_path.relative_to(run_dir)),
         "pcap_sha256": pcap_artifact.sha256,
         "pcap_size_bytes": pcap_artifact.size_bytes,
+        "report_status": report_status,
+        "missing_tools": missing_tools,
         "capinfos": _run_capinfos(capinfos_path, pcap_path),
         "protocol_hierarchy": [],
         "top_sni": [],
@@ -78,7 +89,7 @@ def write_pcap_report(
         )
         report["top_dns"] = _run_top_fields(tshark_path, pcap_path, "dns.qry.name", cfg.top_n, display_filter="dns")
     else:
-        _log(event_logger, "pcap_report_skip", {"reason": "tshark_missing"})
+        _log(event_logger, "pcap_report_partial", {"reason": "tshark_missing"})
     report_path = run_dir / "analysis/pcap_report.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")

@@ -15,6 +15,9 @@ from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
 from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
+from scytaledroid.DynamicAnalysis.pcap.correlate import write_static_dynamic_overlap
+from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import update_dataset_tracker
+from scytaledroid.DynamicAnalysis.pcap.features import write_pcap_features
 from scytaledroid.DynamicAnalysis.pcap.indexer import index_pcap_by_app
 from scytaledroid.DynamicAnalysis.pcap.report import write_pcap_report
 from scytaledroid.DynamicAnalysis.analysis.summarizer import DynamicRunSummarizer
@@ -327,6 +330,13 @@ class DynamicRunOrchestrator:
         report = write_pcap_report(manifest, run_dir, event_logger=event_logger)
         if report:
             outputs.append(report)
+        features = write_pcap_features(manifest, run_dir, event_logger=event_logger)
+        if features:
+            outputs.append(features)
+        overlap = write_static_dynamic_overlap(manifest, run_dir, event_logger=event_logger)
+        if overlap:
+            outputs.append(overlap)
+        update_dataset_tracker(manifest, run_dir, event_logger=event_logger)
         manifest.add_outputs(outputs)
         manifest.finalize()
         writer.write_manifest(manifest)

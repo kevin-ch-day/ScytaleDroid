@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_evidence_path
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
 
@@ -241,6 +242,15 @@ def _build_telemetry_lines(
     clock_line = _clock_delta_line(sampling_duration, duration_seconds, duration_label)
     if clock_line:
         lines.append(clock_line)
+    min_duration = app_config.DYNAMIC_MIN_DURATION_S
+    if sampling_duration is not None:
+        try:
+            if float(sampling_duration) < float(min_duration):
+                lines.append(
+                    f"Duration below minimum ({min_duration}s) — dataset runs require ≥{min_duration}s"
+                )
+        except Exception:
+            pass
     return lines
 
 
