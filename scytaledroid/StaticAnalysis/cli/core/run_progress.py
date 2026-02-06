@@ -115,7 +115,6 @@ class ScanProgress:
         self._write(severity_line)
         self._write(f"Started:   {format_timestamp(started)}")
         self._write(f"Finished:  {format_timestamp(finished)}")
-        self._write(f"Duration:  {format_duration(duration)}")
         self._write()
 
     # --- Group / artifact progress -----------------------------------------

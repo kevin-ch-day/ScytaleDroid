@@ -254,7 +254,8 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                             )
                             totals = {"high": 0, "medium": 0, "low": 0}
                             for sev, cnt in rows or []:
-                                key = (sev or "").lower()
+                                label = severity.format_severity_label(sev, default="")
+                                key = label.lower()
                                 if key in totals:
                                     totals[key] = int(cnt)
                             return totals

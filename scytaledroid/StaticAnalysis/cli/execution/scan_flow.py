@@ -97,6 +97,7 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
             category="static_analysis",
         )
 
+    last_elapsed_for_progress: float | None = None
     for group in selection.groups:
         app_result = AppRunResult(group.package_name, getattr(group, "category", "Uncategorized"))
         identity = _compute_run_identity(group)
@@ -319,9 +320,10 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
                 progress.flush_line()
                 render_resource_warnings(warning_lines)
             if _abort_state()[0]:
-                progress.end()
+                progress.end(last_elapsed_for_progress)
                 break
         app_result.duration_seconds = time.monotonic() - app_start
+        last_elapsed_for_progress = app_result.duration_seconds
         if not _abort_state()[0]:
             progress.flush_line()
             artifact_count = app_result.discovered_artifacts
@@ -332,10 +334,11 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
                 report_metadata=metadata if isinstance(metadata, Mapping) else None,
                 params=params,
             )
+            progress.app_complete(artifact_count, app_result.duration_seconds or 0.0)
         if _abort_state()[0]:
             break
 
-    progress.end()
+    progress.end(last_elapsed_for_progress)
 
     finished_at = datetime.utcnow()
     abort_requested, abort_reason, abort_signal = _abort_state()

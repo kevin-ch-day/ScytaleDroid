@@ -167,5 +167,25 @@ def format_delta_token(kind: str, value: object) -> str:
     return colors.apply(f"{label}:{numeric}", palette_style, bold=True)
 
 
+def format_severity_label(value: object, *, default: str = "Info") -> str:
+    """Return a stable display label for a severity token."""
 
-__all__ = ["format_severity_strip", "normalise_counts", "severity_summary_items"]
+    canonical = _canonical_key(value)
+    if canonical is None:
+        return default
+    label_map = {
+        "critical": "High",
+        "high": "High",
+        "medium": "Medium",
+        "low": "Low",
+        "info": "Info",
+    }
+    return label_map.get(canonical, default)
+
+
+__all__ = [
+    "format_severity_strip",
+    "normalise_counts",
+    "severity_summary_items",
+    "format_severity_label",
+]

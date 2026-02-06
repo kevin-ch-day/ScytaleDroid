@@ -42,19 +42,13 @@ def render_app_completion(
     elapsed_seconds: float,
     report_metadata: Mapping[str, object] | None,
     params: RunParameters,
-) -> None:
+) -> str:
     elapsed = _format_elapsed(elapsed_seconds or 0.0)
-    print(
-        status_messages.status(
-            f"Completed scan ({artifact_count} artifact{'s' if artifact_count != 1 else ''}) — {elapsed}",
-            level="success",
-        )
-    )
     if not isinstance(report_metadata, Mapping):
-        return
+        return elapsed
     summary = report_metadata.get("pipeline_summary")
     if not isinstance(summary, Mapping):
-        return
+        return elapsed
     total = summary.get("detector_total")
     executed = summary.get("detector_executed")
     skipped = summary.get("detector_skipped")
@@ -145,6 +139,7 @@ def render_app_completion(
                 slow_parts.append(f"{det} {dur:.2f}s")
         if slow_parts:
             print("Slowest: " + "; ".join(slow_parts))
+    return elapsed
 
 
 __all__ = [

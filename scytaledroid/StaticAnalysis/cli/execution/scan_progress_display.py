@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import time
 
+from scytaledroid.Utils.DisplayUtils import status_messages
+
 
 def _format_elapsed(seconds: float) -> str:
     total = max(0, int(seconds))
@@ -62,6 +64,17 @@ class _PipelineProgress:
             tail = _truncate_label(_clean_artifact_label(label), 48)
             print(f"Completed {index}/{self.total} artifacts | {tail}")
 
+    def app_complete(self, artifact_count: int, elapsed_seconds: float) -> None:
+        if not self.show_artifacts:
+            return
+        elapsed = _format_elapsed(elapsed_seconds)
+        print(
+            status_messages.status(
+                f"Completed scan ({artifact_count} artifact{'s' if artifact_count != 1 else ''}) — {elapsed}",
+                level="success",
+            )
+        )
+
     def error(self, index: int, label: str, message: str) -> None:
         if not self.show_artifacts:
             return
@@ -79,7 +92,7 @@ class _PipelineProgress:
         else:
             print(f"SKIP Artifact {index}/{self.total}: {tail} - {message}")
 
-    def end(self) -> None:
+    def end(self, elapsed_seconds: float | None = None) -> None:
         if self.show_splits or not self.show_artifacts or self._ended:
             return
         self._ended = True
@@ -87,7 +100,10 @@ class _PipelineProgress:
             self._clear_line()
             print()
         if self.show_checkpoints:
-            elapsed = _format_elapsed(time.monotonic() - self._start)
+            elapsed_value = elapsed_seconds
+            if elapsed_value is None:
+                elapsed_value = time.monotonic() - self._start
+            elapsed = _format_elapsed(elapsed_value)
             print(f"Time Elapsed: {elapsed}")
 
     def flush_line(self) -> None:

@@ -15,6 +15,7 @@ from scytaledroid.StaticAnalysis.modules.string_analysis import (
     BUCKET_METADATA,
     BUCKET_ORDER,
 )
+from scytaledroid.Utils.DisplayUtils import severity as severity_utils
 from scytaledroid.Utils.System import output_prefs
 
 from ....core import StaticAnalysisReport
@@ -54,33 +55,8 @@ _SEVERITY_TOKENS = {"High": "H", "Medium": "M", "Low": "L", "Info": "I"}
 _STRING_BUCKET_TITLES = {key: meta.label for key, meta in BUCKET_METADATA.items()}
 
 
-_SEVERITY_NORMALISER = {
-    "critical": "High",
-    "high": "High",
-    "p0": "High",
-    "medium": "Medium",
-    "med": "Medium",
-    "p1": "Medium",
-    "low": "Low",
-    "p2": "Low",
-    "info": "Info",
-    "information": "Info",
-    "note": "Info",
-    "p3": "Low",
-    "p4": "Info",
-}
-
-
 def _normalise_baseline_severity(value: object) -> str:
-    token = str(value).strip().lower()
-    if not token:
-        return "Info"
-    mapped = _SEVERITY_NORMALISER.get(token)
-    if mapped:
-        return mapped
-    if token and token[0] in _SEVERITY_NORMALISER:
-        return _SEVERITY_NORMALISER[token[0]] or "Info"
-    return token.title()
+    return severity_utils.format_severity_label(value, default="Info")
 
 
 def _detector_severity_map(report: StaticAnalysisReport) -> Mapping[str, str]:
@@ -96,24 +72,24 @@ def _detector_severity_map(report: StaticAnalysisReport) -> Mapping[str, str]:
             if not finding_id:
                 continue
             severity = None
-            severity = severity or _SEVERITY_NORMALISER.get(
-                str(getattr(finding, "severity", "")).strip().lower()
+            severity = severity or severity_utils.format_severity_label(
+                getattr(finding, "severity", ""), default=""
             )
-            severity = severity or _SEVERITY_NORMALISER.get(
-                str(getattr(finding, "severity_label", "")).strip().lower()
+            severity = severity or severity_utils.format_severity_label(
+                getattr(finding, "severity_label", ""), default=""
             )
             metrics = getattr(finding, "metrics", None)
             if isinstance(metrics, Mapping):
-                severity = severity or _SEVERITY_NORMALISER.get(
-                    str(metrics.get("severity", "")).strip().lower()
+                severity = severity or severity_utils.format_severity_label(
+                    metrics.get("severity", ""), default=""
                 )
-                severity = severity or _SEVERITY_NORMALISER.get(
-                    str(metrics.get("severity_level", "")).strip().lower()
+                severity = severity or severity_utils.format_severity_label(
+                    metrics.get("severity_level", ""), default=""
                 )
             if not severity:
                 gate = getattr(getattr(finding, "severity_gate", None), "value", None)
                 if gate is not None:
-                    severity = _SEVERITY_NORMALISER.get(str(gate).strip().lower())
+                    severity = severity_utils.format_severity_label(gate, default="")
             if severity:
                 lookup.setdefault(str(finding_id), severity)
     return lookup

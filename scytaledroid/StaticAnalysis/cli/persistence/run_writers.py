@@ -260,6 +260,23 @@ def create_static_run_ledger(
     catalog_versions: str | None = None,
     study_tag: str | None = None,
 ) -> int | None:
+    if is_canonical and session_label:
+        try:
+            row = core_q.run_sql(
+                """
+                SELECT COUNT(*)
+                FROM static_analysis_runs
+                WHERE session_label=%s AND is_canonical=1
+                """,
+                (session_label,),
+                fetch="one",
+            )
+            existing_canonical = int(row[0] or 0) if row else 0
+        except Exception:
+            existing_canonical = 0
+        if existing_canonical:
+            is_canonical = False
+            canonical_set_at_utc = None
     app_version_id = _ensure_app_version(
         package_for_run=package_name,
         display_name=display_name,
@@ -387,7 +404,9 @@ def _maybe_set_canonical_static_run(
     session_label: str,
     canonical_reason: str | None = None,
 ) -> None:
-    now = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    now = _normalize_datetime_value(datetime.utcnow().isoformat(timespec="seconds") + "Z") or datetime.utcnow().strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
     canonical_reason = canonical_reason or "replace"
     try:
         core_q.run_sql(
