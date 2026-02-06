@@ -15,6 +15,8 @@ from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
 from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
+from scytaledroid.DynamicAnalysis.analysis.pcap_indexer import index_pcap_by_app
+from scytaledroid.DynamicAnalysis.analysis.pcap_report import write_pcap_report
 from scytaledroid.DynamicAnalysis.analysis.summarizer import DynamicRunSummarizer
 from scytaledroid.DynamicAnalysis.core.environment import EnvironmentManager
 from scytaledroid.DynamicAnalysis.core.event_logger import RunEventLogger
@@ -314,6 +316,7 @@ class DynamicRunOrchestrator:
             manifest.add_artifacts([marker_artifact])
         manifest.status = run_status
         manifest.ended_at = self._now()
+        index_pcap_by_app(manifest, run_dir, event_logger=event_logger)
         event_artifact = event_logger.finalize()
         if event_artifact:
             manifest.add_artifacts([event_artifact])
@@ -321,6 +324,9 @@ class DynamicRunOrchestrator:
 
         summarizer = DynamicRunSummarizer(writer)
         outputs = summarizer.summarize(manifest)
+        report = write_pcap_report(manifest, run_dir, event_logger=event_logger)
+        if report:
+            outputs.append(report)
         manifest.add_outputs(outputs)
         manifest.finalize()
         writer.write_manifest(manifest)
