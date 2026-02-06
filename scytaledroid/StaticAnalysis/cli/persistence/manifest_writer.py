@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -27,50 +26,12 @@ def _json_safe(value: object) -> object:
     return value
 
 
-def _permission_audit_present(run_id: int) -> bool:
-    try:
-        row = core_q.run_sql(
-            "SELECT COUNT(*) FROM permission_audit_apps WHERE static_run_id=%s",
-            (run_id,),
-            fetch="one",
-        )
-        if row and int(row[0] or 0) > 0:
-            return True
-    except Exception:
-        return False
-    try:
-        row = core_q.run_sql(
-            "SELECT COUNT(*) FROM permission_audit_snapshots WHERE static_run_id=%s",
-            (run_id,),
-            fetch="one",
-        )
-        return bool(row and int(row[0] or 0) > 0)
-    except Exception:
-        return False
-
-
-_REQUIRED_PAPER_ARTIFACTS: tuple[str, ...] = (
-    "static_baseline_json",
-    "static_dynamic_plan_json",
-    "static_report",
-    "manifest_evidence",
-    "dep_snapshot",
-    "permission_audit_snapshot",
-)
-
-
-def _missing_required_artifacts(
+def write_static_run_manifest(
+    static_run_id: int,
     *,
     grade: str,
-    registry_rows: Sequence[Sequence[object]] | None,
-) -> list[str]:
-    if grade != "PAPER_GRADE":
-        return []
-    present = {str(row[0]) for row in registry_rows or [] if row and row[0]}
-    return [artifact for artifact in _REQUIRED_PAPER_ARTIFACTS if artifact not in present]
-
-
-def write_static_run_manifest(static_run_id: int) -> bool:
+    grade_reasons: Sequence[str] | None = None,
+) -> bool:
     try:
         row = core_q.run_sql(
             """
@@ -119,15 +80,7 @@ def write_static_run_manifest(static_run_id: int) -> bool:
         schema_version,
     ) = row
 
-    grade = "EXPERIMENTAL" if os.getenv("SCYTALEDROID_PERSISTENCE_READY") == "0" else "PAPER_GRADE"
-    reasons = (
-        ["persistence_gate_failed"]
-        if os.getenv("SCYTALEDROID_PERSISTENCE_READY") == "0"
-        else []
-    )
-    if grade == "PAPER_GRADE" and not _permission_audit_present(static_run_id):
-        grade = "EXPERIMENTAL"
-        reasons.append("permission_audit_missing")
+    reasons = list(grade_reasons or [])
 
     manifest = {
         "run_manifest_version": 1,
@@ -154,7 +107,6 @@ def write_static_run_manifest(static_run_id: int) -> bool:
     run_root = Path("evidence") / "static_runs" / str(static_run_id)
     run_root.mkdir(parents=True, exist_ok=True)
     manifest_path = run_root / "run_manifest.json"
-    manifest_evidence_path = run_root / "manifest_evidence.json"
     manifest["artifacts"].append(
         {
             "path": str(manifest_path),
@@ -167,34 +119,6 @@ def write_static_run_manifest(static_run_id: int) -> bool:
             "pull_status": "n/a",
         }
     )
-    if manifest_evidence_path.exists():
-        try:
-            manifest["artifacts"].append(
-                {
-                    "path": str(manifest_evidence_path),
-                    "type": "manifest_evidence",
-                    "sha256": hashlib.sha256(manifest_evidence_path.read_bytes()).hexdigest(),
-                    "size_bytes": manifest_evidence_path.stat().st_size,
-                    "created_at_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-                    "origin": "host",
-                    "pull_status": "n/a",
-                }
-            )
-        except Exception:
-            pass
-    dep_path = run_root / "dep.json"
-    if dep_path.exists():
-        manifest["artifacts"].append(
-            {
-                "path": str(dep_path),
-                "type": "dep_snapshot",
-                "sha256": hashlib.sha256(dep_path.read_bytes()).hexdigest(),
-                "size_bytes": dep_path.stat().st_size,
-                "created_at_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-                "origin": "host",
-                "pull_status": "n/a",
-            }
-        )
     try:
         registry_rows = core_q.run_sql(
             """
@@ -208,16 +132,6 @@ def write_static_run_manifest(static_run_id: int) -> bool:
         )
     except Exception:
         registry_rows = []
-    missing_required = _missing_required_artifacts(grade=grade, registry_rows=registry_rows)
-    if missing_required:
-        log.warning(
-            (
-                "Required artifacts missing for paper-grade manifest; "
-                f"static_run_id={static_run_id} missing={missing_required}"
-            ),
-            category="static_analysis",
-        )
-        return False
     seen_keys: set[tuple[str, str]] = set()
     for artifact in manifest.get("artifacts", []):
         key = (str(artifact.get("type")), str(artifact.get("path")))
@@ -265,8 +179,17 @@ def write_static_run_manifest(static_run_id: int) -> bool:
     return True
 
 
-def refresh_static_run_manifest(static_run_id: int) -> bool:
-    return write_static_run_manifest(static_run_id)
+def refresh_static_run_manifest(
+    static_run_id: int,
+    *,
+    grade: str,
+    grade_reasons: Sequence[str] | None = None,
+) -> bool:
+    return write_static_run_manifest(
+        static_run_id,
+        grade=grade,
+        grade_reasons=grade_reasons,
+    )
 
 
 __all__ = ["write_static_run_manifest", "refresh_static_run_manifest"]

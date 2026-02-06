@@ -18,8 +18,6 @@ from scytaledroid.Utils.DisplayUtils import (
     status_messages,
     summary_cards,
 )
-from scytaledroid.Database.db_core import db_queries as core_q
-
 from ...engine.strings import analyse_strings
 from ...persistence.ingest import ingest_baseline_payload
 from ..core.models import RunOutcome, RunParameters
@@ -64,6 +62,35 @@ from .results_formatters import _format_highlight_tokens
 from .results_persist import _build_ingest_payload, _persist_cohort_rollup
 from .run_db_queries import _apply_display_names
 from .scan_flow import format_duration
+
+
+_REQUIRED_PAPER_ARTIFACTS: tuple[str, ...] = (
+    "static_baseline_json",
+    "static_dynamic_plan_json",
+    "static_report",
+    "manifest_evidence",
+    "dep_snapshot",
+    "permission_audit_snapshot",
+)
+
+
+def _governance_ready() -> tuple[bool, str | None]:
+    try:
+        snapshots = core_q.run_sql(
+            "SELECT COUNT(*) FROM permission_governance_snapshots",
+            fetch="one",
+        )
+        rows = core_q.run_sql(
+            "SELECT COUNT(*) FROM permission_governance_snapshot_rows",
+            fetch="one",
+        )
+    except Exception as exc:
+        return False, f"governance_query_failed:{exc}"
+    snapshot_count = int(snapshots[0] or 0) if snapshots else 0
+    row_count = int(rows[0] or 0) if rows else 0
+    if snapshot_count <= 0 or row_count <= 0:
+        return False, "governance_missing"
+    return True, None
 
 
 def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
@@ -589,12 +616,27 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             artifacts: list[dict[str, object]] = []
             now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
             manifest_evidence_path = None
-            paper_grade = os.getenv("SCYTALEDROID_PAPER_GRADE", "1").strip().lower() in {
+            paper_grade_requested = os.getenv("SCYTALEDROID_PAPER_GRADE", "1").strip().lower() in {
                 "1",
                 "true",
                 "yes",
                 "on",
             }
+            grade = "PAPER_GRADE" if paper_grade_requested else "EXPERIMENTAL"
+            grade_reasons: list[str] = []
+            if paper_grade_requested:
+                gov_ready, gov_detail = _governance_ready()
+                if not gov_ready:
+                    grade = "EXPERIMENTAL"
+                    grade_reasons.append("MISSING_GOVERNANCE")
+                    if gov_detail and gov_detail != "governance_missing":
+                        warning = f"Governance check failed: {gov_detail}"
+                        print(status_messages.status(warning, level="warn"))
+                    warning = (
+                        "Run grade: EXPERIMENTAL (MISSING_GOVERNANCE)"
+                    )
+                    print(status_messages.status(warning, level="warn"))
+                    persistence_errors.append(warning)
             try:
                 metadata_map = base_report.metadata if isinstance(base_report.metadata, Mapping) else {}
                 repro_bundle = (
@@ -631,7 +673,7 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
             if base_artifact and base_artifact.saved_path:
                 report_path = Path(base_artifact.saved_path)
             missing_required: list[str] = []
-            if paper_grade:
+            if grade == "PAPER_GRADE":
                 if not saved_path or not saved_path.exists():
                     missing_required.append("static_baseline_json")
                 if not dynamic_plan_path or not dynamic_plan_path.exists():
@@ -701,7 +743,7 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                     origin="host",
                     pull_status="n/a",
                 )
-            if paper_grade:
+            if grade == "PAPER_GRADE":
                 try:
                     rows = core_q.run_sql(
                         """
@@ -715,10 +757,9 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                     registry_types = {str(row[0]) for row in rows or [] if row and row[0]}
                 except Exception:
                     registry_types = set()
-                if "dep_snapshot" not in registry_types:
-                    missing_required.append("dep_snapshot")
-                if "permission_audit_snapshot" not in registry_types:
-                    missing_required.append("permission_audit_snapshot")
+                for artifact_type in _REQUIRED_PAPER_ARTIFACTS:
+                    if artifact_type not in registry_types and artifact_type not in missing_required:
+                        missing_required.append(artifact_type)
                 if missing_required:
                     warning = (
                         f"Paper-grade artifacts missing for static_run_id={app_result.static_run_id}: "
@@ -734,7 +775,11 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
                         abort_signal=abort_signal,
                     )
                     continue
-                manifest_ok = refresh_static_run_manifest(app_result.static_run_id)
+                manifest_ok = refresh_static_run_manifest(
+                    app_result.static_run_id,
+                    grade=grade,
+                    grade_reasons=grade_reasons,
+                )
                 if not manifest_ok:
                     warning = (
                         f"Failed to publish run_manifest.json for static_run_id={app_result.static_run_id}"

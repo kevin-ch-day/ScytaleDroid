@@ -118,11 +118,11 @@ def main_menu() -> None:
     menu_actions: list[tuple[str, str, Callable[[], None]]] = [
         ("1", "Android Device Analysis", handle_device),
         ("2", "Static APK analysis", handle_static),
-        ("3", "Permission cohort analysis", handle_perm_catalog),
-        ("4", "Dynamic analysis", handle_dynamic),
-        ("5", "API server", handle_api),
-        ("6", "Reporting", handle_reporting),
-        ("7", "Database tools", handle_database),
+        ("3", "Dynamic analysis", handle_dynamic),
+        ("4", "API server", handle_api),
+        ("5", "Reporting", handle_reporting),
+        ("6", "Database tools", handle_database),
+        ("7", "Governance Inputs & Readiness", handle_data_workspace),
         ("8", "Workspace maintenance & cleanup", handle_workspace),
         ("9", "APK library & archives", handle_browse_apks),
         ("10", "About ScytaleDroid", handle_about),
@@ -202,6 +202,8 @@ def _print_tier1_status_banner() -> None:
     print("• Tier-1 Snapshot")
     print(f"• Schema: {schema_label}")
     print(f"• Tier-1 ready runs {badge}: {tier1_ready}")
+    from scytaledroid.Utils.System.paper_grade_inputs import render_dataset_readiness_line
+    render_dataset_readiness_line()
 
 
 # --- Handlers for each menu option ---
@@ -225,33 +227,16 @@ def handle_dynamic() -> None:
     dynamic_analysis_menu()
 
 
-def handle_perm_catalog() -> None:
-    from scytaledroid.Database.db_utils import schema_gate
-    ok, message, detail = schema_gate.permissions_schema_gate()
-    if not ok:
-        status_messages.print_status(f"[ERROR] {message}", level="error")
-        if detail:
-            status_messages.print_status(detail, level="error")
-        status_messages.print_status(
-            "Fix: Database Tools → Apply Tier-1 schema migrations (or import canonical DB export), then retry.",
-            level="error",
-        )
-        return
-
-    log.warning(
-        "Permission catalog utilities have been removed; use governance import + dict tables.",
-        category="application",
-    )
-    status_messages.print_status(
-        "Permission catalog tools are no longer available. Use governance import + dict tables.",
-        level="warn",
-    )
-
-
 def handle_reporting() -> None:
     from scytaledroid.Reporting.menu import reporting_menu
 
     reporting_menu()
+
+
+def handle_data_workspace() -> None:
+    from scytaledroid.Utils.System.paper_grade_inputs import render_paper_grade_inputs
+
+    render_paper_grade_inputs()
 
 
 def handle_api() -> None:

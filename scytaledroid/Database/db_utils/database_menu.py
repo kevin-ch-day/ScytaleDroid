@@ -14,6 +14,7 @@ from .menu_actions import (
     apply_canonical_schema_bootstrap,
     ensure_dynamic_tier_migrations,
     maybe_clear_screen,
+    show_governance_snapshot_status,
     show_connection_and_config,
 )
 
@@ -25,18 +26,20 @@ def database_menu() -> None:
         "1": apply_canonical_schema_bootstrap,
         "2": health_checks.run_health_summary,
         "3": health_checks.run_evidence_integrity_check,
-        "4": show_connection_and_config,
-        "5": ensure_dynamic_tier_migrations,
-        "6": health_checks.prompt_reset_static_data,
+        "4": show_governance_snapshot_status,
+        "5": show_connection_and_config,
+        "6": ensure_dynamic_tier_migrations,
+        "7": health_checks.prompt_reset_static_data,
     }
 
     options: list[MenuOption] = [
         MenuOption("1", "Apply canonical schema updates (required for paper-grade)"),
         MenuOption("2", "Health summary (paper-grade readiness)"),
         MenuOption("3", "Evidence integrity check (required artifacts)"),
-        MenuOption("4", "Connection & config (diagnostic)"),
-        MenuOption("5", "Tier-1 migrations (dynamic/ML; optional)"),
-        MenuOption("6", "Reset static analysis data (destructive)"),
+        MenuOption("4", "Governance snapshot (import/status)"),
+        MenuOption("5", "Connection & config (diagnostic)"),
+        MenuOption("6", "Tier-1 migrations (dynamic/ML; optional)"),
+        MenuOption("7", "Reset static analysis data (destructive)"),
     ]
 
     while True:
@@ -52,7 +55,7 @@ def database_menu() -> None:
             print(f"Schema: {schema_ver}")
         print()
 
-        menu_utils.print_section("Paper-Grade Readiness")
+        menu_utils.print_section("Readiness & Integrity")
         menu_utils.render_menu(
             MenuSpec(
                 items=options,

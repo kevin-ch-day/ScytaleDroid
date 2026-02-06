@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import os
+import sys
+import termios
+import tty
 from collections.abc import Callable, Iterable
 
 from . import colors, status_messages
@@ -89,12 +92,34 @@ def press_enter_to_continue(
     """Pause execution until the user presses Enter."""
 
     if not force:
-        pause = os.getenv("SCYTALEDROID_PAUSE", "0").strip().lower()
-        if pause not in {"1", "true", "yes", "on"}:
-            return
+        pass
     palette = colors.get_palette()
     prompt_text = colors.apply(message, palette.muted)
     input(f"\n{prompt_text}\n")
+
+
+def press_any_key(
+    message: str = "Press any key to continue...",
+    *,
+    force: bool = False,
+) -> None:
+    """Pause execution until the user presses a key."""
+
+    if not force:
+        pass
+    palette = colors.get_palette()
+    prompt_text = colors.apply(message, palette.muted)
+    if not sys.stdin.isatty():
+        input(f"\n{prompt_text}\n")
+        return
+    print(f"\n{prompt_text}")
+    fd = sys.stdin.fileno()
+    try:
+        old_settings = termios.tcgetattr(fd)
+        tty.setraw(fd)
+        sys.stdin.read(1)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
 
 def prompt_text(
@@ -142,6 +167,7 @@ def prompt_text(
 __all__ = [
     "get_choice",
     "press_enter_to_continue",
+    "press_any_key",
     "prompt_text",
     "prompt_yes_no",
 ]

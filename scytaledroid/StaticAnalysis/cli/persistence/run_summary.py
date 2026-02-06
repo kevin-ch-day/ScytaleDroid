@@ -1161,12 +1161,30 @@ def persist_run_summary(
     return outcome
 
 
-def _write_static_run_manifest(static_run_id: int) -> bool:
-    return _manifest_writer.write_static_run_manifest(static_run_id)
+def _write_static_run_manifest(
+    static_run_id: int,
+    *,
+    grade: str,
+    grade_reasons: Sequence[str] | None = None,
+) -> bool:
+    return _manifest_writer.write_static_run_manifest(
+        static_run_id,
+        grade=grade,
+        grade_reasons=grade_reasons,
+    )
 
 
-def refresh_static_run_manifest(static_run_id: int) -> bool:
-    return _manifest_writer.refresh_static_run_manifest(static_run_id)
+def refresh_static_run_manifest(
+    static_run_id: int,
+    *,
+    grade: str,
+    grade_reasons: Sequence[str] | None = None,
+) -> bool:
+    return _manifest_writer.refresh_static_run_manifest(
+        static_run_id,
+        grade=grade,
+        grade_reasons=grade_reasons,
+    )
 
 
 __all__ = [

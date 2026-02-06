@@ -39,6 +39,7 @@ data/static_analysis/baseline/
 data/static_analysis/dynamic_plan/
 data/audit/
 data/sessions/
+data/
 data/db/scytaledroid.sqlite
 scripts/db/**
 !scripts/db/

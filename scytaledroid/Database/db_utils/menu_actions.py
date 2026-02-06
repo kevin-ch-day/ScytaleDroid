@@ -58,6 +58,56 @@ def show_connection_and_config() -> None:
     prompt_utils.press_enter_to_continue()
 
 
+def show_governance_snapshot_status() -> None:
+    """Show high-level governance snapshot status and import guidance."""
+
+    def _section(title: str) -> None:
+        print(title)
+        print("-" * len(title))
+
+    _section("Governance Snapshot Status")
+    version = None
+    sha = None
+    row_count = 0
+    try:
+        row = core_q.run_sql(
+            """
+            SELECT s.governance_version, s.snapshot_sha256, COUNT(r.permission_string) AS row_count
+            FROM permission_governance_snapshots s
+            LEFT JOIN permission_governance_snapshot_rows r
+              ON r.governance_version = s.governance_version
+            GROUP BY s.governance_version, s.snapshot_sha256
+            ORDER BY s.created_at_utc DESC
+            LIMIT 1
+            """,
+            fetch="one",
+        )
+        if row:
+            version = row[0]
+            sha = row[1]
+            row_count = int(row[2] or 0)
+    except Exception as exc:
+        print(status_messages.status(f"Unable to read governance snapshot: {exc}", level="warn"))
+
+    if version:
+        print(f"    Version : {version}")
+        print(f"    SHA-256 : {sha or '<unknown>'}")
+        print(f"    Rows    : {row_count}")
+    else:
+        print("    Status  : missing")
+        print("    Rows    : 0")
+
+    print()
+    _section("Import (required for paper-grade)")
+    print(
+        "    python -m scytaledroid.Database.tools.permission_governance_import \\"
+    )
+    print("      /path/to/governance_snapshot.csv \\")
+    print("      --version gov_vYYYYMMDD --source EREBUS")
+    print()
+    prompt_utils.press_enter_to_continue()
+
+
 def show_db_status() -> None:
     """Show backend/schema status, config source, and env hints."""
 
