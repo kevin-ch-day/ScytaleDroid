@@ -372,7 +372,7 @@ def _evaluate_grade(payload: Mapping[str, Any], pcap_meta: Mapping[str, Any]) ->
     if manifest_artifacts:
         required_types = {"system_log_capture"}
         if payload.get("pcap_required"):
-            required_types.update({"pcapdroid_capture", "network_capture", "proxy_capture"})
+            required_types.add("pcapdroid_capture")
         if payload.get("static_run_id"):
             required_types.add("dep_snapshot")
         present_types = {str(a.get("type")) for a in manifest_artifacts if a.get("type")}
@@ -388,7 +388,7 @@ def _evaluate_grade(payload: Mapping[str, Any], pcap_meta: Mapping[str, Any]) ->
     if registry_rows:
         required_types = {"system_log_capture"}
         if payload.get("pcap_required"):
-            required_types.update({"pcapdroid_capture", "network_capture", "proxy_capture"})
+            required_types.add("pcapdroid_capture")
         if payload.get("static_run_id"):
             required_types.add("dep_snapshot")
         present_types = {row["artifact_type"] for row in registry_rows}
@@ -537,15 +537,15 @@ def _map_observer_issue(observer_id: object, status: object, error: object) -> s
     observer_id = str(observer_id)
     status = str(status).lower()
     error_text = str(error or "").lower()
-    if observer_id == "proxy_capture" and status == "failed":
-        return "proxy_capture_failed"
     if observer_id == "system_log_capture" and status == "failed":
         return "logcat_capture_failed"
+    if observer_id == "proxy_capture" and status == "failed":
+        return "proxy_capture_failed"
     if observer_id == "network_capture":
-        if "non-root" in error_text or "not available" in error_text:
+        if "tcpdump not available" in error_text and "non-root" in error_text:
             return "tcpdump_unavailable_nonroot"
         if status == "failed":
-            return "tcpdump_start_failed"
+            return "network_capture_failed"
     if observer_id == "pcapdroid_capture":
         if "not installed" in error_text:
             return "pcapdroid_unavailable"
@@ -557,8 +557,6 @@ def _map_observer_issue(observer_id: object, status: object, error: object) -> s
             return "pcapdroid_capture_failed"
     if status == "failed":
         return "observer_failed"
-    if status == "skipped" and "tcpdump" in error_text:
-        return "tcpdump_unavailable_nonroot"
     return None
 
 
@@ -742,7 +740,7 @@ def _extract_pcap_meta(payload: Mapping[str, Any], evidence_path: str | None) ->
     for entry in evidence:
         if not isinstance(entry, dict):
             continue
-        if entry.get("type") in {"pcapdroid_capture", "network_capture", "proxy_capture"}:
+        if entry.get("type") == "pcapdroid_capture":
             pcap_relpath = entry.get("relative_path")
             pcap_sha256 = entry.get("sha256")
             pcap_bytes = entry.get("size_bytes")
@@ -765,7 +763,7 @@ def _extract_pcap_meta(payload: Mapping[str, Any], evidence_path: str | None) ->
                 extra={"evidence_path": str(resolved_path), "error": str(exc)},
             )
             manifest = {}
-        capture_types = {"pcapdroid_capture", "network_capture", "proxy_capture"}
+        capture_types = {"pcapdroid_capture"}
         meta_types = {"pcapdroid_capture_meta"}
         for bucket in ("artifacts", "outputs"):
             for entry in manifest.get(bucket) or []:

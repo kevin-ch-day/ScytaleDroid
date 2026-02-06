@@ -240,9 +240,9 @@ class DynamicRunSummarizer:
         total_bytes: int = 0
         found_size = False
         for artifact in manifest.artifacts:
-            if artifact.type not in {"proxy_capture", "network_capture", "pcapdroid_capture"}:
+            if artifact.type != "pcapdroid_capture":
                 continue
-            sources.append(artifact.type.replace("_capture", ""))
+            sources.append("pcapdroid")
             if artifact.size_bytes is not None:
                 total_bytes += int(artifact.size_bytes)
                 found_size = True
@@ -286,7 +286,7 @@ class DynamicRunSummarizer:
         return sorted(set(signals))
 
     def _network_capture_present(self, manifest: RunManifest, pcap_meta: dict[str, Any]) -> str:
-        capture_types = {"network_capture", "proxy_capture", "pcapdroid_capture"}
+        capture_types = {"pcapdroid_capture"}
         min_bytes = _safe_int(pcap_meta.get("min_pcap_bytes"))
         if not min_bytes:
             min_bytes = 30 * 1024

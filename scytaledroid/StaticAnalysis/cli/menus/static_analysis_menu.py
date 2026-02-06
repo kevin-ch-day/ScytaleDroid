@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import os
+import io
+import contextlib
+import time
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -14,14 +17,11 @@ from scytaledroid.Utils.DisplayUtils.menu_utils import MenuItemSpec, MenuSpec
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .static_analysis_menu_helpers import (
-    DEV_TARGETS,
     apply_command_overrides,
     ask_run_controls,
-    build_dev_selection,
     choose_scope,
     collect_view_options,
     confirm_reset,
-    inject_dev_session_label,
     prompt_session_label,
     render_reset_outcome,
     render_version_diff,
@@ -39,6 +39,9 @@ def static_analysis_menu() -> None:
     from scytaledroid.Database.db_utils.reset_static import reset_static_analysis_data
     from scytaledroid.StaticAnalysis.core.repository import group_artifacts
     from scytaledroid.StaticAnalysis.services import static_service
+    from scytaledroid.StaticAnalysis.cli.core.run_specs import build_static_run_spec
+    from scytaledroid.StaticAnalysis.cli.flows.run_dispatch import execute_run_spec
+    from scytaledroid.StaticAnalysis.cli.core.models import ScopeSelection
 
     from ..commands import COMMANDS, get_command, iter_commands
     from ..core.models import RunParameters
@@ -68,8 +71,7 @@ def static_analysis_menu() -> None:
         return
 
     workflow_commands = tuple(cmd for cmd in iter_commands("scan") if cmd.section == "workflow")
-    dev_commands = tuple(cmd for cmd in iter_commands("scan") if cmd.section == "dev")
-    selectable_ids = [cmd.id for cmd in COMMANDS]
+    selectable_ids = [cmd.id for cmd in workflow_commands]
 
     if not selectable_ids:
         print(status_messages.status("No static analysis commands are registered.", level="error"))
@@ -99,18 +101,6 @@ def static_analysis_menu() -> None:
             print("Primary actions")
             print("---------------")
         menu_utils.render_menu(workflow_spec)
-        if dev_commands:
-            print()
-            print("Calibration & regression")
-            print("------------------------")
-            menu_utils.render_menu(
-                MenuSpec(
-                    items=[_command_option(cmd) for cmd in dev_commands],
-                    show_exit=False,
-                    default=None,
-                    show_descriptions=False,
-                )
-            )
         print()
         back_spec = MenuSpec(
             items=[],
@@ -142,18 +132,17 @@ def static_analysis_menu() -> None:
             continue
 
         selection = None
-        if command.section == "dev":
-            selection = build_dev_selection(groups, command.id)
-            if selection is None:
-                label, package = DEV_TARGETS.get(command.id, ("Target", "unknown"))
-                print(
-                    status_messages.status(
-                        f"{label} not found in APK library ({package}). Skipping fixture.",
-                        level="warn",
-                    )
-                )
-                continue
-        elif command.id == "3":
+        if command.id == "5":
+            _run_dataset_batch(
+                groups,
+                base_dir,
+                command,
+                static_service,
+                query_runner,
+                reset_static_analysis_data,
+            )
+            continue
+        if command.id == "3":
             selection = resolve_last_selection(groups)
             if selection is None:
                 prompt_utils.press_enter_to_continue()
@@ -188,10 +177,6 @@ def static_analysis_menu() -> None:
         )
         if show_artifacts:
             params = replace(params, artifact_detail=True)
-        if command.section == "dev":
-            # Make dev runs easy to identify
-            params = inject_dev_session_label(params, selection)
-
         os.environ["SCYTALEDROID_STATIC_SHOW_SPLITS"] = "1" if show_splits else "0"
 
         while True:
@@ -211,16 +196,15 @@ def static_analysis_menu() -> None:
                 effective_params = prompt_session_label(effective_params)
 
             try:
-                result = static_service.run_scan(
-                    selection,
-                    effective_params,
-                    base_dir,
-                    study_tag=getattr(effective_params, "study_tag", None),
-                    pipeline_version=getattr(effective_params, "analysis_version", None),
-                    catalog_versions=None,
-                    config_hash=None,
+                spec = build_static_run_spec(
+                    selection=selection,
+                    params=effective_params,
+                    base_dir=base_dir,
+                    run_mode="interactive",
+                    quiet=False,
+                    noninteractive=False,
                 )
-                outcome = result.outcome
+                outcome = execute_run_spec(spec)
             except static_service.StaticServiceError as exc:
                 print(status_messages.status(f"Static analysis failed: {exc}", level="error"))
                 log.error(f"Static analysis run failed: {exc}", category="static")
@@ -249,3 +233,134 @@ def _command_option(command: Command) -> menu_utils.MenuOption:
 
 
 __all__ = ["static_analysis_menu"]
+
+
+def _run_dataset_batch(
+    groups,
+    base_dir: Path,
+    command,
+    static_service,
+    query_runner,
+    reset_static_analysis_data,
+) -> None:
+    from scytaledroid.DynamicAnalysis.profile_loader import load_profile_packages
+    from scytaledroid.StaticAnalysis.cli.core.models import ScopeSelection
+    from scytaledroid.StaticAnalysis.cli.core.models import RunParameters
+    from scytaledroid.StaticAnalysis.cli.core.run_specs import build_static_run_spec
+    from scytaledroid.StaticAnalysis.cli.flows.run_dispatch import execute_run_spec
+    from scytaledroid.StaticAnalysis.session import make_session_stamp, normalize_session_stamp
+
+    dataset_pkgs = {pkg.lower() for pkg in load_profile_packages("RESEARCH_DATASET_ALPHA")}
+    if not dataset_pkgs:
+        print(status_messages.status("Research Dataset Alpha profile has no apps.", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    batch_groups = [group for group in groups if group.package_name and group.package_name.lower() in dataset_pkgs]
+    if not batch_groups:
+        print(
+            status_messages.status(
+                "No APK artifacts found for Research Dataset Alpha in the local library.",
+                level="warn",
+            )
+        )
+        prompt_utils.press_enter_to_continue()
+        return
+
+    quiet = True
+    prev_quiet = os.environ.get("SCYTALEDROID_STATIC_QUIET")
+    os.environ["SCYTALEDROID_STATIC_QUIET"] = "1" if quiet else "0"
+    prev_batch = os.environ.get("SCYTALEDROID_STATIC_BATCH")
+    os.environ["SCYTALEDROID_STATIC_BATCH"] = "1"
+
+    failures = []
+    total = len(batch_groups)
+    completed = 0
+    batch_start = time.monotonic()
+    for group in batch_groups:
+        session_stamp = normalize_session_stamp(f"{make_session_stamp()}-{group.package_name}")
+        display_name = ""
+        for artifact in group.artifacts:
+            label = artifact.metadata.get("app_label")
+            if isinstance(label, str) and label.strip():
+                display_name = label.strip()
+                break
+        selection_label = f"{display_name} ({group.package_name})" if display_name else group.package_name
+        selection = ScopeSelection(scope="app", label=selection_label, groups=(group,))
+        index = completed + 1
+        print(
+            status_messages.status(
+                f"Batch {index}/{total}: {selection_label} | done={completed} fail={len(failures)}",
+                level="info",
+            )
+        )
+
+        params = RunParameters(
+            profile=command.profile,
+            scope=selection.scope,
+            scope_label=selection.label,
+            selected_tests=tuple(),
+            session_stamp=session_stamp,
+        )
+        effective_params = apply_command_overrides(params, command)
+
+        # Batch mode: no reset prompts; keep state deterministic.
+
+        try:
+            buffer_out = io.StringIO()
+            buffer_err = io.StringIO()
+            with contextlib.redirect_stdout(buffer_out), contextlib.redirect_stderr(buffer_err):
+                spec = build_static_run_spec(
+                    selection=selection,
+                    params=effective_params,
+                    base_dir=base_dir,
+                    run_mode="batch",
+                    quiet=True,
+                    noninteractive=True,
+                )
+                outcome = execute_run_spec(spec)
+        except static_service.StaticServiceError as exc:
+            failures.append(f"{selection.label}: {exc}")
+            print(status_messages.status(f"Static analysis failed: {exc}", level="error"))
+            log.error(f"Static analysis run failed: {exc}", category="static")
+            continue
+        completed += 1
+        elapsed = time.monotonic() - batch_start
+        avg = elapsed / completed if completed else 0.0
+        remaining = total - completed
+        eta = avg * remaining if avg > 0 else 0.0
+        print(
+            status_messages.status(
+                f"Progress: {completed}/{total} | fail={len(failures)} | ETA {eta:.1f}s",
+                level="info",
+            )
+        )
+
+        if command.auto_verify and not effective_params.dry_run and not quiet:
+            session_key = getattr(outcome, "session_stamp", None) if outcome else None
+            if not session_key:
+                session_key = effective_params.session_stamp
+            if session_key:
+                query_runner.render_session_digest(session_key)
+
+    if prev_quiet is None:
+        os.environ.pop("SCYTALEDROID_STATIC_QUIET", None)
+    else:
+        os.environ["SCYTALEDROID_STATIC_QUIET"] = prev_quiet
+    if prev_batch is None:
+        os.environ.pop("SCYTALEDROID_STATIC_BATCH", None)
+    else:
+        os.environ["SCYTALEDROID_STATIC_BATCH"] = prev_batch
+
+    if failures:
+        print()
+        menu_utils.print_section("Batch summary")
+        for failure in failures:
+            print(status_messages.status(f"Failed: {failure}", level="warn"))
+    else:
+        print()
+        menu_utils.print_section("Batch summary")
+        print(status_messages.status("All batch runs completed.", level="success"))
+    elapsed = time.monotonic() - batch_start
+    print(status_messages.status(f"Completed {completed}/{total} apps in {elapsed:.1f}s.", level="info"))
+    prompt_utils.press_enter_to_continue("Press Enter to continue…")

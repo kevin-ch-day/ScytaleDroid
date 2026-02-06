@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
+from scytaledroid.Utils.System import output_prefs
+
 from scytaledroid.Utils.DisplayUtils import status_messages
 
 from ...core.detector_runner import PIPELINE_STAGES
@@ -17,6 +19,9 @@ def render_app_start(
     package_name: str,
     profile_label: str,
 ) -> None:
+    prefs = output_prefs.get()
+    if prefs.quiet and prefs.batch:
+        return
     if not (title or package_name):
         return
     print()
@@ -43,6 +48,9 @@ def render_app_completion(
     report_metadata: Mapping[str, object] | None,
     params: RunParameters,
 ) -> str:
+    prefs = output_prefs.get()
+    if prefs.quiet and prefs.batch:
+        return _format_elapsed(elapsed_seconds or 0.0)
     elapsed = _format_elapsed(elapsed_seconds or 0.0)
     if not isinstance(report_metadata, Mapping):
         return elapsed

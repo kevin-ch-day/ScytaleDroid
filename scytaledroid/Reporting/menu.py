@@ -113,7 +113,7 @@ def reporting_menu() -> None:
         if action:
             action()
         else:  # pragma: no cover - defensive path
-            print(status_messages.status("Option not implemented yet.", level="warn"))
+            print(status_messages.status("Invalid selection.", level="warn"))
             prompt_utils.press_enter_to_continue()
 
 

@@ -68,21 +68,28 @@ def _extract_features(report: dict[str, Any], cfg: PcapFeatureConfig) -> dict[st
     sni_concentration = _concentration(top_sni, top_sni_total, cfg.top_n)
     dns_concentration = _concentration(top_dns, top_dns_total, cfg.top_n)
     return {
-        "packet_count": packet_count,
-        "data_size_bytes": data_bytes,
-        "capture_duration_s": duration_s,
-        "data_byte_rate_bps": byte_rate,
-        "data_bit_rate_bps": bit_rate,
-        "avg_packet_size_bytes": avg_packet_size,
-        "avg_packet_rate_pps": avg_packet_rate,
-        "unique_sni": unique_sni,
-        "unique_dns": unique_dns,
-        "top_sni_total": top_sni_total,
-        "top_dns_total": top_dns_total,
-        "sni_concentration": sni_concentration,
-        "dns_concentration": dns_concentration,
-        "report_status": report.get("report_status"),
-        "missing_tools": report.get("missing_tools") or [],
+        "metrics": {
+            "packet_count": packet_count,
+            "data_size_bytes": data_bytes,
+            "capture_duration_s": duration_s,
+            "data_byte_rate_bps": byte_rate,
+            "data_bit_rate_bps": bit_rate,
+            "avg_packet_size_bytes": avg_packet_size,
+            "avg_packet_rate_pps": avg_packet_rate,
+        },
+        "proxies": {
+            "unique_sni_topn": unique_sni,
+            "unique_dns_topn": unique_dns,
+            "top_sni_total": top_sni_total,
+            "top_dns_total": top_dns_total,
+            "sni_concentration": sni_concentration,
+            "dns_concentration": dns_concentration,
+        },
+        "quality": {
+            "report_status": report.get("report_status"),
+            "missing_tools": report.get("missing_tools") or [],
+            "note": "Fields under quality are excluded from behavioral modeling.",
+        },
     }
 
 

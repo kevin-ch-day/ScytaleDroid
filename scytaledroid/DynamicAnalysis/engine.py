@@ -306,7 +306,7 @@ class DynamicAnalysisEngine:
             return warnings
 
         observers = manifest.get("observers") or []
-        pcap_observer_ids = {"pcapdroid_capture", "network_capture", "proxy_capture"}
+        pcap_observer_ids = {"pcapdroid_capture"}
         pcap_observer_success = any(
             isinstance(obs, dict)
             and obs.get("observer_id") in pcap_observer_ids

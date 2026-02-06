@@ -154,6 +154,56 @@ def _extract_domains(string_payload: Mapping[str, object]) -> tuple[list[str], l
     return sorted(domains), sorted(cleartext_domains)
 
 
+def _extract_nsc_domains(report: StaticAnalysisReport) -> tuple[list[str], list[str]]:
+    metadata = report.metadata or {}
+    bundle = metadata.get("repro_bundle") if isinstance(metadata, Mapping) else None
+    if isinstance(bundle, Mapping):
+        nsc_payload = bundle.get("network_security_config")
+    else:
+        nsc_payload = None
+    if not isinstance(nsc_payload, Mapping):
+        nsc_payload = metadata.get("network_security_config")
+
+    nsc_domains: set[str] = set()
+    nsc_cleartext: set[str] = set()
+    if isinstance(nsc_payload, Mapping):
+        domain_policies = nsc_payload.get("domain_policies")
+        if isinstance(domain_policies, Sequence):
+            for entry in domain_policies:
+                if not isinstance(entry, Mapping):
+                    continue
+                domains = entry.get("domains")
+                if not isinstance(domains, Sequence):
+                    continue
+                cleartext = bool(entry.get("cleartext_permitted"))
+                for domain in domains:
+                    value = str(domain or "").strip()
+                    if not value:
+                        continue
+                    nsc_domains.add(value)
+                    if cleartext:
+                        nsc_cleartext.add(value)
+    return sorted(nsc_domains), sorted(nsc_cleartext)
+
+
+def _merge_domain_sources(
+    *,
+    string_domains: Sequence[str],
+    nsc_domains: Sequence[str],
+) -> tuple[list[str], list[dict[str, object]]]:
+    sources: dict[str, set[str]] = {}
+    for domain in string_domains:
+        sources.setdefault(domain, set()).add("strings")
+    for domain in nsc_domains:
+        sources.setdefault(domain, set()).add("nsc")
+    merged_domains = sorted(sources)
+    domain_sources = [
+        {"domain": domain, "sources": sorted(list(tags))}
+        for domain, tags in sorted(sources.items())
+    ]
+    return merged_domains, domain_sources
+
+
 def _high_value_permissions(declared: Sequence[str]) -> list[str]:
     high_value = {
         "android.permission.READ_SMS",
@@ -189,7 +239,13 @@ def build_dynamic_plan(
 
     exported = report.exported_components
     permissions = report.permissions
-    domains, cleartext_domains = _extract_domains(string_payload)
+    string_domains, string_cleartext = _extract_domains(string_payload)
+    nsc_domains, nsc_cleartext = _extract_nsc_domains(report)
+    domains, domain_sources = _merge_domain_sources(
+        string_domains=string_domains,
+        nsc_domains=nsc_domains,
+    )
+    cleartext_domains = sorted(set(string_cleartext).union(nsc_cleartext))
     declared = sorted(set(permissions.declared))
     dangerous = sorted(set(permissions.dangerous))
     high_value = _high_value_permissions(declared)
@@ -233,6 +289,8 @@ def build_dynamic_plan(
         "network_targets": {
             "domains": domains,
             "cleartext_domains": cleartext_domains,
+            "domain_sources": domain_sources,
+            "domain_sources_note": "Sources are advisory signals (strings, nsc) and are not ground truth.",
         },
         "risk_flags": {
             "debuggable": report.manifest_flags.debuggable,

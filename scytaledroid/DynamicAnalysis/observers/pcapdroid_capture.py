@@ -18,6 +18,9 @@ PCAPDROID_COMPONENT = "com.emanuelef.remote_capture/.activities.CaptureCtrl"
 PCAPDROID_DOWNLOAD_DIR = "/sdcard/Download/PCAPdroid"
 MIN_PCAP_BYTES = 30 * 1024
 CAPTURE_MODE = "app_only"
+FINALIZE_MIN_WAIT_S = 5.0
+FINALIZE_MAX_WAIT_S = 12.0
+FINALIZE_STABLE_POLLS = 2
 
 
 class PcapdroidCaptureObserver(Observer):
@@ -149,6 +152,12 @@ class PcapdroidCaptureObserver(Observer):
 
         local_path = meta_path.parent / pcap_name
         try:
+            if capture_start_epoch is not None:
+                _wait_for_finalized_pcap(
+                    run_ctx.device_serial,
+                    device_path,
+                    min_epoch=capture_start_epoch,
+                )
             resolved_path = _wait_for_capture_path(
                 run_ctx.device_serial,
                 device_path,
@@ -486,6 +495,43 @@ def _wait_for_capture_path(
             return fallback
         time.sleep(poll_s)
     return None
+
+
+def _wait_for_finalized_pcap(
+    device_serial: str,
+    expected_path: str,
+    *,
+    min_epoch: float | None = None,
+) -> None:
+    """Wait for a PCAP to appear and stabilize in size before pulling."""
+
+    time.sleep(max(FINALIZE_MIN_WAIT_S, 0.0))
+    deadline = time.time() + max(FINALIZE_MAX_WAIT_S, 0.1)
+    stable_hits = 0
+    last_size = None
+
+    while time.time() < deadline:
+        path = expected_path
+        if not _device_file_exists(device_serial, path):
+            fallback = _latest_pcapdroid_capture(device_serial, min_epoch=min_epoch)
+            if fallback:
+                path = fallback
+            else:
+                time.sleep(0.5)
+                continue
+
+        size = _device_file_size(device_serial, path)
+        if size is None:
+            time.sleep(0.5)
+            continue
+        if last_size is not None and size == last_size:
+            stable_hits += 1
+        else:
+            stable_hits = 0
+        last_size = size
+        if stable_hits >= FINALIZE_STABLE_POLLS:
+            return
+        time.sleep(0.5)
 
 
 __all__ = ["PcapdroidCaptureObserver", "PCAPDROID_PACKAGE"]

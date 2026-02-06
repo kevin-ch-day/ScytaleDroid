@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .core import DynamicSessionConfig, DynamicSessionResult
+from .core.run_specs import DynamicRunSpec
 from .engine import run_dynamic_engine
 
 
@@ -45,4 +46,19 @@ def run_dynamic_analysis(
     return engine_result.session
 
 
-__all__ = ["run_dynamic_analysis"]
+def execute_dynamic_run_spec(spec: DynamicRunSpec) -> DynamicSessionResult:
+    return run_dynamic_analysis(
+        spec.package_name,
+        duration_seconds=spec.duration_seconds,
+        device_serial=spec.device_serial,
+        scenario_id=spec.scenario_id,
+        observer_ids=spec.observer_ids,
+        interactive=spec.interactive,
+        plan_path=spec.plan_path,
+        tier=spec.tier,
+        static_run_id=spec.static_run_id,
+        clear_logcat=spec.clear_logcat,
+    )
+
+
+__all__ = ["run_dynamic_analysis", "execute_dynamic_run_spec"]

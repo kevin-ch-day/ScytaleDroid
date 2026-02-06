@@ -21,6 +21,8 @@ from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.LoggingUtils.logging_context import RunContext, get_run_logger
 from scytaledroid.Utils.System import output_prefs
 
+from ..core.run_specs import StaticRunSpec
+
 from ..core.abort_reasons import classify_exception, normalize_abort_reason
 from ..core.analysis_profiles import run_modules_for_profile
 from ..core.models import AppRunResult, RunOutcome, RunParameters, ScopeSelection
@@ -56,16 +58,24 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
             reason = "character safety"
             if len(normalized) != len(params.session_stamp):
                 reason = "length safety"
-            print(
-                status_messages.status(
-                    (
-                        "Session label normalized for cross-table "
-                        f"{reason} ({len(params.session_stamp)}→{len(normalized)} chars): "
-                        f"'{params.session_stamp}' → '{normalized}'."
-                    ),
-                    level="warn",
+            quiet = os.getenv("SCYTALEDROID_STATIC_QUIET", "").strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "y",
+                "on",
+            }
+            if not quiet:
+                print(
+                    status_messages.status(
+                        (
+                            "Session label normalized for cross-table "
+                            f"{reason} ({len(params.session_stamp)}→{len(normalized)} chars): "
+                            f"'{params.session_stamp}' → '{normalized}'."
+                        ),
+                        level="warn",
+                    )
                 )
-            )
             params = replace(params, session_stamp=normalized)
         try:
             resolved_stamp, session_label, canonical_action = _resolve_unique_session_stamp(
@@ -92,6 +102,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
         except RuntimeError as exc:
             print(status_messages.status(str(exc), level="error"))
             return None
+    # Honor output prefs when execute_run_spec has already set them.
     output_prefs.set_verbose(bool(params.verbose_output))
     if params.session_stamp:
         os.environ["SCYTALEDROID_STATIC_SESSION"] = params.session_stamp
@@ -423,6 +434,44 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
     return outcome
 
 
+def execute_run_spec(spec: StaticRunSpec) -> RunOutcome | None:
+    """Execute a prepared run spec without prompting."""
+
+    prev_quiet = os.environ.get("SCYTALEDROID_STATIC_QUIET")
+    prev_batch = os.environ.get("SCYTALEDROID_STATIC_BATCH")
+    prev_noninteractive = os.environ.get("SCYTALEDROID_STATIC_NONINTERACTIVE")
+    prev_pref_quiet = output_prefs.get().quiet
+    prev_pref_batch = output_prefs.get().batch
+    prev_pref_mode = output_prefs.get().run_mode
+    output_prefs.set_quiet(spec.quiet)
+    output_prefs.set_batch(spec.run_mode == "batch" or spec.noninteractive)
+    output_prefs.set_run_mode(spec.run_mode)
+    if spec.quiet:
+        os.environ["SCYTALEDROID_STATIC_QUIET"] = "1"
+    if spec.run_mode == "batch" or spec.noninteractive:
+        os.environ["SCYTALEDROID_STATIC_BATCH"] = "1"
+        os.environ["SCYTALEDROID_STATIC_NONINTERACTIVE"] = "1"
+
+    try:
+        return launch_scan_flow(spec.selection, spec.params, spec.base_dir)
+    finally:
+        output_prefs.set_quiet(prev_pref_quiet)
+        output_prefs.set_batch(prev_pref_batch)
+        output_prefs.set_run_mode(prev_pref_mode)
+        if prev_quiet is None:
+            os.environ.pop("SCYTALEDROID_STATIC_QUIET", None)
+        else:
+            os.environ["SCYTALEDROID_STATIC_QUIET"] = prev_quiet
+        if prev_batch is None:
+            os.environ.pop("SCYTALEDROID_STATIC_BATCH", None)
+        else:
+            os.environ["SCYTALEDROID_STATIC_BATCH"] = prev_batch
+        if prev_noninteractive is None:
+            os.environ.pop("SCYTALEDROID_STATIC_NONINTERACTIVE", None)
+        else:
+            os.environ["SCYTALEDROID_STATIC_NONINTERACTIVE"] = prev_noninteractive
+
+
 def _modules_for_run(params: RunParameters) -> tuple[str, ...]:
     if params.profile == "custom" and params.selected_tests:
         return params.selected_tests
@@ -520,11 +569,29 @@ def _resolve_unique_session_stamp(session_stamp: str) -> tuple[str, str, str]:
     except Exception:
         attempts = None
         canonical_id = None
-    print(f"Session label already exists for today: {base_stamp}")
-    if attempts is not None:
-        canonical_text = f" (canonical: static_run_id={canonical_id})" if canonical_id else ""
-        print(f"Existing attempts: {attempts}{canonical_text}")
-    print()
+    batch_mode = os.getenv("SCYTALEDROID_STATIC_BATCH", "").strip().lower() in {"1", "true", "yes", "y", "on"}
+    noninteractive = os.getenv("SCYTALEDROID_STATIC_NONINTERACTIVE", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "y",
+        "on",
+    }
+    quiet = os.getenv("SCYTALEDROID_STATIC_QUIET", "").strip().lower() in {"1", "true", "yes", "y", "on"}
+    if batch_mode or noninteractive:
+        suffix = None
+        if attempts is not None and attempts >= 0:
+            suffix = f"{attempts + 1}"
+        if not suffix:
+            suffix = datetime.now(UTC).strftime("%H%M%S")
+        new_stamp = normalize_session_stamp(f"{base_stamp}-{suffix}")
+        return new_stamp, new_stamp, "auto_suffix"
+    if not quiet:
+        print(f"Session label already exists for today: {base_stamp}")
+        if attempts is not None:
+            canonical_text = f" (canonical: static_run_id={canonical_id})" if canonical_id else ""
+            print(f"Existing attempts: {attempts}{canonical_text}")
+        print()
     confirm = prompt_utils.prompt_yes_no(
         f"Replace today's run and overwrite local output artifacts for {base_stamp}?",
         default=True,

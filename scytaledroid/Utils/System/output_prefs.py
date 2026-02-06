@@ -15,6 +15,9 @@ class OutputPrefs:
     analytics_detail: bool = False
     string_max_samples: int = 2
     cleartext_only: bool = False
+    quiet: bool = False
+    batch: bool = False
+    run_mode: str = "interactive"
 
 
 _PREFS = OutputPrefs()
@@ -55,6 +58,18 @@ def set_cleartext_only(enabled: bool) -> None:
     _PREFS.cleartext_only = bool(enabled)
 
 
+def set_quiet(enabled: bool) -> None:
+    _PREFS.quiet = bool(enabled)
+
+
+def set_batch(enabled: bool) -> None:
+    _PREFS.batch = bool(enabled)
+
+
+def set_run_mode(mode: str) -> None:
+    _PREFS.run_mode = mode or "interactive"
+
+
 def toggle_cleartext_only() -> bool:
     _PREFS.cleartext_only = not _PREFS.cleartext_only
     return _PREFS.cleartext_only
@@ -69,5 +84,7 @@ __all__ = [
     "set_string_max_samples",
     "set_cleartext_only",
     "toggle_cleartext_only",
+    "set_quiet",
+    "set_batch",
+    "set_run_mode",
 ]
-

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
+from scytaledroid.Utils.System import output_prefs
+
 from scytaledroid.Utils.DisplayUtils import status_messages
 
 
@@ -23,6 +25,9 @@ def render_run_start(
     perm_cache_desc: str,
     trace_ids: Sequence[str] | None = None,
 ) -> None:
+    prefs = output_prefs.get()
+    if prefs.quiet and prefs.batch:
+        return
     target_label = "Target"
     if target and not target.startswith("Profile:") and target != "All apps":
         target_label = "Target App"
@@ -74,6 +79,9 @@ def render_run_summary(
     perm_stats: Mapping[str, int],
     evidence_root: str | None = None,
 ) -> None:
+    prefs = output_prefs.get()
+    if prefs.quiet and prefs.batch:
+        return
     status_messages.print_strip(
         "Static Analysis · Complete",
         [

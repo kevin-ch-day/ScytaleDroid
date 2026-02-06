@@ -7,6 +7,7 @@ from pathlib import Path
 
 from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_evidence_path
+from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import load_dataset_tracker
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
 
 
@@ -20,6 +21,9 @@ def print_run_summary(result, duration_label: str) -> None:
         ("Duration", f"{duration_label} ({duration_seconds}s)"),
         ("Status", status),
     ]
+    dataset_validity = _dataset_validity_label(result.dynamic_run_id)
+    if dataset_validity:
+        lines.append(("Dataset validity", dataset_validity))
     if result.evidence_path:
         lines.append(("Evidence", result.evidence_path))
     status_messages.print_strip("Session", lines, width=70)
@@ -184,6 +188,33 @@ def _format_bytes(size: int) -> str:
     return f"{size:.1f}TB"
 
 
+def _dataset_validity_label(dynamic_run_id: str | None) -> str | None:
+    if not dynamic_run_id:
+        return None
+    tracker = load_dataset_tracker()
+    apps = tracker.get("apps") if isinstance(tracker, dict) else {}
+    if not isinstance(apps, dict):
+        return None
+    for entry in apps.values():
+        if not isinstance(entry, dict):
+            continue
+        runs = entry.get("runs")
+        if not isinstance(runs, list):
+            continue
+        for run in runs:
+            if not isinstance(run, dict):
+                continue
+            if run.get("run_id") != dynamic_run_id:
+                continue
+            valid = run.get("valid_dataset_run")
+            if valid is True:
+                return "✅ valid"
+            if valid is False:
+                return "❌ invalid"
+            return "—"
+    return None
+
+
 def _summary_paths(manifest: dict[str, object]) -> list[str]:
     outputs = manifest.get("outputs") or []
     summary = {}
@@ -238,6 +269,11 @@ def _build_telemetry_lines(
         lines.append(f"Max gap: {max_gap:.2f}s")
     if max_gap_excl_first is not None:
         lines.append(f"Max gap (excl first): {max_gap_excl_first:.2f}s")
+    if sampling_duration is not None:
+        try:
+            lines.append(f"Sampling window: {float(sampling_duration):.0f}s")
+        except Exception:
+            pass
 
     clock_line = _clock_delta_line(sampling_duration, duration_seconds, duration_label)
     if clock_line:
@@ -247,7 +283,7 @@ def _build_telemetry_lines(
         try:
             if float(sampling_duration) < float(min_duration):
                 lines.append(
-                    f"Duration below minimum ({min_duration}s) — dataset runs require ≥{min_duration}s"
+                    f"Sampling window below minimum ({min_duration}s) — dataset runs require ≥{min_duration}s"
                 )
         except Exception:
             pass
@@ -302,18 +338,6 @@ def _build_evidence_lines(
                 level="warn",
             )
         )
-    if pcap_valid is None and pcap_size is None:
-        if any(
-            isinstance(observer, dict)
-            and str(observer.get("observer_id", "")).startswith("pcapdroid")
-            for observer in (manifest.get("observers") or [])
-        ):
-            print(
-                status_messages.status(
-                    "PCAP metadata missing; DB fields may be NULL. Run the backfill action if needed.",
-                    level="warn",
-                )
-            )
     artifact_types = {a.get("type") for a in artifacts if isinstance(a, dict)}
     lines.append("System log: yes" if "system_log_capture" in artifact_types else "System log: no")
     return lines

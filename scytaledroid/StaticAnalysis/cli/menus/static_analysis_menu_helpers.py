@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import re
-from dataclasses import replace
 from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from scytaledroid.DeviceAnalysis.services.static_scope_service import static_scope_service
-from scytaledroid.StaticAnalysis.session import make_session_stamp
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 
 if TYPE_CHECKING:
@@ -21,13 +18,6 @@ try:  # optional DB access (offline mode)
     from scytaledroid.Database.db_core import db_queries as core_q
 except Exception:  # pragma: no cover - DB optional
     core_q = None
-
-DEV_TARGETS = {
-    "C": ("CNN", "com.cnn.mobile.android.phone"),
-    "T": ("TikTok", "com.zhiliaoapp.musically"),
-    "G": ("Gmail", "com.google.android.gm"),
-    "W": ("WhatsApp", "com.whatsapp"),
-}
 
 
 @lru_cache(maxsize=1)
@@ -120,13 +110,7 @@ def collect_view_options(command: Command) -> tuple[bool, bool, bool, bool]:
             ],
             "4": [
                 "Diffs latest two stored reports for the package",
-                "Same package only (Phase-C)",
-            ],
-            "5": [
-                "Runs full detector set without persisting results",
-                "Verbose output surfaces warnings/errors",
-                "Artifact detail requires [A]rtifact detail toggle",
-                "Intended for debugging pipeline issues",
+                "Same package only",
             ],
         }
         for line in details_map.get(command.id, ("No additional details.",)):
@@ -134,25 +118,6 @@ def collect_view_options(command: Command) -> tuple[bool, bool, bool, bool]:
     return want_details, want_splits, want_artifacts, False
 
 
-def build_dev_selection(groups, shortcut_id):
-    from scytaledroid.StaticAnalysis.cli.core.models import ScopeSelection
-
-    if shortcut_id not in DEV_TARGETS:
-        return None
-    _, package = DEV_TARGETS[shortcut_id]
-    for group in groups:
-        if getattr(group, "package_name", None) == package:
-            display_name = ""
-            for artifact in group.artifacts:
-                label = artifact.metadata.get("app_label")
-                if isinstance(label, str) and label.strip():
-                    display_name = label.strip()
-                    break
-            selection_label = (
-                f"{display_name} ({package})" if display_name else package
-            )
-            return ScopeSelection(scope="app", label=selection_label, groups=(group,))
-    return None
 
 
 def library_scope_selection(groups):
@@ -415,26 +380,12 @@ def render_version_diff(package_name):
     print()
 
 
-def inject_dev_session_label(params: RunParameters, selection) -> RunParameters:
-    if not selection:
-        return params
-    label = selection.label or ""
-    display = label.split(" (", 1)[0].strip() if label else ""
-    if not display:
-        display = label.strip()
-    slug = re.sub(r"[^a-zA-Z0-9]+", "-", display).strip("-").lower() or "app"
-    return replace(params, session_stamp=f"static-{slug}-{make_session_stamp()}")
-
-
 __all__ = [
-    "DEV_TARGETS",
     "apply_command_overrides",
     "ask_run_controls",
-    "build_dev_selection",
     "choose_scope",
     "collect_view_options",
     "confirm_reset",
-    "inject_dev_session_label",
     "prompt_session_label",
     "render_reset_outcome",
     "render_version_diff",

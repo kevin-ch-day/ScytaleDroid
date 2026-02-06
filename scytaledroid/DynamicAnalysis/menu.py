@@ -38,10 +38,10 @@ def dynamic_analysis_menu() -> None:
         return
 
     options = [
-        MenuOption("1", "Launch sandbox run"),
-        MenuOption("2", "View recent dynamic sessions"),
-        MenuOption("3", "Configure instrumentation"),
-        MenuOption("4", "Run Research Dataset Alpha (guided)"),
+        MenuOption("1", "Run Research Dataset Alpha (guided)"),
+        MenuOption("2", "Dataset run status"),
+        MenuOption("3", "Export run summary CSV"),
+        MenuOption("4", "Export PCAP features CSV"),
     ]
 
     while True:
@@ -55,24 +55,79 @@ def dynamic_analysis_menu() -> None:
             break
 
         if choice == "1":
-            run_sandbox_dynamic_run(
-                select_dynamic_target=_select_dynamic_target,
-                select_observers=_select_observers,
-                print_root_status=_print_root_status,
-                print_network_status=_print_network_status,
-            )
-            continue
-
-        if choice == "4":
             _run_guided_dataset_run()
             prompt_utils.press_enter_to_continue()
             continue
 
+        if choice == "2":
+            _render_dataset_status()
             prompt_utils.press_enter_to_continue()
             continue
 
-        print(status_messages.status("Dynamic analysis workflow not implemented yet.", level="warn"))
-        prompt_utils.press_enter_to_continue()
+        if choice == "3":
+            _export_dynamic_run_summary_csv()
+            prompt_utils.press_enter_to_continue()
+            continue
+
+        if choice == "4":
+            _export_pcap_features_csv()
+            prompt_utils.press_enter_to_continue()
+            continue
+
+
+    return
+
+
+def _render_dataset_status() -> None:
+    from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import load_dataset_tracker
+
+    print()
+    menu_utils.print_header("Dataset Run Status")
+    payload = load_dataset_tracker()
+    apps = payload.get("apps", {})
+    rows = []
+    for package, entry in sorted(apps.items()):
+        runs = int(entry.get("run_count") or 0)
+        valid = int(entry.get("valid_runs") or 0)
+        target = int(entry.get("target_runs") or 0)
+        status = "complete" if entry.get("app_complete") else "in_progress"
+        rows.append(
+            {
+                "Package": package,
+                "Valid": valid,
+                "Runs": runs,
+                "Target": target,
+                "Status": status,
+            }
+        )
+    if not rows:
+        print(status_messages.status("No dataset runs recorded yet.", level="info"))
+        return
+    table_utils.print_table(rows, headers=["Package", "Valid", "Runs", "Target", "Status"])
+
+
+def _export_pcap_features_csv() -> None:
+    from scytaledroid.DynamicAnalysis.pcap.aggregate import export_pcap_features_csv
+
+    print()
+    menu_utils.print_header("PCAP Features Export")
+    output_path = export_pcap_features_csv()
+    if output_path is None:
+        print(status_messages.status("No pcap_features.json files found.", level="warn"))
+        return
+    print(status_messages.status(f"Exported CSV: {output_path}", level="success"))
+
+
+def _export_dynamic_run_summary_csv() -> None:
+    from scytaledroid.DynamicAnalysis.pcap.aggregate import export_dynamic_run_summary_csv
+
+    print()
+    menu_utils.print_header("Run Summary Export")
+    output_path = export_dynamic_run_summary_csv()
+    if output_path is None:
+        print(status_messages.status("No dynamic run summaries found.", level="warn"))
+        return
+    print(status_messages.status(f"Exported CSV: {output_path}", level="success"))
 
 
 def _select_dynamic_target() -> tuple[str, str] | None:
@@ -188,7 +243,7 @@ def _print_tier1_qa_result(dynamic_run_id: str) -> None:
         )
         return
     if not row:
-        print(status_messages.status("Tier-1 QA gate: NOT ENFORCED (dynamic).", level="warn"))
+        print(status_messages.status("Tier-1 QA gate: NOT ENFORCED (dynamic).", level="info"))
         return
 
     failures = []

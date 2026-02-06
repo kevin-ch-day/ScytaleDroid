@@ -319,7 +319,14 @@ class DynamicRunOrchestrator:
             manifest.add_artifacts([marker_artifact])
         manifest.status = run_status
         manifest.ended_at = self._now()
-        index_pcap_by_app(manifest, run_dir, event_logger=event_logger)
+        try:
+            index_pcap_by_app(manifest, run_dir, event_logger=event_logger)
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning(
+                "PCAP archive index failed",
+                extra={"dynamic_run_id": dynamic_run_id, "error": str(exc)},
+            )
+            event_logger.log("pcap_index_failed", {"error": str(exc)})
         event_artifact = event_logger.finalize()
         if event_artifact:
             manifest.add_artifacts([event_artifact])
@@ -689,6 +696,9 @@ class DynamicRunOrchestrator:
         dangerous = perms.get("dangerous") if isinstance(perms.get("dangerous"), list) else []
         high_value = perms.get("high_value") if isinstance(perms.get("high_value"), list) else []
         domains = network.get("domains") if isinstance(network.get("domains"), list) else []
+        domain_sources = (
+            network.get("domain_sources") if isinstance(network.get("domain_sources"), list) else []
+        )
         cleartext = network.get("cleartext_domains") if isinstance(network.get("cleartext_domains"), list) else []
         return {
             "declared_permissions_count": len(declared),
@@ -696,6 +706,8 @@ class DynamicRunOrchestrator:
             "high_value_permissions_count": len(high_value),
             "network_targets_count": len(domains),
             "network_targets_sample": sorted(domains)[:5],
+            "network_targets_all": sorted(domains),
+            "domain_sources": domain_sources,
             "cleartext_targets_sample": sorted(cleartext)[:5],
             "risk_flags": risk_flags,
         }

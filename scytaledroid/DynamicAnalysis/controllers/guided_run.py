@@ -10,6 +10,8 @@ from scytaledroid.DynamicAnalysis.plan_selection import (
     resolve_plan_selection,
 )
 from scytaledroid.DynamicAnalysis.profile_loader import load_profile_packages
+from scytaledroid.DynamicAnalysis.core.run_specs import build_dynamic_run_spec
+from scytaledroid.DynamicAnalysis.run_dynamic_analysis import execute_dynamic_run_spec
 from scytaledroid.DynamicAnalysis.run_summary import print_run_summary
 from scytaledroid.StaticAnalysis.core.repository import group_artifacts
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
@@ -78,20 +80,19 @@ def run_guided_dataset_run(
     print_plan_selection_banner(plan_selection)
     clear_logcat = prompt_utils.prompt_yes_no("Clear logcat at run start?", default=True)
 
-    from scytaledroid.DynamicAnalysis.run_dynamic_analysis import run_dynamic_analysis
-
-    result = run_dynamic_analysis(
-        package_name,
-        duration_seconds=duration_seconds,
+    spec = build_dynamic_run_spec(
+        package_name=package_name,
         device_serial=device_serial,
-        scenario_id=scenario_id,
         observer_ids=tuple(observer_ids),
-        interactive=True,
-        plan_path=plan_path,
+        scenario_id=scenario_id,
         tier=tier,
+        duration_seconds=duration_seconds,
+        plan_path=plan_path,
         static_run_id=static_run_id,
         clear_logcat=clear_logcat,
+        interactive=True,
     )
+    result = execute_dynamic_run_spec(spec)
     print_run_summary(result, label)
     if result.dynamic_run_id and print_tier1_qa_result:
         print_tier1_qa_result(result.dynamic_run_id)

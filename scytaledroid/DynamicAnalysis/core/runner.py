@@ -6,9 +6,7 @@ from datetime import UTC, datetime
 
 from scytaledroid.DynamicAnalysis.core.orchestrator import DynamicRunOrchestrator
 from scytaledroid.DynamicAnalysis.observers import (
-    NetworkCaptureObserver,
     PcapdroidCaptureObserver,
-    ProxyCaptureObserver,
     SystemLogObserver,
 )
 from scytaledroid.DynamicAnalysis.plans.loader import (
@@ -38,10 +36,6 @@ def run_dynamic_session(
     )
     observer_ids = set(config.observer_ids or ("system_log_capture",))
     observers = []
-    if "proxy_capture" in observer_ids:
-        observers.append(ProxyCaptureObserver())
-    if "network_capture" in observer_ids:
-        observers.append(NetworkCaptureObserver())
     if "pcapdroid_capture" in observer_ids:
         observers.append(PcapdroidCaptureObserver())
     if "system_log_capture" in observer_ids:

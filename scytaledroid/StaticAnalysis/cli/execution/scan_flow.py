@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
+from scytaledroid.Utils.System import output_prefs
 
 from ...core import (
     AnalysisConfig,
@@ -74,12 +75,15 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
     total_artifacts = sum(len(_dedupe_artifacts(group.artifacts)) for group in selection.groups)
     show_splits = _show_split_breakdown()
     show_artifacts = (not params.dry_run) or bool(params.artifact_detail)
+    prefs = output_prefs.get()
+    if prefs.quiet and prefs.batch:
+        show_artifacts = False
     display_name_map = load_display_name_map(selection.groups)
     progress = _PipelineProgress(
         total=total_artifacts,
         show_splits=show_splits,
         show_artifacts=show_artifacts,
-        show_checkpoints=not params.dry_run,
+        show_checkpoints=not params.dry_run and show_artifacts,
         progress_every=int(os.getenv("SCYTALEDROID_STATIC_PROGRESS_EVERY", "5").strip() or "5"),
     )
     config_hash = _compute_config_hash(params)
