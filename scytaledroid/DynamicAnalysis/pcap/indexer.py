@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.core.event_logger import RunEventLogger
 from scytaledroid.DynamicAnalysis.core.manifest import RunManifest
 
@@ -60,7 +61,7 @@ def index_pcap_by_app(
     timestamp = _format_timestamp(manifest.scenario.get("started_at") or manifest.started_at)
     run_short = (manifest.dynamic_run_id or "run")[:6]
     filename = f"{timestamp}__{scenario_slug}__run-{run_short}.pcap"
-    dest_dir = run_dir.parent / "by_app" / package
+    dest_dir = Path(app_config.DATA_DIR) / "archive" / "pcap" / "by_app" / package
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest_path = dest_dir / filename
     final_path = _copy_atomic(src_path, dest_path, size_bytes)

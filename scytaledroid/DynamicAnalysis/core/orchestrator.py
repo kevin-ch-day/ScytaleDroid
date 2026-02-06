@@ -15,8 +15,8 @@ from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
 from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
-from scytaledroid.DynamicAnalysis.analysis.pcap_indexer import index_pcap_by_app
-from scytaledroid.DynamicAnalysis.analysis.pcap_report import write_pcap_report
+from scytaledroid.DynamicAnalysis.pcap.indexer import index_pcap_by_app
+from scytaledroid.DynamicAnalysis.pcap.report import write_pcap_report
 from scytaledroid.DynamicAnalysis.analysis.summarizer import DynamicRunSummarizer
 from scytaledroid.DynamicAnalysis.core.environment import EnvironmentManager
 from scytaledroid.DynamicAnalysis.core.event_logger import RunEventLogger
