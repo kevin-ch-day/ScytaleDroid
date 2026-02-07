@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from statistics import mean, pstdev, pvariance
@@ -18,7 +18,15 @@ MIN_PCAP_BYTES = int(getattr(app_config, "DYNAMIC_MIN_PCAP_BYTES", 100000))
 
 @dataclass(frozen=True)
 class DatasetTrackerConfig:
-    repeats_per_app: int = 3
+    repeats_per_app: int = field(
+        default_factory=lambda: int(getattr(app_config, "DYNAMIC_DATASET_RUNS_PER_APP", 3))
+    )
+    baseline_required: int = field(
+        default_factory=lambda: int(getattr(app_config, "DYNAMIC_DATASET_BASELINE_RUNS", 1))
+    )
+    interactive_required: int = field(
+        default_factory=lambda: int(getattr(app_config, "DYNAMIC_DATASET_INTERACTIVE_RUNS", 2))
+    )
     baseline_profile: str = "baseline_idle"
     interactive_profile: str = "interactive_use"
 
@@ -75,6 +83,7 @@ def update_dataset_tracker(
         "run_profile": operator.get("run_profile"),
         "run_sequence": operator.get("run_sequence"),
         "interaction_level": interaction_level,
+        "messaging_activity": operator.get("messaging_activity"),
     }
     run_entry.update(_netstats_summary(run_dir))
     run_entry.update(_pcap_capture_stats(run_dir))
@@ -91,7 +100,20 @@ def update_dataset_tracker(
     app_entry["run_count"] = len(app_entry["runs"])
     app_entry["target_runs"] = cfg.repeats_per_app
     app_entry["valid_runs"] = sum(1 for r in app_entry["runs"] if r.get("valid_dataset_run"))
-    app_entry["app_complete"] = app_entry["valid_runs"] >= cfg.repeats_per_app
+    app_entry["baseline_valid_runs"] = sum(
+        1
+        for r in app_entry["runs"]
+        if r.get("valid_dataset_run") is True and str(r.get("run_profile") or "").startswith(cfg.baseline_profile)
+    )
+    app_entry["interactive_valid_runs"] = sum(
+        1
+        for r in app_entry["runs"]
+        if r.get("valid_dataset_run") is True and str(r.get("run_profile") or "").startswith(cfg.interactive_profile)
+    )
+    app_entry["app_complete"] = (
+        int(app_entry["baseline_valid_runs"]) >= int(cfg.baseline_required)
+        and int(app_entry["interactive_valid_runs"]) >= int(cfg.interactive_required)
+    )
     _apply_quota_marking(app_entry, cfg)
     app_entry["overlap_stats"] = _compute_overlap_stats(app_entry.get("runs") or [])
     payload["updated_at"] = datetime.now(UTC).isoformat()
@@ -112,7 +134,61 @@ def update_dataset_tracker(
 
 def load_dataset_tracker() -> dict[str, Any]:
     tracker_path = Path(app_config.DATA_DIR) / "archive" / "dataset_plan.json"
-    return _load(tracker_path)
+    payload = _load(tracker_path)
+    return _normalize_tracker_payload(payload, DatasetTrackerConfig())
+
+
+def _normalize_tracker_payload(payload: dict[str, Any], cfg: DatasetTrackerConfig) -> dict[str, Any]:
+    """Normalize/repair derived tracker fields in-memory.
+
+    The tracker JSON is a derived index. As the schema evolves, older files may
+    be missing computed keys like baseline_valid_runs. Normalization keeps the UI
+    and status logic stable without requiring an explicit recompute step.
+    """
+    if not isinstance(payload, dict):
+        return {"apps": {}}
+    apps = payload.get("apps")
+    if not isinstance(apps, dict):
+        payload["apps"] = {}
+        return payload
+
+    for _pkg, entry in apps.items():
+        if not isinstance(entry, dict):
+            continue
+        runs = entry.get("runs")
+        if not isinstance(runs, list):
+            runs = []
+            entry["runs"] = runs
+
+        # Recompute key counts if missing or inconsistent.
+        entry["run_count"] = len([r for r in runs if isinstance(r, dict)])
+        entry["target_runs"] = int(entry.get("target_runs") or cfg.repeats_per_app)
+        entry["valid_runs"] = sum(1 for r in runs if isinstance(r, dict) and r.get("valid_dataset_run") is True)
+        entry["baseline_valid_runs"] = sum(
+            1
+            for r in runs
+            if isinstance(r, dict)
+            and r.get("valid_dataset_run") is True
+            and str(r.get("run_profile") or "").startswith(cfg.baseline_profile)
+        )
+        entry["interactive_valid_runs"] = sum(
+            1
+            for r in runs
+            if isinstance(r, dict)
+            and r.get("valid_dataset_run") is True
+            and str(r.get("run_profile") or "").startswith(cfg.interactive_profile)
+        )
+        entry["app_complete"] = (
+            int(entry["baseline_valid_runs"]) >= int(cfg.baseline_required)
+            and int(entry["interactive_valid_runs"]) >= int(cfg.interactive_required)
+        )
+
+        # Ensure quota markings are present for UI labels (extra_run, counts_toward_quota).
+        _apply_quota_marking(entry, cfg)
+        entry["quota_met"] = bool(entry.get("quota_met") or entry.get("app_complete"))
+        entry["extra_valid_runs"] = int(entry.get("extra_valid_runs") or 0)
+
+    return payload
 
 
 def peek_next_run_protocol(
@@ -136,30 +212,44 @@ def peek_next_run_protocol(
     entry = apps.get(package) if isinstance(apps, dict) else None
     runs = entry.get("runs") if isinstance(entry, dict) else []
 
-    valid_runs = entry.get("valid_runs") if isinstance(entry, dict) else None
-    if valid_runs is None and isinstance(runs, list):
-        valid_runs = sum(1 for r in runs if isinstance(r, dict) and r.get("valid_dataset_run"))
-    try:
-        valid_runs_int = int(valid_runs or 0)
-    except Exception:
-        valid_runs_int = 0
+    baseline_valid = 0
+    interactive_valid = 0
+    total_valid = 0
+    if isinstance(runs, list):
+        for r in runs:
+            if not isinstance(r, dict) or r.get("valid_dataset_run") is not True:
+                continue
+            total_valid += 1
+            prof = str(r.get("run_profile") or "")
+            if prof.startswith(cfg.baseline_profile) or "baseline" in prof or "idle" in prof:
+                baseline_valid += 1
+            elif prof.startswith(cfg.interactive_profile) or "interactive" in prof:
+                interactive_valid += 1
 
     # Dataset protocol numbering is by quota slot, not attempt count.
     #
     # If Run #1 fails QA, the next retry should still be "Run #1" until a valid run
     # is recorded. This avoids confusing operators ("baseline Run #2") and matches
     # the paper contract: each app needs >=3 VALID runs; retries fill the same slot.
-    run_sequence = max(valid_runs_int + 1, 1)
+    needed = max(int(cfg.repeats_per_app), int(cfg.baseline_required) + int(cfg.interactive_required))
+    run_sequence = max(min(total_valid + 1, needed), 1)
 
-    run_profile = cfg.baseline_profile if valid_runs_int <= 0 else cfg.interactive_profile
+    if baseline_valid < int(cfg.baseline_required):
+        run_profile = cfg.baseline_profile
+    elif interactive_valid < int(cfg.interactive_required):
+        run_profile = cfg.interactive_profile
+    else:
+        # Quota is satisfied; continue suggesting interactive unless operator chooses otherwise.
+        run_profile = cfg.interactive_profile
     return {
         "run_profile": run_profile,
         "run_sequence": run_sequence,
-        "valid_runs_so_far": valid_runs_int,
+        "valid_runs_so_far": total_valid,
+        "baseline_valid_runs": baseline_valid,
+        "interactive_valid_runs": interactive_valid,
         "protocol_note": (
             "Run sequence counts valid runs (quota slots), not raw attempts. "
-            "baseline_idle is used until the first valid dataset run is recorded; "
-            "later runs use interactive_use."
+            f"Need baseline={cfg.baseline_required} and interactive={cfg.interactive_required} valid run(s)."
         ),
     }
 
@@ -173,8 +263,14 @@ def recompute_dataset_tracker(*, config: DatasetTrackerConfig | None = None) -> 
     tracker_path = Path(app_config.DATA_DIR) / "archive" / "dataset_plan.json"
     tracker_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Iterate all evidence packs and re-run the tracker update; update_dataset_tracker is
-    # idempotent and will update existing entries.
+    # Rebuild from evidence packs only. This intentionally drops tracker entries for
+    # evidence packs that were deleted locally (e.g., removing invalid runs).
+    tracker_path.write_text(
+        json.dumps({"apps": {}, "updated_at": datetime.now(UTC).isoformat()}, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+
+    # Iterate all evidence packs and re-run the tracker update.
     for run_dir in sorted([p for p in output_root.iterdir() if p.is_dir()]):
         manifest_path = run_dir / "run_manifest.json"
         if not manifest_path.exists():
@@ -267,7 +363,11 @@ def _apply_quota_marking(app_entry: dict[str, Any], cfg: DatasetTrackerConfig) -
     runs = app_entry.get("runs")
     if not isinstance(runs, list):
         return
-    needed = int(cfg.repeats_per_app)
+    baseline_needed = max(0, int(cfg.baseline_required))
+    interactive_needed = max(0, int(cfg.interactive_required))
+    # Total quota slots is baseline+interactive, unless legacy repeats_per_app is larger.
+    # This lets teams temporarily over-collect without changing baseline/interactive minima.
+    needed = max(int(cfg.repeats_per_app), baseline_needed + interactive_needed)
     # Reset markers (idempotent).
     for r in runs:
         if isinstance(r, dict):
@@ -283,23 +383,44 @@ def _apply_quota_marking(app_entry: dict[str, Any], cfg: DatasetTrackerConfig) -
         )
     )
 
-    valid_seen = 0
+    baseline_seen = 0
+    interactive_seen = 0
     quota_met_at: str | None = None
     quota_met_run_id: str | None = None
     for _, r in indexed:
         is_valid = r.get("valid_dataset_run") is True
         if not is_valid:
             continue
-        if valid_seen < needed:
+        prof = str(r.get("run_profile") or "")
+        is_baseline = prof.startswith(cfg.baseline_profile) or "baseline" in prof or "idle" in prof
+        is_interactive = prof.startswith(cfg.interactive_profile) or "interactive" in prof
+
+        counted = False
+        if is_baseline and baseline_seen < baseline_needed:
+            baseline_seen += 1
+            counted = True
+        elif is_interactive and interactive_seen < interactive_needed:
+            interactive_seen += 1
+            counted = True
+        elif (baseline_seen + interactive_seen) < needed:
+            # If profile tagging is inconsistent, still allow runs to fill total quota slots.
+            counted = True
+
+        if counted and (baseline_seen + interactive_seen) <= needed:
             r["counts_toward_quota"] = True
-            valid_seen += 1
-            if valid_seen == needed:
+            if (
+                quota_met_at is None
+                and baseline_seen >= baseline_needed
+                and interactive_seen >= interactive_needed
+            ):
                 quota_met_at = r.get("ended_at") or r.get("started_at")
                 quota_met_run_id = r.get("run_id")
         else:
             r["extra_run"] = 1
 
-    app_entry["quota_met"] = bool(valid_seen >= needed)
+    app_entry["quota_met"] = bool(
+        baseline_seen >= baseline_needed and interactive_seen >= interactive_needed
+    )
     app_entry["quota_met_at"] = quota_met_at
     app_entry["quota_met_run_id"] = quota_met_run_id
     app_entry["extra_valid_runs"] = sum(

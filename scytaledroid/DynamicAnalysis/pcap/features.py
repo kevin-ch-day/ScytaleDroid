@@ -73,11 +73,88 @@ def _extract_features(
     top_dns_total = sum(int(item.get("count") or 0) for item in top_dns)
     sni_concentration = _concentration(top_sni, top_sni_total, cfg.top_n)
     dns_concentration = _concentration(top_dns, top_dns_total, cfg.top_n)
+
+    # Derived intensity metrics (stable, comparable across apps/durations).
+    bytes_per_sec = None
+    packets_per_sec = None
+    if duration_s and duration_s > 0:
+        if data_bytes is not None:
+            try:
+                bytes_per_sec = float(data_bytes) / float(duration_s)
+            except Exception:
+                bytes_per_sec = None
+        if packet_count is not None:
+            try:
+                packets_per_sec = float(packet_count) / float(duration_s)
+            except Exception:
+                packets_per_sec = None
+
+    def _proto_key(value: object) -> str | None:
+        if not value or not isinstance(value, str):
+            return None
+        key = value.strip().lower()
+        return key or None
+
+    def _bounded_ratio(numer: int | None, denom: int | None) -> float | None:
+        if numer is None or denom is None:
+            return None
+        if denom <= 0 or numer < 0:
+            return None
+        # tshark protocol hierarchy bytes are not strictly exclusive; due to parsing quirks
+        # it is possible for child protocol byte counts to slightly exceed the parent.
+        # Clamp to [0, 1] to keep the proxy interpretable and ML-safe.
+        ratio = float(numer) / float(denom) if denom else None
+        if ratio is None:
+            return None
+        if ratio < 0:
+            return 0.0
+        if ratio > 1:
+            return 1.0
+        return ratio
+
+    # Transport mix proxies (no decryption; based on protocol hierarchy bytes).
+    proto_bytes: dict[str, int] = {}
+    for row in report.get("protocol_hierarchy") or []:
+        if not isinstance(row, dict):
+            continue
+        proto = _proto_key(row.get("protocol"))
+        b = row.get("bytes")
+        if not proto:
+            continue
+        try:
+            bi = int(b)
+        except Exception:
+            continue
+        proto_bytes[proto] = proto_bytes.get(proto, 0) + bi
+
+    ip_bytes = proto_bytes.get("ip") or proto_bytes.get("frame") or None
+    tcp_bytes = proto_bytes.get("tcp")
+    udp_bytes = proto_bytes.get("udp")
+    tls_bytes = proto_bytes.get("tls")
+    quic_bytes = int((proto_bytes.get("quic") or 0) + (proto_bytes.get("gquic") or 0))
+
+    tcp_ratio = _bounded_ratio(tcp_bytes, ip_bytes)
+    udp_ratio = _bounded_ratio(udp_bytes, ip_bytes)
+    # Use max(parent, child) as denominator to avoid >1 ratios if tshark reports slightly
+    # inconsistent byte counts.
+    quic_ratio = _bounded_ratio(quic_bytes, max(int(udp_bytes or 0), int(quic_bytes or 0)) or None)
+    # For TLS, use TCP as the denominator (\"how much of TCP looks encrypted\").
+    # tshark's protocol hierarchy byte counts can be non-exclusive, so TLS bytes can
+    # exceed TCP bytes. Clamp by capping the numerator at the TCP total.
+    tls_bytes_capped = None
+    if tls_bytes is not None and tcp_bytes is not None:
+        tls_bytes_capped = min(int(tls_bytes), int(tcp_bytes))
+    tls_ratio = _bounded_ratio(tls_bytes_capped, tcp_bytes)
+
+    # Domain diversity proxy (top-N limited; full domain list lives in overlap report).
+    unique_domains_topn = len({str(item.get("value")).strip() for item in (top_sni + top_dns) if item.get("value")})
     return {
         "metrics": {
             "packet_count": packet_count,
             "data_size_bytes": data_bytes,
             "capture_duration_s": duration_s,
+            "bytes_per_sec": bytes_per_sec,
+            "packets_per_sec": packets_per_sec,
             "data_byte_rate_bps": byte_rate,
             "data_bit_rate_bps": bit_rate,
             "avg_packet_size_bytes": avg_packet_size,
@@ -86,14 +163,20 @@ def _extract_features(
         "proxies": {
             "unique_sni_topn": unique_sni,
             "unique_dns_topn": unique_dns,
+            "unique_domains_topn": unique_domains_topn,
             "top_sni_total": top_sni_total,
             "top_dns_total": top_dns_total,
             "sni_concentration": sni_concentration,
             "dns_concentration": dns_concentration,
+            "tcp_ratio": tcp_ratio,
+            "udp_ratio": udp_ratio,
+            "quic_ratio": quic_ratio,
+            "tls_ratio": tls_ratio,
         },
         "quality": {
             "report_status": report.get("report_status"),
             "missing_tools": report.get("missing_tools") or [],
+            "pcap_valid": bool(report.get("report_status") == "ok"),
             "protocol": {
                 "run_profile": (operator or {}).get("run_profile"),
                 "run_sequence": (operator or {}).get("run_sequence"),

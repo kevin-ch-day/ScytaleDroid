@@ -74,6 +74,7 @@ def workspace_menu() -> None:
         menu_utils.print_header("Workspace maintenance & cleanup")
         items = [
             menu_utils.MenuOption("1", "Show workspace usage"),
+            menu_utils.MenuOption("2", "Dynamic evidence packs"),
         ]
         spec_kwargs = display_settings.apply_menu_defaults(
             {"items": items, "exit_label": "Back", "show_exit": True}
@@ -85,6 +86,10 @@ def workspace_menu() -> None:
             break
         if choice == "1":
             _show_summary()
+        elif choice == "2":
+            from scytaledroid.DynamicAnalysis.tools.evidence_packs_menu import evidence_packs_menu
+
+            evidence_packs_menu()
         else:
             print(status_messages.status("Option not available yet.", level="warn"))
             prompt_utils.press_enter_to_continue()

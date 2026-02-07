@@ -144,6 +144,8 @@ class DynamicRunOrchestrator:
             run_profile=(protocol or {}).get("run_profile") if isinstance(protocol, dict) else None,
             run_sequence=(protocol or {}).get("run_sequence") if isinstance(protocol, dict) else None,
             interaction_level=getattr(self.config, "interaction_level", None),
+            messaging_activity=getattr(self.config, "messaging_activity", None),
+            counts_toward_completion=getattr(self.config, "counts_toward_completion", None),
             device_serial=self.config.device_serial,
             clear_logcat=self.config.clear_logcat,
             static_run_id=self.config.static_run_id,
@@ -170,6 +172,8 @@ class DynamicRunOrchestrator:
                 "run_profile": getattr(run_ctx, "run_profile", None),
                 "run_sequence": getattr(run_ctx, "run_sequence", None),
                 "interaction_level": getattr(run_ctx, "interaction_level", None),
+                "messaging_activity": getattr(run_ctx, "messaging_activity", None),
+                "counts_toward_completion": getattr(run_ctx, "counts_toward_completion", None),
             },
         )
 
@@ -428,7 +432,12 @@ class DynamicRunOrchestrator:
             try:
                 entry = {"pcap_size_bytes": next((a.size_bytes for a in manifest.artifacts if a.type == "pcapdroid_capture"), 0)}
                 validity = evaluate_dataset_validity(run_dir, manifest, entry, DatasetTrackerConfig())
-                manifest.operator["dataset_validity"] = validity
+                # First-class dataset validity (Paper #2). Keep legacy operator copy for older tooling.
+                if isinstance(validity, dict):
+                    manifest.dataset = dict(validity)
+                    manifest.dataset.setdefault("tier", self.config.tier)
+                    manifest.dataset.setdefault("countable", True)
+                    manifest.operator["dataset_validity"] = dict(validity)
                 event_logger.log(
                     "dataset_validity",
                     {
@@ -495,6 +504,17 @@ class DynamicRunOrchestrator:
             dynamic_run_id=run_ctx.dynamic_run_id,
             created_at=created_at,
             batch_id=getattr(run_ctx, "batch_id", None),
+            dataset={
+                "tier": self.config.tier,
+                "countable": str(self.config.tier).lower() == "dataset",
+                # Filled deterministically at finalize-time for dataset-tier runs.
+                "valid_dataset_run": None,
+                "invalid_reason_code": None,
+                "min_pcap_bytes": getattr(app_config, "DYNAMIC_MIN_PCAP_BYTES", 100000),
+                "short_run": 0,
+                "no_traffic_observed": 0,
+            },
+            qa={},
             target={
                 "run_type": "dynamic",
                 "package_name": run_ctx.package_name,
@@ -541,6 +561,8 @@ class DynamicRunOrchestrator:
                 # Operator protocol metadata (not used for behavioral modeling).
                 "run_profile": getattr(run_ctx, "run_profile", None),
                 "run_sequence": getattr(run_ctx, "run_sequence", None),
+                "messaging_activity": getattr(run_ctx, "messaging_activity", None),
+                "counts_toward_completion": getattr(run_ctx, "counts_toward_completion", None),
                 # RunContext snapshot: immutable execution context for reproducibility.
                 "run_context": {
                     "interactive": bool(run_ctx.interactive),
@@ -559,6 +581,8 @@ class DynamicRunOrchestrator:
                     "batch_id": getattr(run_ctx, "batch_id", None),
                     "run_profile": getattr(run_ctx, "run_profile", None),
                     "run_sequence": getattr(run_ctx, "run_sequence", None),
+                    "messaging_activity": getattr(run_ctx, "messaging_activity", None),
+                    "counts_toward_completion": getattr(run_ctx, "counts_toward_completion", None),
                     "static_context_tags": static_tags,
                 },
             },

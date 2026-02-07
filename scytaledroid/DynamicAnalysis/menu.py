@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
+from dataclasses import dataclass
 
 from scytaledroid.Config import app_config  # noqa: F401 - re-exported for tests
 from scytaledroid.Database.db_core import run_sql
@@ -24,6 +26,20 @@ from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
 
 _DEVICE_STATUS_CACHE: dict[str, dict[str, str]] = {}
 
+@dataclass(frozen=True)
+class _DynamicUiDefaults:
+    observer_prompts_enabled: bool
+    pcapdroid_api_key: str | None
+
+
+def _load_dynamic_ui_defaults() -> _DynamicUiDefaults:
+    # UI-layer defaults only. Execution semantics must rely on the frozen config
+    # carried in DynamicSessionConfig/RunContext and recorded in run_manifest.json.
+    return _DynamicUiDefaults(
+        observer_prompts_enabled=(os.environ.get("SCYTALEDROID_OBSERVER_PROMPTS") == "1"),
+        pcapdroid_api_key=os.environ.get("SCYTALEDROID_PCAPDROID_API_KEY"),
+    )
+
 
 def dynamic_analysis_menu() -> None:
     from scytaledroid.Database.db_utils import schema_gate
@@ -44,7 +60,10 @@ def dynamic_analysis_menu() -> None:
         MenuOption("3", "Export run summary CSV"),
         MenuOption("4", "Export PCAP features CSV"),
         MenuOption("5", "Verify host PCAP tools (tshark + capinfos)"),
+        MenuOption("6", "Repair legacy run manifests (dataset block)"),
     ]
+
+    ui_defaults = _load_dynamic_ui_defaults()
 
     while True:
         print()
@@ -57,7 +76,7 @@ def dynamic_analysis_menu() -> None:
             break
 
         if choice == "1":
-            _run_guided_dataset_run()
+            _run_guided_dataset_run(ui_defaults)
             prompt_utils.press_enter_to_continue()
             continue
 
@@ -81,6 +100,11 @@ def dynamic_analysis_menu() -> None:
             prompt_utils.press_enter_to_continue()
             continue
 
+        if choice == "6":
+            _repair_legacy_run_manifests()
+            prompt_utils.press_enter_to_continue()
+            continue
+
 
     return
 
@@ -97,6 +121,8 @@ def _render_dataset_status() -> None:
         runs = int(entry.get("run_count") or 0)
         valid = int(entry.get("valid_runs") or 0)
         target = int(entry.get("target_runs") or 0)
+        base = int(entry.get("baseline_valid_runs") or 0)
+        inter = int(entry.get("interactive_valid_runs") or 0)
         extra = int(entry.get("extra_valid_runs") or 0)
         quota_met_at = entry.get("quota_met_at") or ""
         status = "DONE" if entry.get("app_complete") else "IN_PROGRESS"
@@ -104,6 +130,8 @@ def _render_dataset_status() -> None:
             {
                 "Package": package,
                 "Valid": valid,
+                "Base": base,
+                "Inter": inter,
                 "Runs": runs,
                 "Target": target,
                 "Extra": extra,
@@ -114,7 +142,10 @@ def _render_dataset_status() -> None:
     if not rows:
         print(status_messages.status("No dataset runs recorded yet.", level="info"))
         return
-    table_utils.print_table(rows, headers=["Package", "Valid", "Runs", "Target", "Extra", "Quota met at", "Status"])
+    table_utils.print_table(
+        rows,
+        headers=["Package", "Valid", "Base", "Inter", "Runs", "Target", "Extra", "Quota met at", "Status"],
+    )
 
 
 def _export_pcap_features_csv() -> None:
@@ -125,7 +156,34 @@ def _export_pcap_features_csv() -> None:
     output_path = export_pcap_features_csv()
     if output_path is None:
         print(status_messages.status("No pcap_features.json files found.", level="warn"))
+    return
+
+
+def _repair_legacy_run_manifests() -> None:
+    from scytaledroid.DynamicAnalysis.tools.manifest_repair import backfill_dataset_block
+
+    print()
+    menu_utils.print_header("Repair Legacy Manifests")
+    print(
+        status_messages.status(
+            "This will backfill top-level dataset validity for legacy evidence packs by copying "
+            "operator.dataset_validity into manifest.dataset (no recomputation).",
+            level="info",
+        )
+    )
+    confirmed = prompt_utils.prompt_yes_no("Proceed with repair?", default=False)
+    if not confirmed:
         return
+    result = backfill_dataset_block(
+        Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic",
+        dry_run=False,
+    )
+    print(
+        status_messages.status(
+            f"Repair complete: scanned={result.scanned} repaired={result.repaired} skipped={result.skipped} errors={result.errors}",
+            level="info",
+        )
+    )
     print(status_messages.status(f"Exported CSV: {output_path}", level="success"))
 
 
@@ -253,12 +311,18 @@ def _resolve_plan_selection(package_name: str) -> dict[str, object] | None:
     return _prompt_baseline_selection(package_name, candidates)
 
 
-def _run_guided_dataset_run() -> None:
+def _run_guided_dataset_run(ui_defaults: _DynamicUiDefaults) -> None:
     run_guided_dataset_run(
         select_package_from_groups=_select_package_from_groups,
-        select_observers=_select_observers,
+        select_observers=lambda device_serial, mode: _service_select_observers(
+            device_serial,
+            mode=mode,
+            prompt_enabled=bool(ui_defaults.observer_prompts_enabled),
+        ),
         print_device_badge=_print_device_badge,
         print_tier1_qa_result=_print_tier1_qa_result,
+        observer_prompts_enabled=bool(ui_defaults.observer_prompts_enabled),
+        pcapdroid_api_key=ui_defaults.pcapdroid_api_key,
     )
 
 
@@ -460,10 +524,67 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
         return None
     print()
     menu_utils.print_header(title, "Select a package to run")
+    # Dataset progress columns (valid runs + suggested next profile) help operators
+    # track collection without opening the tracker view.
+    dataset_pkgs: set[str] = set()
+    try:
+        dataset_pkgs = {pkg.lower() for pkg in load_profile_packages("RESEARCH_DATASET_ALPHA")}
+    except Exception:
+        dataset_pkgs = set()
+
+    # Lazy imports avoid unnecessary module work for non-dataset menus.
+    from scytaledroid.DynamicAnalysis.utils.run_cleanup import dataset_tracker_counts, recent_tracker_runs
+    from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig, peek_next_run_protocol
+    from scytaledroid.Utils.DisplayUtils import text_blocks
+
+    cfg = DatasetTrackerConfig()
+
+    # Prefer human-friendly app labels in the table. If labels collide, append the
+    # package name so operators can disambiguate.
+    labels = [((app_label or package).strip() or package) for package, _v, _c, app_label in packages]
+    collisions = {label for label in labels if labels.count(label) > 1}
+
     rows = []
-    for idx, (package, _version, count, app_label) in enumerate(packages, start=1):
-        display = app_label or package
-        rows.append([str(idx), display, package, str(count)])
+    for idx, (package, _version, _count, app_label) in enumerate(packages, start=1):
+        display = ((app_label or package).strip() or package)
+        if display in collisions:
+            display = f"{display} ({package})"
+        # Keep dataset selection tables readable on narrower terminals by trimming
+        # the app label. Operators select by index, and the full package name is
+        # visible in the run banner after selection.
+        display = text_blocks.truncate_visible(display, 20)
+
+        base_label = "—"
+        inter_label = "—"
+        runs_label = "—"
+        last_label = "—"
+        next_label = "—"
+        if package.lower() in dataset_pkgs:
+            counts_payload = dataset_tracker_counts(package)
+            base_label = f"{counts_payload.baseline_valid_runs}/{cfg.baseline_required}"
+            inter_label = f"{counts_payload.interactive_valid_runs}/{cfg.interactive_required}"
+            runs_label = str(counts_payload.total_runs)
+            recent = recent_tracker_runs(package, limit=1)
+            if recent:
+                r = recent[0]
+                if r.valid is True:
+                    last_label = "VALID"
+                elif r.valid is False:
+                    # Keep the selection table compact; detailed reason codes are
+                    # visible in Recent Runs and per-run summaries.
+                    last_label = "INVALID"
+                else:
+                    last_label = "UNKNOWN"
+            proto = peek_next_run_protocol(package, tier="dataset") or {}
+            prof = (proto.get("run_profile") or "").lower()
+            if "baseline" in prof or "idle" in prof:
+                next_label = "baseline"
+            elif prof:
+                next_label = "interactive"
+
+        # Columns are intentionally minimal for dataset collection.
+        # Column order is chosen to avoid "Next" being truncated on narrow terminals.
+        rows.append([str(idx), display, base_label, inter_label, next_label, runs_label, last_label])
     _render_package_table(rows)
     index = _choose_index("Select app #", len(packages))
     if index is None:
@@ -473,14 +594,20 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
 
 
 def _render_package_table(rows, *, max_preview: int = 15) -> None:
+    headers = ["#", "App"]
+    if rows and len(rows[0]) >= 7:
+        # Put "Next" before the trailing status columns so it is less likely to
+        # get truncated when the terminal is narrow (table shrink truncates from
+        # the rightmost columns first).
+        headers = ["#", "App", "Base", "Int", "Next", "Runs", "Last"]
     if len(rows) <= max_preview:
-        table_utils.render_table(["#", "App", "Package", "Artifacts"], rows, compact=True)
+        table_utils.render_table(headers, rows, compact=True)
         return
     preview = rows[:max_preview]
-    table_utils.render_table(["#", "App", "Package", "Artifacts"], preview, compact=True)
+    table_utils.render_table(headers, preview, compact=True)
     response = prompt_utils.prompt_text("Press L to list all, or Enter to continue", required=False)
     if response.strip().lower() == "l":
-        table_utils.render_table(["#", "App", "Package", "Artifacts"], rows, compact=True)
+        table_utils.render_table(headers, rows, compact=True)
 
 
 def _choose_index(prompt: str, total: int) -> int | None:
@@ -511,17 +638,10 @@ def _prompt_baseline_selection(
 def _prompt_missing_baseline(package_name: str, note: str | None) -> dict[str, object] | None:
     return _plan_selection._prompt_missing_baseline(package_name, note)
 
-def _observer_prompts_enabled_default() -> bool:
-    # UI-layer default only. Do not read env vars in execution paths.
-    return os.environ.get("SCYTALEDROID_OBSERVER_PROMPTS") == "1"
-
-
 def _select_observers(device_serial: str, *, mode: str) -> list[str]:
-    return _service_select_observers(
-        device_serial,
-        mode=mode,
-        prompt_enabled=_observer_prompts_enabled_default(),
-    )
+    # Back-compat helper (used by older call sites/tests). Prefer passing a
+    # closure from the menu with frozen UI defaults.
+    return _service_select_observers(device_serial, mode=mode, prompt_enabled=False)
 
 
 def _print_device_badge(device_serial: str, device_label: str) -> None:

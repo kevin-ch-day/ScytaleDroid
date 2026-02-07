@@ -28,13 +28,15 @@ def print_run_summary(result, duration_label: str) -> None:
         target = manifest.get("target") or {}
         run_profile = operator.get("run_profile")
         run_sequence = operator.get("run_sequence")
-        if run_profile:
-            slot_label = f"#{run_sequence}" if run_sequence else "—"
-            lines.append(("Run profile", f"{run_profile} (dataset slot {slot_label})"))
         interaction = operator.get("interaction_level")
         if interaction:
             lines.append(("Interaction", str(interaction)))
-        validity = operator.get("dataset_validity") if isinstance(operator, dict) else None
+        messaging_activity = operator.get("messaging_activity")
+        if messaging_activity:
+            lines.append(("Messaging", str(messaging_activity)))
+        validity = manifest.get("dataset")
+        if not isinstance(validity, dict):
+            validity = operator.get("dataset_validity") if isinstance(operator, dict) else None
         if isinstance(validity, dict):
             valid = validity.get("valid_dataset_run")
             reason = validity.get("invalid_reason_code")
@@ -57,6 +59,16 @@ def print_run_summary(result, duration_label: str) -> None:
             quota = _dataset_quota_label(str(pkg) if pkg else None, result.dynamic_run_id)
             if quota:
                 lines.append(("Dataset quota", quota))
+                if run_profile:
+                    if "(extra_run=1)" in quota and run_sequence:
+                        lines.append(("Run profile", f"{run_profile} (extra run #{run_sequence})"))
+                    else:
+                        slot_label = f"#{run_sequence}" if run_sequence else "—"
+                        lines.append(("Run profile", f"{run_profile} (dataset slot {slot_label})"))
+            elif run_profile:
+                # Fallback when tracker isn't available.
+                slot_label = f"#{run_sequence}" if run_sequence else "—"
+                lines.append(("Run profile", f"{run_profile} (dataset slot {slot_label})"))
         else:
             dataset_validity = _dataset_validity_label(result.dynamic_run_id)
             if dataset_validity:

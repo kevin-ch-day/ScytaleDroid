@@ -20,6 +20,8 @@ class RunContext:
     run_profile: str | None = None
     run_sequence: int | None = None
     interaction_level: str | None = None
+    messaging_activity: str | None = None
+    counts_toward_completion: bool | None = None
     device_serial: str | None = None
     clear_logcat: bool = True
     static_run_id: int | None = None

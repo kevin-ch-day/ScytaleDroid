@@ -19,6 +19,8 @@ from scytaledroid.Config import app_config
 class PackageRunCounts:
     total_runs: int
     valid_runs: int
+    baseline_valid_runs: int
+    interactive_valid_runs: int
     quota_met: bool
     extra_valid_runs: int
 
@@ -29,6 +31,7 @@ class RecentRun:
     ended_at: str | None
     run_profile: str | None
     interaction_level: str | None
+    messaging_activity: str | None
     valid: bool | None
     invalid_reason_code: str | None
 
@@ -42,18 +45,23 @@ def _load_json(path: Path) -> dict[str, Any]:
 
 def dataset_tracker_counts(package_name: str) -> PackageRunCounts:
     """Return counts for a package from the dataset tracker (derived index)."""
-    tracker_path = Path(app_config.DATA_DIR) / "archive" / "dataset_plan.json"
-    payload = _load_json(tracker_path) if tracker_path.exists() else {}
+    from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import load_dataset_tracker
+
+    payload = load_dataset_tracker()
     apps = payload.get("apps") if isinstance(payload, dict) else {}
     entry = apps.get(package_name) if isinstance(apps, dict) else None
     runs = entry.get("runs") if isinstance(entry, dict) else []
     total = len(runs) if isinstance(runs, list) else 0
     valid = int(entry.get("valid_runs") or 0) if isinstance(entry, dict) else 0
+    baseline_valid = int(entry.get("baseline_valid_runs") or 0) if isinstance(entry, dict) else 0
+    interactive_valid = int(entry.get("interactive_valid_runs") or 0) if isinstance(entry, dict) else 0
     quota_met = bool(entry.get("quota_met")) if isinstance(entry, dict) else False
     extra_valid = int(entry.get("extra_valid_runs") or 0) if isinstance(entry, dict) else 0
     return PackageRunCounts(
         total_runs=total,
         valid_runs=valid,
+        baseline_valid_runs=baseline_valid,
+        interactive_valid_runs=interactive_valid,
         quota_met=quota_met,
         extra_valid_runs=extra_valid,
     )
@@ -61,8 +69,9 @@ def dataset_tracker_counts(package_name: str) -> PackageRunCounts:
 
 def recent_tracker_runs(package_name: str, *, limit: int = 5) -> list[RecentRun]:
     """Return recent runs for a package from the dataset tracker (derived index)."""
-    tracker_path = Path(app_config.DATA_DIR) / "archive" / "dataset_plan.json"
-    payload = _load_json(tracker_path) if tracker_path.exists() else {}
+    from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import load_dataset_tracker
+
+    payload = load_dataset_tracker()
     apps = payload.get("apps") if isinstance(payload, dict) else {}
     entry = apps.get(package_name) if isinstance(apps, dict) else None
     runs = entry.get("runs") if isinstance(entry, dict) else []
@@ -92,6 +101,9 @@ def recent_tracker_runs(package_name: str, *, limit: int = 5) -> list[RecentRun]
                 run_profile=(str(r.get("run_profile")) if r.get("run_profile") else None),
                 interaction_level=(
                     str(r.get("interaction_level")) if r.get("interaction_level") else None
+                ),
+                messaging_activity=(
+                    str(r.get("messaging_activity")) if r.get("messaging_activity") else None
                 ),
                 valid=valid_norm,
                 invalid_reason_code=(

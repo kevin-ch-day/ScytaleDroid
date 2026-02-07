@@ -9,6 +9,9 @@ from scytaledroid.DynamicAnalysis.pcap import dataset_tracker
 
 def test_peek_next_run_protocol_baseline_until_first_valid(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(dataset_tracker.app_config, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(dataset_tracker.app_config, "DYNAMIC_DATASET_RUNS_PER_APP", 3)
+    monkeypatch.setattr(dataset_tracker.app_config, "DYNAMIC_DATASET_BASELINE_RUNS", 1)
+    monkeypatch.setattr(dataset_tracker.app_config, "DYNAMIC_DATASET_INTERACTIVE_RUNS", 2)
 
     # No tracker file yet: first run should be baseline.
     proto = dataset_tracker.peek_next_run_protocol("com.example.app", tier="dataset")
@@ -34,7 +37,9 @@ def test_peek_next_run_protocol_baseline_until_first_valid(monkeypatch, tmp_path
     assert proto["run_sequence"] == 1
 
     # Once a valid run exists: next runs should switch to interactive profile.
-    tracker["apps"]["com.example.app"]["runs"].append({"run_id": "r2", "valid_dataset_run": True})
+    tracker["apps"]["com.example.app"]["runs"].append(
+        {"run_id": "r2", "valid_dataset_run": True, "run_profile": "baseline_idle"}
+    )
     tracker["apps"]["com.example.app"]["valid_runs"] = 1
     (tmp_path / "archive" / "dataset_plan.json").write_text(json.dumps(tracker), encoding="utf-8")
     proto = dataset_tracker.peek_next_run_protocol("com.example.app", tier="dataset")
@@ -43,9 +48,50 @@ def test_peek_next_run_protocol_baseline_until_first_valid(monkeypatch, tmp_path
     assert proto["run_sequence"] == 2
 
 
+def test_peek_next_run_protocol_two_baselines_when_repeats_is_four(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(dataset_tracker.app_config, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(dataset_tracker.app_config, "DYNAMIC_DATASET_RUNS_PER_APP", 4)
+    monkeypatch.setattr(dataset_tracker.app_config, "DYNAMIC_DATASET_BASELINE_RUNS", 2)
+    monkeypatch.setattr(dataset_tracker.app_config, "DYNAMIC_DATASET_INTERACTIVE_RUNS", 2)
+
+    proto = dataset_tracker.peek_next_run_protocol("com.example.app", tier="dataset")
+    assert proto
+    assert proto["run_profile"] == "baseline_idle"
+    assert proto["run_sequence"] == 1
+
+    tracker = {
+        "apps": {
+            "com.example.app": {
+                "runs": [{"run_id": "r1", "valid_dataset_run": True, "run_profile": "baseline_idle"}],
+                "valid_runs": 1,
+            }
+        }
+    }
+    (tmp_path / "archive").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "archive" / "dataset_plan.json").write_text(json.dumps(tracker), encoding="utf-8")
+    proto = dataset_tracker.peek_next_run_protocol("com.example.app", tier="dataset")
+    assert proto
+    # Second valid slot still baseline when protocol is 4 runs per app.
+    assert proto["run_profile"] == "baseline_idle"
+    assert proto["run_sequence"] == 2
+
+    tracker["apps"]["com.example.app"]["runs"].append(
+        {"run_id": "r2", "valid_dataset_run": True, "run_profile": "baseline_idle"}
+    )
+    tracker["apps"]["com.example.app"]["valid_runs"] = 2
+    (tmp_path / "archive" / "dataset_plan.json").write_text(json.dumps(tracker), encoding="utf-8")
+    proto = dataset_tracker.peek_next_run_protocol("com.example.app", tier="dataset")
+    assert proto
+    assert proto["run_profile"] == "interactive_use"
+    assert proto["run_sequence"] == 3
+
+
 def test_update_dataset_tracker_records_run_protocol(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(dataset_tracker.app_config, "DATA_DIR", str(tmp_path))
     monkeypatch.setattr(dataset_tracker.app_config, "DYNAMIC_MIN_DURATION_S", 120)
+    monkeypatch.setattr(dataset_tracker.app_config, "DYNAMIC_DATASET_RUNS_PER_APP", 3)
+    monkeypatch.setattr(dataset_tracker.app_config, "DYNAMIC_DATASET_BASELINE_RUNS", 1)
+    monkeypatch.setattr(dataset_tracker.app_config, "DYNAMIC_DATASET_INTERACTIVE_RUNS", 2)
 
     run_dir = tmp_path / "run"
     (run_dir / "analysis").mkdir(parents=True, exist_ok=True)

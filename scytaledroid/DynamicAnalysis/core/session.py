@@ -31,6 +31,10 @@ class DynamicSessionConfig:
     # Operator protocol metadata (recorded for stratified analysis; not used for scoring).
     run_profile: str | None = None
     interaction_level: str | None = None
+    # Optional operator tag for messaging apps (text vs call); interpretability only.
+    messaging_activity: str | None = None
+    # UI intent: operator expectation. Dataset tracker computes final "extra_run" at finalize-time.
+    counts_toward_completion: bool | None = None
     # Paper-grade/reproducibility rule: env vars influence defaults only at entrypoint.
     # Downstream modules must rely on this frozen flag, not os.getenv().
     require_dynamic_schema: bool = True

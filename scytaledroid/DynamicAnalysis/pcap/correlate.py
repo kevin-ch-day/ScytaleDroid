@@ -45,11 +45,20 @@ def write_static_dynamic_overlap(
     if dynamic_domains:
         dynamic_only_ratio = len(dynamic_only) / float(len(dynamic_domains))
     overlap_sources = _per_source_overlap(static_sources, dynamic_domains)
+    # Stable top-level aliases for reporting/CSV exports.
+    overlap_ratio_total = overlap_ratio
+    overlap_ratio_nsc = (overlap_sources.get("nsc") or {}).get("overlap_ratio") if overlap_sources else None
+    overlap_ratio_strings = (overlap_sources.get("strings") or {}).get("overlap_ratio") if overlap_sources else None
     payload = {
+        "static_domains_total": len(static_domains),
+        "dynamic_domains_total": len(dynamic_domains),
         "static_domains_count": len(static_domains),
         "dynamic_domains_count": len(dynamic_domains),
         "overlap_count": len(overlap),
         "overlap_ratio": overlap_ratio,
+        "overlap_ratio_total": overlap_ratio_total,
+        "overlap_ratio_nsc": overlap_ratio_nsc,
+        "overlap_ratio_strings": overlap_ratio_strings,
         "dynamic_only_ratio": dynamic_only_ratio,
         "overlap_by_source": overlap_sources,
         "overlap_sample": overlap[: cfg.max_samples],

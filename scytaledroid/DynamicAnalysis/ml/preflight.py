@@ -107,6 +107,13 @@ def load_run_inputs(run_dir: Path) -> RunInputs | None:
 
 
 def is_valid_dataset_run(inputs: RunInputs) -> bool:
+    dataset = inputs.manifest.get("dataset")
+    if isinstance(dataset, dict):
+        if str(dataset.get("tier") or "").lower() != "dataset":
+            return False
+        return dataset.get("valid_dataset_run") is True
+
+    # Back-compat: older evidence packs stored validity under operator.
     operator = inputs.manifest.get("operator") or {}
     if not isinstance(operator, dict):
         return False
@@ -205,4 +212,3 @@ def write_ml_preflight(path: Path, result: MlPreflightResult) -> None:
         "skip_reason": result.skip_reason,
     }
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-

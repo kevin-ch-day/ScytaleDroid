@@ -42,7 +42,11 @@ class ManualScenarioRunner:
                 )
             )
             if profile:
-                slot_label = f" (Dataset slot #{sequence})" if sequence else ""
+                counts_toward = getattr(run_ctx, "counts_toward_completion", None)
+                if counts_toward is False and sequence:
+                    slot_label = f" (Extra run #{sequence})"
+                else:
+                    slot_label = f" (Dataset slot #{sequence})" if sequence else ""
                 print(status_messages.status(f"Run profile: {profile}{slot_label}.", level="info"))
                 if profile == "baseline_idle":
                     print(

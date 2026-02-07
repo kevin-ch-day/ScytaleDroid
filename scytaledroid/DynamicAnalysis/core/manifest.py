@@ -42,6 +42,11 @@ class RunManifest:
     started_at: str | None = None
     ended_at: str | None = None
     status: str = "pending"
+    # Dataset-tier validity and flags. This is a first-class, machine-readable contract
+    # for Paper #2. Legacy readers may also consult operator["dataset_validity"].
+    dataset: dict[str, Any] = field(default_factory=dict)
+    # Placeholder for run-level QA payloads (e.g., toolchain/feature health gates).
+    qa: dict[str, Any] = field(default_factory=dict)
     target: dict[str, Any] = field(default_factory=dict)
     environment: dict[str, Any] = field(default_factory=dict)
     scenario: dict[str, Any] = field(default_factory=dict)
@@ -73,6 +78,8 @@ def manifest_to_dict(manifest: RunManifest) -> dict[str, Any]:
         "started_at": manifest.started_at,
         "ended_at": manifest.ended_at,
         "status": manifest.status,
+        "dataset": manifest.dataset,
+        "qa": manifest.qa,
         "target": manifest.target,
         "environment": manifest.environment,
         "scenario": manifest.scenario,

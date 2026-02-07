@@ -40,6 +40,7 @@ def export_pcap_features_csv() -> Path | None:
                 "run_profile": (manifest.get("operator") or {}).get("run_profile"),
                 "run_sequence": (manifest.get("operator") or {}).get("run_sequence"),
                 "interaction_level": (manifest.get("operator") or {}).get("interaction_level"),
+                "messaging_activity": (manifest.get("operator") or {}).get("messaging_activity"),
             }
         )
         rows.append(row)

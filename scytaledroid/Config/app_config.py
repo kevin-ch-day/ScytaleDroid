@@ -25,6 +25,33 @@ try:
 except Exception:
     DYNAMIC_MIN_PCAP_BYTES = 100000
 
+# Dataset protocol (Paper #2)
+# Default can be overridden at process start via:
+# - SCYTALEDROID_DATASET_BASELINE_RUNS
+# - SCYTALEDROID_DATASET_INTERACTIVE_RUNS
+# - SCYTALEDROID_DATASET_RUNS_PER_APP (legacy total override)
+# This affects quota tracking and UI suggestions only; it does not change capture behavior.
+try:
+    DYNAMIC_DATASET_BASELINE_RUNS = int(os.getenv("SCYTALEDROID_DATASET_BASELINE_RUNS", "1"))
+except Exception:
+    DYNAMIC_DATASET_BASELINE_RUNS = 1
+
+try:
+    DYNAMIC_DATASET_INTERACTIVE_RUNS = int(os.getenv("SCYTALEDROID_DATASET_INTERACTIVE_RUNS", "2"))
+except Exception:
+    DYNAMIC_DATASET_INTERACTIVE_RUNS = 2
+
+try:
+    # If explicitly provided, treat this as an override for the total target runs.
+    # Otherwise, derive it from baseline+interactive targets.
+    _runs_total_env = os.getenv("SCYTALEDROID_DATASET_RUNS_PER_APP")
+    if _runs_total_env is None:
+        DYNAMIC_DATASET_RUNS_PER_APP = int(DYNAMIC_DATASET_BASELINE_RUNS) + int(DYNAMIC_DATASET_INTERACTIVE_RUNS)
+    else:
+        DYNAMIC_DATASET_RUNS_PER_APP = int(_runs_total_env)
+except Exception:
+    DYNAMIC_DATASET_RUNS_PER_APP = int(DYNAMIC_DATASET_BASELINE_RUNS) + int(DYNAMIC_DATASET_INTERACTIVE_RUNS)
+
 # Device module paths
 DEVICE_STATE_DIR = "state"
 DEVICE_STATE_FILE = "active_device.json"

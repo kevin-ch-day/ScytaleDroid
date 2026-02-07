@@ -8,7 +8,6 @@ from dataclasses import replace
 from pathlib import Path
 
 from collections.abc import Callable
-import os
 
 from scytaledroid.DynamicAnalysis.controllers.device_select import select_device
 from scytaledroid.DynamicAnalysis.plan_selection import (
@@ -83,6 +82,8 @@ def run_guided_dataset_run(
     select_observers: Callable[[str, str], list[str]],
     print_device_badge: Callable[[str, str], None],
     print_tier1_qa_result: Callable[[str], None] | None = None,
+    observer_prompts_enabled: bool = False,
+    pcapdroid_api_key: str | None = None,
 ) -> None:
     print()
     menu_utils.print_header("Guided Dataset Run")
@@ -128,25 +129,44 @@ def run_guided_dataset_run(
     next_protocol = peek_next_run_protocol(package_name, tier="dataset") or {}
     suggested_profile = (next_protocol.get("run_profile") or "interactive_use").strip()
     suggested_slot = next_protocol.get("run_sequence")
+    from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig
+
+    cfg = DatasetTrackerConfig()
     counts = dataset_tracker_counts(package_name)
     fs_runs = find_dynamic_run_dirs(package_name)
 
     print()
     print(
         status_messages.status(
-            f"Runs recorded: tracker={counts.total_runs} (valid={counts.valid_runs}/3, quota_met={int(counts.quota_met)}) | local_evidence={len(fs_runs)}",
+            f"Runs recorded: tracker={counts.total_runs} "
+            f"(valid={counts.valid_runs}/{cfg.repeats_per_app}, "
+            f"baseline={counts.baseline_valid_runs}/{cfg.baseline_required}, "
+            f"interactive={counts.interactive_valid_runs}/{cfg.interactive_required}, "
+            f"quota_met={int(counts.quota_met)}) "
+            f"| local_evidence={len(fs_runs)}",
             level="info",
         )
     )
-    if suggested_slot:
+    if counts.quota_met:
+        # Once quota is met, runs are still allowed, but they're "extra" and don't change completion.
         print(
             status_messages.status(
-                f"Suggested by quota (counts toward dataset): {suggested_profile} (dataset slot #{suggested_slot})",
+                "Quota met. Additional runs are allowed and will be tracked as extra (do not change completion).",
+                level="info",
+            )
+        )
+        suggested_slot = None
+    elif suggested_slot:
+        print(
+            status_messages.status(
+                f"Suggested by quota (counts toward completion): {suggested_profile} (dataset slot #{suggested_slot})",
                 level="info",
             )
         )
 
     def _badge_for(key: str) -> str | None:
+        if not suggested_slot:
+            return None
         return "suggested" if key == ("2" if suggested_profile == "interactive_use" else "1") else None
 
     protocol_options = [
@@ -248,18 +268,20 @@ def run_guided_dataset_run(
                     (r.ended_at or "—")[:19],
                     (r.run_profile or "—"),
                     (r.interaction_level or "—"),
+                    (getattr(r, "messaging_activity", None) or "—"),
                     status,
                     (r.run_id or "—")[:8],
                 ]
             )
         menu_utils.print_section("Recent Runs (from tracker)")
         menu_utils.print_table(
-            ["Ended", "Profile", "Interaction", "Status", "Run ID"],
+            ["Ended", "Profile", "Interaction", "Msg", "Status", "Run ID"],
             rows,
         )
 
     # Capture modes.
     tier = "dataset"
+    counts_toward_completion = not bool(counts.quota_met)
     if selected_protocol == "1":
         run_profile = "baseline_idle"
         interaction_level = "minimal"
@@ -269,6 +291,42 @@ def run_guided_dataset_run(
     else:
         run_profile = "interactive_use"
         interaction_level = "heavy"
+
+    messaging_activity: str | None = None
+    messaging_pkgs = {
+        # Dataset messaging apps where text vs call activity meaningfully changes network behavior.
+        "com.facebook.orca",
+        "com.whatsapp",
+        "org.telegram.messenger",
+        "org.thoughtcrime.securesms",
+    }
+    if package_name.lower() in messaging_pkgs:
+        print()
+        menu_utils.print_header("Messaging Activity (Optional Tag)")
+        menu_utils.render_menu(
+            menu_utils.MenuSpec(
+                items=[
+                    menu_utils.MenuOption("1", "None / browsing only", description="no explicit messaging activity"),
+                    menu_utils.MenuOption("2", "Text only", description="send/receive text messages"),
+                    menu_utils.MenuOption("3", "Voice call", description="voice calling only"),
+                    menu_utils.MenuOption("4", "Video call", description="video calling only"),
+                    menu_utils.MenuOption("5", "Mixed", description="text + voice/video"),
+                ],
+                default="1",
+                exit_label=None,
+                show_exit=False,
+                show_descriptions=True,
+                compact=True,
+            )
+        )
+        choice = prompt_utils.get_choice(["1", "2", "3", "4", "5"], default="1", invalid_message="Choose 1-5.")
+        messaging_activity = {
+            "1": "none",
+            "2": "text_only",
+            "3": "voice_call",
+            "4": "video_call",
+            "5": "mixed",
+        }[choice]
 
     print()
     menu_utils.print_header("Dynamic Run Observers")
@@ -307,10 +365,12 @@ def run_guided_dataset_run(
         # Dataset tier is strict; exploratory runs are allowed to proceed with best-effort
         # schema/persistence while still producing an evidence pack.
         require_dynamic_schema=(tier == "dataset"),
-        observer_prompts_enabled=(os.environ.get("SCYTALEDROID_OBSERVER_PROMPTS") == "1"),
-        pcapdroid_api_key=os.environ.get("SCYTALEDROID_PCAPDROID_API_KEY"),
+        observer_prompts_enabled=bool(observer_prompts_enabled),
+        pcapdroid_api_key=pcapdroid_api_key,
         run_profile=run_profile,
         interaction_level=interaction_level,
+        messaging_activity=messaging_activity,
+        counts_toward_completion=counts_toward_completion,
     )
     result = execute_dynamic_run_spec(spec)
     print_run_summary(result, label)

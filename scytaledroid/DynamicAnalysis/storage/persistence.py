@@ -530,17 +530,28 @@ def _issues_from_manifest(dynamic_run_id: str, evidence_path: str | None) -> lis
             )
 
     # Dataset validity is a first-class persisted QA signal for Paper #2.
-    operator = manifest.get("operator") if isinstance(manifest.get("operator"), dict) else {}
-    tier = operator.get("tier")
-    validity = operator.get("dataset_validity") if isinstance(operator, dict) else None
-    if tier and str(tier).lower() == "dataset" and isinstance(validity, dict):
+    dataset = manifest.get("dataset") if isinstance(manifest.get("dataset"), dict) else None
+    if isinstance(dataset, dict) and str(dataset.get("tier") or "").lower() == "dataset":
         issues.append(
             {
                 "dynamic_run_id": dynamic_run_id,
                 "issue_code": "dataset_validity",
-                "details_json": validity,
+                "details_json": dataset,
             }
         )
+    else:
+        # Back-compat for older evidence packs.
+        operator = manifest.get("operator") if isinstance(manifest.get("operator"), dict) else {}
+        tier = operator.get("tier")
+        validity = operator.get("dataset_validity") if isinstance(operator, dict) else None
+        if tier and str(tier).lower() == "dataset" and isinstance(validity, dict):
+            issues.append(
+                {
+                    "dynamic_run_id": dynamic_run_id,
+                    "issue_code": "dataset_validity",
+                    "details_json": validity,
+                }
+            )
     return issues
 
 

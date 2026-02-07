@@ -22,6 +22,10 @@ class DynamicRunSpec:
     # Operator protocol metadata (recorded in evidence pack for QA + stratified analysis).
     run_profile: str | None = None
     interaction_level: str | None = None
+    messaging_activity: str | None = None
+    # UI intent: whether the operator expects this run to count toward completion.
+    # Final quota marking is computed at finalize-time by the dataset tracker.
+    counts_toward_completion: bool | None = None
     # Frozen execution semantics: avoid env reads in execution paths.
     require_dynamic_schema: bool = True
     observer_prompts_enabled: bool = False
@@ -44,6 +48,8 @@ def build_dynamic_run_spec(
     batch_id: str | None = None,
     run_profile: str | None = None,
     interaction_level: str | None = None,
+    messaging_activity: str | None = None,
+    counts_toward_completion: bool | None = None,
     require_dynamic_schema: bool = True,
     observer_prompts_enabled: bool = False,
     pcapdroid_api_key: str | None = None,
@@ -62,6 +68,8 @@ def build_dynamic_run_spec(
         batch_id=batch_id,
         run_profile=run_profile,
         interaction_level=interaction_level,
+        messaging_activity=messaging_activity,
+        counts_toward_completion=counts_toward_completion,
         require_dynamic_schema=require_dynamic_schema,
         observer_prompts_enabled=observer_prompts_enabled,
         pcapdroid_api_key=pcapdroid_api_key,

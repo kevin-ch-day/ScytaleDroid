@@ -63,7 +63,26 @@ def extract_packet_timeline(pcap_path: Path) -> Iterable[PacketRecord]:
             proc.stdout.close()  # type: ignore[union-attr]
         except Exception:
             pass
-        proc.wait(timeout=30)
+        try:
+            proc.wait(timeout=90)
+        except subprocess.TimeoutExpired:
+            # tshark can take a while to shut down after stdout is closed on large PCAPs.
+            # Terminate to avoid noisy \"Exception ignored\" warnings at interpreter exit.
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+            try:
+                proc.wait(timeout=10)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+                try:
+                    proc.wait(timeout=5)
+                except Exception:
+                    pass
 
 
 def build_window_features(
