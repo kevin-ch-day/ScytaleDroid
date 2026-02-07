@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 from collections import Counter
@@ -30,12 +29,7 @@ from ..views.run_detail_view import (
     app_detail_loop,
     render_app_detail,
 )
-from ..views.view_renderers import (
-    build_dynamic_plan,
-    render_app_result,
-    write_baseline_json,
-    write_dynamic_plan_json,
-)
+from ..views.view_renderers import render_app_result
 from .analytics import (
     _build_permission_profile,
     _build_static_risk_row,
@@ -63,35 +57,15 @@ from .results_formatters import _format_highlight_tokens
 from .results_persist import _build_ingest_payload, _persist_cohort_rollup
 from .run_db_queries import _apply_display_names
 from .scan_flow import format_duration
-
-
-_REQUIRED_PAPER_ARTIFACTS: tuple[str, ...] = (
-    "static_baseline_json",
-    "static_dynamic_plan_json",
-    "static_report",
-    "manifest_evidence",
-    "dep_snapshot",
-    "permission_audit_snapshot",
+from .artifacts import (
+    build_artifact_registry_entries,
+    update_static_aliases,
+    write_baseline_json_artifact,
+    write_manifest_evidence,
 )
-
-
-def _governance_ready() -> tuple[bool, str | None]:
-    try:
-        snapshots = core_q.run_sql(
-            "SELECT COUNT(*) FROM permission_governance_snapshots",
-            fetch="one",
-        )
-        rows = core_q.run_sql(
-            "SELECT COUNT(*) FROM permission_governance_snapshot_rows",
-            fetch="one",
-        )
-    except Exception as exc:
-        return False, f"governance_query_failed:{exc}"
-    snapshot_count = int(snapshots[0] or 0) if snapshots else 0
-    row_count = int(rows[0] or 0) if rows else 0
-    if snapshot_count <= 0 or row_count <= 0:
-        return False, "governance_missing"
-    return True, None
+from .plan import build_dynamic_plan_artifact
+from .pipeline import REQUIRED_PAPER_ARTIFACTS, governance_ready
+from .view import DetailBuffer
 
 
 def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
@@ -152,9 +126,10 @@ def _render_run_results_impl(outcome: RunOutcome, params: RunParameters) -> None
     baseline_rule_hits_total = 0
     string_samples_persisted_total = 0
     string_samples_selected_total = 0
-    detail_output: list[str] = []
+    detail_output = DetailBuffer()
+
     def _emit_detail(line: str = "") -> None:
-        detail_output.append(line)
+        detail_output.add(line)
     overview_items = [
         summary_cards.summary_item("Applications", len(outcome.results)),
         summary_cards.summary_item("Artifacts", artifact_count),
@@ -605,56 +580,23 @@ def _render_run_results_impl(outcome: RunOutcome, params: RunParameters) -> None
             )
         if persist_enabled and app_result.static_run_id:
             try:
-                saved_path = write_baseline_json(
+                saved_path = write_baseline_json_artifact(
                     payload,
-                    package=app_result.package_name,
+                    package_name=app_result.package_name,
                     profile=params.profile,
                     scope=params.scope,
                 )
-            except Exception as exc:
-                warning = f"Failed to write baseline JSON for {app_result.package_name}: {exc}"
-                print(status_messages.status(warning, level="warn"))
             try:
-                identity_valid = None
-                metadata_map = base_report.metadata if isinstance(base_report.metadata, Mapping) else {}
-                if isinstance(metadata_map, Mapping):
-                    identity_valid = metadata_map.get("identity_valid")
-                if identity_valid is False:
-                    print(
-                        status_messages.status(
-                            (
-                                "Skipping dynamic plan generation for "
-                                f"{app_result.package_name}: run identity invalid."
-                            ),
-                            level="warn",
-                        )
-                    )
-                else:
-                    # Freeze provenance into the plan at build time; dynamic must not do
-                    # ad-hoc DB lookups to understand the static snapshot.
-                    from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
-
-                    plan_payload = build_dynamic_plan(
-                        base_report,
-                        payload,
-                        static_run_id=app_result.static_run_id,
-                        schema_version=db_diagnostics.get_schema_version() or "<unknown>",
-                        batch_id=(
-                            getattr(output_prefs.get_run_context(), "batch_id", None)
-                            if output_prefs.get_run_context()
-                            else None
-                        ),
-                    )
-                    dynamic_plan_path = write_dynamic_plan_json(
-                        plan_payload,
-                        package=app_result.package_name,
-                        profile=params.profile,
-                        scope=params.scope,
-                        static_run_id=app_result.static_run_id,
-                    )
-            except Exception as exc:
-                warning = f"Failed to write dynamic plan for {app_result.package_name}: {exc}"
-                print(status_messages.status(warning, level="warn"))
+                dynamic_plan_path = build_dynamic_plan_artifact(
+                    base_report,
+                    payload,
+                    package_name=app_result.package_name,
+                    profile=params.profile,
+                    scope=params.scope,
+                    static_run_id=app_result.static_run_id,
+                )
+            except Exception:
+                dynamic_plan_path = None
 
         if saved_path:
             baseline_written_count += 1
@@ -674,12 +616,11 @@ def _render_run_results_impl(outcome: RunOutcome, params: RunParameters) -> None
         if persist_enabled and app_result.static_run_id:
             artifacts: list[dict[str, object]] = []
             now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
-            manifest_evidence_path = None
             paper_grade_requested = bool(params.paper_grade_requested)
             grade = "PAPER_GRADE" if paper_grade_requested else "EXPERIMENTAL"
             grade_reasons: list[str] = []
             if paper_grade_requested:
-                gov_ready, gov_detail = _governance_ready()
+                gov_ready, gov_detail = governance_ready()
                 if not gov_ready:
                     grade = "EXPERIMENTAL"
                     grade_reasons.append("MISSING_GOVERNANCE")
@@ -691,38 +632,12 @@ def _render_run_results_impl(outcome: RunOutcome, params: RunParameters) -> None
                     )
                     print(status_messages.status(warning, level="warn"))
                     persistence_errors.append(warning)
-            try:
-                metadata_map = base_report.metadata if isinstance(base_report.metadata, Mapping) else {}
-                repro_bundle = (
-                    metadata_map.get("repro_bundle")
-                    if isinstance(metadata_map, Mapping)
-                    else None
-                )
-                manifest_evidence = (
-                    repro_bundle.get("manifest_evidence")
-                    if isinstance(repro_bundle, Mapping)
-                    else None
-                )
-                components = (
-                    manifest_evidence.get("components")
-                    if isinstance(manifest_evidence, Mapping)
-                    else manifest_evidence
-                )
-                if isinstance(components, list):
-                    evidence_dir = Path("evidence") / "static_runs" / str(app_result.static_run_id)
-                    evidence_dir.mkdir(parents=True, exist_ok=True)
-                    manifest_evidence_path = evidence_dir / "manifest_evidence.json"
-                    manifest_payload = {
-                        "schema": "manifest_evidence_v1",
-                        "generated_at_utc": now,
-                        "package_name": app_result.package_name,
-                        "components": components,
-                    }
-                    manifest_evidence_path.write_text(
-                        json.dumps(manifest_payload, indent=2, sort_keys=True, default=str)
-                    )
-            except Exception:
-                manifest_evidence_path = None
+            manifest_evidence_path = write_manifest_evidence(
+                base_report,
+                package_name=app_result.package_name,
+                static_run_id=app_result.static_run_id,
+                generated_at_utc=now,
+            )
             report_path = None
             if base_artifact and base_artifact.saved_path:
                 report_path = Path(base_artifact.saved_path)
@@ -736,59 +651,13 @@ def _render_run_results_impl(outcome: RunOutcome, params: RunParameters) -> None
                     missing_required.append("static_report")
                 if not manifest_evidence_path or not manifest_evidence_path.exists():
                     missing_required.append("manifest_evidence")
-            for path, artifact_type in (
-                (saved_path, "static_baseline_json"),
-                (dynamic_plan_path, "static_dynamic_plan_json"),
-            ):
-                if not path:
-                    continue
-                try:
-                    digest = hashlib.sha256(path.read_bytes()).hexdigest()
-                    artifacts.append(
-                        {
-                            "path": str(path),
-                            "type": artifact_type,
-                            "sha256": digest,
-                            "size_bytes": path.stat().st_size,
-                            "created_at_utc": now,
-                            "origin": "host",
-                            "pull_status": "n/a",
-                        }
-                    )
-                except Exception:
-                    continue
-            if manifest_evidence_path and manifest_evidence_path.exists():
-                try:
-                    digest = hashlib.sha256(manifest_evidence_path.read_bytes()).hexdigest()
-                    artifacts.append(
-                        {
-                            "path": str(manifest_evidence_path),
-                            "type": "manifest_evidence",
-                            "sha256": digest,
-                            "size_bytes": manifest_evidence_path.stat().st_size,
-                            "created_at_utc": now,
-                            "origin": "host",
-                            "pull_status": "n/a",
-                        }
-                    )
-                except Exception:
-                    pass
-            if report_path and report_path.exists():
-                try:
-                    digest = hashlib.sha256(report_path.read_bytes()).hexdigest()
-                    artifacts.append(
-                        {
-                            "path": str(report_path),
-                            "type": "static_report",
-                            "sha256": digest,
-                            "size_bytes": report_path.stat().st_size,
-                            "created_at_utc": now,
-                            "origin": "host",
-                            "pull_status": "n/a",
-                        }
-                    )
-                except Exception:
-                    pass
+            artifacts = build_artifact_registry_entries(
+                saved_path=saved_path,
+                dynamic_plan_path=dynamic_plan_path,
+                manifest_evidence_path=manifest_evidence_path,
+                report_path=report_path,
+                created_at_utc=now,
+            )
             if artifacts:
                 record_artifacts(
                     run_id=str(app_result.static_run_id),
@@ -811,7 +680,7 @@ def _render_run_results_impl(outcome: RunOutcome, params: RunParameters) -> None
                     registry_types = {str(row[0]) for row in rows or [] if row and row[0]}
                 except Exception:
                     registry_types = set()
-                for artifact_type in _REQUIRED_PAPER_ARTIFACTS:
+                for artifact_type in REQUIRED_PAPER_ARTIFACTS:
                     if artifact_type not in registry_types and artifact_type not in missing_required:
                         missing_required.append(artifact_type)
                 if missing_required:
@@ -863,26 +732,16 @@ def _render_run_results_impl(outcome: RunOutcome, params: RunParameters) -> None
             and (saved_path or dynamic_plan_path)
         ):
             alias_base = params.session_label
-            try:
-                if saved_path:
-                    alias = saved_path.parent / f"{alias_base}_baseline.json"
-                    alias.write_bytes(saved_path.read_bytes())
-                    latest_alias = saved_path.parent / "latest_baseline.json"
-                    latest_alias.write_bytes(saved_path.read_bytes())
-                if dynamic_plan_path:
-                    alias = dynamic_plan_path.parent / f"{alias_base}_plan.json"
-                    alias.write_bytes(dynamic_plan_path.read_bytes())
-                    latest_alias = dynamic_plan_path.parent / "latest_plan.json"
-                    latest_alias.write_bytes(dynamic_plan_path.read_bytes())
-                if params.canonical_action == "replace":
-                    prior = session_meta.get("canonical")
-                    if prior and app_result.static_run_id:
-                        run_notes.append(
-                            f"Canonical updated: static_run_id={prior} → {app_result.static_run_id}"
-                        )
-                run_notes.append("Daily aliases updated (baseline/plan).")
-            except Exception:
-                pass
+            run_notes.extend(
+                update_static_aliases(
+                    saved_path=saved_path,
+                    dynamic_plan_path=dynamic_plan_path,
+                    alias_base=alias_base,
+                    canonical_action=params.canonical_action,
+                    prior_canonical_id=session_meta.get("canonical"),
+                    static_run_id=app_result.static_run_id,
+                )
+            )
 
         if index < len(outcome.results):
             _emit_detail("")
@@ -996,7 +855,7 @@ def _render_run_results_impl(outcome: RunOutcome, params: RunParameters) -> None
                 show_details = False
 
     if show_details:
-        for line in detail_output:
+        for line in detail_output.lines:
             print(line)
 
     if outcome.results and show_details:

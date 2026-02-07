@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -18,6 +19,7 @@ if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
 
 
 REPORTS_DIR = Path(app_config.DATA_DIR) / "static_analysis" / "reports"
+_SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 class ReportStorageError(Exception):
@@ -49,7 +51,18 @@ def save_report(report: StaticAnalysisReport) -> SavedReportPaths:
 
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     sha256 = report.hashes.get("sha256")
-    filename = f"{sha256}.json" if sha256 else f"report_{report.generated_at}.json"
+    session_stamp = None
+    if isinstance(report.metadata, dict):
+        session_stamp = report.metadata.get("session_stamp")
+    session_suffix = _safe_filename(str(session_stamp)) if session_stamp else ""
+    generated_suffix = _safe_filename(report.generated_at)
+    if sha256:
+        if session_suffix:
+            filename = f"{sha256}_{session_suffix}.json"
+        else:
+            filename = f"{sha256}_{generated_suffix}.json"
+    else:
+        filename = f"report_{generated_suffix}.json"
     path = REPORTS_DIR / filename
 
     view_payload = dict(build_report_view(report))
@@ -77,6 +90,12 @@ def save_report(report: StaticAnalysisReport) -> SavedReportPaths:
     summary += f" (sha256={sha256 or 'unknown'})"
     log.info(summary, category="static_analysis")
     return SavedReportPaths(json_path=path, html_path=html_path, view=view_payload)
+
+
+def _safe_filename(value: str) -> str:
+    cleaned = _SAFE_FILENAME_RE.sub("-", value.strip())
+    cleaned = cleaned.strip("-.")
+    return cleaned or "report"
 
 
 def _read_report(path: Path) -> StaticAnalysisReport | None:

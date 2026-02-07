@@ -32,6 +32,8 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from fastapi import FastAPI
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
+MAX_LIST_LIMIT = 200
+MAX_JOB_HISTORY = 200
 
 
 @dataclass
@@ -51,6 +53,9 @@ _jobs_lock = threading.Lock()
 def _record_job(job: JobRecord) -> None:
     with _jobs_lock:
         _jobs[job.job_id] = job
+        if len(_jobs) > MAX_JOB_HISTORY:
+            for stale in sorted(_jobs.values(), key=lambda entry: entry.created_at)[: len(_jobs) - MAX_JOB_HISTORY]:
+                _jobs.pop(stale.job_id, None)
 
 
 def _update_job(job_id: str, *, state: str, detail: str | None = None) -> None:
@@ -282,6 +287,7 @@ def build_api_app() -> FastAPI:
 
     @app.get("/jobs")
     def jobs_list(limit: int = 25) -> dict[str, Any]:
+        limit = max(1, min(limit, MAX_LIST_LIMIT))
         with _jobs_lock:
             jobs = list(_jobs.values())
         jobs = sorted(jobs, key=lambda entry: entry.created_at, reverse=True)[:limit]
@@ -291,6 +297,7 @@ def build_api_app() -> FastAPI:
     def runs_list(limit: int = 25, q: str | None = None, profile: str | None = None) -> dict[str, Any]:
         if core_q is None:
             return {"runs": []}
+        limit = max(1, min(limit, MAX_LIST_LIMIT))
         where = []
         params: list[Any] = []
         if q:
@@ -339,6 +346,7 @@ def build_api_app() -> FastAPI:
     def apps_list(limit: int = 25, q: str | None = None, profile: str | None = None) -> dict[str, Any]:
         if core_q is None:
             return {"apps": []}
+        limit = max(1, min(limit, MAX_LIST_LIMIT))
         where = []
         params: list[Any] = []
         if q:
@@ -415,6 +423,7 @@ def build_api_app() -> FastAPI:
     def apps_recent(limit: int = 25) -> dict[str, Any]:
         if core_q is None:
             return {"apps": []}
+        limit = max(1, min(limit, MAX_LIST_LIMIT))
         rows = core_q.run_sql(
             """
             SELECT av.id AS app_version_id,
