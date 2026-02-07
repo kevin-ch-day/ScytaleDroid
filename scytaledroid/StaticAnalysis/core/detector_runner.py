@@ -71,26 +71,89 @@ def run_detector_pipeline(context) -> tuple[DetectorResult, ...]:
     results: list[DetectorResult] = []
     profile = (context.config.profile or "full").lower()
     enabled = {detector_id.lower() for detector_id in context.config.enabled_detectors or ()}
+    observer = getattr(context, "stage_observer", None)
+    emit = observer if callable(observer) else None
 
     for stage in PIPELINE_STAGES:
         context.intermediate_results = tuple(results)
         detector = stage.instantiate()
+        if emit:
+            try:
+                emit(
+                    {
+                        "event": "stage_start",
+                        "stage_index": len(results) + 1,
+                        "stage_total": len(PIPELINE_STAGES),
+                        "section_key": stage.section_key,
+                        "detector_id": detector.detector_id,
+                    }
+                )
+            except Exception:
+                pass
 
         if enabled and detector.detector_id.lower() not in enabled:
             reason = "disabled by custom selection"
             results.append(
                 _build_skipped_result(detector, stage.section_key, reason)
             )
+            if emit:
+                try:
+                    emit(
+                        {
+                            "event": "stage_end",
+                            "stage_index": len(results),
+                            "stage_total": len(PIPELINE_STAGES),
+                            "section_key": stage.section_key,
+                            "detector_id": detector.detector_id,
+                            "status": "skipped",
+                            "duration_sec": 0.0,
+                            "note": reason,
+                        }
+                    )
+                except Exception:
+                    pass
             continue
 
         if profile == "quick" and not stage.include_in_quick:
             reason = "skipped by quick profile"
             results.append(_build_skipped_result(detector, stage.section_key, reason))
+            if emit:
+                try:
+                    emit(
+                        {
+                            "event": "stage_end",
+                            "stage_index": len(results),
+                            "stage_total": len(PIPELINE_STAGES),
+                            "section_key": stage.section_key,
+                            "detector_id": detector.detector_id,
+                            "status": "skipped",
+                            "duration_sec": 0.0,
+                            "note": reason,
+                        }
+                    )
+                except Exception:
+                    pass
             continue
 
         if not detector.applies_to_profile(context.config.profile):
             reason = f"disabled for profile {context.config.profile}"
             results.append(_build_skipped_result(detector, stage.section_key, reason))
+            if emit:
+                try:
+                    emit(
+                        {
+                            "event": "stage_end",
+                            "stage_index": len(results),
+                            "stage_total": len(PIPELINE_STAGES),
+                            "section_key": stage.section_key,
+                            "detector_id": detector.detector_id,
+                            "status": "skipped",
+                            "duration_sec": 0.0,
+                            "note": reason,
+                        }
+                    )
+                except Exception:
+                    pass
             continue
 
         started = perf_counter()
@@ -107,6 +170,22 @@ def run_detector_pipeline(context) -> tuple[DetectorResult, ...]:
                     f"detector failed: {exc}",
                 )
             )
+            if emit:
+                try:
+                    emit(
+                        {
+                            "event": "stage_end",
+                            "stage_index": len(results),
+                            "stage_total": len(PIPELINE_STAGES),
+                            "section_key": stage.section_key,
+                            "detector_id": detector.detector_id,
+                            "status": "skipped",
+                            "duration_sec": float(duration),
+                            "note": f"detector failed: {exc}",
+                        }
+                    )
+                except Exception:
+                    pass
             continue
 
         if not isinstance(result, DetectorResult):
@@ -118,6 +197,22 @@ def run_detector_pipeline(context) -> tuple[DetectorResult, ...]:
                     "detector returned invalid result",
                 )
             )
+            if emit:
+                try:
+                    emit(
+                        {
+                            "event": "stage_end",
+                            "stage_index": len(results),
+                            "stage_total": len(PIPELINE_STAGES),
+                            "section_key": stage.section_key,
+                            "detector_id": detector.detector_id,
+                            "status": "skipped",
+                            "duration_sec": float(duration),
+                            "note": "detector returned invalid result",
+                        }
+                    )
+                except Exception:
+                    pass
             continue
 
         updates: dict[str, object] = {}
@@ -131,6 +226,21 @@ def run_detector_pipeline(context) -> tuple[DetectorResult, ...]:
             result = replace(result, **updates)
 
         results.append(result)
+        if emit:
+            try:
+                emit(
+                    {
+                        "event": "stage_end",
+                        "stage_index": len(results),
+                        "stage_total": len(PIPELINE_STAGES),
+                        "section_key": stage.section_key,
+                        "detector_id": detector.detector_id,
+                        "status": str(result.status),
+                        "duration_sec": float(getattr(result, "duration_sec", duration) or 0.0),
+                    }
+                )
+            except Exception:
+                pass
 
     context.intermediate_results = tuple(results)
 

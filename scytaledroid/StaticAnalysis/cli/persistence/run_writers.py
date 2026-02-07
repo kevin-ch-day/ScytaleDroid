@@ -22,11 +22,20 @@ def _normalize_datetime_value(value: str | None) -> str | None:
     if not candidate:
         return None
     if "T" in candidate or candidate.endswith("Z"):
+        # Normalize common ISO8601 inputs into MariaDB-friendly DATETIME strings.
+        # Guard against the buggy form "<iso-with-offset>Z" (e.g. "...+00:00Z").
         try:
-            parsed = datetime.fromisoformat(candidate.replace("Z", "+00:00"))
+            text = candidate
+            if text.endswith("Z"):
+                text = text[:-1]
+                # If there's already a timezone offset, don't append another.
+                if not (text.endswith("+00:00") or text.endswith("-00:00") or ("+" in text[-6:] or "-" in text[-6:])):
+                    text = text + "+00:00"
+            parsed = datetime.fromisoformat(text)
             return parsed.strftime("%Y-%m-%d %H:%M:%S")
         except ValueError:
-            return candidate
+            # Never return an invalid value that will poison writes; treat as missing.
+            return None
     return candidate
 
 
@@ -487,19 +496,36 @@ def finalize_open_static_runs(
     abort_reason: str | None = None,
     abort_signal: str | None = None,
 ) -> int:
+    # Safety: this helper should only ever finalize explicit run IDs.
+    # Updating "all RUNNING rows" is too dangerous and can corrupt provenance.
+    if static_run_ids is None:
+        log.warning(
+            "finalize_open_static_runs called with static_run_ids=None; refusing to update all RUNNING rows.",
+            category="static_analysis",
+        )
+        return 0
+
+    ids: list[int] = []
+    for value in static_run_ids:
+        try:
+            ids.append(int(value))
+        except Exception:
+            continue
+    if not ids:
+        return 0
+
     now = _utc_now_dbstr()
+    normalized_ended_at = _normalize_datetime_value(ended_at_utc) or now
+    params: list[object] = [status, normalized_ended_at, abort_reason, abort_signal]
+    placeholders = ",".join(["%s"] * len(ids))
+    sql = f"""
+        UPDATE static_analysis_runs
+        SET status=%s, ended_at_utc=%s, abort_reason=%s, abort_signal=%s
+        WHERE status='RUNNING' AND ended_at_utc IS NULL
+          AND id IN ({placeholders})
+    """
+    params.extend(ids)
     try:
-        normalized_ended_at = _normalize_datetime_value(ended_at_utc) or now
-        params = [status, normalized_ended_at, abort_reason, abort_signal]
-        sql = """
-            UPDATE static_analysis_runs
-            SET status=%s, ended_at_utc=%s, abort_reason=%s, abort_signal=%s
-            WHERE status='RUNNING' AND ended_at_utc IS NULL
-        """
-        if static_run_ids:
-            placeholders = ",".join(["%s"] * len(static_run_ids))
-            sql += f" AND id IN ({placeholders})"
-            params.extend(static_run_ids)
         return safe_int(
             run_sql_write(
                 sql,
@@ -508,7 +534,11 @@ def finalize_open_static_runs(
             ),
             default=0,
         )
-    except Exception:
+    except Exception as exc:
+        log.warning(
+            f"Failed to finalize open static runs (n={len(ids)}): {exc}",
+            category="static_analysis",
+        )
         return 0
 
 

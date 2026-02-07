@@ -58,7 +58,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
             reason = "character safety"
             if len(normalized) != len(params.session_stamp):
                 reason = "length safety"
-            if not output_prefs.get().quiet:
+            if not output_prefs.effective_quiet():
                 print(
                     status_messages.status(
                         (
@@ -73,9 +73,9 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
         try:
             resolved_stamp, session_label, canonical_action = _resolve_unique_session_stamp(
                 params.session_stamp,
-                run_mode=output_prefs.get().run_mode,
-                noninteractive=output_prefs.get().noninteractive,
-                quiet=output_prefs.get().quiet,
+                run_mode=output_prefs.effective_run_mode(),
+                noninteractive=output_prefs.effective_noninteractive(),
+                quiet=output_prefs.effective_quiet(),
                 canonical_action=params.canonical_action,
             )
             params = replace(
@@ -91,9 +91,9 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
         try:
             resolved_stamp, session_label, canonical_action = _resolve_unique_session_stamp(
                 session_stamp,
-                run_mode=output_prefs.get().run_mode,
-                noninteractive=output_prefs.get().noninteractive,
-                quiet=output_prefs.get().quiet,
+                run_mode=output_prefs.effective_run_mode(),
+                noninteractive=output_prefs.effective_noninteractive(),
+                quiet=output_prefs.effective_quiet(),
                 canonical_action=params.canonical_action,
             )
             params = replace(
@@ -109,7 +109,9 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
     output_prefs.set_verbose(bool(params.verbose_output))
 
     persistence_ready, persistence_note = _check_static_persistence_readiness(params)
-    os.environ["SCYTALEDROID_PERSISTENCE_READY"] = "1" if persistence_ready else "0"
+    # Freeze persistence readiness into the run parameters for this run. We avoid mutating
+    # process env mid-run to keep execution deterministic and auditable.
+    params = replace(params, persistence_ready=bool(persistence_ready))
     if not persistence_ready:
         level = "error" if params.strict_persistence or params.paper_grade_requested else "warn"
         print(status_messages.status(persistence_note, level=level))
@@ -150,8 +152,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
     scope_target = format_scope_target(selection)
 
     workers_label = f"auto ({workers})" if isinstance(params.workers, str) else str(workers)
-    prefs = output_prefs.get()
-    if not (prefs.quiet and prefs.batch):
+    if not (output_prefs.effective_quiet() and output_prefs.effective_batch()):
         render_run_start(
             run_id=params.session_stamp,
             profile_label=params.profile_label,
@@ -193,11 +194,11 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
                     output_prefs.get_run_context().__dict__
                     if output_prefs.get_run_context()
                     else {
-                        "run_mode": output_prefs.get().run_mode,
-                        "quiet": output_prefs.get().quiet,
-                        "batch": output_prefs.get().batch,
-                        "noninteractive": output_prefs.get().noninteractive,
-                        "show_splits": output_prefs.get().show_splits,
+                        "run_mode": output_prefs.effective_run_mode(),
+                        "quiet": output_prefs.effective_quiet(),
+                        "batch": output_prefs.effective_batch(),
+                        "noninteractive": output_prefs.effective_noninteractive(),
+                        "show_splits": output_prefs.effective_show_splits(),
                         "session_stamp": params.session_stamp,
                         "persistence_ready": params.persistence_ready,
                         "paper_grade_requested": params.paper_grade_requested,
@@ -246,7 +247,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
         print()
     from scytaledroid.Utils.DisplayUtils import text_blocks
 
-    if not (prefs.quiet and prefs.batch):
+    if not (output_prefs.effective_quiet() and output_prefs.effective_batch()):
         print("Starting Static Analysis pipeline")
         print(text_blocks.divider("─"))
     outcome: RunOutcome | None = None
@@ -277,7 +278,11 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
             print(status_messages.status(linkage_blocked_reason, level="warn"))
         else:
             try:
-                run_map = _build_session_run_map(outcome, params.session_stamp)
+                run_map = _build_session_run_map(
+                    outcome,
+                    params.session_stamp,
+                    allow_overwrite=bool(params.run_map_overwrite),
+                )
                 if run_map and not params.dry_run:
                     for entry in run_map.get("apps", []):
                         missing = [
@@ -312,7 +317,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
             print(status_messages.status(linkage_blocked_reason, level="warn"))
         else:
             try:
-                if not (prefs.quiet and prefs.batch):
+                if not (output_prefs.effective_quiet() and output_prefs.effective_batch()):
                     print()
                     print(
                         status_messages.step(
@@ -411,7 +416,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
 
     # Structured RUN SUMMARY (formatter-based) for transcripts/screenshots.
     # Batch mode must stay quiet and deterministic (no per-app blocks).
-    if outcome and getattr(outcome, "summary", None) and not output_prefs.get().batch:
+    if outcome and getattr(outcome, "summary", None) and not output_prefs.effective_batch():
         summary = outcome.summary
         sev_counts = {
             "high": getattr(summary, "high", 0),
@@ -625,7 +630,12 @@ def _resolve_unique_session_stamp(
     )
 
 
-def _build_session_run_map(outcome: RunOutcome | None, session_stamp: str | None) -> dict | None:
+def _build_session_run_map(
+    outcome: RunOutcome | None,
+    session_stamp: str | None,
+    *,
+    allow_overwrite: bool,
+) -> dict | None:
     if outcome is None or not session_stamp:
         return None
     results = outcome.results or []
@@ -689,7 +699,7 @@ def _build_session_run_map(outcome: RunOutcome | None, session_stamp: str | None
         "apps": apps,
         "by_package": by_package,
     }
-    _write_run_map_atomic(session_stamp, run_map, allow_overwrite=params.run_map_overwrite)
+    _write_run_map_atomic(session_stamp, run_map, allow_overwrite=bool(allow_overwrite))
     return run_map
 
 

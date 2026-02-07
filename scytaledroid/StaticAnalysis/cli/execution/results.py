@@ -11,6 +11,7 @@ from pathlib import Path
 
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_utils.artifact_registry import record_artifacts
+from scytaledroid.Utils.LoggingUtils import logging_engine
 from scytaledroid.Utils.DisplayUtils import (
     prompt_utils,
     severity,
@@ -66,6 +67,45 @@ from .artifacts import (
 from .plan import build_dynamic_plan_artifact
 from .pipeline import REQUIRED_PAPER_ARTIFACTS, governance_ready
 from .view import DetailBuffer
+
+# Back-compat: tests and older callers patch these names.
+_REQUIRED_PAPER_ARTIFACTS = REQUIRED_PAPER_ARTIFACTS
+
+
+def write_baseline_json(payload: dict[str, object], *, package: str, profile: str, scope: str) -> Path:
+    """Write the baseline JSON artifact.
+
+    This wrapper exists to keep a stable patch point for tests and legacy code.
+    """
+    return write_baseline_json_artifact(
+        payload,
+        package_name=package,
+        profile=profile,
+        scope=scope,
+    )
+
+
+def write_dynamic_plan_json(
+    base_report,
+    payload: dict[str, object],
+    *,
+    package: str,
+    profile: str,
+    scope: str,
+    static_run_id: int,
+) -> Path | None:
+    """Build and write the dynamic plan JSON artifact.
+
+    This wrapper exists to keep a stable patch point for tests and legacy code.
+    """
+    return build_dynamic_plan_artifact(
+        base_report,
+        payload,
+        package_name=package,
+        profile=profile,
+        scope=scope,
+        static_run_id=static_run_id,
+    )
 
 
 def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
@@ -580,17 +620,21 @@ def _render_run_results_impl(outcome: RunOutcome, params: RunParameters) -> None
             )
         if persist_enabled and app_result.static_run_id:
             try:
-                saved_path = write_baseline_json_artifact(
+                saved_path = write_baseline_json(
                     payload,
-                    package_name=app_result.package_name,
+                    package=app_result.package_name,
                     profile=params.profile,
                     scope=params.scope,
                 )
+            except Exception as exc:
+                saved_path = None
+                warning = f"Failed to write baseline JSON for {app_result.package_name}: {exc}"
+                print(status_messages.status(warning, level="warn"))
             try:
-                dynamic_plan_path = build_dynamic_plan_artifact(
+                dynamic_plan_path = write_dynamic_plan_json(
                     base_report,
                     payload,
-                    package_name=app_result.package_name,
+                    package=app_result.package_name,
                     profile=params.profile,
                     scope=params.scope,
                     static_run_id=app_result.static_run_id,

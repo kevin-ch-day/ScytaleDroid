@@ -67,6 +67,9 @@ class DetectorContext:
     permission_catalog: PermissionCatalog | None = None
     intermediate_results: Sequence[DetectorResult] = field(default_factory=tuple)
     config: AnalysisConfig = field(default_factory=AnalysisConfig)
+    # Optional hook for callers that want stage-level progress without changing detector semantics.
+    # Expected signature: fn(payload: Mapping[str, object]) -> None
+    stage_observer: object | None = None
 
 
 __all__ = ["AnalysisConfig", "DetectorContext", "SecretsSamplerConfig"]

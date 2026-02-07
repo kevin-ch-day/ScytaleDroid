@@ -1125,7 +1125,25 @@ def persist_run_summary(
         from scytaledroid.Utils.System import output_prefs
         ctx = output_prefs.get_run_context()
         paper_grade_requested = bool(ctx.paper_grade_requested) if ctx else True
-        if not persistence_failed and session_stamp and paper_grade_requested:
+        # Canonical enforcement must check the *session_label* that was actually written for this run.
+        # session_stamp may differ (e.g., auto-suffix collisions), and using the stamp here can
+        # incorrectly fail PAPER_GRADE runs with "found 0 canonicals".
+        enforced_session_label: str | None = None
+        if static_run_id:
+            try:
+                row = core_q.run_sql(
+                    "SELECT session_label FROM static_analysis_runs WHERE id=%s",
+                    (static_run_id,),
+                    fetch="one",
+                )
+                if row and row[0]:
+                    enforced_session_label = str(row[0])
+            except Exception:
+                enforced_session_label = None
+        if not enforced_session_label:
+            enforced_session_label = session_stamp
+
+        if not persistence_failed and enforced_session_label and paper_grade_requested:
             try:
                 row = core_q.run_sql(
                     """
@@ -1133,7 +1151,7 @@ def persist_run_summary(
                     FROM static_analysis_runs
                     WHERE session_label=%s AND is_canonical=1
                     """,
-                    (session_stamp,),
+                    (enforced_session_label,),
                     fetch="one",
                 )
                 canonical_count = int(row[0] or 0) if row else 0
@@ -1144,7 +1162,7 @@ def persist_run_summary(
                 run_status = "FAILED"
                 message = (
                     "Canonical enforcement failed: expected exactly one canonical row "
-                    f"for session_label={session_stamp}, found {canonical_count}."
+                    f"for session_label={enforced_session_label}, found {canonical_count}."
                 )
                 log.warning(message, category="static_analysis")
                 outcome.add_error(message)

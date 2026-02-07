@@ -193,6 +193,7 @@ def analyze_apk(
     metadata: Mapping[str, object | None] = None,
     storage_root: Path | None = None,
     config: AnalysisConfig | None = None,
+    stage_observer: object | None = None,
 ) -> StaticAnalysisReport:
     """Run resilient static analysis on *apk_path* and return a report."""
 
@@ -345,6 +346,9 @@ def analyze_apk(
         network_security_policy=network_security_policy,
         permission_catalog=permission_catalog,
     )
+    if callable(stage_observer):
+        # Optional stage-level progress hook (used by CLI batch runs). Must not affect analysis.
+        context.stage_observer = stage_observer
 
     # Run detectors (pipeline itself should be robust, but keep trace)
     detector_results = run_detector_pipeline(context)

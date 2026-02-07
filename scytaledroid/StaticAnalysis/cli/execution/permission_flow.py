@@ -52,7 +52,7 @@ def execute_permission_scan(
         session_stamp = make_session_stamp()
     normalized = normalize_session_stamp(session_stamp)
     if normalized != session_stamp:
-        if not output_prefs.get().batch:
+        if not output_prefs.effective_batch():
             print(
                 status_messages.status(
                     (
@@ -81,7 +81,7 @@ def execute_permission_scan(
         else:
             compact_output = selection.scope == "all" or len(scope_groups) > 15
     if compact_output:
-        if not output_prefs.get().batch:
+        if not output_prefs.effective_batch():
             render_compact_notice()
 
     for group in scope_groups:
@@ -102,7 +102,7 @@ def execute_permission_scan(
             defined=defined,
             sdk=sdk,
             compact=bool(compact_output),
-            silent=bool(output_prefs.get().batch),
+            silent=bool(output_prefs.effective_batch()),
         )
 
         if persist_detections and report is not None:
@@ -112,7 +112,7 @@ def execute_permission_scan(
                 )
 
                 counts = persist_permissions_to_db(report)
-                if not output_prefs.get().batch:
+                if not output_prefs.effective_batch():
                     render_permission_persisted(counts)
             except Exception:
                 logging_engine.get_error_logger().exception(
@@ -126,7 +126,7 @@ def execute_permission_scan(
                         }
                     ),
                 )
-                if not output_prefs.get().batch:
+                if not output_prefs.effective_batch():
                     render_permission_persist_failed()
 
         declared_permissions = [name for name, _tag in permissions]

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import time
+import sys
 from collections import Counter
 from collections.abc import Mapping, MutableMapping
 from datetime import datetime, timezone
@@ -12,6 +13,7 @@ from pathlib import Path
 
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.System import output_prefs
+from scytaledroid.Utils.DisplayUtils import status_messages
 
 from ...core import (
     AnalysisConfig,
@@ -445,7 +447,7 @@ def _execute_single_artifact(
 
 
 def _show_split_breakdown() -> bool:
-    return output_prefs.get().show_splits
+    return output_prefs.effective_show_splits()
 
 
 
@@ -521,12 +523,44 @@ def generate_report(
             }
         )
 
+    stage_observer = None
+    if output_prefs.effective_batch() and output_prefs.effective_quiet():
+        # Batch runs redirect stdout/stderr for quiet mode. Provide limited stage-level visibility
+        # by emitting to sys.__stdout__ from within the detector pipeline.
+        pkg = getattr(artifact, "package_name", None) or str(metadata_payload.get("package_name") or "")
+        artifact_label = getattr(artifact, "artifact_label", None) or getattr(artifact, "display_path", None) or "artifact"
+        last_emit = {"t": 0.0}
+
+        def _emit(payload: Mapping[str, object]) -> None:
+            try:
+                if payload.get("event") != "stage_end":
+                    return
+                # Throttle: always show WARN/FAIL; show long stages; otherwise keep sparse.
+                status = str(payload.get("status") or "")
+                dur = float(payload.get("duration_sec") or 0.0)
+                now = time.monotonic()
+                if status.upper() not in {"WARN", "FAIL"} and dur < 1.0 and (now - last_emit["t"]) < 30.0:
+                    return
+                last_emit["t"] = now
+                idx = int(payload.get("stage_index") or 0)
+                total = int(payload.get("stage_total") or 0)
+                section = str(payload.get("section_key") or "unknown")
+                msg = f"Stage {idx:02d}/{total:02d}: {section} | {status} | {dur:.2f}s"
+                prefix = f"{pkg} - {artifact_label}"
+                sys.__stdout__.write(status_messages.status(f"{prefix} | {msg}", level="info") + "\n")
+                sys.__stdout__.flush()
+            except Exception:
+                return
+
+        stage_observer = _emit
+
     try:
         report = analyze_apk(
             artifact.path,
             metadata=metadata_payload,
             storage_root=base_dir,
             config=build_analysis_config(params),
+            stage_observer=stage_observer,
         )
     except StaticAnalysisError as exc:
         return None, None, str(exc), True

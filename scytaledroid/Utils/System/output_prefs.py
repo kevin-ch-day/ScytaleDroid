@@ -39,6 +39,43 @@ def set_run_context(ctx) -> None:
     _RUN_CONTEXT = ctx
 
 
+def _ctx_flag(name: str, fallback: bool) -> bool:
+    ctx = _RUN_CONTEXT
+    if ctx is not None and hasattr(ctx, name):
+        try:
+            return bool(getattr(ctx, name))
+        except Exception:
+            return bool(fallback)
+    return bool(fallback)
+
+
+def effective_quiet() -> bool:
+    return _ctx_flag("quiet", _PREFS.quiet)
+
+
+def effective_batch() -> bool:
+    return _ctx_flag("batch", _PREFS.batch)
+
+
+def effective_noninteractive() -> bool:
+    return _ctx_flag("noninteractive", _PREFS.noninteractive)
+
+
+def effective_show_splits() -> bool:
+    return _ctx_flag("show_splits", _PREFS.show_splits)
+
+
+def effective_run_mode() -> str:
+    ctx = _RUN_CONTEXT
+    if ctx is not None and hasattr(ctx, "run_mode"):
+        try:
+            value = getattr(ctx, "run_mode")
+            return str(value or "interactive")
+        except Exception:
+            return _PREFS.run_mode or "interactive"
+    return _PREFS.run_mode or "interactive"
+
+
 def set_verbose(enabled: bool) -> None:
     _PREFS.verbose = bool(enabled)
 
@@ -101,6 +138,11 @@ def toggle_cleartext_only() -> bool:
 
 __all__ = [
     "get",
+    "effective_quiet",
+    "effective_batch",
+    "effective_run_mode",
+    "effective_noninteractive",
+    "effective_show_splits",
     "set_verbose",
     "toggle_verbose",
     "set_analytics_detail",
