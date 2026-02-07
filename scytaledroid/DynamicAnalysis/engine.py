@@ -146,7 +146,10 @@ class DynamicAnalysisEngine:
         if self.plan_payload is not None:
             return self.plan_payload, None
         if not self.config.plan_path:
-            return None, None
+            raise RuntimeError(
+                "Dynamic analysis requires a static baseline plan. "
+                "Run static analysis to generate a dynamic plan first."
+            )
         try:
             payload = load_dynamic_plan(self.config.plan_path)
         except (OSError, ValueError) as exc:

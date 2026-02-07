@@ -30,6 +30,11 @@ def run_dynamic_analysis(
         raise RuntimeError(
             "Dynamic analysis requires interactive session per app; batch dynamic is disabled."
         )
+    if static_run_id is None:
+        raise RuntimeError(
+            "Dynamic analysis requires static_run_id from static analysis; "
+            "run static analysis first to generate a baseline."
+        )
     config = DynamicSessionConfig(
         package_name=package_name,
         duration_seconds=duration_seconds,

@@ -523,6 +523,12 @@ class DatabaseEngine:
             connection.autocommit(False)
         else:
             prev_autocommit = None
+            # sqlite in autocommit mode needs an explicit BEGIN for atomicity
+            if not bool(getattr(connection, "in_transaction", False)):
+                try:
+                    connection.execute("BEGIN")
+                except sqlite3.OperationalError:
+                    pass
         try:
             yield self
             connection.commit()
