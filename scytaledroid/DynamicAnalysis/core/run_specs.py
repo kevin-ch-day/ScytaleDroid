@@ -19,6 +19,9 @@ class DynamicRunSpec:
     clear_logcat: bool
     interactive: bool = True
     batch_id: str | None = None
+    # Operator protocol metadata (recorded in evidence pack for QA + stratified analysis).
+    run_profile: str | None = None
+    interaction_level: str | None = None
     # Frozen execution semantics: avoid env reads in execution paths.
     require_dynamic_schema: bool = True
     observer_prompts_enabled: bool = False
@@ -39,6 +42,8 @@ def build_dynamic_run_spec(
     clear_logcat: bool,
     interactive: bool = True,
     batch_id: str | None = None,
+    run_profile: str | None = None,
+    interaction_level: str | None = None,
     require_dynamic_schema: bool = True,
     observer_prompts_enabled: bool = False,
     pcapdroid_api_key: str | None = None,
@@ -55,6 +60,8 @@ def build_dynamic_run_spec(
         clear_logcat=clear_logcat,
         interactive=interactive,
         batch_id=batch_id,
+        run_profile=run_profile,
+        interaction_level=interaction_level,
         require_dynamic_schema=require_dynamic_schema,
         observer_prompts_enabled=observer_prompts_enabled,
         pcapdroid_api_key=pcapdroid_api_key,

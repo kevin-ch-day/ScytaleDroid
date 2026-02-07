@@ -135,7 +135,6 @@ def peek_next_run_protocol(
     apps = tracker.get("apps") if isinstance(tracker, dict) else {}
     entry = apps.get(package) if isinstance(apps, dict) else None
     runs = entry.get("runs") if isinstance(entry, dict) else []
-    run_sequence = (len(runs) + 1) if isinstance(runs, list) else 1
 
     valid_runs = entry.get("valid_runs") if isinstance(entry, dict) else None
     if valid_runs is None and isinstance(runs, list):
@@ -145,12 +144,20 @@ def peek_next_run_protocol(
     except Exception:
         valid_runs_int = 0
 
+    # Dataset protocol numbering is by quota slot, not attempt count.
+    #
+    # If Run #1 fails QA, the next retry should still be "Run #1" until a valid run
+    # is recorded. This avoids confusing operators ("baseline Run #2") and matches
+    # the paper contract: each app needs >=3 VALID runs; retries fill the same slot.
+    run_sequence = max(valid_runs_int + 1, 1)
+
     run_profile = cfg.baseline_profile if valid_runs_int <= 0 else cfg.interactive_profile
     return {
         "run_profile": run_profile,
         "run_sequence": run_sequence,
         "valid_runs_so_far": valid_runs_int,
         "protocol_note": (
+            "Run sequence counts valid runs (quota slots), not raw attempts. "
             "baseline_idle is used until the first valid dataset run is recorded; "
             "later runs use interactive_use."
         ),

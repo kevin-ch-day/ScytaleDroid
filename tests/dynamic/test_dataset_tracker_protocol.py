@@ -30,7 +30,8 @@ def test_peek_next_run_protocol_baseline_until_first_valid(monkeypatch, tmp_path
     proto = dataset_tracker.peek_next_run_protocol("com.example.app", tier="dataset")
     assert proto
     assert proto["run_profile"] == "baseline_idle"
-    assert proto["run_sequence"] == 2
+    # Sequence is quota slot index (valid runs + 1), not raw attempt count.
+    assert proto["run_sequence"] == 1
 
     # Once a valid run exists: next runs should switch to interactive profile.
     tracker["apps"]["com.example.app"]["runs"].append({"run_id": "r2", "valid_dataset_run": True})
@@ -39,7 +40,7 @@ def test_peek_next_run_protocol_baseline_until_first_valid(monkeypatch, tmp_path
     proto = dataset_tracker.peek_next_run_protocol("com.example.app", tier="dataset")
     assert proto
     assert proto["run_profile"] == "interactive_use"
-    assert proto["run_sequence"] == 3
+    assert proto["run_sequence"] == 2
 
 
 def test_update_dataset_tracker_records_run_protocol(monkeypatch, tmp_path: Path) -> None:

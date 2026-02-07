@@ -29,8 +29,8 @@ def print_run_summary(result, duration_label: str) -> None:
         run_profile = operator.get("run_profile")
         run_sequence = operator.get("run_sequence")
         if run_profile:
-            seq_label = f"#{run_sequence}" if run_sequence else "—"
-            lines.append(("Run profile", f"{run_profile} (run {seq_label})"))
+            slot_label = f"#{run_sequence}" if run_sequence else "—"
+            lines.append(("Run profile", f"{run_profile} (dataset slot {slot_label})"))
         interaction = operator.get("interaction_level")
         if interaction:
             lines.append(("Interaction", str(interaction)))

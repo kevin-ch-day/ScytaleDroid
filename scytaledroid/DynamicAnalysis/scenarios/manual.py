@@ -30,7 +30,7 @@ class ManualScenarioRunner:
         on_start: Callable[[], None] | None = None,
         on_end: Callable[[], None] | None = None,
     ) -> ScenarioResult:
-        interaction_level = None
+        interaction_level = getattr(run_ctx, "interaction_level", None)
         if run_ctx.interactive:
             duration = f"{run_ctx.duration_seconds}s" if run_ctx.duration_seconds else "unspecified"
             profile = getattr(run_ctx, "run_profile", None)
@@ -42,8 +42,8 @@ class ManualScenarioRunner:
                 )
             )
             if profile:
-                seq_label = f" (Run #{sequence})" if sequence else ""
-                print(status_messages.status(f"Run profile: {profile}{seq_label}.", level="info"))
+                slot_label = f" (Dataset slot #{sequence})" if sequence else ""
+                print(status_messages.status(f"Run profile: {profile}{slot_label}.", level="info"))
                 if profile == "baseline_idle":
                     print(
                         status_messages.status(
@@ -60,7 +60,8 @@ class ManualScenarioRunner:
                 print(status_messages.status(run_ctx.scenario_hint, level="info"))
             # Operator protocol metadata: pick interaction level *before* the run starts so the
             # evidence pack is tagged deterministically without post-run prompts.
-            interaction_level = _prompt_interaction_level(profile)
+            if not interaction_level:
+                interaction_level = _prompt_interaction_level(profile)
             if interaction_level:
                 print(status_messages.status(f"Interaction level: {interaction_level}.", level="info"))
             prompt_utils.press_enter_to_continue("Press Enter to begin (timer starts)...")
@@ -91,15 +92,31 @@ class ManualScenarioRunner:
 def _prompt_interaction_level(profile: str | None) -> str:
     # This is operator protocol metadata. It is used for QA and stratified analysis,
     # not as a behavioral feature.
-    valid = ["minimal", "normal", "heavy"]
-    default = "minimal" if profile == "baseline_idle" else "normal"
+    options = [
+        ("1", "minimal", "Baseline / low interaction"),
+        ("2", "normal", "Typical interaction"),
+        ("3", "heavy", "High interaction"),
+    ]
+    default_key = "1" if profile == "baseline_idle" else "2"
     print(status_messages.status("Operator note: tag interaction level for this run.", level="info"))
-    return prompt_utils.get_choice(
-        valid,
-        default=default,
-        casefold=True,
-        invalid_message="Choose one of: minimal, normal, heavy.",
+    from scytaledroid.Utils.DisplayUtils import menu_utils
+
+    menu_utils.render_menu(
+        menu_utils.MenuSpec(
+            items=[
+                menu_utils.MenuOption(key, label, description=desc)
+                for key, label, desc in options
+            ],
+            default=default_key,
+            exit_label=None,
+            show_exit=False,
+            show_descriptions=True,
+            compact=True,
+        )
     )
+    selection = prompt_utils.get_choice([key for key, _, _ in options], default=default_key)
+    mapping = {key: label for key, label, _ in options}
+    return mapping.get(selection, mapping[default_key])
 
 
 def _run_countdown(duration_seconds: int) -> datetime:

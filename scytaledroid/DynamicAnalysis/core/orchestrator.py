@@ -116,6 +116,14 @@ class DynamicRunOrchestrator:
             self.config.package_name,
             tier=self.config.tier,
         )
+        # Allow entrypoint/UI to provide explicit operator protocol metadata. This does not
+        # change scoring/QA semantics; it is used only for tagging and stratified analysis.
+        if isinstance(protocol, dict):
+            if getattr(self.config, "run_profile", None):
+                protocol = dict(protocol)
+                protocol["run_profile"] = self.config.run_profile
+        elif getattr(self.config, "run_profile", None):
+            protocol = {"run_profile": self.config.run_profile}
         static_hint_lines = build_operator_guidance(
             plan_payload,
             run_profile=(protocol or {}).get("run_profile") if isinstance(protocol, dict) else None,
@@ -135,6 +143,7 @@ class DynamicRunOrchestrator:
             interactive=self.config.interactive,
             run_profile=(protocol or {}).get("run_profile") if isinstance(protocol, dict) else None,
             run_sequence=(protocol or {}).get("run_sequence") if isinstance(protocol, dict) else None,
+            interaction_level=getattr(self.config, "interaction_level", None),
             device_serial=self.config.device_serial,
             clear_logcat=self.config.clear_logcat,
             static_run_id=self.config.static_run_id,
@@ -160,6 +169,7 @@ class DynamicRunOrchestrator:
                 "batch_id": getattr(run_ctx, "batch_id", None),
                 "run_profile": getattr(run_ctx, "run_profile", None),
                 "run_sequence": getattr(run_ctx, "run_sequence", None),
+                "interaction_level": getattr(run_ctx, "interaction_level", None),
             },
         )
 

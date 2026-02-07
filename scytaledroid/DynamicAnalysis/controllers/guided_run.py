@@ -19,6 +19,14 @@ from scytaledroid.DynamicAnalysis.profile_loader import load_profile_packages
 from scytaledroid.DynamicAnalysis.core.run_specs import build_dynamic_run_spec
 from scytaledroid.DynamicAnalysis.run_dynamic_analysis import execute_dynamic_run_spec
 from scytaledroid.DynamicAnalysis.run_summary import print_run_summary
+from scytaledroid.DynamicAnalysis.pcap.tools import collect_host_tools, missing_required_tools
+from scytaledroid.DynamicAnalysis.utils.run_cleanup import (
+    dataset_tracker_counts,
+    delete_dynamic_evidence_packs,
+    find_dynamic_run_dirs,
+    recent_tracker_runs,
+    reset_package_dataset_tracker,
+)
 from scytaledroid.StaticAnalysis.core.repository import group_artifacts
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 
@@ -114,7 +122,153 @@ def run_guided_dataset_run(
     if not package_name:
         return
 
+    # Per-app run menu: operators can run in any order and as many times as needed.
+    from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import peek_next_run_protocol
+
+    next_protocol = peek_next_run_protocol(package_name, tier="dataset") or {}
+    suggested_profile = (next_protocol.get("run_profile") or "interactive_use").strip()
+    suggested_slot = next_protocol.get("run_sequence")
+    counts = dataset_tracker_counts(package_name)
+    fs_runs = find_dynamic_run_dirs(package_name)
+
+    print()
+    print(
+        status_messages.status(
+            f"Runs recorded: tracker={counts.total_runs} (valid={counts.valid_runs}/3, quota_met={int(counts.quota_met)}) | local_evidence={len(fs_runs)}",
+            level="info",
+        )
+    )
+    if suggested_slot:
+        print(
+            status_messages.status(
+                f"Suggested by quota (counts toward dataset): {suggested_profile} (dataset slot #{suggested_slot})",
+                level="info",
+            )
+        )
+
+    def _badge_for(key: str) -> str | None:
+        return "suggested" if key == ("2" if suggested_profile == "interactive_use" else "1") else None
+
+    protocol_options = [
+        menu_utils.MenuOption("1", "Idle / minimal", description="baseline_idle + minimal interaction", badge=_badge_for("1")),
+        menu_utils.MenuOption("2", "Normal", description="interactive_use + normal interaction", badge=_badge_for("2")),
+        menu_utils.MenuOption("3", "Heavy", description="interactive_use + heavy interaction", badge=None),
+        menu_utils.MenuOption("4", "Test app (Dry Run/No Saving)", description="no capture; checks plan + tools", badge=None),
+        menu_utils.MenuOption("D", "Delete previous runs", description="delete local evidence packs + reset tracker for this app", badge=None),
+    ]
+
+    menu_utils.print_header("Tag Dynamic Analysis Run")
+    menu_utils.render_menu(
+        menu_utils.MenuSpec(
+            items=protocol_options,
+            default="2" if suggested_profile == "interactive_use" else "1",
+            exit_label="Exit",
+            show_exit=True,
+            show_descriptions=True,
+            compact=True,
+        )
+    )
+    selected_protocol = prompt_utils.get_choice(
+        ["1", "2", "3", "4", "D", "0"],
+        default="2" if suggested_profile == "interactive_use" else "1",
+        casefold=True,
+        invalid_message="Choose 0-4 or D.",
+    )
+    selected_protocol = selected_protocol.upper()
+    if selected_protocol == "0":
+        return
+    if selected_protocol == "D":
+        local = find_dynamic_run_dirs(package_name)
+        print(
+            status_messages.status(
+                f"Local dynamic runs for {package_name}: {len(local)} evidence pack(s).",
+                level="warn",
+            )
+        )
+        if not local and counts.total_runs <= 0:
+            print(status_messages.status("Nothing to delete/reset.", level="info"))
+            prompt_utils.press_enter_to_continue()
+            return
+        confirmed = prompt_utils.prompt_yes_no(
+            f"Delete local evidence packs AND reset dataset tracker entry for {package_name}?",
+            default=False,
+        )
+        if not confirmed:
+            return
+        deleted = delete_dynamic_evidence_packs(package_name)
+        reset_package_dataset_tracker(package_name)
+        remaining = len(find_dynamic_run_dirs(package_name))
+        print(
+            status_messages.status(
+                f"Deleted {deleted} evidence pack(s). Remaining={remaining}. Tracker entry reset.",
+                level="info",
+            )
+        )
+        prompt_utils.press_enter_to_continue()
+        return
+    if selected_protocol == "4":
+        # Preflight-only test: do not capture or write evidence packs.
+        missing = missing_required_tools(tier="dataset")
+        tools = collect_host_tools()
+        if missing:
+            print(
+                status_messages.status(
+                    f"Preflight FAIL: missing host tools: {', '.join(missing)}",
+                    level="error",
+                )
+            )
+        else:
+            print(status_messages.status("Preflight OK: host tools present.", level="success"))
+        print(status_messages.status(f"Host tools: {tools}", level="info"))
+        # Also ensure a plan exists (offer to run static once, as normal).
+        plan_selection = ensure_plan_or_error(
+            package_name,
+            prompt_run_static=True,
+            deterministic=True,
+            run_static_callback=_auto_run_static_for_package,
+        )
+        if plan_selection:
+            print(status_messages.status(f"Plan OK: {plan_selection['plan_path']}", level="success"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    # Show recent history before starting capture so operator can sanity-check state.
+    recent = recent_tracker_runs(package_name, limit=5)
+    if recent:
+        rows = []
+        for r in recent:
+            if r.valid is True:
+                status = "VALID"
+            elif r.valid is False:
+                status = f"INVALID:{r.invalid_reason_code or 'UNKNOWN'}"
+            else:
+                status = "UNKNOWN"
+            rows.append(
+                [
+                    (r.ended_at or "—")[:19],
+                    (r.run_profile or "—"),
+                    (r.interaction_level or "—"),
+                    status,
+                    (r.run_id or "—")[:8],
+                ]
+            )
+        menu_utils.print_section("Recent Runs (from tracker)")
+        menu_utils.print_table(
+            ["Ended", "Profile", "Interaction", "Status", "Run ID"],
+            rows,
+        )
+
+    # Capture modes.
     tier = "dataset"
+    if selected_protocol == "1":
+        run_profile = "baseline_idle"
+        interaction_level = "minimal"
+    elif selected_protocol == "2":
+        run_profile = "interactive_use"
+        interaction_level = "normal"
+    else:
+        run_profile = "interactive_use"
+        interaction_level = "heavy"
 
     print()
     menu_utils.print_header("Dynamic Run Observers")
@@ -150,9 +304,13 @@ def run_guided_dataset_run(
         static_run_id=static_run_id,
         clear_logcat=clear_logcat,
         interactive=True,
-        require_dynamic_schema=True,
+        # Dataset tier is strict; exploratory runs are allowed to proceed with best-effort
+        # schema/persistence while still producing an evidence pack.
+        require_dynamic_schema=(tier == "dataset"),
         observer_prompts_enabled=(os.environ.get("SCYTALEDROID_OBSERVER_PROMPTS") == "1"),
         pcapdroid_api_key=os.environ.get("SCYTALEDROID_PCAPDROID_API_KEY"),
+        run_profile=run_profile,
+        interaction_level=interaction_level,
     )
     result = execute_dynamic_run_spec(spec)
     print_run_summary(result, label)
