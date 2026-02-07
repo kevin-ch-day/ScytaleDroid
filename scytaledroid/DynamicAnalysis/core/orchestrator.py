@@ -125,6 +125,22 @@ class DynamicRunOrchestrator:
             batch_id=self.config.batch_id,
         )
 
+        self.logger.info(
+            "RunContext snapshot",
+            extra={
+                "dynamic_run_id": run_ctx.dynamic_run_id,
+                "package_name": run_ctx.package_name,
+                "interactive": bool(run_ctx.interactive),
+                "tier": self.config.tier,
+                "duration_seconds": run_ctx.duration_seconds,
+                "scenario_id": run_ctx.scenario_id,
+                "device_serial": run_ctx.device_serial,
+                "observer_ids": [observer.observer_id for observer in self.observers],
+                "sampling_rate_s": self.config.sampling_rate_s,
+                "batch_id": getattr(run_ctx, "batch_id", None),
+            },
+        )
+
         manifest = self._build_manifest(run_ctx, plan_payload, writer)
         manifest.started_at = self._now()
         event_logger = RunEventLogger(run_ctx)

@@ -390,6 +390,8 @@ def create_static_run_ledger(
     dry_run: bool = False,
 ) -> int | None:
     """Create a RUNNING static_analysis_runs row before scanning begins."""
+    canonical_actions = {"first_run", "replace", "auto_suffix", "append"}
+    canonical_enabled = canonical_action in canonical_actions if canonical_action else False
     return _run_writers.create_static_run_ledger(
         package_name=package_name,
         display_name=display_name or package_name,
@@ -411,11 +413,9 @@ def create_static_run_ledger(
         findings_total=0,
         run_started_utc=run_started_utc,
         status="RUNNING",
-        is_canonical=True if (canonical_action in {"first_run", "replace"}) else False
-        if canonical_action
-        else None,
-        canonical_set_at_utc=run_started_utc if canonical_action in {"first_run", "replace"} else None,
-        canonical_reason=canonical_action if canonical_action in {"first_run", "replace"} else None,
+        is_canonical=True if canonical_enabled else False if canonical_action else None,
+        canonical_set_at_utc=run_started_utc if canonical_enabled else None,
+        canonical_reason=canonical_action if canonical_enabled else None,
         sha256=sha256,
         base_apk_sha256=base_apk_sha256,
         artifact_set_hash=artifact_set_hash,
