@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -26,8 +27,10 @@ class EvidencePackWriter:
     def write_manifest(self, manifest: RunManifest) -> Path:
         manifest_path = self.run_dir / "run_manifest.json"
         payload = manifest_to_dict(manifest)
-        temp_path = self.run_dir / "run_manifest.json.tmp"
-        temp_path.write_text(json.dumps(payload, indent=2, sort_keys=True))
+        # Write atomically: temp + replace. Use a per-process temp name to avoid
+        # rare collisions if a run directory is ever touched concurrently.
+        temp_path = self.run_dir / f"run_manifest.json.tmp.{os.getpid()}"
+        temp_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
         temp_path.replace(manifest_path)
         return manifest_path
 
@@ -41,13 +44,13 @@ class EvidencePackWriter:
     def write_text(self, relative_path: str, content: str) -> Path:
         path = self.run_dir / relative_path
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content)
+        path.write_text(content, encoding="utf-8")
         return path
 
     def write_json(self, relative_path: str, payload: dict[str, Any]) -> Path:
         path = self.run_dir / relative_path
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, indent=2, sort_keys=True))
+        path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
         return path
 
 

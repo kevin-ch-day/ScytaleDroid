@@ -146,19 +146,47 @@ _DDL_STATEMENTS: list[str] = [
         ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
+    """
+    CREATE TABLE IF NOT EXISTS dynamic_network_indicators (
+      id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      dynamic_run_id  CHAR(36)        NOT NULL,
+      indicator_type  VARCHAR(32)     NOT NULL,
+      indicator_value VARCHAR(255)    NOT NULL,
+      indicator_count INT             DEFAULT NULL,
+      indicator_source VARCHAR(32)    DEFAULT NULL,
+      meta_json       JSON            DEFAULT NULL,
+      created_at      TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY ux_dyn_net_ind (dynamic_run_id, indicator_type, indicator_value, indicator_source),
+      KEY idx_dyn_net_ind_type_value (indicator_type, indicator_value),
+      CONSTRAINT fk_dyn_net_ind_run
+        FOREIGN KEY (dynamic_run_id)
+        REFERENCES dynamic_sessions (dynamic_run_id)
+        ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
 ]
 
 
 _TABLE_NAME_PATTERN = re.compile(r"CREATE TABLE IF NOT EXISTS\\s+`?([a-zA-Z0-9_]+)`?", re.IGNORECASE)
 
+_REQUIRED_TABLES: tuple[str, ...] = (
+    # Core persistence tables. These are required for DB-backed indexing, but DB
+    # must remain optional for evidence-pack-based workflows.
+    "dynamic_sessions",
+    "dynamic_session_issues",
+    "dynamic_telemetry_process",
+    "dynamic_telemetry_network",
+)
+
 
 def ensure_all() -> bool:
-    """Verify dynamic tables exist; no runtime DDL is executed."""
-    tables = set()
-    for stmt in _DDL_STATEMENTS:
-        match = _TABLE_NAME_PATTERN.search(stmt)
-        if match:
-            tables.add(match.group(1))
+    """Verify required dynamic tables exist; no runtime DDL is executed.
+
+    Important: this must be an explicit allowlist so derived/index tables don't
+    accidentally become required just because DDL was added.
+    """
+    tables = set(_REQUIRED_TABLES)
     if not tables:
         return True
     ok = True

@@ -278,9 +278,18 @@ def run_health_checks() -> None:
 
 
 def run_evidence_integrity_check() -> None:
-    """Check evidence linkage fields for snapshots."""
+    """Check DB-only evidence linkage fields for static permission snapshots.
+
+    Note: dynamic evidence packs are verified via Workspace & Evidence, not via DB.
+    """
     print()
-    menu_utils.print_header("Evidence Integrity Check")
+    menu_utils.print_header("DB Integrity Check (Snapshot Linkage)")
+    print(
+        status_messages.status(
+            "For dynamic evidence packs integrity: Workspace & Evidence -> Verify dynamic evidence packs.",
+            level="info",
+        )
+    )
 
     if _column_exists("permission_audit_snapshots", "evidence_relpath"):
         missing_relpath = scalar(

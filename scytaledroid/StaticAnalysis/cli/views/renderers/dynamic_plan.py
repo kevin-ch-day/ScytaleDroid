@@ -359,6 +359,8 @@ def build_dynamic_plan(
             "artifact_set_hash": metadata.get("artifact_set_hash"),
             "run_signature": metadata.get("run_signature"),
             "run_signature_version": metadata.get("run_signature_version"),
+            # Convenience join pointer (not part of the identity tuple).
+            "static_run_id": static_run_id,
             "identity_valid": metadata.get("identity_valid"),
             "identity_error_reason": metadata.get("identity_error_reason"),
         },

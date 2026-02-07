@@ -123,7 +123,7 @@ def main_menu() -> None:
         ("5", "Reporting", handle_reporting),
         ("6", "Database tools", handle_database),
         ("7", "Governance Inputs & Readiness", handle_data_workspace),
-        ("8", "Workspace maintenance & cleanup", handle_workspace),
+        ("8", "Workspace & Evidence", handle_workspace),
         ("9", "APK library & archives", handle_browse_apks),
         ("10", "About ScytaleDroid", handle_about),
     ]
@@ -192,7 +192,9 @@ def _print_tier1_status_banner() -> None:
     schema_ver = status.get("schema_version") or "<unknown>"
     expected = status.get("expected_schema") or "<unknown>"
     tier1_ready = status.get("tier1_ready_runs", 0)
-    badge = "✅" if tier1_ready and int(tier1_ready) > 0 else "⚠️"
+    db_dataset = int(status.get("db_dynamic_sessions_dataset") or 0)
+    ev_dataset_total = int(status.get("evidence_dataset_packs") or 0)
+    ev_dataset_valid = int(status.get("evidence_dataset_valid") or 0)
     schema_outdated = schema_ver != expected
     schema_label = (
         f"{schema_ver} (expects {expected})" if schema_outdated else str(schema_ver)
@@ -201,7 +203,13 @@ def _print_tier1_status_banner() -> None:
     print("─────────────────────")
     print("• Tier-1 Snapshot")
     print(f"• Schema: {schema_label}")
-    print(f"• Tier-1 ready runs {badge}: {tier1_ready}")
+    # "Tier-1 ready runs" is a DB-derived counter; evidence packs are the Paper #2 truth.
+    badge = " ✅" if tier1_ready and int(tier1_ready) > 0 else ""
+    print(f"• Tier-1 ready runs (DB): {tier1_ready}{badge}")
+    # When dynamic DB persistence is not tracking runs, show evidence-pack counts so
+    # operators can trust what they actually collected (Paper #2 contract).
+    if db_dataset == 0 and ev_dataset_total > 0:
+        print(f"• Evidence packs (dataset): {ev_dataset_valid}/{ev_dataset_total} valid (DB tracking: 0)")
     from scytaledroid.Utils.System.paper_grade_inputs import render_dataset_readiness_line
     render_dataset_readiness_line()
 

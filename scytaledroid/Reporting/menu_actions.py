@@ -558,6 +558,13 @@ def fetch_tier1_status() -> dict[str, object]:
         "last_export_at": None,
         "pcap_valid_runs": 0,
         "pcap_total_runs": 0,
+        # DB tracking state (some workflows are evidence-pack-first).
+        "db_dynamic_sessions_total": 0,
+        "db_dynamic_sessions_dataset": 0,
+        # Evidence-pack-derived counts (DB-free; aligns with Paper #2 contract).
+        "evidence_packs_total": 0,
+        "evidence_dataset_packs": 0,
+        "evidence_dataset_valid": 0,
     }
     try:
         row = core_q.run_sql(
@@ -569,6 +576,29 @@ def fetch_tier1_status() -> dict[str, object]:
             status["schema_version"] = row.get("version")
     except Exception:
         status["schema_version"] = None
+
+    # Dynamic DB row counts (used to detect when the DB isn't tracking runs).
+    try:
+        row = core_q.run_sql(
+            "SELECT COUNT(*) AS cnt FROM dynamic_sessions",
+            fetch="one",
+            dictionary=True,
+        )
+        if row:
+            status["db_dynamic_sessions_total"] = int(row.get("cnt") or 0)
+    except Exception:
+        status["db_dynamic_sessions_total"] = 0
+
+    try:
+        row = core_q.run_sql(
+            "SELECT COUNT(*) AS cnt FROM dynamic_sessions WHERE tier='dataset'",
+            fetch="one",
+            dictionary=True,
+        )
+        if row:
+            status["db_dynamic_sessions_dataset"] = int(row.get("cnt") or 0)
+    except Exception:
+        status["db_dynamic_sessions_dataset"] = 0
 
     try:
         row = core_q.run_sql(
@@ -612,6 +642,39 @@ def fetch_tier1_status() -> dict[str, object]:
     except Exception:
         status["pcap_valid_runs"] = 0
         status["pcap_total_runs"] = 0
+
+    # Evidence-pack-derived counts (authoritative for Paper #2 / ML).
+    try:
+        import json
+        from pathlib import Path
+
+        root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+        total = dataset_total = dataset_valid = 0
+        if root.exists():
+            for mf in root.glob("*/run_manifest.json"):
+                total += 1
+                try:
+                    payload = json.loads(mf.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                if not isinstance(payload, dict):
+                    continue
+                ds = payload.get("dataset") if isinstance(payload.get("dataset"), dict) else {}
+                tier = ds.get("tier")
+                if str(tier or "").lower() != "dataset":
+                    continue
+                if ds.get("countable") is False:
+                    continue
+                dataset_total += 1
+                if ds.get("valid_dataset_run") is True:
+                    dataset_valid += 1
+        status["evidence_packs_total"] = total
+        status["evidence_dataset_packs"] = dataset_total
+        status["evidence_dataset_valid"] = dataset_valid
+    except Exception:
+        status["evidence_packs_total"] = 0
+        status["evidence_dataset_packs"] = 0
+        status["evidence_dataset_valid"] = 0
 
     try:
         export_dir = Path(app_config.OUTPUT_DIR) / "exports" / "scytaledroid_dyn_v1"

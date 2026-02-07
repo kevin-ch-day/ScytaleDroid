@@ -11,6 +11,10 @@ from scytaledroid.Database.db_core import run_sql
 from scytaledroid.DeviceAnalysis.adb import shell as adb_shell, status as adb_status
 from scytaledroid.DynamicAnalysis import plan_selection as _plan_selection
 from scytaledroid.DynamicAnalysis.controllers.guided_run import run_guided_dataset_run
+from scytaledroid.DynamicAnalysis.datasets.research_dataset_alpha import (
+    PROFILE_KEY as _DATASET_PROFILE_KEY,
+    load_dataset_packages as _load_dataset_packages,
+)
 from scytaledroid.DynamicAnalysis.profile_loader import load_db_profiles, load_profile_packages
 from scytaledroid.DynamicAnalysis.services.observer_service import (
     select_observers as _service_select_observers,
@@ -45,14 +49,16 @@ def dynamic_analysis_menu() -> None:
     from scytaledroid.Database.db_utils import schema_gate
     ok, message, detail = schema_gate.dynamic_schema_gate()
     if not ok:
-        status_messages.print_status(f"[ERROR] {message}", level="error")
+        # Paper #2 contract: evidence packs are authoritative; DB is a derived index.
+        # Do not block capture/collection on DB readiness. Surface a warning and
+        # allow DB-free workflows to proceed.
+        status_messages.print_status(f"[WARN] {message}", level="warn")
         if detail:
-            status_messages.print_status(detail, level="error")
+            status_messages.print_status(detail, level="warn")
         status_messages.print_status(
-            "Fix: Database Tools → Apply Tier-1 schema migrations (or import canonical DB export), then retry.",
-            level="error",
+            "Note: DB-backed features may be unavailable. Dynamic capture and evidence-pack workflows remain enabled.",
+            level="warn",
         )
-        return
 
     options = [
         MenuOption("1", "Run Research Dataset Alpha (guided)"),
@@ -151,7 +157,11 @@ def _export_pcap_features_csv() -> None:
     if output_path is None:
         print(status_messages.status("No pcap_features.json files found.", level="warn"))
         return
-    print(status_messages.status(f"Exported CSV: {output_path}", level="success"))
+    count = _count_csv_rows(output_path)
+    msg = f"Exported CSV: {output_path}"
+    if count is not None:
+        msg += f" ({count} row(s))"
+    print(status_messages.status(msg, level="success"))
     return
 
 def _export_dynamic_run_summary_csv() -> None:
@@ -163,7 +173,22 @@ def _export_dynamic_run_summary_csv() -> None:
     if output_path is None:
         print(status_messages.status("No dynamic run summaries found.", level="warn"))
         return
-    print(status_messages.status(f"Exported CSV: {output_path}", level="success"))
+    count = _count_csv_rows(output_path)
+    msg = f"Exported CSV: {output_path}"
+    if count is not None:
+        msg += f" ({count} row(s))"
+    print(status_messages.status(msg, level="success"))
+
+
+def _count_csv_rows(path: Path) -> int | None:
+    """Return data row count for a CSV (excluding header)."""
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            # cheap line count; subtract 1 for header
+            n = sum(1 for _ in f)
+        return max(0, n - 1)
+    except Exception:
+        return None
 
 
 def _verify_host_pcap_tools() -> None:
@@ -224,7 +249,7 @@ def _select_dynamic_target() -> tuple[str, str] | None:
     groups = group_artifacts()
     dataset_pkgs: set[str] = set()
     try:
-        dataset_pkgs = {pkg.lower() for pkg in load_profile_packages("RESEARCH_DATASET_ALPHA")}
+        dataset_pkgs = {pkg.lower() for pkg in _load_dataset_packages()}
     except Exception:
         dataset_pkgs = set()
 
@@ -247,7 +272,7 @@ def _select_dynamic_target() -> tuple[str, str] | None:
         profile_selection = _select_profile_package(groups)
         if profile_selection:
             package_name, profile_key = profile_selection
-            tier = "dataset" if profile_key == "RESEARCH_DATASET_ALPHA" else "exploration"
+            tier = "dataset" if profile_key == _DATASET_PROFILE_KEY else "exploration"
             return (package_name, tier)
         package_name = _prompt_custom_package()
         if package_name:
@@ -495,7 +520,7 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
     # track collection without opening the tracker view.
     dataset_pkgs: set[str] = set()
     try:
-        dataset_pkgs = {pkg.lower() for pkg in load_profile_packages("RESEARCH_DATASET_ALPHA")}
+        dataset_pkgs = {pkg.lower() for pkg in _load_dataset_packages()}
     except Exception:
         dataset_pkgs = set()
 
@@ -516,10 +541,10 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
         display = ((app_label or package).strip() or package)
         if display in collisions:
             display = f"{display} ({package})"
-        # Keep dataset selection tables readable on narrower terminals by trimming
-        # the app label. Operators select by index, and the full package name is
-        # visible in the run banner after selection.
-        display = text_blocks.truncate_visible(display, 20)
+        # Keep dataset selection tables readable on narrower terminals. We bias
+        # the width budget toward progress columns ("Base/Int/Next") so they
+        # don't get truncated into "interact…".
+        display = text_blocks.truncate_visible(display, 18)
 
         base_label = "—"
         inter_label = "—"
@@ -545,9 +570,9 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
             proto = peek_next_run_protocol(package, tier="dataset") or {}
             prof = (proto.get("run_profile") or "").lower()
             if "baseline" in prof or "idle" in prof:
-                next_label = "baseline"
+                next_label = "base"
             elif prof:
-                next_label = "interactive"
+                next_label = "inter"
 
         # Columns are intentionally minimal for dataset collection.
         # Column order is chosen to avoid "Next" being truncated on narrow terminals.

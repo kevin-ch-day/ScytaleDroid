@@ -436,7 +436,7 @@ class DynamicRunOrchestrator:
                 if isinstance(validity, dict):
                     manifest.dataset = dict(validity)
                     manifest.dataset.setdefault("tier", self.config.tier)
-                    manifest.dataset.setdefault("countable", True)
+                    manifest.dataset.setdefault("countable", str(self.config.tier).lower() == "dataset")
                     manifest.operator["dataset_validity"] = dict(validity)
                 event_logger.log(
                     "dataset_validity",
@@ -455,6 +455,15 @@ class DynamicRunOrchestrator:
                     extra={"dynamic_run_id": dynamic_run_id, "error": str(exc)},
                 )
                 event_logger.log("dataset_validity_error", {"error": str(exc)})
+            # Fail-closed: dataset-tier runs must never leave validity unset.
+            if isinstance(manifest.dataset, dict) and manifest.dataset.get("valid_dataset_run") is None:
+                manifest.dataset.update(
+                    {
+                        "valid_dataset_run": False,
+                        "invalid_reason_code": "PCAP_PARSE_ERROR",
+                        "countable": True,
+                    }
+                )
         manifest.add_outputs(outputs)
         manifest.finalize()
         writer.write_manifest(manifest)

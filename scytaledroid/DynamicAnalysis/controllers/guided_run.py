@@ -14,7 +14,7 @@ from scytaledroid.DynamicAnalysis.plan_selection import (
     ensure_plan_or_error,
     print_plan_selection_banner,
 )
-from scytaledroid.DynamicAnalysis.profile_loader import load_profile_packages
+from scytaledroid.DynamicAnalysis.datasets.research_dataset_alpha import load_dataset_packages
 from scytaledroid.DynamicAnalysis.core.run_specs import build_dynamic_run_spec
 from scytaledroid.DynamicAnalysis.run_dynamic_analysis import execute_dynamic_run_spec
 from scytaledroid.DynamicAnalysis.run_summary import print_run_summary
@@ -98,7 +98,7 @@ def run_guided_dataset_run(
     label = "Dataset (guided)"
 
     groups = group_artifacts()
-    dataset_pkgs = {pkg.lower() for pkg in load_profile_packages("RESEARCH_DATASET_ALPHA")}
+    dataset_pkgs = {pkg.lower() for pkg in load_dataset_packages()}
     if not dataset_pkgs:
         print(status_messages.status("Research Dataset Alpha profile has no apps.", level="warn"))
         return

@@ -236,12 +236,30 @@ class DynamicAnalysisEngine:
         event_logger = RunEventLogger(run_ctx)
         event_logger.log("plan.validation", build_plan_validation_event(validation))
         event_artifact = event_logger.finalize()
+        dataset_block = None
+        if str(self.config.tier or "").lower() == "dataset":
+            # Plan validation failures are pre-capture blockers. We still write a
+            # deterministic dataset validity record so the manifest remains the
+            # authoritative truth source for Phase D.
+            dataset_block = {
+                "tier": self.config.tier,
+                "countable": True,
+                "valid_dataset_run": False,
+                # Locked enum doesn't include plan-validation specific codes; use
+                # the generic parse/error bucket for pipeline/preflight blockers.
+                "invalid_reason_code": "PCAP_PARSE_ERROR",
+                "sampling_duration_seconds": None,
+                "min_pcap_bytes": getattr(app_config, "DYNAMIC_MIN_PCAP_BYTES", 100000),
+                "short_run": 0,
+                "no_traffic_observed": 0,
+            }
         manifest = RunManifest(
             run_manifest_version=1,
             dynamic_run_id=dynamic_run_id,
             created_at=datetime.now(UTC).isoformat(),
             batch_id=self.config.batch_id,
             status="blocked",
+            dataset=dataset_block or {},
             target={
                 "package_name": self.config.package_name,
                 "static_run_id": self.config.static_run_id,
@@ -258,6 +276,10 @@ class DynamicAnalysisEngine:
                 "schema_version": db_diagnostics.get_schema_version() or "<unknown>",
             },
         )
+        if dataset_block:
+            # Keep legacy mirror for downstream consumers still reading operator.dataset_validity.
+            manifest.operator["tier"] = self.config.tier
+            manifest.operator["dataset_validity"] = dict(dataset_block)
         if event_artifact:
             manifest.add_artifacts([event_artifact])
         manifest.finalize()
@@ -322,6 +344,11 @@ class DynamicAnalysisEngine:
             created_at=datetime.now(UTC).isoformat(),
             batch_id=self.config.batch_id,
             status="blocked",
+            dataset={
+                "tier": self.config.tier,
+                "countable": str(self.config.tier).lower() == "dataset",
+                **{k: v for k, v in dataset_validity.items() if k in {"valid_dataset_run", "invalid_reason_code", "min_pcap_bytes", "sampling_duration_seconds", "short_run", "no_traffic_observed"}},
+            },
             target={
                 "package_name": self.config.package_name,
                 "static_run_id": self.config.static_run_id,
@@ -371,20 +398,73 @@ class DynamicAnalysisEngine:
         session_result: DynamicSessionResult,
         summary_payload: Mapping[str, Any],
     ) -> None:
+        """Persist dynamic summary to DB when available.
+
+        DB is a derived index for Paper #2; evidence packs remain authoritative.
+        Persistence failures must be explicit (manifest + CLI), but must not
+        block capture/finalization.
+        """
+        status = {
+            "attempted": False,
+            "ok": False,
+            "error_code": None,
+            "error": None,
+        }
         try:
             payload = dict(summary_payload)
             # Include telemetry rows for DB persistence without bloating engine_summary.json.
             payload["telemetry_process"] = session_result.telemetry_process
             payload["telemetry_network"] = session_result.telemetry_network
             payload["telemetry_stats"] = session_result.telemetry_stats
+            status["attempted"] = True
             persist_dynamic_summary(self.config, session_result, payload)
+            status["ok"] = True
         except NotImplementedError:
             self.logger.info("Dynamic persistence not enabled yet.")
+            status["error_code"] = "DB_PERSISTENCE_DISABLED"
         except Exception as exc:  # noqa: BLE001
             self.logger.warning(
                 "Failed to persist dynamic summary",
                 extra={"error": str(exc)},
             )
+            status["error_code"] = "DB_PERSISTENCE_FAILED"
+            status["error"] = str(exc)
+
+        self._record_db_persistence_status(session_result, status)
+        if not status["ok"] and status["attempted"]:
+            # Mirror to engine summary payload for quick debugging. Evidence pack remains authoritative.
+            try:
+                run_dir = resolve_evidence_path(session_result.evidence_path)
+                if run_dir:
+                    writer = EvidencePackWriter(run_dir)
+                    writer.write_json("analysis/db_persistence_status.json", dict(status))
+            except Exception:
+                pass
+
+    def _record_db_persistence_status(self, session_result: DynamicSessionResult, status: Mapping[str, Any]) -> None:
+        run_dir = resolve_evidence_path(session_result.evidence_path)
+        if not run_dir:
+            return
+        manifest_path = run_dir / "run_manifest.json"
+        if not manifest_path.exists():
+            return
+        try:
+            payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+        env = payload.get("environment")
+        if not isinstance(env, dict):
+            env = {}
+        # Use a stable, machine-readable block. Never store secrets here.
+        env["db_persistence"] = {
+            "attempted": bool(status.get("attempted")),
+            "ok": bool(status.get("ok")),
+            "error_code": status.get("error_code"),
+            # Keep error short; detailed logs are in run_events.jsonl
+            "error": (str(status.get("error") or "")[:240] or None),
+        }
+        payload["environment"] = env
+        manifest_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
     def _attach_engine_outputs(
         self,

@@ -28,15 +28,22 @@ def export_pcap_features_csv() -> Path | None:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
+        dataset = manifest.get("dataset") if isinstance(manifest.get("dataset"), dict) else {}
         row = _flatten_features(features)
         row.update(
             {
                 "dynamic_run_id": manifest.get("dynamic_run_id"),
                 "package_name": (manifest.get("target") or {}).get("package_name"),
+                "static_run_id": (manifest.get("target") or {}).get("static_run_id"),
                 "scenario": (manifest.get("scenario") or {}).get("id"),
                 "started_at": manifest.get("started_at"),
                 "ended_at": manifest.get("ended_at"),
-                "tier": (manifest.get("operator") or {}).get("tier"),
+                "tier": dataset.get("tier") or (manifest.get("operator") or {}).get("tier"),
+                "countable": dataset.get("countable"),
+                "valid_dataset_run": dataset.get("valid_dataset_run"),
+                "invalid_reason_code": dataset.get("invalid_reason_code"),
+                "min_pcap_bytes": dataset.get("min_pcap_bytes"),
+                "pcap_size_bytes": dataset.get("pcap_size_bytes"),
                 "run_profile": (manifest.get("operator") or {}).get("run_profile"),
                 "run_sequence": (manifest.get("operator") or {}).get("run_sequence"),
                 "interaction_level": (manifest.get("operator") or {}).get("interaction_level"),
@@ -101,6 +108,7 @@ def _build_run_summary_row(
     features: dict[str, Any],
 ) -> dict[str, Any] | None:
     target = manifest.get("target") or {}
+    dataset = manifest.get("dataset") if isinstance(manifest.get("dataset"), dict) else {}
     static_tags = target.get("static_context_tags")
     static_context = target.get("static_context") if isinstance(target.get("static_context"), dict) else None
     # Back-compat: older runs won't have static tags in the manifest. Derive them
@@ -129,6 +137,12 @@ def _build_run_summary_row(
         "run_id": manifest.get("dynamic_run_id"),
         # Alias for downstream consumers that expect an explicit dynamic_run_id field.
         "dynamic_run_id": manifest.get("dynamic_run_id"),
+        "tier": dataset.get("tier") or (manifest.get("operator") or {}).get("tier"),
+        "countable": dataset.get("countable"),
+        "valid_dataset_run": dataset.get("valid_dataset_run"),
+        "invalid_reason_code": dataset.get("invalid_reason_code"),
+        "min_pcap_bytes": dataset.get("min_pcap_bytes"),
+        "pcap_size_bytes": dataset.get("pcap_size_bytes"),
         "run_profile": (manifest.get("operator") or {}).get("run_profile"),
         "run_sequence": (manifest.get("operator") or {}).get("run_sequence"),
         "interaction_level": (manifest.get("operator") or {}).get("interaction_level"),
@@ -146,10 +160,14 @@ def _build_run_summary_row(
         "bytes_per_sec": metrics.get("data_byte_rate_bps"),
         "packets_per_sec": metrics.get("avg_packet_rate_pps"),
         # Use the post-processed ratios from pcap_features.json (quic/udp, tls/tcp).
-        # This avoids double-counting when protocol_hierarchy contains multiple rows
-        # per protocol and matches the values used by the verifier.
+        # This avoids double-counting when protocol_hierarchy contains multiple rows.
         "quic_ratio": proxies.get("quic_ratio"),
         "tls_ratio": proxies.get("tls_ratio"),
+        # Explicit-denominator aliases to avoid misinterpretation.
+        "quic_over_udp_ratio": proxies.get("quic_ratio"),
+        "tls_over_tcp_ratio": proxies.get("tls_ratio"),
+        "tcp_ratio": proxies.get("tcp_ratio"),
+        "udp_ratio": proxies.get("udp_ratio"),
         "unique_domains": unique_domains,
     }
 

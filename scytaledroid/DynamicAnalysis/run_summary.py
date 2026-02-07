@@ -77,6 +77,18 @@ def print_run_summary(result, duration_label: str) -> None:
                     reasons = _dataset_validity_reasons(result.dynamic_run_id)
                     if reasons:
                         lines.append(("Dataset issues", ", ".join(reasons)))
+
+        # DB is a derived index (not authoritative). Make its status explicit so
+        # operators can spot schema/persistence problems without reading logs.
+        env = manifest.get("environment") or {}
+        if isinstance(env, dict):
+            dbp = env.get("db_persistence")
+            if isinstance(dbp, dict) and dbp.get("attempted") is True:
+                if dbp.get("ok") is True:
+                    lines.append(("DB persistence", "OK (derived index)"))
+                else:
+                    code = dbp.get("error_code") or "DB_PERSISTENCE_FAILED"
+                    lines.append(("DB persistence", f"FAILED: {code} (derived index)"))
     if result.evidence_path:
         lines.append(("Evidence", result.evidence_path))
     status_messages.print_strip("Session", lines, width=70)
