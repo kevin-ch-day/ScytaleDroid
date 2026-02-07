@@ -666,6 +666,10 @@ def _render_run_results_impl(outcome: RunOutcome, params: RunParameters) -> None
             message = f"Saved dynamic plan → {dynamic_plan_path.name}"
             if not compact_mode:
                 _emit_detail(message)
+            try:
+                app_result.dynamic_plan_path = str(dynamic_plan_path)
+            except Exception:
+                app_result.dynamic_plan_path = None
 
         if persist_enabled and app_result.static_run_id:
             artifacts: list[dict[str, object]] = []
@@ -1198,6 +1202,22 @@ def _render_run_results_impl(outcome: RunOutcome, params: RunParameters) -> None
     if persistence_errors and not params.dry_run:
         if not any("persistence" in str(item).lower() for item in outcome.failures):
             outcome.failures.append("persistence_failed")
+
+    if not params.dry_run:
+        outcome.persistence_failed = bool(persistence_errors)
+        outcome.canonical_failed = bool(canonical_failures)
+        if outcome.persistence_failed or outcome.canonical_failed:
+            outcome.paper_grade_status = "fail"
+        elif outcome.aborted:
+            outcome.paper_grade_status = "warn"
+        else:
+            outcome.paper_grade_status = "ok"
+        audit_notes: list[dict[str, str]] = []
+        for message in persistence_errors:
+            audit_notes.append({"code": "persistence_error", "message": str(message)})
+        for message in canonical_failures:
+            audit_notes.append({"code": "canonical_error", "message": str(message)})
+        outcome.audit_notes = audit_notes
 
     if outcome.aborted:
         completed = outcome.completed_artifacts

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import zoneinfo
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from scytaledroid.Config import app_config
@@ -19,21 +19,12 @@ from scytaledroid.Utils.System.world_clock.display import format_display_time
 
 
 def resolve_plan_selection(package_name: str) -> dict[str, object] | None:
-    candidates, note = _load_plan_candidates(package_name)
-    if not candidates:
-        return _prompt_missing_baseline(package_name, note)
-
-    grouped: dict[str, list[dict[str, object]]] = {}
-    for candidate in candidates:
-        key = candidate["identity_key"]
-        grouped.setdefault(key, []).append(candidate)
-
-    if len(grouped) == 1:
-        only_key = next(iter(grouped))
-        selection = _pick_newest_candidate(grouped[only_key])
-        return _build_selection(selection)
-
-    return _prompt_baseline_selection(package_name, candidates)
+    return ensure_plan_or_error(
+        package_name,
+        prompt_run_static=True,
+        deterministic=False,
+        run_static_callback=_run_static_for_package,
+    )
 
 
 def load_plan_candidates(package_name: str) -> tuple[list[dict[str, object]], str | None]:
@@ -52,11 +43,33 @@ def resolve_plan_selection_noninteractive(package_name: str) -> dict[str, object
     Dataset-mode runs must not prompt (operator variance).
     """
 
-    candidates, _note = _load_plan_candidates(package_name)
+    return ensure_plan_or_error(
+        package_name,
+        prompt_run_static=False,
+        deterministic=True,
+        run_static_callback=None,
+    )
+
+
+def ensure_plan_or_error(
+    package_name: str,
+    *,
+    prompt_run_static: bool,
+    deterministic: bool,
+    run_static_callback,
+) -> dict[str, object] | None:
+    candidates, note = _load_plan_candidates(package_name)
+    if not candidates:
+        if not prompt_run_static:
+            return None
+        if _prompt_run_static_now(package_name, note, run_static_callback):
+            candidates, _note = _load_plan_candidates(package_name)
     if not candidates:
         return None
-    selection = _pick_newest_candidate(candidates)
-    return _build_selection(selection)
+    if deterministic:
+        selection = _pick_newest_candidate(candidates)
+        return _build_selection(selection)
+    return _prompt_plan_selection(package_name, candidates)
 
 
 def print_plan_selection_banner(selection: dict[str, object]) -> None:
@@ -100,6 +113,9 @@ def _load_plan_candidates(package_name: str) -> tuple[list[dict[str, object]], s
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
+            continue
+        identity_raw = payload.get("run_identity") if isinstance(payload.get("run_identity"), dict) else {}
+        if identity_raw.get("identity_valid") is False:
             continue
         identity = extract_plan_identity(payload)
         if str(identity.get("package") or "") != package_name:
@@ -151,7 +167,7 @@ def _build_selection(candidate: dict[str, object]) -> dict[str, object]:
     }
 
 
-def _prompt_baseline_selection(package_name: str, candidates: list[dict[str, object]]) -> dict[str, object] | None:
+def _prompt_plan_selection(package_name: str, candidates: list[dict[str, object]]) -> dict[str, object] | None:
     print()
     menu_utils.print_header("Baseline selection required")
     print(
@@ -173,9 +189,12 @@ def _prompt_baseline_selection(package_name: str, candidates: list[dict[str, obj
     print("Options: [number] Select baseline  |  S Run static analysis  |  0 Cancel")
     choice = prompt_utils.prompt_text("Select baseline", required=False).strip().lower()
     if choice == "s":
-        from scytaledroid.StaticAnalysis.cli import static_analysis_menu
-
-        static_analysis_menu()
+        if _run_static_for_package(package_name):
+            refreshed, _note = _load_plan_candidates(package_name)
+            if refreshed:
+                selection = _pick_newest_candidate(refreshed)
+                return _build_selection(selection)
+        _warn_missing_plan()
         return None
     if choice == "0" or not choice:
         print(status_messages.status("Baseline selection cancelled.", level="warn"))
@@ -191,18 +210,80 @@ def _prompt_baseline_selection(package_name: str, candidates: list[dict[str, obj
     return _build_selection(sorted_candidates[index])
 
 
-def _prompt_missing_baseline(package_name: str, note: str | None) -> dict[str, object] | None:
+def _prompt_run_static_now(
+    package_name: str,
+    note: str | None,
+    run_static_callback,
+) -> bool:
     print(status_messages.status(note or "No dynamic plan found for package.", level="warn"))
     print()
-    print("Options: S Run static analysis  |  0 Cancel")
-    choice = prompt_utils.prompt_text("Selection", required=False).strip().lower()
-    if choice == "s":
-        from scytaledroid.StaticAnalysis.cli import static_analysis_menu
+    run_static = prompt_utils.prompt_yes_no(
+        "Run static analysis now for this app to generate a plan?",
+        default=True,
+    )
+    if not run_static:
+        print(status_messages.status("Baseline selection cancelled.", level="warn"))
+        return False
+    if run_static_callback is None:
+        run_static_callback = _run_static_for_package
+    if not run_static_callback(package_name):
+        return False
+    return True
 
-        static_analysis_menu()
-        return None
-    print(status_messages.status("Baseline selection cancelled.", level="warn"))
-    return None
+
+def _warn_missing_plan() -> None:
+    print(
+        status_messages.status(
+            "Static analysis completed but no plan was generated. Run static analysis interactively to diagnose.",
+            level="error",
+        )
+    )
+
+
+def _run_static_for_package(package_name: str) -> bool:
+    from scytaledroid.Config import app_config
+    from scytaledroid.StaticAnalysis.cli.core.models import RunParameters, ScopeSelection
+    from scytaledroid.StaticAnalysis.cli.core.run_specs import build_static_run_spec
+    from scytaledroid.StaticAnalysis.cli.flows.run_dispatch import execute_run_spec
+    from scytaledroid.StaticAnalysis.core.repository import group_artifacts
+    from scytaledroid.StaticAnalysis.session import normalize_session_stamp
+
+    groups = group_artifacts()
+    group = next(
+        (g for g in groups if (g.package_name or "").lower() == package_name.lower()),
+        None,
+    )
+    if not group:
+        print(status_messages.status("No APK artifacts found locally for this package.", level="error"))
+        return False
+    session_stamp = normalize_session_stamp(
+        f"{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}-{package_name}"
+    )
+    selection = ScopeSelection(scope="app", label=group.package_name or package_name, groups=(group,))
+    params = RunParameters(
+        profile="full",
+        scope=selection.scope,
+        scope_label=selection.label,
+        session_stamp=session_stamp,
+        show_split_summaries=False,
+    )
+    base_dir = Path(app_config.DATA_DIR) / "device_apks"
+    spec = build_static_run_spec(
+        selection=selection,
+        params=params,
+        base_dir=base_dir,
+        run_mode="interactive",
+        quiet=False,
+        noninteractive=False,
+    )
+    outcome = execute_run_spec(spec)
+    if not outcome:
+        print(status_messages.status("Static analysis did not return a result.", level="warn"))
+        return False
+    if getattr(outcome, "aborted", False):
+        print(status_messages.status("Static analysis was aborted.", level="warn"))
+        return False
+    return True
 
 
 def _format_candidate_row(index: int, candidate: dict[str, object]) -> list[str]:
@@ -274,8 +355,8 @@ def _identity_key(identity: dict[str, object]) -> str:
     )
 
 
-__all__ = ["resolve_plan_selection", "print_plan_selection_banner"]
 __all__ = [
+    "ensure_plan_or_error",
     "resolve_plan_selection",
     "resolve_plan_selection_noninteractive",
     "load_plan_candidates",

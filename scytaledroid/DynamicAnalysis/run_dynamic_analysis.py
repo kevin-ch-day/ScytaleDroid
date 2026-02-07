@@ -26,6 +26,10 @@ def run_dynamic_analysis(
     sampling_rate_s: int = 2,
     batch_id: str | None = None,
 ) -> DynamicSessionResult:
+    if not interactive or batch_id:
+        raise RuntimeError(
+            "Dynamic analysis requires interactive session per app; batch dynamic is disabled."
+        )
     config = DynamicSessionConfig(
         package_name=package_name,
         duration_seconds=duration_seconds,
@@ -49,6 +53,10 @@ def run_dynamic_analysis(
 
 
 def execute_dynamic_run_spec(spec: DynamicRunSpec) -> DynamicSessionResult:
+    if not spec.interactive or getattr(spec, "batch_id", None):
+        raise RuntimeError(
+            "Dynamic analysis requires interactive session per app; batch dynamic is disabled."
+        )
     return run_dynamic_analysis(
         spec.package_name,
         duration_seconds=spec.duration_seconds,

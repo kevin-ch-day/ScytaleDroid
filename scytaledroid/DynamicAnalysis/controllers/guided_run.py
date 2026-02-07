@@ -11,8 +11,8 @@ from collections.abc import Callable
 
 from scytaledroid.DynamicAnalysis.controllers.device_select import select_device
 from scytaledroid.DynamicAnalysis.plan_selection import (
+    ensure_plan_or_error,
     print_plan_selection_banner,
-    resolve_plan_selection_noninteractive,
 )
 from scytaledroid.DynamicAnalysis.profile_loader import load_profile_packages
 from scytaledroid.DynamicAnalysis.core.run_specs import build_dynamic_run_spec
@@ -125,24 +125,14 @@ def run_guided_dataset_run(
 
     # Dataset mode is deterministic about plan choice, but interactive about gating:
     # if no plan exists yet, offer a single prompt to run static now.
-    plan_selection = resolve_plan_selection_noninteractive(package_name)
+    plan_selection = ensure_plan_or_error(
+        package_name,
+        prompt_run_static=True,
+        deterministic=True,
+        run_static_callback=_auto_run_static_for_package,
+    )
     if not plan_selection:
-        print(status_messages.status("No dynamic plans found for package.", level="warn"))
-        run_static = prompt_utils.prompt_yes_no("Run static analysis now for this app to generate a plan?", default=True)
-        if not run_static:
-            return
-        print(status_messages.status("Running static analysis (quiet) to generate a baseline plan…", level="info"))
-        if not _auto_run_static_for_package(package_name):
-            return
-        plan_selection = resolve_plan_selection_noninteractive(package_name)
-        if not plan_selection:
-            print(
-                status_messages.status(
-                    "Static analysis completed but no plan was generated. Re-run static analysis interactively to diagnose.",
-                    level="error",
-                )
-            )
-            return
+        return
     plan_path = plan_selection["plan_path"]
     static_run_id = plan_selection["static_run_id"]
     print_plan_selection_banner(plan_selection)

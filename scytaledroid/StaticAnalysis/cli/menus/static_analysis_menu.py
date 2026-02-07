@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import io
+import json
 import contextlib
 import time
 from dataclasses import replace
@@ -237,31 +238,7 @@ def _command_option(command: Command) -> menu_utils.MenuOption:
 __all__ = ["static_analysis_menu"]
 
 
-def _run_dataset_batch(
-    groups,
-    base_dir: Path,
-    command,
-    static_service,
-    query_runner,
-    reset_static_analysis_data,
-) -> None:
-    from scytaledroid.DynamicAnalysis.profile_loader import load_profile_packages
-    from scytaledroid.StaticAnalysis.cli.core.models import ScopeSelection
-    from scytaledroid.StaticAnalysis.cli.core.models import RunParameters
-    from scytaledroid.StaticAnalysis.cli.core.run_specs import build_static_run_spec
-    from scytaledroid.StaticAnalysis.cli.flows.run_dispatch import execute_run_spec
-    from scytaledroid.StaticAnalysis.session import make_session_stamp, normalize_session_stamp
-    from datetime import datetime, timezone
-    import json
-    import sys
-    import threading
-
-    dataset_pkgs = {pkg.lower() for pkg in load_profile_packages("RESEARCH_DATASET_ALPHA")}
-    if not dataset_pkgs:
-        print(status_messages.status("Research Dataset Alpha profile has no apps.", level="warn"))
-        prompt_utils.press_enter_to_continue()
-        return
-
+def _resolve_batch_groups(groups, dataset_pkgs: set[str]) -> list[object]:
     # Batch determinism: select one "best" artifact group per package (newest by session stamp + mtime).
     # We explicitly avoid env-driven selection here to keep batch behavior stable and reviewable.
     def _artifact_mtime(artifact) -> float:
@@ -309,8 +286,103 @@ def _run_dataset_batch(
         cur = by_pkg.get(pkg_l)
         if cur is None or _group_recency_key(group) > _group_recency_key(cur):
             by_pkg[pkg_l] = group
+    return list(by_pkg.values())
 
-    batch_groups = list(by_pkg.values())
+
+def _derive_persistence_audit(outcome, static_run_id: int | None) -> dict[str, object]:
+    persistence_failed = bool(getattr(outcome, "persistence_failed", False))
+    canonical_failed = bool(getattr(outcome, "canonical_failed", False))
+    paper_grade_status = getattr(outcome, "paper_grade_status", "ok")
+    evidence_path = (
+        str(Path("evidence") / "static_runs" / str(static_run_id))
+        if static_run_id is not None
+        else None
+    )
+    return {
+        "paper_grade": paper_grade_status,
+        "persistence_failed": persistence_failed,
+        "canonical_failed": canonical_failed,
+        "evidence_path": evidence_path,
+        "audit_notes": list(getattr(outcome, "audit_notes", []) or []),
+    }
+
+
+def _write_batch_summary(
+    *,
+    batch_summary_path: Path,
+    batch_id: str,
+    batch_rows: list[dict[str, object]],
+    apps_total: int,
+    apps_completed: int,
+    apps_failed: int,
+    ended_at: str | None,
+) -> None:
+    payload = {
+        "batch_id": batch_id,
+        "started_at": batch_rows[0]["started_at"] if batch_rows else None,
+        "ended_at": ended_at,
+        "apps_total": apps_total,
+        "apps_completed": apps_completed,
+        "apps_failed": apps_failed,
+        "rows": batch_rows,
+    }
+    batch_summary_path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+
+
+def _execute_batch_run(
+    *,
+    group: object,
+    selection_label: str,
+    selection: ScopeSelection,
+    effective_params: RunParameters,
+    base_dir: Path,
+    batch_id: str,
+):
+    from scytaledroid.StaticAnalysis.cli.core.run_specs import build_static_run_spec
+    from scytaledroid.StaticAnalysis.cli.flows.run_dispatch import execute_run_spec
+
+    buffer_out = io.StringIO()
+    buffer_err = io.StringIO()
+    with contextlib.redirect_stdout(buffer_out), contextlib.redirect_stderr(buffer_err):
+        spec = build_static_run_spec(
+            selection=selection,
+            params=effective_params,
+            base_dir=base_dir,
+            run_mode="batch",
+            quiet=True,
+            noninteractive=True,
+            batch_id=batch_id,
+        )
+        outcome = execute_run_spec(spec)
+    return outcome
+
+
+def _run_dataset_batch(
+    groups,
+    base_dir: Path,
+    command,
+    static_service,
+    query_runner,
+    reset_static_analysis_data,
+) -> None:
+    from scytaledroid.DynamicAnalysis.profile_loader import load_profile_packages
+    from scytaledroid.StaticAnalysis.cli.core.models import ScopeSelection
+    from scytaledroid.StaticAnalysis.cli.core.models import RunParameters
+    from scytaledroid.StaticAnalysis.session import normalize_session_stamp
+    from datetime import datetime, timezone
+    import sys
+    import threading
+
+    dataset_pkgs = {pkg.lower() for pkg in load_profile_packages("RESEARCH_DATASET_ALPHA")}
+    if not dataset_pkgs:
+        print(status_messages.status("Research Dataset Alpha profile has no apps.", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    batch_groups = _resolve_batch_groups(groups, dataset_pkgs)
     if not batch_groups:
         print(
             status_messages.status(
@@ -391,19 +463,14 @@ def _run_dataset_batch(
             hb_thread = threading.Thread(target=_heartbeat, name="static-batch-heartbeat", daemon=True)
             hb_thread.start()
 
-            buffer_out = io.StringIO()
-            buffer_err = io.StringIO()
-            with contextlib.redirect_stdout(buffer_out), contextlib.redirect_stderr(buffer_err):
-                spec = build_static_run_spec(
-                    selection=selection,
-                    params=effective_params,
-                    base_dir=base_dir,
-                    run_mode="batch",
-                    quiet=True,
-                    noninteractive=True,
-                    batch_id=batch_id,
-                )
-                outcome = execute_run_spec(spec)
+            outcome = _execute_batch_run(
+                group=group,
+                selection_label=selection_label,
+                selection=selection,
+                effective_params=effective_params,
+                base_dir=base_dir,
+                batch_id=batch_id,
+            )
             hb_stop.set()
             hb_thread.join(timeout=1.0)
         except static_service.StaticServiceError as exc:
@@ -462,22 +529,40 @@ def _run_dataset_batch(
                 failures.append(f"{selection.label}: {failure_note}")
         duration_label = f"{duration:.1f}s" if isinstance(duration, (int, float)) else "n/a"
         static_run_id = None
+        plan_path = None
         try:
             if outcome and getattr(outcome, "results", None):
                 first = outcome.results[0]
                 static_run_id = getattr(first, "static_run_id", None)
+                plan_path = getattr(first, "dynamic_plan_path", None)
         except Exception:
             static_run_id = None
+            plan_path = None
+        audit = _derive_persistence_audit(outcome, static_run_id)
+        paper_grade_status = audit["paper_grade"]
+        if status_label != "ok" and paper_grade_status == "ok":
+            paper_grade_status = "warn"
         print(
             status_messages.status(
                 (
                     f"Completed: {selection_label} | status={status_label} | duration={duration_label}"
                     + (f" | static_run_id={static_run_id}" if static_run_id is not None else " | static_run_id=—")
+                    + f" | paper_grade={paper_grade_status}"
                     + (f" | note={failure_note}" if failure_note and status_label != "ok" else "")
                 ),
                 level="success" if status_label == "ok" else "warn",
             )
         )
+        if paper_grade_status != "ok" and static_run_id is not None:
+            print(
+                status_messages.status(
+                    (
+                        "Artifacts exist, but this run is not paper-grade. "
+                        f"See {audit['evidence_path']}; fix canonical/session policy."
+                    ),
+                    level="warn",
+                )
+            )
         batch_rows.append(
             {
                 "package_name": group.package_name,
@@ -485,6 +570,12 @@ def _run_dataset_batch(
                 "session_stamp": session_stamp,
                 "static_run_id": static_run_id,
                 "status": status_label,
+                "paper_grade": paper_grade_status,
+                "persistence_failed": audit["persistence_failed"],
+                "canonical_failed": audit["canonical_failed"],
+                "evidence_path": audit["evidence_path"],
+                "audit_notes": audit["audit_notes"],
+                "plan_path": plan_path,
                 "failures_count": len(getattr(outcome, "failures", []) or []) if outcome else 0,
                 "failures_sample": (getattr(outcome, "failures", []) or [])[:3] if outcome else [],
                 "aborted": bool(getattr(outcome, "aborted", False)) if outcome else False,
@@ -506,18 +597,14 @@ def _run_dataset_batch(
         )
         # Persist an incremental batch summary so an interrupted batch still leaves an audit trail.
         try:
-            incremental_payload = {
-                "batch_id": batch_id,
-                "started_at": batch_rows[0]["started_at"] if batch_rows else None,
-                "ended_at": None,
-                "apps_total": total,
-                "apps_completed": completed,
-                "apps_failed": len(failures),
-                "rows": batch_rows,
-            }
-            batch_summary_path.write_text(
-                json.dumps(incremental_payload, indent=2, sort_keys=True),
-                encoding="utf-8",
+            _write_batch_summary(
+                batch_summary_path=batch_summary_path,
+                batch_id=batch_id,
+                batch_rows=batch_rows,
+                apps_total=total,
+                apps_completed=completed,
+                apps_failed=len(failures),
+                ended_at=None,
             )
         except Exception:
             pass
@@ -539,17 +626,16 @@ def _run_dataset_batch(
         menu_utils.print_section("Batch summary")
         print(status_messages.status("All batch runs completed.", level="success"))
     elapsed = time.monotonic() - batch_start
-    batch_payload = {
-        "batch_id": batch_id,
-        "started_at": batch_rows[0]["started_at"] if batch_rows else None,
-        "ended_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "apps_total": total,
-        "apps_completed": completed,
-        "apps_failed": len(failures),
-        "rows": batch_rows,
-    }
     try:
-        batch_summary_path.write_text(json.dumps(batch_payload, indent=2, sort_keys=True), encoding="utf-8")
+        _write_batch_summary(
+            batch_summary_path=batch_summary_path,
+            batch_id=batch_id,
+            batch_rows=batch_rows,
+            apps_total=total,
+            apps_completed=completed,
+            apps_failed=len(failures),
+            ended_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        )
     except Exception as exc:
         print(status_messages.status(f"Failed to write batch summary: {exc}", level="warn"))
     print(status_messages.status(f"Completed {completed}/{total} apps in {elapsed:.1f}s.", level="info"))

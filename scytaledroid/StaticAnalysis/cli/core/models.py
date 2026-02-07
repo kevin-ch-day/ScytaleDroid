@@ -225,6 +225,7 @@ class AppRunResult:
     artifact_set_hash: str | None = None
     run_signature: str | None = None
     run_signature_version: str | None = None
+    dynamic_plan_path: str | None = None
 
     def severity_totals(self) -> Counter[str]:
         totals: Counter[str] = Counter()
@@ -256,6 +257,10 @@ class RunOutcome:
     base_dir: Path
     warnings: list[str] = field(default_factory=list)
     failures: list[str] = field(default_factory=list)
+    persistence_failed: bool = False
+    canonical_failed: bool = False
+    paper_grade_status: str = "ok"
+    audit_notes: list[dict[str, str]] = field(default_factory=list)
     aborted: bool = False
     abort_reason: str | None = None
     abort_signal: str | None = None
