@@ -179,7 +179,7 @@ def run_detector_pipeline(context) -> tuple[DetectorResult, ...]:
                             "stage_total": len(PIPELINE_STAGES),
                             "section_key": stage.section_key,
                             "detector_id": detector.detector_id,
-                            "status": "skipped",
+                            "status": "ERROR",
                             "duration_sec": float(duration),
                             "note": f"detector failed: {exc}",
                         }
@@ -206,7 +206,7 @@ def run_detector_pipeline(context) -> tuple[DetectorResult, ...]:
                             "stage_total": len(PIPELINE_STAGES),
                             "section_key": stage.section_key,
                             "detector_id": detector.detector_id,
-                            "status": "skipped",
+                            "status": "ERROR",
                             "duration_sec": float(duration),
                             "note": "detector returned invalid result",
                         }
@@ -272,7 +272,7 @@ def _build_error_result(
     return DetectorResult(
         detector_id=detector.detector_id,
         section_key=section_key,
-        status=Badge.SKIPPED,
+        status=Badge.ERROR,
         duration_sec=max(duration, 0.0),
         metrics={"error": message},
         evidence=tuple(),

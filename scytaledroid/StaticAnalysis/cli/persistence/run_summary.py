@@ -89,6 +89,8 @@ class PersistenceOutcome:
     persisted_findings: int = 0
     baseline_written: bool = False
     string_samples_persisted: int = 0
+    persistence_failed: bool = False
+    canonical_failed: bool = False
     errors: list[str] = field(default_factory=list)
 
     @property
@@ -528,6 +530,7 @@ def persist_run_summary(
     ended_at_utc: str | None = None,
     abort_reason: str | None = None,
     abort_signal: str | None = None,
+    paper_grade_requested: bool | None = None,
     dry_run: bool = False,
 ) -> PersistenceOutcome:
     outcome = PersistenceOutcome()
@@ -749,8 +752,15 @@ def persist_run_summary(
     db_errors: list[str] = []
 
     def _note_db_error(message: str) -> None:
-        outcome.add_error(message)
-        db_errors.append(message)
+        # Standardize DB persistence blockers so batch mode can display actionable reasons.
+        normalized = message if message.startswith("db_write_failed:") else f"db_write_failed:{message}"
+        outcome.add_error(normalized)
+        db_errors.append(normalized)
+
+    def _raise_db_error(op: str, reason: str) -> None:
+        token = truncate(f"{op}:{reason}", 240)
+        _note_db_error(token)
+        raise RuntimeError(token)
 
     baseline_counts = coerce_severity_counts(finding_totals)
     severity_counter: Counter[str] = Counter()
@@ -956,10 +966,12 @@ def persist_run_summary(
             with database_session() as db:
                 with db.transaction():
                     if run_id is not None:
-                        if not write_buckets(int(run_id), metrics_bundle.buckets, static_run_id=static_run_id):
-                            message = f"Failed to persist scoring buckets for run_id={run_id}"
-                            log.warning(message, category="static_analysis")
-                            _note_db_error(message)
+                        try:
+                            ok = write_buckets(int(run_id), metrics_bundle.buckets, static_run_id=static_run_id)
+                        except Exception as exc:
+                            _raise_db_error("buckets.write", f"{exc.__class__.__name__}:{exc}")
+                        if not ok:
+                            _raise_db_error("buckets.write", "returned_false")
 
                     if finding_rows:
                         if run_id is None:
@@ -977,28 +989,29 @@ def persist_run_summary(
                                 category="static_analysis",
                             )
                         elif not persist_findings(int(run_id), finding_rows, static_run_id=static_run_id):
-                            message = (
-                                f"Failed to persist findings for run_id={run_id} "
-                                f"static_run_id={static_run_id}"
+                            _raise_db_error(
+                                "findings.write",
+                                f"returned_false:run_id={run_id}:static_run_id={static_run_id}",
                             )
-                            log.warning(message, category="static_analysis")
-                            _note_db_error(message)
 
                     if static_run_id and correlation_rows:
-                        if not _persist_correlation_results(correlation_rows):
-                            message = (
-                                f"Correlation results persistence failed for static_run_id={static_run_id}"
-                            )
-                            log.warning(message, category="static_analysis")
-                            _note_db_error(message)
+                        try:
+                            ok = _persist_correlation_results(correlation_rows)
+                        except Exception as exc:
+                            _raise_db_error("correlations.write", f"{exc.__class__.__name__}:{exc}")
+                        if not ok:
+                            _raise_db_error("correlations.write", f"returned_false:static_run_id={static_run_id}")
 
                     if run_id is not None:
                         if control_summary:
-                            persist_masvs_controls(
-                                int(run_id),
-                                package_for_run,
-                                control_summary,
-                            )
+                            try:
+                                persist_masvs_controls(
+                                    int(run_id),
+                                    package_for_run,
+                                    control_summary,
+                                )
+                            except Exception as exc:
+                                _raise_db_error("masvs_controls.write", f"{exc.__class__.__name__}:{exc}")
                         else:
                             log.info(
                                 (
@@ -1007,7 +1020,10 @@ def persist_run_summary(
                                 ),
                                 category="static_analysis",
                             )
-                        persist_storage_surface_data(br, session_stamp, scope_label)
+                        try:
+                            persist_storage_surface_data(br, session_stamp, scope_label)
+                        except Exception as exc:
+                            _raise_db_error("storage_surface.write", f"{exc.__class__.__name__}:{exc}")
                         apk_identifier = safe_int(metadata_map.get("apk_id")) if metadata_map else None
                         if apk_identifier is None and metadata_map:
                             apk_identifier = safe_int(metadata_map.get("apkId"))
@@ -1025,33 +1041,44 @@ def persist_run_summary(
                                 if isinstance(profiles, Mapping):
                                     permission_profiles_map = profiles
 
-                        persist_permission_matrix(
-                            static_run_id=int(static_run_id) if static_run_id is not None else None,
-                            package_name=package_for_run,
-                            apk_id=apk_identifier,
-                            permission_profiles=permission_profiles_map,
-                        )
-                        persist_permission_risk(
-                            run_id=int(run_id),
-                            report=br,
-                            package_name=package_for_run,
-                            session_stamp=session_stamp,
-                            scope_label=scope_label,
-                            metrics_bundle=metrics_bundle,
-                            baseline_payload=baseline_payload,
-                        )
+                        try:
+                            persist_permission_matrix(
+                                static_run_id=int(static_run_id) if static_run_id is not None else None,
+                                package_name=package_for_run,
+                                apk_id=apk_identifier,
+                                permission_profiles=permission_profiles_map,
+                            )
+                        except Exception as exc:
+                            _raise_db_error("permission_matrix.write", f"{exc.__class__.__name__}:{exc}")
+                        try:
+                            persist_permission_risk(
+                                run_id=int(run_id),
+                                report=br,
+                                package_name=package_for_run,
+                                session_stamp=session_stamp,
+                                scope_label=scope_label,
+                                metrics_bundle=metrics_bundle,
+                                baseline_payload=baseline_payload,
+                            )
+                        except Exception as exc:
+                            _raise_db_error("permission_risk.write", f"{exc.__class__.__name__}:{exc}")
 
-                    if run_id is not None and not write_metrics(int(run_id), metrics_payload, static_run_id=static_run_id):
-                        message = f"Failed to persist metrics for run_id={run_id}"
-                        log.warning(message, category="static_analysis")
-                        _note_db_error(message)
+                    if run_id is not None:
+                        try:
+                            ok = write_metrics(int(run_id), metrics_payload, static_run_id=static_run_id)
+                        except Exception as exc:
+                            _raise_db_error("metrics.write", f"{exc.__class__.__name__}:{exc}")
+                        if not ok:
+                            _raise_db_error("metrics.write", f"returned_false:run_id={run_id}")
 
                     contributors = metrics_bundle.contributors
                     if contributors and run_id is not None:
-                        if not write_contributors(int(run_id), contributors):
-                            message = f"Failed to persist contributor breakdown for run_id={run_id}"
-                            log.warning(message, category="static_analysis")
-                            _note_db_error(message)
+                        try:
+                            ok = write_contributors(int(run_id), contributors)
+                        except Exception as exc:
+                            _raise_db_error("contributors.write", f"{exc.__class__.__name__}:{exc}")
+                        if not ok:
+                            _raise_db_error("contributors.write", f"returned_false:run_id={run_id}")
 
                     if run_id is not None:
                         baseline_section = baseline_payload.get("baseline") if isinstance(baseline_payload, Mapping) else {}
@@ -1075,13 +1102,14 @@ def persist_run_summary(
                             _note_db_error(err)
 
                     if db_errors:
-                        raise RuntimeError("Static persistence failed for one or more tables.")
+                        raise RuntimeError(db_errors[-1])
         except Exception as exc:
             persistence_failed = True
             message = f"Static persistence transaction failed for {run_package}: {exc}"
             log.warning(message, category="static_analysis")
             if message not in outcome.errors:
                 outcome.add_error(message)
+        outcome.persistence_failed = persistence_failed
     else:
         if finding_rows:
             sample = finding_rows[0] if finding_rows else {}
@@ -1120,11 +1148,12 @@ def persist_run_summary(
             )
 
     if static_run_id and not dry_run:
+        canonical_failed = False
+        if paper_grade_requested is None:
+            paper_grade_requested = True
+
         if persistence_failed:
             run_status = "FAILED"
-        from scytaledroid.Utils.System import output_prefs
-        ctx = output_prefs.get_run_context()
-        paper_grade_requested = bool(ctx.paper_grade_requested) if ctx else True
         # Canonical enforcement must check the *session_label* that was actually written for this run.
         # session_stamp may differ (e.g., auto-suffix collisions), and using the stamp here can
         # incorrectly fail PAPER_GRADE runs with "found 0 canonicals".
@@ -1158,10 +1187,11 @@ def persist_run_summary(
             except Exception:
                 canonical_count = 0
             if canonical_count != 1:
-                persistence_failed = True
+                canonical_failed = True
+                outcome.canonical_failed = True
                 run_status = "FAILED"
                 message = (
-                    "Canonical enforcement failed: expected exactly one canonical row "
+                    "canonical_enforcement_failed: expected exactly one canonical row "
                     f"for session_label={enforced_session_label}, found {canonical_count}."
                 )
                 log.warning(message, category="static_analysis")

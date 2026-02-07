@@ -16,7 +16,7 @@ from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
 from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
 from scytaledroid.DynamicAnalysis.pcap.correlate import write_static_dynamic_overlap
-from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import update_dataset_tracker
+from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import peek_next_run_protocol, update_dataset_tracker
 from scytaledroid.DynamicAnalysis.pcap.features import write_pcap_features
 from scytaledroid.DynamicAnalysis.pcap.indexer import index_pcap_by_app
 from scytaledroid.DynamicAnalysis.pcap.report import write_pcap_report
@@ -27,6 +27,7 @@ from scytaledroid.DynamicAnalysis.core.evidence_pack import EvidencePackWriter
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord, ObserverRecord, RunManifest
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
 from scytaledroid.DynamicAnalysis.core.session import DynamicSessionConfig
+from scytaledroid.DynamicAnalysis.core.static_context import build_operator_guidance, compute_static_context
 from scytaledroid.DynamicAnalysis.core.target_manager import TargetManager
 from scytaledroid.DynamicAnalysis.monitor import RunMonitor, RunMonitorConfig
 from scytaledroid.DynamicAnalysis.observers.base import Observer, ObserverHandle
@@ -105,6 +106,17 @@ class DynamicRunOrchestrator:
         scenario_hint = None
         if self.config.scenario_id == "permission_trigger":
             scenario_hint = self._build_permission_trigger_hint(plan_payload)
+        protocol = peek_next_run_protocol(
+            self.config.package_name,
+            tier=self.config.tier,
+        )
+        static_hint_lines = build_operator_guidance(
+            plan_payload,
+            run_profile=(protocol or {}).get("run_profile") if isinstance(protocol, dict) else None,
+        )
+        if static_hint_lines:
+            static_hint = "\n".join(static_hint_lines)
+            scenario_hint = f"{scenario_hint}\n{static_hint}" if scenario_hint else static_hint
         run_ctx = RunContext(
             dynamic_run_id=dynamic_run_id,
             package_name=self.config.package_name,
@@ -115,6 +127,8 @@ class DynamicRunOrchestrator:
             analysis_dir=writer.analysis_dir,
             notes_dir=writer.notes_dir,
             interactive=self.config.interactive,
+            run_profile=(protocol or {}).get("run_profile") if isinstance(protocol, dict) else None,
+            run_sequence=(protocol or {}).get("run_sequence") if isinstance(protocol, dict) else None,
             device_serial=self.config.device_serial,
             clear_logcat=self.config.clear_logcat,
             static_run_id=self.config.static_run_id,
@@ -138,6 +152,8 @@ class DynamicRunOrchestrator:
                 "observer_ids": [observer.observer_id for observer in self.observers],
                 "sampling_rate_s": self.config.sampling_rate_s,
                 "batch_id": getattr(run_ctx, "batch_id", None),
+                "run_profile": getattr(run_ctx, "run_profile", None),
+                "run_sequence": getattr(run_ctx, "run_sequence", None),
             },
         )
 
@@ -272,8 +288,25 @@ class DynamicRunOrchestrator:
                 "started_at": scenario_result.started_at.isoformat(),
                 "ended_at": scenario_result.ended_at.isoformat(),
                 "notes": scenario_result.notes,
+                "interaction_level": (
+                    "minimal"
+                    if getattr(scenario_result, "interaction_level", None) == "idle"
+                    else getattr(scenario_result, "interaction_level", None)
+                ),
             }
         )
+        interaction_level = (
+            "minimal"
+            if getattr(scenario_result, "interaction_level", None) == "idle"
+            else getattr(scenario_result, "interaction_level", None)
+        )
+        if interaction_level:
+            manifest.operator["interaction_level"] = interaction_level
+            manifest.operator.setdefault("run_context", {})["interaction_level"] = interaction_level
+            event_logger.log(
+                "operator_interaction_level",
+                {"interaction_level": interaction_level},
+            )
 
         observer_artifacts: list[ArtifactRecord] = []
         run_status = "success"
@@ -403,6 +436,8 @@ class DynamicRunOrchestrator:
                 or plan_payload.get("profile")
                 or plan_payload.get("scope_label")
             )
+        static_context = compute_static_context(plan_payload if isinstance(plan_payload, dict) else None)
+        static_tags = static_context.get("tags") if isinstance(static_context, dict) else []
         manifest = RunManifest(
             run_manifest_version=1,
             dynamic_run_id=run_ctx.dynamic_run_id,
@@ -418,6 +453,8 @@ class DynamicRunOrchestrator:
                 "profile_key": profile_key,
                 "static_plan_path": plan_artifact.relative_path if plan_artifact else None,
                 "static_plan_summary": self._summarize_plan(plan_payload),
+                "static_context_tags": static_tags,
+                "static_context": static_context,
             },
             environment={
                 "device_serial": run_ctx.device_serial,
@@ -440,6 +477,9 @@ class DynamicRunOrchestrator:
                 "tool_semver": app_config.APP_VERSION,
                 "tool_git_commit": get_git_commit(),
                 "schema_version": db_diagnostics.get_schema_version() or "<unknown>",
+                # Operator protocol metadata (not used for behavioral modeling).
+                "run_profile": getattr(run_ctx, "run_profile", None),
+                "run_sequence": getattr(run_ctx, "run_sequence", None),
                 # RunContext snapshot: immutable execution context for reproducibility.
                 "run_context": {
                     "interactive": bool(run_ctx.interactive),
@@ -452,6 +492,9 @@ class DynamicRunOrchestrator:
                     "enable_monitor": bool(getattr(self.config, "enable_monitor", False)),
                     "monitor_verbose": bool(getattr(self.config, "monitor_verbose", False)),
                     "batch_id": getattr(run_ctx, "batch_id", None),
+                    "run_profile": getattr(run_ctx, "run_profile", None),
+                    "run_sequence": getattr(run_ctx, "run_sequence", None),
+                    "static_context_tags": static_tags,
                 },
             },
         )

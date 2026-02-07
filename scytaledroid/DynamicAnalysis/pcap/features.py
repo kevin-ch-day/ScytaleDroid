@@ -33,7 +33,7 @@ def write_pcap_features(
     except (OSError, json.JSONDecodeError):
         _log(event_logger, "pcap_features_skip", {"reason": "pcap_report_invalid"})
         return None
-    features = _extract_features(report, cfg)
+    features = _extract_features(report, cfg, operator=(manifest.operator or {}), target=(manifest.target or {}))
     if not features:
         _log(event_logger, "pcap_features_skip", {"reason": "pcap_features_empty"})
         return None
@@ -50,7 +50,13 @@ def write_pcap_features(
     )
 
 
-def _extract_features(report: dict[str, Any], cfg: PcapFeatureConfig) -> dict[str, Any]:
+def _extract_features(
+    report: dict[str, Any],
+    cfg: PcapFeatureConfig,
+    *,
+    operator: dict[str, Any] | None = None,
+    target: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     capinfos = (report.get("capinfos") or {}).get("parsed") or {}
     packet_count = _safe_int(capinfos.get("packet_count"))
     data_bytes = _safe_int(capinfos.get("data_size_bytes"))
@@ -88,6 +94,16 @@ def _extract_features(report: dict[str, Any], cfg: PcapFeatureConfig) -> dict[st
         "quality": {
             "report_status": report.get("report_status"),
             "missing_tools": report.get("missing_tools") or [],
+            "protocol": {
+                "run_profile": (operator or {}).get("run_profile"),
+                "run_sequence": (operator or {}).get("run_sequence"),
+                "interaction_level": (operator or {}).get("interaction_level"),
+            },
+            "static_context": {
+                "tags": (target or {}).get("static_context_tags") or [],
+                "summary": (target or {}).get("static_context") or {},
+                "note": "Static context is advisory and excluded from behavioral modeling.",
+            },
             "note": "Fields under quality are excluded from behavioral modeling.",
         },
     }

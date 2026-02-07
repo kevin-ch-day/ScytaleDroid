@@ -53,6 +53,7 @@ _BADGE_COLOURS = {
     "INFO": "34",
     "WARN": "33",
     "FAIL": "31",
+    "ERROR": "31",
     "SKIPPED": "90",
 }
 

@@ -34,6 +34,48 @@ def _format_eta(seconds: float | int | None) -> str:
     return f"{mins}m {secs}s"
 
 
+def _safe_split_token(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    token = value.strip()
+    if not token:
+        return None
+    # Avoid leaking full paths into batch logs.
+    token = token.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    if token.lower().endswith(".apk"):
+        token = token[:-4]
+    return token if token else None
+
+
+def _artifact_set_for_batch_log(artifact: object) -> str:
+    """Resolve artifact set for batch logs ("base" or a split token)."""
+    from scytaledroid.StaticAnalysis.cli.views.view_sections import extract_integrity_profiles
+
+    artifact_set = "base"
+    try:
+        _, _, artifact_profile, _ = extract_integrity_profiles(getattr(artifact, "report", None))
+        role = str((artifact_profile or {}).get("role") or "").lower()
+        if role and role != "base":
+            meta = artifact.metadata if isinstance(getattr(artifact, "metadata", None), dict) else {}
+            artifact_set = (
+                _safe_split_token(meta.get("split_name"))
+                or _safe_split_token(meta.get("split"))
+                or _safe_split_token(meta.get("artifact"))
+                or _safe_split_token(getattr(artifact, "label", None))
+                or "split"
+            )
+        else:
+            artifact_set = "base"
+    except Exception:
+        meta = artifact.metadata if isinstance(getattr(artifact, "metadata", None), dict) else {}
+        artifact_set = (
+            _safe_split_token(meta.get("split_name"))
+            or _safe_split_token(getattr(artifact, "label", None))
+            or "base"
+        )
+    return artifact_set
+
+
 def _resolve_batch_groups(groups, dataset_pkgs: set[str]) -> list[object]:
     # Batch determinism: select one "best" artifact group per package (newest by session stamp + mtime).
     def _artifact_mtime(artifact) -> float:
@@ -81,7 +123,8 @@ def _resolve_batch_groups(groups, dataset_pkgs: set[str]) -> list[object]:
         cur = by_pkg.get(pkg_l)
         if cur is None or _group_recency_key(group) > _group_recency_key(cur):
             by_pkg[pkg_l] = group
-    return list(by_pkg.values())
+    # Deterministic order: stable across runs given the same library state.
+    return sorted(by_pkg.values(), key=lambda g: str(getattr(g, "package_name", "")).lower())
 
 
 def _derive_persistence_audit(outcome, static_run_id: int | None) -> dict[str, object]:
@@ -102,6 +145,25 @@ def _derive_persistence_audit(outcome, static_run_id: int | None) -> dict[str, o
         "audit_notes": list(getattr(outcome, "audit_notes", []) or []),
         "errors_sample": errors[-3:],
     }
+
+
+def _format_audit_notes(notes: object, *, limit: int = 3) -> str | None:
+    if not isinstance(notes, list) or not notes:
+        return None
+    parts: list[str] = []
+    for item in notes[: max(1, int(limit))]:
+        if isinstance(item, dict):
+            code = str(item.get("code") or "").strip() or "note"
+            msg = str(item.get("message") or "").strip()
+            if msg:
+                parts.append(f"{code}: {msg}")
+            else:
+                parts.append(code)
+        else:
+            text = str(item).strip()
+            if text:
+                parts.append(text)
+    return "; ".join(parts) if parts else None
 
 
 def _write_batch_summary(
@@ -223,7 +285,6 @@ def run_dataset_static_batch(
                 level="info",
             )
         )
-        print(status_messages.status("Status: running (quiet batch mode)", level="info"))
 
         params = RunParameters(
             profile=command.profile,
@@ -234,6 +295,7 @@ def run_dataset_static_batch(
             session_label=session_stamp,
             canonical_action="first_run",
             show_split_summaries=False,
+            scan_splits=False,
         )
         effective_params = apply_command_overrides(params, command)
 
@@ -349,6 +411,36 @@ def run_dataset_static_batch(
         errors_sample = audit.get("errors_sample") if isinstance(audit, dict) else None
         errors_list = errors_sample if isinstance(errors_sample, list) else []
 
+        # Compact blocker summary (useful for debugging persistence_failed/canonical_failed).
+        blockers_text = _format_audit_notes(audit_notes_list, limit=2)
+
+        # High-signal stage summary (WARN/FAIL only), collapsed across split APK artifacts.
+        try:
+            if outcome and getattr(outcome, "results", None):
+                app_result = outcome.results[0]
+                from scytaledroid.StaticAnalysis.cli.batch.log_semantics import (
+                    BatchStageLevel,
+                    summarize_stage_levels,
+                )
+
+                stage_lines = summarize_stage_levels(
+                    app_result,
+                    artifact_set_resolver=_artifact_set_for_batch_log,
+                )
+                for item in stage_lines:
+                    # Keep WARN/FINDING/POLICY_FAIL/ERROR visible in batch logs.
+                    # These are stage outcomes, not run status.
+                    if item.level == BatchStageLevel.ERROR:
+                        level = "error"
+                    elif item.level == BatchStageLevel.WARN and "EVIDENCE" in item.format():
+                        # Evidence warnings are informational (not app risk, not tooling failure).
+                        level = "info"
+                    else:
+                        level = "warn"
+                    print(status_messages.status(item.format(), level=level))
+        except Exception:
+            pass
+
         print(
             status_messages.status(
                 (
@@ -356,6 +448,7 @@ def run_dataset_static_batch(
                     + (f" | static_run_id={static_run_id}" if static_run_id is not None else " | static_run_id=—")
                     + f" | paper_grade={paper_grade_status}"
                     + (f" | note={failure_note}" if failure_note and status_label != "ok" else "")
+                    + (f" | blockers={blockers_text}" if blockers_text and status_label != "ok" else "")
                 ),
                 level="success" if status_label == "ok" else "warn",
             )
@@ -468,4 +561,3 @@ def run_dataset_static_batch(
 
 
 __all__ = ["run_dataset_static_batch"]
-

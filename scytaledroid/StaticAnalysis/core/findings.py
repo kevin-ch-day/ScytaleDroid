@@ -35,6 +35,7 @@ class Badge(StrEnum):
     INFO = "INFO"
     WARN = "WARN"
     FAIL = "FAIL"
+    ERROR = "ERROR"
     SKIPPED = "skipped"
 
 

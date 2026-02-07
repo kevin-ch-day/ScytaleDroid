@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from scytaledroid.Config import app_config
+from scytaledroid.DynamicAnalysis.core.static_context import compute_static_context
 
 
 def export_pcap_features_csv() -> Path | None:
@@ -36,6 +37,9 @@ def export_pcap_features_csv() -> Path | None:
                 "started_at": manifest.get("started_at"),
                 "ended_at": manifest.get("ended_at"),
                 "tier": (manifest.get("operator") or {}).get("tier"),
+                "run_profile": (manifest.get("operator") or {}).get("run_profile"),
+                "run_sequence": (manifest.get("operator") or {}).get("run_sequence"),
+                "interaction_level": (manifest.get("operator") or {}).get("interaction_level"),
             }
         )
         rows.append(row)
@@ -62,7 +66,7 @@ def export_dynamic_run_summary_csv() -> Path | None:
         features = _load_json(run_dir / "analysis" / "pcap_features.json")
         if not manifest or not summary or not report or not features:
             continue
-        row = _build_run_summary_row(manifest, summary, report, overlap, features)
+        row = _build_run_summary_row(run_dir, manifest, summary, report, overlap, features)
         if row:
             rows.append(row)
     if not rows:
@@ -88,6 +92,7 @@ def _flatten_features(features: dict[str, Any]) -> dict[str, Any]:
 
 
 def _build_run_summary_row(
+    run_dir: Path,
     manifest: dict[str, Any],
     summary: dict[str, Any],
     report: dict[str, Any],
@@ -95,6 +100,20 @@ def _build_run_summary_row(
     features: dict[str, Any],
 ) -> dict[str, Any] | None:
     target = manifest.get("target") or {}
+    static_tags = target.get("static_context_tags")
+    static_context = target.get("static_context") if isinstance(target.get("static_context"), dict) else None
+    # Back-compat: older runs won't have static tags in the manifest. Derive them
+    # from the embedded static plan, without modifying the evidence pack.
+    if not isinstance(static_tags, list):
+        plan = _load_json(run_dir / "inputs" / "static_dynamic_plan.json")
+        if isinstance(plan, dict):
+            derived = compute_static_context(plan)
+            static_tags = derived.get("tags") if isinstance(derived.get("tags"), list) else None
+            static_context = derived if isinstance(derived, dict) else static_context
+    if isinstance(static_tags, list):
+        static_tags_str = json.dumps(static_tags, sort_keys=True)
+    else:
+        static_tags_str = None
     telemetry = summary.get("telemetry") or {}
     stats = telemetry.get("stats") or {}
     capture = summary.get("capture") or {}
@@ -109,6 +128,14 @@ def _build_run_summary_row(
     return {
         "app": target.get("package_name"),
         "run_id": manifest.get("dynamic_run_id"),
+        "run_profile": (manifest.get("operator") or {}).get("run_profile"),
+        "run_sequence": (manifest.get("operator") or {}).get("run_sequence"),
+        "interaction_level": (manifest.get("operator") or {}).get("interaction_level"),
+        "static_tags": static_tags_str,
+        "static_run_id": target.get("static_run_id"),
+        "exported_components_total": ((static_context or {}).get("exported_components") or {}).get("total")
+        if isinstance(static_context, dict)
+        else None,
         "sampling_duration_seconds": stats.get("sampling_duration_seconds"),
         "pcap_valid": capture.get("pcap_valid"),
         "overlap_ratio": (overlap or {}).get("overlap_ratio"),

@@ -110,6 +110,7 @@ def build_pipeline_summary(results: Sequence[DetectorResult]) -> Mapping[str, ob
     status_counts: Counter[str] = Counter(result.status.value for result in results)
     error_detectors: list[dict[str, object]] = []
     policy_fail_detectors: list[dict[str, object]] = []
+    finding_fail_detectors: list[dict[str, object]] = []
 
     severity_counter: Counter[str] = Counter()
     for result in results:
@@ -121,7 +122,7 @@ def build_pipeline_summary(results: Sequence[DetectorResult]) -> Mapping[str, ob
             metrics_payload.get("error"),
             *(note.strip() for note in result.notes if isinstance(note, str)),
         )
-        if error_text and result.status is Badge.SKIPPED:
+        if error_text and result.status is Badge.ERROR:
             error_detectors.append(
                 {
                     "detector": result.detector_id,
@@ -130,12 +131,13 @@ def build_pipeline_summary(results: Sequence[DetectorResult]) -> Mapping[str, ob
                 }
             )
         elif result.status is Badge.FAIL:
-            policy_fail_detectors.append(
-                {
-                    "detector": result.detector_id,
-                    "section": result.section_key,
-                }
-            )
+            metrics_payload = _serialise_metrics(result.metrics)
+            is_policy_gate = bool(metrics_payload.get("policy_gate", False))
+            entry = {"detector": result.detector_id, "section": result.section_key}
+            if is_policy_gate:
+                policy_fail_detectors.append(entry)
+            else:
+                finding_fail_detectors.append(entry)
 
     total_findings = int(sum(severity_counter.values()))
 
@@ -198,6 +200,10 @@ def build_pipeline_summary(results: Sequence[DetectorResult]) -> Mapping[str, ob
     if policy_fail_detectors:
         summary["policy_fail_count"] = len(policy_fail_detectors)
         summary["policy_fail_detectors"] = policy_fail_detectors
+
+    if finding_fail_detectors:
+        summary["finding_fail_count"] = len(finding_fail_detectors)
+        summary["finding_fail_detectors"] = finding_fail_detectors
 
     if skipped_details:
         summary["skipped_detectors"] = skipped_details

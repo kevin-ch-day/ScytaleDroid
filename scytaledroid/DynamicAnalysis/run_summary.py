@@ -14,6 +14,8 @@ from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
 def print_run_summary(result, duration_label: str) -> None:
     status = result.status or "unknown"
     duration_seconds = result.elapsed_seconds or result.duration_seconds
+    run_dir = resolve_evidence_path(result.evidence_path) if result.evidence_path else None
+    manifest = _load_manifest(run_dir) if run_dir else None
     print()
     lines = [
         ("Package", result.package_name or "unknown"),
@@ -21,15 +23,27 @@ def print_run_summary(result, duration_label: str) -> None:
         ("Duration", f"{duration_label} ({duration_seconds}s)"),
         ("Status", status),
     ]
+    if manifest:
+        operator = manifest.get("operator") or {}
+        run_profile = operator.get("run_profile")
+        run_sequence = operator.get("run_sequence")
+        if run_profile:
+            seq_label = f"#{run_sequence}" if run_sequence else "—"
+            lines.append(("Run profile", f"{run_profile} (run {seq_label})"))
+        interaction = operator.get("interaction_level")
+        if interaction:
+            lines.append(("Interaction", str(interaction)))
     dataset_validity = _dataset_validity_label(result.dynamic_run_id)
     if dataset_validity:
         lines.append(("Dataset validity", dataset_validity))
+        if dataset_validity.startswith("❌"):
+            reasons = _dataset_validity_reasons(result.dynamic_run_id)
+            if reasons:
+                lines.append(("Dataset issues", ", ".join(reasons)))
     if result.evidence_path:
         lines.append(("Evidence", result.evidence_path))
     status_messages.print_strip("Session", lines, width=70)
 
-    run_dir = resolve_evidence_path(result.evidence_path) if result.evidence_path else None
-    manifest = _load_manifest(run_dir) if run_dir else None
     summary_payload = _load_summary(run_dir) if run_dir else None
     engine_summary = _load_engine_summary(run_dir) if run_dir else None
     if manifest:
@@ -212,6 +226,31 @@ def _dataset_validity_label(dynamic_run_id: str | None) -> str | None:
             if valid is False:
                 return "❌ invalid"
             return "—"
+    return None
+
+
+def _dataset_validity_reasons(dynamic_run_id: str | None) -> list[str] | None:
+    if not dynamic_run_id:
+        return None
+    tracker = load_dataset_tracker()
+    apps = tracker.get("apps") if isinstance(tracker, dict) else {}
+    if not isinstance(apps, dict):
+        return None
+    for entry in apps.values():
+        if not isinstance(entry, dict):
+            continue
+        runs = entry.get("runs")
+        if not isinstance(runs, list):
+            continue
+        for run in runs:
+            if not isinstance(run, dict):
+                continue
+            if run.get("run_id") != dynamic_run_id:
+                continue
+            reasons = run.get("validity_reasons")
+            if isinstance(reasons, list):
+                return [str(item) for item in reasons if item]
+            return None
     return None
 
 

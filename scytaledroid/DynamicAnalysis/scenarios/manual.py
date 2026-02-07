@@ -19,6 +19,7 @@ class ScenarioResult:
     started_at: datetime
     ended_at: datetime
     notes: str | None = None
+    interaction_level: str | None = None
 
 
 class ManualScenarioRunner:
@@ -29,14 +30,31 @@ class ManualScenarioRunner:
         on_start: Callable[[], None] | None = None,
         on_end: Callable[[], None] | None = None,
     ) -> ScenarioResult:
+        interaction_level = None
         if run_ctx.interactive:
             duration = f"{run_ctx.duration_seconds}s" if run_ctx.duration_seconds else "unspecified"
+            profile = getattr(run_ctx, "run_profile", None)
+            sequence = getattr(run_ctx, "run_sequence", None)
             print(
                 status_messages.status(
-                    f"Scenario: {run_ctx.scenario_id} (duration {duration}). Use the app normally.",
+                    f"Scenario: {run_ctx.scenario_id} (duration {duration}).",
                     level="info",
                 )
             )
+            if profile:
+                seq_label = f" (Run #{sequence})" if sequence else ""
+                print(status_messages.status(f"Run profile: {profile}{seq_label}.", level="info"))
+                if profile == "baseline_idle":
+                    print(
+                        status_messages.status(
+                            "Protocol: keep the app in the foreground; minimize interactions (baseline capture).",
+                            level="info",
+                        )
+                    )
+                else:
+                    print(status_messages.status("Protocol: use the app normally.", level="info"))
+            else:
+                print(status_messages.status("Protocol: use the app normally.", level="info"))
             print(status_messages.status("Tip: keep the app in the foreground during the session.", level="info"))
             if run_ctx.scenario_hint:
                 print(status_messages.status(run_ctx.scenario_hint, level="info"))
@@ -54,6 +72,7 @@ class ManualScenarioRunner:
                 on_end()
             elapsed = int((ended_at - started_at).total_seconds())
             print(status_messages.status(f"Scenario elapsed time: {_format_duration(elapsed)}.", level="info"))
+            interaction_level = _prompt_interaction_level(profile)
         else:
             started_at = datetime.now(UTC)
             if on_start:
@@ -62,7 +81,21 @@ class ManualScenarioRunner:
             ended_at = datetime.now(UTC)
             if on_end:
                 on_end()
-        return ScenarioResult(started_at=started_at, ended_at=ended_at)
+        return ScenarioResult(started_at=started_at, ended_at=ended_at, interaction_level=interaction_level)
+
+
+def _prompt_interaction_level(profile: str | None) -> str:
+    # This is operator protocol metadata. It is used for QA and stratified analysis,
+    # not as a behavioral feature.
+    valid = ["minimal", "normal", "active"]
+    default = "minimal" if profile == "baseline_idle" else "normal"
+    print(status_messages.status("Operator note: tag interaction level for this run.", level="info"))
+    return prompt_utils.get_choice(
+        valid,
+        default=default,
+        casefold=True,
+        invalid_message="Choose one of: minimal, normal, active.",
+    )
 
 
 def _run_countdown(duration_seconds: int) -> datetime:

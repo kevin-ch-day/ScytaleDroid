@@ -63,6 +63,10 @@ def _default_run_map_overwrite() -> bool:
 def _default_show_splits() -> bool:
     return _env_flag("SCYTALEDROID_STATIC_SHOW_SPLITS", False)
 
+def _default_scan_splits() -> bool:
+    # Default to scanning split artifacts in interactive mode. Batch dataset runs can override.
+    return _env_flag("SCYTALEDROID_STATIC_SCAN_SPLITS", True)
+
 
 def _default_long_string_length() -> int:
     try:
@@ -128,6 +132,7 @@ class RunParameters:
     strict_persistence: bool = field(default_factory=_default_strict_persistence)
     run_map_overwrite: bool = field(default_factory=_default_run_map_overwrite)
     show_split_summaries: bool = field(default_factory=_default_show_splits)
+    scan_splits: bool = field(default_factory=_default_scan_splits)
     progress_every: int = field(default_factory=_default_progress_every)
     selected_tests: tuple[str, ...] = tuple()
     evidence_lines: int = 2

@@ -17,6 +17,8 @@ class RunContext:
     analysis_dir: Path
     notes_dir: Path
     interactive: bool
+    run_profile: str | None = None
+    run_sequence: int | None = None
     device_serial: str | None = None
     clear_logcat: bool = True
     static_run_id: int | None = None

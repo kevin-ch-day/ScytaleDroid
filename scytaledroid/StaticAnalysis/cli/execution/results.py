@@ -116,8 +116,7 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
     but suppress all console rendering in quiet batch.
     """
 
-    prefs = output_prefs.get()
-    silent_output = bool(prefs.quiet and prefs.batch)
+    silent_output = bool(output_prefs.effective_quiet() and output_prefs.effective_batch())
     if silent_output:
         import contextlib
         import io
@@ -133,7 +132,8 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
 def _render_run_results_impl(outcome: RunOutcome, params: RunParameters) -> None:
     """Internal implementation for render_run_results (may print)."""
 
-    prefs = output_prefs.get()
+    # Avoid mutable prefs reads for execution decisions; use the frozen run context.
+    prefs_verbose = bool(output_prefs.get().verbose)
 
     aggregated: Counter[str] = Counter()
     artifact_count = 0
@@ -538,6 +538,7 @@ def _render_run_results_impl(outcome: RunOutcome, params: RunParameters) -> None
                     ended_at_utc=ended_at_utc,
                     abort_reason=abort_reason,
                     abort_signal=abort_signal,
+                    paper_grade_requested=params.paper_grade_requested,
                     dry_run=params.dry_run,
                 )
                 if outcome_status:
@@ -885,8 +886,7 @@ def _render_run_results_impl(outcome: RunOutcome, params: RunParameters) -> None
     session_stamp = params.session_stamp
     if not params.dry_run:
         print()
-        prefs = output_prefs.get()
-        if prefs.batch or prefs.noninteractive:
+        if output_prefs.effective_batch() or output_prefs.effective_noninteractive():
             # Batch/noninteractive runs must not block on UI prompts.
             show_details = False
         else:
@@ -1094,11 +1094,12 @@ def _render_run_results_impl(outcome: RunOutcome, params: RunParameters) -> None
                 trend_deltas,
                 scope_label=params.scope_label,
             )
-        prefs = output_prefs.get()
+        # Frozen run context governs whether we can prompt for details.
+        batch_or_noninteractive = bool(output_prefs.effective_batch() or output_prefs.effective_noninteractive())
         if (
             params.verbose_output
             and len(outcome.results) <= 5
-            and not (prefs.batch or prefs.noninteractive)
+            and not batch_or_noninteractive
         ):
             _interactive_detail_loop(outcome, params)
 
@@ -1153,8 +1154,7 @@ def _render_run_results_impl(outcome: RunOutcome, params: RunParameters) -> None
 
 
 def _interactive_detail_loop(outcome: RunOutcome, params: RunParameters) -> None:
-    prefs = output_prefs.get()
-    if prefs.batch or prefs.noninteractive:
+    if output_prefs.effective_batch() or output_prefs.effective_noninteractive():
         return
     while True:
         resp = prompt_utils.prompt_text(

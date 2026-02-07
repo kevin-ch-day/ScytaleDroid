@@ -65,7 +65,8 @@ def render_app_completion(
     skipped = summary.get("detector_skipped")
     duration = summary.get("total_duration_sec")
     status_counts = summary.get("status_counts") if isinstance(summary.get("status_counts"), Mapping) else {}
-    fail_count = int(status_counts.get("FAIL", 0) or 0)
+    policy_fail_count = int(summary.get("policy_fail_count", 0) or 0)
+    finding_fail_count = int(summary.get("finding_fail_count", 0) or 0)
     warn_count = int(status_counts.get("WARN", 0) or 0)
     ok_count = int(status_counts.get("OK", 0) or 0)
     info_count = int(status_counts.get("INFO", 0) or 0)
@@ -74,7 +75,9 @@ def render_app_completion(
     status_line = "Checks complete"
     if executed is not None and total is not None:
         status_line += f": {executed}/{total} executed"
-    status_line += f" · ok={ok_count} warn={warn_count} policy_fail={fail_count}"
+    status_line += f" · ok={ok_count} warn={warn_count} policy_fail={policy_fail_count}"
+    if finding_fail_count:
+        status_line += f" fail={finding_fail_count}"
     if error_count:
         status_line += f" error={error_count}"
     if info_count:
@@ -86,7 +89,7 @@ def render_app_completion(
     print(status_line)
 
     policy_failures = summary.get("policy_fail_detectors")
-    if fail_count and isinstance(policy_failures, Sequence) and policy_failures:
+    if policy_fail_count and isinstance(policy_failures, Sequence) and policy_failures:
         def _policy_label(section: str) -> str:
             lookup = {
                 "integrity": "Integrity identity",

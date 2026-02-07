@@ -185,7 +185,13 @@ def _dedupe_artifacts(artifacts: Sequence) -> list:
         except Exception:
             sha = None
         try:
-            split_label = getattr(artifact, "artifact_label", None) or getattr(artifact, "display_path", "")
+            # Use stable split identifiers over paths so the same artifact set does not get scanned twice
+            # due to label/path differences.
+            split_name, _ = _split_name_for_artifact_with_reason(artifact)
+            if split_name:
+                split_label = split_name
+            else:
+                split_label = getattr(artifact, "artifact_label", None) or getattr(artifact, "display_path", "")
         except Exception:
             split_label = ""
         key = (_normalise_digest(sha, artifact), split_label or "")

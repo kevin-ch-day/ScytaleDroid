@@ -77,8 +77,7 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
     total_artifacts = sum(len(_dedupe_artifacts(group.artifacts)) for group in selection.groups)
     show_splits = _show_split_breakdown()
     show_artifacts = (not params.dry_run) or bool(params.artifact_detail)
-    prefs = output_prefs.get()
-    if prefs.quiet and prefs.batch:
+    if output_prefs.effective_quiet() and output_prefs.effective_batch():
         show_artifacts = False
     display_name_map = load_display_name_map(selection.groups)
     progress = _PipelineProgress(
@@ -208,6 +207,10 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
             break
 
         artifacts = _dedupe_artifacts(group.artifacts)
+        if output_prefs.effective_batch() and output_prefs.effective_quiet() and not bool(getattr(params, "scan_splits", True)):
+            # Batch dataset runs should be predictable and cheap: scan base only.
+            base_artifact = getattr(group, "base_artifact", None)
+            artifacts = [base_artifact] if base_artifact is not None else artifacts[:1]
         app_result.discovered_artifacts = len(artifacts)
         if not artifacts:
             message = f"No artifacts available for {group.package_name}; skipping."
@@ -523,36 +526,9 @@ def generate_report(
             }
         )
 
+    # Batch quiet mode should be deterministic and low-noise: do not stream per-stage progress.
+    # High-signal WARN/FAIL summaries are printed by the batch runner.
     stage_observer = None
-    if output_prefs.effective_batch() and output_prefs.effective_quiet():
-        # Batch runs redirect stdout/stderr for quiet mode. Provide limited stage-level visibility
-        # by emitting to sys.__stdout__ from within the detector pipeline.
-        pkg = getattr(artifact, "package_name", None) or str(metadata_payload.get("package_name") or "")
-        artifact_label = getattr(artifact, "artifact_label", None) or getattr(artifact, "display_path", None) or "artifact"
-        last_emit = {"t": 0.0}
-
-        def _emit(payload: Mapping[str, object]) -> None:
-            try:
-                if payload.get("event") != "stage_end":
-                    return
-                # Throttle: always show WARN/FAIL; show long stages; otherwise keep sparse.
-                status = str(payload.get("status") or "")
-                dur = float(payload.get("duration_sec") or 0.0)
-                now = time.monotonic()
-                if status.upper() not in {"WARN", "FAIL"} and dur < 1.0 and (now - last_emit["t"]) < 30.0:
-                    return
-                last_emit["t"] = now
-                idx = int(payload.get("stage_index") or 0)
-                total = int(payload.get("stage_total") or 0)
-                section = str(payload.get("section_key") or "unknown")
-                msg = f"Stage {idx:02d}/{total:02d}: {section} | {status} | {dur:.2f}s"
-                prefix = f"{pkg} - {artifact_label}"
-                sys.__stdout__.write(status_messages.status(f"{prefix} | {msg}", level="info") + "\n")
-                sys.__stdout__.flush()
-            except Exception:
-                return
-
-        stage_observer = _emit
 
     try:
         report = analyze_apk(
