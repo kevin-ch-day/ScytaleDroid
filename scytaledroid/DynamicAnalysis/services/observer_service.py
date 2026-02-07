@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-
 from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
 from scytaledroid.DynamicAnalysis.observers.pcapdroid_capture import PCAPDROID_PACKAGE
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
@@ -11,13 +9,12 @@ from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
 _OBSERVER_PREFS: dict[tuple[str, str], dict[str, bool]] = {}
 
 
-def select_observers(device_serial: str, *, mode: str) -> list[str]:
+def select_observers(device_serial: str, *, mode: str, prompt_enabled: bool) -> list[str]:
     prefs = _OBSERVER_PREFS.get((device_serial, mode), {})
     pcap_available = _device_has_pcapdroid(device_serial)
     default_pcap = prefs.get("pcapdroid", pcap_available)
     default_logs = prefs.get("system_log", True)
 
-    prompt_enabled = os.environ.get("SCYTALEDROID_OBSERVER_PROMPTS") == "1"
     if not prompt_enabled:
         use_pcapdroid = bool(default_pcap) if pcap_available else False
         use_logs = bool(default_logs)

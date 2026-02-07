@@ -37,7 +37,7 @@ def run_dynamic_session(
     observer_ids = set(config.observer_ids or ("system_log_capture",))
     observers = []
     if "pcapdroid_capture" in observer_ids:
-        observers.append(PcapdroidCaptureObserver())
+        observers.append(PcapdroidCaptureObserver(api_key=getattr(config, "pcapdroid_api_key", None)))
     if "system_log_capture" in observer_ids:
         observers.append(SystemLogObserver())
 

@@ -31,6 +31,10 @@ class DynamicSessionConfig:
     # Paper-grade/reproducibility rule: env vars influence defaults only at entrypoint.
     # Downstream modules must rely on this frozen flag, not os.getenv().
     require_dynamic_schema: bool = True
+    # Observer/tool runtime config must be frozen at config build time (no env reads in observers).
+    observer_prompts_enabled: bool = False
+    # Secret value used only for PCAPdroid observer start/stop. Never written to evidence/DB.
+    pcapdroid_api_key: str | None = None
 
 
 @dataclass

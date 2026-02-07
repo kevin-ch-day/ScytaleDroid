@@ -53,7 +53,7 @@ def test_correlation_missing_baseline_is_warn_not_fail(monkeypatch):
     result = CorrelationDetector().run(ctx)
     assert result.status is Badge.WARN
     assert "reason_codes" in (result.metrics or {})
-    assert "insufficient_evidence:baseline_missing" in (result.metrics or {}).get("reason_codes", [])
+    assert "not_applicable:baseline_missing" in (result.metrics or {}).get("reason_codes", [])
 
     risk = next((f for f in result.findings if f.finding_id == "risk_profile"), None)
     assert risk is not None
@@ -104,4 +104,3 @@ def test_correlation_exception_is_error(monkeypatch):
     result = CorrelationDetector().run(ctx)
     assert result.status is Badge.ERROR
     assert "error" in (result.metrics or {})
-

@@ -27,7 +27,8 @@ from ...modules import resolve_category
 from ...persistence import ReportStorageError, save_report
 from ..core.models import AppRunResult, ArtifactOutcome, RunOutcome, RunParameters, ScopeSelection
 from ..core.run_context import StaticRunContext
-from ..persistence.run_summary import create_static_run_ledger
+from ..persistence.run_summary import create_static_run_ledger, finalize_open_static_runs
+from .heartbeat_state import set_stage as _hb_set_stage
 from .scan_identity_helpers import (
     _artifact_manifest_sha256,
     _compute_config_hash,
@@ -41,6 +42,7 @@ from .scan_view import (
     render_app_start,
     render_resource_warnings,
 )
+from .heartbeat_state import set_app as _hb_set_app, set_stage as _hb_set_stage
 
 _abort_requested = False
 _abort_reason: str | None = None
@@ -120,6 +122,28 @@ def execute_scan(
             "Static persistence gate failed; running in exploratory mode (no static_run_id, no evidence writes).",
             category="static_analysis",
         )
+
+    # Crash safety: older runs can be left in RUNNING state if the process died mid-run.
+    # This creates persistent DB noise and breaks paper-grade audit expectations. We do not
+    # support concurrent static scans, so it is safe to finalize any open RUNNING rows here.
+    if persistence_ready and not params.dry_run:
+        try:
+            closed = finalize_open_static_runs(
+                None,
+                status="ABORTED",
+                abort_reason="stale_open_run_cleanup",
+                abort_signal="cleanup",
+            )
+            if int(closed or 0) > 0:
+                print(
+                    status_messages.status(
+                        f"Static run cleanup: finalized {closed} stale RUNNING row(s) as ABORTED.",
+                        level="warn",
+                    )
+                )
+        except Exception:
+            # Cleanup is best-effort; it must not block the scan.
+            pass
 
     last_elapsed_for_progress: float | None = None
     for group in selection.groups:
@@ -247,6 +271,12 @@ def execute_scan(
                 profile_label=params.profile_label,
                 run_ctx=run_ctx,
             )
+            # Batch quiet mode suppresses per-artifact streaming. Heartbeat is the operator
+            # visibility channel, so update a shared state with the current app context.
+            try:
+                _hb_set_app(str(display_name or group.package_name), total=len(artifacts))
+            except Exception:
+                pass
         app_start = time.monotonic()
         for artifact_index, artifact in enumerate(artifacts, start=1):
             abort_requested, _, _ = _abort_state()
@@ -254,6 +284,10 @@ def execute_scan(
                 break
             artifact_label = _artifact_label(artifact, display_name=display_name)
             progress.start(artifact_index, artifact_label)
+            try:
+                _hb_set_stage(f"scan:{artifact_label}", done=artifact_index - 1, total=len(artifacts))
+            except Exception:
+                pass
             try:
                 report, summary, timings, error_message, skipped = _execute_single_artifact(
                     artifact,
@@ -301,6 +335,10 @@ def execute_scan(
                 completed_artifacts += 1
                 app_result.executed_artifacts += 1
                 progress.finish(completed_artifacts, artifact_label)
+                try:
+                    _hb_set_stage(f"scan:{artifact_label}", done=artifact_index, total=len(artifacts))
+                except Exception:
+                    pass
                 if _abort_state()[0]:
                     break
                 continue
@@ -323,6 +361,10 @@ def execute_scan(
                 completed_artifacts += 1
                 app_result.executed_artifacts += 1
                 progress.finish(completed_artifacts, artifact_label)
+                try:
+                    _hb_set_stage(f"scan:{artifact_label}", done=artifact_index, total=len(artifacts))
+                except Exception:
+                    pass
                 if _abort_state()[0]:
                     break
                 continue
@@ -345,6 +387,10 @@ def execute_scan(
                 last_report_for_app = report
             if report is not None:
                 progress.finish(completed_artifacts, artifact_label)
+                try:
+                    _hb_set_stage(f"scan:{artifact_label}", done=artifact_index, total=len(artifacts))
+                except Exception:
+                    pass
             if warning_lines:
                 progress.flush_line()
                 render_resource_warnings(warning_lines, run_ctx=run_ctx)
@@ -549,11 +595,33 @@ def generate_report(
             }
         )
 
-    # Batch quiet mode should be deterministic and low-noise: do not stream per-stage progress.
-    # High-signal WARN/FAIL summaries are printed by the batch runner.
-    stage_observer = None
+    # Batch quiet mode is deterministic and low-noise, but we still want meaningful
+    # heartbeats. Use the core pipeline stage_observer to expose detector stage progress
+    # without printing anything during the scan itself.
+    def _stage_observer(evt: object) -> None:
+        if not isinstance(evt, dict):
+            return
+        if evt.get("event") != "stage_start":
+            return
+        section = str(evt.get("section_key") or evt.get("detector_id") or "unknown")
+        idx = evt.get("stage_index")
+        total = evt.get("stage_total")
+        try:
+            _hb_set_stage(
+                f"detector:{section}",
+                stage_index=int(idx) if isinstance(idx, (int, float, str)) else None,
+                stage_total=int(total) if isinstance(total, (int, float, str)) else None,
+            )
+        except Exception:
+            return
+
+    stage_observer = _stage_observer
 
     try:
+        try:
+            _hb_set_stage("prepare:analyze_apk")
+        except Exception:
+            pass
         report = analyze_apk(
             artifact.path,
             metadata=metadata_payload,
@@ -562,20 +630,44 @@ def generate_report(
             stage_observer=stage_observer,
         )
     except StaticAnalysisError as exc:
+        try:
+            _hb_set_stage("error:analyze_apk")
+        except Exception:
+            pass
         return None, None, str(exc), True
 
     if params.dry_run:
+        try:
+            _hb_set_stage("dry_run:not_persisted")
+        except Exception:
+            pass
         return report, None, "dry-run (not persisted)", True
 
     persistence_ready = bool(getattr(params, "persistence_ready", True))
     if not persistence_ready:
+        try:
+            _hb_set_stage("persist:skipped")
+        except Exception:
+            pass
         return report, None, None, False
 
     try:
+        try:
+            _hb_set_stage("persist:save_report")
+        except Exception:
+            pass
         saved_paths = save_report(report)
+        try:
+            _hb_set_stage("persist:done")
+        except Exception:
+            pass
         return report, saved_paths.json_path, None, False
     except ReportStorageError as exc:
         log.error(str(exc), category="static_analysis")
+        try:
+            _hb_set_stage("error:persist")
+        except Exception:
+            pass
         return report, None, str(exc), False
 
 

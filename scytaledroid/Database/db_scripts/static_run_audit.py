@@ -19,6 +19,14 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 
+# Allow running this file directly (e.g., `python scytaledroid/.../static_run_audit.py`)
+# without requiring `python -m ...` from the repo root.
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 from scytaledroid.Database.db_core import db_engine
 
 

@@ -64,16 +64,19 @@ def test_warn_collapse_prefers_base_only() -> None:
     assert webview.level == BatchStageLevel.WARN
     assert webview.warn_kind == BatchWarnKind.RISK
     assert set(webview.artifact_sets) == {"base"}
+    assert webview.format().startswith("RISK")
 
 
 def test_warn_kind_evidence_from_reason_codes() -> None:
     res = FakeDetectorResult(
         status="WARN",
         section_key="correlation_findings",
-        metrics={"reason_codes": ["insufficient_evidence:baseline_missing"]},
+        metrics={"reason_codes": ["not_applicable:baseline_missing"]},
     )
     app = FakeAppResult(artifacts=[FakeArtifact(report=FakeReport(detector_results=[res]))])
     lines = summarize_stage_levels(app, artifact_set_resolver=lambda _a: "base")
     item = lines[0]
     assert item.level == BatchStageLevel.WARN
     assert item.warn_kind == BatchWarnKind.EVIDENCE
+    assert item.format().startswith("EVIDENCE_WARN")
+    assert "not_applicable:baseline_missing" in item.format()

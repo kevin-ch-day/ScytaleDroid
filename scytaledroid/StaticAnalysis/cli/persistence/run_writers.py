@@ -496,50 +496,57 @@ def finalize_open_static_runs(
     abort_reason: str | None = None,
     abort_signal: str | None = None,
 ) -> int:
-    # Safety: this helper should only ever finalize explicit run IDs.
-    # Updating "all RUNNING rows" is too dangerous and can corrupt provenance.
-    if static_run_ids is None:
-        log.warning(
-            "finalize_open_static_runs called with static_run_ids=None; refusing to update all RUNNING rows.",
-            category="static_analysis",
-        )
-        return 0
-
-    ids: list[int] = []
-    for value in static_run_ids:
-        try:
-            ids.append(int(value))
-        except Exception:
-            continue
-    if not ids:
-        return 0
-
     now = _utc_now_dbstr()
     normalized_ended_at = _normalize_datetime_value(ended_at_utc) or now
+
+    # DB wrapper does not expose rowcount; compute a deterministic delta.
+    try:
+        row = core_q.run_sql(
+            "SELECT COUNT(*) FROM static_analysis_runs WHERE status='RUNNING' AND ended_at_utc IS NULL",
+            (),
+            fetch="one",
+        )
+        before = int(row[0] if row and row[0] is not None else 0)
+    except Exception:
+        before = 0
+
     params: list[object] = [status, normalized_ended_at, abort_reason, abort_signal]
-    placeholders = ",".join(["%s"] * len(ids))
-    sql = f"""
+    sql = """
         UPDATE static_analysis_runs
         SET status=%s, ended_at_utc=%s, abort_reason=%s, abort_signal=%s
         WHERE status='RUNNING' AND ended_at_utc IS NULL
-          AND id IN ({placeholders})
     """
-    params.extend(ids)
+
+    if static_run_ids is not None:
+        ids: list[int] = []
+        for value in static_run_ids:
+            try:
+                ids.append(int(value))
+            except Exception:
+                continue
+        if not ids:
+            return 0
+        placeholders = ",".join(["%s"] * len(ids))
+        sql += f" AND id IN ({placeholders})"
+        params.extend(ids)
+
+    run_sql_write(sql, tuple(params))
+
     try:
-        return safe_int(
-            run_sql_write(
-                sql,
-                tuple(params),
-                return_rowcount=True,
-            ),
-            default=0,
+        row = core_q.run_sql(
+            "SELECT COUNT(*) FROM static_analysis_runs WHERE status='RUNNING' AND ended_at_utc IS NULL",
+            (),
+            fetch="one",
         )
+        after = int(row[0] if row and row[0] is not None else 0)
     except Exception as exc:
         log.warning(
-            f"Failed to finalize open static runs (n={len(ids)}): {exc}",
+            f"Failed to finalize open static runs: {exc}",
             category="static_analysis",
         )
         return 0
+
+    return max(before - after, 0)
 
 
 def update_static_run_metadata(**kwargs: Any) -> None:

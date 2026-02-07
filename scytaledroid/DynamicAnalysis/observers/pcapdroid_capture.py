@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import time
 from pathlib import Path
 
@@ -28,6 +27,10 @@ class PcapdroidCaptureObserver(Observer):
     observer_id = "pcapdroid_capture"
     observer_name = "PCAPdroid VPN Capture"
 
+    def __init__(self, *, api_key: str | None = None) -> None:
+        # Read secrets at config build time only. Never read env vars in start/stop.
+        self._api_key = api_key
+
     def start(self, run_ctx: RunContext) -> ObserverHandle:
         if not adb_client.is_available():
             raise RuntimeError("adb binary not available on PATH")
@@ -42,7 +45,7 @@ class PcapdroidCaptureObserver(Observer):
 
         pcap_name = f"scytaledroid_{run_ctx.dynamic_run_id}.pcap"
         device_path = f"{PCAPDROID_DOWNLOAD_DIR}/{pcap_name}"
-        api_key = os.environ.get("SCYTALEDROID_PCAPDROID_API_KEY")
+        api_key = self._api_key
         capture_start = time.time()
 
         start_args = [
@@ -86,6 +89,7 @@ class PcapdroidCaptureObserver(Observer):
                     "app_filter": run_ctx.package_name,
                     "capture_mode": CAPTURE_MODE,
                     "pcapdroid_package": PCAPDROID_PACKAGE,
+                    "api_key_present": bool(api_key),
                     "capture_start_epoch": capture_start,
                     "status_check": {
                         "ok": status_ok,
@@ -107,6 +111,7 @@ class PcapdroidCaptureObserver(Observer):
                 "device_path": device_path,
                 "meta_path": meta_path,
                 "capture_start_epoch": capture_start,
+                "api_key_present": bool(api_key),
             },
         )
 
@@ -118,7 +123,7 @@ class PcapdroidCaptureObserver(Observer):
         device_path: str = payload["device_path"]
         meta_path: Path = payload["meta_path"]
         capture_start_epoch = payload.get("capture_start_epoch")
-        api_key = os.environ.get("SCYTALEDROID_PCAPDROID_API_KEY")
+        api_key = self._api_key
 
         stop_args = [
             "am",

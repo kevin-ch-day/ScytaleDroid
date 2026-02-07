@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from scytaledroid.Config import app_config  # noqa: F401 - re-exported for tests
 from scytaledroid.Database.db_core import run_sql
 from scytaledroid.DeviceAnalysis.adb import shell as adb_shell, status as adb_status
@@ -509,9 +511,17 @@ def _prompt_baseline_selection(
 def _prompt_missing_baseline(package_name: str, note: str | None) -> dict[str, object] | None:
     return _plan_selection._prompt_missing_baseline(package_name, note)
 
+def _observer_prompts_enabled_default() -> bool:
+    # UI-layer default only. Do not read env vars in execution paths.
+    return os.environ.get("SCYTALEDROID_OBSERVER_PROMPTS") == "1"
+
 
 def _select_observers(device_serial: str, *, mode: str) -> list[str]:
-    return _service_select_observers(device_serial, mode=mode)
+    return _service_select_observers(
+        device_serial,
+        mode=mode,
+        prompt_enabled=_observer_prompts_enabled_default(),
+    )
 
 
 def _print_device_badge(device_serial: str, device_label: str) -> None:

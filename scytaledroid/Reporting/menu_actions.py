@@ -15,6 +15,9 @@ from scytaledroid.DeviceAnalysis.adb import devices as adb_devices
 from scytaledroid.DeviceAnalysis import device_manager
 from scytaledroid.DeviceAnalysis.report import generate_device_report
 from scytaledroid.DynamicAnalysis.exports.dataset_export import export_tier1_pack
+from scytaledroid.DynamicAnalysis.ml import run_ml_on_evidence_packs
+from scytaledroid.DynamicAnalysis.ml import config as ml_config
+from scytaledroid.DynamicAnalysis.ml.report import write_ml_preflight_report
 from scytaledroid.Reporting.generator import export_static_analysis_markdown
 from scytaledroid.StaticAnalysis.persistence import list_reports
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
@@ -237,6 +240,81 @@ def handle_static_report() -> None:
     resolved = relative_path(output_path)
     print(status_messages.status(f"Markdown report saved to {resolved}", level="success"))
     log.info(f"Static analysis markdown exported to {output_path}", category="reporting")
+    prompt_utils.press_enter_to_continue()
+
+
+def handle_run_ml_on_frozen_dataset() -> None:
+    """Run Paper #2 ML over frozen evidence packs (offline, DB-free)."""
+
+    marker = Path(app_config.DATA_DIR) / "archive" / "dataset_freeze.json"
+    if not marker.exists():
+        print(
+            status_messages.status(
+                f"Dataset is not frozen (missing {relative_path(marker)}).",
+                level="warn",
+            )
+        )
+        print(
+            status_messages.status(
+                "Create the freeze marker only after all apps have >= 3 VALID runs and QA/retention are verified.",
+                level="info",
+            )
+        )
+        prompt_utils.press_enter_to_continue()
+        return
+
+    missing = [tool for tool in ("capinfos", "tshark") if not shutil.which(tool)]
+    if missing:
+        print(
+            status_messages.status(
+                f"Host tools missing: {', '.join(missing)} (dataset-tier ML requires these).",
+                level="fail",
+            )
+        )
+        prompt_utils.press_enter_to_continue()
+        return
+
+    print()
+    menu_utils.print_header("Run ML on frozen dataset")
+    print(status_messages.status("Mode: offline (evidence packs only); DB is not used.", level="info"))
+
+    stats = run_ml_on_evidence_packs()
+    dataset_csv = (
+        Path(app_config.DATA_DIR)
+        / "archive"
+        / "ml"
+        / f"dataset_ml_summary_{ml_config.ML_SCHEMA_LABEL}.csv"
+    )
+
+    print(
+        status_messages.status(
+            f"ML complete: apps_seen={stats.apps_seen} apps_trained={stats.apps_trained} "
+            f"runs_scored={stats.runs_scored} runs_skipped={stats.runs_skipped}",
+            level="success",
+        )
+    )
+    print(
+        status_messages.status(
+            f"Dataset summary CSV: {relative_path(dataset_csv)}",
+            level="info",
+        )
+    )
+    prompt_utils.press_enter_to_continue()
+
+
+def handle_run_ml_preflight_report() -> None:
+    """Write a DB-free ML preflight report over evidence packs."""
+
+    print()
+    menu_utils.print_header("ML preflight report")
+    print(
+        status_messages.status(
+            "Scans output/evidence/dynamic/* and validates frozen inputs per run (DB-free).",
+            level="info",
+        )
+    )
+    path = write_ml_preflight_report()
+    print(status_messages.status(f"Wrote: {relative_path(path)}", level="success"))
     prompt_utils.press_enter_to_continue()
 
 

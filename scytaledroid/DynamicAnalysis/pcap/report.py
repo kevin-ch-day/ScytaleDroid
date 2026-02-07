@@ -148,6 +148,8 @@ def _parse_capinfos(text: str) -> dict[str, object]:
 
 
 def _parse_capinfos_value(key: str, value: str) -> object:
+    if key == "packet_count":
+        return _parse_int(value)
     if key.endswith("_bytes"):
         return _parse_int(value)
     if key.endswith("_bps") or key.endswith("_pps"):
@@ -159,13 +161,19 @@ def _parse_capinfos_value(key: str, value: str) -> object:
 
 def _run_protocol_hierarchy(tshark_path: str, pcap_path: Path) -> list[dict[str, object]]:
     result = _run_command([tshark_path, "-r", str(pcap_path), "-q", "-z", "io,phs"])
-    if not result.get("stdout"):
+    return _parse_protocol_hierarchy_output(str(result.get("stdout") or ""))
+
+
+def _parse_protocol_hierarchy_output(stdout: str) -> list[dict[str, object]]:
+    if not stdout:
         return []
-    rows = []
-    for line in result["stdout"].splitlines():
+    rows: list[dict[str, object]] = []
+    for line in stdout.splitlines():
         if not line.strip() or line.startswith("=") or line.startswith("Filter"):
             continue
-        match = re.match(r"\\s*(\\S+)\\s+frames:(\\d+)\\s+bytes:(\\d+)", line)
+        # Example line:
+        #   udp                                frames:8091 bytes:8112162
+        match = re.match(r"\s*(\S+)\s+frames:(\d+)\s+bytes:(\d+)", line)
         if not match:
             continue
         rows.append(

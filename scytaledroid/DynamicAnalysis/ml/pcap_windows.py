@@ -1,0 +1,154 @@
+"""Per-window feature extraction from canonical PCAP (offline, deterministic)."""
+
+from __future__ import annotations
+
+import csv
+import subprocess
+from dataclasses import dataclass
+from bisect import bisect_right
+from pathlib import Path
+from typing import Any, Iterable
+
+from .windowing import WindowSpec, iter_windows
+
+
+@dataclass(frozen=True)
+class PacketRecord:
+    t: float  # seconds from capture start (tshark frame.time_relative)
+    length: int  # frame length in bytes
+
+
+def extract_packet_timeline(pcap_path: Path) -> Iterable[PacketRecord]:
+    """Stream packet timeline from tshark.
+
+    Uses fields:
+    - frame.time_relative
+    - frame.len
+    """
+    # NOTE: Use tshark via PATH. Dataset-tier runs already gate missing tools.
+    cmd = [
+        "tshark",
+        "-r",
+        str(pcap_path),
+        "-T",
+        "fields",
+        "-E",
+        "separator=,",
+        "-e",
+        "frame.time_relative",
+        "-e",
+        "frame.len",
+    ]
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    assert proc.stdout is not None
+    try:
+        for line in proc.stdout:
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split(",", 1)
+            if len(parts) != 2:
+                continue
+            try:
+                t = float(parts[0])
+                length = int(float(parts[1]))
+            except Exception:
+                continue
+            if t < 0 or length < 0:
+                continue
+            yield PacketRecord(t=t, length=length)
+    finally:
+        # Ensure process exits; ignore stderr unless we need it later.
+        try:
+            proc.stdout.close()  # type: ignore[union-attr]
+        except Exception:
+            pass
+        proc.wait(timeout=30)
+
+
+def build_window_features(
+    packets: Iterable[PacketRecord],
+    *,
+    duration_s: float,
+    spec: WindowSpec,
+) -> tuple[list[dict[str, Any]], int]:
+    """Aggregate packet timeline into fixed windows.
+
+    Returns (rows, dropped_partial_windows).
+    Each row contains:
+    - window_start_s, window_end_s
+    - packet_count
+    - byte_count
+    - avg_packet_size_bytes
+    """
+    windows, dropped = iter_windows(duration_s, spec)
+    if not windows:
+        return [], dropped
+    # Initialize bins
+    counts = [0 for _ in windows]
+    bytes_ = [0 for _ in windows]
+
+    # Sliding assignment: window i covers [start, end)
+    i = 0
+    prev_t: float | None = None
+    monotonic = True
+    ends = [w[1] for w in windows]
+    for pkt in packets:
+        if prev_t is not None and pkt.t + 1e-9 < prev_t:
+            # Defensive: if tshark output is not monotonic (should be rare), switch to
+            # window lookup by timestamp rather than relying on the sliding pointer.
+            monotonic = False
+        prev_t = pkt.t
+
+        if not monotonic:
+            j = bisect_right(ends, pkt.t)  # first end > t
+            if j <= 0 or j > len(windows):
+                continue
+            start, end = windows[j - 1]
+            if pkt.t < start or pkt.t >= end:
+                continue
+            counts[j - 1] += 1
+            bytes_[j - 1] += int(pkt.length)
+            continue
+
+        # Advance i while packet is beyond current window.
+        while i < len(windows) and pkt.t >= windows[i][1]:
+            i += 1
+        if i >= len(windows):
+            break
+        # Packet might be before window start (shouldn't happen due to monotonic time_relative)
+        if pkt.t < windows[i][0]:
+            continue
+        counts[i] += 1
+        bytes_[i] += int(pkt.length)
+
+    rows: list[dict[str, Any]] = []
+    for (start, end), c, b in zip(windows, counts, bytes_, strict=True):
+        avg = (float(b) / float(c)) if c > 0 else 0.0
+        rows.append(
+            {
+                "window_start_s": float(start),
+                "window_end_s": float(end),
+                "packet_count": int(c),
+                "byte_count": int(b),
+                "avg_packet_size_bytes": float(avg),
+            }
+        )
+    return rows, dropped
+
+
+def write_anomaly_scores_csv(path: Path, rows: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not rows:
+        # Still write a header-only file for auditability.
+        fieldnames = ["window_start_s", "window_end_s", "score", "threshold", "is_anomalous"]
+        with path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fieldnames)
+            writer.writeheader()
+        return
+    fieldnames = ["window_start_s", "window_end_s", "score", "threshold", "is_anomalous"]
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({k: row.get(k) for k in fieldnames})

@@ -49,7 +49,7 @@ def print_inventory_run_summary_from_result(result) -> None:
             "Retention: "
             f"policy=N={status.get('policy_keep_last')} "
             f"db_snapshots={status.get('db_snapshots')} "
-            f"fs_history_files={status.get('fs_history_files')}"
+            f"fs_snapshots={status.get('fs_snapshots')}"
         )
         inv_dir = status.get("inventory_dir")
         if inv_dir:

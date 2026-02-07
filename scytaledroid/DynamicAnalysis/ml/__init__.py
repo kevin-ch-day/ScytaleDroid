@@ -1,0 +1,12 @@
+"""ML module for Paper #2 (unsupervised, offline, evidence-pack driven).
+
+Primary contract (PM-locked):
+- ML runs as a batch command over frozen evidence packs (DB-free).
+- Inputs are immutable evidence-pack artifacts.
+- Outputs are versioned under analysis/ml/v<ml_schema_version>/.
+"""
+
+from .runner import run_ml_on_evidence_packs
+
+__all__ = ["run_ml_on_evidence_packs"]
+

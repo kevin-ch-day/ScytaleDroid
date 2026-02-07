@@ -19,6 +19,11 @@ class DynamicRunSpec:
     clear_logcat: bool
     interactive: bool = True
     batch_id: str | None = None
+    # Frozen execution semantics: avoid env reads in execution paths.
+    require_dynamic_schema: bool = True
+    observer_prompts_enabled: bool = False
+    # Secret for PCAPdroid capture (never persisted).
+    pcapdroid_api_key: str | None = None
 
 
 def build_dynamic_run_spec(
@@ -34,6 +39,9 @@ def build_dynamic_run_spec(
     clear_logcat: bool,
     interactive: bool = True,
     batch_id: str | None = None,
+    require_dynamic_schema: bool = True,
+    observer_prompts_enabled: bool = False,
+    pcapdroid_api_key: str | None = None,
 ) -> DynamicRunSpec:
     return DynamicRunSpec(
         package_name=package_name,
@@ -47,6 +55,9 @@ def build_dynamic_run_spec(
         clear_logcat=clear_logcat,
         interactive=interactive,
         batch_id=batch_id,
+        require_dynamic_schema=require_dynamic_schema,
+        observer_prompts_enabled=observer_prompts_enabled,
+        pcapdroid_api_key=pcapdroid_api_key,
     )
 
 

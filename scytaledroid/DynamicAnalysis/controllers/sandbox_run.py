@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 
 from scytaledroid.DynamicAnalysis.controllers.device_select import select_device
@@ -99,6 +100,9 @@ def run_sandbox_dynamic_run(
         tier=tier,
         static_run_id=static_run_id,
         clear_logcat=clear_logcat,
+        require_dynamic_schema=True,
+        observer_prompts_enabled=(os.environ.get("SCYTALEDROID_OBSERVER_PROMPTS") == "1"),
+        pcapdroid_api_key=os.environ.get("SCYTALEDROID_PCAPDROID_API_KEY"),
     )
     print_run_summary(result, label)
     prompt_utils.press_enter_to_continue()

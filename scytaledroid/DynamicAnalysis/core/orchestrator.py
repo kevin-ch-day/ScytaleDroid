@@ -503,6 +503,10 @@ class DynamicRunOrchestrator:
                 "host": platform.node(),
                 "platform": platform.platform(),
                 "python_version": platform.python_version(),
+                # Frozen execution config (no env reads in execution paths).
+                "require_dynamic_schema": bool(getattr(self.config, "require_dynamic_schema", True)),
+                "observer_prompts_enabled": bool(getattr(self.config, "observer_prompts_enabled", False)),
+                "pcapdroid_api_key_present": bool(getattr(self.config, "pcapdroid_api_key", None)),
                 # Host toolchain audit payload for reproducibility. This is not a gate here
                 # (dataset-tier gating happens earlier), but recording it avoids "version drift"
                 # ambiguity when reviewing frozen evidence packs.
@@ -533,6 +537,9 @@ class DynamicRunOrchestrator:
                     "tier": self.config.tier,
                     "sampling_rate_s": self.config.sampling_rate_s,
                     "min_pcap_bytes": getattr(app_config, "DYNAMIC_MIN_PCAP_BYTES", 100000),
+                    "require_dynamic_schema": bool(getattr(self.config, "require_dynamic_schema", True)),
+                    "observer_prompts_enabled": bool(getattr(self.config, "observer_prompts_enabled", False)),
+                    "pcapdroid_api_key_present": bool(getattr(self.config, "pcapdroid_api_key", None)),
                     "duration_seconds": run_ctx.duration_seconds,
                     "scenario_id": run_ctx.scenario_id,
                     "device_serial": run_ctx.device_serial,

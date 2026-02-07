@@ -58,6 +58,11 @@ class ManualScenarioRunner:
             print(status_messages.status("Tip: keep the app in the foreground during the session.", level="info"))
             if run_ctx.scenario_hint:
                 print(status_messages.status(run_ctx.scenario_hint, level="info"))
+            # Operator protocol metadata: pick interaction level *before* the run starts so the
+            # evidence pack is tagged deterministically without post-run prompts.
+            interaction_level = _prompt_interaction_level(profile)
+            if interaction_level:
+                print(status_messages.status(f"Interaction level: {interaction_level}.", level="info"))
             prompt_utils.press_enter_to_continue("Press Enter to begin (timer starts)...")
             started_at = datetime.now(UTC)
             if on_start:
@@ -72,7 +77,6 @@ class ManualScenarioRunner:
                 on_end()
             elapsed = int((ended_at - started_at).total_seconds())
             print(status_messages.status(f"Scenario elapsed time: {_format_duration(elapsed)}.", level="info"))
-            interaction_level = _prompt_interaction_level(profile)
         else:
             started_at = datetime.now(UTC)
             if on_start:
@@ -87,14 +91,14 @@ class ManualScenarioRunner:
 def _prompt_interaction_level(profile: str | None) -> str:
     # This is operator protocol metadata. It is used for QA and stratified analysis,
     # not as a behavioral feature.
-    valid = ["minimal", "normal", "active"]
+    valid = ["minimal", "normal", "heavy"]
     default = "minimal" if profile == "baseline_idle" else "normal"
     print(status_messages.status("Operator note: tag interaction level for this run.", level="info"))
     return prompt_utils.get_choice(
         valid,
         default=default,
         casefold=True,
-        invalid_message="Choose one of: minimal, normal, active.",
+        invalid_message="Choose one of: minimal, normal, heavy.",
     )
 
 

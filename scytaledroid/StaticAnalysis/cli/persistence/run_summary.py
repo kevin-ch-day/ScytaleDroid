@@ -499,21 +499,30 @@ def update_static_run_status(
 
 
 def finalize_open_static_runs(
-    static_run_ids: Sequence[int],
+    static_run_ids: Sequence[int] | None = None,
     *,
     status: str,
     ended_at_utc: str | None = None,
     abort_reason: str | None = None,
     abort_signal: str | None = None,
-) -> None:
-    if not static_run_ids:
-        return
-    _run_writers.finalize_open_static_runs(
-        static_run_ids,
-        status=status,
-        ended_at_utc=ended_at_utc,
-        abort_reason=abort_reason,
-        abort_signal=abort_signal,
+) -> int:
+    """Finalize any RUNNING static runs left open by crashes.
+
+    If `static_run_ids` is None, finalize all open runs.
+    If `static_run_ids` is an empty sequence, no-op.
+    Returns number of rows updated (best-effort; 0 on error).
+    """
+    if static_run_ids is not None and not static_run_ids:
+        return 0
+    return int(
+        _run_writers.finalize_open_static_runs(
+            static_run_ids,
+            status=status,
+            ended_at_utc=ended_at_utc,
+            abort_reason=abort_reason,
+            abort_signal=abort_signal,
+        )
+        or 0
     )
 
 def persist_run_summary(

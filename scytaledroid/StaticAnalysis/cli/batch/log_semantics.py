@@ -6,12 +6,13 @@ We separate "run failure" from "risk findings":
 - Stage WARN/FINDING/POLICY_FAIL are *signals* (detectors ran) not execution failure.
 - Stage ERROR indicates a detector crashed and is a tooling/system failure signal.
 
-Five-level stage taxonomy (v1):
+Five-level stage taxonomy (v1, operator-visible):
 - OK: no output in batch
-- WARN: detector warning (risk signal)
-- FINDING: detector FAIL but not a policy gate (risk signal)
+- RISK: detector warning implying an app risk/signal (not a run failure)
+- EVIDENCE_WARN: detector could not compute due to missing/insufficient evidence (not a run failure)
+- FINDING: detector FAIL but not a policy gate (risk signal, not a run failure)
 - POLICY_FAIL: detector FAIL with policy_gate=True (paper-grade blocker)
-- ERROR: detector crash/exception
+- ERROR: detector crash/exception (tooling/system failure signal)
 """
 
 from __future__ import annotations
@@ -55,7 +56,10 @@ class BatchWarnKind(str, Enum):
     def from_detector_result(cls, result: object) -> "BatchWarnKind":
         codes = _reason_codes(result)
         joined = " ".join(codes).lower()
-        if any(code.lower().startswith("insufficient_evidence:") for code in codes) or "baseline_missing" in joined:
+        if (
+            any(code.lower().startswith("insufficient_evidence:") for code in codes)
+            or "baseline_missing" in joined
+        ):
             return cls.EVIDENCE
         if (
             "missing_tools" in joined
@@ -79,8 +83,13 @@ class StageSummaryLine:
     def format(self) -> str:
         sets = _format_artifact_sets(set(self.artifact_sets))
         prefix = self.level.value
-        if self.level == BatchStageLevel.WARN and self.warn_kind is not None:
-            prefix = f"WARN[{self.warn_kind.value}]"
+        if self.level == BatchStageLevel.WARN:
+            # Strict, paper-safe batch labels: WARN is never printed directly.
+            if self.warn_kind == BatchWarnKind.RISK:
+                prefix = "RISK"
+            else:
+                # TOOLING warnings are still "evidence environment not ready" for batch semantics.
+                prefix = "EVIDENCE_WARN"
         line = f"{prefix:<11} {self.section} ({sets})"
         if self.note:
             line += f" note={self.note}"
@@ -117,7 +126,7 @@ def summarize_stage_levels(
                 warn_kind = BatchWarnKind.from_detector_result(result)
                 codes = _reason_codes(result)
                 if codes:
-                    note = _truncate_note(codes[0])
+                    note = _format_note(section, warn_kind, codes)
             stage_sets.setdefault((level, warn_kind, section, note), set()).add(artifact_set)
 
     # Collapse policy: WARN repeats across splits are noise if base already WARNs.
@@ -197,6 +206,27 @@ def _truncate_note(value: str) -> str:
     if len(text) <= 60:
         return text
     return text[:57] + "..."
+
+
+def _format_note(section: str, warn_kind: BatchWarnKind | None, codes: list[str]) -> str | None:
+    """Convert raw reason codes into operator-friendly batch notes."""
+    if not codes:
+        return None
+
+    first = str(codes[0]).strip()
+    lowered = first.lower()
+
+    # Correlation baseline can be missing (expected on the first scan of an app/version).
+    if section == "correlation_findings" and (
+        lowered == "insufficient_evidence:baseline_missing" or lowered == "not_applicable:baseline_missing"
+    ):
+        return "not_applicable:baseline_missing"
+
+    # Tooling warnings: keep the reason code, but prefix so it's obvious this is environment, not app risk.
+    if warn_kind == BatchWarnKind.TOOLING:
+        return _truncate_note(f"tooling:{first}")
+
+    return _truncate_note(first)
 
 
 def _section_order_map() -> dict[str, int]:

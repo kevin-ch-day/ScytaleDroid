@@ -8,6 +8,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from collections.abc import Callable
+import os
 
 from scytaledroid.DynamicAnalysis.controllers.device_select import select_device
 from scytaledroid.DynamicAnalysis.plan_selection import (
@@ -149,6 +150,9 @@ def run_guided_dataset_run(
         static_run_id=static_run_id,
         clear_logcat=clear_logcat,
         interactive=True,
+        require_dynamic_schema=True,
+        observer_prompts_enabled=(os.environ.get("SCYTALEDROID_OBSERVER_PROMPTS") == "1"),
+        pcapdroid_api_key=os.environ.get("SCYTALEDROID_PCAPDROID_API_KEY"),
     )
     result = execute_dynamic_run_spec(spec)
     print_run_summary(result, label)

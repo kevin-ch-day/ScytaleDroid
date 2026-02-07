@@ -58,24 +58,35 @@ def _prune_inventory_files(serial: str, *, keep_last: int) -> tuple[int, int]:
         if _timestamp_from_name(name):
             history_files.append(path)
 
-    before = len(history_files)
+    # Retention is defined in terms of snapshots (timestamps), not individual files.
+    by_ts: dict[str, list[Path]] = {}
+    for path in history_files:
+        ts = _timestamp_from_name(path.name)
+        if not ts:
+            continue
+        by_ts.setdefault(ts, []).append(path)
+
+    before = len(by_ts)
     if before <= keep_last:
         return before, 0
 
-    timestamps = sorted({t for t in (_timestamp_from_name(p.name) for p in history_files) if t}, reverse=True)
+    timestamps = sorted(by_ts.keys(), reverse=True)
     keep_ts = set(timestamps[: max(int(keep_last), 0)])
 
     deleted = 0
-    for path in history_files:
-        ts = _timestamp_from_name(path.name)
-        if not ts or ts in keep_ts:
+    for ts, paths in by_ts.items():
+        if ts in keep_ts:
             continue
-        try:
-            path.unlink(missing_ok=True)
+        removed_any = False
+        for path in paths:
+            try:
+                path.unlink(missing_ok=True)
+                removed_any = True
+            except Exception:
+                # Best effort; retention is enforced on every sync so we'll try again next time.
+                continue
+        if removed_any:
             deleted += 1
-        except Exception:
-            # Best effort; retention is enforced on every sync so we'll try again next time.
-            pass
     return before, deleted
 
 
@@ -158,7 +169,8 @@ def get_inventory_retention_status(serial: str, *, keep_last: int = _INVENTORY_R
     inv_dir = _STATE_ROOT / serial / "inventory"
 
     # FS: history snapshots only (inventory_<timestamp>*.json + .meta.json).
-    fs_history = 0
+    fs_files = 0
+    fs_snapshots: set[str] = set()
     if inv_dir.exists():
         for path in inv_dir.iterdir():
             if not path.is_file():
@@ -172,7 +184,8 @@ def get_inventory_retention_status(serial: str, *, keep_last: int = _INVENTORY_R
             rest = name[len("inventory_") :]
             ts = rest.split(".", 1)[0]
             if len(ts) == 15 and "-" in ts:
-                fs_history += 1
+                fs_files += 1
+                fs_snapshots.add(ts)
 
     # DB: snapshot row count for the device.
     db_snapshots = 0
@@ -191,7 +204,9 @@ def get_inventory_retention_status(serial: str, *, keep_last: int = _INVENTORY_R
         "device_serial": serial,
         "policy_keep_last": int(keep_last),
         "db_snapshots": int(db_snapshots),
-        "fs_history_files": int(fs_history),
+        # Report snapshot count as the primary bounded metric; file count is diagnostic only.
+        "fs_snapshots": int(len(fs_snapshots)),
+        "fs_history_files": int(fs_files),
         "inventory_dir": str(inv_dir),
     }
 

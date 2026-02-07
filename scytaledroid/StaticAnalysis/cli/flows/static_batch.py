@@ -436,6 +436,7 @@ def run_dataset_static_batch(
     total = len(batch_groups)
     completed = 0
     batch_start = time.monotonic()
+    correlation_first_run_note_printed = False
 
     print()
     menu_utils.print_section("Running Research Dataset (batch static)")
@@ -479,10 +480,39 @@ def run_dataset_static_batch(
             def _heartbeat() -> None:
                 while not hb_stop.wait(30.0):
                     elapsed_s = time.monotonic() - hb_started
-                    msg = status_messages.status(
-                        f"Heartbeat: {selection_label} | elapsed={elapsed_s:.0f}s",
-                        level="info",
-                    )
+                    stage = None
+                    done = None
+                    total_done = None
+                    stage_index = None
+                    stage_total = None
+                    try:
+                        from scytaledroid.StaticAnalysis.cli.execution.heartbeat_state import snapshot
+
+                        hb = snapshot()
+                        stage = hb.get("stage")
+                        done = hb.get("done")
+                        total_done = hb.get("total")
+                        stage_index = hb.get("stage_index")
+                        stage_total = hb.get("stage_total")
+                    except Exception:
+                        stage = None
+                        done = None
+                        total_done = None
+                        stage_index = None
+                        stage_total = None
+
+                    parts = [f"Heartbeat: {selection_label}", f"elapsed={elapsed_s:.0f}s"]
+                    if stage:
+                        parts.append(f"stage={stage}")
+                    if (
+                        isinstance(stage_index, int)
+                        and isinstance(stage_total, int)
+                        and stage_total > 0
+                    ):
+                        parts.append(f"stage_progress={stage_index}/{stage_total}")
+                    if isinstance(done, int) and isinstance(total_done, int) and total_done > 0:
+                        parts.append(f"artifacts_done={done}/{total_done}")
+                    msg = status_messages.status(" | ".join(parts), level="info")
                     try:
                         sys.__stdout__.write(msg + "\n")
                         sys.__stdout__.flush()
@@ -565,14 +595,49 @@ def run_dataset_static_batch(
         duration_label = f"{duration:.1f}s" if isinstance(duration, (int, float)) else "n/a"
         static_run_id = None
         plan_path = None
+        identity_valid = None
         try:
             if outcome and getattr(outcome, "results", None):
                 first = outcome.results[0]
                 static_run_id = getattr(first, "static_run_id", None)
                 plan_path = getattr(first, "dynamic_plan_path", None)
+                identity_valid = getattr(first, "identity_valid", None)
         except Exception:
             static_run_id = None
             plan_path = None
+            identity_valid = None
+
+        # Batch static must produce a dynamic plan for gating dynamic runs.
+        # Treat "no plan path" or "plan path missing on disk" as a batch failure even if the
+        # scan otherwise completed, since this breaks Paper #2 static->dynamic contract.
+        plan_exists = False
+        plan_path_display = None
+        try:
+            if isinstance(plan_path, (str, Path)) and str(plan_path):
+                plan_p = Path(str(plan_path))
+                plan_exists = plan_p.exists()
+                # Keep console output readable while still being precise.
+                try:
+                    plan_path_display = str(plan_p.relative_to(Path.cwd()))
+                except Exception:
+                    plan_path_display = str(plan_p)
+        except Exception:
+            plan_exists = False
+            plan_path_display = None
+
+        if status_label == "ok":
+            if static_run_id is None:
+                status_label = "failed"
+                failure_note = "static_run_id_missing"
+                failures.append(f"{selection.label}: {failure_note}")
+            elif isinstance(identity_valid, bool) and identity_valid is False:
+                status_label = "failed"
+                failure_note = "identity_invalid"
+                failures.append(f"{selection.label}: {failure_note}")
+            elif not plan_exists:
+                status_label = "failed"
+                failure_note = "plan_missing"
+                failures.append(f"{selection.label}: {failure_note}")
 
         audit = _derive_persistence_audit(outcome, static_run_id)
         paper_grade_status = audit["paper_grade"]
@@ -587,12 +652,14 @@ def run_dataset_static_batch(
         # Compact blocker summary (useful for debugging persistence_failed/canonical_failed).
         blockers_text = _format_audit_notes(audit_notes_list, limit=2)
 
-        # High-signal stage summary (WARN/FAIL only), collapsed across split APK artifacts.
+        # High-signal stage summary (collapsed across split APK artifacts).
+        # In dataset batch mode, RISK/FINDING are not "run failures"; keep them visible but non-alarming.
         try:
             if outcome and getattr(outcome, "results", None):
                 app_result = outcome.results[0]
                 from scytaledroid.StaticAnalysis.cli.batch.log_semantics import (
                     BatchStageLevel,
+                    BatchWarnKind,
                     summarize_stage_levels,
                 )
 
@@ -600,32 +667,96 @@ def run_dataset_static_batch(
                     app_result,
                     artifact_set_resolver=_artifact_set_for_batch_log,
                 )
+                counts = {"RISK": 0, "FINDING": 0, "EVIDENCE_WARN": 0, "NOTE": 0, "POLICY_FAIL": 0, "ERROR": 0}
                 for item in stage_lines:
-                    # Keep WARN/FINDING/POLICY_FAIL/ERROR visible in batch logs.
-                    # These are stage outcomes, not run status.
+                    text = item.format()
+
+                    # Correlation "no baseline" is expected on the first dataset batch run.
+                    # Print a single batch-level note instead of repeating it per app.
+                    if (
+                        item.level == BatchStageLevel.WARN
+                        and item.warn_kind == BatchWarnKind.EVIDENCE
+                        and item.section == "correlation_findings"
+                        and (item.note or "") == "not_applicable:baseline_missing"
+                    ):
+                        # Treat as a NOTE, not an evidence warning, so per-app summaries don't
+                        # imply a deficiency "by construction" when an app/version has no prior baseline.
+                        counts["NOTE"] += 1
+                        if not correlation_first_run_note_printed:
+                            correlation_first_run_note_printed = True
+                            print(
+                                status_messages.status(
+                                    "Correlation findings baseline not available for this app/version (expected after reset "
+                                    "or first observation). Baseline comparisons require at least two static reports for "
+                                    "the same app/version.",
+                                    level="info",
+                                )
+                            )
+                        continue
+
                     if item.level == BatchStageLevel.ERROR:
-                        level = "error"
-                    elif item.level == BatchStageLevel.WARN and "EVIDENCE" in item.format():
-                        # Evidence warnings are informational (not app risk, not tooling failure).
-                        level = "info"
-                    else:
-                        level = "warn"
-                    print(status_messages.status(item.format(), level=level))
+                        counts["ERROR"] += 1
+                        print(status_messages.status(text, level="error"))
+                        continue
+                    if item.level == BatchStageLevel.POLICY_FAIL:
+                        counts["POLICY_FAIL"] += 1
+                        print(status_messages.status(text, level="warn"))
+                        continue
+                    if item.level == BatchStageLevel.FINDING:
+                        counts["FINDING"] += 1
+                        print(status_messages.status(text, level="info"))
+                        continue
+                    if item.level == BatchStageLevel.WARN:
+                        if item.warn_kind == BatchWarnKind.RISK:
+                            counts["RISK"] += 1
+                            print(status_messages.status(text, level="info"))
+                        else:
+                            counts["EVIDENCE_WARN"] += 1
+                            print(status_messages.status(text, level="info"))
+                        continue
+
+                # Per-app findings summary line (operator-friendly, deterministic).
+                print(
+                    status_messages.status(
+                        "Findings summary: "
+                        f"risk={counts['RISK']} finding={counts['FINDING']} "
+                        f"evidence_warn={counts['EVIDENCE_WARN']} note={counts['NOTE']} "
+                        f"policy_fail={counts['POLICY_FAIL']} error={counts['ERROR']}",
+                        level="info",
+                    )
+                )
         except Exception:
             pass
 
+        # Multiline completion block improves operator confidence and reduces "stuck" confusion.
         print(
             status_messages.status(
-                (
-                    f"Completed: {selection_label} | status={status_label} | duration={duration_label}"
-                    + (f" | static_run_id={static_run_id}" if static_run_id is not None else " | static_run_id=—")
-                    + f" | paper_grade={paper_grade_status}"
-                    + (f" | note={failure_note}" if failure_note and status_label != "ok" else "")
-                    + (f" | blockers={blockers_text}" if blockers_text and status_label != "ok" else "")
-                ),
+                f"Completed: {selection_label}",
                 level="success" if status_label == "ok" else "warn",
             )
         )
+        print(
+            status_messages.status(
+                f"status={status_label} | duration={duration_label}",
+                level="info",
+            )
+        )
+        print(
+            status_messages.status(
+                (f"static_run_id={static_run_id}" if static_run_id is not None else "static_run_id=—")
+                + f" | paper_grade={paper_grade_status}",
+                level="info",
+            )
+        )
+        if isinstance(identity_valid, bool):
+            print(status_messages.status(f"identity_valid={identity_valid}", level="info"))
+        if plan_path_display:
+            print(status_messages.status(f"plan={plan_path_display}", level="info"))
+        if failure_note and status_label != "ok":
+            print(status_messages.status(f"note={failure_note}", level="warn"))
+        if blockers_text and status_label != "ok":
+            print(status_messages.status(f"blockers={blockers_text}", level="warn"))
+
         if status_label != "ok" and outcome is not None:
             try:
                 failures_list = list(getattr(outcome, "failures", []) or [])
@@ -667,6 +798,7 @@ def run_dataset_static_batch(
                 "evidence_path": audit["evidence_path"],
                 "audit_notes": audit["audit_notes"],
                 "plan_path": plan_path,
+                "plan_exists": bool(plan_exists),
                 "failures_count": len(getattr(outcome, "failures", []) or []) if outcome else 0,
                 "failures_sample": (getattr(outcome, "failures", []) or [])[:3] if outcome else [],
                 "aborted": bool(getattr(outcome, "aborted", False)) if outcome else False,
@@ -687,6 +819,7 @@ def run_dataset_static_batch(
                 level="info",
             )
         )
+        print()
 
         try:
             _write_batch_summary(

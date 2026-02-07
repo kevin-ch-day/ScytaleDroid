@@ -10,6 +10,8 @@ from .menu_actions import (
     handle_dataset_readiness_dashboard,
     handle_device_report,
     handle_recent_static_runs,
+    handle_run_ml_on_frozen_dataset,
+    handle_run_ml_preflight_report,
     handle_static_report,
     handle_tier1_audit_report,
     handle_tier1_export_pack,
@@ -26,6 +28,8 @@ def reporting_menu() -> None:
         "2": handle_tier1_audit_report,
         "7": handle_tier1_qa_failures_report,
         "8": handle_dataset_readiness_dashboard,
+        "9": handle_run_ml_on_frozen_dataset,
+        "10": handle_run_ml_preflight_report,
         "3": handle_device_report,
         "4": handle_static_report,
         "5": view_saved_reports,
@@ -37,6 +41,8 @@ def reporting_menu() -> None:
         MenuOption("2", "Tier-1 audit report (dataset readiness)"),
         MenuOption("7", "Tier-1 QA failures (last 10 runs)"),
         MenuOption("8", "Dataset readiness dashboard (app install/harvest/static/dynamic)"),
+        MenuOption("9", "Run ML on frozen dataset (offline, evidence-pack only)"),
+        MenuOption("10", "ML preflight report (evidence packs, DB-free)"),
         MenuOption("3", "Generate device summary report"),
         MenuOption("4", "Generate static analysis report"),
         MenuOption("5", "View saved reports"),
@@ -86,7 +92,7 @@ def reporting_menu() -> None:
         menu_utils.print_section("Research / Tier-1")
         menu_utils.render_menu(
             MenuSpec(
-                items=options[:3],
+                items=options[:5],
                 show_exit=False,
                 exit_label=None,
                 show_descriptions=False,
@@ -96,7 +102,7 @@ def reporting_menu() -> None:
         menu_utils.print_section("Operational Reports")
         menu_utils.render_menu(
             MenuSpec(
-                items=options[3:],
+                items=options[5:],
                 show_exit=False,
                 exit_label=None,
                 show_descriptions=False,

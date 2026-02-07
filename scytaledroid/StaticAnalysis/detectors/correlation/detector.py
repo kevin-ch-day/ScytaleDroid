@@ -54,7 +54,9 @@ class CorrelationDetector(BaseDetector):
         try:
             bundle = build_diff_bundle(context)
             if bundle.previous is None:
-                reason_codes.append("insufficient_evidence:baseline_missing")
+                # Correlation diffs require a prior static report for the same app/version.
+                # This is expected after a DB reset or the first time an app/version is scanned.
+                reason_codes.append("not_applicable:baseline_missing")
 
             historical_findings = diff_findings(bundle)
             current_snapshot = current_network_snapshot(context)
