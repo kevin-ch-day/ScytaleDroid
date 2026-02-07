@@ -52,7 +52,9 @@ def test_update_dataset_tracker_records_run_protocol(monkeypatch, tmp_path: Path
         json.dumps(
             {
                 "report_status": "ok",
+                "missing_tools": [],
                 "capinfos": {"parsed": {"capture_duration_s": 180, "packet_count": 1000, "data_size_bytes": 123}},
+                "protocol_hierarchy": [{"protocol": "quic", "frames": 1, "bytes": 1}],
             }
         ),
         encoding="utf-8",
@@ -111,7 +113,7 @@ def test_update_dataset_tracker_records_run_protocol(monkeypatch, tmp_path: Path
     assert run["interaction_level"] == "minimal"
 
 
-def test_dataset_validity_rejects_short_pcap_span_when_netstats_large(monkeypatch, tmp_path: Path) -> None:
+def test_dataset_validity_allows_short_capture_span_when_other_requirements_met(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(dataset_tracker.app_config, "DATA_DIR", str(tmp_path))
     monkeypatch.setattr(dataset_tracker.app_config, "DYNAMIC_MIN_DURATION_S", 120)
 
@@ -122,7 +124,9 @@ def test_dataset_validity_rejects_short_pcap_span_when_netstats_large(monkeypatc
         json.dumps(
             {
                 "report_status": "ok",
+                "missing_tools": [],
                 "capinfos": {"parsed": {"capture_duration_s": 4.0, "packet_count": 2000, "data_size_bytes": 10}},
+                "protocol_hierarchy": [{"protocol": "tcp", "frames": 1, "bytes": 1}],
             }
         ),
         encoding="utf-8",
@@ -149,7 +153,12 @@ def test_dataset_validity_rejects_short_pcap_span_when_netstats_large(monkeypatc
         status="success",
         target={"package_name": "com.example.app"},
         scenario={"id": "basic_usage"},
-        operator={"tier": "dataset", "run_profile": "interactive_use", "run_sequence": 2},
+        operator={
+            "tier": "dataset",
+            "run_profile": "interactive_use",
+            "run_sequence": 2,
+            "interaction_level": "interactive",
+        },
     )
     manifest.add_artifacts(
         [
@@ -169,4 +178,4 @@ def test_dataset_validity_rejects_short_pcap_span_when_netstats_large(monkeypatc
     out_path = dataset_tracker.update_dataset_tracker(manifest, run_dir)
     payload = json.loads(out_path.read_text(encoding="utf-8"))
     run = payload["apps"]["com.example.app"]["runs"][0]
-    assert run["valid_dataset_run"] is False
+    assert run["valid_dataset_run"] is True

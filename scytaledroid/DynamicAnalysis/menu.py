@@ -41,6 +41,7 @@ def dynamic_analysis_menu() -> None:
         MenuOption("2", "Dataset run status"),
         MenuOption("3", "Export run summary CSV"),
         MenuOption("4", "Export PCAP features CSV"),
+        MenuOption("5", "Verify host PCAP tools (tshark + capinfos)"),
     ]
 
     while True:
@@ -73,6 +74,11 @@ def dynamic_analysis_menu() -> None:
             prompt_utils.press_enter_to_continue()
             continue
 
+        if choice == "5":
+            _verify_host_pcap_tools()
+            prompt_utils.press_enter_to_continue()
+            continue
+
 
     return
 
@@ -89,20 +95,24 @@ def _render_dataset_status() -> None:
         runs = int(entry.get("run_count") or 0)
         valid = int(entry.get("valid_runs") or 0)
         target = int(entry.get("target_runs") or 0)
-        status = "complete" if entry.get("app_complete") else "in_progress"
+        extra = int(entry.get("extra_valid_runs") or 0)
+        quota_met_at = entry.get("quota_met_at") or ""
+        status = "DONE" if entry.get("app_complete") else "IN_PROGRESS"
         rows.append(
             {
                 "Package": package,
                 "Valid": valid,
                 "Runs": runs,
                 "Target": target,
+                "Extra": extra,
+                "Quota met at": str(quota_met_at),
                 "Status": status,
             }
         )
     if not rows:
         print(status_messages.status("No dataset runs recorded yet.", level="info"))
         return
-    table_utils.print_table(rows, headers=["Package", "Valid", "Runs", "Target", "Status"])
+    table_utils.print_table(rows, headers=["Package", "Valid", "Runs", "Target", "Extra", "Quota met at", "Status"])
 
 
 def _export_pcap_features_csv() -> None:
@@ -127,6 +137,47 @@ def _export_dynamic_run_summary_csv() -> None:
         print(status_messages.status("No dynamic run summaries found.", level="warn"))
         return
     print(status_messages.status(f"Exported CSV: {output_path}", level="success"))
+
+
+def _verify_host_pcap_tools() -> None:
+    """Verify host toolchain required for dataset-tier PCAP post-analysis."""
+    from pathlib import Path
+
+    from scytaledroid.DynamicAnalysis.pcap.tools import collect_host_tools, missing_required_tools
+
+    print()
+    menu_utils.print_header("Host PCAP Tools")
+    tools = collect_host_tools()
+    missing = missing_required_tools(tier="dataset")
+    for name in ("tshark", "capinfos"):
+        meta = tools.get(name) if isinstance(tools, dict) else None
+        path = meta.get("path") if isinstance(meta, dict) else None
+        version = meta.get("version") if isinstance(meta, dict) else None
+        if path:
+            print(status_messages.status(f"{name}: OK ({path})", level="success"))
+            if version:
+                print(status_messages.status(f"{name}: {version}", level="info"))
+        else:
+            print(status_messages.status(f"{name}: MISSING", level="warn"))
+
+    script = Path("scripts/install_wireshark_cli.sh")
+    if missing:
+        if script.exists():
+            print(
+                status_messages.status(
+                    "Fix: install required tools with: sudo scripts/install_wireshark_cli.sh",
+                    level="warn",
+                )
+            )
+        else:
+            print(
+                status_messages.status(
+                    "Fix: install wireshark-cli (tshark + capinfos) using your OS package manager.",
+                    level="warn",
+                )
+            )
+    else:
+        print(status_messages.status("Host toolchain is dataset-ready.", level="success"))
 
 
 def _select_dynamic_target() -> tuple[str, str] | None:

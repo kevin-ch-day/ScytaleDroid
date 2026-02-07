@@ -15,6 +15,16 @@ STATIC_ANALYSIS_RETENTION_DAYS = 30
 DYNAMIC_MIN_DURATION_S = 120
 DYNAMIC_TARGET_DURATION_S = 180
 
+# Dynamic dataset QA (Paper #2)
+# Default can be overridden at process start via SCYTALEDROID_MIN_PCAP_BYTES.
+# Env is read at import time (entrypoint default) and must not be read mid-run.
+import os  # noqa: E402
+
+try:
+    DYNAMIC_MIN_PCAP_BYTES = int(os.getenv("SCYTALEDROID_MIN_PCAP_BYTES", "100000"))
+except Exception:
+    DYNAMIC_MIN_PCAP_BYTES = 100000
+
 # Device module paths
 DEVICE_STATE_DIR = "state"
 DEVICE_STATE_FILE = "active_device.json"

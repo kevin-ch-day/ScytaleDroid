@@ -102,7 +102,13 @@ def run_full_sync(
     mode = (mode or os.getenv("SCYTALEDROID_INVENTORY_MODE", "baseline")).lower().strip()
     progress_cb = None
     if progress_sink == "cli":
-        progress.render_snapshot_block(meta, ui_prefs=ui_prefs, mode=mode, serial=serial)
+        progress.render_snapshot_block(
+            meta,
+            ui_prefs=ui_prefs,
+            mode=mode,
+            serial=serial,
+            allow_fallbacks=resolved_config.allow_fallbacks,
+        )
         progress_cb = progress.make_cli_progress_printer(ui_prefs=ui_prefs)
 
     # Structured RUN_START log
@@ -133,8 +139,8 @@ def run_full_sync(
     except Exception:
         inventory_logger = None
 
-    if resolved_config.allow_fallbacks and progress_sink == "cli":
-        print(status_messages.status("Fallbacks enabled (non-root).", level="warn"))
+    # Fallback messaging is handled by the inventory progress preamble to keep
+    # the run output visually coherent (single panel).
 
     try:
         result = runner.run_full_sync(

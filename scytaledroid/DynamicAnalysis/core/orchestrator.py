@@ -16,10 +16,16 @@ from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
 from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
 from scytaledroid.DynamicAnalysis.pcap.correlate import write_static_dynamic_overlap
-from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import peek_next_run_protocol, update_dataset_tracker
+from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
+    DatasetTrackerConfig,
+    evaluate_dataset_validity,
+    peek_next_run_protocol,
+    update_dataset_tracker,
+)
 from scytaledroid.DynamicAnalysis.pcap.features import write_pcap_features
 from scytaledroid.DynamicAnalysis.pcap.indexer import index_pcap_by_app
 from scytaledroid.DynamicAnalysis.pcap.report import write_pcap_report
+from scytaledroid.DynamicAnalysis.pcap.tools import collect_host_tools
 from scytaledroid.DynamicAnalysis.analysis.summarizer import DynamicRunSummarizer
 from scytaledroid.DynamicAnalysis.core.environment import EnvironmentManager
 from scytaledroid.DynamicAnalysis.core.event_logger import RunEventLogger
@@ -300,6 +306,17 @@ class DynamicRunOrchestrator:
             if getattr(scenario_result, "interaction_level", None) == "idle"
             else getattr(scenario_result, "interaction_level", None)
         )
+        # If the scenario runner didn't provide an interaction level, derive a
+        # deterministic operator label from the dataset protocol (baseline vs interactive).
+        if not interaction_level:
+            tier = self.config.tier
+            run_profile = getattr(run_ctx, "run_profile", None)
+            if tier and str(tier).lower() == "dataset" and run_profile:
+                if str(run_profile).lower().startswith("baseline"):
+                    interaction_level = "minimal"
+                else:
+                    interaction_level = "interactive"
+
         if interaction_level:
             manifest.operator["interaction_level"] = interaction_level
             manifest.operator.setdefault("run_context", {})["interaction_level"] = interaction_level
@@ -394,6 +411,31 @@ class DynamicRunOrchestrator:
         if overlap:
             outputs.append(overlap)
         update_dataset_tracker(manifest, run_dir, event_logger=event_logger)
+
+        # Deterministic dataset validity classification (Paper #2) must be written to the manifest.
+        tier = (manifest.operator or {}).get("tier") if isinstance(manifest.operator, dict) else None
+        if tier and str(tier).lower() == "dataset":
+            try:
+                entry = {"pcap_size_bytes": next((a.size_bytes for a in manifest.artifacts if a.type == "pcapdroid_capture"), 0)}
+                validity = evaluate_dataset_validity(run_dir, manifest, entry, DatasetTrackerConfig())
+                manifest.operator["dataset_validity"] = validity
+                event_logger.log(
+                    "dataset_validity",
+                    {
+                        "valid": bool(validity.get("valid_dataset_run")),
+                        "invalid_reason_code": validity.get("invalid_reason_code"),
+                        "min_pcap_bytes": validity.get("min_pcap_bytes"),
+                        "sampling_duration_seconds": validity.get("sampling_duration_seconds"),
+                        "short_run": validity.get("short_run"),
+                        "no_traffic_observed": validity.get("no_traffic_observed"),
+                    },
+                )
+            except Exception as exc:  # noqa: BLE001
+                self.logger.warning(
+                    "Dataset validity computation failed",
+                    extra={"dynamic_run_id": dynamic_run_id, "error": str(exc)},
+                )
+                event_logger.log("dataset_validity_error", {"error": str(exc)})
         manifest.add_outputs(outputs)
         manifest.finalize()
         writer.write_manifest(manifest)
@@ -461,6 +503,10 @@ class DynamicRunOrchestrator:
                 "host": platform.node(),
                 "platform": platform.platform(),
                 "python_version": platform.python_version(),
+                # Host toolchain audit payload for reproducibility. This is not a gate here
+                # (dataset-tier gating happens earlier), but recording it avoids "version drift"
+                # ambiguity when reviewing frozen evidence packs.
+                "host_tools": collect_host_tools(),
             },
             scenario={
                 "id": run_ctx.scenario_id,
@@ -477,6 +523,7 @@ class DynamicRunOrchestrator:
                 "tool_semver": app_config.APP_VERSION,
                 "tool_git_commit": get_git_commit(),
                 "schema_version": db_diagnostics.get_schema_version() or "<unknown>",
+                "host_tools": collect_host_tools(),
                 # Operator protocol metadata (not used for behavioral modeling).
                 "run_profile": getattr(run_ctx, "run_profile", None),
                 "run_sequence": getattr(run_ctx, "run_sequence", None),
@@ -485,6 +532,7 @@ class DynamicRunOrchestrator:
                     "interactive": bool(run_ctx.interactive),
                     "tier": self.config.tier,
                     "sampling_rate_s": self.config.sampling_rate_s,
+                    "min_pcap_bytes": getattr(app_config, "DYNAMIC_MIN_PCAP_BYTES", 100000),
                     "duration_seconds": run_ctx.duration_seconds,
                     "scenario_id": run_ctx.scenario_id,
                     "device_serial": run_ctx.device_serial,

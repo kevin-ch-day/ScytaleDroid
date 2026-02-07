@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import shutil
 from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
@@ -92,6 +93,18 @@ def handle_dataset_readiness_dashboard() -> None:
 
     print()
     menu_utils.print_header("Dataset readiness dashboard")
+    # Host toolchain check (dataset-tier dynamic QA requires these).
+    missing = [tool for tool in ("capinfos", "tshark") if not shutil.which(tool)]
+    if missing:
+        print(status_messages.status(f"Host tools missing: {', '.join(missing)}", level="warn"))
+    else:
+        print(status_messages.status("Host tools: capinfos OK, tshark OK", level="success"))
+    print(
+        status_messages.status(
+            f"Dataset QA: MIN_PCAP_BYTES={getattr(app_config, 'DYNAMIC_MIN_PCAP_BYTES', 100000)}",
+            level="info",
+        )
+    )
     headers = [
         "App",
         "Package",

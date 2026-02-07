@@ -8,6 +8,7 @@ import os
 import time
 from pathlib import Path
 
+from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis.adb import client as adb_client, shell as adb_shell
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
@@ -16,7 +17,7 @@ from scytaledroid.DynamicAnalysis.observers.base import Observer, ObserverHandle
 PCAPDROID_PACKAGE = "com.emanuelef.remote_capture"
 PCAPDROID_COMPONENT = "com.emanuelef.remote_capture/.activities.CaptureCtrl"
 PCAPDROID_DOWNLOAD_DIR = "/sdcard/Download/PCAPdroid"
-MIN_PCAP_BYTES = 30 * 1024
+MIN_PCAP_BYTES = int(getattr(app_config, "DYNAMIC_MIN_PCAP_BYTES", 100000))
 CAPTURE_MODE = "app_only"
 FINALIZE_MIN_WAIT_S = 5.0
 FINALIZE_MAX_WAIT_S = 12.0

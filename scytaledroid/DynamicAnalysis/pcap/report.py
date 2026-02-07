@@ -41,18 +41,12 @@ def write_pcap_report(
     event_logger: RunEventLogger | None = None,
 ) -> ArtifactRecord | None:
     cfg = config or PcapReportConfig()
+    report_path = run_dir / "analysis/pcap_report.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+
     pcap_artifact = _find_pcap_artifact(manifest)
-    if not pcap_artifact or not pcap_artifact.relative_path:
-        _log(event_logger, "pcap_report_skip", {"reason": "pcap_artifact_missing"})
-        return None
-    pcap_path = run_dir / pcap_artifact.relative_path
-    if not pcap_path.exists():
-        _log(
-            event_logger,
-            "pcap_report_skip",
-            {"reason": "pcap_file_missing", "path": str(pcap_path)},
-        )
-        return None
+    pcap_rel = pcap_artifact.relative_path if pcap_artifact else None
+    pcap_path = (run_dir / pcap_rel) if pcap_rel else None
     capinfos_path = shutil.which("capinfos")
     tshark_path = shutil.which("tshark")
     missing_tools: list[str] = []
@@ -64,22 +58,40 @@ def write_pcap_report(
         missing_tools.append("tshark")
         if report_status == "ok":
             report_status = "partial"
-    if report_status == "skip":
-        _log(event_logger, "pcap_report_skip", {"reason": "capinfos_missing"})
-        return None
+
+    reason_codes: list[str] = []
+    if not pcap_artifact or not pcap_rel:
+        reason_codes.append("pcap_artifact_missing")
+        report_status = "skip"
+    elif not pcap_path or not pcap_path.exists():
+        reason_codes.append("pcap_file_missing")
+        report_status = "skip"
+
     report = {
         "generated_at": datetime.now(UTC).isoformat(),
-        "pcap_path": str(pcap_path.relative_to(run_dir)),
-        "pcap_sha256": pcap_artifact.sha256,
-        "pcap_size_bytes": pcap_artifact.size_bytes,
+        "pcap_path": str(pcap_path.relative_to(run_dir)) if pcap_path else None,
+        "pcap_sha256": pcap_artifact.sha256 if pcap_artifact else None,
+        "pcap_size_bytes": pcap_artifact.size_bytes if pcap_artifact else None,
         "report_status": report_status,
         "missing_tools": missing_tools,
-        "capinfos": _run_capinfos(capinfos_path, pcap_path),
+        "reason_codes": reason_codes,
+        "no_traffic_observed": 0,
+        "capinfos": {"raw": "", "parsed": {}, "error": "skipped"} if report_status == "skip" else _run_capinfos(capinfos_path, pcap_path),  # type: ignore[arg-type]
         "protocol_hierarchy": [],
         "top_sni": [],
         "top_dns": [],
     }
-    if tshark_path:
+
+    # capinfos-derived "no traffic" flag for interpretability and deterministic QA gating.
+    try:
+        parsed = (report.get("capinfos") or {}).get("parsed") or {}
+        pkt = parsed.get("packet_count")
+        if isinstance(pkt, (int, float)) and int(pkt) == 0:
+            report["no_traffic_observed"] = 1
+    except Exception:
+        pass
+
+    if report_status != "skip" and tshark_path and pcap_path:
         report["protocol_hierarchy"] = _run_protocol_hierarchy(tshark_path, pcap_path)
         report["top_sni"] = _run_top_fields(
             tshark_path,
@@ -88,10 +100,9 @@ def write_pcap_report(
             cfg.top_n,
         )
         report["top_dns"] = _run_top_fields(tshark_path, pcap_path, "dns.qry.name", cfg.top_n, display_filter="dns")
-    else:
+    elif report_status != "skip" and not tshark_path:
         _log(event_logger, "pcap_report_partial", {"reason": "tshark_missing"})
-    report_path = run_dir / "analysis/pcap_report.json"
-    report_path.parent.mkdir(parents=True, exist_ok=True)
+
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
     return ArtifactRecord(
         relative_path=str(report_path.relative_to(run_dir)),

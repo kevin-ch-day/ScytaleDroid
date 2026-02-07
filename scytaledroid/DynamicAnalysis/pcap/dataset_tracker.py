@@ -11,8 +11,9 @@ from typing import Any
 
 from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.core.event_logger import RunEventLogger
-from scytaledroid.DynamicAnalysis.observers.pcapdroid_capture import MIN_PCAP_BYTES
 from scytaledroid.DynamicAnalysis.core.manifest import RunManifest
+
+MIN_PCAP_BYTES = int(getattr(app_config, "DYNAMIC_MIN_PCAP_BYTES", 100000))
 
 
 @dataclass(frozen=True)
@@ -20,10 +21,20 @@ class DatasetTrackerConfig:
     repeats_per_app: int = 3
     baseline_profile: str = "baseline_idle"
     interactive_profile: str = "interactive_use"
-    # Dataset validity guardrail: catch cases where netstats indicates substantial
-    # traffic but the PCAP spans only a few seconds (misconfiguration or capture gap).
-    large_netstats_bytes_threshold: int = 5 * 1024 * 1024
-    min_pcap_span_seconds_if_large_netstats: float = 30.0
+
+
+_VALIDITY_ENUM = {
+    "INSUFFICIENT_DURATION",
+    "PCAP_MISSING",
+    "PCAP_TOO_SMALL",
+    "PCAP_REPORT_MISSING",
+    "PCAP_REPORT_SKIP",
+    "MISSING_TOOLS_TSHARK",
+    "MISSING_TOOLS_CAPINFOS",
+    "PCAP_REPORT_EMPTY_NO_REASON",
+    "PCAP_PARSE_ERROR",
+    "CAPTURE_INTERRUPTED",
+}
 
 
 def update_dataset_tracker(
@@ -67,9 +78,8 @@ def update_dataset_tracker(
     }
     run_entry.update(_netstats_summary(run_dir))
     run_entry.update(_pcap_capture_stats(run_dir))
-    valid, reasons = _is_valid_run(run_dir, run_entry, cfg)
-    run_entry["valid_dataset_run"] = valid
-    run_entry["validity_reasons"] = reasons
+    validity = evaluate_dataset_validity(run_dir, manifest, run_entry, cfg)
+    run_entry.update(validity)
 
     # Idempotent: update existing entries so older runs can be re-evaluated when
     # QA rules evolve (e.g., PCAP span vs netstats guardrail).
@@ -82,6 +92,7 @@ def update_dataset_tracker(
     app_entry["target_runs"] = cfg.repeats_per_app
     app_entry["valid_runs"] = sum(1 for r in app_entry["runs"] if r.get("valid_dataset_run"))
     app_entry["app_complete"] = app_entry["valid_runs"] >= cfg.repeats_per_app
+    _apply_quota_marking(app_entry, cfg)
     app_entry["overlap_stats"] = _compute_overlap_stats(app_entry.get("runs") or [])
     payload["updated_at"] = datetime.now(UTC).isoformat()
     tracker_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
@@ -222,6 +233,77 @@ def _load(path: Path) -> dict[str, Any]:
         return {"apps": {}}
 
 
+def _parse_dt(value: object) -> datetime | None:
+    """Best-effort parse of ISO-ish timestamps used in manifests and tracker runs."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    # Allow common ISO 'Z' suffix.
+    if text.endswith("Z") and "+" not in text:
+        text = text[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(text)
+    except Exception:
+        return None
+
+
+def _apply_quota_marking(app_entry: dict[str, Any], cfg: DatasetTrackerConfig) -> None:
+    """Mark which runs count toward the first N valid runs (quota) and which are extras.
+
+    This is intentionally deterministic from recorded run history, not from the order in
+    which the tracker is updated or recomputed.
+    """
+    runs = app_entry.get("runs")
+    if not isinstance(runs, list):
+        return
+    needed = int(cfg.repeats_per_app)
+    # Reset markers (idempotent).
+    for r in runs:
+        if isinstance(r, dict):
+            r["counts_toward_quota"] = False
+            r["extra_run"] = 0
+    indexed: list[tuple[int, dict[str, Any]]] = [(i, r) for i, r in enumerate(runs) if isinstance(r, dict)]
+    indexed.sort(
+        key=lambda item: (
+            _parse_dt(item[1].get("ended_at"))
+            or _parse_dt(item[1].get("started_at"))
+            or datetime.min.replace(tzinfo=UTC),
+            item[0],
+        )
+    )
+
+    valid_seen = 0
+    quota_met_at: str | None = None
+    quota_met_run_id: str | None = None
+    for _, r in indexed:
+        is_valid = r.get("valid_dataset_run") is True
+        if not is_valid:
+            continue
+        if valid_seen < needed:
+            r["counts_toward_quota"] = True
+            valid_seen += 1
+            if valid_seen == needed:
+                quota_met_at = r.get("ended_at") or r.get("started_at")
+                quota_met_run_id = r.get("run_id")
+        else:
+            r["extra_run"] = 1
+
+    app_entry["quota_met"] = bool(valid_seen >= needed)
+    app_entry["quota_met_at"] = quota_met_at
+    app_entry["quota_met_run_id"] = quota_met_run_id
+    app_entry["extra_valid_runs"] = sum(
+        1
+        for r in runs
+        if isinstance(r, dict)
+        and r.get("valid_dataset_run") is True
+        and not r.get("counts_toward_quota")
+    )
+
+
 def _pcap_size(manifest: RunManifest) -> int | None:
     for artifact in manifest.artifacts:
         if artifact.type == "pcapdroid_capture":
@@ -240,64 +322,112 @@ def _pcap_report_status(run_dir: Path) -> str | None:
     return payload.get("report_status")
 
 
-def _duration_ok(run_dir: Path) -> bool:
-    summary_path = run_dir / "analysis" / "summary.json"
-    if not summary_path.exists():
-        return False
-    try:
-        payload = json.loads(summary_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return False
-    telemetry = (payload.get("telemetry") or {}).get("stats") or {}
-    sampling_duration = telemetry.get("sampling_duration_seconds")
-    try:
-        return float(sampling_duration) >= float(app_config.DYNAMIC_MIN_DURATION_S)
-    except Exception:
-        return False
-
-
 def _features_ok(run_dir: Path) -> bool:
     return (run_dir / "analysis/pcap_features.json").exists()
 
 
-def _is_valid_run(
+def evaluate_dataset_validity(
     run_dir: Path,
+    manifest: RunManifest,
     entry: dict[str, Any],
     cfg: DatasetTrackerConfig,
-) -> tuple[bool, list[str]]:
-    reasons: list[str] = []
-    pcap_size = int(entry.get("pcap_size_bytes") or 0)
-    if pcap_size < MIN_PCAP_BYTES:
-        reasons.append("pcap_too_small")
-        return False, reasons
-    report_status = entry.get("report_status")
-    if report_status == "skip" or report_status is None:
-        reasons.append("pcap_report_missing_or_skip")
-        return False, reasons
+) -> dict[str, Any]:
+    """Deterministic dataset validity classifier (Paper #2).
+
+    Contract:
+    - valid_dataset_run: bool
+    - invalid_reason_code: str | None (exactly one when invalid)
+    - flags: short_run, no_traffic_observed (ints 0/1)
+    """
+    flags: dict[str, int] = {"short_run": 0, "no_traffic_observed": 0}
+
+    # Dataset protocol metadata is part of the Paper #2 dataset contract.
+    operator = manifest.operator if isinstance(manifest.operator, dict) else {}
+    missing_protocol = []
+    if not operator.get("run_profile"):
+        missing_protocol.append("run_profile")
+    if operator.get("run_sequence") in (None, "", 0):
+        missing_protocol.append("run_sequence")
+    if not operator.get("interaction_level"):
+        missing_protocol.append("interaction_level")
+    if missing_protocol:
+        return _invalid(
+            "PCAP_PARSE_ERROR",
+            {**flags, "protocol_missing": 1},
+            run_dir,
+        )
+
+    # Capture interrupted (observer failure) is always invalid for dataset tier.
+    for obs in manifest.observers or []:
+        if getattr(obs, "observer_id", None) == "pcapdroid_capture":
+            if str(getattr(obs, "status", "")).lower() == "failed":
+                return _invalid("CAPTURE_INTERRUPTED", flags, run_dir)
+
+    # Duration policy: sampling window is canonical.
+    sampling_seconds = _sampling_duration_seconds(run_dir)
+    if sampling_seconds is None:
+        return _invalid("INSUFFICIENT_DURATION", flags, run_dir)
+    if float(sampling_seconds) < float(app_config.DYNAMIC_MIN_DURATION_S):
+        return _invalid("INSUFFICIENT_DURATION", flags, run_dir)
+    if float(sampling_seconds) < float(app_config.DYNAMIC_TARGET_DURATION_S):
+        flags["short_run"] = 1
+
+    # PCAP size policy.
+    min_bytes = int(getattr(app_config, "DYNAMIC_MIN_PCAP_BYTES", 100000))
+    pcap_size = entry.get("pcap_size_bytes")
+    try:
+        pcap_size_int = int(pcap_size or 0)
+    except Exception:
+        pcap_size_int = 0
+    if pcap_size_int <= 0:
+        return _invalid("PCAP_MISSING", flags, run_dir)
+    if pcap_size_int < min_bytes:
+        return _invalid("PCAP_TOO_SMALL", flags, run_dir)
+
+    # PCAP report must exist and not be skipped for dataset tier.
+    report = _load_report(run_dir)
+    if report is None:
+        return _invalid("PCAP_REPORT_MISSING", flags, run_dir)
+    report_status = report.get("report_status")
+    if report_status is None:
+        return _invalid("PCAP_REPORT_MISSING", flags, run_dir)
+    if str(report_status).lower() == "skip":
+        return _invalid("PCAP_REPORT_SKIP", flags, run_dir)
+
+    # Missing tools are a dataset-tier invalidation (environment not dataset-ready).
+    missing = report.get("missing_tools") or []
+    missing_set = {str(x).lower() for x in missing if x}
+    if "tshark" in missing_set:
+        return _invalid("MISSING_TOOLS_TSHARK", flags, run_dir)
+    if "capinfos" in missing_set:
+        return _invalid("MISSING_TOOLS_CAPINFOS", flags, run_dir)
+
+    # Protocol hierarchy may be empty only with an explicit no_traffic_observed flag.
+    proto = report.get("protocol_hierarchy") or []
+    no_traffic = report.get("no_traffic_observed")
+    try:
+        no_traffic_int = int(no_traffic or 0)
+    except Exception:
+        no_traffic_int = 0
+    if not proto:
+        if no_traffic_int == 1:
+            flags["no_traffic_observed"] = 1
+        else:
+            return _invalid("PCAP_REPORT_EMPTY_NO_REASON", flags, run_dir)
+
+    # Features must exist for dataset counting.
     if not _features_ok(run_dir):
-        reasons.append("pcap_features_missing")
-        return False, reasons
-    if not _duration_ok(run_dir):
-        reasons.append("sampling_duration_below_min")
-        return False, reasons
-    # Guardrail: if netstats indicates substantial traffic, the PCAP should span
-    # more than just a few seconds. This prevents "valid by size" captures from
-    # being accepted when they likely missed most of the session traffic.
-    net_total = entry.get("netstats_total_bytes")
-    pcap_span = entry.get("pcap_capture_duration_s")
-    try:
-        net_total_int = int(net_total or 0)
-    except Exception:
-        net_total_int = 0
-    try:
-        pcap_span_f = float(pcap_span) if pcap_span is not None else None
-    except Exception:
-        pcap_span_f = None
-    if net_total_int >= int(cfg.large_netstats_bytes_threshold):
-        if pcap_span_f is None or pcap_span_f < float(cfg.min_pcap_span_seconds_if_large_netstats):
-            reasons.append("pcap_span_too_short_for_netstats")
-            return False, reasons
-    return True, reasons
+        # We intentionally map this to a report parse error-like code to avoid
+        # expanding the locked enum set for Paper #2.
+        return _invalid("PCAP_PARSE_ERROR", flags, run_dir)
+
+    return {
+        "valid_dataset_run": True,
+        "invalid_reason_code": None,
+        "sampling_duration_seconds": sampling_seconds,
+        "min_pcap_bytes": min_bytes,
+        **flags,
+    }
 
 
 def _netstats_summary(run_dir: Path) -> dict[str, Any]:
@@ -458,6 +588,45 @@ def _max_delta_or_none(values: list[float]) -> float | None:
 def _log(event_logger: RunEventLogger | None, event: str, payload: dict[str, Any]) -> None:
     if event_logger:
         event_logger.log(event, payload)
+
+
+def _invalid(code: str, flags: dict[str, int], run_dir: Path) -> dict[str, Any]:
+    if code not in _VALIDITY_ENUM:
+        code = "PCAP_PARSE_ERROR"
+    return {
+        "valid_dataset_run": False,
+        "invalid_reason_code": code,
+        "sampling_duration_seconds": _sampling_duration_seconds(run_dir),
+        "min_pcap_bytes": int(getattr(app_config, "DYNAMIC_MIN_PCAP_BYTES", 100000)),
+        **flags,
+    }
+
+
+def _sampling_duration_seconds(run_dir: Path) -> float | None:
+    summary_path = run_dir / "analysis" / "summary.json"
+    if not summary_path.exists():
+        return None
+    try:
+        payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    telemetry = (payload.get("telemetry") or {}).get("stats") or {}
+    sampling_duration = telemetry.get("sampling_duration_seconds")
+    try:
+        return float(sampling_duration)
+    except Exception:
+        return None
+
+
+def _load_report(run_dir: Path) -> dict[str, Any] | None:
+    report_path = run_dir / "analysis" / "pcap_report.json"
+    if not report_path.exists():
+        return None
+    try:
+        payload = json.loads(report_path.read_text(encoding="utf-8"))
+        return payload if isinstance(payload, dict) else None
+    except (OSError, json.JSONDecodeError):
+        return {"report_status": None}
 
 
 __all__ = [

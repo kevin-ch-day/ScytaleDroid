@@ -21,6 +21,8 @@ from scytaledroid.DynamicAnalysis.core.event_logger import RunEventLogger
 from scytaledroid.DynamicAnalysis.core.evidence_pack import EvidencePackWriter
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord, RunManifest
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
+from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import peek_next_run_protocol
+from scytaledroid.DynamicAnalysis.pcap.tools import collect_host_tools, missing_required_tools
 from scytaledroid.DynamicAnalysis.plans.loader import (
     build_plan_validation_event,
     load_dynamic_plan,
@@ -95,6 +97,41 @@ class DynamicAnalysisEngine:
                 config=self.config,
                 session=blocked,
                 plan=None,
+                probe_summary={},
+                summary_payload=summary_payload,
+            )
+
+        # Dataset-tier preflight: host toolchain must be complete (Paper #2).
+        missing_tools = missing_required_tools(tier=self.config.tier)
+        if missing_tools:
+            now = datetime.now(UTC)
+            dynamic_run_id, evidence_path = self._write_blocked_tools_missing(plan_payload, missing_tools)
+            blocked = DynamicSessionResult(
+                package_name=self.config.package_name,
+                duration_seconds=self.config.duration_seconds,
+                started_at=now,
+                ended_at=now,
+                status="blocked",
+                notes="Environment not dataset-ready (missing tools).",
+                errors=[f"missing_tools:{','.join(missing_tools)}"],
+                dynamic_run_id=dynamic_run_id,
+                evidence_path=evidence_path,
+            )
+            summary_payload = {
+                "dynamic_run_id": dynamic_run_id,
+                "package_name": self.config.package_name,
+                "status": blocked.status,
+                "evidence_path": evidence_path,
+                "plan": plan_payload,
+                "probes": {},
+                "diagnostics_warnings": ["missing_tools"],
+            }
+            # Persist blocked dataset-tier runs so validity is auditable in DB.
+            self._persist_summary(blocked, summary_payload)
+            return DynamicEngineResult(
+                config=self.config,
+                session=blocked,
+                plan=plan_payload,
                 probe_summary={},
                 summary_payload=summary_payload,
             )
@@ -211,6 +248,10 @@ class DynamicAnalysisEngine:
                 "run_type": "dynamic",
             },
             scenario={"id": self.config.scenario_id},
+            environment={
+                "device_serial": self.config.device_serial,
+                "host_tools": collect_host_tools(),
+            },
             operator={
                 "tool_semver": app_config.APP_VERSION,
                 "tool_git_commit": get_git_commit(),
@@ -221,6 +262,97 @@ class DynamicAnalysisEngine:
             manifest.add_artifacts([event_artifact])
         manifest.finalize()
         writer.write_manifest(manifest)
+        return dynamic_run_id, str(run_dir)
+
+    def _write_blocked_tools_missing(
+        self,
+        plan_payload: Mapping[str, Any] | None,
+        missing_tools: list[str],
+    ) -> tuple[str | None, str | None]:
+        """Write a blocked evidence pack for missing host tools (dataset tier)."""
+        dynamic_run_id = str(uuid.uuid4())
+        output_root = Path(self.config.output_root or "output/evidence/dynamic")
+        run_dir = output_root / dynamic_run_id
+        writer = EvidencePackWriter(run_dir)
+        writer.ensure_layout()
+        run_ctx = RunContext(
+            dynamic_run_id=dynamic_run_id,
+            package_name=self.config.package_name,
+            duration_seconds=self.config.duration_seconds,
+            scenario_id=self.config.scenario_id,
+            run_dir=run_dir,
+            artifacts_dir=writer.artifacts_dir,
+            analysis_dir=writer.analysis_dir,
+            notes_dir=writer.notes_dir,
+            interactive=self.config.interactive,
+            device_serial=self.config.device_serial,
+            clear_logcat=self.config.clear_logcat,
+            static_run_id=self.config.static_run_id,
+            harvest_session_id=self.config.harvest_session_id,
+            static_plan=dict(plan_payload) if isinstance(plan_payload, Mapping) else None,
+            proxy_port=self.config.proxy_port,
+            batch_id=self.config.batch_id,
+        )
+        event_logger = RunEventLogger(run_ctx)
+        event_logger.log("preflight.tools_missing", {"missing_tools": missing_tools, "tier": self.config.tier})
+        event_artifact = event_logger.finalize()
+
+        protocol = peek_next_run_protocol(self.config.package_name, tier=self.config.tier)
+        run_profile = (protocol or {}).get("run_profile") if isinstance(protocol, dict) else None
+        run_sequence = (protocol or {}).get("run_sequence") if isinstance(protocol, dict) else None
+        interaction_level = "minimal" if str(run_profile or "").lower().startswith("baseline") else "interactive"
+
+        # Deterministic invalid reason code: pick one (no lists) per PM contract.
+        missing = {str(t).lower() for t in missing_tools}
+        invalid_reason = "MISSING_TOOLS_CAPINFOS" if "capinfos" in missing else "MISSING_TOOLS_TSHARK"
+
+        dataset_validity = {
+            "valid_dataset_run": False,
+            "invalid_reason_code": invalid_reason,
+            "min_pcap_bytes": getattr(app_config, "DYNAMIC_MIN_PCAP_BYTES", 100000),
+            "sampling_duration_seconds": None,
+            "short_run": 0,
+            "no_traffic_observed": 0,
+            "missing_tools": sorted(missing_tools),
+        }
+
+        manifest = RunManifest(
+            run_manifest_version=1,
+            dynamic_run_id=dynamic_run_id,
+            created_at=datetime.now(UTC).isoformat(),
+            batch_id=self.config.batch_id,
+            status="blocked",
+            target={
+                "package_name": self.config.package_name,
+                "static_run_id": self.config.static_run_id,
+                "run_type": "dynamic",
+                "static_plan_path": self.config.plan_path,
+            },
+            scenario={"id": self.config.scenario_id},
+            operator={
+                "tool_semver": app_config.APP_VERSION,
+                "tool_git_commit": get_git_commit(),
+                "schema_version": db_diagnostics.get_schema_version() or "<unknown>",
+                "host_tools": collect_host_tools(),
+                "tier": self.config.tier,
+                "run_profile": run_profile,
+                "run_sequence": run_sequence,
+                "interaction_level": interaction_level,
+                "dataset_validity": dataset_validity,
+            },
+            notes=["Environment not dataset-ready (missing tools)."],
+        )
+        if event_artifact:
+            manifest.add_artifacts([event_artifact])
+        manifest.finalize()
+        writer.write_manifest(manifest)
+        if self.config.interactive:
+            print(
+                status_messages.status(
+                    f"Environment not dataset-ready (missing tools): {', '.join(sorted(missing_tools))}",
+                    level="error",
+                )
+            )
         return dynamic_run_id, str(run_dir)
 
     def _emit_plan_validation(self, validation) -> None:

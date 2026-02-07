@@ -53,7 +53,10 @@ def _format_progress_lines(
     phase_label: str | None = None,
 ) -> tuple[str, str]:
     percentage = (processed / total) * 100 if total else 0.0
-    eta_text = _format_duration(eta_seconds)
+    # ETA tends to be noisy early. Suppress until we have enough signal.
+    eta_text = ""
+    if elapsed_seconds >= 30.0 and processed >= max(10, int(total * 0.05) if total else 10):
+        eta_text = _format_duration(eta_seconds)
 
     # Scale the bar to the terminal to avoid line wrapping on narrow consoles.
     term_width = terminal.get_terminal_width(default=100)
@@ -71,22 +74,22 @@ def _format_progress_lines(
         filled_bar = colors.apply(filled_bar, palette.accent)
         empty_bar = colors.apply(empty_bar, palette.muted)
     bar = f"{filled_bar}{empty_bar}"
-    line1 = f"[{bar}] {processed}/{total} ({percentage:.1f}%)"
-    if phase_label:
-        label = phase_label
-        if colors.colors_enabled():
-            palette = colors.get_palette()
-            label = colors.apply(phase_label, palette.header, bold=True)
-        line1 = f"{label}  {line1}"
+    # Rate is more stable than ETA and helps operators see that the run is alive.
+    rate = (processed / elapsed_seconds) if elapsed_seconds > 0 else 0.0
+    elapsed_text = _format_duration(elapsed_seconds)
+    eta_field = eta_text or "--"
 
-    line2 = ""
-    if processed >= total and total > 0:
-        line2 = "ETA --"
-    elif eta_text:
-        line2 = f"ETA: {eta_text}"
+    label = (phase_label or "Collecting").strip()
+    if colors.colors_enabled():
+        palette = colors.get_palette()
+        label = colors.apply(label, palette.header, bold=True)
+
+    # Two-line layout: keep the progress bar readable and move timing/rate to line 2.
+    line1 = f"{label}  [{bar}] {processed}/{total} ({percentage:.1f}%)"
+
+    line2 = f"elapsed {elapsed_text}  eta {eta_field}  rate {rate:.2f} pkg/s"
     if split_processed:
-        line2 = f"{line2} | splits {split_processed}" if line2 else f"splits {split_processed}"
-
+        line2 += f"  splits {split_processed}"
     return line1, line2
 
 
@@ -111,8 +114,8 @@ def make_cli_progress_printer(ui_prefs=None):
         if phase == "start":
             current_phase_label = event.get("phase_label") or "Collecting packages"
             print()  # visual separation after snapshot block
-            print()  # reserve second line for live updates
-            print("\033[F", end="")  # move cursor back to first reserved line
+            print()  # reserve line2
+            print("\033[F", end="")  # move cursor back to line1
             return True
         if phase == "progress":
             last_elapsed = float(event.get("elapsed_seconds", 0.0) or 0.0)
@@ -149,6 +152,7 @@ def render_snapshot_block(
     mode: str | None = None,
     *,
     serial: str | None = None,
+    allow_fallbacks: bool | None = None,
 ) -> None:
     """Render a stable snapshot info block before sync starts."""
     status_text = "UNKNOWN"
@@ -177,12 +181,30 @@ def render_snapshot_block(
         else:
             pkg_text = str(snapshot_count if snapshot_count is not None else "—")
 
-    mode_text = mode or "baseline"
-    print(text_blocks.headline("Inventory Sync Status", width=70))
-    print(f"Inventory: {status_text}")
-    print(f"Last sync {age_text}")
-    print(f"Packages: {pkg_text}")
-    print(f"Mode: {mode_text}")
+    mode_text = (mode or "baseline").strip()
+    device_text = (serial or "unknown").strip()
+    prev_id = getattr(previous_meta, "snapshot_id", None) if previous_meta else None
+
+    # Panel-style header: readable, not busy.
+    print(text_blocks.headline("Inventory Sync", width=70))
+    title = f"Device: {device_text}    Mode: {mode_text}"
+    if colors.colors_enabled():
+        palette = colors.get_palette()
+        title = colors.apply(title, palette.header, bold=True)
+    print(title)
+
+    meta_line = f"Status: {status_text}    Last sync: {age_text}    Packages: {pkg_text}"
+    if prev_id is not None:
+        meta_line += f"    Prev snapshot: id={prev_id}"
+    print(meta_line)
+
+    if allow_fallbacks is True:
+        print(
+            status_messages.status(
+                "Fallbacks enabled (non-root). Coverage is coarse; OK for orchestration.",
+                level="warn",
+            )
+        )
 
 
 __all__ = ["make_cli_progress_printer", "render_snapshot_block"]

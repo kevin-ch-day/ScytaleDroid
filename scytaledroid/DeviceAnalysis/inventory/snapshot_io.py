@@ -21,6 +21,179 @@ from scytaledroid.Database.db_func.harvest import device_inventory as inventory_
 from scytaledroid.Database.db_utils.package_utils import normalize_package_name
 
 _STATE_ROOT = Path(app_config.DATA_DIR) / app_config.DEVICE_STATE_DIR
+_INVENTORY_RETENTION_N = 5
+
+
+def _prune_inventory_files(serial: str, *, keep_last: int) -> tuple[int, int]:
+    """Prune inventory history files under data/state/<serial>/inventory.
+
+    Keep latest pointers; prune only inventory_<timestamp>* history files.
+    Returns (before_count, deleted_count) for history files.
+    """
+    inv_dir = _STATE_ROOT / serial / "inventory"
+    if not inv_dir.exists():
+        return 0, 0
+
+    def _timestamp_from_name(name: str) -> str | None:
+        # inventory_YYYYMMDD-HHMMSS[.<variant>].json
+        # inventory_YYYYMMDD-HHMMSS[.<variant>].meta.json
+        if not name.startswith("inventory_"):
+            return None
+        # Extract the first timestamp token after inventory_
+        rest = name[len("inventory_") :]
+        ts = rest.split(".", 1)[0]
+        if len(ts) != 15 or "-" not in ts:
+            return None
+        return ts
+
+    history_files: list[Path] = []
+    for path in inv_dir.iterdir():
+        if not path.is_file():
+            continue
+        name = path.name
+        if not name.startswith("inventory_"):
+            continue
+        if not (name.endswith(".json") or name.endswith(".meta.json")):
+            continue
+        if _timestamp_from_name(name):
+            history_files.append(path)
+
+    before = len(history_files)
+    if before <= keep_last:
+        return before, 0
+
+    timestamps = sorted({t for t in (_timestamp_from_name(p.name) for p in history_files) if t}, reverse=True)
+    keep_ts = set(timestamps[: max(int(keep_last), 0)])
+
+    deleted = 0
+    for path in history_files:
+        ts = _timestamp_from_name(path.name)
+        if not ts or ts in keep_ts:
+            continue
+        try:
+            path.unlink(missing_ok=True)
+            deleted += 1
+        except Exception:
+            # Best effort; retention is enforced on every sync so we'll try again next time.
+            pass
+    return before, deleted
+
+
+def _prune_inventory_db(serial: str, *, keep_last: int) -> tuple[int, int]:
+    """Prune device inventory snapshot history in DB for one device serial.
+
+    Returns (before_count, deleted_count).
+    """
+    if not inventory_repo.ensure_tables():
+        return 0, 0
+    keep_last = max(int(keep_last), 0)
+    try:
+        rows = run_sql(
+            """
+            SELECT snapshot_id
+            FROM device_inventory_snapshots
+            WHERE device_serial=%s
+            ORDER BY snapshot_id DESC
+            """,
+            (serial,),
+            fetch="all",
+        ) or []
+    except Exception:
+        return 0, 0
+    snapshot_ids = [int(r[0]) for r in rows if r and r[0] is not None]
+    before = len(snapshot_ids)
+    if before <= keep_last:
+        return before, 0
+    delete_ids = snapshot_ids[keep_last:]
+    if not delete_ids:
+        return before, 0
+
+    placeholders = ", ".join(["%s"] * len(delete_ids))
+    try:
+        with database_session() as engine:
+            with engine.transaction():
+                run_sql(
+                    f"DELETE FROM device_inventory WHERE snapshot_id IN ({placeholders})",
+                    tuple(delete_ids),
+                )
+                run_sql(
+                    f"DELETE FROM device_inventory_snapshots WHERE snapshot_id IN ({placeholders})",
+                    tuple(delete_ids),
+                )
+        return before, len(delete_ids)
+    except Exception:
+        return before, 0
+
+
+def _enforce_inventory_retention(serial: str, *, keep_last: int = _INVENTORY_RETENTION_N) -> None:
+    """Enforce inventory retention for both DB and filesystem (Paper #2)."""
+    db_before, db_deleted = _prune_inventory_db(serial, keep_last=keep_last)
+    fs_before, fs_deleted = _prune_inventory_files(serial, keep_last=keep_last)
+
+    before = db_before if db_before else fs_before
+    deleted = db_deleted if db_before else fs_deleted
+
+    # Deterministic, grep-friendly audit line (PM-locked).
+    log.info(
+        f"RETENTION inventory device={serial} policy=N={keep_last} "
+        f"before={before} kept={keep_last} deleted={deleted}",
+        category="inventory",
+        extra={
+            "device_serial": serial,
+            "policy_keep_last": keep_last,
+            "db_before": db_before,
+            "db_deleted": db_deleted,
+            "fs_before": fs_before,
+            "fs_deleted": fs_deleted,
+        },
+    )
+
+
+def get_inventory_retention_status(serial: str, *, keep_last: int = _INVENTORY_RETENTION_N) -> dict[str, int | str]:
+    """Return best-effort retention status for operator visibility (not audit truth).
+
+    The paper/audit contract is the structured log line emitted by retention itself.
+    This helper is for CLI reassurance that retention is active and bounded.
+    """
+    inv_dir = _STATE_ROOT / serial / "inventory"
+
+    # FS: history snapshots only (inventory_<timestamp>*.json + .meta.json).
+    fs_history = 0
+    if inv_dir.exists():
+        for path in inv_dir.iterdir():
+            if not path.is_file():
+                continue
+            name = path.name
+            if not name.startswith("inventory_"):
+                continue
+            if not (name.endswith(".json") or name.endswith(".meta.json")):
+                continue
+            # Count only timestamped history, not latest pointers.
+            rest = name[len("inventory_") :]
+            ts = rest.split(".", 1)[0]
+            if len(ts) == 15 and "-" in ts:
+                fs_history += 1
+
+    # DB: snapshot row count for the device.
+    db_snapshots = 0
+    try:
+        rows = run_sql(
+            "SELECT COUNT(*) FROM device_inventory_snapshots WHERE device_serial=%s",
+            (serial,),
+            fetch="one",
+        )
+        if rows and rows[0] is not None:
+            db_snapshots = int(rows[0])
+    except Exception:
+        db_snapshots = 0
+
+    return {
+        "device_serial": serial,
+        "policy_keep_last": int(keep_last),
+        "db_snapshots": int(db_snapshots),
+        "fs_history_files": int(fs_history),
+        "inventory_dir": str(inv_dir),
+    }
 
 
 def _normalise_hash_token(*values: object) -> str:
@@ -309,6 +482,9 @@ def persist_snapshot(
         delta_details=delta if delta is not None else None,
     )
     meta.write_files(timestamp, suffix=filename_suffix)
+
+    # Phase A closure requirement: enforce bounded snapshot growth on every sync (DB + filesystem).
+    _enforce_inventory_retention(serial, keep_last=_INVENTORY_RETENTION_N)
 
     return PersistedSnapshot(path=display_path, snapshot_id=snapshot_id, persisted_rows=persisted)
 

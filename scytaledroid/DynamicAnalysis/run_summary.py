@@ -25,6 +25,7 @@ def print_run_summary(result, duration_label: str) -> None:
     ]
     if manifest:
         operator = manifest.get("operator") or {}
+        target = manifest.get("target") or {}
         run_profile = operator.get("run_profile")
         run_sequence = operator.get("run_sequence")
         if run_profile:
@@ -33,13 +34,37 @@ def print_run_summary(result, duration_label: str) -> None:
         interaction = operator.get("interaction_level")
         if interaction:
             lines.append(("Interaction", str(interaction)))
-    dataset_validity = _dataset_validity_label(result.dynamic_run_id)
-    if dataset_validity:
-        lines.append(("Dataset validity", dataset_validity))
-        if dataset_validity.startswith("❌"):
-            reasons = _dataset_validity_reasons(result.dynamic_run_id)
-            if reasons:
-                lines.append(("Dataset issues", ", ".join(reasons)))
+        validity = operator.get("dataset_validity") if isinstance(operator, dict) else None
+        if isinstance(validity, dict):
+            valid = validity.get("valid_dataset_run")
+            reason = validity.get("invalid_reason_code")
+            label = "—"
+            if valid is True:
+                label = "✅ VALID"
+            elif valid is False:
+                label = f"❌ INVALID: {reason or 'UNKNOWN'}"
+            lines.append(("Dataset validity", label))
+            min_bytes = validity.get("min_pcap_bytes")
+            if min_bytes is not None:
+                lines.append(("MIN_PCAP_BYTES", str(min_bytes)))
+            if validity.get("short_run"):
+                lines.append(("Dataset flag", "short_run=1"))
+            if validity.get("no_traffic_observed"):
+                lines.append(("Dataset flag", "no_traffic_observed=1"))
+
+            # Operator-visible quota tracking (does not block extra runs).
+            pkg = (target.get("package_name") if isinstance(target, dict) else None) or result.package_name
+            quota = _dataset_quota_label(str(pkg) if pkg else None, result.dynamic_run_id)
+            if quota:
+                lines.append(("Dataset quota", quota))
+        else:
+            dataset_validity = _dataset_validity_label(result.dynamic_run_id)
+            if dataset_validity:
+                lines.append(("Dataset validity", dataset_validity))
+                if dataset_validity.startswith("❌"):
+                    reasons = _dataset_validity_reasons(result.dynamic_run_id)
+                    if reasons:
+                        lines.append(("Dataset issues", ", ".join(reasons)))
     if result.evidence_path:
         lines.append(("Evidence", result.evidence_path))
     status_messages.print_strip("Session", lines, width=70)
@@ -222,11 +247,36 @@ def _dataset_validity_label(dynamic_run_id: str | None) -> str | None:
                 continue
             valid = run.get("valid_dataset_run")
             if valid is True:
-                return "✅ valid"
+                return "✅ VALID"
             if valid is False:
-                return "❌ invalid"
+                return "❌ INVALID"
             return "—"
     return None
+
+
+def _dataset_quota_label(package_name: str | None, dynamic_run_id: str | None) -> str | None:
+    if not package_name:
+        return None
+    tracker = load_dataset_tracker()
+    apps = tracker.get("apps") if isinstance(tracker, dict) else {}
+    if not isinstance(apps, dict):
+        return None
+    entry = apps.get(str(package_name))
+    if not isinstance(entry, dict):
+        return None
+    valid = int(entry.get("valid_runs") or 0)
+    target = int(entry.get("target_runs") or 0)
+    if entry.get("quota_met") or entry.get("app_complete"):
+        label = f"MET ({valid}/{target})"
+    else:
+        label = f"{valid}/{target}"
+    if dynamic_run_id:
+        runs = entry.get("runs")
+        if isinstance(runs, list):
+            run = next((r for r in runs if isinstance(r, dict) and r.get("run_id") == dynamic_run_id), None)
+            if isinstance(run, dict) and run.get("extra_run"):
+                label += " (extra_run=1)"
+    return label
 
 
 def _dataset_validity_reasons(dynamic_run_id: str | None) -> list[str] | None:
@@ -247,10 +297,17 @@ def _dataset_validity_reasons(dynamic_run_id: str | None) -> list[str] | None:
                 continue
             if run.get("run_id") != dynamic_run_id:
                 continue
-            reasons = run.get("validity_reasons")
-            if isinstance(reasons, list):
-                return [str(item) for item in reasons if item]
-            return None
+            code = run.get("invalid_reason_code")
+            flags = []
+            if run.get("short_run"):
+                flags.append("short_run")
+            if run.get("no_traffic_observed"):
+                flags.append("no_traffic_observed")
+            out = []
+            if code:
+                out.append(str(code))
+            out.extend(flags)
+            return out or None
     return None
 
 

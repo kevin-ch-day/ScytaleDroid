@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from scytaledroid.DeviceAnalysis.inventory import snapshot_io
 from scytaledroid.Utils.DisplayUtils import menu_utils
 
 from .diagnostics import compute_inventory_metrics
@@ -39,3 +40,18 @@ def print_inventory_run_summary_from_result(result) -> None:
     )
     print(f"[RESULT] User apps (candidates): {metrics.user_scope_candidates}")
     print()
+
+    # Phase A closure visibility: show bounded retention status (operator-visible).
+    serial = getattr(result, "serial", None)
+    if serial:
+        status = snapshot_io.get_inventory_retention_status(str(serial))
+        print(
+            "Retention: "
+            f"policy=N={status.get('policy_keep_last')} "
+            f"db_snapshots={status.get('db_snapshots')} "
+            f"fs_history_files={status.get('fs_history_files')}"
+        )
+        inv_dir = status.get("inventory_dir")
+        if inv_dir:
+            print(f"Inventory dir: {inv_dir}")
+        print()
