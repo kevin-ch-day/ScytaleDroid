@@ -16,7 +16,6 @@ from scytaledroid.StaticAnalysis.modules.string_analysis import (
     BUCKET_ORDER,
 )
 from scytaledroid.Utils.DisplayUtils import severity as severity_utils
-from scytaledroid.Utils.System import output_prefs
 
 from ....core import StaticAnalysisReport
 from .dynamic_plan import (
@@ -595,7 +594,7 @@ def _normalise_string_data(raw: Mapping[str, object]) -> Mapping[str, object]:
     }
 
 
-def _string_lines(string_payload: Mapping[str, object]) -> list[str]:
+def _string_lines(string_payload: Mapping[str, object], *, verbose_output: bool) -> list[str]:
     lines = ["String Analysis"]
     counts = string_payload.get("counts", {}) if isinstance(string_payload, Mapping) else {}
     extra = string_payload.get("extra_counts", {}) if isinstance(string_payload, Mapping) else {}
@@ -612,10 +611,6 @@ def _string_lines(string_payload: Mapping[str, object]) -> list[str]:
         sample_limit = max(int(options.get("max_samples", 2)), 1)
     except Exception:
         sample_limit = 2
-    try:
-        verbose_output = output_prefs.get().verbose
-    except Exception:
-        verbose_output = False
     if not verbose_output:
         sample_limit = min(sample_limit, 5)
     cleartext_only = bool(options.get("cleartext_only")) if isinstance(options, Mapping) else False
@@ -1056,6 +1051,7 @@ def render_app_result(
     split_count: int,
     string_data: Mapping[str, object],
     duration_seconds: float,
+    verbose_output: bool = False,
 ) -> tuple[list[str], Mapping[str, object], Counter[str]]:
     """Return printable lines, JSON payload, and severity totals."""
 
@@ -1112,10 +1108,10 @@ def render_app_result(
     lines.append(counts_line)
 
     lines.append("")
-    render_declared_permissions(lines, permissions, _wrap_lines, output_prefs)
+    render_declared_permissions(lines, permissions, _wrap_lines, verbose_output=verbose_output)
 
     lines.append("")
-    lines.extend(_string_lines(string_payload))
+    lines.extend(_string_lines(string_payload, verbose_output=verbose_output))
 
     lines.append("")
     lines.extend(_finding_lines(findings))

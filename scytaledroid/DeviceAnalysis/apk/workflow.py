@@ -351,7 +351,7 @@ def resolve_harvest_plan(
         )
         delta_applied = False
         delta_count = len(selection.packages)
-        if summary:
+        if summary and not bool(selection.metadata.get("disable_delta_filter")):
             include = delta.collect_delta_package_names(summary)
             filtered_rows = delta.apply_delta_filter(selection.packages, include=include)
             delta_count = len(filtered_rows)

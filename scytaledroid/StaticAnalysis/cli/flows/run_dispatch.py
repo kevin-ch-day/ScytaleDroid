@@ -40,6 +40,7 @@ from ..execution import (
 from ..execution.static_run_map import REQUIRED_FIELDS, validate_run_map
 from ..views.view_layouts import render_run_start, render_run_summary
 from .selection import format_scope_target
+from ..core.run_context import StaticRunContext
 
 
 def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir: Path) -> RunOutcome | None:
@@ -134,6 +135,19 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
             )
             return None
 
+    # Freeze run context once. Deep execution/render paths must not read env vars or
+    # mutable output prefs after this point.
+    frozen_ctx = StaticRunContext(
+        run_mode=output_prefs.effective_run_mode(),
+        quiet=output_prefs.effective_quiet(),
+        batch=output_prefs.effective_batch(),
+        noninteractive=output_prefs.effective_noninteractive(),
+        show_splits=output_prefs.effective_show_splits(),
+        session_stamp=params.session_stamp,
+        persistence_ready=bool(getattr(params, "persistence_ready", True)),
+        paper_grade_requested=bool(getattr(params, "paper_grade_requested", True)),
+    )
+
     try:
         canonical_ingest.ensure_provider_plumbing()
         if params.session_stamp:
@@ -152,7 +166,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
     scope_target = format_scope_target(selection)
 
     workers_label = f"auto ({workers})" if isinstance(params.workers, str) else str(workers)
-    if not (output_prefs.effective_quiet() and output_prefs.effective_batch()):
+    if not (frozen_ctx.quiet and frozen_ctx.batch):
         render_run_start(
             run_id=params.session_stamp,
             profile_label=params.profile_label,
@@ -162,6 +176,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
             cache_desc="purge" if not params.reuse_cache else "reuse",
             log_level=params.log_level,
             perm_cache_desc="refresh" if params.permission_snapshot_refresh else "skip",
+            run_ctx=frozen_ctx,
             trace_ids=params.trace_detectors,
         )
 
@@ -190,20 +205,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
                 "cache": "purge" if not params.reuse_cache else "reuse",
                 "perm_cache": "refresh" if params.permission_snapshot_refresh else "skip",
                 "dry_run": params.dry_run,
-                "run_context": (
-                    output_prefs.get_run_context().__dict__
-                    if output_prefs.get_run_context()
-                    else {
-                        "run_mode": output_prefs.effective_run_mode(),
-                        "quiet": output_prefs.effective_quiet(),
-                        "batch": output_prefs.effective_batch(),
-                        "noninteractive": output_prefs.effective_noninteractive(),
-                        "show_splits": output_prefs.effective_show_splits(),
-                        "session_stamp": params.session_stamp,
-                        "persistence_ready": params.persistence_ready,
-                        "paper_grade_requested": params.paper_grade_requested,
-                    }
-                ),
+                "run_context": frozen_ctx.__dict__,
             },
         )
     except Exception:
@@ -247,7 +249,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
         print()
     from scytaledroid.Utils.DisplayUtils import text_blocks
 
-    if not (output_prefs.effective_quiet() and output_prefs.effective_batch()):
+    if not (frozen_ctx.quiet and frozen_ctx.batch):
         print("Starting Static Analysis pipeline")
         print(text_blocks.divider("─"))
     outcome: RunOutcome | None = None
@@ -255,7 +257,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
     abort_reason: str | None = None
     abort_signal: str | None = None
     try:
-        outcome = execute_scan(selection, params, base_dir)
+        outcome = execute_scan(selection, params, base_dir, run_ctx=frozen_ctx)
     finally:
         signal.signal(signal.SIGINT, previous_handler)
     try:
@@ -317,7 +319,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
             print(status_messages.status(linkage_blocked_reason, level="warn"))
         else:
             try:
-                if not (output_prefs.effective_quiet() and output_prefs.effective_batch()):
+                if not (frozen_ctx.quiet and frozen_ctx.batch):
                     print()
                     print(
                         status_messages.step(
@@ -353,7 +355,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
 
     try:
         if outcome is not None:
-            render_run_results(outcome, params)
+            render_run_results(outcome, params, run_ctx=frozen_ctx)
             run_status = "COMPLETED"
             if outcome.aborted:
                 run_status = "ABORTED"
@@ -416,7 +418,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
 
     # Structured RUN SUMMARY (formatter-based) for transcripts/screenshots.
     # Batch mode must stay quiet and deterministic (no per-app blocks).
-    if outcome and getattr(outcome, "summary", None) and not output_prefs.effective_batch():
+    if outcome and getattr(outcome, "summary", None) and not frozen_ctx.batch:
         summary = outcome.summary
         sev_counts = {
             "high": getattr(summary, "high", 0),
@@ -440,6 +442,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
             sev_counts=sev_counts,
             failed_masvs=failed_masvs,
             perm_stats=perm_stats,
+            run_ctx=frozen_ctx,
             evidence_root=evidence_root,
         )
     if params.session_stamp:
@@ -455,11 +458,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
 def execute_run_spec(spec: StaticRunSpec) -> RunOutcome | None:
     """Execute a prepared run spec without prompting."""
 
-    prev_pref_quiet = output_prefs.get().quiet
-    prev_pref_batch = output_prefs.get().batch
-    prev_pref_mode = output_prefs.get().run_mode
-    prev_pref_noninteractive = output_prefs.get().noninteractive
-    prev_pref_show_splits = output_prefs.get().show_splits
+    prev_prefs = output_prefs.snapshot()
     prev_ctx = output_prefs.get_run_context()
     from scytaledroid.StaticAnalysis.engine.strings_runtime import get_config as _get_strings_cfg
     from scytaledroid.StaticAnalysis.engine.strings_runtime import set_config as _set_strings_cfg
@@ -483,11 +482,7 @@ def execute_run_spec(spec: StaticRunSpec) -> RunOutcome | None:
     try:
         return launch_scan_flow(spec.selection, spec.params, spec.base_dir)
     finally:
-        output_prefs.set_quiet(prev_pref_quiet)
-        output_prefs.set_batch(prev_pref_batch)
-        output_prefs.set_run_mode(prev_pref_mode)
-        output_prefs.set_noninteractive(prev_pref_noninteractive)
-        output_prefs.set_show_splits(prev_pref_show_splits)
+        output_prefs.restore(prev_prefs)
         output_prefs.set_run_context(prev_ctx)
         _set_strings_cfg(prev_strings_cfg)
 

@@ -30,6 +30,17 @@ def get() -> OutputPrefs:
     return _PREFS
 
 
+def snapshot() -> OutputPrefs:
+    """Return a copy of the current preferences for later restoration."""
+    return OutputPrefs(**_PREFS.__dict__)
+
+
+def restore(prefs: OutputPrefs) -> None:
+    """Restore preferences from a previous snapshot."""
+    for key, value in prefs.__dict__.items():
+        setattr(_PREFS, key, value)
+
+
 def get_run_context():
     return _RUN_CONTEXT
 
@@ -138,6 +149,8 @@ def toggle_cleartext_only() -> bool:
 
 __all__ = [
     "get",
+    "snapshot",
+    "restore",
     "effective_quiet",
     "effective_batch",
     "effective_run_mode",

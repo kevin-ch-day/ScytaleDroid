@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 
-def render_declared_permissions(lines, permissions, wrap_lines, output_prefs) -> None:
+def render_declared_permissions(lines, permissions, wrap_lines, *, verbose_output: bool) -> None:
     lines.append("Declared permissions (raw manifest list)")
     declared = (
         list(permissions["declared"])
@@ -15,10 +15,6 @@ def render_declared_permissions(lines, permissions, wrap_lines, output_prefs) ->
         f"  Counts: dangerous={counts['dangerous']}  signature={counts['signature']}  custom={counts['custom']}"
     )
     # Compact high-signal preview; top-N raw list only when verbose mode is set
-    try:
-        verbose = output_prefs.get().verbose
-    except Exception:
-        verbose = False
     if declared:
         # Extract high-signal subset
         high_keys = {
@@ -35,7 +31,7 @@ def render_declared_permissions(lines, permissions, wrap_lines, output_prefs) ->
         if top:
             top_line = ", ".join(sorted(set(top)))
             lines.append("  High-signal: " + top_line)
-        if verbose:
+        if verbose_output:
             full = ", ".join(declared)
             lines.extend(wrap_lines("  " + full, indent=0, subsequent_indent=2))
         else:

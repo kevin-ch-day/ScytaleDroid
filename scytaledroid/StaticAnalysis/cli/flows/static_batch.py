@@ -218,6 +218,116 @@ def _execute_batch_run(
     return outcome
 
 
+def _select_active_device_serial() -> str | None:
+    """Return active device serial for noninteractive batch operations.
+
+    Batch static may need to auto-harvest APKs. We only support this when:
+    - an active device is set, or
+    - exactly one connected adb device is present (auto-select).
+    """
+    try:
+        from scytaledroid.DeviceAnalysis import device_manager
+        from scytaledroid.DeviceAnalysis.adb import devices as adb_devices
+
+        serial = device_manager.get_active_serial()
+        if serial:
+            return serial
+        devices = adb_devices.list_devices()
+        connected = [
+            d for d in devices
+            if str(d.get("state") or "").lower() == "device" and d.get("serial")
+        ]
+        if len(connected) == 1:
+            return str(connected[0].get("serial"))
+        return None
+    except Exception:
+        return None
+
+
+def _auto_harvest_dataset_apks(*, dataset_pkgs: set[str], base_dir: Path) -> bool:
+    """Best-effort quick harvest of dataset APKs into the local library.
+
+    Returns True if we attempted a harvest. It may still result in zero packages
+    pulled (e.g., packages not installed or inventory missing).
+    """
+    try:
+        from scytaledroid.Config import app_config
+        from scytaledroid.DeviceAnalysis.adb import client as adb_client
+        from scytaledroid.DeviceAnalysis import harvest, inventory
+        from scytaledroid.DeviceAnalysis.harvest import planner as harvest_planner
+        from scytaledroid.DeviceAnalysis.services import inventory_service
+        from scytaledroid.Utils.DisplayUtils import status_messages
+        from scytaledroid.Utils.DisplayUtils import text_blocks
+    except Exception:
+        return False
+
+    serial = _select_active_device_serial()
+    if not serial:
+        print(
+            status_messages.status(
+                "No active adb device available for auto-harvest. "
+                "Fix: Device Analysis → select device (or connect exactly one device), then retry.",
+                level="warn",
+            )
+        )
+        return False
+
+    adb_path = adb_client.get_adb_binary()
+    if not adb_path:
+        print(status_messages.status("adb not available; cannot auto-harvest APKs.", level="warn"))
+        return False
+
+    # Load (or create) a recent inventory snapshot for this device.
+    snapshot = inventory.load_latest_inventory(serial)
+    if not snapshot or not snapshot.get("packages"):
+        try:
+            inventory_service.run_full_sync(serial=serial, ui_prefs=text_blocks.UI_PREFS)
+        except Exception as exc:
+            print(status_messages.status(f"Inventory sync failed ({exc.__class__.__name__}).", level="warn"))
+            return True
+        snapshot = inventory.load_latest_inventory(serial)
+
+    packages_raw = snapshot.get("packages", []) if isinstance(snapshot, dict) else []
+    rows = harvest.build_inventory_rows(packages_raw) if packages_raw else []
+    if not rows:
+        print(status_messages.status("No inventory rows available; cannot auto-harvest APKs.", level="warn"))
+        return True
+
+    # Filter to dataset packages only (non-root mode will auto-filter system partitions).
+    filtered = [row for row in rows if str(row.package_name).lower() in dataset_pkgs]
+    if not filtered:
+        print(status_messages.status("Dataset packages not present in device inventory; nothing to harvest.", level="warn"))
+        return True
+
+    plan = harvest_planner.build_harvest_plan(filtered, include_system_partitions=False)
+    # Align with existing on-disk library structure: data/device_apks/<serial>/<YYYYMMDD>/...
+    from datetime import UTC, datetime
+
+    session_stamp = datetime.now(UTC).strftime("%Y%m%d")
+    dest_root = (Path(app_config.DATA_DIR) / "device_apks" / serial / session_stamp).resolve()
+    dest_root.mkdir(parents=True, exist_ok=True)
+
+    print(
+        status_messages.status(
+            f"Auto-harvest: pulling {len(plan.packages)} dataset package(s) from {serial} into {dest_root}.",
+            level="info",
+        )
+    )
+    try:
+        harvest.quick_harvest(
+            plan.packages,
+            adb_path=adb_path,
+            dest_root=dest_root,
+            session_stamp=session_stamp,
+            config=app_config,
+            serial=serial,
+            verbose=False,
+        )
+    except Exception as exc:
+        print(status_messages.status(f"Auto-harvest failed ({exc.__class__.__name__}).", level="warn"))
+    return True
+
+
 def run_dataset_static_batch(
     *,
     groups,
@@ -243,14 +353,77 @@ def run_dataset_static_batch(
 
     batch_groups = _resolve_batch_groups(groups, dataset_pkgs)
     if not batch_groups:
-        print(
-            status_messages.status(
-                "No APK artifacts found for Research Dataset Alpha in the local library.",
-                level="warn",
+        attempted = _auto_harvest_dataset_apks(dataset_pkgs=dataset_pkgs, base_dir=base_dir)
+        if attempted:
+            # Re-scan the local library for newly harvested artifacts.
+            try:
+                from scytaledroid.StaticAnalysis.core.repository import group_artifacts
+
+                refreshed_groups = tuple(group_artifacts(base_dir))
+                batch_groups = _resolve_batch_groups(refreshed_groups, dataset_pkgs)
+            except Exception:
+                batch_groups = []
+
+        if not batch_groups:
+            # Helpful diagnostics for operators after a reset.
+            try:
+                local_groups = list(groups)
+                local_pkgs = sorted(
+                    {str(getattr(g, "package_name", "")).lower() for g in local_groups if getattr(g, "package_name", None)}
+                )
+            except Exception:
+                local_pkgs = []
+            if local_pkgs:
+                print(
+                    status_messages.status(
+                        f"Local library packages (sample): {', '.join(local_pkgs[:8])}"
+                        + (" …" if len(local_pkgs) > 8 else ""),
+                        level="info",
+                    )
+                )
+
+            # Check whether dataset packages exist in the most recent device inventory snapshot (if any).
+            try:
+                from scytaledroid.DeviceAnalysis import inventory
+
+                serial = _select_active_device_serial()
+                if serial:
+                    snapshot = inventory.load_latest_inventory(serial)
+                    pkgs = snapshot.get("packages", []) if isinstance(snapshot, dict) else []
+                    inv = {str(p.get("package_name") or "").lower() for p in pkgs if isinstance(p, dict)}
+                    missing = sorted(pkg for pkg in dataset_pkgs if pkg not in inv)
+                    present = sorted(pkg for pkg in dataset_pkgs if pkg in inv)
+                    if present:
+                        print(
+                            status_messages.status(
+                                f"Dataset packages present on device: {len(present)}/{len(dataset_pkgs)}",
+                                level="info",
+                            )
+                        )
+                    if missing:
+                        print(
+                            status_messages.status(
+                                f"Dataset packages missing from device inventory: {', '.join(missing)}",
+                                level="warn",
+                            )
+                        )
+            except Exception:
+                pass
+
+            print(
+                status_messages.status(
+                    "No APK artifacts found for Research Dataset Alpha in the local library.",
+                    level="warn",
+                )
             )
-        )
-        prompt_utils.press_enter_to_continue()
-        return
+            print(
+                status_messages.status(
+                    f"Library root: {base_dir}. Fix: Device Analysis → pull APK artifacts for these apps, then retry batch.",
+                    level="info",
+                )
+            )
+            prompt_utils.press_enter_to_continue()
+            return
 
     quiet = True
     batch_id = datetime.now(timezone.utc).strftime("static-batch-%Y%m%dT%H%M%SZ")

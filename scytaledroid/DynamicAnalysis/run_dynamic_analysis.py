@@ -2,9 +2,18 @@
 
 from __future__ import annotations
 
+import os
+
 from .core import DynamicSessionConfig, DynamicSessionResult
 from .core.run_specs import DynamicRunSpec
 from .engine import run_dynamic_engine
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def run_dynamic_analysis(
@@ -35,6 +44,8 @@ def run_dynamic_analysis(
             "Dynamic analysis requires static_run_id from static analysis; "
             "run static analysis first to generate a baseline."
         )
+    # Env vars are entrypoint defaults only. Downstream modules must not read env.
+    require_dynamic_schema = _env_flag("SCYTALEDROID_PAPER_GRADE", True)
     config = DynamicSessionConfig(
         package_name=package_name,
         duration_seconds=duration_seconds,
@@ -52,6 +63,7 @@ def run_dynamic_analysis(
         proxy_port=proxy_port,
         sampling_rate_s=sampling_rate_s,
         batch_id=batch_id,
+        require_dynamic_schema=require_dynamic_schema,
     )
     engine_result = run_dynamic_engine(config)
     return engine_result.session

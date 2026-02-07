@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-from scytaledroid.Utils.System import output_prefs
-
 from scytaledroid.Utils.DisplayUtils import status_messages
 
 from ...core.detector_runner import PIPELINE_STAGES
+from ..core.run_context import StaticRunContext
 from ..core.models import RunParameters
 from .scan_progress_display import _format_elapsed
 
@@ -18,9 +17,9 @@ def render_app_start(
     title: str | None,
     package_name: str,
     profile_label: str,
+    run_ctx: StaticRunContext,
 ) -> None:
-    prefs = output_prefs.get()
-    if prefs.quiet and prefs.batch:
+    if run_ctx.quiet and run_ctx.batch:
         return
     if not (title or package_name):
         return
@@ -32,11 +31,10 @@ def render_app_start(
     print(f"Checks: {len(PIPELINE_STAGES)} stages · Profile: {profile_label}")
 
 
-def render_resource_warnings(lines: Sequence[str]) -> None:
+def render_resource_warnings(lines: Sequence[str], *, run_ctx: StaticRunContext) -> None:
     if not lines:
         return
-    prefs = output_prefs.get()
-    if prefs.quiet and prefs.batch:
+    if run_ctx.quiet and run_ctx.batch:
         return
     print()
     for line in lines:
@@ -50,9 +48,9 @@ def render_app_completion(
     elapsed_seconds: float,
     report_metadata: Mapping[str, object] | None,
     params: RunParameters,
+    run_ctx: StaticRunContext,
 ) -> str:
-    prefs = output_prefs.get()
-    if prefs.quiet and prefs.batch:
+    if run_ctx.quiet and run_ctx.batch:
         return _format_elapsed(elapsed_seconds or 0.0)
     elapsed = _format_elapsed(elapsed_seconds or 0.0)
     if not isinstance(report_metadata, Mapping):

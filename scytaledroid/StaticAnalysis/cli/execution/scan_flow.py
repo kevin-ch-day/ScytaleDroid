@@ -12,7 +12,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
-from scytaledroid.Utils.System import output_prefs
 from scytaledroid.Utils.DisplayUtils import status_messages
 
 from ...core import (
@@ -27,6 +26,7 @@ from ...core.repository import load_display_name_map
 from ...modules import resolve_category
 from ...persistence import ReportStorageError, save_report
 from ..core.models import AppRunResult, ArtifactOutcome, RunOutcome, RunParameters, ScopeSelection
+from ..core.run_context import StaticRunContext
 from ..persistence.run_summary import create_static_run_ledger
 from .scan_identity_helpers import (
     _artifact_manifest_sha256,
@@ -60,8 +60,28 @@ def _abort_state() -> tuple[bool, str | None, str | None]:
     return _abort_requested, _abort_reason, _abort_signal
 
 
-def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Path) -> RunOutcome:
+def execute_scan(
+    selection: ScopeSelection,
+    params: RunParameters,
+    base_dir: Path,
+    *,
+    run_ctx: StaticRunContext | None = None,
+) -> RunOutcome:
     """Execute static analysis across all scoped artifacts."""
+
+    if run_ctx is None:
+        # Back-compat fallback (API/server callers). CLI paths should always pass an
+        # explicit StaticRunContext to avoid hidden global state in deep layers.
+        run_ctx = StaticRunContext(
+            run_mode="interactive",
+            quiet=False,
+            batch=False,
+            noninteractive=False,
+            show_splits=bool(getattr(params, "show_split_summaries", False)),
+            session_stamp=getattr(params, "session_stamp", None),
+            persistence_ready=bool(getattr(params, "persistence_ready", True)),
+            paper_grade_requested=bool(getattr(params, "paper_grade_requested", True)),
+        )
 
     global _abort_requested, _abort_reason, _abort_signal
     _abort_requested = False
@@ -75,9 +95,9 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
     dry_run_skipped = 0
     completed_artifacts = 0
     total_artifacts = sum(len(_dedupe_artifacts(group.artifacts)) for group in selection.groups)
-    show_splits = _show_split_breakdown()
+    show_splits = _show_split_breakdown(run_ctx)
     show_artifacts = (not params.dry_run) or bool(params.artifact_detail)
-    if output_prefs.effective_quiet() and output_prefs.effective_batch():
+    if run_ctx.quiet and run_ctx.batch:
         show_artifacts = False
     display_name_map = load_display_name_map(selection.groups)
     progress = _PipelineProgress(
@@ -85,6 +105,7 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
         show_splits=show_splits,
         show_artifacts=show_artifacts,
         show_checkpoints=not params.dry_run and show_artifacts,
+        run_ctx=run_ctx,
         progress_every=getattr(params, "progress_every", 5),
     )
     config_hash = _compute_config_hash(params)
@@ -207,7 +228,7 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
             break
 
         artifacts = _dedupe_artifacts(group.artifacts)
-        if output_prefs.effective_batch() and output_prefs.effective_quiet() and not bool(getattr(params, "scan_splits", True)):
+        if run_ctx.batch and run_ctx.quiet and not bool(getattr(params, "scan_splits", True)):
             # Batch dataset runs should be predictable and cheap: scan base only.
             base_artifact = getattr(group, "base_artifact", None)
             artifacts = [base_artifact] if base_artifact is not None else artifacts[:1]
@@ -224,6 +245,7 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
                 title=display_name or group.package_name,
                 package_name=group.package_name,
                 profile_label=params.profile_label,
+                run_ctx=run_ctx,
             )
         app_start = time.monotonic()
         for artifact_index, artifact in enumerate(artifacts, start=1):
@@ -325,7 +347,7 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
                 progress.finish(completed_artifacts, artifact_label)
             if warning_lines:
                 progress.flush_line()
-                render_resource_warnings(warning_lines)
+                render_resource_warnings(warning_lines, run_ctx=run_ctx)
             if _abort_state()[0]:
                 progress.end(last_elapsed_for_progress)
                 break
@@ -340,6 +362,7 @@ def execute_scan(selection: ScopeSelection, params: RunParameters, base_dir: Pat
                 elapsed_seconds=app_result.duration_seconds or 0.0,
                 report_metadata=metadata if isinstance(metadata, Mapping) else None,
                 params=params,
+                run_ctx=run_ctx,
             )
             progress.app_complete(artifact_count, app_result.duration_seconds or 0.0)
         if _abort_state()[0]:
@@ -449,8 +472,8 @@ def _execute_single_artifact(
     return report, summary, timings, None, False
 
 
-def _show_split_breakdown() -> bool:
-    return output_prefs.effective_show_splits()
+def _show_split_breakdown(run_ctx: StaticRunContext) -> bool:
+    return bool(run_ctx.show_splits)
 
 
 

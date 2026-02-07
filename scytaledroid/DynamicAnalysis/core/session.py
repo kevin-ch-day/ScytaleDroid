@@ -28,6 +28,9 @@ class DynamicSessionConfig:
     enable_monitor: bool = False
     monitor_verbose: bool = False
     batch_id: str | None = None
+    # Paper-grade/reproducibility rule: env vars influence defaults only at entrypoint.
+    # Downstream modules must rely on this frozen flag, not os.getenv().
+    require_dynamic_schema: bool = True
 
 
 @dataclass

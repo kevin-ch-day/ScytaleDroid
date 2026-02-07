@@ -18,10 +18,10 @@ from scytaledroid.Utils.DisplayUtils import (
     status_messages,
     summary_cards,
 )
-from scytaledroid.Utils.System import output_prefs
 from ...engine.strings import analyse_strings
 from ...persistence.ingest import ingest_baseline_payload
 from ..core.models import RunOutcome, RunParameters
+from ..core.run_context import StaticRunContext
 from ..core.run_lifecycle import finalize_static_run
 from ..core.run_persistence import persist_run_summary, update_static_run_status
 from ..persistence.run_summary import refresh_static_run_manifest
@@ -108,7 +108,12 @@ def write_dynamic_plan_json(
     )
 
 
-def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
+def render_run_results(
+    outcome: RunOutcome,
+    params: RunParameters,
+    *,
+    run_ctx: StaticRunContext | None = None,
+) -> None:
     """Persist and (optionally) render run results.
 
     Batch mode must remain deterministic and non-interactive:
@@ -116,24 +121,28 @@ def render_run_results(outcome: RunOutcome, params: RunParameters) -> None:
     but suppress all console rendering in quiet batch.
     """
 
-    silent_output = bool(output_prefs.effective_quiet() and output_prefs.effective_batch())
+    silent_output = bool(run_ctx.quiet and run_ctx.batch) if isinstance(run_ctx, StaticRunContext) else False
     if silent_output:
         import contextlib
         import io
 
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(buffer):
-            _render_run_results_impl(outcome, params)
+            _render_run_results_impl(outcome, params, run_ctx=run_ctx)
         return
 
-    _render_run_results_impl(outcome, params)
+    _render_run_results_impl(outcome, params, run_ctx=run_ctx)
 
 
-def _render_run_results_impl(outcome: RunOutcome, params: RunParameters) -> None:
+def _render_run_results_impl(
+    outcome: RunOutcome,
+    params: RunParameters,
+    *,
+    run_ctx: StaticRunContext | None,
+) -> None:
     """Internal implementation for render_run_results (may print)."""
 
-    # Avoid mutable prefs reads for execution decisions; use the frozen run context.
-    prefs_verbose = bool(output_prefs.get().verbose)
+    prefs_verbose = bool(params.verbose_output)
 
     aggregated: Counter[str] = Counter()
     artifact_count = 0
@@ -477,6 +486,7 @@ def _render_run_results_impl(outcome: RunOutcome, params: RunParameters) -> None
             split_count=len(app_result.artifacts),
             string_data=string_data,
             duration_seconds=total_duration,
+            verbose_output=bool(params.verbose_output),
         )
         if isinstance(string_data, Mapping):
             selected_payload = string_data.get("selected_samples")
@@ -886,7 +896,7 @@ def _render_run_results_impl(outcome: RunOutcome, params: RunParameters) -> None
     session_stamp = params.session_stamp
     if not params.dry_run:
         print()
-        if output_prefs.effective_batch() or output_prefs.effective_noninteractive():
+        if isinstance(run_ctx, StaticRunContext) and (run_ctx.batch or run_ctx.noninteractive):
             # Batch/noninteractive runs must not block on UI prompts.
             show_details = False
         else:
@@ -1095,13 +1105,15 @@ def _render_run_results_impl(outcome: RunOutcome, params: RunParameters) -> None
                 scope_label=params.scope_label,
             )
         # Frozen run context governs whether we can prompt for details.
-        batch_or_noninteractive = bool(output_prefs.effective_batch() or output_prefs.effective_noninteractive())
+        batch_or_noninteractive = bool(
+            isinstance(run_ctx, StaticRunContext) and (run_ctx.batch or run_ctx.noninteractive)
+        )
         if (
             params.verbose_output
             and len(outcome.results) <= 5
             and not batch_or_noninteractive
         ):
-            _interactive_detail_loop(outcome, params)
+            _interactive_detail_loop(outcome, params, run_ctx=run_ctx)
 
     if persistence_errors and not params.dry_run:
         if not any("persistence" in str(item).lower() for item in outcome.failures):
@@ -1153,8 +1165,8 @@ def _render_run_results_impl(outcome: RunOutcome, params: RunParameters) -> None
         _render_db_masvs_summary()
 
 
-def _interactive_detail_loop(outcome: RunOutcome, params: RunParameters) -> None:
-    if output_prefs.effective_batch() or output_prefs.effective_noninteractive():
+def _interactive_detail_loop(outcome: RunOutcome, params: RunParameters, *, run_ctx: StaticRunContext | None) -> None:
+    if isinstance(run_ctx, StaticRunContext) and (run_ctx.batch or run_ctx.noninteractive):
         return
     while True:
         resp = prompt_utils.prompt_text(

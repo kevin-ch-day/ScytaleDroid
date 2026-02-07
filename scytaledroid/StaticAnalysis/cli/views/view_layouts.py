@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-from scytaledroid.Utils.System import output_prefs
-
 from scytaledroid.Utils.DisplayUtils import status_messages
+
+from ..core.run_context import StaticRunContext
 
 
 def render_run_start(
@@ -23,10 +23,10 @@ def render_run_start(
     cache_desc: str,
     log_level: str,
     perm_cache_desc: str,
+    run_ctx: StaticRunContext | None = None,
     trace_ids: Sequence[str] | None = None,
 ) -> None:
-    prefs = output_prefs.get()
-    if prefs.quiet and prefs.batch:
+    if run_ctx is not None and run_ctx.quiet and run_ctx.batch:
         return
     target_label = "Target"
     if target and not target.startswith("Profile:") and target != "All apps":
@@ -77,10 +77,10 @@ def render_run_summary(
     sev_counts: Mapping[str, int],
     failed_masvs: Sequence[str],
     perm_stats: Mapping[str, int],
+    run_ctx: StaticRunContext | None = None,
     evidence_root: str | None = None,
 ) -> None:
-    prefs = output_prefs.get()
-    if prefs.quiet and prefs.batch:
+    if run_ctx is not None and run_ctx.quiet and run_ctx.batch:
         return
     status_messages.print_strip(
         "Static Analysis · Complete",

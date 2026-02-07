@@ -106,121 +106,61 @@ def select_package_scope(
                 handler=lambda: _LAST_SCOPE,
             )
 
+        # Primary: research dataset collection.
+        try:
+            from scytaledroid.DynamicAnalysis.profile_loader import load_profile_packages
+
+            dataset_pkgs = {p.lower() for p in load_profile_packages("RESEARCH_DATASET_ALPHA")}
+        except Exception:
+            dataset_pkgs = set()
+        dataset_rows = [row for row in rows if row.package_name.lower() in dataset_pkgs] if dataset_pkgs else []
         _add_entry(
             "1",
+            "Research Dataset Alpha",
+            packages=len(dataset_rows),
+            files=estimated_files(dataset_rows),
+            note="recommended",
+            handler=lambda: ScopeSelection(
+                label="Research Dataset Alpha",
+                packages=list(dataset_rows),
+                kind="research_dataset",
+                metadata={
+                    "estimated_files": estimated_files(dataset_rows),
+                    "candidate_count": len(rows),
+                    "selected_count": len(dataset_rows),
+                    "profile_key": "RESEARCH_DATASET_ALPHA",
+                    # Always pull the full dataset set; do not delta-filter these runs.
+                    "disable_delta_filter": True,
+                    "policy": "non_root_paths" if not is_rooted else "none",
+                },
+            ),
+        )
+
+        _add_entry(
+            "2",
             "Play & user apps",
             packages=context["default_counts"].get("packages"),
             files=context["default_counts"].get("files"),
             note="default",
             handler=lambda: _scope_default(rows, allow),
         )
-        updated_note = "updated-only"
-        filtered_non_user = updated_meta.get("filtered_non_user")
-        if filtered_non_user and not updated_rows:
-            updated_note = f"0 eligible; filtered_non_user={filtered_non_user}"
-        elif filtered_non_user:
-            updated_note = f"{updated_note} (filtered_non_user={filtered_non_user})"
-        _add_entry(
-            "U",
-            "Updated apps only",
-            packages=len(updated_rows),
-            files=estimated_files(updated_rows),
-            note=updated_note,
-            handler=lambda: _scope_updated_only(rows, updated_rows, updated_meta),
-        )
-
-        social_rows = profile_key_groups.get("SOCIAL")
-        _add_entry(
-            "2",
-            "Profile: Social",
-            packages=len(social_rows) if social_rows else 0,
-            handler=lambda: _scope_profile_key_subset(
-                rows,
-                allow,
-                {"SOCIAL"},
-                label="Profile: Social",
-            ),
-        )
-
-        messaging_rows = profile_key_groups.get("MESSAGING")
+        # Primary: profiled apps. This is the research dataset adjacent view, without being a hard-coded list.
         _add_entry(
             "3",
-            "Profile: Messaging",
-            packages=len(messaging_rows) if messaging_rows else 0,
-            handler=lambda: _scope_profile_key_subset(
-                rows,
-                allow,
-                {"MESSAGING"},
-                label="Profile: Messaging",
-            ),
+            "Target profiles",
+            packages=context["profile_summary"].get("packages"),
+            files=context["profile_summary"].get("files"),
+            note="SOCIAL/MESSAGING/MEDIA/BROWSER/PRODUCTIVITY/SHOPPING/NEWS",
+            handler=lambda: _scope_profiles(rows, profile_counts, allow),
         )
 
-        combined_rows = (social_rows or []) + (messaging_rows or [])
         _add_entry(
             "4",
-            "Profile: Social + Messaging",
-            packages=len(combined_rows) if combined_rows else 0,
-            note="profile",
-            handler=lambda: _scope_profile_key_subset(
-                rows,
-                allow,
-                {"SOCIAL", "MESSAGING"},
-                label="Profile: Social + Messaging",
-            ),
-        )
-
-        _add_entry(
-            "5",
-            "Profile: Google user",
-            packages=context["google_user"].get("packages"),
-            files=context["google_user"].get("files"),
-            note="profile",
-            handler=lambda: _scope_google_user_apps(rows, allow),
-        )
-
-        if profile_counts:
-            _add_entry(
-                "6",
-                "Target profiles",
-                packages=context["profile_summary"].get("packages"),
-                files=context["profile_summary"].get("files"),
-                note="SOCIAL/MESSAGING/MEDIA/BROWSER/PRODUCTIVITY/SHOPPING/NEWS",
-                handler=lambda: _scope_profiles(rows, profile_counts, allow),
-            )
-
-        if watchlist_entries:
-            for idx, entry in enumerate(watchlist_entries, start=1):
-                key = f"W{idx}"
-                _add_entry(
-                    key,
-                    f"Watchlist · {entry.watchlist.name}",
-                    packages=entry.counts.get("packages"),
-                    files=entry.counts.get("files"),
-                    note=_format_watchlist_hint(entry),
-                    handler=lambda e=entry: _scope_watchlist(e),
-                )
-
-        _add_entry(
-            "7",
             "Google allow-list",
             packages=context["google_exceptions"].get("packages"),
             files=context["google_exceptions"].get("files"),
             note="allow-list",
             handler=lambda: _scope_google_allowlist(rows, allow),
-        )
-        _add_entry(
-            "8",
-            "System families",
-            packages=context["families"].get("packages"),
-            files=context["families"].get("files"),
-            note="root required",
-            handler=lambda: _scope_families(rows),
-        )
-        _add_entry(
-            "9",
-            "Custom patterns",
-            note="pattern list (comma, * prefix)",
-            handler=lambda: _scope_custom(rows, allow),
         )
         _add_entry(
             "E",

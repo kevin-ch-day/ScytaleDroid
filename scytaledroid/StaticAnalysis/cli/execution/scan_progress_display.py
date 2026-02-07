@@ -5,7 +5,8 @@ from __future__ import annotations
 import time
 
 from scytaledroid.Utils.DisplayUtils import status_messages
-from scytaledroid.Utils.System import output_prefs
+
+from ..core.run_context import StaticRunContext
 
 
 def _format_elapsed(seconds: float) -> str:
@@ -33,14 +34,26 @@ class _PipelineProgress:
         show_splits: bool,
         show_artifacts: bool,
         show_checkpoints: bool,
+        *,
+        run_ctx: StaticRunContext | None = None,
         progress_every: int = 5,
     ) -> None:
         self.total = max(1, int(total))
         self.show_splits = show_splits
         self.show_artifacts = show_artifacts
         self.show_checkpoints = show_checkpoints
-        prefs = output_prefs.get()
-        self._silent = bool(prefs.quiet and prefs.batch)
+        if run_ctx is None:
+            run_ctx = StaticRunContext(
+                run_mode="interactive",
+                quiet=False,
+                batch=False,
+                noninteractive=False,
+                show_splits=show_splits,
+                session_stamp=None,
+                persistence_ready=True,
+                paper_grade_requested=True,
+            )
+        self._silent = bool(run_ctx.quiet and run_ctx.batch)
         if self._silent:
             # Hard guard: batch quiet must not emit per-artifact output.
             self.show_artifacts = False

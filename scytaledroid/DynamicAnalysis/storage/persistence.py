@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from typing import Any
@@ -29,7 +28,7 @@ _LOGGER = logging_engine.get_dynamic_logger()
 def persist_dynamic_summary(
     config: DynamicSessionConfig, result: DynamicSessionResult, payload: dict[str, Any]
 ) -> None:
-    if not _require_dynamic_schema():
+    if not _require_dynamic_schema(require=bool(getattr(config, "require_dynamic_schema", True))):
         return
     dynamic_run_id = result.dynamic_run_id or payload.get("dynamic_run_id")
     if not dynamic_run_id:
@@ -150,10 +149,11 @@ def persist_dynamic_summary(
         raise
 
 
-def _require_dynamic_schema() -> bool:
+def _require_dynamic_schema(*, require: bool) -> bool:
     if dynamic_schema.ensure_all():
         return True
-    if os.getenv("SCYTALEDROID_PAPER_GRADE", "1").strip().lower() in {"1", "true", "yes", "on"}:
+    # Env vars are entrypoint defaults only. Schema gating must be based on the frozen run config.
+    if require:
         raise RuntimeError("DB schema is outdated; run migrations to use dynamic schema.")
     _LOGGER.warning("Dynamic schema missing; persistence skipped (experimental mode).")
     return False
