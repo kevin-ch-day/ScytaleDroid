@@ -60,7 +60,6 @@ def dynamic_analysis_menu() -> None:
         MenuOption("3", "Export run summary CSV"),
         MenuOption("4", "Export PCAP features CSV"),
         MenuOption("5", "Verify host PCAP tools (tshark + capinfos)"),
-        MenuOption("6", "Repair legacy run manifests (dataset block)"),
     ]
 
     ui_defaults = _load_dynamic_ui_defaults()
@@ -97,11 +96,6 @@ def dynamic_analysis_menu() -> None:
 
         if choice == "5":
             _verify_host_pcap_tools()
-            prompt_utils.press_enter_to_continue()
-            continue
-
-        if choice == "6":
-            _repair_legacy_run_manifests()
             prompt_utils.press_enter_to_continue()
             continue
 
@@ -156,36 +150,9 @@ def _export_pcap_features_csv() -> None:
     output_path = export_pcap_features_csv()
     if output_path is None:
         print(status_messages.status("No pcap_features.json files found.", level="warn"))
-    return
-
-
-def _repair_legacy_run_manifests() -> None:
-    from scytaledroid.DynamicAnalysis.tools.manifest_repair import backfill_dataset_block
-
-    print()
-    menu_utils.print_header("Repair Legacy Manifests")
-    print(
-        status_messages.status(
-            "This will backfill top-level dataset validity for legacy evidence packs by copying "
-            "operator.dataset_validity into manifest.dataset (no recomputation).",
-            level="info",
-        )
-    )
-    confirmed = prompt_utils.prompt_yes_no("Proceed with repair?", default=False)
-    if not confirmed:
         return
-    result = backfill_dataset_block(
-        Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic",
-        dry_run=False,
-    )
-    print(
-        status_messages.status(
-            f"Repair complete: scanned={result.scanned} repaired={result.repaired} skipped={result.skipped} errors={result.errors}",
-            level="info",
-        )
-    )
     print(status_messages.status(f"Exported CSV: {output_path}", level="success"))
-
+    return
 
 def _export_dynamic_run_summary_csv() -> None:
     from scytaledroid.DynamicAnalysis.pcap.aggregate import export_dynamic_run_summary_csv

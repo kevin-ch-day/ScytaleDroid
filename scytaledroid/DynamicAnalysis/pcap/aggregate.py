@@ -119,16 +119,16 @@ def _build_run_summary_row(
     stats = telemetry.get("stats") or {}
     capture = summary.get("capture") or {}
     metrics = (features.get("metrics") or {}) if isinstance(features.get("metrics"), dict) else {}
+    proxies = (features.get("proxies") or {}) if isinstance(features.get("proxies"), dict) else {}
     overlap_sources = (overlap or {}).get("overlap_by_source") or {}
     overlap_nsc = _overlap_ratio_for_source(overlap_sources, "nsc")
     overlap_strings = _overlap_ratio_for_source(overlap_sources, "strings")
-    proto = report.get("protocol_hierarchy") or []
-    quic_ratio = _protocol_ratio(proto, "quic")
-    tls_ratio = _protocol_ratio(proto, "tls")
     unique_domains = _unique_domains(report)
     return {
         "app": target.get("package_name"),
         "run_id": manifest.get("dynamic_run_id"),
+        # Alias for downstream consumers that expect an explicit dynamic_run_id field.
+        "dynamic_run_id": manifest.get("dynamic_run_id"),
         "run_profile": (manifest.get("operator") or {}).get("run_profile"),
         "run_sequence": (manifest.get("operator") or {}).get("run_sequence"),
         "interaction_level": (manifest.get("operator") or {}).get("interaction_level"),
@@ -145,8 +145,11 @@ def _build_run_summary_row(
         "dynamic_only_ratio": (overlap or {}).get("dynamic_only_ratio"),
         "bytes_per_sec": metrics.get("data_byte_rate_bps"),
         "packets_per_sec": metrics.get("avg_packet_rate_pps"),
-        "quic_ratio": quic_ratio,
-        "tls_ratio": tls_ratio,
+        # Use the post-processed ratios from pcap_features.json (quic/udp, tls/tcp).
+        # This avoids double-counting when protocol_hierarchy contains multiple rows
+        # per protocol and matches the values used by the verifier.
+        "quic_ratio": proxies.get("quic_ratio"),
+        "tls_ratio": proxies.get("tls_ratio"),
         "unique_domains": unique_domains,
     }
 
