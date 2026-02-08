@@ -28,6 +28,7 @@ def extract_packet_timeline(pcap_path: Path) -> Iterable[PacketRecord]:
     # NOTE: Use tshark via PATH. Dataset-tier runs already gate missing tools.
     cmd = [
         "tshark",
+        "-n",  # never resolve names; deterministic and avoids slow DNS lookups
         "-r",
         str(pcap_path),
         "-T",
@@ -39,7 +40,8 @@ def extract_packet_timeline(pcap_path: Path) -> Iterable[PacketRecord]:
         "-e",
         "frame.len",
     ]
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    # Avoid deadlocks if tshark emits lots of warnings to stderr (PIPE not drained).
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     assert proc.stdout is not None
     try:
         for line in proc.stdout:
