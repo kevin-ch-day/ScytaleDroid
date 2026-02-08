@@ -27,6 +27,7 @@ def fixed_model_specs(seed: int) -> list[ModelSpec]:
                 "n_estimators": 200,
                 "max_samples": "auto",
                 "contamination": "auto",  # thresholding is percentile-based, not this field
+                "bootstrap": False,
                 "random_state": seed,
             },
         ),
@@ -36,6 +37,8 @@ def fixed_model_specs(seed: int) -> list[ModelSpec]:
                 "kernel": "rbf",
                 "nu": 0.05,
                 "gamma": "scale",
+                "shrinking": False,
+                "tol": 1e-3,
             },
         ),
     ]
@@ -62,4 +65,3 @@ def anomaly_scores(model_name: str, model, X: np.ndarray) -> np.ndarray:
         # decision_function: higher is more normal -> invert.
         return -model.decision_function(X).reshape(-1)
     raise ValueError(f"Unknown model: {model_name}")
-

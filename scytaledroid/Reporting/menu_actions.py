@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import shutil
 from collections.abc import Iterable
 from datetime import datetime
@@ -246,11 +247,32 @@ def handle_static_report() -> None:
 def handle_run_ml_on_frozen_dataset() -> None:
     """Run Paper #2 ML over frozen evidence packs (offline, DB-free)."""
 
-    marker = Path(app_config.DATA_DIR) / "archive" / "dataset_freeze.json"
-    if not marker.exists():
+    archive_dir = Path(app_config.DATA_DIR) / "archive"
+    canonical = archive_dir / "dataset_freeze.json"
+    freeze_path = None
+    # Prefer a checksummed freeze manifest; canonical may be legacy.
+    if canonical.exists():
+        try:
+            payload = json.loads(canonical.read_text(encoding="utf-8"))
+        except Exception:
+            payload = {}
+        if isinstance(payload, dict) and isinstance(payload.get("included_run_checksums"), dict):
+            freeze_path = canonical
+    if freeze_path is None:
+        candidates = sorted(archive_dir.glob("dataset_freeze-*.json"), reverse=True)
+        for p in candidates:
+            try:
+                payload = json.loads(p.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if isinstance(payload, dict) and isinstance(payload.get("included_run_checksums"), dict):
+                freeze_path = p
+                break
+
+    if freeze_path is None:
         print(
             status_messages.status(
-                f"Dataset is not frozen (missing {relative_path(marker)}).",
+                "Dataset is not frozen (missing a checksummed freeze manifest under data/archive/).",
                 level="warn",
             )
         )
@@ -277,14 +299,12 @@ def handle_run_ml_on_frozen_dataset() -> None:
     print()
     menu_utils.print_header("Run ML on frozen dataset")
     print(status_messages.status("Mode: offline (evidence packs only); DB is not used.", level="info"))
+    print(status_messages.status(f"Freeze selector: {relative_path(freeze_path)}", level="info"))
 
-    stats = run_ml_on_evidence_packs()
-    dataset_csv = (
-        Path(app_config.DATA_DIR)
-        / "archive"
-        / "ml"
-        / f"dataset_ml_summary_{ml_config.ML_SCHEMA_LABEL}.csv"
-    )
+    stats = run_ml_on_evidence_packs(freeze_manifest_path=freeze_path)
+    prevalence_csv = Path(app_config.DATA_DIR) / "anomaly_prevalence_per_app_phase.csv"
+    overlap_csv = Path(app_config.DATA_DIR) / "model_overlap_per_run.csv"
+    transport_csv = Path(app_config.DATA_DIR) / "transport_mix_by_phase.csv"
 
     print(
         status_messages.status(
@@ -295,7 +315,19 @@ def handle_run_ml_on_frozen_dataset() -> None:
     )
     print(
         status_messages.status(
-            f"Dataset summary CSV: {relative_path(dataset_csv)}",
+            f"Wrote: {relative_path(prevalence_csv)}",
+            level="info",
+        )
+    )
+    print(
+        status_messages.status(
+            f"Wrote: {relative_path(overlap_csv)}",
+            level="info",
+        )
+    )
+    print(
+        status_messages.status(
+            f"Wrote: {relative_path(transport_csv)}",
             level="info",
         )
     )

@@ -13,6 +13,14 @@ WINDOW_STRIDE_S = 5.0
 # Thresholding (locked)
 THRESHOLD_PERCENTILE = 95.0
 
+# Training quality gates (reviewer-approved defaults; Paper #2)
+# Minimum number of baseline windows required for baseline-only training.
+# With 10s/5s windowing, ~180s baseline -> ~35 windows.
+MIN_WINDOWS_BASELINE = 30
+
+# PCAP bytes gate fallback (manifest value wins if present).
+MIN_PCAP_BYTES_FALLBACK = 100_000
+
 # Seed derivation (locked)
 SEED_SALT_LABEL = "paper2-ml-seed-salt-v1"
 # Stable salt string. Do not change during Paper #2.
@@ -21,4 +29,3 @@ SEED_SALT = "scytaledroid-paper2-ml-seed-salt-v1"
 # Models (locked)
 MODEL_IFOREST = "isolation_forest"
 MODEL_OCSVM = "one_class_svm"
-
