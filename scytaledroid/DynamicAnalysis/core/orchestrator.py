@@ -436,8 +436,36 @@ class DynamicRunOrchestrator:
                 if isinstance(validity, dict):
                     manifest.dataset = dict(validity)
                     manifest.dataset.setdefault("tier", self.config.tier)
-                    manifest.dataset.setdefault("countable", str(self.config.tier).lower() == "dataset")
+                    # "countable" is quota-counted by construction. Determine it from the
+                    # derived tracker markings (counts_toward_quota) rather than from
+                    # operator choice or run order.
+                    try:
+                        from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import load_dataset_tracker
+
+                        tracker = load_dataset_tracker()
+                        apps = tracker.get("apps") if isinstance(tracker, dict) else {}
+                        pkg = (manifest.target.get("package_name") or "").strip()
+                        entry = apps.get(pkg) if isinstance(apps, dict) and pkg else None
+                        runs = entry.get("runs") if isinstance(entry, dict) else []
+                        countable = None
+                        if isinstance(runs, list):
+                            for r in runs:
+                                if isinstance(r, dict) and r.get("run_id") == manifest.dynamic_run_id:
+                                    countable = r.get("countable")
+                                    if isinstance(countable, bool):
+                                        break
+                                    countable = bool(r.get("counts_toward_quota"))
+                                    break
+                        if isinstance(countable, bool):
+                            manifest.dataset["countable"] = countable
+                        else:
+                            manifest.dataset.setdefault("countable", True)
+                    except Exception:
+                        manifest.dataset.setdefault("countable", True)
                     manifest.operator["dataset_validity"] = dict(validity)
+                    # Mirror countable into the legacy operator block for older tooling.
+                    if isinstance(manifest.dataset.get("countable"), bool):
+                        manifest.operator["dataset_validity"]["countable"] = manifest.dataset["countable"]
                 event_logger.log(
                     "dataset_validity",
                     {
@@ -447,6 +475,7 @@ class DynamicRunOrchestrator:
                         "sampling_duration_seconds": validity.get("sampling_duration_seconds"),
                         "short_run": validity.get("short_run"),
                         "no_traffic_observed": validity.get("no_traffic_observed"),
+                        "countable": bool((manifest.dataset or {}).get("countable")),
                     },
                 )
             except Exception as exc:  # noqa: BLE001
@@ -461,7 +490,7 @@ class DynamicRunOrchestrator:
                     {
                         "valid_dataset_run": False,
                         "invalid_reason_code": "PCAP_PARSE_ERROR",
-                        "countable": True,
+                        "countable": bool(manifest.dataset.get("countable", True)),
                     }
                 )
         manifest.add_outputs(outputs)
@@ -515,7 +544,11 @@ class DynamicRunOrchestrator:
             batch_id=getattr(run_ctx, "batch_id", None),
             dataset={
                 "tier": self.config.tier,
-                "countable": str(self.config.tier).lower() == "dataset",
+                "countable": (
+                    bool(getattr(run_ctx, "counts_toward_completion"))
+                    if getattr(run_ctx, "counts_toward_completion", None) is not None
+                    else str(self.config.tier).lower() == "dataset"
+                ),
                 # Filled deterministically at finalize-time for dataset-tier runs.
                 "valid_dataset_run": None,
                 "invalid_reason_code": None,

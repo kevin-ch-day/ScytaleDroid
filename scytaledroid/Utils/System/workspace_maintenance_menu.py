@@ -385,6 +385,7 @@ def _workspace_advanced_destructive_menu(*, reset_static_action, legacy_manifest
         items = [
             menu_utils.MenuOption("1", "Reset static analysis data (destructive)"),
             menu_utils.MenuOption("2", "Repair legacy dynamic manifests (rare)"),
+            menu_utils.MenuOption("3", "Prune derived dynamic DB orphans (safe)"),
         ]
         spec_kwargs = display_settings.apply_menu_defaults(
             {"items": items, "exit_label": "Back", "show_exit": True}
@@ -397,6 +398,47 @@ def _workspace_advanced_destructive_menu(*, reset_static_action, legacy_manifest
             reset_static_action()
         if choice == "2":
             legacy_manifest_repair_action()
+        if choice == "3":
+            _prune_dynamic_db_orphans()
+
+
+def _prune_dynamic_db_orphans() -> None:
+    """Delete dynamic_sessions rows whose evidence_path no longer exists locally."""
+    from pathlib import Path
+
+    from scytaledroid.DynamicAnalysis.storage.db_maintenance import (
+        delete_dynamic_sessions_by_id,
+        find_dynamic_db_orphans,
+    )
+
+    print()
+    menu_utils.print_header("Prune Derived Dynamic DB Orphans")
+    print(status_messages.status("DB is a derived index. Evidence packs remain authoritative.", level="info"))
+    repo_root = Path.cwd()
+    orphans = find_dynamic_db_orphans(repo_root=repo_root)
+    if not orphans:
+        print(status_messages.status("No DB orphans found.", level="success"))
+        prompt_utils.press_enter_to_continue()
+        return
+    print(status_messages.status(f"Orphans found: {len(orphans)}", level="warn"))
+    # Show a compact sample for operator confidence.
+    for o in orphans[:10]:
+        rid = str(o.get("dynamic_run_id") or "")[:8]
+        pkg = str(o.get("package_name") or "")
+        reason = str(o.get("reason") or "")
+        path = str(o.get("evidence_path") or "")
+        print(status_messages.status(f"- {rid} {pkg} ({reason}) path={path}", level="warn"))
+    if len(orphans) > 10:
+        print(status_messages.status(f"... and {len(orphans) - 10} more", level="info"))
+
+    if not prompt_utils.prompt_yes_no("Delete these orphan DB rows now? (cascades to derived tables)", default=False):
+        print(status_messages.status("Cancelled.", level="info"))
+        prompt_utils.press_enter_to_continue()
+        return
+    ids = [str(o.get("dynamic_run_id") or "") for o in orphans if str(o.get("dynamic_run_id") or "").strip()]
+    deleted = delete_dynamic_sessions_by_id(ids)
+    print(status_messages.status(f"Deleted {deleted} dynamic_sessions row(s).", level="success"))
+    prompt_utils.press_enter_to_continue()
 
 
 __all__ = ["workspace_menu"]

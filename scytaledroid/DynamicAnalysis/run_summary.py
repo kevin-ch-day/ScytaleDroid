@@ -60,15 +60,13 @@ def print_run_summary(result, duration_label: str) -> None:
             if quota:
                 lines.append(("Dataset quota", quota))
                 if run_profile:
-                    if "(extra_run=1)" in quota and run_sequence:
-                        lines.append(("Run profile", f"{run_profile} (extra run #{run_sequence})"))
-                    else:
-                        slot_label = f"#{run_sequence}" if run_sequence else "—"
-                        lines.append(("Run profile", f"{run_profile} (dataset slot {slot_label})"))
+                    # Do not imply ordering constraints via "slot" language.
+                    lines.append(("Run profile", f"{run_profile}"))
+                if validity.get("countable") is False:
+                    lines.append(("Countable", "no (extra run)"))
             elif run_profile:
                 # Fallback when tracker isn't available.
-                slot_label = f"#{run_sequence}" if run_sequence else "—"
-                lines.append(("Run profile", f"{run_profile} (dataset slot {slot_label})"))
+                lines.append(("Run profile", f"{run_profile}"))
         else:
             dataset_validity = _dataset_validity_label(result.dynamic_run_id)
             if dataset_validity:

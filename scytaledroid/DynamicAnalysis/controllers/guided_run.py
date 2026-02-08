@@ -162,7 +162,9 @@ def run_guided_dataset_run(
     elif suggested_slot:
         print(
             status_messages.status(
-                f"Suggested by quota (counts toward completion): {suggested_profile} (dataset slot #{suggested_slot})",
+                # Do not imply an ordering constraint. Operators may run in any order;
+                # the tracker deterministically counts the first N valid baseline/interactive runs.
+                f"Suggested by quota (counts toward completion): {suggested_profile}",
                 level="info",
             )
         )

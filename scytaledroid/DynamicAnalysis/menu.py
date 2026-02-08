@@ -525,11 +525,17 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
         dataset_pkgs = set()
 
     # Lazy imports avoid unnecessary module work for non-dataset menus.
-    from scytaledroid.DynamicAnalysis.utils.run_cleanup import dataset_tracker_counts, recent_tracker_runs
-    from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig, peek_next_run_protocol
+    from scytaledroid.DynamicAnalysis.utils.run_cleanup import recent_tracker_runs
+    from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
+        DatasetTrackerConfig,
+        load_dataset_tracker,
+        peek_next_run_protocol,
+    )
     from scytaledroid.Utils.DisplayUtils import text_blocks
 
     cfg = DatasetTrackerConfig()
+    tracker = load_dataset_tracker()
+    tracker_apps = tracker.get("apps") if isinstance(tracker, dict) else {}
 
     # Prefer human-friendly app labels in the table. If labels collide, append the
     # package name so operators can disambiguate.
@@ -548,14 +554,56 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
 
         base_label = "—"
         inter_label = "—"
+        need_label = "—"
         runs_label = "—"
         last_label = "—"
         next_label = "—"
         if package.lower() in dataset_pkgs:
-            counts_payload = dataset_tracker_counts(package)
-            base_label = f"{counts_payload.baseline_valid_runs}/{cfg.baseline_required}"
-            inter_label = f"{counts_payload.interactive_valid_runs}/{cfg.interactive_required}"
-            runs_label = str(counts_payload.total_runs)
+            # Important: the dataset tracker deterministically counts only the
+            # first N valid runs per bucket (baseline/interactive). Operators can
+            # still collect extra valid runs for exploration. To avoid confusion,
+            # show "countable(+extra)" here rather than a quota-style "x/y".
+            entry = tracker_apps.get(package) if isinstance(tracker_apps, dict) else None
+            runs = entry.get("runs") if isinstance(entry, dict) else []
+            base_countable = 0
+            base_extra = 0
+            inter_countable = 0
+            inter_extra = 0
+            total_runs = len(runs) if isinstance(runs, list) else 0
+            if isinstance(runs, list):
+                for r in runs:
+                    if not isinstance(r, dict):
+                        continue
+                    if r.get("valid_dataset_run") is not True:
+                        continue
+                    prof = str(r.get("run_profile") or "").lower()
+                    countable = bool(r.get("countable", True))
+                    is_baseline = ("baseline" in prof) or ("idle" in prof)
+                    if is_baseline:
+                        if countable:
+                            base_countable += 1
+                        else:
+                            base_extra += 1
+                    else:
+                        if countable:
+                            inter_countable += 1
+                        else:
+                            inter_extra += 1
+
+            base_label = str(base_countable) if base_extra <= 0 else f"{base_countable}(+{base_extra})"
+            inter_label = str(inter_countable) if inter_extra <= 0 else f"{inter_countable}(+{inter_extra})"
+            need_base = max(0, int(cfg.baseline_required) - base_countable)
+            need_inter = max(0, int(cfg.interactive_required) - inter_countable)
+            if need_base or need_inter:
+                need_parts = []
+                if need_base:
+                    need_parts.append(f"B{need_base}")
+                if need_inter:
+                    need_parts.append(f"I{need_inter}")
+                need_label = " ".join(need_parts)
+            else:
+                need_label = "0"
+            runs_label = str(total_runs)
             recent = recent_tracker_runs(package, limit=1)
             if recent:
                 r = recent[0]
@@ -576,8 +624,15 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
 
         # Columns are intentionally minimal for dataset collection.
         # Column order is chosen to avoid "Next" being truncated on narrow terminals.
-        rows.append([str(idx), display, base_label, inter_label, next_label, runs_label, last_label])
+        rows.append([str(idx), display, base_label, inter_label, need_label, next_label, runs_label, last_label])
     _render_package_table(rows)
+    if any(r[2] != "—" for r in rows):
+        print(
+            status_messages.status(
+                "Note: Baseline/Interactive show countable valid runs; '(+N)' indicates extra valid runs (kept, out-of-dataset).",
+                level="info",
+            )
+        )
     index = _choose_index("Select app #", len(packages))
     if index is None:
         return None
@@ -587,11 +642,11 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
 
 def _render_package_table(rows, *, max_preview: int = 15) -> None:
     headers = ["#", "App"]
-    if rows and len(rows[0]) >= 7:
+    if rows and len(rows[0]) >= 8:
         # Put "Next" before the trailing status columns so it is less likely to
         # get truncated when the terminal is narrow (table shrink truncates from
         # the rightmost columns first).
-        headers = ["#", "App", "Base", "Int", "Next", "Runs", "Last"]
+        headers = ["#", "App", "Baseline", "Interactive", "Need", "Next", "Runs", "Last"]
     if len(rows) <= max_preview:
         table_utils.render_table(headers, rows, compact=True)
         return

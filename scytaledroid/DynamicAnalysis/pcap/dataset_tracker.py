@@ -97,25 +97,42 @@ def update_dataset_tracker(
         app_entry["runs"].append(run_entry)
     else:
         existing.update(run_entry)
-    app_entry["run_count"] = len(app_entry["runs"])
+    runs_list = app_entry.get("runs") if isinstance(app_entry, dict) else []
+    if not isinstance(runs_list, list):
+        runs_list = []
+        app_entry["runs"] = runs_list
+
+    app_entry["run_count"] = len([r for r in runs_list if isinstance(r, dict)])
     app_entry["target_runs"] = cfg.repeats_per_app
-    app_entry["valid_runs"] = sum(1 for r in app_entry["runs"] if r.get("valid_dataset_run"))
+
+    # Deterministically mark quota-counted runs vs extras.
+    _apply_quota_marking(app_entry, cfg)
+
+    def _counted(r: dict[str, Any]) -> bool:
+        return r.get("valid_dataset_run") is True and bool(r.get("counts_toward_quota"))
+
+    # Headline counts reflect quota-counted valid runs only (extras are allowed
+    # but must not distort completion progress).
+    app_entry["valid_runs"] = sum(1 for r in runs_list if isinstance(r, dict) and _counted(r))
     app_entry["baseline_valid_runs"] = sum(
         1
-        for r in app_entry["runs"]
-        if r.get("valid_dataset_run") is True and str(r.get("run_profile") or "").startswith(cfg.baseline_profile)
+        for r in runs_list
+        if isinstance(r, dict)
+        and _counted(r)
+        and str(r.get("run_profile") or "").startswith(cfg.baseline_profile)
     )
     app_entry["interactive_valid_runs"] = sum(
         1
-        for r in app_entry["runs"]
-        if r.get("valid_dataset_run") is True and str(r.get("run_profile") or "").startswith(cfg.interactive_profile)
+        for r in runs_list
+        if isinstance(r, dict)
+        and _counted(r)
+        and str(r.get("run_profile") or "").startswith(cfg.interactive_profile)
     )
     app_entry["app_complete"] = (
         int(app_entry["baseline_valid_runs"]) >= int(cfg.baseline_required)
         and int(app_entry["interactive_valid_runs"]) >= int(cfg.interactive_required)
     )
-    _apply_quota_marking(app_entry, cfg)
-    app_entry["overlap_stats"] = _compute_overlap_stats(app_entry.get("runs") or [])
+    app_entry["overlap_stats"] = _compute_overlap_stats(runs_list)
     payload["updated_at"] = datetime.now(UTC).isoformat()
     tracker_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
     _log(
@@ -160,31 +177,35 @@ def _normalize_tracker_payload(payload: dict[str, Any], cfg: DatasetTrackerConfi
             runs = []
             entry["runs"] = runs
 
-        # Recompute key counts if missing or inconsistent.
         entry["run_count"] = len([r for r in runs if isinstance(r, dict)])
         entry["target_runs"] = int(entry.get("target_runs") or cfg.repeats_per_app)
-        entry["valid_runs"] = sum(1 for r in runs if isinstance(r, dict) and r.get("valid_dataset_run") is True)
+
+        # Ensure quota markings are present for UI labels (extra_run, counts_toward_quota),
+        # and then compute counts from those deterministic markings.
+        _apply_quota_marking(entry, cfg)
+
+        def _counted(r: dict[str, Any]) -> bool:
+            return r.get("valid_dataset_run") is True and bool(r.get("counts_toward_quota"))
+
+        entry["valid_runs"] = sum(1 for r in runs if isinstance(r, dict) and _counted(r))
         entry["baseline_valid_runs"] = sum(
             1
             for r in runs
             if isinstance(r, dict)
-            and r.get("valid_dataset_run") is True
+            and _counted(r)
             and str(r.get("run_profile") or "").startswith(cfg.baseline_profile)
         )
         entry["interactive_valid_runs"] = sum(
             1
             for r in runs
             if isinstance(r, dict)
-            and r.get("valid_dataset_run") is True
+            and _counted(r)
             and str(r.get("run_profile") or "").startswith(cfg.interactive_profile)
         )
         entry["app_complete"] = (
             int(entry["baseline_valid_runs"]) >= int(cfg.baseline_required)
             and int(entry["interactive_valid_runs"]) >= int(cfg.interactive_required)
         )
-
-        # Ensure quota markings are present for UI labels (extra_run, counts_toward_quota).
-        _apply_quota_marking(entry, cfg)
         entry["quota_met"] = bool(entry.get("quota_met") or entry.get("app_complete"))
         entry["extra_valid_runs"] = int(entry.get("extra_valid_runs") or 0)
 
@@ -218,6 +239,11 @@ def peek_next_run_protocol(
     if isinstance(runs, list):
         for r in runs:
             if not isinstance(r, dict) or r.get("valid_dataset_run") is not True:
+                continue
+            # Only quota-counted runs satisfy the Paper #2 quota and increment
+            # the protocol sequence. Extras are allowed but must not influence
+            # operator guidance.
+            if not bool(r.get("counts_toward_quota", True)):
                 continue
             total_valid += 1
             prof = str(r.get("run_profile") or "")
@@ -402,8 +428,10 @@ def _apply_quota_marking(app_entry: dict[str, Any], cfg: DatasetTrackerConfig) -
         elif is_interactive and interactive_seen < interactive_needed:
             interactive_seen += 1
             counted = True
-        elif (baseline_seen + interactive_seen) < needed:
-            # If profile tagging is inconsistent, still allow runs to fill total quota slots.
+        elif (baseline_seen + interactive_seen) < needed and not (is_baseline or is_interactive):
+            # If profile tagging is inconsistent/unknown, still allow runs to fill
+            # total quota slots rather than failing closed. Do not let extra baseline
+            # runs satisfy interactive quota (Paper #2 quota is strict).
             counted = True
 
         if counted and (baseline_seen + interactive_seen) <= needed:
@@ -417,6 +445,12 @@ def _apply_quota_marking(app_entry: dict[str, Any], cfg: DatasetTrackerConfig) -
                 quota_met_run_id = r.get("run_id")
         else:
             r["extra_run"] = 1
+
+    # Stable boolean alias for downstream consumers (menus, DB indexer, exports).
+    # "countable" means "counts toward the fixed dataset quota by construction".
+    for r in runs:
+        if isinstance(r, dict):
+            r["countable"] = bool(r.get("counts_toward_quota"))
 
     app_entry["quota_met"] = bool(
         baseline_seen >= baseline_needed and interactive_seen >= interactive_needed

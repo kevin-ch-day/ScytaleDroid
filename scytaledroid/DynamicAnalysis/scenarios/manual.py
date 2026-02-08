@@ -41,12 +41,6 @@ class ManualScenarioRunner:
             if not interaction_level:
                 interaction_level = _prompt_interaction_level(profile)
 
-            counts_toward = getattr(run_ctx, "counts_toward_completion", None)
-            if counts_toward is False and sequence:
-                slot_label = f"extra_run #{sequence}"
-            else:
-                slot_label = f"dataset slot #{sequence}" if sequence else None
-
             # Render a concise multi-line protocol block (operator-friendly).
             min_s = int(getattr(app_config, "DYNAMIC_MIN_DURATION_S", 120))
             target_s = int(getattr(app_config, "DYNAMIC_TARGET_DURATION_S", 180))
@@ -62,9 +56,7 @@ class ManualScenarioRunner:
                 block.append(f"Target duration: {target_s}s (min {min_s}s)")
             if profile:
                 block.append(f"Profile: {profile}")
-            if slot_label:
-                # Keep the slot label as a single line (dataset vs extra run).
-                block.append(f"Slot: {slot_label}")
+            # Do not surface run sequencing/slot labels. Operators may run in any order.
 
             block.append("")
             block.append("User behavior:")
