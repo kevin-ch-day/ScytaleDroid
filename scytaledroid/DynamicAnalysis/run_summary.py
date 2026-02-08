@@ -95,6 +95,8 @@ def print_run_summary(result, duration_label: str) -> None:
 
     summary_payload = _load_summary(run_dir) if run_dir else None
     engine_summary = _load_engine_summary(run_dir) if run_dir else None
+    pcap_report = _load_json(run_dir / "analysis" / "pcap_report.json") if run_dir else None
+    pcap_features = _load_json(run_dir / "analysis" / "pcap_features.json") if run_dir else None
     if manifest:
         operator = manifest.get("operator") or {}
         telemetry_stats = operator.get("telemetry_stats") or {}
@@ -143,15 +145,30 @@ def print_run_summary(result, duration_label: str) -> None:
                         )
                     )
 
+        pcap_qa_lines = _build_pcap_qa_lines(pcap_report, pcap_features)
+        if pcap_qa_lines:
+            _print_simple_list("PCAP QA", pcap_qa_lines)
+
         artifact_summary = [
             f"Artifacts: {len(artifacts)}",
             f"Outputs: {len(outputs)}",
         ]
         _print_simple_list("Artifacts", artifact_summary)
 
-        evidence_lines = _build_evidence_lines(summary_payload, artifacts, manifest)
+        evidence_lines = _build_evidence_lines(
+            run_dir,
+            summary_payload,
+            pcap_report,
+            pcap_features,
+            artifacts,
+            manifest,
+        )
         if evidence_lines:
             _print_simple_list("Evidence", evidence_lines)
+
+        indicator_lines = _build_indicator_summary_lines(pcap_report)
+        if indicator_lines:
+            _print_simple_list("Indicators (Top)", indicator_lines)
 
         if engine_summary:
             warnings = engine_summary.get("diagnostics_warnings") or []
@@ -239,6 +256,18 @@ def _load_engine_summary(run_dir: Path | None) -> dict[str, object] | None:
         return json.loads(summary_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
+
+
+def _load_json(path: Path | None) -> dict[str, object] | None:
+    if not path:
+        return None
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
 
 
 def _format_bytes(size: int) -> str:
@@ -432,7 +461,10 @@ def _clock_delta_line(
 
 
 def _build_evidence_lines(
+    run_dir: Path | None,
     summary_payload: dict[str, object] | None,
+    pcap_report: dict[str, object] | None,
+    pcap_features: dict[str, object] | None,
     artifacts: list[object],
     manifest: dict[str, object],
 ) -> list[str]:
@@ -460,7 +492,125 @@ def _build_evidence_lines(
         )
     artifact_types = {a.get("type") for a in artifacts if isinstance(a, dict)}
     lines.append("System log: yes" if "system_log_capture" in artifact_types else "System log: no")
+
+    # Add a compact PCAP QA line when available (keeps operators from guessing).
+    # If run_dir exists, show the PCAP report toolchain warning surface (no noise in normal case).
+    if run_dir and isinstance(pcap_report, dict):
+        missing_tools = pcap_report.get("missing_tools") or []
+        if isinstance(missing_tools, list) and missing_tools:
+            lines.append("PCAP tools missing: " + ", ".join(str(x) for x in missing_tools))
     return lines
+
+
+def _build_pcap_qa_lines(
+    pcap_report: dict[str, object] | None,
+    pcap_features: dict[str, object] | None,
+) -> list[str]:
+    lines: list[str] = []
+    if isinstance(pcap_report, dict):
+        cap = (pcap_report.get("capinfos") or {}).get("parsed") or {}
+        if isinstance(cap, dict):
+            dur = cap.get("capture_duration_s")
+            pkts = cap.get("packet_count")
+            dbytes = cap.get("data_size_bytes")
+            pps = cap.get("avg_packet_rate_pps")
+            bps = cap.get("data_byte_rate_bps")
+            parts = []
+            try:
+                if dur is not None:
+                    parts.append(f"dur={float(dur):.0f}s")
+            except Exception:
+                pass
+            try:
+                if pkts is not None:
+                    parts.append(f"pkts={int(pkts)}")
+            except Exception:
+                pass
+            try:
+                if dbytes is not None:
+                    parts.append(f"data={_format_bytes(int(dbytes))}")
+            except Exception:
+                pass
+            try:
+                if pps is not None:
+                    parts.append(f"pps={float(pps):.1f}")
+            except Exception:
+                pass
+            try:
+                if bps is not None:
+                    parts.append(f"byte_rate={_format_bytes(int(float(bps)))}s")
+            except Exception:
+                pass
+            if parts:
+                lines.append(" ".join(parts))
+
+    if isinstance(pcap_features, dict):
+        proxies = pcap_features.get("proxies") or {}
+        if isinstance(proxies, dict):
+            # Transport mix proxies (TLS/QUIC/etc)
+            tls = proxies.get("tls_ratio")
+            quic = proxies.get("quic_ratio")
+            tcp = proxies.get("tcp_ratio")
+            udp = proxies.get("udp_ratio")
+            parts = []
+            for k, v in (("tls", tls), ("quic", quic), ("tcp", tcp), ("udp", udp)):
+                try:
+                    if v is not None:
+                        parts.append(f"{k}={float(v):.2f}")
+                except Exception:
+                    continue
+            if parts:
+                lines.append("transport: " + " ".join(parts))
+
+            # Diversity proxies
+            ud = proxies.get("unique_domains_topn")
+            dns_n = proxies.get("unique_dns_topn")
+            sni_n = proxies.get("unique_sni_topn")
+            segs = []
+            if dns_n is not None:
+                segs.append(f"dns={dns_n}")
+            if sni_n is not None:
+                segs.append(f"sni={sni_n}")
+            if ud is not None:
+                segs.append(f"domains={ud}")
+            if segs:
+                lines.append("diversity: " + " ".join(segs))
+    return lines
+
+
+def _build_indicator_summary_lines(pcap_report: dict[str, object] | None) -> list[str]:
+    if not isinstance(pcap_report, dict):
+        return []
+
+    def _top(items: object, label: str) -> str | None:
+        if not isinstance(items, list) or not items:
+            return None
+        pairs: list[tuple[str, int]] = []
+        for item in items[:3]:
+            if not isinstance(item, dict):
+                continue
+            v = item.get("value")
+            c = item.get("count")
+            if not isinstance(v, str) or not v.strip():
+                continue
+            try:
+                ci = int(c) if c is not None else 0
+            except Exception:
+                ci = 0
+            pairs.append((v.strip(), ci))
+        if not pairs:
+            return None
+        joined = ", ".join([f"{v} ({c})" if c else v for v, c in pairs])
+        return f"{label}: {joined}"
+
+    out: list[str] = []
+    dns = _top(pcap_report.get("top_dns"), "dns")
+    sni = _top(pcap_report.get("top_sni"), "sni")
+    if dns:
+        out.append(dns)
+    if sni:
+        out.append(sni)
+    return out
 
 
 __all__ = ["print_run_summary"]

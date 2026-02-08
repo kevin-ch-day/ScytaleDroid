@@ -10,6 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
 
@@ -32,47 +33,54 @@ class ManualScenarioRunner:
     ) -> ScenarioResult:
         interaction_level = getattr(run_ctx, "interaction_level", None)
         if run_ctx.interactive:
-            duration = f"{run_ctx.duration_seconds}s" if run_ctx.duration_seconds else "unspecified"
+            duration_seconds = max(int(run_ctx.duration_seconds or 0), 0)
             profile = getattr(run_ctx, "run_profile", None)
             sequence = getattr(run_ctx, "run_sequence", None)
-            print(
-                status_messages.status(
-                    f"Scenario: {run_ctx.scenario_id} (duration {duration}).",
-                    level="info",
-                )
-            )
-            if profile:
-                counts_toward = getattr(run_ctx, "counts_toward_completion", None)
-                if counts_toward is False and sequence:
-                    slot_label = f" (Extra run #{sequence})"
-                else:
-                    slot_label = f" (Dataset slot #{sequence})" if sequence else ""
-                print(status_messages.status(f"Run profile: {profile}{slot_label}.", level="info"))
-                if profile == "baseline_idle":
-                    print(
-                        status_messages.status(
-                            "Protocol: keep the app in the foreground; minimize interactions (baseline capture).",
-                            level="info",
-                        )
-                    )
-                else:
-                    print(status_messages.status("Protocol: use the app normally.", level="info"))
-            else:
-                print(status_messages.status("Protocol: use the app normally.", level="info"))
-            print(status_messages.status("Tip: keep the app in the foreground during the session.", level="info"))
-            if run_ctx.scenario_hint:
-                print(status_messages.status(run_ctx.scenario_hint, level="info"))
             # Operator protocol metadata: pick interaction level *before* the run starts so the
             # evidence pack is tagged deterministically without post-run prompts.
             if not interaction_level:
                 interaction_level = _prompt_interaction_level(profile)
+
+            counts_toward = getattr(run_ctx, "counts_toward_completion", None)
+            if counts_toward is False and sequence:
+                slot_label = f"extra_run #{sequence}"
+            else:
+                slot_label = f"dataset slot #{sequence}" if sequence else None
+
+            # Render a concise multi-line protocol block (operator-friendly).
+            min_s = int(getattr(app_config, "DYNAMIC_MIN_DURATION_S", 120))
+            target_s = int(getattr(app_config, "DYNAMIC_TARGET_DURATION_S", 180))
+
+            block: list[str] = []
+            block.append(f"Scenario: {run_ctx.scenario_id}")
             if interaction_level:
-                print(status_messages.status(f"Interaction level: {interaction_level}.", level="info"))
+                block.append(f"Interaction: {interaction_level}")
+            if duration_seconds:
+                block.append(f"Duration: {duration_seconds}s")
+            else:
+                # Manual runs are stopwatch-based; still show the dataset target/minimum.
+                block.append(f"Target duration: {target_s}s (min {min_s}s)")
+            if profile:
+                block.append(f"Profile: {profile}")
+            if slot_label:
+                # Keep the slot label as a single line (dataset vs extra run).
+                block.append(f"Slot: {slot_label}")
+
+            block.append("")
+            block.append("User behavior:")
+            if profile == "baseline_idle":
+                block.append("  - Keep the app in the foreground")
+                block.append("  - Minimize interactions (baseline capture)")
+            else:
+                block.append("  - Keep the app in the foreground")
+                block.append("  - Use the app normally")
+            print(status_messages.status("\n".join(block).rstrip(), level="info"))
+            if run_ctx.scenario_hint:
+                print(status_messages.status(run_ctx.scenario_hint, level="info"))
             prompt_utils.press_enter_to_continue("Press Enter to begin (timer starts)...")
             started_at = datetime.now(UTC)
             if on_start:
                 on_start()
-            duration_seconds = max(int(run_ctx.duration_seconds or 0), 0)
             if duration_seconds:
                 print(status_messages.status("Press Enter to stop early (optional).", level="info"))
                 ended_at = _run_countdown(duration_seconds)

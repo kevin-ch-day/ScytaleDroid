@@ -872,11 +872,39 @@ def _extract_pcap_meta(payload: Mapping[str, Any], evidence_path: str | None) ->
 
 
 def _fmt_dt(value: object | None) -> str | None:
+    """Convert common timestamp shapes to MySQL DATETIME string.
+
+    Dynamic persistence writes into MariaDB/MySQL `DATETIME` columns. We accept:
+    - `datetime` objects
+    - ISO-8601-ish strings (with `Z` or `+00:00`)
+    - already-normalized DB strings (`YYYY-MM-DD HH:MM:SS`)
+    """
+    if not value:
+        return None
+
     if isinstance(value, datetime):
-        return value.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S")
-    if isinstance(value, str) and value:
-        return value
-    return None
+        dt = value
+    else:
+        if not isinstance(value, str):
+            return None
+        s = value.strip()
+        if not s:
+            return None
+        # Common forms: 2026-02-07T17:06:31Z, 2026-02-07T17:06:31.123+00:00
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        try:
+            dt = datetime.fromisoformat(s)
+        except Exception:
+            # Fallback: already a DB string (or at least DB-compatible prefix)
+            if len(s) >= 19 and s[4] == "-" and s[10] in (" ", "T"):
+                return s[:19].replace("T", " ")
+            return None
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    dt = dt.astimezone(UTC)
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _safe_int(value: object | None) -> int | None:

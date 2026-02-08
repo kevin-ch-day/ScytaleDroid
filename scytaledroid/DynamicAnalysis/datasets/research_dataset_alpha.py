@@ -27,6 +27,15 @@ CANONICAL_PACKAGES: tuple[str, ...] = (
     "org.thoughtcrime.securesms",  # Signal
 )
 
+# Messaging apps where operator activity type (text vs voice/video) is a meaningful
+# stratification tag for network behavior.
+MESSAGING_PACKAGES: tuple[str, ...] = (
+    "com.facebook.orca",  # Facebook Messenger
+    "com.whatsapp",  # WhatsApp
+    "org.telegram.messenger",  # Telegram
+    "org.thoughtcrime.securesms",  # Signal
+)
+
 
 def load_dataset_packages() -> Sequence[str]:
     """Prefer DB profile mapping; fall back to the canonical list if unavailable."""
@@ -40,5 +49,4 @@ def load_dataset_packages() -> Sequence[str]:
         return list(CANONICAL_PACKAGES)
 
 
-__all__ = ["PROFILE_KEY", "CANONICAL_PACKAGES", "load_dataset_packages"]
-
+__all__ = ["PROFILE_KEY", "CANONICAL_PACKAGES", "MESSAGING_PACKAGES", "load_dataset_packages"]

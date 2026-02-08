@@ -486,9 +486,25 @@ def evaluate_dataset_validity(
         )
 
     # Capture interrupted (observer failure) is always invalid for dataset tier.
+    #
+    # Reason precedence (locked enum, Paper #2):
+    # - If PCAP is missing/too small, that is the more specific invalidation than a generic interruption.
+    # - Otherwise, fall back to CAPTURE_INTERRUPTED.
+    #
+    # This avoids "CAPTURE_INTERRUPTED" masking the actionable remediation ("PCAP too small").
+    min_bytes = int(getattr(app_config, "DYNAMIC_MIN_PCAP_BYTES", 100000))
+    pcap_size = entry.get("pcap_size_bytes")
+    try:
+        pcap_size_int = int(pcap_size or 0)
+    except Exception:
+        pcap_size_int = 0
     for obs in manifest.observers or []:
         if getattr(obs, "observer_id", None) == "pcapdroid_capture":
             if str(getattr(obs, "status", "")).lower() == "failed":
+                if pcap_size_int <= 0:
+                    return _invalid("PCAP_MISSING", flags, run_dir)
+                if pcap_size_int < min_bytes:
+                    return _invalid("PCAP_TOO_SMALL", flags, run_dir)
                 return _invalid("CAPTURE_INTERRUPTED", flags, run_dir)
 
     # Duration policy: sampling window is canonical.
@@ -501,12 +517,6 @@ def evaluate_dataset_validity(
         flags["short_run"] = 1
 
     # PCAP size policy.
-    min_bytes = int(getattr(app_config, "DYNAMIC_MIN_PCAP_BYTES", 100000))
-    pcap_size = entry.get("pcap_size_bytes")
-    try:
-        pcap_size_int = int(pcap_size or 0)
-    except Exception:
-        pcap_size_int = 0
     if pcap_size_int <= 0:
         return _invalid("PCAP_MISSING", flags, run_dir)
     if pcap_size_int < min_bytes:

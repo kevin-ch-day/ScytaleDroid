@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
+from typing import Any
 
 from . import colors, text_blocks
 from .terminal import get_terminal_width
@@ -167,3 +168,36 @@ def render_key_value_pairs(pairs: Sequence[tuple[str, object]], *, padding: int 
     for key, value in pairs:
         label = _pad_visible(key, key_width)
         print(f"{label}{' ' * padding}{value}")
+
+
+def print_table(
+    rows: Sequence[dict[str, Any]],
+    *,
+    headers: Sequence[str] | None = None,
+    max_rows: int | None = None,
+    compact: bool = False,
+    zebra: bool = False,
+) -> None:
+    """Compatibility wrapper for callers that build row dicts.
+
+    Prefer calling render_table() directly for new code.
+    """
+    if not rows:
+        print("No data available.")
+        return
+
+    if headers is None:
+        # Deterministic: preserve first-row key order.
+        headers = list(rows[0].keys())
+
+    table_rows: list[list[object]] = []
+    for row in rows:
+        table_rows.append([row.get(h) for h in headers])
+
+    render_table(
+        list(headers),
+        table_rows,
+        max_rows=max_rows,
+        compact=compact,
+        zebra=zebra,
+    )

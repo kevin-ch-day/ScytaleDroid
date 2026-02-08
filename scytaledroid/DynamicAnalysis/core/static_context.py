@@ -113,7 +113,6 @@ def build_operator_guidance(plan_payload: dict[str, Any] | None, *, run_profile:
     lines = [f"Static context tags: {tag_text}"]
 
     if run_profile == "baseline_idle":
-        lines.append("Baseline protocol: keep the app awake/foreground; minimal interaction.")
         return lines
 
     # Advisory suggestions only; do not imply requirements or label behavior.
@@ -129,4 +128,3 @@ def build_operator_guidance(plan_payload: dict[str, Any] | None, *, run_profile:
 
 
 __all__ = ["StaticContextPolicy", "build_operator_guidance", "compute_static_context"]
-

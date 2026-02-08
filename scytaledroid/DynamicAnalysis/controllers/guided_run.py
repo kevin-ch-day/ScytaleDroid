@@ -14,7 +14,10 @@ from scytaledroid.DynamicAnalysis.plan_selection import (
     ensure_plan_or_error,
     print_plan_selection_banner,
 )
-from scytaledroid.DynamicAnalysis.datasets.research_dataset_alpha import load_dataset_packages
+from scytaledroid.DynamicAnalysis.datasets.research_dataset_alpha import (
+    MESSAGING_PACKAGES,
+    load_dataset_packages,
+)
 from scytaledroid.DynamicAnalysis.core.run_specs import build_dynamic_run_spec
 from scytaledroid.DynamicAnalysis.run_dynamic_analysis import execute_dynamic_run_spec
 from scytaledroid.DynamicAnalysis.run_summary import print_run_summary
@@ -293,16 +296,10 @@ def run_guided_dataset_run(
         interaction_level = "heavy"
 
     messaging_activity: str | None = None
-    messaging_pkgs = {
-        # Dataset messaging apps where text vs call activity meaningfully changes network behavior.
-        "com.facebook.orca",
-        "com.whatsapp",
-        "org.telegram.messenger",
-        "org.thoughtcrime.securesms",
-    }
+    messaging_pkgs = {p.lower() for p in MESSAGING_PACKAGES}
     if package_name.lower() in messaging_pkgs:
         print()
-        menu_utils.print_header("Messaging Activity (Optional Tag)")
+        menu_utils.print_header("Messaging Activity (Required Tag)")
         menu_utils.render_menu(
             menu_utils.MenuSpec(
                 items=[
@@ -327,6 +324,9 @@ def run_guided_dataset_run(
             "4": "video_call",
             "5": "mixed",
         }[choice]
+    elif messaging_activity is None:
+        # Non-messaging apps: leave unset so downstream can distinguish "not applicable" vs "none".
+        messaging_activity = None
 
     print()
     menu_utils.print_header("Dynamic Run Observers")
