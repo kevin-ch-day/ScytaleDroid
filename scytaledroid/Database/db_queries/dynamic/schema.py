@@ -165,6 +165,58 @@ _DDL_STATEMENTS: list[str] = [
         ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
+    """
+    -- Derived (rebuildable) per-run network feature index.
+    --
+    -- Paper #2 contract: evidence packs remain authoritative. This table exists
+    -- purely to accelerate SQL pulls for ML/reporting without JSON scanning.
+    CREATE TABLE IF NOT EXISTS dynamic_network_features (
+      dynamic_run_id     CHAR(36)        NOT NULL,
+      package_name       VARCHAR(255)    NOT NULL,
+      run_profile        VARCHAR(64)     DEFAULT NULL,
+      interaction_level  VARCHAR(32)     DEFAULT NULL,
+      tier               VARCHAR(32)     DEFAULT NULL,
+      valid_dataset_run  TINYINT(1)      DEFAULT NULL,
+      invalid_reason_code VARCHAR(64)    DEFAULT NULL,
+      countable          TINYINT(1)      DEFAULT NULL,
+      min_pcap_bytes     INT             DEFAULT NULL,
+      min_duration_s     INT             DEFAULT NULL,
+      feature_schema_version VARCHAR(32) NOT NULL,
+      host_tools_json    JSON            DEFAULT NULL,
+
+      -- Metrics (from analysis/pcap_features.json:metrics)
+      capture_duration_s DOUBLE          DEFAULT NULL,
+      packet_count       BIGINT          DEFAULT NULL,
+      data_size_bytes    BIGINT          DEFAULT NULL,
+      bytes_per_sec      DOUBLE          DEFAULT NULL,
+      packets_per_sec    DOUBLE          DEFAULT NULL,
+      avg_packet_size_bytes DOUBLE       DEFAULT NULL,
+      avg_packet_rate_pps DOUBLE         DEFAULT NULL,
+
+      -- Proxies (from analysis/pcap_features.json:proxies)
+      tls_ratio          FLOAT           DEFAULT NULL,
+      quic_ratio         FLOAT           DEFAULT NULL,
+      tcp_ratio          FLOAT           DEFAULT NULL,
+      udp_ratio          FLOAT           DEFAULT NULL,
+      unique_dns_topn    INT             DEFAULT NULL,
+      unique_sni_topn    INT             DEFAULT NULL,
+      unique_domains_topn INT            DEFAULT NULL,
+      top_dns_total      INT             DEFAULT NULL,
+      top_sni_total      INT             DEFAULT NULL,
+      dns_concentration  FLOAT           DEFAULT NULL,
+      sni_concentration  FLOAT           DEFAULT NULL,
+
+      created_at         TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at         TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (dynamic_run_id),
+      KEY idx_dyn_net_feat_pkg_profile (package_name, run_profile),
+      KEY idx_dyn_net_feat_pkg_valid (package_name, valid_dataset_run),
+      CONSTRAINT fk_dyn_net_feat_run
+        FOREIGN KEY (dynamic_run_id)
+        REFERENCES dynamic_sessions (dynamic_run_id)
+        ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
 ]
 
 

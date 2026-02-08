@@ -141,6 +141,90 @@ def upsert_dynamic_session_row(row: dict[str, Any]) -> None:
     core_q.run_sql_write(sql, tuple(row[c] for c in cols), query_name="dynamic.sessions.index_from_evidence")
 
 
+def build_dynamic_network_features_row_from_evidence_pack(run_dir: Path) -> dict[str, Any] | None:
+    """Build a derived per-run feature row from evidence-pack artifacts.
+
+    This is intentionally conservative: it mirrors fields we already compute and
+    export today (pcap_features.json + manifest dataset metadata) so the schema
+    does not churn weekly.
+    """
+    mf = _read_json(run_dir / "run_manifest.json") or {}
+    if not mf:
+        return None
+    rid = str(mf.get("dynamic_run_id") or run_dir.name).strip()
+    target = mf.get("target") if isinstance(mf.get("target"), dict) else {}
+    pkg = str((target or {}).get("package_name") or "").strip()
+    if not rid or not pkg:
+        return None
+
+    ds = mf.get("dataset") if isinstance(mf.get("dataset"), dict) else {}
+    op = mf.get("operator") if isinstance(mf.get("operator"), dict) else {}
+    env = mf.get("environment") if isinstance(mf.get("environment"), dict) else {}
+
+    pf = _read_json(run_dir / "analysis" / "pcap_features.json") or {}
+    metrics = pf.get("metrics") if isinstance(pf.get("metrics"), dict) else {}
+    proxies = pf.get("proxies") if isinstance(pf.get("proxies"), dict) else {}
+    qual = pf.get("quality") if isinstance(pf.get("quality"), dict) else {}
+
+    # In pcap_features.json we store protocol tags under quality.protocol
+    proto = qual.get("protocol") if isinstance(qual.get("protocol"), dict) else {}
+    run_profile = str(proto.get("run_profile") or op.get("run_profile") or "").strip() or None
+    interaction_level = str(proto.get("interaction_level") or op.get("interaction_level") or "").strip() or None
+
+    host_tools = env.get("host_tools") if isinstance(env.get("host_tools"), dict) else None
+    # Stored as JSON (string) for audit/repro; do not denormalize tool versions yet.
+    host_tools_json = json.dumps(host_tools, sort_keys=True) if isinstance(host_tools, dict) else None
+
+    return {
+        "dynamic_run_id": rid,
+        "package_name": pkg,
+        "run_profile": run_profile,
+        "interaction_level": interaction_level,
+        "tier": str(ds.get("tier") or "") or None,
+        "valid_dataset_run": 1 if ds.get("valid_dataset_run") is True else (0 if ds.get("valid_dataset_run") is False else None),
+        "invalid_reason_code": str(ds.get("invalid_reason_code") or "") or None,
+        "countable": 1 if ds.get("countable") is True else (0 if ds.get("countable") is False else None),
+        "min_pcap_bytes": int(ds.get("min_pcap_bytes") or 0) or None,
+        "min_duration_s": int(getattr(app_config, "DYNAMIC_MIN_DURATION_S", 120)),
+        "feature_schema_version": "v1",
+        "host_tools_json": host_tools_json,
+
+        # Metrics
+        "capture_duration_s": float(metrics.get("capture_duration_s")) if metrics.get("capture_duration_s") is not None else None,
+        "packet_count": int(metrics.get("packet_count")) if metrics.get("packet_count") is not None else None,
+        "data_size_bytes": int(metrics.get("data_size_bytes")) if metrics.get("data_size_bytes") is not None else None,
+        "bytes_per_sec": float(metrics.get("bytes_per_sec")) if metrics.get("bytes_per_sec") is not None else None,
+        "packets_per_sec": float(metrics.get("packets_per_sec")) if metrics.get("packets_per_sec") is not None else None,
+        "avg_packet_size_bytes": float(metrics.get("avg_packet_size_bytes")) if metrics.get("avg_packet_size_bytes") is not None else None,
+        "avg_packet_rate_pps": float(metrics.get("avg_packet_rate_pps")) if metrics.get("avg_packet_rate_pps") is not None else None,
+
+        # Proxies
+        "tls_ratio": float(proxies.get("tls_ratio")) if proxies.get("tls_ratio") is not None else None,
+        "quic_ratio": float(proxies.get("quic_ratio")) if proxies.get("quic_ratio") is not None else None,
+        "tcp_ratio": float(proxies.get("tcp_ratio")) if proxies.get("tcp_ratio") is not None else None,
+        "udp_ratio": float(proxies.get("udp_ratio")) if proxies.get("udp_ratio") is not None else None,
+        "unique_dns_topn": int(proxies.get("unique_dns_topn")) if proxies.get("unique_dns_topn") is not None else None,
+        "unique_sni_topn": int(proxies.get("unique_sni_topn")) if proxies.get("unique_sni_topn") is not None else None,
+        "unique_domains_topn": int(proxies.get("unique_domains_topn")) if proxies.get("unique_domains_topn") is not None else None,
+        "top_dns_total": int(proxies.get("top_dns_total")) if proxies.get("top_dns_total") is not None else None,
+        "top_sni_total": int(proxies.get("top_sni_total")) if proxies.get("top_sni_total") is not None else None,
+        "dns_concentration": float(proxies.get("dns_concentration")) if proxies.get("dns_concentration") is not None else None,
+        "sni_concentration": float(proxies.get("sni_concentration")) if proxies.get("sni_concentration") is not None else None,
+    }
+
+
+def upsert_dynamic_network_features_row(row: dict[str, Any]) -> None:
+    cols = list(row.keys())
+    placeholders = ", ".join(["%s"] * len(cols))
+    updates = ", ".join([f"{c}=VALUES({c})" for c in cols if c != "dynamic_run_id"])
+    sql = f"""
+        INSERT INTO dynamic_network_features ({', '.join(cols)})
+        VALUES ({placeholders})
+        ON DUPLICATE KEY UPDATE {updates}
+    """
+    core_q.run_sql_write(sql, tuple(row[c] for c in cols), query_name="dynamic.network_features.index_from_evidence")
+
+
 def index_dynamic_evidence_pack_to_db(run_dir: Path) -> dict[str, Any]:
     row = build_dynamic_session_row_from_evidence_pack(run_dir)
     if not row:
@@ -151,35 +235,61 @@ def index_dynamic_evidence_pack_to_db(run_dir: Path) -> dict[str, Any]:
     except Exception as exc:
         return {"ok": False, "reason": f"dynamic_sessions_upsert_failed:{exc}", "dynamic_run_id": rid}
 
+    features_upserted = 0
+    feat_row = build_dynamic_network_features_row_from_evidence_pack(run_dir)
+    if feat_row:
+        try:
+            upsert_dynamic_network_features_row(feat_row)
+            features_upserted = 1
+        except Exception:
+            features_upserted = 0
+
     indicators = 0
     try:
         indicators = index_network_indicators_for_run(rid, run_dir)
     except Exception:
         indicators = 0
-    return {"ok": True, "dynamic_run_id": rid, "indicators_indexed": indicators}
+    return {
+        "ok": True,
+        "dynamic_run_id": rid,
+        "network_features_upserted": features_upserted,
+        "indicators_indexed": indicators,
+    }
 
 
 def index_dynamic_evidence_packs_to_db(root: Path) -> dict[str, Any]:
     run_dirs = sorted([p for p in root.iterdir()] if root.exists() else [], key=lambda p: p.name)
     scanned = 0
     ok = 0
+    features = 0
     indicators = 0
     errors: list[str] = []
     for rd in run_dirs:
         if not rd.is_dir():
+            continue
+        # Skip ghost dirs early (no manifest) to keep rebuild noise-free.
+        if not (rd / "run_manifest.json").exists():
             continue
         scanned += 1
         res = index_dynamic_evidence_pack_to_db(rd)
         if res.get("ok") is True:
             ok += 1
             indicators += int(res.get("indicators_indexed") or 0)
+            features += int(res.get("network_features_upserted") or 0)
         else:
             errors.append(str(res.get("reason") or "error"))
-    return {"scanned": scanned, "ok": ok, "indicators_indexed": indicators, "errors": errors[:20]}
+    return {
+        "scanned": scanned,
+        "ok": ok,
+        "network_features_upserted": features,
+        "indicators_indexed": indicators,
+        "errors": errors[:20],
+    }
 
 
 __all__ = [
     "build_dynamic_session_row_from_evidence_pack",
+    "build_dynamic_network_features_row_from_evidence_pack",
     "index_dynamic_evidence_pack_to_db",
     "index_dynamic_evidence_packs_to_db",
 ]
