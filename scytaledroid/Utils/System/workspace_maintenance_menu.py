@@ -263,7 +263,7 @@ def _show_dashboard() -> None:
         cfg = DatasetTrackerConfig()
         baseline_required = int(cfg.baseline_required)
         interactive_required = int(cfg.interactive_required)
-        valid_required = int(cfg.repeats_per_app)
+        valid_required = baseline_required + interactive_required
     except Exception:
         pass
 
@@ -341,7 +341,7 @@ def workspace_menu() -> None:
         if choice == "1":
             _show_summary()
         elif choice == "2":
-            from scytaledroid.DynamicAnalysis.tools.evidence_packs_menu import evidence_packs_menu
+            from scytaledroid.DynamicAnalysis.tools.evidence.menu import evidence_packs_menu
 
             evidence_packs_menu()
         elif choice == "3":
@@ -366,25 +366,22 @@ def workspace_menu() -> None:
             evidence_recompute_dataset_tracker(pause=True)
         elif choice == "9":
             from scytaledroid.Database.db_utils.menus import health_checks
-            from scytaledroid.DynamicAnalysis.tools.evidence.menu import evidence_repair_legacy_manifests
 
             _workspace_advanced_destructive_menu(
                 reset_static_action=health_checks.prompt_reset_static_data,
-                legacy_manifest_repair_action=lambda: evidence_repair_legacy_manifests(pause=True),
             )
         else:
             print(status_messages.status("Option not available yet.", level="warn"))
             prompt_utils.press_enter_to_continue()
 
 
-def _workspace_advanced_destructive_menu(*, reset_static_action, legacy_manifest_repair_action) -> None:
+def _workspace_advanced_destructive_menu(*, reset_static_action) -> None:
     """Centralize destructive actions away from high-traffic menus."""
     while True:
         print()
         menu_utils.print_header("Workspace & Evidence (Advanced / Destructive)")
         items = [
             menu_utils.MenuOption("1", "Reset static analysis data (destructive)"),
-            menu_utils.MenuOption("2", "Repair legacy dynamic manifests (rare)"),
             menu_utils.MenuOption("3", "Prune derived dynamic DB orphans (safe)"),
         ]
         spec_kwargs = display_settings.apply_menu_defaults(
@@ -396,8 +393,6 @@ def _workspace_advanced_destructive_menu(*, reset_static_action, legacy_manifest
             return
         if choice == "1":
             reset_static_action()
-        if choice == "2":
-            legacy_manifest_repair_action()
         if choice == "3":
             _prune_dynamic_db_orphans()
 

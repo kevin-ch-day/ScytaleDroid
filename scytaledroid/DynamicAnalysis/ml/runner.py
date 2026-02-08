@@ -53,10 +53,15 @@ def run_ml_on_evidence_packs(*, output_root: Path | None = None) -> MlRunStats:
         return MlRunStats(0, 0, 0, 0, datetime.now(UTC).isoformat())
 
     frozen = DATASET_FREEZE_MARKER.exists()
+    freeze_included: set[str] | None = None
+    if frozen:
+        freeze_included = _load_frozen_run_ids(DATASET_FREEZE_MARKER)
     window_spec = WindowSpec(window_size_s=config.WINDOW_SIZE_S, stride_s=config.WINDOW_STRIDE_S)
 
     runs: list[RunInputs] = []
     for run_dir in sorted([p for p in root.iterdir() if p.is_dir()], key=lambda p: p.name):
+        if freeze_included is not None and run_dir.name not in freeze_included:
+            continue
         inputs = load_run_inputs(run_dir)
         if not inputs:
             continue
@@ -90,6 +95,7 @@ def run_ml_on_evidence_packs(*, output_root: Path | None = None) -> MlRunStats:
 
         # Build training matrix from all windows of all runs (union baseline+interactive).
         all_rows: list[dict[str, Any]] = []
+        train_rows: list[dict[str, Any]] = []
         per_run_rows: dict[str, tuple[list[dict[str, Any]], int]] = {}
         per_run_duration: dict[str, float] = {}
         per_model_scores_by_run: dict[str, dict[str, list[float]]] = {}
@@ -127,6 +133,10 @@ def run_ml_on_evidence_packs(*, output_root: Path | None = None) -> MlRunStats:
             for row in rows:
                 row["_run_id"] = r.run_id
                 all_rows.append(row)
+                # Valid != trainable: low-signal is excluded from training deterministically,
+                # but the run is still scored for reporting (Paper #2 contract).
+                if not _is_low_signal(r):
+                    train_rows.append(row)
 
         if len({rid for rid, _ in per_run_rows.items()}) < 3:
             # After per-run preflight, we may drop below the required run count.
@@ -134,8 +144,20 @@ def run_ml_on_evidence_packs(*, output_root: Path | None = None) -> MlRunStats:
             runs_skipped += len(app_runs_sorted)
             continue
 
-        X, feature_names = _rows_to_matrix(all_rows)
-        if X.size == 0 or X.shape[0] < 3:
+        # Training set is a strict subset (excludes low_signal). If nothing remains,
+        # skip ML training for this app deterministically.
+        if not train_rows:
+            _write_app_skip(app_runs_sorted, frozen=frozen, reason="ML_SKIPPED_EMPTY_FEATURE_VECTOR")
+            runs_skipped += len(app_runs_sorted)
+            continue
+
+        X_train, feature_names = _rows_to_matrix(train_rows)
+        if X_train.size == 0 or X_train.shape[0] < 3:
+            _write_app_skip(app_runs_sorted, frozen=frozen, reason="ML_SKIPPED_EMPTY_FEATURE_VECTOR")
+            runs_skipped += len(app_runs_sorted)
+            continue
+        X_all, _ = _rows_to_matrix(all_rows)
+        if X_all.size == 0:
             _write_app_skip(app_runs_sorted, frozen=frozen, reason="ML_SKIPPED_EMPTY_FEATURE_VECTOR")
             runs_skipped += len(app_runs_sorted)
             continue
@@ -145,14 +167,15 @@ def run_ml_on_evidence_packs(*, output_root: Path | None = None) -> MlRunStats:
         # Fit and score for each model.
         model_outputs: dict[str, dict[str, Any]] = {}
         for spec in specs:
-            model = fit_model(spec, X)
-            scores = anomaly_scores(spec.name, model, X)
-            threshold = float(np.percentile(scores, config.THRESHOLD_PERCENTILE))
+            model = fit_model(spec, X_train)
+            scores_train = anomaly_scores(spec.name, model, X_train)
+            scores_all = anomaly_scores(spec.name, model, X_all)
+            threshold = float(np.percentile(scores_train, config.THRESHOLD_PERCENTILE))
             per_model_thresholds[spec.name] = float(threshold)
             model_outputs[spec.name] = {
                 "threshold_percentile": config.THRESHOLD_PERCENTILE,
                 "threshold_value": threshold,
-                "training_samples": int(X.shape[0]),
+                "training_samples": int(X_train.shape[0]),
                 "feature_names": list(feature_names),
                 "params": dict(spec.params),
             }
@@ -160,7 +183,7 @@ def run_ml_on_evidence_packs(*, output_root: Path | None = None) -> MlRunStats:
             # Write per-run anomaly scores.
             by_run: dict[str, list[dict[str, Any]]] = {}
             scores_by_run: dict[str, list[float]] = {}
-            for row, score in zip(all_rows, scores, strict=True):
+            for row, score in zip(all_rows, scores_all, strict=True):
                 rid = row.get("_run_id")
                 if not rid:
                     continue
@@ -237,6 +260,33 @@ def run_ml_on_evidence_packs(*, output_root: Path | None = None) -> MlRunStats:
         runs_skipped=runs_skipped,
         generated_at=datetime.now(UTC).isoformat(),
     )
+
+
+def _load_frozen_run_ids(path: Path) -> set[str] | None:
+    """Return included run_ids from dataset_freeze.json, or None if unreadable.
+
+    When frozen, ML must score only the included run set to prevent accidental
+    inclusion of extra valid runs (Paper #2 contract).
+    """
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    ids = payload.get("included_run_ids")
+    if not isinstance(ids, list):
+        return None
+    out: set[str] = set()
+    for rid in ids:
+        if isinstance(rid, str) and rid:
+            out.add(rid)
+    return out or None
+
+
+def _is_low_signal(run_inputs: RunInputs) -> bool:
+    ds = run_inputs.manifest.get("dataset") if isinstance(run_inputs.manifest, dict) else None
+    if not isinstance(ds, dict):
+        return False
+    return ds.get("low_signal") is True
 
 
 def _rows_to_matrix(rows: list[dict[str, Any]]) -> tuple[np.ndarray, list[str]]:

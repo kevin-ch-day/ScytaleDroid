@@ -35,8 +35,6 @@ def print_run_summary(result, duration_label: str) -> None:
         if messaging_activity:
             lines.append(("Messaging", str(messaging_activity)))
         validity = manifest.get("dataset")
-        if not isinstance(validity, dict):
-            validity = operator.get("dataset_validity") if isinstance(operator, dict) else None
         if isinstance(validity, dict):
             valid = validity.get("valid_dataset_run")
             reason = validity.get("invalid_reason_code")

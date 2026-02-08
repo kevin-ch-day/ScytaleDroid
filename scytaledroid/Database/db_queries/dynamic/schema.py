@@ -179,6 +179,8 @@ _DDL_STATEMENTS: list[str] = [
       valid_dataset_run  TINYINT(1)      DEFAULT NULL,
       invalid_reason_code VARCHAR(64)    DEFAULT NULL,
       countable          TINYINT(1)      DEFAULT NULL,
+      low_signal         TINYINT(1)      DEFAULT NULL,
+      low_signal_reasons_json JSON       DEFAULT NULL,
       min_pcap_bytes     INT             DEFAULT NULL,
       min_duration_s     INT             DEFAULT NULL,
       feature_schema_version VARCHAR(32) NOT NULL,
@@ -192,6 +194,14 @@ _DDL_STATEMENTS: list[str] = [
       packets_per_sec    DOUBLE          DEFAULT NULL,
       avg_packet_size_bytes DOUBLE       DEFAULT NULL,
       avg_packet_rate_pps DOUBLE         DEFAULT NULL,
+      bytes_per_second_p50 DOUBLE        DEFAULT NULL,
+      bytes_per_second_p95 DOUBLE        DEFAULT NULL,
+      bytes_per_second_max DOUBLE        DEFAULT NULL,
+      packets_per_second_p50 DOUBLE      DEFAULT NULL,
+      packets_per_second_p95 DOUBLE      DEFAULT NULL,
+      packets_per_second_max DOUBLE      DEFAULT NULL,
+      burstiness_bytes_p95_over_p50 DOUBLE DEFAULT NULL,
+      burstiness_packets_p95_over_p50 DOUBLE DEFAULT NULL,
 
       -- Proxies (from analysis/pcap_features.json:proxies)
       tls_ratio          FLOAT           DEFAULT NULL,
@@ -201,6 +211,18 @@ _DDL_STATEMENTS: list[str] = [
       unique_dns_topn    INT             DEFAULT NULL,
       unique_sni_topn    INT             DEFAULT NULL,
       unique_domains_topn INT            DEFAULT NULL,
+      unique_dst_ip_count INT            DEFAULT NULL,
+      unique_dst_port_count INT          DEFAULT NULL,
+      sni_observation_count INT          DEFAULT NULL,
+      dns_observation_count INT          DEFAULT NULL,
+      unique_sni_count     INT           DEFAULT NULL,
+      unique_dns_qname_count INT         DEFAULT NULL,
+      top1_sni_share      FLOAT          DEFAULT NULL,
+      top1_dns_share      FLOAT          DEFAULT NULL,
+      domains_per_min     FLOAT          DEFAULT NULL,
+      new_domain_rate_per_min FLOAT      DEFAULT NULL,
+      new_sni_rate_per_min FLOAT         DEFAULT NULL,
+      new_dns_rate_per_min FLOAT         DEFAULT NULL,
       top_dns_total      INT             DEFAULT NULL,
       top_sni_total      INT             DEFAULT NULL,
       dns_concentration  FLOAT           DEFAULT NULL,
@@ -216,6 +238,30 @@ _DDL_STATEMENTS: list[str] = [
         REFERENCES dynamic_sessions (dynamic_run_id)
         ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
+    """
+    -- Best-effort forward schema extension (derived table only).
+    ALTER TABLE dynamic_network_features
+      ADD COLUMN IF NOT EXISTS bytes_per_second_p50 DOUBLE DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS bytes_per_second_p95 DOUBLE DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS bytes_per_second_max DOUBLE DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS packets_per_second_p50 DOUBLE DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS packets_per_second_p95 DOUBLE DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS packets_per_second_max DOUBLE DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS burstiness_bytes_p95_over_p50 DOUBLE DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS burstiness_packets_p95_over_p50 DOUBLE DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS unique_dst_ip_count INT DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS unique_dst_port_count INT DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS sni_observation_count INT DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS dns_observation_count INT DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS unique_sni_count INT DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS unique_dns_qname_count INT DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS top1_sni_share FLOAT DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS top1_dns_share FLOAT DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS domains_per_min FLOAT DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS new_domain_rate_per_min FLOAT DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS new_sni_rate_per_min FLOAT DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS new_dns_rate_per_min FLOAT DEFAULT NULL;
     """,
 ]
 

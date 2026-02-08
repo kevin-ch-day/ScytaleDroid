@@ -135,6 +135,7 @@ def run_guided_dataset_run(
     from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig
 
     cfg = DatasetTrackerConfig()
+    total_required = int(cfg.baseline_required) + int(cfg.interactive_required)
     counts = dataset_tracker_counts(package_name)
     fs_runs = find_dynamic_run_dirs(package_name)
 
@@ -142,7 +143,7 @@ def run_guided_dataset_run(
     print(
         status_messages.status(
             f"Runs recorded: tracker={counts.total_runs} "
-            f"(valid={counts.valid_runs}/{cfg.repeats_per_app}, "
+            f"(valid={counts.valid_runs}/{total_required}, "
             f"baseline={counts.baseline_valid_runs}/{cfg.baseline_required}, "
             f"interactive={counts.interactive_valid_runs}/{cfg.interactive_required}, "
             f"quota_met={int(counts.quota_met)}) "

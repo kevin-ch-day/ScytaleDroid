@@ -43,7 +43,7 @@ class RunManifest:
     ended_at: str | None = None
     status: str = "pending"
     # Dataset-tier validity and flags. This is a first-class, machine-readable contract
-    # for Paper #2. Legacy readers may also consult operator["dataset_validity"].
+    # for Paper #2.
     dataset: dict[str, Any] = field(default_factory=dict)
     # Placeholder for run-level QA payloads (e.g., toolchain/feature health gates).
     qa: dict[str, Any] = field(default_factory=dict)

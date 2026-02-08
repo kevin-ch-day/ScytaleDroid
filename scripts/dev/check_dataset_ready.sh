@@ -15,7 +15,7 @@
 
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
 
 fail=0
@@ -112,4 +112,3 @@ if [[ "$fail" -eq 0 ]]; then
 fi
 err "Dataset environment is NOT ready. Fix errors above."
 exit 1
-

@@ -142,20 +142,6 @@ class PcapdroidCaptureObserver(Observer):
         status = "success"
         error = None
 
-        if meta_path.exists():
-            digest = hashlib.sha256(meta_path.read_bytes()).hexdigest()
-            artifacts.append(
-                ArtifactRecord(
-                    relative_path=str(meta_path.relative_to(run_ctx.run_dir)),
-                    type="pcapdroid_capture_meta",
-                    sha256=digest,
-                    size_bytes=meta_path.stat().st_size,
-                    produced_by=self.observer_id,
-                    origin="host",
-                    pull_status="n/a",
-                )
-            )
-
         local_path = meta_path.parent / pcap_name
         try:
             if capture_start_epoch is not None:
@@ -305,6 +291,21 @@ class PcapdroidCaptureObserver(Observer):
                     json.dumps(meta_payload, indent=2, sort_keys=True),
                     encoding="utf-8",
                 )
+
+        # Meta artifact must be hashed only after all writes are complete.
+        if meta_path.exists():
+            digest = hashlib.sha256(meta_path.read_bytes()).hexdigest()
+            artifacts.append(
+                ArtifactRecord(
+                    relative_path=str(meta_path.relative_to(run_ctx.run_dir)),
+                    type="pcapdroid_capture_meta",
+                    sha256=digest,
+                    size_bytes=meta_path.stat().st_size,
+                    produced_by=self.observer_id,
+                    origin="host",
+                    pull_status="n/a",
+                )
+            )
 
         if status == "failed":
             error_path = meta_path.parent / "observer_error.txt"

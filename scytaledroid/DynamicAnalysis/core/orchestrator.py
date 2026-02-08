@@ -408,10 +408,6 @@ class DynamicRunOrchestrator:
                 extra={"dynamic_run_id": dynamic_run_id, "error": str(exc)},
             )
             event_logger.log("pcap_index_failed", {"error": str(exc)})
-        event_artifact = event_logger.finalize()
-        if event_artifact:
-            manifest.add_artifacts([event_artifact])
-        manifest.finalize()
 
         summarizer = DynamicRunSummarizer(writer)
         outputs = summarizer.summarize(manifest)
@@ -432,10 +428,23 @@ class DynamicRunOrchestrator:
             try:
                 entry = {"pcap_size_bytes": next((a.size_bytes for a in manifest.artifacts if a.type == "pcapdroid_capture"), 0)}
                 validity = evaluate_dataset_validity(run_dir, manifest, entry, DatasetTrackerConfig())
-                # First-class dataset validity (Paper #2). Keep legacy operator copy for older tooling.
+                # First-class dataset validity (Paper #2). Written only to manifest.dataset.
                 if isinstance(validity, dict):
                     manifest.dataset = dict(validity)
                     manifest.dataset.setdefault("tier", self.config.tier)
+
+                    # ML readiness is separate from validity. Tag low-signal runs deterministically
+                    # without changing VALID/INVALID semantics (Paper #2 contract).
+                    try:
+                        from scytaledroid.DynamicAnalysis.pcap.low_signal import compute_low_signal_from_evidence_pack
+
+                        ls = compute_low_signal_from_evidence_pack(run_dir)
+                        if isinstance(ls, dict):
+                            manifest.dataset.update(ls)
+                    except Exception:
+                        # Best-effort; absence is not a correctness failure.
+                        pass
+
                     # "countable" is quota-counted by construction. Determine it from the
                     # derived tracker markings (counts_toward_quota) rather than from
                     # operator choice or run order.
@@ -445,8 +454,8 @@ class DynamicRunOrchestrator:
                         tracker = load_dataset_tracker()
                         apps = tracker.get("apps") if isinstance(tracker, dict) else {}
                         pkg = (manifest.target.get("package_name") or "").strip()
-                        entry = apps.get(pkg) if isinstance(apps, dict) and pkg else None
-                        runs = entry.get("runs") if isinstance(entry, dict) else []
+                        app_entry = apps.get(pkg) if isinstance(apps, dict) and pkg else None
+                        runs = app_entry.get("runs") if isinstance(app_entry, dict) else []
                         countable = None
                         if isinstance(runs, list):
                             for r in runs:
@@ -462,20 +471,19 @@ class DynamicRunOrchestrator:
                             manifest.dataset.setdefault("countable", True)
                     except Exception:
                         manifest.dataset.setdefault("countable", True)
-                    manifest.operator["dataset_validity"] = dict(validity)
-                    # Mirror countable into the legacy operator block for older tooling.
-                    if isinstance(manifest.dataset.get("countable"), bool):
-                        manifest.operator["dataset_validity"]["countable"] = manifest.dataset["countable"]
+
+                ds = manifest.dataset if isinstance(manifest.dataset, dict) else {}
                 event_logger.log(
                     "dataset_validity",
                     {
-                        "valid": bool(validity.get("valid_dataset_run")),
-                        "invalid_reason_code": validity.get("invalid_reason_code"),
-                        "min_pcap_bytes": validity.get("min_pcap_bytes"),
-                        "sampling_duration_seconds": validity.get("sampling_duration_seconds"),
-                        "short_run": validity.get("short_run"),
-                        "no_traffic_observed": validity.get("no_traffic_observed"),
-                        "countable": bool((manifest.dataset or {}).get("countable")),
+                        "valid": bool(ds.get("valid_dataset_run")),
+                        "invalid_reason_code": ds.get("invalid_reason_code"),
+                        "min_pcap_bytes": ds.get("min_pcap_bytes"),
+                        "sampling_duration_seconds": ds.get("sampling_duration_seconds"),
+                        "short_run": ds.get("short_run"),
+                        "no_traffic_observed": ds.get("no_traffic_observed"),
+                        "countable": bool(ds.get("countable")),
+                        "low_signal": bool(ds.get("low_signal")),
                     },
                 )
             except Exception as exc:  # noqa: BLE001
@@ -493,6 +501,12 @@ class DynamicRunOrchestrator:
                         "countable": bool(manifest.dataset.get("countable", True)),
                     }
                 )
+
+        # Finalize structured event log *after* all analysis steps that emit events.
+        # This prevents SHA mismatches for the run_events artifact.
+        event_artifact = event_logger.finalize()
+        if event_artifact:
+            manifest.add_artifacts([event_artifact])
         manifest.add_outputs(outputs)
         manifest.finalize()
         writer.write_manifest(manifest)
@@ -555,6 +569,9 @@ class DynamicRunOrchestrator:
                 "min_pcap_bytes": getattr(app_config, "DYNAMIC_MIN_PCAP_BYTES", 100000),
                 "short_run": 0,
                 "no_traffic_observed": 0,
+                # ML-only quality flag (non-invalidating). Filled best-effort at finalize-time.
+                "low_signal": None,
+                "low_signal_reasons": [],
             },
             qa={},
             target={

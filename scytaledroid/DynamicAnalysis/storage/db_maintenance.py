@@ -87,8 +87,17 @@ def delete_dynamic_sessions_by_id(dynamic_run_ids: list[str]) -> int:
     for i in range(0, len(dynamic_run_ids), chunk):
         batch = dynamic_run_ids[i : i + chunk]
         placeholders = ",".join(["%s"] * len(batch))
+        # run_sql_write() is intentionally void; compute a deterministic "would delete"
+        # count first so callers can report what happened.
+        count_sql = f"SELECT COUNT(*) FROM dynamic_sessions WHERE dynamic_run_id IN ({placeholders})"
+        try:
+            row = run_sql(count_sql, tuple(batch), fetch="one")
+            batch_count = int(row[0]) if row and row[0] is not None else 0
+        except Exception:
+            batch_count = 0
         sql = f"DELETE FROM dynamic_sessions WHERE dynamic_run_id IN ({placeholders})"
-        deleted += int(run_sql_write(sql, tuple(batch), return_rowcount=True) or 0)
+        run_sql_write(sql, tuple(batch))
+        deleted += batch_count
     return deleted
 
 

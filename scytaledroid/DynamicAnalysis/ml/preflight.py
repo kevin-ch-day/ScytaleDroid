@@ -112,17 +112,7 @@ def is_valid_dataset_run(inputs: RunInputs) -> bool:
         if str(dataset.get("tier") or "").lower() != "dataset":
             return False
         return dataset.get("valid_dataset_run") is True
-
-    # Back-compat: older evidence packs stored validity under operator.
-    operator = inputs.manifest.get("operator") or {}
-    if not isinstance(operator, dict):
-        return False
-    if str(operator.get("tier") or "").lower() != "dataset":
-        return False
-    validity = operator.get("dataset_validity")
-    if not isinstance(validity, dict):
-        return False
-    return validity.get("valid_dataset_run") is True
+    return False
 
 
 def get_sampling_duration_seconds(inputs: RunInputs) -> float | None:

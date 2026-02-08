@@ -9,7 +9,6 @@ from scytaledroid.DynamicAnalysis.pcap import dataset_tracker
 
 def test_peek_next_run_protocol_baseline_until_first_valid(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(dataset_tracker.app_config, "DATA_DIR", str(tmp_path))
-    monkeypatch.setattr(dataset_tracker.app_config, "DYNAMIC_DATASET_RUNS_PER_APP", 3)
     monkeypatch.setattr(dataset_tracker.app_config, "DYNAMIC_DATASET_BASELINE_RUNS", 1)
     monkeypatch.setattr(dataset_tracker.app_config, "DYNAMIC_DATASET_INTERACTIVE_RUNS", 2)
 
@@ -48,9 +47,8 @@ def test_peek_next_run_protocol_baseline_until_first_valid(monkeypatch, tmp_path
     assert proto["run_sequence"] == 2
 
 
-def test_peek_next_run_protocol_two_baselines_when_repeats_is_four(monkeypatch, tmp_path: Path) -> None:
+def test_peek_next_run_protocol_two_baselines_when_baseline_required_is_two(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(dataset_tracker.app_config, "DATA_DIR", str(tmp_path))
-    monkeypatch.setattr(dataset_tracker.app_config, "DYNAMIC_DATASET_RUNS_PER_APP", 4)
     monkeypatch.setattr(dataset_tracker.app_config, "DYNAMIC_DATASET_BASELINE_RUNS", 2)
     monkeypatch.setattr(dataset_tracker.app_config, "DYNAMIC_DATASET_INTERACTIVE_RUNS", 2)
 
@@ -89,7 +87,6 @@ def test_peek_next_run_protocol_two_baselines_when_repeats_is_four(monkeypatch, 
 def test_update_dataset_tracker_records_run_protocol(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(dataset_tracker.app_config, "DATA_DIR", str(tmp_path))
     monkeypatch.setattr(dataset_tracker.app_config, "DYNAMIC_MIN_DURATION_S", 120)
-    monkeypatch.setattr(dataset_tracker.app_config, "DYNAMIC_DATASET_RUNS_PER_APP", 3)
     monkeypatch.setattr(dataset_tracker.app_config, "DYNAMIC_DATASET_BASELINE_RUNS", 1)
     monkeypatch.setattr(dataset_tracker.app_config, "DYNAMIC_DATASET_INTERACTIVE_RUNS", 2)
 

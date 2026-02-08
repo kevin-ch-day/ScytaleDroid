@@ -26,7 +26,8 @@ def test_pcap_features_include_intensity_and_transport_ratios() -> None:
         "top_dns": [{"value": "b.example.com", "count": 1}],
     }
     out = _extract_features(report, PcapFeatureConfig(), operator={"run_profile": "interactive_use"}, target={})
-    assert set(out.keys()) == {"metrics", "proxies", "quality"}
+    # Versioned feature contract: schema version may be emitted at the top level.
+    assert {"metrics", "proxies", "quality"}.issubset(set(out.keys()))
     metrics = out["metrics"]
     proxies = out["proxies"]
     quality = out["quality"]
@@ -39,4 +40,3 @@ def test_pcap_features_include_intensity_and_transport_ratios() -> None:
     assert proxies["tls_ratio"] == 0.5
     assert proxies["unique_domains_topn"] == 2
     assert quality["pcap_valid"] is True
-

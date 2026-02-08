@@ -11,6 +11,7 @@ from typing import Any
 
 from scytaledroid.DynamicAnalysis.core.event_logger import RunEventLogger
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord, RunManifest
+from scytaledroid.DynamicAnalysis.pcap.timeseries import scan_pcap_timeseries_and_destinations
 
 
 @dataclass(frozen=True)
@@ -165,14 +166,25 @@ def _extract_features(
 
     # Unique-per-minute proxy. This is not "new over time"; it is a stable diversity rate.
     domains_per_min = None
+    new_sni_rate_per_min = None
+    new_dns_rate_per_min = None
     if duration_s and duration_s > 0:
         try:
             denom = float(duration_s) / 60.0
             if denom > 0 and (sni_unique is not None or dns_unique is not None):
                 domains_per_min = float((sni_unique or 0) + (dns_unique or 0)) / denom
+            if denom > 0 and sni_unique is not None:
+                new_sni_rate_per_min = float(sni_unique or 0) / denom
+            if denom > 0 and dns_unique is not None:
+                new_dns_rate_per_min = float(dns_unique or 0) / denom
         except Exception:
             domains_per_min = None
+            new_sni_rate_per_min = None
+            new_dns_rate_per_min = None
     return {
+        # Backwards-compatible feature schema tag (Paper #2). New keys must only be
+        # appended; existing key semantics must not change.
+        "feature_schema_version": "v1.1",
         "metrics": {
             "packet_count": packet_count,
             "data_size_bytes": data_bytes,
@@ -195,6 +207,11 @@ def _extract_features(
             "top1_sni_share": top1_sni_share,
             "top1_dns_share": top1_dns_share,
             "domains_per_min": domains_per_min,
+            # Alias to match PM wording; this is "unique observed per minute"
+            # (not a temporal "new vs old" time series).
+            "new_domain_rate_per_min": domains_per_min,
+            "new_sni_rate_per_min": new_sni_rate_per_min,
+            "new_dns_rate_per_min": new_dns_rate_per_min,
             "top_sni_total": top_sni_total,
             "top_dns_total": top_dns_total,
             "sni_concentration": sni_concentration,
@@ -212,6 +229,7 @@ def _extract_features(
                 "status": "not_attempted",
                 "reason": None,
             },
+            "feature_schema_version": "v1.1",
             "protocol": {
                 "run_profile": (operator or {}).get("run_profile"),
                 "run_sequence": (operator or {}).get("run_sequence"),
@@ -269,7 +287,7 @@ def _enrich_features_from_pcap(
         return
 
     try:
-        stats = _scan_pcap_timeseries_and_destinations(tshark_path, pcap_path)
+        stats = scan_pcap_timeseries_and_destinations(pcap_path, tshark_path=tshark_path)
     except Exception as exc:  # noqa: BLE001
         enrich["status"] = "failed"
         enrich["reason"] = f"scan_failed:{exc}"
@@ -305,126 +323,6 @@ def _enrich_features_from_pcap(
     )
     enrich["status"] = "ok"
     enrich["reason"] = None
-
-
-def _percentile(sorted_values: list[float], p: float) -> float | None:
-    if not sorted_values:
-        return None
-    if p <= 0:
-        return float(sorted_values[0])
-    if p >= 100:
-        return float(sorted_values[-1])
-    # Nearest-rank percentile (deterministic).
-    k = int((p / 100.0) * (len(sorted_values) - 1))
-    k = max(0, min(k, len(sorted_values) - 1))
-    return float(sorted_values[k])
-
-
-def _scan_pcap_timeseries_and_destinations(tshark_path: str, pcap_path: Path) -> dict[str, Any]:
-    """Scan PCAP with tshark fields output (streaming) and compute summary stats."""
-    # One pass: per-second bytes/packets + unique dst IP/port.
-    cmd = [
-        tshark_path,
-        "-r",
-        str(pcap_path),
-        "-T",
-        "fields",
-        "-E",
-        "separator=\t",
-        "-e",
-        "frame.time_relative",
-        "-e",
-        "frame.len",
-        "-e",
-        "ip.dst",
-        "-e",
-        "tcp.dstport",
-        "-e",
-        "udp.dstport",
-    ]
-
-    bytes_by_s: dict[int, int] = {}
-    pkts_by_s: dict[int, int] = {}
-    uniq_ip: set[str] = set()
-    uniq_port: set[int] = set()
-    max_sec = 0
-
-    # tshark can be very verbose on stderr for some malformed captures; avoid deadlocks by
-    # discarding stderr in this streaming path. We only need deterministic stats.
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
-    assert proc.stdout is not None  # for type checkers
-    try:
-        for line in proc.stdout:
-            parts = line.split("\t")
-            if len(parts) < 2:
-                continue
-            t_s = parts[0].strip()
-            l_s = parts[1].strip()
-            if not t_s or not l_s:
-                continue
-            try:
-                t = float(t_s)
-                ln = int(l_s)
-            except Exception:
-                continue
-            sec = int(t) if t >= 0 else 0
-            max_sec = max(max_sec, sec)
-            bytes_by_s[sec] = bytes_by_s.get(sec, 0) + max(ln, 0)
-            pkts_by_s[sec] = pkts_by_s.get(sec, 0) + 1
-
-            if len(parts) >= 3:
-                ip = parts[2].strip()
-                if ip:
-                    uniq_ip.add(ip)
-            # Prefer TCP port if present, else UDP.
-            tcp_p = parts[3].strip() if len(parts) >= 4 else ""
-            udp_p = parts[4].strip() if len(parts) >= 5 else ""
-            port = tcp_p or udp_p
-            if port:
-                try:
-                    pi = int(port)
-                    if 0 <= pi <= 65535:
-                        uniq_port.add(pi)
-                except Exception:
-                    pass
-    finally:
-        stdout = proc.stdout
-        try:
-            stdout.close()
-        except Exception:
-            pass
-    rc = proc.wait()
-    if rc != 0:
-        raise RuntimeError("tshark_failed")
-
-    # Include seconds with 0 activity so percentiles reflect burstiness.
-    bytes_series = [float(bytes_by_s.get(i, 0)) for i in range(max_sec + 1)]
-    pkts_series = [float(pkts_by_s.get(i, 0)) for i in range(max_sec + 1)]
-    bytes_sorted = sorted(bytes_series)
-    pkts_sorted = sorted(pkts_series)
-
-    b50 = _percentile(bytes_sorted, 50)
-    b95 = _percentile(bytes_sorted, 95)
-    p50 = _percentile(pkts_sorted, 50)
-    p95 = _percentile(pkts_sorted, 95)
-    bmax = float(bytes_sorted[-1]) if bytes_sorted else None
-    pmax = float(pkts_sorted[-1]) if pkts_sorted else None
-
-    burst_b = (float(b95) / float(b50)) if b50 and b95 is not None and b50 > 0 else None
-    burst_p = (float(p95) / float(p50)) if p50 and p95 is not None and p50 > 0 else None
-
-    return {
-        "bytes_per_second_p50": b50,
-        "bytes_per_second_p95": b95,
-        "bytes_per_second_max": bmax,
-        "packets_per_second_p50": p50,
-        "packets_per_second_p95": p95,
-        "packets_per_second_max": pmax,
-        "burstiness_bytes_p95_over_p50": burst_b,
-        "burstiness_packets_p95_over_p50": burst_p,
-        "unique_dst_ip_count": len(uniq_ip) if uniq_ip else 0,
-        "unique_dst_port_count": len(uniq_port) if uniq_port else 0,
-    }
 
 
 def _concentration(items: list[dict[str, Any]], total: int, top_n: int) -> float | None:

@@ -202,7 +202,8 @@ def _normalize_plan(plan: dict[str, Any]) -> dict[str, object]:
     return {
         "package": plan.get("package_name") or plan.get("package"),
         "package_name": plan.get("package_name"),
-        "static_run_id": plan.get("static_run_id"),
+        # Back-compat: some plan writers store static_run_id only under run_identity.
+        "static_run_id": plan.get("static_run_id") or identity.get("static_run_id"),
         "run_signature": plan.get("run_signature") or identity.get("run_signature"),
         "run_signature_version": plan.get("run_signature_version") or identity.get("run_signature_version"),
         "artifact_set_hash": plan.get("artifact_set_hash") or identity.get("artifact_set_hash"),

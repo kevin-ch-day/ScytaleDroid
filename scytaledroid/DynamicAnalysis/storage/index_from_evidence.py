@@ -18,6 +18,7 @@ from typing import Any
 from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
+from scytaledroid.DynamicAnalysis.pcap.timeseries import scan_pcap_timeseries_and_destinations
 from scytaledroid.DynamicAnalysis.storage.network_indicators import index_network_indicators_for_run
 
 
@@ -55,6 +56,77 @@ def _to_mysql_dt(value: object) -> str | None:
         dt = dt.replace(tzinfo=UTC)
     dt = dt.astimezone(UTC)
     return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _ensure_dynamic_network_features_columns() -> None:
+    """Best-effort migration for derived/index-only columns.
+
+    This runs only as part of the explicit "rebuild DB index from evidence packs"
+    workflow (not during capture). It keeps DB optional and rebuildable.
+    """
+
+    try:
+        cols = core_q.run_sql("SHOW COLUMNS FROM dynamic_network_features", fetch="all")
+        existing = {str(c[0]) for c in (cols or []) if c and len(c) >= 1}
+    except Exception:
+        return
+
+    alters: list[str] = []
+
+    # Dataset/ML tags (non-authoritative; derived from run_manifest.json).
+    if "low_signal" not in existing:
+        alters.append("ADD COLUMN low_signal TINYINT(1) DEFAULT NULL")
+    if "low_signal_reasons_json" not in existing:
+        # JSON type is supported on MariaDB/MySQL; if not, it will fail and we fall back.
+        alters.append("ADD COLUMN low_signal_reasons_json JSON DEFAULT NULL")
+
+    # Window-ready per-run summaries (from pcap_features.json metrics/proxies).
+    add_float = [
+        "bytes_per_second_p50",
+        "bytes_per_second_p95",
+        "bytes_per_second_max",
+        "packets_per_second_p50",
+        "packets_per_second_p95",
+        "packets_per_second_max",
+        "burstiness_bytes_p95_over_p50",
+        "burstiness_packets_p95_over_p50",
+        "top1_sni_share",
+        "top1_dns_share",
+        "domains_per_min",
+        "new_domain_rate_per_min",
+        "new_sni_rate_per_min",
+        "new_dns_rate_per_min",
+    ]
+    add_int = [
+        "unique_dst_ip_count",
+        "unique_dst_port_count",
+        "sni_observation_count",
+        "dns_observation_count",
+        "unique_sni_count",
+        "unique_dns_qname_count",
+    ]
+    for col in add_float:
+        if col not in existing:
+            alters.append(f"ADD COLUMN {col} DOUBLE DEFAULT NULL")
+    for col in add_int:
+        if col not in existing:
+            alters.append(f"ADD COLUMN {col} INT DEFAULT NULL")
+
+    if not alters:
+        return
+
+    for clause in alters:
+        try:
+            core_q.run_sql_write(f"ALTER TABLE dynamic_network_features {clause}")
+        except Exception:
+            # Fallback for older MariaDB configurations without JSON type.
+            if "JSON" in clause:
+                try:
+                    core_q.run_sql_write(
+                        "ALTER TABLE dynamic_network_features ADD COLUMN low_signal_reasons_json LONGTEXT DEFAULT NULL"
+                    )
+                except Exception:
+                    pass
 
 
 def build_dynamic_session_row_from_evidence_pack(run_dir: Path) -> dict[str, Any] | None:
@@ -166,6 +238,139 @@ def build_dynamic_network_features_row_from_evidence_pack(run_dir: Path) -> dict
     proxies = pf.get("proxies") if isinstance(pf.get("proxies"), dict) else {}
     qual = pf.get("quality") if isinstance(pf.get("quality"), dict) else {}
 
+    pr = _read_json(run_dir / "analysis" / "pcap_report.json") or {}
+
+    # Optional accelerator: for older runs, pcap_features.json may not include the
+    # window-ready enrichment metrics yet. We can derive them from the PCAP at
+    # *index time* (derived DB only) without mutating evidence packs.
+    need_ts = any(
+        metrics.get(k) is None
+        for k in (
+            "bytes_per_second_p50",
+            "bytes_per_second_p95",
+            "bytes_per_second_max",
+            "packets_per_second_p50",
+            "packets_per_second_p95",
+            "packets_per_second_max",
+        )
+    ) or any(proxies.get(k) is None for k in ("unique_dst_ip_count", "unique_dst_port_count"))
+
+    if need_ts:
+        rel = pr.get("pcap_path") if isinstance(pr.get("pcap_path"), str) else None
+        pcap_path = (run_dir / rel) if rel else None
+        if pcap_path and pcap_path.exists():
+            try:
+                ts = scan_pcap_timeseries_and_destinations(pcap_path)
+            except Exception:
+                ts = None
+            if isinstance(ts, dict):
+                for k in (
+                    "bytes_per_second_p50",
+                    "bytes_per_second_p95",
+                    "bytes_per_second_max",
+                    "packets_per_second_p50",
+                    "packets_per_second_p95",
+                    "packets_per_second_max",
+                    "burstiness_bytes_p95_over_p50",
+                    "burstiness_packets_p95_over_p50",
+                ):
+                    if metrics.get(k) is None and ts.get(k) is not None:
+                        metrics[k] = ts.get(k)
+                for k in ("unique_dst_ip_count", "unique_dst_port_count"):
+                    if proxies.get(k) is None and ts.get(k) is not None:
+                        proxies[k] = ts.get(k)
+
+    # Fill missing diversity proxies from pcap_report.json (no tshark scan needed).
+    def _safe_int(value: object) -> int | None:
+        try:
+            return int(value)  # type: ignore[arg-type]
+        except Exception:
+            return None
+
+    def _top1_share(items: object) -> float | None:
+        if not isinstance(items, list) or not items:
+            return None
+        total = 0
+        top1 = 0
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            try:
+                c = int(item.get("count") or 0)
+            except Exception:
+                c = 0
+            total += c
+            if c > top1:
+                top1 = c
+        return (float(top1) / float(total)) if total > 0 else None
+
+    if proxies.get("sni_observation_count") is None:
+        v = _safe_int(pr.get("sni_observation_count"))
+        if v is not None:
+            proxies["sni_observation_count"] = v
+    if proxies.get("dns_observation_count") is None:
+        v = _safe_int(pr.get("dns_observation_count"))
+        if v is not None:
+            proxies["dns_observation_count"] = v
+    if proxies.get("unique_sni_count") is None:
+        v = _safe_int(pr.get("sni_unique_count"))
+        if v is not None:
+            proxies["unique_sni_count"] = v
+    if proxies.get("unique_dns_qname_count") is None:
+        v = _safe_int(pr.get("dns_unique_count"))
+        if v is not None:
+            proxies["unique_dns_qname_count"] = v
+    if proxies.get("top1_sni_share") is None:
+        v = pr.get("top1_sni_share")
+        if isinstance(v, (int, float)):
+            proxies["top1_sni_share"] = float(v)
+        else:
+            share = _top1_share(pr.get("top_sni"))
+            if share is not None:
+                proxies["top1_sni_share"] = share
+    if proxies.get("top1_dns_share") is None:
+        v = pr.get("top1_dns_share")
+        if isinstance(v, (int, float)):
+            proxies["top1_dns_share"] = float(v)
+        else:
+            share = _top1_share(pr.get("top_dns"))
+            if share is not None:
+                proxies["top1_dns_share"] = share
+
+    # Derive unique-per-minute proxies if missing but duration+unique counts exist.
+    dur = metrics.get("capture_duration_s")
+    try:
+        denom_min = float(dur) / 60.0 if dur else None
+    except Exception:
+        denom_min = None
+    if denom_min and denom_min > 0:
+        sni_u = proxies.get("unique_sni_count")
+        dns_u = proxies.get("unique_dns_qname_count")
+        try:
+            sni_ui = int(sni_u) if sni_u is not None else 0
+        except Exception:
+            sni_ui = 0
+        try:
+            dns_ui = int(dns_u) if dns_u is not None else 0
+        except Exception:
+            dns_ui = 0
+        if proxies.get("domains_per_min") is None and (sni_u is not None or dns_u is not None):
+            proxies["domains_per_min"] = float(sni_ui + dns_ui) / float(denom_min)
+        # Fallback: when report-level unique counts are missing, approximate from the
+        # top-N-limited unique_domains_topn proxy (still useful as a diversity rate).
+        if proxies.get("domains_per_min") is None and proxies.get("unique_domains_topn") is not None:
+            try:
+                ud = int(proxies.get("unique_domains_topn") or 0)
+            except Exception:
+                ud = 0
+            proxies["domains_per_min"] = float(ud) / float(denom_min) if denom_min else None
+        if proxies.get("new_domain_rate_per_min") is None and proxies.get("domains_per_min") is not None:
+            proxies["new_domain_rate_per_min"] = proxies.get("domains_per_min")
+        if proxies.get("new_sni_rate_per_min") is None and sni_u is not None:
+            proxies["new_sni_rate_per_min"] = float(sni_ui) / float(denom_min)
+        if proxies.get("new_dns_rate_per_min") is None and dns_u is not None:
+            proxies["new_dns_rate_per_min"] = float(dns_ui) / float(denom_min)
+
     # In pcap_features.json we store protocol tags under quality.protocol
     proto = qual.get("protocol") if isinstance(qual.get("protocol"), dict) else {}
     run_profile = str(proto.get("run_profile") or op.get("run_profile") or "").strip() or None
@@ -174,6 +379,12 @@ def build_dynamic_network_features_row_from_evidence_pack(run_dir: Path) -> dict
     host_tools = env.get("host_tools") if isinstance(env.get("host_tools"), dict) else None
     # Stored as JSON (string) for audit/repro; do not denormalize tool versions yet.
     host_tools_json = json.dumps(host_tools, sort_keys=True) if isinstance(host_tools, dict) else None
+
+    schema_ver = None
+    if isinstance(pf.get("feature_schema_version"), str) and pf.get("feature_schema_version").strip():
+        schema_ver = pf.get("feature_schema_version").strip()
+    elif isinstance(qual.get("feature_schema_version"), str) and qual.get("feature_schema_version").strip():
+        schema_ver = qual.get("feature_schema_version").strip()
 
     return {
         "dynamic_run_id": rid,
@@ -184,9 +395,15 @@ def build_dynamic_network_features_row_from_evidence_pack(run_dir: Path) -> dict
         "valid_dataset_run": 1 if ds.get("valid_dataset_run") is True else (0 if ds.get("valid_dataset_run") is False else None),
         "invalid_reason_code": str(ds.get("invalid_reason_code") or "") or None,
         "countable": 1 if ds.get("countable") is True else (0 if ds.get("countable") is False else None),
+        "low_signal": 1 if ds.get("low_signal") is True else (0 if ds.get("low_signal") is False else None),
+        "low_signal_reasons_json": (
+            json.dumps(ds.get("low_signal_reasons"), sort_keys=True)
+            if isinstance(ds.get("low_signal_reasons"), list)
+            else None
+        ),
         "min_pcap_bytes": int(ds.get("min_pcap_bytes") or 0) or None,
         "min_duration_s": int(getattr(app_config, "DYNAMIC_MIN_DURATION_S", 120)),
-        "feature_schema_version": "v1",
+        "feature_schema_version": schema_ver or "v1",
         "host_tools_json": host_tools_json,
 
         # Metrics
@@ -197,6 +414,14 @@ def build_dynamic_network_features_row_from_evidence_pack(run_dir: Path) -> dict
         "packets_per_sec": float(metrics.get("packets_per_sec")) if metrics.get("packets_per_sec") is not None else None,
         "avg_packet_size_bytes": float(metrics.get("avg_packet_size_bytes")) if metrics.get("avg_packet_size_bytes") is not None else None,
         "avg_packet_rate_pps": float(metrics.get("avg_packet_rate_pps")) if metrics.get("avg_packet_rate_pps") is not None else None,
+        "bytes_per_second_p50": float(metrics.get("bytes_per_second_p50")) if metrics.get("bytes_per_second_p50") is not None else None,
+        "bytes_per_second_p95": float(metrics.get("bytes_per_second_p95")) if metrics.get("bytes_per_second_p95") is not None else None,
+        "bytes_per_second_max": float(metrics.get("bytes_per_second_max")) if metrics.get("bytes_per_second_max") is not None else None,
+        "packets_per_second_p50": float(metrics.get("packets_per_second_p50")) if metrics.get("packets_per_second_p50") is not None else None,
+        "packets_per_second_p95": float(metrics.get("packets_per_second_p95")) if metrics.get("packets_per_second_p95") is not None else None,
+        "packets_per_second_max": float(metrics.get("packets_per_second_max")) if metrics.get("packets_per_second_max") is not None else None,
+        "burstiness_bytes_p95_over_p50": float(metrics.get("burstiness_bytes_p95_over_p50")) if metrics.get("burstiness_bytes_p95_over_p50") is not None else None,
+        "burstiness_packets_p95_over_p50": float(metrics.get("burstiness_packets_p95_over_p50")) if metrics.get("burstiness_packets_p95_over_p50") is not None else None,
 
         # Proxies
         "tls_ratio": float(proxies.get("tls_ratio")) if proxies.get("tls_ratio") is not None else None,
@@ -206,6 +431,18 @@ def build_dynamic_network_features_row_from_evidence_pack(run_dir: Path) -> dict
         "unique_dns_topn": int(proxies.get("unique_dns_topn")) if proxies.get("unique_dns_topn") is not None else None,
         "unique_sni_topn": int(proxies.get("unique_sni_topn")) if proxies.get("unique_sni_topn") is not None else None,
         "unique_domains_topn": int(proxies.get("unique_domains_topn")) if proxies.get("unique_domains_topn") is not None else None,
+        "unique_dst_ip_count": int(proxies.get("unique_dst_ip_count")) if proxies.get("unique_dst_ip_count") is not None else None,
+        "unique_dst_port_count": int(proxies.get("unique_dst_port_count")) if proxies.get("unique_dst_port_count") is not None else None,
+        "sni_observation_count": int(proxies.get("sni_observation_count")) if proxies.get("sni_observation_count") is not None else None,
+        "dns_observation_count": int(proxies.get("dns_observation_count")) if proxies.get("dns_observation_count") is not None else None,
+        "unique_sni_count": int(proxies.get("unique_sni_count")) if proxies.get("unique_sni_count") is not None else None,
+        "unique_dns_qname_count": int(proxies.get("unique_dns_qname_count")) if proxies.get("unique_dns_qname_count") is not None else None,
+        "top1_sni_share": float(proxies.get("top1_sni_share")) if proxies.get("top1_sni_share") is not None else None,
+        "top1_dns_share": float(proxies.get("top1_dns_share")) if proxies.get("top1_dns_share") is not None else None,
+        "domains_per_min": float(proxies.get("domains_per_min")) if proxies.get("domains_per_min") is not None else None,
+        "new_domain_rate_per_min": float(proxies.get("new_domain_rate_per_min")) if proxies.get("new_domain_rate_per_min") is not None else None,
+        "new_sni_rate_per_min": float(proxies.get("new_sni_rate_per_min")) if proxies.get("new_sni_rate_per_min") is not None else None,
+        "new_dns_rate_per_min": float(proxies.get("new_dns_rate_per_min")) if proxies.get("new_dns_rate_per_min") is not None else None,
         "top_dns_total": int(proxies.get("top_dns_total")) if proxies.get("top_dns_total") is not None else None,
         "top_sni_total": int(proxies.get("top_sni_total")) if proxies.get("top_sni_total") is not None else None,
         "dns_concentration": float(proxies.get("dns_concentration")) if proxies.get("dns_concentration") is not None else None,
@@ -258,6 +495,7 @@ def index_dynamic_evidence_pack_to_db(run_dir: Path) -> dict[str, Any]:
 
 
 def index_dynamic_evidence_packs_to_db(root: Path) -> dict[str, Any]:
+    _ensure_dynamic_network_features_columns()
     run_dirs = sorted([p for p in root.iterdir()] if root.exists() else [], key=lambda p: p.name)
     scanned = 0
     ok = 0

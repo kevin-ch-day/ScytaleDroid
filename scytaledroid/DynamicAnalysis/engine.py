@@ -277,9 +277,7 @@ class DynamicAnalysisEngine:
             },
         )
         if dataset_block:
-            # Keep legacy mirror for downstream consumers still reading operator.dataset_validity.
             manifest.operator["tier"] = self.config.tier
-            manifest.operator["dataset_validity"] = dict(dataset_block)
         if event_artifact:
             manifest.add_artifacts([event_artifact])
         manifest.finalize()
@@ -365,7 +363,6 @@ class DynamicAnalysisEngine:
                 "run_profile": run_profile,
                 "run_sequence": run_sequence,
                 "interaction_level": interaction_level,
-                "dataset_validity": dataset_validity,
             },
             notes=["Environment not dataset-ready (missing tools)."],
         )

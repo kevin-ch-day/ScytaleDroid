@@ -18,9 +18,6 @@ MIN_PCAP_BYTES = int(getattr(app_config, "DYNAMIC_MIN_PCAP_BYTES", 100000))
 
 @dataclass(frozen=True)
 class DatasetTrackerConfig:
-    repeats_per_app: int = field(
-        default_factory=lambda: int(getattr(app_config, "DYNAMIC_DATASET_RUNS_PER_APP", 3))
-    )
     baseline_required: int = field(
         default_factory=lambda: int(getattr(app_config, "DYNAMIC_DATASET_BASELINE_RUNS", 1))
     )
@@ -103,7 +100,7 @@ def update_dataset_tracker(
         app_entry["runs"] = runs_list
 
     app_entry["run_count"] = len([r for r in runs_list if isinstance(r, dict)])
-    app_entry["target_runs"] = cfg.repeats_per_app
+    app_entry["target_runs"] = int(cfg.baseline_required) + int(cfg.interactive_required)
 
     # Deterministically mark quota-counted runs vs extras.
     _apply_quota_marking(app_entry, cfg)
@@ -178,7 +175,7 @@ def _normalize_tracker_payload(payload: dict[str, Any], cfg: DatasetTrackerConfi
             entry["runs"] = runs
 
         entry["run_count"] = len([r for r in runs if isinstance(r, dict)])
-        entry["target_runs"] = int(entry.get("target_runs") or cfg.repeats_per_app)
+        entry["target_runs"] = int(cfg.baseline_required) + int(cfg.interactive_required)
 
         # Ensure quota markings are present for UI labels (extra_run, counts_toward_quota),
         # and then compute counts from those deterministic markings.
@@ -257,7 +254,7 @@ def peek_next_run_protocol(
     # If Run #1 fails QA, the next retry should still be "Run #1" until a valid run
     # is recorded. This avoids confusing operators ("baseline Run #2") and matches
     # the paper contract: each app needs >=3 VALID runs; retries fill the same slot.
-    needed = max(int(cfg.repeats_per_app), int(cfg.baseline_required) + int(cfg.interactive_required))
+    needed = int(cfg.baseline_required) + int(cfg.interactive_required)
     run_sequence = max(min(total_valid + 1, needed), 1)
 
     if baseline_valid < int(cfg.baseline_required):
@@ -391,9 +388,8 @@ def _apply_quota_marking(app_entry: dict[str, Any], cfg: DatasetTrackerConfig) -
         return
     baseline_needed = max(0, int(cfg.baseline_required))
     interactive_needed = max(0, int(cfg.interactive_required))
-    # Total quota slots is baseline+interactive, unless legacy repeats_per_app is larger.
-    # This lets teams temporarily over-collect without changing baseline/interactive minima.
-    needed = max(int(cfg.repeats_per_app), baseline_needed + interactive_needed)
+    # Total quota slots (Paper #2 locked): baseline + interactive.
+    needed = baseline_needed + interactive_needed
     # Reset markers (idempotent).
     for r in runs:
         if isinstance(r, dict):

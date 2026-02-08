@@ -29,7 +29,6 @@ except Exception:
 # Default can be overridden at process start via:
 # - SCYTALEDROID_DATASET_BASELINE_RUNS
 # - SCYTALEDROID_DATASET_INTERACTIVE_RUNS
-# - SCYTALEDROID_DATASET_RUNS_PER_APP (legacy total override)
 # This affects quota tracking and UI suggestions only; it does not change capture behavior.
 try:
     DYNAMIC_DATASET_BASELINE_RUNS = int(os.getenv("SCYTALEDROID_DATASET_BASELINE_RUNS", "1"))
@@ -41,16 +40,9 @@ try:
 except Exception:
     DYNAMIC_DATASET_INTERACTIVE_RUNS = 2
 
-try:
-    # If explicitly provided, treat this as an override for the total target runs.
-    # Otherwise, derive it from baseline+interactive targets.
-    _runs_total_env = os.getenv("SCYTALEDROID_DATASET_RUNS_PER_APP")
-    if _runs_total_env is None:
-        DYNAMIC_DATASET_RUNS_PER_APP = int(DYNAMIC_DATASET_BASELINE_RUNS) + int(DYNAMIC_DATASET_INTERACTIVE_RUNS)
-    else:
-        DYNAMIC_DATASET_RUNS_PER_APP = int(_runs_total_env)
-except Exception:
-    DYNAMIC_DATASET_RUNS_PER_APP = int(DYNAMIC_DATASET_BASELINE_RUNS) + int(DYNAMIC_DATASET_INTERACTIVE_RUNS)
+# Total quota slots (Paper #2 locked): baseline + interactive.
+# Intentionally no legacy env override for total runs (avoids scope creep).
+DYNAMIC_DATASET_RUNS_PER_APP = int(DYNAMIC_DATASET_BASELINE_RUNS) + int(DYNAMIC_DATASET_INTERACTIVE_RUNS)
 
 # Device module paths
 DEVICE_STATE_DIR = "state"
