@@ -1,33 +1,38 @@
-# Static-analysis housekeeping & logs
+# Workspace housekeeping & logs
 
 Keeping local workspaces tidy ensures repeatable scans and prevents stale
 artifacts from confusing follow-up investigations. This guide summarises the
 built-in maintenance helpers and documents where the CLI writes log files and
 reports.
 
-## Utilities → Housekeep static-analysis artefacts
+## Workspace & Evidence (menu)
 
-The Utilities menu now exposes an option named **"Housekeep static-analysis
-artefacts"**. When selected it will:
+The CLI provides a **Workspace & Evidence** menu intended for Paper #2
+collection operations and safe cleanup. Typical actions include:
 
-1. Delete JSON, NDJSON, HTML, and archive exports older than the configured
-   retention window (30 days by default).
-2. Reset `data/static_analysis/tmp/` and `data/static_analysis/cache/` so the
-   next scan starts with a fresh workspace.
-3. Report how many files were removed and how much disk space was reclaimed.
+- Workspace disk usage (APK storage, evidence packs, logs, caches).
+- Dynamic evidence pack verification (overview, deep checks).
+- Dataset freeze manifest writing and immutability verification.
+- Deleting INVALID dataset runs locally (evidence-pack cleanup).
+- Pruning derived DB orphans (safe; DB is not authoritative).
 
-The retention window defaults to
-`scytaledroid.Config.app_config.STATIC_ANALYSIS_RETENTION_DAYS` (30 days), but it
-can be overridden per run by setting the
-`SCYTALEDROID_STATIC_RETENTION_DAYS` environment variable to a positive integer.
-For example:
+Important:
+- Evidence packs are authoritative.
+- The DB is derived/rebuildable and may drift if runs are deleted locally.
+- After dataset freeze, do not recompute artifacts for the included run set.
 
-```bash
-export SCYTALEDROID_STATIC_RETENTION_DAYS=7
-```
+Paper #2 references:
+- `docs/paper2/README.md`
+- `docs/paper2/operator_runbook.md`
 
-Running the housekeeping action after setting the variable will prune reports
-older than a week.
+## Static analysis caches & retention
+
+Static analysis may use caches under:
+- `data/static_analysis/cache/`
+- `output/cache/` (if used)
+
+Retention settings (if enabled by the CLI) should be treated as housekeeping
+only. Do not rely on retention as a correctness mechanism for paper-grade runs.
 
 ## Where logs live
 
@@ -56,10 +61,9 @@ needed.
 
 ## Recommended cadence
 
-* Run the housekeeping action before large batch scans or when switching
-  between projects to ensure caches are empty.
-* Archive any reports you want to keep before triggering housekeeping; files
-  older than the retention window are permanently deleted.
+* Use Workspace & Evidence verification checks during collection to avoid silent drift.
+* Run prune-orphans only when DB drift is observed (ad-hoc; derived index).
+* Keep ML runs offline and evidence-pack-only; do not depend on DB state.
 * Keep the log directory under version control ignores (e.g. `.gitignore`)
   so logs never end up in commits.
 

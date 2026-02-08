@@ -18,7 +18,8 @@ def test_ml_preflight_reports_missing_frozen_inputs(tmp_path: Path):
     manifest = {
         "dynamic_run_id": "run-1",
         "target": {"package_name": "com.example.app"},
-        "operator": {"tier": "dataset", "dataset_validity": {"valid_dataset_run": True}},
+        "operator": {"tier": "dataset"},
+        "dataset": {"tier": "dataset", "valid_dataset_run": True},
         "artifacts": [],
     }
     _write_json(run_dir / "run_manifest.json", manifest)
@@ -42,7 +43,8 @@ def test_ml_preflight_computes_expected_windows(tmp_path: Path):
     manifest = {
         "dynamic_run_id": "run-2",
         "target": {"package_name": "com.example.app"},
-        "operator": {"tier": "dataset", "dataset_validity": {"valid_dataset_run": True}},
+        "operator": {"tier": "dataset"},
+        "dataset": {"tier": "dataset", "valid_dataset_run": True},
         "artifacts": [{"type": "pcapdroid_capture", "relative_path": "artifacts/pcap.pcap"}],
     }
     _write_json(run_dir / "run_manifest.json", manifest)
@@ -60,4 +62,3 @@ def test_ml_preflight_computes_expected_windows(tmp_path: Path):
     # For duration 23s and window=10/stride=5, expect 3 full windows and 2 dropped.
     assert result.windows_total_expected == 3
     assert result.dropped_partial_windows_expected == 2
-

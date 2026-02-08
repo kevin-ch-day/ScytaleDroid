@@ -14,12 +14,14 @@ from __future__ import annotations
 
 import json
 import statistics
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+import shutil
 
 from scytaledroid.Config import app_config
 
@@ -39,7 +41,7 @@ from .windowing import WindowSpec
 
 
 FREEZE_DIR = Path(app_config.DATA_DIR) / "archive"
-DATASET_FREEZE_CANONICAL = FREEZE_DIR / "dataset_freeze.json"
+DATASET_FREEZE_CANONICAL = FREEZE_DIR / config.FREEZE_CANONICAL_FILENAME
 
 
 @dataclass(frozen=True)
@@ -51,6 +53,17 @@ class MlRunStats:
     generated_at: str
 
 
+@dataclass(frozen=True)
+class _ExemplarCandidate:
+    run_id: str
+    package_name: str
+    interaction_tag: str
+    ended_at: str | None
+    sustained_bytes_per_sec_k6: float
+    iforest_flagged_pct: float
+    ocsvm_flagged_pct: float
+
+
 def run_ml_on_evidence_packs(
     *,
     output_root: Path | None = None,
@@ -58,17 +71,23 @@ def run_ml_on_evidence_packs(
 ) -> MlRunStats:
     """Run Paper #2 ML over evidence packs.
 
-    - If freeze_manifest_path is provided, use it (must be checksummed).
-    - Otherwise, auto-select the most recent checksummed freeze manifest if present.
-    - If no freeze manifest exists, runs in exploratory mode over all VALID dataset packs.
+    Selector (PM/reviewer locked):
+    - Use the canonical freeze anchor unless an explicit freeze_manifest_path is provided.
+    - Fail closed if the freeze manifest is missing required checksum fields.
+
+    Hard rules (Paper #2):
+    - No DB reads for selection/training/scoring.
+    - No exploratory-mode fallback.
     """
 
     root = output_root or (Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic")
     if not root.exists():
         return MlRunStats(0, 0, 0, 0, datetime.now(UTC).isoformat())
 
-    freeze_path = freeze_manifest_path or _select_freeze_manifest()
-    frozen = freeze_path is not None
+    freeze_path = freeze_manifest_path or DATASET_FREEZE_CANONICAL
+    if not freeze_path.exists():
+        raise RuntimeError(f"Freeze manifest missing (fail-closed): {freeze_path}")
+    frozen = True
 
     window_spec = WindowSpec(window_size_s=config.WINDOW_SIZE_S, stride_s=config.WINDOW_STRIDE_S)
 
@@ -79,6 +98,7 @@ def run_ml_on_evidence_packs(
     dataset_phase_rows: list[dict[str, Any]] = []
     model_overlap_rows: list[dict[str, Any]] = []
     transport_mix_rows: list[dict[str, Any]] = []
+    exemplar_candidate: _ExemplarCandidate | None = None
 
     if frozen:
         assert freeze_path is not None
@@ -146,6 +166,9 @@ def run_ml_on_evidence_packs(
                 pf_path = out_dir_pf / "ml_preflight.json"
                 if not pf_path.exists():
                     write_ml_preflight(pf_path, compute_ml_preflight(r))
+                # Back-compat: some earlier v1 outputs used internal model names in filenames.
+                # Copy them to the canonical paper-facing filenames without recomputation.
+                _ensure_score_csv_aliases(out_dir_pf)
 
                 duration = get_sampling_duration_seconds(r)
                 if duration is None or duration <= 0:
@@ -250,7 +273,7 @@ def run_ml_on_evidence_packs(
                 for r in app_runs:
                     out_dir = _ml_output_dir(r.run_dir, frozen=True)
                     out_dir.mkdir(parents=True, exist_ok=True)
-                    scores_path = out_dir / f"anomaly_scores_{spec.name}.csv"
+                    scores_path = out_dir / f"anomaly_scores_{_model_csv_label(spec.name)}.csv"
                     if scores_path.exists():
                         continue  # immutable
                     write_anomaly_scores_csv(scores_path, by_run_rows.get(r.run_id) or [])
@@ -317,50 +340,31 @@ def run_ml_on_evidence_packs(
                     per_run_tag=per_run_tag,
                 )
             )
+            exemplar_candidate = _select_fig_b1_exemplar_candidate(
+                current=exemplar_candidate,
+                package_name=pkg,
+                interactive_run_ids=interactive_ids,
+                per_run_rows=per_run_rows,
+                per_run_tag=per_run_tag,
+                per_model_scores_by_run=per_model_scores_by_run,
+                per_model_thresholds=per_model_thresholds,
+                checksums=checksums,
+            )
 
-        _write_dataset_phase_csv(dataset_phase_rows)
+        _write_prevalence_csvs(dataset_phase_rows)
         _write_model_overlap_csv(model_overlap_rows)
-        _write_transport_mix_csv(transport_mix_rows)
-        return MlRunStats(apps_seen=apps_seen, apps_trained=apps_trained, runs_scored=runs_scored, runs_skipped=runs_skipped, generated_at=datetime.now(UTC).isoformat())
-
-    # Exploratory mode (no freeze).
-    run_dirs = sorted([p for p in root.iterdir() if p.is_dir()], key=lambda p: p.name)
-    runs: list[RunInputs] = []
-    for run_dir in run_dirs:
-        inputs = load_run_inputs(run_dir)
-        if not inputs:
-            continue
-        if not is_valid_dataset_run(inputs):
-            continue
-        runs.append(inputs)
-
-    by_app: dict[str, list[RunInputs]] = {}
-    for r in runs:
-        key = r.identity_key or (r.package_name or "_unknown")
-        by_app.setdefault(key, []).append(r)
-
-    for app_key, app_runs in sorted(by_app.items(), key=lambda item: item[0]):
-        # Not used for Paper #2; keep minimal and deterministic.
-        _write_app_skip(app_runs, frozen=False, reason="ML_SKIPPED_INSUFFICIENT_RUNS")
-        runs_skipped += len(app_runs)
-
-    return MlRunStats(apps_seen=len(by_app), apps_trained=apps_trained, runs_scored=runs_scored, runs_skipped=runs_skipped, generated_at=datetime.now(UTC).isoformat())
-
-
-def _select_freeze_manifest() -> Path | None:
-    """Prefer a checksummed timestamped freeze manifest; fall back to canonical if checksummed."""
-    if DATASET_FREEZE_CANONICAL.exists():
-        payload = _load_freeze_payload(DATASET_FREEZE_CANONICAL)
-        if isinstance(payload.get("included_run_checksums"), dict):
-            return DATASET_FREEZE_CANONICAL
-    if not FREEZE_DIR.exists():
-        return None
-    candidates = sorted(FREEZE_DIR.glob("dataset_freeze-*.json"), reverse=True)
-    for path in candidates:
-        payload = _load_freeze_payload(path)
-        if isinstance(payload.get("included_run_checksums"), dict):
-            return path
-    return None
+        _write_transport_mix_csvs(transport_mix_rows)
+        _maybe_write_paper_artifacts_json(
+            candidate=exemplar_candidate,
+            freeze_manifest_path=freeze_path,
+        )
+        return MlRunStats(
+            apps_seen=apps_seen,
+            apps_trained=apps_trained,
+            runs_scored=runs_scored,
+            runs_skipped=runs_skipped,
+            generated_at=datetime.now(UTC).isoformat(),
+        )
 
 
 def _load_freeze_payload(path: Path) -> dict[str, Any]:
@@ -408,6 +412,25 @@ def _interaction_tag_from_manifest(manifest: dict[str, Any]) -> str | None:
     return inter or None
 
 
+def _canonical_interaction_tag(tag: str | None) -> str | None:
+    if not tag:
+        return None
+    t = str(tag).strip().lower()
+    if not t:
+        return None
+    if "video" in t:
+        return "video"
+    if "voice" in t or "audio" in t:
+        return "voice"
+    if "text" in t:
+        return "text"
+    if "mixed" in t:
+        return "mixed"
+    if "none" in t:
+        return "none"
+    return t
+
+
 def _fallback_phase(run_profile: str | None) -> str:
     if not run_profile:
         return "interactive"
@@ -415,6 +438,46 @@ def _fallback_phase(run_profile: str | None) -> str:
     if "baseline" in p or "idle" in p:
         return "idle"
     return "interactive"
+
+
+def _model_csv_label(model_name: str) -> str:
+    """Stable, paper-facing model label used in output filenames."""
+    if model_name == config.MODEL_IFOREST:
+        return "iforest"
+    if model_name == config.MODEL_OCSVM:
+        return "ocsvm"
+    return model_name
+
+
+def _ensure_score_csv_aliases(out_dir: Path) -> None:
+    """Ensure canonical anomaly score CSV names exist (Paper #2) without recomputation.
+
+    Earlier runs wrote:
+      - anomaly_scores_isolation_forest.csv
+      - anomaly_scores_one_class_svm.csv
+    Paper-facing canonical names are:
+      - anomaly_scores_iforest.csv
+      - anomaly_scores_ocsvm.csv
+
+    This function only copies when the old file exists and the new one does not.
+    """
+    mapping = {
+        "anomaly_scores_isolation_forest.csv": "anomaly_scores_iforest.csv",
+        "anomaly_scores_one_class_svm.csv": "anomaly_scores_ocsvm.csv",
+    }
+    for old, new in mapping.items():
+        src = out_dir / old
+        dst = out_dir / new
+        if dst.exists():
+            continue
+        if not src.exists():
+            continue
+        try:
+            shutil.copyfile(src, dst)
+        except Exception:
+            # Best-effort. If this fails, the runner may still write the canonical
+            # files during a full ML run.
+            pass
 
 
 def _baseline_bytes_gate_ok(app_runs: list[RunInputs], *, baseline_rid: str) -> tuple[bool, int]:
@@ -517,11 +580,21 @@ def _compute_phase_rows(
     return rows
 
 
-def _write_dataset_phase_csv(rows: list[dict[str, Any]]) -> None:
+def _write_prevalence_csvs(rows: list[dict[str, Any]]) -> None:
+    """Write dataset-level anomaly prevalence tables.
+
+    Paper #2 (locked):
+    - Main table is per-app and has only two phases: idle vs interactive (concatenated windows).
+    - Detailed per-run/per-model distributions are written to a separate appendix file.
+    """
     out_dir = Path(app_config.DATA_DIR)
     out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / "anomaly_prevalence_per_app_phase.csv"
-    fieldnames = [
+    main_path = out_dir / "anomaly_prevalence_per_app_phase.csv"
+    appendix_path = out_dir / "anomaly_prevalence_per_run.csv"
+    import csv
+
+    # Appendx: per-run/per-model with distribution stats.
+    appendix_fields = [
         "identity_key",
         "package_name",
         "run_id",
@@ -540,13 +613,63 @@ def _write_dataset_phase_csv(rows: list[dict[str, Any]]) -> None:
         "threshold_percentile",
         "ml_schema_version",
     ]
-    import csv
-
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+    with appendix_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=appendix_fields)
         writer.writeheader()
         for row in rows:
-            writer.writerow({k: row.get(k) for k in fieldnames})
+            writer.writerow({k: row.get(k) for k in appendix_fields})
+
+    # Main: per-app, idle vs interactive_concat (concatenated windows, no per-run averaging).
+    agg: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for row in rows:
+        pkg = str(row.get("package_name") or "").strip()
+        model = str(row.get("model") or "").strip()
+        if not pkg or not model:
+            continue
+        phase = str(row.get("phase") or "").strip().lower()
+        phase2 = "idle" if phase == "idle" else "interactive"
+        key = (pkg, phase2, model)
+        cur = agg.get(key)
+        if not cur:
+            cur = {
+                "package_name": pkg,
+                "phase": phase2,
+                "model": model,
+                "windows_total": 0,
+                "windows_flagged": 0,
+                "training_mode": row.get("training_mode"),
+                "ml_schema_version": row.get("ml_schema_version"),
+            }
+            agg[key] = cur
+        try:
+            cur["windows_total"] += int(row.get("windows_total") or 0)
+            cur["windows_flagged"] += int(row.get("anomalous_windows") or 0)
+        except Exception:
+            continue
+
+    main_fields = [
+        "package_name",
+        "phase",
+        "model",
+        "windows_total",
+        "windows_flagged",
+        "flagged_pct",
+        "training_mode",
+        "ml_schema_version",
+    ]
+    rows_out: list[dict[str, Any]] = []
+    for (_, _, _), cur in sorted(agg.items(), key=lambda kv: (kv[1]["package_name"], kv[1]["phase"], kv[1]["model"])):
+        total = int(cur.get("windows_total") or 0)
+        flagged = int(cur.get("windows_flagged") or 0)
+        pct = (float(flagged) / float(total)) if total > 0 else 0.0
+        out = dict(cur)
+        out["flagged_pct"] = pct
+        rows_out.append(out)
+    with main_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=main_fields)
+        writer.writeheader()
+        for row in rows_out:
+            writer.writerow({k: row.get(k) for k in main_fields})
 
 
 def _compute_model_overlap_rows(
@@ -635,6 +758,7 @@ def _compute_transport_mix_rows(
         tls, quic, tcp, udp = _transport_ratios_from_inputs(r)
         phase = per_run_phase.get(r.run_id) or _fallback_phase(r.run_profile)
         tag = per_run_tag.get(r.run_id) or ""
+        pcap_bytes = _pcap_size_bytes_from_inputs(r)
         rows.append(
             {
                 "package_name": package_name,
@@ -645,16 +769,24 @@ def _compute_transport_mix_rows(
                 "quic_ratio": quic,
                 "tcp_ratio": tcp,
                 "udp_ratio": udp,
+                "pcap_bytes": pcap_bytes,
             }
         )
     return rows
 
 
-def _write_transport_mix_csv(rows: list[dict[str, Any]]) -> None:
+def _write_transport_mix_csvs(rows: list[dict[str, Any]]) -> None:
+    """Write transport mix tables.
+
+    Paper #2 main table: per-app, idle vs interactive (weighted by PCAP bytes when available).
+    """
     out_dir = Path(app_config.DATA_DIR)
     out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / "transport_mix_by_phase.csv"
-    fieldnames = [
+    main_path = out_dir / "transport_mix_by_phase.csv"
+    appendix_path = out_dir / "transport_mix_per_run.csv"
+    import csv
+
+    appendix_fields = [
         "package_name",
         "run_id",
         "phase",
@@ -663,14 +795,221 @@ def _write_transport_mix_csv(rows: list[dict[str, Any]]) -> None:
         "quic_ratio",
         "tcp_ratio",
         "udp_ratio",
+        "pcap_bytes",
     ]
-    import csv
-
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+    with appendix_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=appendix_fields)
         writer.writeheader()
         for row in rows:
-            writer.writerow({k: row.get(k) for k in fieldnames})
+            writer.writerow({k: row.get(k) for k in appendix_fields})
+
+    # Aggregate idle vs interactive (bytes-weighted when available).
+    groups: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        pkg = str(row.get("package_name") or "").strip()
+        if not pkg:
+            continue
+        phase = str(row.get("phase") or "").strip().lower()
+        phase2 = "idle" if phase == "idle" else "interactive"
+        groups[(pkg, phase2)].append(row)
+
+    main_fields = [
+        "package_name",
+        "phase",
+        "runs_in_phase",
+        "weight_bytes_total",
+        "tls_ratio",
+        "quic_ratio",
+        "tcp_ratio",
+        "udp_ratio",
+    ]
+
+    def wavg(vals: list[tuple[float | None, int]]) -> float | None:
+        num = 0.0
+        den = 0.0
+        for v, w in vals:
+            if v is None:
+                continue
+            ww = max(int(w), 0)
+            if ww <= 0:
+                continue
+            num += float(v) * float(ww)
+            den += float(ww)
+        if den > 0:
+            return float(num) / float(den)
+        # fall back to unweighted mean of non-null
+        xs = [float(v) for v, _ in vals if v is not None]
+        if not xs:
+            return None
+        return float(sum(xs)) / float(len(xs))
+
+    out_rows: list[dict[str, Any]] = []
+    for (pkg, phase), rs in sorted(groups.items(), key=lambda kv: (kv[0][0], kv[0][1])):
+        weights = [int(r.get("pcap_bytes") or 0) for r in rs]
+        weight_total = int(sum(max(w, 0) for w in weights))
+        out_rows.append(
+            {
+                "package_name": pkg,
+                "phase": phase,
+                "runs_in_phase": int(len(rs)),
+                "weight_bytes_total": int(weight_total),
+                "tls_ratio": wavg([( _safe_float(r.get("tls_ratio")), int(r.get("pcap_bytes") or 0)) for r in rs]),
+                "quic_ratio": wavg([( _safe_float(r.get("quic_ratio")), int(r.get("pcap_bytes") or 0)) for r in rs]),
+                "tcp_ratio": wavg([( _safe_float(r.get("tcp_ratio")), int(r.get("pcap_bytes") or 0)) for r in rs]),
+                "udp_ratio": wavg([( _safe_float(r.get("udp_ratio")), int(r.get("pcap_bytes") or 0)) for r in rs]),
+            }
+        )
+    with main_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=main_fields)
+        writer.writeheader()
+        for row in out_rows:
+            writer.writerow({k: row.get(k) for k in main_fields})
+
+
+def _pcap_size_bytes_from_inputs(inputs: RunInputs) -> int | None:
+    if isinstance(inputs.pcap_report, dict):
+        v = inputs.pcap_report.get("pcap_size_bytes")
+        try:
+            if v is not None:
+                return int(v)
+        except Exception:
+            pass
+    if inputs.pcap_path and inputs.pcap_path.exists():
+        try:
+            return int(inputs.pcap_path.stat().st_size)
+        except Exception:
+            return None
+    return None
+
+
+def _maybe_write_paper_artifacts_json(*, candidate: _ExemplarCandidate | None, freeze_manifest_path: Path) -> None:
+    """Write a stable, human-readable lock file for the paper's flagship timeline exemplar.
+
+    This file is dataset-adjacent (stored next to the freeze manifest) and is never overwritten.
+    """
+    path = FREEZE_DIR / "paper_artifacts.json"
+    if path.exists():
+        return
+    if not candidate:
+        # No eligible exemplar (e.g., no video-tagged interactive runs). Leave absent rather than guessing.
+        return
+    payload: dict[str, Any] = {
+        "freeze_anchor": str(freeze_manifest_path),
+        "fig_B1_run_id": candidate.run_id,
+        "package_name": candidate.package_name,
+        "interaction_tag": candidate.interaction_tag,
+        "ended_at": candidate.ended_at,
+        "selection_metric": "sustained_bytes_per_sec_k6",
+        "tie_breakers": ["iforest_prevalence", "ocsvm_prevalence", "ended_at"],
+        "metrics": {
+            "sustained_bytes_per_sec_k6": float(candidate.sustained_bytes_per_sec_k6),
+            "iforest_flagged_pct": float(candidate.iforest_flagged_pct),
+            "ocsvm_flagged_pct": float(candidate.ocsvm_flagged_pct),
+        },
+        "written_at": datetime.now(UTC).isoformat(),
+    }
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _select_fig_b1_exemplar_candidate(
+    *,
+    current: _ExemplarCandidate | None,
+    package_name: str,
+    interactive_run_ids: list[str],
+    per_run_rows: dict[str, tuple[list[dict[str, Any]], int]],
+    per_run_tag: dict[str, str | None],
+    per_model_scores_by_run: dict[str, dict[str, list[float]]],
+    per_model_thresholds: dict[str, float],
+    checksums: dict[str, Any],
+    k_windows: int = 6,
+) -> _ExemplarCandidate | None:
+    """Select the canonical Fig B1 exemplar candidate deterministically.
+
+    Reviewer protocol (Paper #2):
+    - Consider only interactive runs with unambiguous video tag.
+    - Primary metric: sustained bytes/sec over >=K consecutive windows (K=6 => 30s).
+    - Tie breakers: higher IF prevalence, then higher OC-SVM prevalence, then later ended_at.
+    """
+    if config.MODEL_IFOREST not in per_model_scores_by_run or config.MODEL_OCSVM not in per_model_scores_by_run:
+        return current
+
+    if_thr = float(per_model_thresholds.get(config.MODEL_IFOREST) or 0.0)
+    oc_thr = float(per_model_thresholds.get(config.MODEL_OCSVM) or 0.0)
+
+    for rid in interactive_run_ids:
+        tag_raw = per_run_tag.get(rid)
+        tag = _canonical_interaction_tag(tag_raw)
+        if tag != "video":
+            continue
+        run_rows = per_run_rows.get(rid, ([], 0))[0]
+        if not run_rows:
+            continue
+        bps = []
+        denom = float(config.WINDOW_SIZE_S) if float(config.WINDOW_SIZE_S) > 0 else 1.0
+        for row in run_rows:
+            try:
+                bps.append(float(row.get("byte_count") or 0.0) / denom)
+            except Exception:
+                continue
+        if len(bps) < int(k_windows):
+            continue
+        # Sustained metric: max rolling mean over K windows.
+        best = 0.0
+        s = sum(bps[:k_windows])
+        best = max(best, float(s) / float(k_windows))
+        for i in range(k_windows, len(bps)):
+            s += bps[i] - bps[i - k_windows]
+            best = max(best, float(s) / float(k_windows))
+
+        if_scores = per_model_scores_by_run[config.MODEL_IFOREST].get(rid) or []
+        oc_scores = per_model_scores_by_run[config.MODEL_OCSVM].get(rid) or []
+        if not if_scores or not oc_scores:
+            continue
+        if_pct = float(sum(1 for x in if_scores if float(x) >= if_thr)) / float(len(if_scores)) if if_scores else 0.0
+        oc_pct = float(sum(1 for x in oc_scores if float(x) >= oc_thr)) / float(len(oc_scores)) if oc_scores else 0.0
+
+        ended_at = None
+        blk = checksums.get(rid) if isinstance(checksums.get(rid), dict) else {}
+        ended_at = blk.get("ended_at") if isinstance(blk, dict) else None
+
+        cand = _ExemplarCandidate(
+            run_id=rid,
+            package_name=package_name,
+            interaction_tag=tag,
+            ended_at=str(ended_at) if ended_at is not None else None,
+            sustained_bytes_per_sec_k6=float(best),
+            iforest_flagged_pct=float(if_pct),
+            ocsvm_flagged_pct=float(oc_pct),
+        )
+        if not current:
+            current = cand
+            continue
+
+        # Primary
+        if cand.sustained_bytes_per_sec_k6 > current.sustained_bytes_per_sec_k6 + 1e-12:
+            current = cand
+            continue
+        if abs(cand.sustained_bytes_per_sec_k6 - current.sustained_bytes_per_sec_k6) <= 1e-12:
+            # Tie 1: IF prevalence
+            if cand.iforest_flagged_pct > current.iforest_flagged_pct + 1e-12:
+                current = cand
+                continue
+            if abs(cand.iforest_flagged_pct - current.iforest_flagged_pct) <= 1e-12:
+                # Tie 2: OC-SVM prevalence
+                if cand.ocsvm_flagged_pct > current.ocsvm_flagged_pct + 1e-12:
+                    current = cand
+                    continue
+                if abs(cand.ocsvm_flagged_pct - current.ocsvm_flagged_pct) <= 1e-12:
+                    # Tie 3: later ended_at (fallback: lexical run_id)
+                    a = _parse_ended_at_epoch(current.ended_at)
+                    b = _parse_ended_at_epoch(cand.ended_at)
+                    if b > a + 1e-9:
+                        current = cand
+                        continue
+                    if abs(b - a) <= 1e-9 and cand.run_id > current.run_id:
+                        current = cand
+                        continue
+    return current
 
 
 def _transport_ratios_from_inputs(inputs: RunInputs) -> tuple[float | None, float | None, float | None, float | None]:
@@ -860,4 +1199,3 @@ def _write_app_skip(app_runs: list[RunInputs], *, frozen: bool, reason: str) -> 
 
 
 __all__ = ["MlRunStats", "run_ml_on_evidence_packs"]
-

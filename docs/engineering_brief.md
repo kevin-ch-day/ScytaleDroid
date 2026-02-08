@@ -5,6 +5,11 @@
 - Findings are mapped to OWASP MASVS v2.1 and scored with CVSS v4.0 so published tables/figures (e.g., CARS 2025) are reproducible.
 - Think “toolchain behind academic studies,” not a one-off script; every change impacts reproducibility claims.
 
+Paper #2 posture (dynamic + ML):
+- Evidence packs are authoritative.
+- DB is a derived/rebuildable accelerator (fast queries), not ground truth.
+- ML is a deterministic lens for execution-dependent behavior, not detection/accuracy.
+
 ## Research Context (keep in mind)
 - **Deconstructing Twitter App:** Single-app static teardown (manifest, exported components, permissions, network config, hardcoded material). Mostly bespoke scripts.
 - **CARS2025 Social Media:** Generalizes to multiple social apps (Twitter/X, FB, IG, TikTok, Snapchat, etc.) and looks for patterns:
@@ -15,15 +20,29 @@
   - Cleartext or weak network configs
 - ScytaleDroid’s job: industrialize these methods and make them extensible to new app sets and studies.
 
-## Current State (legacy phase labels; see sprint tracker)
+## Current State (as of 2026-02-08)
 - **Inventory engine:** `DeviceAnalysis/inventory/*` + `inventory_service` collect packages, persist snapshots, sync app definitions, compute a single InventoryDelta reused across UI (summary cards, dashboard, gating).
 - **Staleness/gating:** 24h age semantics; “fresh + diff” surfaces a single dialog; stale forces sync prompt.
 - **Harvesting:** Menu → Pull APKs → scope selection → clean handling of multi-split APKs; per-package summaries; artifacts under `data/apks/device_apks/...`.
 - **Menu/UX:** Device Analysis menu stable; shortcuts (`r`, `c`, `i`, `s`, `l`, `q/0`) consistent.
 - **Classification sanity:** Inventory summary shows user-scope candidates, Play vs sideload vs unknown for user apps, roles by partition (User/OEM/System/Mainline/Vendor).
 
-## What’s Next (legacy phase labels; see sprint tracker)
-### Phase 3 – Research-complete, reproducible engine
+## Paper #2 (Phases A–E) summary
+
+- Phase A: Device + APK intake (harvest) — complete.
+- Phase B: Static analysis (paper-grade, batch) — complete; produces dynamic plans + static context.
+- Phase C: Static → Dynamic contract — complete; dynamic packs embed `inputs/static_dynamic_plan.json`.
+- Phase D: Dynamic capture + QA — complete for Paper #2; dataset freeze + immutability verification.
+- Phase E: ML (offline, evidence-pack-only) — deterministic windowing and fixed models; outputs versioned under evidence packs.
+
+## What’s Next
+### Phase E – ML completion (Paper #2)
+- Batch ML runner selects runs only from the checksummed freeze manifest.
+- Per-app IF + OC-SVM scoring over 10s/5s windows (drop partials).
+- Dataset-level CSVs + 2–4 paper figures/tables (prevalence, overlap, transport mix, exemplar timeline).
+- Reproducibility appendix: freeze filename+checksum, tool versions, seeds, quality gates.
+
+### Phase 3 – Research-complete, reproducible engine (post-paper backlog)
 - **Static run metadata + DB:** `static_service.run_scan` as the only entry; stamp pipeline_version, catalog_versions, config_hash, study_tag, run_started_utc; persist to `static_analysis_runs` (run_id, started_utc, scope/app_count, pipeline_version, catalog_versions, config_hash, study_tag).
 - **Analyzers for paper issue classes:** Implement checks (manifest/components, permissions, legacy storage, network config, secrets) in `StaticAnalysis/checks/*`; normalize findings with app identity, MASVS control, CVSS v4 vector/severity into `static_analysis_findings`.
 - **Performance modes (honest):** Baseline = truth. Document and log modes (`baseline`, `user_only`, `bulk`, `incremental` if added). Any fast mode must match baseline semantics for delta/scope/roles on the same device. Log timing with mode.
@@ -44,3 +63,9 @@
 ## What “done” means
 - **Phase 3:** Static run metadata persisted + visible in reporting; analyzers implemented and tested with fixtures for the paper’s issue classes; fast modes documented and parity-checked against baseline.
 - **Phase 4:** Device panel polished; compact/verbose harvest output; Recent static runs view wired to DB; debug diagnostics present but quiet by default.
+
+Paper #2 Phase E is “done” when:
+- ML outputs exist for the 36 included frozen runs (per-run artifacts under evidence packs).
+- Dataset-level tables exist under `data/` (prevalence, overlap, transport mix).
+- Figures/tables are generated to support the paper’s execution-dependent behavior claims.
+- Freeze immutability verification is recorded.

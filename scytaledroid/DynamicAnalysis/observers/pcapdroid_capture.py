@@ -235,7 +235,7 @@ class PcapdroidCaptureObserver(Observer):
                         mismatch_warning = (
                             "PCAPdroid capture filename mismatch (fallback file does not match run id)."
                         )
-                    digest = hashlib.sha256(local_path.read_bytes()).hexdigest()
+                    digest = _sha256_stream(local_path)
                     artifacts.append(
                         ArtifactRecord(
                             relative_path=str(local_path.relative_to(run_ctx.run_dir)),
@@ -292,14 +292,16 @@ class PcapdroidCaptureObserver(Observer):
                     encoding="utf-8",
                 )
 
-        # Meta artifact must be hashed only after all writes are complete.
+        # pcapdroid_capture_meta.json is not treated as an immutable artifact (it may be
+        # enriched later by post-processing). Do not include sha256 to avoid integrity
+        # failures "by construction". Freeze immutability relies on dataset-level
+        # checksums, not these best-effort hashes.
         if meta_path.exists():
-            digest = hashlib.sha256(meta_path.read_bytes()).hexdigest()
             artifacts.append(
                 ArtifactRecord(
                     relative_path=str(meta_path.relative_to(run_ctx.run_dir)),
                     type="pcapdroid_capture_meta",
-                    sha256=digest,
+                    sha256=None,
                     size_bytes=meta_path.stat().st_size,
                     produced_by=self.observer_id,
                     origin="host",
@@ -310,12 +312,11 @@ class PcapdroidCaptureObserver(Observer):
         if status == "failed":
             error_path = meta_path.parent / "observer_error.txt"
             error_path.write_text(error or "", encoding="utf-8")
-            digest = hashlib.sha256(error_path.read_bytes()).hexdigest()
             artifacts.append(
                 ArtifactRecord(
                     relative_path=str(error_path.relative_to(run_ctx.run_dir)),
                     type="observer_error",
-                    sha256=digest,
+                    sha256=None,
                     size_bytes=error_path.stat().st_size,
                     produced_by=self.observer_id,
                     origin="host",
@@ -325,12 +326,11 @@ class PcapdroidCaptureObserver(Observer):
         elif error:
             error_path = meta_path.parent / "observer_error.txt"
             error_path.write_text(error or "", encoding="utf-8")
-            digest = hashlib.sha256(error_path.read_bytes()).hexdigest()
             artifacts.append(
                 ArtifactRecord(
                     relative_path=str(error_path.relative_to(run_ctx.run_dir)),
                     type="observer_error",
-                    sha256=digest,
+                    sha256=None,
                     size_bytes=error_path.stat().st_size,
                     produced_by=self.observer_id,
                     origin="host",
@@ -352,6 +352,14 @@ def _pcapdroid_installed(device_serial: str) -> bool:
     except Exception:
         return False
     return "package:" in output
+
+
+def _sha256_stream(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _pcapdroid_status_ok(device_serial: str, api_key: str | None) -> tuple[bool | None, str | None]:

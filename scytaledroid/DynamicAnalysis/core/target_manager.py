@@ -1,8 +1,12 @@
-"""Target management helpers for dynamic analysis runs."""
+"""Target management helpers for dynamic analysis runs.
+
+Hash posture: per-artifact sha256 values are best-effort audit aids. Most target/env
+artifacts are not treated as immutable inputs to Phase E; freeze checksums are the
+immutability anchor.
+"""
 
 from __future__ import annotations
 
-import hashlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -61,7 +65,7 @@ class TargetManager:
         )
         path = run_ctx.run_dir / "artifacts/target/package_info.txt"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(package_dump)
+        path.write_text(package_dump, encoding="utf-8")
         version_name = self._extract_value(package_dump, r"versionName=(\S+)")
         version_code = self._extract_value(package_dump, r"versionCode=(\d+)")
         package_paths = self._read_package_paths(run_ctx)
@@ -102,7 +106,7 @@ class TargetManager:
         )
         path = run_ctx.run_dir / "artifacts/target/launch_output.txt"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(output)
+        path.write_text(output, encoding="utf-8")
         return path
 
     def _force_stop_app(self, run_ctx: RunContext) -> Path | None:
@@ -112,15 +116,14 @@ class TargetManager:
         )
         path = run_ctx.run_dir / "artifacts/target/stop_output.txt"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(output)
+        path.write_text(output, encoding="utf-8")
         return path
 
     def _artifact_record(self, run_ctx: RunContext, path: Path, artifact_type: str) -> ArtifactRecord:
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
         return ArtifactRecord(
             relative_path=str(path.relative_to(run_ctx.run_dir)),
             type=artifact_type,
-            sha256=digest,
+            sha256=None,
             size_bytes=path.stat().st_size,
             produced_by="target_manager",
             origin="host",

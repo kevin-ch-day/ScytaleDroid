@@ -1,0 +1,43 @@
+# Paper #2 — Dynamic Dataset + Phase E (ML) Index
+
+This folder contains the **authoritative operator + implementation contracts**
+for Paper #2.
+
+## What Paper #2 is (and is not)
+
+Paper #2 thesis (locked):
+- **Android app security risk is execution-dependent.**
+- Static analysis shows **where risk exists**; dynamic analysis shows **when risk matters**
+  under real user interaction (idle vs interactive; messaging/text/voice/video tags).
+
+Non-goals (explicit, reviewer-facing):
+- Not malware detection.
+- Not supervised classification.
+- No model tuning / accuracy claims.
+- No DPI / payload inspection / decryption.
+
+## Frozen Dataset Anchor (Ground Truth)
+
+Canonical citation anchor (do not switch unless intentionally versioning dataset inputs):
+- `data/archive/dataset_freeze-20260208T201527Z.json`
+
+Selection rule (locked):
+- Phase E selects **only** `included_run_ids` from the freeze manifest (exactly 36).
+- Extra valid runs may exist on disk; they are **out-of-dataset** and must not be selected.
+
+Immutability rule (locked):
+- Evidence packs are authoritative.
+- Freeze immutability is verified via `included_run_checksums` in the freeze manifest.
+- Do not recompute frozen artifacts (`pcap_report.json`, `pcap_features.json`) for included runs.
+
+## Key Docs
+
+- `docs/paper2/operator_runbook.md`
+  - Operator workflow for Phase D collection, freeze, and Phase E execution.
+- `docs/paper2/phase_e_plan.md`
+  - Phase E (ML) contract (inputs, windowing, gates, models, outputs).
+- `docs/evidence_pack_spec.md`
+  - Frozen input contract and where outputs live.
+- `docs/database/derived_index.md`
+  - DB posture (derived/rebuildable; Phase E runner is DB-free).
+

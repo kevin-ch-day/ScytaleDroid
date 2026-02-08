@@ -13,6 +13,8 @@ findings.
   back to UTC and annotate the fallback zone label.
 - **Determinism:** Outputs must have fixed wording and deterministic ordering (sort lists before rendering).
 - **Safety:** Never render raw secret values—only evidence pointers and short hashes.
+- **Paper #2 boundary:** Static signals are used for contextual explanation/stratification only.
+  They must not be fed into Phase E ML feature vectors (dynamic/PCAP is the behavioral input).
 - **Badges:** Valid status badges are `[OK]`, `[INFO]`, `[WARN]`, `[FAIL]`, and `[skipped]`.
 - **Timing:** Every section returns a `duration_sec` (float) and renders it with one decimal place.
 - **Evidence limit:** Renderers must display no more than `N` evidence entries (default `2`), appending `(+N more)` when additional entries are omitted.

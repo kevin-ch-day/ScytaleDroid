@@ -76,15 +76,13 @@ def print_run_summary(result, duration_label: str) -> None:
 
         # DB is a derived index (not authoritative). Make its status explicit so
         # operators can spot schema/persistence problems without reading logs.
-        env = manifest.get("environment") or {}
-        if isinstance(env, dict):
-            dbp = env.get("db_persistence")
-            if isinstance(dbp, dict) and dbp.get("attempted") is True:
-                if dbp.get("ok") is True:
-                    lines.append(("DB persistence", "OK (derived index)"))
-                else:
-                    code = dbp.get("error_code") or "DB_PERSISTENCE_FAILED"
-                    lines.append(("DB persistence", f"FAILED: {code} (derived index)"))
+        dbp = _load_db_persistence_status(run_dir)
+        if isinstance(dbp, dict) and dbp.get("attempted") is True:
+            if dbp.get("ok") is True:
+                lines.append(("DB persistence", "OK (derived index)"))
+            else:
+                code = dbp.get("error_code") or "DB_PERSISTENCE_FAILED"
+                lines.append(("DB persistence", f"FAILED: {code} (derived index)"))
     if result.evidence_path:
         lines.append(("Evidence", result.evidence_path))
     status_messages.print_strip("Session", lines, width=70)
@@ -252,6 +250,24 @@ def _load_engine_summary(run_dir: Path | None) -> dict[str, object] | None:
         return json.loads(summary_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
+
+
+def _load_db_persistence_status(run_dir: Path | None) -> dict[str, object] | None:
+    if not run_dir:
+        return None
+    # Preferred: derived, versioned index artifact (does not mutate the manifest).
+    payload = _load_json(run_dir / "analysis" / "index" / "v1" / "db_persistence_status.json")
+    if isinstance(payload, dict):
+        return payload
+    # Backward compatibility: older manifests embedded env.db_persistence.
+    manifest = _load_manifest(run_dir)
+    if not isinstance(manifest, dict):
+        return None
+    env = manifest.get("environment")
+    if not isinstance(env, dict):
+        return None
+    dbp = env.get("db_persistence")
+    return dbp if isinstance(dbp, dict) else None
 
 
 def _load_json(path: Path | None) -> dict[str, object] | None:

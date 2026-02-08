@@ -8,6 +8,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from scytaledroid.Config import app_config
+
 from .manifest import RunManifest, manifest_to_dict
 
 
@@ -24,8 +26,18 @@ class EvidencePackWriter:
         self.analysis_dir.mkdir(parents=True, exist_ok=True)
         self.notes_dir.mkdir(parents=True, exist_ok=True)
 
-    def write_manifest(self, manifest: RunManifest) -> Path:
+    def write_manifest(self, manifest: RunManifest, *, allow_overwrite: bool = False) -> Path:
         manifest_path = self.run_dir / "run_manifest.json"
+        if manifest_path.exists() and not allow_overwrite:
+            raise RuntimeError(f"Refusing to overwrite sealed manifest: {manifest_path}")
+        if not manifest.sealed_at:
+            # Sealing moment: the final manifest write.
+            # Use the same UTC ISO format used elsewhere in manifests.
+            from datetime import UTC, datetime
+
+            manifest.sealed_at = datetime.now(UTC).isoformat()
+        if not manifest.sealed_by:
+            manifest.sealed_by = f"{app_config.APP_NAME} {app_config.APP_VERSION}"
         payload = manifest_to_dict(manifest)
         # Write atomically: temp + replace. Use a per-process temp name to avoid
         # rare collisions if a run directory is ever touched concurrently.

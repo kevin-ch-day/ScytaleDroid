@@ -25,23 +25,13 @@ try:
 except Exception:
     DYNAMIC_MIN_PCAP_BYTES = 100000
 
-# Dataset protocol (Paper #2)
-# Default can be overridden at process start via:
-# - SCYTALEDROID_DATASET_BASELINE_RUNS
-# - SCYTALEDROID_DATASET_INTERACTIVE_RUNS
-# This affects quota tracking and UI suggestions only; it does not change capture behavior.
-try:
-    DYNAMIC_DATASET_BASELINE_RUNS = int(os.getenv("SCYTALEDROID_DATASET_BASELINE_RUNS", "1"))
-except Exception:
-    DYNAMIC_DATASET_BASELINE_RUNS = 1
-
-try:
-    DYNAMIC_DATASET_INTERACTIVE_RUNS = int(os.getenv("SCYTALEDROID_DATASET_INTERACTIVE_RUNS", "2"))
-except Exception:
-    DYNAMIC_DATASET_INTERACTIVE_RUNS = 2
+# Dataset protocol (Paper #2, locked)
+# Quotas are a methods-level contract and must not be overridden via environment variables
+# in dataset-tier collection paths (prevents accidental scope creep).
+DYNAMIC_DATASET_BASELINE_RUNS = 1
+DYNAMIC_DATASET_INTERACTIVE_RUNS = 2
 
 # Total quota slots (Paper #2 locked): baseline + interactive.
-# Intentionally no legacy env override for total runs (avoids scope creep).
 DYNAMIC_DATASET_RUNS_PER_APP = int(DYNAMIC_DATASET_BASELINE_RUNS) + int(DYNAMIC_DATASET_INTERACTIVE_RUNS)
 
 # Device module paths

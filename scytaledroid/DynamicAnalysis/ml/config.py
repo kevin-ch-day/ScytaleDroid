@@ -6,6 +6,11 @@ from __future__ import annotations
 ML_SCHEMA_VERSION = 1
 ML_SCHEMA_LABEL = f"v{ML_SCHEMA_VERSION}"
 
+# Canonical Paper #2 dataset anchor (PM/reviewer locked).
+# Phase E must select ONLY `included_run_ids` from this freeze file and fail closed if
+# it is missing or not checksummed.
+FREEZE_CANONICAL_FILENAME = "dataset_freeze-20260208T201527Z.json"
+
 # Windowing (locked)
 WINDOW_SIZE_S = 10.0
 WINDOW_STRIDE_S = 5.0

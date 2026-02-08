@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import subprocess
 
 from scytaledroid.DeviceAnalysis.adb import client as adb_client
@@ -55,11 +54,10 @@ class SystemLogObserver(Observer):
         file_handle.flush()
         file_handle.close()
         path = run_ctx.run_dir / relative_path
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
         artifact = ArtifactRecord(
             relative_path=relative_path,
             type="system_log_capture",
-            sha256=digest,
+            sha256=None,
             size_bytes=path.stat().st_size,
             produced_by=self.observer_id,
             origin="host",

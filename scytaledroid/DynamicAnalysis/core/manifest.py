@@ -14,8 +14,11 @@ def _sorted_artifacts(artifacts: list[ArtifactRecord]) -> list[ArtifactRecord]:
 class ArtifactRecord:
     relative_path: str
     type: str
-    sha256: str
     produced_by: str
+    # Best-effort audit hash. For Paper #2 immutability, rely on the dataset-level
+    # freeze manifest checksums. Mutable artifacts (e.g., JSONL logs) should omit
+    # sha256 to avoid integrity failures "by construction".
+    sha256: str | None = None
     size_bytes: int | None = None
     origin: str | None = None
     device_path: str | None = None
@@ -41,6 +44,10 @@ class RunManifest:
     batch_id: str | None = None
     started_at: str | None = None
     ended_at: str | None = None
+    # Sealing metadata: set once when the manifest is finalized. After a run is sealed,
+    # the manifest must not be rewritten in-place (derived outputs must be versioned).
+    sealed_at: str | None = None
+    sealed_by: str | None = None
     status: str = "pending"
     # Dataset-tier validity and flags. This is a first-class, machine-readable contract
     # for Paper #2.
@@ -77,6 +84,8 @@ def manifest_to_dict(manifest: RunManifest) -> dict[str, Any]:
         "batch_id": manifest.batch_id,
         "started_at": manifest.started_at,
         "ended_at": manifest.ended_at,
+        "sealed_at": manifest.sealed_at,
+        "sealed_by": manifest.sealed_by,
         "status": manifest.status,
         "dataset": manifest.dataset,
         "qa": manifest.qa,

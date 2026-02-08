@@ -38,23 +38,19 @@ class RunEventLogger:
     def finalize(self) -> ArtifactRecord | None:
         if not self.path.exists():
             return None
-        digest = self._hash_file(self.path)
+        # Do not hash mutable logs inside the per-run manifest. Freeze-level
+        # immutability uses included_run_checksums in the dataset freeze manifest.
         return ArtifactRecord(
             relative_path=str(self.path.relative_to(self.run_ctx.run_dir)),
             type="run_events",
-            sha256=digest,
+            sha256=None,
             size_bytes=self.path.stat().st_size,
             produced_by="event_logger",
             origin="host",
             pull_status="n/a",
         )
 
-    def _hash_file(self, path: Path) -> str:
-        hasher = hashlib.sha256()
-        with path.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(8192), b""):
-                hasher.update(chunk)
-        return hasher.hexdigest()
+    # Intentionally no hash_file here (run_events.jsonl is mutable).
 
     @staticmethod
     def _now() -> str:

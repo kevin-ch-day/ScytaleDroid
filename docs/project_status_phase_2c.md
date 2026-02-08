@@ -1,5 +1,13 @@
 # Project Status — Phase 2C (Legacy Snapshot)
 
+This document is **historic** and preserved for context only.
+It does not represent the current Paper #2 Phase D/E status.
+
+Current Paper #2 docs:
+- `docs/paper2/operator_runbook.md`
+- `docs/paper2/phase_e_plan.md`
+- `docs/evidence_pack_spec.md`
+
 ## Phase / Sprint Status (historic)
 - **Phase 2C (telemetry stabilization + Tier-1 readiness):** complete.
 - Sampling stability, QA gates, and dataset export are functional and verified.

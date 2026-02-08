@@ -4,6 +4,11 @@ This document defines the contract, data model, and evidence rules for dynamic
 analysis in ScytaleDroid. It is intentionally tool-agnostic and focused on
 research-grade reproducibility.
 
+Paper #2 notes:
+- Evidence packs are authoritative.
+- The DB is derived/rebuildable (accelerator), not ground truth.
+- Phase E (ML) selects runs from a dataset-level freeze manifest and consumes evidence packs only.
+
 ## 0. Cross-Cutting Rules
 
 - **Run identity:** `dynamic_run_id` is a UUIDv4. It is not derived from inputs.
@@ -16,8 +21,13 @@ research-grade reproducibility.
 - **Determinism:** Folder layout and filenames are stable. Do not embed
   timestamps in artifact filenames; timestamps are allowed only as manifest
   metadata.
-- **Evidence integrity:** Every artifact must be registered in the manifest
-  with a relative path and `sha256`.
+- **Evidence integrity (per-run):** Artifacts should be registered in the manifest
+  with relative paths. Per-artifact hashes are best-effort and should be treated
+  as an audit aid, not the Paper #2 immutability anchor. Only immutable artifacts
+  should carry `sha256` in the registry; mutable note/log artifacts should omit
+  hashes.
+- **Evidence integrity (dataset-level):** Paper #2 relies on a checksummed dataset
+  freeze manifest (`included_run_checksums`) to verify immutability of frozen inputs.
 - **Redaction:** Raw artifacts are preserved. Redaction occurs only in
   summaries or rendered output.
 - **Status model:** `success`, `degraded`, `failed`.
@@ -80,19 +90,42 @@ must include:
 - `artifacts` (global registry, sorted by relative path)
 - `outputs` (analysis summaries, notes)
 
+### Dataset validity block (Paper #2)
+
+Dataset validity is recorded in the manifest and treated as authoritative:
+- `dataset.tier` (e.g., `"dataset"`)
+- `dataset.valid_dataset_run: true|false`
+- `dataset.invalid_reason_code` (when invalid)
+- `dataset.countable: true|false` (counts toward quota)
+
+Trainability is separate from validity:
+- `dataset.low_signal: true|false` (flag only; does not invalidate)
+- `dataset.low_signal_reasons: []` (optional)
+
 ### Artifact registry
 
 Every artifact entry contains:
 
 - `relative_path`
 - `type`
-- `sha256`
+- `sha256` (optional; only for immutable artifacts)
 - `size_bytes` (optional)
 - `produced_by` (observer id)
 
 Artifact registry entries must be sorted by `relative_path` for deterministic
 output. An optional `manifest_sha256` may be stored after the manifest is
 finalized.
+
+## 3.1 Dataset freeze (Paper #2 selector + immutability anchor)
+
+The frozen dataset is selected by a dataset-level freeze manifest:
+- `data/archive/dataset_freeze-*.json`
+- `included_run_ids` lists the exact run_ids included for Paper #2 (36).
+- `included_run_checksums` provides SHA-256 checksums for the frozen inputs per included run.
+
+Freeze rules:
+- The freeze manifest does not mutate evidence packs.
+- After freeze, do not recompute frozen artifacts for the included set.
 
 ## 4. Status Semantics
 
@@ -216,6 +249,22 @@ comparable across runs.
 
 `summary.md` provides a 10–20 line human-readable narrative suitable for paper
 drafting.
+
+## 8.2 ML outputs (derived, versioned)
+
+Phase E writes derived outputs under the evidence pack:
+
+```
+output/evidence/dynamic/<dynamic_run_id>/analysis/ml/v<ml_schema_version>/
+  anomaly_scores_iforest.csv
+  anomaly_scores_ocsvm.csv
+  model_manifest.json
+  ml_summary.json
+```
+
+After freeze, ML outputs must be treated as immutable:
+- No overwrites for included runs.
+- Bug fixes require bumping the ML schema/output version and writing to a new path.
 
 ## 9. Redaction Rules (Summaries Only)
 

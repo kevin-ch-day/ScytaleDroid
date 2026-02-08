@@ -427,41 +427,24 @@ class DynamicAnalysisEngine:
             status["error_code"] = "DB_PERSISTENCE_FAILED"
             status["error"] = str(exc)
 
-        self._record_db_persistence_status(session_result, status)
-        if not status["ok"] and status["attempted"]:
-            # Mirror to engine summary payload for quick debugging. Evidence pack remains authoritative.
-            try:
-                run_dir = resolve_evidence_path(session_result.evidence_path)
-                if run_dir:
-                    writer = EvidencePackWriter(run_dir)
-                    writer.write_json("analysis/db_persistence_status.json", dict(status))
-            except Exception:
-                pass
-
-    def _record_db_persistence_status(self, session_result: DynamicSessionResult, status: Mapping[str, Any]) -> None:
-        run_dir = resolve_evidence_path(session_result.evidence_path)
-        if not run_dir:
-            return
-        manifest_path = run_dir / "run_manifest.json"
-        if not manifest_path.exists():
-            return
+        # Do not mutate run_manifest.json post-finalize. Record DB persistence as a
+        # derived artifact under a versioned path (safe to rebuild) and surface it
+        # in the CLI summary by reading this file.
         try:
-            payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return
-        env = payload.get("environment")
-        if not isinstance(env, dict):
-            env = {}
-        # Use a stable, machine-readable block. Never store secrets here.
-        env["db_persistence"] = {
-            "attempted": bool(status.get("attempted")),
-            "ok": bool(status.get("ok")),
-            "error_code": status.get("error_code"),
-            # Keep error short; detailed logs are in run_events.jsonl
-            "error": (str(status.get("error") or "")[:240] or None),
-        }
-        payload["environment"] = env
-        manifest_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+            run_dir = resolve_evidence_path(session_result.evidence_path)
+            if run_dir:
+                writer = EvidencePackWriter(run_dir)
+                path = run_dir / "analysis" / "index" / "v1" / "db_persistence_status.json"
+                if not path.exists():
+                    writer.write_json(
+                        "analysis/index/v1/db_persistence_status.json",
+                        {
+                            **dict(status),
+                            "recorded_at": datetime.now(UTC).isoformat(),
+                        },
+                    )
+        except Exception:
+            pass
 
     def _attach_engine_outputs(
         self,
@@ -478,25 +461,15 @@ class DynamicAnalysisEngine:
             return
         run_dir = Path(session_result.evidence_path)
         writer = EvidencePackWriter(run_dir)
-        outputs: list[ArtifactRecord] = []
 
-        summary_path = writer.write_json("analysis/engine_summary.json", dict(summary_payload))
-        outputs.append(self._output_record(writer, summary_path, "engine_summary"))
+        # Engine outputs are derived artifacts. Do not mutate run_manifest.json post-seal
+        # to "register" them; the freeze manifest checksums are the immutability anchor.
+        writer.write_json("analysis/engine_summary.json", dict(summary_payload))
 
-        probe_path = writer.write_json("analysis/probe_summary.json", dict(probe_summary))
-        outputs.append(self._output_record(writer, probe_path, "probe_summary"))
+        writer.write_json("analysis/probe_summary.json", dict(probe_summary))
 
         if plan_payload:
-            plan_path = writer.write_json("notes/dynamic_plan.json", dict(plan_payload))
-            outputs.append(self._output_record(writer, plan_path, "dynamic_plan_snapshot"))
-
-        try:
-            self._update_manifest_outputs(writer, outputs)
-        except Exception as exc:  # noqa: BLE001
-            self.logger.warning(
-                "Failed to update run manifest with engine outputs",
-                extra={"error": str(exc)},
-            )
+            writer.write_json("notes/dynamic_plan.json", dict(plan_payload))
 
     def _collect_diagnostics_warnings(
         self,
@@ -573,49 +546,6 @@ class DynamicAnalysisEngine:
             warnings.append("pcap_file_stat_failed")
         return warnings
 
-
-    def _output_record(
-        self,
-        writer: EvidencePackWriter,
-        path: Path,
-        output_type: str,
-    ) -> ArtifactRecord:
-        digest = writer.hash_file(path)
-        return ArtifactRecord(
-            relative_path=str(path.relative_to(writer.run_dir)),
-            type=output_type,
-            sha256=digest,
-            size_bytes=path.stat().st_size,
-            produced_by="dynamic_engine",
-            origin="host",
-            pull_status="n/a",
-        )
-
-    def _update_manifest_outputs(
-        self,
-        writer: EvidencePackWriter,
-        outputs: list[ArtifactRecord],
-    ) -> None:
-        manifest_path = writer.run_dir / "run_manifest.json"
-        if not manifest_path.exists():
-            return
-        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-        existing_outputs = payload.get("outputs")
-        if not isinstance(existing_outputs, list):
-            existing_outputs = []
-        for record in outputs:
-            existing_outputs.append(
-                {
-                    "relative_path": record.relative_path,
-                    "type": record.type,
-                    "sha256": record.sha256,
-                    "size_bytes": record.size_bytes,
-                    "produced_by": record.produced_by,
-                }
-            )
-        existing_outputs.sort(key=lambda item: str(item.get("relative_path", "")))
-        payload["outputs"] = existing_outputs
-        manifest_path.write_text(json.dumps(payload, indent=2, sort_keys=True))
 
 
 def run_dynamic_engine(config: DynamicSessionConfig) -> DynamicEngineResult:

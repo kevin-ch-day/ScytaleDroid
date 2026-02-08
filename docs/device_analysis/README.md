@@ -8,7 +8,7 @@ help move the project forward.
 
 ScytaleDroid is a menu-driven CLI that connects to live Android devices and
 pulls APK artifacts into a structured repository. The toolchain favors a
-"database-first" architecture:
+database-backed architecture for APK intake:
 
 - Every artifact is stored with a deterministic file path and filename that
   embeds the package name and version code.
@@ -105,7 +105,7 @@ inventory to curated APK harvesting and repository ingestion.
 
 ## Roadmap after Device Analysis
 
-Once the harvest loop is fully locked down, the same database-first approach
+Once the harvest loop is fully locked down, the same database-backed approach
 expands to:
 
 1. **Static analysis:** manifest parsing, permission and API surfacing, tracker
@@ -114,8 +114,9 @@ expands to:
    the repository folders that `StaticAnalysis/core/pipeline.py` consumes,
    enabling reproducibility bundles (manifest, NSC, strings) and split-aware
    posture diffing without additional preparation.
-2. **Dynamic analysis:** sandbox executions, dynamic logging, and network
-   capture ingestion.
+2. **Dynamic analysis:** evidence-pack-first dynamic capture (PCAP + telemetry +
+   logs) where evidence packs are authoritative; the DB is a rebuildable derived
+   index for querying/reporting (not ground truth).
 3. **Threat-intel enrichment:** signer lineage analysis and reputation
    scoring sourced from internal datasets.
 4. **Web UI:** searchable catalogs, version diffs across devices, and per-app

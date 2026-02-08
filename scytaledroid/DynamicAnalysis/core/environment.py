@@ -1,8 +1,14 @@
-"""Environment management for dynamic analysis runs."""
+"""Environment management for dynamic analysis runs.
+
+Paper #2 integrity posture:
+- Evidence packs are authoritative.
+- Freeze manifest checksums are the immutability anchor.
+- Per-artifact sha256 values in run_manifest.json are best-effort audit aids and should
+  be omitted for artifacts that may be enriched/rewritten later.
+"""
 
 from __future__ import annotations
 
-import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -64,21 +70,20 @@ class EnvironmentManager:
         )
         path = run_ctx.run_dir / f"artifacts/environment/{filename}"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(output)
+        path.write_text(output, encoding="utf-8")
         return path
 
     def _write_json(self, run_ctx: RunContext, relative_path: str, payload: dict[str, Any]) -> Path:
         path = run_ctx.run_dir / relative_path
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, indent=2, sort_keys=True))
+        path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
         return path
 
     def _artifact_record(self, run_ctx: RunContext, path: Path, artifact_type: str) -> ArtifactRecord:
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
         return ArtifactRecord(
             relative_path=str(path.relative_to(run_ctx.run_dir)),
             type=artifact_type,
-            sha256=digest,
+            sha256=None,
             size_bytes=path.stat().st_size,
             produced_by="environment_manager",
             origin="host",

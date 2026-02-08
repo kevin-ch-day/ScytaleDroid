@@ -6,9 +6,10 @@
 
 ScytaleDroid is a menu-driven toolkit for harvesting, cataloging, and analyzing Android
 application packages (APKs) from real devices. The project emphasizes a
-"database-first" design so every artifact is traced by an `apk_id`, paired with
-predictable filenames, and ready for follow-on static, dynamic, or threat-intel
-analysis.
+research-grade provenance and reproducibility. Static analysis is persisted to a
+canonical database schema for fast cross-run analytics. Dynamic analysis is
+evidence-pack-first: evidence packs are authoritative and the DB is a rebuildable
+accelerator (derived index) for querying/reporting.
 
 Dynamic analysis runs are executed on physical devices (non-root telemetry),
 structured as dynamic sessions, and designed to support time-series anomaly
@@ -38,9 +39,11 @@ baseline linkage.
   inventories are only soft-stale the pull step defaults to the quick-harvest
   path, which resolves APK locations live with `pm path` so you can grab fresh
   artifacts without taking a full filesystem snapshot.
-- **Database-first harvesting.** Durable tables, strict filename conventions,
+- **Database-backed harvesting.** Durable tables, strict filename conventions,
   and scoped pulls replace the JSON/CSV-heavy v1 tooling. Hash-aware dedupe and
-  optional DB writes keep collections lean while maintaining provenance.
+  optional DB writes keep collections lean while maintaining provenance. For
+  Paper #2 dynamic collection, evidence packs remain authoritative and the DB
+  is a derived index.
 - **Research-grade static analysis.** A modular detector pipeline surfaces
   manifest hygiene, IPC exposure, provider ACLs, network posture, secrets,
   storage/backup hygiene, WebView hardening, crypto misuse, DFIR hints, and a
@@ -187,12 +190,22 @@ ScytaleDroid keeps detailed operator documentation under `docs/`:
   detector contracts, pipeline order, and rendering requirements.
 - [`docs/dynamic_analysis_contract.md`](docs/dynamic_analysis_contract.md) –
   dynamic analysis contract, evidence packs, and run manifest requirements.
+- [`docs/evidence_pack_spec.md`](docs/evidence_pack_spec.md) – authoritative
+  frozen-input contract, freeze manifest semantics, and ML output paths.
+- [`docs/paper2/operator_runbook.md`](docs/paper2/operator_runbook.md) – Paper #2
+  collection + freeze + Phase E operator flow.
+- [`docs/paper2/README.md`](docs/paper2/README.md) – Paper #2 index (thesis,
+  frozen dataset anchor, and doc pointers).
+- [`docs/paper2/phase_e_plan.md`](docs/paper2/phase_e_plan.md) – Phase E (ML)
+  implementation contract (evidence-pack-only, deterministic).
 - [`docs/static_analysis/static_analysis_pipeline_plan.md`](docs/static_analysis/static_analysis_pipeline_plan.md) – roadmap,
   implementation status, and research backlog.
 - [`docs/maintenance/housekeeping.md`](docs/maintenance/housekeeping.md) – log
   locations, housekeeping behaviour, and retention policy controls.
 - [`docs/database`](docs/database) – schema notes and read-side query
   blueprints for downstream portals.
+- [`docs/database/derived_index.md`](docs/database/derived_index.md) – Paper #2
+  DB posture (derived/rebuildable; ML is DB-free).
 - [`docs/database/permission_analysis_schema.md`](docs/database/permission_analysis_schema.md) – risk
   snapshots and proposed matrix/rationale tables.
 - [`docs/static_analysis_analytics.md`](docs/static_analysis_analytics.md) –

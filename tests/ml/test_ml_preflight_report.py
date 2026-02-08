@@ -25,7 +25,8 @@ def test_write_ml_preflight_report_writes_csv(tmp_path, monkeypatch):
     manifest = {
         "dynamic_run_id": "run-1",
         "target": {"package_name": "com.example.app"},
-        "operator": {"tier": "dataset", "dataset_validity": {"valid_dataset_run": True}},
+        "operator": {"tier": "dataset"},
+        "dataset": {"tier": "dataset", "valid_dataset_run": True},
         "artifacts": [{"type": "pcapdroid_capture", "relative_path": "artifacts/pcap.pcap"}],
     }
     (run_dir / "run_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
@@ -47,4 +48,3 @@ def test_write_ml_preflight_report_writes_csv(tmp_path, monkeypatch):
     text = path.read_text(encoding="utf-8")
     assert "run_id" in text
     assert "run-1" in text
-

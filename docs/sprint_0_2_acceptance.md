@@ -1,5 +1,10 @@
 # Sprint 0.2 Acceptance (Identity + Linkage)
 
+Note: This is a historic acceptance checklist for early identity/linkage work.
+For current Paper #2 Phase D/E contracts and operator flows, see:
+- `docs/paper2/operator_runbook.md`
+- `docs/paper2/phase_e_plan.md`
+
 Scope: static run identity, run_map linkage, and diagnostic linkage reporting.
 
 ## Diagnostic linkage acceptance (state machine)
@@ -52,4 +57,3 @@ UNAVAILABLE/INVALID states and fail dynamic-ready.
 
 `static_analysis_runs` remains nullable for legacy rows, but new COMPLETED
 runs must populate pipeline_version and signature fields (enforced in code/tests).
-

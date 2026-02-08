@@ -538,7 +538,7 @@ class DynamicRunOrchestrator:
             plan_artifact = ArtifactRecord(
                 relative_path=str(plan_path.relative_to(writer.run_dir)),
                 type="static_dynamic_plan",
-                sha256=writer.hash_file(plan_path),
+                sha256=None,
                 size_bytes=plan_path.stat().st_size,
                 produced_by="dynamic_orchestrator",
             )
@@ -696,7 +696,7 @@ class DynamicRunOrchestrator:
         return ArtifactRecord(
             relative_path=str(dest_path.relative_to(writer.run_dir)),
             type="dep_snapshot",
-            sha256=writer.hash_file(dest_path),
+            sha256=None,
             size_bytes=dest_path.stat().st_size,
             produced_by="static_analysis",
         )
@@ -730,12 +730,11 @@ class DynamicRunOrchestrator:
                 )
                 error_path = run_ctx.artifacts_dir / observer.observer_id / "observer_error.txt"
                 error_path.parent.mkdir(parents=True, exist_ok=True)
-                error_path.write_text(str(exc))
-                digest = EvidencePackWriter(run_ctx.run_dir).hash_file(error_path)
+                error_path.write_text(str(exc), encoding="utf-8")
                 artifact = ArtifactRecord(
                     relative_path=str(error_path.relative_to(run_ctx.run_dir)),
                     type="observer_error",
-                    sha256=digest,
+                    sha256=None,
                     size_bytes=error_path.stat().st_size,
                     produced_by=observer.observer_id,
                 )
@@ -766,12 +765,11 @@ class DynamicRunOrchestrator:
         except Exception as exc:  # noqa: BLE001
             error_path = run_ctx.artifacts_dir / observer.observer_id / "observer_error.txt"
             error_path.parent.mkdir(parents=True, exist_ok=True)
-            error_path.write_text(str(exc))
-            digest = EvidencePackWriter(run_ctx.run_dir).hash_file(error_path)
+            error_path.write_text(str(exc), encoding="utf-8")
             artifact = ArtifactRecord(
                 relative_path=str(error_path.relative_to(run_ctx.run_dir)),
                 type="observer_error",
-                sha256=digest,
+                sha256=None,
                 size_bytes=error_path.stat().st_size,
                 produced_by=observer.observer_id,
             )
@@ -805,11 +803,10 @@ class DynamicRunOrchestrator:
         marker_path = run_ctx.run_dir / "artifacts/markers/run_markers.txt"
         if not marker_path.exists():
             return None
-        digest = EvidencePackWriter(run_ctx.run_dir).hash_file(marker_path)
         return ArtifactRecord(
             relative_path=str(marker_path.relative_to(run_ctx.run_dir)),
             type="run_markers",
-            sha256=digest,
+            sha256=None,
             size_bytes=marker_path.stat().st_size,
             produced_by="orchestrator",
         )

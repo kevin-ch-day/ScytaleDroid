@@ -5,6 +5,9 @@ running scanners, persisting results, and verifying database coverage. It assume
 `requirements.txt` has been installed (via `./setup.sh`) and that you have
 credentials for the canonical database target.
 
+Paper #2 dynamic collection + ML:
+- See `docs/paper2/operator_runbook.md` and `docs/paper2/phase_e_plan.md`.
+
 ## 1. Prepare the session
 
 1. **Bootstrap dependencies** – `./setup.sh` (or install the packages listed in

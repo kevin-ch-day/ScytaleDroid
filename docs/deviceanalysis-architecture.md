@@ -1,5 +1,10 @@
 # DeviceAnalysis Architecture Contract (Status Matrix)
 
+Note: This document tracks a legacy internal migration plan for the DeviceAnalysis package.
+It is not the Paper #2 Phase D/E contract. For Paper #2 operator flows and ML, see:
+- `docs/paper2/operator_runbook.md`
+- `docs/paper2/phase_e_plan.md`
+
 ## Layering rules
 - **UI-only printing/prompting:** Any `print()`, prompts, panels, or progress UI must live in the UI layer.
 - **ADB-only shell calls:** Any ADB command construction, shell calls, or ADB parsing must live in `DeviceAnalysis/adb/`.

@@ -336,8 +336,8 @@ def recompute_dataset_tracker(*, config: DatasetTrackerConfig | None = None) -> 
                 ArtifactRecord(
                     relative_path=str(item.get("relative_path") or ""),
                     type=str(item.get("type") or ""),
-                    sha256=str(item.get("sha256") or ""),
                     produced_by=str(item.get("produced_by") or ""),
+                    sha256=str(item.get("sha256")) if isinstance(item.get("sha256"), str) and item.get("sha256") else None,
                     size_bytes=item.get("size_bytes"),
                     origin=item.get("origin"),
                     device_path=item.get("device_path"),
