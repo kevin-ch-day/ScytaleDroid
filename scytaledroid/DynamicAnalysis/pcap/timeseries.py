@@ -6,7 +6,7 @@ These helpers are shared across:
 
 Contract/safety:
 - Uses tshark field extraction only; no payload inspection.
-- Deterministic computations (nearest-rank percentiles; includes 0-activity seconds).
+- Deterministic computations (discrete percentiles over 0-filled seconds; includes 0-activity seconds).
 """
 
 from __future__ import annotations
@@ -25,7 +25,8 @@ def percentile(sorted_values: list[float], p: float) -> float | None:
         return float(sorted_values[0])
     if p >= 100:
         return float(sorted_values[-1])
-    # Nearest-rank percentile (deterministic).
+    # Deterministic discrete percentile:
+    # index = floor(p/100 * (n-1)) over a sorted series.
     k = int((p / 100.0) * (len(sorted_values) - 1))
     k = max(0, min(k, len(sorted_values) - 1))
     return float(sorted_values[k])

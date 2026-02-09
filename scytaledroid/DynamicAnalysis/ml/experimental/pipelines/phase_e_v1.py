@@ -35,7 +35,6 @@ class _MetadataStage:
 class PhaseEConfig:
     """Configuration for Phase E pipeline wiring."""
 
-    frozen: bool = True
     schema_label: str = config.ML_SCHEMA_LABEL
 
 
@@ -57,7 +56,6 @@ class PhaseEPreflightStage:
         paths = MLOutputPaths(
             run_dir=run_dir,
             schema_label=self.config.schema_label,
-            frozen=self.config.frozen,
         )
         paths.output_dir.mkdir(parents=True, exist_ok=True)
         # Do not overwrite v1 artifacts (immutability posture for Paper #2).

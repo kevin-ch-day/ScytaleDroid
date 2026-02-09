@@ -495,12 +495,14 @@ def _write_bundle_closure_record(path: Path, *, bundle_manifest_path: Path) -> N
     later without depending on any DB state or rerunning generation.
     """
     from .evidence_pack_ml_orchestrator import PAPER_ARTIFACTS_PATH
+    from scytaledroid.Utils.toolchain_versions import gather_toolchain_versions
 
     payload = {
         "bundle_manifest_path": str(bundle_manifest_path),
         "bundle_manifest_sha256": _sha256_stream(bundle_manifest_path),
         "bundle_root": str(output_paper_root()),
         "closed_at_utc": datetime.now(UTC).isoformat(),
+        "toolchain": gather_toolchain_versions(),
         "freeze_anchor": str(freeze_anchor_path()),
         "freeze_sha256": _sha256_stream(freeze_anchor_path()),
         "ml_schema_version": int(config.ML_SCHEMA_VERSION),

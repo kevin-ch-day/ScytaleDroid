@@ -7,6 +7,7 @@ This is primarily used during dataset collection to:
 
 from __future__ import annotations
 
+import os
 import json
 import shutil
 from pathlib import Path
@@ -627,7 +628,7 @@ def evidence_verify_freeze_immutability(*, pause: bool = True) -> None:
             )
             print(
                 status_messages.status(
-                    "Action: run 'F) Write dataset freeze manifest (Paper #2)' to write a timestamped freeze file with checksums, then rerun this check.",
+                    "Action: generate a checksummed freeze manifest (Paper mode), then rerun this check.",
                     level="info",
                 )
             )
@@ -685,90 +686,6 @@ def evidence_network_audit_report(*, pause: bool = True) -> None:
         prompt_utils.press_enter_to_continue()
 
 
-def evidence_index_network_indicators_db(*, pause: bool = True) -> None:
-    """Rebuild derived DB index from evidence packs (runs + features + indicators)."""
-    from scytaledroid.DynamicAnalysis.storage.index_from_evidence import index_dynamic_evidence_packs_to_db
-
-    root = _dynamic_evidence_root()
-    print()
-    result = index_dynamic_evidence_packs_to_db(root)
-    scanned = int(result.get("scanned") or 0)
-    ok = int(result.get("ok") or 0)
-    features = int(result.get("network_features_upserted") or 0)
-    indexed = int(result.get("indicators_indexed") or 0)
-    errors = result.get("errors") or []
-    print(status_messages.status(f"Scanned={scanned} ok={ok} network_features_upserted={features} indicators_indexed={indexed}", level="info"))
-    if errors:
-        print(status_messages.status(f"Errors (sample): {', '.join(str(e) for e in errors[:5])}", level="warn"))
-    print(status_messages.status("DB is a derived index; evidence packs remain authoritative.", level="info"))
-    if pause:
-        prompt_utils.press_enter_to_continue()
-
-
-def evidence_prune_db_orphans(*, pause: bool = True) -> None:
-    """Prune derived DB rows that no longer have evidence packs on disk."""
-    try:
-        from scytaledroid.DynamicAnalysis.storage.db_maintenance import (
-            delete_dynamic_sessions_by_id,
-            find_dynamic_db_orphans,
-        )
-    except Exception as exc:  # noqa: BLE001
-        print(status_messages.status(f"DB maintenance unavailable: {exc}", level="error"))
-        if pause:
-            prompt_utils.press_enter_to_continue()
-        return
-
-    repo_root = Path(".").resolve()
-    try:
-        orphans = find_dynamic_db_orphans(repo_root=repo_root)
-    except Exception as exc:  # noqa: BLE001
-        print(status_messages.status(f"Failed to scan DB orphans: {exc}", level="error"))
-        if pause:
-            prompt_utils.press_enter_to_continue()
-        return
-
-    if not orphans:
-        print(status_messages.status("No DB orphans found (DB matches local evidence paths).", level="success"))
-        if pause:
-            prompt_utils.press_enter_to_continue()
-        return
-
-    print()
-    menu_utils.print_header("Prune DB Orphans", "Derived DB hygiene (evidence packs remain authoritative)")
-    print(status_messages.status(f"Orphan dynamic_sessions rows: {len(orphans)}", level="warn"))
-    for row in orphans[:20]:
-        rid = str(row.get("dynamic_run_id") or "")[:8]
-        pkg = str(row.get("package_name") or "_unknown")
-        reason = str(row.get("reason") or "")
-        ev = str(row.get("evidence_path") or "")
-        print(status_messages.status(f"{rid} {pkg} {reason} {ev}", level="warn"))
-    if len(orphans) > 20:
-        print(status_messages.status(f"(showing 20/{len(orphans)})", level="info"))
-
-    if not prompt_utils.prompt_yes_no(f"Delete these {len(orphans)} derived DB row(s)?", default=False):
-        print(status_messages.status("Cancelled.", level="info"))
-        if pause:
-            prompt_utils.press_enter_to_continue()
-        return
-
-    ids = [str(r.get("dynamic_run_id") or "") for r in orphans if str(r.get("dynamic_run_id") or "").strip()]
-    try:
-        deleted = delete_dynamic_sessions_by_id(ids)
-    except Exception as exc:  # noqa: BLE001
-        print(status_messages.status(f"Delete failed: {exc}", level="error"))
-        if pause:
-            prompt_utils.press_enter_to_continue()
-        return
-
-    print(status_messages.status(f"Deleted {deleted} DB row(s) (FK cascade removes derived feature/indicator rows).", level="success"))
-
-    if prompt_utils.prompt_yes_no("Rebuild DB index from evidence packs now?", default=True):
-        evidence_index_network_indicators_db(pause=False)
-
-    if pause:
-        prompt_utils.press_enter_to_continue()
-
-
 def evidence_packs_menu() -> None:
     while True:
         print()
@@ -778,14 +695,9 @@ def evidence_packs_menu() -> None:
             menu_utils.MenuOption("2", "Quick health check (packs/missing/bad + PCAP sizes)"),
             menu_utils.MenuOption("3", "View app runs (details)"),
             menu_utils.MenuOption("4", "Delete INVALID dataset runs (local only)"),
-            menu_utils.MenuOption("C", "Cleanup workspace (safe)"),
             menu_utils.MenuOption("5", "Recompute dataset tracker (from evidence packs)"),
             menu_utils.MenuOption("6", "Network audit report (trends)"),
-            menu_utils.MenuOption("7", "Rebuild DB index from evidence packs (runs + features + indicators)"),
             menu_utils.MenuOption("9", "Deep checks (DB vs manifest + transport + indicator quality)"),
-            menu_utils.MenuOption("F", "Write dataset freeze manifest (Paper #2)"),
-            menu_utils.MenuOption("V", "Verify freeze immutability (hash-based)"),
-            menu_utils.MenuOption("P", "Prune DB orphans (derived; evidence-pack-first)"),
             menu_utils.MenuOption("R", "Recompute PCAP artifacts (pcap_report + pcap_features)"),
         ]
         menu_utils.render_menu(menu_utils.MenuSpec(items=items, exit_label="Back", show_exit=True))
@@ -809,10 +721,6 @@ def evidence_packs_menu() -> None:
             evidence_delete_invalid_dataset_runs(pause=True)
             continue
 
-        if choice == "C":
-            evidence_cleanup_workspace(pause=True)
-            continue
-
         if choice == "5":
             evidence_recompute_dataset_tracker(pause=True)
             continue
@@ -820,22 +728,8 @@ def evidence_packs_menu() -> None:
         if choice == "6":
             evidence_network_audit_report(pause=True)
             continue
-
-        if choice == "7":
-            evidence_index_network_indicators_db(pause=True)
-            continue
-
         if choice == "9":
             evidence_deep_checks(pause=True)
-            continue
-        if choice == "F":
-            evidence_write_dataset_freeze_manifest(pause=True)
-            continue
-        if choice == "V":
-            evidence_verify_freeze_immutability(pause=True)
-            continue
-        if choice == "P":
-            evidence_prune_db_orphans(pause=True)
             continue
         if choice == "R":
             evidence_recompute_pcap_artifacts(pause=True)
@@ -848,8 +742,6 @@ __all__ = [
     "evidence_deep_checks",
     "evidence_recompute_pcap_artifacts",
     "evidence_network_audit_report",
-    "evidence_index_network_indicators_db",
-    "evidence_prune_db_orphans",
     "evidence_packs_menu",
     "evidence_quick_health_check",
     "evidence_recompute_dataset_tracker",

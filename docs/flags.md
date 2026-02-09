@@ -13,11 +13,7 @@ Classification follows: **keep** (supported) and **deprecated** (do not use for 
 - `SCYTALEDROID_PCAPDROID_API_KEY` (PCAPdroid integration; secret; do not log raw value)
 
 ## Deprecated (do not use for research runs)
-- `SCYTALEDROID_INVENTORY_MODE=legacy` (old inventory path).
-- Legacy harvest pull modes (`pull_mode="legacy"`) – hidden from UI.
-- Boxed UI output (`SCYTALEDROID_UI_BOXED`) – dev-only switch.
-- `SCYTALEDROID_DATASET_RUNS_PER_APP` and related quota overrides – legacy scope-creep footgun.
-  Paper #2 quota is locked to **1 baseline + 2 interactive** per app; extra runs are allowed but
-  out-of-dataset and deterministically excluded. These env overrides are ignored in dataset-tier paths.
+- Historical legacy toggles and experimental knobs are intentionally not documented here.
+  If you find an env var in older notes that is not in the **Keep** list above, treat it as unsupported.
 
 These flags are retained for backward compatibility but should not be used for Tier-1 runs.

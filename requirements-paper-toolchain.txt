@@ -1,0 +1,9 @@
+-r requirements.txt
+
+# Paper toolchain pins (Phase E determinism contract).
+# If these versions drift, Phase E outputs are no longer guaranteed bit-for-bit.
+numpy==2.3.5
+scikit-learn==1.8.0
+openpyxl==3.1.5
+matplotlib==3.10.7
+

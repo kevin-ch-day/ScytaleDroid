@@ -10,12 +10,13 @@ from pathlib import Path
 class MLOutputPaths:
     run_dir: Path
     schema_label: str
-    frozen: bool = True
 
     @property
     def output_dir(self) -> Path:
-        base = "ml" if self.frozen else "ml_provisional"
-        return self.run_dir / "analysis" / base / self.schema_label
+        # Phase E and Phase F operational snapshots both treat `analysis/ml/<schema>` as
+        # the canonical location. Older `analysis/ml_provisional/...` layouts are legacy
+        # and intentionally not supported by new code paths.
+        return self.run_dir / "analysis" / "ml" / self.schema_label
 
     @property
     def summary_path(self) -> Path:

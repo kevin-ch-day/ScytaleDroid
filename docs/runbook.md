@@ -12,6 +12,9 @@ Paper #2 dynamic collection + ML:
 
 1. **Bootstrap dependencies** – `./setup.sh` (or install the packages listed in
    `requirements.txt`).
+   - Paper toolchain (Phase E determinism): `SCYTALEDROID_PAPER_TOOLCHAIN=1 ./setup.sh`
+     uses `requirements-paper-toolchain.txt` if present.
+  - Reporting menu: all actions are shown by default.
 2. **Ensure schema helpers** – prime the canonical helpers once per shell
    session (idempotent):
    ```bash

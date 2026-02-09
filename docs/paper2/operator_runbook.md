@@ -38,8 +38,7 @@ Important:
 
 Tier-1 note:
 - Tier-1 QA/readiness is DB-derived. If Tier-1 QA-pass is unexpectedly 0 while evidence packs are valid,
-  use **Workspace & Evidence → Dynamic evidence packs → Rebuild DB index from evidence packs**.
-  (Shortcut: **Reporting → [12] Rebuild DB index from evidence packs** or **[13] Tier-1 quick fix**.)
+  use **Reporting → [4] Tier-1 quick fix** (or **[5] Tier-1 end-to-end**).
 
 ## 3) Freeze (Dataset Anchor, Non-Mutating)
 
@@ -59,7 +58,7 @@ After freeze:
 ## 4) Freeze Immutability Check (Hash-Based)
 
 Use:
-- **Dynamic evidence packs → V) Verify freeze immutability (hash-based)**
+- **Reporting → Paper / ML → Verify freeze immutability (hash-based)** *(advanced)*
 
 Expected:
 - scanned=36
@@ -79,7 +78,7 @@ Paper #2 Phase E posture:
 - Fixed models (IF + OC-SVM), percentile thresholding.
 
 Run:
-- **Reporting → Run ML on frozen dataset (offline, evidence-pack only)**
+- **Reporting → Paper #2 end-to-end**
 
 Outputs:
 - Per run: `output/evidence/dynamic/<run_id>/analysis/ml/v1/…`

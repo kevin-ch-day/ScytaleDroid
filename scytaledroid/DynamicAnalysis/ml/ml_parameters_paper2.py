@@ -47,6 +47,10 @@ WINDOW_STRIDE_S = 5.0
 # Thresholding (locked)
 THRESHOLD_PERCENTILE = 95.0
 
+# Determinism lock: explicitly pin the NumPy percentile algorithm (do not rely on defaults).
+# This is a paper toolchain contract; changing it after a freeze is a new snapshot/version.
+NP_PERCENTILE_METHOD = "linear"
+
 # Training quality gates (reviewer-approved defaults; Paper #2)
 # Minimum number of baseline windows required for baseline-only training.
 # With 10s/5s windowing, ~180s baseline -> ~35 windows.

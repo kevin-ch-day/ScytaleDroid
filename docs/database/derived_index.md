@@ -18,8 +18,8 @@ Paper #2 posture:
 
 ## Rebuild workflow (preferred)
 
-Use the menu action:
-- “Rebuild DB index from evidence packs …”
+Use:
+- **Reporting → Tier-1 quick fix** (or **Tier-1 end-to-end**)
 
 Characteristics:
 - Idempotent upserts.
@@ -30,4 +30,3 @@ Characteristics:
 
 - Orphan rows (evidence path missing) are safe to delete; they are derived.
 - Evidence packs remain the truth.
-

@@ -21,11 +21,11 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import shutil
 
 from scytaledroid.Config import app_config
 
 from . import ml_parameters_paper2 as config
+from .numpy_percentile import percentile as np_percentile
 from .seed_identity import derive_seed, salt_metadata
 from .io import MLOutputPaths
 from .anomaly_model_training import anomaly_scores, fit_model, fixed_model_specs
@@ -224,9 +224,6 @@ def run_ml_on_evidence_packs(
                 pf_path = out_dir_pf / "ml_preflight.json"
                 if not pf_path.exists():
                     write_ml_preflight(pf_path, compute_ml_preflight(r))
-                # Back-compat: some earlier v1 outputs used internal model names in filenames.
-                # Copy them to the canonical paper-facing filenames without recomputation.
-                _ensure_score_csv_aliases(out_dir_pf)
 
                 duration = get_sampling_duration_seconds(r)
                 if duration is None or duration <= 0:
@@ -310,7 +307,13 @@ def run_ml_on_evidence_packs(
                 model = fit_model(spec, X_train)
                 scores_train = anomaly_scores(spec.name, model, X_train)
                 scores_all = anomaly_scores(spec.name, model, X_all)
-                threshold = float(np.percentile(scores_train, config.THRESHOLD_PERCENTILE))
+                threshold = float(
+                    np_percentile(
+                        scores_train,
+                        config.THRESHOLD_PERCENTILE,
+                        method=config.NP_PERCENTILE_METHOD,
+                    )
+                )
                 train_max = float(np.max(scores_train)) if scores_train.size else 0.0
                 threshold_equals_max = bool(abs(threshold - train_max) <= 1e-9)
                 training_samples = int(X_train.shape[0])
@@ -320,6 +323,7 @@ def run_ml_on_evidence_packs(
                 model_outputs[spec.name] = {
                     "threshold_percentile": config.THRESHOLD_PERCENTILE,
                     "threshold_value": threshold,
+                    "np_percentile_method": str(config.NP_PERCENTILE_METHOD),
                     "training_samples": training_samples,
                     "training_samples_warning": training_samples_warning,
                     "threshold_equals_max": threshold_equals_max,
@@ -376,6 +380,7 @@ def run_ml_on_evidence_packs(
                         "training_samples_warning": training_samples_warning,
                         "threshold_value": threshold,
                         "threshold_percentile": float(config.THRESHOLD_PERCENTILE),
+                        "np_percentile_method": str(config.NP_PERCENTILE_METHOD),
                         "threshold_equals_max": threshold_equals_max,
                         "baseline_windows": int(len(baseline_rows)),
                         "baseline_pcap_bytes": baseline_pcap_bytes,
@@ -505,7 +510,7 @@ def _all_frozen_v1_outputs_exist(root: Path, included_run_ids: set[str]) -> bool
 
 
 def _run_has_complete_v1_outputs(run_dir: Path) -> bool:
-    paths = MLOutputPaths(run_dir=run_dir, schema_label=config.ML_SCHEMA_LABEL, frozen=True)
+    paths = MLOutputPaths(run_dir=run_dir, schema_label=config.ML_SCHEMA_LABEL)
     required = [
         paths.model_manifest_path,
         paths.summary_path,
@@ -597,37 +602,6 @@ def _model_csv_label(model_name: str) -> str:
     return model_name
 
 
-def _ensure_score_csv_aliases(out_dir: Path) -> None:
-    """Ensure canonical anomaly score CSV names exist (Paper #2) without recomputation.
-
-    Earlier runs wrote:
-      - anomaly_scores_isolation_forest.csv
-      - anomaly_scores_one_class_svm.csv
-    Paper-facing canonical names are:
-      - anomaly_scores_iforest.csv
-      - anomaly_scores_ocsvm.csv
-
-    This function only copies when the old file exists and the new one does not.
-    """
-    mapping = {
-        "anomaly_scores_isolation_forest.csv": "anomaly_scores_iforest.csv",
-        "anomaly_scores_one_class_svm.csv": "anomaly_scores_ocsvm.csv",
-    }
-    for old, new in mapping.items():
-        src = out_dir / old
-        dst = out_dir / new
-        if dst.exists():
-            continue
-        if not src.exists():
-            continue
-        try:
-            shutil.copyfile(src, dst)
-        except Exception:
-            # Best-effort. If this fails, the runner may still write the canonical
-            # files during a full ML run.
-            pass
-
-
 def _baseline_bytes_gate_ok(app_runs: list[RunInputs], *, baseline_rid: str) -> tuple[bool, int]:
     baseline = next((r for r in app_runs if r.run_id == baseline_rid), None)
     if not baseline:
@@ -685,8 +659,8 @@ def _apply_robust_scaling(
 ) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
     if X_train.size == 0:
         return X_train, X_all, {"method": "none"}
-    q1 = np.percentile(X_train, 25.0, axis=0)
-    q3 = np.percentile(X_train, 75.0, axis=0)
+    q1 = np_percentile(X_train, 25.0, axis=0, method=config.NP_PERCENTILE_METHOD)
+    q3 = np_percentile(X_train, 75.0, axis=0, method=config.NP_PERCENTILE_METHOD)
     med = np.median(X_train, axis=0)
     iqr = np.maximum(q3 - q1, 1e-9)
     X_train_scaled = (X_train - med) / iqr
@@ -703,7 +677,9 @@ def _apply_robust_scaling(
 
 
 def _ml_output_dir(run_dir: Path, *, frozen: bool) -> Path:
-    return MLOutputPaths(run_dir=run_dir, schema_label=config.ML_SCHEMA_LABEL, frozen=frozen).output_dir
+    # Retain `frozen` for compatibility with existing call sites; output paths are canonical.
+    _ = frozen
+    return MLOutputPaths(run_dir=run_dir, schema_label=config.ML_SCHEMA_LABEL).output_dir
 
 
 def _compute_phase_rows(
@@ -741,7 +717,7 @@ def _compute_phase_rows(
                     "low_signal": bool(ds.get("low_signal")) if ds.get("low_signal") is not None else None,
                     "windows_total": int(arr.shape[0]),
                     "median": float(statistics.median(run_scores)),
-                    "p95": float(np.percentile(arr, 95.0)),
+                    "p95": float(np_percentile(arr, 95.0, method=config.NP_PERCENTILE_METHOD)),
                     "max": float(np.max(arr)),
                     "anomalous_windows": anomalous,
                     "anomalous_pct": float(anomalous) / float(arr.shape[0]) if arr.shape[0] > 0 else 0.0,
@@ -931,6 +907,7 @@ def _write_ml_audit_csv(rows: list[dict[str, Any]]) -> None:
         "training_samples_warning",
         "threshold_value",
         "threshold_percentile",
+        "np_percentile_method",
         "threshold_equals_max",
         "baseline_windows",
         "baseline_pcap_bytes",
@@ -1303,7 +1280,7 @@ def _rebuild_dataset_outputs_from_v1(
                         "low_signal": bool(ds.get("low_signal")) if ds.get("low_signal") is not None else None,
                         "windows_total": int(arr.shape[0]),
                         "median": float(statistics.median(run_scores)),
-                        "p95": float(np.percentile(arr, 95.0)),
+                        "p95": float(np_percentile(arr, 95.0, method=config.NP_PERCENTILE_METHOD)),
                         "max": float(np.max(arr)),
                         "anomalous_windows": anomalous,
                         "anomalous_pct": float(anomalous) / float(arr.shape[0]) if arr.shape[0] > 0 else 0.0,
@@ -1709,7 +1686,13 @@ def _write_ml_summary(
         streak_count, longest_streak = _anomaly_streak_metrics(scores, threshold)
         payload["models"][model_name] = {
             "median": float(statistics.median(scores)),
-            "p95": float(np.percentile(np.asarray(scores, dtype=float), 95.0)),
+            "p95": float(
+                np_percentile(
+                    np.asarray(scores, dtype=float),
+                    95.0,
+                    method=config.NP_PERCENTILE_METHOD,
+                )
+            ),
             "max": float(max(scores)),
             "anomalous_windows": int(sum(1 for s in scores if float(s) >= threshold)),
             "anomalous_streaks": {"count": streak_count, "longest": longest_streak},
@@ -1755,7 +1738,7 @@ def _anomaly_streak_metrics(scores: list[float], threshold: float) -> tuple[int,
 
 
 def _write_run_skip(run: RunInputs, *, frozen: bool, reason: str) -> None:
-    paths = MLOutputPaths(run_dir=run.run_dir, schema_label=config.ML_SCHEMA_LABEL, frozen=frozen)
+    paths = MLOutputPaths(run_dir=run.run_dir, schema_label=config.ML_SCHEMA_LABEL)
     paths.output_dir.mkdir(parents=True, exist_ok=True)
     if frozen and paths.summary_path.exists():
         return

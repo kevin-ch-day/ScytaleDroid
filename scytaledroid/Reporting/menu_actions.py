@@ -244,55 +244,8 @@ def handle_static_report() -> None:
     prompt_utils.press_enter_to_continue()
 
 
-def handle_run_ml_on_frozen_dataset() -> None:
-    """Run Paper #2 ML over frozen evidence packs (offline, DB-free)."""
-
-    # PM/reviewer locked: Phase E must use the canonical checksummed freeze anchor only.
-    from scytaledroid.DynamicAnalysis.ml.ml_parameters_paper2 import FREEZE_CANONICAL_FILENAME
-
-    archive_dir = Path(app_config.DATA_DIR) / "archive"
-    freeze_path = archive_dir / FREEZE_CANONICAL_FILENAME
-
-    if not freeze_path.exists():
-        print(
-            status_messages.status(
-                f"Dataset is not frozen (missing canonical checksummed freeze anchor: {relative_path(freeze_path)}).",
-                level="warn",
-            )
-        )
-        print(
-            status_messages.status(
-                "Create the freeze marker only after all apps have >= 3 VALID runs and QA/retention are verified.",
-                level="info",
-            )
-        )
-        prompt_utils.press_enter_to_continue()
-        return
-
-    try:
-        payload = json.loads(freeze_path.read_text(encoding="utf-8"))
-    except Exception:
-        payload = {}
-    if not (isinstance(payload, dict) and isinstance(payload.get("included_run_checksums"), dict)):
-        print(
-            status_messages.status(
-                f"Freeze anchor is legacy or invalid (missing included_run_checksums): {relative_path(freeze_path)}",
-                level="fail",
-            )
-        )
-        prompt_utils.press_enter_to_continue()
-        return
-
-    missing = [tool for tool in ("capinfos", "tshark") if not shutil.which(tool)]
-    if missing:
-        print(
-            status_messages.status(
-                f"Host tools missing: {', '.join(missing)} (dataset-tier ML requires these).",
-                level="fail",
-            )
-        )
-        prompt_utils.press_enter_to_continue()
-        return
+def _run_phase_e_ml(freeze_path: Path):
+    """Run Phase E ML and print results. Returns MlRunStats on success."""
 
     print()
     menu_utils.print_header("Run ML on frozen dataset")
@@ -311,45 +264,78 @@ def handle_run_ml_on_frozen_dataset() -> None:
             level="success",
         )
     )
-    print(
-        status_messages.status(
-            f"Wrote: {relative_path(prevalence_csv)}",
-            level="info",
-        )
-    )
-    print(
-        status_messages.status(
-            f"Wrote: {relative_path(overlap_csv)}",
-            level="info",
-        )
-    )
-    print(
-        status_messages.status(
-            f"Wrote: {relative_path(transport_csv)}",
-            level="info",
-        )
-    )
-    prompt_utils.press_enter_to_continue()
+    print(status_messages.status(f"Wrote: {relative_path(prevalence_csv)}", level="info"))
+    print(status_messages.status(f"Wrote: {relative_path(overlap_csv)}", level="info"))
+    print(status_messages.status(f"Wrote: {relative_path(transport_csv)}", level="info"))
+    return stats
 
 
-def handle_run_ml_preflight_report() -> None:
-    """Write a DB-free ML preflight report over evidence packs."""
+def handle_run_ml_query_mode() -> None:
+    """Run ML in query mode and write an operational snapshot under output/operational/."""
+
+    from scytaledroid.DynamicAnalysis.ml.query_mode_runner import run_ml_query_mode
+    from scytaledroid.DynamicAnalysis.ml.selectors import QueryParams, QuerySelector
+
+    root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    if not root.exists():
+        print(status_messages.status("Dynamic evidence root not found.", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
 
     print()
-    menu_utils.print_header("ML preflight report")
+    menu_utils.print_header("Run ML (query mode, operational snapshot)")
+    print(status_messages.status("Selection is evidence-pack-authoritative; DB may be used as an index only.", level="info"))
+    pkg = prompt_utils.prompt_text("Filter package_name (blank=all)", required=False, show_arrow=False).strip()
+    base_sha = prompt_utils.prompt_text("Filter base_apk_sha256 (blank=all)", required=False, show_arrow=False).strip()
+    mode = prompt_utils.prompt_text("Filter mode baseline|interactive (blank=all)", required=False, show_arrow=False).strip().lower()
+    tier = prompt_utils.prompt_text("Tier (default=dataset)", required=False, show_arrow=False).strip()
+    include_unknown = prompt_utils.prompt_yes_no("Include unknown-mode runs?", default=True)
+
+    mode_filter = None
+    if mode in ("baseline", "interactive", "unknown"):
+        mode_filter = mode
+
+    params = QueryParams(
+        tier=tier or "dataset",
+        package_name=pkg or None,
+        base_apk_sha256=base_sha or None,
+        mode=mode_filter,
+        include_unknown_mode=bool(include_unknown),
+        pool_versions=False,
+        require_valid_dataset_run=True,
+    )
+    selector = QuerySelector(evidence_root=root, params=params, allow_db_index=True)
+    selection = selector.select()
+    if not selection.included:
+        print(status_messages.status("No runs selected (check filters).", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    stats = run_ml_query_mode(selection=selection)
     print(
         status_messages.status(
-            "Scans output/evidence/dynamic/* and validates frozen inputs per run (DB-free).",
-            level="info",
+            f"Query ML complete: groups_seen={stats.groups_seen} groups_trained={stats.groups_trained} "
+            f"runs_scored={stats.runs_scored} runs_skipped={stats.runs_skipped}",
+            level="success",
         )
     )
-    path = write_ml_preflight_report()
-    print(status_messages.status(f"Wrote: {relative_path(path)}", level="success"))
+    print(status_messages.status(f"Wrote snapshot: {stats.snapshot_dir}", level="info"))
     prompt_utils.press_enter_to_continue()
 
 
-def handle_write_phase_e_deliverables_bundle() -> None:
-    """Write the Paper #2 Phase E deliverable bundle under output/ (zip-and-share)."""
+def handle_verify_freeze_immutability_paper2() -> None:
+    """Verify frozen-input immutability (hash-based) for the canonical Paper #2 freeze."""
+
+    from scytaledroid.DynamicAnalysis.tools.evidence.menu import evidence_verify_freeze_immutability
+
+    evidence_verify_freeze_immutability(pause=True)
+
+
+def _write_phase_e_deliverables_bundle_from_pin() -> bool:
+    """Write the Paper #2 Phase E deliverable bundle under output/ (zip-and-share).
+
+    Returns True on success, False on any failure/cancel.
+    """
 
     from scytaledroid.DynamicAnalysis.ml.artifact_bundle_writer import write_phase_e_deliverables_bundle
     from scytaledroid.DynamicAnalysis.ml.deliverable_bundle_paths import freeze_anchor_path, output_paper_root
@@ -359,44 +345,25 @@ def handle_write_phase_e_deliverables_bundle() -> None:
     archive_dir = Path(app_config.DATA_DIR) / "archive"
     freeze_path = archive_dir / FREEZE_CANONICAL_FILENAME
     if not freeze_path.exists():
-        print(
-            status_messages.status(
-                f"Missing canonical freeze anchor: {relative_path(freeze_path)}",
-                level="fail",
-            )
-        )
-        prompt_utils.press_enter_to_continue()
-        return
+        print(status_messages.status(f"Missing canonical freeze anchor: {relative_path(freeze_path)}", level="fail"))
+        return False
 
     paper_artifacts = archive_dir / "paper_artifacts.json"
     if not paper_artifacts.exists():
-        print(
-            status_messages.status(
-                f"Missing paper artifact lock file: {relative_path(paper_artifacts)}",
-                level="warn",
-            )
-        )
-        print(
-            status_messages.status(
-                "Action: run 'Run ML on frozen dataset' first (it deterministically selects and pins Fig B1).",
-                level="info",
-            )
-        )
-        prompt_utils.press_enter_to_continue()
-        return
+        print(status_messages.status(f"Missing paper artifact lock file: {relative_path(paper_artifacts)}", level="warn"))
+        print(status_messages.status("Action: run Paper #2 end-to-end (it generates/pins Fig B1).", level="info"))
+        return False
 
     try:
         payload = json.loads(paper_artifacts.read_text(encoding="utf-8"))
     except Exception as exc:  # noqa: BLE001
         print(status_messages.status(f"Failed to read paper_artifacts.json: {exc}", level="fail"))
-        prompt_utils.press_enter_to_continue()
-        return
+        return False
     rid = str(payload.get("fig_B1_run_id") or "").strip()
     tag = str(payload.get("interaction_tag") or "").strip() or None
     if not rid:
         print(status_messages.status("paper_artifacts.json missing fig_B1_run_id.", level="fail"))
-        prompt_utils.press_enter_to_continue()
-        return
+        return False
 
     def _canonical_tag(raw: str | None) -> str | None:
         if not raw:
@@ -446,14 +413,12 @@ def handle_write_phase_e_deliverables_bundle() -> None:
         )
         if not prompt_utils.prompt_yes_no("Repin Fig B1 exemplar deterministically now?", default=False):
             print(status_messages.status("Cancelled.", level="info"))
-            prompt_utils.press_enter_to_continue()
-            return
+            return False
         try:
             freeze = json.loads(freeze_path.read_text(encoding="utf-8"))
         except Exception as exc:  # noqa: BLE001
             print(status_messages.status(f"Failed to read freeze anchor: {exc}", level="fail"))
-            prompt_utils.press_enter_to_continue()
-            return
+            return False
         from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_orchestrator import _select_fig_b1_exemplar_from_existing_or_inputs
 
         exemplar = _select_fig_b1_exemplar_from_existing_or_inputs(
@@ -463,9 +428,7 @@ def handle_write_phase_e_deliverables_bundle() -> None:
         )
         if not exemplar:
             print(status_messages.status("No eligible exemplar found in frozen dataset.", level="fail"))
-            prompt_utils.press_enter_to_continue()
-            return
-        # Backup existing pin for auditability (one-time repin flow).
+            return False
         backup = archive_dir / f"paper_artifacts.prev-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.json"
         backup.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
@@ -482,10 +445,7 @@ def handle_write_phase_e_deliverables_bundle() -> None:
                 "iforest_flagged_pct": float(exemplar.iforest_flagged_pct),
                 "ocsvm_flagged_pct": float(exemplar.ocsvm_flagged_pct),
             },
-            "repinned_from": {
-                "fig_B1_run_id": str(rid),
-                "interaction_tag": str(tag or ""),
-            },
+            "repinned_from": {"fig_B1_run_id": str(rid), "interaction_tag": str(tag or "")},
             "repinned_at": datetime.now(UTC).isoformat(),
         }
         paper_artifacts.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
@@ -499,19 +459,17 @@ def handle_write_phase_e_deliverables_bundle() -> None:
     print(status_messages.status(f"Fig B1 exemplar: {rid[:8]} ({tag or 'interactive'})", level="info"))
     if not prompt_utils.prompt_yes_no("Write/refresh bundle under output/?", default=True):
         print(status_messages.status("Cancelled.", level="info"))
-        prompt_utils.press_enter_to_continue()
-        return
+        return False
 
     try:
         artifacts = write_phase_e_deliverables_bundle(fig_b1_run_id=rid, interaction_tag=tag)
     except Exception as exc:  # noqa: BLE001
         print(status_messages.status(f"Bundle generation failed: {exc}", level="fail"))
-        prompt_utils.press_enter_to_continue()
-        return
+        return False
 
     print(status_messages.status(f"Wrote: {relative_path(output_paper_root())}", level="success"))
     print(status_messages.status(f"Manifest: {relative_path(artifacts.artifacts_manifest_json)}", level="info"))
-    prompt_utils.press_enter_to_continue()
+    return True
 
 
 def view_saved_reports() -> None:
@@ -713,39 +671,6 @@ def _rebuild_dynamic_db_index_from_evidence(root: Path) -> dict[str, object]:
     }
 
 
-def handle_rebuild_dynamic_db_index_from_evidence() -> None:
-    """Rebuild derived DB index from evidence packs (dynamic_sessions + features + indicators)."""
-
-    root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
-    if not root.exists():
-        print(status_messages.status("Dynamic evidence root not found.", level="warn"))
-        prompt_utils.press_enter_to_continue()
-        return
-
-    print()
-    menu_utils.print_header("Rebuild DB index from evidence packs")
-    print(status_messages.status("DB is derived; evidence packs remain authoritative.", level="info"))
-    print(status_messages.status(f"Root: {root}", level="info"))
-    if not prompt_utils.prompt_yes_no("Rebuild now?", default=True):
-        return
-
-    outcome = _rebuild_dynamic_db_index_from_evidence(root)
-    scanned = int(outcome.get("scanned") or 0)
-    ok = int(outcome.get("ok") or 0)
-    features = int(outcome.get("network_features_upserted") or 0)
-    indexed = int(outcome.get("indicators_indexed") or 0)
-    errors = outcome.get("errors") or []
-    print(
-        status_messages.status(
-            f"Reindex complete: scanned={scanned} ok={ok} network_features_upserted={features} indicators_indexed={indexed}",
-            level="success" if scanned and scanned == ok else "warn",
-        )
-    )
-    if errors:
-        print(status_messages.status(f"Errors (sample): {', '.join(str(e) for e in errors[:5])}", level="warn"))
-    prompt_utils.press_enter_to_continue()
-
-
 def handle_tier1_quick_fix() -> None:
     """One-shot helper: rebuild DB index from evidence packs and rerun Tier-1 checks."""
 
@@ -787,6 +712,309 @@ def handle_tier1_quick_fix() -> None:
     ):
         handle_tier1_export_pack()
 
+    prompt_utils.press_enter_to_continue()
+
+
+def handle_paper_bundle_health_check() -> None:
+    """One-shot paper-mode health check (freeze + bundle integrity + semantic lint + toolchain pins)."""
+
+    ok = _paper_bundle_health_check()
+    print()
+    print(status_messages.status("Health check: PASS" if ok else "Health check: FAIL", level="success" if ok else "error"))
+    prompt_utils.press_enter_to_continue()
+
+
+def handle_phase_f1_acceptance_gates() -> None:
+    """Run Phase F1 acceptance gates (Phase E regression + query-mode smoke)."""
+
+    import subprocess
+    import sys
+
+    print()
+    menu_utils.print_header("Phase F1 Acceptance Gates")
+    print(
+        status_messages.status(
+            "Runs two gates: (1) Phase E no-drift regression (paper toolchain) and (2) query-mode variable-N smoke.",
+            level="info",
+        )
+    )
+
+    repo_root = Path(__file__).resolve().parents[2]
+    gate_phase_e = repo_root / "scripts" / "paper2" / "phase_e_regression_gate.py"
+    gate_smoke = repo_root / "scripts" / "operational" / "query_mode_smoke_gate.py"
+    ref_path = Path(app_config.DATA_DIR) / "archive" / "phase_e_reference_hashes.json"
+
+    ok_all = True
+
+    if not gate_phase_e.exists():
+        ok_all = False
+        print(status_messages.status(f"Missing regression gate script: {gate_phase_e}", level="error"))
+    if not gate_smoke.exists():
+        ok_all = False
+        print(status_messages.status(f"Missing smoke gate script: {gate_smoke}", level="error"))
+
+    if not ok_all:
+        prompt_utils.press_enter_to_continue()
+        return
+
+    # Phase E regression: record reference if missing.
+    if not ref_path.exists():
+        print(status_messages.status(f"Phase E reference hashes missing: {relative_path(ref_path)}", level="warn"))
+        if prompt_utils.prompt_yes_no("Record reference hashes now? (writes to data/archive)", default=True):
+            proc = subprocess.run([sys.executable, str(gate_phase_e), "--record"], text=True, capture_output=True)
+            if proc.returncode != 0:
+                ok_all = False
+                print(status_messages.status("Gate (Phase E regression): FAIL (record step)", level="error"))
+                out = (proc.stdout or "").strip()
+                err = (proc.stderr or "").strip()
+                if out:
+                    print(out.splitlines()[-1])
+                if err:
+                    print(err.splitlines()[-1])
+            else:
+                out = (proc.stdout or "").strip()
+                print(status_messages.status("Gate (Phase E regression): reference recorded", level="success"))
+                if out:
+                    print(out.splitlines()[-1])
+        else:
+            ok_all = False
+
+    print()
+    proc = subprocess.run([sys.executable, str(gate_phase_e)], text=True, capture_output=True)
+    if proc.returncode != 0:
+        ok_all = False
+        print(status_messages.status("Gate (Phase E regression): FAIL", level="error"))
+        out = (proc.stdout or "").strip()
+        err = (proc.stderr or "").strip()
+        if out:
+            print(out.splitlines()[-1])
+        if err:
+            print(err.splitlines()[-1])
+    else:
+        out = (proc.stdout or "").strip()
+        print(status_messages.status("Gate (Phase E regression): PASS", level="success"))
+        if out:
+            print(out.splitlines()[-1])
+
+    print()
+    proc = subprocess.run([sys.executable, str(gate_smoke)], text=True, capture_output=True)
+    if proc.returncode != 0:
+        ok_all = False
+        print(status_messages.status("Gate (Query-mode smoke): FAIL", level="error"))
+        out = (proc.stdout or "").strip()
+        err = (proc.stderr or "").strip()
+        if out:
+            print(out.splitlines()[-1])
+        if err:
+            print(err.splitlines()[-1])
+    else:
+        out = (proc.stdout or "").strip()
+        print(status_messages.status("Gate (Query-mode smoke): PASS", level="success"))
+        if out:
+            print(out.splitlines()[-1])
+
+    print()
+    print(status_messages.status("Phase F1: PASS" if ok_all else "Phase F1: FAIL", level="success" if ok_all else "error"))
+    prompt_utils.press_enter_to_continue()
+
+
+def _paper_bundle_health_check() -> bool:
+    """Run paper-mode checks and print results. Returns True if all checks pass."""
+
+    import json
+    import subprocess
+    import sys
+    from hashlib import sha256
+
+    from scytaledroid.DynamicAnalysis.ml import deliverable_bundle_paths
+    from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as ml_config
+    from scytaledroid.Utils.toolchain_versions import gather_toolchain_versions
+
+    def _sha256_file(path: Path) -> str | None:
+        if not path.exists():
+            return None
+        h = sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                h.update(chunk)
+        return h.hexdigest()
+
+    def _repo_root() -> Path:
+        # repo_root/scytaledroid/Reporting/menu_actions.py -> parents[2] is repo root
+        return Path(__file__).resolve().parents[2]
+
+    print()
+    menu_utils.print_header("Paper Bundle Health Check (Phase E)")
+    print(status_messages.status("This does not regenerate artifacts; it verifies integrity + semantics.", level="info"))
+
+    checks_ok = True
+
+    # Freeze anchor exists.
+    freeze_path = deliverable_bundle_paths.freeze_anchor_path()
+    if freeze_path.exists():
+        print(status_messages.status(f"Freeze anchor: ok ({freeze_path})", level="success"))
+    else:
+        checks_ok = False
+        print(status_messages.status(f"Freeze anchor: missing ({freeze_path})", level="error"))
+
+    # Bundle presence + closure record integrity.
+    bundle_root = Path(app_config.OUTPUT_DIR) / "paper" / "paper2" / "phase_e"
+    manifest_dir = bundle_root / "manifest"
+    closure_path = manifest_dir / "phase_e_closure_record.json"
+    artifacts_manifest_path = manifest_dir / "phase_e_artifacts_manifest.json"
+    if not bundle_root.exists():
+        checks_ok = False
+        print(status_messages.status(f"Phase E bundle: missing ({bundle_root})", level="warn"))
+        print(status_messages.status("Next: Reporting → Paper / ML → Paper #2 end-to-end.", level="info"))
+    else:
+        print(status_messages.status(f"Phase E bundle: present ({bundle_root})", level="success"))
+        if not closure_path.exists() or not artifacts_manifest_path.exists():
+            checks_ok = False
+            print(status_messages.status("Bundle manifests: missing closure record or artifacts manifest.", level="error"))
+        else:
+            try:
+                closure = json.loads(closure_path.read_text(encoding="utf-8"))
+                recorded = str(closure.get("bundle_manifest_sha256") or "")
+                actual = _sha256_file(artifacts_manifest_path) or ""
+                if recorded and recorded == actual:
+                    print(status_messages.status("Bundle closure record: ok (manifest sha matches)", level="success"))
+                else:
+                    checks_ok = False
+                    print(status_messages.status("Bundle closure record: mismatch (manifest sha)", level="error"))
+            except Exception as exc:
+                checks_ok = False
+                print(status_messages.status(f"Bundle closure record: unreadable ({exc})", level="error"))
+
+    # Semantic lint (best-effort; non-fatal if bundle missing).
+    lint_script = _repo_root() / "scripts" / "paper2" / "semantic_lint.py"
+    if lint_script.exists():
+        proc = subprocess.run([sys.executable, str(lint_script)], capture_output=True, text=True)
+        if proc.returncode == 0:
+            print(status_messages.status("Semantic lint: ok", level="success"))
+        else:
+            checks_ok = False
+            print(status_messages.status("Semantic lint: FAILED", level="error"))
+            out = (proc.stdout or "").strip()
+            err = (proc.stderr or "").strip()
+            if out:
+                print(out.splitlines()[-1])
+            if err:
+                print(err.splitlines()[-1])
+    else:
+        print(status_messages.status("Semantic lint: missing script (skipped)", level="warn"))
+
+    # Toolchain + percentile method.
+    tc = gather_toolchain_versions()
+    np_ver = ((tc.get("packages") or {}).get("numpy")) if isinstance(tc.get("packages"), dict) else None
+    print(
+        status_messages.status(
+            f"Toolchain: python={sys.version.split()[0]} numpy={np_ver or '<unknown>'} "
+            f"np_percentile_method={ml_config.NP_PERCENTILE_METHOD}",
+            level="info",
+        )
+    )
+
+    # Paper toolchain pins check (if configured).
+    pins_path = _repo_root() / "requirements-paper-toolchain.txt"
+    if pins_path.exists():
+        pins: dict[str, str] = {}
+        for line in pins_path.read_text(encoding="utf-8").splitlines():
+            raw = line.strip()
+            if not raw or raw.startswith("#") or raw.startswith("-r "):
+                continue
+            if "==" not in raw:
+                continue
+            name, ver = raw.split("==", 1)
+            pins[name.strip().lower()] = ver.strip()
+        mismatches: list[str] = []
+        if pins:
+            try:
+                from importlib.metadata import version
+            except Exception:  # pragma: no cover
+                version = None  # type: ignore[assignment]
+            for dist, want in sorted(pins.items()):
+                got = None
+                if version is not None:
+                    try:
+                        got = version(dist)
+                    except Exception:
+                        got = None
+                if got != want:
+                    mismatches.append(f"{dist}={got or '<missing>'} (want {want})")
+        if not pins:
+            print(status_messages.status("Paper toolchain pins: empty (skipped)", level="warn"))
+        elif not mismatches:
+            print(status_messages.status("Paper toolchain pins: ok", level="success"))
+        else:
+            checks_ok = False
+            print(status_messages.status(f"Paper toolchain pins: mismatch ({len(mismatches)})", level="error"))
+            print(status_messages.status(f"Sample: {mismatches[0]}", level="warn"))
+    else:
+        print(status_messages.status("Paper toolchain pins: not configured", level="warn"))
+
+    return checks_ok
+
+
+def handle_paper2_end_to_end() -> None:
+    """One-button paper run: Phase E ML + bundle write + health check."""
+
+    from scytaledroid.DynamicAnalysis.ml.ml_parameters_paper2 import FREEZE_CANONICAL_FILENAME
+
+    archive_dir = Path(app_config.DATA_DIR) / "archive"
+    freeze_path = archive_dir / FREEZE_CANONICAL_FILENAME
+    if not freeze_path.exists():
+        print(status_messages.status("Missing freeze anchor; cannot run paper end-to-end.", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    _run_phase_e_ml(freeze_path)
+    if not _write_phase_e_deliverables_bundle_from_pin():
+        prompt_utils.press_enter_to_continue()
+        return
+    ok = _paper_bundle_health_check()
+    print()
+    print(status_messages.status("Paper end-to-end: PASS" if ok else "Paper end-to-end: FAIL", level="success" if ok else "error"))
+    prompt_utils.press_enter_to_continue()
+
+
+def handle_tier1_end_to_end() -> None:
+    """One-button Tier-1 run: rebuild DB index + audit + export."""
+
+    from scytaledroid.Database.db_utils import schema_gate
+
+    ok, message, detail = schema_gate.dynamic_schema_gate()
+    if not ok:
+        status_messages.print_status(f"[ERROR] {message}", level="error")
+        if detail:
+            status_messages.print_status(detail, level="error")
+        status_messages.print_status(
+            "Fix: Database Tools → Apply Tier-1 schema migrations (or import canonical DB export), then retry.",
+            level="error",
+        )
+        return
+
+    root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    if not root.exists():
+        print(status_messages.status("Dynamic evidence root not found.", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    print()
+    menu_utils.print_header("Tier-1 end-to-end")
+    print(status_messages.status("Rebuild DB index from evidence packs → audit → export pack.", level="info"))
+    result = index_dynamic_evidence_packs_to_db(root)
+    scanned = int(result.get("scanned") or 0)
+    ok_n = int(result.get("ok") or 0)
+    print(
+        status_messages.status(
+            f"Reindex: scanned={scanned} ok={ok_n}",
+            level="success" if scanned and scanned == ok_n else "warn",
+        )
+    )
+    health_checks.run_tier1_audit_report()
+    default_dir = Path(app_config.OUTPUT_DIR) / "exports" / "scytaledroid_dyn_v1"
+    outputs = export_tier1_pack(default_dir)
+    print(status_messages.status(f"Export written: {outputs.get('manifest')}", level="success"))
     prompt_utils.press_enter_to_continue()
 
 
@@ -838,6 +1066,37 @@ def handle_tier1_qa_failures_report() -> None:
 def fetch_tier1_status() -> dict[str, object]:
     """Return a compact Tier-1 readiness snapshot for the reporting menu."""
 
+    def _repo_root() -> Path:
+        # repo_root/scytaledroid/Reporting/menu_actions.py -> parents[2] is repo root
+        return Path(__file__).resolve().parents[2]
+
+    def _parse_pinned_requirements(path: Path) -> dict[str, str]:
+        pins: dict[str, str] = {}
+        if not path.exists():
+            return pins
+        for line in path.read_text(encoding="utf-8").splitlines():
+            raw = line.strip()
+            if not raw or raw.startswith("#"):
+                continue
+            if raw.startswith("-r "):
+                continue
+            if "==" not in raw:
+                continue
+            name, ver = raw.split("==", 1)
+            name = name.strip()
+            ver = ver.strip()
+            if name and ver:
+                pins[name.lower()] = ver
+        return pins
+
+    def _installed_version(dist: str) -> str | None:
+        try:
+            from importlib.metadata import version
+
+            return version(dist)
+        except Exception:
+            return None
+
     status: dict[str, object] = {
         "schema_version": None,
         "expected_schema": "0.2.6",
@@ -853,6 +1112,13 @@ def fetch_tier1_status() -> dict[str, object]:
         "evidence_packs_total": 0,
         "evidence_dataset_packs": 0,
         "evidence_dataset_valid": 0,
+        # Export-derived health signals (post-export).
+        "feature_health_status": None,
+        "feature_health_at": None,
+        # Paper toolchain pins (determinism contract).
+        "paper_toolchain_pins_present": False,
+        "paper_toolchain_ok": None,
+        "paper_toolchain_summary": None,
     }
     try:
         row = core_q.run_sql(
@@ -975,6 +1241,44 @@ def fetch_tier1_status() -> dict[str, object]:
     except Exception:
         status["last_export_path"] = None
         status["last_export_at"] = None
+
+    # Feature health status (only exists after export).
+    try:
+        export_analysis_dir = Path(app_config.OUTPUT_DIR) / "exports" / "scytaledroid_dyn_v1" / "analysis"
+        fh_path = export_analysis_dir / "feature_health.json"
+        if fh_path.exists():
+            import json
+
+            payload = json.loads(fh_path.read_text(encoding="utf-8"))
+            if isinstance(payload, dict):
+                status["feature_health_status"] = payload.get("status")
+            status["feature_health_at"] = datetime.fromtimestamp(fh_path.stat().st_mtime).strftime(
+                "%Y-%m-%d %H:%M"
+            )
+    except Exception:
+        status["feature_health_status"] = None
+        status["feature_health_at"] = None
+
+    # Paper toolchain pins (requirements-paper-toolchain.txt).
+    try:
+        pins_path = _repo_root() / "requirements-paper-toolchain.txt"
+        pins = _parse_pinned_requirements(pins_path)
+        status["paper_toolchain_pins_present"] = bool(pins)
+        if pins:
+            mismatches: list[str] = []
+            for dist, want in sorted(pins.items()):
+                got = _installed_version(dist) or "<missing>"
+                if got != want:
+                    mismatches.append(f"{dist}={got} (want {want})")
+            status["paper_toolchain_ok"] = not mismatches
+            status["paper_toolchain_summary"] = "ok" if not mismatches else f"mismatch ({len(mismatches)})"
+        else:
+            status["paper_toolchain_ok"] = None
+            status["paper_toolchain_summary"] = "not configured"
+    except Exception:
+        status["paper_toolchain_pins_present"] = False
+        status["paper_toolchain_ok"] = None
+        status["paper_toolchain_summary"] = "unknown"
 
     return status
 

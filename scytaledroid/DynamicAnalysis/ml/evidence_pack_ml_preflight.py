@@ -169,6 +169,8 @@ def compute_ml_preflight(inputs: RunInputs) -> MlPreflightResult:
         # Map missing frozen inputs to PM-approved skip enums.
         if "analysis/pcap_report.json" in missing:
             skip_reason = "ML_SKIPPED_MISSING_PROTOCOL_FEATURES"
+        elif "analysis/pcap_features.json" in missing:
+            skip_reason = "ML_SKIPPED_MISSING_PCAP_FEATURES"
         else:
             skip_reason = "ML_SKIPPED_EMPTY_FEATURE_VECTOR"
     elif windows_total <= 0:

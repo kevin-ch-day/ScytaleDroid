@@ -2,7 +2,12 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REQ_FILE="$ROOT_DIR/requirements.txt"
+REQ_FILE_DEFAULT="$ROOT_DIR/requirements.txt"
+REQ_FILE_PAPER="$ROOT_DIR/requirements-paper-toolchain.txt"
+REQ_FILE="${SCYTALEDROID_REQUIREMENTS_FILE:-$REQ_FILE_DEFAULT}"
+if [[ "${SCYTALEDROID_PAPER_TOOLCHAIN:-0}" == "1" ]] && [[ -f "$REQ_FILE_PAPER" ]]; then
+  REQ_FILE="$REQ_FILE_PAPER"
+fi
 SETUP_STATE_DIR="$ROOT_DIR/.setup"
 REQ_HASH_FILE="$SETUP_STATE_DIR/requirements.sha256"
 ANDROID_TOOLS_LIB="$ROOT_DIR/scripts/lib/android_tools.sh"

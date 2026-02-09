@@ -48,6 +48,7 @@ _ML_AUDIT_COLUMNS = {
     "training_samples",
     "training_samples_warning",
     "threshold_equals_max",
+    "np_percentile_method",
     "feature_transform",
     "feature_scaling",
 }
@@ -583,9 +584,10 @@ def run_dynamic_evidence_verify(
                     quic_ratio = _coerce_float(proxies.get("quic_ratio"))
 
             if expect_ml:
-                ml_summary = run_dir / "analysis" / "ml_provisional" / "v1" / "ml_summary.json"
+                # Canonical location for ML outputs (Phase E / Paper #2).
+                ml_summary = run_dir / "analysis" / "ml" / "v1" / "ml_summary.json"
                 if not ml_summary.exists():
-                    notes.append("missing_ml:analysis/ml_provisional/v1/ml_summary.json")
+                    notes.append("missing_ml:analysis/ml/v1/ml_summary.json")
 
             status = "OK"
             if missing_required:

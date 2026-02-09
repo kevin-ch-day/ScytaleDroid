@@ -323,12 +323,10 @@ def workspace_menu() -> None:
         items = [
             menu_utils.MenuOption("1", "Show workspace usage"),
             menu_utils.MenuOption("2", "Dynamic evidence packs"),
-            menu_utils.MenuOption("3", "Verify evidence packs (overview)"),
-            menu_utils.MenuOption("4", "Quick health check (packs/missing/bad + PCAP sizes)"),
-            menu_utils.MenuOption("5", "View app runs (details)"),
-            menu_utils.MenuOption("6", "Delete INVALID dataset runs (local only)"),
-            menu_utils.MenuOption("7", "Recompute dataset tracker (from evidence packs)"),
-            menu_utils.MenuOption("9", "Advanced / destructive"),
+            menu_utils.MenuOption("3", "Cleanup dynamic evidence workspace (safe)"),
+            menu_utils.MenuOption("4", "Prune derived dynamic DB orphans (safe)"),
+            menu_utils.MenuOption("5", "Prune legacy ML artifacts on disk (safe)"),
+            menu_utils.MenuOption("6", "Reset static analysis data (destructive)"),
         ]
         spec_kwargs = display_settings.apply_menu_defaults(
             {"items": items, "exit_label": "Back", "show_exit": True}
@@ -345,56 +343,20 @@ def workspace_menu() -> None:
 
             evidence_packs_menu()
         elif choice == "3":
-            from scytaledroid.DynamicAnalysis.tools.evidence.menu import evidence_verify_overview
+            from scytaledroid.DynamicAnalysis.tools.evidence.menu import evidence_cleanup_workspace
 
-            evidence_verify_overview(pause=True)
+            evidence_cleanup_workspace(pause=True)
         elif choice == "4":
-            from scytaledroid.DynamicAnalysis.tools.evidence.menu import evidence_quick_health_check
-
-            evidence_quick_health_check(pause=True)
+            _prune_dynamic_db_orphans()
         elif choice == "5":
-            from scytaledroid.DynamicAnalysis.tools.evidence.menu import evidence_view_app_runs
-
-            evidence_view_app_runs(pause=True)
+            _prune_legacy_ml_artifacts()
         elif choice == "6":
-            from scytaledroid.DynamicAnalysis.tools.evidence.menu import evidence_delete_invalid_dataset_runs
-
-            evidence_delete_invalid_dataset_runs(pause=True)
-        elif choice == "7":
-            from scytaledroid.DynamicAnalysis.tools.evidence.menu import evidence_recompute_dataset_tracker
-
-            evidence_recompute_dataset_tracker(pause=True)
-        elif choice == "9":
             from scytaledroid.Database.db_utils.menus import health_checks
 
-            _workspace_advanced_destructive_menu(
-                reset_static_action=health_checks.prompt_reset_static_data,
-            )
+            health_checks.prompt_reset_static_data()
         else:
             print(status_messages.status("Option not available yet.", level="warn"))
             prompt_utils.press_enter_to_continue()
-
-
-def _workspace_advanced_destructive_menu(*, reset_static_action) -> None:
-    """Centralize destructive actions away from high-traffic menus."""
-    while True:
-        print()
-        menu_utils.print_header("Workspace & Evidence (Advanced / Destructive)")
-        items = [
-            menu_utils.MenuOption("1", "Reset static analysis data (destructive)"),
-            menu_utils.MenuOption("3", "Prune derived dynamic DB orphans (safe)"),
-        ]
-        spec_kwargs = display_settings.apply_menu_defaults(
-            {"items": items, "exit_label": "Back", "show_exit": True}
-        )
-        menu_utils.render_menu(menu_utils.MenuSpec(**spec_kwargs))
-        choice = prompt_utils.get_choice([opt.key for opt in items] + ["0"], default="0")
-        if choice == "0":
-            return
-        if choice == "1":
-            reset_static_action()
-        if choice == "3":
-            _prune_dynamic_db_orphans()
 
 
 def _prune_dynamic_db_orphans() -> None:
@@ -433,6 +395,101 @@ def _prune_dynamic_db_orphans() -> None:
     ids = [str(o.get("dynamic_run_id") or "") for o in orphans if str(o.get("dynamic_run_id") or "").strip()]
     deleted = delete_dynamic_sessions_by_id(ids)
     print(status_messages.status(f"Deleted {deleted} dynamic_sessions row(s).", level="success"))
+    prompt_utils.press_enter_to_continue()
+
+
+def _prune_legacy_ml_artifacts() -> None:
+    """Remove legacy ML outputs that are redundant with canonical `analysis/ml/v1` artifacts.
+
+    Safe deletion rules:
+    - Remove `analysis/ml_provisional/...` only when `analysis/ml/v1/ml_summary.json` exists.
+    - Remove legacy score CSV filenames under `analysis/ml/v1/` only when canonical files exist.
+    """
+    import shutil
+
+    print()
+    menu_utils.print_header("Prune Legacy ML Artifacts")
+    print(status_messages.status("This deletes redundant legacy files on disk; it does not recompute ML.", level="info"))
+
+    root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    if not root.exists():
+        print(status_messages.status(f"No dynamic evidence root: {root}", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    dirs_to_delete: list[Path] = []
+    files_to_delete: list[Path] = []
+
+    # Canonical v1 marker.
+    def _has_canonical_v1(run_dir: Path) -> bool:
+        return (run_dir / "analysis" / "ml" / "v1" / "ml_summary.json").exists()
+
+    for run_dir in sorted([p for p in root.iterdir() if p.is_dir()], key=lambda p: p.name):
+        if not _has_canonical_v1(run_dir):
+            continue
+
+        legacy_dir = run_dir / "analysis" / "ml_provisional"
+        if legacy_dir.exists():
+            dirs_to_delete.append(legacy_dir)
+
+        v1_dir = run_dir / "analysis" / "ml" / "v1"
+        if not v1_dir.exists():
+            continue
+
+        # Legacy filenames kept for back-compat; safe to remove when canonical exists.
+        canon_if = v1_dir / "anomaly_scores_iforest.csv"
+        canon_oc = v1_dir / "anomaly_scores_ocsvm.csv"
+        if canon_if.exists():
+            legacy_if = v1_dir / "anomaly_scores_isolation_forest.csv"
+            if legacy_if.exists():
+                files_to_delete.append(legacy_if)
+        if canon_oc.exists():
+            legacy_oc = v1_dir / "anomaly_scores_one_class_svm.csv"
+            if legacy_oc.exists():
+                files_to_delete.append(legacy_oc)
+
+    if not dirs_to_delete and not files_to_delete:
+        print(status_messages.status("No legacy ML artifacts found to prune.", level="success"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    bytes_dirs = sum(_dir_size_bytes(p) for p in dirs_to_delete if p.exists())
+    bytes_files = sum(p.stat().st_size for p in files_to_delete if p.exists())
+    print(
+        status_messages.status(
+            f"Will delete: {len(dirs_to_delete)} legacy dir(s), {len(files_to_delete)} legacy file(s) "
+            f"({ _humanize_bytes(int(bytes_dirs + bytes_files)) } total).",
+            level="warn",
+        )
+    )
+    if dirs_to_delete:
+        print(status_messages.status(f"- dirs: {len(dirs_to_delete)} (e.g., {dirs_to_delete[0]})", level="info"))
+    if files_to_delete:
+        print(status_messages.status(f"- files: {len(files_to_delete)} (e.g., {files_to_delete[0]})", level="info"))
+
+    if not prompt_utils.prompt_yes_no("Delete these legacy ML artifacts now?", default=False):
+        print(status_messages.status("Cancelled.", level="info"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    deleted_dirs = 0
+    deleted_files = 0
+    for p in files_to_delete:
+        try:
+            if p.exists():
+                p.unlink()
+                deleted_files += 1
+        except OSError:
+            continue
+    for p in dirs_to_delete:
+        try:
+            if p.exists():
+                shutil.rmtree(p)
+                deleted_dirs += 1
+        except OSError:
+            continue
+
+    print(status_messages.status(f"Deleted legacy ML: dirs={deleted_dirs} files={deleted_files}", level="success"))
     prompt_utils.press_enter_to_continue()
 
 

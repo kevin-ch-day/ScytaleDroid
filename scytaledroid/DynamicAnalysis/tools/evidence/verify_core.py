@@ -113,16 +113,9 @@ def verify_dynamic_evidence_packs(
                         "manifest.dataset missing/empty for dataset-tier run",
                     )
                 )
-            # Legacy mirrors are ignored (Paper #2 contract). Flag presence so operators
-            # can prune legacy runs if they appear in the workspace.
-            legacy_validity = operator.get("dataset_validity") if isinstance(operator, dict) else None
-            if isinstance(legacy_validity, dict):
-                issues.append(
-                    VerifyIssue(
-                        "legacy_dataset_validity_present",
-                        "operator.dataset_validity present (legacy); ignored in favor of manifest.dataset",
-                    )
-                )
+            # Legacy mirrors (e.g., operator.dataset_validity) are intentionally ignored.
+            # Do not warn: many runs contain this mirror due to prior migrations, and the
+            # Paper #2 contract treats `manifest.dataset` as authoritative.
 
         valid = dataset.get("valid_dataset_run") if isinstance(dataset, dict) else None
         invalid_reason = dataset.get("invalid_reason_code") if isinstance(dataset, dict) else None

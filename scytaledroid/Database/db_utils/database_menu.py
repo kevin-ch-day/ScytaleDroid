@@ -22,40 +22,13 @@ from .menu_actions import (
 def database_menu() -> None:
     """Render the database utilities menu and dispatch to sub-menus."""
 
-    def advanced_optional_menu() -> None:
-        actions: dict[str, Callable[[], None]] = {
-            "1": ensure_dynamic_tier_migrations,
-        }
-        options: list[MenuOption] = [
-            MenuOption("1", "Tier-1 migrations (dynamic/ML; optional)"),
-        ]
-
-        while True:
-            maybe_clear_screen()
-            menu_utils.print_header("Database Tools (Advanced / Optional)")
-            menu_utils.render_menu(
-                MenuSpec(
-                    items=options,
-                    exit_label="Back",
-                    show_exit=True,
-                    padding=False,
-                    show_descriptions=False,
-                )
-            )
-            choice = prompt_utils.get_choice([option.key for option in options] + ["0"], default="0")
-            if choice == "0":
-                return
-            action = actions.get(choice)
-            if action:
-                action()
-
     actions: dict[str, Callable[[], None]] = {
         "1": apply_canonical_schema_bootstrap,
         "2": health_checks.run_health_summary,
         "3": health_checks.run_evidence_integrity_check,
         "4": show_governance_snapshot_status,
         "5": show_connection_and_config,
-        "6": advanced_optional_menu,
+        "6": ensure_dynamic_tier_migrations,
     }
 
     options: list[MenuOption] = [
@@ -64,7 +37,7 @@ def database_menu() -> None:
         MenuOption("3", "DB integrity check (DB snapshot linkage)"),
         MenuOption("4", "Governance snapshot (import/status)"),
         MenuOption("5", "Connection & config (diagnostic)"),
-        MenuOption("6", "Advanced / optional"),
+        MenuOption("6", "Tier-1 migrations (dynamic/ML; optional)"),
     ]
 
     while True:
