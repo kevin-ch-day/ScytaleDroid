@@ -17,7 +17,6 @@ from scytaledroid.DeviceAnalysis import device_manager
 from scytaledroid.DeviceAnalysis.report import generate_device_report
 from scytaledroid.DynamicAnalysis.exports.dataset_export import export_tier1_pack
 from scytaledroid.DynamicAnalysis.ml import run_ml_on_evidence_packs
-from scytaledroid.DynamicAnalysis.ml import config as ml_config
 from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_preflight_report import write_ml_preflight_report
 from scytaledroid.Reporting.generator import export_static_analysis_markdown
 from scytaledroid.StaticAnalysis.persistence import list_reports

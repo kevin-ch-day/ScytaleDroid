@@ -15,7 +15,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import matplotlib.pyplot as plt
+# Force a headless-safe backend. This module may run in CLI/CI environments
+# without a display server.
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402
 
 from scytaledroid.Config import app_config
 
