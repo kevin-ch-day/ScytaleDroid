@@ -32,14 +32,14 @@ from . import ml_parameters_paper2 as config
 from .deliverable_bundle_paths import (
     dataset_tables_dir,
     freeze_anchor_path,
-    output_paper_appendix_dir,
-    output_paper_artifacts_manifest_path,
-    output_paper_figures_dir,
-    output_paper_freeze_copy_path,
-    output_paper_manifest_dir,
-    output_paper_readme_path,
-    output_paper_root,
-    output_paper_tables_dir,
+    output_phase_e_bundle_appendix_dir,
+    output_phase_e_bundle_artifacts_manifest_path,
+    output_phase_e_bundle_figures_dir,
+    output_phase_e_bundle_freeze_copy_path,
+    output_phase_e_bundle_manifest_dir,
+    output_phase_e_bundle_readme_path,
+    output_phase_e_bundle_root,
+    output_phase_e_bundle_tables_dir,
 )
 from .pcap_window_features import build_window_features, extract_packet_timeline
 from .evidence_pack_ml_preflight import get_sampling_duration_seconds, load_run_inputs
@@ -68,7 +68,7 @@ def write_phase_e_deliverables_bundle(
     fig_b1_run_id: str,
     interaction_tag: str | None = None,
 ) -> PhaseEArtifacts:
-    """Write Phase E deliverables under output/paper/paper2/phase_e/.
+    """Write Phase E deliverables under output/paper/internal/baseline/.
 
     Assumes:
     - Freeze anchor exists and is checksummed.
@@ -76,11 +76,11 @@ def write_phase_e_deliverables_bundle(
     - ML v1 outputs exist for the exemplar run (anomaly_scores_*).
     """
 
-    out_root = output_paper_root()
-    figs_dir = output_paper_figures_dir()
-    tables_dir = output_paper_tables_dir()
-    appendix_dir = output_paper_appendix_dir()
-    manifest_dir = output_paper_manifest_dir()
+    out_root = output_phase_e_bundle_root()
+    figs_dir = output_phase_e_bundle_figures_dir()
+    tables_dir = output_phase_e_bundle_tables_dir()
+    appendix_dir = output_phase_e_bundle_appendix_dir()
+    manifest_dir = output_phase_e_bundle_manifest_dir()
     for d in (out_root, figs_dir, tables_dir, appendix_dir, manifest_dir):
         d.mkdir(parents=True, exist_ok=True)
 
@@ -107,12 +107,12 @@ def write_phase_e_deliverables_bundle(
     )
 
     # Freeze anchor copy (convenience; canonical stays in data/archive/).
-    _copy_required(freeze_anchor_path(), output_paper_freeze_copy_path(), overwrite=True)
+    _copy_required(freeze_anchor_path(), output_phase_e_bundle_freeze_copy_path(), overwrite=True)
 
     # Copy the exemplar pin lockfile for audit convenience.
     from .evidence_pack_ml_orchestrator import PAPER_ARTIFACTS_PATH
 
-    _copy_required(PAPER_ARTIFACTS_PATH, output_paper_manifest_dir() / "paper_artifacts.json", overwrite=True)
+    _copy_required(PAPER_ARTIFACTS_PATH, output_phase_e_bundle_manifest_dir() / "paper_artifacts.json", overwrite=True)
 
     # Figures (PM locked): Fig B1 + B2 + B4.
     fig_b1_png, fig_b1_pdf = _write_fig_b1(fig_b1_run_id, figs_dir, interaction_tag=interaction_tag, overwrite=True)
@@ -124,11 +124,11 @@ def write_phase_e_deliverables_bundle(
     repro_appendix_md.write_text(_render_repro_appendix(), encoding="utf-8")
 
     # Bundle README.
-    readme = output_paper_readme_path()
+    readme = output_phase_e_bundle_readme_path()
     readme.write_text(_render_bundle_readme(fig_b1_run_id), encoding="utf-8")
 
     # Bundle manifest (hashes + versions + pointers).
-    artifacts_manifest_json = output_paper_artifacts_manifest_path()
+    artifacts_manifest_json = output_phase_e_bundle_artifacts_manifest_path()
     _write_bundle_manifest(
         artifacts_manifest_json,
         fig_b1_run_id=fig_b1_run_id,
@@ -166,7 +166,7 @@ def write_phase_e_deliverables_bundle(
     # Close-out receipt: pins freeze + bundle-manifest hashes so a zipped bundle
     # can be verified later without re-running anything.
     _write_bundle_closure_record(
-        output_paper_manifest_dir() / "phase_e_closure_record.json",
+        output_phase_e_bundle_manifest_dir() / "phase_e_closure_record.json",
         bundle_manifest_path=artifacts_manifest_json,
     )
 
@@ -466,12 +466,12 @@ def _write_bundle_manifest(
             "table_7_tex": {"path": str(table_7_tex), "sha256": _sha256_stream(table_7_tex)},
             "repro_appendix": {"path": str(repro_appendix_md), "sha256": _sha256_stream(repro_appendix_md)},
             "freeze_copy": {
-                "path": str(output_paper_freeze_copy_path()),
-                "sha256": _sha256_stream(output_paper_freeze_copy_path()),
+                "path": str(output_phase_e_bundle_freeze_copy_path()),
+                "sha256": _sha256_stream(output_phase_e_bundle_freeze_copy_path()),
             },
             "paper_artifacts_copy": {
-                "path": str(output_paper_manifest_dir() / "paper_artifacts.json"),
-                "sha256": _sha256_stream(output_paper_manifest_dir() / "paper_artifacts.json"),
+                "path": str(output_phase_e_bundle_manifest_dir() / "paper_artifacts.json"),
+                "sha256": _sha256_stream(output_phase_e_bundle_manifest_dir() / "paper_artifacts.json"),
             },
         },
     }
@@ -491,7 +491,7 @@ def _copy_required(src: Path, dest: Path, *, overwrite: bool) -> None:
 def _write_bundle_closure_record(path: Path, *, bundle_manifest_path: Path) -> None:
     """Write a close-out receipt for the current bundle contents.
 
-    This file exists so a zipped `output/paper/.../phase_e/` bundle can be verified
+    This file exists so a zipped `output/paper/internal/baseline/` bundle can be verified
     later without depending on any DB state or rerunning generation.
     """
     from .evidence_pack_ml_orchestrator import PAPER_ARTIFACTS_PATH
@@ -500,7 +500,7 @@ def _write_bundle_closure_record(path: Path, *, bundle_manifest_path: Path) -> N
     payload = {
         "bundle_manifest_path": str(bundle_manifest_path),
         "bundle_manifest_sha256": _sha256_stream(bundle_manifest_path),
-        "bundle_root": str(output_paper_root()),
+        "bundle_root": str(output_phase_e_bundle_root()),
         "closed_at_utc": datetime.now(UTC).isoformat(),
         "toolchain": gather_toolchain_versions(),
         "freeze_anchor": str(freeze_anchor_path()),

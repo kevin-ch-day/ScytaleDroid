@@ -60,6 +60,5 @@ Location: `scytaledroid/DynamicAnalysis/ml/`
 
 - `artifact_bundle_writer.py`
   - Generates a zip-and-share paper bundle under:
-    - `output/paper/paper2/phase_e/`
+    - `output/paper/` (canonical paper artifact surface; internal provenance under `output/paper/internal/`)
   - Copies canonical tables, copies freeze anchor for convenience, writes Fig B1 timeline, writes a bundle manifest with hashes.
-

@@ -76,15 +76,15 @@ def check_docs_language() -> None:
 
 
 def check_bundle_artifacts() -> None:
-    bundle = ROOT / "output" / "paper" / "paper2" / "phase_e"
+    bundle = ROOT / "output" / "paper"
     if not bundle.exists():
-        _warn("Phase E bundle missing; skipping bundle lint.")
+        _warn("Canonical paper output missing; skipping bundle lint.")
         return
 
     # Table 5: findings-based naming
     t5 = bundle / "tables" / "table_5_masvs_coverage.csv"
     if not t5.exists():
-        _fail("Missing Table 5: output/paper/paper2/phase_e/tables/table_5_masvs_coverage.csv")
+        _fail("Missing Table 5: output/paper/tables/table_5_masvs_coverage.csv")
     header = ""
     for line in _read_text(t5).splitlines():
         if line.startswith("#") or not line.strip():
@@ -100,7 +100,7 @@ def check_bundle_artifacts() -> None:
     # Table 7: interpretive caption in tex
     t7_tex = bundle / "tables" / "table_7_exposure_deviation_summary.tex"
     if not t7_tex.exists():
-        _fail("Missing Table 7 tex: output/paper/paper2/phase_e/tables/table_7_exposure_deviation_summary.tex")
+        _fail("Missing Table 7 tex: output/paper/tables/table_7_exposure_deviation_summary.tex")
     cap_line = ""
     for line in _read_text(t7_tex).splitlines():
         if line.startswith("% Table 7:"):
@@ -115,12 +115,12 @@ def check_bundle_artifacts() -> None:
     _ok("Table 7 caption: interpretive + not system output + not measured risk.")
 
     # Closure record pins manifest hash correctly
-    closure = bundle / "manifest" / "phase_e_closure_record.json"
-    manifest = bundle / "manifest" / "phase_e_artifacts_manifest.json"
+    closure = bundle / "manifests" / "phase_e_closure_record.json"
+    manifest = bundle / "internal" / "provenance" / "phase_e_artifacts_manifest.json"
     if not closure.exists():
-        _fail("Missing closure record: output/paper/paper2/phase_e/manifest/phase_e_closure_record.json")
+        _fail("Missing closure record: output/paper/manifests/phase_e_closure_record.json")
     if not manifest.exists():
-        _fail("Missing artifacts manifest: output/paper/paper2/phase_e/manifest/phase_e_artifacts_manifest.json")
+        _fail("Missing artifacts manifest: output/paper/internal/provenance/phase_e_artifacts_manifest.json")
     obj = json.loads(_read_text(closure))
     expected = _sha256_file(manifest)
     got = str(obj.get("bundle_manifest_sha256") or "").strip()
@@ -137,4 +137,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

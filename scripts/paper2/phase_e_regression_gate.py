@@ -160,9 +160,9 @@ def _toolchain_matches(pins: dict[str, str]) -> tuple[bool, list[str]]:
 
 def _phase_e_bundle_root() -> Path:
     # Avoid importing app_config early (it can touch env/.env); import lazily inside the gate.
-    from scytaledroid.DynamicAnalysis.ml.deliverable_bundle_paths import output_paper_root
+    from scytaledroid.DynamicAnalysis.ml.deliverable_bundle_paths import output_phase_e_bundle_root
 
-    return output_paper_root()
+    return output_phase_e_bundle_root()
 
 
 def _collect_hash_targets() -> list[Path]:
@@ -216,6 +216,9 @@ def _hash_snapshot() -> dict[str, str]:
     for p in _collect_hash_targets():
         rp = p.resolve()
         rel = str(rp.relative_to(REPO_ROOT_RESOLVED))
+        # Output layout migration: normalize legacy keys so older recordings still validate.
+        rel = rel.replace("output/paper/paper2/phase_e/", "output/paper/internal/baseline/")
+        rel = rel.replace("output/paper/paper2/baseline/", "output/paper/internal/baseline/")
         out[rel] = _sha256_canonical(rp)
     return dict(sorted(out.items()))
 
@@ -289,6 +292,15 @@ def run_gate(*, reference_path: Path, record: bool, allow_toolchain_mismatch: bo
 
     ref = _load_json(reference_path)
     ref_hashes = ref.get("hashes") if isinstance(ref.get("hashes"), dict) else {}
+    # Normalize legacy keys in the reference so older recordings still validate.
+    if isinstance(ref_hashes, dict):
+        norm: dict[str, Any] = {}
+        for k, v in ref_hashes.items():
+            ks = str(k)
+            ks = ks.replace("output/paper/paper2/phase_e/", "output/paper/internal/baseline/")
+            ks = ks.replace("output/paper/paper2/baseline/", "output/paper/internal/baseline/")
+            norm[ks] = v
+        ref_hashes = norm
     mism: list[str] = []
     missing: list[str] = []
 

@@ -107,7 +107,7 @@ Dataset-level derived outputs (not frozen inputs):
 - `data/transport_mix_per_run.csv` (appendix; per-run transport ratios)
 
 Paper-ready deliverables bundle (zip-and-share; operator/paper-facing):
-- `output/paper/paper2/phase_e/`
+- Canonical paper artifact surface: `output/paper/` (tables/figures/appendix/manifests).
   - `figures/` (main figures)
     - `fig_b1_timeline_<runid8>.png/.pdf`
     - `fig_b2_rdi_by_app.png/.pdf`

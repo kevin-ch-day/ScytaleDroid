@@ -18,7 +18,8 @@ under `experimental/` so it cannot accidentally drift Paper #2 semantics.
 - `anomaly_model_training.py`
   - Fixed-model training + score normalization (higher = more anomalous).
 - `artifact_bundle_writer.py` + `deliverable_bundle_paths.py`
-  - Paper-ready bundle under `output/paper/paper2/phase_e/` (zip-and-share).
+  - Canonical paper artifact surface under `output/paper/` (stable paths for LaTeX).
+  - Internal Phase E baseline bundle under `output/paper/internal/baseline/` (regression/no-drift target).
 - `io/`
   - Evidence-pack and output path helpers.
 

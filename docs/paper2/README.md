@@ -55,11 +55,13 @@ Derived dataset tables (regenerable; developer/analyst-facing):
 - `data/transport_mix_per_run.csv` *(appendix; per-run transport ratios)*
 
 Paper-ready deliverables bundle (zip-and-share; operator/paper-facing):
-- `output/paper/paper2/phase_e/`
+- Canonical paper artifact surface: `output/paper/`
+  - Paper-facing: `output/paper/tables/`, `output/paper/figures/`, `output/paper/appendix/`, `output/paper/manifests/`
+  - Internal provenance: `output/paper/internal/`
 
 Bundle integrity receipts (inside the bundle):
-- `output/paper/paper2/phase_e/manifest/phase_e_artifacts_manifest.json` (hashes + provenance pointers)
-- `output/paper/paper2/phase_e/manifest/phase_e_closure_record.json` (pins freeze sha256 + bundle-manifest sha256)
+- `output/paper/internal/provenance/phase_e_artifacts_manifest.json` (hashes + provenance pointers)
+- `output/paper/manifests/phase_e_closure_record.json` (pins freeze sha256 + bundle-manifest sha256)
 
 Semantic lint (optional, recommended before sharing a bundle):
 - `scripts/paper2/semantic_lint.py`

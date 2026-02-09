@@ -111,13 +111,13 @@ Locked boundary statement (paper-ready):
 ## 7) Core Outputs (Paper-Facing)
 
 Tables:
-- `output/paper/paper2/phase_e/tables/table_1_rdi_prevalence.csv`
-- `output/paper/paper2/phase_e/tables/table_2_transport_mix.csv`
-- `output/paper/paper2/phase_e/tables/table_3_model_agreement.csv`
-- `output/paper/paper2/phase_e/tables/table_4_signature_deltas.csv`
-- `output/paper/paper2/phase_e/tables/table_5_masvs_coverage.csv` *(static context; derived from Phase B reports; not ML inputs)*
-- `output/paper/paper2/phase_e/tables/table_6_static_posture_scores.csv` *(static context; emitted to make Fig B4 auditable)*
-- `output/paper/paper2/phase_e/tables/table_7_exposure_deviation_summary.csv` *(interpretive; tertile bins; no combined scalar)*
+- `output/paper/tables/table_1_rdi_prevalence.csv`
+- `output/paper/tables/table_2_transport_mix.csv`
+- `output/paper/tables/table_3_model_agreement.csv`
+- `output/paper/tables/table_4_signature_deltas.csv`
+- `output/paper/tables/table_5_masvs_coverage.csv` *(static context; derived from Phase B reports; not ML inputs)*
+- `output/paper/tables/table_6_static_posture_scores.csv` *(static context; emitted to make Fig B4 auditable)*
+- `output/paper/tables/table_7_exposure_deviation_summary.csv` *(interpretive; tertile bins; no combined scalar)*
 
 Note:
 - Table 5 reports **static finding counts** by MASVS category and tool-defined severity; it is **not** MASVS control compliance.
@@ -134,7 +134,7 @@ Fig B1 exemplar timeline:
 ## 8) Appendix-Only Outputs (Hard Separation)
 
 Appendix-only root:
-- `output/paper/paper2/phase_e_appendix_exploratory/`
+- `output/paper/appendix/`
 
 Rules:
 - extra runs allowed
@@ -164,6 +164,7 @@ To prevent score confusion, Paper #2 uses a strict hierarchy:
 
 ## 10) Bundle Integrity (Operational)
 
-The deliverables bundle includes two audit files under `output/paper/paper2/phase_e/manifest/`:
+The canonical paper artifacts surface includes key audit files under `output/paper/manifests/`,
+with deeper provenance under `output/paper/internal/provenance/`:
 - `phase_e_artifacts_manifest.json`: paths + sha256 digests for bundle outputs
 - `phase_e_closure_record.json`: pins freeze sha256 + bundle-manifest sha256 (close-out receipt)

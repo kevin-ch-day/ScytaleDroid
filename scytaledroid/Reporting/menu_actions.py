@@ -239,6 +239,65 @@ def handle_run_ml_query_mode() -> None:
     prompt_utils.press_enter_to_continue()
 
 
+def handle_write_canonical_paper_directory() -> None:
+    """Write a single canonical output/paper/ directory for paper assembly."""
+
+    from scytaledroid.DynamicAnalysis.ml.deliverable_bundle_paths import output_phase_e_bundle_root
+    from scytaledroid.Paper.canonical_paper_writer import write_canonical_paper_directory
+
+    baseline_root = output_phase_e_bundle_root()
+    if not baseline_root.exists():
+        print(status_messages.status("Internal Phase E baseline bundle missing; generating it first.", level="warn"))
+        ok = _write_phase_e_deliverables_bundle_from_pin()
+        if not ok:
+            prompt_utils.press_enter_to_continue()
+            return
+
+    # Choose snapshot to surface (optional).
+    snaps_root = Path(app_config.OUTPUT_DIR) / "operational"
+    snaps: list[Path] = []
+    if snaps_root.exists():
+        snaps = sorted([p for p in snaps_root.iterdir() if p.is_dir()])
+
+    snapshot_dir: Path | None = None
+    snapshot_id: str | None = None
+    if snaps:
+        use_latest = prompt_utils.prompt_yes_no(f"Surface latest operational snapshot into output/paper/? ({snaps[-1].name})", default=True)
+        if use_latest:
+            snapshot_dir = snaps[-1]
+            snapshot_id = snapshot_dir.name
+        else:
+            sid = prompt_utils.prompt_text("Snapshot id under output/operational (blank=skip)", required=False, show_arrow=False).strip()
+            if sid:
+                cand = snaps_root / sid
+                if not cand.exists():
+                    print(status_messages.status(f"Snapshot not found: {cand}", level="warn"))
+                else:
+                    snapshot_dir = cand
+                    snapshot_id = cand.name
+    else:
+        print(status_messages.status("No operational snapshots found under output/operational; exporting Phase E only.", level="info"))
+
+    print()
+    menu_utils.print_header("Write Canonical Paper Directory")
+    print(status_messages.status("This surfaces baseline + (optional) snapshot into output/paper/ with stable paths.", level="info"))
+
+    try:
+        res = write_canonical_paper_directory(
+            baseline_bundle_root=baseline_root,
+            snapshot_dir=snapshot_dir,
+            snapshot_id=snapshot_id,
+            overwrite=True,
+        )
+    except Exception as exc:  # pragma: no cover
+        print(status_messages.status(f"Canonical export failed: {exc}", level="error"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    print(status_messages.status(f"Wrote: {relative_path(res.paper_root)}", level="success"))
+    prompt_utils.press_enter_to_continue()
+
+
 def handle_verify_freeze_immutability_paper2() -> None:
     """Verify frozen-input immutability (hash-based) for the canonical Paper #2 freeze."""
 
@@ -254,7 +313,7 @@ def _write_phase_e_deliverables_bundle_from_pin() -> bool:
     """
 
     from scytaledroid.DynamicAnalysis.ml.artifact_bundle_writer import write_phase_e_deliverables_bundle
-    from scytaledroid.DynamicAnalysis.ml.deliverable_bundle_paths import freeze_anchor_path, output_paper_root
+    from scytaledroid.DynamicAnalysis.ml.deliverable_bundle_paths import freeze_anchor_path, output_phase_e_bundle_root
     from scytaledroid.DynamicAnalysis.ml.ml_parameters_paper2 import FREEZE_CANONICAL_FILENAME
     from scytaledroid.DynamicAnalysis.ml.ml_parameters_paper2 import EXEMPLAR_ALLOWED_INTERACTION_TAGS, MESSAGING_PACKAGES
 
@@ -383,7 +442,7 @@ def _write_phase_e_deliverables_bundle_from_pin() -> bool:
         print(status_messages.status(f"Bundle generation failed: {exc}", level="fail"))
         return False
 
-    print(status_messages.status(f"Wrote: {relative_path(output_paper_root())}", level="success"))
+    print(status_messages.status(f"Wrote internal baseline bundle: {relative_path(output_phase_e_bundle_root())}", level="success"))
     print(status_messages.status(f"Manifest: {relative_path(artifacts.artifacts_manifest_json)}", level="info"))
     return True
 
@@ -870,7 +929,7 @@ def _paper_bundle_health_check() -> bool:
         return Path(__file__).resolve().parents[2]
 
     print()
-    menu_utils.print_header("Paper Bundle Health Check (Phase E)")
+    menu_utils.print_header("Paper Bundle Health Check")
     print(status_messages.status("This does not regenerate artifacts; it verifies integrity + semantics.", level="info"))
 
     checks_ok = True
@@ -883,33 +942,34 @@ def _paper_bundle_health_check() -> bool:
         checks_ok = False
         print(status_messages.status(f"Freeze anchor: missing ({freeze_path})", level="error"))
 
-    # Bundle presence + closure record integrity.
-    bundle_root = Path(app_config.OUTPUT_DIR) / "paper" / "paper2" / "phase_e"
-    manifest_dir = bundle_root / "manifest"
-    closure_path = manifest_dir / "phase_e_closure_record.json"
-    artifacts_manifest_path = manifest_dir / "phase_e_artifacts_manifest.json"
-    if not bundle_root.exists():
+    # Canonical paper output presence + closure record integrity.
+    paper_root = deliverable_bundle_paths.output_paper_root()
+    manifests_dir = deliverable_bundle_paths.output_paper_manifests_dir()
+    internal_prov_dir = deliverable_bundle_paths.output_paper_internal_provenance_dir()
+    closure_path = manifests_dir / "phase_e_closure_record.json"
+    artifacts_manifest_path = internal_prov_dir / "phase_e_artifacts_manifest.json"
+    if not paper_root.exists():
         checks_ok = False
-        print(status_messages.status(f"Phase E bundle: missing ({bundle_root})", level="warn"))
-        print(status_messages.status("Next: Reporting → Paper / ML → Paper #2 end-to-end.", level="info"))
+        print(status_messages.status(f"Canonical paper dir: missing ({paper_root})", level="warn"))
+        print(status_messages.status("Next: Reporting → Paper / ML → Write canonical paper directory.", level="info"))
     else:
-        print(status_messages.status(f"Phase E bundle: present ({bundle_root})", level="success"))
+        print(status_messages.status(f"Canonical paper dir: present ({paper_root})", level="success"))
         if not closure_path.exists() or not artifacts_manifest_path.exists():
             checks_ok = False
-            print(status_messages.status("Bundle manifests: missing closure record or artifacts manifest.", level="error"))
+            print(status_messages.status("Manifests: missing Phase E closure record or artifacts manifest.", level="error"))
         else:
             try:
                 closure = json.loads(closure_path.read_text(encoding="utf-8"))
                 recorded = str(closure.get("bundle_manifest_sha256") or "")
                 actual = _sha256_file(artifacts_manifest_path) or ""
                 if recorded and recorded == actual:
-                    print(status_messages.status("Bundle closure record: ok (manifest sha matches)", level="success"))
+                    print(status_messages.status("Phase E closure record: ok (manifest sha matches)", level="success"))
                 else:
                     checks_ok = False
-                    print(status_messages.status("Bundle closure record: mismatch (manifest sha)", level="error"))
+                    print(status_messages.status("Phase E closure record: mismatch (manifest sha)", level="error"))
             except Exception as exc:
                 checks_ok = False
-                print(status_messages.status(f"Bundle closure record: unreadable ({exc})", level="error"))
+                print(status_messages.status(f"Phase E closure record: unreadable ({exc})", level="error"))
 
     # Semantic lint (best-effort; non-fatal if bundle missing).
     lint_script = _repo_root() / "scripts" / "paper2" / "semantic_lint.py"
