@@ -16,7 +16,8 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any, Literal
 
-from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as ml_config
+from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper_config
+from scytaledroid.DynamicAnalysis.ml import ml_parameters_operational as operational_config
 from scytaledroid.DynamicAnalysis.ml.anomaly_model_training import fixed_model_specs
 from scytaledroid.Utils.toolchain_versions import gather_toolchain_versions
 
@@ -91,9 +92,14 @@ def _repo_root() -> Path:
     # repo_root/scytaledroid/DynamicAnalysis/ml/selectors/models.py -> parents[5] is repo root
     return Path(__file__).resolve().parents[5]
 
+def _cfg_for_selector(selector_type: SelectorType):
+    # Freeze selector fingerprints Paper #2 config; query selector fingerprints operational config.
+    return operational_config if selector_type == "query" else paper_config
 
-def _config_fingerprint() -> dict[str, Any]:
+
+def _config_fingerprint(selector_type: SelectorType) -> dict[str, Any]:
     # Use a fixed seed for fingerprinting spec templates (not app-specific seeds).
+    ml_config = _cfg_for_selector(selector_type)
     specs = fixed_model_specs(seed=0)
     spec_rows = [{"name": s.name, "params": dict(s.params)} for s in specs]
     return {
@@ -108,8 +114,8 @@ def _config_fingerprint() -> dict[str, Any]:
     }
 
 
-def _config_fingerprint_sha256() -> str:
-    blob = json.dumps(_config_fingerprint(), sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode(
+def _config_fingerprint_sha256(selector_type: SelectorType) -> str:
+    blob = json.dumps(_config_fingerprint(selector_type), sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode(
         "utf-8"
     )
     return sha256(blob).hexdigest()
@@ -122,7 +128,7 @@ def write_selection_manifest(path: Path, *, result: SelectionResult) -> Selectio
     repo_root = _repo_root()
     tool_version = _git_commit_hash(repo_root)
     toolchain = gather_toolchain_versions()
-    cfg_fp = _config_fingerprint_sha256()
+    cfg_fp = _config_fingerprint_sha256(result.selector_type)
 
     included_run_ids = [r.run_id for r in result.included]
     per_run_meta: dict[str, Any] = {}

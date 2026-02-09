@@ -21,6 +21,7 @@ Applies to **query-mode operational snapshots only** (`output/operational/...`):
 - Feature stabilisation: `log1p` + robust scaling (operational config).
 - Persistence metrics: anomaly streak count + longest streak (seconds).
 - Threshold stability diagnostics and coverage/confidence signals.
+ - Operational risk summary tables (heuristic, explainable).
 
 Operational tables:
 - `output/operational/<snapshot_id>/tables/anomaly_persistence_per_run.csv`
@@ -34,6 +35,15 @@ Risk scoring spec:
 
 ## Phase F3 (Snapshots + Closure)
 
-Not implemented yet:
-- Snapshot protocol v2 (query selection → new freeze artifact).
-- Model lifecycle / registry artifacts and paper sensitivity packaging.
+Implemented:
+- Each operational snapshot writes closure artifacts:
+  - `selection_manifest.json` (selector provenance, config fingerprint)
+  - `freeze_manifest.json` (checksummed evidence-pack inputs for immutability verification)
+  - `operational_lint.json` (DB-free math/consistency audit)
+  - `model_registry.json` (per group x model provenance: training run ids, thresholds, transforms)
+  - `snapshot_bundle_manifest.json` (sha256 inventory of snapshot artifacts)
+
+Tools:
+- `python scripts/operational/semantic_lint_operational.py --snapshot output/operational/<snapshot_id>`
+- `python scripts/operational/write_snapshot_bundle.py --snapshot output/operational/<snapshot_id>`
+- `python scripts/operational/phase_f3_acceptance_gate.py`

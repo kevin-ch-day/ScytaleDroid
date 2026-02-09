@@ -54,6 +54,8 @@ from .operational_risk import (
     minmax_norm,
     static_exposure_score_components,
 )
+from .snapshot_freeze import write_snapshot_freeze_manifest
+from .operational_lint import lint_operational_snapshot
 
 
 @dataclass(frozen=True)
@@ -345,6 +347,40 @@ def _write_snapshot_summary(snapshot_dir: Path, summary: dict[str, Any]) -> None
     path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def _sha256_file(path: Path) -> str:
+    import hashlib
+
+    h = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _write_snapshot_bundle_manifest(snapshot_dir: Path) -> Path:
+    """Write a sha256 inventory of snapshot outputs (Phase F3)."""
+    payload: dict[str, Any] = {
+        "artifact_type": "operational_snapshot_bundle_manifest",
+        "created_at_utc": datetime.now(UTC).isoformat(),
+        "snapshot_dir": str(snapshot_dir),
+        "files": {},
+    }
+    files: dict[str, str] = {}
+    for p in sorted(snapshot_dir.rglob("*")):
+        if not p.is_file():
+            continue
+        if p.name.startswith("."):
+            continue
+        if p.suffix.lower() not in {".json", ".csv", ".tex", ".png", ".md", ".txt"}:
+            continue
+        rel = str(p.relative_to(snapshot_dir))
+        files[rel] = _sha256_file(p)
+    payload["files"] = files
+    out = snapshot_dir / "snapshot_bundle_manifest.json"
+    out.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return out
+
+
 def run_ml_query_mode(
     *,
     selection: SelectionResult,
@@ -387,6 +423,7 @@ def run_ml_query_mode(
     per_group_coverage: list[dict[str, Any]] = []
     per_group_risk: list[dict[str, Any]] = []
     per_group_model_math_audit: list[dict[str, Any]] = []
+    model_registry_rows: list[dict[str, Any]] = []
     overlap_rows: list[dict[str, Any]] = []
     transport_rows: list[dict[str, Any]] = []
     transport_group_mode_rows: list[dict[str, Any]] = []
@@ -533,6 +570,15 @@ def run_ml_query_mode(
             groups_union_fallback += 1
             train_rows = baseline_rows + interactive_rows
 
+        # Training run provenance (Phase F3): unknown-mode runs are never used for training.
+        training_run_ids: list[str] = []
+        for rid, (_, _, m) in by_run_rows.items():
+            if m == "baseline":
+                training_run_ids.append(rid)
+            elif m == "interactive" and training_mode == "union_fallback":
+                training_run_ids.append(rid)
+        training_run_ids = sorted(set(training_run_ids))
+
         # Baseline p95 bytes/sec for intensity inference (heuristic).
         baseline_p95_bps: float | None = None
         try:
@@ -615,6 +661,22 @@ def run_ml_query_mode(
                     **stability,
                     "np_percentile_method": str(config.NP_PERCENTILE_METHOD),
                     "threshold_percentile": float(config.THRESHOLD_PERCENTILE),
+                    "ml_schema_version": int(config.ML_SCHEMA_VERSION),
+                }
+            )
+            model_registry_rows.append(
+                {
+                    "group_key": group_key,
+                    "package_name": pkg,
+                    "model": spec.name,
+                    "training_mode": training_mode,
+                    "training_run_ids": training_run_ids,
+                    "training_samples": int(stability.get("training_samples") or 0),
+                    "threshold_value": float(threshold),
+                    "threshold_percentile": float(config.THRESHOLD_PERCENTILE),
+                    "np_percentile_method": str(config.NP_PERCENTILE_METHOD),
+                    "feature_log1p": bool(config.FEATURE_LOG1P),
+                    "feature_robust_scale": bool(config.FEATURE_ROBUST_SCALE),
                     "ml_schema_version": int(config.ML_SCHEMA_VERSION),
                 }
             )
@@ -1032,6 +1094,40 @@ def run_ml_query_mode(
         transport_rows=transport_rows,
         transport_group_mode_rows=transport_group_mode_rows,
     )
+
+    # Phase F3: snapshot closure artifacts (freeze + lint + model registry + bundle manifest).
+    evidence_root_fs = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    freeze_ok = True
+    freeze_err: str | None = None
+    try:
+        write_snapshot_freeze_manifest(snapshot_dir=snapshot_dir, evidence_root=evidence_root_fs, overwrite=True)
+    except Exception as exc:  # noqa: BLE001
+        freeze_ok = False
+        freeze_err = str(exc)
+        (snapshot_dir / "freeze_manifest_error.txt").write_text(freeze_err + "\n", encoding="utf-8")
+
+    lint = lint_operational_snapshot(snapshot_dir)
+    lint_path = snapshot_dir / "operational_lint.json"
+    lint_path.write_text(json.dumps({"ok": lint.ok, "issues": lint.issues}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    reg_path = snapshot_dir / "model_registry.json"
+    reg_path.write_text(
+        json.dumps(
+            {
+                "artifact_type": "operational_model_registry",
+                "created_at_utc": datetime.now(UTC).isoformat(),
+                "snapshot_id": sid,
+                "models": model_registry_rows,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    bundle_manifest = _write_snapshot_bundle_manifest(snapshot_dir)
+
     _write_snapshot_summary(
         snapshot_dir,
         {
@@ -1050,7 +1146,15 @@ def run_ml_query_mode(
                 "selection_manifest": str(manifest_path),
                 "tables_dir": str(snapshot_dir / "tables"),
                 "runs_dir": str(snapshot_dir / "runs"),
+                "freeze_manifest": str(snapshot_dir / "freeze_manifest.json"),
+                "operational_lint": str(lint_path),
+                "model_registry": str(reg_path),
+                "snapshot_bundle_manifest": str(bundle_manifest),
             },
+            "bundle_ok": bool(lint.ok and freeze_ok),
+            "freeze_ok": bool(freeze_ok),
+            "freeze_error": freeze_err,
+            "lint_ok": bool(lint.ok),
         },
     )
 
