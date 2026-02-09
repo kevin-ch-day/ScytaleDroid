@@ -184,6 +184,8 @@ def test_paper_artifacts_json_written_once(tmp_path, monkeypatch):
     freeze_dir = tmp_path / "archive"
     freeze_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(orchestrator, "FREEZE_DIR", freeze_dir)
+    # paper_artifacts path is derived at import time; patch it too.
+    monkeypatch.setattr(orchestrator, "PAPER_ARTIFACTS_PATH", freeze_dir / "paper_artifacts.json")
 
     cand1 = orchestrator._ExemplarCandidate(
         run_id="rid1",

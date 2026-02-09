@@ -43,6 +43,7 @@ from .telemetry_windowing import WindowSpec
 
 FREEZE_DIR = Path(app_config.DATA_DIR) / "archive"
 DATASET_FREEZE_CANONICAL = FREEZE_DIR / config.FREEZE_CANONICAL_FILENAME
+PAPER_ARTIFACTS_PATH = FREEZE_DIR / "paper_artifacts.json"
 
 
 @dataclass(frozen=True)
@@ -115,7 +116,9 @@ def run_ml_on_evidence_packs(
             raise RuntimeError(f"Freeze manifest missing required fields: {freeze_path}")
 
         # Fast path: if all per-run v1 outputs already exist, do not re-run tshark/modeling.
-        # This keeps "run Phase E" idempotent and avoids accidental long reprocessing runs.
+        # Still ensure dataset-level derived tables and paper lockfiles exist (they are
+        # regenerable but required for the paper bundle). If missing, rebuild from
+        # existing v1 outputs without touching per-run artifacts.
         if reuse_existing_outputs and _all_frozen_v1_outputs_exist(root, included_run_ids):
             apps_seen = 0
             for pkg, entry in sorted(freeze_apps.items()):
@@ -125,6 +128,29 @@ def run_ml_on_evidence_packs(
                 inter_ids = entry.get("interactive_run_ids") or []
                 if isinstance(base_ids, list) and isinstance(inter_ids, list) and len(base_ids) >= 1 and len(inter_ids) >= 2:
                     apps_seen += 1
+
+            # Ensure the canonical dataset-level CSVs exist. If they are missing, rebuild
+            # them from per-run v1 outputs (DB-free) without recomputation.
+            missing_tables = _missing_dataset_level_outputs()
+            if missing_tables:
+                _rebuild_dataset_outputs_from_v1(
+                    evidence_root=root,
+                    freeze_path=freeze_path,
+                    freeze_payload=freeze,
+                    freeze_apps=freeze_apps,
+                    checksums=checksums,
+                )
+
+            # Ensure the exemplar lock exists. If absent, we allow a lightweight selection
+            # pass (windowing) because this is a paper-facing artifact.
+            if not PAPER_ARTIFACTS_PATH.exists():
+                exemplar = _select_fig_b1_exemplar_from_existing_or_inputs(
+                    evidence_root=root,
+                    freeze_apps=freeze_apps,
+                    checksums=checksums,
+                )
+                _maybe_write_paper_artifacts_json(candidate=exemplar, freeze_manifest_path=freeze_path)
+
             return MlRunStats(
                 apps_seen=apps_seen,
                 apps_trained=apps_seen,
@@ -958,7 +984,7 @@ def _maybe_write_paper_artifacts_json(*, candidate: _ExemplarCandidate | None, f
 
     This file is dataset-adjacent (stored next to the freeze manifest) and is never overwritten.
     """
-    path = FREEZE_DIR / "paper_artifacts.json"
+    path = PAPER_ARTIFACTS_PATH
     if path.exists():
         return
     if not candidate:
@@ -980,6 +1006,259 @@ def _maybe_write_paper_artifacts_json(*, candidate: _ExemplarCandidate | None, f
         "written_at": datetime.now(UTC).isoformat(),
     }
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _missing_dataset_level_outputs() -> list[str]:
+    """Return a list of missing required dataset-level CSV paths (relative)."""
+    required = [
+        "anomaly_prevalence_per_app_phase.csv",
+        "model_overlap_per_run.csv",
+        "transport_mix_by_phase.csv",
+    ]
+    out_dir = Path(app_config.DATA_DIR)
+    missing = []
+    for name in required:
+        if not (out_dir / name).exists():
+            missing.append(str(out_dir / name))
+    return missing
+
+
+def _rebuild_dataset_outputs_from_v1(
+    *,
+    evidence_root: Path,
+    freeze_path: Path,
+    freeze_payload: dict[str, Any],
+    freeze_apps: dict[str, Any],
+    checksums: dict[str, Any],
+) -> None:
+    """Rebuild dataset-level CSVs from existing per-run v1 outputs.
+
+    This is used only when:
+    - per-run v1 outputs exist for all included runs, but
+    - the dataset-level CSVs under data/ are missing (deleted/cleaned).
+
+    It does not touch per-run artifacts and does not rerun modeling.
+    """
+    # Build per-run rows in the same shape expected by _write_* writers.
+    phase_rows: list[dict[str, Any]] = []
+    overlap_rows: list[dict[str, Any]] = []
+    transport_rows: list[dict[str, Any]] = []
+
+    included = _load_frozen_run_ids_from_payload(freeze_payload) or set()
+
+    for pkg, entry in sorted(freeze_apps.items()):
+        if not isinstance(entry, dict):
+            continue
+        base_ids = entry.get("baseline_run_ids") or []
+        inter_ids = entry.get("interactive_run_ids") or []
+        if not (isinstance(base_ids, list) and isinstance(inter_ids, list) and len(base_ids) >= 1 and len(inter_ids) >= 2):
+            continue
+        baseline_id = str(base_ids[0])
+        interactive_ids = [str(x) for x in inter_ids[:2]]
+        interactive_ids = sorted(
+            interactive_ids,
+            key=lambda rid: (_parse_ended_at_epoch((checksums.get(rid) or {}).get("ended_at")), rid),
+        )
+        run_ids = [baseline_id] + interactive_ids
+        for rid in run_ids:
+            if rid not in included:
+                raise RuntimeError(f"Freeze manifest inconsistency (rebuild): {rid} not in included_run_ids")
+
+        per_run_phase = {
+            baseline_id: "idle",
+            interactive_ids[0]: "interactive_a",
+            interactive_ids[1]: "interactive_b",
+        }
+
+        # Load manifests just for tags/low_signal.
+        inputs_by_rid: dict[str, RunInputs] = {}
+        for rid in run_ids:
+            run_dir = evidence_root / rid
+            inputs = load_run_inputs(run_dir)
+            if not inputs:
+                raise RuntimeError(f"Missing included run during rebuild: {rid}")
+            inputs_by_rid[rid] = inputs
+
+        identity_key = next((r.identity_key for r in inputs_by_rid.values() if r.identity_key), None) or pkg
+        tag_by_rid = {rid: _interaction_tag_from_manifest(inputs_by_rid[rid].manifest) for rid in run_ids}
+
+        # Read per-model per-run scores/flags.
+        per_model_scores_by_run: dict[str, dict[str, list[float]]] = {
+            config.MODEL_IFOREST: {},
+            config.MODEL_OCSVM: {},
+        }
+        per_model_thresholds: dict[str, float] = {}
+        training_mode = None
+
+        for model_name in (config.MODEL_IFOREST, config.MODEL_OCSVM):
+            for rid in run_ids:
+                out_dir = _ml_output_dir(evidence_root / rid, frozen=True)
+                csv_path = out_dir / f"anomaly_scores_{_model_csv_label(model_name)}.csv"
+                scores, threshold = _read_scores_and_threshold(csv_path)
+                per_model_scores_by_run[model_name][rid] = scores
+                if threshold is not None:
+                    per_model_thresholds[model_name] = float(threshold)
+            # training_mode + thresholds are recorded in model_manifest (same for all 3 runs in app)
+            mf = _ml_output_dir(evidence_root / baseline_id, frozen=True) / "model_manifest.json"
+            try:
+                m = json.loads(mf.read_text(encoding="utf-8"))
+                models = m.get("models") if isinstance(m.get("models"), dict) else {}
+                mo = models.get(model_name) if isinstance(models.get(model_name), dict) else {}
+                if training_mode is None:
+                    training_mode = str(mo.get("training_mode") or "") or None
+                if model_name not in per_model_thresholds and mo.get("threshold_value") is not None:
+                    per_model_thresholds[model_name] = float(mo.get("threshold_value"))
+            except Exception:
+                pass
+
+        training_mode = training_mode or "baseline_only"
+
+        # Phase rows: per-run, per-model (distribution computed from CSV scores).
+        for model_name, scores_by_run in per_model_scores_by_run.items():
+            threshold = float(per_model_thresholds.get(model_name) or 0.0)
+            for rid in run_ids:
+                run_scores = scores_by_run.get(rid) or []
+                if not run_scores:
+                    continue
+                arr = np.asarray(run_scores, dtype=float)
+                anomalous = int(sum(1 for s in run_scores if float(s) >= threshold))
+                ds = inputs_by_rid[rid].manifest.get("dataset") if isinstance(inputs_by_rid[rid].manifest.get("dataset"), dict) else {}
+                phase_rows.append(
+                    {
+                        "identity_key": identity_key,
+                        "package_name": pkg,
+                        "run_id": rid,
+                        "phase": per_run_phase.get(rid) or "interactive",
+                        "interaction_tag": tag_by_rid.get(rid) or "",
+                        "model": model_name,
+                        "training_mode": training_mode,
+                        "low_signal": bool(ds.get("low_signal")) if ds.get("low_signal") is not None else None,
+                        "windows_total": int(arr.shape[0]),
+                        "median": float(statistics.median(run_scores)),
+                        "p95": float(np.percentile(arr, 95.0)),
+                        "max": float(np.max(arr)),
+                        "anomalous_windows": anomalous,
+                        "anomalous_pct": float(anomalous) / float(arr.shape[0]) if arr.shape[0] > 0 else 0.0,
+                        "threshold_value": float(threshold),
+                        "threshold_percentile": float(config.THRESHOLD_PERCENTILE),
+                        "ml_schema_version": int(config.ML_SCHEMA_VERSION),
+                    }
+                )
+
+        # Model overlap: computed from CSV flags via thresholds.
+        overlap_rows.extend(
+            _compute_model_overlap_rows(
+                package_name=pkg,
+                app_runs=[inputs_by_rid[r] for r in run_ids],
+                per_model_scores_by_run=per_model_scores_by_run,
+                per_model_thresholds=per_model_thresholds,
+                per_run_phase=per_run_phase,
+                per_run_tag=tag_by_rid,
+                training_mode=training_mode,
+            )
+        )
+
+        # Transport mix: derived from existing pcap_features/pcap_report.
+        transport_rows.extend(
+            _compute_transport_mix_rows(
+                package_name=pkg,
+                app_runs=[inputs_by_rid[r] for r in run_ids],
+                per_run_phase=per_run_phase,
+                per_run_tag=tag_by_rid,
+            )
+        )
+
+    _write_prevalence_csvs(phase_rows)
+    _write_model_overlap_csv(overlap_rows)
+    _write_transport_mix_csvs(transport_rows)
+
+
+def _read_scores_and_threshold(path: Path) -> tuple[list[float], float | None]:
+    """Read anomaly score CSV and return (scores, threshold) where threshold may be None."""
+    import csv
+
+    if not path.exists():
+        return [], None
+    scores: list[float] = []
+    threshold: float | None = None
+    with path.open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            try:
+                s = float(row.get("score") or 0.0)
+            except Exception:
+                continue
+            scores.append(float(s))
+            if threshold is None:
+                try:
+                    threshold = float(row.get("threshold") or row.get("threshold_value") or 0.0)
+                except Exception:
+                    threshold = None
+    return scores, threshold
+
+
+def _select_fig_b1_exemplar_from_existing_or_inputs(
+    *,
+    evidence_root: Path,
+    freeze_apps: dict[str, Any],
+    checksums: dict[str, Any],
+) -> _ExemplarCandidate | None:
+    """Select exemplar candidate in a reuse-only scenario.
+
+    If paper_artifacts.json is missing, we may need to compute the sustained bytes/sec metric.
+    This function performs a minimal windowing pass only for eligible video-tagged interactive runs.
+    """
+    candidate: _ExemplarCandidate | None = None
+    for pkg, entry in sorted(freeze_apps.items()):
+        if not isinstance(entry, dict):
+            continue
+        base_ids = entry.get("baseline_run_ids") or []
+        inter_ids = entry.get("interactive_run_ids") or []
+        if not (isinstance(base_ids, list) and isinstance(inter_ids, list) and len(base_ids) >= 1 and len(inter_ids) >= 2):
+            continue
+        interactive_ids = [str(x) for x in inter_ids[:2]]
+        interactive_ids = sorted(
+            interactive_ids,
+            key=lambda rid: (_parse_ended_at_epoch((checksums.get(rid) or {}).get("ended_at")), rid),
+        )
+        # Load minimal per-run tag + anomaly prevalence (from CSVs). Sustained bytes requires windowing.
+        per_run_tag: dict[str, str | None] = {}
+        per_run_rows: dict[str, tuple[list[dict[str, Any]], int]] = {}
+        per_model_scores_by_run: dict[str, dict[str, list[float]]] = {config.MODEL_IFOREST: {}, config.MODEL_OCSVM: {}}
+        per_model_thresholds: dict[str, float] = {}
+
+        for rid in interactive_ids:
+            inputs = load_run_inputs(evidence_root / rid)
+            if not inputs:
+                continue
+            per_run_tag[rid] = _interaction_tag_from_manifest(inputs.manifest)
+            # Load anomaly scores/thresholds.
+            for model_name in (config.MODEL_IFOREST, config.MODEL_OCSVM):
+                out_dir = _ml_output_dir(evidence_root / rid, frozen=True)
+                csv_path = out_dir / f"anomaly_scores_{_model_csv_label(model_name)}.csv"
+                scores, threshold = _read_scores_and_threshold(csv_path)
+                per_model_scores_by_run[model_name][rid] = scores
+                if threshold is not None:
+                    per_model_thresholds[model_name] = float(threshold)
+            # Window rows for sustained bytes/sec.
+            dur = get_sampling_duration_seconds(inputs)
+            if not inputs.pcap_path or not inputs.pcap_path.exists() or not dur:
+                continue
+            packets = extract_packet_timeline(inputs.pcap_path)
+            rows, dropped = build_window_features(packets, duration_s=float(dur), spec=WindowSpec(window_size_s=config.WINDOW_SIZE_S, stride_s=config.WINDOW_STRIDE_S))
+            per_run_rows[rid] = (rows, dropped)
+
+        candidate = _select_fig_b1_exemplar_candidate(
+            current=candidate,
+            package_name=pkg,
+            interactive_run_ids=interactive_ids,
+            per_run_rows=per_run_rows,
+            per_run_tag=per_run_tag,
+            per_model_scores_by_run=per_model_scores_by_run,
+            per_model_thresholds=per_model_thresholds,
+            checksums=checksums,
+        )
+    return candidate
 
 
 def _select_fig_b1_exemplar_candidate(
