@@ -12,15 +12,9 @@ from pathlib import Path
 from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_utils.menus import health_checks
-from scytaledroid.DeviceAnalysis.adb import devices as adb_devices
-from scytaledroid.DeviceAnalysis import device_manager
-from scytaledroid.DeviceAnalysis.report import generate_device_report
 from scytaledroid.DynamicAnalysis.exports.dataset_export import export_tier1_pack
 from scytaledroid.DynamicAnalysis.ml import run_ml_on_evidence_packs
-from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_preflight_report import write_ml_preflight_report
 from scytaledroid.DynamicAnalysis.storage.index_from_evidence import index_dynamic_evidence_packs_to_db
-from scytaledroid.Reporting.generator import export_static_analysis_markdown
-from scytaledroid.StaticAnalysis.persistence import list_reports
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
@@ -163,84 +157,6 @@ def handle_dataset_readiness_dashboard() -> None:
         )
     table_utils.render_table(headers, table_rows)
     print()
-    prompt_utils.press_enter_to_continue()
-
-
-def handle_device_report() -> None:
-    """Generate a device report for the active or selected device."""
-
-    active_serial = device_manager.get_active_serial()
-    if active_serial:
-        label = device_manager.describe_active_device()
-        if prompt_utils.prompt_yes_no(
-            f"Generate report for active device {label}?",
-            default=True,
-        ):
-            generate_device_report(active_serial)
-            return
-
-    serial = _select_device_serial()
-    if serial:
-        log.info(f"Generating device report for {serial}", category="reporting")
-        generate_device_report(serial)
-
-
-def handle_static_report() -> None:
-    """Export a stored static analysis run to markdown."""
-
-    stored = list_reports()
-    if not stored:
-        print(status_messages.status("No static analysis reports found.", level="warn"))
-        prompt_utils.press_enter_to_continue()
-        return
-
-    print()
-    menu_utils.print_header("Static analysis reports", "Select a report to export")
-
-    rows: list[list[str]] = []
-    for index, entry in enumerate(stored, start=1):
-        manifest = entry.report.manifest
-        package = (
-            manifest.package_name
-            or entry.report.metadata.get("package_name")
-            or "Unknown"
-        )
-        version = (
-            manifest.version_name
-            or entry.report.metadata.get("version_name")
-            or manifest.version_code
-            or entry.report.metadata.get("version_code")
-            or "Unknown"
-        )
-        generated = format_timestamp(entry.report.generated_at)
-        severity = summarise_severity(entry.report.findings)
-        rows.append([str(index), package, version, generated, severity])
-
-    table_utils.render_table(["#", "Package", "Version", "Captured", "Findings"], rows)
-
-    print()
-    choice = prompt_utils.get_choice(
-        [str(index) for index in range(1, len(stored) + 1)] + ["0"],
-        prompt="Select report #: ",
-        default="0",
-    )
-    if choice == "0":
-        return
-
-    selected = stored[int(choice) - 1]
-    try:
-        output_path = export_static_analysis_markdown(
-            selected.report,
-            source_path=selected.path,
-        )
-    except OSError as exc:  # pragma: no cover - filesystem errors
-        print(status_messages.status(f"Failed to write report: {exc}", level="fail"))
-        prompt_utils.press_enter_to_continue()
-        return
-
-    resolved = relative_path(output_path)
-    print(status_messages.status(f"Markdown report saved to {resolved}", level="success"))
-    log.info(f"Static analysis markdown exported to {output_path}", category="reporting")
     prompt_utils.press_enter_to_continue()
 
 
@@ -1018,51 +934,6 @@ def handle_tier1_end_to_end() -> None:
     prompt_utils.press_enter_to_continue()
 
 
-def handle_tier1_qa_failures_report() -> None:
-    """Show the most recent Tier-1 QA failures with reasons."""
-
-    print()
-    menu_utils.print_header("Tier-1 QA Failures (last 10 runs)")
-    rows = _fetch_recent_tier1_candidates(limit=10)
-    if not rows:
-        print(status_messages.status("No dynamic runs found.", level="warn"))
-        prompt_utils.press_enter_to_continue()
-        return
-
-    table_rows = []
-    for row in rows:
-        failures = _evaluate_tier1_qa_failures(row)
-        table_rows.append(
-            [
-                row.get("dynamic_run_id") or "",
-                row.get("package_name") or "",
-                row.get("tier") or "",
-                row.get("status") or "",
-                _fmt_ratio(row.get("captured_samples"), row.get("expected_samples")),
-                _fmt_gap(row.get("sample_max_gap_s")),
-                "yes" if row.get("telemetry_partial") else "no",
-                ", ".join(failures) if failures else "ok",
-            ]
-        )
-
-    table_utils.render_table(
-        [
-            "run_id",
-            "package",
-            "tier",
-            "status",
-            "capture_ratio",
-            "max_gap_s",
-            "partial_samples",
-            "failed_checks",
-        ],
-        table_rows,
-        compact=True,
-    )
-    print()
-    prompt_utils.press_enter_to_continue()
-
-
 def fetch_tier1_status() -> dict[str, object]:
     """Return a compact Tier-1 readiness snapshot for the reporting menu."""
 
@@ -1283,89 +1154,6 @@ def fetch_tier1_status() -> dict[str, object]:
     return status
 
 
-def _fetch_recent_tier1_candidates(limit: int = 10) -> list[dict[str, object]]:
-    sql = """
-        SELECT
-          ds.dynamic_run_id,
-          ds.package_name,
-          ds.tier,
-          ds.status,
-          ds.sampling_rate_s,
-          ds.expected_samples,
-          ds.captured_samples,
-          ds.sample_max_gap_s,
-          MAX(CASE WHEN i.issue_code = 'telemetry_partial_samples' THEN 1 ELSE 0 END) AS telemetry_partial
-        FROM dynamic_sessions ds
-        LEFT JOIN dynamic_session_issues i
-          ON i.dynamic_run_id = ds.dynamic_run_id
-        GROUP BY ds.dynamic_run_id, ds.package_name, ds.tier, ds.status,
-                 ds.sampling_rate_s, ds.expected_samples, ds.captured_samples, ds.sample_max_gap_s
-        ORDER BY ds.started_at_utc DESC
-        LIMIT %s
-    """
-    rows = core_q.run_sql(sql, (limit,), fetch="all", dictionary=True) or []
-    return [dict(row) for row in rows]
-
-
-def _evaluate_tier1_qa_failures(row: dict[str, object]) -> list[str]:
-    failures: list[str] = []
-    tier = row.get("tier")
-    status = row.get("status")
-    sampling_rate = row.get("sampling_rate_s")
-    expected = row.get("expected_samples")
-    captured = row.get("captured_samples")
-    max_gap = row.get("sample_max_gap_s")
-    partial = row.get("telemetry_partial")
-
-    if tier != "dataset":
-        failures.append("tier_not_dataset")
-    if status != "success":
-        failures.append("status_not_success")
-    ratio = _safe_ratio(captured, expected)
-    if ratio is None:
-        failures.append("missing_capture_ratio")
-    elif ratio < 0.90:
-        failures.append("low_capture_ratio")
-    if sampling_rate is None or max_gap is None:
-        failures.append("missing_gap_stats")
-    else:
-        try:
-            if float(max_gap) > (float(sampling_rate) * 2):
-                failures.append("max_gap_exceeded")
-        except (TypeError, ValueError):
-            failures.append("invalid_gap_stats")
-    if partial:
-        failures.append("telemetry_partial_samples")
-    return failures
-
-
-def _safe_ratio(captured: object, expected: object) -> float | None:
-    try:
-        cap = float(captured)
-        exp = float(expected)
-    except (TypeError, ValueError):
-        return None
-    if exp == 0:
-        return None
-    return cap / exp
-
-
-def _fmt_ratio(captured: object, expected: object) -> str:
-    ratio = _safe_ratio(captured, expected)
-    if ratio is None:
-        return "n/a"
-    return f"{ratio:.3f}"
-
-
-def _fmt_gap(value: object) -> str:
-    try:
-        return f"{float(value):.2f}"
-    except (TypeError, ValueError):
-        return "n/a"
-
-
-
-
 def relative_path(path: Path) -> Path:
     """Return the path relative to the current working directory if possible."""
 
@@ -1387,99 +1175,9 @@ def format_timestamp(value: str) -> str:
     return parsed.strftime("%Y-%m-%d %H:%M UTC")
 
 
-def _select_device_serial() -> str | None:
-    devices, warnings = adb_devices.scan_devices()
-    for message in warnings:
-        print(status_messages.status(message, level="warn"))
-
-    if not devices:
-        print(status_messages.status("No Android devices detected.", level="warn"))
-        prompt_utils.press_enter_to_continue()
-        return None
-
-    print()
-    menu_utils.print_header("Device selection", "Choose a connected device")
-    rows: list[list[str]] = []
-    for index, device in enumerate(devices, start=1):
-        serial = device.get("serial") or "?"
-        model = device.get("model") or device.get("device") or "Unknown"
-        state = device.get("state") or "unknown"
-        rows.append([str(index), serial, model, state.upper()])
-    table_utils.render_table(["#", "Serial", "Model", "State"], rows)
-
-    print()
-    choice = prompt_utils.get_choice(
-        [str(index) for index in range(1, len(devices) + 1)] + ["0"],
-        prompt="Select device #: ",
-        default="0",
-    )
-    if choice == "0":
-        return None
-
-    return devices[int(choice) - 1].get("serial")
-
-
-def handle_recent_static_runs() -> None:
-    """List recent static-analysis runs with metadata for quick review."""
-
-    try:
-        rows = core_q.run_sql(
-            (
-                "SELECT id, COALESCE(run_started_utc, DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s')) AS started_utc, "
-                "scope_label, findings_total, pipeline_version, catalog_versions, config_hash, study_tag "
-                "FROM static_analysis_runs "
-                "ORDER BY created_at DESC LIMIT 20"
-            ),
-            fetch="all",
-        )
-    except Exception as exc:  # pragma: no cover - DB connectivity guard
-        print(status_messages.status(f"Unable to query static analysis runs: {exc}", level="warn"))
-        prompt_utils.press_enter_to_continue()
-        return
-
-    if not rows:
-        print(status_messages.status("No static-analysis runs found in the database.", level="info"))
-        prompt_utils.press_enter_to_continue()
-        return
-
-    headers = ["ID", "Started (UTC)", "Scope", "Findings", "Pipeline", "Catalogs", "Config", "Study"]
-    table_rows: list[list[str]] = []
-    for row in rows:
-        (
-            run_id,
-            started,
-            scope_label,
-            findings_total,
-            pipeline_version,
-            catalog_versions,
-            config_hash,
-            study_tag,
-        ) = row
-        table_rows.append(
-            [
-                str(run_id),
-                str(started or "—"),
-                str(scope_label or "—"),
-                str(findings_total or 0),
-                str(pipeline_version or "—"),
-                str(catalog_versions or "—"),
-                str(config_hash or "—"),
-                str(study_tag or "—"),
-            ]
-        )
-
-    print()
-    menu_utils.print_header("Recent static analysis runs", subtitle=f"Showing {len(table_rows)} most recent")
-    table_utils.render_table(headers, table_rows)
-    prompt_utils.press_enter_to_continue()
-
-
 __all__ = [
     "classify_report",
     "format_timestamp",
-    "handle_device_report",
-    "handle_static_report",
-    "handle_recent_static_runs",
     "preview_report_file",
     "relative_path",
     "summarise_severity",

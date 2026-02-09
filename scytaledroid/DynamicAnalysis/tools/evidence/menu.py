@@ -7,7 +7,6 @@ This is primarily used during dataset collection to:
 
 from __future__ import annotations
 
-import os
 import json
 import shutil
 from pathlib import Path
@@ -686,63 +685,12 @@ def evidence_network_audit_report(*, pause: bool = True) -> None:
         prompt_utils.press_enter_to_continue()
 
 
-def evidence_packs_menu() -> None:
-    while True:
-        print()
-        menu_utils.print_header("Dynamic Evidence Packs")
-        items = [
-            menu_utils.MenuOption("1", "Verify evidence packs (overview)"),
-            menu_utils.MenuOption("2", "Quick health check (packs/missing/bad + PCAP sizes)"),
-            menu_utils.MenuOption("3", "View app runs (details)"),
-            menu_utils.MenuOption("4", "Delete INVALID dataset runs (local only)"),
-            menu_utils.MenuOption("5", "Recompute dataset tracker (from evidence packs)"),
-            menu_utils.MenuOption("6", "Network audit report (trends)"),
-            menu_utils.MenuOption("9", "Deep checks (DB vs manifest + transport + indicator quality)"),
-            menu_utils.MenuOption("R", "Recompute PCAP artifacts (pcap_report + pcap_features)"),
-        ]
-        menu_utils.render_menu(menu_utils.MenuSpec(items=items, exit_label="Back", show_exit=True))
-        choice = prompt_utils.get_choice([opt.key for opt in items] + ["0"], default="1")
-        if choice == "0":
-            break
-
-        if choice == "1":
-            evidence_verify_overview(pause=True)
-            continue
-
-        if choice == "2":
-            evidence_quick_health_check(pause=True)
-            continue
-
-        if choice == "3":
-            evidence_view_app_runs(pause=True)
-            continue
-
-        if choice == "4":
-            evidence_delete_invalid_dataset_runs(pause=True)
-            continue
-
-        if choice == "5":
-            evidence_recompute_dataset_tracker(pause=True)
-            continue
-
-        if choice == "6":
-            evidence_network_audit_report(pause=True)
-            continue
-        if choice == "9":
-            evidence_deep_checks(pause=True)
-            continue
-        if choice == "R":
-            evidence_recompute_pcap_artifacts(pause=True)
-            continue
-
-
 __all__ = [
     "evidence_delete_invalid_dataset_runs",
     "evidence_cleanup_workspace",
     "evidence_deep_checks",
     "evidence_recompute_pcap_artifacts",
     "evidence_network_audit_report",
-    "evidence_packs_menu",
     "evidence_quick_health_check",
     "evidence_recompute_dataset_tracker",
     "evidence_verify_overview",

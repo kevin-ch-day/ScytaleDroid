@@ -26,7 +26,7 @@ Recommended operator loop (per app):
 
 Use the menu:
 - **Workspace & Evidence → Verify evidence packs (overview)**
-- **Workspace & Evidence → Dynamic evidence packs → Deep checks**
+- **Workspace & Evidence → Deep checks**
 
 Use cleanup only when needed:
 - Delete INVALID dataset runs (local only)
@@ -58,7 +58,7 @@ After freeze:
 ## 4) Freeze Immutability Check (Hash-Based)
 
 Use:
-- **Reporting → Paper / ML → Verify freeze immutability (hash-based)** *(advanced)*
+- **Reporting → Paper / ML → Verify freeze immutability (hash-based)**
 
 Expected:
 - scanned=36
