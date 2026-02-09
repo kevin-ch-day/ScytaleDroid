@@ -27,6 +27,7 @@ from scytaledroid.Config import app_config
 
 from . import ml_parameters_paper2 as config
 from .seed_identity import derive_seed, salt_metadata
+from .io import MLOutputPaths
 from .anomaly_model_training import anomaly_scores, fit_model, fixed_model_specs
 from .pcap_window_features import build_window_features, extract_packet_timeline, write_anomaly_scores_csv
 from .evidence_pack_ml_preflight import (
@@ -389,19 +390,19 @@ def run_ml_on_evidence_packs(
 
 def _all_frozen_v1_outputs_exist(root: Path, included_run_ids: set[str]) -> bool:
     """Return True if all included runs already have the required v1 outputs on disk."""
-    req = [
-        "analysis/ml/v1/model_manifest.json",
-        "analysis/ml/v1/ml_summary.json",
-        "analysis/ml/v1/anomaly_scores_iforest.csv",
-        "analysis/ml/v1/anomaly_scores_ocsvm.csv",
-    ]
     for rid in included_run_ids:
         run_dir = root / rid
         if not run_dir.exists():
             return False
-        for rel in req:
-            if not (run_dir / rel).exists():
-                return False
+        paths = MLOutputPaths(run_dir=run_dir, schema_label=config.ML_SCHEMA_LABEL, frozen=True)
+        required = [
+            paths.model_manifest_path,
+            paths.summary_path,
+            paths.iforest_scores_path,
+            paths.ocsvm_scores_path,
+        ]
+        if not all(path.exists() for path in required):
+            return False
     return True
 
 
@@ -566,9 +567,7 @@ def _rows_to_matrix(rows: list[dict[str, Any]], *, window_spec: WindowSpec) -> t
 
 
 def _ml_output_dir(run_dir: Path, *, frozen: bool) -> Path:
-    if frozen:
-        return run_dir / "analysis" / "ml" / config.ML_SCHEMA_LABEL
-    return run_dir / "analysis" / "ml_provisional" / config.ML_SCHEMA_LABEL
+    return MLOutputPaths(run_dir=run_dir, schema_label=config.ML_SCHEMA_LABEL, frozen=frozen).output_dir
 
 
 def _compute_phase_rows(
@@ -1216,10 +1215,9 @@ def _load_scores(csv_path: Path) -> list[float]:
 
 
 def _write_run_skip(run: RunInputs, *, frozen: bool, reason: str) -> None:
-    out_dir = _ml_output_dir(run.run_dir, frozen=frozen)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    summary_path = out_dir / "ml_summary.json"
-    if frozen and summary_path.exists():
+    paths = MLOutputPaths(run_dir=run.run_dir, schema_label=config.ML_SCHEMA_LABEL, frozen=frozen)
+    paths.output_dir.mkdir(parents=True, exist_ok=True)
+    if frozen and paths.summary_path.exists():
         return
     payload = {
         "ml_schema_version": config.ML_SCHEMA_VERSION,
@@ -1228,7 +1226,7 @@ def _write_run_skip(run: RunInputs, *, frozen: bool, reason: str) -> None:
         "run_profile": run.run_profile,
         "skip": {"reason": reason},
     }
-    summary_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    paths.summary_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
 def _write_app_skip(app_runs: list[RunInputs], *, frozen: bool, reason: str) -> None:
