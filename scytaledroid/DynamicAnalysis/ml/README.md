@@ -20,6 +20,7 @@ built in the packages below.
   - End-to-end pipelines built from `core` stages (preflight → feature extraction
     → training → scoring → outputs).
   - `phase_e_v1.py` provides an initial scaffold with explicit stage boundaries.
+  - `PhaseEPreflightStage` writes `ml_preflight.json` using evidence-pack inputs.
 
 ## Next steps
 
