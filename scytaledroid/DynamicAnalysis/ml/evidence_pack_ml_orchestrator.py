@@ -52,6 +52,8 @@ class MlRunStats:
     runs_scored: int
     runs_skipped: int
     generated_at: str
+    # Runs whose v1 outputs already existed and were reused (no overwrite).
+    runs_reused: int = 0
 
 
 @dataclass(frozen=True)
@@ -94,8 +96,9 @@ def run_ml_on_evidence_packs(
     window_spec = WindowSpec(window_size_s=config.WINDOW_SIZE_S, stride_s=config.WINDOW_STRIDE_S)
 
     apps_trained = 0
-    runs_scored = 0
+    runs_scored = 0  # "ready/complete" runs (includes reused outputs)
     runs_skipped = 0
+    written_run_ids: set[str] = set()
 
     dataset_phase_rows: list[dict[str, Any]] = []
     model_overlap_rows: list[dict[str, Any]] = []
@@ -128,6 +131,7 @@ def run_ml_on_evidence_packs(
                 runs_scored=len(included_run_ids),
                 runs_skipped=0,
                 generated_at=datetime.now(UTC).isoformat(),
+                runs_reused=len(included_run_ids),
             )
 
         apps_seen = 0
@@ -201,8 +205,23 @@ def run_ml_on_evidence_packs(
                     runs_skipped += 1
                     continue
 
-                packets = extract_packet_timeline(r.pcap_path)
-                rows, dropped = build_window_features(packets, duration_s=float(duration), spec=window_spec)
+                try:
+                    packets = extract_packet_timeline(r.pcap_path)
+                    rows, dropped = build_window_features(packets, duration_s=float(duration), spec=window_spec)
+                except Exception as exc:  # noqa: BLE001
+                    # Do not crash the batch run: emit an explicit SKIPPED artifact
+                    # for this run. This keeps Phase E deterministic and audit-friendly.
+                    out_dir = _ml_output_dir(r.run_dir, frozen=True)
+                    out_dir.mkdir(parents=True, exist_ok=True)
+                    err_path = out_dir / "tshark_error.txt"
+                    if not err_path.exists():
+                        try:
+                            err_path.write_text(str(exc), encoding="utf-8")
+                        except Exception:
+                            pass
+                    _write_run_skip(r, frozen=True, reason="ML_SKIPPED_TSHARK_ERROR")
+                    runs_skipped += 1
+                    continue
                 if not rows:
                     _write_run_skip(r, frozen=True, reason="ML_SKIPPED_INSUFFICIENT_WINDOWS")
                     runs_skipped += 1
@@ -298,6 +317,7 @@ def run_ml_on_evidence_packs(
                     if scores_path.exists():
                         continue  # immutable
                     write_anomaly_scores_csv(scores_path, by_run_rows.get(r.run_id) or [])
+                    written_run_ids.add(r.run_id)
 
             # Write per-run manifests/summaries.
             for r in app_runs:
@@ -305,29 +325,32 @@ def run_ml_on_evidence_packs(
                 out_dir.mkdir(parents=True, exist_ok=True)
                 manifest_path = out_dir / "model_manifest.json"
                 summary_path = out_dir / "ml_summary.json"
-                if manifest_path.exists() or summary_path.exists():
-                    continue  # immutable
-
-                _write_model_manifest(
-                    manifest_path,
-                    run_inputs=r,
-                    identity_key_used=identity_key,
-                    seed=seed,
-                    window_spec=window_spec,
-                    model_outputs=model_outputs,
-                    freeze_manifest_path=str(freeze_path),
-                )
-                _write_ml_summary(
-                    summary_path,
-                    run_inputs=r,
-                    phase=per_run_phase.get(r.run_id) or _fallback_phase(r.run_profile),
-                    interaction_tag=per_run_tag.get(r.run_id),
-                    window_rows=per_run_rows[r.run_id][0],
-                    dropped_partial_windows=per_run_rows[r.run_id][1],
-                    model_outputs=model_outputs,
-                    out_dir=out_dir,
-                )
-                runs_scored += 1
+                wrote_any = False
+                if not manifest_path.exists():
+                    _write_model_manifest(
+                        manifest_path,
+                        run_inputs=r,
+                        identity_key_used=identity_key,
+                        seed=seed,
+                        window_spec=window_spec,
+                        model_outputs=model_outputs,
+                        freeze_manifest_path=str(freeze_path),
+                    )
+                    wrote_any = True
+                if not summary_path.exists():
+                    _write_ml_summary(
+                        summary_path,
+                        run_inputs=r,
+                        phase=per_run_phase.get(r.run_id) or _fallback_phase(r.run_profile),
+                        interaction_tag=per_run_tag.get(r.run_id),
+                        window_rows=per_run_rows[r.run_id][0],
+                        dropped_partial_windows=per_run_rows[r.run_id][1],
+                        model_outputs=model_outputs,
+                        out_dir=out_dir,
+                    )
+                    wrote_any = True
+                if wrote_any:
+                    written_run_ids.add(r.run_id)
 
             # Dataset-level derived outputs (not frozen inputs).
             dataset_phase_rows.extend(
@@ -379,12 +402,19 @@ def run_ml_on_evidence_packs(
             candidate=exemplar_candidate,
             freeze_manifest_path=freeze_path,
         )
+        # Compute "scored" as "all included runs that have complete v1 outputs present",
+        # regardless of whether this invocation had to write anything.
+        runs_scored = sum(
+            1 for rid in included_run_ids if _run_has_complete_v1_outputs(root / rid)
+        )
+        runs_reused = max(0, runs_scored - len(written_run_ids))
         return MlRunStats(
             apps_seen=apps_seen,
             apps_trained=apps_trained,
             runs_scored=runs_scored,
             runs_skipped=runs_skipped,
             generated_at=datetime.now(UTC).isoformat(),
+            runs_reused=runs_reused,
         )
 
 
@@ -394,16 +424,20 @@ def _all_frozen_v1_outputs_exist(root: Path, included_run_ids: set[str]) -> bool
         run_dir = root / rid
         if not run_dir.exists():
             return False
-        paths = MLOutputPaths(run_dir=run_dir, schema_label=config.ML_SCHEMA_LABEL, frozen=True)
-        required = [
-            paths.model_manifest_path,
-            paths.summary_path,
-            paths.iforest_scores_path,
-            paths.ocsvm_scores_path,
-        ]
-        if not all(path.exists() for path in required):
+        if not _run_has_complete_v1_outputs(run_dir):
             return False
     return True
+
+
+def _run_has_complete_v1_outputs(run_dir: Path) -> bool:
+    paths = MLOutputPaths(run_dir=run_dir, schema_label=config.ML_SCHEMA_LABEL, frozen=True)
+    required = [
+        paths.model_manifest_path,
+        paths.summary_path,
+        paths.iforest_scores_path,
+        paths.ocsvm_scores_path,
+    ]
+    return all(path.exists() for path in required)
 
 
 def _load_freeze_payload(path: Path) -> dict[str, Any]:
@@ -1083,10 +1117,32 @@ def _transport_ratios_from_inputs(inputs: RunInputs) -> tuple[float | None, floa
     quic_b = (pb.get("quic") or 0) + (pb.get("gquic") or 0)
     total = float(tcp_b + udp_b) if (tcp_b + udp_b) > 0 else 0.0
     tls_ratio = float(min(tls_b, tcp_b)) / float(tcp_b) if tcp_b > 0 else None
-    quic_ratio = float(quic_b) / float(udp_b) if udp_b > 0 else None
+    # Protocol hierarchy can contain duplicate/overlapping rows. Normalize defensively:
+    # - use a denominator that cannot yield >1.0
+    # - clamp ratios into [0,1]
+    quic_denom = float(max(udp_b, quic_b))
+    quic_ratio = (float(quic_b) / quic_denom) if quic_denom > 0 else None
     tcp_ratio = float(tcp_b) / total if total > 0 else None
     udp_ratio = float(udp_b) / total if total > 0 else None
+    tls_ratio = _clamp01(tls_ratio)
+    quic_ratio = _clamp01(quic_ratio)
+    tcp_ratio = _clamp01(tcp_ratio)
+    udp_ratio = _clamp01(udp_ratio)
     return tls_ratio, quic_ratio, tcp_ratio, udp_ratio
+
+
+def _clamp01(v: float | None) -> float | None:
+    if v is None:
+        return None
+    try:
+        x = float(v)
+    except Exception:
+        return None
+    if x < 0.0:
+        return 0.0
+    if x > 1.0:
+        return 1.0
+    return x
 
 
 def _safe_float(v: object) -> float | None:

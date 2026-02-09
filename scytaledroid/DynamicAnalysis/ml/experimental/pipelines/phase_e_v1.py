@@ -7,13 +7,13 @@ from pathlib import Path
 from typing import Any
 
 from ..core import Pipeline, PipelineContext
-from ..io import MLOutputPaths
-from ..evidence_pack_ml_preflight import (
+from ...io import MLOutputPaths
+from ...evidence_pack_ml_preflight import (
     compute_ml_preflight,
     load_run_inputs,
     write_ml_preflight,
 )
-from .. import ml_parameters_paper2 as config
+from ... import ml_parameters_paper2 as config
 
 
 @dataclass
@@ -22,7 +22,12 @@ class _MetadataStage:
     updates: dict[str, Any]
 
     def run(self, context: PipelineContext) -> PipelineContext:
-        context.metadata.update(self.updates)
+        # Avoid clobbering nested dictionaries (this is a scaffold, but keep it correct).
+        for k, v in self.updates.items():
+            if k == "phase_e" and isinstance(v, dict):
+                context.metadata.setdefault("phase_e", {}).update(v)
+            else:
+                context.metadata[k] = v
         return context
 
 
@@ -55,7 +60,10 @@ class PhaseEPreflightStage:
             frozen=self.config.frozen,
         )
         paths.output_dir.mkdir(parents=True, exist_ok=True)
-        write_ml_preflight(paths.output_dir / "ml_preflight.json", result)
+        # Do not overwrite v1 artifacts (immutability posture for Paper #2).
+        pf_path = paths.output_dir / "ml_preflight.json"
+        if not pf_path.exists():
+            write_ml_preflight(pf_path, result)
         context.metadata.setdefault("phase_e", {})["preflight"] = "ok" if result.frozen_inputs_ok else "failed"
         return context
 

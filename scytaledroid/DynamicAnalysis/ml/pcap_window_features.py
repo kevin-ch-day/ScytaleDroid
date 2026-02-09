@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from bisect import bisect_right
 from pathlib import Path
@@ -40,9 +41,13 @@ def extract_packet_timeline(pcap_path: Path) -> Iterable[PacketRecord]:
         "-e",
         "frame.len",
     ]
-    # Avoid deadlocks if tshark emits lots of warnings to stderr (PIPE not drained).
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    # Avoid deadlocks if tshark emits lots of warnings to stderr. We direct stderr to a
+    # temp file, then check returncode and include a tail snippet on failure.
+    err = tempfile.TemporaryFile(mode="w+b")
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=err, text=True)
     assert proc.stdout is not None
+    rc: int | None = None
+    err_tail: str = ""
     try:
         for line in proc.stdout:
             line = line.strip()
@@ -85,6 +90,22 @@ def extract_packet_timeline(pcap_path: Path) -> Iterable[PacketRecord]:
                     proc.wait(timeout=5)
                 except Exception:
                     pass
+        try:
+            rc = proc.returncode
+            if rc is None:
+                rc = -1
+            # Best-effort error tail (avoid reading huge stderr into memory).
+            err.seek(0, 2)
+            size = err.tell()
+            err.seek(max(0, size - 4096), 0)
+            err_tail = err.read().decode("utf-8", errors="replace").strip()
+            err.close()
+        except Exception:
+            pass
+
+    # Only reached if the generator was exhausted naturally (not closed early).
+    if rc is not None and rc != 0:
+        raise RuntimeError(f"tshark failed (rc={rc}) for PCAP: {pcap_path} ({err_tail})")
 
 
 def build_window_features(
@@ -136,7 +157,9 @@ def build_window_features(
         while i < len(windows) and pkt.t >= windows[i][1]:
             i += 1
         if i >= len(windows):
-            break
+            # Continue draining the packet stream so tshark can exit cleanly and we can
+            # detect non-zero exit codes deterministically.
+            continue
         # Packet might be before window start (shouldn't happen due to monotonic time_relative)
         if pkt.t < windows[i][0]:
             continue

@@ -159,8 +159,11 @@ def _write_fig_b1(fig_run_id: str, figs_dir: Path, *, interaction_tag: str | Non
     if_flags = _read_flags(if_csv)
     oc_flags = _read_flags(oc_csv)
     if len(if_flags) != len(xs) or len(oc_flags) != len(xs):
-        if_flags = [False for _ in xs]
-        oc_flags = [False for _ in xs]
+        raise RuntimeError(
+            "Fig B1 invariant failed: anomaly score rows must match window count "
+            f"(windows={len(xs)} if_rows={len(if_flags)} oc_rows={len(oc_flags)}). "
+            "Refusing to generate a misleading figure."
+        )
 
     pkg = inputs.package_name or "<unknown>"
     tag = interaction_tag or _interaction_tag(inputs.manifest) or "interactive"
