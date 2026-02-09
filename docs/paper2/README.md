@@ -50,6 +50,8 @@ Paper-ready deliverables bundle (zip-and-share; operator/paper-facing):
   - Operator workflow for Phase D collection, freeze, and Phase E execution.
 - `docs/paper2/phase_e_plan.md`
   - Phase E (ML) contract (inputs, windowing, gates, models, outputs).
+- `docs/paper2/phase_e_intelligence_map.md`
+  - Research-grade control document: what is measured, where structure emerges, what ML quantifies, and non-claims.
 - `docs/evidence_pack_spec.md`
   - Frozen input contract and where outputs live.
 - `docs/database/derived_index.md`

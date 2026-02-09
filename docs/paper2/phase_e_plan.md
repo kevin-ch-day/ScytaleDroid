@@ -119,7 +119,7 @@ Required:
     Interactive group.
 - Table: model overlap (Jaccard + disagreement counts)
 - Table: transport mix by phase (Baseline vs Interactive; contextual)
-- One flagship timeline figure (bytes/s + flags over time) for a messaging/video interaction
+- One flagship timeline figure (bytes/s + flags over time) for a messaging call interaction (voice or video)
 - Repro appendix:
   - freeze filename + checksum
   - tool versions
@@ -129,6 +129,9 @@ Required:
 Paper artifact lock file (derived, dataset-level; does not mutate packs):
 - `data/archive/paper_artifacts.json`
   - Must pin the canonical exemplar run_id used for Fig B1 so it cannot drift.
-  - Selection protocol (reviewer): choose the interactive run with `interaction_tag=video` that maximizes
-    sustained bytes/sec over K consecutive windows (K=6 => 30s); tie-break by IF prevalence, then OC-SVM prevalence,
-    then later `ended_at`.
+  - Selection protocol (PM-locked): choose the best eligible *messaging call* run (voice or video) from the frozen 36:
+    - messaging app only
+    - interaction tag must be call (`voice_call` or `video_call`)
+    - must not be `low_signal`
+    - primary metric: sustained bytes/sec over K consecutive windows (K=6 => 30s)
+    - tie-break: higher IF prevalence, then higher OC-SVM prevalence, then later `ended_at`
