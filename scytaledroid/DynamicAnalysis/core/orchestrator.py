@@ -333,7 +333,6 @@ class DynamicRunOrchestrator:
 
         if interaction_level:
             manifest.operator["interaction_level"] = interaction_level
-            manifest.operator.setdefault("run_context", {})["interaction_level"] = interaction_level
             event_logger.log(
                 "operator_interaction_level",
                 {"interaction_level": interaction_level},
