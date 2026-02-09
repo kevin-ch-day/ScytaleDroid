@@ -206,6 +206,12 @@ def run_ml_on_evidence_packs(
                 interactive_ids[1]: "interactive_b",
             }
             per_run_tag = {r.run_id: _interaction_tag_from_manifest(r.manifest) for r in app_runs}
+            per_run_low_signal = {
+                r.run_id: bool(
+                    (r.manifest.get("dataset") if isinstance(r.manifest.get("dataset"), dict) else {}).get("low_signal") is True
+                )
+                for r in app_runs
+            }
 
             # Extract windows for each run (always write ML preflight).
             per_run_rows: dict[str, tuple[list[dict[str, Any]], int]] = {}
@@ -416,6 +422,7 @@ def run_ml_on_evidence_packs(
                 interactive_run_ids=interactive_ids,
                 per_run_rows=per_run_rows,
                 per_run_tag=per_run_tag,
+                per_run_low_signal=per_run_low_signal,
                 per_model_scores_by_run=per_model_scores_by_run,
                 per_model_thresholds=per_model_thresholds,
                 checksums=checksums,
@@ -983,6 +990,8 @@ def _maybe_write_paper_artifacts_json(*, candidate: _ExemplarCandidate | None, f
     """Write a stable, human-readable lock file for the paper's flagship timeline exemplar.
 
     This file is dataset-adjacent (stored next to the freeze manifest) and is never overwritten.
+
+    Controlled repinning (one-time) must be performed explicitly by an operator-facing action.
     """
     path = PAPER_ARTIFACTS_PATH
     if path.exists():
@@ -1206,11 +1215,14 @@ def _select_fig_b1_exemplar_from_existing_or_inputs(
     """Select exemplar candidate in a reuse-only scenario.
 
     If paper_artifacts.json is missing, we may need to compute the sustained bytes/sec metric.
-    This function performs a minimal windowing pass only for eligible video-tagged interactive runs.
+    This function performs a minimal windowing pass only for eligible messaging call runs
+    (voice/video tags) that are not low_signal (PM locked).
     """
     candidate: _ExemplarCandidate | None = None
     for pkg, entry in sorted(freeze_apps.items()):
         if not isinstance(entry, dict):
+            continue
+        if pkg not in config.MESSAGING_PACKAGES:
             continue
         base_ids = entry.get("baseline_run_ids") or []
         inter_ids = entry.get("interactive_run_ids") or []
@@ -1223,6 +1235,7 @@ def _select_fig_b1_exemplar_from_existing_or_inputs(
         )
         # Load minimal per-run tag + anomaly prevalence (from CSVs). Sustained bytes requires windowing.
         per_run_tag: dict[str, str | None] = {}
+        per_run_low_signal: dict[str, bool] = {}
         per_run_rows: dict[str, tuple[list[dict[str, Any]], int]] = {}
         per_model_scores_by_run: dict[str, dict[str, list[float]]] = {config.MODEL_IFOREST: {}, config.MODEL_OCSVM: {}}
         per_model_thresholds: dict[str, float] = {}
@@ -1232,6 +1245,8 @@ def _select_fig_b1_exemplar_from_existing_or_inputs(
             if not inputs:
                 continue
             per_run_tag[rid] = _interaction_tag_from_manifest(inputs.manifest)
+            ds = inputs.manifest.get("dataset") if isinstance(inputs.manifest.get("dataset"), dict) else {}
+            per_run_low_signal[rid] = bool(ds.get("low_signal") is True)
             # Load anomaly scores/thresholds.
             for model_name in (config.MODEL_IFOREST, config.MODEL_OCSVM):
                 out_dir = _ml_output_dir(evidence_root / rid, frozen=True)
@@ -1254,6 +1269,7 @@ def _select_fig_b1_exemplar_from_existing_or_inputs(
             interactive_run_ids=interactive_ids,
             per_run_rows=per_run_rows,
             per_run_tag=per_run_tag,
+            per_run_low_signal=per_run_low_signal,
             per_model_scores_by_run=per_model_scores_by_run,
             per_model_thresholds=per_model_thresholds,
             checksums=checksums,
@@ -1268,6 +1284,7 @@ def _select_fig_b1_exemplar_candidate(
     interactive_run_ids: list[str],
     per_run_rows: dict[str, tuple[list[dict[str, Any]], int]],
     per_run_tag: dict[str, str | None],
+    per_run_low_signal: dict[str, bool],
     per_model_scores_by_run: dict[str, dict[str, list[float]]],
     per_model_thresholds: dict[str, float],
     checksums: dict[str, Any],
@@ -1275,12 +1292,16 @@ def _select_fig_b1_exemplar_candidate(
 ) -> _ExemplarCandidate | None:
     """Select the canonical Fig B1 exemplar candidate deterministically.
 
-    Reviewer protocol (Paper #2):
-    - Consider only interactive runs with unambiguous video tag.
+    PM protocol (Paper #2):
+    - Consider only messaging apps (locked cohort).
+    - Consider only interactive runs with call tags (voice or video).
+    - Exclude low_signal runs.
     - Primary metric: sustained bytes/sec over >=K consecutive windows (K=6 => 30s).
     - Tie breakers: higher IF prevalence, then higher OC-SVM prevalence, then later ended_at.
     """
     if config.MODEL_IFOREST not in per_model_scores_by_run or config.MODEL_OCSVM not in per_model_scores_by_run:
+        return current
+    if package_name not in config.MESSAGING_PACKAGES:
         return current
 
     if_thr = float(per_model_thresholds.get(config.MODEL_IFOREST) or 0.0)
@@ -1289,7 +1310,9 @@ def _select_fig_b1_exemplar_candidate(
     for rid in interactive_run_ids:
         tag_raw = per_run_tag.get(rid)
         tag = _canonical_interaction_tag(tag_raw)
-        if tag != "video":
+        if tag not in config.EXEMPLAR_ALLOWED_INTERACTION_TAGS:
+            continue
+        if per_run_low_signal.get(rid) is True:
             continue
         run_rows = per_run_rows.get(rid, ([], 0))[0]
         if not run_rows:

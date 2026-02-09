@@ -6,7 +6,7 @@ import csv
 import json
 import shutil
 from collections.abc import Iterable
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from scytaledroid.Config import app_config
@@ -353,6 +353,7 @@ def handle_write_phase_e_deliverables_bundle() -> None:
     from scytaledroid.DynamicAnalysis.ml.artifact_bundle_writer import write_phase_e_deliverables_bundle
     from scytaledroid.DynamicAnalysis.ml.deliverable_bundle_paths import freeze_anchor_path, output_paper_root
     from scytaledroid.DynamicAnalysis.ml.ml_parameters_paper2 import FREEZE_CANONICAL_FILENAME
+    from scytaledroid.DynamicAnalysis.ml.ml_parameters_paper2 import EXEMPLAR_ALLOWED_INTERACTION_TAGS, MESSAGING_PACKAGES
 
     archive_dir = Path(app_config.DATA_DIR) / "archive"
     freeze_path = archive_dir / FREEZE_CANONICAL_FILENAME
@@ -395,6 +396,100 @@ def handle_write_phase_e_deliverables_bundle() -> None:
         print(status_messages.status("paper_artifacts.json missing fig_B1_run_id.", level="fail"))
         prompt_utils.press_enter_to_continue()
         return
+
+    def _canonical_tag(raw: str | None) -> str | None:
+        if not raw:
+            return None
+        s = str(raw).strip().lower()
+        if not s:
+            return None
+        if "video" in s:
+            return "video"
+        if "voice" in s or "audio" in s:
+            return "voice"
+        return s
+
+    def _pin_is_valid(run_id: str) -> tuple[bool, str]:
+        run_dir = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic" / run_id
+        manifest_path = run_dir / "run_manifest.json"
+        if not manifest_path.exists():
+            return False, "evidence_missing"
+        try:
+            m = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception:
+            return False, "manifest_unreadable"
+        pkg = (m.get("target") or {}).get("package_name")
+        if pkg not in MESSAGING_PACKAGES:
+            return False, "not_messaging_app"
+        ds = m.get("dataset") if isinstance(m.get("dataset"), dict) else {}
+        if ds.get("low_signal") is True:
+            return False, "low_signal"
+        op = m.get("operator") if isinstance(m.get("operator"), dict) else {}
+        tag_raw = op.get("messaging_activity") or op.get("interaction_level")
+        tag_c = _canonical_tag(tag_raw)
+        if tag_c not in EXEMPLAR_ALLOWED_INTERACTION_TAGS:
+            return False, "not_call_tag"
+        return True, "ok"
+
+    ok, why = _pin_is_valid(rid)
+    if not ok:
+        print()
+        menu_utils.print_header("Write Phase E deliverables bundle")
+        print(status_messages.status("paper_artifacts.json pin is invalid under current PM policy.", level="warn"))
+        print(status_messages.status(f"Reason: {why}", level="warn"))
+        print(
+            status_messages.status(
+                "PM policy: Fig B1 exemplar must be frozen-only, messaging app, call (voice/video), and not low_signal.",
+                level="info",
+            )
+        )
+        if not prompt_utils.prompt_yes_no("Repin Fig B1 exemplar deterministically now?", default=False):
+            print(status_messages.status("Cancelled.", level="info"))
+            prompt_utils.press_enter_to_continue()
+            return
+        try:
+            freeze = json.loads(freeze_path.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            print(status_messages.status(f"Failed to read freeze anchor: {exc}", level="fail"))
+            prompt_utils.press_enter_to_continue()
+            return
+        from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_orchestrator import _select_fig_b1_exemplar_from_existing_or_inputs
+
+        exemplar = _select_fig_b1_exemplar_from_existing_or_inputs(
+            evidence_root=Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic",
+            freeze_apps=freeze.get("apps") or {},
+            checksums=freeze.get("included_run_checksums") or {},
+        )
+        if not exemplar:
+            print(status_messages.status("No eligible exemplar found in frozen dataset.", level="fail"))
+            prompt_utils.press_enter_to_continue()
+            return
+        # Backup existing pin for auditability (one-time repin flow).
+        backup = archive_dir / f"paper_artifacts.prev-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.json"
+        backup.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+        payload = {
+            "freeze_anchor": str(freeze_path),
+            "fig_B1_run_id": exemplar.run_id,
+            "package_name": exemplar.package_name,
+            "interaction_tag": exemplar.interaction_tag,
+            "ended_at": exemplar.ended_at,
+            "selection_metric": "sustained_bytes_per_sec_k6",
+            "tie_breakers": ["iforest_prevalence", "ocsvm_prevalence", "ended_at"],
+            "metrics": {
+                "sustained_bytes_per_sec_k6": float(exemplar.sustained_bytes_per_sec_k6),
+                "iforest_flagged_pct": float(exemplar.iforest_flagged_pct),
+                "ocsvm_flagged_pct": float(exemplar.ocsvm_flagged_pct),
+            },
+            "repinned_from": {
+                "fig_B1_run_id": str(rid),
+                "interaction_tag": str(tag or ""),
+            },
+            "repinned_at": datetime.now(UTC).isoformat(),
+        }
+        paper_artifacts.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        rid = str(payload.get("fig_B1_run_id") or "").strip()
+        tag = str(payload.get("interaction_tag") or "").strip() or None
 
     print()
     menu_utils.print_header("Write Phase E deliverables bundle")

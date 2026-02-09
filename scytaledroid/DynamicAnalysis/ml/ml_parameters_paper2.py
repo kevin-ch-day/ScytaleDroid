@@ -11,6 +11,15 @@ ML_SCHEMA_LABEL = f"v{ML_SCHEMA_VERSION}"
 # it is missing or not checksummed.
 FREEZE_CANONICAL_FILENAME = "dataset_freeze-20260208T201527Z.json"
 
+# Messaging cohort for Paper #2 (used for exemplar selection + optional stratification).
+# This must remain stable for Paper #2.
+MESSAGING_PACKAGES = {
+    "com.facebook.orca",  # Facebook Messenger
+    "org.thoughtcrime.securesms",  # Signal
+    "org.telegram.messenger",  # Telegram
+    "com.whatsapp",  # WhatsApp
+}
+
 # Windowing (locked)
 WINDOW_SIZE_S = 10.0
 WINDOW_STRIDE_S = 5.0
@@ -34,3 +43,7 @@ SEED_SALT = "scytaledroid-paper2-ml-seed-salt-v1"
 # Models (locked)
 MODEL_IFOREST = "isolation_forest"
 MODEL_OCSVM = "one_class_svm"
+
+# Fig B1 exemplar selection (PM locked)
+# Exemplar must be a messaging app and must be a call (voice or video).
+EXEMPLAR_ALLOWED_INTERACTION_TAGS = {"voice", "video"}
