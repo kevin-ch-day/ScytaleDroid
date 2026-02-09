@@ -347,6 +347,77 @@ def handle_run_ml_preflight_report() -> None:
     prompt_utils.press_enter_to_continue()
 
 
+def handle_write_phase_e_deliverables_bundle() -> None:
+    """Write the Paper #2 Phase E deliverable bundle under output/ (zip-and-share)."""
+
+    from scytaledroid.DynamicAnalysis.ml.artifact_bundle_writer import write_phase_e_deliverables_bundle
+    from scytaledroid.DynamicAnalysis.ml.deliverable_bundle_paths import freeze_anchor_path, output_paper_root
+    from scytaledroid.DynamicAnalysis.ml.ml_parameters_paper2 import FREEZE_CANONICAL_FILENAME
+
+    archive_dir = Path(app_config.DATA_DIR) / "archive"
+    freeze_path = archive_dir / FREEZE_CANONICAL_FILENAME
+    if not freeze_path.exists():
+        print(
+            status_messages.status(
+                f"Missing canonical freeze anchor: {relative_path(freeze_path)}",
+                level="fail",
+            )
+        )
+        prompt_utils.press_enter_to_continue()
+        return
+
+    paper_artifacts = archive_dir / "paper_artifacts.json"
+    if not paper_artifacts.exists():
+        print(
+            status_messages.status(
+                f"Missing paper artifact lock file: {relative_path(paper_artifacts)}",
+                level="warn",
+            )
+        )
+        print(
+            status_messages.status(
+                "Action: run 'Run ML on frozen dataset' first (it deterministically selects and pins Fig B1).",
+                level="info",
+            )
+        )
+        prompt_utils.press_enter_to_continue()
+        return
+
+    try:
+        payload = json.loads(paper_artifacts.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        print(status_messages.status(f"Failed to read paper_artifacts.json: {exc}", level="fail"))
+        prompt_utils.press_enter_to_continue()
+        return
+    rid = str(payload.get("fig_B1_run_id") or "").strip()
+    tag = str(payload.get("interaction_tag") or "").strip() or None
+    if not rid:
+        print(status_messages.status("paper_artifacts.json missing fig_B1_run_id.", level="fail"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    print()
+    menu_utils.print_header("Write Phase E deliverables bundle")
+    print(status_messages.status("This packages already-derived tables + one flagship timeline figure.", level="info"))
+    print(status_messages.status(f"Freeze anchor (copied into bundle): {relative_path(freeze_anchor_path())}", level="info"))
+    print(status_messages.status(f"Fig B1 exemplar: {rid[:8]} ({tag or 'interactive'})", level="info"))
+    if not prompt_utils.prompt_yes_no("Write/refresh bundle under output/?", default=True):
+        print(status_messages.status("Cancelled.", level="info"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    try:
+        artifacts = write_phase_e_deliverables_bundle(fig_b1_run_id=rid, interaction_tag=tag)
+    except Exception as exc:  # noqa: BLE001
+        print(status_messages.status(f"Bundle generation failed: {exc}", level="fail"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    print(status_messages.status(f"Wrote: {relative_path(output_paper_root())}", level="success"))
+    print(status_messages.status(f"Manifest: {relative_path(artifacts.artifacts_manifest_json)}", level="info"))
+    prompt_utils.press_enter_to_continue()
+
+
 def view_saved_reports() -> None:
     """Browse and preview generated markdown reports."""
 
