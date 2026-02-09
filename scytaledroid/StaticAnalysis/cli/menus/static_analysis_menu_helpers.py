@@ -59,7 +59,7 @@ def collect_view_options(command: Command) -> tuple[bool, bool, bool, bool]:
     print("View options")
     print("------------------------")
     print("[1] Summary details")
-    print("    High-level findings, risk grades, and key signals.")
+    print("    High-level findings, static scoring bands, and key signals.")
     print("    Best starting point for review or demo.")
     print()
     print("[2] Split breakdown")

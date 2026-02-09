@@ -18,6 +18,7 @@ from scytaledroid.DeviceAnalysis.report import generate_device_report
 from scytaledroid.DynamicAnalysis.exports.dataset_export import export_tier1_pack
 from scytaledroid.DynamicAnalysis.ml import run_ml_on_evidence_packs
 from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_preflight_report import write_ml_preflight_report
+from scytaledroid.DynamicAnalysis.storage.index_from_evidence import index_dynamic_evidence_packs_to_db
 from scytaledroid.Reporting.generator import export_static_analysis_markdown
 from scytaledroid.StaticAnalysis.persistence import list_reports
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
@@ -695,6 +696,98 @@ def handle_tier1_audit_report() -> None:
     """Run Tier-1 dataset readiness audit."""
 
     health_checks.run_tier1_audit_report()
+
+
+def _rebuild_dynamic_db_index_from_evidence(root: Path) -> dict[str, object]:
+    """Return indexer results for a dynamic evidence-pack root."""
+
+    result = index_dynamic_evidence_packs_to_db(root)
+    # Normalize keys we print repeatedly.
+    return {
+        "raw": result,
+        "scanned": int(result.get("scanned") or 0),
+        "ok": int(result.get("ok") or 0),
+        "network_features_upserted": int(result.get("network_features_upserted") or 0),
+        "indicators_indexed": int(result.get("indicators_indexed") or 0),
+        "errors": result.get("errors") or [],
+    }
+
+
+def handle_rebuild_dynamic_db_index_from_evidence() -> None:
+    """Rebuild derived DB index from evidence packs (dynamic_sessions + features + indicators)."""
+
+    root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    if not root.exists():
+        print(status_messages.status("Dynamic evidence root not found.", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    print()
+    menu_utils.print_header("Rebuild DB index from evidence packs")
+    print(status_messages.status("DB is derived; evidence packs remain authoritative.", level="info"))
+    print(status_messages.status(f"Root: {root}", level="info"))
+    if not prompt_utils.prompt_yes_no("Rebuild now?", default=True):
+        return
+
+    outcome = _rebuild_dynamic_db_index_from_evidence(root)
+    scanned = int(outcome.get("scanned") or 0)
+    ok = int(outcome.get("ok") or 0)
+    features = int(outcome.get("network_features_upserted") or 0)
+    indexed = int(outcome.get("indicators_indexed") or 0)
+    errors = outcome.get("errors") or []
+    print(
+        status_messages.status(
+            f"Reindex complete: scanned={scanned} ok={ok} network_features_upserted={features} indicators_indexed={indexed}",
+            level="success" if scanned and scanned == ok else "warn",
+        )
+    )
+    if errors:
+        print(status_messages.status(f"Errors (sample): {', '.join(str(e) for e in errors[:5])}", level="warn"))
+    prompt_utils.press_enter_to_continue()
+
+
+def handle_tier1_quick_fix() -> None:
+    """One-shot helper: rebuild DB index from evidence packs and rerun Tier-1 checks."""
+
+    root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    if not root.exists():
+        print(status_messages.status("Dynamic evidence root not found.", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    print()
+    menu_utils.print_header("Tier-1 quick fix")
+    print(status_messages.status("This does not modify evidence packs; it rebuilds derived DB tables.", level="info"))
+    print(status_messages.status(f"Root: {root}", level="info"))
+    if not prompt_utils.prompt_yes_no("Rebuild DB index now?", default=True):
+        return
+
+    outcome = _rebuild_dynamic_db_index_from_evidence(root)
+    scanned = int(outcome.get("scanned") or 0)
+    ok = int(outcome.get("ok") or 0)
+    features = int(outcome.get("network_features_upserted") or 0)
+    indexed = int(outcome.get("indicators_indexed") or 0)
+    errors = outcome.get("errors") or []
+    print(
+        status_messages.status(
+            f"Reindex complete: scanned={scanned} ok={ok} network_features_upserted={features} indicators_indexed={indexed}",
+            level="success" if scanned and scanned == ok else "warn",
+        )
+    )
+    if errors:
+        print(status_messages.status(f"Errors (sample): {', '.join(str(e) for e in errors[:5])}", level="warn"))
+
+    print()
+    if prompt_utils.prompt_yes_no("Run Tier-1 audit report now?", default=True):
+        health_checks.run_tier1_audit_report()
+
+    print()
+    if prompt_utils.prompt_yes_no(
+        "Generate Tier-1 export pack now? (populates Feature Health)", default=False
+    ):
+        handle_tier1_export_pack()
+
+    prompt_utils.press_enter_to_continue()
 
 
 def handle_tier1_qa_failures_report() -> None:

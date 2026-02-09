@@ -95,7 +95,11 @@ def press_enter_to_continue(
         pass
     palette = colors.get_palette()
     prompt_text = colors.apply(message, palette.muted)
-    input(f"\n{prompt_text}\n")
+    try:
+        input(f"\n{prompt_text}\n")
+    except EOFError:
+        # Non-interactive execution (e.g., scripts/CI). Treat as "continue".
+        return
 
 
 def press_any_key(

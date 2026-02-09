@@ -10,8 +10,10 @@ from .menu_actions import (
     handle_dataset_readiness_dashboard,
     handle_device_report,
     handle_recent_static_runs,
+    handle_rebuild_dynamic_db_index_from_evidence,
     handle_run_ml_on_frozen_dataset,
     handle_run_ml_preflight_report,
+    handle_tier1_quick_fix,
     handle_write_phase_e_deliverables_bundle,
     handle_static_report,
     handle_tier1_audit_report,
@@ -32,6 +34,8 @@ def reporting_menu() -> None:
         "9": handle_run_ml_on_frozen_dataset,
         "10": handle_run_ml_preflight_report,
         "11": handle_write_phase_e_deliverables_bundle,
+        "12": handle_rebuild_dynamic_db_index_from_evidence,
+        "13": handle_tier1_quick_fix,
         "3": handle_device_report,
         "4": handle_static_report,
         "5": view_saved_reports,
@@ -46,6 +50,8 @@ def reporting_menu() -> None:
         MenuOption("9", "Run ML on frozen dataset (offline, evidence-pack only)"),
         MenuOption("10", "ML preflight report (evidence packs, DB-free)"),
         MenuOption("11", "Write Phase E deliverables bundle (output/paper/paper2/phase_e)"),
+        MenuOption("12", "Rebuild DB index from evidence packs (derived; fixes Tier-1 QA counts)"),
+        MenuOption("13", "Tier-1 quick fix (reindex DB + audit + optional export)"),
         MenuOption("3", "Generate device summary report"),
         MenuOption("4", "Generate static analysis report"),
         MenuOption("5", "View saved reports"),
@@ -59,6 +65,9 @@ def reporting_menu() -> None:
         schema_ver = status.get("schema_version") or "<unknown>"
         expected = status.get("expected_schema") or "<unknown>"
         tier1_ready = status.get("tier1_ready_runs", 0)
+        evidence_valid = status.get("evidence_dataset_valid", 0)
+        evidence_total = status.get("evidence_dataset_packs", 0)
+        db_dataset = status.get("db_dynamic_sessions_dataset", 0)
         last_export_path = status.get("last_export_path")
         last_export_at = status.get("last_export_at")
         pcap_valid = status.get("pcap_valid_runs", 0)
@@ -72,17 +81,23 @@ def reporting_menu() -> None:
         export_label = f"{last_export_path} @ {last_export_at}" if last_export_path else "none"
         pcap_label = f"{pcap_valid}/{pcap_total}" if pcap_total else "none"
         pcap_style = "severity_low" if pcap_total and pcap_valid == 0 else "progress"
+        evidence_label = f"{evidence_valid}/{evidence_total}" if evidence_total else "none"
+        db_dataset_label = str(db_dataset or 0)
         summary_items = [
             summary_cards.summary_item("Schema", schema_label, value_style=schema_style),
             summary_cards.summary_item(
-                f"Tier-1 ready runs {ready_badge}",
+                f"Tier-1 QA-pass (DB) {ready_badge}",
                 str(tier1_ready),
                 value_style="progress",
             ),
+            summary_cards.summary_item("Dataset packs valid (evidence)", evidence_label, value_style="progress"),
+            summary_cards.summary_item("DB dataset runs tracked", db_dataset_label, value_style="muted"),
             summary_cards.summary_item("PCAP valid runs", pcap_label, value_style=pcap_style),
             summary_cards.summary_item("Last export", export_label, value_style="muted"),
         ]
         footer = "Tip: Run Tier-1 audit if schema or readiness is out-of-date."
+        if evidence_valid and int(evidence_valid) > 0 and (not tier1_ready or int(tier1_ready) == 0):
+            footer = "Tip: Evidence packs look valid but DB QA-pass is 0. Run [13] Tier-1 quick fix (or [12] reindex)."
         if schema_outdated:
             footer = "Next step: Database Tools → Apply Tier-1 schema migrations"
         summary_cards.print_summary_card(
@@ -95,7 +110,7 @@ def reporting_menu() -> None:
         menu_utils.print_section("Research / Tier-1")
         menu_utils.render_menu(
             MenuSpec(
-                items=options[:5],
+                items=options[:6],
                 show_exit=False,
                 exit_label=None,
                 show_descriptions=False,
@@ -105,7 +120,7 @@ def reporting_menu() -> None:
         menu_utils.print_section("Operational Reports")
         menu_utils.render_menu(
             MenuSpec(
-                items=options[5:],
+                items=options[6:],
                 show_exit=False,
                 exit_label=None,
                 show_descriptions=False,

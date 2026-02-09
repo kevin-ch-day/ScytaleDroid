@@ -36,6 +36,11 @@ Important:
 - Evidence packs are authoritative.
 - DB is derived and may drift; rebuild index when needed.
 
+Tier-1 note:
+- Tier-1 QA/readiness is DB-derived. If Tier-1 QA-pass is unexpectedly 0 while evidence packs are valid,
+  use **Workspace & Evidence → Dynamic evidence packs → Rebuild DB index from evidence packs**.
+  (Shortcut: **Reporting → [12] Rebuild DB index from evidence packs** or **[13] Tier-1 quick fix**.)
+
 ## 3) Freeze (Dataset Anchor, Non-Mutating)
 
 Freeze file (canonical citation anchor for Paper #2):
@@ -85,6 +90,10 @@ Outputs:
 
 Paper artifact lock file:
 - `data/archive/paper_artifacts.json` (pins Fig B1 exemplar run_id)
+
+Tier-1 Feature Health:
+- The Tier-1 export pack writes `output/exports/scytaledroid_dyn_v1/analysis/feature_health.json`.
+  Tier-1 audit will show "Feature Health missing" until you run the export at least once.
 
 Post-freeze bug policy:
 - Version ML outputs (bump `ml_schema_version` / output path).
