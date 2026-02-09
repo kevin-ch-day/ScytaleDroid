@@ -645,6 +645,8 @@ def handle_phase_f1_acceptance_gates() -> None:
 
     import subprocess
     import sys
+    import re
+    from hashlib import sha256
 
     print()
     menu_utils.print_header("Phase F1 Acceptance Gates")
@@ -661,6 +663,11 @@ def handle_phase_f1_acceptance_gates() -> None:
     ref_path = Path(app_config.DATA_DIR) / "archive" / "phase_e_reference_hashes.json"
 
     ok_all = True
+    phase_e_stdout = ""
+    phase_e_stderr = ""
+    smoke_stdout = ""
+    smoke_stderr = ""
+    smoke_snapshot: str | None = None
 
     if not gate_phase_e.exists():
         ok_all = False
@@ -700,14 +707,18 @@ def handle_phase_f1_acceptance_gates() -> None:
     if proc.returncode != 0:
         ok_all = False
         print(status_messages.status("Gate (Phase E regression): FAIL", level="error"))
-        out = (proc.stdout or "").strip()
-        err = (proc.stderr or "").strip()
+        phase_e_stdout = (proc.stdout or "").strip()
+        phase_e_stderr = (proc.stderr or "").strip()
+        out = phase_e_stdout
+        err = phase_e_stderr
         if out:
             print(out.splitlines()[-1])
         if err:
             print(err.splitlines()[-1])
     else:
-        out = (proc.stdout or "").strip()
+        phase_e_stdout = (proc.stdout or "").strip()
+        phase_e_stderr = (proc.stderr or "").strip()
+        out = phase_e_stdout
         print(status_messages.status("Gate (Phase E regression): PASS", level="success"))
         if out:
             print(out.splitlines()[-1])
@@ -717,20 +728,119 @@ def handle_phase_f1_acceptance_gates() -> None:
     if proc.returncode != 0:
         ok_all = False
         print(status_messages.status("Gate (Query-mode smoke): FAIL", level="error"))
-        out = (proc.stdout or "").strip()
-        err = (proc.stderr or "").strip()
+        smoke_stdout = (proc.stdout or "").strip()
+        smoke_stderr = (proc.stderr or "").strip()
+        out = smoke_stdout
+        err = smoke_stderr
         if out:
             print(out.splitlines()[-1])
         if err:
             print(err.splitlines()[-1])
     else:
-        out = (proc.stdout or "").strip()
+        smoke_stdout = (proc.stdout or "").strip()
+        smoke_stderr = (proc.stderr or "").strip()
+        out = smoke_stdout
         print(status_messages.status("Gate (Query-mode smoke): PASS", level="success"))
         if out:
             print(out.splitlines()[-1])
+        combined = "\n".join([smoke_stdout, smoke_stderr]).strip()
+        m = re.search(r"^[\\r\\s]*\\-\\s+snapshot:\\s+(\\S+)", combined, flags=re.MULTILINE)
+        if m:
+            smoke_snapshot = m.group(1).strip()
+        else:
+            for line in combined.splitlines():
+                if "snapshot:" in line:
+                    smoke_snapshot = line.split("snapshot:", 1)[1].strip().split()[0]
+                    break
 
     print()
     print(status_messages.status("Phase F1: PASS" if ok_all else "Phase F1: FAIL", level="success" if ok_all else "error"))
+
+    if ok_all:
+        # Closure artifact: lock Phase F1 as complete (and record that Phase F2 operational
+        # diagnostics are present in the smoke snapshot).
+        try:
+            from scytaledroid.Utils.toolchain_versions import gather_toolchain_versions
+            from scytaledroid.DynamicAnalysis.ml import ml_parameters_operational as op_cfg
+            from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper_cfg
+
+            def _sha256_file(path: Path) -> str | None:
+                if not path.exists():
+                    return None
+                h = sha256()
+                with path.open("rb") as handle:
+                    for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                        h.update(chunk)
+                return h.hexdigest()
+
+            def _git(args: list[str]) -> str | None:
+                try:
+                    p = subprocess.run(args, cwd=repo_root, capture_output=True, text=True)
+                    if p.returncode != 0:
+                        return None
+                    return (p.stdout or "").strip() or None
+                except Exception:
+                    return None
+
+            head = _git(["git", "rev-parse", "HEAD"])
+            branch = _git(["git", "rev-parse", "--abbrev-ref", "HEAD"])
+            dirty = bool(_git(["git", "status", "--porcelain"]))
+
+            created = datetime.now(UTC).isoformat()
+            tc = gather_toolchain_versions()
+
+            selection_manifest_sha = None
+            f2_tables_present: dict[str, bool] = {}
+            if smoke_snapshot:
+                snap = Path(smoke_snapshot)
+                selection_manifest_sha = _sha256_file(snap / "selection_manifest.json")
+                tables = snap / "tables"
+                f2_tables_present = {
+                    "anomaly_persistence_per_run.csv": (tables / "anomaly_persistence_per_run.csv").exists(),
+                    "threshold_stability_per_group_model.csv": (tables / "threshold_stability_per_group_model.csv").exists(),
+                    "coverage_confidence_per_group.csv": (tables / "coverage_confidence_per_group.csv").exists(),
+                }
+
+            payload = {
+                "phase_f1_complete": True,
+                "created_at_utc": created,
+                "git": {"commit": head, "branch": branch, "dirty": dirty},
+                "toolchain": tc,
+                "percentile": {
+                    "paper_np_percentile_method": str(paper_cfg.NP_PERCENTILE_METHOD),
+                    "operational_np_percentile_method": str(op_cfg.NP_PERCENTILE_METHOD),
+                },
+                "operational_mode": {
+                    "feature_log1p": bool(getattr(op_cfg, "FEATURE_LOG1P", False)),
+                    "feature_robust_scale": bool(getattr(op_cfg, "FEATURE_ROBUST_SCALE", False)),
+                },
+                "gates": {
+                    "phase_e_regression": {
+                        "status": "PASS",
+                        "script": str(gate_phase_e),
+                        "reference_hashes_path": str(ref_path),
+                        "stdout_tail": phase_e_stdout.splitlines()[-1] if phase_e_stdout else "",
+                        "stderr_tail": phase_e_stderr.splitlines()[-1] if phase_e_stderr else "",
+                    },
+                    "query_mode_smoke": {
+                        "status": "PASS",
+                        "script": str(gate_smoke),
+                        "snapshot_path": smoke_snapshot or "",
+                        "selection_manifest_sha256": selection_manifest_sha or "",
+                        "f2_tables_present": f2_tables_present,
+                        "stdout_tail": smoke_stdout.splitlines()[-1] if smoke_stdout else "",
+                        "stderr_tail": smoke_stderr.splitlines()[-1] if smoke_stderr else "",
+                    },
+                },
+            }
+
+            out_path = Path(app_config.DATA_DIR) / "archive" / "phase_f1_closure.json"
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            print(status_messages.status(f"Wrote: {relative_path(out_path)}", level="success"))
+        except Exception as exc:  # pragma: no cover
+            print(status_messages.status(f"Closure artifact write failed (non-fatal): {exc}", level="warn"))
+
     prompt_utils.press_enter_to_continue()
 
 

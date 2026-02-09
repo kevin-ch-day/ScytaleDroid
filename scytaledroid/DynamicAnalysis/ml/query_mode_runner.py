@@ -1,7 +1,8 @@
-"""Query-mode ML execution (Phase F1).
+"""Query-mode ML execution (Phase F2).
 
 Goals:
-- No ML math changes relative to Phase E (same windowing/features/models/thresholding).
+- Keep Phase E (paper) semantics intact and reproducible.
+- In operational snapshots, add stability + persistence metrics and (optional) feature stabilisation.
 - Selection is explicit and provenance is written to output/operational/<snapshot_id>/selection_manifest.json.
 - Per-run outputs are written under the operational snapshot:
   output/operational/<snapshot_id>/runs/<run_id>/...
@@ -22,7 +23,7 @@ import numpy as np
 
 from scytaledroid.Config import app_config
 
-from . import ml_parameters_paper2 as config
+from . import ml_parameters_operational as config
 from .anomaly_model_training import anomaly_scores, fit_model, fixed_model_specs
 from .evidence_pack_ml_preflight import (
     RunInputs,
@@ -37,6 +38,22 @@ from .pcap_window_features import build_window_features, extract_packet_timeline
 from .seed_identity import derive_seed
 from .telemetry_windowing import WindowSpec
 from .selectors.models import SelectionResult, write_selection_manifest
+from .operational_metrics import (
+    anomaly_streaks,
+    infer_intensity_from_windows,
+    persistence_seconds,
+    threshold_stability,
+)
+from .operational_risk import (
+    build_static_inputs_from_plan,
+    exposure_grade,
+    deviation_grade,
+    dynamic_deviation_score_0_100,
+    final_posture_grade,
+    final_posture_regime,
+    minmax_norm,
+    static_exposure_score_components,
+)
 
 
 @dataclass(frozen=True)
@@ -218,23 +235,6 @@ def _write_model_manifest(
     _write_json_if_missing(path, payload)
 
 
-def _anomaly_streak_metrics(scores: list[float], threshold: float) -> tuple[int, int]:
-    streak = 0
-    longest = 0
-    streaks = 0
-    for s in scores:
-        if float(s) >= float(threshold):
-            streak += 1
-            longest = max(longest, streak)
-        else:
-            if streak:
-                streaks += 1
-            streak = 0
-    if streak:
-        streaks += 1
-    return streaks, longest
-
-
 def _write_ml_summary(
     path: Path,
     *,
@@ -273,7 +273,9 @@ def _write_ml_summary(
         if not scores:
             continue
         threshold = float(meta.get("threshold_value") or 0.0)
-        streak_count, longest_streak = _anomaly_streak_metrics(scores, threshold)
+        is_anom = [float(s) >= threshold for s in scores]
+        streak_count, longest_streak = anomaly_streaks(is_anom)
+        longest_s = persistence_seconds(longest_streak, spec=WindowSpec(window_size_s=config.WINDOW_SIZE_S, stride_s=config.WINDOW_STRIDE_S))
         payload["models"][model_name] = {
             "median": float(statistics.median(scores)),
             "p95": float(
@@ -285,7 +287,7 @@ def _write_ml_summary(
             ),
             "max": float(max(scores)),
             "anomalous_windows": int(sum(1 for s in scores if float(s) >= threshold)),
-            "anomalous_streaks": {"count": streak_count, "longest": longest_streak},
+            "anomalous_streaks": {"count": streak_count, "longest": longest_streak, "longest_seconds": float(longest_s)},
             "threshold_value": float(threshold),
             "threshold_percentile": float(meta.get("threshold_percentile") or config.THRESHOLD_PERCENTILE),
             "np_percentile_method": str(meta.get("np_percentile_method") or config.NP_PERCENTILE_METHOD),
@@ -302,6 +304,11 @@ def _write_tables(
     *,
     per_run_rows: list[dict[str, Any]],
     per_group_mode_rows: list[dict[str, Any]],
+    persistence_rows: list[dict[str, Any]],
+    stability_rows: list[dict[str, Any]],
+    coverage_rows: list[dict[str, Any]],
+    risk_rows: list[dict[str, Any]],
+    dynamic_math_audit_rows: list[dict[str, Any]],
     overlap_rows: list[dict[str, Any]],
     transport_rows: list[dict[str, Any]],
     transport_group_mode_rows: list[dict[str, Any]],
@@ -323,6 +330,11 @@ def _write_tables(
 
     _write(tables / "anomaly_prevalence_per_run.csv", per_run_rows)
     _write(tables / "anomaly_prevalence_per_group_mode.csv", per_group_mode_rows)
+    _write(tables / "anomaly_persistence_per_run.csv", persistence_rows)
+    _write(tables / "threshold_stability_per_group_model.csv", stability_rows)
+    _write(tables / "coverage_confidence_per_group.csv", coverage_rows)
+    _write(tables / "risk_summary_per_group.csv", risk_rows)
+    _write(tables / "dynamic_math_audit_per_group_model.csv", dynamic_math_audit_rows)
     _write(tables / "model_overlap_per_run.csv", overlap_rows)
     _write(tables / "transport_mix_per_run.csv", transport_rows)
     _write(tables / "transport_mix_per_group_mode.csv", transport_group_mode_rows)
@@ -370,9 +382,15 @@ def run_ml_query_mode(
 
     per_run_prevalence: list[dict[str, Any]] = []
     per_group_mode_prevalence: list[dict[str, Any]] = []
+    per_run_persistence: list[dict[str, Any]] = []
+    per_group_model_stability: list[dict[str, Any]] = []
+    per_group_coverage: list[dict[str, Any]] = []
+    per_group_risk: list[dict[str, Any]] = []
+    per_group_model_math_audit: list[dict[str, Any]] = []
     overlap_rows: list[dict[str, Any]] = []
     transport_rows: list[dict[str, Any]] = []
     transport_group_mode_rows: list[dict[str, Any]] = []
+    static_inputs_by_group: dict[str, dict[str, Any]] = {}
 
     groups_seen = len(groups)
     groups_trained = 0
@@ -395,6 +413,28 @@ def run_ml_query_mode(
             ),
         )
         pkg = next((r.package_name for r in runs if r.package_name), None) or "<unknown>"
+        # Static inputs: plan is embedded in evidence packs (baseline run is canonical).
+        # If missing, we still run dynamic ML; static is optional for operational summary.
+        static_inputs = None
+        for candidate in runs:
+            if derive_run_mode(candidate)[0] == "baseline":
+                plan_path = candidate.run_dir / "inputs" / "static_dynamic_plan.json"
+                if plan_path.exists():
+                    try:
+                        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+                    except Exception:
+                        plan = None
+                    if isinstance(plan, dict):
+                        static_inputs = build_static_inputs_from_plan(plan)
+                break
+        if static_inputs is not None:
+            static_inputs_by_group[group_key] = {
+                "package_name": pkg,
+                "E_raw": int(static_inputs.exported_components_total),
+                "P_raw": int(static_inputs.dangerous_permission_count),
+                "C": int(static_inputs.uses_cleartext_traffic),
+                "S": float(static_inputs.sdk_indicator_score),
+            }
 
         # Preflight + windowing per run.
         by_run_rows: dict[str, tuple[list[dict[str, Any]], int, str]] = {}
@@ -462,6 +502,8 @@ def run_ml_query_mode(
             groups_skipped_no_baseline += 1
             continue
         baseline_run_count = sum(1 for _, (_, _, m) in by_run_rows.items() if m == "baseline")
+        interactive_run_count = sum(1 for _, (_, _, m) in by_run_rows.items() if m == "interactive")
+        unknown_run_count = sum(1 for _, (_, _, m) in by_run_rows.items() if m == "unknown")
         if baseline_run_count < 2:
             groups_baseline_thin += 1
 
@@ -490,6 +532,16 @@ def run_ml_query_mode(
             training_mode = "union_fallback"
             groups_union_fallback += 1
             train_rows = baseline_rows + interactive_rows
+
+        # Baseline p95 bytes/sec for intensity inference (heuristic).
+        baseline_p95_bps: float | None = None
+        try:
+            denom = float(window_spec.window_size_s) if window_spec.window_size_s > 0 else 1.0
+            bps = [float(r.get("byte_count") or 0.0) / denom for r in baseline_rows]
+            if bps:
+                baseline_p95_bps = float(np_percentile(np.asarray(bps, dtype=float), 95.0, method="linear"))
+        except Exception:
+            baseline_p95_bps = None
 
         X_train, feature_names = _rows_to_matrix(train_rows, window_spec=window_spec)
         X_all, _ = _rows_to_matrix(all_rows, window_spec=window_spec)
@@ -521,6 +573,7 @@ def run_ml_query_mode(
                     method=config.NP_PERCENTILE_METHOD,
                 )
             )
+            stability = threshold_stability(scores_train, threshold, np_method=config.NP_PERCENTILE_METHOD)
             train_max = float(np.max(scores_train)) if scores_train.size else 0.0
             threshold_equals_max = bool(abs(threshold - train_max) <= 1e-9)
             training_samples = int(X_train.shape[0])
@@ -540,6 +593,7 @@ def run_ml_query_mode(
                 "params": dict(spec.params),
                 "score_semantics": "higher_is_more_anomalous",
                 "training_mode": training_mode,
+                "threshold_stability": stability,
                 "quality_gates": {
                     "baseline_min_pcap_bytes": int(min_bytes),
                     "baseline_pcap_bytes_total": int(baseline_pcap_bytes_total),
@@ -549,6 +603,21 @@ def run_ml_query_mode(
                     "baseline_windows_ok": bool(baseline_windows_ok),
                 },
             }
+            per_group_model_stability.append(
+                {
+                    "group_key": group_key,
+                    "package_name": pkg,
+                    "model": spec.name,
+                    "training_mode": training_mode,
+                    "baseline_runs": int(baseline_run_count),
+                    "interactive_runs": int(interactive_run_count),
+                    "unknown_runs": int(unknown_run_count),
+                    **stability,
+                    "np_percentile_method": str(config.NP_PERCENTILE_METHOD),
+                    "threshold_percentile": float(config.THRESHOLD_PERCENTILE),
+                    "ml_schema_version": int(config.ML_SCHEMA_VERSION),
+                }
+            )
 
             # Split per-run scores in deterministic order.
             scores_by_run: dict[str, list[float]] = defaultdict(list)
@@ -576,6 +645,42 @@ def run_ml_query_mode(
                 if reuse_existing_outputs and scores_path.exists():
                     continue
                 write_anomaly_scores_csv(scores_path, rows_by_run.get(r.run_id) or [])
+
+        # Coverage/confidence row per group (operational diagnostic; heuristic, auditable).
+        confidence_notes: list[str] = []
+        if baseline_run_count < 2:
+            confidence_notes.append("baseline_thin")
+        if not baseline_windows_ok:
+            confidence_notes.append("baseline_windows_below_min")
+        if not baseline_bytes_ok:
+            confidence_notes.append("baseline_pcap_bytes_below_min")
+        if training_mode == "union_fallback":
+            confidence_notes.append("union_fallback")
+        # Very simple level: high if baseline-only and not thin, else medium/low.
+        if training_mode == "baseline_only" and baseline_run_count >= 2 and baseline_windows_ok and baseline_bytes_ok:
+            confidence_level = "high"
+        elif training_mode == "baseline_only" and baseline_windows_ok and baseline_bytes_ok:
+            confidence_level = "medium"
+        else:
+            confidence_level = "low"
+        per_group_coverage.append(
+            {
+                "group_key": group_key,
+                "package_name": pkg,
+                "baseline_runs": int(baseline_run_count),
+                "interactive_runs": int(interactive_run_count),
+                "unknown_runs": int(unknown_run_count),
+                "baseline_windows_total": int(len(baseline_rows)),
+                "interactive_windows_total": int(len(interactive_rows)),
+                "unknown_windows_total": int(len(unknown_rows)),
+                "baseline_pcap_bytes_total": int(baseline_pcap_bytes_total),
+                "baseline_min_pcap_bytes": int(min_bytes),
+                "training_mode": training_mode,
+                "confidence_level": confidence_level,
+                "confidence_notes": ",".join(confidence_notes) if confidence_notes else "",
+                "ml_schema_version": int(config.ML_SCHEMA_VERSION),
+            }
+        )
 
         # Write per-run manifests/summaries.
         for r in runs:
@@ -648,6 +753,15 @@ def run_ml_query_mode(
                 mode = by_run_rows.get(rid, ([], 0, "unknown"))[2]
                 anomalous = int(sum(1 for s in scores if float(s) >= thr))
                 arr = np.asarray(scores, dtype=float)
+                # Persistence (Phase F2)
+                is_anom = [float(s) >= thr for s in scores]
+                streak_count, longest_streak = anomaly_streaks(is_anom)
+                longest_s = persistence_seconds(longest_streak, spec=window_spec)
+                intensity = infer_intensity_from_windows(
+                    run_window_rows=by_run_rows.get(rid, ([], 0, mode))[0],
+                    baseline_p95_bytes_per_sec=baseline_p95_bps,
+                    spec=window_spec,
+                )
                 per_run_prevalence.append(
                     {
                         "group_key": group_key,
@@ -665,6 +779,25 @@ def run_ml_query_mode(
                         "threshold_value": float(thr),
                         "threshold_percentile": float(config.THRESHOLD_PERCENTILE),
                         "np_percentile_method": str(config.NP_PERCENTILE_METHOD),
+                        "ml_schema_version": int(config.ML_SCHEMA_VERSION),
+                    }
+                )
+                per_run_persistence.append(
+                    {
+                        "group_key": group_key,
+                        "package_name": pkg,
+                        "run_id": rid,
+                        "mode": mode,
+                        "model": model_name,
+                        "training_mode": training_mode,
+                        "windows_total": int(arr.shape[0]),
+                        "anomalous_windows": int(anomalous),
+                        "anomalous_pct": float(anomalous) / float(arr.shape[0]) if arr.shape[0] > 0 else 0.0,
+                        "anomalous_streak_count": int(streak_count),
+                        "anomalous_longest_streak_windows": int(longest_streak),
+                        "anomalous_longest_streak_seconds": float(longest_s),
+                        "intensity_label": intensity.label,
+                        "intensity_score": float(intensity.score) if intensity.score is not None else None,
                         "ml_schema_version": int(config.ML_SCHEMA_VERSION),
                     }
                 )
@@ -737,10 +870,164 @@ def run_ml_query_mode(
 
         runs_scored += len(by_run_rows)
 
+    # ---- Derived operational summary tables (F2) ----
+    # Static exposure: cohort-relative min-max over selected groups (within snapshot).
+    static_by_group: dict[str, dict[str, Any]] = {}
+    if static_inputs_by_group:
+        gks = sorted(static_inputs_by_group.keys())
+        e_norm = minmax_norm([float(static_inputs_by_group[g]["E_raw"]) for g in gks])
+        p_norm = minmax_norm([float(static_inputs_by_group[g]["P_raw"]) for g in gks])
+        for idx, gk in enumerate(gks):
+            rec = dict(static_inputs_by_group[gk])
+            rec["E_norm"] = float(e_norm[idx])
+            rec["P_norm"] = float(p_norm[idx])
+            rec["static_exposure_score"] = static_exposure_score_components(
+                E_norm=e_norm[idx],
+                P_norm=p_norm[idx],
+                C=rec.get("C"),
+                S=rec.get("S"),
+            )
+            rec["exposure_grade"] = exposure_grade(rec.get("static_exposure_score"))
+            static_by_group[gk] = rec
+
+    # Dynamic math audit per group/model: join stability + interactive aggregate + persistence aggregate.
+    # Index interactive prevalence per group/model.
+    prev_idx: dict[tuple[str, str], dict[str, Any]] = {}
+    for r in per_group_mode_prevalence:
+        if str(r.get("mode") or "") != "interactive":
+            continue
+        key = (str(r.get("group_key") or ""), str(r.get("model") or ""))
+        prev_idx[key] = r
+    # Persistence aggregate per group/model over interactive runs: take max longest streak, sum windows.
+    pers_idx: dict[tuple[str, str], dict[str, Any]] = {}
+    for r in per_run_persistence:
+        if str(r.get("mode") or "") != "interactive":
+            continue
+        key = (str(r.get("group_key") or ""), str(r.get("model") or ""))
+        rec = pers_idx.setdefault(
+            key,
+            {
+                "windows_total": 0,
+                "anomalous_windows": 0,
+                "anomalous_longest_streak_windows": 0,
+                "anomalous_longest_streak_seconds": 0.0,
+            },
+        )
+        rec["windows_total"] += int(r.get("windows_total") or 0)
+        rec["anomalous_windows"] += int(r.get("anomalous_windows") or 0)
+        rec["anomalous_longest_streak_windows"] = max(
+            int(rec.get("anomalous_longest_streak_windows") or 0),
+            int(r.get("anomalous_longest_streak_windows") or 0),
+        )
+        rec["anomalous_longest_streak_seconds"] = float(
+            max(
+                float(rec.get("anomalous_longest_streak_seconds") or 0.0),
+                float(r.get("anomalous_longest_streak_seconds") or 0.0),
+            )
+        )
+        pers_idx[key] = rec
+    # Confidence per group.
+    conf_idx = {str(r.get("group_key") or ""): r for r in per_group_coverage}
+
+    for st in per_group_model_stability:
+        gk = str(st.get("group_key") or "")
+        model = str(st.get("model") or "")
+        pkg = str(st.get("package_name") or "")
+        conf = conf_idx.get(gk) or {}
+        prev = prev_idx.get((gk, model)) or {}
+        pers = pers_idx.get((gk, model)) or {}
+        anomalous_pct = prev.get("anomalous_pct")
+        longest_s = pers.get("anomalous_longest_streak_seconds")
+        grade = deviation_grade(
+            anomalous_pct=float(anomalous_pct) if anomalous_pct is not None else None,
+            longest_streak_seconds=float(longest_s) if longest_s is not None else None,
+            confidence_level=str(conf.get("confidence_level") or ""),
+        )
+        dyn_score = dynamic_deviation_score_0_100(
+            anomalous_pct=float(anomalous_pct) if anomalous_pct is not None else None,
+            longest_streak_windows=int(pers.get("anomalous_longest_streak_windows") or 0),
+            windows_total=int(pers.get("windows_total") or 0),
+            confidence_level=str(conf.get("confidence_level") or ""),
+        )
+        per_group_model_math_audit.append(
+            {
+                "group_key": gk,
+                "package_name": pkg,
+                "model": model,
+                "training_mode": st.get("training_mode"),
+                "training_samples": st.get("training_samples"),
+                "threshold_value": st.get("threshold_value"),
+                "threshold_equals_max": st.get("threshold_equals_max"),
+                "threshold_near_max": st.get("threshold_near_max"),
+                "threshold_to_max_norm": st.get("threshold_to_max_norm"),
+                "interactive_windows_total": pers.get("windows_total"),
+                "interactive_anomalous_pct": anomalous_pct,
+                "interactive_longest_streak_seconds": pers.get("anomalous_longest_streak_seconds"),
+                "deviation_grade": grade,
+                "dynamic_deviation_score": dyn_score,
+                "confidence_level": conf.get("confidence_level"),
+                "confidence_notes": conf.get("confidence_notes"),
+                "ml_schema_version": int(config.ML_SCHEMA_VERSION),
+            }
+        )
+
+    # Per-group unified risk summary (primary model IF; include OC-SVM as secondary columns if available).
+    # Use deviation grades and exposure grades; final is a rule-based regime label (not fused scalar).
+    # Index dynamic audit by group/model.
+    audit_idx = {(r["group_key"], r["model"]): r for r in per_group_model_math_audit if r.get("group_key") and r.get("model")}
+    for cov in per_group_coverage:
+        gk = str(cov.get("group_key") or "")
+        pkg = str(cov.get("package_name") or "")
+        stat = static_by_group.get(gk) or {}
+        exp_score = stat.get("static_exposure_score")
+        exp_grade = stat.get("exposure_grade") or exposure_grade(exp_score if exp_score is not None else None)
+        # Primary model = isolation forest.
+        if_row = audit_idx.get((gk, config.MODEL_IFOREST)) or {}
+        oc_row = audit_idx.get((gk, config.MODEL_OCSVM)) or {}
+        dev_grade_if = if_row.get("deviation_grade") or "Unknown"
+        final_reg = final_posture_regime(exposure_grade_label=str(exp_grade), deviation_grade_label=str(dev_grade_if))
+        final_grade = final_posture_grade(exposure_grade_label=str(exp_grade), deviation_grade_label=str(dev_grade_if))
+        conf_level = str(cov.get("confidence_level") or "")
+        # Rationale: compact, operator-facing.
+        static_drivers = []
+        if "E_raw" in stat:
+            static_drivers.append(f"exported={stat.get('E_raw')}")
+        if "P_raw" in stat:
+            static_drivers.append(f"dangerous_perms={stat.get('P_raw')}")
+        if stat.get("C") is not None:
+            static_drivers.append(f"cleartext_flag={int(stat.get('C') or 0)}")
+        dyn_driver = ""
+        if if_row:
+            dyn_driver = f"p={if_row.get('interactive_anomalous_pct')} longest_s={if_row.get('interactive_longest_streak_seconds')}"
+        per_group_risk.append(
+            {
+                "group_key": gk,
+                "package_name": pkg,
+                "static_exposure_score": exp_score,
+                "exposure_grade": exp_grade,
+                "dynamic_deviation_score_if": if_row.get("dynamic_deviation_score"),
+                "deviation_grade_if": dev_grade_if,
+                "dynamic_deviation_score_oc": oc_row.get("dynamic_deviation_score"),
+                "deviation_grade_oc": oc_row.get("deviation_grade") or "",
+                "final_regime_if": final_reg,
+                "final_grade_if": final_grade,
+                "confidence_level": conf_level,
+                "confidence_notes": cov.get("confidence_notes") or "",
+                "static_drivers": ";".join(static_drivers),
+                "dynamic_driver_if": dyn_driver,
+                "ml_schema_version": int(config.ML_SCHEMA_VERSION),
+            }
+        )
+
     _write_tables(
         snapshot_dir,
         per_run_rows=per_run_prevalence,
         per_group_mode_rows=per_group_mode_prevalence,
+        persistence_rows=per_run_persistence,
+        stability_rows=per_group_model_stability,
+        coverage_rows=per_group_coverage,
+        risk_rows=per_group_risk,
+        dynamic_math_audit_rows=per_group_model_math_audit,
         overlap_rows=overlap_rows,
         transport_rows=transport_rows,
         transport_group_mode_rows=transport_group_mode_rows,
