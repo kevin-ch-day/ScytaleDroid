@@ -46,6 +46,20 @@ from .evidence_pack_ml_preflight import get_sampling_duration_seconds, load_run_
 from .telemetry_windowing import WindowSpec
 
 
+OKABE_ITO = {
+    # Colorblind-safe palette (Okabe-Ito).
+    "black": "#000000",
+    "orange": "#E69F00",
+    "sky_blue": "#56B4E9",
+    "bluish_green": "#009E73",
+    "yellow": "#F0E442",
+    "blue": "#0072B2",
+    "vermillion": "#D55E00",
+    "reddish_purple": "#CC79A7",
+    "gray": "#7F7F7F",
+}
+
+
 @dataclass(frozen=True)
 class PhaseEArtifacts:
     out_root: Path
@@ -117,6 +131,10 @@ def write_phase_e_deliverables_bundle(
     # Figures (PM locked): Fig B1 + B2 + B4.
     fig_b1_png, fig_b1_pdf = _write_fig_b1(fig_b1_run_id, figs_dir, interaction_tag=interaction_tag, overwrite=True)
     fig_b2_png, fig_b2_pdf = _write_fig_b2(figs_dir, provenance=provenance, overwrite=True)
+    # Paper-friendly variant: split Fig B2 into social vs messaging cohorts.
+    (_fig_b2_social_png, _fig_b2_social_pdf), (_fig_b2_msg_png, _fig_b2_msg_pdf) = _write_fig_b2_split(
+        figs_dir, overwrite=True
+    )
     fig_b4_png, fig_b4_pdf = _write_fig_b4(figs_dir, provenance=provenance, overwrite=True)
 
     # Repro appendix snippet.
@@ -240,11 +258,11 @@ def _write_fig_b1(
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10.5, 6.5), sharex=True)
     fig.suptitle(title, fontsize=12)
 
-    ax1.plot(xs, bytes_ps, color="#0B3C5D", linewidth=1.5)
+    ax1.plot(xs, bytes_ps, color=OKABE_ITO["blue"], linewidth=1.6)
     ax1.set_ylabel("Bytes/sec")
     ax1.grid(True, alpha=0.25)
 
-    ax2.plot(xs, pkts_ps, color="#328CC1", linewidth=1.5)
+    ax2.plot(xs, pkts_ps, color=OKABE_ITO["bluish_green"], linewidth=1.6)
     ax2.set_ylabel("Packets/sec")
     ax2.set_xlabel("Time (s, relative to capture start)")
     ax2.grid(True, alpha=0.25)
@@ -255,8 +273,8 @@ def _write_fig_b1(
         xs_f = [x for x, f in zip(xs, flags, strict=True) if f]
         ax.scatter(xs_f, [y_plot for _ in xs_f], s=22, marker=marker, color=color, alpha=0.85, label=label)
 
-    _overlay(ax1, bytes_ps, if_flags, marker="^", color="#D1495B", label="IF (flagged)")
-    _overlay(ax1, bytes_ps, oc_flags, marker="o", color="#00798C", label="OC-SVM (flagged)")
+    _overlay(ax1, bytes_ps, if_flags, marker="^", color=OKABE_ITO["vermillion"], label="IF (flagged)")
+    _overlay(ax1, bytes_ps, oc_flags, marker="o", color=OKABE_ITO["reddish_purple"], label="OC-SVM (flagged)")
     ax1.legend(loc="upper right", fontsize=8, frameon=False)
 
     note = f"dropped_partial_windows={dropped} window={spec.window_size_s}s stride={spec.stride_s}s"
@@ -292,7 +310,7 @@ def _write_fig_b2(figs_dir: Path, *, provenance: dict[str, str], overwrite: bool
 
     x = np.arange(len(apps))
     width = 0.35
-    colors = {"idle": "#0B3C5D", "interactive": "#328CC1"}
+    colors = {"idle": OKABE_ITO["blue"], "interactive": OKABE_ITO["orange"]}
 
     fig, axes = plt.subplots(2, 1, figsize=(12.5, 7.2), sharex=True)
     for ax, (model_key, model_label) in zip(
@@ -317,6 +335,86 @@ def _write_fig_b2(figs_dir: Path, *, provenance: dict[str, str], overwrite: bool
     return png, pdf
 
 
+def _write_fig_b2_subset(
+    figs_dir: Path,
+    *,
+    apps: list[str],
+    stem: str,
+    title: str,
+    overwrite: bool,
+) -> tuple[Path, Path]:
+    """Variant of Fig B2 restricted to a subset of apps (to reduce width)."""
+    png = figs_dir / f"{stem}.png"
+    pdf = figs_dir / f"{stem}.pdf"
+    if not overwrite and png.exists() and pdf.exists():
+        return png, pdf
+
+    rows = _read_csv_rows(dataset_tables_dir() / "anomaly_prevalence_per_app_phase.csv")
+    apps = [a for a in apps if a]
+    labels = [config.DISPLAY_NAME_BY_PACKAGE.get(a, a) for a in apps]
+
+    def get(pkg: str, phase: str, model: str) -> float:
+        for r in rows:
+            if r.get("package_name") == pkg and r.get("phase") == phase and r.get("model") == model:
+                try:
+                    return float(r.get("flagged_pct") or 0.0)
+                except Exception:
+                    return 0.0
+        return 0.0
+
+    x = np.arange(len(apps))
+    width = 0.35
+    colors = {"idle": OKABE_ITO["blue"], "interactive": OKABE_ITO["orange"]}
+
+    # Dynamic width: keep readable in IEEE column/page layouts.
+    fig_w = max(7.0, 0.9 * len(apps) + 2.5)
+    fig, axes = plt.subplots(2, 1, figsize=(fig_w, 6.3), sharex=True)
+    for ax, (model_key, model_label) in zip(
+        axes, [(config.MODEL_IFOREST, "Isolation Forest"), (config.MODEL_OCSVM, "OC-SVM")], strict=True
+    ):
+        idle_vals = [get(a, "idle", model_key) for a in apps]
+        int_vals = [get(a, "interactive", model_key) for a in apps]
+        ax.bar(x - width / 2, idle_vals, width, label="Idle", color=colors["idle"], alpha=0.92)
+        ax.bar(x + width / 2, int_vals, width, label="Interactive", color=colors["interactive"], alpha=0.92)
+        ax.set_ylabel("RDI (flagged %)")
+        ax.set_title(model_label, fontsize=10)
+        ax.grid(True, axis="y", alpha=0.25)
+        ax.set_ylim(0.0, 1.0)
+    axes[0].legend(loc="upper right", fontsize=9, frameon=False)
+    axes[-1].set_xticks(x, labels, rotation=30, ha="right")
+    axes[-1].set_xlabel("App")
+    fig.suptitle(title, fontsize=12)
+    fig.tight_layout(rect=[0, 0.02, 1, 0.95])
+    fig.savefig(png, dpi=200)
+    fig.savefig(pdf)
+    plt.close(fig)
+    return png, pdf
+
+
+def _write_fig_b2_split(figs_dir: Path, *, overwrite: bool) -> tuple[tuple[Path, Path], tuple[Path, Path]]:
+    """Split Fig B2 into two narrower panels (social media vs messaging)."""
+    rows = _read_csv_rows(dataset_tables_dir() / "anomaly_prevalence_per_app_phase.csv")
+    all_apps = sorted({r.get("package_name") for r in rows if r.get("package_name")})
+    messaging = sorted([a for a in all_apps if a in config.MESSAGING_PACKAGES])
+    social = sorted([a for a in all_apps if a not in config.MESSAGING_PACKAGES])
+
+    social_paths = _write_fig_b2_subset(
+        figs_dir,
+        apps=social,
+        stem="fig_b2_rdi_social_by_app",
+        title="Fig B2(a): RDI by Social Media App (Idle vs Interactive)",
+        overwrite=overwrite,
+    )
+    messaging_paths = _write_fig_b2_subset(
+        figs_dir,
+        apps=messaging,
+        stem="fig_b2_rdi_messaging_by_app",
+        title="Fig B2(b): RDI by Messaging App (Idle vs Interactive)",
+        overwrite=overwrite,
+    )
+    return social_paths, messaging_paths
+
+
 def _write_fig_b4(figs_dir: Path, *, provenance: dict[str, str], overwrite: bool) -> tuple[Path, Path]:
     """Fig B4: static posture vs interactive RDI (context only)."""
     stem = "fig_b4_static_vs_rdi"
@@ -334,15 +432,44 @@ def _write_fig_b4(figs_dir: Path, *, provenance: dict[str, str], overwrite: bool
     rho = _spearman_rho(xs, ys)
 
     fig, ax = plt.subplots(1, 1, figsize=(9.5, 6.2))
-    ax.scatter(xs, ys, s=46, color="#0B3C5D", alpha=0.86)
+    # Color by cohort to add readable structure without adding semantics.
+    msg = set(config.MESSAGING_PACKAGES)
+    xs_social = [posture[p][0] for p in pkgs if p not in msg]
+    ys_social = [rdi[p] for p in pkgs if p not in msg]
+    xs_msg = [posture[p][0] for p in pkgs if p in msg]
+    ys_msg = [rdi[p] for p in pkgs if p in msg]
+    if xs_social and ys_social:
+        ax.scatter(
+            xs_social,
+            ys_social,
+            s=52,
+            color=OKABE_ITO["bluish_green"],
+            alpha=0.88,
+            edgecolor="white",
+            linewidth=0.5,
+            label="Social media",
+        )
+    if xs_msg and ys_msg:
+        ax.scatter(
+            xs_msg,
+            ys_msg,
+            s=52,
+            color=OKABE_ITO["reddish_purple"],
+            alpha=0.88,
+            edgecolor="white",
+            linewidth=0.5,
+            label="Messaging",
+        )
     ax.set_xlabel("Static Posture Score (0–100, context only)")
     ax.set_ylabel("Interactive RDI (IF flagged %)")
     ax.grid(True, alpha=0.25)
     ax.set_ylim(0.0, 1.0)
 
     if xs and ys:
-        ax.axvline(float(np.median(xs)), color="#888888", linewidth=1.0, alpha=0.7)
-        ax.axhline(float(np.median(ys)), color="#888888", linewidth=1.0, alpha=0.7)
+        ax.axvline(float(np.median(xs)), color=OKABE_ITO["gray"], linewidth=1.0, alpha=0.75)
+        ax.axhline(float(np.median(ys)), color=OKABE_ITO["gray"], linewidth=1.0, alpha=0.75)
+
+    ax.legend(loc="upper left", fontsize=9, frameon=False)
 
     for pkg, x0, y0 in zip(pkgs, xs, ys, strict=True):
         name = config.DISPLAY_NAME_BY_PACKAGE.get(pkg, pkg)
@@ -594,6 +721,8 @@ def _clean_bundle_dirs(*, tables_dir: Path, figs_dir: Path, fig_b1_run_id: str) 
     keep_fig_stems = {
         f"fig_b1_timeline_{fig_b1_run_id[:8]}",
         "fig_b2_rdi_by_app",
+        "fig_b2_rdi_social_by_app",
+        "fig_b2_rdi_messaging_by_app",
         "fig_b4_static_vs_rdi",
     }
     keep_exts = {".csv", ".xlsx", ".tex", ".png", ".pdf"}

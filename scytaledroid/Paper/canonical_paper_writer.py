@@ -70,6 +70,156 @@ def _pick_one(dir_path: Path, glob_pat: str) -> Path:
     return matches[0]
 
 
+def _read_csv_rows(path: Path) -> list[dict[str, str]]:
+    import csv
+
+    text = path.read_text(encoding="utf-8", errors="strict").splitlines()
+    # No comment headers expected for operational snapshot CSVs; keep simple.
+    r = csv.DictReader([ln for ln in text if ln.strip()])
+    return [dict(row) for row in r]
+
+
+def _read_table6_app_names(path: Path) -> dict[str, str]:
+    """Read (package_name -> display app name) from Table 6 CSV (skipping comments)."""
+    import csv
+
+    lines = []
+    for ln in path.read_text(encoding="utf-8", errors="strict").splitlines():
+        if ln.startswith("#") or not ln.strip():
+            continue
+        lines.append(ln)
+    r = csv.DictReader(lines)
+    out: dict[str, str] = {}
+    for row in r:
+        pkg = (row.get("package_name") or "").strip()
+        name = (row.get("app") or "").strip()
+        if pkg and name:
+            out[pkg] = name
+    return out
+
+
+def _render_risk_scoring_table_tex(rows: list[dict[str, str]], *, app_name_by_package: dict[str, str] | None = None) -> str:
+    """Compact IEEE-single-column friendly risk scoring table.
+
+    Columns are intentionally compressed:
+    - Static: score + grade (Exposure)
+    - Dynamic: score + grade (Deviation; IF primary)
+    - Final: grade only (rule-based regime mapping)
+    """
+
+    # Deterministic ordering by package name for stable diffs.
+    rows = sorted(rows, key=lambda r: (r.get("package_name") or ""))
+
+    def fmt_score(x: str) -> str:
+        try:
+            return f"{float(x):.1f}"
+        except Exception:
+            return "n/a"
+
+    def fmt_grade(g: str) -> str:
+        s = (g or "").strip().lower()
+        return {"low": "L", "medium": "M", "high": "H"}.get(s, (g or "").strip()[:1].upper() or "n/a")
+
+    lines: list[str] = []
+    lines.append("% Risk scoring & grades (compact; IEEE single-column friendly).")
+    lines.append("% Notes: Dynamic score is deviation (RDI-derived), not measured security harm.")
+    lines.append("\\begin{table}[t]")
+    lines.append("\\centering")
+    lines.append("\\scriptsize")
+    lines.append("\\setlength{\\tabcolsep}{3pt}")
+    lines.append("\\renewcommand{\\arraystretch}{1.05}")
+    lines.append("\\begin{tabular}{lccc}")
+    lines.append("\\toprule")
+    lines.append("App & Static Exposure (score/grade) & Dynamic Deviation (score/grade) & Final Regime (grade) \\\\")
+    lines.append("\\midrule")
+    app_name_by_package = app_name_by_package or {}
+    for r in rows:
+        pkg = (r.get("package_name") or "").strip()
+        app_disp = app_name_by_package.get(pkg) or pkg
+        if not app_disp:
+            app_disp = "n/a"
+        static_cell = f"{fmt_score(r.get('static_exposure_score',''))}/{fmt_grade(r.get('exposure_grade',''))}"
+        dyn_cell = f"{fmt_score(r.get('dynamic_deviation_score_if',''))}/{fmt_grade(r.get('deviation_grade_if',''))}"
+        final_cell = fmt_grade(r.get("final_grade_if", ""))
+        lines.append(f"{app_disp} & {static_cell} & {dyn_cell} & {final_cell} \\\\")
+    lines.append("\\bottomrule")
+    lines.append("\\end{tabular}")
+    lines.append(
+        "\\caption{Risk scoring and regime grades per app (frozen cohort). Static Exposure uses StaticPostureScore. "
+        "Dynamic Deviation reflects runtime behavioral deviation from a baseline distribution (Isolation Forest, interactive; "
+        "deviation is not measured harm). Final Regime (grade) is rule-based and not a fused scalar.}"
+    )
+    lines.append("\\label{tab:risk_scoring}")
+    lines.append("\\end{table}")
+    return "\n".join(lines) + "\n"
+
+
+def _render_masvs_domain_mapping_table_tex() -> str:
+    """Small, explanatory MASVS mapping table (paper-only; no counts/compliance).
+
+    Purpose: provide a semantic anchor for what "Static Exposure" covers without
+    introducing per-app MASVS findings or compliance claims.
+    """
+
+    lines: list[str] = []
+    lines.append("% MASVS domain mapping (context only; not compliance; no per-app counts).")
+    lines.append("\\begin{table}[t]")
+    lines.append("\\centering")
+    lines.append("\\footnotesize")
+    lines.append("\\setlength{\\tabcolsep}{3pt}")
+    lines.append("\\renewcommand{\\arraystretch}{1.05}")
+    lines.append("\\begin{tabular}{lll}")
+    lines.append("\\toprule")
+    lines.append("MASVS Domain & Example Signals & Used Where \\\\")
+    lines.append("\\midrule")
+    lines.append("MASVS-NETWORK & Cleartext posture, transport config & Static Exposure \\\\")
+    lines.append("MASVS-PLATFORM & Exported components, IPC surface & Static Exposure \\\\")
+    lines.append("MASVS-PRIVACY & High-value permission surface & Static Exposure \\\\")
+    lines.append("\\bottomrule")
+    lines.append("\\end{tabular}")
+    lines.append(
+        "\\caption{MASVS domain mapping for Static Exposure context. This table is explanatory only and does not "
+        "represent MASVS compliance, pass/fail status, or per-app findings counts.}"
+    )
+    lines.append("\\label{tab:masvs_mapping}")
+    lines.append("\\end{table}")
+    return "\n".join(lines) + "\n"
+
+
+def _ieeeify_tabular_booktabs(tex: str) -> str:
+    """Convert a simple '\\hline' tabular into booktabs style (top/mid/bottomrule).
+
+    This is a best-effort transformation for the surfaced paper-facing tables.
+    It intentionally does not touch internal baseline artifacts used for regression gates.
+    """
+
+    lines = tex.splitlines()
+    out: list[str] = []
+    in_tabular = False
+    hline_idx: list[int] = []
+    for ln in lines:
+        if ln.startswith("\\begin{tabular}"):
+            in_tabular = True
+            hline_idx = []
+        if in_tabular and ln.strip() == "\\hline":
+            # Record position within out (not lines) so we can post-fix easily.
+            hline_idx.append(len(out))
+            out.append(ln)
+            continue
+        out.append(ln)
+        if in_tabular and ln.startswith("\\end{tabular}"):
+            in_tabular = False
+            # Replace up to 3 hlines inside this tabular block.
+            if len(hline_idx) >= 1:
+                out[hline_idx[0]] = "\\toprule"
+            if len(hline_idx) >= 2:
+                out[hline_idx[1]] = "\\midrule"
+            if len(hline_idx) >= 3:
+                out[hline_idx[-1]] = "\\bottomrule"
+
+    return "\n".join(out) + ("\n" if tex.endswith("\n") else "")
+
+
 @dataclass(frozen=True)
 class CanonicalPaperResult:
     paper_root: Path
@@ -104,42 +254,31 @@ def write_canonical_paper_directory(
     for d in (paper_root, tables_dir, figs_dir, appendix_dir, manifests_dir, internal_prov, internal_snaps):
         d.mkdir(parents=True, exist_ok=True)
 
-    # Keep the canonical surface clean: only stable paper-facing filenames live here.
+    # Keep the canonical surface clean: only locked main-paper artifacts live here.
     _clean_dir(
         tables_dir,
         keep={
-            # Phase E (tex/csv are stable; xlsx stays internal).
-            "table_1_rdi_prevalence.tex",
-            "table_2_transport_mix.tex",
-            "table_3_model_agreement.tex",
+            "table_masvs_domain_mapping.tex",
             "table_4_signature_deltas.tex",
-            "table_5_masvs_coverage.tex",
-            "table_6_static_posture_scores.tex",
             "table_7_exposure_deviation_summary.tex",
-            "table_1_rdi_prevalence.csv",
-            "table_2_transport_mix.csv",
-            "table_3_model_agreement.csv",
             "table_4_signature_deltas.csv",
-            "table_5_masvs_coverage.csv",
-            "table_6_static_posture_scores.csv",
             "table_7_exposure_deviation_summary.csv",
-            # Phase F surfaced snapshot tables.
-            "risk_summary_per_group.csv",
-            "dynamic_math_audit_per_group_model.csv",
+            "table_risk_scoring.tex",
         },
     )
     _clean_dir(
         figs_dir,
         keep={
-            "fig_b1_timeline.pdf",
-            "fig_b1_timeline.png",
-            "fig_b2_rdi_by_app.pdf",
-            "fig_b2_rdi_by_app.png",
+            "fig_b2_rdi_social_by_app.pdf",
+            "fig_b2_rdi_social_by_app.png",
+            "fig_b2_rdi_messaging_by_app.pdf",
+            "fig_b2_rdi_messaging_by_app.png",
             "fig_b4_static_vs_rdi.pdf",
             "fig_b4_static_vs_rdi.png",
         },
     )
-    _clean_dir(appendix_dir, keep={"repro_appendix.md"})
+    # No appendix section in the 8-page paper; keep repro notes internal-only.
+    _clean_dir(appendix_dir, keep=set())
     _clean_dir(
         manifests_dir,
         keep={
@@ -153,37 +292,38 @@ def write_canonical_paper_directory(
         },
     )
 
-    # Surface Phase E tables (csv + tex).
+    # Surface Phase E tables (csv + tex) that are locked into the main paper.
     base_tables = baseline_bundle_root / "tables"
+    (tables_dir / "table_masvs_domain_mapping.tex").write_text(_render_masvs_domain_mapping_table_tex(), encoding="utf-8")
     for stem in (
-        "table_1_rdi_prevalence",
-        "table_2_transport_mix",
-        "table_3_model_agreement",
         "table_4_signature_deltas",
-        "table_5_masvs_coverage",
-        "table_6_static_posture_scores",
         "table_7_exposure_deviation_summary",
     ):
         _copy(base_tables / f"{stem}.tex", tables_dir / f"{stem}.tex", overwrite=overwrite)
         _copy(base_tables / f"{stem}.csv", tables_dir / f"{stem}.csv", overwrite=overwrite)
 
-    # Surface Phase E figures with stable paper names (strip run-id suffix).
-    base_figs = baseline_bundle_root / "figures"
-    b1_pdf = _pick_one(base_figs, "fig_b1_timeline_*.pdf")
-    b1_png = _pick_one(base_figs, "fig_b1_timeline_*.png")
-    _copy(b1_pdf, figs_dir / "fig_b1_timeline.pdf", overwrite=overwrite)
-    _copy(b1_png, figs_dir / "fig_b1_timeline.png", overwrite=overwrite)
-    _copy(base_figs / "fig_b2_rdi_by_app.pdf", figs_dir / "fig_b2_rdi_by_app.pdf", overwrite=overwrite)
-    _copy(base_figs / "fig_b2_rdi_by_app.png", figs_dir / "fig_b2_rdi_by_app.png", overwrite=overwrite)
-    _copy(base_figs / "fig_b4_static_vs_rdi.pdf", figs_dir / "fig_b4_static_vs_rdi.pdf", overwrite=overwrite)
-    _copy(base_figs / "fig_b4_static_vs_rdi.png", figs_dir / "fig_b4_static_vs_rdi.png", overwrite=overwrite)
+    # IEEE style touch-up for surfaced tabular-only TeX tables (booktabs rules).
+    for stem in ("table_4_signature_deltas", "table_7_exposure_deviation_summary"):
+        p = tables_dir / f"{stem}.tex"
+        if p.exists():
+            p.write_text(_ieeeify_tabular_booktabs(p.read_text(encoding="utf-8", errors="strict")), encoding="utf-8")
 
-    # Surface repro appendix.
+    # Surface Phase E figures that are locked into the main paper.
+    base_figs = baseline_bundle_root / "figures"
+    _copy(base_figs / "fig_b2_rdi_social_by_app.pdf", figs_dir / "fig_b2_rdi_social_by_app.pdf", overwrite=overwrite)
+    _copy(base_figs / "fig_b2_rdi_social_by_app.png", figs_dir / "fig_b2_rdi_social_by_app.png", overwrite=overwrite)
     _copy(
-        baseline_bundle_root / "appendix" / "repro_appendix_phase_e.md",
-        appendix_dir / "repro_appendix.md",
+        base_figs / "fig_b2_rdi_messaging_by_app.pdf",
+        figs_dir / "fig_b2_rdi_messaging_by_app.pdf",
         overwrite=overwrite,
     )
+    _copy(
+        base_figs / "fig_b2_rdi_messaging_by_app.png",
+        figs_dir / "fig_b2_rdi_messaging_by_app.png",
+        overwrite=overwrite,
+    )
+    _copy(base_figs / "fig_b4_static_vs_rdi.pdf", figs_dir / "fig_b4_static_vs_rdi.pdf", overwrite=overwrite)
+    _copy(base_figs / "fig_b4_static_vs_rdi.png", figs_dir / "fig_b4_static_vs_rdi.png", overwrite=overwrite)
 
     # Manifests: baseline + (optional) snapshot.
     base_manifest = baseline_bundle_root / "manifest"
@@ -213,13 +353,17 @@ def write_canonical_paper_directory(
         _copy(snap_manifest / "model_registry.json", manifests_dir / "model_registry.json", overwrite=overwrite)
         (manifests_dir / "paper_snapshot_id.txt").write_text((snapshot_id or snapshot_dir.name) + "\n", encoding="utf-8")
 
-        # Surface the two paper-facing snapshot tables.
+        # Render compact TeX risk scoring table for the main paper from snapshot tables.
         snap_tables = snapshot_dir / "tables"
-        _copy(snap_tables / "risk_summary_per_group.csv", tables_dir / "risk_summary_per_group.csv", overwrite=overwrite)
-        _copy(
-            snap_tables / "dynamic_math_audit_per_group_model.csv",
-            tables_dir / "dynamic_math_audit_per_group_model.csv",
-            overwrite=overwrite,
+        risk_rows = _read_csv_rows(snap_tables / "risk_summary_per_group.csv")
+        app_names = {}
+        try:
+            app_names = _read_table6_app_names(base_tables / "table_6_static_posture_scores.csv")
+        except Exception:
+            app_names = {}
+        (tables_dir / "table_risk_scoring.tex").write_text(
+            _render_risk_scoring_table_tex(risk_rows, app_name_by_package=app_names),
+            encoding="utf-8",
         )
 
         # Archive full snapshot under internal/ for provenance.
@@ -252,13 +396,17 @@ def write_canonical_paper_directory(
             [
                 "# Canonical Paper Artifacts",
                 "",
-                "This directory is the canonical, stable artifact surface used to compile the paper.",
+                "This directory is the canonical, stable artifact surface used to compile the 8-page IEEE main paper.",
                 "",
                 "Paper-facing paths:",
                 f"- tables: `{tables_dir.relative_to(paper_root)}/`",
                 f"- figures: `{figs_dir.relative_to(paper_root)}/`",
-                f"- appendix: `{appendix_dir.relative_to(paper_root)}/`",
+                f"- appendix: `{appendix_dir.relative_to(paper_root)}/` (unused in 8-page main paper)",
                 f"- manifests: `{manifests_dir.relative_to(paper_root)}/`",
+                "",
+                "Locked main-paper artifacts (no swaps):",
+                "- Figures: `figures/fig_b2_rdi_social_by_app.pdf`, `figures/fig_b2_rdi_messaging_by_app.pdf` (Fig B2 a/b), `figures/fig_b4_static_vs_rdi.pdf`",
+                "- Tables: `tables/table_risk_scoring.tex`, `tables/table_7_exposure_deviation_summary.tex`, `tables/table_4_signature_deltas.tex`, `tables/table_masvs_domain_mapping.tex` (context-only)",
                 "",
                 "Internal provenance (not used directly by LaTeX):",
                 f"- internal: `{paper_paths.output_paper_internal_root().relative_to(paper_root)}/`",

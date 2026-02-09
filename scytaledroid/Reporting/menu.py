@@ -38,9 +38,9 @@ def reporting_menu() -> None:
         "8": handle_run_ml_query_mode,
         "9": handle_verify_freeze_immutability_paper2,
         "10": handle_phase_f1_acceptance_gates,
-        "12": handle_write_canonical_paper_directory,
         # Reports
-        "11": view_saved_reports,
+        "11": handle_write_canonical_paper_directory,
+        "12": view_saved_reports,
     }
 
     tier1_options = [
@@ -56,10 +56,10 @@ def reporting_menu() -> None:
         MenuOption("8", "Run ML (query mode, operational snapshot)"),
         MenuOption("9", "Verify freeze immutability (hash-based)"),
         MenuOption("10", "Phase F1 acceptance gates (regression + query smoke)"),
-        MenuOption("12", "Write canonical paper artifact directory (output/paper)"),
+        MenuOption("11", "Write canonical paper artifact directory (output/paper)"),
     ]
     reports_options = [
-        MenuOption("11", "View saved reports"),
+        MenuOption("12", "View saved reports"),
     ]
 
     tier1_visible = tier1_options
