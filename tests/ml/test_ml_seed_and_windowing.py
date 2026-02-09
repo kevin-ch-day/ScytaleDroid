@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from scytaledroid.DynamicAnalysis.ml.identity import derive_seed, identity_key_from_plan
-from scytaledroid.DynamicAnalysis.ml.windowing import WindowSpec, iter_windows
+from scytaledroid.DynamicAnalysis.ml.seed_identity import derive_seed, identity_key_from_plan
+from scytaledroid.DynamicAnalysis.ml.telemetry_windowing import WindowSpec, iter_windows
 
 
 def test_identity_key_from_plan_prefers_full_identity_tuple():
@@ -32,4 +32,3 @@ def test_iter_windows_drops_partial_tail():
     assert windows == [(0.0, 10.0), (5.0, 15.0), (10.0, 20.0)]
     # Starts at 15 and 20 do not fit a full 10s window in 23s.
     assert dropped == 2
-

@@ -11,7 +11,7 @@ def _read_csv(path: Path) -> list[dict[str, str]]:
 
 def test_write_prevalence_csvs_aggregates_idle_vs_interactive(tmp_path, monkeypatch):
     from scytaledroid.Config import app_config
-    from scytaledroid.DynamicAnalysis.ml import runner
+    from scytaledroid.DynamicAnalysis.ml import evidence_pack_ml_orchestrator as orchestrator
 
     monkeypatch.setattr(app_config, "DATA_DIR", str(tmp_path))
 
@@ -75,7 +75,7 @@ def test_write_prevalence_csvs_aggregates_idle_vs_interactive(tmp_path, monkeypa
         },
     ]
 
-    runner._write_prevalence_csvs(rows)
+    orchestrator._write_prevalence_csvs(rows)
 
     main_path = tmp_path / "anomaly_prevalence_per_app_phase.csv"
     appendix_path = tmp_path / "anomaly_prevalence_per_run.csv"
@@ -103,7 +103,7 @@ def test_write_prevalence_csvs_aggregates_idle_vs_interactive(tmp_path, monkeypa
 
 def test_write_transport_mix_csvs_weighted_average(tmp_path, monkeypatch):
     from scytaledroid.Config import app_config
-    from scytaledroid.DynamicAnalysis.ml import runner
+    from scytaledroid.DynamicAnalysis.ml import evidence_pack_ml_orchestrator as orchestrator
 
     monkeypatch.setattr(app_config, "DATA_DIR", str(tmp_path))
 
@@ -154,7 +154,7 @@ def test_write_transport_mix_csvs_weighted_average(tmp_path, monkeypatch):
         },
     ]
 
-    runner._write_transport_mix_csvs(rows)
+    orchestrator._write_transport_mix_csvs(rows)
 
     main_path = tmp_path / "transport_mix_by_phase.csv"
     appendix_path = tmp_path / "transport_mix_per_run.csv"
@@ -178,14 +178,14 @@ def test_write_transport_mix_csvs_weighted_average(tmp_path, monkeypatch):
 
 
 def test_paper_artifacts_json_written_once(tmp_path, monkeypatch):
-    from scytaledroid.DynamicAnalysis.ml import runner
+    from scytaledroid.DynamicAnalysis.ml import evidence_pack_ml_orchestrator as orchestrator
 
     # FREEZE_DIR is a module-level constant; patch it directly for the test.
     freeze_dir = tmp_path / "archive"
     freeze_dir.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr(runner, "FREEZE_DIR", freeze_dir)
+    monkeypatch.setattr(orchestrator, "FREEZE_DIR", freeze_dir)
 
-    cand1 = runner._ExemplarCandidate(
+    cand1 = orchestrator._ExemplarCandidate(
         run_id="rid1",
         package_name="com.example.a",
         interaction_tag="video",
@@ -194,14 +194,14 @@ def test_paper_artifacts_json_written_once(tmp_path, monkeypatch):
         iforest_flagged_pct=0.5,
         ocsvm_flagged_pct=0.1,
     )
-    runner._maybe_write_paper_artifacts_json(candidate=cand1, freeze_manifest_path=Path("data/archive/dataset_freeze.json"))
+    orchestrator._maybe_write_paper_artifacts_json(candidate=cand1, freeze_manifest_path=Path("data/archive/dataset_freeze.json"))
 
     path = freeze_dir / "paper_artifacts.json"
     assert path.exists()
     first = json.loads(path.read_text(encoding="utf-8"))
     assert first["fig_B1_run_id"] == "rid1"
 
-    cand2 = runner._ExemplarCandidate(
+    cand2 = orchestrator._ExemplarCandidate(
         run_id="rid2",
         package_name="com.example.b",
         interaction_tag="video",
@@ -210,8 +210,7 @@ def test_paper_artifacts_json_written_once(tmp_path, monkeypatch):
         iforest_flagged_pct=1.0,
         ocsvm_flagged_pct=1.0,
     )
-    runner._maybe_write_paper_artifacts_json(candidate=cand2, freeze_manifest_path=Path("data/archive/dataset_freeze.json"))
+    orchestrator._maybe_write_paper_artifacts_json(candidate=cand2, freeze_manifest_path=Path("data/archive/dataset_freeze.json"))
     second = json.loads(path.read_text(encoding="utf-8"))
     # Must be immutable once written.
     assert second["fig_B1_run_id"] == "rid1"
-

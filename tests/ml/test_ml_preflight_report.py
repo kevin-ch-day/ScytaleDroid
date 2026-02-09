@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from scytaledroid.DynamicAnalysis.ml.report import write_ml_preflight_report
+from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_preflight_report import write_ml_preflight_report
 
 
 def test_write_ml_preflight_report_writes_csv(tmp_path, monkeypatch):

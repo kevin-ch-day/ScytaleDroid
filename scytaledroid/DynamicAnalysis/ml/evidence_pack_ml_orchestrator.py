@@ -25,11 +25,11 @@ import shutil
 
 from scytaledroid.Config import app_config
 
-from . import config
-from .identity import derive_seed, salt_metadata
-from .models import anomaly_scores, fit_model, fixed_model_specs
-from .pcap_windows import build_window_features, extract_packet_timeline, write_anomaly_scores_csv
-from .preflight import (
+from . import ml_parameters_paper2 as config
+from .seed_identity import derive_seed, salt_metadata
+from .anomaly_model_training import anomaly_scores, fit_model, fixed_model_specs
+from .pcap_window_features import build_window_features, extract_packet_timeline, write_anomaly_scores_csv
+from .evidence_pack_ml_preflight import (
     RunInputs,
     compute_ml_preflight,
     get_sampling_duration_seconds,
@@ -37,7 +37,7 @@ from .preflight import (
     load_run_inputs,
     write_ml_preflight,
 )
-from .windowing import WindowSpec
+from .telemetry_windowing import WindowSpec
 
 
 FREEZE_DIR = Path(app_config.DATA_DIR) / "archive"
@@ -68,6 +68,7 @@ def run_ml_on_evidence_packs(
     *,
     output_root: Path | None = None,
     freeze_manifest_path: Path | None = None,
+    reuse_existing_outputs: bool = True,
 ) -> MlRunStats:
     """Run Paper #2 ML over evidence packs.
 
@@ -108,6 +109,25 @@ def run_ml_on_evidence_packs(
         checksums = freeze.get("included_run_checksums") if isinstance(freeze.get("included_run_checksums"), dict) else None
         if included_run_ids is None or freeze_apps is None or checksums is None:
             raise RuntimeError(f"Freeze manifest missing required fields: {freeze_path}")
+
+        # Fast path: if all per-run v1 outputs already exist, do not re-run tshark/modeling.
+        # This keeps "run Phase E" idempotent and avoids accidental long reprocessing runs.
+        if reuse_existing_outputs and _all_frozen_v1_outputs_exist(root, included_run_ids):
+            apps_seen = 0
+            for pkg, entry in sorted(freeze_apps.items()):
+                if not isinstance(entry, dict):
+                    continue
+                base_ids = entry.get("baseline_run_ids") or []
+                inter_ids = entry.get("interactive_run_ids") or []
+                if isinstance(base_ids, list) and isinstance(inter_ids, list) and len(base_ids) >= 1 and len(inter_ids) >= 2:
+                    apps_seen += 1
+            return MlRunStats(
+                apps_seen=apps_seen,
+                apps_trained=apps_seen,
+                runs_scored=len(included_run_ids),
+                runs_skipped=0,
+                generated_at=datetime.now(UTC).isoformat(),
+            )
 
         apps_seen = 0
         for pkg in sorted(freeze_apps.keys()):
@@ -365,6 +385,24 @@ def run_ml_on_evidence_packs(
             runs_skipped=runs_skipped,
             generated_at=datetime.now(UTC).isoformat(),
         )
+
+
+def _all_frozen_v1_outputs_exist(root: Path, included_run_ids: set[str]) -> bool:
+    """Return True if all included runs already have the required v1 outputs on disk."""
+    req = [
+        "analysis/ml/v1/model_manifest.json",
+        "analysis/ml/v1/ml_summary.json",
+        "analysis/ml/v1/anomaly_scores_iforest.csv",
+        "analysis/ml/v1/anomaly_scores_ocsvm.csv",
+    ]
+    for rid in included_run_ids:
+        run_dir = root / rid
+        if not run_dir.exists():
+            return False
+        for rel in req:
+            if not (run_dir / rel).exists():
+                return False
+    return True
 
 
 def _load_freeze_payload(path: Path) -> dict[str, Any]:

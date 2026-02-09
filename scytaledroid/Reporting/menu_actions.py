@@ -18,7 +18,7 @@ from scytaledroid.DeviceAnalysis.report import generate_device_report
 from scytaledroid.DynamicAnalysis.exports.dataset_export import export_tier1_pack
 from scytaledroid.DynamicAnalysis.ml import run_ml_on_evidence_packs
 from scytaledroid.DynamicAnalysis.ml import config as ml_config
-from scytaledroid.DynamicAnalysis.ml.report import write_ml_preflight_report
+from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_preflight_report import write_ml_preflight_report
 from scytaledroid.Reporting.generator import export_static_analysis_markdown
 from scytaledroid.StaticAnalysis.persistence import list_reports
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
@@ -247,32 +247,16 @@ def handle_static_report() -> None:
 def handle_run_ml_on_frozen_dataset() -> None:
     """Run Paper #2 ML over frozen evidence packs (offline, DB-free)."""
 
-    archive_dir = Path(app_config.DATA_DIR) / "archive"
-    canonical = archive_dir / "dataset_freeze.json"
-    freeze_path = None
-    # Prefer a checksummed freeze manifest; canonical may be legacy.
-    if canonical.exists():
-        try:
-            payload = json.loads(canonical.read_text(encoding="utf-8"))
-        except Exception:
-            payload = {}
-        if isinstance(payload, dict) and isinstance(payload.get("included_run_checksums"), dict):
-            freeze_path = canonical
-    if freeze_path is None:
-        candidates = sorted(archive_dir.glob("dataset_freeze-*.json"), reverse=True)
-        for p in candidates:
-            try:
-                payload = json.loads(p.read_text(encoding="utf-8"))
-            except Exception:
-                continue
-            if isinstance(payload, dict) and isinstance(payload.get("included_run_checksums"), dict):
-                freeze_path = p
-                break
+    # PM/reviewer locked: Phase E must use the canonical checksummed freeze anchor only.
+    from scytaledroid.DynamicAnalysis.ml.ml_parameters_paper2 import FREEZE_CANONICAL_FILENAME
 
-    if freeze_path is None:
+    archive_dir = Path(app_config.DATA_DIR) / "archive"
+    freeze_path = archive_dir / FREEZE_CANONICAL_FILENAME
+
+    if not freeze_path.exists():
         print(
             status_messages.status(
-                "Dataset is not frozen (missing a checksummed freeze manifest under data/archive/).",
+                f"Dataset is not frozen (missing canonical checksummed freeze anchor: {relative_path(freeze_path)}).",
                 level="warn",
             )
         )
@@ -280,6 +264,20 @@ def handle_run_ml_on_frozen_dataset() -> None:
             status_messages.status(
                 "Create the freeze marker only after all apps have >= 3 VALID runs and QA/retention are verified.",
                 level="info",
+            )
+        )
+        prompt_utils.press_enter_to_continue()
+        return
+
+    try:
+        payload = json.loads(freeze_path.read_text(encoding="utf-8"))
+    except Exception:
+        payload = {}
+    if not (isinstance(payload, dict) and isinstance(payload.get("included_run_checksums"), dict)):
+        print(
+            status_messages.status(
+                f"Freeze anchor is legacy or invalid (missing included_run_checksums): {relative_path(freeze_path)}",
+                level="fail",
             )
         )
         prompt_utils.press_enter_to_continue()

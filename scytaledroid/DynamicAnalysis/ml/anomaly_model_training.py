@@ -9,7 +9,7 @@ import numpy as np
 from sklearn.ensemble import IsolationForest
 from sklearn.svm import OneClassSVM
 
-from . import config
+from . import ml_parameters_paper2 as config
 
 
 @dataclass(frozen=True)

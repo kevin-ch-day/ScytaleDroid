@@ -7,9 +7,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .identity import identity_key_fallback, identity_key_from_plan
-from . import config as ml_config
-from .windowing import WindowSpec, iter_windows
+from .seed_identity import identity_key_fallback, identity_key_from_plan
+from . import ml_parameters_paper2 as ml_config
+from .telemetry_windowing import WindowSpec, iter_windows
 
 
 @dataclass(frozen=True)

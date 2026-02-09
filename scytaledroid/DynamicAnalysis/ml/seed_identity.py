@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-from . import config
+from . import ml_parameters_paper2 as config
 
 
 def identity_key_from_plan(plan: dict[str, Any] | None) -> str | None:
@@ -50,4 +50,3 @@ def derive_seed(identity_key: str) -> int:
 
 def salt_metadata() -> dict[str, str]:
     return {"salt_label": config.SEED_SALT_LABEL}
-

@@ -119,7 +119,8 @@ finalized.
 ## 3.1 Dataset freeze (Paper #2 selector + immutability anchor)
 
 The frozen dataset is selected by a dataset-level freeze manifest:
-- `data/archive/dataset_freeze-*.json`
+- Canonical anchor (PM/reviewer locked for Paper #2):
+  - `data/archive/dataset_freeze-20260208T201527Z.json`
 - `included_run_ids` lists the exact run_ids included for Paper #2 (36).
 - `included_run_checksums` provides SHA-256 checksums for the frozen inputs per included run.
 

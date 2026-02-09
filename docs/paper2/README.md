@@ -30,6 +30,20 @@ Immutability rule (locked):
 - Freeze immutability is verified via `included_run_checksums` in the freeze manifest.
 - Do not recompute frozen artifacts (`pcap_report.json`, `pcap_features.json`) for included runs.
 
+## Where Outputs Live (Phase E)
+
+Authoritative inputs:
+- Freeze anchor: `data/archive/dataset_freeze-20260208T201527Z.json`
+- Exemplar pin: `data/archive/paper_artifacts.json`
+
+Derived dataset tables (regenerable; developer/analyst-facing):
+- `data/anomaly_prevalence_per_app_phase.csv`
+- `data/model_overlap_per_run.csv`
+- `data/transport_mix_by_phase.csv`
+
+Paper-ready deliverables bundle (zip-and-share; operator/paper-facing):
+- `output/paper/paper2/phase_e/`
+
 ## Key Docs
 
 - `docs/paper2/operator_runbook.md`
@@ -40,4 +54,3 @@ Immutability rule (locked):
   - Frozen input contract and where outputs live.
 - `docs/database/derived_index.md`
   - DB posture (derived/rebuildable; Phase E runner is DB-free).
-

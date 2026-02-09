@@ -9,7 +9,7 @@ from bisect import bisect_right
 from pathlib import Path
 from typing import Any, Iterable
 
-from .windowing import WindowSpec, iter_windows
+from .telemetry_windowing import WindowSpec, iter_windows
 
 
 @dataclass(frozen=True)
