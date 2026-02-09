@@ -6,6 +6,7 @@ Primary contract (PM-locked):
 - Outputs are versioned under analysis/ml/v<ml_schema_version>/.
 """
 
+from .engine import MLEngine, MLRunResult
 from .evidence_pack_ml_orchestrator import run_ml_on_evidence_packs
 
-__all__ = ["run_ml_on_evidence_packs"]
+__all__ = ["MLEngine", "MLRunResult", "run_ml_on_evidence_packs"]
