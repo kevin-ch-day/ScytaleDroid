@@ -184,6 +184,8 @@ def _fetch_manifest_rows() -> list[dict[str, Any]]:
         payload["netstats_bytes_in_total"] = totals_row.get("sum_in")
         payload["netstats_bytes_out_total"] = totals_row.get("sum_out")
         stored_quality = payload.get("network_signal_quality")
+        payload["netstats_missing_ratio"] = _compute_netstats_missing_ratio(payload)
+        payload["netstats_pcap_ratio"] = _compute_netstats_pcap_ratio(payload)
         computed_quality = _compute_network_quality(payload)
         payload["network_signal_quality_stored"] = stored_quality
         payload["network_signal_quality_computed"] = computed_quality
@@ -196,7 +198,8 @@ def _fetch_manifest_rows() -> list[dict[str, Any]]:
         )
         payload["network_signal_quality"] = computed_quality
         payload["network_inclusion_status"] = computed_quality
-        payload["network_csv_included"] = _should_include_network(payload)
+        payload["network_inclusion_reason"] = _network_inclusion_reason(payload)
+        payload["network_csv_included"] = payload["network_inclusion_reason"] is None
         payload["expected_math_flag_sampling"] = _expected_math_flag_sampling(payload)
         payload["clock_alignment_flag"] = _clock_alignment_flag(payload)
         enriched.append(payload)
@@ -226,9 +229,12 @@ def _build_tier1_summary_rows(manifest_rows: list[dict[str, Any]]) -> list[dict[
                 "network_signal_quality_final": row.get("network_signal_quality_final"),
                 "network_quality_mismatch": row.get("network_quality_mismatch"),
                 "network_inclusion_status": row.get("network_inclusion_status"),
+                "network_inclusion_reason": row.get("network_inclusion_reason"),
                 "network_csv_included": row.get("network_csv_included"),
                 "netstats_rows": row.get("netstats_rows"),
                 "netstats_missing_rows": row.get("netstats_missing_rows"),
+                "netstats_missing_ratio": row.get("netstats_missing_ratio"),
+                "netstats_pcap_ratio": row.get("netstats_pcap_ratio"),
                 "sampling_duration_seconds": row.get("sampling_duration_seconds"),
                 "clock_alignment_delta_s": row.get("clock_alignment_delta_s"),
                 "expected_math_flag_sampling": row.get("expected_math_flag_sampling"),
@@ -253,6 +259,7 @@ def _build_tier1_rollup_rows(manifest_rows: list[dict[str, Any]]) -> list[dict[s
                 "runs_excluded": 0,
                 "avg_capture_ratio": [],
                 "netstats_missing_pct": [],
+                "netstats_pcap_ratio": [],
             },
         )
         bucket["runs_total"] += 1
@@ -273,11 +280,18 @@ def _build_tier1_rollup_rows(manifest_rows: list[dict[str, Any]]) -> list[dict[s
             total = None
         if missing is not None and total and total > 0:
             bucket["netstats_missing_pct"].append(missing / total)
+        pcap_ratio = row.get("netstats_pcap_ratio")
+        if pcap_ratio is not None:
+            try:
+                bucket["netstats_pcap_ratio"].append(float(pcap_ratio))
+            except (TypeError, ValueError):
+                pass
 
     output: list[dict[str, Any]] = []
     for pkg, bucket in rollup.items():
         ratios = bucket.pop("avg_capture_ratio")
         miss_pct = bucket.pop("netstats_missing_pct")
+        pcap_ratios = bucket.pop("netstats_pcap_ratio")
         output.append(
             {
                 "package_name": pkg,
@@ -286,9 +300,39 @@ def _build_tier1_rollup_rows(manifest_rows: list[dict[str, Any]]) -> list[dict[s
                 "runs_excluded": bucket["runs_excluded"],
                 "avg_capture_ratio": round(sum(ratios) / len(ratios), 3) if ratios else None,
                 "avg_netstats_missing_pct": round(sum(miss_pct) / len(miss_pct), 3) if miss_pct else None,
+                "avg_netstats_pcap_ratio": round(sum(pcap_ratios) / len(pcap_ratios), 3) if pcap_ratios else None,
             }
         )
     return output
+
+
+def _compute_netstats_missing_ratio(row: Mapping[str, Any]) -> float | None:
+    try:
+        netstats_rows = int(row.get("netstats_rows") or 0)
+        netstats_missing = int(row.get("netstats_missing_rows") or 0)
+    except (TypeError, ValueError):
+        return None
+    denom = netstats_rows + netstats_missing
+    if denom <= 0:
+        return None
+    return netstats_missing / denom
+
+
+def _compute_netstats_pcap_ratio(row: Mapping[str, Any]) -> float | None:
+    try:
+        sum_in = int(row.get("netstats_bytes_in_total") or 0)
+        sum_out = int(row.get("netstats_bytes_out_total") or 0)
+    except (TypeError, ValueError):
+        sum_in = 0
+        sum_out = 0
+    try:
+        pcap_bytes = int(row.get("pcap_bytes") or 0)
+    except (TypeError, ValueError):
+        pcap_bytes = 0
+    net_total = sum_in + sum_out
+    if net_total <= 0 or pcap_bytes <= 0:
+        return None
+    return net_total / pcap_bytes
 
 
 def _compute_network_quality(row: Mapping[str, Any]) -> str:
@@ -321,10 +365,10 @@ def _compute_network_quality(row: Mapping[str, Any]) -> str:
     return "none"
 
 
-def _should_include_network(row: Mapping[str, Any]) -> bool:
+def _network_inclusion_reason(row: Mapping[str, Any]) -> str | None:
     quality = row.get("network_signal_quality") or row.get("network_signal_quality_final")
     if quality not in {"netstats_ok", "netstats_partial"}:
-        return False
+        return f"quality_{quality or 'unknown'}"
     try:
         netstats_rows = int(row.get("netstats_rows") or 0)
         netstats_missing = int(row.get("netstats_missing_rows") or 0)
@@ -339,13 +383,13 @@ def _should_include_network(row: Mapping[str, Any]) -> bool:
         sum_out = 0
     net_total = sum_in + sum_out
     if net_total <= 0:
-        return False
+        return "netstats_zero_bytes"
     denom = netstats_rows + netstats_missing
     if denom <= 0:
-        return False
+        return "netstats_missing_rows"
     missing_ratio = netstats_missing / denom
     if missing_ratio > NETSTATS_MISSING_RATIO_MAX:
-        return False
+        return "missing_ratio_high"
     try:
         pcap_bytes = int(row.get("pcap_bytes") or 0)
     except (TypeError, ValueError):
@@ -353,8 +397,8 @@ def _should_include_network(row: Mapping[str, Any]) -> bool:
     if pcap_bytes > 0:
         ratio = net_total / pcap_bytes if pcap_bytes else 0
         if ratio < NETSTATS_PCAP_RATIO_MIN or ratio > NETSTATS_PCAP_RATIO_MAX:
-            return False
-    return True
+            return "pcap_ratio_out_of_bounds"
+    return None
 
 
 def _write_network_skipped(path: Path, *, reason: str) -> None:

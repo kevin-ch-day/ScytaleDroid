@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import io
 import json
+import os
+import tempfile
 import threading
 import time
 import uuid
@@ -34,6 +35,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 WEB_DIR = Path(__file__).resolve().parent / "web"
 MAX_LIST_LIMIT = 200
 MAX_JOB_HISTORY = 200
+DEFAULT_MAX_UPLOAD_MB = 200
 
 
 @dataclass
@@ -134,6 +136,57 @@ def _hash_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _resolve_api_key() -> str | None:
+    api_key = os.getenv("SCYTALEDROID_API_KEY", "").strip()
+    return api_key or None
+
+
+def _require_api_key(request: Any) -> None:
+    from fastapi import HTTPException
+
+    api_key = _resolve_api_key()
+    if not api_key:
+        return
+    auth_header = request.headers.get("Authorization", "")
+    token = ""
+    if auth_header.lower().startswith("bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+    if not token:
+        token = request.headers.get("X-API-Key", "").strip()
+    if token != api_key:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def _resolve_max_upload_bytes() -> int:
+    raw = os.getenv("SCYTALEDROID_API_MAX_UPLOAD_MB", str(DEFAULT_MAX_UPLOAD_MB)).strip()
+    try:
+        mb = max(1, int(raw))
+    except ValueError:
+        mb = DEFAULT_MAX_UPLOAD_MB
+    return mb * 1024 * 1024
+
+
+def _resolve_allowed_apk_base() -> Path:
+    return (Path(app_config.DATA_DIR) / "device_apks").resolve()
+
+
+def _validate_apk_path(apk_path: Path) -> Path:
+    from fastapi import HTTPException
+
+    base_dir = _resolve_allowed_apk_base()
+    resolved = apk_path.expanduser().resolve()
+    try:
+        resolved.relative_to(base_dir)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"APK path must be within {base_dir}",
+        ) from exc
+    if not resolved.exists():
+        raise HTTPException(status_code=404, detail=f"APK not found: {resolved}")
+    return resolved
+
+
 def _collect_run_status(session_stamp: str) -> dict[str, Any]:
     if core_q is None:
         return {"session_stamp": session_stamp, "status": "db_unavailable"}
@@ -154,8 +207,8 @@ def _collect_run_status(session_stamp: str) -> dict[str, Any]:
 
 
 def build_api_app() -> FastAPI:
-    from fastapi import FastAPI, File, HTTPException, UploadFile
-    from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+    from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Request, UploadFile
+    from fastapi.responses import FileResponse, JSONResponse
     from fastapi.staticfiles import StaticFiles
     from pydantic import BaseModel
 
@@ -171,20 +224,36 @@ def build_api_app() -> FastAPI:
 
     upload_file = File(...)
 
+    def require_api_key(request: Request) -> None:
+        _require_api_key(request)
+
     @app.post("/upload")
-    def upload_apk(file: UploadFile = upload_file) -> dict[str, Any]:
+    def upload_apk(
+        file: UploadFile = upload_file,
+        _: None = Depends(require_api_key),
+    ) -> dict[str, Any]:
         upload_dir = Path(app_config.DATA_DIR) / "device_apks" / "repo_uploads"
         upload_dir.mkdir(parents=True, exist_ok=True)
         suffix = Path(file.filename or "upload.apk").suffix or ".apk"
         upload_id = uuid.uuid4().hex
         filename = f"{upload_id}{suffix}"
         destination = upload_dir / filename
+        max_bytes = _resolve_max_upload_bytes()
+        written = 0
 
         with destination.open("wb") as handle:
             while True:
                 chunk = file.file.read(1024 * 1024)
                 if not chunk:
                     break
+                written += len(chunk)
+                if written > max_bytes:
+                    handle.close()
+                    destination.unlink(missing_ok=True)
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Upload exceeds max size ({max_bytes // (1024 * 1024)} MB).",
+                    )
                 handle.write(chunk)
 
         digest = _hash_file(destination)
@@ -228,10 +297,11 @@ def build_api_app() -> FastAPI:
         return FileResponse(WEB_DIR / "ops.html", media_type="text/html")
 
     @app.post("/scan")
-    def scan_apk(payload: ScanRequest) -> JSONResponse:
-        apk_path = Path(payload.apk_path).expanduser().resolve()
-        if not apk_path.exists():
-            raise HTTPException(status_code=404, detail=f"APK not found: {apk_path}")
+    def scan_apk(
+        payload: ScanRequest,
+        _: None = Depends(require_api_key),
+    ) -> JSONResponse:
+        apk_path = _validate_apk_path(Path(payload.apk_path))
 
         session_stamp = payload.session_stamp or make_session_stamp()
         normalized = normalize_session_stamp(session_stamp)
@@ -278,7 +348,7 @@ def build_api_app() -> FastAPI:
         )
 
     @app.get("/job/{job_id}")
-    def job_status(job_id: str) -> dict[str, Any]:
+    def job_status(job_id: str, _: None = Depends(require_api_key)) -> dict[str, Any]:
         with _jobs_lock:
             job = _jobs.get(job_id)
         if not job:
@@ -286,7 +356,7 @@ def build_api_app() -> FastAPI:
         return _serialize_job(job)
 
     @app.get("/jobs")
-    def jobs_list(limit: int = 25) -> dict[str, Any]:
+    def jobs_list(limit: int = 25, _: None = Depends(require_api_key)) -> dict[str, Any]:
         limit = max(1, min(limit, MAX_LIST_LIMIT))
         with _jobs_lock:
             jobs = list(_jobs.values())
@@ -294,7 +364,12 @@ def build_api_app() -> FastAPI:
         return {"jobs": [_serialize_job(job) for job in jobs]}
 
     @app.get("/runs")
-    def runs_list(limit: int = 25, q: str | None = None, profile: str | None = None) -> dict[str, Any]:
+    def runs_list(
+        limit: int = 25,
+        q: str | None = None,
+        profile: str | None = None,
+        _: None = Depends(require_api_key),
+    ) -> dict[str, Any]:
         if core_q is None:
             return {"runs": []}
         limit = max(1, min(limit, MAX_LIST_LIMIT))
@@ -343,7 +418,12 @@ def build_api_app() -> FastAPI:
         return {"runs": runs}
 
     @app.get("/apps")
-    def apps_list(limit: int = 25, q: str | None = None, profile: str | None = None) -> dict[str, Any]:
+    def apps_list(
+        limit: int = 25,
+        q: str | None = None,
+        profile: str | None = None,
+        _: None = Depends(require_api_key),
+    ) -> dict[str, Any]:
         if core_q is None:
             return {"apps": []}
         limit = max(1, min(limit, MAX_LIST_LIMIT))
@@ -404,7 +484,7 @@ def build_api_app() -> FastAPI:
         return {"apps": apps}
 
     @app.get("/profiles")
-    def profile_list() -> dict[str, Any]:
+    def profile_list(_: None = Depends(require_api_key)) -> dict[str, Any]:
         if core_q is None:
             return {"profiles": []}
         rows = core_q.run_sql(
@@ -420,7 +500,7 @@ def build_api_app() -> FastAPI:
         return {"profiles": profiles}
 
     @app.get("/apps/recent")
-    def apps_recent(limit: int = 25) -> dict[str, Any]:
+    def apps_recent(limit: int = 25, _: None = Depends(require_api_key)) -> dict[str, Any]:
         if core_q is None:
             return {"apps": []}
         limit = max(1, min(limit, MAX_LIST_LIMIT))
@@ -467,7 +547,10 @@ def build_api_app() -> FastAPI:
         return {"apps": apps}
 
     @app.get("/app_version/{app_version_id}/latest_run")
-    def latest_run_for_version(app_version_id: int) -> dict[str, Any]:
+    def latest_run_for_version(
+        app_version_id: int,
+        _: None = Depends(require_api_key),
+    ) -> dict[str, Any]:
         if core_q is None:
             return {"status": "db_unavailable"}
         row = core_q.run_sql(
@@ -496,14 +579,14 @@ def build_api_app() -> FastAPI:
         }
 
     @app.get("/report/{report_hash}.json")
-    def report_by_hash(report_hash: str) -> FileResponse:
+    def report_by_hash(report_hash: str, _: None = Depends(require_api_key)) -> FileResponse:
         report_path = _find_report_by_hash(report_hash)
         if report_path is None:
             raise HTTPException(status_code=404, detail="Report not found")
         return FileResponse(report_path, media_type="application/json")
 
     @app.get("/health/summary")
-    def health_summary() -> dict[str, Any]:
+    def health_summary(_: None = Depends(require_api_key)) -> dict[str, Any]:
         if core_q is None:
             return {"status": "db_unavailable"}
         rows = core_q.run_sql(
@@ -529,7 +612,7 @@ def build_api_app() -> FastAPI:
         }
 
     @app.post("/maintenance/finalize_stale")
-    def finalize_stale(minutes: int = 60) -> dict[str, Any]:
+    def finalize_stale(minutes: int = 60, _: None = Depends(require_api_key)) -> dict[str, Any]:
         if core_q is None:
             return {"status": "db_unavailable"}
         threshold = max(1, int(minutes))
@@ -550,37 +633,48 @@ def build_api_app() -> FastAPI:
         return {"status": "ok", "updated": updated, "threshold_minutes": threshold}
 
     @app.get("/run/{session_stamp}/status")
-    def run_status(session_stamp: str) -> dict[str, Any]:
+    def run_status(session_stamp: str, _: None = Depends(require_api_key)) -> dict[str, Any]:
         return _collect_run_status(session_stamp)
 
     @app.get("/run/{session_stamp}/report.json")
-    def report_json(session_stamp: str) -> FileResponse:
+    def report_json(session_stamp: str, _: None = Depends(require_api_key)) -> FileResponse:
         report_path = _find_report_for_session(session_stamp)
         if report_path is None:
             raise HTTPException(status_code=404, detail="Report not found")
         return FileResponse(report_path, media_type="application/json")
 
     @app.get("/run/{session_stamp}/evidence.zip")
-    def report_evidence(session_stamp: str) -> StreamingResponse:
+    def report_evidence(
+        session_stamp: str,
+        background_tasks: BackgroundTasks,
+        _: None = Depends(require_api_key),
+    ) -> FileResponse:
         report_path = _find_report_for_session(session_stamp)
         if report_path is None:
             raise HTTPException(status_code=404, detail="Report not found")
 
-        buffer = io.BytesIO()
-        payload = report_path.read_bytes()
         manifest = {
             "session_stamp": session_stamp,
             "report_path": str(report_path),
         }
         import zipfile
 
-        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            archive.writestr(report_path.name, payload)
-            archive.writestr("manifest.json", json.dumps(manifest, indent=2))
+        with tempfile.NamedTemporaryFile(prefix="scytaledroid-evidence-", suffix=".zip", delete=False) as temp_file:
+            temp_path = Path(temp_file.name)
+        try:
+            with zipfile.ZipFile(temp_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                archive.write(report_path, arcname=report_path.name)
+                archive.writestr("manifest.json", json.dumps(manifest, indent=2))
+        except Exception:
+            temp_path.unlink(missing_ok=True)
+            raise
 
-        buffer.seek(0)
+        def _cleanup_temp(path: Path) -> None:
+            path.unlink(missing_ok=True)
+
+        background_tasks.add_task(_cleanup_temp, temp_path)
         headers = {"Content-Disposition": f"attachment; filename={session_stamp}_evidence.zip"}
-        return StreamingResponse(buffer, media_type="application/zip", headers=headers)
+        return FileResponse(temp_path, media_type="application/zip", headers=headers)
 
     return app
 

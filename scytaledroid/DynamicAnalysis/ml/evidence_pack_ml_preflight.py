@@ -36,6 +36,8 @@ class MlPreflightResult:
     package_name: str | None
     run_profile: str | None
     identity_key: str | None
+    mode: str
+    mode_source: str
     frozen_inputs_ok: bool
     missing_inputs: list[str]
     sampling_duration_seconds: float | None
@@ -172,12 +174,15 @@ def compute_ml_preflight(inputs: RunInputs) -> MlPreflightResult:
     elif windows_total <= 0:
         skip_reason = "ML_SKIPPED_INSUFFICIENT_WINDOWS"
 
+    mode, mode_source = derive_run_mode(inputs)
     return MlPreflightResult(
         ml_schema_version=ml_config.ML_SCHEMA_VERSION,
         run_id=inputs.run_id,
         package_name=inputs.package_name,
         run_profile=inputs.run_profile,
         identity_key=inputs.identity_key,
+        mode=mode,
+        mode_source=mode_source,
         frozen_inputs_ok=frozen_ok,
         missing_inputs=missing,
         sampling_duration_seconds=duration_s,
@@ -194,6 +199,8 @@ def write_ml_preflight(path: Path, result: MlPreflightResult) -> None:
         "package_name": result.package_name,
         "run_profile": result.run_profile,
         "identity_key": result.identity_key,
+        "mode": result.mode,
+        "mode_source": result.mode_source,
         "frozen_inputs_ok": result.frozen_inputs_ok,
         "missing_inputs": result.missing_inputs,
         "sampling_duration_seconds": result.sampling_duration_seconds,
@@ -202,3 +209,14 @@ def write_ml_preflight(path: Path, result: MlPreflightResult) -> None:
         "skip_reason": result.skip_reason,
     }
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def derive_run_mode(inputs: RunInputs) -> tuple[str, str]:
+    """Normalize legacy run_profile into baseline/interactive/unknown + source."""
+    prof = str(inputs.run_profile or "").strip().lower()
+    if prof:
+        if prof.startswith(("baseline", "minimal", "idle")):
+            return "baseline", "run_profile"
+        if prof.startswith(("interactive", "normal", "heavy")):
+            return "interactive", "run_profile"
+    return "unknown", "missing"

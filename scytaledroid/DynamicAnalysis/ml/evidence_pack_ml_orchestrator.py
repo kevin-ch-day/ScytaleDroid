@@ -104,6 +104,7 @@ def run_ml_on_evidence_packs(
     dataset_phase_rows: list[dict[str, Any]] = []
     model_overlap_rows: list[dict[str, Any]] = []
     transport_mix_rows: list[dict[str, Any]] = []
+    audit_rows: list[dict[str, Any]] = []
     exemplar_candidate: _ExemplarCandidate | None = None
 
     if frozen:
@@ -294,23 +295,36 @@ def run_ml_on_evidence_packs(
                 runs_skipped += len(app_runs)
                 continue
 
+            feature_scaling: dict[str, Any] | None = None
+            if config.FEATURE_ROBUST_SCALE:
+                X_train, X_all, feature_scaling = _apply_robust_scaling(X_train, X_all)
+
             apps_trained += 1
 
             per_model_scores_by_run: dict[str, dict[str, list[float]]] = {}
             per_model_thresholds: dict[str, float] = {}
             model_outputs: dict[str, dict[str, Any]] = {}
+            per_model_audit_rows: list[dict[str, Any]] = []
 
             for spec in specs:
                 model = fit_model(spec, X_train)
                 scores_train = anomaly_scores(spec.name, model, X_train)
                 scores_all = anomaly_scores(spec.name, model, X_all)
                 threshold = float(np.percentile(scores_train, config.THRESHOLD_PERCENTILE))
+                train_max = float(np.max(scores_train)) if scores_train.size else 0.0
+                threshold_equals_max = bool(abs(threshold - train_max) <= 1e-9)
+                training_samples = int(X_train.shape[0])
+                training_samples_warning = bool(training_samples < int(config.MIN_TRAINING_SAMPLES_WARNING))
 
                 per_model_thresholds[spec.name] = threshold
                 model_outputs[spec.name] = {
                     "threshold_percentile": config.THRESHOLD_PERCENTILE,
                     "threshold_value": threshold,
-                    "training_samples": int(X_train.shape[0]),
+                    "training_samples": training_samples,
+                    "training_samples_warning": training_samples_warning,
+                    "threshold_equals_max": threshold_equals_max,
+                    "feature_transform": "log1p_bytes_packets" if config.FEATURE_LOG1P else "none",
+                    "feature_scaling": feature_scaling,
                     "feature_names": list(feature_names),
                     "params": dict(spec.params),
                     "score_semantics": "higher_is_more_anomalous",
@@ -350,6 +364,33 @@ def run_ml_on_evidence_packs(
                         continue  # immutable
                     write_anomaly_scores_csv(scores_path, by_run_rows.get(r.run_id) or [])
                     written_run_ids.add(r.run_id)
+
+                baseline_inputs = next((r for r in app_runs if r.run_id == baseline_id), None)
+                baseline_pcap_bytes = _pcap_size_bytes_from_inputs(baseline_inputs) if baseline_inputs else None
+                per_model_audit_rows.append(
+                    {
+                        "package_name": pkg,
+                        "model": spec.name,
+                        "training_mode": training_mode,
+                        "training_samples": training_samples,
+                        "training_samples_warning": training_samples_warning,
+                        "threshold_value": threshold,
+                        "threshold_percentile": float(config.THRESHOLD_PERCENTILE),
+                        "threshold_equals_max": threshold_equals_max,
+                        "baseline_windows": int(len(baseline_rows)),
+                        "baseline_pcap_bytes": baseline_pcap_bytes,
+                        "baseline_min_pcap_bytes": int(min_bytes),
+                        "baseline_pcap_bytes_ok": bool(bytes_ok),
+                        "baseline_windows_ok": bool(windows_ok),
+                        "windows_scored": int(len(all_rows)),
+                        "windows_dropped_partial": int(sum(d for _, d in per_run_rows.values())),
+                        "feature_transform": "log1p_bytes_packets" if config.FEATURE_LOG1P else "none",
+                        "feature_scaling": feature_scaling.get("method") if feature_scaling else None,
+                        "ml_schema_version": int(config.ML_SCHEMA_VERSION),
+                    }
+                )
+
+            audit_rows.extend(per_model_audit_rows)
 
             # Write per-run manifests/summaries.
             for r in app_runs:
@@ -431,6 +472,7 @@ def run_ml_on_evidence_packs(
         _write_prevalence_csvs(dataset_phase_rows)
         _write_model_overlap_csv(model_overlap_rows)
         _write_transport_mix_csvs(transport_mix_rows)
+        _write_ml_audit_csv(audit_rows)
         _maybe_write_paper_artifacts_json(
             candidate=exemplar_candidate,
             freeze_manifest_path=freeze_path,
@@ -625,12 +667,39 @@ def _rows_to_matrix(rows: list[dict[str, Any]], *, window_spec: WindowSpec) -> t
             byte_count = float(row.get("byte_count") or 0.0)
             pkt_count = float(row.get("packet_count") or 0.0)
             avg_pkt = float(row.get("avg_packet_size_bytes") or 0.0)
-            data.append([byte_count / denom, pkt_count / denom, avg_pkt])
+            bytes_per_sec = byte_count / denom
+            packets_per_sec = pkt_count / denom
+            if config.FEATURE_LOG1P:
+                bytes_per_sec = float(np.log1p(bytes_per_sec))
+                packets_per_sec = float(np.log1p(packets_per_sec))
+            data.append([bytes_per_sec, packets_per_sec, avg_pkt])
         except Exception:
             continue
     if not data:
         return np.zeros((0, len(feature_names)), dtype=float), feature_names
     return np.asarray(data, dtype=float), feature_names
+
+
+def _apply_robust_scaling(
+    X_train: np.ndarray, X_all: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    if X_train.size == 0:
+        return X_train, X_all, {"method": "none"}
+    q1 = np.percentile(X_train, 25.0, axis=0)
+    q3 = np.percentile(X_train, 75.0, axis=0)
+    med = np.median(X_train, axis=0)
+    iqr = np.maximum(q3 - q1, 1e-9)
+    X_train_scaled = (X_train - med) / iqr
+    X_all_scaled = (X_all - med) / iqr
+    return (
+        X_train_scaled,
+        X_all_scaled,
+        {
+            "method": "robust_zscore",
+            "median": [float(v) for v in med],
+            "iqr": [float(v) for v in iqr],
+        },
+    )
 
 
 def _ml_output_dir(run_dir: Path, *, frozen: bool) -> Path:
@@ -850,6 +919,39 @@ def _write_model_overlap_csv(rows: list[dict[str, Any]]) -> None:
             writer.writerow({k: row.get(k) for k in fieldnames})
 
 
+def _write_ml_audit_csv(rows: list[dict[str, Any]]) -> None:
+    out_dir = Path(app_config.DATA_DIR)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / "ml_audit_per_app_model.csv"
+    fieldnames = [
+        "package_name",
+        "model",
+        "training_mode",
+        "training_samples",
+        "training_samples_warning",
+        "threshold_value",
+        "threshold_percentile",
+        "threshold_equals_max",
+        "baseline_windows",
+        "baseline_pcap_bytes",
+        "baseline_min_pcap_bytes",
+        "baseline_pcap_bytes_ok",
+        "baseline_windows_ok",
+        "windows_scored",
+        "windows_dropped_partial",
+        "feature_transform",
+        "feature_scaling",
+        "ml_schema_version",
+    ]
+    import csv
+
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({k: row.get(k) for k in fieldnames})
+
+
 def _compute_transport_mix_rows(
     *,
     package_name: str,
@@ -1023,6 +1125,7 @@ def _missing_dataset_level_outputs() -> list[str]:
         "anomaly_prevalence_per_app_phase.csv",
         "model_overlap_per_run.csv",
         "transport_mix_by_phase.csv",
+        "ml_audit_per_app_model.csv",
     ]
     out_dir = Path(app_config.DATA_DIR)
     missing = []
@@ -1052,6 +1155,7 @@ def _rebuild_dataset_outputs_from_v1(
     phase_rows: list[dict[str, Any]] = []
     overlap_rows: list[dict[str, Any]] = []
     transport_rows: list[dict[str, Any]] = []
+    audit_rows: list[dict[str, Any]] = []
 
     included = _load_frozen_run_ids_from_payload(freeze_payload) or set()
 
@@ -1098,6 +1202,7 @@ def _rebuild_dataset_outputs_from_v1(
         }
         per_model_thresholds: dict[str, float] = {}
         training_mode = None
+        model_meta_by_name: dict[str, dict[str, Any]] = {}
 
         for model_name in (config.MODEL_IFOREST, config.MODEL_OCSVM):
             for rid in run_ids:
@@ -1117,10 +1222,64 @@ def _rebuild_dataset_outputs_from_v1(
                     training_mode = str(mo.get("training_mode") or "") or None
                 if model_name not in per_model_thresholds and mo.get("threshold_value") is not None:
                     per_model_thresholds[model_name] = float(mo.get("threshold_value"))
+                if not model_meta_by_name and isinstance(models, dict):
+                    for name, meta in models.items():
+                        if isinstance(meta, dict):
+                            model_meta_by_name[str(name)] = dict(meta)
             except Exception:
                 pass
 
         training_mode = training_mode or "baseline_only"
+
+        bytes_ok, min_bytes = _baseline_bytes_gate_ok([inputs_by_rid[r] for r in run_ids], baseline_rid=baseline_id)
+        baseline_windows = len(per_model_scores_by_run[config.MODEL_IFOREST].get(baseline_id) or [])
+        windows_ok = baseline_windows >= int(config.MIN_WINDOWS_BASELINE)
+        baseline_pcap_bytes = _pcap_size_bytes_from_inputs(inputs_by_rid[baseline_id])
+        windows_scored = int(
+            sum(len(per_model_scores_by_run[config.MODEL_IFOREST].get(rid) or []) for rid in run_ids)
+        )
+        windows_dropped_partial = 0
+        for rid in run_ids:
+            summary_path = _ml_output_dir(evidence_root / rid, frozen=True) / "ml_summary.json"
+            if summary_path.exists():
+                try:
+                    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+                    windows_dropped_partial += int(summary.get("dropped_partial_windows") or 0)
+                except Exception:
+                    pass
+
+        for model_name in (config.MODEL_IFOREST, config.MODEL_OCSVM):
+            meta = model_meta_by_name.get(model_name, {})
+            training_samples = int(meta.get("training_samples") or 0)
+            training_samples_warning = bool(
+                meta.get("training_samples_warning")
+                if "training_samples_warning" in meta
+                else training_samples < int(config.MIN_TRAINING_SAMPLES_WARNING)
+            )
+            audit_rows.append(
+                {
+                    "package_name": pkg,
+                    "model": model_name,
+                    "training_mode": training_mode,
+                    "training_samples": training_samples,
+                    "training_samples_warning": training_samples_warning,
+                    "threshold_value": float(per_model_thresholds.get(model_name) or 0.0),
+                    "threshold_percentile": float(config.THRESHOLD_PERCENTILE),
+                    "threshold_equals_max": bool(meta.get("threshold_equals_max")),
+                    "baseline_windows": int(baseline_windows),
+                    "baseline_pcap_bytes": baseline_pcap_bytes,
+                    "baseline_min_pcap_bytes": int(min_bytes),
+                    "baseline_pcap_bytes_ok": bool(bytes_ok),
+                    "baseline_windows_ok": bool(windows_ok),
+                    "windows_scored": int(windows_scored),
+                    "windows_dropped_partial": int(windows_dropped_partial),
+                    "feature_transform": meta.get("feature_transform"),
+                    "feature_scaling": (meta.get("feature_scaling") or {}).get("method")
+                    if isinstance(meta.get("feature_scaling"), dict)
+                    else meta.get("feature_scaling"),
+                    "ml_schema_version": int(config.ML_SCHEMA_VERSION),
+                }
+            )
 
         # Phase rows: per-run, per-model (distribution computed from CSV scores).
         for model_name, scores_by_run in per_model_scores_by_run.items():
@@ -1177,6 +1336,7 @@ def _rebuild_dataset_outputs_from_v1(
             )
         )
 
+    _write_ml_audit_csv(audit_rows)
     _write_prevalence_csvs(phase_rows)
     _write_model_overlap_csv(overlap_rows)
     _write_transport_mix_csvs(transport_rows)
@@ -1546,14 +1706,19 @@ def _write_ml_summary(
         if not scores:
             continue
         threshold = float(meta.get("threshold_value") or 0.0)
+        streak_count, longest_streak = _anomaly_streak_metrics(scores, threshold)
         payload["models"][model_name] = {
             "median": float(statistics.median(scores)),
             "p95": float(np.percentile(np.asarray(scores, dtype=float), 95.0)),
             "max": float(max(scores)),
             "anomalous_windows": int(sum(1 for s in scores if float(s) >= threshold)),
+            "anomalous_streaks": {"count": streak_count, "longest": longest_streak},
             "threshold_value": float(threshold),
             "threshold_percentile": float(meta.get("threshold_percentile") or config.THRESHOLD_PERCENTILE),
             "training_mode": meta.get("training_mode"),
+            "training_samples": int(meta.get("training_samples") or 0),
+            "training_samples_warning": bool(meta.get("training_samples_warning")),
+            "threshold_equals_max": bool(meta.get("threshold_equals_max")),
         }
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
@@ -1570,6 +1735,23 @@ def _load_scores(csv_path: Path) -> list[float]:
             except Exception:
                 continue
     return scores
+
+
+def _anomaly_streak_metrics(scores: list[float], threshold: float) -> tuple[int, int]:
+    streaks = 0
+    longest = 0
+    current = 0
+    thr = float(threshold)
+    for score in scores:
+        if float(score) >= thr:
+            current += 1
+            if current == 1:
+                streaks += 1
+            if current > longest:
+                longest = current
+        else:
+            current = 0
+    return streaks, longest
 
 
 def _write_run_skip(run: RunInputs, *, frozen: bool, reason: str) -> None:

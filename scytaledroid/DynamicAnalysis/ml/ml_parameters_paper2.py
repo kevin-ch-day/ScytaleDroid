@@ -55,6 +55,14 @@ MIN_WINDOWS_BASELINE = 30
 # PCAP bytes gate fallback (manifest value wins if present).
 MIN_PCAP_BYTES_FALLBACK = 100_000
 
+# ML audit thresholds (Phase F1)
+# Warning threshold for training sample size; does not affect model fitting.
+MIN_TRAINING_SAMPLES_WARNING = 50
+
+# Feature transforms (Phase F1 opt-in, defaults to legacy behavior)
+FEATURE_LOG1P = False
+FEATURE_ROBUST_SCALE = False
+
 # Seed derivation (locked)
 SEED_SALT_LABEL = "paper2-ml-seed-salt-v1"
 # Stable salt string. Do not change during Paper #2.
