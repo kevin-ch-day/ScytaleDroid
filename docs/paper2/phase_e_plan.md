@@ -106,6 +106,31 @@ Dataset-level derived outputs (not frozen inputs):
 - `data/transport_mix_by_phase.csv`
 - `data/transport_mix_per_run.csv` (appendix; per-run transport ratios)
 
+Paper-ready deliverables bundle (zip-and-share; operator/paper-facing):
+- `output/paper/paper2/phase_e/`
+  - `figures/` (main figures)
+    - `fig_b1_timeline_<runid8>.png/.pdf`
+    - `fig_b2_rdi_by_app.png/.pdf`
+    - `fig_b4_static_vs_rdi.png/.pdf`
+  - `tables/` (main paper tables; **triple-format**)
+    - `table_1_rdi_prevalence.csv/.xlsx/.tex`
+    - `table_2_transport_mix.csv/.xlsx/.tex`
+    - `table_3_model_agreement.csv/.xlsx/.tex`
+    - `table_4_signature_deltas.csv/.xlsx/.tex`
+  - `appendix/`
+    - `repro_appendix_phase_e.md`
+  - `manifest/`
+    - `dataset_freeze.json` (copy; canonical stays in `data/archive/`)
+    - `paper_artifacts.json` (copy of the exemplar pin lockfile)
+    - `phase_e_artifacts_manifest.json` (hashes + provenance pointers)
+
+Provenance header requirement (paper-grade reproducibility):
+- Every main table `.csv` and `.tex` must embed a comment header with:
+  - freeze anchor filename + sha256
+  - `ml_schema_version`
+  - `report_schema_version`
+  - generation timestamp (UTC)
+
 Immutability after freeze:
 - Do not overwrite ML outputs for included runs.
 - If a bug is found post-freeze, bump `ml_schema_version` and write to a new versioned path.
@@ -119,6 +144,7 @@ Required:
     Interactive group.
 - Table: model overlap (Jaccard + disagreement counts)
 - Table: transport mix by phase (Baseline vs Interactive; contextual)
+- Table: behavioral signature deltas (idle vs interactive deltas; descriptive)
 - One flagship timeline figure (bytes/s + flags over time) for a messaging call interaction (voice or video)
 - Repro appendix:
   - freeze filename + checksum
