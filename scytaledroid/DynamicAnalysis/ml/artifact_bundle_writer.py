@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import io
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -54,6 +55,9 @@ class PhaseEArtifacts:
     table_2_csv: Path
     table_3_csv: Path
     table_4_csv: Path
+    table_5_csv: Path
+    table_6_csv: Path
+    table_7_csv: Path
     repro_appendix_md: Path
     artifacts_manifest_json: Path
     generated_at: str
@@ -92,6 +96,15 @@ def write_phase_e_deliverables_bundle(
     table_2_csv, table_2_xlsx, table_2_tex = _write_table_2_transport_mix(tables_dir, provenance=provenance)
     table_3_csv, table_3_xlsx, table_3_tex = _write_table_3_model_agreement(tables_dir, provenance=provenance)
     table_4_csv, table_4_xlsx, table_4_tex = _write_table_4_signature_deltas(tables_dir, provenance=provenance)
+    table_5_csv, table_5_xlsx, table_5_tex, masvs_inputs = _write_table_5_masvs_coverage(
+        tables_dir, provenance=provenance
+    )
+    table_6_csv, table_6_xlsx, table_6_tex = _write_table_6_static_posture_scores(
+        tables_dir, provenance=provenance
+    )
+    table_7_csv, table_7_xlsx, table_7_tex = _write_table_7_exposure_deviation_summary(
+        tables_dir, provenance=provenance
+    )
 
     # Freeze anchor copy (convenience; canonical stays in data/archive/).
     _copy_required(freeze_anchor_path(), output_paper_freeze_copy_path(), overwrite=True)
@@ -133,11 +146,28 @@ def write_phase_e_deliverables_bundle(
         table_4_csv=table_4_csv,
         table_4_xlsx=table_4_xlsx,
         table_4_tex=table_4_tex,
+        table_5_csv=table_5_csv,
+        table_5_xlsx=table_5_xlsx,
+        table_5_tex=table_5_tex,
+        table_6_csv=table_6_csv,
+        table_6_xlsx=table_6_xlsx,
+        table_6_tex=table_6_tex,
+        table_7_csv=table_7_csv,
+        table_7_xlsx=table_7_xlsx,
+        table_7_tex=table_7_tex,
         repro_appendix_md=repro_appendix_md,
         fig_b2_png=fig_b2_png,
         fig_b2_pdf=fig_b2_pdf,
         fig_b4_png=fig_b4_png,
         fig_b4_pdf=fig_b4_pdf,
+        masvs_inputs=masvs_inputs,
+    )
+
+    # Close-out receipt: pins freeze + bundle-manifest hashes so a zipped bundle
+    # can be verified later without re-running anything.
+    _write_bundle_closure_record(
+        output_paper_manifest_dir() / "phase_e_closure_record.json",
+        bundle_manifest_path=artifacts_manifest_json,
     )
 
     return PhaseEArtifacts(
@@ -148,6 +178,9 @@ def write_phase_e_deliverables_bundle(
         table_2_csv=table_2_csv,
         table_3_csv=table_3_csv,
         table_4_csv=table_4_csv,
+        table_5_csv=table_5_csv,
+        table_6_csv=table_6_csv,
+        table_7_csv=table_7_csv,
         repro_appendix_md=repro_appendix_md,
         artifacts_manifest_json=artifacts_manifest_json,
         generated_at=datetime.now(UTC).isoformat(),
@@ -352,9 +385,10 @@ def _render_bundle_readme(fig_run_id: str) -> str:
         "Contents:\n"
         f"- figures/: Fig B1 timeline for exemplar run `{fig_run_id}`\n"
         "- figures/: Fig B2 prevalence summary; Fig B4 static-vs-dynamic discordance\n"
-        "- tables/: Table 1–4 (csv + xlsx + tex)\n"
+        "- tables/: Table 1–7 (csv + xlsx + tex)\n"
         "- appendix/: reproducibility snippet\n"
         "- manifest/: bundle manifest with hashes and pointers\n"
+        "- manifest/: closure record (`phase_e_closure_record.json`) pins freeze + artifact hashes\n"
     )
 
 
@@ -376,11 +410,21 @@ def _write_bundle_manifest(
     table_4_csv: Path,
     table_4_xlsx: Path,
     table_4_tex: Path,
+    table_5_csv: Path,
+    table_5_xlsx: Path,
+    table_5_tex: Path,
+    table_6_csv: Path,
+    table_6_xlsx: Path,
+    table_6_tex: Path,
+    table_7_csv: Path,
+    table_7_xlsx: Path,
+    table_7_tex: Path,
     repro_appendix_md: Path,
     fig_b2_png: Path,
     fig_b2_pdf: Path,
     fig_b4_png: Path,
     fig_b4_pdf: Path,
+    masvs_inputs: list[dict[str, str]] | None = None,
 ) -> None:
     payload = {
         "generated_at": datetime.now(UTC).isoformat(),
@@ -389,6 +433,9 @@ def _write_bundle_manifest(
         "fig_b1_run_id": fig_b1_run_id,
         "ml_schema_version": config.ML_SCHEMA_VERSION,
         "report_schema_version": config.REPORT_SCHEMA_VERSION,
+        # Table 5 is derived from static reports (Phase B) using the plan's base_apk_sha256.
+        # This is context-only; it does not affect Phase E training/scoring.
+        "masvs_inputs": masvs_inputs or [],
         "files": {
             "fig_b1_png": {"path": str(fig_b1_png), "sha256": _sha256_stream(fig_b1_png)},
             "fig_b1_pdf": {"path": str(fig_b1_pdf), "sha256": _sha256_stream(fig_b1_pdf)},
@@ -408,6 +455,15 @@ def _write_bundle_manifest(
             "table_4_csv": {"path": str(table_4_csv), "sha256": _sha256_stream(table_4_csv)},
             "table_4_xlsx": {"path": str(table_4_xlsx), "sha256": _sha256_stream(table_4_xlsx)},
             "table_4_tex": {"path": str(table_4_tex), "sha256": _sha256_stream(table_4_tex)},
+            "table_5_csv": {"path": str(table_5_csv), "sha256": _sha256_stream(table_5_csv)},
+            "table_5_xlsx": {"path": str(table_5_xlsx), "sha256": _sha256_stream(table_5_xlsx)},
+            "table_5_tex": {"path": str(table_5_tex), "sha256": _sha256_stream(table_5_tex)},
+            "table_6_csv": {"path": str(table_6_csv), "sha256": _sha256_stream(table_6_csv)},
+            "table_6_xlsx": {"path": str(table_6_xlsx), "sha256": _sha256_stream(table_6_xlsx)},
+            "table_6_tex": {"path": str(table_6_tex), "sha256": _sha256_stream(table_6_tex)},
+            "table_7_csv": {"path": str(table_7_csv), "sha256": _sha256_stream(table_7_csv)},
+            "table_7_xlsx": {"path": str(table_7_xlsx), "sha256": _sha256_stream(table_7_xlsx)},
+            "table_7_tex": {"path": str(table_7_tex), "sha256": _sha256_stream(table_7_tex)},
             "repro_appendix": {"path": str(repro_appendix_md), "sha256": _sha256_stream(repro_appendix_md)},
             "freeze_copy": {
                 "path": str(output_paper_freeze_copy_path()),
@@ -430,6 +486,30 @@ def _copy_required(src: Path, dest: Path, *, overwrite: bool) -> None:
     if dest.exists() and not overwrite:
         return
     dest.write_bytes(src.read_bytes())
+
+
+def _write_bundle_closure_record(path: Path, *, bundle_manifest_path: Path) -> None:
+    """Write a close-out receipt for the current bundle contents.
+
+    This file exists so a zipped `output/paper/.../phase_e/` bundle can be verified
+    later without depending on any DB state or rerunning generation.
+    """
+    from .evidence_pack_ml_orchestrator import PAPER_ARTIFACTS_PATH
+
+    payload = {
+        "bundle_manifest_path": str(bundle_manifest_path),
+        "bundle_manifest_sha256": _sha256_stream(bundle_manifest_path),
+        "bundle_root": str(output_paper_root()),
+        "closed_at_utc": datetime.now(UTC).isoformat(),
+        "freeze_anchor": str(freeze_anchor_path()),
+        "freeze_sha256": _sha256_stream(freeze_anchor_path()),
+        "ml_schema_version": int(config.ML_SCHEMA_VERSION),
+        "paper_artifacts_path": str(PAPER_ARTIFACTS_PATH),
+        "paper_artifacts_sha256": _sha256_stream(PAPER_ARTIFACTS_PATH),
+        "report_schema_version": int(config.REPORT_SCHEMA_VERSION),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def _sha256_stream(p: Path) -> str:
@@ -476,6 +556,24 @@ def _read_csv_rows(path: Path) -> list[dict[str, str]]:
         return [dict(r) for r in reader]
 
 
+def _read_csv_rows_with_comment_header(path: Path) -> list[dict[str, str]]:
+    """Read a CSV that may start with provenance comment lines beginning with '#'.
+
+    Our paper-facing CSVs embed a comment header; `csv.DictReader` does not skip comments.
+    """
+    text = path.read_text(encoding="utf-8")
+    lines = []
+    for line in text.splitlines():
+        if not lines and (line.startswith("#") or not line.strip()):
+            continue
+        lines.append(line)
+    if not lines:
+        return []
+    buf = io.StringIO("\n".join(lines) + "\n")
+    reader = csv.DictReader(buf)
+    return [dict(r) for r in reader]
+
+
 def _clean_bundle_dirs(*, tables_dir: Path, figs_dir: Path, fig_b1_run_id: str) -> None:
     """Remove legacy files from previous bundle iterations.
 
@@ -487,6 +585,9 @@ def _clean_bundle_dirs(*, tables_dir: Path, figs_dir: Path, fig_b1_run_id: str) 
         "table_2_transport_mix",
         "table_3_model_agreement",
         "table_4_signature_deltas",
+        "table_5_masvs_coverage",
+        "table_6_static_posture_scores",
+        "table_7_exposure_deviation_summary",
     }
     keep_fig_stems = {
         f"fig_b1_timeline_{fig_b1_run_id[:8]}",
@@ -973,9 +1074,17 @@ def _compute_static_posture_scores() -> dict[str, tuple[float, list[str]]]:
         rf = obj.get("risk_flags") if isinstance(obj.get("risk_flags"), dict) else {}
         c = 1 if rf.get("uses_cleartext_traffic") is True else 0
 
-        # SDK indicators are not yet present in plan schema; treat missing as 0 and record.
+        # SDK indicators are context-only. For frozen Paper #2 plans this is typically missing.
         s = 0.0
-        notes.append("sdk_indicators_missing")
+        sdk = obj.get("sdk_indicators") if isinstance(obj.get("sdk_indicators"), dict) else None
+        if isinstance(sdk, dict) and sdk.get("score") is not None:
+            try:
+                s = float(sdk.get("score") or 0.0)
+            except Exception:
+                s = 0.0
+                notes.append("sdk_indicators_invalid")
+        else:
+            notes.append("sdk_indicators_missing")
 
         raw.append((pkg, int(e or 0), int(p or 0), int(c), float(s), notes))
 
@@ -1005,3 +1114,454 @@ def _load_interactive_rdi_iforest() -> dict[str, float]:
             except Exception:
                 continue
     return out
+
+
+def _rank_tertiles_4_4_4(
+    values_by_pkg: dict[str, float | None],
+    *,
+    ascending: bool,
+) -> tuple[dict[str, str], list[str]]:
+    """Assign exact 4/4/4 rank-based tertiles (n=12).
+
+    Ties are broken deterministically by package_name to preserve equal bin sizes.
+    Missing values are excluded from grading and returned separately.
+    """
+    missing = sorted([pkg for pkg, v in values_by_pkg.items() if v is None])
+    present = [(pkg, float(v)) for pkg, v in values_by_pkg.items() if v is not None]
+    present.sort(key=lambda t: (t[1], t[0]) if ascending else (-t[1], t[0]))
+
+    n = len(present)
+    grade: dict[str, str] = {}
+    if n <= 0:
+        return grade, missing
+
+    # Paper #2 expects n=12. Keep a defensive fallback for partial data.
+    if n == 12:
+        cuts = (4, 8)
+    else:
+        k = max(1, n // 3)
+        cuts = (k, 2 * k)
+
+    for i, (pkg, _) in enumerate(present):
+        if i < cuts[0]:
+            grade[pkg] = "Low"
+        elif i < cuts[1]:
+            grade[pkg] = "Medium"
+        else:
+            grade[pkg] = "High"
+    return grade, missing
+
+
+def _write_table_5_masvs_coverage(
+    tables_dir: Path, *, provenance: dict[str, str]
+) -> tuple[Path, Path, Path, list[dict[str, str]]]:
+    """Table 5: MASVS category mapping derived from Phase B static reports.
+
+    This is a context-only artifact. It does not affect Phase E ML features or scoring.
+    """
+
+    def _parse_iso_z(s: str) -> datetime | None:
+        try:
+            return datetime.fromisoformat(s.replace("Z", "+00:00"))
+        except Exception:
+            return None
+
+    def _pick_static_report(*, base_apk_sha256: str, package_name: str, plan_generated_at: str | None) -> Path | None:
+        reports_dir = Path(app_config.DATA_DIR) / "static_analysis" / "reports"
+        if not reports_dir.exists():
+            return None
+        candidates: list[Path] = []
+        # Common filename patterns include <sha>_static-batch-...-<package>.json and <sha>_YYYYMMDD.json.
+        for p in reports_dir.glob(f"{base_apk_sha256}*.json"):
+            if not p.is_file():
+                continue
+            # Prefer filenames that name the package explicitly to avoid sha collisions across variants.
+            if package_name in p.name:
+                candidates.append(p)
+        if not candidates:
+            candidates = [p for p in reports_dir.glob(f"{base_apk_sha256}*.json") if p.is_file()]
+        if not candidates:
+            return None
+
+        plan_ts = _parse_iso_z(plan_generated_at) if plan_generated_at else None
+
+        scored: list[tuple[int, float, Path]] = []
+        for p in candidates:
+            try:
+                obj = json.loads(p.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            md = obj.get("metadata") if isinstance(obj.get("metadata"), dict) else {}
+            pkg = str(md.get("package_name") or "").strip()
+            if pkg and pkg != package_name:
+                continue
+            prof = str(md.get("run_profile") or "").strip().lower()
+            scope = str(md.get("run_scope") or "").strip().lower()
+            # Strong preference for full/app runs (paper-grade Phase B).
+            quality = 0
+            if prof == "full":
+                quality += 2
+            if scope == "app":
+                quality += 1
+
+            gen = _parse_iso_z(str(obj.get("generated_at") or ""))
+            if plan_ts and gen:
+                # Prefer the static report closest at/behind plan generation time.
+                delta = (plan_ts - gen).total_seconds()
+                # Behind => non-negative; ahead => penalize heavily.
+                dist = abs(delta) if delta >= 0 else (abs(delta) + 1e9)
+            elif gen:
+                # Fall back to recency.
+                dist = -gen.timestamp()
+            else:
+                dist = float("inf")
+
+            scored.append((quality, dist, p))
+        if not scored:
+            return None
+        scored.sort(key=lambda t: (-t[0], t[1], t[2].name))
+        return scored[0][2]
+
+    freeze = json.loads(freeze_anchor_path().read_text(encoding="utf-8"))
+    apps = freeze.get("apps") or {}
+    evidence_root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+
+    cats = ("PLATFORM", "NETWORK", "PRIVACY", "STORAGE", "CRYPTO", "RESILIENCE", "OTHER")
+    out: list[dict[str, Any]] = []
+    masvs_inputs: list[dict[str, str]] = []
+
+    for pkg, ent in sorted(apps.items()):
+        if not isinstance(ent, dict):
+            continue
+        bid = (ent.get("baseline_run_ids") or [None])[0]
+        if not bid:
+            continue
+        plan_path = evidence_root / str(bid) / "inputs" / "static_dynamic_plan.json"
+        if not plan_path.exists():
+            continue
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        base_sha = str((plan.get("run_identity") or {}).get("base_apk_sha256") or "").strip()
+        if not base_sha:
+            continue
+        plan_ts = str(plan.get("generated_at") or "").strip() or None
+        report_path = _pick_static_report(base_apk_sha256=base_sha, package_name=pkg, plan_generated_at=plan_ts)
+
+        counts_by_cat = {c: 0 for c in cats}
+        sev = {"P0": 0, "P1": 0, "P2": 0, "NOTE": 0}
+        total = 0
+        notes: list[str] = []
+
+        if not report_path:
+            notes.append("static_report_missing")
+        else:
+            try:
+                report = json.loads(report_path.read_text(encoding="utf-8"))
+                findings = report.get("findings") if isinstance(report.get("findings"), list) else []
+                for f in findings:
+                    if not isinstance(f, dict):
+                        continue
+                    total += 1
+                    cat = str(f.get("category_masvs") or "OTHER").strip().upper()
+                    if cat not in counts_by_cat:
+                        cat = "OTHER"
+                    counts_by_cat[cat] += 1
+                    sg = str(f.get("severity_gate") or "").strip().upper()
+                    if sg in sev:
+                        sev[sg] += 1
+                masvs_inputs.append(
+                    {
+                        "package_name": pkg,
+                        "base_apk_sha256": base_sha,
+                        "static_report_path": str(report_path),
+                        "static_report_sha256": _sha256_stream(report_path),
+                    }
+                )
+            except Exception:
+                notes.append("static_report_invalid_json")
+
+        row: dict[str, Any] = {
+            "app": config.DISPLAY_NAME_BY_PACKAGE.get(pkg, pkg),
+            "package_name": pkg,
+            "base_apk_sha256_8": base_sha[:8],
+            "finding_count_total": total,
+            "finding_count_p0": sev["P0"],
+            "finding_count_p1": sev["P1"],
+            "finding_count_p2": sev["P2"],
+            "finding_count_note": sev["NOTE"],
+            "notes": ";".join(notes) if notes else "",
+        }
+        for c in cats:
+            row[f"finding_count_{c.lower()}"] = counts_by_cat[c]
+        out.append(row)
+
+    cols = [
+        ("app", "App"),
+        ("package_name", "Package"),
+        ("base_apk_sha256_8", "Base SHA"),
+        ("finding_count_total", "Finding count"),
+        ("finding_count_p0", "P0"),
+        ("finding_count_p1", "P1"),
+        ("finding_count_p2", "P2"),
+        ("finding_count_note", "NOTE"),
+        ("finding_count_platform", "PLATFORM"),
+        ("finding_count_network", "NETWORK"),
+        ("finding_count_privacy", "PRIVACY"),
+        ("finding_count_storage", "STORAGE"),
+        ("finding_count_crypto", "CRYPTO"),
+        ("finding_count_resilience", "RESILIENCE"),
+        ("finding_count_other", "OTHER"),
+        ("notes", "Notes"),
+    ]
+    csv_path = tables_dir / "table_5_masvs_coverage.csv"
+    xlsx_path = tables_dir / "table_5_masvs_coverage.xlsx"
+    tex_path = tables_dir / "table_5_masvs_coverage.tex"
+    _write_csv_with_provenance(csv_path, [k for k, _ in cols], out, provenance=provenance)
+    _write_xlsx(xlsx_path, sheet_name="table_5", columns=cols, rows=out, provenance=provenance)
+    _write_tex_table(
+        tex_path,
+        columns=cols,
+        rows=out,
+        provenance=provenance,
+        caption_comment=(
+            "Table 5: MASVS category mapping from Phase B static findings (finding counts). "
+            "Severity (P0–P2/NOTE) is tool-defined; not MASVS control criticality. "
+            "Context-only; not a compliance checklist."
+        ),
+    )
+    return csv_path, xlsx_path, tex_path, masvs_inputs
+
+
+def _write_table_6_static_posture_scores(
+    tables_dir: Path, *, provenance: dict[str, str]
+) -> tuple[Path, Path, Path]:
+    """Table 6: Static posture components and score (context-only, Fig B4 auditable)."""
+    freeze = json.loads(freeze_anchor_path().read_text(encoding="utf-8"))
+    apps = freeze.get("apps") or {}
+    evidence_root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+
+    raw: list[dict[str, Any]] = []
+    for pkg, ent in sorted(apps.items()):
+        if not isinstance(ent, dict):
+            continue
+        bid = (ent.get("baseline_run_ids") or [None])[0]
+        if not bid:
+            continue
+        plan_path = evidence_root / str(bid) / "inputs" / "static_dynamic_plan.json"
+        notes: list[str] = []
+        if not plan_path.exists():
+            raw.append(
+                {
+                    "package_name": pkg,
+                    "exported_raw": 0,
+                    "dangerous_raw": 0,
+                    "cleartext_flag": 0,
+                    "sdk_score": 0.0,
+                    "notes": "missing_plan",
+                }
+            )
+            continue
+
+        obj = json.loads(plan_path.read_text(encoding="utf-8"))
+
+        ec = obj.get("exported_components") if isinstance(obj.get("exported_components"), dict) else {}
+        e = ec.get("total")
+        if e is None:
+            try:
+                e = sum(len(ec.get(k) or []) for k in ("activities", "services", "receivers", "providers"))
+            except Exception:
+                e = 0
+            notes.append("exported_missing_total")
+
+        perms = obj.get("permissions") if isinstance(obj.get("permissions"), dict) else {}
+        dang = perms.get("dangerous")
+        if isinstance(dang, list):
+            p = len(dang)
+        else:
+            p = 0
+            notes.append("dangerous_perms_missing")
+
+        rf = obj.get("risk_flags") if isinstance(obj.get("risk_flags"), dict) else {}
+        c = 1 if rf.get("uses_cleartext_traffic") is True else 0
+
+        s = 0.0
+        sdk = obj.get("sdk_indicators") if isinstance(obj.get("sdk_indicators"), dict) else None
+        if isinstance(sdk, dict) and sdk.get("score") is not None:
+            try:
+                s = float(sdk.get("score") or 0.0)
+            except Exception:
+                s = 0.0
+                notes.append("sdk_indicators_invalid")
+        else:
+            notes.append("sdk_indicators_missing")
+
+        raw.append(
+            {
+                "package_name": pkg,
+                "exported_raw": int(e or 0),
+                "dangerous_raw": int(p or 0),
+                "cleartext_flag": int(c),
+                "sdk_score": float(s),
+                "notes": ";".join(notes) if notes else "",
+            }
+        )
+
+    es = [int(r.get("exported_raw") or 0) for r in raw]
+    ps = [int(r.get("dangerous_raw") or 0) for r in raw]
+    e_min, e_max = (min(es), max(es)) if es else (0, 0)
+    p_min, p_max = (min(ps), max(ps)) if ps else (0, 0)
+
+    out: list[dict[str, Any]] = []
+    for r in raw:
+        e = int(r.get("exported_raw") or 0)
+        p = int(r.get("dangerous_raw") or 0)
+        c = int(r.get("cleartext_flag") or 0)
+        s = float(r.get("sdk_score") or 0.0)
+        e_n = (float(e - e_min) / float(e_max - e_min)) if e_max > e_min else 0.0
+        p_n = (float(p - p_min) / float(p_max - p_min)) if p_max > p_min else 0.0
+        score = 100.0 * (0.25 * e_n + 0.25 * p_n + 0.25 * float(c) + 0.25 * float(s))
+        pkg = str(r.get("package_name") or "").strip()
+        out.append(
+            {
+                "app": config.DISPLAY_NAME_BY_PACKAGE.get(pkg, pkg),
+                "package_name": pkg,
+                "exported_raw": e,
+                "dangerous_raw": p,
+                "cleartext_flag": c,
+                "sdk_score": round(s, 3),
+                "exported_norm": round(e_n, 3),
+                "dangerous_norm": round(p_n, 3),
+                "static_posture_score": round(float(score), 2),
+                "notes": str(r.get("notes") or ""),
+            }
+        )
+
+    cols = [
+        ("app", "App"),
+        ("package_name", "Package"),
+        ("exported_raw", "Exported (raw)"),
+        ("dangerous_raw", "Dangerous perms (raw)"),
+        ("cleartext_flag", "Cleartext flag"),
+        ("sdk_score", "SDK score"),
+        ("exported_norm", "E norm"),
+        ("dangerous_norm", "P norm"),
+        ("static_posture_score", "StaticPostureScore"),
+        ("notes", "Notes"),
+    ]
+    csv_path = tables_dir / "table_6_static_posture_scores.csv"
+    xlsx_path = tables_dir / "table_6_static_posture_scores.xlsx"
+    tex_path = tables_dir / "table_6_static_posture_scores.tex"
+    _write_csv_with_provenance(csv_path, [k for k, _ in cols], out, provenance=provenance)
+    _write_xlsx(xlsx_path, sheet_name="table_6", columns=cols, rows=out, provenance=provenance)
+    _write_tex_table(
+        tex_path,
+        columns=cols,
+        rows=out,
+        provenance=provenance,
+        caption_comment="Table 6: Static posture components and score (context-only; Fig B4 inputs).",
+    )
+    return csv_path, xlsx_path, tex_path
+
+
+def _write_table_7_exposure_deviation_summary(
+    tables_dir: Path, *, provenance: dict[str, str]
+) -> tuple[Path, Path, Path]:
+    """Table 7: interpretive Exposure–Deviation summary (no fused scalar)."""
+    # Exposure: recompute from baseline plans to bin on full precision (Table 6 is rounded for readability).
+    posture = _compute_static_posture_scores()
+    exposure_by_pkg: dict[str, float | None] = {}
+    exposure_notes_by_pkg: dict[str, list[str]] = {}
+    for pkg, (score, notes) in posture.items():
+        exposure_notes_by_pkg[pkg] = list(notes)
+        # Treat missing plan as missing for bin computation (still reported with note).
+        exposure_by_pkg[pkg] = None if "missing_plan" in notes else float(score)
+
+    # Deviation comes from the dataset-level prevalence table (full precision), interactive only.
+    rdi_rows = _read_csv_rows(dataset_tables_dir() / "anomaly_prevalence_per_app_phase.csv")
+    if_rdi_by_pkg: dict[str, float | None] = {pkg: None for pkg in exposure_by_pkg}
+    oc_rdi_by_pkg: dict[str, float | None] = {pkg: None for pkg in exposure_by_pkg}
+    training_mode_if: dict[str, str] = {}
+    for r in rdi_rows:
+        pkg = str(r.get("package_name") or "").strip()
+        if pkg not in if_rdi_by_pkg:
+            continue
+        if str(r.get("phase") or "").strip().lower() != "interactive":
+            continue
+        model = str(r.get("model") or "").strip()
+        try:
+            v = float(r.get("flagged_pct") or 0.0)
+        except Exception:
+            v = None
+        if model == config.MODEL_IFOREST:
+            if_rdi_by_pkg[pkg] = v
+            training_mode_if[pkg] = str(r.get("training_mode") or "baseline_only")
+        elif model == config.MODEL_OCSVM:
+            oc_rdi_by_pkg[pkg] = v
+
+    exposure_grade, exposure_missing = _rank_tertiles_4_4_4(exposure_by_pkg, ascending=True)
+    deviation_grade_if, deviation_missing = _rank_tertiles_4_4_4(if_rdi_by_pkg, ascending=True)
+
+    out: list[dict[str, Any]] = []
+    for pkg in sorted(exposure_by_pkg.keys()):
+        exposure = exposure_by_pkg.get(pkg)
+        rdi_if = if_rdi_by_pkg.get(pkg)
+        rdi_oc = oc_rdi_by_pkg.get(pkg)
+        e_grade = "" if pkg in exposure_missing else exposure_grade.get(pkg, "")
+        d_grade = "" if pkg in deviation_missing else deviation_grade_if.get(pkg, "")
+        quadrant = f"{e_grade} Exposure + {d_grade} Deviation" if e_grade and d_grade else ""
+        training_mode = training_mode_if.get(pkg, "")
+        notes = []
+        if training_mode and training_mode != "baseline_only":
+            notes.append("union_fallback")
+        if pkg in exposure_missing:
+            notes.append("missing_exposure")
+        if pkg in deviation_missing:
+            notes.append("missing_deviation")
+        # Preserve source notes for auditability (e.g., sdk_indicators_missing).
+        notes.extend(exposure_notes_by_pkg.get(pkg) or [])
+
+        out.append(
+            {
+                "app": config.DISPLAY_NAME_BY_PACKAGE.get(pkg, pkg),
+                "package_name": pkg,
+                "static_exposure_score": round(exposure, 2) if exposure is not None else None,
+                "exposure_grade": e_grade,
+                "rdi_if_interactive": round(rdi_if, 3) if rdi_if is not None else None,
+                "deviation_grade_if": d_grade,
+                "quadrant_label_if": quadrant,
+                "rdi_ocsvm_interactive": round(rdi_oc, 3) if rdi_oc is not None else None,
+                "training_mode_if": training_mode,
+                "notes": ";".join(notes),
+            }
+        )
+
+    # Render: keep raw full-precision values in CSV; rounding happens in xlsx/tex renderers.
+    cols = [
+        ("app", "App"),
+        ("package_name", "Package"),
+        ("static_exposure_score", "Exposure (StaticPostureScore)"),
+        ("exposure_grade", "Exposure Grade"),
+        ("rdi_if_interactive", "Deviation (RDI IF, interactive)"),
+        ("deviation_grade_if", "Deviation Grade (IF)"),
+        ("quadrant_label_if", "Regime (IF)"),
+        ("rdi_ocsvm_interactive", "RDI OC-SVM (interactive)"),
+        ("training_mode_if", "Train (IF)"),
+        ("notes", "Notes"),
+    ]
+    csv_path = tables_dir / "table_7_exposure_deviation_summary.csv"
+    xlsx_path = tables_dir / "table_7_exposure_deviation_summary.xlsx"
+    tex_path = tables_dir / "table_7_exposure_deviation_summary.tex"
+    _write_csv_with_provenance(csv_path, [k for k, _ in cols], out, provenance=provenance)
+    _write_xlsx(xlsx_path, sheet_name="table_7", columns=cols, rows=out, provenance=provenance)
+    _write_tex_table(
+        tex_path,
+        columns=cols,
+        rows=out,
+        provenance=provenance,
+        caption_comment=(
+            "Table 7: Interpretive Exposure–Deviation Summary over the frozen 12-app dataset. "
+            "Exposure Grade and Deviation Grade are rank-based tertile bins (4/4/4) computed on full-precision values "
+            "with deterministic tie-breaking by package_name. "
+            "Grades and quadrant labels are interpretive overlays (not system outputs) and do not represent measured security risk."
+        ),
+    )
+    return csv_path, xlsx_path, tex_path

@@ -117,12 +117,16 @@ Paper-ready deliverables bundle (zip-and-share; operator/paper-facing):
     - `table_2_transport_mix.csv/.xlsx/.tex`
     - `table_3_model_agreement.csv/.xlsx/.tex`
     - `table_4_signature_deltas.csv/.xlsx/.tex`
+    - `table_5_masvs_coverage.csv/.xlsx/.tex` *(static context; derived from Phase B reports; not ML inputs)*
+    - `table_6_static_posture_scores.csv/.xlsx/.tex` *(static context; emitted to make Fig B4 auditable)*
+    - `table_7_exposure_deviation_summary.csv/.xlsx/.tex` *(interpretive; tertile bins over the frozen cohort; no combined scalar)*
   - `appendix/`
     - `repro_appendix_phase_e.md`
   - `manifest/`
     - `dataset_freeze.json` (copy; canonical stays in `data/archive/`)
     - `paper_artifacts.json` (copy of the exemplar pin lockfile)
     - `phase_e_artifacts_manifest.json` (hashes + provenance pointers)
+    - `phase_e_closure_record.json` (close-out receipt: freeze sha256 + bundle-manifest sha256)
 
 Provenance header requirement (paper-grade reproducibility):
 - Every main table `.csv` and `.tex` must embed a comment header with:

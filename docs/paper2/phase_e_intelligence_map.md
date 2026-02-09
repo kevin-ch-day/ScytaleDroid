@@ -111,9 +111,16 @@ Locked boundary statement (paper-ready):
 ## 7) Core Outputs (Paper-Facing)
 
 Tables:
-- `output/paper/paper2/phase_e/tables/table_1_anomaly_prevalence.csv`
+- `output/paper/paper2/phase_e/tables/table_1_rdi_prevalence.csv`
 - `output/paper/paper2/phase_e/tables/table_2_transport_mix.csv`
-- `output/paper/paper2/phase_e/tables/table_3_model_overlap.csv`
+- `output/paper/paper2/phase_e/tables/table_3_model_agreement.csv`
+- `output/paper/paper2/phase_e/tables/table_4_signature_deltas.csv`
+- `output/paper/paper2/phase_e/tables/table_5_masvs_coverage.csv` *(static context; derived from Phase B reports; not ML inputs)*
+- `output/paper/paper2/phase_e/tables/table_6_static_posture_scores.csv` *(static context; emitted to make Fig B4 auditable)*
+- `output/paper/paper2/phase_e/tables/table_7_exposure_deviation_summary.csv` *(interpretive; tertile bins; no combined scalar)*
+
+Note:
+- Table 5 reports **static finding counts** by MASVS category and tool-defined severity; it is **not** MASVS control compliance.
 
 Fig B1 exemplar timeline:
 - pinned in `data/archive/paper_artifacts.json`
@@ -140,3 +147,23 @@ Rules:
 - static posture provides context, not prediction (and is never an ML feature input)
 - ML is an analytical lens, not a detector
 
+## 9.1) Semantic Hierarchy (Lock)
+
+To prevent score confusion, Paper #2 uses a strict hierarchy:
+- Primary analytic outputs: Static Exposure Score (StaticPostureScore) and Runtime Deviation Index (RDI flagged %).
+- Secondary context outputs: MASVS finding counts (Table 5), and any static permission risk scoring (outside Phase E).
+- Interpretive overlays: exposure/deviation grades and quadrant/regime labels (e.g., Table 7); not model outputs and not measured risk.
+
+## 9.2) Limitations (Paper-Facing)
+
+- Small cohort (n=12 apps): results are descriptive of the frozen set.
+- StaticPostureScore is relative (min–max over the frozen cohort); it has no absolute meaning outside that cohort.
+- RDI quantifies deviation, not harm; no ground-truth security outcomes are inferred.
+- Exposure/deviation bins are interpretive discretization; raw values are always reported alongside grades.
+- SDK indicator score component (S) is unavailable for the frozen dataset and treated as zero.
+
+## 10) Bundle Integrity (Operational)
+
+The deliverables bundle includes two audit files under `output/paper/paper2/phase_e/manifest/`:
+- `phase_e_artifacts_manifest.json`: paths + sha256 digests for bundle outputs
+- `phase_e_closure_record.json`: pins freeze sha256 + bundle-manifest sha256 (close-out receipt)

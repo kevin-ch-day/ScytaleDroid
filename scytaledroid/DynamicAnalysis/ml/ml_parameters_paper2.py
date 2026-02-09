@@ -7,7 +7,8 @@ ML_SCHEMA_VERSION = 1
 ML_SCHEMA_LABEL = f"v{ML_SCHEMA_VERSION}"
 
 # Report/bundle schema (paper-facing). Bump only when table/figure schemas or formatting contracts change.
-REPORT_SCHEMA_VERSION = 1
+# v2: adds Table 7 and clarifies Table 5 column naming (`finding_count_*`).
+REPORT_SCHEMA_VERSION = 2
 
 # Canonical Paper #2 dataset anchor (PM/reviewer locked).
 # Phase E must select ONLY `included_run_ids` from this freeze file and fail closed if

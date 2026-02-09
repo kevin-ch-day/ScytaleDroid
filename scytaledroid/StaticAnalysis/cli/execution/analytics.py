@@ -537,7 +537,7 @@ def _render_static_risk_table(rows: Sequence[dict[str, object]], *, limit: int =
     )[:limit]
     if not ordered:
         return False
-    print("\nStatic Risk Scores — Composite buckets")
+    print("\nStatic Risk Scores — Composite (static) buckets")
     headers = [
         "App",
         "Grade",

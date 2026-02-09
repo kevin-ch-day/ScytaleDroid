@@ -95,8 +95,8 @@ async function reportLoad() {
     setHtml(
       "reportRisk",
       buildKvRows([
-        { label: "Risk Band", value: risk.band || "-" },
-        { label: "Risk Score", value: risk.score ?? "-" },
+        { label: "Static Risk Band", value: risk.band || "-" },
+        { label: "Static Composite Risk Score", value: risk.score ?? "-" },
         { label: "P0", value: result.p0 ?? 0 },
         { label: "P1", value: result.p1 ?? 0 },
         { label: "P2", value: result.p2 ?? 0 },

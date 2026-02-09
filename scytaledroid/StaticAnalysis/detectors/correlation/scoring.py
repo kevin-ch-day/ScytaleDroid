@@ -215,7 +215,7 @@ def risk_finding(profile: Mapping[str, object]) -> Finding:
         severity = SeverityLevel.NOTE
         badge = Badge.INFO
 
-    because = f"Composite risk score {score} ({grade})."
+    because = f"Composite static risk score {score} ({grade})."
 
     return Finding(
         finding_id="risk_profile",

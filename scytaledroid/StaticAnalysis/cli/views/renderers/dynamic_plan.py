@@ -340,6 +340,10 @@ def build_dynamic_plan(
     if webview_summary:
         suggested_probes.append("webview_observation")
 
+    # Optional: SDK indicators (context-only). This is a forward-compatible hook:
+    # Phase E treats missing as 0 and records the omission in posture scoring.
+    sdk_indicators = baseline.get("sdk_indicators") if isinstance(baseline, Mapping) else None
+
     # Contract note: the plan JSON is the "static snapshot" consumed by dynamic runs.
     # Keep a dedicated schema version so we can evolve the plan format without relying
     # on DB schema versions or implicit assumptions.
@@ -392,6 +396,9 @@ def build_dynamic_plan(
         },
         "suggested_probes": suggested_probes,
     }
+    if isinstance(sdk_indicators, Mapping):
+        # Keep it loosely typed; producer side may evolve. Consumer treats absent/invalid as 0.
+        plan["sdk_indicators"] = dict(sdk_indicators)
     if static_run_id is not None:
         plan["static_run_id"] = static_run_id
     _validate_plan_schema(plan)

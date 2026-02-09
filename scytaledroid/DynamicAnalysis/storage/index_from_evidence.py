@@ -151,6 +151,10 @@ def build_dynamic_session_row_from_evidence_pack(run_dir: Path) -> dict[str, Any
     ident = plan.get("run_identity") if isinstance(plan.get("run_identity"), dict) else {}
 
     pcap_report = _read_json(run_dir / "analysis" / "pcap_report.json") or {}
+    summary = _read_json(run_dir / "analysis" / "summary.json") or {}
+    telemetry = summary.get("telemetry") if isinstance(summary.get("telemetry"), dict) else {}
+    telemetry_stats = telemetry.get("stats") if isinstance(telemetry.get("stats"), dict) else {}
+    telemetry_quality = telemetry.get("quality") if isinstance(telemetry.get("quality"), dict) else {}
 
     # PCAP artifact metadata (best-effort).
     pcap_rel = None
@@ -166,6 +170,36 @@ def build_dynamic_session_row_from_evidence_pack(run_dir: Path) -> dict[str, Any
 
     schema_version = db_diagnostics.get_schema_version() or "<unknown>"
 
+    # Sampling rate is defined by the operator config; some older manifests do not
+    # duplicate it into `dataset`. Fall back to telemetry-derived average delta.
+    sampling_rate_s = ds.get("sampling_rate_s")
+    if sampling_rate_s is None:
+        sampling_rate_s = (mf.get("operator") or {}).get("sampling_rate_s") if isinstance(mf.get("operator"), dict) else None
+    if sampling_rate_s is None:
+        sampling_rate_s = telemetry_stats.get("sample_avg_delta_s")
+    if sampling_rate_s is None:
+        sampling_rate_s = telemetry_quality.get("avg_delta_s")
+    try:
+        sampling_rate_s_int = int(float(sampling_rate_s)) if sampling_rate_s is not None else None
+    except Exception:
+        sampling_rate_s_int = None
+
+    def _as_int(v: object) -> int | None:
+        try:
+            if v is None:
+                return None
+            return int(v)
+        except Exception:
+            return None
+
+    def _as_float(v: object) -> float | None:
+        try:
+            if v is None:
+                return None
+            return float(v)
+        except Exception:
+            return None
+
     return {
         "dynamic_run_id": rid,
         "package_name": pkg,
@@ -173,7 +207,7 @@ def build_dynamic_session_row_from_evidence_pack(run_dir: Path) -> dict[str, Any
         "scenario_id": scenario_id,
         "tier": str(ds.get("tier") or "") or None,
         "duration_seconds": int(ds.get("duration_seconds") or 0) or None,
-        "sampling_rate_s": int(ds.get("sampling_rate_s") or 0) or None,
+        "sampling_rate_s": sampling_rate_s_int,
         "started_at_utc": _to_mysql_dt(mf.get("started_at")),
         "ended_at_utc": _to_mysql_dt(mf.get("ended_at")),
         "status": str(mf.get("status") or "") or None,
@@ -186,6 +220,12 @@ def build_dynamic_session_row_from_evidence_pack(run_dir: Path) -> dict[str, Any
         "version_name": plan.get("version_name"),
         "version_code": int(plan.get("version_code") or 0) or None,
         "netstats_available": 1 if ((mf.get("qa") or {}).get("network_quality") == "netstats_ok") else None,
+        "expected_samples": _as_int(telemetry_stats.get("expected_samples")),
+        "captured_samples": _as_int(telemetry_stats.get("captured_samples")),
+        "sample_max_gap_s": _as_float(telemetry_stats.get("sample_max_gap_s") or telemetry_quality.get("max_gap_s")),
+        "netstats_missing_rows": _as_int(telemetry_stats.get("netstats_missing_rows")),
+        "netstats_rows": _as_int(telemetry_stats.get("netstats_rows")),
+        "network_signal_quality": str(telemetry_stats.get("network_signal_quality") or telemetry.get("network_signal_quality") or "") or None,
         "pcap_relpath": pcap_rel,
         "pcap_bytes": int(pcap_report.get("pcap_size_bytes") or ds.get("pcap_size_bytes") or 0) or None,
         "pcap_sha256": str(pcap_report.get("pcap_sha256") or ds.get("pcap_sha256") or "") or None,
