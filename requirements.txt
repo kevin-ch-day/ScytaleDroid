@@ -8,3 +8,4 @@ PyYAML>=6.0.0
 scikit-learn>=1.4.0
 matplotlib>=3.8.0
 mitmproxy>=10.3.0
+openpyxl>=3.1.5

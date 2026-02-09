@@ -6,6 +6,9 @@ from __future__ import annotations
 ML_SCHEMA_VERSION = 1
 ML_SCHEMA_LABEL = f"v{ML_SCHEMA_VERSION}"
 
+# Report/bundle schema (paper-facing). Bump only when table/figure schemas or formatting contracts change.
+REPORT_SCHEMA_VERSION = 1
+
 # Canonical Paper #2 dataset anchor (PM/reviewer locked).
 # Phase E must select ONLY `included_run_ids` from this freeze file and fail closed if
 # it is missing or not checksummed.
@@ -18,6 +21,22 @@ MESSAGING_PACKAGES = {
     "org.thoughtcrime.securesms",  # Signal
     "org.telegram.messenger",  # Telegram
     "com.whatsapp",  # WhatsApp
+}
+
+# Friendly labels used in paper-facing tables/figures (bundle only). Keep stable for Paper #2.
+DISPLAY_NAME_BY_PACKAGE = {
+    "com.facebook.katana": "Facebook",
+    "com.facebook.orca": "Facebook Messenger",
+    "com.instagram.android": "Instagram",
+    "com.linkedin.android": "LinkedIn",
+    "com.pinterest": "Pinterest",
+    "com.reddit.frontpage": "Reddit",
+    "org.thoughtcrime.securesms": "Signal",
+    "com.snapchat.android": "Snapchat",
+    "org.telegram.messenger": "Telegram",
+    "com.zhiliaoapp.musically": "TikTok",
+    "com.whatsapp": "WhatsApp",
+    "com.twitter.android": "X",
 }
 
 # Windowing (locked)
