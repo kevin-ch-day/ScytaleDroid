@@ -323,19 +323,24 @@ def evidence_recompute_pcap_artifacts(*, pause: bool = True) -> None:
             prompt_utils.press_enter_to_continue()
         return
 
-    freeze_marker = Path(app_config.DATA_DIR) / "archive" / "dataset_freeze.json"
-    if freeze_marker.exists():
+    # Paper #2 (PM-locked): once the canonical checksummed freeze anchor exists,
+    # we must not mutate evidence packs in-place. Any recomputation must be
+    # versioned (new dataset or versioned derived outputs), not overwriting.
+    from scytaledroid.DynamicAnalysis.ml.ml_parameters_paper2 import FREEZE_CANONICAL_FILENAME
+
+    freeze_anchor = Path(app_config.DATA_DIR) / "archive" / FREEZE_CANONICAL_FILENAME
+    if freeze_anchor.exists():
         print()
         menu_utils.print_header("Recompute PCAP Artifacts")
         print(
             status_messages.status(
-                f"Dataset appears frozen ({freeze_marker}). Recomputing would mutate evidence packs.",
+                f"Dataset is frozen (canonical freeze anchor exists: {freeze_anchor}). Recomputing would mutate evidence packs.",
                 level="warn",
             )
         )
         print(
             status_messages.status(
-                "Blocked by design. If you intentionally want to recompute artifacts, delete the freeze marker and regenerate it after recompute.",
+                "Blocked by design. For Paper #2, do not overwrite frozen inputs. If a bug is discovered, version outputs or version the dataset.",
                 level="info",
             )
         )

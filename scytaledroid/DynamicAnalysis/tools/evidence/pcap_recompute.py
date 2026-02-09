@@ -139,6 +139,21 @@ def _upsert_output(payload: dict[str, Any], record: ArtifactRecord) -> None:
 
 
 def recompute_pcap_artifacts(output_root: Path, *, dry_run: bool = False) -> RecomputeResult:
+    # Paper #2 guardrail: if the canonical checksummed freeze anchor exists,
+    # refuse to recompute in-place. Post-freeze recomputation must be versioned.
+    try:
+        from scytaledroid.Config import app_config
+        from scytaledroid.DynamicAnalysis.ml.ml_parameters_paper2 import FREEZE_CANONICAL_FILENAME
+
+        freeze_anchor = Path(app_config.DATA_DIR) / "archive" / FREEZE_CANONICAL_FILENAME
+        if freeze_anchor.exists():
+            raise RuntimeError(f"Refusing to recompute PCAP artifacts after freeze: {freeze_anchor}")
+    except Exception as exc:
+        # If we cannot determine freeze status safely, fail closed.
+        if isinstance(exc, RuntimeError):
+            raise
+        raise RuntimeError(f"Unable to verify freeze status; refusing to recompute: {exc}") from exc
+
     scanned = updated = skipped = errors = 0
     if not output_root.exists():
         return RecomputeResult(scanned=0, updated=0, skipped=0, errors=0)
@@ -191,4 +206,3 @@ def recompute_pcap_artifacts(output_root: Path, *, dry_run: bool = False) -> Rec
 
 
 __all__ = ["RecomputeResult", "recompute_pcap_artifacts"]
-
