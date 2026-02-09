@@ -7,6 +7,7 @@ run DB-free (air-gapped) by disabling enrichment.
 
 from __future__ import annotations
 
+import csv
 import json
 import os
 from dataclasses import dataclass
@@ -39,6 +40,17 @@ PLAN_IDENTITY_KEYS = {
 
 RATIO_KEYS = ("tls_ratio", "quic_ratio", "tcp_ratio", "udp_ratio")
 _RATIO_TOLERANCE = 0.02
+
+_ML_AUDIT_COLUMNS = {
+    "package_name",
+    "model",
+    "training_mode",
+    "training_samples",
+    "training_samples_warning",
+    "threshold_equals_max",
+    "feature_transform",
+    "feature_scaling",
+}
 
 
 def _truncate(text: str, width: int) -> str:
@@ -93,6 +105,23 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     except Exception:
         return None
     return payload if isinstance(payload, dict) else None
+
+
+def _load_ml_audit_rows() -> list[dict[str, Any]]:
+    path = Path(app_config.DATA_DIR) / "ml_audit_per_app_model.csv"
+    if not path.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    try:
+        with path.open("r", newline="", encoding="utf-8") as handle:
+            reader = csv.DictReader(handle)
+            for row in reader:
+                if not isinstance(row, dict):
+                    continue
+                rows.append({k: row.get(k) for k in _ML_AUDIT_COLUMNS})
+    except Exception:
+        return []
+    return rows
 
 
 def _fmt_bytes(n: int | None) -> str:
@@ -952,6 +981,29 @@ def run_dynamic_evidence_deep_checks(
     db_notes: list[dict[str, Any]] = []
     ratio_mismatch: list[dict[str, Any]] = []
     indicator_warnings: list[dict[str, Any]] = []
+    ml_audit_rows = _load_ml_audit_rows()
+    ml_audit_summary: dict[str, Any] = {}
+
+    if ml_audit_rows:
+        warnings = [
+            r for r in ml_audit_rows
+            if str(r.get("training_samples_warning") or "").lower() in {"1", "true", "yes"}
+            or str(r.get("threshold_equals_max") or "").lower() in {"1", "true", "yes"}
+            or str(r.get("training_mode") or "") == "union_fallback"
+        ]
+        ml_audit_summary = {
+            "rows": len(ml_audit_rows),
+            "warnings": len(warnings),
+            "union_fallback": sum(1 for r in ml_audit_rows if str(r.get("training_mode") or "") == "union_fallback"),
+            "training_samples_warning": sum(
+                1 for r in ml_audit_rows if str(r.get("training_samples_warning") or "").lower() in {"1", "true", "yes"}
+            ),
+            "threshold_equals_max": sum(
+                1 for r in ml_audit_rows if str(r.get("threshold_equals_max") or "").lower() in {"1", "true", "yes"}
+            ),
+            "feature_transform": sorted({str(r.get("feature_transform") or "") for r in ml_audit_rows if r.get("feature_transform")}),
+            "feature_scaling": sorted({str(r.get("feature_scaling") or "") for r in ml_audit_rows if r.get("feature_scaling")}),
+        }
 
     for p in packs:
         rid = str(p["run_id"])
@@ -1060,6 +1112,18 @@ def run_dynamic_evidence_deep_checks(
                 f"dns_top1={x['dns_top1']} sni_top1={x['sni_top1']} "
                 f"dns_junk_rate={x['dns_junk_rate']} sni_junk_rate={x['sni_junk_rate']}"
             )
+    if ml_audit_rows:
+        print()
+        print("ML audit summary")
+        print("----------------")
+        print(f"rows                : {ml_audit_summary.get('rows', 0)}")
+        print(f"union_fallback       : {ml_audit_summary.get('union_fallback', 0)}")
+        print(f"training_warn        : {ml_audit_summary.get('training_samples_warning', 0)}")
+        print(f"threshold_equals_max : {ml_audit_summary.get('threshold_equals_max', 0)}")
+        if ml_audit_summary.get("feature_transform"):
+            print(f"feature_transform    : {', '.join(ml_audit_summary['feature_transform'])}")
+        if ml_audit_summary.get("feature_scaling"):
+            print(f"feature_scaling      : {', '.join(ml_audit_summary['feature_scaling'])}")
 
     report = {
         "generated_at": started_at,
@@ -1069,6 +1133,7 @@ def run_dynamic_evidence_deep_checks(
         "db_notes": db_notes,
         "ratio_mismatches": ratio_mismatch,
         "indicator_warnings": indicator_warnings,
+        "ml_audit_summary": ml_audit_summary,
     }
     if write_outputs:
         out_dir = Path(app_config.OUTPUT_DIR) / "batches" / "dynamic"
@@ -1080,4 +1145,4 @@ def run_dynamic_evidence_deep_checks(
     return report
 
 
-__all__ = ["run_dynamic_evidence_verify", "run_dynamic_evidence_quick_check"]
+__all__ = ["run_dynamic_evidence_verify", "run_dynamic_evidence_quick_check", "run_dynamic_evidence_deep_checks"]

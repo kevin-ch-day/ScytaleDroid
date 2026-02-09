@@ -11,6 +11,7 @@ Contract/safety:
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -115,7 +116,26 @@ def scan_pcap_timeseries_and_destinations(pcap_path: Path, *, tshark_path: str |
             proc.stdout.close()
         except Exception:
             pass
-    rc = proc.wait()
+    timeout_s = _resolve_tshark_timeout_s()
+    try:
+        rc = proc.wait(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+        try:
+            rc = proc.wait(timeout=10)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            try:
+                rc = proc.wait(timeout=5)
+            except Exception:
+                rc = -1
+        raise RuntimeError("tshark_timeout")
     if rc != 0:
         raise RuntimeError("tshark_failed")
 
@@ -149,5 +169,12 @@ def scan_pcap_timeseries_and_destinations(pcap_path: Path, *, tshark_path: str |
     }
 
 
-__all__ = ["scan_pcap_timeseries_and_destinations", "percentile"]
+def _resolve_tshark_timeout_s() -> float:
+    raw = os.getenv("SCYTALEDROID_TSHARK_TIMEOUT_S", "120").strip()
+    try:
+        return max(5.0, float(raw))
+    except ValueError:
+        return 120.0
 
+
+__all__ = ["scan_pcap_timeseries_and_destinations", "percentile"]

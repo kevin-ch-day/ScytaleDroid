@@ -17,6 +17,8 @@ class ColumnStats:
     zeros: int = 0
     sum_value: float = 0.0
     sum_sq: float = 0.0
+    min_value: float | None = None
+    max_value: float | None = None
 
     def add(self, value: str | None) -> None:
         self.total += 1
@@ -31,6 +33,10 @@ class ColumnStats:
         self.numeric += 1
         self.sum_value += numeric_value
         self.sum_sq += numeric_value * numeric_value
+        if self.min_value is None or numeric_value < self.min_value:
+            self.min_value = numeric_value
+        if self.max_value is None or numeric_value > self.max_value:
+            self.max_value = numeric_value
         if numeric_value == 0:
             self.zeros += 1
 
@@ -39,6 +45,17 @@ class ColumnStats:
             return None
         mean = self.sum_value / self.numeric
         return max((self.sum_sq / self.numeric) - (mean * mean), 0.0)
+
+    def mean(self) -> float | None:
+        if self.numeric == 0:
+            return None
+        return self.sum_value / self.numeric
+
+    def stddev(self) -> float | None:
+        var = self.variance()
+        if var is None:
+            return None
+        return var ** 0.5
 
     def missing_pct(self) -> float | None:
         if self.total == 0:
@@ -82,6 +99,10 @@ def build_feature_health_report(
             "missing_pct": missing_pct,
             "zero_pct": zero_pct,
             "variance": variance,
+            "mean": stats.mean(),
+            "stddev": stats.stddev(),
+            "min": stats.min_value,
+            "max": stats.max_value,
             "numeric_samples": stats.numeric,
             "total_samples": stats.total,
         }
@@ -172,7 +193,8 @@ def _render_markdown(report: dict[str, Any]) -> str:
     for name, info in sorted((report.get("metrics") or {}).items()):
         lines.append(
             f"- {name}: missing_pct={info.get('missing_pct')}, zero_pct={info.get('zero_pct')}, "
-            f"variance={info.get('variance')}"
+            f"mean={info.get('mean')}, stddev={info.get('stddev')}, "
+            f"min={info.get('min')}, max={info.get('max')}, variance={info.get('variance')}"
         )
     lines.append("")
     return "\n".join(lines)
