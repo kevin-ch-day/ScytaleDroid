@@ -139,19 +139,30 @@ def show_db_status() -> None:
     prompt_utils.press_enter_to_continue()
 
 
-def ingest_analysis_cohort_from_paper_bundle() -> None:
-    """Phase H helper: ingest canonical output/paper artifacts into DB.
+def ingest_analysis_cohort_from_publication_bundle() -> None:
+    """Phase H helper: ingest canonical output/publication artifacts into DB.
 
     This is tables-only ingestion (no recomputation). Evidence packs remain the ground truth;
     DB stores the cohort index + derived aggregates for queryability.
     """
 
-    from scytaledroid.Database.tools.analysis_ingest import ingest_paper_bundle_to_db
+    from scytaledroid.Database.tools.analysis_ingest import ingest_publication_bundle_to_db
 
     print()
     print("Ingest Analysis Cohort (Phase H)")
     print("--------------------------------")
-    paper_root = prompt_utils.prompt_text("Paper root (default=output/paper)", required=False, show_arrow=False).strip() or "output/paper"
+    bundle_root = (
+        prompt_utils.prompt_text(
+            "Bundle root (default=output/publication)",
+            required=False,
+            show_arrow=False,
+        ).strip()
+        or "output/publication"
+    )
+    # Back-compat: many workspaces still have output/paper from the submission pipeline.
+    if not Path(bundle_root).exists() and Path("output/paper").exists():
+        print(status_messages.status("Bundle root not found; falling back to output/paper (legacy).", level="warn"))
+        bundle_root = "output/paper"
     cohort_id = prompt_utils.prompt_text("cohort_id (required, stable id)", required=True, show_arrow=False).strip()
     name = prompt_utils.prompt_text("name (required)", required=True, show_arrow=False).strip()
     selector_type = (
@@ -164,8 +175,8 @@ def ingest_analysis_cohort_from_paper_bundle() -> None:
         return
 
     try:
-        ingest_paper_bundle_to_db(
-            paper_root=Path(paper_root),
+        ingest_publication_bundle_to_db(
+            bundle_root=Path(bundle_root),
             cohort_id=cohort_id,
             name=name,
             selector_type=selector_type,

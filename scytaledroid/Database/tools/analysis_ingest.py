@@ -1,4 +1,4 @@
-"""Phase H: ingest paper/operational artifacts into DB (tables-only; no JSON discovery).
+"""Phase H: ingest publication/operational artifacts into DB (tables-only; no JSON discovery).
 
 Goal:
 - Stop hunting scattered JSON/CSVs for derived facts.
@@ -12,7 +12,7 @@ Non-goals:
 
 Usage (example):
   python -m scytaledroid.Database.tools.analysis_ingest \\
-    --paper-root output/paper \\
+    --bundle-root output/publication \\
     --cohort-id paper2_submission_20260209 \\
     --name "Paper2 submission" \\
     --selector-type freeze
@@ -87,8 +87,8 @@ def _toolchain_fingerprint(toolchain_txt: Path | None) -> str | None:
 
 
 @dataclass(frozen=True)
-class PaperPaths:
-    paper_root: Path
+class BundlePaths:
+    bundle_root: Path
     manifests_dir: Path
     internal_baseline_root: Path
     internal_snapshot_root: Path | None
@@ -109,26 +109,29 @@ class PaperPaths:
         return self.internal_snapshot_root / "tables"
 
 
-def resolve_paper_paths(*, paper_root: Path) -> PaperPaths:
-    paper_root = paper_root.resolve()
-    manifests = paper_root / "manifests"
-    internal_baseline = paper_root / "internal" / "baseline"
+def resolve_bundle_paths(*, bundle_root: Path) -> BundlePaths:
+    bundle_root = bundle_root.resolve()
+    manifests = bundle_root / "manifests"
+    internal_baseline = bundle_root / "internal" / "baseline"
     if not manifests.exists():
-        raise RuntimeError(f"paper_root missing manifests/: {manifests}")
+        raise RuntimeError(f"bundle_root missing manifests/: {manifests}")
     if not internal_baseline.exists():
-        raise RuntimeError(f"paper_root missing internal/baseline/: {internal_baseline}")
+        raise RuntimeError(f"bundle_root missing internal/baseline/: {internal_baseline}")
 
     snapshot_id = None
     snap_dir = None
-    sid_path = manifests / "paper_snapshot_id.txt"
-    if sid_path.exists():
+    for name in ("publication_snapshot_id.txt", "paper_snapshot_id.txt"):
+        sid_path = manifests / name
+        if not sid_path.exists():
+            continue
         snapshot_id = sid_path.read_text(encoding="utf-8").strip() or None
         if snapshot_id:
-            cand = paper_root / "internal" / "snapshots" / snapshot_id
+            cand = bundle_root / "internal" / "snapshots" / snapshot_id
             if cand.exists():
                 snap_dir = cand
-    return PaperPaths(
-        paper_root=paper_root,
+        break
+    return BundlePaths(
+        bundle_root=bundle_root,
         manifests_dir=manifests,
         internal_baseline_root=internal_baseline,
         internal_snapshot_root=snap_dir,
@@ -284,7 +287,7 @@ def _query_dynamic_session(run_id: str) -> dict[str, Any] | None:
 def ingest_cohort_runs_from_manifests(
     *,
     cohort_id: str,
-    paths: PaperPaths,
+    paths: BundlePaths,
 ) -> int:
     """Populate analysis_cohort_runs from the paper bundle manifests (idempotent)."""
     now = _utc_now()
@@ -373,7 +376,7 @@ def ingest_aggregates_from_csvs(
     *,
     cohort_id: str,
     receipt_id: int,
-    paths: PaperPaths,
+    paths: BundlePaths,
 ) -> dict[str, int]:
     """Import already-derived aggregate facts from canonical CSVs (no recomputation)."""
     now = _utc_now()
@@ -439,7 +442,7 @@ def ingest_aggregates_from_csvs(
         if name in inv:
             raise RuntimeError(f"Duplicate display name in alias map: {name}")
         inv[name] = pkg
-    t4 = paths.paper_root / "tables" / "table_4_signature_deltas.csv"
+    t4 = paths.bundle_root / "tables" / "table_4_signature_deltas.csv"
     t4_rows = _read_csv_rows(t4) if t4.exists() else []
     sig_param_rows: list[tuple[Any, ...]] = []
     for r in t4_rows:
@@ -587,14 +590,14 @@ def ingest_aggregates_from_csvs(
     }
 
 
-def ingest_paper_bundle_to_db(
+def ingest_publication_bundle_to_db(
     *,
-    paper_root: Path,
+    bundle_root: Path,
     cohort_id: str,
     name: str,
     selector_type: str,
 ) -> None:
-    paths = resolve_paper_paths(paper_root=paper_root)
+    paths = resolve_bundle_paths(bundle_root=bundle_root)
 
     freeze_path = paths.manifests_dir / "dataset_freeze.json"
     sel_path = paths.manifests_dir / "selection_manifest.json"
@@ -623,13 +626,13 @@ def ingest_paper_bundle_to_db(
         toolchain_fingerprint=toolchain_fp,
         pipeline_git_sha=git_sha,
         params_json={
-            "paper_root": str(paths.paper_root),
+            "bundle_root": str(paths.bundle_root),
             "snapshot_id": paths.snapshot_id,
             "sources": {
                 "dataset_freeze": str(freeze_path) if freeze_path.exists() else None,
                 "selection_manifest": str(sel_path) if sel_path.exists() else None,
                 "ml_metrics_csv": str(paths.baseline_inputs_dir / "anomaly_prevalence_per_app_phase.csv"),
-                "table_4_signature_deltas": str(paths.paper_root / "tables" / "table_4_signature_deltas.csv"),
+                "table_4_signature_deltas": str(paths.bundle_root / "tables" / "table_4_signature_deltas.csv"),
                 "table_6_static_posture_scores": str(paths.baseline_tables_dir / "table_6_static_posture_scores.csv"),
                 "risk_summary_per_group": str((paths.snapshot_tables_dir / "risk_summary_per_group.csv") if paths.snapshot_tables_dir else None),
             },
@@ -679,17 +682,37 @@ def ingest_paper_bundle_to_db(
         print(f"[OK] {k}: {v}")
 
 
+def ingest_paper_bundle_to_db(
+    *,
+    paper_root: Path,
+    cohort_id: str,
+    name: str,
+    selector_type: str,
+) -> None:
+    """Back-compat wrapper (deprecated): use ingest_publication_bundle_to_db()."""
+    ingest_publication_bundle_to_db(
+        bundle_root=paper_root,
+        cohort_id=cohort_id,
+        name=name,
+        selector_type=selector_type,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="Ingest paper bundle artifacts into DB (Phase H1).")
-    ap.add_argument("--paper-root", default="output/paper", help="Path to canonical output/paper directory.")
+    ap = argparse.ArgumentParser(description="Ingest publication bundle artifacts into DB (Phase H1).")
+    ap.add_argument("--bundle-root", default="output/publication", help="Path to canonical output/publication directory.")
+    ap.add_argument("--paper-root", default=None, help="Deprecated alias for --bundle-root.")
     ap.add_argument("--cohort-id", required=True, help="Deterministic cohort_id to register in DB.")
     ap.add_argument("--name", required=True, help="Human-friendly cohort name.")
     ap.add_argument("--selector-type", default="freeze", choices=["freeze", "query", "manual"], help="Selector type.")
     args = ap.parse_args(argv)
 
     with database_session(reuse_connection=False):
-        ingest_paper_bundle_to_db(
-            paper_root=Path(args.paper_root),
+        bundle_root = args.bundle_root
+        if args.paper_root:
+            bundle_root = args.paper_root
+        ingest_publication_bundle_to_db(
+            bundle_root=Path(bundle_root),
             cohort_id=args.cohort_id.strip(),
             name=args.name.strip(),
             selector_type=args.selector_type.strip(),

@@ -40,11 +40,7 @@ _DDL_STATEMENTS: list[str] = [
       error_text       TEXT            DEFAULT NULL,
       created_at_utc   DATETIME        NOT NULL,
       PRIMARY KEY (receipt_id),
-      KEY idx_analysis_receipts_cohort (cohort_id),
-      CONSTRAINT fk_analysis_receipts_cohort
-        FOREIGN KEY (cohort_id)
-        REFERENCES analysis_cohorts (cohort_id)
-        ON DELETE CASCADE
+      KEY idx_analysis_receipts_cohort (cohort_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
     """
@@ -67,15 +63,7 @@ _DDL_STATEMENTS: list[str] = [
       created_at_utc   DATETIME     NOT NULL,
       PRIMARY KEY (cohort_id, dynamic_run_id),
       KEY idx_analysis_cohort_runs_pkg (cohort_id, package_name),
-      KEY idx_analysis_cohort_runs_role (cohort_id, run_role),
-      CONSTRAINT fk_analysis_cohort_runs_cohort
-        FOREIGN KEY (cohort_id)
-        REFERENCES analysis_cohorts (cohort_id)
-        ON DELETE CASCADE,
-      CONSTRAINT fk_analysis_cohort_runs_dyn
-        FOREIGN KEY (dynamic_run_id)
-        REFERENCES dynamic_sessions (dynamic_run_id)
-        ON DELETE CASCADE
+      KEY idx_analysis_cohort_runs_role (cohort_id, run_role)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
     """
@@ -96,15 +84,7 @@ _DDL_STATEMENTS: list[str] = [
       pipeline_git_sha VARCHAR(40)  DEFAULT NULL,
       created_at_utc   DATETIME     NOT NULL,
       PRIMARY KEY (cohort_id, package_name, phase, model_key),
-      KEY idx_analysis_ml_metrics_receipt (receipt_id),
-      CONSTRAINT fk_analysis_ml_metrics_receipt
-        FOREIGN KEY (receipt_id)
-        REFERENCES analysis_derivation_receipts (receipt_id)
-        ON DELETE RESTRICT,
-      CONSTRAINT fk_analysis_ml_metrics_cohort
-        FOREIGN KEY (cohort_id)
-        REFERENCES analysis_cohorts (cohort_id)
-        ON DELETE CASCADE
+      KEY idx_analysis_ml_metrics_receipt (receipt_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
     """
@@ -122,15 +102,7 @@ _DDL_STATEMENTS: list[str] = [
       interactive_windows INT       DEFAULT NULL,
       created_at_utc   DATETIME     NOT NULL,
       PRIMARY KEY (cohort_id, package_name),
-      KEY idx_analysis_sig_receipt (receipt_id),
-      CONSTRAINT fk_analysis_sig_receipt
-        FOREIGN KEY (receipt_id)
-        REFERENCES analysis_derivation_receipts (receipt_id)
-        ON DELETE RESTRICT,
-      CONSTRAINT fk_analysis_sig_cohort
-        FOREIGN KEY (cohort_id)
-        REFERENCES analysis_cohorts (cohort_id)
-        ON DELETE CASCADE
+      KEY idx_analysis_sig_receipt (receipt_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
     """
@@ -149,15 +121,7 @@ _DDL_STATEMENTS: list[str] = [
       notes_json       JSON          DEFAULT NULL,
       created_at_utc   DATETIME      NOT NULL,
       PRIMARY KEY (cohort_id, package_name),
-      KEY idx_analysis_exposure_receipt (receipt_id),
-      CONSTRAINT fk_analysis_exposure_receipt
-        FOREIGN KEY (receipt_id)
-        REFERENCES analysis_derivation_receipts (receipt_id)
-        ON DELETE RESTRICT,
-      CONSTRAINT fk_analysis_exposure_cohort
-        FOREIGN KEY (cohort_id)
-        REFERENCES analysis_cohorts (cohort_id)
-        ON DELETE CASCADE
+      KEY idx_analysis_exposure_receipt (receipt_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
     """
@@ -173,15 +137,7 @@ _DDL_STATEMENTS: list[str] = [
       notes_json       JSON         DEFAULT NULL,
       created_at_utc   DATETIME     NOT NULL,
       PRIMARY KEY (cohort_id, package_name),
-      KEY idx_analysis_regime_receipt (receipt_id),
-      CONSTRAINT fk_analysis_regime_receipt
-        FOREIGN KEY (receipt_id)
-        REFERENCES analysis_derivation_receipts (receipt_id)
-        ON DELETE RESTRICT,
-      CONSTRAINT fk_analysis_regime_cohort
-        FOREIGN KEY (cohort_id)
-        REFERENCES analysis_cohorts (cohort_id)
-        ON DELETE CASCADE
+      KEY idx_analysis_regime_receipt (receipt_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
 ]
