@@ -86,7 +86,7 @@ def main(argv: list[str]) -> int:
     # Allow running directly from a git checkout without installation.
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
-    gate_phase_e = repo_root / "scripts" / "paper2" / "phase_e_regression_gate.py"
+    gate_phase_e = repo_root / "scripts" / "publication" / "regression_gate_freeze.py"
     gate_smoke = repo_root / "scripts" / "operational" / "query_mode_smoke_gate.py"
 
     if not gate_phase_e.exists():

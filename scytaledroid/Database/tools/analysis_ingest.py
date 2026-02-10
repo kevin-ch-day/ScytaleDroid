@@ -35,7 +35,7 @@ from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_core.session import database_session, get_current_engine
 from scytaledroid.Database.db_func.apps.app_labels import upsert_display_names
 from scytaledroid.Database.db_func.apps.app_ordering import upsert_ordering
-from scytaledroid.Paper.paper_contract_inputs import load_paper_contracts
+from scytaledroid.Publication.contract_inputs import load_publication_contracts
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -377,7 +377,7 @@ def ingest_aggregates_from_csvs(
 ) -> dict[str, int]:
     """Import already-derived aggregate facts from canonical CSVs (no recomputation)."""
     now = _utc_now()
-    contracts = load_paper_contracts(fail_closed=True)
+    contracts = load_publication_contracts(fail_closed=True)
 
     # 1) ML app/phase/model metrics: prefer internal baseline input copy, fallback to repo data/.
     ml_src = paths.baseline_inputs_dir / "anomaly_prevalence_per_app_phase.csv"
@@ -655,9 +655,9 @@ def ingest_paper_bundle_to_db(
 
     # Ensure apps.display_name and ordering are populated (avoid scattered JSON maps).
     try:
-        contracts = load_paper_contracts(fail_closed=True)
+        contracts = load_publication_contracts(fail_closed=True)
         upsert_display_names(contracts.display_name_by_package, overwrite=True)
-        upsert_ordering("paper2", contracts.paper_ordering)
+        upsert_ordering("paper2", contracts.package_order)
     except Exception:
         pass
 

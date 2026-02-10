@@ -1,13 +1,14 @@
-"""Write a single canonical `output/paper/` directory for paper assembly.
+"""Write a single canonical `output/publication/` directory for publication assembly.
 
-The canonical directory has stable, paper-facing paths:
-  output/paper/tables/
-  output/paper/figures/
-  output/paper/appendix/
-  output/paper/manifests/
+This exporter produces stable paths for consuming artifacts in a manuscript,
+blog post, report, or slide deck:
+  output/publication/tables/
+  output/publication/figures/
+  output/publication/appendix/
+  output/publication/manifests/
 
-Phase/snapshot details are stored under output/paper/internal/ so the paper
-writer doesn't need to navigate phase trees.
+Snapshot/provenance detail is stored under output/publication/internal/ so authors
+don't need to navigate internal phase trees.
 """
 
 from __future__ import annotations
@@ -20,11 +21,11 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
-from scytaledroid.DynamicAnalysis.ml import deliverable_bundle_paths as paper_paths
-from scytaledroid.Paper.paper_contract_inputs import (
+from scytaledroid.DynamicAnalysis.ml import deliverable_bundle_paths as bundle_paths
+from scytaledroid.Publication.contract_inputs import (
+    app_ordering_path,
     display_name_map_path,
-    load_paper_contracts,
-    paper_ordering_path,
+    load_publication_contracts,
 )
 
 
@@ -82,25 +83,6 @@ def _read_csv_rows(path: Path) -> list[dict[str, str]]:
     # No comment headers expected for operational snapshot CSVs; keep simple.
     r = csv.DictReader([ln for ln in text if ln.strip()])
     return [dict(row) for row in r]
-
-
-def _read_table6_app_names(path: Path) -> dict[str, str]:
-    """Read (package_name -> display app name) from Table 6 CSV (skipping comments)."""
-    import csv
-
-    lines = []
-    for ln in path.read_text(encoding="utf-8", errors="strict").splitlines():
-        if ln.startswith("#") or not ln.strip():
-            continue
-        lines.append(ln)
-    r = csv.DictReader(lines)
-    out: dict[str, str] = {}
-    for row in r:
-        pkg = (row.get("package_name") or "").strip()
-        name = (row.get("app") or "").strip()
-        if pkg and name:
-            out[pkg] = name
-    return out
 
 
 def _split_csv_comment_header(text: str) -> tuple[list[str], list[str]]:
@@ -173,7 +155,7 @@ def _render_tabular_from_rows(
 
 
 _LEGACY_LABEL_VARIANTS: dict[str, list[str]] = {
-    # Phase G: allow reading older emitted labels, but paper-facing artifacts must emit only canonical aliases.
+    # Allow reading older emitted labels, but publication-facing artifacts must emit only canonical aliases.
     "com.facebook.orca": ["Facebook Messenger", "Messenger"],
 }
 
@@ -245,7 +227,7 @@ def _render_masvs_domain_mapping_tabular_tex() -> str:
 def _ieeeify_tabular_booktabs(tex: str) -> str:
     """Convert a simple '\\hline' tabular into booktabs style (top/mid/bottomrule).
 
-    This is a best-effort transformation for the surfaced paper-facing tables.
+    This is a best-effort transformation for the surfaced publication-facing tables.
     It intentionally does not touch internal baseline artifacts used for regression gates.
     """
 
@@ -277,40 +259,40 @@ def _ieeeify_tabular_booktabs(tex: str) -> str:
 
 
 @dataclass(frozen=True)
-class CanonicalPaperResult:
-    paper_root: Path
+class CanonicalPublicationResult:
+    publication_root: Path
     baseline_bundle_root: Path
     snapshot_id: str | None
     snapshot_source_dir: Path | None
     ok: bool
 
 
-def write_canonical_paper_directory(
+def write_canonical_publication_directory(
     *,
     baseline_bundle_root: Path,
     snapshot_dir: Path | None,
     snapshot_id: str | None,
     overwrite: bool,
-) -> CanonicalPaperResult:
-    """Surface baseline + (optional) operational snapshot into output/paper/.
+) -> CanonicalPublicationResult:
+    """Surface baseline + (optional) operational snapshot into output/publication/.
 
-    `baseline_bundle_root` is expected to be the Phase E internal bundle
-    directory (output/paper/internal/baseline/).
+    `baseline_bundle_root` is expected to be the internal baseline bundle
+    directory (output/publication/internal/baseline/).
     `snapshot_dir` is expected to be output/operational/<snapshot_id>/.
     """
 
-    paper_root = paper_paths.output_paper_root()
-    tables_dir = paper_paths.output_paper_tables_dir()
-    figs_dir = paper_paths.output_paper_figures_dir()
-    appendix_dir = paper_paths.output_paper_appendix_dir()
-    manifests_dir = paper_paths.output_paper_manifests_dir()
-    internal_prov = paper_paths.output_paper_internal_provenance_dir()
-    internal_snaps = paper_paths.output_paper_internal_snapshots_root()
+    publication_root = bundle_paths.output_publication_root()
+    tables_dir = bundle_paths.output_publication_tables_dir()
+    figs_dir = bundle_paths.output_publication_figures_dir()
+    appendix_dir = bundle_paths.output_publication_appendix_dir()
+    manifests_dir = bundle_paths.output_publication_manifests_dir()
+    internal_prov = bundle_paths.output_publication_internal_provenance_dir()
+    internal_snaps = bundle_paths.output_publication_internal_snapshots_root()
 
-    for d in (paper_root, tables_dir, figs_dir, appendix_dir, manifests_dir, internal_prov, internal_snaps):
+    for d in (publication_root, tables_dir, figs_dir, appendix_dir, manifests_dir, internal_prov, internal_snaps):
         d.mkdir(parents=True, exist_ok=True)
 
-    # Keep the canonical surface clean: only locked main-paper artifacts live here.
+    # Keep the canonical surface clean: only the publication-facing artifacts live here.
     _clean_dir(
         tables_dir,
         keep={
@@ -333,7 +315,7 @@ def write_canonical_paper_directory(
             "fig_b4_static_vs_rdi.png",
         },
     )
-    # No appendix section in the 8-page paper; keep repro notes internal-only.
+    # Appendix is optional; keep it empty by default.
     _clean_dir(appendix_dir, keep=set())
     _clean_dir(
         manifests_dir,
@@ -344,25 +326,25 @@ def write_canonical_paper_directory(
             "model_registry.json",
             "toolchain.txt",
             "phase_e_closure_record.json",
-            "paper_snapshot_id.txt",
-            # Phase G contracts / gates.
+            "publication_snapshot_id.txt",
+            # Contracts / gates.
             "display_name_map.json",
-            "paper_ordering.json",
-            "paper_contract.json",
-            "paper_traceability.csv",
+            "app_ordering.json",
+            "publication_contract.json",
+            "publication_traceability.csv",
             "crosschecks.json",
         },
     )
 
-    contracts = load_paper_contracts(fail_closed=True)
+    contracts = load_publication_contracts(fail_closed=True)
 
-    # Surface Phase E tables (csv + tex) that are locked into the main paper.
+    # Surface baseline tables (csv + tex) for publication assembly.
     base_tables = baseline_bundle_root / "tables"
     (tables_dir / "table_masvs_domain_mapping.tex").write_text(
         _render_masvs_domain_mapping_tabular_tex(), encoding="utf-8"
     )
 
-    # Rewrite Table 4/7 to enforce Phase G ordering + alias contracts (paper-facing).
+    # Rewrite Table 4/7 to enforce ordering + alias contracts (publication-facing).
     # This does not change values; it only stabilizes ordering/labels and avoids nested floats in LaTeX.
     # Table 7: keyed by package_name.
     t7_src = base_tables / "table_7_exposure_deviation_summary.csv"
@@ -460,7 +442,7 @@ def write_canonical_paper_directory(
         if p.exists():
             p.write_text(_ieeeify_tabular_booktabs(p.read_text(encoding="utf-8", errors="strict")), encoding="utf-8")
 
-    # Surface Phase E figures that are locked into the main paper.
+    # Surface baseline figures for publication assembly.
     base_figs = baseline_bundle_root / "figures"
     _copy(base_figs / "fig_b2_rdi_social_by_app.pdf", figs_dir / "fig_b2_rdi_social_by_app.pdf", overwrite=overwrite)
     _copy(base_figs / "fig_b2_rdi_social_by_app.png", figs_dir / "fig_b2_rdi_social_by_app.png", overwrite=overwrite)
@@ -482,12 +464,12 @@ def write_canonical_paper_directory(
     _copy(base_manifest / "dataset_freeze.json", manifests_dir / "dataset_freeze.json", overwrite=overwrite)
     _copy(base_manifest / "phase_e_closure_record.json", manifests_dir / "phase_e_closure_record.json", overwrite=overwrite)
     _copy(display_name_map_path(), manifests_dir / "display_name_map.json", overwrite=overwrite)
-    _copy(paper_ordering_path(), manifests_dir / "paper_ordering.json", overwrite=overwrite)
+    _copy(app_ordering_path(), manifests_dir / "app_ordering.json", overwrite=overwrite)
 
-    # Phase G crosschecks prefer a self-contained source for "B2/threshold truth" rather than reading from gitignored data/.
+    # Crosschecks prefer a self-contained source for "RDI truth" rather than reading from gitignored data/.
     # This is a pure copy; it does not regenerate or alter any values.
     try:
-        internal_inputs = (paper_root / "internal" / "baseline" / "inputs")
+        internal_inputs = (publication_root / "internal" / "baseline" / "inputs")
         internal_inputs.mkdir(parents=True, exist_ok=True)
         repo_root = Path(__file__).resolve().parents[2]
         src = repo_root / "data" / "anomaly_prevalence_per_app_phase.csv"
@@ -500,13 +482,18 @@ def write_canonical_paper_directory(
     # Prefer the snapshot's pinned toolchain text if present; fallback to repo pins.
     toolchain_src = None
     if snapshot_dir:
-        cand = snapshot_dir / "manifest" / "requirements-paper-toolchain.txt"
-        if cand.exists():
-            toolchain_src = cand
+        for name in ("requirements-toolchain.txt", "requirements-paper-toolchain.txt"):
+            cand = snapshot_dir / "manifest" / name
+            if cand.exists():
+                toolchain_src = cand
+                break
     if not toolchain_src:
-        cand = Path(__file__).resolve().parents[2] / "requirements-paper-toolchain.txt"
-        if cand.exists():
-            toolchain_src = cand
+        repo_root = Path(__file__).resolve().parents[2]
+        for name in ("requirements-toolchain.txt", "requirements-paper-toolchain.txt"):
+            cand = repo_root / name
+            if cand.exists():
+                toolchain_src = cand
+                break
     if toolchain_src:
         _copy(toolchain_src, manifests_dir / "toolchain.txt", overwrite=overwrite)
 
@@ -518,9 +505,11 @@ def write_canonical_paper_directory(
         _copy(snap_manifest / "selection_manifest.json", manifests_dir / "selection_manifest.json", overwrite=overwrite)
         _copy(snap_manifest / "freeze_manifest.json", manifests_dir / "freeze_manifest.json", overwrite=overwrite)
         _copy(snap_manifest / "model_registry.json", manifests_dir / "model_registry.json", overwrite=overwrite)
-        (manifests_dir / "paper_snapshot_id.txt").write_text((snapshot_id or snapshot_dir.name) + "\n", encoding="utf-8")
+        (manifests_dir / "publication_snapshot_id.txt").write_text(
+            (snapshot_id or snapshot_dir.name) + "\n", encoding="utf-8"
+        )
 
-        # Render compact TeX risk scoring table for the main paper from snapshot tables.
+        # Render compact TeX risk scoring table from snapshot tables.
         snap_tables = snapshot_dir / "tables"
         risk_rows = _read_csv_rows(snap_tables / "risk_summary_per_group.csv")
         (tables_dir / "table_risk_scoring.tex").write_text(
@@ -543,7 +532,7 @@ def write_canonical_paper_directory(
             if p.exists():
                 _copy(p, internal_prov / name, overwrite=overwrite)
 
-    # README: single place to point the paper author at.
+    # README: single place to point authors at.
     surfaced: dict[str, Any] = {
         "created_at_utc": datetime.now(UTC).isoformat(),
         "baseline_bundle_root": str(baseline_bundle_root),
@@ -554,28 +543,28 @@ def write_canonical_paper_directory(
             "figures": str(figs_dir),
             "appendix": str(appendix_dir),
             "manifests": str(manifests_dir),
-            "internal": str(paper_paths.output_paper_internal_root()),
+            "internal": str(bundle_paths.output_publication_internal_root()),
         },
     }
-    (paper_root / "README.md").write_text(
+    (publication_root / "README.md").write_text(
         "\n".join(
             [
-                "# Canonical Paper Artifacts",
+                "# Canonical Publication Bundle",
                 "",
-                "This directory is the canonical, stable artifact surface used to compile the 8-page IEEE main paper.",
+                "This directory is the canonical, stable artifact surface for publication assembly.",
                 "",
-                "Paper-facing paths:",
-                f"- tables: `{tables_dir.relative_to(paper_root)}/`",
-                f"- figures: `{figs_dir.relative_to(paper_root)}/`",
-                f"- appendix: `{appendix_dir.relative_to(paper_root)}/` (unused in 8-page main paper)",
-                f"- manifests: `{manifests_dir.relative_to(paper_root)}/`",
+                "Publication-facing paths:",
+                f"- tables: `{tables_dir.relative_to(publication_root)}/`",
+                f"- figures: `{figs_dir.relative_to(publication_root)}/`",
+                f"- appendix: `{appendix_dir.relative_to(publication_root)}/`",
+                f"- manifests: `{manifests_dir.relative_to(publication_root)}/`",
                 "",
-                "Locked main-paper artifacts (no swaps):",
+                "Primary artifacts (stable filenames):",
                 "- Figures: `figures/fig_b2_rdi_social_by_app.pdf`, `figures/fig_b2_rdi_messaging_by_app.pdf` (Fig B2 a/b), `figures/fig_b4_static_vs_rdi.pdf`",
                 "- Tables: `tables/table_risk_scoring.tex`, `tables/table_7_exposure_deviation_summary.tex`, `tables/table_4_signature_deltas.tex`, `tables/table_masvs_domain_mapping.tex` (context-only)",
                 "",
                 "Internal provenance (not used directly by LaTeX):",
-                f"- internal: `{paper_paths.output_paper_internal_root().relative_to(paper_root)}/`",
+                f"- internal: `{bundle_paths.output_publication_internal_root().relative_to(publication_root)}/`",
                 "",
                 "Snapshot surfaced:",
                 f"- `{surfaced['snapshot_id']}`" if surfaced["snapshot_id"] else "- (none)",
@@ -588,11 +577,11 @@ def write_canonical_paper_directory(
 
     # Also write a machine-readable receipt with hashes of surfaced top-level artifacts.
     receipt: dict[str, Any] = {
-        "artifact_type": "canonical_paper_receipt",
+        "artifact_type": "canonical_publication_receipt",
         **surfaced,
         "sha256": {},
     }
-    for p in sorted(paper_root.rglob("*")):
+    for p in sorted(publication_root.rglob("*")):
         if not p.is_file():
             continue
         if "/internal/" in str(p).replace("\\", "/"):
@@ -601,14 +590,14 @@ def write_canonical_paper_directory(
             continue
         if p.suffix.lower() not in {".json", ".csv", ".tex", ".png", ".pdf", ".md", ".txt"}:
             continue
-        rel = str(p.relative_to(paper_root))
+        rel = str(p.relative_to(publication_root))
         receipt["sha256"][rel] = _sha256_file(p)
-    (paper_paths.output_paper_manifests_dir() / "canonical_receipt.json").write_text(
+    (bundle_paths.output_publication_manifests_dir() / "canonical_receipt.json").write_text(
         json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
 
-    return CanonicalPaperResult(
-        paper_root=paper_root,
+    return CanonicalPublicationResult(
+        publication_root=publication_root,
         baseline_bundle_root=baseline_bundle_root,
         snapshot_id=(snapshot_id or (snapshot_dir.name if snapshot_dir else None)),
         snapshot_source_dir=snap_source_dir,

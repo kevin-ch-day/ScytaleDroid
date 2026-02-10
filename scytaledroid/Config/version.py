@@ -1,8 +1,8 @@
 """Application versioning and release metadata."""
 
 APP_NAME = "ScytaleDroid"
-APP_VERSION = "1.3.1"
-APP_RELEASE = "Beta"
+APP_VERSION = "2.0.1"
+APP_RELEASE = "Alpha"
 APP_DESCRIPTION = "Android Security Research Platform"
 APP_AUTHOR = "Kevin Day"
 

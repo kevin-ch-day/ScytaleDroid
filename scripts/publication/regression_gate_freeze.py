@@ -215,8 +215,10 @@ def _hash_snapshot() -> dict[str, str]:
         rp = p.resolve()
         rel = str(rp.relative_to(REPO_ROOT_RESOLVED))
         # Output layout migration: normalize legacy keys so older recordings still validate.
-        rel = rel.replace("output/paper/paper2/phase_e/", "output/paper/internal/baseline/")
-        rel = rel.replace("output/paper/paper2/baseline/", "output/paper/internal/baseline/")
+        # Normalize legacy layouts into the canonical publication internal baseline path.
+        rel = rel.replace("output/paper/paper2/phase_e/", "output/publication/internal/baseline/")
+        rel = rel.replace("output/paper/paper2/baseline/", "output/publication/internal/baseline/")
+        rel = rel.replace("output/paper/internal/baseline/", "output/publication/internal/baseline/")
         out[rel] = _sha256_canonical(rp)
     return dict(sorted(out.items()))
 
@@ -224,7 +226,7 @@ def _hash_snapshot() -> dict[str, str]:
 def _default_reference_path() -> Path:
     from scytaledroid.Config import app_config
 
-    return Path(app_config.DATA_DIR) / "archive" / "phase_e_reference_hashes.json"
+    return Path(app_config.DATA_DIR) / "archive" / "baseline_reference_hashes.json"
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -299,8 +301,9 @@ def run_gate(*, reference_path: Path, record: bool, allow_toolchain_mismatch: bo
         norm: dict[str, Any] = {}
         for k, v in ref_hashes.items():
             ks = str(k)
-            ks = ks.replace("output/paper/paper2/phase_e/", "output/paper/internal/baseline/")
-            ks = ks.replace("output/paper/paper2/baseline/", "output/paper/internal/baseline/")
+            ks = ks.replace("output/paper/paper2/phase_e/", "output/publication/internal/baseline/")
+            ks = ks.replace("output/paper/paper2/baseline/", "output/publication/internal/baseline/")
+            ks = ks.replace("output/paper/internal/baseline/", "output/publication/internal/baseline/")
             norm[ks] = v
         ref_hashes = norm
     mism: list[str] = []

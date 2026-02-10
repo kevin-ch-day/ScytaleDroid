@@ -17,7 +17,7 @@ from .menu_actions import (
     handle_tier1_export_pack,
     handle_tier1_quick_fix,
     handle_verify_freeze_immutability_paper2,
-    handle_write_canonical_paper_directory,
+    handle_write_canonical_publication_bundle,
     view_saved_reports,
 )
 
@@ -39,7 +39,7 @@ def reporting_menu() -> None:
         "9": handle_verify_freeze_immutability_paper2,
         "10": handle_phase_f1_acceptance_gates,
         # Reports
-        "11": handle_write_canonical_paper_directory,
+        "11": handle_write_canonical_publication_bundle,
         "12": view_saved_reports,
     }
 
@@ -51,12 +51,12 @@ def reporting_menu() -> None:
         MenuOption("5", "Tier-1 end-to-end (reindex + audit + export)"),
     ]
     paper_options = [
-        MenuOption("6", "Paper #2 end-to-end (Phase E ML + bundle + health check)"),
-        MenuOption("7", "Paper bundle health check (freeze + manifests + semantic lint + toolchain)"),
+        MenuOption("6", "Freeze end-to-end (ML + baseline bundle + health check)"),
+        MenuOption("7", "Bundle health check (freeze + manifests + semantic lint + toolchain)"),
         MenuOption("8", "Run ML (query mode, operational snapshot)"),
         MenuOption("9", "Verify freeze immutability (hash-based)"),
-        MenuOption("10", "Phase F1 acceptance gates (regression + query smoke)"),
-        MenuOption("11", "Write canonical paper artifact directory (output/paper)"),
+        MenuOption("10", "Acceptance gates (regression + query smoke)"),
+        MenuOption("11", "Write canonical publication bundle (output/publication)"),
     ]
     reports_options = [
         MenuOption("12", "View saved reports"),
@@ -115,7 +115,7 @@ def reporting_menu() -> None:
             summary_cards.summary_item("DB dataset runs tracked", db_dataset_label, value_style="muted"),
             summary_cards.summary_item("PCAP valid runs", pcap_label, value_style=pcap_style),
             summary_cards.summary_item("Feature Health (export)", feature_health_label, value_style="muted"),
-            summary_cards.summary_item("Paper toolchain pins", toolchain_label, value_style=toolchain_style),
+            summary_cards.summary_item("Toolchain pins", toolchain_label, value_style=toolchain_style),
             summary_cards.summary_item("Last export", export_label, value_style="muted"),
         ]
         footer = ""

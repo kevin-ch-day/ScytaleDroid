@@ -1,18 +1,18 @@
-"""Centralized paper artifact path conventions.
+"""Centralized publication bundle path conventions.
 
-Policy (Paper #2):
-- The *canonical* paper output directory is `output/paper/` with stable paths:
-  - output/paper/tables
-  - output/paper/figures
-  - output/paper/appendix
-  - output/paper/manifests
-- Phase/snapshot separation exists only under `output/paper/internal/` so paper
-  writing never has to navigate phase trees.
+Policy:
+- The canonical publication output directory is `output/publication/` with stable paths:
+  - output/publication/tables
+  - output/publication/figures
+  - output/publication/appendix
+  - output/publication/manifests
+- Snapshot/provenance separation exists only under `output/publication/internal/` so
+  authors don't need to navigate internal trees.
 
-Important:
-- Phase E regression/no-drift uses the *internal* Phase E baseline bundle under
-  `output/paper/internal/baseline/` so it remains deterministic and isolated
-  from operational snapshot tables.
+Note:
+- Some older modules still refer to these as "paper" paths. Legacy helper names remain
+  as thin aliases to avoid breaking existing workflows, but new code should use the
+  publication-prefixed helpers.
 """
 
 from __future__ import annotations
@@ -34,46 +34,83 @@ def dataset_tables_dir() -> Path:
     return Path(app_config.DATA_DIR)
 
 
-# Canonical paper directory (stable paths for LaTeX and humans).
-def output_paper_root() -> Path:
-    return Path(app_config.OUTPUT_DIR) / "paper"
+# Canonical publication directory (stable paths for manuscripts and humans).
+def output_publication_root() -> Path:
+    return Path(app_config.OUTPUT_DIR) / "publication"
 
 
-def output_paper_tables_dir() -> Path:
-    return output_paper_root() / "tables"
+def output_publication_tables_dir() -> Path:
+    return output_publication_root() / "tables"
 
 
-def output_paper_figures_dir() -> Path:
-    return output_paper_root() / "figures"
+def output_publication_figures_dir() -> Path:
+    return output_publication_root() / "figures"
 
 
-def output_paper_appendix_dir() -> Path:
-    return output_paper_root() / "appendix"
+def output_publication_appendix_dir() -> Path:
+    return output_publication_root() / "appendix"
 
 
-def output_paper_manifests_dir() -> Path:
-    return output_paper_root() / "manifests"
+def output_publication_manifests_dir() -> Path:
+    return output_publication_root() / "manifests"
 
 
-def output_paper_internal_root() -> Path:
-    return output_paper_root() / "internal"
+def output_publication_internal_root() -> Path:
+    return output_publication_root() / "internal"
 
 
-def output_paper_internal_provenance_dir() -> Path:
-    return output_paper_internal_root() / "provenance"
+def output_publication_internal_provenance_dir() -> Path:
+    return output_publication_internal_root() / "provenance"
 
 
-def output_paper_internal_snapshots_root() -> Path:
-    return output_paper_internal_root() / "snapshots"
+def output_publication_internal_snapshots_root() -> Path:
+    return output_publication_internal_root() / "snapshots"
 
 
-def output_paper_internal_snapshot_dir(snapshot_id: str) -> Path:
-    return output_paper_internal_snapshots_root() / snapshot_id
+def output_publication_internal_snapshot_dir(snapshot_id: str) -> Path:
+    return output_publication_internal_snapshots_root() / snapshot_id
+
+
+# Legacy aliases (deprecated): "paper" == "publication"
+def output_paper_root() -> Path:  # pragma: no cover
+    return output_publication_root()
+
+
+def output_paper_tables_dir() -> Path:  # pragma: no cover
+    return output_publication_tables_dir()
+
+
+def output_paper_figures_dir() -> Path:  # pragma: no cover
+    return output_publication_figures_dir()
+
+
+def output_paper_appendix_dir() -> Path:  # pragma: no cover
+    return output_publication_appendix_dir()
+
+
+def output_paper_manifests_dir() -> Path:  # pragma: no cover
+    return output_publication_manifests_dir()
+
+
+def output_paper_internal_root() -> Path:  # pragma: no cover
+    return output_publication_internal_root()
+
+
+def output_paper_internal_provenance_dir() -> Path:  # pragma: no cover
+    return output_publication_internal_provenance_dir()
+
+
+def output_paper_internal_snapshots_root() -> Path:  # pragma: no cover
+    return output_publication_internal_snapshots_root()
+
+
+def output_paper_internal_snapshot_dir(snapshot_id: str) -> Path:  # pragma: no cover
+    return output_publication_internal_snapshot_dir(snapshot_id)
 
 
 # Internal Phase E baseline bundle (deterministic, used for regression gates).
 def output_phase_e_bundle_root() -> Path:
-    return output_paper_internal_root() / "baseline"
+    return output_publication_internal_root() / "baseline"
 
 
 def output_phase_e_bundle_figures_dir() -> Path:
@@ -102,4 +139,3 @@ def output_phase_e_bundle_artifacts_manifest_path() -> Path:
 
 def output_phase_e_bundle_readme_path() -> Path:
     return output_phase_e_bundle_root() / "README.md"
-

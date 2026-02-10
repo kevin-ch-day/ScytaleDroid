@@ -536,7 +536,7 @@ def seed_paper_dataset_profile() -> None:
         CANONICAL_PACKAGES,
         PROFILE_KEY,
     )
-    from scytaledroid.Paper.paper_contract_inputs import load_paper_contracts
+    from scytaledroid.Publication.contract_inputs import load_publication_contracts
 
     profile_key = PROFILE_KEY
     display_name = "Research Dataset Alpha (Paper #2)"
@@ -592,9 +592,9 @@ def seed_paper_dataset_profile() -> None:
 
     # Seed canonical display names (best-effort). This helps avoid scattered JSON label maps.
     try:
-        contracts = load_paper_contracts(fail_closed=True)
+        contracts = load_publication_contracts(fail_closed=True)
         upsert_display_names(contracts.display_name_by_package, overwrite=True)
-        upsert_ordering("paper2", contracts.paper_ordering)
+        upsert_ordering("paper2", contracts.package_order)
     except Exception:
         pass
 
@@ -614,13 +614,13 @@ def sync_paper_contracts_to_db() -> None:
     """
     from scytaledroid.Database.db_func.apps.app_labels import upsert_display_names
     from scytaledroid.Database.db_func.apps.app_ordering import upsert_ordering
-    from scytaledroid.Paper.paper_contract_inputs import load_paper_contracts
+    from scytaledroid.Publication.contract_inputs import load_publication_contracts
 
     print(status_messages.status("Syncing paper contracts -> DB (display names + ordering).", level="info"))
     if not prompt_utils.prompt_yes_no("Apply updates now?", default=True):
         return
     try:
-        contracts = load_paper_contracts(fail_closed=True)
+        contracts = load_publication_contracts(fail_closed=True)
     except Exception as exc:
         print(status_messages.status(f"Failed to load paper contracts: {exc}", level="error"))
         prompt_utils.press_enter_to_continue()
@@ -629,7 +629,7 @@ def sync_paper_contracts_to_db() -> None:
     # Display names
     n_names = upsert_display_names(contracts.display_name_by_package, overwrite=True)
     # Ordering
-    n_order = upsert_ordering("paper2", contracts.paper_ordering)
+    n_order = upsert_ordering("paper2", contracts.package_order)
 
     print(status_messages.status(f"Upserted display names: {n_names}", level="success"))
     print(status_messages.status(f"Upserted ordering rows: {n_order}", level="success"))

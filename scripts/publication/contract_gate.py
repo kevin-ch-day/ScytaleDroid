@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Phase G gate: paper-facing contracts + crosschecks (DB-free).
+"""Contract gate: publication-facing contracts + crosschecks (DB-free).
 
 This gate does not change analysis. It verifies that the *paper-facing* outputs
-under output/paper/ are stable and auditable:
+under output/publication/ are stable and auditable:
 - TeX include contract: generated .tex are tabular-only (no floats/captions/labels).
 - Display alias contract: all labels come from display_name_map.json (no variants).
-- Ordering contract: rows/bars use paper_ordering.json exactly.
+- Ordering contract: rows/bars use app_ordering.json exactly.
 - Crosschecks: minimum invariants across figure inputs and table outputs.
 
-It also writes contract artifacts under output/paper/manifests/:
-- paper_contract.json
-- paper_traceability.csv
+It also writes contract artifacts under output/publication/manifests/:
+- publication_contract.json
+- publication_traceability.csv
 - crosschecks.json
 - (internal) math_receipt.md
 """
@@ -108,21 +108,21 @@ class Contracts:
 
 def _load_contracts(paper_manifests: Path) -> Contracts:
     dn = paper_manifests / "display_name_map.json"
-    od = paper_manifests / "paper_ordering.json"
+    od = paper_manifests / "app_ordering.json"
     if not dn.exists():
         _fail(f"Missing display name map: {dn}")
     if not od.exists():
-        _fail(f"Missing paper ordering: {od}")
+        _fail(f"Missing app ordering: {od}")
     display_obj = json.loads(_read_text(dn))
     order_obj = json.loads(_read_text(od))
     if not isinstance(display_obj, dict):
         _fail("display_name_map.json must be an object")
     if not isinstance(order_obj, list):
-        _fail("paper_ordering.json must be an array")
+        _fail("app_ordering.json must be an array")
     display: dict[str, str] = {str(k).strip(): str(v).strip() for k, v in display_obj.items() if str(k).strip() and str(v).strip()}
     order = [str(x).strip() for x in order_obj if str(x).strip()]
     if len(set(order)) != len(order):
-        _fail("paper_ordering.json contains duplicates")
+        _fail("app_ordering.json contains duplicates")
     return Contracts(display_name_by_package=display, package_order=order)
 
 
@@ -191,7 +191,7 @@ def gate_crosschecks(paper_root: Path, contracts: Contracts) -> dict[str, Any]:
 
     # Crosscheck 1: Table 7 RDI(IF, interactive) matches the deterministic dataset CSV used for Fig B2.
     #
-    # Prefer a self-contained copy inside output/paper/internal/... so Phase G can run from a paper bundle
+    # Prefer a self-contained copy inside output/publication/internal/... so the gate can run from a bundle
     # without depending on gitignored `data/`.
     src = paper_root / "internal" / "baseline" / "inputs" / "anomaly_prevalence_per_app_phase.csv"
     if not src.exists():
@@ -254,7 +254,7 @@ def write_phase_g_artifacts(
             "manifests": sorted([p.name for p in manifests.glob("*") if p.is_file()]),
         },
         "ordering": {
-            "file": "paper_ordering.json",
+            "file": "app_ordering.json",
             "package_order": contracts.package_order,
         },
         "aliases": {
@@ -270,7 +270,9 @@ def write_phase_g_artifacts(
         },
         "crosschecks": crosschecks,
     }
-    (manifests / "paper_contract.json").write_text(json.dumps(contract, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (manifests / "publication_contract.json").write_text(
+        json.dumps(contract, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
     # Traceability map (CSV).
     trace_rows = [
@@ -310,7 +312,7 @@ def write_phase_g_artifacts(
             "key_fields": "(n/a)",
         },
     ]
-    out_csv = manifests / "paper_traceability.csv"
+    out_csv = manifests / "publication_traceability.csv"
     with out_csv.open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=["artifact_path", "input_csv_path", "key_fields"])
         w.writeheader()
@@ -346,9 +348,9 @@ def write_phase_g_artifacts(
 
 
 def main(argv: list[str]) -> int:
-    paper_root = ROOT / "output" / "paper"
+    paper_root = ROOT / "output" / "publication"
     if not paper_root.exists():
-        _fail("Missing output/paper (run canonical export first).")
+        _fail("Missing output/publication (write canonical publication bundle first).")
     contracts = _load_contracts(paper_root / "manifests")
 
     gate_tex_include_contract(paper_root / "tables")

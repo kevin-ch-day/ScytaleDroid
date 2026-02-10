@@ -1,11 +1,10 @@
-"""Phase G: canonical paper contracts (display aliases + ordering).
+"""Canonical publication contracts (display aliases + ordering).
 
 Design goals:
 - Contracts must be available on a fresh checkout (no dependence on gitignored `data/`).
-- Contracts may be overridden at runtime (e.g., for a specific paper snapshot).
-- Writers/gates should treat missing contracts as a hard failure when running in
-  "paper/Phase G" mode (fail-closed), but tooling that renders figures for
-  interactive exploration may choose fail-open.
+- Contracts may be overridden at runtime (e.g., for a specific bundle snapshot).
+- Regeneration/gates may treat missing contracts as a hard failure (fail-closed),
+  but interactive tooling may choose fail-open.
 """
 
 from __future__ import annotations
@@ -19,7 +18,7 @@ from scytaledroid.Config import app_config
 
 
 @dataclass(frozen=True)
-class PaperContracts:
+class PublicationContracts:
     display_name_by_package: dict[str, str]
     package_order: list[str]
 
@@ -36,9 +35,14 @@ def _archive_dir() -> Path:
 def _contract_dir_candidates() -> list[Path]:
     """Search order for contract directory."""
     out: list[Path] = []
-    env = os.environ.get("SCYTALEDROID_PAPER_CONTRACT_DIR", "").strip()
+    # Preferred generic knob.
+    env = os.environ.get("SCYTALEDROID_CONTRACT_DIR", "").strip()
     if env:
         out.append(Path(env))
+    # Back-compat for older environments.
+    legacy = os.environ.get("SCYTALEDROID_PAPER_CONTRACT_DIR", "").strip()
+    if legacy:
+        out.append(Path(legacy))
     # Prefer tracked defaults so fresh checkouts work.
     out.append(_repo_contracts_dir())
     # Allow overrides under data/archive for local pinned snapshots.
@@ -55,22 +59,26 @@ def display_name_map_path() -> Path:
     return _repo_contracts_dir() / "display_name_map.json"
 
 
-def paper_ordering_path() -> Path:
+def app_ordering_path() -> Path:
     for d in _contract_dir_candidates():
-        p = d / "paper_ordering.json"
+        p = d / "app_ordering.json"
         if p.exists():
             return p
-    return _repo_contracts_dir() / "paper_ordering.json"
+        # Back-compat for legacy filename.
+        p_legacy = d / "paper_ordering.json"
+        if p_legacy.exists():
+            return p_legacy
+    return _repo_contracts_dir() / "app_ordering.json"
 
 
-def load_paper_contracts(*, fail_closed: bool = True) -> PaperContracts:
-    """Load canonical paper contracts.
+def load_publication_contracts(*, fail_closed: bool = True) -> PublicationContracts:
+    """Load canonical publication contracts.
 
-    If fail_closed=True, missing/invalid files raise RuntimeError (Phase G posture).
+    If fail_closed=True, missing/invalid files raise RuntimeError (fail-closed posture).
     """
 
     dn_path = display_name_map_path()
-    ord_path = paper_ordering_path()
+    ord_path = app_ordering_path()
 
     def die(msg: str) -> None:
         if fail_closed:
@@ -78,10 +86,10 @@ def load_paper_contracts(*, fail_closed: bool = True) -> PaperContracts:
 
     if not dn_path.exists():
         die(f"Missing display name map: {dn_path}")
-        return PaperContracts(display_name_by_package={}, package_order=[])
+        return PublicationContracts(display_name_by_package={}, package_order=[])
     if not ord_path.exists():
-        die(f"Missing paper ordering: {ord_path}")
-        return PaperContracts(display_name_by_package={}, package_order=[])
+        die(f"Missing app ordering: {ord_path}")
+        return PublicationContracts(display_name_by_package={}, package_order=[])
 
     try:
         dn = json.loads(dn_path.read_text(encoding="utf-8"))
@@ -101,10 +109,10 @@ def load_paper_contracts(*, fail_closed: bool = True) -> PaperContracts:
     try:
         order_obj = json.loads(ord_path.read_text(encoding="utf-8"))
     except Exception as exc:  # noqa: BLE001
-        die(f"Failed to read paper ordering: {ord_path} ({exc})")
+        die(f"Failed to read app ordering: {ord_path} ({exc})")
         order_obj = []
     if not isinstance(order_obj, list):
-        die(f"Invalid paper ordering (expected array): {ord_path}")
+        die(f"Invalid app ordering (expected array): {ord_path}")
         order_obj = []
     order = [str(x).strip() for x in order_obj if str(x).strip()]
 
@@ -112,10 +120,10 @@ def load_paper_contracts(*, fail_closed: bool = True) -> PaperContracts:
     seen = set()
     dups = [p for p in order if (p in seen) or seen.add(p)]
     if dups:
-        die(f"paper_ordering.json contains duplicate entries: {sorted(set(dups))}")
+        die(f"app_ordering contains duplicate entries: {sorted(set(dups))}")
 
-    return PaperContracts(display_name_by_package=display, package_order=order)
+    return PublicationContracts(display_name_by_package=display, package_order=order)
 
 
-def canonical_display_name(pkg: str, *, contracts: PaperContracts) -> str:
+def canonical_display_name(pkg: str, *, contracts: PublicationContracts) -> str:
     return contracts.display_name_by_package.get(pkg, pkg)

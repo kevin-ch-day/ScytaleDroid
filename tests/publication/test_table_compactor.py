@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from scytaledroid.Paper.table4_compactor import write_table_4_compact_tex
+from scytaledroid.Publication.table_compactor import write_table_4_compact_tex
 
 
 def test_write_table_4_compact_tex(tmp_path: Path) -> None:
@@ -27,4 +27,3 @@ def test_write_table_4_compact_tex(tmp_path: Path) -> None:
     assert "AppA" in tex
     assert "Bytes/s" in tex
     assert "PPS" in tex or "PktSz" in tex
-

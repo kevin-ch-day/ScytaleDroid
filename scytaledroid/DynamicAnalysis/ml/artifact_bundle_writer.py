@@ -298,11 +298,11 @@ def _write_fig_b2(figs_dir: Path, *, provenance: dict[str, str], overwrite: bool
     if not overwrite and png.exists() and pdf.exists():
         return png, pdf
 
-    from scytaledroid.Paper.paper_contract_inputs import load_paper_contracts
+    from scytaledroid.Publication.contract_inputs import load_publication_contracts
 
     rows = _read_csv_rows(dataset_tables_dir() / "anomaly_prevalence_per_app_phase.csv")
     all_apps = sorted({r.get("package_name") for r in rows if r.get("package_name")})
-    contracts = load_paper_contracts(fail_closed=False)
+    contracts = load_publication_contracts(fail_closed=False)
     # Prefer the canonical paper ordering when available.
     if contracts.package_order:
         apps = [p for p in contracts.package_order if p in set(all_apps)]
@@ -360,11 +360,11 @@ def _write_fig_b2_subset(
     if not overwrite and png.exists() and pdf.exists():
         return png, pdf
 
-    from scytaledroid.Paper.paper_contract_inputs import load_paper_contracts
+    from scytaledroid.Publication.contract_inputs import load_publication_contracts
 
     rows = _read_csv_rows(dataset_tables_dir() / "anomaly_prevalence_per_app_phase.csv")
     apps = [a for a in apps if a]
-    contracts = load_paper_contracts(fail_closed=False)
+    contracts = load_publication_contracts(fail_closed=False)
     labels = [contracts.display_name_by_package.get(a, config.DISPLAY_NAME_BY_PACKAGE.get(a, a)) for a in apps]
 
     def get(pkg: str, phase: str, model: str) -> float:
@@ -407,7 +407,7 @@ def _write_fig_b2_subset(
 
 def _write_fig_b2_split(figs_dir: Path, *, overwrite: bool) -> tuple[tuple[Path, Path], tuple[Path, Path]]:
     """Split Fig B2 into two narrower panels (social media vs messaging)."""
-    from scytaledroid.Paper.paper_contract_inputs import load_paper_contracts
+    from scytaledroid.Publication.contract_inputs import load_publication_contracts
 
     rows = _read_csv_rows(dataset_tables_dir() / "anomaly_prevalence_per_app_phase.csv")
     all_apps = sorted({r.get("package_name") for r in rows if r.get("package_name")})
@@ -415,7 +415,7 @@ def _write_fig_b2_split(figs_dir: Path, *, overwrite: bool) -> tuple[tuple[Path,
     social = sorted([a for a in all_apps if a not in config.MESSAGING_PACKAGES])
 
     # Preserve canonical paper ordering when available.
-    contracts = load_paper_contracts(fail_closed=False)
+    contracts = load_publication_contracts(fail_closed=False)
     if contracts.package_order:
         messaging = [p for p in contracts.package_order if p in set(messaging)]
         social = [p for p in contracts.package_order if p in set(social)]
@@ -445,12 +445,12 @@ def _write_fig_b4(figs_dir: Path, *, provenance: dict[str, str], overwrite: bool
     if not overwrite and png.exists() and pdf.exists():
         return png, pdf
 
-    from scytaledroid.Paper.paper_contract_inputs import load_paper_contracts
+    from scytaledroid.Publication.contract_inputs import load_publication_contracts
 
     posture = _compute_static_posture_scores()
     rdi = _load_interactive_rdi_iforest()
     pkgs_all = list(sorted(set(posture.keys()) & set(rdi.keys())))
-    contracts = load_paper_contracts(fail_closed=False)
+    contracts = load_publication_contracts(fail_closed=False)
     if contracts.package_order:
         pkgs = [p for p in contracts.package_order if p in set(pkgs_all)]
     else:

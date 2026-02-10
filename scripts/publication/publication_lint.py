@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Paper #2 semantic lint.
+"""Publication bundle semantic lint.
 
 This script enforces "reviewer safety" invariants:
-- no accidental dynamic/final "risk score" language in Paper #2 docs
+- no accidental dynamic/final "risk score" language in publication docs
 - MASVS table is explicitly findings-based (`finding_count_*` columns)
 - Table 7 is explicitly interpretive and not a system output
 - bundle closure receipt matches the bundle manifest
@@ -47,9 +47,12 @@ def _sha256_file(p: Path) -> str:
 
 
 def check_docs_language() -> None:
-    paper2 = ROOT / "docs" / "paper2"
-    if not paper2.exists():
-        _warn("docs/paper2 missing; skipping docs lint.")
+    docs_root = ROOT / "docs" / "publications" / "paper2"
+    if not docs_root.exists():
+        # Back-compat: allow legacy location in older trees.
+        docs_root = ROOT / "docs" / "paper2"
+    if not docs_root.exists():
+        _warn("Publication docs missing; skipping docs lint.")
         return
 
     forbidden = [
@@ -63,20 +66,20 @@ def check_docs_language() -> None:
     ]
 
     hits: list[str] = []
-    for p in sorted(paper2.rglob("*.md")):
+    for p in sorted(docs_root.rglob("*.md")):
         text = _read_text(p)
         for pat in forbidden:
             if pat.search(text):
                 hits.append(f"{p.relative_to(ROOT)} matched {pat.pattern!r}")
     if hits:
-        _fail("Forbidden Paper #2 wording found:\n" + "\n".join(hits))
-    _ok("docs/paper2 wording: no forbidden dynamic/final risk phrases.")
+        _fail("Forbidden publication wording found:\n" + "\n".join(hits))
+    _ok("Publication docs wording: no forbidden dynamic/final risk phrases.")
 
 
 def check_bundle_artifacts() -> None:
-    bundle = ROOT / "output" / "paper"
+    bundle = ROOT / "output" / "publication"
     if not bundle.exists():
-        _warn("Canonical paper output missing; skipping bundle lint.")
+        _warn("Canonical publication bundle missing; skipping bundle lint.")
         return
 
     # Locked main-paper figures. Fig B2 is split into two narrower panels (a/b).
@@ -87,13 +90,13 @@ def check_bundle_artifacts() -> None:
     ):
         p = bundle / rel
         if not p.exists():
-            _fail(f"Missing locked figure: output/paper/{rel}")
+            _fail(f"Missing locked figure: output/publication/{rel}")
     _ok("Locked figures: present (B2, B4).")
 
     # Locked main-paper tables.
     masvs_map = bundle / "tables" / "table_masvs_domain_mapping.tex"
     if not masvs_map.exists():
-        _fail("Missing MASVS mapping table tex: output/paper/tables/table_masvs_domain_mapping.tex")
+        _fail("Missing MASVS mapping table tex: output/publication/tables/table_masvs_domain_mapping.tex")
     txt_map = _read_text(masvs_map)
     if "MASVS-" not in txt_map:
         _fail("MASVS mapping table does not contain MASVS domain labels (expected MASVS-*).")
@@ -107,13 +110,13 @@ def check_bundle_artifacts() -> None:
 
     t4 = bundle / "tables" / "table_4_signature_deltas.tex"
     if not t4.exists():
-        _fail("Missing Table 4 tex: output/paper/tables/table_4_signature_deltas.tex")
+        _fail("Missing Table 4 tex: output/publication/tables/table_4_signature_deltas.tex")
     _ok("Table 4 tex: present.")
 
     # Table 7: interpretive caption in tex
     t7_tex = bundle / "tables" / "table_7_exposure_deviation_summary.tex"
     if not t7_tex.exists():
-        _fail("Missing Table 7 tex: output/paper/tables/table_7_exposure_deviation_summary.tex")
+        _fail("Missing Table 7 tex: output/publication/tables/table_7_exposure_deviation_summary.tex")
     cap_line = ""
     for line in _read_text(t7_tex).splitlines():
         if line.startswith("% Table 7:"):
@@ -130,7 +133,7 @@ def check_bundle_artifacts() -> None:
     # Risk scoring table: required for main paper assembly.
     risk_tex = bundle / "tables" / "table_risk_scoring.tex"
     if not risk_tex.exists():
-        _fail("Missing risk scoring table tex: output/paper/tables/table_risk_scoring.tex")
+        _fail("Missing risk scoring table tex: output/publication/tables/table_risk_scoring.tex")
     txt = _read_text(risk_tex)
     if "Final Regime" not in txt:
         _fail("Risk scoring table missing 'Final Regime' label (expected PM wording).")
@@ -175,9 +178,9 @@ def check_bundle_artifacts() -> None:
     closure = bundle / "manifests" / "phase_e_closure_record.json"
     manifest = bundle / "internal" / "provenance" / "phase_e_artifacts_manifest.json"
     if not closure.exists():
-        _fail("Missing closure record: output/paper/manifests/phase_e_closure_record.json")
+        _fail("Missing closure record: output/publication/manifests/phase_e_closure_record.json")
     if not manifest.exists():
-        _fail("Missing artifacts manifest: output/paper/internal/provenance/phase_e_artifacts_manifest.json")
+        _fail("Missing artifacts manifest: output/publication/internal/provenance/phase_e_artifacts_manifest.json")
     obj = json.loads(_read_text(closure))
     expected = _sha256_file(manifest)
     got = str(obj.get("bundle_manifest_sha256") or "").strip()

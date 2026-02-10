@@ -240,11 +240,13 @@ def handle_run_ml_query_mode() -> None:
     prompt_utils.press_enter_to_continue()
 
 
-def handle_write_canonical_paper_directory() -> None:
-    """Write a single canonical output/paper/ directory for paper assembly."""
+def handle_write_canonical_publication_bundle() -> None:
+    """Write a single canonical output/publication/ directory for publication assembly."""
 
     from scytaledroid.DynamicAnalysis.ml.deliverable_bundle_paths import output_phase_e_bundle_root
-    from scytaledroid.Paper.canonical_paper_writer import write_canonical_paper_directory
+    from scytaledroid.Publication.canonical_bundle_writer import (
+        write_canonical_publication_directory,
+    )
 
     baseline_root = output_phase_e_bundle_root()
     if not baseline_root.exists():
@@ -263,7 +265,10 @@ def handle_write_canonical_paper_directory() -> None:
     snapshot_dir: Path | None = None
     snapshot_id: str | None = None
     if snaps:
-        use_latest = prompt_utils.prompt_yes_no(f"Surface latest operational snapshot into output/paper/? ({snaps[-1].name})", default=True)
+        use_latest = prompt_utils.prompt_yes_no(
+            f"Surface latest operational snapshot into output/publication/? ({snaps[-1].name})",
+            default=True,
+        )
         if use_latest:
             snapshot_dir = snaps[-1]
             snapshot_id = snapshot_dir.name
@@ -280,11 +285,16 @@ def handle_write_canonical_paper_directory() -> None:
         print(status_messages.status("No operational snapshots found under output/operational; exporting Phase E only.", level="info"))
 
     print()
-    menu_utils.print_header("Write Canonical Paper Directory")
-    print(status_messages.status("This surfaces baseline + (optional) snapshot into output/paper/ with stable paths.", level="info"))
+    menu_utils.print_header("Write Canonical Publication Bundle")
+    print(
+        status_messages.status(
+            "This surfaces the baseline bundle + (optional) snapshot into output/publication/ with stable paths.",
+            level="info",
+        )
+    )
 
     try:
-        res = write_canonical_paper_directory(
+        res = write_canonical_publication_directory(
             baseline_bundle_root=baseline_root,
             snapshot_dir=snapshot_dir,
             snapshot_id=snapshot_id,
@@ -295,7 +305,7 @@ def handle_write_canonical_paper_directory() -> None:
         prompt_utils.press_enter_to_continue()
         return
 
-    print(status_messages.status(f"Wrote: {relative_path(res.paper_root)}", level="success"))
+    print(status_messages.status(f"Wrote: {relative_path(res.publication_root)}", level="success"))
     prompt_utils.press_enter_to_continue()
 
 
@@ -722,15 +732,15 @@ def handle_phase_f1_acceptance_gates() -> None:
     menu_utils.print_header("Phase F1 Acceptance Gates")
     print(
         status_messages.status(
-            "Runs two gates: (1) Phase E no-drift regression (paper toolchain) and (2) query-mode variable-N smoke.",
+            "Runs two gates: (1) no-drift regression under the pinned toolchain and (2) query-mode variable-N smoke.",
             level="info",
         )
     )
 
     repo_root = Path(__file__).resolve().parents[2]
-    gate_phase_e = repo_root / "scripts" / "paper2" / "phase_e_regression_gate.py"
+    gate_phase_e = repo_root / "scripts" / "publication" / "regression_gate_freeze.py"
     gate_smoke = repo_root / "scripts" / "operational" / "query_mode_smoke_gate.py"
-    ref_path = Path(app_config.DATA_DIR) / "archive" / "phase_e_reference_hashes.json"
+    ref_path = Path(app_config.DATA_DIR) / "archive" / "baseline_reference_hashes.json"
 
     ok_all = True
     phase_e_stdout = ""
