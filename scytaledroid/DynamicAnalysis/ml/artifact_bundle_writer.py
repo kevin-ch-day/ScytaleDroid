@@ -59,6 +59,11 @@ OKABE_ITO = {
     "gray": "#7F7F7F",
 }
 
+_LEGACY_LABEL_VARIANTS: dict[str, list[str]] = {
+    # Phase G: allow reading legacy labels from older derived CSVs, but do not emit them.
+    "com.facebook.orca": ["Facebook Messenger", "Messenger"],
+}
+
 
 @dataclass(frozen=True)
 class PhaseEArtifacts:
@@ -295,9 +300,17 @@ def _write_fig_b2(figs_dir: Path, *, provenance: dict[str, str], overwrite: bool
     if not overwrite and png.exists() and pdf.exists():
         return png, pdf
 
+    from scytaledroid.Paper.paper_contract_inputs import load_paper_contracts
+
     rows = _read_csv_rows(dataset_tables_dir() / "anomaly_prevalence_per_app_phase.csv")
-    apps = sorted({r.get("package_name") for r in rows if r.get("package_name")})
-    labels = [config.DISPLAY_NAME_BY_PACKAGE.get(a, a) for a in apps]
+    all_apps = sorted({r.get("package_name") for r in rows if r.get("package_name")})
+    contracts = load_paper_contracts(fail_closed=False)
+    # Prefer the canonical paper ordering when available.
+    if contracts.package_order:
+        apps = [p for p in contracts.package_order if p in set(all_apps)]
+    else:
+        apps = all_apps
+    labels = [contracts.display_name_by_package.get(a, config.DISPLAY_NAME_BY_PACKAGE.get(a, a)) for a in apps]
 
     def get(pkg: str, phase: str, model: str) -> float:
         for r in rows:
@@ -349,9 +362,12 @@ def _write_fig_b2_subset(
     if not overwrite and png.exists() and pdf.exists():
         return png, pdf
 
+    from scytaledroid.Paper.paper_contract_inputs import load_paper_contracts
+
     rows = _read_csv_rows(dataset_tables_dir() / "anomaly_prevalence_per_app_phase.csv")
     apps = [a for a in apps if a]
-    labels = [config.DISPLAY_NAME_BY_PACKAGE.get(a, a) for a in apps]
+    contracts = load_paper_contracts(fail_closed=False)
+    labels = [contracts.display_name_by_package.get(a, config.DISPLAY_NAME_BY_PACKAGE.get(a, a)) for a in apps]
 
     def get(pkg: str, phase: str, model: str) -> float:
         for r in rows:
@@ -393,10 +409,18 @@ def _write_fig_b2_subset(
 
 def _write_fig_b2_split(figs_dir: Path, *, overwrite: bool) -> tuple[tuple[Path, Path], tuple[Path, Path]]:
     """Split Fig B2 into two narrower panels (social media vs messaging)."""
+    from scytaledroid.Paper.paper_contract_inputs import load_paper_contracts
+
     rows = _read_csv_rows(dataset_tables_dir() / "anomaly_prevalence_per_app_phase.csv")
     all_apps = sorted({r.get("package_name") for r in rows if r.get("package_name")})
     messaging = sorted([a for a in all_apps if a in config.MESSAGING_PACKAGES])
     social = sorted([a for a in all_apps if a not in config.MESSAGING_PACKAGES])
+
+    # Preserve canonical paper ordering when available.
+    contracts = load_paper_contracts(fail_closed=False)
+    if contracts.package_order:
+        messaging = [p for p in contracts.package_order if p in set(messaging)]
+        social = [p for p in contracts.package_order if p in set(social)]
 
     social_paths = _write_fig_b2_subset(
         figs_dir,
@@ -423,9 +447,16 @@ def _write_fig_b4(figs_dir: Path, *, provenance: dict[str, str], overwrite: bool
     if not overwrite and png.exists() and pdf.exists():
         return png, pdf
 
+    from scytaledroid.Paper.paper_contract_inputs import load_paper_contracts
+
     posture = _compute_static_posture_scores()
     rdi = _load_interactive_rdi_iforest()
-    pkgs = sorted(set(posture.keys()) & set(rdi.keys()))
+    pkgs_all = list(sorted(set(posture.keys()) & set(rdi.keys())))
+    contracts = load_paper_contracts(fail_closed=False)
+    if contracts.package_order:
+        pkgs = [p for p in contracts.package_order if p in set(pkgs_all)]
+    else:
+        pkgs = pkgs_all
     xs = [posture[p][0] for p in pkgs]
     ys = [rdi[p] for p in pkgs]
 
@@ -472,7 +503,7 @@ def _write_fig_b4(figs_dir: Path, *, provenance: dict[str, str], overwrite: bool
     ax.legend(loc="upper left", fontsize=9, frameon=False)
 
     for pkg, x0, y0 in zip(pkgs, xs, ys, strict=True):
-        name = config.DISPLAY_NAME_BY_PACKAGE.get(pkg, pkg)
+        name = contracts.display_name_by_package.get(pkg, config.DISPLAY_NAME_BY_PACKAGE.get(pkg, pkg))
         ax.text(x0 + 0.8, y0 + 0.01, name, fontsize=8, alpha=0.85)
 
     subtitle = "Spearman rho: n/a" if rho is None else f"Spearman rho={rho:.2f}"

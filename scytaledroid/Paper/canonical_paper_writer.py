@@ -21,6 +21,11 @@ from pathlib import Path
 from typing import Any
 
 from scytaledroid.DynamicAnalysis.ml import deliverable_bundle_paths as paper_paths
+from scytaledroid.Paper.paper_contract_inputs import (
+    display_name_map_path,
+    load_paper_contracts,
+    paper_ordering_path,
+)
 
 
 def _sha256_file(p: Path) -> str:
@@ -98,17 +103,98 @@ def _read_table6_app_names(path: Path) -> dict[str, str]:
     return out
 
 
-def _render_risk_scoring_table_tex(rows: list[dict[str, str]], *, app_name_by_package: dict[str, str] | None = None) -> str:
-    """Compact IEEE-single-column friendly risk scoring table.
+def _split_csv_comment_header(text: str) -> tuple[list[str], list[str]]:
+    """Split a CSV file into (comment_header_lines, data_lines).
 
-    Columns are intentionally compressed:
-    - Static: score + grade (Exposure)
-    - Dynamic: score + grade (Deviation; IF primary)
-    - Final: grade only (rule-based regime mapping)
+    Comment header lines are leading lines starting with '#' or blank lines.
     """
+    lines = text.splitlines()
+    hdr: list[str] = []
+    i = 0
+    while i < len(lines):
+        ln = lines[i]
+        if not ln.strip() or ln.startswith("#"):
+            hdr.append(ln)
+            i += 1
+            continue
+        break
+    return hdr, lines[i:]
 
-    # Deterministic ordering by package name for stable diffs.
-    rows = sorted(rows, key=lambda r: (r.get("package_name") or ""))
+
+def _read_csv_skip_comments(path: Path) -> list[dict[str, str]]:
+    import csv
+
+    text = path.read_text(encoding="utf-8", errors="strict")
+    _, data_lines = _split_csv_comment_header(text)
+    data_lines = [ln for ln in data_lines if ln.strip()]
+    if not data_lines:
+        return []
+    r = csv.DictReader(data_lines)
+    return [dict(row) for row in r]
+
+
+def _write_csv_text_with_header(*, comment_header: list[str], fieldnames: list[str], rows: list[dict[str, str]]) -> str:
+    import csv
+    import io
+
+    buf = io.StringIO()
+    for ln in comment_header:
+        buf.write(ln + "\n" if not ln.endswith("\n") else ln)
+    w = csv.DictWriter(buf, fieldnames=fieldnames)
+    w.writeheader()
+    for row in rows:
+        w.writerow({k: row.get(k, "") for k in fieldnames})
+    return buf.getvalue()
+
+
+def _render_tabular_from_rows(
+    *,
+    columns: list[tuple[str, str]],
+    rows: list[dict[str, str]],
+    caption_comment: str | None = None,
+) -> str:
+    """Render a tabular-only LaTeX table with booktabs rules."""
+    keys = [k for k, _ in columns]
+    headers = [h for _, h in columns]
+    spec = "l" + ("r" * (len(columns) - 1))
+    out: list[str] = []
+    if caption_comment:
+        out.append(f"% {caption_comment}")
+    out.append(f"\\begin{{tabular}}{{{spec}}}")
+    out.append("\\toprule")
+    out.append(" & ".join(headers) + " \\\\")
+    out.append("\\midrule")
+    for r in rows:
+        vals = [str(r.get(k, "")).replace("_", "\\_") for k in keys]
+        out.append(" & ".join(vals) + " \\\\")
+    out.append("\\bottomrule")
+    out.append("\\end{tabular}")
+    return "\n".join(out) + "\n"
+
+
+_LEGACY_LABEL_VARIANTS: dict[str, list[str]] = {
+    # Phase G: allow reading older emitted labels, but paper-facing artifacts must emit only canonical aliases.
+    "com.facebook.orca": ["Facebook Messenger", "Messenger"],
+}
+
+
+def _legacy_label_variants_for_pkg(pkg: str) -> list[str]:
+    return list(_LEGACY_LABEL_VARIANTS.get(pkg, []))
+
+
+def _render_risk_scoring_tabular_tex(
+    rows: list[dict[str, str]],
+    *,
+    package_order: list[str],
+    display_name_by_package: dict[str, str],
+) -> str:
+    """Tabular-only risk scoring table (manuscript owns float/caption/label)."""
+
+    row_by_pkg = {(r.get("package_name") or "").strip(): r for r in rows if (r.get("package_name") or "").strip()}
+    ordered_pkgs = [p for p in package_order if p in row_by_pkg]
+    if len(ordered_pkgs) != len(package_order):
+        missing = sorted(set(package_order) - set(ordered_pkgs))
+        raise RuntimeError(f"Risk table missing packages: {missing}")
 
     def fmt_score(x: str) -> str:
         try:
@@ -121,53 +207,29 @@ def _render_risk_scoring_table_tex(rows: list[dict[str, str]], *, app_name_by_pa
         return {"low": "L", "medium": "M", "high": "H"}.get(s, (g or "").strip()[:1].upper() or "n/a")
 
     lines: list[str] = []
-    lines.append("% Risk scoring & grades (compact; IEEE single-column friendly).")
+    lines.append("% Risk scoring & grades (tabular-only; manuscript owns float/caption/label).")
     lines.append("% Notes: Dynamic score is deviation (RDI-derived), not measured security harm.")
-    lines.append("\\begin{table}[t]")
-    lines.append("\\centering")
-    lines.append("\\scriptsize")
-    lines.append("\\setlength{\\tabcolsep}{3pt}")
-    lines.append("\\renewcommand{\\arraystretch}{1.05}")
     lines.append("\\begin{tabular}{lccc}")
     lines.append("\\toprule")
     lines.append("App & Static Exposure (score/grade) & Dynamic Deviation (score/grade) & Final Regime (grade) \\\\")
     lines.append("\\midrule")
-    app_name_by_package = app_name_by_package or {}
-    for r in rows:
-        pkg = (r.get("package_name") or "").strip()
-        app_disp = app_name_by_package.get(pkg) or pkg
-        if not app_disp:
-            app_disp = "n/a"
+    for pkg in ordered_pkgs:
+        r = row_by_pkg[pkg]
+        app_disp = display_name_by_package.get(pkg, pkg) or pkg
         static_cell = f"{fmt_score(r.get('static_exposure_score',''))}/{fmt_grade(r.get('exposure_grade',''))}"
         dyn_cell = f"{fmt_score(r.get('dynamic_deviation_score_if',''))}/{fmt_grade(r.get('deviation_grade_if',''))}"
         final_cell = fmt_grade(r.get("final_grade_if", ""))
         lines.append(f"{app_disp} & {static_cell} & {dyn_cell} & {final_cell} \\\\")
     lines.append("\\bottomrule")
     lines.append("\\end{tabular}")
-    lines.append(
-        "\\caption{Risk scoring and regime grades per app (frozen cohort). Static Exposure uses StaticPostureScore. "
-        "Dynamic Deviation reflects runtime behavioral deviation from a baseline distribution (Isolation Forest, interactive; "
-        "deviation is not measured harm). Final Regime (grade) is rule-based and not a fused scalar.}"
-    )
-    lines.append("\\label{tab:risk_scoring}")
-    lines.append("\\end{table}")
     return "\n".join(lines) + "\n"
 
 
-def _render_masvs_domain_mapping_table_tex() -> str:
-    """Small, explanatory MASVS mapping table (paper-only; no counts/compliance).
-
-    Purpose: provide a semantic anchor for what "Static Exposure" covers without
-    introducing per-app MASVS findings or compliance claims.
-    """
+def _render_masvs_domain_mapping_tabular_tex() -> str:
+    """Tabular-only MASVS mapping table (context only; no counts/compliance)."""
 
     lines: list[str] = []
     lines.append("% MASVS domain mapping (context only; not compliance; no per-app counts).")
-    lines.append("\\begin{table}[t]")
-    lines.append("\\centering")
-    lines.append("\\footnotesize")
-    lines.append("\\setlength{\\tabcolsep}{3pt}")
-    lines.append("\\renewcommand{\\arraystretch}{1.05}")
     lines.append("\\begin{tabular}{lll}")
     lines.append("\\toprule")
     lines.append("MASVS Domain & Example Signals & Used Where \\\\")
@@ -177,12 +239,6 @@ def _render_masvs_domain_mapping_table_tex() -> str:
     lines.append("MASVS-PRIVACY & High-value permission surface & Static Exposure \\\\")
     lines.append("\\bottomrule")
     lines.append("\\end{tabular}")
-    lines.append(
-        "\\caption{MASVS domain mapping for Static Exposure context. This table is explanatory only and does not "
-        "represent MASVS compliance, pass/fail status, or per-app findings counts.}"
-    )
-    lines.append("\\label{tab:masvs_mapping}")
-    lines.append("\\end{table}")
     return "\n".join(lines) + "\n"
 
 
@@ -289,18 +345,114 @@ def write_canonical_paper_directory(
             "toolchain.txt",
             "phase_e_closure_record.json",
             "paper_snapshot_id.txt",
+            # Phase G contracts / gates.
+            "display_name_map.json",
+            "paper_ordering.json",
+            "paper_contract.json",
+            "paper_traceability.csv",
+            "crosschecks.json",
         },
     )
 
+    contracts = load_paper_contracts(fail_closed=True)
+
     # Surface Phase E tables (csv + tex) that are locked into the main paper.
     base_tables = baseline_bundle_root / "tables"
-    (tables_dir / "table_masvs_domain_mapping.tex").write_text(_render_masvs_domain_mapping_table_tex(), encoding="utf-8")
-    for stem in (
-        "table_4_signature_deltas",
-        "table_7_exposure_deviation_summary",
-    ):
-        _copy(base_tables / f"{stem}.tex", tables_dir / f"{stem}.tex", overwrite=overwrite)
-        _copy(base_tables / f"{stem}.csv", tables_dir / f"{stem}.csv", overwrite=overwrite)
+    (tables_dir / "table_masvs_domain_mapping.tex").write_text(
+        _render_masvs_domain_mapping_tabular_tex(), encoding="utf-8"
+    )
+
+    # Rewrite Table 4/7 to enforce Phase G ordering + alias contracts (paper-facing).
+    # This does not change values; it only stabilizes ordering/labels and avoids nested floats in LaTeX.
+    # Table 7: keyed by package_name.
+    t7_src = base_tables / "table_7_exposure_deviation_summary.csv"
+    t7_comment, _ = _split_csv_comment_header(t7_src.read_text(encoding="utf-8", errors="strict"))
+    t7_rows = _read_csv_skip_comments(t7_src)
+    t7_by_pkg = {(r.get("package_name") or "").strip(): r for r in t7_rows if (r.get("package_name") or "").strip()}
+    ordered_t7: list[dict[str, str]] = []
+    for pkg in contracts.package_order:
+        if pkg not in t7_by_pkg:
+            raise RuntimeError(f"Missing Table 7 row for package: {pkg}")
+        row = dict(t7_by_pkg[pkg])
+        row["app"] = contracts.display_name_by_package.get(pkg, row.get("app") or pkg)
+        ordered_t7.append(row)
+    if ordered_t7:
+        (tables_dir / "table_7_exposure_deviation_summary.csv").write_text(
+            _write_csv_text_with_header(
+                comment_header=t7_comment,
+                fieldnames=list(ordered_t7[0].keys()),
+                rows=ordered_t7,
+            ),
+            encoding="utf-8",
+        )
+    (tables_dir / "table_7_exposure_deviation_summary.tex").write_text(
+        _render_tabular_from_rows(
+            columns=[
+                ("app", "App"),
+                ("package_name", "Package"),
+                ("static_posture_score", "Exposure (StaticPostureScore)"),
+                ("exposure_grade", "Exposure Grade"),
+                ("rdi_if_interactive", "Deviation (RDI IF, interactive)"),
+                ("deviation_grade_if", "Deviation Grade (IF)"),
+                ("regime_if", "Regime (IF)"),
+                ("rdi_ocsvm_interactive", "RDI OC-SVM (interactive)"),
+                ("training_mode_if", "Train (IF)"),
+                ("notes", "Notes"),
+            ],
+            rows=ordered_t7,
+            caption_comment=(
+                "Table 7: Interpretive Exposure–Deviation Summary over the frozen 12-app dataset. "
+                "Exposure Grade and Deviation Grade are rank-based tertile bins (4/4/4) computed on full-precision values "
+                "with deterministic tie-breaking by package_name. Grades and quadrant labels are interpretive overlays "
+                "(not system outputs) and do not represent measured security risk."
+            ),
+        ),
+        encoding="utf-8",
+    )
+
+    # Table 4: keyed by app label only (legacy); remap to canonical alias per package.
+    t4_src = base_tables / "table_4_signature_deltas.csv"
+    t4_comment, _ = _split_csv_comment_header(t4_src.read_text(encoding="utf-8", errors="strict"))
+    t4_rows = _read_csv_skip_comments(t4_src)
+    t4_by_app = {(r.get("app") or "").strip(): r for r in t4_rows if (r.get("app") or "").strip()}
+    ordered_t4: list[dict[str, str]] = []
+    for pkg in contracts.package_order:
+        canonical = contracts.display_name_by_package.get(pkg, pkg)
+        candidates = [canonical] + _legacy_label_variants_for_pkg(pkg)
+        found: dict[str, str] | None = None
+        for label in candidates:
+            if label in t4_by_app:
+                found = dict(t4_by_app[label])
+                break
+        if not found:
+            raise RuntimeError(f"Missing Table 4 row for package {pkg}; tried labels {candidates}")
+        found["app"] = canonical
+        ordered_t4.append(found)
+    if ordered_t4:
+        (tables_dir / "table_4_signature_deltas.csv").write_text(
+            _write_csv_text_with_header(
+                comment_header=t4_comment,
+                fieldnames=list(ordered_t4[0].keys()),
+                rows=ordered_t4,
+            ),
+            encoding="utf-8",
+        )
+    (tables_dir / "table_4_signature_deltas.tex").write_text(
+        _render_tabular_from_rows(
+            columns=[
+                ("app", "App"),
+                ("bytes_p50_delta", "Bytes/s Δ p50"),
+                ("bytes_p95_delta", "Bytes/s Δ p95"),
+                ("pps_p50_delta", "PPS Δ p50"),
+                ("pps_p95_delta", "PPS Δ p95"),
+                ("pkt_size_p50_delta", "PktSz Δ p50"),
+                ("pkt_size_p95_delta", "PktSz Δ p95"),
+            ],
+            rows=ordered_t4,
+            caption_comment="Table 4: Behavioral signature deltas (idle vs interactive), window stats (p50/p95 deltas).",
+        ),
+        encoding="utf-8",
+    )
 
     # IEEE style touch-up for surfaced tabular-only TeX tables (booktabs rules).
     for stem in ("table_4_signature_deltas", "table_7_exposure_deviation_summary"):
@@ -329,6 +481,21 @@ def write_canonical_paper_directory(
     base_manifest = baseline_bundle_root / "manifest"
     _copy(base_manifest / "dataset_freeze.json", manifests_dir / "dataset_freeze.json", overwrite=overwrite)
     _copy(base_manifest / "phase_e_closure_record.json", manifests_dir / "phase_e_closure_record.json", overwrite=overwrite)
+    _copy(display_name_map_path(), manifests_dir / "display_name_map.json", overwrite=overwrite)
+    _copy(paper_ordering_path(), manifests_dir / "paper_ordering.json", overwrite=overwrite)
+
+    # Phase G crosschecks prefer a self-contained source for "B2/threshold truth" rather than reading from gitignored data/.
+    # This is a pure copy; it does not regenerate or alter any values.
+    try:
+        internal_inputs = (paper_root / "internal" / "baseline" / "inputs")
+        internal_inputs.mkdir(parents=True, exist_ok=True)
+        repo_root = Path(__file__).resolve().parents[2]
+        src = repo_root / "data" / "anomaly_prevalence_per_app_phase.csv"
+        if src.exists():
+            _copy(src, internal_inputs / "anomaly_prevalence_per_app_phase.csv", overwrite=overwrite)
+    except Exception:
+        # Non-fatal: gates will fall back (or fail-closed) depending on posture.
+        pass
 
     # Prefer the snapshot's pinned toolchain text if present; fallback to repo pins.
     toolchain_src = None
@@ -362,7 +529,11 @@ def write_canonical_paper_directory(
         except Exception:
             app_names = {}
         (tables_dir / "table_risk_scoring.tex").write_text(
-            _render_risk_scoring_table_tex(risk_rows, app_name_by_package=app_names),
+            _render_risk_scoring_tabular_tex(
+                risk_rows,
+                package_order=contracts.package_order,
+                display_name_by_package=contracts.display_name_by_package,
+            ),
             encoding="utf-8",
         )
 

@@ -156,7 +156,7 @@ def _show_summary() -> None:
     dyn_size = _dir_size_bytes(dyn_evidence)
     if dyn_size > 5 * 1024 * 1024 * 1024:
         hints.append(
-            "Dynamic evidence is large: consider deleting INVALID runs (Workspace & Evidence -> Delete INVALID dataset runs)."
+            "Dynamic evidence is large: consider cleanup of invalid/ghost runs (Workspace & Evidence -> Cleanup dynamic evidence workspace)."
         )
     if cache_size > 1024 * 1024 * 1024:
         hints.append("Caches exceed 1GB: clear output cache if disk space is tight.")
@@ -325,15 +325,13 @@ def workspace_menu() -> None:
             menu_utils.MenuOption("2", "Verify evidence packs (overview)"),
             menu_utils.MenuOption("3", "Quick health check (packs/missing/bad + PCAP sizes)"),
             menu_utils.MenuOption("4", "View app runs (details)"),
-            menu_utils.MenuOption("5", "Delete INVALID dataset runs (local only)"),
-            menu_utils.MenuOption("6", "Recompute dataset tracker (from evidence packs)"),
+            menu_utils.MenuOption("5", "Recompute dataset tracker (from evidence packs)"),
+            menu_utils.MenuOption("6", "Rebuild DB index from evidence packs (derived)"),
             menu_utils.MenuOption("7", "Network audit report (trends)"),
-            menu_utils.MenuOption("8", "Recompute PCAP artifacts (pcap_report + pcap_features)"),
+            menu_utils.MenuOption("8", "Cleanup dynamic evidence workspace (safe)"),
             menu_utils.MenuOption("9", "Deep checks (DB vs manifest + transport + indicator quality)"),
-            menu_utils.MenuOption("10", "Cleanup dynamic evidence workspace (safe)"),
-            menu_utils.MenuOption("11", "Prune derived dynamic DB orphans (safe)"),
-            menu_utils.MenuOption("12", "Prune legacy ML artifacts on disk (safe)"),
-            menu_utils.MenuOption("13", "Reset static analysis data (destructive)"),
+            menu_utils.MenuOption("10", "Prune derived dynamic DB orphans (safe)"),
+            menu_utils.MenuOption("11", "Prune legacy ML artifacts on disk (safe)"),
         ]
         spec_kwargs = display_settings.apply_menu_defaults(
             {"items": items, "exit_label": "Back", "show_exit": True}
@@ -358,37 +356,40 @@ def workspace_menu() -> None:
 
             evidence_view_app_runs(pause=True)
         elif choice == "5":
-            from scytaledroid.DynamicAnalysis.tools.evidence.menu import evidence_delete_invalid_dataset_runs
-
-            evidence_delete_invalid_dataset_runs(pause=True)
-        elif choice == "6":
             from scytaledroid.DynamicAnalysis.tools.evidence.menu import evidence_recompute_dataset_tracker
 
             evidence_recompute_dataset_tracker(pause=True)
+        elif choice == "6":
+            from scytaledroid.DynamicAnalysis.storage.index_from_evidence import index_dynamic_evidence_packs_to_db
+
+            root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+            print()
+            menu_utils.print_header("Rebuild DB Index From Evidence Packs")
+            print(status_messages.status("DB is a derived index. Evidence packs remain authoritative.", level="info"))
+            if not prompt_utils.prompt_yes_no("Rebuild DB index now?", default=True):
+                prompt_utils.press_enter_to_continue()
+                continue
+            res = index_dynamic_evidence_packs_to_db(root)
+            print(status_messages.status(f"Scanned={res.get('scanned')} ok={res.get('ok')}", level="success"))
+            if res.get("errors"):
+                print(status_messages.status(f"Errors (sample): {', '.join(res.get('errors') or [])}", level="warn"))
+            prompt_utils.press_enter_to_continue()
         elif choice == "7":
             from scytaledroid.DynamicAnalysis.tools.evidence.menu import evidence_network_audit_report
 
             evidence_network_audit_report(pause=True)
         elif choice == "8":
-            from scytaledroid.DynamicAnalysis.tools.evidence.menu import evidence_recompute_pcap_artifacts
+            from scytaledroid.DynamicAnalysis.tools.evidence.menu import evidence_cleanup_workspace
 
-            evidence_recompute_pcap_artifacts(pause=True)
+            evidence_cleanup_workspace(pause=True)
         elif choice == "9":
             from scytaledroid.DynamicAnalysis.tools.evidence.menu import evidence_deep_checks
 
             evidence_deep_checks(pause=True)
         elif choice == "10":
-            from scytaledroid.DynamicAnalysis.tools.evidence.menu import evidence_cleanup_workspace
-
-            evidence_cleanup_workspace(pause=True)
-        elif choice == "11":
             _prune_dynamic_db_orphans()
-        elif choice == "12":
+        elif choice == "11":
             _prune_legacy_ml_artifacts()
-        elif choice == "13":
-            from scytaledroid.Database.db_utils.menus import health_checks
-
-            health_checks.prompt_reset_static_data()
         else:
             print(status_messages.status("Option not available yet.", level="warn"))
             prompt_utils.press_enter_to_continue()

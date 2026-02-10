@@ -44,25 +44,9 @@ def _read_json(path: Path) -> dict | None:
 
 
 def _load_app_labels(packages: set[str]) -> dict[str, str]:
-    if not packages:
-        return {}
-    try:
-        from scytaledroid.Database.db_core import run_sql
-    except Exception:
-        return {}
-    try:
-        placeholders = ",".join(["%s"] * len(packages))
-        sql = f"SELECT package_name, display_name FROM apps WHERE package_name IN ({placeholders})"
-        rows = run_sql(sql, tuple(sorted(packages)), fetch="all", dictionary=True)
-    except Exception:
-        return {}
-    mapping: dict[str, str] = {}
-    for row in rows or []:
-        pkg = str(row.get("package_name") or "").strip()
-        name = str(row.get("display_name") or "").strip()
-        if pkg and name:
-            mapping[pkg] = name
-    return mapping
+    from scytaledroid.Database.db_func.apps.app_labels import fetch_display_name_map
+
+    return fetch_display_name_map(packages)
 
 
 def _list_run_manifests(root: Path) -> list[Path]:
@@ -229,6 +213,11 @@ def evidence_cleanup_workspace(*, pause: bool = True) -> None:
 
 
 def _runs_for_package(root: Path, package_name: str) -> list[dict]:
+    # Prefer the DB index when available to avoid repeated JSON scanning.
+    db_runs = _runs_for_package_db(package_name)
+    if db_runs:
+        return db_runs
+
     runs: list[dict] = []
     for mf in _list_run_manifests(root):
         m = _read_json(mf) or {}
@@ -255,6 +244,121 @@ def _runs_for_package(root: Path, package_name: str) -> list[dict]:
         )
     # ended_at is iso, sort descending when possible; fallback by run_id
     return sorted(runs, key=lambda r: (r.get("ended_at") or "", r.get("run_id") or ""), reverse=True)
+
+
+def _runs_for_package_db(package_name: str) -> list[dict]:
+    """Best-effort DB-backed run listing for a package.
+
+    Returns [] on any DB/config failure; caller falls back to filesystem scan.
+    """
+    pkg = str(package_name or "").strip()
+    if not pkg:
+        return []
+    try:
+        from scytaledroid.Database.db_core import run_sql
+    except Exception:
+        return []
+    try:
+        rows = run_sql(
+            """
+            SELECT
+              dynamic_run_id,
+              ended_at_utc,
+              operator_run_profile,
+              operator_interaction_level,
+              operator_messaging_activity,
+              tier,
+              countable,
+              valid_dataset_run,
+              invalid_reason_code,
+              sampling_duration_seconds,
+              pcap_bytes,
+              pcap_valid,
+              grade
+            FROM dynamic_sessions
+            WHERE package_name = %s
+            ORDER BY ended_at_utc DESC, dynamic_run_id DESC
+            """,
+            (pkg,),
+            fetch="all",
+            dictionary=True,
+        ) or []
+    except Exception:
+        return []
+
+    out: list[dict] = []
+    for r in rows:
+        rid = str(r.get("dynamic_run_id") or "").strip()
+        if not rid:
+            continue
+        ended = r.get("ended_at_utc")
+        ended_s = str(ended) if ended is not None else ""
+        tier = str(r.get("tier") or "").strip().lower()
+        grade = str(r.get("grade") or "").strip()
+        valid_raw = r.get("valid_dataset_run")
+        valid = True if valid_raw in (1, True, "1", "true", "TRUE") else (False if valid_raw in (0, False, "0", "false", "FALSE") else None)
+        countable_raw = r.get("countable")
+        countable = True if countable_raw in (1, True, "1", "true", "TRUE") else (False if countable_raw in (0, False, "0", "false", "FALSE") else None)
+        invalid_reason = str(r.get("invalid_reason_code") or "").strip() or None
+        out.append(
+            {
+                "run_id": rid,
+                "ended_at": ended_s,
+                "run_profile": str(r.get("operator_run_profile") or ""),
+                "interaction_level": str(r.get("operator_interaction_level") or ""),
+                "messaging_activity": str(r.get("operator_messaging_activity") or ""),
+                # Evidence packs remain authoritative. When the DB index is built from
+                # evidence packs, these fields mirror run_manifest.json for convenience.
+                "valid": valid if tier == "dataset" else None,
+                "reason": invalid_reason or (grade or "—"),
+                "countable": countable,
+                "sampling_s": r.get("sampling_duration_seconds"),
+                "pcap_size_bytes": r.get("pcap_bytes") or None,
+            }
+        )
+    return out
+
+
+def _list_packages_db() -> list[str]:
+    """Best-effort list of packages with dynamic_sessions rows (DB index)."""
+    try:
+        from scytaledroid.Database.db_core import run_sql
+    except Exception:
+        return []
+    try:
+        rows = run_sql(
+            """
+            SELECT DISTINCT package_name
+            FROM dynamic_sessions
+            WHERE package_name IS NOT NULL AND package_name <> ''
+            ORDER BY package_name ASC
+            """,
+            fetch="all",
+            dictionary=False,
+        ) or []
+    except Exception:
+        return []
+
+    out: list[str] = []
+    for r in rows:
+        pkg = None
+        if isinstance(r, (list, tuple)) and r:
+            pkg = r[0]
+        elif isinstance(r, dict):
+            pkg = r.get("package_name")
+        pkg = str(pkg or "").strip()
+        if pkg:
+            out.append(pkg)
+    return out
+
+
+def _fetch_paper2_ordering_db() -> list[str]:
+    """Best-effort fetch of DB-backed 'paper2' ordering (post-paper hygiene)."""
+    try:
+        from scytaledroid.Database.db_func.apps.app_ordering import fetch_ordering
+    except Exception:
+        return []
+    return fetch_ordering("paper2")
 
 
 def _render_app_runs(root: Path, display_name: str, package_name: str, runs: list[dict]) -> None:
@@ -314,75 +418,37 @@ def evidence_deep_checks(*, pause: bool = True) -> None:
         prompt_utils.press_enter_to_continue()
 
 
-def evidence_recompute_pcap_artifacts(*, pause: bool = True) -> None:
-    """Recompute pcap_report.json + pcap_features.json for existing packs (pre-freeze)."""
-    root = _dynamic_evidence_root()
-    if not root.exists():
-        print(status_messages.status("No evidence packs found.", level="warn"))
-        if pause:
-            prompt_utils.press_enter_to_continue()
-        return
-
-    # Paper #2 (PM-locked): once the canonical checksummed freeze anchor exists,
-    # we must not mutate evidence packs in-place. Any recomputation must be
-    # versioned (new dataset or versioned derived outputs), not overwriting.
-    from scytaledroid.DynamicAnalysis.ml.ml_parameters_paper2 import FREEZE_CANONICAL_FILENAME
-
-    freeze_anchor = Path(app_config.DATA_DIR) / "archive" / FREEZE_CANONICAL_FILENAME
-    if freeze_anchor.exists():
-        print()
-        menu_utils.print_header("Recompute PCAP Artifacts")
-        print(
-            status_messages.status(
-                f"Dataset is frozen (canonical freeze anchor exists: {freeze_anchor}). Recomputing would mutate evidence packs.",
-                level="warn",
-            )
-        )
-        print(
-            status_messages.status(
-                "Blocked by design. For Paper #2, do not overwrite frozen inputs. If a bug is discovered, version outputs or version the dataset.",
-                level="info",
-            )
-        )
-        if pause:
-            prompt_utils.press_enter_to_continue()
-        return
-
-    print()
-    menu_utils.print_header("Recompute PCAP Artifacts", "Re-run pcap_report + pcap_features (pre-freeze only)")
-    print(status_messages.status("This overwrites analysis artifacts inside evidence packs.", level="warn"))
-    confirm = prompt_utils.prompt_text("Type RECOMPUTE to continue", required=False).strip()
-    if confirm != "RECOMPUTE":
-        print(status_messages.status("Cancelled.", level="info"))
-        if pause:
-            prompt_utils.press_enter_to_continue()
-        return
-
-    from scytaledroid.DynamicAnalysis.tools.evidence.pcap_recompute import recompute_pcap_artifacts
-
-    res = recompute_pcap_artifacts(root, dry_run=False)
-    print(status_messages.status(f"Scanned={res.scanned} updated={res.updated} skipped={res.skipped} errors={res.errors}", level="info"))
-    if pause:
-        prompt_utils.press_enter_to_continue()
-
-
 def evidence_view_app_runs(*, pause: bool = True) -> None:
     root = _dynamic_evidence_root()
-    manifests = _list_run_manifests(root)
-    packages = set()
-    for mf in manifests:
-        m = _read_json(mf) or {}
-        target = m.get("target") or {}
-        pkg = target.get("package_name") if isinstance(target, dict) else None
-        if isinstance(pkg, str) and pkg.strip():
-            packages.add(pkg.strip())
+    packages = set(_list_packages_db())
+    if not packages:
+        manifests = _list_run_manifests(root)
+        packages = set()
+        for mf in manifests:
+            m = _read_json(mf) or {}
+            target = m.get("target") or {}
+            pkg = target.get("package_name") if isinstance(target, dict) else None
+            if isinstance(pkg, str) and pkg.strip():
+                packages.add(pkg.strip())
     if not packages:
         print(status_messages.status("No runs available.", level="warn"))
         if pause:
             prompt_utils.press_enter_to_continue()
         return
     labels = _load_app_labels(packages)
-    app_list = sorted([(labels.get(p, p), p) for p in packages], key=lambda x: x[0].lower())
+    app_list: list[tuple[str, str]] = []
+    ordered = _fetch_paper2_ordering_db()
+    if ordered:
+        seen = set()
+        for pkg in ordered:
+            if pkg in packages:
+                app_list.append((labels.get(pkg, pkg), pkg))
+                seen.add(pkg)
+        # Append any unordered packages deterministically.
+        tail = sorted([(labels.get(p, p), p) for p in packages if p not in seen], key=lambda x: x[0].lower())
+        app_list.extend(tail)
+    else:
+        app_list = sorted([(labels.get(p, p), p) for p in packages], key=lambda x: x[0].lower())
 
     print()
     menu_utils.print_header("Select App", "View runs and reasons")
@@ -486,98 +552,6 @@ def evidence_view_app_runs(*, pause: bool = True) -> None:
     recompute_dataset_tracker()
     if pause:
         prompt_utils.press_enter_to_continue()
-
-
-def evidence_delete_invalid_dataset_runs(*, pause: bool = True) -> None:
-    root = _dynamic_evidence_root()
-    from scytaledroid.DynamicAnalysis.tools.evidence.verify_cli import run_dynamic_evidence_verify
-
-    report = run_dynamic_evidence_verify(write_json=False, enrich_db_labels=True, show_reason_column=True)
-    ghost_dirs = [g for g in (report.get("ghost_dirs") or []) if isinstance(g, str) and g.strip()]
-    invalid = [
-        r
-        for r in (report.get("packs") or [])
-        # Delete INVALID runs regardless of whether they're countable/extras. Invalid
-        # evidence packs are never part of the frozen dataset and keeping them tends
-        # to confuse operators and inflate workspace size.
-        if isinstance(r, dict) and r.get("valid_dataset_run") is False
-    ]
-    if not invalid and not ghost_dirs:
-        print(status_messages.status("No INVALID runs or ghost dirs found to delete.", level="info"))
-        if pause:
-            prompt_utils.press_enter_to_continue()
-        return
-
-    print()
-    if ghost_dirs:
-        print(status_messages.status(f"Ghost dirs to delete: {len(ghost_dirs)}", level="warn"))
-        print(status_messages.status(", ".join(ghost_dirs), level="warn"))
-        print()
-    if invalid:
-        print(status_messages.status(f"INVALID runs to delete: {len(invalid)}", level="warn"))
-        for row in invalid:
-            rid = str(row.get("run_id") or "")[:8]
-            name = str(row.get("display_name") or row.get("package_name") or "_unknown")
-            reason = str(row.get("invalid_reason_code") or "UNKNOWN")
-            print(status_messages.status(f"{rid} {name} INVALID:{reason}", level="warn"))
-
-    total = len(invalid) + len(ghost_dirs)
-    if not prompt_utils.prompt_yes_no(f"Delete these {total} item(s) locally?", default=False):
-        return
-
-    deleted = 0
-    for row in invalid:
-        run_id = str(row.get("run_id") or "")
-        if run_id and _safe_rmtree(root / run_id, root=root):
-            deleted += 1
-    for gid in ghost_dirs:
-        if _safe_rmtree(root / gid, root=root):
-            deleted += 1
-    print(status_messages.status(f"Deleted {deleted} item(s).", level="success"))
-
-    from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import recompute_dataset_tracker
-
-    recompute_dataset_tracker()
-    if pause:
-        prompt_utils.press_enter_to_continue()
-
-
-def evidence_write_dataset_freeze_manifest(*, pause: bool = True) -> None:
-    root = _dynamic_evidence_root()
-    if not root.exists():
-        print(status_messages.status("No evidence packs found.", level="warn"))
-        if pause:
-            prompt_utils.press_enter_to_continue()
-        return
-
-    print()
-    menu_utils.print_header("Dataset Freeze Manifest", "Paper #2 dataset anchor (does not mutate packs)")
-    out_dir = Path(app_config.DATA_DIR) / "archive"
-    canonical = out_dir / "dataset_freeze.json"
-    if canonical.exists():
-        print(status_messages.status(f"Canonical freeze file already exists: {canonical}", level="warn"))
-        if not prompt_utils.prompt_yes_no("Write an additional timestamped freeze manifest?", default=False):
-            print(status_messages.status("Cancelled.", level="info"))
-            if pause:
-                prompt_utils.press_enter_to_continue()
-            return
-
-    from scytaledroid.DynamicAnalysis.tools.evidence.freeze_manifest import write_dataset_freeze_manifest
-
-    try:
-        path = write_dataset_freeze_manifest(evidence_root=root, out_dir=out_dir, also_write_canonical=not canonical.exists())
-    except Exception as exc:  # noqa: BLE001
-        print(status_messages.status(f"Freeze manifest failed: {exc}", level="error"))
-        if pause:
-            prompt_utils.press_enter_to_continue()
-        return
-
-    print(status_messages.status(f"Freeze manifest written: {path}", level="success"))
-    if not canonical.exists():
-        print(status_messages.status(f"Canonical freeze written: {out_dir / 'dataset_freeze.json'}", level="success"))
-    if pause:
-        prompt_utils.press_enter_to_continue()
-
 
 def evidence_verify_freeze_immutability(*, pause: bool = True) -> None:
     """Verify the frozen inputs for included runs have not changed since freeze."""
@@ -686,15 +660,12 @@ def evidence_network_audit_report(*, pause: bool = True) -> None:
 
 
 __all__ = [
-    "evidence_delete_invalid_dataset_runs",
     "evidence_cleanup_workspace",
     "evidence_deep_checks",
-    "evidence_recompute_pcap_artifacts",
     "evidence_network_audit_report",
     "evidence_quick_health_check",
     "evidence_recompute_dataset_tracker",
     "evidence_verify_overview",
     "evidence_verify_freeze_immutability",
     "evidence_view_app_runs",
-    "evidence_write_dataset_freeze_manifest",
 ]

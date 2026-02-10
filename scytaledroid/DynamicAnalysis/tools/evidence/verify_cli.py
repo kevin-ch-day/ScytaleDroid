@@ -283,25 +283,9 @@ def _load_app_labels(packages: set[str]) -> dict[str, str]:
 
     This is optional enrichment. Any failure returns an empty mapping.
     """
-    if not packages:
-        return {}
-    try:
-        from scytaledroid.Database.db_core import run_sql
-    except Exception:
-        return {}
-    try:
-        placeholders = ",".join(["%s"] * len(packages))
-        sql = f"SELECT package_name, display_name FROM apps WHERE package_name IN ({placeholders})"
-        rows = run_sql(sql, tuple(sorted(packages)), fetch="all", dictionary=True)
-    except Exception:
-        return {}
-    mapping: dict[str, str] = {}
-    for row in rows or []:
-        pkg = str(row.get("package_name") or "").strip()
-        name = str(row.get("display_name") or "").strip()
-        if pkg and name:
-            mapping[pkg] = name
-    return mapping
+    from scytaledroid.Database.db_func.apps.app_labels import fetch_display_name_map
+
+    return fetch_display_name_map(packages)
 
 
 def _pcap_path_from_manifest(run_dir: Path, manifest: dict[str, Any]) -> Path | None:

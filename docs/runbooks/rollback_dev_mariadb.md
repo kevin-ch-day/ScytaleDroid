@@ -14,7 +14,7 @@ mysql -u scytale_cli -p'SCYTALE_PASS' scytaledroid_droid_intel_db_dev < /tmp/scy
 
 Notes:
 - Run from Fedora host where MariaDB is local.
-- Replace `SCYTALE_PASS` with the actual password (Password123! in DEV).
+- Replace `SCYTALE_PASS` with the actual password for your environment.
 - Ensure no processes are writing during restore.
 - After restore, re-run `python -m scytaledroid.Database.tools.db_status` to confirm schema_version and connectivity.
 

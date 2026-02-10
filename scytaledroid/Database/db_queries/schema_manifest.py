@@ -9,6 +9,7 @@ from .canonical import schema as canonical_schema
 from .dynamic import schema as dynamic_schema
 from .harvest import device_inventory, dynamic_loading
 from .permissions import governance_snapshot, permission_support
+from .analysis import schema as analysis_schema
 from .static_analysis import (
     risk_scores,
     static_findings,
@@ -107,6 +108,9 @@ def ordered_schema_statements() -> list[str]:
 
     # Dynamic analysis sessions + telemetry (Phase 2).
     statements.extend(list(getattr(dynamic_schema, "_DDL_STATEMENTS", [])))
+
+    # Post-paper analysis registry + derived aggregates (Phase H).
+    statements.extend(list(getattr(analysis_schema, "_DDL_STATEMENTS", [])))
 
     # Web-owned additive tables.
     statements.extend(

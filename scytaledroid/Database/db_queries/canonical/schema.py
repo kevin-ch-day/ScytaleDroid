@@ -11,6 +11,59 @@ import re
 from ...db_core import db_queries as core_q
 
 _DDL_STATEMENTS: list[str] = [
+    # Core dictionaries used by many flows (device inventory, profiles, publishers).
+    """
+    CREATE TABLE IF NOT EXISTS android_app_categories (
+      category_id   INT            NOT NULL AUTO_INCREMENT,
+      category_name VARCHAR(191)   NOT NULL,
+      created_at    TIMESTAMP      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (category_id),
+      UNIQUE KEY ux_app_categories_name (category_name)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS android_app_profiles (
+      profile_key   VARCHAR(64)    NOT NULL,
+      display_name  VARCHAR(191)   NOT NULL,
+      description   TEXT           DEFAULT NULL,
+      scope_group   VARCHAR(64)    DEFAULT NULL,
+      sort_order    INT            DEFAULT 0,
+      is_active     TINYINT(1)     NOT NULL DEFAULT 1,
+      created_at    TIMESTAMP      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at    TIMESTAMP      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (profile_key),
+      KEY idx_profiles_active (is_active),
+      KEY idx_profiles_sort (sort_order)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS android_app_publishers (
+      publisher_key VARCHAR(64)    NOT NULL,
+      display_name  VARCHAR(191)   NOT NULL,
+      description   TEXT           DEFAULT NULL,
+      sort_order    INT            DEFAULT 0,
+      is_active     TINYINT(1)     NOT NULL DEFAULT 1,
+      created_at    TIMESTAMP      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at    TIMESTAMP      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (publisher_key),
+      KEY idx_publishers_active (is_active),
+      KEY idx_publishers_sort (sort_order)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS android_publisher_prefix_rules (
+      rule_id       BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      publisher_key VARCHAR(64)     NOT NULL,
+      match_type    VARCHAR(16)     NOT NULL, -- EXACT|PREFIX
+      pattern       VARCHAR(255)    NOT NULL,
+      priority      INT             NOT NULL DEFAULT 100,
+      is_active     TINYINT(1)      NOT NULL DEFAULT 1,
+      created_at    TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (rule_id),
+      KEY idx_pub_rules_active (is_active, priority),
+      KEY idx_pub_rules_publisher (publisher_key)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
     # Apps and Versions
     """
     CREATE TABLE IF NOT EXISTS apps (
@@ -19,15 +72,32 @@ _DDL_STATEMENTS: list[str] = [
       display_name  VARCHAR(255)    DEFAULT NULL,
       category_id   INT             DEFAULT NULL,
       profile_key   VARCHAR(64)     NOT NULL DEFAULT 'UNCLASSIFIED',
+      publisher_key VARCHAR(64)     NOT NULL DEFAULT 'UNKNOWN',
       created_at    TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at    TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       PRIMARY KEY (id),
       UNIQUE KEY ux_apps_package (package_name),
       KEY idx_app_category_id (category_id),
       KEY idx_apps_profile_key (profile_key),
+      KEY idx_apps_publisher_key (publisher_key),
       CONSTRAINT fk_app_category FOREIGN KEY (category_id)
         REFERENCES android_app_categories (category_id)
         ON DELETE SET NULL ON UPDATE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
+    """
+    ALTER TABLE apps
+      ADD COLUMN IF NOT EXISTS publisher_key VARCHAR(64) NOT NULL DEFAULT 'UNKNOWN';
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS app_display_orderings (
+      ordering_key  VARCHAR(64)   NOT NULL,
+      package_name  VARCHAR(255)  NOT NULL,
+      sort_order    INT           NOT NULL,
+      created_at    TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at    TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (ordering_key, package_name),
+      KEY idx_app_orderings_key_order (ordering_key, sort_order)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
     """
@@ -534,9 +604,10 @@ _DDL_STATEMENTS: list[str] = [
     JOIN app_versions av ON r.app_version_id = av.id
     JOIN apps a ON av.app_id = a.id
     JOIN static_string_summary s
-      ON s.package_name = a.package_name
+      -- Explicit collation to prevent MariaDB "illegal mix of collations" when schemas evolve.
+      ON s.package_name COLLATE utf8mb4_unicode_ci = a.package_name COLLATE utf8mb4_unicode_ci
      AND (
-          (r.session_stamp IS NOT NULL AND s.session_stamp = r.session_stamp)
+          (r.session_stamp IS NOT NULL AND s.session_stamp COLLATE utf8mb4_unicode_ci = r.session_stamp COLLATE utf8mb4_unicode_ci)
           OR (
               ABS(TIMESTAMPDIFF(SECOND, s.created_at, r.created_at)) <= 3600
           )
@@ -555,8 +626,8 @@ _DDL_STATEMENTS: list[str] = [
     JOIN app_versions av ON r.app_version_id = av.id
     JOIN apps a ON av.app_id = a.id
     LEFT JOIN static_permission_risk spr
-      ON spr.session_stamp = r.session_stamp
-     AND spr.package_name = a.package_name
+      ON spr.session_stamp COLLATE utf8mb4_unicode_ci = r.session_stamp COLLATE utf8mb4_unicode_ci
+     AND spr.package_name COLLATE utf8mb4_unicode_ci = a.package_name COLLATE utf8mb4_unicode_ci
     GROUP BY COALESCE(r.category, 'Uncategorized');
     """,
 ]

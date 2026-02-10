@@ -141,6 +141,7 @@ def build_dynamic_session_row_from_evidence_pack(run_dir: Path) -> dict[str, Any
 
     ds = mf.get("dataset") if isinstance(mf.get("dataset"), dict) else {}
     env = mf.get("environment") if isinstance(mf.get("environment"), dict) else {}
+    op = mf.get("operator") if isinstance(mf.get("operator"), dict) else {}
 
     scenario = mf.get("scenario") if isinstance(mf.get("scenario"), dict) else {}
     scenario_id = None
@@ -174,7 +175,7 @@ def build_dynamic_session_row_from_evidence_pack(run_dir: Path) -> dict[str, Any
     # duplicate it into `dataset`. Fall back to telemetry-derived average delta.
     sampling_rate_s = ds.get("sampling_rate_s")
     if sampling_rate_s is None:
-        sampling_rate_s = (mf.get("operator") or {}).get("sampling_rate_s") if isinstance(mf.get("operator"), dict) else None
+        sampling_rate_s = (op or {}).get("sampling_rate_s") if isinstance(op, dict) else None
     if sampling_rate_s is None:
         sampling_rate_s = telemetry_stats.get("sample_avg_delta_s")
     if sampling_rate_s is None:
@@ -204,8 +205,15 @@ def build_dynamic_session_row_from_evidence_pack(run_dir: Path) -> dict[str, Any
         "dynamic_run_id": rid,
         "package_name": pkg,
         "device_serial": str((target or {}).get("device_serial") or "").strip() or None,
+        # Operator protocol tags (interpretability only; not used for scoring).
+        "operator_run_profile": str((op or {}).get("run_profile") or "").strip() or None,
+        "operator_interaction_level": str((op or {}).get("interaction_level") or "").strip() or None,
+        "operator_messaging_activity": str((op or {}).get("messaging_activity") or "").strip() or None,
         "scenario_id": scenario_id,
         "tier": str(ds.get("tier") or "") or None,
+        "countable": 1 if ds.get("countable") is True else (0 if ds.get("countable") is False else None),
+        "valid_dataset_run": 1 if ds.get("valid_dataset_run") is True else (0 if ds.get("valid_dataset_run") is False else None),
+        "invalid_reason_code": str(ds.get("invalid_reason_code") or "") or None,
         "duration_seconds": int(ds.get("duration_seconds") or 0) or None,
         "sampling_rate_s": sampling_rate_s_int,
         "started_at_utc": _to_mysql_dt(mf.get("started_at")),

@@ -35,6 +35,11 @@ def isolate_integration_db(request: pytest.FixtureRequest) -> Iterator[None]:
         yield
         return
 
+    # Integration tests are opt-in. Require an explicit DSN to avoid accidental
+    # connections to local/prod databases.
+    if not (os.environ.get("SCYTALEDROID_TEST_DB_URL") or os.environ.get("SCYTALEDROID_DB_URL")):
+        pytest.skip("Integration DB tests are opt-in. Set SCYTALEDROID_TEST_DB_URL (recommended) or SCYTALEDROID_DB_URL.")
+
     test_db = os.environ.get("SCYTALEDROID_TEST_DB", "scytaledroid_droid_intel_db_test")
     original_db = db_config.DB_CONFIG["database"]
     db_config.override_database(test_db)

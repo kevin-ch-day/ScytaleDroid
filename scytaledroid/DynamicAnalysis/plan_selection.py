@@ -336,10 +336,23 @@ def _format_generated_at(value: object) -> str:
 
 
 def _resolve_display_name(package_name: str) -> str | None:
+    pkg = (package_name or "").strip()
+    if not pkg:
+        return None
+    # Prefer DB-backed label (post-paper reality).
+    try:
+        from scytaledroid.Database.db_func.apps.app_labels import fetch_display_name
+
+        name = fetch_display_name(pkg)
+        if name:
+            return name
+    except Exception:
+        pass
+    # Fallback to local static repository label map.
     try:
         groups = group_artifacts()
         display_map = load_display_name_map(groups)
-        return display_map.get(package_name.lower())
+        return display_map.get(pkg.lower())
     except Exception:
         return None
 

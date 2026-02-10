@@ -138,6 +138,16 @@ def check_bundle_artifacts() -> None:
         _fail("Risk scoring table missing 'Final Regime' label (expected PM wording).")
     _ok("Risk scoring table: present (table_risk_scoring.tex).")
 
+    # Phase G include-contract (paper owns floats/captions/labels): generated TeX must be tabular-only.
+    for p in sorted((bundle / "tables").glob("*.tex")):
+        txt = _read_text(p)
+        if "\\begin{table" in txt or "\\caption{" in txt or "\\label{" in txt:
+            _fail(f"Generated table is not tabular-only (contains float/caption/label): {p}")
+        for need in ("\\begin{tabular}", "\\toprule", "\\midrule", "\\bottomrule"):
+            if need not in txt:
+                _fail(f"Generated table missing required TeX token {need!r}: {p}")
+    _ok("TeX include-contract: tabular-only tables verified.")
+
     # Enforce main-paper lock: no extra artifacts in paper-facing tables/figures.
     allow_tables = {
         "table_masvs_domain_mapping.tex",

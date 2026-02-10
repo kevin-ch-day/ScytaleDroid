@@ -14,6 +14,6 @@ Integration tests cover the pipeline end-to-end (`tests/integration/test_persist
 
 ## Running persistence tests locally
 
-The persistence unit tests (`tests/persistence/`) connect to MariaDB/MySQL using the hardcoded defaults in `scytaledroid/Database/db_core/db_config.py` (host `localhost`, port `3306`, user `root`, password `Password123!`). If no database is listening, the tests will fail with `pymysql.err.OperationalError: (2003, "Can't connect to MySQL server on 'localhost' ([Errno 111] Connection refused)")`.
+The persistence integration tests (`tests/integration/`) require a MariaDB/MySQL instance. These tests are **opt-in** and will be skipped unless you explicitly set `SCYTALEDROID_TEST_DB_URL` (recommended) or `SCYTALEDROID_DB_URL` to a working DSN in your environment.
 
-To exercise these tests locally, start a compatible MariaDB/MySQL instance with a schema matching `DB_CONFIG["database"]` (default `scytaledroid_droid_intel_db_prod`). For smoke runs without a database, skip the persistence suite (e.g., `pytest -k 'not persistence'`) to avoid connection errors.
+For smoke runs without a database, just run `pytest`; the DB integration suite will self-skip when not configured.

@@ -76,8 +76,16 @@ def persist_dynamic_summary(
         "package_name": config.package_name,
         "device_serial": config.device_serial,
         "profile_key": profile_key,
+        # Operator protocol tags (recorded for stratification/interpretability only).
+        "operator_run_profile": config.run_profile,
+        "operator_interaction_level": config.interaction_level,
+        "operator_messaging_activity": config.messaging_activity,
         "scenario_id": config.scenario_id,
         "tier": config.tier,
+        # Dataset tracker owns final validity; capture the intent here for indexing.
+        "countable": 1 if getattr(config, "counts_toward_completion", None) is True else (0 if getattr(config, "counts_toward_completion", None) is False else None),
+        "valid_dataset_run": None,
+        "invalid_reason_code": None,
         "duration_seconds": duration_seconds,
         "sampling_duration_seconds": sampling_duration_seconds,
         "clock_alignment_delta_s": clock_alignment_delta_s,

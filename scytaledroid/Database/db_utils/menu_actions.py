@@ -6,6 +6,7 @@ import getpass
 import os
 import socket
 from datetime import UTC, datetime
+from pathlib import Path
 
 from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core import db_config
@@ -138,6 +139,43 @@ def show_db_status() -> None:
     prompt_utils.press_enter_to_continue()
 
 
+def ingest_analysis_cohort_from_paper_bundle() -> None:
+    """Phase H helper: ingest canonical output/paper artifacts into DB.
+
+    This is tables-only ingestion (no recomputation). Evidence packs remain the ground truth;
+    DB stores the cohort index + derived aggregates for queryability.
+    """
+
+    from scytaledroid.Database.tools.analysis_ingest import ingest_paper_bundle_to_db
+
+    print()
+    print("Ingest Analysis Cohort (Phase H)")
+    print("--------------------------------")
+    paper_root = prompt_utils.prompt_text("Paper root (default=output/paper)", required=False, show_arrow=False).strip() or "output/paper"
+    cohort_id = prompt_utils.prompt_text("cohort_id (required, stable id)", required=True, show_arrow=False).strip()
+    name = prompt_utils.prompt_text("name (required)", required=True, show_arrow=False).strip()
+    selector_type = (
+        prompt_utils.prompt_text("selector_type freeze|query|manual (default=freeze)", required=False, show_arrow=False).strip()
+        or "freeze"
+    ).lower()
+    if selector_type not in {"freeze", "query", "manual"}:
+        print(status_messages.status(f"Invalid selector_type: {selector_type!r}", level="fail"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    try:
+        ingest_paper_bundle_to_db(
+            paper_root=Path(paper_root),
+            cohort_id=cohort_id,
+            name=name,
+            selector_type=selector_type,
+        )
+        print(status_messages.status("Ingest complete.", level="success"))
+    except Exception as exc:  # pragma: no cover
+        print(status_messages.status(f"Ingest failed: {exc}", level="error"))
+    prompt_utils.press_enter_to_continue()
+
+
 def apply_canonical_schema_bootstrap(*, prompt_user: bool = True) -> bool:
     """Apply canonical schema statements (CREATE/ALTER) for missing tables/columns."""
 
@@ -153,7 +191,16 @@ def apply_canonical_schema_bootstrap(*, prompt_user: bool = True) -> bool:
             default=True,
         ):
             return False
-        bootstrap_database()
+        # Paper/ops posture: fail-closed if schema statements cannot be applied.
+        prev_strict = os.environ.get("SCYTALEDROID_DB_BOOTSTRAP_STRICT")
+        os.environ["SCYTALEDROID_DB_BOOTSTRAP_STRICT"] = "1"
+        try:
+            bootstrap_database()
+        finally:
+            if prev_strict is None:
+                os.environ.pop("SCYTALEDROID_DB_BOOTSTRAP_STRICT", None)
+            else:
+                os.environ["SCYTALEDROID_DB_BOOTSTRAP_STRICT"] = prev_strict
         _drop_legacy_string_run_id_columns()
         _ensure_canonical_triggers()
         success = True
@@ -483,31 +530,18 @@ def maybe_clear_screen() -> None:
 def seed_paper_dataset_profile() -> None:
     """Create or update the paper dataset profile and assign packages."""
 
-    profile_key = "RESEARCH_DATASET_ALPHA"
-    display_name = "Research Dataset Alpha (v1)"
-    description = "ScytaleDroid-Dyn-v1 research dataset (Tier 0/1/2 apps)"
+    from scytaledroid.DynamicAnalysis.datasets.research_dataset_alpha import CANONICAL_PACKAGES, PROFILE_KEY
+    from scytaledroid.Paper.paper_contract_inputs import load_paper_contracts
+    from scytaledroid.Database.db_func.apps.app_labels import upsert_display_names
+    from scytaledroid.Database.db_func.apps.app_ordering import upsert_ordering
+
+    profile_key = PROFILE_KEY
+    display_name = "Research Dataset Alpha (Paper #2)"
+    description = "ScytaleDroid-Dyn-v1 research dataset (12-app frozen cohort; Paper #2)."
     scope_group = "research"
     sort_order = 10
     is_active = 1
-    packages = [
-        "com.zhiliaoapp.musically",
-        "com.instagram.android",
-        "com.reddit.frontpage",
-        "com.twitter.android",
-        "com.snapchat.android",
-        "com.facebook.katana",
-        "com.facebook.lite",
-        "com.linkedin.android",
-        "com.whatsapp",
-        "org.telegram.messenger",
-        "org.thoughtcrime.securesms",
-        "com.discord",
-        "com.facebook.orca",
-        "com.google.android.apps.messaging",
-        "com.tinder",
-        "tv.twitch.android.app",
-        "com.pinterest",
-    ]
+    packages = list(CANONICAL_PACKAGES)
 
     print(status_messages.status("Seeding paper dataset profile (DB).", level="info"))
     print(f"Profile key: {profile_key}")
@@ -553,11 +587,49 @@ def seed_paper_dataset_profile() -> None:
     payload = [(pkg, profile_key) for pkg in packages]
     core_q.run_sql_many(app_sql, payload, query_name="db_utils.seed_paper_profile.apps")
 
+    # Seed canonical display names (best-effort). This helps avoid scattered JSON label maps.
+    try:
+        contracts = load_paper_contracts(fail_closed=True)
+        upsert_display_names(contracts.display_name_by_package, overwrite=True)
+        upsert_ordering("paper2", contracts.paper_ordering)
+    except Exception:
+        pass
+
     placeholders = ", ".join(["%s"] * len(packages))
     count_sql = f"SELECT COUNT(*) AS matched FROM apps WHERE package_name IN ({placeholders})"
     rows = core_q.run_sql(count_sql, tuple(packages), fetch="one", dictionary=True)
     matched = rows.get("matched") if isinstance(rows, dict) else None
     print(status_messages.status(f"Updated apps: {matched or 0}", level="success"))
+    prompt_utils.press_enter_to_continue()
+
+
+def sync_paper_contracts_to_db() -> None:
+    """Sync tracked paper contracts into the DB (display names + ordering).
+
+    This is a post-paper hygiene action to reduce drift from scattered JSON maps.
+    It does not change any evidence packs or paper outputs.
+    """
+    from scytaledroid.Paper.paper_contract_inputs import load_paper_contracts
+    from scytaledroid.Database.db_func.apps.app_labels import upsert_display_names
+    from scytaledroid.Database.db_func.apps.app_ordering import upsert_ordering
+
+    print(status_messages.status("Syncing paper contracts -> DB (display names + ordering).", level="info"))
+    if not prompt_utils.prompt_yes_no("Apply updates now?", default=True):
+        return
+    try:
+        contracts = load_paper_contracts(fail_closed=True)
+    except Exception as exc:
+        print(status_messages.status(f"Failed to load paper contracts: {exc}", level="error"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    # Display names
+    n_names = upsert_display_names(contracts.display_name_by_package, overwrite=True)
+    # Ordering
+    n_order = upsert_ordering("paper2", contracts.paper_ordering)
+
+    print(status_messages.status(f"Upserted display names: {n_names}", level="success"))
+    print(status_messages.status(f"Upserted ordering rows: {n_order}", level="success"))
     prompt_utils.press_enter_to_continue()
 
 

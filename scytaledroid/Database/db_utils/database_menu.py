@@ -13,7 +13,10 @@ from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
 from .menu_actions import (
     apply_canonical_schema_bootstrap,
     ensure_dynamic_tier_migrations,
+    ingest_analysis_cohort_from_paper_bundle,
     maybe_clear_screen,
+    seed_paper_dataset_profile,
+    sync_paper_contracts_to_db,
     show_governance_snapshot_status,
     show_connection_and_config,
 )
@@ -29,6 +32,9 @@ def database_menu() -> None:
         "4": show_governance_snapshot_status,
         "5": show_connection_and_config,
         "6": ensure_dynamic_tier_migrations,
+        "7": ingest_analysis_cohort_from_paper_bundle,
+        "8": seed_paper_dataset_profile,
+        "9": sync_paper_contracts_to_db,
     }
 
     options: list[MenuOption] = [
@@ -38,6 +44,9 @@ def database_menu() -> None:
         MenuOption("4", "Governance snapshot (import/status)"),
         MenuOption("5", "Connection & config (diagnostic)"),
         MenuOption("6", "Tier-1 migrations (dynamic/ML; optional)"),
+        MenuOption("7", "Ingest analysis cohort from output/paper (Phase H; tables-only)"),
+        MenuOption("8", "Seed paper dataset profile (DB)"),
+        MenuOption("9", "Sync paper contracts -> DB (labels + ordering)"),
     ]
 
     while True:
