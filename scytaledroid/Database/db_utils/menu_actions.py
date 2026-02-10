@@ -151,23 +151,87 @@ def ingest_analysis_cohort_from_publication_bundle() -> None:
     print()
     print("Ingest Analysis Cohort (Phase H)")
     print("--------------------------------")
+    # Prefer the canonical publication bundle location when present.
+    default_root = "output/paper" if Path("output/paper").exists() else "output/publication"
     bundle_root = (
         prompt_utils.prompt_text(
-            "Bundle root (default=output/publication)",
+            "Bundle root",
+            default=default_root,
             required=False,
             show_arrow=False,
         ).strip()
-        or "output/publication"
+        or default_root
     )
-    # Back-compat: many workspaces still have output/paper from the submission pipeline.
-    if not Path(bundle_root).exists() and Path("output/paper").exists():
-        print(status_messages.status("Bundle root not found; falling back to output/paper (legacy).", level="warn"))
-        bundle_root = "output/paper"
-    cohort_id = prompt_utils.prompt_text("cohort_id (required, stable id)", required=True, show_arrow=False).strip()
-    name = prompt_utils.prompt_text("name (required)", required=True, show_arrow=False).strip()
+    bundle_root_path = Path(bundle_root)
+    if not bundle_root_path.exists():
+        print(status_messages.status(f"Bundle root not found: {bundle_root_path}", level="fail"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    # Derive stable defaults from bundle provenance when available.
+    import json
+    import hashlib
+
+    def _sha256_file(path: Path) -> str | None:
+        try:
+            h = hashlib.sha256()
+            with path.open("rb") as f:
+                for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                    h.update(chunk)
+            return h.hexdigest()
+        except Exception:
+            return None
+
+    snapshot_id = None
+    selector_hint = None
+    summary_path = bundle_root_path / "internal" / "provenance" / "snapshot_summary.json"
+    if summary_path.exists():
+        try:
+            obj = json.loads(summary_path.read_text(encoding="utf-8"))
+            if isinstance(obj, dict):
+                snapshot_id = str(obj.get("snapshot_id") or "").strip() or None
+                selector_hint = str(obj.get("selector_type") or "").strip().lower() or None
+        except Exception:
+            snapshot_id = None
+
+    # If we can't find a snapshot id, fall back to hashing a stable manifest.
+    if snapshot_id is None:
+        for candidate in (
+            bundle_root_path / "manifests" / "selection_manifest.json",
+            bundle_root_path / "manifests" / "dataset_freeze.json",
+            bundle_root_path / "manifests" / "freeze_manifest.json",
+        ):
+            if candidate.exists():
+                digest = _sha256_file(candidate)
+                if digest:
+                    snapshot_id = f"bundle-{digest[:12]}"
+                    break
+
+    default_cohort_id = snapshot_id or ""
+    default_name = f"Publication bundle {snapshot_id}" if snapshot_id else ""
+    default_selector = selector_hint if selector_hint in {"freeze", "query", "manual"} else "freeze"
+
+    cohort_id = prompt_utils.prompt_text(
+        "cohort_id",
+        default=default_cohort_id or None,
+        required=True,
+        show_arrow=False,
+        error_message="Please provide a stable cohort_id (or press Enter to accept the default).",
+    ).strip()
+    name = prompt_utils.prompt_text(
+        "name",
+        default=default_name or None,
+        required=True,
+        show_arrow=False,
+    ).strip()
     selector_type = (
-        prompt_utils.prompt_text("selector_type freeze|query|manual (default=freeze)", required=False, show_arrow=False).strip()
-        or "freeze"
+        prompt_utils.prompt_text(
+            "selector_type freeze|query|manual",
+            default=default_selector,
+            required=False,
+            show_arrow=False,
+        ).strip()
+        or default_selector
     ).lower()
     if selector_type not in {"freeze", "query", "manual"}:
         print(status_messages.status(f"Invalid selector_type: {selector_type!r}", level="fail"))
@@ -601,10 +665,19 @@ def seed_paper_dataset_profile() -> None:
     payload = [(pkg, profile_key) for pkg in packages]
     core_q.run_sql_many(app_sql, payload, query_name="db_utils.seed_paper_profile.apps")
 
-    # Seed canonical display names (best-effort). This helps avoid scattered JSON label maps.
+    # Seed display names (best-effort).
+    # Important: DB canonical display names should remain the full product name.
+    # Paper/publication alias shortening is stored separately as an alias set.
     try:
         contracts = load_publication_contracts(fail_closed=True)
-        upsert_display_names(contracts.display_name_by_package, overwrite=True)
+        # Do not overwrite existing canonical names.
+        upsert_display_names(contracts.display_name_by_package, overwrite=False)
+        # Persist paper/publication aliases explicitly.
+        try:
+            from scytaledroid.Database.db_func.apps.app_labels import upsert_display_aliases
+            upsert_display_aliases("paper2", contracts.display_name_by_package, overwrite=True)
+        except Exception:
+            pass
         upsert_ordering("paper2", contracts.package_order)
     except Exception:
         pass
@@ -623,11 +696,11 @@ def sync_paper_contracts_to_db() -> None:
     This is a post-paper hygiene action to reduce drift from scattered JSON maps.
     It does not change any evidence packs or paper outputs.
     """
-    from scytaledroid.Database.db_func.apps.app_labels import upsert_display_names
+    from scytaledroid.Database.db_func.apps.app_labels import upsert_display_aliases, upsert_display_names
     from scytaledroid.Database.db_func.apps.app_ordering import upsert_ordering
     from scytaledroid.Publication.contract_inputs import load_publication_contracts
 
-    print(status_messages.status("Syncing paper contracts -> DB (display names + ordering).", level="info"))
+    print(status_messages.status("Syncing publication labels and ordering -> DB.", level="info"))
     if not prompt_utils.prompt_yes_no("Apply updates now?", default=True):
         return
     try:
@@ -637,12 +710,15 @@ def sync_paper_contracts_to_db() -> None:
         prompt_utils.press_enter_to_continue()
         return
 
-    # Display names
-    n_names = upsert_display_names(contracts.display_name_by_package, overwrite=True)
+    # Canonical display names: never clobber full product names with publication abbreviations.
+    n_names = upsert_display_names(contracts.display_name_by_package, overwrite=False)
+    # Publication aliases (short labels) live in a separate table.
+    n_alias = upsert_display_aliases("paper2", contracts.display_name_by_package, overwrite=True)
     # Ordering
     n_order = upsert_ordering("paper2", contracts.package_order)
 
     print(status_messages.status(f"Upserted display names: {n_names}", level="success"))
+    print(status_messages.status(f"Upserted publication aliases: {n_alias}", level="success"))
     print(status_messages.status(f"Upserted ordering rows: {n_order}", level="success"))
     prompt_utils.press_enter_to_continue()
 

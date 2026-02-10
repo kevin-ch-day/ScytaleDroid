@@ -346,7 +346,7 @@ def _run_apk_pull(
         )
         print(
             status_messages.status(
-                "Proceeding without sync may miss updated packages.",
+                "Proceeding without sync may miss newly installed or metadata-changed packages.",
                 level="warn",
             )
         )

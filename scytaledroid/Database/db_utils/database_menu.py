@@ -37,15 +37,15 @@ def database_menu() -> None:
     }
 
     options: list[MenuOption] = [
-        MenuOption("1", "Apply canonical schema updates (required for paper-grade)"),
-        MenuOption("2", "Health summary (paper-grade readiness)"),
-        MenuOption("3", "DB integrity check (DB snapshot linkage)"),
-        MenuOption("4", "Governance snapshot (import/status)"),
-        MenuOption("5", "Connection & config (diagnostic)"),
-        MenuOption("6", "Tier-1 migrations (dynamic/ML; optional)"),
-        MenuOption("7", "Ingest analysis cohort from output/publication (Phase H; tables-only)"),
-        MenuOption("8", "Seed paper dataset profile (DB)"),
-        MenuOption("9", "Sync paper contracts -> DB (labels + ordering)"),
+        MenuOption("1", "Apply schema updates"),
+        MenuOption("2", "Health summary"),
+        MenuOption("3", "Integrity check"),
+        MenuOption("4", "Governance status"),
+        MenuOption("5", "Connection diagnostics"),
+        MenuOption("6", "Optional migrations"),
+        MenuOption("7", "Ingest analysis cohort from publication bundle"),
+        MenuOption("8", "Seed dataset profile"),
+        MenuOption("9", "Sync publication labels and ordering"),
     ]
 
     while True:
@@ -55,7 +55,7 @@ def database_menu() -> None:
         menu_utils.print_header("Database Tools")
         if schema_ver != expected_schema and schema_ver != "<unknown>":
             print(f"Schema: {schema_ver} (Tier-1 expects {expected_schema}) [OUTDATED]")
-            print("Tip: Run option (1) Apply canonical schema updates")
+            print("Tip: Run option (1) Apply schema updates")
         else:
             print(f"Schema: {schema_ver}")
         print()

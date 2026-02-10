@@ -12,6 +12,9 @@ from typing import Any
 from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_core.session import database_session
+from scytaledroid.Database.db_func.static_analysis.persistence_failures import (
+    record_static_persistence_failure,
+)
 from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.version_utils import get_git_commit
@@ -539,6 +542,7 @@ def persist_run_summary(
 ) -> PersistenceOutcome:
     outcome = PersistenceOutcome()
     br = base_report
+    failure_stage: str | None = None
     try:
         metadata_map: Mapping[str, object] = getattr(br, "metadata", {}) or {}
     except Exception:
@@ -763,6 +767,8 @@ def persist_run_summary(
 
     def _raise_db_error(op: str, reason: str) -> None:
         token = truncate(f"{op}:{reason}", 240)
+        nonlocal failure_stage
+        failure_stage = op
         _note_db_error(token)
         raise RuntimeError(token)
 
@@ -1113,6 +1119,18 @@ def persist_run_summary(
             log.warning(message, category="static_analysis")
             if message not in outcome.errors:
                 outcome.add_error(message)
+            # Best-effort durable failure record (outside the rolled-back transaction).
+            if static_run_id:
+                try:
+                    record_static_persistence_failure(
+                        static_run_id=int(static_run_id),
+                        stage=failure_stage,
+                        exc_class=exc.__class__.__name__,
+                        exc_message=str(exc),
+                        errors_tail=list(outcome.errors)[-10:],
+                    )
+                except Exception:
+                    pass
         outcome.persistence_failed = persistence_failed
     else:
         if finding_rows:
@@ -1198,6 +1216,23 @@ def persist_run_summary(
                 )
                 log.warning(message, category="static_analysis")
                 outcome.add_error(message)
+
+        # Keep static_analysis_runs.findings_total consistent with persisted findings.
+        # This value is used by DB health summaries and run listings; leaving it at 0
+        # makes completed runs look empty even when static_findings rows exist.
+        try:
+            total_findings = int(finding_totals.get("total", 0) or 0)
+        except Exception:
+            total_findings = 0
+        try:
+            core_q.run_sql(
+                "UPDATE static_analysis_runs SET findings_total=%s WHERE id=%s",
+                (total_findings, static_run_id),
+            )
+        except Exception:
+            # Never fail the run due to a rollup write; the per-finding rows are authoritative.
+            pass
+
         update_static_run_status(
             static_run_id=static_run_id,
             status=run_status,

@@ -105,6 +105,8 @@ def _verify_required_schema(*, dialect: str) -> None:
         "android_publisher_prefix_rules",
         "dynamic_sessions",
         "app_display_orderings",
+        "app_display_aliases",
+        "static_persistence_failures",
         # Phase H derived-facts store.
         "analysis_cohorts",
         "analysis_derivation_receipts",

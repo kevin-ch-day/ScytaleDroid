@@ -331,7 +331,8 @@ def _scope_updated_only(
         "updated_version_mismatch": meta.get("version_mismatch", 0),
         "updated_version_match": meta.get("version_match", 0),
     }
-    return ScopeSelection("Updated apps only", list(updated_rows), "updated_only", metadata)
+    # Inventory-only deltas are metadata-based under non-root constraints, not build-identity claims.
+    return ScopeSelection("Changed apps only", list(updated_rows), "updated_only", metadata)
 
 
 def _scope_profiles(

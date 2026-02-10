@@ -101,6 +101,19 @@ _DDL_STATEMENTS: list[str] = [
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
     """
+    -- Context-specific display aliases (e.g., publication shortening) without overwriting
+    -- apps.display_name (canonical).
+    CREATE TABLE IF NOT EXISTS app_display_aliases (
+      alias_key     VARCHAR(64)   NOT NULL,
+      package_name  VARCHAR(255)  NOT NULL,
+      display_name  VARCHAR(255)  NOT NULL,
+      created_at    TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at    TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (alias_key, package_name),
+      KEY idx_app_aliases_key_name (alias_key, display_name)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
+    """
     CREATE TABLE IF NOT EXISTS app_versions (
       id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
       app_id        BIGINT UNSIGNED NOT NULL,
@@ -226,6 +239,21 @@ _DDL_STATEMENTS: list[str] = [
       PRIMARY KEY (artifact_id),
       KEY ix_artifact_run (run_id, run_type),
       KEY ix_artifact_type (artifact_type)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
+    """
+    -- Durable failure records for static persistence. Written outside the main
+    -- persistence transaction so we don't lose the root cause on rollback.
+    CREATE TABLE IF NOT EXISTS static_persistence_failures (
+      id                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      static_run_id     BIGINT UNSIGNED NOT NULL,
+      stage             VARCHAR(64)     DEFAULT NULL,
+      exception_class   VARCHAR(128)    DEFAULT NULL,
+      exception_message VARCHAR(1024)   DEFAULT NULL,
+      errors_tail       TEXT            DEFAULT NULL,
+      occurred_at_utc   DATETIME        NOT NULL,
+      PRIMARY KEY (id),
+      KEY ix_static_persist_fail_run (static_run_id, occurred_at_utc)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
     """

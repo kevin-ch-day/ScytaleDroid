@@ -95,7 +95,7 @@ def prompt_inventory_decision(
         )
         print(
             status_messages.status(
-                "A fresh inventory is recommended to avoid missing newly installed or updated apps.",
+                "A fresh inventory is recommended to avoid missing newly installed or metadata-changed apps.",
                 level="info",
             )
         )
@@ -110,7 +110,7 @@ def prompt_inventory_decision(
         )
         print(
             status_messages.status(
-                "Sync now is recommended before pulling APKs; using the existing snapshot may miss updates.",
+                "Sync now is recommended before pulling APKs; using the existing snapshot may miss changes.",
                 level="info",
             )
         )

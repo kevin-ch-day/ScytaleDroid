@@ -86,3 +86,51 @@ def upsert_display_names(display_name_by_package: dict[str, str], *, overwrite: 
     run_sql_many(sql, items)
     return len(items)
 
+
+def upsert_display_aliases(
+    alias_key: str,
+    display_name_by_package: dict[str, str],
+    *,
+    overwrite: bool,
+) -> int:
+    """Upsert context-specific display aliases (does not touch apps.display_name).
+
+    This is for cases like publication/paper rendering where shorter labels may be
+    desirable, but the DB canonical display_name should remain the full product name.
+    """
+    key = str(alias_key or "").strip()
+    if not key:
+        return 0
+    items: list[tuple[str, str, str]] = []
+    for k, v in (display_name_by_package or {}).items():
+        pkg = str(k).strip()
+        name = str(v).strip()
+        if pkg and name:
+            items.append((key, pkg, name))
+    if not items:
+        return 0
+
+    try:
+        from scytaledroid.Database.db_core import run_sql_many
+    except Exception:
+        return 0
+
+    if overwrite:
+        sql = """
+        INSERT INTO app_display_aliases (alias_key, package_name, display_name)
+        VALUES (%s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+          display_name = VALUES(display_name),
+          updated_at = CURRENT_TIMESTAMP
+        """
+    else:
+        sql = """
+        INSERT INTO app_display_aliases (alias_key, package_name, display_name)
+        VALUES (%s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+          display_name = COALESCE(display_name, VALUES(display_name)),
+          updated_at = CURRENT_TIMESTAMP
+        """
+
+    run_sql_many(sql, items)
+    return len(items)

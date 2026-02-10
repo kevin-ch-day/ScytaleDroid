@@ -10,7 +10,6 @@ REQUIRED_PAPER_ARTIFACTS: tuple[str, ...] = (
     "static_report",
     "manifest_evidence",
     "dep_snapshot",
-    "permission_audit_snapshot",
 )
 
 

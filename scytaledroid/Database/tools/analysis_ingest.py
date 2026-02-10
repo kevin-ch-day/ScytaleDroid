@@ -33,7 +33,7 @@ from typing import Any
 
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_core.session import database_session, get_current_engine
-from scytaledroid.Database.db_func.apps.app_labels import upsert_display_names
+from scytaledroid.Database.db_func.apps.app_labels import upsert_display_aliases, upsert_display_names
 from scytaledroid.Database.db_func.apps.app_ordering import upsert_ordering
 from scytaledroid.Publication.contract_inputs import load_publication_contracts
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
@@ -641,13 +641,15 @@ def ingest_publication_bundle_to_db(
 
     try:
         # Make derived facts atomic: either all cohort facts are updated, or none are.
-        engine = get_current_engine()
-        if engine is None:
-            raise RuntimeError("No active DB engine (expected database_session)")
-        with engine.transaction():
-            runs_ingested = ingest_cohort_runs_from_manifests(cohort_id=cohort_id, paths=paths)
-            counts = ingest_aggregates_from_csvs(cohort_id=cohort_id, receipt_id=receipt_id, paths=paths)
-            _finalize_receipt_ok(receipt_id)
+        # This function may be called from menu code; ensure a session-bound engine exists.
+        with database_session():
+            engine = get_current_engine()
+            if engine is None:  # pragma: no cover - defensive
+                raise RuntimeError("No active DB engine (expected database_session)")
+            with engine.transaction():
+                runs_ingested = ingest_cohort_runs_from_manifests(cohort_id=cohort_id, paths=paths)
+                counts = ingest_aggregates_from_csvs(cohort_id=cohort_id, receipt_id=receipt_id, paths=paths)
+                _finalize_receipt_ok(receipt_id)
     except Exception as exc:
         # Keep receipts durable even when the derived-facts transaction rolls back.
         try:
@@ -656,10 +658,13 @@ def ingest_publication_bundle_to_db(
             pass
         raise
 
-    # Ensure apps.display_name and ordering are populated (avoid scattered JSON maps).
+    # Ensure labels and ordering are populated (avoid scattered JSON maps).
+    # Canonical DB display_name should remain the full product name; publication shortening
+    # is stored under app_display_aliases (alias_key='paper2').
     try:
         contracts = load_publication_contracts(fail_closed=True)
-        upsert_display_names(contracts.display_name_by_package, overwrite=True)
+        upsert_display_names(contracts.display_name_by_package, overwrite=False)
+        upsert_display_aliases("paper2", contracts.display_name_by_package, overwrite=True)
         upsert_ordering("paper2", contracts.package_order)
     except Exception:
         pass

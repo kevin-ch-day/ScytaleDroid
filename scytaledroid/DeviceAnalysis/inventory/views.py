@@ -36,7 +36,7 @@ def print_inventory_run_summary_from_result(result) -> None:
     print(f"Packages: {metrics.total_packages}")
     print(
         "Delta vs previous: "
-        f"new={metrics.delta_new} removed={metrics.delta_removed} updated={metrics.delta_updated}"
+        f"new={metrics.delta_new} removed={metrics.delta_removed} changed={metrics.delta_updated}"
     )
     print(f"[RESULT] User apps (candidates): {metrics.user_scope_candidates}")
     print()

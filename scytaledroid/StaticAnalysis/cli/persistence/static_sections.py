@@ -167,16 +167,20 @@ def persist_static_sections(
     for values in samples.values():
         if isinstance(values, Sequence):
             sample_total += len(values)
-        string_errors = persist_string_summary(
-            package_name=package_name,
-            session_stamp=session_stamp,
-            scope_label=scope_label,
-            counts=counts,
-            samples=samples,
-            selected_samples=selected_samples,
-            selection_params=selection_params if isinstance(selection_params, Mapping) else None,
-            static_run_id=static_run_id,
-        )
+    # Persist string summary once per package. Previously this call was
+    # accidentally nested under the sample iteration, which could leave
+    # `string_errors` unbound when there are no samples and could also
+    # duplicate persistence work.
+    string_errors: list[str] | None = persist_string_summary(
+        package_name=package_name,
+        session_stamp=session_stamp,
+        scope_label=scope_label,
+        counts=counts,
+        samples=samples,
+        selected_samples=selected_samples,
+        selection_params=selection_params if isinstance(selection_params, Mapping) else None,
+        static_run_id=static_run_id,
+    )
     if string_errors:
         errors.extend(string_errors)
         sample_total = 0
