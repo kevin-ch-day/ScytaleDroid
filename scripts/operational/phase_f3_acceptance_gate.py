@@ -19,7 +19,6 @@ import json
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -37,8 +36,8 @@ def main(argv: list[str]) -> int:
         sys.path.insert(0, str(ROOT))
 
     from scytaledroid.Config import app_config
-    from scytaledroid.DynamicAnalysis.ml.selectors import QueryParams, QuerySelector
     from scytaledroid.DynamicAnalysis.ml.query_mode_runner import run_ml_query_mode
+    from scytaledroid.DynamicAnalysis.ml.selectors import QueryParams, QuerySelector
 
     evidence_root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
     if not evidence_root.exists():

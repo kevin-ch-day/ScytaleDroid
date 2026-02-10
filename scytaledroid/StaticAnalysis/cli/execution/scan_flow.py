@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-import os
 import re
 import time
-import sys
 from collections import Counter
 from collections.abc import Mapping, MutableMapping
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
-from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.DisplayUtils import status_messages
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ...core import (
     AnalysisConfig,
@@ -28,6 +26,7 @@ from ...persistence import ReportStorageError, save_report
 from ..core.models import AppRunResult, ArtifactOutcome, RunOutcome, RunParameters, ScopeSelection
 from ..core.run_context import StaticRunContext
 from ..persistence.run_summary import create_static_run_ledger, finalize_open_static_runs
+from .heartbeat_state import set_app as _hb_set_app
 from .heartbeat_state import set_stage as _hb_set_stage
 from .scan_identity_helpers import (
     _artifact_manifest_sha256,
@@ -42,7 +41,6 @@ from .scan_view import (
     render_app_start,
     render_resource_warnings,
 )
-from .heartbeat_state import set_app as _hb_set_app, set_stage as _hb_set_stage
 
 _abort_requested = False
 _abort_reason: str | None = None
@@ -90,7 +88,7 @@ def execute_scan(
     _abort_reason = None
     _abort_signal = None
 
-    started_at = datetime.now(timezone.utc)
+    started_at = datetime.now(UTC)
     results: list[AppRunResult] = []
     warnings: list[str] = []
     failures: list[str] = []
@@ -228,7 +226,7 @@ def execute_scan(
                 identity_error_reason=identity["identity_error_reason"],
                 config_hash=config_hash,
                 pipeline_version=pipeline_version,
-                run_started_utc=started_at.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                run_started_utc=started_at.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S"),
                 dry_run=params.dry_run,
             )
             if not static_run_id and not params.dry_run:
@@ -416,7 +414,7 @@ def execute_scan(
 
     progress.end(last_elapsed_for_progress)
 
-    finished_at = datetime.now(timezone.utc)
+    finished_at = datetime.now(UTC)
     abort_requested, abort_reason, abort_signal = _abort_state()
     if params.dry_run:
         failures = []
@@ -561,8 +559,8 @@ def _summarize_artifact(artifact, report: StaticAnalysisReport, json_path: Path 
         severity=severity,
         duration_seconds=duration,
         saved_path=str(json_path) if json_path else None,
-        started_at=datetime.now(timezone.utc),
-        finished_at=datetime.now(timezone.utc),
+        started_at=datetime.now(UTC),
+        finished_at=datetime.now(UTC),
         metadata=artifact.metadata,
     )
 

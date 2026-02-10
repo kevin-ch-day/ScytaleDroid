@@ -14,7 +14,6 @@ from contextlib import redirect_stderr, redirect_stdout
 from scytaledroid.StaticAnalysis._androguard import open_apk_safely
 from scytaledroid.Utils.LoggingUtils import logging_engine
 
-from .strings_runtime import get_config
 from ..modules.string_analysis import (
     BUCKET_ORDER,
     StringHit,
@@ -22,13 +21,13 @@ from ..modules.string_analysis import (
     build_bucket_overview,
     build_string_index,
 )
-from ..modules.string_analysis.selection import select_samples
 from ..modules.string_analysis.allowlist import DEFAULT_POLICY_ROOT, load_noise_policy
 from ..modules.string_analysis.constants import (
     CONTENT_URI_PATTERN,
     DOCUMENTARY_ROOTS,
     FILE_URI_PATTERN,
 )
+from ..modules.string_analysis.selection import select_samples
 from .strings_capture import (
     _extract_bounds_warnings,
     _run_with_fd_capture,
@@ -48,6 +47,8 @@ from .strings_helpers import (
     _short_hash,
     _source_type_for,
 )
+from .strings_runtime import get_config
+
 
 def _shannon_entropy(value: str) -> float:
     if not value:

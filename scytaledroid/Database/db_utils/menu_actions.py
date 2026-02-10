@@ -530,10 +530,13 @@ def maybe_clear_screen() -> None:
 def seed_paper_dataset_profile() -> None:
     """Create or update the paper dataset profile and assign packages."""
 
-    from scytaledroid.DynamicAnalysis.datasets.research_dataset_alpha import CANONICAL_PACKAGES, PROFILE_KEY
-    from scytaledroid.Paper.paper_contract_inputs import load_paper_contracts
     from scytaledroid.Database.db_func.apps.app_labels import upsert_display_names
     from scytaledroid.Database.db_func.apps.app_ordering import upsert_ordering
+    from scytaledroid.DynamicAnalysis.datasets.research_dataset_alpha import (
+        CANONICAL_PACKAGES,
+        PROFILE_KEY,
+    )
+    from scytaledroid.Paper.paper_contract_inputs import load_paper_contracts
 
     profile_key = PROFILE_KEY
     display_name = "Research Dataset Alpha (Paper #2)"
@@ -609,9 +612,9 @@ def sync_paper_contracts_to_db() -> None:
     This is a post-paper hygiene action to reduce drift from scattered JSON maps.
     It does not change any evidence packs or paper outputs.
     """
-    from scytaledroid.Paper.paper_contract_inputs import load_paper_contracts
     from scytaledroid.Database.db_func.apps.app_labels import upsert_display_names
     from scytaledroid.Database.db_func.apps.app_ordering import upsert_ordering
+    from scytaledroid.Paper.paper_contract_inputs import load_paper_contracts
 
     print(status_messages.status("Syncing paper contracts -> DB (display names + ordering).", level="info"))
     if not prompt_utils.prompt_yes_no("Apply updates now?", default=True):

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import numpy as np
-
 from scytaledroid.DynamicAnalysis.ml.operational_metrics import (
     anomaly_streaks,
     infer_intensity_from_windows,

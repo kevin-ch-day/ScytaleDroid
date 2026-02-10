@@ -11,12 +11,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
-import sys
-
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -71,8 +70,8 @@ class BundleResult:
 
 def write_bundle(snapshot_dir: Path) -> BundleResult:
     from scytaledroid.Config import app_config
-    from scytaledroid.DynamicAnalysis.ml.snapshot_freeze import write_snapshot_freeze_manifest
     from scytaledroid.DynamicAnalysis.ml.operational_lint import lint_operational_snapshot
+    from scytaledroid.DynamicAnalysis.ml.snapshot_freeze import write_snapshot_freeze_manifest
 
     evidence_root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
     snapshot_dir.mkdir(parents=True, exist_ok=True)

@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from dataclasses import dataclass
+from pathlib import Path
 
 from scytaledroid.Config import app_config  # noqa: F401 - re-exported for tests
 from scytaledroid.Database.db_core import run_sql
-from scytaledroid.DeviceAnalysis.adb import shell as adb_shell, status as adb_status
+from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
+from scytaledroid.DeviceAnalysis.adb import status as adb_status
 from scytaledroid.DynamicAnalysis import plan_selection as _plan_selection
 from scytaledroid.DynamicAnalysis.controllers.guided_run import run_guided_dataset_run
 from scytaledroid.DynamicAnalysis.datasets.research_dataset_alpha import (
     PROFILE_KEY as _DATASET_PROFILE_KEY,
+)
+from scytaledroid.DynamicAnalysis.datasets.research_dataset_alpha import (
     load_dataset_packages as _load_dataset_packages,
 )
 from scytaledroid.DynamicAnalysis.profile_loader import load_db_profiles, load_profile_packages
@@ -525,12 +528,12 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
         dataset_pkgs = set()
 
     # Lazy imports avoid unnecessary module work for non-dataset menus.
-    from scytaledroid.DynamicAnalysis.utils.run_cleanup import recent_tracker_runs
     from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
         DatasetTrackerConfig,
         load_dataset_tracker,
         peek_next_run_protocol,
     )
+    from scytaledroid.DynamicAnalysis.utils.run_cleanup import recent_tracker_runs
     from scytaledroid.Utils.DisplayUtils import text_blocks
 
     cfg = DatasetTrackerConfig()

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 from scytaledroid.ui import formatter
+from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 
 from .runtime import api_status, start_api_server, stop_api_server
 

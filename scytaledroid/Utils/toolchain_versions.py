@@ -12,7 +12,6 @@ import platform
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass
 from typing import Any
 
 
@@ -38,7 +37,7 @@ def _run_version_cmd(argv: list[str], *, timeout_s: float = 5.0) -> str | None:
 
 def _pkg_version(dist_name: str) -> str | None:
     try:
-        from importlib.metadata import PackageNotFoundError, version
+        from importlib.metadata import version
 
         return version(dist_name)
     except Exception:

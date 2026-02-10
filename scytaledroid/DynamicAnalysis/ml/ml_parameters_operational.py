@@ -9,7 +9,6 @@ Contract:
 
 from __future__ import annotations
 
-
 # Keep the schema label consistent with Phase E for now (same output shape), but the
 # *semantics* are operational (stabilised features, extra diagnostic tables).
 ML_SCHEMA_VERSION = 1

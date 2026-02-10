@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 ML_SCHEMA_VERSION = 1
 ML_SCHEMA_LABEL = f"v{ML_SCHEMA_VERSION}"
 

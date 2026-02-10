@@ -4,24 +4,22 @@ from __future__ import annotations
 
 import contextlib
 import io
-from dataclasses import replace
+from collections.abc import Callable
 from pathlib import Path
 
-from collections.abc import Callable
-
 from scytaledroid.DynamicAnalysis.controllers.device_select import select_device
-from scytaledroid.DynamicAnalysis.plan_selection import (
-    ensure_plan_or_error,
-    print_plan_selection_banner,
-)
+from scytaledroid.DynamicAnalysis.core.run_specs import build_dynamic_run_spec
 from scytaledroid.DynamicAnalysis.datasets.research_dataset_alpha import (
     MESSAGING_PACKAGES,
     load_dataset_packages,
 )
-from scytaledroid.DynamicAnalysis.core.run_specs import build_dynamic_run_spec
+from scytaledroid.DynamicAnalysis.pcap.tools import collect_host_tools, missing_required_tools
+from scytaledroid.DynamicAnalysis.plan_selection import (
+    ensure_plan_or_error,
+    print_plan_selection_banner,
+)
 from scytaledroid.DynamicAnalysis.run_dynamic_analysis import execute_dynamic_run_spec
 from scytaledroid.DynamicAnalysis.run_summary import print_run_summary
-from scytaledroid.DynamicAnalysis.pcap.tools import collect_host_tools, missing_required_tools
 from scytaledroid.DynamicAnalysis.utils.run_cleanup import (
     dataset_tracker_counts,
     delete_dynamic_evidence_packs,

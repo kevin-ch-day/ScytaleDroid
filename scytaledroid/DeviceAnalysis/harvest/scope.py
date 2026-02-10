@@ -54,9 +54,7 @@ def select_package_scope(
     allow = set(google_allowlist or rules.GOOGLE_ALLOWLIST)
     context = build_scope_context(rows, allow)
     profile_counts = context["profile_counts"]  # type: ignore[assignment]
-    profile_key_groups = _group_by_profile_key(rows)
-
-    watchlist_entries: list[_WatchlistEntry] = context.get("watchlists", [])  # type: ignore[assignment]
+    # Note: profile groups / watchlists are rendered inside build_scope_context() output.
 
     default_rows, _ = apply_default_scope(rows, allow)
     updated_rows, updated_meta = filter_updated_only(rows)
@@ -120,14 +118,14 @@ def select_package_scope(
             packages=len(dataset_rows),
             files=estimated_files(dataset_rows),
             note="recommended",
-            handler=lambda: ScopeSelection(
+            handler=lambda rows=dataset_rows: ScopeSelection(
                 label="Research Dataset Alpha",
-                packages=list(dataset_rows),
+                packages=list(rows),
                 kind="research_dataset",
                 metadata={
-                    "estimated_files": estimated_files(dataset_rows),
+                    "estimated_files": estimated_files(rows),
                     "candidate_count": len(rows),
-                    "selected_count": len(dataset_rows),
+                    "selected_count": len(rows),
                     "profile_key": "RESEARCH_DATASET_ALPHA",
                     # Always pull the full dataset set; do not delta-filter these runs.
                     "disable_delta_filter": True,

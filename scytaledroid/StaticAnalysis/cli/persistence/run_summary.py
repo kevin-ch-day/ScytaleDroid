@@ -2,22 +2,17 @@
 
 from __future__ import annotations
 
-import hashlib
-import os
 import json
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_core.session import database_session
-from scytaledroid.Database.db_core.db_queries import run_sql_write
 from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
-from scytaledroid.Database.db_utils.artifact_registry import record_artifacts
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.version_utils import get_git_commit
 
@@ -26,6 +21,9 @@ from ..core.cvss_v4 import apply_profiles
 from ..core.masvs_mapper import rule_to_area, summarise_controls
 from ..core.rule_ids import derive_rule_id
 from ..reports.evidence_report import normalize_evidence
+from . import assembly as _assembly
+from . import manifest_writer as _manifest_writer
+from . import run_writers as _run_writers
 from .dep_export import export_dep_json
 from .findings_writer import (
     compute_cvss_base,
@@ -51,9 +49,6 @@ from .utils import (
     safe_int,
     truncate,
 )
-from . import run_writers as _run_writers
-from . import manifest_writer as _manifest_writer
-from . import assembly as _assembly
 
 
 def _normalize_datetime_value(value: str | None) -> str | None:
@@ -1157,7 +1152,6 @@ def persist_run_summary(
             )
 
     if static_run_id and not dry_run:
-        canonical_failed = False
         if paper_grade_requested is None:
             paper_grade_requested = True
 
@@ -1196,7 +1190,6 @@ def persist_run_summary(
             except Exception:
                 canonical_count = 0
             if canonical_count != 1:
-                canonical_failed = True
                 outcome.canonical_failed = True
                 run_status = "FAILED"
                 message = (

@@ -43,7 +43,10 @@ def test_ml_preflight_accepts_dataset_block(tmp_path) -> None:
     }
     (run_dir / "run_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
 
-    from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_preflight import load_run_inputs, is_valid_dataset_run
+    from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_preflight import (
+        is_valid_dataset_run,
+        load_run_inputs,
+    )
 
     inputs = load_run_inputs(run_dir)
     assert inputs is not None

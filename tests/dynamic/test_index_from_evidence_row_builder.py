@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 
 def test_build_dynamic_session_row_from_evidence_pack(tmp_path):
-    from scytaledroid.DynamicAnalysis.storage.index_from_evidence import build_dynamic_session_row_from_evidence_pack
+    from scytaledroid.DynamicAnalysis.storage.index_from_evidence import (
+        build_dynamic_session_row_from_evidence_pack,
+    )
 
     run_dir = tmp_path / "output" / "evidence" / "dynamic" / "run123"
     (run_dir / "inputs").mkdir(parents=True)

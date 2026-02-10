@@ -387,7 +387,7 @@ def _render_app_runs(root: Path, display_name: str, package_name: str, runs: lis
             ]
         )
     # Use the shared table renderer for consistent formatting.
-    from scytaledroid.Utils.DisplayUtils import table_utils, display_settings
+    from scytaledroid.Utils.DisplayUtils import display_settings, table_utils
 
     table_kwargs = display_settings.apply_table_defaults({"compact": True, "accent_first_column": True})
     table_utils.render_table(headers, rows, **table_kwargs)
@@ -403,7 +403,9 @@ def evidence_verify_overview(*, pause: bool = True) -> None:
 
 
 def evidence_quick_health_check(*, pause: bool = True) -> None:
-    from scytaledroid.DynamicAnalysis.tools.evidence.verify_cli import run_dynamic_evidence_quick_check
+    from scytaledroid.DynamicAnalysis.tools.evidence.verify_cli import (
+        run_dynamic_evidence_quick_check,
+    )
 
     run_dynamic_evidence_quick_check(enrich_db_labels=True)
     if pause:
@@ -411,7 +413,9 @@ def evidence_quick_health_check(*, pause: bool = True) -> None:
 
 
 def evidence_deep_checks(*, pause: bool = True) -> None:
-    from scytaledroid.DynamicAnalysis.tools.evidence.verify_cli import run_dynamic_evidence_deep_checks
+    from scytaledroid.DynamicAnalysis.tools.evidence.verify_cli import (
+        run_dynamic_evidence_deep_checks,
+    )
 
     run_dynamic_evidence_deep_checks(enrich_db_labels=True, write_outputs=True)
     if pause:
@@ -452,7 +456,7 @@ def evidence_view_app_runs(*, pause: bool = True) -> None:
 
     print()
     menu_utils.print_header("Select App", "View runs and reasons")
-    from scytaledroid.Utils.DisplayUtils import table_utils, display_settings
+    from scytaledroid.Utils.DisplayUtils import display_settings, table_utils
 
     try:
         from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig
@@ -585,7 +589,9 @@ def evidence_verify_freeze_immutability(*, pause: bool = True) -> None:
             prompt_utils.press_enter_to_continue()
         return
 
-    from scytaledroid.DynamicAnalysis.tools.evidence.freeze_verify import verify_dataset_freeze_immutability
+    from scytaledroid.DynamicAnalysis.tools.evidence.freeze_verify import (
+        verify_dataset_freeze_immutability,
+    )
 
     print()
     menu_utils.print_header("Freeze Immutability Check", "Hash-based verification (does not mutate packs)")
@@ -644,7 +650,9 @@ def evidence_recompute_dataset_tracker(*, pause: bool = True) -> None:
 
 
 def evidence_network_audit_report(*, pause: bool = True) -> None:
-    from scytaledroid.DynamicAnalysis.tools.evidence.audit_report import run_dynamic_evidence_network_audit
+    from scytaledroid.DynamicAnalysis.tools.evidence.audit_report import (
+        run_dynamic_evidence_network_audit,
+    )
 
     print()
     report = run_dynamic_evidence_network_audit(enrich_db_labels=True, write_outputs=True)

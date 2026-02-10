@@ -6,14 +6,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ..core import Pipeline, PipelineContext
-from ...io import MLOutputPaths
+from ... import ml_parameters_paper2 as config
 from ...evidence_pack_ml_preflight import (
     compute_ml_preflight,
     load_run_inputs,
     write_ml_preflight,
 )
-from ... import ml_parameters_paper2 as config
+from ...io import MLOutputPaths
+from ..core import Pipeline, PipelineContext
 
 
 @dataclass

@@ -8,16 +8,16 @@ from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
 from .menu_actions import (
     fetch_tier1_status,
     handle_dataset_readiness_dashboard,
-    handle_run_ml_query_mode,
-    handle_write_canonical_paper_directory,
-    handle_paper_bundle_health_check,
     handle_paper2_end_to_end,
-    handle_tier1_end_to_end,
-    handle_tier1_quick_fix,
-    handle_tier1_audit_report,
-    handle_tier1_export_pack,
+    handle_paper_bundle_health_check,
     handle_phase_f1_acceptance_gates,
+    handle_run_ml_query_mode,
+    handle_tier1_audit_report,
+    handle_tier1_end_to_end,
+    handle_tier1_export_pack,
+    handle_tier1_quick_fix,
     handle_verify_freeze_immutability_paper2,
+    handle_write_canonical_paper_directory,
     view_saved_reports,
 )
 

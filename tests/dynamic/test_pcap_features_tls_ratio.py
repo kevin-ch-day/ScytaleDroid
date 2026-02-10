@@ -1,6 +1,5 @@
-import json
 
-from scytaledroid.DynamicAnalysis.pcap.features import _extract_features, PcapFeatureConfig
+from scytaledroid.DynamicAnalysis.pcap.features import PcapFeatureConfig, _extract_features
 
 
 def test_tls_ratio_uses_tcp_denominator_and_is_bounded():

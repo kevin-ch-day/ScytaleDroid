@@ -25,7 +25,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -335,9 +334,9 @@ def write_phase_g_artifacts(
                 "- Windowing (paper): 10s windows / 5s stride; partial windows dropped.",
                 "",
                 "Code pointers:",
-                f"- Fig B2/B4 generation: `scytaledroid/DynamicAnalysis/ml/artifact_bundle_writer.py`",
-                f"- Canonical export: `scytaledroid/Paper/canonical_paper_writer.py`",
-                f"- Query-mode runner (operational snapshot): `scytaledroid/DynamicAnalysis/ml/query_mode_runner.py`",
+                "- Fig B2/B4 generation: `scytaledroid/DynamicAnalysis/ml/artifact_bundle_writer.py`",
+                "- Canonical export: `scytaledroid/Paper/canonical_paper_writer.py`",
+                "- Query-mode runner (operational snapshot): `scytaledroid/DynamicAnalysis/ml/query_mode_runner.py`",
                 "",
             ]
         )

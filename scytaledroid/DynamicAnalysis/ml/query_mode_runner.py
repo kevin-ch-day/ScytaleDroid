@@ -20,7 +20,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-
 from scytaledroid.Config import app_config
 
 from . import ml_parameters_operational as config
@@ -34,10 +33,7 @@ from .evidence_pack_ml_preflight import (
     write_ml_preflight,
 )
 from .numpy_percentile import percentile as np_percentile
-from .pcap_window_features import build_window_features, extract_packet_timeline, write_anomaly_scores_csv
-from .seed_identity import derive_seed
-from .telemetry_windowing import WindowSpec
-from .selectors.models import SelectionResult, write_selection_manifest
+from .operational_lint import lint_operational_snapshot
 from .operational_metrics import (
     anomaly_streaks,
     infer_intensity_from_windows,
@@ -46,16 +42,23 @@ from .operational_metrics import (
 )
 from .operational_risk import (
     build_static_inputs_from_plan,
-    exposure_grade,
     deviation_grade,
     dynamic_deviation_score_0_100,
+    exposure_grade,
     final_posture_grade,
     final_posture_regime,
     minmax_norm,
     static_exposure_score_components,
 )
+from .pcap_window_features import (
+    build_window_features,
+    extract_packet_timeline,
+    write_anomaly_scores_csv,
+)
+from .seed_identity import derive_seed
+from .selectors.models import SelectionResult, write_selection_manifest
 from .snapshot_freeze import write_snapshot_freeze_manifest
-from .operational_lint import lint_operational_snapshot
+from .telemetry_windowing import WindowSpec
 
 
 @dataclass(frozen=True)
@@ -526,7 +529,7 @@ def run_ml_query_mode(
         baseline_rows: list[dict[str, Any]] = []
         interactive_rows: list[dict[str, Any]] = []
         unknown_rows: list[dict[str, Any]] = []
-        for rid, (rows, _, mode) in by_run_rows.items():
+        for _rid, (rows, _, mode) in by_run_rows.items():
             if mode == "baseline":
                 baseline_rows.extend(rows)
             elif mode == "interactive":

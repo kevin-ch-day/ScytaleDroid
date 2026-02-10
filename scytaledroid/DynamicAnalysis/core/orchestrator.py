@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import getpass
-import os
 import platform
 import shutil
 import uuid
@@ -15,6 +14,20 @@ from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
 from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
+from scytaledroid.DynamicAnalysis.analysis.summarizer import DynamicRunSummarizer
+from scytaledroid.DynamicAnalysis.core.environment import EnvironmentManager
+from scytaledroid.DynamicAnalysis.core.event_logger import RunEventLogger
+from scytaledroid.DynamicAnalysis.core.evidence_pack import EvidencePackWriter
+from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord, ObserverRecord, RunManifest
+from scytaledroid.DynamicAnalysis.core.run_context import RunContext
+from scytaledroid.DynamicAnalysis.core.session import DynamicSessionConfig
+from scytaledroid.DynamicAnalysis.core.static_context import (
+    build_operator_guidance,
+    compute_static_context,
+)
+from scytaledroid.DynamicAnalysis.core.target_manager import TargetManager
+from scytaledroid.DynamicAnalysis.monitor import RunMonitor, RunMonitorConfig
+from scytaledroid.DynamicAnalysis.observers.base import Observer, ObserverHandle
 from scytaledroid.DynamicAnalysis.pcap.correlate import write_static_dynamic_overlap
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
     DatasetTrackerConfig,
@@ -26,17 +39,6 @@ from scytaledroid.DynamicAnalysis.pcap.features import write_pcap_features
 from scytaledroid.DynamicAnalysis.pcap.indexer import index_pcap_by_app
 from scytaledroid.DynamicAnalysis.pcap.report import write_pcap_report
 from scytaledroid.DynamicAnalysis.pcap.tools import collect_host_tools
-from scytaledroid.DynamicAnalysis.analysis.summarizer import DynamicRunSummarizer
-from scytaledroid.DynamicAnalysis.core.environment import EnvironmentManager
-from scytaledroid.DynamicAnalysis.core.event_logger import RunEventLogger
-from scytaledroid.DynamicAnalysis.core.evidence_pack import EvidencePackWriter
-from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord, ObserverRecord, RunManifest
-from scytaledroid.DynamicAnalysis.core.run_context import RunContext
-from scytaledroid.DynamicAnalysis.core.session import DynamicSessionConfig
-from scytaledroid.DynamicAnalysis.core.static_context import build_operator_guidance, compute_static_context
-from scytaledroid.DynamicAnalysis.core.target_manager import TargetManager
-from scytaledroid.DynamicAnalysis.monitor import RunMonitor, RunMonitorConfig
-from scytaledroid.DynamicAnalysis.observers.base import Observer, ObserverHandle
 from scytaledroid.DynamicAnalysis.plans.loader import (
     PlanValidationError,
     build_plan_validation_event,
@@ -435,7 +437,9 @@ class DynamicRunOrchestrator:
                     # ML readiness is separate from validity. Tag low-signal runs deterministically
                     # without changing VALID/INVALID semantics (Paper #2 contract).
                     try:
-                        from scytaledroid.DynamicAnalysis.pcap.low_signal import compute_low_signal_from_evidence_pack
+                        from scytaledroid.DynamicAnalysis.pcap.low_signal import (
+                            compute_low_signal_from_evidence_pack,
+                        )
 
                         ls = compute_low_signal_from_evidence_pack(run_dir)
                         if isinstance(ls, dict):
@@ -448,7 +452,9 @@ class DynamicRunOrchestrator:
                     # derived tracker markings (counts_toward_quota) rather than from
                     # operator choice or run order.
                     try:
-                        from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import load_dataset_tracker
+                        from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
+                            load_dataset_tracker,
+                        )
 
                         tracker = load_dataset_tracker()
                         apps = tracker.get("apps") if isinstance(tracker, dict) else {}
@@ -558,7 +564,7 @@ class DynamicRunOrchestrator:
             dataset={
                 "tier": self.config.tier,
                 "countable": (
-                    bool(getattr(run_ctx, "counts_toward_completion"))
+                    bool(run_ctx.counts_toward_completion)
                     if getattr(run_ctx, "counts_toward_completion", None) is not None
                     else str(self.config.tier).lower() == "dataset"
                 ),
@@ -676,10 +682,8 @@ class DynamicRunOrchestrator:
         except Exception:
             row = None
         package_name = run_ctx.package_name
-        sha256 = None
         if row:
             package_name = row[0] or package_name
-            sha256 = row[1] or row[2]
         dep_path = Path("evidence") / "static_runs" / str(run_ctx.static_run_id) / "dep.json"
         if not dep_path.exists():
             note = (

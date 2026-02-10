@@ -27,7 +27,11 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from scytaledroid.Database.db_core import db_engine
+def _imports():  # noqa: ANN202 - small script helper
+    # Local import so this script can be run both as `python ...` and with repo-root sys.path tweak.
+    from scytaledroid.Database.db_core import db_engine
+
+    return db_engine
 
 
 def _fetch_columns(cursor, table: str) -> set[str]:
@@ -192,6 +196,7 @@ class RunAudit:
 def collect_static_run_counts(
     *, session_stamp: str | None = None, static_run_id: int | None = None
 ) -> RunAudit | None:
+    db_engine = _imports()
     with db_engine.connect() as conn:
         cur = conn.cursor()
         (

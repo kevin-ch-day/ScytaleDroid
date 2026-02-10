@@ -7,7 +7,7 @@ import os
 import shutil
 import signal
 from dataclasses import replace
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from scytaledroid.Config import app_config
@@ -21,12 +21,12 @@ from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.LoggingUtils.logging_context import RunContext, get_run_logger
 from scytaledroid.Utils.System import output_prefs
 
-from ..core.run_specs import StaticRunSpec
-
 from ..core.abort_reasons import classify_exception, normalize_abort_reason
 from ..core.analysis_profiles import run_modules_for_profile
 from ..core.models import AppRunResult, RunOutcome, RunParameters, ScopeSelection
+from ..core.run_context import StaticRunContext
 from ..core.run_lifecycle import finalize_open_runs
+from ..core.run_specs import StaticRunSpec
 from ..execution import (
     build_analysis_config,
     configure_logging_for_cli,
@@ -40,7 +40,6 @@ from ..execution import (
 from ..execution.static_run_map import REQUIRED_FIELDS, validate_run_map
 from ..views.view_layouts import render_run_start, render_run_summary
 from .selection import format_scope_target
-from ..core.run_context import StaticRunContext
 
 
 def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir: Path) -> RunOutcome | None:
@@ -618,10 +617,10 @@ def _resolve_unique_session_stamp(
     if action in {"cancel", "abort"}:
         raise RuntimeError(f"Session label already used: {base_stamp}. Cancelled by caller.")
     raise RuntimeError(
-        (
+        
             f"Session label already used: {base_stamp}. "
             "Resolve this in the menu layer (replace or append) before execution."
-        )
+        
     )
 
 
@@ -727,7 +726,7 @@ def _persist_session_run_links(session_stamp: str | None, run_map: dict | None) 
                     f"static_run_id(s) missing from static_analysis_runs: {', '.join(map(str, missing_ids))}"
                 )
 
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
         insert_columns = ["session_stamp", "package_name", "static_run_id"]
         if "run_origin" in columns:
             insert_columns.append("run_origin")

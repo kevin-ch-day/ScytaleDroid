@@ -21,15 +21,10 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-
 from scytaledroid.Config import app_config
 
 from . import ml_parameters_paper2 as config
-from .numpy_percentile import percentile as np_percentile
-from .seed_identity import derive_seed, salt_metadata
-from .io import MLOutputPaths
 from .anomaly_model_training import anomaly_scores, fit_model, fixed_model_specs
-from .pcap_window_features import build_window_features, extract_packet_timeline, write_anomaly_scores_csv
 from .evidence_pack_ml_preflight import (
     RunInputs,
     compute_ml_preflight,
@@ -38,8 +33,15 @@ from .evidence_pack_ml_preflight import (
     load_run_inputs,
     write_ml_preflight,
 )
+from .io import MLOutputPaths
+from .numpy_percentile import percentile as np_percentile
+from .pcap_window_features import (
+    build_window_features,
+    extract_packet_timeline,
+    write_anomaly_scores_csv,
+)
+from .seed_identity import derive_seed, salt_metadata
 from .telemetry_windowing import WindowSpec
-
 
 FREEZE_DIR = Path(app_config.DATA_DIR) / "archive"
 DATASET_FREEZE_CANONICAL = FREEZE_DIR / config.FREEZE_CANONICAL_FILENAME
@@ -122,7 +124,7 @@ def run_ml_on_evidence_packs(
         # existing v1 outputs without touching per-run artifacts.
         if reuse_existing_outputs and _all_frozen_v1_outputs_exist(root, included_run_ids):
             apps_seen = 0
-            for pkg, entry in sorted(freeze_apps.items()):
+            for _pkg, entry in sorted(freeze_apps.items()):
                 if not isinstance(entry, dict):
                     continue
                 base_ids = entry.get("baseline_run_ids") or []
@@ -282,7 +284,7 @@ def run_ml_on_evidence_packs(
             else:
                 training_mode = "union_fallback"
                 train_rows = []
-                for rid, (rows, _) in per_run_rows.items():
+                for _rid, (rows, _) in per_run_rows.items():
                     train_rows.extend(rows)
 
             X_train, feature_names = _rows_to_matrix(train_rows, window_spec=window_spec)

@@ -11,7 +11,9 @@ def _write_json(p: Path, obj: object) -> None:
 
 def test_network_audit_report_smoke(tmp_path, monkeypatch):
     from scytaledroid.Config import app_config
-    from scytaledroid.DynamicAnalysis.tools.evidence.audit_report import run_dynamic_evidence_network_audit
+    from scytaledroid.DynamicAnalysis.tools.evidence.audit_report import (
+        run_dynamic_evidence_network_audit,
+    )
 
     # app_config is loaded at import time, so patch it directly for isolation.
     monkeypatch.setattr(app_config, "OUTPUT_DIR", str(tmp_path / "output"), raising=False)

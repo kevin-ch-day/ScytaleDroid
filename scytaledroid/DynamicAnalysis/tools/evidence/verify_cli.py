@@ -9,14 +9,12 @@ from __future__ import annotations
 
 import csv
 import json
-import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from scytaledroid.Config import app_config
-
 
 REQUIRED_FILES = [
     "run_manifest.json",
@@ -615,7 +613,7 @@ def run_dynamic_evidence_verify(
         valid_label = "VALID" if r.valid is True else ("INVALID" if r.valid is False else "—")
         ls_label = "Y" if r.low_signal is True else ("N" if r.low_signal is False else "—")
         table_rows.append(
-            ([r.run_id[:8], app_name, r.run_profile or "—", valid_label]
+            [r.run_id[:8], app_name, r.run_profile or "—", valid_label]
              + ([r.invalid_reason or "—"] if show_reason_column else [])
              + [
                 "Y" if r.countable is True else ("N" if r.countable is False else "—"),
@@ -625,7 +623,7 @@ def run_dynamic_evidence_verify(
                 f"{r.tls_ratio:.2f}" if r.tls_ratio is not None else "—",
                 f"{r.quic_ratio:.2f}" if r.quic_ratio is not None else "—",
                 r.status,
-            ])
+            ]
         )
     # Keep "App" readable; use DB display_name when available.
     max_widths = {1: 22, 2: 14}
@@ -766,7 +764,9 @@ def run_dynamic_evidence_quick_check(*, enrich_db_labels: bool = True) -> dict[s
     This intentionally mirrors the ad-hoc shell one-liners operators used during
     Phase D hardening, but is now a first-class menu action.
     """
-    from scytaledroid.DynamicAnalysis.tools.evidence.verify_core import verify_dynamic_evidence_packs
+    from scytaledroid.DynamicAnalysis.tools.evidence.verify_core import (
+        verify_dynamic_evidence_packs,
+    )
 
     root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
     report = verify_dynamic_evidence_packs(root, dataset_only=False)

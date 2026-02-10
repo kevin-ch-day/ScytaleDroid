@@ -356,11 +356,15 @@ def workspace_menu() -> None:
 
             evidence_view_app_runs(pause=True)
         elif choice == "5":
-            from scytaledroid.DynamicAnalysis.tools.evidence.menu import evidence_recompute_dataset_tracker
+            from scytaledroid.DynamicAnalysis.tools.evidence.menu import (
+                evidence_recompute_dataset_tracker,
+            )
 
             evidence_recompute_dataset_tracker(pause=True)
         elif choice == "6":
-            from scytaledroid.DynamicAnalysis.storage.index_from_evidence import index_dynamic_evidence_packs_to_db
+            from scytaledroid.DynamicAnalysis.storage.index_from_evidence import (
+                index_dynamic_evidence_packs_to_db,
+            )
 
             root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
             print()
@@ -375,7 +379,9 @@ def workspace_menu() -> None:
                 print(status_messages.status(f"Errors (sample): {', '.join(res.get('errors') or [])}", level="warn"))
             prompt_utils.press_enter_to_continue()
         elif choice == "7":
-            from scytaledroid.DynamicAnalysis.tools.evidence.menu import evidence_network_audit_report
+            from scytaledroid.DynamicAnalysis.tools.evidence.menu import (
+                evidence_network_audit_report,
+            )
 
             evidence_network_audit_report(pause=True)
         elif choice == "8":

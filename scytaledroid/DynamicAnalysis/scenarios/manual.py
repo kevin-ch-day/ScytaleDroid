@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import select
 import sys
 import time
@@ -35,7 +34,6 @@ class ManualScenarioRunner:
         if run_ctx.interactive:
             duration_seconds = max(int(run_ctx.duration_seconds or 0), 0)
             profile = getattr(run_ctx, "run_profile", None)
-            sequence = getattr(run_ctx, "run_sequence", None)
             # Operator protocol metadata: pick interaction level *before* the run starts so the
             # evidence pack is tagged deterministically without post-run prompts.
             if not interaction_level:

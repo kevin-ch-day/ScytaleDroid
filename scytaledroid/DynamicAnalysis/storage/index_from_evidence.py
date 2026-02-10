@@ -140,7 +140,6 @@ def build_dynamic_session_row_from_evidence_pack(run_dir: Path) -> dict[str, Any
         return None
 
     ds = mf.get("dataset") if isinstance(mf.get("dataset"), dict) else {}
-    env = mf.get("environment") if isinstance(mf.get("environment"), dict) else {}
     op = mf.get("operator") if isinstance(mf.get("operator"), dict) else {}
 
     scenario = mf.get("scenario") if isinstance(mf.get("scenario"), dict) else {}

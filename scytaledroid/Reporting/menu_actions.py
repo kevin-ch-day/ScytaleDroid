@@ -14,9 +14,10 @@ from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_utils.menus import health_checks
 from scytaledroid.DynamicAnalysis.exports.dataset_export import export_tier1_pack
 from scytaledroid.DynamicAnalysis.ml import run_ml_on_evidence_packs
-from scytaledroid.DynamicAnalysis.storage.index_from_evidence import index_dynamic_evidence_packs_to_db
+from scytaledroid.DynamicAnalysis.storage.index_from_evidence import (
+    index_dynamic_evidence_packs_to_db,
+)
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
-from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
 def handle_dataset_readiness_dashboard() -> None:
@@ -312,10 +313,18 @@ def _write_phase_e_deliverables_bundle_from_pin() -> bool:
     Returns True on success, False on any failure/cancel.
     """
 
-    from scytaledroid.DynamicAnalysis.ml.artifact_bundle_writer import write_phase_e_deliverables_bundle
-    from scytaledroid.DynamicAnalysis.ml.deliverable_bundle_paths import freeze_anchor_path, output_phase_e_bundle_root
-    from scytaledroid.DynamicAnalysis.ml.ml_parameters_paper2 import FREEZE_CANONICAL_FILENAME
-    from scytaledroid.DynamicAnalysis.ml.ml_parameters_paper2 import EXEMPLAR_ALLOWED_INTERACTION_TAGS, MESSAGING_PACKAGES
+    from scytaledroid.DynamicAnalysis.ml.artifact_bundle_writer import (
+        write_phase_e_deliverables_bundle,
+    )
+    from scytaledroid.DynamicAnalysis.ml.deliverable_bundle_paths import (
+        freeze_anchor_path,
+        output_phase_e_bundle_root,
+    )
+    from scytaledroid.DynamicAnalysis.ml.ml_parameters_paper2 import (
+        EXEMPLAR_ALLOWED_INTERACTION_TAGS,
+        FREEZE_CANONICAL_FILENAME,
+        MESSAGING_PACKAGES,
+    )
 
     archive_dir = Path(app_config.DATA_DIR) / "archive"
     freeze_path = archive_dir / FREEZE_CANONICAL_FILENAME
@@ -394,7 +403,9 @@ def _write_phase_e_deliverables_bundle_from_pin() -> bool:
         except Exception as exc:  # noqa: BLE001
             print(status_messages.status(f"Failed to read freeze anchor: {exc}", level="fail"))
             return False
-        from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_orchestrator import _select_fig_b1_exemplar_from_existing_or_inputs
+        from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_orchestrator import (
+            _select_fig_b1_exemplar_from_existing_or_inputs,
+        )
 
         exemplar = _select_fig_b1_exemplar_from_existing_or_inputs(
             evidence_root=Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic",
@@ -702,9 +713,9 @@ def handle_paper_bundle_health_check() -> None:
 def handle_phase_f1_acceptance_gates() -> None:
     """Run Phase F1 acceptance gates (Phase E regression + query-mode smoke)."""
 
+    import re
     import subprocess
     import sys
-    import re
     from hashlib import sha256
 
     print()
@@ -819,9 +830,9 @@ def handle_phase_f1_acceptance_gates() -> None:
         # Closure artifact: lock Phase F1 as complete (and record that Phase F2 operational
         # diagnostics are present in the smoke snapshot).
         try:
-            from scytaledroid.Utils.toolchain_versions import gather_toolchain_versions
             from scytaledroid.DynamicAnalysis.ml import ml_parameters_operational as op_cfg
             from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper_cfg
+            from scytaledroid.Utils.toolchain_versions import gather_toolchain_versions
 
             def _sha256_file(path: Path) -> str | None:
                 if not path.exists():

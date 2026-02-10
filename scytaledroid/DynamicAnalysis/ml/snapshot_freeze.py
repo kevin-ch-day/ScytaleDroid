@@ -20,7 +20,6 @@ from typing import Any
 
 from scytaledroid.Config import app_config
 
-
 _REQUIRED_RELATIVE_INPUTS = (
     "run_manifest.json",
     "inputs/static_dynamic_plan.json",

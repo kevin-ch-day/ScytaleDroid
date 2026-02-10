@@ -19,7 +19,7 @@ from scytaledroid.DynamicAnalysis.core import (
 )
 from scytaledroid.DynamicAnalysis.core.event_logger import RunEventLogger
 from scytaledroid.DynamicAnalysis.core.evidence_pack import EvidencePackWriter
-from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord, RunManifest
+from scytaledroid.DynamicAnalysis.core.manifest import RunManifest
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import peek_next_run_protocol
 from scytaledroid.DynamicAnalysis.pcap.tools import collect_host_tools, missing_required_tools

@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
 from pathlib import Path
-
-import pytest
+from types import SimpleNamespace
 
 from scytaledroid.StaticAnalysis.core.findings import Badge
 from scytaledroid.StaticAnalysis.detectors.correlation.detector import CorrelationDetector
-from scytaledroid.StaticAnalysis.detectors.correlation.models import DiffBundle, NetworkDiff, NetworkSnapshot
+from scytaledroid.StaticAnalysis.detectors.correlation.models import (
+    DiffBundle,
+    NetworkDiff,
+    NetworkSnapshot,
+)
 
 
 def _dummy_snapshot() -> NetworkSnapshot:

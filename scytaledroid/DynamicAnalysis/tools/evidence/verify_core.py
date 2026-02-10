@@ -13,7 +13,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-
 REQUIRED_FROZEN_INPUTS = (
     "run_manifest.json",
     "inputs/static_dynamic_plan.json",

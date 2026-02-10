@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from scytaledroid.DeviceAnalysis import device_manager, inventory_meta
 from scytaledroid.DeviceAnalysis.inventory import progress, runner, snapshot_io, views
@@ -120,7 +120,7 @@ def run_full_sync(
             if meta
             else (active.get("model") if active else None)
         ),
-        run_id=f"INV-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}",
+        run_id=f"INV-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}",
         scope=mode,
         profile=mode,
     )

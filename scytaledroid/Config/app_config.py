@@ -1,11 +1,7 @@
-from .version import (
-    APP_AUTHOR,
-    APP_DESCRIPTION,
-    APP_NAME,
-    APP_RELEASE,
-    APP_VERSION,
-    GITHUB_REPO,
-)
+
+# Re-export version metadata for callers that treat app_config as the canonical
+# config surface.
+from scytaledroid.Config.version import APP_NAME, APP_RELEASE, APP_VERSION  # noqa: E402
 
 # Paths
 DATA_DIR   = "data"

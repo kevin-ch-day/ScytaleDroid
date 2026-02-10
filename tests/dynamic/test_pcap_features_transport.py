@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from scytaledroid.DynamicAnalysis.pcap.features import _extract_features, PcapFeatureConfig
+from scytaledroid.DynamicAnalysis.pcap.features import PcapFeatureConfig, _extract_features
 
 
 def test_pcap_features_include_intensity_and_transport_ratios() -> None:

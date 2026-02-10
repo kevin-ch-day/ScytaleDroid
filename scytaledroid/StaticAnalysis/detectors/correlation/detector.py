@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from time import perf_counter
-from dataclasses import replace
 
 from ...core.context import DetectorContext
 from ...core.findings import Badge, DetectorResult, EvidencePointer, Finding

@@ -42,7 +42,7 @@ def identity_key_fallback(manifest: dict[str, Any] | None) -> str | None:
 
 def derive_seed(identity_key: str) -> int:
     """Derive a stable 32-bit seed from identity key + fixed salt."""
-    token = f"{identity_key}|{config.SEED_SALT}".encode("utf-8")
+    token = f"{identity_key}|{config.SEED_SALT}".encode()
     digest = hashlib.sha256(token).hexdigest()
     # 32-bit seed range for sklearn random_state.
     return int(digest[:8], 16)

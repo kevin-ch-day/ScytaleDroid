@@ -18,7 +18,10 @@ try:  # optional DB access for candidate discovery
 except Exception:  # pragma: no cover
     core_q = None
 
-from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_preflight import derive_run_mode, load_run_inputs
+from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_preflight import (
+    derive_run_mode,
+    load_run_inputs,
+)
 
 from .models import QueryParams, RunRef, SelectionResult
 

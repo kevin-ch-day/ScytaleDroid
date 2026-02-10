@@ -9,7 +9,12 @@ Notes:
 """
 
 from .verify_cli import run_dynamic_evidence_verify
-from .verify_core import RunVerifyResult, VerifyIssue, verify_dynamic_evidence_packs, write_verify_report
+from .verify_core import (
+    RunVerifyResult,
+    VerifyIssue,
+    verify_dynamic_evidence_packs,
+    write_verify_report,
+)
 
 __all__ = [
     "RunVerifyResult",

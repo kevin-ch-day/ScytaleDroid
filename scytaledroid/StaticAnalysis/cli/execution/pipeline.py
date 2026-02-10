@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from scytaledroid.Database.db_core import db_queries as core_q
 
-
 REQUIRED_PAPER_ARTIFACTS: tuple[str, ...] = (
     "static_baseline_json",
     "static_dynamic_plan_json",

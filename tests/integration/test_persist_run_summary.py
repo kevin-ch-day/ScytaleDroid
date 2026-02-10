@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -7,9 +8,9 @@ from typing import Any
 
 import pytest
 from scytaledroid.Database.db_core import db_queries as core_q
+from scytaledroid.Database.db_utils.artifact_registry import record_artifacts
 from scytaledroid.StaticAnalysis.cli.core.run_persistence import persist_run_summary
 from scytaledroid.StaticAnalysis.cli.persistence.run_summary import refresh_static_run_manifest
-from scytaledroid.Database.db_utils.artifact_registry import record_artifacts
 from scytaledroid.StaticAnalysis.persistence import ingest
 
 

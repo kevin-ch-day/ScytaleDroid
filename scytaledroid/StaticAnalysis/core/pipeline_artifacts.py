@@ -11,8 +11,8 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 from ..analytics import build_finding_matrices, build_workload_profile
-from .manifest_utils import build_manifest_evidence
 from .findings import Badge, DetectorResult
+from .manifest_utils import build_manifest_evidence
 
 if TYPE_CHECKING:  # pragma: no cover - typing imports only
     from .context import DetectorContext

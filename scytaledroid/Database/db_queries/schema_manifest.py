@@ -5,11 +5,11 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 
+from .analysis import schema as analysis_schema
 from .canonical import schema as canonical_schema
 from .dynamic import schema as dynamic_schema
 from .harvest import device_inventory, dynamic_loading
 from .permissions import governance_snapshot, permission_support
-from .analysis import schema as analysis_schema
 from .static_analysis import (
     risk_scores,
     static_findings,

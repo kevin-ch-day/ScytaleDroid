@@ -12,7 +12,7 @@ import json
 import sys
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from scytaledroid.Utils.DisplayUtils import status_messages
@@ -252,12 +252,11 @@ def _auto_harvest_dataset_apks(*, dataset_pkgs: set[str], base_dir: Path) -> boo
     """
     try:
         from scytaledroid.Config import app_config
-        from scytaledroid.DeviceAnalysis.adb import client as adb_client
         from scytaledroid.DeviceAnalysis import harvest, inventory
+        from scytaledroid.DeviceAnalysis.adb import client as adb_client
         from scytaledroid.DeviceAnalysis.harvest import planner as harvest_planner
         from scytaledroid.DeviceAnalysis.services import inventory_service
-        from scytaledroid.Utils.DisplayUtils import status_messages
-        from scytaledroid.Utils.DisplayUtils import text_blocks
+        from scytaledroid.Utils.DisplayUtils import status_messages, text_blocks
     except Exception:
         return False
 
@@ -339,9 +338,10 @@ def run_dataset_static_batch(
 ) -> None:
     """Run static analysis for Research Dataset Alpha packages (batch, quiet console)."""
     from scytaledroid.DynamicAnalysis.profile_loader import load_profile_packages
-    from scytaledroid.StaticAnalysis.cli.core.models import ScopeSelection
-    from scytaledroid.StaticAnalysis.cli.core.models import RunParameters
-    from scytaledroid.StaticAnalysis.cli.menus.static_analysis_menu_helpers import apply_command_overrides
+    from scytaledroid.StaticAnalysis.cli.core.models import RunParameters, ScopeSelection
+    from scytaledroid.StaticAnalysis.cli.menus.static_analysis_menu_helpers import (
+        apply_command_overrides,
+    )
     from scytaledroid.StaticAnalysis.session import normalize_session_stamp
     from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils
 
@@ -426,7 +426,7 @@ def run_dataset_static_batch(
             return
 
     quiet = True
-    batch_id = datetime.now(timezone.utc).strftime("static-batch-%Y%m%dT%H%M%SZ")
+    batch_id = datetime.now(UTC).strftime("static-batch-%Y%m%dT%H%M%SZ")
     batch_out_dir = Path("output") / "batches" / "static"
     batch_out_dir.mkdir(parents=True, exist_ok=True)
     batch_summary_path = batch_out_dir / f"{batch_id}.json"
@@ -441,7 +441,7 @@ def run_dataset_static_batch(
     print()
     menu_utils.print_section("Running Research Dataset (batch static)")
     for group in batch_groups:
-        app_started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        app_started_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
         session_stamp = normalize_session_stamp(f"{batch_id}-{group.package_name}")
 
         display_name = ""
@@ -477,16 +477,18 @@ def run_dataset_static_batch(
             hb_stop = threading.Event()
             hb_started = time.monotonic()
 
-            def _heartbeat() -> None:
-                while not hb_stop.wait(30.0):
-                    elapsed_s = time.monotonic() - hb_started
+            def _heartbeat(*, _stop=hb_stop, _started=hb_started, _label=selection_label) -> None:
+                while not _stop.wait(30.0):
+                    elapsed_s = time.monotonic() - _started
                     stage = None
                     done = None
                     total_done = None
                     stage_index = None
                     stage_total = None
                     try:
-                        from scytaledroid.StaticAnalysis.cli.execution.heartbeat_state import snapshot
+                        from scytaledroid.StaticAnalysis.cli.execution.heartbeat_state import (
+                            snapshot,
+                        )
 
                         hb = snapshot()
                         stage = hb.get("stage")
@@ -501,7 +503,7 @@ def run_dataset_static_batch(
                         stage_index = None
                         stage_total = None
 
-                    parts = [f"Heartbeat: {selection_label}", f"elapsed={elapsed_s:.0f}s"]
+                    parts = [f"Heartbeat: {_label}", f"elapsed={elapsed_s:.0f}s"]
                     if stage:
                         parts.append(f"stage={stage}")
                     if (
@@ -553,7 +555,7 @@ def run_dataset_static_batch(
                     "status": "error",
                     "error": str(exc),
                     "started_at": app_started_at,
-                    "ended_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    "ended_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
                 }
             )
             continue
@@ -804,7 +806,7 @@ def run_dataset_static_batch(
                 "aborted": bool(getattr(outcome, "aborted", False)) if outcome else False,
                 "abort_reason": getattr(outcome, "abort_reason", None) if outcome else None,
                 "started_at": app_started_at,
-                "ended_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "ended_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
             }
         )
 
@@ -858,7 +860,7 @@ def run_dataset_static_batch(
             apps_total=total,
             apps_completed=completed,
             apps_failed=len(failures),
-            ended_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            ended_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         )
     except Exception as exc:
         print(status_messages.status(f"Failed to write batch summary: {exc}", level="warn"))

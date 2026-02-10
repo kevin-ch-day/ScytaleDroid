@@ -15,8 +15,8 @@ from scytaledroid.StaticAnalysis.cli.persistence.static_findings_writer import (
     persist_static_findings,
 )
 from scytaledroid.StaticAnalysis.cli.persistence.strings_writer import persist_string_summary
-from scytaledroid.StaticAnalysis.modules.string_analysis.selection import select_samples
 from scytaledroid.StaticAnalysis.cli.persistence.utils import first_text, require_canonical_schema
+from scytaledroid.StaticAnalysis.modules.string_analysis.selection import select_samples
 
 # export for existing imports
 coerce_severity_counts = sf_writer.coerce_severity_counts  # re-export

@@ -80,7 +80,7 @@ def effective_run_mode() -> str:
     ctx = _RUN_CONTEXT
     if ctx is not None and hasattr(ctx, "run_mode"):
         try:
-            value = getattr(ctx, "run_mode")
+            value = ctx.run_mode
             return str(value or "interactive")
         except Exception:
             return _PREFS.run_mode or "interactive"

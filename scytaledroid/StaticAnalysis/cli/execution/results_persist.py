@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from collections.abc import Mapping, MutableMapping
 
 from scytaledroid.Database.db_core import db_queries as core_q

@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from datetime import UTC
 
-from scytaledroid.StaticAnalysis.cli.execution import db_verification, diagnostics, results_formatters
+from scytaledroid.StaticAnalysis.cli.execution import (
+    db_verification,
+    diagnostics,
+    results_formatters,
+)
 
 
 def test_hash_prefix_short_value():

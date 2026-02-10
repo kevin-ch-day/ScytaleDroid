@@ -16,8 +16,8 @@ from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_mes
 from scytaledroid.Utils.DisplayUtils.terminal import get_terminal_width
 
 from ..health_checks import fetch_latest_run, fetch_latest_session
-from ..health_checks.summary import fetch_health_summary
 from ..health_checks.inventory_checks import run_inventory_snapshot_checks
+from ..health_checks.summary import fetch_health_summary
 from ..menu_actions import log_db_op
 from ..reset_static import (
     HARVEST_TABLES,

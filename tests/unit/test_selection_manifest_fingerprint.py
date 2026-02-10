@@ -3,7 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from scytaledroid.DynamicAnalysis.ml.selectors.models import RunRef, SelectionResult, write_selection_manifest
+from scytaledroid.DynamicAnalysis.ml.selectors.models import (
+    RunRef,
+    SelectionResult,
+    write_selection_manifest,
+)
 
 
 def _dummy_runref(tmp_path: Path, run_id: str) -> RunRef:

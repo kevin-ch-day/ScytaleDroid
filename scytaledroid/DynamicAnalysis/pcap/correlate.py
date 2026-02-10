@@ -214,7 +214,7 @@ def _per_source_overlap(
             bucket["static_domains_count"] = int(bucket["static_domains_count"] or 0) + 1
             if domain in dynamic_domains:
                 bucket["overlap_count"] = int(bucket["overlap_count"] or 0) + 1
-    for tag, bucket in per_source.items():
+    for _tag, bucket in per_source.items():
         total = int(bucket.get("static_domains_count") or 0)
         overlap = int(bucket.get("overlap_count") or 0)
         bucket["overlap_ratio"] = (overlap / float(total)) if total else None

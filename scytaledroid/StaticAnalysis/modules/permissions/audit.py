@@ -9,21 +9,21 @@ before changing any weighting configuration.
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
 import json
 import math
 import os
 import traceback
 from collections.abc import Iterable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from statistics import mean
 from typing import Any
 
-from scytaledroid.Utils.evidence_store import filesystem_safe_slug
-from scytaledroid.Utils.LoggingUtils import logging_engine
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_utils.artifact_registry import record_artifacts
+from scytaledroid.Utils.evidence_store import filesystem_safe_slug
+from scytaledroid.Utils.LoggingUtils import logging_engine
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.ops.operation_result import OperationResult
 
@@ -841,7 +841,7 @@ class PermissionAuditAccumulator:
                                             "type": "permission_audit_snapshot",
                                             "sha256": sha256,
                                             "size_bytes": snap_path.stat().st_size,
-                                            "created_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds") + "Z",
+                                            "created_at_utc": datetime.now(UTC).isoformat(timespec="seconds") + "Z",
                                             "origin": "host",
                                             "pull_status": "n/a",
                                         }

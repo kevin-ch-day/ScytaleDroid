@@ -12,7 +12,10 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
-from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_preflight import derive_run_mode, load_run_inputs
+from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_preflight import (
+    derive_run_mode,
+    load_run_inputs,
+)
 
 from .models import RunRef, SelectionResult
 

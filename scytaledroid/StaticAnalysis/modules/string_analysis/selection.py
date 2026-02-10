@@ -7,8 +7,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from .bucket_meta import BUCKET_METADATA, BUCKET_ORDER
 from .allowlist import DEFAULT_POLICY_ROOT
+from .bucket_meta import BUCKET_METADATA, BUCKET_ORDER
 
 _SELECTION_VERSION = "v1"
 _CONFIDENCE_RANK = {

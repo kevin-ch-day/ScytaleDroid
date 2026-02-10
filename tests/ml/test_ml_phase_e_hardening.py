@@ -1,6 +1,5 @@
 import io
 import json
-from pathlib import Path
 
 
 def test_extract_packet_timeline_fails_closed_on_tshark_error(monkeypatch, tmp_path):
@@ -29,9 +28,10 @@ def test_extract_packet_timeline_fails_closed_on_tshark_error(monkeypatch, tmp_p
     pcap.write_bytes(b"not a real pcap")
     try:
         list(pwf.extract_packet_timeline(pcap))
-        assert False, "expected RuntimeError"
     except RuntimeError as exc:
         assert "tshark failed" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
 
 
 def test_transport_mix_fallback_clamps_quic_ratio(monkeypatch):
@@ -58,8 +58,10 @@ def test_transport_mix_fallback_clamps_quic_ratio(monkeypatch):
 
 
 def test_phase_e_preflight_stage_does_not_overwrite_v1_preflight(tmp_path):
-    from scytaledroid.DynamicAnalysis.ml.experimental.pipelines.phase_e_v1 import PhaseEPreflightStage
     from scytaledroid.DynamicAnalysis.ml.experimental.core.pipeline import PipelineContext
+    from scytaledroid.DynamicAnalysis.ml.experimental.pipelines.phase_e_v1 import (
+        PhaseEPreflightStage,
+    )
 
     run_dir = tmp_path / "run"
     (run_dir / "inputs").mkdir(parents=True, exist_ok=True)

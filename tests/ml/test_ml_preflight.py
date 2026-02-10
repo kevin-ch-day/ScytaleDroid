@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_preflight import compute_ml_preflight, load_run_inputs
+from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_preflight import (
+    compute_ml_preflight,
+    load_run_inputs,
+)
 
 
 def _write_json(path: Path, payload: dict) -> None:

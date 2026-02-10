@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
@@ -11,13 +10,14 @@ from pathlib import Path
 
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_utils.artifact_registry import record_artifacts
-from scytaledroid.Utils.LoggingUtils import logging_engine
 from scytaledroid.Utils.DisplayUtils import (
     prompt_utils,
     severity,
     status_messages,
     summary_cards,
 )
+from scytaledroid.Utils.LoggingUtils import logging_engine
+
 from ...engine.strings import analyse_strings
 from ...persistence.ingest import ingest_baseline_payload
 from ..core.models import RunOutcome, RunParameters
@@ -43,6 +43,12 @@ from .analytics import (
     _render_cross_app_insights,
     _render_post_run_views,
 )
+from .artifacts import (
+    build_artifact_registry_entries,
+    update_static_aliases,
+    write_baseline_json_artifact,
+    write_manifest_evidence,
+)
 from .db_verification import (
     _render_db_masvs_summary,
     _render_db_severity_table,
@@ -54,18 +60,12 @@ from .diagnostics import (
     _render_diagnostic_app_summary,
     _schema_guard_status,
 )
+from .pipeline import REQUIRED_PAPER_ARTIFACTS, governance_ready
+from .plan import build_dynamic_plan_artifact
 from .results_formatters import _format_highlight_tokens
 from .results_persist import _build_ingest_payload, _persist_cohort_rollup
 from .run_db_queries import _apply_display_names
 from .scan_flow import format_duration
-from .artifacts import (
-    build_artifact_registry_entries,
-    update_static_aliases,
-    write_baseline_json_artifact,
-    write_manifest_evidence,
-)
-from .plan import build_dynamic_plan_artifact
-from .pipeline import REQUIRED_PAPER_ARTIFACTS, governance_ready
 from .view import DetailBuffer
 
 # Back-compat: tests and older callers patch these names.
@@ -141,8 +141,7 @@ def _render_run_results_impl(
     run_ctx: StaticRunContext | None,
 ) -> None:
     """Internal implementation for render_run_results (may print)."""
-
-    prefs_verbose = bool(params.verbose_output)
+    # Keep verbose flag owned by callers; this function reads params directly.
 
     aggregated: Counter[str] = Counter()
     artifact_count = 0

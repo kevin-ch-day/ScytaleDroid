@@ -4,8 +4,6 @@ from collections import Counter
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-import pytest
-
 from scytaledroid.StaticAnalysis.cli.core.models import (
     AppRunResult,
     ArtifactOutcome,

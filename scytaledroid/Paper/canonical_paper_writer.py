@@ -523,11 +523,6 @@ def write_canonical_paper_directory(
         # Render compact TeX risk scoring table for the main paper from snapshot tables.
         snap_tables = snapshot_dir / "tables"
         risk_rows = _read_csv_rows(snap_tables / "risk_summary_per_group.csv")
-        app_names = {}
-        try:
-            app_names = _read_table6_app_names(base_tables / "table_6_static_posture_scores.csv")
-        except Exception:
-            app_names = {}
         (tables_dir / "table_risk_scoring.tex").write_text(
             _render_risk_scoring_tabular_tex(
                 risk_rows,

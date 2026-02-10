@@ -303,9 +303,9 @@ def run_dynamic_evidence_network_audit(
                 if v is not None:
                     dns_j.append(v)
 
-        def _bucket_vals(bucket: str, key: str) -> list[float]:
+        def _bucket_vals(bucket: str, key: str, _runs=runs) -> list[float]:
             xs: list[float] = []
-            for r in runs:
+            for r in _runs:
                 if r.bucket != bucket:
                     continue
                 v = getattr(r, key)

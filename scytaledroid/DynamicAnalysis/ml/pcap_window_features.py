@@ -5,10 +5,11 @@ from __future__ import annotations
 import csv
 import subprocess
 import tempfile
-from dataclasses import dataclass
 from bisect import bisect_right
+from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from .telemetry_windowing import WindowSpec, iter_windows
 

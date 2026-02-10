@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from scytaledroid.Database.db_core import db_config
 from scytaledroid.Database.db_utils import diagnostics
 from scytaledroid.Database.db_utils.menus import health_checks
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils
@@ -16,9 +15,9 @@ from .menu_actions import (
     ingest_analysis_cohort_from_paper_bundle,
     maybe_clear_screen,
     seed_paper_dataset_profile,
-    sync_paper_contracts_to_db,
-    show_governance_snapshot_status,
     show_connection_and_config,
+    show_governance_snapshot_status,
+    sync_paper_contracts_to_db,
 )
 
 
@@ -51,7 +50,6 @@ def database_menu() -> None:
 
     while True:
         maybe_clear_screen()
-        cfg = db_config.DB_CONFIG
         schema_ver = diagnostics.get_schema_version() or "<unknown>"
         expected_schema = "0.2.6"
         menu_utils.print_header("Database Tools")

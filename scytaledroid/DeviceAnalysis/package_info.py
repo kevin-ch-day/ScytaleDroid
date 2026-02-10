@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import re
 
-from scytaledroid.DeviceAnalysis.adb import cache as adb_cache, client as adb_client
+from scytaledroid.DeviceAnalysis.adb import cache as adb_cache
+from scytaledroid.DeviceAnalysis.adb import client as adb_client
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 

@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Any
-
+from datetime import UTC, datetime
 from pathlib import Path
-from datetime import datetime, timezone
+from typing import Any
 
 from scytaledroid.Config import app_config
 from scytaledroid.StaticAnalysis.session import normalize_session_stamp
-
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 
 try:  # optional DB access (offline mode)
@@ -157,7 +155,7 @@ def prompt_session_label(params: RunParameters) -> RunParameters:
         if isinstance(attempts, int) and attempts >= 0:
             suffix = str(attempts + 1)
         if not suffix:
-            suffix = datetime.now(timezone.utc).strftime("%H%M%S")
+            suffix = datetime.now(UTC).strftime("%H%M%S")
         session_stamp = normalize_session_stamp(f"{session_stamp}-{suffix}")
         return replace(params, session_stamp=session_stamp, canonical_action="append")
 

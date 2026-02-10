@@ -1,5 +1,5 @@
 def test_pcap_features_protocol_ratios_clamped_and_case_normalized():
-    from scytaledroid.DynamicAnalysis.pcap.features import _extract_features, PcapFeatureConfig
+    from scytaledroid.DynamicAnalysis.pcap.features import PcapFeatureConfig, _extract_features
 
     report = {
         "report_status": "ok",

@@ -5,7 +5,11 @@ from pathlib import Path
 
 
 def test_selection_manifest_sha256_is_stable(tmp_path: Path) -> None:
-    from scytaledroid.DynamicAnalysis.ml.selectors.models import RunRef, SelectionResult, write_selection_manifest
+    from scytaledroid.DynamicAnalysis.ml.selectors.models import (
+        RunRef,
+        SelectionResult,
+        write_selection_manifest,
+    )
 
     run_dir = tmp_path / "evidence" / "r1"
     run_dir.mkdir(parents=True)

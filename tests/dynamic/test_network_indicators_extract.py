@@ -2,7 +2,9 @@ from __future__ import annotations
 
 
 def test_extract_network_indicators_from_pcap_report():
-    from scytaledroid.DynamicAnalysis.storage.network_indicators import extract_network_indicators_from_pcap_report
+    from scytaledroid.DynamicAnalysis.storage.network_indicators import (
+        extract_network_indicators_from_pcap_report,
+    )
 
     report = {
         "top_dns": [{"value": "example.com", "count": 3}, {"value": " ", "count": 1}],

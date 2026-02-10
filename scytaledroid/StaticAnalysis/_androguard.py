@@ -12,6 +12,7 @@ from pathlib import Path
 
 from androguard.core.apk import APK, FileNotPresent
 
+
 def _extract_bounds_warnings(text: str) -> list[str]:
     if not text:
         return []

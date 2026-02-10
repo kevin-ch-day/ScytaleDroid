@@ -18,8 +18,8 @@ class _DummyValidation:
 
 def test_engine_blocked_plan_validation_writes_manifest_dataset_block(tmp_path, monkeypatch) -> None:
     # Avoid DB schema version lookup variability.
-    from scytaledroid.DynamicAnalysis.engine import DynamicAnalysisEngine
     from scytaledroid.DynamicAnalysis.core.session import DynamicSessionConfig
+    from scytaledroid.DynamicAnalysis.engine import DynamicAnalysisEngine
 
     # Keep host tools deterministic (not required for this test).
     monkeypatch.setattr(
@@ -54,8 +54,8 @@ def test_engine_blocked_plan_validation_writes_manifest_dataset_block(tmp_path, 
 
 
 def test_engine_blocked_missing_tools_writes_manifest_dataset_block(tmp_path, monkeypatch) -> None:
-    from scytaledroid.DynamicAnalysis.engine import DynamicAnalysisEngine
     from scytaledroid.DynamicAnalysis.core.session import DynamicSessionConfig
+    from scytaledroid.DynamicAnalysis.engine import DynamicAnalysisEngine
 
     monkeypatch.setattr(
         "scytaledroid.DynamicAnalysis.engine.collect_host_tools",

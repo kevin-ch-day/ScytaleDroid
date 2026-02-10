@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from scytaledroid.DeviceAnalysis.inventory.snapshot_io import _prune_inventory_files
 
 

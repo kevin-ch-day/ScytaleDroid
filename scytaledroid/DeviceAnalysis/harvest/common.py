@@ -12,7 +12,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from scytaledroid.Config import app_config
-from scytaledroid.DeviceAnalysis.adb import client as adb_client, packages as adb_packages
+from scytaledroid.DeviceAnalysis.adb import client as adb_client
+from scytaledroid.DeviceAnalysis.adb import packages as adb_packages
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 

@@ -32,13 +32,11 @@ from pathlib import Path
 from typing import Any
 
 from scytaledroid.Database.db_core import db_queries as core_q
-from scytaledroid.Database.db_core.session import database_session
-from scytaledroid.Database.db_core.session import get_current_engine
+from scytaledroid.Database.db_core.session import database_session, get_current_engine
 from scytaledroid.Database.db_func.apps.app_labels import upsert_display_names
 from scytaledroid.Database.db_func.apps.app_ordering import upsert_ordering
 from scytaledroid.Paper.paper_contract_inputs import load_paper_contracts
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
-
 
 ROOT = Path(__file__).resolve().parents[3]
 

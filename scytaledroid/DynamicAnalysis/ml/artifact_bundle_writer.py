@@ -25,7 +25,6 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 from openpyxl import Workbook  # noqa: E402
 from openpyxl.styles import Alignment, Font  # noqa: E402
-
 from scytaledroid.Config import app_config
 
 from . import ml_parameters_paper2 as config
@@ -41,10 +40,9 @@ from .deliverable_bundle_paths import (
     output_phase_e_bundle_root,
     output_phase_e_bundle_tables_dir,
 )
-from .pcap_window_features import build_window_features, extract_packet_timeline
 from .evidence_pack_ml_preflight import get_sampling_duration_seconds, load_run_inputs
+from .pcap_window_features import build_window_features, extract_packet_timeline
 from .telemetry_windowing import WindowSpec
-
 
 OKABE_ITO = {
     # Colorblind-safe palette (Okabe-Ito).
@@ -652,8 +650,9 @@ def _write_bundle_closure_record(path: Path, *, bundle_manifest_path: Path) -> N
     This file exists so a zipped `output/paper/internal/baseline/` bundle can be verified
     later without depending on any DB state or rerunning generation.
     """
-    from .evidence_pack_ml_orchestrator import PAPER_ARTIFACTS_PATH
     from scytaledroid.Utils.toolchain_versions import gather_toolchain_versions
+
+    from .evidence_pack_ml_orchestrator import PAPER_ARTIFACTS_PATH
 
     payload = {
         "bundle_manifest_path": str(bundle_manifest_path),

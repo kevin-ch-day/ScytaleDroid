@@ -120,7 +120,7 @@ def scan_pcap_timeseries_and_destinations(pcap_path: Path, *, tshark_path: str |
     timeout_s = _resolve_tshark_timeout_s()
     try:
         rc = proc.wait(timeout=timeout_s)
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as err:
         try:
             proc.terminate()
         except Exception:
@@ -136,7 +136,7 @@ def scan_pcap_timeseries_and_destinations(pcap_path: Path, *, tshark_path: str |
                 rc = proc.wait(timeout=5)
             except Exception:
                 rc = -1
-        raise RuntimeError("tshark_timeout")
+        raise RuntimeError("tshark_timeout") from err
     if rc != 0:
         raise RuntimeError("tshark_failed")
 

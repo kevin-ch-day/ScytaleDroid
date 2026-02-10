@@ -15,25 +15,43 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover
+    from scytaledroid.DeviceAnalysis.harvest.scope import InventoryRow
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from scytaledroid.DeviceAnalysis import device_manager
-from scytaledroid.DeviceAnalysis.harvest import rules
-from scytaledroid.DeviceAnalysis.harvest.scope import InventoryRow
-from scytaledroid.DeviceAnalysis.harvest.scope_context import (
-    apply_default_scope,
-    build_inventory_rows,
-    build_scope_context,
-    collect_exclusion_samples,
-)
-from scytaledroid.DeviceAnalysis.inventory import snapshot_io
+def _imports():  # noqa: ANN202 - small script helper
+    # Local import so this script can be run both as `python ...` and with repo-root sys.path tweak.
+    from scytaledroid.DeviceAnalysis import device_manager
+    from scytaledroid.DeviceAnalysis.harvest import rules
+    from scytaledroid.DeviceAnalysis.harvest.scope import InventoryRow
+    from scytaledroid.DeviceAnalysis.harvest.scope_context import (
+        apply_default_scope,
+        build_inventory_rows,
+        build_scope_context,
+        collect_exclusion_samples,
+    )
+    from scytaledroid.DeviceAnalysis.inventory import snapshot_io
+
+    return (
+        device_manager,
+        rules,
+        InventoryRow,
+        apply_default_scope,
+        build_inventory_rows,
+        build_scope_context,
+        collect_exclusion_samples,
+        snapshot_io,
+    )
 
 
 def _load_serial(arg_serial: str | None) -> str | None:
+    device_manager, *_ = _imports()
     if arg_serial:
         return arg_serial
     active = device_manager.get_active_device()
@@ -42,7 +60,17 @@ def _load_serial(arg_serial: str | None) -> str | None:
     return None
 
 
-def _fetch_rows(serial: str) -> list[InventoryRow]:
+def _fetch_rows(serial: str):  # noqa: ANN201 - script utility
+    (
+        _device_manager,
+        _rules,
+        InventoryRow,
+        _apply_default_scope,
+        build_inventory_rows,
+        _build_scope_context,
+        _collect_exclusion_samples,
+        snapshot_io,
+    ) = _imports()
     snapshot = snapshot_io.load_latest_inventory(serial)
     if not snapshot:
         print(f"[WARN] No inventory snapshot found for {serial}.")
@@ -65,6 +93,16 @@ def _describe_exclusions(excluded: dict[str, int]) -> str:
 
 
 def _print_scope(label: str, rows: Sequence[InventoryRow], allow: set[str]) -> None:
+    (
+        _device_manager,
+        _rules,
+        _InventoryRow,
+        apply_default_scope,
+        _build_inventory_rows,
+        _build_scope_context,
+        collect_exclusion_samples,
+        _snapshot_io,
+    ) = _imports()
     filtered, excluded_counts = apply_default_scope(rows, allow)
     candidates = len(rows)
     kept = len(filtered)
@@ -83,6 +121,16 @@ def _print_scope(label: str, rows: Sequence[InventoryRow], allow: set[str]) -> N
 
 
 def _category_group(rows: Sequence[InventoryRow]) -> dict[str, list[InventoryRow]]:
+    (
+        _device_manager,
+        rules,
+        _InventoryRow,
+        _apply_default_scope,
+        _build_inventory_rows,
+        build_scope_context,
+        _collect_exclusion_samples,
+        _snapshot_io,
+    ) = _imports()
     context = build_scope_context(rows, set(rules.GOOGLE_ALLOWLIST))
     return context.get("category_groups", {}) or {}
 
@@ -97,6 +145,16 @@ def main(serial: str | None) -> int:
     if not rows:
         return 1
 
+    (
+        _device_manager,
+        rules,
+        _InventoryRow,
+        _apply_default_scope,
+        _build_inventory_rows,
+        _build_scope_context,
+        _collect_exclusion_samples,
+        _snapshot_io,
+    ) = _imports()
     allow = set(rules.GOOGLE_ALLOWLIST)
 
     print(f"[INFO] Scope diagnostics for {serial}")

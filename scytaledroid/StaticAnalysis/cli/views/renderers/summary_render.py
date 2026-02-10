@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Mapping, MutableMapping, Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from textwrap import fill
 
 from scytaledroid.StaticAnalysis.modules.string_analysis import (
@@ -18,17 +18,21 @@ from scytaledroid.StaticAnalysis.modules.string_analysis import (
 from scytaledroid.Utils.DisplayUtils import severity as severity_utils
 
 from ....core import StaticAnalysisReport
+from .diagnostics_render import summarise_masvs_inline as _summarise_masvs_inline
 from .dynamic_plan import (
     _build_modernization_guidance,
     build_dynamic_plan,
     write_baseline_json,
     write_dynamic_plan_json,
 )
-from .diagnostics_render import summarise_masvs_inline as _summarise_masvs_inline
 from .exploratory import render_exploratory_summary
 from .findings_render import (
     BaselineFinding,
+)
+from .findings_render import (
     finding_lines as _finding_lines,
+)
+from .findings_render import (
     severity_summary_lines as _severity_summary_lines,
 )
 from .permissions_payload import permission_payload
@@ -1216,7 +1220,7 @@ def render_app_result(
         webview_summary = None
 
     payload = {
-        "generated_at": datetime.now(timezone.utc).isoformat() + "Z",
+        "generated_at": datetime.now(UTC).isoformat() + "Z",
         "app": metadata,
         "baseline": {
             "manifest_flags": {

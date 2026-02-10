@@ -7,7 +7,6 @@ lives in separate modules.
 
 from __future__ import annotations
 
-import os
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -38,13 +37,12 @@ def static_analysis_menu() -> None:
     from scytaledroid.Database.db_utils import schema_gate
     from scytaledroid.Database.db_utils.menus import query_runner
     from scytaledroid.Database.db_utils.reset_static import reset_static_analysis_data
-    from scytaledroid.StaticAnalysis.core.repository import group_artifacts
-    from scytaledroid.StaticAnalysis.services import static_service
     from scytaledroid.StaticAnalysis.cli.core.run_specs import build_static_run_spec
     from scytaledroid.StaticAnalysis.cli.flows.run_dispatch import execute_run_spec
-    from scytaledroid.StaticAnalysis.cli.core.models import ScopeSelection
+    from scytaledroid.StaticAnalysis.core.repository import group_artifacts
+    from scytaledroid.StaticAnalysis.services import static_service
 
-    from ..commands import COMMANDS, get_command, iter_commands
+    from ..commands import get_command, iter_commands
     from ..core.models import RunParameters
     from ..core.run_prompts import default_custom_tests, prompt_advanced_options
 

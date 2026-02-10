@@ -7,8 +7,8 @@ from collections.abc import Mapping, Sequence
 from scytaledroid.Utils.DisplayUtils import status_messages
 
 from ...core.detector_runner import PIPELINE_STAGES
-from ..core.run_context import StaticRunContext
 from ..core.models import RunParameters
+from ..core.run_context import StaticRunContext
 from .scan_progress_display import _format_elapsed
 
 

@@ -9,8 +9,8 @@ PM-locked goals:
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime

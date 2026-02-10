@@ -13,6 +13,7 @@ This gate:
 from __future__ import annotations
 
 import argparse
+import importlib.metadata as md
 import json
 import os
 import re
@@ -22,9 +23,6 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
-
-import importlib.metadata as md
-
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REPO_ROOT_RESOLVED = REPO_ROOT.resolve()
@@ -239,9 +237,13 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 
 
 def _run_phase_e() -> None:
-    from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_orchestrator import run_ml_on_evidence_packs
-    from scytaledroid.DynamicAnalysis.ml.artifact_bundle_writer import write_phase_e_deliverables_bundle
     from scytaledroid.Config import app_config
+    from scytaledroid.DynamicAnalysis.ml.artifact_bundle_writer import (
+        write_phase_e_deliverables_bundle,
+    )
+    from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_orchestrator import (
+        run_ml_on_evidence_packs,
+    )
 
     run_ml_on_evidence_packs(output_root=Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic")
 

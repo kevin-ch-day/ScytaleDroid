@@ -6,8 +6,8 @@ import json
 from pathlib import Path
 
 from scytaledroid.Config import app_config
-from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_evidence_path
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import load_dataset_tracker
+from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_evidence_path
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
 
 
@@ -27,7 +27,6 @@ def print_run_summary(result, duration_label: str) -> None:
         operator = manifest.get("operator") or {}
         target = manifest.get("target") or {}
         run_profile = operator.get("run_profile")
-        run_sequence = operator.get("run_sequence")
         interaction = operator.get("interaction_level")
         if interaction:
             lines.append(("Interaction", str(interaction)))

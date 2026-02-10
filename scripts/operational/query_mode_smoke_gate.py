@@ -21,7 +21,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
@@ -126,9 +125,9 @@ def main(argv: list[str]) -> int:
     args = ap.parse_args(argv)
 
     from scytaledroid.Config import app_config
+    from scytaledroid.DynamicAnalysis.ml.query_mode_runner import run_ml_query_mode
     from scytaledroid.DynamicAnalysis.ml.selectors import QueryParams
     from scytaledroid.DynamicAnalysis.ml.selectors.query_selector import QuerySelector
-    from scytaledroid.DynamicAnalysis.ml.query_mode_runner import run_ml_query_mode
 
     src_root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
     if not src_root.exists():

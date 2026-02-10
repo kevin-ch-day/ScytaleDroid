@@ -104,7 +104,6 @@ class ScanProgress:
         self._write()
 
     def print_repository_summary(self, *, started: datetime, finished: datetime) -> None:
-        duration = (finished - started).total_seconds()
         ordered_labels = ("P0", "P1", "P2", "NOTE")
         severity_line = "Severities: " + "   ".join(
             f"{label}={self._severity_totals.get(label, 0)}" for label in ordered_labels

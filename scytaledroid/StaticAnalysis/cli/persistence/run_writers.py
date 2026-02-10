@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from typing import Any
 
-from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_core.db_queries import run_sql_write
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .dep_export import export_dep_json
-from .utils import safe_int
 
 
 def _normalize_datetime_value(value: str | None) -> str | None:
@@ -40,7 +38,7 @@ def _normalize_datetime_value(value: str | None) -> str | None:
 
 
 def _utc_now_dbstr() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _ensure_app_version(
@@ -341,16 +339,15 @@ def create_static_run_ledger(
             canonical_reason=canonical_reason,
         )
     try:
-        run_id = core_q.run_sql(
+        core_q.run_sql(
             """
             INSERT INTO runs (session_stamp, package_name, scope_label, profile, static_run_id)
             VALUES (%s,%s,%s,%s,%s)
             """,
             (session_stamp, package_name, scope_label, profile, static_run_id),
-            return_lastrowid=True,
         )
     except Exception:
-        run_id = None
+        pass
     return static_run_id
 
 

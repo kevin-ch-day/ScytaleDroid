@@ -10,7 +10,7 @@ No payload inspection and no secrets are stored here.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 

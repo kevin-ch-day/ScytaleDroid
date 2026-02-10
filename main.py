@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import datetime
 
 from scytaledroid.Api import start_api_server
 from scytaledroid.Config import app_config

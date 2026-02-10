@@ -18,10 +18,10 @@ Five-level stage taxonomy (v1, operator-visible):
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 
-class BatchStageLevel(str, Enum):
+class BatchStageLevel(StrEnum):
     OK = "OK"
     WARN = "WARN"
     FINDING = "FINDING"
@@ -29,7 +29,7 @@ class BatchStageLevel(str, Enum):
     ERROR = "ERROR"
 
     @classmethod
-    def from_detector_result(cls, result: object) -> "BatchStageLevel":
+    def from_detector_result(cls, result: object) -> BatchStageLevel:
         status = str(getattr(result, "status", "") or "").upper()
         if status == "WARN":
             return cls.WARN
@@ -42,7 +42,7 @@ class BatchStageLevel(str, Enum):
         return cls.OK
 
 
-class BatchWarnKind(str, Enum):
+class BatchWarnKind(StrEnum):
     """Refines WARN so batch logs remain interpretable.
 
     WARN kinds are *not* run failures.
@@ -53,7 +53,7 @@ class BatchWarnKind(str, Enum):
     TOOLING = "TOOLING"  # detector degraded due to missing tools/dependencies
 
     @classmethod
-    def from_detector_result(cls, result: object) -> "BatchWarnKind":
+    def from_detector_result(cls, result: object) -> BatchWarnKind:
         codes = _reason_codes(result)
         joined = " ".join(codes).lower()
         if (

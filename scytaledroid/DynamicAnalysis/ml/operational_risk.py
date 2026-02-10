@@ -86,10 +86,10 @@ def dynamic_deviation_score_0_100(
     if anomalous_pct is None or windows_total is None or windows_total <= 0:
         return None
     p = _clamp01(float(anomalous_pct))
-    l = 0.0
+    longest_frac = 0.0
     if longest_streak_windows is not None and windows_total > 0:
-        l = _clamp01(float(max(int(longest_streak_windows), 0)) / float(int(windows_total)))
-    raw = 0.7 * p + 0.3 * l
+        longest_frac = _clamp01(float(max(int(longest_streak_windows), 0)) / float(int(windows_total)))
+    raw = 0.7 * p + 0.3 * longest_frac
     mod = confidence_modifier(confidence_level)
     return float(round(100.0 * raw * mod, 3))
 

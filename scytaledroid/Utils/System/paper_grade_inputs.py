@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Utils.DisplayUtils import colors, menu_utils, prompt_utils
-import hashlib
-import json
 
 
 def _ensure_workspace() -> Path:
