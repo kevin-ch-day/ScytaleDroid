@@ -17,6 +17,7 @@ from scytaledroid.StaticAnalysis.core.repository import (
 )
 from scytaledroid.StaticAnalysis.services import static_service
 from scytaledroid.StaticAnalysis.session import normalize_session_stamp
+from scytaledroid.Utils.System import output_prefs
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 try:  # optional during offline runs
@@ -78,6 +79,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--allow-session-reuse", action="store_true", help="Permit reusing an existing session stamp")
     args = parser.parse_args(argv)
+
+    # Headless runs must not prompt for interactive "next view" choices at the end
+    # of the scan. This preference is process-local and does not affect the
+    # interactive menu UI.
+    output_prefs.set_noninteractive(True)
+    output_prefs.set_run_mode("batch")
 
     apk_path = Path(args.apk).expanduser().resolve()
     if not apk_path.exists():
