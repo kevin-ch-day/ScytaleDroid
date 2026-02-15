@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import re
-
 from scytaledroid.DeviceAnalysis.adb import cache as adb_cache
 from scytaledroid.DeviceAnalysis.adb import client as adb_client
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
@@ -95,9 +93,6 @@ def get_package_metadata(
         return {}
 
     metadata: dict[str, str | None] = {"package_name": package_name}
-    version_code_pattern = re.compile(r"versionCode=(\d+)")
-    version_name_pattern = re.compile(r"versionName=([^\s]+)")
-
     for line in completed.stdout.splitlines():
         stripped = line.strip()
         if stripped.startswith("application-label:"):
@@ -114,14 +109,12 @@ def get_package_metadata(
             metadata["last_update"] = stripped.split("=", 1)[1].strip()
         elif stripped.startswith("installerPackageName="):
             metadata["installer"] = stripped.split("=", 1)[1].strip()
-        elif stripped.startswith("versionCode="):
-            match = version_code_pattern.search(stripped)
-            if match:
-                metadata["version_code"] = match.group(1)
-        elif stripped.startswith("versionName="):
-            match = version_name_pattern.search(stripped)
-            if match:
-                metadata["version_name"] = match.group(1)
+        elif stripped.startswith("versionName=") and "version_name" not in metadata:
+            # Version identity is sourced from `pm list packages --show-versioncode`.
+            # Keep versionName as best-effort ancillary metadata only.
+            value = stripped.split("=", 1)[1].strip()
+            if value:
+                metadata["version_name"] = value
 
     adb_cache.PACKAGE_META_CACHE.set(cache_key, metadata)
     return metadata

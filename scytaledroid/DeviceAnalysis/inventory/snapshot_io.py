@@ -390,6 +390,13 @@ def persist_snapshot(
         payload["build_fingerprint"] = build_fingerprint
     if duration_seconds is not None:
         payload["duration_seconds"] = duration_seconds
+    if collection_stats is not None:
+        identity_source = getattr(collection_stats, "identity_source", None)
+        identity_quality = getattr(collection_stats, "identity_quality", None)
+        if isinstance(identity_source, str) and identity_source:
+            payload["identity_source"] = identity_source
+        if isinstance(identity_quality, str) and identity_quality:
+            payload["identity_quality"] = identity_quality
 
     suffix_segment = f".{filename_suffix}" if filename_suffix else ""
     target_file = device_dir / f"inventory_{timestamp}{suffix_segment}.json"
@@ -430,6 +437,8 @@ def persist_snapshot(
                     scope_size=len(normalized_rows),
                     extras={
                         "snapshot_path": str(display_path),
+                        "identity_source": payload.get("identity_source"),
+                        "identity_quality": payload.get("identity_quality"),
                     },
                 )
                 if snapshot_id:

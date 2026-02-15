@@ -695,7 +695,7 @@ def prompt_reset_static_data() -> None:
 
 def run_tier1_audit_report() -> None:
     print()
-    menu_utils.print_header("Tier-1 Audit Report")
+    menu_utils.print_header("Baseline Audit Report")
 
     schema_version = diagnostics.get_schema_version() or "<unknown>"
     print(f"Schema version : {schema_version}")
@@ -783,7 +783,7 @@ def run_tier1_audit_report() -> None:
     )
     _print_status_line(
         "ok" if tier1_ready and int(tier1_ready) > 0 else "warn",
-        "Tier-1 QA-pass runs",
+        "Baseline QA-pass runs",
         detail=str(tier1_ready or 0),
     )
 
@@ -854,7 +854,7 @@ def run_tier1_audit_report() -> None:
 
     netstats_summary = _fetch_netstats_missing_summary()
     if netstats_summary:
-        print(status_messages.status("Tier-1 netstats missing summary:", level="info"))
+        print(status_messages.status("Baseline netstats missing summary:", level="info"))
         table_rows = [
             [
                 row.get("package_name", ""),

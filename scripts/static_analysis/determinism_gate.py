@@ -5,22 +5,63 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlparse
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scytaledroid.Config import app_config
+from scytaledroid.Database.db_core import db_config
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.StaticAnalysis.cli.flows import headless_run
 from scytaledroid.StaticAnalysis.cli.flows.headless_run import _artifact_group_from_path
 from scytaledroid.Utils.version_utils import get_git_commit
+
+
+def _configure_db_target(db_target: str) -> None:
+    parsed = urlparse(db_target)
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in {"mysql", "mariadb", "sqlite", "file"}:
+        raise RuntimeError("Unsupported --db-target scheme. Use mysql://... or sqlite:///...")
+
+    os.environ["SCYTALEDROID_DB_URL"] = db_target
+    if scheme in {"sqlite", "file"}:
+        db_path = parsed.path or parsed.netloc
+        if not db_path:
+            raise RuntimeError("sqlite --db-target must include a path, e.g. sqlite:///abs/path.db")
+        db_config.DB_CONFIG = {
+            "engine": "sqlite",
+            "database": db_path,
+            "charset": "utf8",
+            "readonly": False,
+        }
+        db_config.DB_CONFIG_SOURCE = "cli:--db-target"
+        print(f"[DB TARGET] backend=sqlite path={db_path}")
+        return
+
+    db_config.DB_CONFIG = {
+        "engine": "mysql",
+        "host": parsed.hostname or "localhost",
+        "port": int(parsed.port or 3306),
+        "user": unquote(parsed.username or ""),
+        "password": unquote(parsed.password or ""),
+        "database": (parsed.path or "").lstrip("/"),
+        "charset": "utf8mb4",
+    }
+    db_config.DB_CONFIG_SOURCE = "cli:--db-target"
+    print(
+        "[DB TARGET] "
+        f"backend=mysql host={db_config.DB_CONFIG['host']} "
+        f"port={db_config.DB_CONFIG['port']} db={db_config.DB_CONFIG['database']}"
+    )
 
 
 def _now_stamp() -> str:
@@ -308,6 +349,11 @@ def _collect_diff(left: Any, right: Any, prefix: str = "") -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Static-analysis determinism gate (run same APK twice).")
+    parser.add_argument(
+        "--db-target",
+        required=True,
+        help="Explicit DB target DSN (mysql://... or sqlite:///...). Required for audit safety.",
+    )
     parser.add_argument("--apk", required=True, help="Path to APK under analysis.")
     parser.add_argument(
         "--profile",
@@ -326,6 +372,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Allow session reuse during scan invocations.",
     )
     args = parser.parse_args(argv)
+    _configure_db_target(str(args.db_target))
 
     apk_path = Path(args.apk).expanduser().resolve()
     if not apk_path.exists():

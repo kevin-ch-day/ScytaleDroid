@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #
-# Dataset readiness quick-check (Paper #2)
+# Dataset readiness quick-check
 #
 # This is intentionally fast and operator-friendly. It does NOT mutate state.
 # It checks:
 # - Host PCAP tools required for dataset-tier runs (tshark + capinfos)
-# - DB Tier-1 schema gates (static + dynamic)
+# - DB baseline schema gates (static + dynamic)
 # - Presence of static plans for Research Dataset Alpha packages
 #
 # Exit codes:
@@ -26,7 +26,7 @@ warn() { echo "[WARN] $*"; }
 err() { echo "[ERROR] $*"; fail=1; }
 
 hr
-echo "ScytaleDroid Dataset Readiness Check (Paper #2)"
+echo "ScytaleDroid Dataset Readiness Check"
 echo "Workspace: $ROOT_DIR"
 hr
 

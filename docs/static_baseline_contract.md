@@ -1,4 +1,4 @@
-# Static Baseline Contract (Paper #1)
+# Static Baseline Contract
 
 Scope: static analysis only. This contract is the acceptance target for baseline audit runs.
 
@@ -11,7 +11,7 @@ Scope: static analysis only. This contract is the acceptance target for baseline
 ## 2) Idempotency
 - Re-scanning the same artifact hash must not create a new app identity (`apps`/`app_versions` remain stable).
 - Each execution creates a new `static_analysis_runs` row (new run ledger), but analytical outputs for same hash+config must be equal.
-- `risk_scores` is upserted per `(package_name, session_stamp, scope_label)` and is the Paper #1 scoring source.
+- `risk_scores` is upserted per `(package_name, session_stamp, scope_label)` and is the canonical scoring source.
 
 ## 3) Determinism
 - Fixed inputs: same APK, same profile/config, same toolchain snapshot, same schema.
@@ -31,7 +31,7 @@ Scope: static analysis only. This contract is the acceptance target for baseline
 - Persisted config/version anchors are read from `static_analysis_runs`:
   - `config_hash`, `pipeline_version`, `analysis_version`, `catalog_versions`,
   - `tool_semver`, `tool_git_commit`, `schema_version`.
-- Paper #1 tables must be generated from a frozen snapshot boundary and include these metadata fields in output manifests.
+- Corpus tables must be generated from a frozen snapshot boundary and include these metadata fields in output manifests.
 
 ## 6) Noise Controls (Enforced)
 - Persisted findings are capped per detector:

@@ -26,13 +26,13 @@ def reporting_menu() -> None:
     """Render the reporting menu until the user chooses to exit."""
 
     actions_all = {
-        # Research / Tier-1
+        # Research / Baseline
         "1": handle_tier1_export_pack,
         "2": handle_tier1_audit_report,
         "3": handle_dataset_readiness_dashboard,
         "4": handle_tier1_quick_fix,
         "5": handle_tier1_end_to_end,
-        # Paper / ML
+        # Research / ML
         "6": handle_paper2_end_to_end,
         "7": handle_paper_bundle_health_check,
         "8": handle_run_ml_query_mode,
@@ -44,11 +44,11 @@ def reporting_menu() -> None:
     }
 
     tier1_options = [
-        MenuOption("1", "Export Tier-1 dataset pack (manifest + telemetry + summary)"),
-        MenuOption("2", "Tier-1 audit report (dataset readiness)"),
+        MenuOption("1", "Export baseline dataset pack (manifest + telemetry + summary)"),
+        MenuOption("2", "Baseline audit report (dataset readiness)"),
         MenuOption("3", "Dataset readiness dashboard (app install/harvest/static/dynamic)"),
-        MenuOption("4", "Tier-1 quick fix (reindex DB + audit + optional export)"),
-        MenuOption("5", "Tier-1 end-to-end (reindex + audit + export)"),
+        MenuOption("4", "Baseline quick fix (reindex DB + audit + optional export)"),
+        MenuOption("5", "Baseline end-to-end (reindex + audit + export)"),
     ]
     paper_options = [
         MenuOption("6", "Freeze end-to-end (ML + baseline bundle + health check)"),
@@ -56,7 +56,7 @@ def reporting_menu() -> None:
         MenuOption("8", "Run ML (query mode, operational snapshot)"),
         MenuOption("9", "Verify freeze immutability (hash-based)"),
         MenuOption("10", "Acceptance gates (regression + query smoke)"),
-        MenuOption("11", "Write canonical publication bundle (output/publication)"),
+        MenuOption("11", "Write canonical research bundle (output/publication)"),
     ]
     reports_options = [
         MenuOption("12", "View saved reports"),
@@ -107,7 +107,7 @@ def reporting_menu() -> None:
         summary_items = [
             summary_cards.summary_item("Schema", schema_label, value_style=schema_style),
             summary_cards.summary_item(
-                f"Tier-1 QA-pass (DB) {ready_badge}",
+                f"Baseline QA-pass (DB) {ready_badge}",
                 str(tier1_ready),
                 value_style="progress",
             ),
@@ -120,25 +120,25 @@ def reporting_menu() -> None:
         ]
         footer = ""
         if schema_outdated:
-            footer = "Next step: Database Tools → Apply Tier-1 schema migrations."
+            footer = "Next step: Database Tools → Apply baseline schema migrations."
         elif evidence_valid and int(evidence_valid) > 0 and (not tier1_ready or int(tier1_ready) == 0):
-            footer = "Fix: Evidence valid but DB QA-pass is 0. Run [4] Tier-1 quick fix."
+            footer = "Fix: Evidence valid but DB QA-pass is 0. Run [4] Baseline quick fix."
         elif (not last_export_path) or (feature_health_status is None):
-            footer = "Tip: Run [1] Export Tier-1 dataset pack to generate Feature Health."
+            footer = "Tip: Run [1] Export baseline dataset pack to generate Feature Health."
         elif paper_toolchain_ok is False:
-            footer = "Tip: Paper toolchain pins mismatch. Run SCYTALEDROID_PAPER_TOOLCHAIN=1 ./setup.sh"
+            footer = "Tip: pinned toolchain mismatch. Run SCYTALEDROID_PAPER_TOOLCHAIN=1 ./setup.sh"
         else:
             footer = "All checks green."
         summary_cards.print_summary_card(
-            "Research Dataset Status",
+            "Research Baseline Status",
             summary_items,
             subtitle="ScytaleDroid-Dyn-v1 readiness snapshot",
             footer=footer,
         )
         print()
-        menu_utils.print_section("Research / Tier-1")
+        menu_utils.print_section("Research / Baseline")
         menu_utils.render_menu(MenuSpec(items=tier1_visible, show_exit=False, exit_label=None, show_descriptions=False, padding=True))
-        menu_utils.print_section("Paper / ML")
+        menu_utils.print_section("Research / ML")
         menu_utils.render_menu(MenuSpec(items=paper_visible, show_exit=False, exit_label=None, show_descriptions=False, padding=True))
         menu_utils.print_section("Reports")
         menu_utils.render_menu(MenuSpec(items=reports_visible, show_exit=False, exit_label=None, show_descriptions=False, padding=True))

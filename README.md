@@ -42,8 +42,8 @@ baseline linkage.
 - **Database-backed harvesting.** Durable tables, strict filename conventions,
   and scoped pulls replace the JSON/CSV-heavy v1 tooling. Hash-aware dedupe and
   optional DB writes keep collections lean while maintaining provenance. For
-  Paper #2 dynamic collection, evidence packs remain authoritative and the DB
-  is a derived index.
+  dynamic collection, evidence packs remain authoritative and the DB is a
+  derived index.
 - **Research-grade static analysis.** A modular detector pipeline surfaces
   manifest hygiene, IPC exposure, provider ACLs, network posture, secrets,
   storage/backup hygiene, WebView hardening, crypto misuse, DFIR hints, and a
@@ -169,18 +169,18 @@ To simulate a run without touching the database use a dry-run:
 python -m scytaledroid.StaticAnalysis.cli.run --profile full --dry-run
 ```
 
-### Paper #1 baseline audit commands
+### Baseline Audit Commands
 
 Determinism hard gate (same APK scanned twice, strict analytical diff):
 
 ```bash
-python scripts/static_analysis/determinism_gate.py --apk /path/to/app.apk --profile full --output output/audit/determinism/result.json
+python scripts/static_analysis/determinism_gate.py --db-target "mysql://user:pass@localhost:3306/scytaledroid_db_dev" --apk /path/to/app.apk --profile full --output output/audit/determinism/result.json
 ```
 
-Paper #1 corpus tables (from canonical DB snapshot boundary):
+Corpus tables (from canonical DB snapshot boundary):
 
 ```bash
-python scripts/static_analysis/paper1_tables.py --out-dir output/audit/paper1 --formats csv json
+python scripts/static_analysis/static_baseline_tables.py --db-target "mysql://user:pass@localhost:3306/scytaledroid_db_dev" --out-dir output/audit/static_baseline --formats csv json
 ```
 
 Baseline contracts:
@@ -213,11 +213,10 @@ ScytaleDroid keeps detailed operator documentation under `docs/`:
   dynamic analysis contract, evidence packs, and run manifest requirements.
 - [`docs/evidence_pack_spec.md`](docs/evidence_pack_spec.md) – authoritative
   frozen-input contract, freeze manifest semantics, and ML output paths.
-- [`docs/paper2/operator_runbook.md`](docs/paper2/operator_runbook.md) – Paper #2
-  collection + freeze + Phase E operator flow.
-- [`docs/paper2/README.md`](docs/paper2/README.md) – Paper #2 index (thesis,
-  frozen dataset anchor, and doc pointers).
-- [`docs/paper2/phase_e_plan.md`](docs/paper2/phase_e_plan.md) – Phase E (ML)
+- [`docs/paper2/operator_runbook.md`](docs/paper2/operator_runbook.md) – dynamic
+  collection + freeze + ML operator flow.
+- [`docs/paper2/README.md`](docs/paper2/README.md) – dynamic dataset/ML index.
+- [`docs/paper2/phase_e_plan.md`](docs/paper2/phase_e_plan.md) – ML
   implementation contract (evidence-pack-only, deterministic).
 - [`docs/static_analysis/static_analysis_pipeline_plan.md`](docs/static_analysis/static_analysis_pipeline_plan.md) – roadmap,
   implementation status, and research backlog.
@@ -225,8 +224,8 @@ ScytaleDroid keeps detailed operator documentation under `docs/`:
   locations, housekeeping behaviour, and retention policy controls.
 - [`docs/database`](docs/database) – schema notes and read-side query
   blueprints for downstream portals.
-- [`docs/database/derived_index.md`](docs/database/derived_index.md) – Paper #2
-  DB posture (derived/rebuildable; ML is DB-free).
+- [`docs/database/derived_index.md`](docs/database/derived_index.md) – DB
+  posture (derived/rebuildable; ML is DB-free).
 - [`docs/database/permission_analysis_schema.md`](docs/database/permission_analysis_schema.md) – risk
   snapshots and proposed matrix/rationale tables.
 - [`docs/static_analysis_analytics.md`](docs/static_analysis_analytics.md) –

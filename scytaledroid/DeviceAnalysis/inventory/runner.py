@@ -10,6 +10,7 @@ from typing import Protocol
 
 from scytaledroid.DeviceAnalysis.inventory import db_sync, package_collection, snapshot_io
 from scytaledroid.DeviceAnalysis.modes.inventory import InventoryConfig, InventoryMode
+from scytaledroid.Database.db_utils.package_utils import normalize_package_name
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
@@ -67,7 +68,7 @@ def run_full_sync(
     prev_meta = snapshot_io.load_latest_snapshot_meta(serial)
     prev_snapshot = snapshot_io.load_latest_inventory(serial)
     prev_packages: set[str] = set()
-    prev_rows_map: dict[str, dict[str, object]] = {}
+    prev_identity: dict[str, str | None] = {}
     prev_split = 0
     if prev_snapshot:
         pkgs = prev_snapshot.get("packages") or []
@@ -76,12 +77,14 @@ def run_full_sync(
                 if isinstance(item, dict):
                     name = item.get("package_name")
                     if isinstance(name, str):
-                        # Normalise package ids from older snapshots that may contain path=package
-                        if "=" in name:
-                            name = name.rsplit("=", 1)[-1].strip()
-                        if name:
-                            prev_packages.add(name)
-                            prev_rows_map[name] = item
+                        cleaned = normalize_package_name(name, context="inventory")
+                        if cleaned:
+                            prev_packages.add(cleaned)
+                            version_code = item.get("version_code")
+                            if isinstance(version_code, (int, str)):
+                                prev_identity[cleaned] = str(version_code)
+                            else:
+                                prev_identity[cleaned] = None
                     if int(item.get("split_count") or 1) > 1:
                         prev_split += 1
 
@@ -130,14 +133,20 @@ def run_full_sync(
 
     # Build package name maps for delta computation.
     current_pkg_names: set[str] = set()
+    current_identity: dict[str, str | None] = {}
     split_count = 0
-    current_map: dict[str, dict[str, object]] = {}
     for item in rows:
         if isinstance(item, dict):
             name = item.get("package_name")
             if isinstance(name, str):
-                current_pkg_names.add(name)
-                current_map[name] = item
+                cleaned = normalize_package_name(name, context="inventory")
+                if cleaned:
+                    current_pkg_names.add(cleaned)
+                    version_code = item.get("version_code")
+                    if isinstance(version_code, (int, str)):
+                        current_identity[cleaned] = str(version_code)
+                    else:
+                        current_identity[cleaned] = None
             if int(item.get("split_count") or 1) > 1:
                 split_count += 1
 
@@ -155,16 +164,9 @@ def run_full_sync(
 
     updated_pkgs = 0
     if prev_packages:
-        # Keep change detection focused on stable fields to avoid noisy diffs.
-        compare_fields = ("version_code", "version_name", "primary_path", "split_count")
         for name in current_pkg_names & prev_packages:
-            previous_entry = prev_rows_map.get(name)
-            current_entry = current_map.get(name) or {}
-            if previous_entry:
-                before = tuple(previous_entry.get(field) for field in compare_fields)
-                after = tuple(current_entry.get(field) for field in compare_fields)
-                if before != after:
-                    updated_pkgs += 1
+            if prev_identity.get(name) != current_identity.get(name):
+                updated_pkgs += 1
 
     delta = InventoryDelta(
         new_count=new_pkgs,
@@ -183,6 +185,7 @@ def run_full_sync(
         build_fingerprint=coll_stats.build_fingerprint,
         duration_seconds=coll_stats.elapsed_seconds,
         snapshot_type="full",
+        collection_stats=coll_stats,
         delta=delta,
     )
     snapshot_path = persist_result.path

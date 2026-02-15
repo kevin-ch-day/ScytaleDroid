@@ -1,4 +1,4 @@
-# Risk Scoring Contract (Paper #1)
+# Risk Scoring Contract
 
 Authoritative score store: `risk_scores` (not transient run payloads).
 
@@ -16,13 +16,13 @@ Authoritative score store: `risk_scores` (not transient run payloads).
   - `Medium` if score `>= 40`
   - `Low` otherwise
 
-## Persisted Breakdown (Paper Tables)
+## Persisted Breakdown (Corpus Tables)
 - `risk_scores.risk_score` and `risk_scores.risk_grade` are canonical.
 - Persisted dimension columns:
   - `dangerous`
   - `signature`
   - `vendor`
-- Paper #1 aggregate scripts must read these columns directly from `risk_scores`.
+- Aggregate scripts must read these columns directly from `risk_scores`.
 
 ## Explainability Output Contract
 - Per-app explainability artifact must contain:

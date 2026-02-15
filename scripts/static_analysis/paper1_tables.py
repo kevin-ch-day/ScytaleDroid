@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Generate Paper #1 static corpus tables from a frozen DB snapshot."""
+"""Generate static corpus tables from a frozen DB snapshot."""
 
 from __future__ import annotations
 
 import argparse
 import csv
 import json
+import os
 import sys
 from collections import defaultdict
 from dataclasses import dataclass
@@ -13,12 +14,14 @@ from hashlib import sha256
 from pathlib import Path
 from statistics import median
 from typing import Any
+from urllib.parse import unquote, urlparse
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scytaledroid.Config import app_config
+from scytaledroid.Database.db_core import db_config
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Utils.version_utils import get_git_commit
 
@@ -64,6 +67,44 @@ def _safe_int(value: Any) -> int | None:
 def _category(value: str | None) -> str:
     text = (value or "").strip()
     return text if text else "UNKNOWN"
+
+
+def _configure_db_target(db_target: str) -> None:
+    parsed = urlparse(db_target)
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in {"mysql", "mariadb", "sqlite", "file"}:
+        raise RuntimeError("Unsupported --db-target scheme. Use mysql://... or sqlite:///...")
+
+    os.environ["SCYTALEDROID_DB_URL"] = db_target
+    if scheme in {"sqlite", "file"}:
+        db_path = parsed.path or parsed.netloc
+        if not db_path:
+            raise RuntimeError("sqlite --db-target must include a path, e.g. sqlite:///abs/path.db")
+        db_config.DB_CONFIG = {
+            "engine": "sqlite",
+            "database": db_path,
+            "charset": "utf8",
+            "readonly": False,
+        }
+        db_config.DB_CONFIG_SOURCE = "cli:--db-target"
+        print(f"[DB TARGET] backend=sqlite path={db_path}")
+        return
+
+    db_config.DB_CONFIG = {
+        "engine": "mysql",
+        "host": parsed.hostname or "localhost",
+        "port": int(parsed.port or 3306),
+        "user": unquote(parsed.username or ""),
+        "password": unquote(parsed.password or ""),
+        "database": (parsed.path or "").lstrip("/"),
+        "charset": "utf8mb4",
+    }
+    db_config.DB_CONFIG_SOURCE = "cli:--db-target"
+    print(
+        "[DB TARGET] "
+        f"backend=mysql host={db_config.DB_CONFIG['host']} "
+        f"port={db_config.DB_CONFIG['port']} db={db_config.DB_CONFIG['database']}"
+    )
 
 
 def _resolve_snapshot_rows() -> list[SnapshotRow]:
@@ -425,8 +466,13 @@ def _emit_table(out_dir: Path, stem: str, rows: list[dict[str, Any]], meta: dict
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Generate Paper #1 static corpus tables from canonical DB.")
-    parser.add_argument("--out-dir", default="output/audit/paper1", help="Output directory.")
+    parser = argparse.ArgumentParser(description="Generate static corpus tables from canonical DB.")
+    parser.add_argument(
+        "--db-target",
+        required=True,
+        help="Explicit DB target DSN (mysql://... or sqlite:///...). Required for audit safety.",
+    )
+    parser.add_argument("--out-dir", default="output/audit/static_baseline", help="Output directory.")
     parser.add_argument(
         "--formats",
         nargs="+",
@@ -437,6 +483,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--top-limit", type=int, default=50, help="Top-N rows for holes/detector tables.")
     parser.add_argument("--contributors-limit", type=int, default=10, help="Top-N finding contributors per app.")
     args = parser.parse_args(argv)
+    _configure_db_target(str(args.db_target))
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

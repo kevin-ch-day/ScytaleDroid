@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from scytaledroid.Database.db_utils.package_utils import normalize_package_name
+
 
 def extract_delta_summary(snapshot_rows: Mapping[str, object]) -> Mapping[str, object] | None:
     """Return the most relevant delta summary available for the current scope."""
@@ -26,7 +28,9 @@ def collect_delta_package_names(summary: Mapping[str, object]) -> set[str]:
     if isinstance(added, Sequence):
         for entry in added:
             if isinstance(entry, str) and entry:
-                names.add(entry)
+                canonical = normalize_package_name(entry, context="inventory")
+                if canonical:
+                    names.add(canonical)
 
     updated = summary.get("updated_full") or summary.get("updated")
     if isinstance(updated, Sequence):
@@ -34,7 +38,9 @@ def collect_delta_package_names(summary: Mapping[str, object]) -> set[str]:
             if isinstance(entry, Mapping):
                 candidate = entry.get("package")
                 if isinstance(candidate, str) and candidate:
-                    names.add(candidate)
+                    canonical = normalize_package_name(candidate, context="inventory")
+                    if canonical:
+                        names.add(canonical)
 
     # Explicitly ignore removed packages (nothing to harvest)
     return names
@@ -45,4 +51,12 @@ def apply_delta_filter(package_rows: Sequence[Any], *, include: set[str]) -> lis
 
     if not include:
         return list(package_rows)
-    return [row for row in package_rows if getattr(row, "package_name", None) in include]
+    filtered: list[Any] = []
+    for row in package_rows:
+        name = getattr(row, "package_name", None)
+        if not isinstance(name, str):
+            continue
+        canonical = normalize_package_name(name, context="inventory")
+        if canonical in include:
+            filtered.append(row)
+    return filtered

@@ -113,7 +113,7 @@ def handle_dataset_readiness_dashboard() -> None:
         "Repo Ver",
         "Static",
         "Dyn Runs",
-        "Paper",
+        "Dataset",
         "PCAP",
         "Status",
     ]
@@ -241,7 +241,7 @@ def handle_run_ml_query_mode() -> None:
 
 
 def handle_write_canonical_publication_bundle() -> None:
-    """Write a single canonical output/publication/ directory for publication assembly."""
+    """Write a canonical `output/publication/` research bundle directory."""
 
     from scytaledroid.DynamicAnalysis.ml.deliverable_bundle_paths import output_phase_e_bundle_root
     from scytaledroid.Publication.canonical_bundle_writer import (
@@ -266,7 +266,7 @@ def handle_write_canonical_publication_bundle() -> None:
     snapshot_id: str | None = None
     if snaps:
         use_latest = prompt_utils.prompt_yes_no(
-            f"Surface latest operational snapshot into output/publication/? ({snaps[-1].name})",
+            f"Surface latest operational snapshot into the research bundle path (output/publication)? ({snaps[-1].name})",
             default=True,
         )
         if use_latest:
@@ -285,10 +285,10 @@ def handle_write_canonical_publication_bundle() -> None:
         print(status_messages.status("No operational snapshots found under output/operational; exporting Phase E only.", level="info"))
 
     print()
-    menu_utils.print_header("Write Canonical Publication Bundle")
+    menu_utils.print_header("Write Canonical Research Bundle")
     print(
         status_messages.status(
-            "This surfaces the baseline bundle + (optional) snapshot into output/publication/ with stable paths.",
+            "This surfaces the baseline bundle + (optional) snapshot into the research bundle path (output/publication/) with stable paths.",
             level="info",
         )
     )
@@ -310,7 +310,7 @@ def handle_write_canonical_publication_bundle() -> None:
 
 
 def handle_verify_freeze_immutability_paper2() -> None:
-    """Verify frozen-input immutability (hash-based) for the canonical Paper #2 freeze."""
+    """Verify frozen-input immutability (hash-based) for the canonical research baseline freeze."""
 
     from scytaledroid.DynamicAnalysis.tools.evidence.menu import evidence_verify_freeze_immutability
 
@@ -318,7 +318,7 @@ def handle_verify_freeze_immutability_paper2() -> None:
 
 
 def _write_phase_e_deliverables_bundle_from_pin() -> bool:
-    """Write the Paper #2 Phase E deliverable bundle under output/ (zip-and-share).
+    """Write the research baseline Phase E deliverable bundle under output/ (zip-and-share).
 
     Returns True on success, False on any failure/cancel.
     """
@@ -342,21 +342,23 @@ def _write_phase_e_deliverables_bundle_from_pin() -> bool:
         print(status_messages.status(f"Missing canonical freeze anchor: {relative_path(freeze_path)}", level="fail"))
         return False
 
-    paper_artifacts = archive_dir / "paper_artifacts.json"
-    if not paper_artifacts.exists():
-        print(status_messages.status(f"Missing paper artifact lock file: {relative_path(paper_artifacts)}", level="warn"))
-        print(status_messages.status("Action: run Paper #2 end-to-end (it generates/pins Fig B1).", level="info"))
+    research_artifacts = archive_dir / "research_artifacts.json"
+    legacy_artifacts = archive_dir / "paper_artifacts.json"
+    artifacts_file = research_artifacts if research_artifacts.exists() else legacy_artifacts
+    if not artifacts_file.exists():
+        print(status_messages.status(f"Missing artifact lock file: {relative_path(research_artifacts)}", level="warn"))
+        print(status_messages.status("Action: run research end-to-end (it generates/pins Fig B1).", level="info"))
         return False
 
     try:
-        payload = json.loads(paper_artifacts.read_text(encoding="utf-8"))
+        payload = json.loads(artifacts_file.read_text(encoding="utf-8"))
     except Exception as exc:  # noqa: BLE001
-        print(status_messages.status(f"Failed to read paper_artifacts.json: {exc}", level="fail"))
+        print(status_messages.status(f"Failed to read artifact lock file: {exc}", level="fail"))
         return False
     rid = str(payload.get("fig_B1_run_id") or "").strip()
     tag = str(payload.get("interaction_tag") or "").strip() or None
     if not rid:
-        print(status_messages.status("paper_artifacts.json missing fig_B1_run_id.", level="fail"))
+        print(status_messages.status("Artifact lock file missing fig_B1_run_id.", level="fail"))
         return False
 
     def _canonical_tag(raw: str | None) -> str | None:
@@ -397,7 +399,7 @@ def _write_phase_e_deliverables_bundle_from_pin() -> bool:
     if not ok:
         print()
         menu_utils.print_header("Write Phase E deliverables bundle")
-        print(status_messages.status("paper_artifacts.json pin is invalid under current PM policy.", level="warn"))
+        print(status_messages.status("Artifact lock pin is invalid under current PM policy.", level="warn"))
         print(status_messages.status(f"Reason: {why}", level="warn"))
         print(
             status_messages.status(
@@ -425,7 +427,7 @@ def _write_phase_e_deliverables_bundle_from_pin() -> bool:
         if not exemplar:
             print(status_messages.status("No eligible exemplar found in frozen dataset.", level="fail"))
             return False
-        backup = archive_dir / f"paper_artifacts.prev-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.json"
+        backup = archive_dir / f"research_artifacts.prev-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.json"
         backup.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
         payload = {
@@ -444,7 +446,10 @@ def _write_phase_e_deliverables_bundle_from_pin() -> bool:
             "repinned_from": {"fig_B1_run_id": str(rid), "interaction_tag": str(tag or "")},
             "repinned_at": datetime.now(UTC).isoformat(),
         }
-        paper_artifacts.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        # Write the new canonical filename and refresh the legacy filename for compatibility.
+        content = json.dumps(payload, indent=2, sort_keys=True)
+        research_artifacts.write_text(content, encoding="utf-8")
+        legacy_artifacts.write_text(content, encoding="utf-8")
         rid = str(payload.get("fig_B1_run_id") or "").strip()
         tag = str(payload.get("interaction_tag") or "").strip() or None
 
@@ -572,7 +577,7 @@ def preview_report_file(path: Path) -> None:
 
 
 def handle_tier1_export_pack() -> None:
-    """Export the Tier-1 dataset pack (manifest + telemetry + summary)."""
+    """Export the Baseline dataset pack (manifest + telemetry + summary)."""
 
     from scytaledroid.Database.db_utils import schema_gate
 
@@ -582,14 +587,14 @@ def handle_tier1_export_pack() -> None:
         if detail:
             status_messages.print_status(detail, level="error")
         status_messages.print_status(
-            "Fix: Database Tools → Apply Tier-1 schema migrations (or import canonical DB export), then retry.",
+            "Fix: Database Tools → Apply Baseline schema migrations (or import canonical DB export), then retry.",
             level="error",
         )
         return
 
     default_dir = Path(app_config.OUTPUT_DIR) / "exports" / "scytaledroid_dyn_v1"
     print(status_messages.status(f"Export directory: {default_dir}", level="info"))
-    if not prompt_utils.prompt_yes_no("Generate Tier-1 export pack now?", default=True):
+    if not prompt_utils.prompt_yes_no("Generate Baseline export pack now?", default=True):
         return
     outputs = export_tier1_pack(default_dir)
     print(status_messages.status(f"Manifest written: {outputs['manifest']}", level="success"))
@@ -647,7 +652,7 @@ def _print_export_validation(outputs: dict) -> None:
 
 
 def handle_tier1_audit_report() -> None:
-    """Run Tier-1 dataset readiness audit."""
+    """Run Baseline dataset readiness audit."""
 
     health_checks.run_tier1_audit_report()
 
@@ -668,7 +673,7 @@ def _rebuild_dynamic_db_index_from_evidence(root: Path) -> dict[str, object]:
 
 
 def handle_tier1_quick_fix() -> None:
-    """One-shot helper: rebuild DB index from evidence packs and rerun Tier-1 checks."""
+    """One-shot helper: rebuild DB index from evidence packs and rerun Baseline checks."""
 
     root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
     if not root.exists():
@@ -677,7 +682,7 @@ def handle_tier1_quick_fix() -> None:
         return
 
     print()
-    menu_utils.print_header("Tier-1 quick fix")
+    menu_utils.print_header("Baseline quick fix")
     print(status_messages.status("This does not modify evidence packs; it rebuilds derived DB tables.", level="info"))
     print(status_messages.status(f"Root: {root}", level="info"))
     if not prompt_utils.prompt_yes_no("Rebuild DB index now?", default=True):
@@ -699,12 +704,12 @@ def handle_tier1_quick_fix() -> None:
         print(status_messages.status(f"Errors (sample): {', '.join(str(e) for e in errors[:5])}", level="warn"))
 
     print()
-    if prompt_utils.prompt_yes_no("Run Tier-1 audit report now?", default=True):
+    if prompt_utils.prompt_yes_no("Run Baseline audit report now?", default=True):
         health_checks.run_tier1_audit_report()
 
     print()
     if prompt_utils.prompt_yes_no(
-        "Generate Tier-1 export pack now? (populates Feature Health)", default=False
+        "Generate Baseline export pack now? (populates Feature Health)", default=False
     ):
         handle_tier1_export_pack()
 
@@ -712,7 +717,7 @@ def handle_tier1_quick_fix() -> None:
 
 
 def handle_paper_bundle_health_check() -> None:
-    """One-shot paper-mode health check (freeze + bundle integrity + semantic lint + toolchain pins)."""
+    """One-shot research-mode health check (freeze + bundle integrity + semantic lint + toolchain pins)."""
 
     ok = _paper_bundle_health_check()
     print()
@@ -925,7 +930,7 @@ def handle_phase_f1_acceptance_gates() -> None:
 
 
 def _paper_bundle_health_check() -> bool:
-    """Run paper-mode checks and print results. Returns True if all checks pass."""
+    """Run research-mode checks and print results. Returns True if all checks pass."""
 
     import json
     import subprocess
@@ -950,7 +955,7 @@ def _paper_bundle_health_check() -> bool:
         return Path(__file__).resolve().parents[2]
 
     print()
-    menu_utils.print_header("Paper Bundle Health Check")
+    menu_utils.print_header("Research Bundle Health Check")
     print(status_messages.status("This does not regenerate artifacts; it verifies integrity + semantics.", level="info"))
 
     checks_ok = True
@@ -963,7 +968,7 @@ def _paper_bundle_health_check() -> bool:
         checks_ok = False
         print(status_messages.status(f"Freeze anchor: missing ({freeze_path})", level="error"))
 
-    # Canonical paper output presence + closure record integrity.
+    # Canonical research-bundle output presence + closure record integrity.
     paper_root = deliverable_bundle_paths.output_paper_root()
     manifests_dir = deliverable_bundle_paths.output_paper_manifests_dir()
     internal_prov_dir = deliverable_bundle_paths.output_paper_internal_provenance_dir()
@@ -971,10 +976,10 @@ def _paper_bundle_health_check() -> bool:
     artifacts_manifest_path = internal_prov_dir / "phase_e_artifacts_manifest.json"
     if not paper_root.exists():
         checks_ok = False
-        print(status_messages.status(f"Canonical paper dir: missing ({paper_root})", level="warn"))
-        print(status_messages.status("Next: Reporting → Paper / ML → Write canonical paper directory.", level="info"))
+        print(status_messages.status(f"Canonical research bundle dir: missing ({paper_root})", level="warn"))
+        print(status_messages.status("Next: Reporting → Research / ML → Write canonical research bundle directory.", level="info"))
     else:
-        print(status_messages.status(f"Canonical paper dir: present ({paper_root})", level="success"))
+        print(status_messages.status(f"Canonical research bundle dir: present ({paper_root})", level="success"))
         if not closure_path.exists() or not artifacts_manifest_path.exists():
             checks_ok = False
             print(status_messages.status("Manifests: missing Phase E closure record or artifacts manifest.", level="error"))
@@ -1021,7 +1026,7 @@ def _paper_bundle_health_check() -> bool:
         )
     )
 
-    # Paper toolchain pins check (if configured).
+    # Pinned toolchain check (if configured).
     pins_path = _repo_root() / "requirements-paper-toolchain.txt"
     if pins_path.exists():
         pins: dict[str, str] = {}
@@ -1049,28 +1054,28 @@ def _paper_bundle_health_check() -> bool:
                 if got != want:
                     mismatches.append(f"{dist}={got or '<missing>'} (want {want})")
         if not pins:
-            print(status_messages.status("Paper toolchain pins: empty (skipped)", level="warn"))
+            print(status_messages.status("Pinned toolchain: empty (skipped)", level="warn"))
         elif not mismatches:
-            print(status_messages.status("Paper toolchain pins: ok", level="success"))
+            print(status_messages.status("Pinned toolchain: ok", level="success"))
         else:
             checks_ok = False
-            print(status_messages.status(f"Paper toolchain pins: mismatch ({len(mismatches)})", level="error"))
+            print(status_messages.status(f"Pinned toolchain: mismatch ({len(mismatches)})", level="error"))
             print(status_messages.status(f"Sample: {mismatches[0]}", level="warn"))
     else:
-        print(status_messages.status("Paper toolchain pins: not configured", level="warn"))
+        print(status_messages.status("Pinned toolchain: not configured", level="warn"))
 
     return checks_ok
 
 
 def handle_paper2_end_to_end() -> None:
-    """One-button paper run: Phase E ML + bundle write + health check."""
+    """One-button research run: Phase E ML + bundle write + health check."""
 
     from scytaledroid.DynamicAnalysis.ml.ml_parameters_paper2 import FREEZE_CANONICAL_FILENAME
 
     archive_dir = Path(app_config.DATA_DIR) / "archive"
     freeze_path = archive_dir / FREEZE_CANONICAL_FILENAME
     if not freeze_path.exists():
-        print(status_messages.status("Missing freeze anchor; cannot run paper end-to-end.", level="warn"))
+        print(status_messages.status("Missing freeze anchor; cannot run research end-to-end.", level="warn"))
         prompt_utils.press_enter_to_continue()
         return
 
@@ -1080,12 +1085,12 @@ def handle_paper2_end_to_end() -> None:
         return
     ok = _paper_bundle_health_check()
     print()
-    print(status_messages.status("Paper end-to-end: PASS" if ok else "Paper end-to-end: FAIL", level="success" if ok else "error"))
+    print(status_messages.status("Research end-to-end: PASS" if ok else "Research end-to-end: FAIL", level="success" if ok else "error"))
     prompt_utils.press_enter_to_continue()
 
 
 def handle_tier1_end_to_end() -> None:
-    """One-button Tier-1 run: rebuild DB index + audit + export."""
+    """One-button Baseline run: rebuild DB index + audit + export."""
 
     from scytaledroid.Database.db_utils import schema_gate
 
@@ -1095,7 +1100,7 @@ def handle_tier1_end_to_end() -> None:
         if detail:
             status_messages.print_status(detail, level="error")
         status_messages.print_status(
-            "Fix: Database Tools → Apply Tier-1 schema migrations (or import canonical DB export), then retry.",
+            "Fix: Database Tools → Apply Baseline schema migrations (or import canonical DB export), then retry.",
             level="error",
         )
         return
@@ -1107,7 +1112,7 @@ def handle_tier1_end_to_end() -> None:
         return
 
     print()
-    menu_utils.print_header("Tier-1 end-to-end")
+    menu_utils.print_header("Baseline end-to-end")
     print(status_messages.status("Rebuild DB index from evidence packs → audit → export pack.", level="info"))
     result = index_dynamic_evidence_packs_to_db(root)
     scanned = int(result.get("scanned") or 0)
@@ -1126,7 +1131,7 @@ def handle_tier1_end_to_end() -> None:
 
 
 def fetch_tier1_status() -> dict[str, object]:
-    """Return a compact Tier-1 readiness snapshot for the reporting menu."""
+    """Return a compact Baseline readiness snapshot for the reporting menu."""
 
     def _repo_root() -> Path:
         # repo_root/scytaledroid/Reporting/menu_actions.py -> parents[2] is repo root
@@ -1170,14 +1175,14 @@ def fetch_tier1_status() -> dict[str, object]:
         # DB tracking state (some workflows are evidence-pack-first).
         "db_dynamic_sessions_total": 0,
         "db_dynamic_sessions_dataset": 0,
-        # Evidence-pack-derived counts (DB-free; aligns with Paper #2 contract).
+        # Evidence-pack-derived counts (DB-free; aligns with research baseline contract).
         "evidence_packs_total": 0,
         "evidence_dataset_packs": 0,
         "evidence_dataset_valid": 0,
         # Export-derived health signals (post-export).
         "feature_health_status": None,
         "feature_health_at": None,
-        # Paper toolchain pins (determinism contract).
+        # Pinned toolchain (determinism contract).
         "paper_toolchain_pins_present": False,
         "paper_toolchain_ok": None,
         "paper_toolchain_summary": None,
@@ -1259,7 +1264,7 @@ def fetch_tier1_status() -> dict[str, object]:
         status["pcap_valid_runs"] = 0
         status["pcap_total_runs"] = 0
 
-    # Evidence-pack-derived counts (authoritative for Paper #2 / ML).
+    # Evidence-pack-derived counts (authoritative for research baseline / ML).
     try:
         import json
         from pathlib import Path
@@ -1321,7 +1326,7 @@ def fetch_tier1_status() -> dict[str, object]:
         status["feature_health_status"] = None
         status["feature_health_at"] = None
 
-    # Paper toolchain pins (requirements-paper-toolchain.txt).
+    # Pinned toolchain (requirements-paper-toolchain.txt).
     try:
         pins_path = _repo_root() / "requirements-paper-toolchain.txt"
         pins = _parse_pinned_requirements(pins_path)

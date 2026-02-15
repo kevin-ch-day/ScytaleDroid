@@ -1,4 +1,4 @@
-"""Paper-grade inputs dashboard helpers."""
+"""Research-grade inputs dashboard helpers."""
 
 from __future__ import annotations
 
@@ -83,7 +83,7 @@ def _render_checklist() -> None:
     print("  3) (Optional) Run validate-only to confirm counts")
     print("  4) Run importer to load snapshot")
     print("  5) Confirm status below (Status: present, Rows > 0)")
-    print("  6) Run a paper-grade static scan")
+    print("  6) Run a research-grade static scan")
 
 
 def _render_status(palette) -> None:
@@ -112,12 +112,12 @@ def _render_status(palette) -> None:
         print("  Status  : unknown (database query failed)")
     print()
     if status == "present":
-        print(colors.apply("Paper-grade runs: ENABLED", palette.success))
+        print(colors.apply("Research-grade runs: ENABLED", palette.success))
     elif status == "missing":
-        print(colors.apply("Paper-grade runs: BLOCKED (missing governance snapshot)", palette.error))
+        print(colors.apply("Research-grade runs: BLOCKED (missing governance snapshot)", palette.error))
         print(colors.apply("Next step: import a snapshot CSV into governance tables.", palette.muted))
     else:
-        print("Paper-grade runs: UNKNOWN (governance status unavailable)")
+        print("Research-grade runs: UNKNOWN (governance status unavailable)")
     print()
 
 

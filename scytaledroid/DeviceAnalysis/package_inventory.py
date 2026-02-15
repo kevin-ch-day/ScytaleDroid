@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from scytaledroid.Database.db_utils.package_utils import normalize_package_name
 from scytaledroid.DeviceAnalysis.adb import client as adb_client
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
@@ -96,6 +97,8 @@ def _parse_package_listing(output: str) -> list[tuple[str, str | None, str | Non
                 version_name = token.split(":", 1)[1].strip()
 
         if package_name:
-            packages.append((package_name, version_code or None, version_name or None))
+            canonical = normalize_package_name(package_name, context="inventory")
+            if canonical:
+                packages.append((canonical, version_code or None, version_name or None))
 
     return packages

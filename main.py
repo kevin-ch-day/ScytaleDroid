@@ -95,7 +95,7 @@ def main_menu() -> None:
         if detail:
             status_messages.print_status(detail, level="error")
         status_messages.print_status(
-            "Fix: Verify database connection and schema. Then run Database Tools → Apply Tier-1 schema migrations (or import canonical DB export).",
+            "Fix: Verify database connection and schema. Then run Database Tools → Apply baseline schema migrations (or import canonical DB export).",
             level="error",
         )
         return
@@ -185,13 +185,13 @@ def _print_tier1_status_banner() -> None:
     )
     print("Dataset readiness")
     print("─────────────────────")
-    print("• Tier-1 Snapshot")
+    print("• Baseline Snapshot")
     print(f"• Schema: {schema_label}")
-    # "Tier-1 ready runs" is a DB-derived counter; evidence packs are the Paper #2 truth.
+    # "Baseline-ready runs" is a DB-derived counter; evidence packs remain the authoritative source.
     badge = " ✅" if tier1_ready and int(tier1_ready) > 0 else ""
-    print(f"• Tier-1 ready runs (DB): {tier1_ready}{badge}")
+    print(f"• Baseline-ready runs (DB): {tier1_ready}{badge}")
     # When dynamic DB persistence is not tracking runs, show evidence-pack counts so
-    # operators can trust what they actually collected (Paper #2 contract).
+    # operators can trust what they actually collected (evidence-pack contract).
     if db_dataset == 0 and ev_dataset_total > 0:
         print(f"• Evidence packs (dataset): {ev_dataset_valid}/{ev_dataset_total} valid (DB tracking: 0)")
     from scytaledroid.Utils.System.paper_grade_inputs import render_dataset_readiness_line

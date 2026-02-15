@@ -1,4 +1,4 @@
-# Static Baseline Audit SQL Pack (Paper #1)
+# Static Baseline Audit SQL Pack
 
 Scope: canonical static tables only.
 
@@ -16,7 +16,7 @@ String tables are optional integrity checks only and are not core invariants.
 
 ## 1) Snapshot Coverage (latest completed per package/version/hash)
 
-Purpose: validate the corpus boundary definition used by Paper #1 scripts.
+Purpose: validate the corpus boundary definition used by baseline scripts.
 
 ```sql
 SELECT
@@ -212,4 +212,4 @@ SELECT
   (SELECT COUNT(*) FROM static_string_sample_sets) AS sample_set_rows;
 ```
 
-Expected: informational only; failures here do not block Paper #1 core invariants.
+Expected: informational only; failures here do not block baseline core invariants.

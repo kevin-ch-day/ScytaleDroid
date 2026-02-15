@@ -43,9 +43,9 @@ def database_menu() -> None:
         MenuOption("4", "Governance status"),
         MenuOption("5", "Connection diagnostics"),
         MenuOption("6", "Optional migrations"),
-        MenuOption("7", "Ingest analysis cohort from publication bundle"),
+        MenuOption("7", "Ingest analysis cohort from research bundle"),
         MenuOption("8", "Seed dataset profile"),
-        MenuOption("9", "Sync publication labels and ordering"),
+        MenuOption("9", "Sync contract labels and ordering"),
     ]
 
     while True:
@@ -54,7 +54,7 @@ def database_menu() -> None:
         expected_schema = "0.2.6"
         menu_utils.print_header("Database Tools")
         if schema_ver != expected_schema and schema_ver != "<unknown>":
-            print(f"Schema: {schema_ver} (Tier-1 expects {expected_schema}) [OUTDATED]")
+            print(f"Schema: {schema_ver} (baseline expects {expected_schema}) [OUTDATED]")
             print("Tip: Run option (1) Apply schema updates")
         else:
             print(f"Schema: {schema_ver}")

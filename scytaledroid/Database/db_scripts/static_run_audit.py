@@ -14,10 +14,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
+from urllib.parse import urlparse
 
 # Allow running this file directly (e.g., `python scytaledroid/.../static_run_audit.py`)
 # without requiring `python -m ...` from the repo root.
@@ -26,6 +28,22 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
+
+
+def _configure_db_target(db_target: str) -> None:
+    parsed = urlparse(db_target)
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in {"mysql", "mariadb", "sqlite", "file"}:
+        raise RuntimeError("Unsupported --db-target scheme. Use mysql://... or sqlite:///...")
+    os.environ["SCYTALEDROID_DB_URL"] = db_target
+    if scheme in {"sqlite", "file"}:
+        path = parsed.path or parsed.netloc
+        print(f"[DB TARGET] backend=sqlite path={path}")
+    else:
+        host = parsed.hostname or "localhost"
+        port = parsed.port or 3306
+        db_name = (parsed.path or "").lstrip("/")
+        print(f"[DB TARGET] backend=mysql host={host} port={port} db={db_name}")
 
 def _imports():  # noqa: ANN202 - small script helper
     # Local import so this script can be run both as `python ...` and with repo-root sys.path tweak.
@@ -347,9 +365,15 @@ def audit_run(session_stamp: str | None, run_id: int | None) -> int:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Audit static-analysis run counts across tables.")
+    ap.add_argument(
+        "--db-target",
+        required=True,
+        help="Explicit DB target DSN (mysql://... or sqlite:///...). Required for audit safety.",
+    )
     ap.add_argument("--session", help="session_stamp (e.g., 20251128-203341)")
     ap.add_argument("--run-id", type=int, help="static_analysis_runs.id")
     args = ap.parse_args()
+    _configure_db_target(str(args.db_target))
     exit_code = audit_run(args.session, args.run_id)
     sys.exit(exit_code)
 

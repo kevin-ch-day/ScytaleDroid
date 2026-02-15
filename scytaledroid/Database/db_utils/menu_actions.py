@@ -99,7 +99,7 @@ def show_governance_snapshot_status() -> None:
         print("    Rows    : 0")
 
     print()
-    _section("Import (required for paper-grade)")
+    _section("Import (required for research-grade runs)")
     print(
         "    python -m scytaledroid.Database.tools.permission_governance_import \\"
     )
@@ -151,7 +151,7 @@ def ingest_analysis_cohort_from_publication_bundle() -> None:
     print()
     print("Ingest Analysis Cohort (Phase H)")
     print("--------------------------------")
-    # Prefer the canonical publication bundle location when present.
+    # Prefer the canonical research bundle location when present.
     default_root = "output/paper" if Path("output/paper").exists() else "output/publication"
     bundle_root = (
         prompt_utils.prompt_text(
@@ -603,7 +603,7 @@ def maybe_clear_screen() -> None:
         print()
 
 def seed_paper_dataset_profile() -> None:
-    """Create or update the paper dataset profile and assign packages."""
+    """Create or update the research dataset profile and assign packages."""
 
     from scytaledroid.Database.db_func.apps.app_labels import upsert_display_names
     from scytaledroid.Database.db_func.apps.app_ordering import upsert_ordering
@@ -614,14 +614,14 @@ def seed_paper_dataset_profile() -> None:
     from scytaledroid.Publication.contract_inputs import load_publication_contracts
 
     profile_key = PROFILE_KEY
-    display_name = "Research Dataset Alpha (Paper #2)"
-    description = "ScytaleDroid-Dyn-v1 research dataset (12-app frozen cohort; Paper #2)."
+    display_name = "Research Dataset Alpha"
+    description = "ScytaleDroid dynamic research dataset (12-app frozen cohort)."
     scope_group = "research"
     sort_order = 10
     is_active = 1
     packages = list(CANONICAL_PACKAGES)
 
-    print(status_messages.status("Seeding paper dataset profile (DB).", level="info"))
+    print(status_messages.status("Seeding research dataset profile (DB).", level="info"))
     print(f"Profile key: {profile_key}")
     print(f"Display name: {display_name}")
     print(f"Packages: {len(packages)}")
@@ -672,7 +672,7 @@ def seed_paper_dataset_profile() -> None:
         contracts = load_publication_contracts(fail_closed=True)
         # Do not overwrite existing canonical names.
         upsert_display_names(contracts.display_name_by_package, overwrite=False)
-        # Persist paper/publication aliases explicitly.
+        # Persist research/publication aliases explicitly.
         try:
             from scytaledroid.Database.db_func.apps.app_labels import upsert_display_aliases
             upsert_display_aliases("paper2", contracts.display_name_by_package, overwrite=True)
@@ -691,22 +691,22 @@ def seed_paper_dataset_profile() -> None:
 
 
 def sync_paper_contracts_to_db() -> None:
-    """Sync tracked paper contracts into the DB (display names + ordering).
+    """Sync tracked research contracts into the DB (display names + ordering).
 
-    This is a post-paper hygiene action to reduce drift from scattered JSON maps.
-    It does not change any evidence packs or paper outputs.
+    This is a post-freeze hygiene action to reduce drift from scattered JSON maps.
+    It does not change any evidence packs or research outputs.
     """
     from scytaledroid.Database.db_func.apps.app_labels import upsert_display_aliases, upsert_display_names
     from scytaledroid.Database.db_func.apps.app_ordering import upsert_ordering
     from scytaledroid.Publication.contract_inputs import load_publication_contracts
 
-    print(status_messages.status("Syncing publication labels and ordering -> DB.", level="info"))
+    print(status_messages.status("Syncing contract labels and ordering -> DB.", level="info"))
     if not prompt_utils.prompt_yes_no("Apply updates now?", default=True):
         return
     try:
         contracts = load_publication_contracts(fail_closed=True)
     except Exception as exc:
-        print(status_messages.status(f"Failed to load paper contracts: {exc}", level="error"))
+        print(status_messages.status(f"Failed to load contract inputs: {exc}", level="error"))
         prompt_utils.press_enter_to_continue()
         return
 
@@ -718,7 +718,7 @@ def sync_paper_contracts_to_db() -> None:
     n_order = upsert_ordering("paper2", contracts.package_order)
 
     print(status_messages.status(f"Upserted display names: {n_names}", level="success"))
-    print(status_messages.status(f"Upserted publication aliases: {n_alias}", level="success"))
+    print(status_messages.status(f"Upserted research aliases: {n_alias}", level="success"))
     print(status_messages.status(f"Upserted ordering rows: {n_order}", level="success"))
     prompt_utils.press_enter_to_continue()
 
@@ -986,7 +986,7 @@ def ensure_dynamic_gap_columns(*, prompt_user: bool = True) -> bool:
 
 
 def ensure_dynamic_tier_migrations(*, prompt_user: bool = True) -> bool:
-    """Apply all Tier-1 dynamic schema migrations in one step."""
+    """Apply all Baseline dynamic schema migrations in one step."""
 
     _ensure_db_ops_log_table()
     schema_before = diagnostics.get_schema_version() or "<unknown>"

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import datetime
 
+from scytaledroid.Database.db_utils.package_utils import normalize_package_name
 from scytaledroid.DeviceAnalysis.services import device_service, inventory_service
 
 from ..utils import coerce_float, coerce_int
@@ -221,11 +222,21 @@ def get_latest_inventory_metadata(
     if not with_current_state:
         return metadata
 
-    current_signatures = device_service.list_packages_with_versions(serial)
+    raw_current_signatures = device_service.list_packages_with_versions(serial)
+    current_signatures: list[tuple[str, str | None, str | None]] = []
+    for name, version_code, version_name in raw_current_signatures:
+        cleaned = normalize_package_name(name, context="inventory")
+        if not cleaned:
+            continue
+        normalized_version: str | None = None
+        if isinstance(version_code, (int, str)):
+            normalized_version = str(version_code).strip() or None
+        current_signatures.append((cleaned, normalized_version, version_name))
+
     current_names = [name for name, _, _ in current_signatures]
     current_count = len(current_signatures)
     current_hash = inventory_service.compute_name_hash(current_names)
-    current_signature_hash = inventory_service.compute_signature_hash(current_signatures)
+    current_identity_set = {(name, version_code or "") for name, version_code, _ in current_signatures}
 
     device_props = device_service.get_basic_properties(serial)
     current_fingerprint = None
@@ -250,8 +261,22 @@ def get_latest_inventory_metadata(
             # Clear any old delta summaries to avoid noisy downstream warnings.
             metadata.pop("package_delta_summary", None)
         else:
-            if package_signature_hash and current_signature_hash:
-                packages_changed = package_signature_hash != current_signature_hash
+            if snapshot_packages:
+                previous_identity_set: set[tuple[str, str]] = set()
+                for entry in snapshot_packages:
+                    if not isinstance(entry, dict):
+                        continue
+                    package_name = entry.get("package_name")
+                    cleaned = normalize_package_name(package_name, context="inventory") if isinstance(package_name, str) else None
+                    if not cleaned:
+                        continue
+                    version_code = entry.get("version_code")
+                    if isinstance(version_code, (int, str)):
+                        version_token = str(version_code).strip()
+                    else:
+                        version_token = ""
+                    previous_identity_set.add((cleaned, version_token))
+                packages_changed = previous_identity_set != current_identity_set
             elif package_list_hash and current_hash:
                 packages_changed = package_list_hash != current_hash
             elif package_count is not None and package_count != current_count:
@@ -264,8 +289,7 @@ def get_latest_inventory_metadata(
     metadata["current_package_count"] = current_count
     if current_hash:
         metadata["current_package_hash"] = current_hash
-    if current_signature_hash:
-        metadata["current_package_signature_hash"] = current_signature_hash
+    metadata["current_package_signature_hash"] = inventory_service.compute_signature_hash(current_signatures)
     if current_fingerprint:
         metadata["current_build_fingerprint"] = current_fingerprint
     metadata["build_fingerprint_changed"] = fingerprint_changed

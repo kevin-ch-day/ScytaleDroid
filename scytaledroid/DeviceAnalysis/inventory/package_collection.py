@@ -8,6 +8,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
+from scytaledroid.Database.db_utils.package_utils import normalize_package_name
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .. import inventory_meta
@@ -43,6 +44,8 @@ class CollectionStats:
     package_signature_hash: str | None = None
     build_fingerprint: str | None = None
     fallback_used: bool = False
+    identity_source: str = "pm_list_show_versioncode"
+    identity_quality: str = "strict"
 
 
 def collect_inventory(
@@ -101,6 +104,15 @@ def collect_inventory(
         canonical_metadata = {}
 
     rows: list[dict[str, object]] = []
+    version_by_package: dict[str, str] = {}
+    degraded_identity = False
+    for package_name, version_code, _ in packages_with_versions:
+        canonical_name = normalize_package_name(package_name, context="inventory") or package_name.strip().lower()
+        if not canonical_name:
+            continue
+        if isinstance(version_code, str) and version_code.strip():
+            version_by_package[canonical_name] = version_code.strip()
+
     package_definitions: dict[str, str | None] = {}
     progress_interval = max(20, total // 20 or 1)
     scan_start = time.time()
@@ -128,9 +140,19 @@ def collect_inventory(
             ) from exc
         profile_calls_paths += 1
         profile_calls_meta += 1
-        package_key = package_name.lower()
+        package_key = normalize_package_name(package_name, context="inventory") or package_name.lower()
         canonical_entry = canonical_metadata.get(package_key)
         entry = normalizer.compose_inventory_entry(package_name, paths, metadata, canonical_entry)
+        canonical_name = str(entry.get("package_name") or "").strip().lower()
+        authoritative_version_code = version_by_package.get(canonical_name)
+        if authoritative_version_code:
+            entry["version_code"] = authoritative_version_code
+            entry["identity_quality"] = "strict"
+            entry["identity_source"] = "pm_list_show_versioncode"
+        else:
+            degraded_identity = True
+            entry["identity_quality"] = "degraded"
+            entry["identity_source"] = "fallback"
 
         if filter_fn and not filter_fn(entry):
             continue
@@ -218,6 +240,8 @@ def collect_inventory(
         package_signature_hash=package_signature_hash,
         build_fingerprint=fingerprint,
         fallback_used=fallback_used,
+        identity_source="pm_list_show_versioncode" if not fallback_used else "fallback",
+        identity_quality="degraded" if degraded_identity else "strict",
     )
 
     return rows, stats

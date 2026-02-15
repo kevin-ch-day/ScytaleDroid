@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from scytaledroid.Database.db_utils.package_utils import normalize_package_name
+
 from .normalizers import display_version, normalise_version_code
 
 
@@ -23,7 +25,10 @@ def build_package_delta_summary(
         name = entry.get("package_name")
         if not isinstance(name, str) or not name:
             continue
-        previous_map[name] = {
+        canonical_name = normalize_package_name(name, context="inventory")
+        if not canonical_name:
+            continue
+        previous_map[canonical_name] = {
             "version_code": normalise_version_code(entry.get("version_code")),
             "version_name": entry.get("version_name") if isinstance(entry.get("version_name"), str) else None,
         }
@@ -32,7 +37,10 @@ def build_package_delta_summary(
     for name, version_code, version_name in current_signatures:
         if not isinstance(name, str) or not name:
             continue
-        current_map[name] = {
+        canonical_name = normalize_package_name(name, context="inventory")
+        if not canonical_name:
+            continue
+        current_map[canonical_name] = {
             "version_code": normalise_version_code(version_code),
             "version_name": version_name if isinstance(version_name, str) else None,
         }
