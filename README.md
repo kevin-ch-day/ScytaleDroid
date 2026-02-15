@@ -132,6 +132,8 @@ fastest way to explore it is:
 ./run.sh
 ```
 
+Note: the JSON API server is no longer auto-started on CLI launch. Start/stop it explicitly from **Main Menu → 4) API server**.
+
 Passing `--help` reveals every sub-command:
 
 ```bash
@@ -166,6 +168,25 @@ To simulate a run without touching the database use a dry-run:
 ```bash
 python -m scytaledroid.StaticAnalysis.cli.run --profile full --dry-run
 ```
+
+### Paper #1 baseline audit commands
+
+Determinism hard gate (same APK scanned twice, strict analytical diff):
+
+```bash
+python scripts/static_analysis/determinism_gate.py --apk /path/to/app.apk --profile full --output output/audit/determinism/result.json
+```
+
+Paper #1 corpus tables (from canonical DB snapshot boundary):
+
+```bash
+python scripts/static_analysis/paper1_tables.py --out-dir output/audit/paper1 --formats csv json
+```
+
+Baseline contracts:
+
+- `docs/static_baseline_contract.md`
+- `docs/risk_scoring_contract.md`
 
 ### Work with standalone APKs
 

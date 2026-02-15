@@ -1,66 +1,215 @@
-# APK → MySQL Write Path Audit
+# Static Baseline Audit SQL Pack (Paper #1)
 
-This note captures the current database write surface used during APK harvests. No schema or code changes were made while collecting this information.
+Scope: canonical static tables only.
 
-## Primary writers
+Tables covered:
+- `apps`
+- `app_versions`
+- `static_analysis_runs`
+- `static_analysis_findings`
+- `risk_scores`
+- `static_permission_risk`
+- `static_permission_matrix`
+- `static_persistence_failures`
 
-| Location | Function | Purpose |
-| --- | --- | --- |
-| `scytaledroid/Database/db_func/harvest/apk_repository.py` | `ensure_app_definition(package_name, app_name, ..., context=None)` | Upserts a row in `android_app_definitions` and optionally updates `category_id`, `profile_id`, `profile_name`. Requires `package_name`. |
-| `scytaledroid/Database/db_func/harvest/apk_repository.py` | `upsert_apk_record(ApkRecord, context=None)` | Inserts or updates a row in `android_apk_repository` for each harvested artifact, keyed by `sha256`. |
-| `scytaledroid/Database/db_func/harvest/apk_repository.py` | `ensure_split_group(package_name, context=None)` / `mark_split_members(group_id, apk_ids)` | Create and maintain `apk_split_groups` records when a package has multiple split APKs. |
-| `scytaledroid/Database/db_func/harvest/apk_repository.py` | `ensure_storage_root(host_name, data_root, context=None)` | Registers the ingest host and data root in `harvest_storage_roots` (unique per host/path). |
-| `scytaledroid/Database/db_func/harvest/apk_repository.py` | `upsert_artifact_path(apk_id, storage_root_id, ..., context=None)` | Stores device + local path metadata for each artifact in `harvest_artifact_paths`. |
-| `scytaledroid/DeviceAnalysis/harvest/runner.py` | `_execute_package_plan(...)` | Calls the helpers above for the legacy/standard harvest path (default). |
-| `scytaledroid/DeviceAnalysis/harvest/quick_harvest.py` | `quick_harvest(...)` | Mirrors the legacy path but honours `HARVEST_WRITE_DB` (can disable DB writes for quick pulls). |
+String tables are optional integrity checks only and are not core invariants.
 
-## Fields written today
+## 1) Snapshot Coverage (latest completed per package/version/hash)
 
-The `ApkRecord` dataclass (same file) enforces the minimum payload. During a successful harvest, the following keys are populated in `android_apk_repository`:
+Purpose: validate the corpus boundary definition used by Paper #1 scripts.
 
-* **Required**: `package_name`, `sha256`
-* **Derived / optional but typically present**:
-  * `app_id` (from `ensure_app_definition`)
-  * `file_name`, `file_size`
-  * `is_system` (boolean → stored as 0/1)
-  * `installer`
-  * `version_name`, `version_code`
-  * `md5`, `sha1`, `sha256`
-  * `device_serial`
-  * `harvested_at` (UTC datetime)
-  * `is_split_member`, `split_group_id`
-  * `signer_fingerprint` (currently unused – left `None` unless populated elsewhere)
-* Path metadata moves to `harvest_artifact_paths` with:
-  * `apk_id` (FK into `android_apk_repository`)
-  * `storage_root_id` (FK into `harvest_storage_roots`)
-  * `source_path` (per-artifact device path)
-  * `local_rel_path` (path relative to the ingest host’s `data/apks/` root)
-* `harvest_storage_roots` records the ingest environment:
-  * `host_name`, `data_root` (`/abs/path/to/data/apks`), timestamps
+```sql
+SELECT
+  a.package_name,
+  av.version_code,
+  r.sha256,
+  MAX(r.id) AS latest_completed_run_id
+FROM static_analysis_runs r
+JOIN app_versions av ON av.id = r.app_version_id
+JOIN apps a ON a.id = av.app_id
+WHERE r.status = 'COMPLETED'
+GROUP BY a.package_name, COALESCE(av.version_code, -1), COALESCE(r.sha256, '');
+```
 
-`ensure_app_definition` still records:
+Expected: one row per `(package_name, version_code, sha256)` tuple.
 
-* `package_name` (lowercased), optional `app_name`
-* Optional linking to `android_app_categories` via `category_id`
-* Optional profile metadata (`profile_id`, `profile_name`) when the schema provides those columns.
+## 2) Orphan Detection
 
-## When DB writes are skipped
+### 2.1 `app_versions` without parent app
+```sql
+SELECT COUNT(*) AS orphan_app_versions
+FROM app_versions av
+LEFT JOIN apps a ON a.id = av.app_id
+WHERE a.id IS NULL;
+```
+Expected: `0`.
 
-* Both legacy and quick harvests resolve `HarvestOptions` via `harvest/common.py::load_options`. The flag `HARVEST_WRITE_DB` (default `True`) controls whether any of the writes above occur.
-* The quick-harvest path (`harvest/quick_harvest.py`) respects the same flag. When `HARVEST_WRITE_DB = False`:
-  * APKs are still pulled to `data/apks/device_apks/<serial>/<timestamp>/...`
-  * Metadata sidecars are written if `HARVEST_WRITE_META` remains `True`
-  * No MySQL calls occur (results stay on disk only).
-* When `HARVEST_WRITE_DB = True` but a per-package error occurs (e.g., app definition upsert fails), the package is skipped and tagged with `app_definition_failed` in the summary, leaving existing rows untouched.
+### 2.2 `static_analysis_runs` without app version
+```sql
+SELECT COUNT(*) AS orphan_static_runs
+FROM static_analysis_runs r
+LEFT JOIN app_versions av ON av.id = r.app_version_id
+WHERE av.id IS NULL;
+```
+Expected: `0`.
 
-## What is **not** persisted yet
+### 2.3 `static_analysis_findings` without run
+```sql
+SELECT COUNT(*) AS orphan_findings
+FROM static_analysis_findings f
+LEFT JOIN static_analysis_runs r ON r.id = f.run_id
+WHERE r.id IS NULL;
+```
+Expected: `0`.
 
-* Run-level manifests (timestamp, guard decision, etc.) live only in sidecar JSON files.
-* Guard decisions / package delta summaries are tracked in-memory and surfaced in CLI summaries, but no table records consume them today.
-* Absolute filesystem paths are no longer stored directly; reconstruct them via `harvest_storage_roots.data_root || '/' || harvest_artifact_paths.local_rel_path` when needed.
-* Static-analysis results, pipeline traces, and reproducibility bundles stay in `data/static_analysis/reports/` for now—no writer touches SQL yet. Future schema work (`static_analysis_runs`) should accept `apk_id`, `sha256`, `pipeline_trace`, and `repro_bundle` hashes captured during analysis.
+### 2.4 `static_permission_matrix` without run
+```sql
+SELECT COUNT(*) AS orphan_permission_matrix
+FROM static_permission_matrix m
+LEFT JOIN static_analysis_runs r ON r.id = m.run_id
+WHERE r.id IS NULL;
+```
+Expected: `0`.
 
-## Pointers for future docs
+## 3) Run/Findings/Risk Consistency
 
-* Table/column names originate from the SQL strings in `db_queries/harvest/apk_repository.py`.
-* Any PHP/MySQL UI should rely on the documented fields above; no other tables are written by the harvest code paths reviewed.
+### 3.1 `findings_total` ledger consistency
+```sql
+SELECT
+  r.id AS run_id,
+  r.findings_total AS recorded_findings_total,
+  COUNT(f.id) AS actual_findings_count
+FROM static_analysis_runs r
+LEFT JOIN static_analysis_findings f ON f.run_id = r.id
+GROUP BY r.id, r.findings_total
+HAVING r.findings_total <> COUNT(f.id);
+```
+Expected: no rows.
+
+### 3.2 Completed runs missing risk row
+```sql
+SELECT
+  r.id AS run_id,
+  a.package_name,
+  r.session_stamp,
+  r.scope_label
+FROM static_analysis_runs r
+JOIN app_versions av ON av.id = r.app_version_id
+JOIN apps a ON a.id = av.app_id
+LEFT JOIN risk_scores rs
+  ON rs.package_name = a.package_name
+ AND rs.session_stamp = r.session_stamp
+ AND rs.scope_label = r.scope_label
+WHERE r.status = 'COMPLETED'
+  AND rs.id IS NULL;
+```
+Expected: no rows.
+
+### 3.3 Duplicate score rows violating unique policy
+```sql
+SELECT
+  package_name,
+  session_stamp,
+  scope_label,
+  COUNT(*) AS n
+FROM risk_scores
+GROUP BY package_name, session_stamp, scope_label
+HAVING COUNT(*) > 1;
+```
+Expected: no rows.
+
+## 4) Duplicate Identity Checks
+
+### 4.1 Same semantic identity with multiple hashes (allowed, audit only)
+```sql
+SELECT
+  a.package_name,
+  av.version_code,
+  av.version_name,
+  COUNT(DISTINCT r.sha256) AS distinct_hashes
+FROM static_analysis_runs r
+JOIN app_versions av ON av.id = r.app_version_id
+JOIN apps a ON a.id = av.app_id
+WHERE r.status = 'COMPLETED'
+GROUP BY a.package_name, av.version_code, av.version_name
+HAVING COUNT(DISTINCT r.sha256) > 1
+ORDER BY distinct_hashes DESC, a.package_name ASC;
+```
+Expected: may return rows; this is a collision-policy visibility query.
+
+### 4.2 Exact hash/session duplicates (should be reviewed)
+```sql
+SELECT
+  a.package_name,
+  r.sha256,
+  r.session_stamp,
+  COUNT(*) AS n
+FROM static_analysis_runs r
+JOIN app_versions av ON av.id = r.app_version_id
+JOIN apps a ON a.id = av.app_id
+GROUP BY a.package_name, r.sha256, r.session_stamp
+HAVING COUNT(*) > 1
+ORDER BY n DESC, a.package_name ASC;
+```
+Expected: ideally no rows.
+
+## 5) Persistence Failure Detection
+
+```sql
+SELECT
+  static_run_id,
+  stage,
+  exception_class,
+  occurred_at_utc
+FROM static_persistence_failures
+ORDER BY occurred_at_utc DESC
+LIMIT 100;
+```
+Expected: empty for clean batch; non-empty rows require triage.
+
+## 6) `finalize_stale` Validation
+
+### 6.1 Before call
+```sql
+SELECT COUNT(*) AS stale_running_rows
+FROM static_analysis_runs
+WHERE status = 'RUNNING'
+  AND ended_at_utc IS NULL
+  AND COALESCE(
+        STR_TO_DATE(REPLACE(REPLACE(run_started_utc,'T',' '),'Z',''), '%Y-%m-%d %H:%i:%s.%f'),
+        STR_TO_DATE(REPLACE(REPLACE(run_started_utc,'T',' '),'Z',''), '%Y-%m-%d %H:%i:%s')
+      ) < (UTC_TIMESTAMP() - INTERVAL 60 MINUTE);
+```
+
+### 6.2 API call
+```text
+POST /maintenance/finalize_stale?minutes=60
+```
+
+### 6.3 After call
+```sql
+SELECT COUNT(*) AS stale_running_rows_after
+FROM static_analysis_runs
+WHERE status = 'RUNNING'
+  AND ended_at_utc IS NULL
+  AND COALESCE(
+        STR_TO_DATE(REPLACE(REPLACE(run_started_utc,'T',' '),'Z',''), '%Y-%m-%d %H:%i:%s.%f'),
+        STR_TO_DATE(REPLACE(REPLACE(run_started_utc,'T',' '),'Z',''), '%Y-%m-%d %H:%i:%s')
+      ) < (UTC_TIMESTAMP() - INTERVAL 60 MINUTE);
+```
+
+Expected:
+- API `updated` count equals (`before` - `after`).
+- `after` should be `0` for stale rows at the chosen threshold.
+
+## 7) Optional String-Table Integrity (non-core)
+
+```sql
+SELECT
+  (SELECT COUNT(*) FROM static_string_summary) AS summary_rows,
+  (SELECT COUNT(*) FROM static_string_samples) AS sample_rows,
+  (SELECT COUNT(*) FROM static_string_selected_samples) AS selected_rows,
+  (SELECT COUNT(*) FROM static_string_sample_sets) AS sample_set_rows;
+```
+
+Expected: informational only; failures here do not block Paper #1 core invariants.

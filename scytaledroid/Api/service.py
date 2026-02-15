@@ -32,7 +32,6 @@ except Exception:  # pragma: no cover - offline mode
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from fastapi import FastAPI
 
-WEB_DIR = Path(__file__).resolve().parent / "web"
 MAX_LIST_LIMIT = 200
 MAX_JOB_HISTORY = 200
 DEFAULT_MAX_UPLOAD_MB = 200
@@ -209,11 +208,9 @@ def _collect_run_status(session_stamp: str) -> dict[str, Any]:
 def build_api_app() -> FastAPI:
     from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Request, UploadFile
     from fastapi.responses import FileResponse, JSONResponse
-    from fastapi.staticfiles import StaticFiles
     from pydantic import BaseModel
 
     app = FastAPI(title="ScytaleDroid API", version=app_config.APP_VERSION)
-    app.mount("/assets", StaticFiles(directory=WEB_DIR / "assets"), name="assets")
 
     class ScanRequest(BaseModel):
         apk_path: str
@@ -263,38 +260,6 @@ def build_api_app() -> FastAPI:
             "sha256": digest,
             "size_bytes": destination.stat().st_size,
         }
-
-    @app.get("/")
-    def root_status() -> FileResponse:
-        return FileResponse(WEB_DIR / "index.html", media_type="text/html")
-
-    @app.get("/ui/upload")
-    def ui_upload() -> FileResponse:
-        return FileResponse(WEB_DIR / "upload.html", media_type="text/html")
-
-    @app.get("/ui/jobs")
-    def ui_jobs() -> FileResponse:
-        return FileResponse(WEB_DIR / "jobs.html", media_type="text/html")
-
-    @app.get("/ui/run")
-    def ui_run() -> FileResponse:
-        return FileResponse(WEB_DIR / "run.html", media_type="text/html")
-
-    @app.get("/ui/runs")
-    def ui_runs() -> FileResponse:
-        return FileResponse(WEB_DIR / "runs.html", media_type="text/html")
-
-    @app.get("/ui/apps")
-    def ui_apps() -> FileResponse:
-        return FileResponse(WEB_DIR / "apps.html", media_type="text/html")
-
-    @app.get("/ui/report")
-    def ui_report() -> FileResponse:
-        return FileResponse(WEB_DIR / "report.html", media_type="text/html")
-
-    @app.get("/ui/ops")
-    def ui_ops() -> FileResponse:
-        return FileResponse(WEB_DIR / "ops.html", media_type="text/html")
 
     @app.post("/scan")
     def scan_apk(
@@ -628,8 +593,7 @@ def build_api_app() -> FastAPI:
                 STR_TO_DATE(REPLACE(REPLACE(run_started_utc,'T',' '),'Z',''), '%Y-%m-%d %H:%i:%s')
               ) < (UTC_TIMESTAMP() - INTERVAL %s MINUTE)
         """
-        result = core_q.run_sql(query, (threshold,))
-        updated = result if isinstance(result, int) else 0
+        updated = core_q.run_sql_rowcount(query, (threshold,), query_name="api.finalize_stale")
         return {"status": "ok", "updated": updated, "threshold_minutes": threshold}
 
     @app.get("/run/{session_stamp}/status")

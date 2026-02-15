@@ -79,8 +79,8 @@ def _ensure_app_version(
                 )
         else:
             app_id = core_q.run_sql(
-                "INSERT INTO apps (package_name, display_name) VALUES (%s,%s)",
-                (cleaned_package, display_name),
+                "INSERT INTO apps (package_name, display_name, profile_key) VALUES (%s,%s,%s)",
+                (cleaned_package, display_name, "UNKNOWN"),
                 return_lastrowid=True,
             )
             app_id = int(app_id) if app_id else None

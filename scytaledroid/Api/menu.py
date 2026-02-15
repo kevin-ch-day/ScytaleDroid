@@ -37,9 +37,12 @@ def api_menu() -> None:
         if choice == "0":
             return
         if choice == "1":
-            status = start_api_server(force=False)
-            level = "success" if status.running else "warn"
-            print(status_messages.status(f"API status: {status.status}", level=level))
+            try:
+                status = start_api_server(force=False)
+                level = "success" if status.running else "warn"
+                print(status_messages.status(f"API status: {status.status}", level=level))
+            except RuntimeError as exc:
+                print(status_messages.status(f"API start blocked: {exc}", level="error"))
             continue
         if choice == "2":
             status = stop_api_server()
@@ -48,9 +51,12 @@ def api_menu() -> None:
             continue
         if choice == "3":
             stop_api_server()
-            status = start_api_server(force=True)
-            level = "success" if status.running else "warn"
-            print(status_messages.status(f"API status: {status.status}", level=level))
+            try:
+                status = start_api_server(force=True)
+                level = "success" if status.running else "warn"
+                print(status_messages.status(f"API status: {status.status}", level=level))
+            except RuntimeError as exc:
+                print(status_messages.status(f"API start blocked: {exc}", level="error"))
             continue
 
 

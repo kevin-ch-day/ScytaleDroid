@@ -45,6 +45,13 @@ def _resolve_port() -> int:
         return _api_port
 
 
+def _require_api_key_configured() -> str:
+    api_key = os.getenv("SCYTALEDROID_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("SCYTALEDROID_API_KEY is required; refusing to start JSON API without authentication.")
+    return api_key
+
+
 def api_status() -> ApiRuntimeState:
     running = _api_server is not None and bool(getattr(_api_server, "started", False))
     detail = _api_error
@@ -74,6 +81,12 @@ def start_api_server(*, force: bool = False) -> ApiRuntimeState:
             status="disabled",
             detail="SCYTALEDROID_API_ENABLED is false",
         )
+    try:
+        _require_api_key_configured()
+    except RuntimeError as exc:
+        _api_error = str(exc)
+        log.error(str(exc), category="api")
+        raise
 
     try:
         import uvicorn  # type: ignore

@@ -561,6 +561,30 @@ class DatabaseEngine:
         if self._should_commit(connection):
             connection.commit()
 
+    def execute_with_rowcount(
+        self,
+        sql: str,
+        params: Any | None = None,
+        *,
+        query_name: str | None = None,
+        context: Mapping[str, Any] | None = None,
+    ) -> int:
+        self._guard_write(sql)
+        connection = self._ensure_connection()
+        with _cursor_ctx(connection) as cursor:
+            _execute(
+                cursor,
+                sql,
+                params,
+                query_name=query_name or "execute_with_rowcount",
+                context=context,
+                many=False,
+            )
+            rowcount = int(getattr(cursor, "rowcount", 0) or 0)
+        if self._should_commit(connection):
+            connection.commit()
+        return rowcount
+
     def execute_many(
         self,
         sql: str,

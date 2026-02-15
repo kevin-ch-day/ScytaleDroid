@@ -6,6 +6,7 @@ from collections.abc import Mapping
 
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_func.static_analysis import (
+    risk_scores as risk_scores_db,
     static_permission_risk as permission_risk_db,
 )
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
@@ -13,6 +14,7 @@ from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from .utils import first_text, require_canonical_schema, safe_int
 
 _PERMISSION_TABLE_READY = False
+_RISK_SCORES_TABLE_READY = False
 
 
 def _ensure_permission_table() -> bool:
@@ -30,6 +32,22 @@ def _ensure_permission_table() -> bool:
         )
         _PERMISSION_TABLE_READY = False
     return _PERMISSION_TABLE_READY
+
+
+def _ensure_risk_scores_table() -> bool:
+    global _RISK_SCORES_TABLE_READY
+    if _RISK_SCORES_TABLE_READY:
+        return True
+    try:
+        _RISK_SCORES_TABLE_READY = bool(risk_scores_db.ensure_table())
+    except Exception as exc:  # pragma: no cover - defensive
+        log.debug(
+            "risk_scores table unavailable: %s",
+            exc,
+            category="static_analysis",
+        )
+        _RISK_SCORES_TABLE_READY = False
+    return _RISK_SCORES_TABLE_READY
 
 
 def persist_permission_risk(
@@ -133,6 +151,30 @@ def persist_permission_risk(
             f"Permission risk upsert skipped for {package_name}: {exc}",
             category="static_analysis",
         )
+
+    if _ensure_risk_scores_table():
+        try:
+            risk_scores_db.upsert_risk(
+                risk_scores_db.RiskScoreRecord(
+                    package_name=package_name,
+                    app_label=first_text(
+                        metadata.get("app_label"),
+                        metadata.get("label"),
+                    ),
+                    session_stamp=session_stamp,
+                    scope_label=scope_label,
+                    risk_score=risk_score,
+                    risk_grade=risk_grade,
+                    dangerous=int(payload["dangerous"]),
+                    signature=int(payload["signature"]),
+                    vendor=int(payload["vendor"]),
+                )
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            log.debug(
+                f"risk_scores upsert skipped for {package_name}: {exc}",
+                category="static_analysis",
+            )
 
 
 __all__ = ["persist_permission_risk"]

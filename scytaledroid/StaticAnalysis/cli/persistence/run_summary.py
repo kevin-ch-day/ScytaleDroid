@@ -129,6 +129,28 @@ def _json_safe(value: object) -> object:
     return _manifest_writer._json_safe(value)
 
 
+def _finding_cap_for_detector(detector_id: str) -> int:
+    default_cap = int(getattr(app_config, "STATIC_FINDINGS_CAP_PER_DETECTOR", 20) or 20)
+    overrides_raw = getattr(app_config, "STATIC_FINDINGS_CAP_OVERRIDES", {})
+    overrides = overrides_raw if isinstance(overrides_raw, Mapping) else {}
+    value = overrides.get(detector_id)
+    if value is None:
+        return max(1, default_cap)
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return max(1, default_cap)
+
+
+def _taxonomy_label(*, severity: str, detector_status: object, policy_gate: bool) -> str:
+    status_text = str(getattr(detector_status, "value", detector_status) or "").upper()
+    if severity == "Info":
+        return "INFO"
+    if status_text == "FAIL" and not policy_gate:
+        return "FINDING"
+    return "RISK"
+
+
 def _persist_correlation_results(rows: Sequence[Mapping[str, object]]) -> bool:
     if not rows:
         return True
@@ -271,6 +293,52 @@ def _persist_correlation_results(rows: Sequence[Mapping[str, object]]) -> bool:
             category="static_analysis",
         )
         return False
+
+
+def _persist_static_analysis_findings(
+    *,
+    static_run_id: int,
+    rows: Sequence[Mapping[str, object]],
+) -> None:
+    """Persist canonical per-finding rows for a static run."""
+
+    core_q.run_sql(
+        "DELETE FROM static_analysis_findings WHERE run_id=%s",
+        (static_run_id,),
+        query_name="static_findings_canonical.delete",
+    )
+    if not rows:
+        return
+    sql = """
+        INSERT INTO static_analysis_findings (
+          run_id, finding_id, status, severity, category, title, tags, evidence, fix,
+          rule_id, cvss_score, masvs_control, detector, module, evidence_refs
+        ) VALUES (
+          %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+        )
+    """
+    params: list[tuple[object, ...]] = []
+    for row in rows:
+        params.append(
+            (
+                static_run_id,
+                row.get("finding_id"),
+                row.get("status"),
+                row.get("severity"),
+                row.get("category"),
+                row.get("title"),
+                row.get("tags"),
+                row.get("evidence"),
+                row.get("fix"),
+                row.get("rule_id"),
+                row.get("cvss_score"),
+                row.get("masvs_control"),
+                row.get("detector"),
+                row.get("module"),
+                row.get("evidence_refs"),
+            )
+        )
+    core_q.run_sql_many(sql, params, query_name="static_findings_canonical.insert")
 
 
 def _ensure_app_version(
@@ -775,8 +843,12 @@ def persist_run_summary(
     baseline_counts = coerce_severity_counts(finding_totals)
     severity_counter: Counter[str] = Counter()
     downgraded_high = 0
+    persisted_by_detector: Counter[str] = Counter()
+    capped_by_detector: Counter[str] = Counter()
+    taxonomy_counter: Counter[str] = Counter()
 
     finding_rows: list[dict[str, Any]] = []
+    canonical_finding_rows: list[dict[str, object]] = []
     control_entries: list[tuple[str, Mapping[str, Any]]] = []
     correlation_rows: list[dict[str, object]] = []
     total_findings = 0
@@ -789,8 +861,11 @@ def persist_run_summary(
     try:
         for result in (br.detector_results or ()):  # type: ignore[attr-defined]
             detector_id = str(getattr(result, "detector_id", getattr(result, "section_key", None)) or "unknown")
+            detector_cap = _finding_cap_for_detector(detector_id)
             module_id_val = getattr(result, "module_id", None)
             module_id = str(module_id_val) if module_id_val not in (None, "") else None
+            result_metrics = getattr(result, "metrics", None)
+            policy_gate = bool(result_metrics.get("policy_gate", False)) if isinstance(result_metrics, Mapping) else False
             if detector_id == "correlation_engine" and static_run_id:
                 correlation_rows.extend(
                     _correlation_rows_from_result(
@@ -818,6 +893,9 @@ def persist_run_summary(
                 if detector_sev == "High" and sev != "High":
                     downgraded_high += 1
                 severity_counter[sev] += 1
+                if persisted_by_detector[detector_id] >= detector_cap:
+                    capped_by_detector[detector_id] += 1
+                    continue
                 evidence = normalize_evidence(
                     f.evidence,
                     detail_hint=getattr(f, "detail", None)
@@ -859,6 +937,12 @@ def persist_run_summary(
                 ) = apply_profiles(base_vector, envelope.threat_profile, envelope.env_profile)
                 if bte_vector:
                     bte_vector_count += 1
+                taxonomy = _taxonomy_label(
+                    severity=sev,
+                    detector_status=getattr(result, "status", Badge.INFO),
+                    policy_gate=policy_gate,
+                )
+                taxonomy_counter[taxonomy] += 1
                 meta_combined: dict[str, Any] = {}
                 if base_meta:
                     meta_combined.update(base_meta)
@@ -891,6 +975,41 @@ def persist_run_summary(
                         ),
                     }
                 )
+                status_value = str(
+                    getattr(getattr(f, "status", None), "value", getattr(f, "status", None))
+                    or ""
+                ).upper()
+                tags_value = getattr(f, "tags", None)
+                tags_json = None
+                if isinstance(tags_value, Sequence) and not isinstance(tags_value, (str, bytes)):
+                    tags_json = json.dumps([str(tag) for tag in tags_value], ensure_ascii=False)
+                evidence_refs_payload = None
+                if isinstance(metrics_map, Mapping):
+                    hashes_payload = metrics_map.get("hashes") or metrics_map.get("evidence_refs")
+                    if hashes_payload is not None:
+                        evidence_refs_payload = json.dumps(hashes_payload, ensure_ascii=False, default=str)
+                canonical_finding_rows.append(
+                    {
+                        "finding_id": truncate(first_text(getattr(f, "finding_id", None), rule_id), 128),
+                        "status": truncate(status_value, 32),
+                        "severity": truncate(sev, 32),
+                        "category": truncate(masvs_area, 64),
+                        "title": truncate(
+                            first_text(getattr(f, "title", None), evidence_preview, detector_id),
+                            512,
+                        ),
+                        "tags": tags_json,
+                        "evidence": evidence_payload,
+                        "fix": truncate(first_text(getattr(f, "remediate", None)), 2048),
+                        "rule_id": truncate(rule_id, 128),
+                        "cvss_score": base_score,
+                        "masvs_control": truncate(masvs_area, 32),
+                        "detector": truncate(detector_id, 64),
+                        "module": truncate(module_id, 64),
+                        "evidence_refs": evidence_refs_payload,
+                    }
+                )
+                persisted_by_detector[detector_id] += 1
                 control_entries.extend(getattr(result, "masvs_coverage", []))
     except Exception as exc:
         message = f"Failed to coerce findings for {run_package}: {exc}"
@@ -957,8 +1076,16 @@ def persist_run_summary(
         "permissions.risk_grade": (None, getattr(metrics_bundle, "permission_grade", "")),
     }
     metrics_payload["findings.total"] = (float(total_findings), None)
+    metrics_payload["findings.persisted_total"] = (float(len(finding_rows)), None)
     if downgraded_high:
         metrics_payload["findings.high_downgraded"] = (float(downgraded_high), None)
+    capped_total = int(sum(capped_by_detector.values()))
+    metrics_payload["findings.capped_total"] = (float(capped_total), None)
+    metrics_payload["findings.cap_per_detector_default"] = (float(_finding_cap_for_detector("__default__")), None)
+    for detector_id, dropped in sorted(capped_by_detector.items()):
+        metrics_payload[f"findings.capped.{detector_id}"] = (float(dropped), None)
+    for label in ("RISK", "FINDING", "INFO"):
+        metrics_payload[f"findings.taxonomy.{label.lower()}"] = (float(taxonomy_counter.get(label, 0)), None)
     rule_cov_pct = (float(rule_assigned) / float(total_findings) * 100.0) if total_findings else 0.0
     base_cov_pct = (float(base_vector_count) / float(total_findings) * 100.0) if total_findings else 0.0
     bte_cov_pct = (float(bte_vector_count) / float(total_findings) * 100.0) if total_findings else 0.0
@@ -1003,6 +1130,17 @@ def persist_run_summary(
                                 "findings.write",
                                 f"returned_false:run_id={run_id}:static_run_id={static_run_id}",
                             )
+                        if static_run_id is not None:
+                            try:
+                                _persist_static_analysis_findings(
+                                    static_run_id=int(static_run_id),
+                                    rows=canonical_finding_rows,
+                                )
+                            except Exception as exc:
+                                _raise_db_error(
+                                    "canonical_findings.write",
+                                    f"{exc.__class__.__name__}:{exc}",
+                                )
 
                     if static_run_id and correlation_rows:
                         try:

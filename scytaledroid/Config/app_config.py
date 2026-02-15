@@ -95,6 +95,17 @@ HARVEST_META_FIELDS = (
     "artifact",
 )
 
+# Static analysis noise controls (Paper #1 baseline)
+# Hard cap on persisted findings per detector to keep corpus outputs readable.
+STATIC_FINDINGS_CAP_PER_DETECTOR = 20
+# Optional detector-specific overrides (detector_id -> cap).
+STATIC_FINDINGS_CAP_OVERRIDES: dict[str, int] = {
+    "strings_runtime": 20,
+    "secrets": 20,
+    "sdk_inventory": 20,
+    "correlation_engine": 20,
+}
+
 # Device analysis tuning
 DEVICE_PROPERTY_KEYS = {
     "ro.product.brand": "brand",

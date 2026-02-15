@@ -168,8 +168,8 @@ def _get_or_create_app(package_name: str, display_name: str | None = None) -> in
         if row and row[0]:
             return int(row[0])
         new_id = core_q.run_sql(
-            "INSERT INTO apps (package_name, display_name) VALUES (%s, %s)",
-            (cleaned_package, display_name),
+            "INSERT INTO apps (package_name, display_name, profile_key) VALUES (%s, %s, %s)",
+            (cleaned_package, display_name, "UNKNOWN"),
             return_lastrowid=True,
         )
         apply_publisher_mapping([cleaned_package])

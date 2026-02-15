@@ -260,4 +260,38 @@ def run_sql_write(
     )
 
 
-__all__ = ["run_sql", "run_sql_many", "run_sql_write"]
+def run_sql_rowcount(
+    query: str,
+    params: ParamsType = None,
+    *,
+    query_name: str | None = None,
+    context: Mapping[str, Any] | None = None,
+) -> int:
+    """Execute a write statement and return affected row count."""
+
+    normalised_params = _normalise_params(params)
+    _validate_placeholder_style(query, normalised_params)
+    exec_params = _prepare_params(normalised_params)
+    eng_or_ctx = _resolve_engine()
+    if hasattr(eng_or_ctx, "__enter__") and hasattr(eng_or_ctx, "__exit__"):
+        with eng_or_ctx as db:  # type: ignore[assignment]
+            return int(
+                db.execute_with_rowcount(
+                    query,
+                    exec_params,
+                    query_name=query_name or "run_sql.rowcount",
+                    context=context,
+                )
+            )
+    db = eng_or_ctx  # type: ignore[assignment]
+    return int(
+        db.execute_with_rowcount(
+            query,
+            exec_params,
+            query_name=query_name or "run_sql.rowcount",
+            context=context,
+        )
+    )
+
+
+__all__ = ["run_sql", "run_sql_many", "run_sql_rowcount", "run_sql_write"]

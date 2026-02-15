@@ -7,7 +7,6 @@ import sys
 from collections.abc import Callable
 from datetime import datetime
 
-from scytaledroid.Api import start_api_server
 from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core.db_engine import ensure_db_ready
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
@@ -100,21 +99,6 @@ def main_menu() -> None:
             level="error",
         )
         return
-    api_state = start_api_server()
-    if api_state.status == "running":
-        print(f"API Server Running at {api_state.host}:{api_state.port} (http://{api_state.host}:{api_state.port}/)")
-    elif api_state.status in {"unavailable", "disabled"}:
-        status_messages.print_status(
-            "API server unavailable (install fastapi/uvicorn/python-multipart).",
-            level="warn",
-        )
-    if len(sys.argv) > 1:
-        # Support direct subcommands (behavior, static, etc.)
-        if sys.argv[1] == "static":
-            from scytaledroid.StaticAnalysis.cli import headless as static_headless
-            static_headless.main(sys.argv[2:])
-            return
-
     menu_actions: list[tuple[str, str, Callable[[], None]]] = [
         ("1", "Android Device Analysis", handle_device),
         ("2", "Static APK analysis", handle_static),
@@ -298,6 +282,11 @@ def _run_diagnostics(json_mode: bool) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] == "static":
+        from scytaledroid.StaticAnalysis.cli.flows import headless_run
+
+        return int(headless_run.main(argv[1:]))
+
     parser = argparse.ArgumentParser(description="ScytaleDroid CLI")
     parser.add_argument(
         "--diag",
