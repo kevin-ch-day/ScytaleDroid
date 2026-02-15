@@ -687,37 +687,17 @@ def ingest_publication_bundle_to_db(
         print(f"[OK] {k}: {v}")
 
 
-def ingest_paper_bundle_to_db(
-    *,
-    paper_root: Path,
-    cohort_id: str,
-    name: str,
-    selector_type: str,
-) -> None:
-    """Back-compat wrapper (deprecated): use ingest_publication_bundle_to_db()."""
-    ingest_publication_bundle_to_db(
-        bundle_root=paper_root,
-        cohort_id=cohort_id,
-        name=name,
-        selector_type=selector_type,
-    )
-
-
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Ingest publication bundle artifacts into DB (Phase H1).")
     ap.add_argument("--bundle-root", default="output/publication", help="Path to canonical output/publication directory.")
-    ap.add_argument("--paper-root", default=None, help="Deprecated alias for --bundle-root.")
     ap.add_argument("--cohort-id", required=True, help="Deterministic cohort_id to register in DB.")
     ap.add_argument("--name", required=True, help="Human-friendly cohort name.")
     ap.add_argument("--selector-type", default="freeze", choices=["freeze", "query", "manual"], help="Selector type.")
     args = ap.parse_args(argv)
 
     with database_session(reuse_connection=False):
-        bundle_root = args.bundle_root
-        if args.paper_root:
-            bundle_root = args.paper_root
         ingest_publication_bundle_to_db(
-            bundle_root=Path(bundle_root),
+            bundle_root=Path(args.bundle_root),
             cohort_id=args.cohort_id.strip(),
             name=args.name.strip(),
             selector_type=args.selector_type.strip(),

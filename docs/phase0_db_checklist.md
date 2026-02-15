@@ -1,6 +1,6 @@
-# Phase-0 Database Unification (MariaDB) Checklist
+# Database Unification (MariaDB) Checklist
 
-Goal: single shared MariaDB backend for CLI + web, no silent SQLite fallback.
+Goal: single canonical MariaDB backend for CLI workflows, no silent SQLite fallback.
 
 ## Prereqs
 - MariaDB running on Fedora and reachable.
@@ -29,7 +29,6 @@ Goal: single shared MariaDB backend for CLI + web, no silent SQLite fallback.
 - If `SCYTALEDROID_DB_URL` is set and connection/schema fails, CLI exits non-zero (no fallback).
 - Fresh MariaDB can be bootstrapped deterministically via `db_init`.
 - Schema version is stored and reported in db_status and the CLI menu.
-- Web app can point to the same DB (identical schema).
 
 ## Troubleshooting
 - Connection fails: verify credentials/host in `SCYTALEDROID_DB_URL`.

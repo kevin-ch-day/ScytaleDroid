@@ -6,15 +6,13 @@ running scanners, persisting results, and verifying database coverage. It assume
 credentials for the canonical database target.
 
 Paper #2 dynamic collection + ML:
-- See `docs/paper2/operator_runbook.md` and `docs/paper2/phase_e_plan.md`.
+- Optional legacy export/repro notes live under `docs/paper2/`.
 
 ## 1. Prepare the session
 
 1. **Bootstrap dependencies** – `./setup.sh` (or install the packages listed in
    `requirements.txt`).
-   - Paper toolchain (Phase E determinism): `SCYTALEDROID_PAPER_TOOLCHAIN=1 ./setup.sh`
-     uses `requirements-paper-toolchain.txt` if present.
-  - Reporting menu: all actions are shown by default.
+  - Reporting menu defaults to core workflows; legacy publication/export actions are opt-in.
 2. **Ensure schema helpers** – prime the canonical helpers once per shell
    session (idempotent):
    ```bash

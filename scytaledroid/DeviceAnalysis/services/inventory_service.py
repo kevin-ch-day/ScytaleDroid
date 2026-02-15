@@ -169,8 +169,6 @@ def run_full_sync(
 
     if progress_sink == "cli":
         views.print_inventory_run_summary_from_result(result)
-        if getattr(result, "fallback_used", False):
-            print(status_messages.status("Fallbacks used (non-root).", level="warn"))
         # Keep CLI output minimal; follow-on actions are driven by menu flow.
 
     # Emit structured run summary to logs for reproducibility.

@@ -196,24 +196,8 @@ def get_latest_inventory_metadata(
             scope_hash_changed = False
         metadata["scope_hash_changed"] = scope_hash_changed
 
-        if (
-            serial
-            and scope_id != resolved_scope_id
-            and scope_hashes
-            and scope_id in scope_hashes
-        ):
-            removed_map = inventory_service.update_scope_hash(serial, scope_id, None)
-            if removed_map is not None:
-                scope_hashes = removed_map
-                metadata["scope_hashes"] = removed_map
-
-        if serial and expected_scope_hash:
-            updated = inventory_service.update_scope_hash(
-                serial, resolved_scope_id, expected_scope_hash
-            )
-            if updated is not None:
-                metadata["scope_hashes"] = updated
-                scope_hashes = updated
+        # Read path must stay pure: scope hashes are compared only, never mutated here.
+        # Reconciliation writes (if needed) must be handled by explicit sync/update flows.
     else:
         metadata.setdefault("scope_hash_changed", False)
 

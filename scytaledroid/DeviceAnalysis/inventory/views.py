@@ -25,20 +25,22 @@ def print_inventory_run_summary_from_result(result) -> None:
     menu_utils.print_header("Inventory Sync · RUN SUMMARY")
     snapshot_path = getattr(result, "snapshot_path", None)
     snapshot_id = getattr(result, "snapshot_id", None)
-    snapshot_label = snapshot_path or (f"id={snapshot_id}" if snapshot_id is not None else "—")
-    print(f"[RUN] Snapshot: {snapshot_label}")
-    summary = (
-        f"Inventory sync complete · {metrics.total_packages} packages · "
-        f"snapshot id={snapshot_id if snapshot_id is not None else '—'} · "
-        f"{metrics.scan_duration}"
-    )
-    print(f"✔ {summary}")
+    elapsed_seconds = float(getattr(result, "elapsed_seconds", 0.0) or 0.0)
+    avg_rate = (metrics.total_packages / elapsed_seconds) if elapsed_seconds > 0 else 0.0
+    fallback_used = bool(getattr(result, "fallback_used", False))
+
+    print(f"[RUN] Snapshot path: {snapshot_path or '—'}")
+    print(f"[RUN] Snapshot id: {snapshot_id if snapshot_id is not None else '—'}")
     print(f"Packages: {metrics.total_packages}")
+    print(f"Split packages: {metrics.split_apk_packages}")
+    print(f"Duration: {metrics.scan_duration}")
+    print(f"Avg rate: {avg_rate:.2f} pkg/s")
+    print(f"Fallback mode: {'enabled' if fallback_used else 'disabled'}")
     print(
         "Delta vs previous: "
-        f"new={metrics.delta_new} removed={metrics.delta_removed} changed={metrics.delta_updated}"
+        f"new={metrics.delta_new} removed={metrics.delta_removed} updated={metrics.delta_updated}"
     )
-    print(f"[RESULT] User apps (candidates): {metrics.user_scope_candidates}")
+    print(f"User apps (candidates): {metrics.user_scope_candidates}")
     print()
 
     # Phase A closure visibility: show bounded retention status (operator-visible).

@@ -7,8 +7,8 @@ reports.
 
 ## Workspace & Evidence (menu)
 
-The CLI provides a **Workspace & Evidence** menu intended for Paper #2
-collection operations and safe cleanup. Typical actions include:
+The CLI provides a **Workspace & Evidence** menu for collection operations and
+safe cleanup. Typical actions include:
 
 - Workspace disk usage (APK storage, evidence packs, logs, caches).
 - Dynamic evidence pack verification (overview, deep checks).
@@ -19,11 +19,7 @@ collection operations and safe cleanup. Typical actions include:
 Important:
 - Evidence packs are authoritative.
 - The DB is derived/rebuildable and may drift if runs are deleted locally.
-- After dataset freeze, do not recompute artifacts for the included run set.
-
-Paper #2 references:
-- `docs/paper2/README.md`
-- `docs/paper2/operator_runbook.md`
+- Legacy paper export/repro docs remain under `docs/paper2/` as an optional path.
 
 ## Static analysis caches & retention
 

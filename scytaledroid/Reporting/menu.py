@@ -2,72 +2,64 @@
 
 from __future__ import annotations
 
+import os
+
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, summary_cards
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
 
 from .menu_actions import (
     fetch_tier1_status,
     handle_dataset_readiness_dashboard,
-    handle_paper2_end_to_end,
-    handle_paper_bundle_health_check,
-    handle_phase_f1_acceptance_gates,
-    handle_run_ml_query_mode,
     handle_tier1_audit_report,
     handle_tier1_end_to_end,
     handle_tier1_export_pack,
     handle_tier1_quick_fix,
-    handle_verify_freeze_immutability_paper2,
     handle_write_canonical_publication_bundle,
     view_saved_reports,
 )
+
+
+def _legacy_publication_enabled() -> bool:
+    value = os.getenv("SCYTALEDROID_ENABLE_LEGACY_PUBLICATION", "0").strip().lower()
+    return value in {"1", "true", "yes", "on"}
 
 
 def reporting_menu() -> None:
     """Render the reporting menu until the user chooses to exit."""
 
     actions_all = {
-        # Research / Baseline
+        # Core
         "1": handle_tier1_export_pack,
         "2": handle_tier1_audit_report,
         "3": handle_dataset_readiness_dashboard,
         "4": handle_tier1_quick_fix,
         "5": handle_tier1_end_to_end,
-        # Research / ML
-        "6": handle_paper2_end_to_end,
-        "7": handle_paper_bundle_health_check,
-        "8": handle_run_ml_query_mode,
-        "9": handle_verify_freeze_immutability_paper2,
-        "10": handle_phase_f1_acceptance_gates,
-        # Reports
-        "11": handle_write_canonical_publication_bundle,
-        "12": view_saved_reports,
+        "6": view_saved_reports,
     }
 
-    tier1_options = [
+    core_options = [
         MenuOption("1", "Export baseline dataset pack (manifest + telemetry + summary)"),
         MenuOption("2", "Baseline audit report (dataset readiness)"),
         MenuOption("3", "Dataset readiness dashboard (app install/harvest/static/dynamic)"),
         MenuOption("4", "Baseline quick fix (reindex DB + audit + optional export)"),
         MenuOption("5", "Baseline end-to-end (reindex + audit + export)"),
     ]
-    paper_options = [
-        MenuOption("6", "Freeze end-to-end (ML + baseline bundle + health check)"),
-        MenuOption("7", "Bundle health check (freeze + manifests + semantic lint + toolchain)"),
-        MenuOption("8", "Run ML (query mode, operational snapshot)"),
-        MenuOption("9", "Verify freeze immutability (hash-based)"),
-        MenuOption("10", "Acceptance gates (regression + query smoke)"),
-        MenuOption("11", "Write canonical research bundle (output/publication)"),
-    ]
     reports_options = [
-        MenuOption("12", "View saved reports"),
+        MenuOption("6", "View saved reports"),
     ]
 
-    tier1_visible = tier1_options
-    paper_visible = paper_options
+    legacy_export_options: list[MenuOption] = []
+    if _legacy_publication_enabled():
+        actions_all["7"] = handle_write_canonical_publication_bundle
+        legacy_export_options.append(
+            MenuOption("7", "Legacy export: write canonical publication bundle")
+        )
+
+    core_visible = core_options
     reports_visible = reports_options
-    visible_keys = {it.key for it in (tier1_visible + paper_visible + reports_visible)}
+    visible_keys = {it.key for it in (core_visible + legacy_export_options + reports_visible)}
     actions = {k: v for k, v in actions_all.items() if k in visible_keys}
-    choice_keys = [it.key for it in (tier1_visible + paper_visible + reports_visible)]
+    choice_keys = [it.key for it in (core_visible + legacy_export_options + reports_visible)]
 
     while True:
         print()
@@ -85,8 +77,6 @@ def reporting_menu() -> None:
         pcap_total = status.get("pcap_total_runs", 0)
         feature_health_status = status.get("feature_health_status")
         feature_health_at = status.get("feature_health_at")
-        paper_toolchain_summary = status.get("paper_toolchain_summary")
-        paper_toolchain_ok = status.get("paper_toolchain_ok")
         schema_outdated = schema_ver != expected
         schema_label = (
             f"{schema_ver} (expects {expected}) [OUTDATED]" if schema_outdated else str(schema_ver)
@@ -102,8 +92,6 @@ def reporting_menu() -> None:
             feature_health_label = f"{feature_health_status} @ {feature_health_at}" if feature_health_at else str(feature_health_status)
         else:
             feature_health_label = "missing"
-        toolchain_label = str(paper_toolchain_summary or "unknown")
-        toolchain_style = "severity_high" if paper_toolchain_ok is False else "muted"
         summary_items = [
             summary_cards.summary_item("Schema", schema_label, value_style=schema_style),
             summary_cards.summary_item(
@@ -115,7 +103,6 @@ def reporting_menu() -> None:
             summary_cards.summary_item("DB dataset runs tracked", db_dataset_label, value_style="muted"),
             summary_cards.summary_item("PCAP valid runs", pcap_label, value_style=pcap_style),
             summary_cards.summary_item("Feature Health (export)", feature_health_label, value_style="muted"),
-            summary_cards.summary_item("Toolchain pins", toolchain_label, value_style=toolchain_style),
             summary_cards.summary_item("Last export", export_label, value_style="muted"),
         ]
         footer = ""
@@ -125,8 +112,6 @@ def reporting_menu() -> None:
             footer = "Fix: Evidence valid but DB QA-pass is 0. Run [4] Baseline quick fix."
         elif (not last_export_path) or (feature_health_status is None):
             footer = "Tip: Run [1] Export baseline dataset pack to generate Feature Health."
-        elif paper_toolchain_ok is False:
-            footer = "Tip: pinned toolchain mismatch. Run SCYTALEDROID_PAPER_TOOLCHAIN=1 ./setup.sh"
         else:
             footer = "All checks green."
         summary_cards.print_summary_card(
@@ -136,10 +121,19 @@ def reporting_menu() -> None:
             footer=footer,
         )
         print()
-        menu_utils.print_section("Research / Baseline")
-        menu_utils.render_menu(MenuSpec(items=tier1_visible, show_exit=False, exit_label=None, show_descriptions=False, padding=True))
-        menu_utils.print_section("Research / ML")
-        menu_utils.render_menu(MenuSpec(items=paper_visible, show_exit=False, exit_label=None, show_descriptions=False, padding=True))
+        menu_utils.print_section("Core")
+        menu_utils.render_menu(MenuSpec(items=core_visible, show_exit=False, exit_label=None, show_descriptions=False, padding=True))
+        if legacy_export_options:
+            menu_utils.print_section("Exports (Legacy)")
+            menu_utils.render_menu(
+                MenuSpec(
+                    items=legacy_export_options,
+                    show_exit=False,
+                    exit_label=None,
+                    show_descriptions=False,
+                    padding=True,
+                )
+            )
         menu_utils.print_section("Reports")
         menu_utils.render_menu(MenuSpec(items=reports_visible, show_exit=False, exit_label=None, show_descriptions=False, padding=True))
         menu_utils.render_menu(MenuSpec(items=[], default=None, show_exit=True, exit_label="Back"))

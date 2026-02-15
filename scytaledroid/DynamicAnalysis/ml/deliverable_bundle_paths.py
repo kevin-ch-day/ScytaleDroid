@@ -71,43 +71,6 @@ def output_publication_internal_snapshot_dir(snapshot_id: str) -> Path:
     return output_publication_internal_snapshots_root() / snapshot_id
 
 
-# Legacy aliases (deprecated): "paper" == "publication"
-def output_paper_root() -> Path:  # pragma: no cover
-    return output_publication_root()
-
-
-def output_paper_tables_dir() -> Path:  # pragma: no cover
-    return output_publication_tables_dir()
-
-
-def output_paper_figures_dir() -> Path:  # pragma: no cover
-    return output_publication_figures_dir()
-
-
-def output_paper_appendix_dir() -> Path:  # pragma: no cover
-    return output_publication_appendix_dir()
-
-
-def output_paper_manifests_dir() -> Path:  # pragma: no cover
-    return output_publication_manifests_dir()
-
-
-def output_paper_internal_root() -> Path:  # pragma: no cover
-    return output_publication_internal_root()
-
-
-def output_paper_internal_provenance_dir() -> Path:  # pragma: no cover
-    return output_publication_internal_provenance_dir()
-
-
-def output_paper_internal_snapshots_root() -> Path:  # pragma: no cover
-    return output_publication_internal_snapshots_root()
-
-
-def output_paper_internal_snapshot_dir(snapshot_id: str) -> Path:  # pragma: no cover
-    return output_publication_internal_snapshot_dir(snapshot_id)
-
-
 # Internal Phase E baseline bundle (deterministic, used for regression gates).
 def output_phase_e_bundle_root() -> Path:
     return output_publication_internal_root() / "baseline"

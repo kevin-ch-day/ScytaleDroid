@@ -11,6 +11,9 @@ canonical database schema for fast cross-run analytics. Dynamic analysis is
 evidence-pack-first: evidence packs are authoritative and the DB is a rebuildable
 accelerator (derived index) for querying/reporting.
 
+Paper export support is optional and isolated from core workflows. The primary
+operator experience is the menu-driven CLI launched via `./run.sh`.
+
 Dynamic analysis runs are executed on physical devices (non-root telemetry),
 structured as dynamic sessions, and designed to support time-series anomaly
 detection pipelines (Isolation Forest / One-Class SVM) with reproducible
@@ -195,11 +198,8 @@ This is useful for regression testing or reviewing artifacts harvested outside S
 
 ## DB integration helpers
 
-- `python -m scytaledroid.Web.db_status_server --host 0.0.0.0 --port 8080` exposes a minimal `/db_status`
-  endpoint (backend, db, schema_version, ok flag). Purpose: integration/debug proof that web + CLI
-  see the same MariaDB; not a production service and unauthenticated by design.
-- Table ownership guidance for Phase-1 is documented in `docs/db/table_ownership.md` to avoid write
-  collisions as the web app comes online. Treat it as authoritative guidance for which side writes what.
+- Database connection and schema checks are menu-driven from **Database tools**.
+- Baseline static audit scripts accept explicit DB targets (`--db-target`) for reproducible checks.
 
 ## Project layout & docs
 
@@ -213,11 +213,14 @@ ScytaleDroid keeps detailed operator documentation under `docs/`:
   dynamic analysis contract, evidence packs, and run manifest requirements.
 - [`docs/evidence_pack_spec.md`](docs/evidence_pack_spec.md) – authoritative
   frozen-input contract, freeze manifest semantics, and ML output paths.
-- [`docs/paper2/operator_runbook.md`](docs/paper2/operator_runbook.md) – dynamic
-  collection + freeze + ML operator flow.
-- [`docs/paper2/README.md`](docs/paper2/README.md) – dynamic dataset/ML index.
-- [`docs/paper2/phase_e_plan.md`](docs/paper2/phase_e_plan.md) – ML
-  implementation contract (evidence-pack-only, deterministic).
+- [`docs/engineering_invariants.md`](docs/engineering_invariants.md) –
+  non-negotiable architecture/runtime invariants.
+- [`docs/inventory_guard_determinism_contract.md`](docs/inventory_guard_determinism_contract.md) –
+  deterministic decision contract for inventory freshness guard logic.
+- [`docs/refactor_test_matrix.md`](docs/refactor_test_matrix.md) –
+  refactor/removal acceptance matrix and risk coverage.
+- [`docs/paper2/README.md`](docs/paper2/README.md) – legacy paper export
+  reproducibility notes (optional path, not core runtime).
 - [`docs/static_analysis/static_analysis_pipeline_plan.md`](docs/static_analysis/static_analysis_pipeline_plan.md) – roadmap,
   implementation status, and research backlog.
 - [`docs/maintenance/housekeeping.md`](docs/maintenance/housekeeping.md) – log

@@ -17,7 +17,6 @@ from .static_analysis import (
     static_permission_risk,
     string_analysis,
 )
-from .web import tables as web_tables
 
 _CREATE_TABLE_RE = re.compile(
     r"CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+`?([a-zA-Z0-9_]+)`?",
@@ -111,14 +110,6 @@ def ordered_schema_statements() -> list[str]:
 
     # Post-paper analysis registry + derived aggregates (Phase H).
     statements.extend(list(getattr(analysis_schema, "_DDL_STATEMENTS", [])))
-
-    # Web-owned additive tables.
-    statements.extend(
-        [
-            web_tables.CREATE_WEB_ANNOTATIONS,
-            web_tables.CREATE_WEB_USER_PREFS,
-        ]
-    )
 
     return _dedupe_create_tables(statements)
 

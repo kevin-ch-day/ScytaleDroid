@@ -1,9 +1,9 @@
 # Sprint 0.2 Acceptance (Identity + Linkage)
 
 Note: This is a historic acceptance checklist for early identity/linkage work.
-For current Paper #2 Phase D/E contracts and operator flows, see:
-- `docs/paper2/operator_runbook.md`
-- `docs/paper2/phase_e_plan.md`
+Current implementation contracts live in `docs/engineering_invariants.md` and
+`docs/refactor_phase_plan.md`. Legacy paper export references are optional and
+kept under `docs/paper2/`.
 
 Scope: static run identity, run_map linkage, and diagnostic linkage reporting.
 

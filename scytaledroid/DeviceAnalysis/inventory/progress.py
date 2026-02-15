@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from datetime import UTC, datetime
 
 from scytaledroid.Utils.DisplayUtils import colors, status_messages, terminal, text_blocks
@@ -12,35 +11,27 @@ try:
     from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.constants import (
         INVENTORY_STALE_SECONDS,
     )
-    from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.utils import humanize_seconds
 except Exception:  # pragma: no cover - headless fall-back
     INVENTORY_STALE_SECONDS = 24 * 60 * 60
 
-    def humanize_seconds(seconds: float | int | None) -> str:
-        if seconds is None:
-            return "unknown"
-        total = int(seconds)
-        mins, secs = divmod(total, 60)
-        hours, mins = divmod(mins, 60)
-        days, hours = divmod(hours, 24)
-        parts = []
-        if days:
-            parts.append(f"{days}d")
-        if hours or parts:
-            parts.append(f"{hours}h")
-        if mins or parts:
-            parts.append(f"{mins:02d}m")
-        parts.append(f"{secs:02d}s")
-        return " ".join(parts)
-
 
 def _format_duration(seconds: float | None) -> str:
-    """Return a human-friendly duration like 8 mins 49 sec."""
+    """Return a compact duration like 8m49s for fast operator scanning."""
     if seconds is None:
         return ""
     if seconds < 0:
         return "--"
-    return humanize_seconds(seconds)
+    total = int(seconds)
+    mins, secs = divmod(total, 60)
+    hours, mins = divmod(mins, 60)
+    days, hours = divmod(hours, 24)
+    if days > 0:
+        return f"{days}d{hours:02d}h{mins:02d}m"
+    if hours > 0:
+        return f"{hours}h{mins:02d}m{secs:02d}s"
+    if mins > 0:
+        return f"{mins}m{secs:02d}s"
+    return f"{secs}s"
 
 
 def _format_progress_lines(
@@ -50,12 +41,18 @@ def _format_progress_lines(
     elapsed_seconds: float,
     eta_seconds: float | None,
     split_processed: int,
+    rate_override: float | None = None,
+    show_splits: bool = False,
     phase_label: str | None = None,
 ) -> tuple[str, str]:
     percentage = (processed / total) * 100 if total else 0.0
     # ETA tends to be noisy early. Suppress until we have enough signal.
     eta_text = ""
-    if elapsed_seconds >= 30.0 and processed >= max(10, int(total * 0.05) if total else 10):
+    if (
+        eta_seconds is not None
+        and elapsed_seconds >= 60.0
+        and processed >= max(10, int(total * 0.15) if total else 10)
+    ):
         eta_text = _format_duration(eta_seconds)
 
     # Scale the bar to the terminal to avoid line wrapping on narrow consoles.
@@ -74,8 +71,8 @@ def _format_progress_lines(
         filled_bar = colors.apply(filled_bar, palette.accent)
         empty_bar = colors.apply(empty_bar, palette.muted)
     bar = f"{filled_bar}{empty_bar}"
-    # Rate is more stable than ETA and helps operators see that the run is alive.
-    rate = (processed / elapsed_seconds) if elapsed_seconds > 0 else 0.0
+    # Rate helps operators see that the run is alive.
+    rate = rate_override if rate_override is not None else ((processed / elapsed_seconds) if elapsed_seconds > 0 else 0.0)
     elapsed_text = _format_duration(elapsed_seconds)
     eta_field = eta_text or "--"
 
@@ -88,51 +85,68 @@ def _format_progress_lines(
     line1 = f"{label}  [{bar}] {processed}/{total} ({percentage:.1f}%)"
 
     line2 = f"elapsed {elapsed_text}  eta {eta_field}  rate {rate:.2f} pkg/s"
-    if split_processed:
+    if split_processed and show_splits:
         line2 += f"  splits {split_processed}"
     return line1, line2
-
-
-_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
-
-
-def _visible_length(text: str) -> int:
-    return len(_ANSI_ESCAPE_RE.sub("", text))
 
 
 def make_cli_progress_printer(ui_prefs=None):
     """Return a progress callback that renders a two-line, updating progress block."""
 
-    last_line1 = 0
-    last_line2 = 0
     current_phase_label: str | None = None
     last_elapsed: float = 0.0
+    last_processed: int = 0
+    ema_rate: float = 0.0
+    split_milestones_seen: set[int] = set()
 
     def _printer(event: dict[str, object]) -> bool | None:
-        nonlocal last_line1, last_line2, current_phase_label, last_elapsed
+        nonlocal current_phase_label, last_elapsed, last_processed, ema_rate, split_milestones_seen
         phase = event.get("phase")
         if phase == "start":
             current_phase_label = event.get("phase_label") or "Collecting packages"
+            last_processed = 0
+            last_elapsed = 0.0
+            ema_rate = 0.0
+            split_milestones_seen.clear()
             print()  # visual separation after snapshot block
             print()  # reserve line2
             print("\033[F", end="")  # move cursor back to line1
             return True
         if phase == "progress":
-            last_elapsed = float(event.get("elapsed_seconds", 0.0) or 0.0)
+            processed = int(event.get("processed", 0) or 0)
+            total = int(event.get("total", 0) or 0)
+            elapsed = float(event.get("elapsed_seconds", 0.0) or 0.0)
+            split_processed = int(event.get("split_processed", 0) or 0)
+            delta_elapsed = max(elapsed - last_elapsed, 0.0)
+            delta_processed = max(processed - last_processed, 0)
+            inst_rate = (delta_processed / delta_elapsed) if delta_elapsed > 0 else 0.0
+            if ema_rate <= 0.0:
+                ema_rate = inst_rate or ((processed / elapsed) if elapsed > 0 else 0.0)
+            elif inst_rate > 0.0:
+                # Favor stability over responsiveness so ETA does not jump excessively.
+                ema_rate = (0.15 * inst_rate) + (0.85 * ema_rate)
+            effective_rate = ema_rate if ema_rate > 0 else ((processed / elapsed) if elapsed > 0 else 0.0)
+            eta_smoothed = ((total - processed) / effective_rate) if effective_rate > 0 and total > processed else None
+            pct = int((processed / total) * 100) if total > 0 else 0
+            show_splits = False
+            for mark in (25, 50, 75, 100):
+                if pct >= mark and mark not in split_milestones_seen:
+                    split_milestones_seen.add(mark)
+                    show_splits = True
+            last_elapsed = elapsed
+            last_processed = processed
             line1, line2 = _format_progress_lines(
-                processed=int(event.get("processed", 0) or 0),
-                total=int(event.get("total", 0) or 0),
-                elapsed_seconds=last_elapsed,
-                eta_seconds=event.get("eta_seconds"),
-                split_processed=int(event.get("split_processed", 0) or 0),
+                processed=processed,
+                total=total,
+                elapsed_seconds=elapsed,
+                eta_seconds=eta_smoothed,
+                split_processed=split_processed,
+                rate_override=effective_rate,
+                show_splits=show_splits,
                 phase_label=current_phase_label,
             )
-            vis1 = _visible_length(line1)
-            vis2 = _visible_length(line2)
-            pad1 = " " * max(0, last_line1 - vis1)
-            pad2 = " " * max(0, last_line2 - vis2)
-            print(f"\r{line1}{pad1}\n{line2}{pad2}\033[F", end="", flush=True)
-            last_line1, last_line2 = vis1, vis2
+            # Clear each line before redraw to avoid visual residue/trailing spaces.
+            print(f"\r\033[K{line1}\n\033[K{line2}\033[F", end="", flush=True)
         elif phase == "complete":
             # Ensure we end on a clean line below the progress block.
             print("\r", end="")
@@ -165,7 +179,7 @@ def render_snapshot_block(
         )
         is_stale = age_seconds >= INVENTORY_STALE_SECONDS
         status_text = "STALE" if is_stale else "FRESH"
-        age_text = humanize_seconds(age_seconds)
+        age_text = _format_duration(age_seconds)
         snapshot_count = getattr(previous_meta, "package_count", None)
         device_count = None
         if serial:
@@ -185,26 +199,33 @@ def render_snapshot_block(
     device_text = (serial or "unknown").strip()
     prev_id = getattr(previous_meta, "snapshot_id", None) if previous_meta else None
 
-    # Panel-style header: readable, not busy.
+    # Compact header with deterministic field ordering.
     print(text_blocks.headline("Inventory Sync", width=70))
-    title = f"Device: {device_text}    Mode: {mode_text}"
+    title = f"Device: {device_text}  |  mode={mode_text}"
+    if prev_id is not None:
+        title += f"  |  prev_snapshot={prev_id}"
     if colors.colors_enabled():
         palette = colors.get_palette()
         title = colors.apply(title, palette.header, bold=True)
     print(title)
 
-    meta_line = f"Status: {status_text}    Last sync: {age_text}    Packages: {pkg_text}"
-    if prev_id is not None:
-        meta_line += f"    Prev snapshot: id={prev_id}"
+    meta_line = f"Status: {status_text}  |  last_sync={age_text}  |  packages={pkg_text}"
     print(meta_line)
 
     if allow_fallbacks is True:
+        warn_key = f"{device_text}|{mode_text}"
+        if warn_key in _FALLBACK_WARNED_KEYS:
+            return
+        _FALLBACK_WARNED_KEYS.add(warn_key)
         print(
             status_messages.status(
-                "Fallbacks enabled (non-root). Coverage is coarse; OK for orchestration.",
+                "Non-root collection active: metadata coverage is reduced.",
                 level="warn",
             )
         )
 
 
 __all__ = ["make_cli_progress_printer", "render_snapshot_block"]
+
+
+_FALLBACK_WARNED_KEYS: set[str] = set()
