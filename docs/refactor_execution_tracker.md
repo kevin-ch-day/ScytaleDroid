@@ -14,8 +14,8 @@ Last updated: 2026-02-16
 
 ## Current Status Snapshot
 
-1. Phase 1 (`Determinism Comparator Contract`): in progress
-2. Phase 2 (`Atomic Persistence`): in progress
+1. Phase 1 (`Determinism Comparator Contract`): completed
+2. Phase 2 (`Atomic Persistence`): completed
 3. Phase 3 (`Schema/Data Contract Corrections`): in progress (migration prepared, cutover pending)
 4. Phase 4 (`Boundary Enforcement`): not started
 5. Phase 5 (`Legacy Publication Isolation + Removal`): in progress (isolation tests present, deletion batches pending)
@@ -29,11 +29,10 @@ Completed evidence:
 - `docs/contracts/determinism_keys.md`
 - `tests/static_analysis/test_determinism_gate_schema.py`
 - `tests/inventory/test_inventory_determinism.py`
+- Database Tools menu action: `Inventory determinism comparator (strict)`
 
 Open items:
-- Ensure comparator is exposed from a stable menu/operator command path.
-- Ensure strict mode is the default for nightly/automation entrypoints.
-- Verify allowed-diff list parity across scripts and docs.
+- none (Phase 1 exit criteria met)
 
 Exit criteria:
 - Comparator command is operator-visible and documented.
@@ -47,12 +46,13 @@ Completed evidence:
 - `docs/contracts/persistence_uow_tables.md`
 - `tests/persistence/test_persist_run_summary_atomicity.py`
 - `tests/persistence/test_persistence_write_targets.py`
+- `tests/persistence/test_permission_risk.py` (strict `risk_scores` availability behavior)
+- `scytaledroid/StaticAnalysis/cli/persistence/run_envelope.py` (no DB writes in envelope prep)
+- `scytaledroid/StaticAnalysis/cli/persistence/run_summary.py` (legacy run creation moved inside transaction)
+- `scytaledroid/StaticAnalysis/cli/persistence/permission_risk.py` (fail-loud critical writes)
 
 Open high-risk items:
-- Eliminate pre-transaction writes in static persistence flow.
-- Move scientific run-row creation fully inside UoW.
-- Remove silent suppression of critical risk write failures.
-- Align run status mapping at persistence boundary.
+- none (Phase 2 exit criteria met)
 
 Exit criteria:
 - Failure injection proves zero scientific rows on failure.
@@ -65,12 +65,24 @@ Exit criteria:
 Completed evidence:
 - `docs/contracts/static_permission_risk_migration.md`
 - `migrations/2026-02-16_static_permission_risk_runid_perm.sql`
+- `scytaledroid/StaticAnalysis/cli/persistence/utils.py` (`canonical_decimal_text`)
+- `scytaledroid/StaticAnalysis/cli/persistence/permission_risk.py` (identity validation + score canonicalization)
+- `scytaledroid/StaticAnalysis/cli/persistence/run_summary.py` (scope/package identity validation + canonical metric values)
+- `tests/persistence/test_numeric_canonicalization.py`
+- `scytaledroid/StaticAnalysis/cli/persistence/permission_risk.py` vNext gate:
+  `SCYTALEDROID_ENABLE_SPR_VNEXT=1` (default off)
+- `tests/persistence/test_permission_risk.py` vNext gate behavior (off-by-default,
+  opt-in path exercised)
 
 Open items:
 - Cut over writers/readers to run-aware `static_permission_risk` model after
   freeze boundary allows merge.
-- Enforce write-time float canonicalization for scientific fields.
-- Enforce required identity key fields at persistence time.
+- Extend write-time float canonicalization beyond current risk/metrics path to
+  remaining scientific decimal fields as needed.
+
+Recent extension:
+- CVSS finding score fields are now canonicalized at write-time in
+  `persist_run_summary` (`cvss.base/bt/be/bte`).
 
 Exit criteria:
 - No cross-run overwrite in scientific tables.
@@ -118,11 +130,10 @@ Exit criteria:
 
 ## Next Work Queue (Ordered)
 
-1. Phase 2: pre-transaction write removal and fail-loud persistence behavior.
-2. Phase 2: status normalization and rollback assertions for full UoW table set.
-3. Phase 3: float canonicalization validation path and tests.
-4. Phase 4: remove SQL from reporting/menu entrypoints.
-5. Phase 5: first low-risk deletion batch with reachability proof.
+1. Phase 3: float canonicalization validation path and tests.
+2. Phase 3: identity-key enforcement at persistence boundaries.
+3. Phase 4: remove SQL from reporting/menu entrypoints.
+4. Phase 5: next low-risk deletion batch with reachability proof.
 
 ## Open Decisions to Confirm Before Merge-Critical Work
 

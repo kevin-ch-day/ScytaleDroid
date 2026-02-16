@@ -30,6 +30,19 @@ CREATE TABLE IF NOT EXISTS static_permission_risk (
 );
 """
 
+SQLITE_CREATE_TABLE_VNEXT = """
+CREATE TABLE IF NOT EXISTS static_permission_risk_vnext (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id INTEGER NOT NULL,
+  permission_name TEXT NOT NULL,
+  risk_score REAL NOT NULL,
+  risk_class TEXT NULL,
+  rationale_code TEXT NULL,
+  created_at_utc TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(run_id, permission_name)
+);
+"""
+
 SQLITE_UPSERT = """
 INSERT INTO static_permission_risk (
   apk_id, app_id, package_name, sha256,
@@ -54,6 +67,19 @@ ON CONFLICT(apk_id) DO UPDATE SET
   signature=excluded.signature,
   vendor=excluded.vendor,
   created_at=CURRENT_TIMESTAMP
+"""
+
+SQLITE_UPSERT_VNEXT = """
+INSERT INTO static_permission_risk_vnext (
+  run_id, permission_name, risk_score, risk_class, rationale_code
+) VALUES (
+  %(run_id)s, %(permission_name)s, %(risk_score)s, %(risk_class)s, %(rationale_code)s
+)
+ON CONFLICT(run_id, permission_name) DO UPDATE SET
+  risk_score=excluded.risk_score,
+  risk_class=excluded.risk_class,
+  rationale_code=excluded.rationale_code,
+  created_at_utc=CURRENT_TIMESTAMP
 """
 
 
@@ -108,6 +134,44 @@ def upsert(payload: Mapping[str, object]) -> None:
         run_sql(queries.UPSERT_RISK, payload)
 
 
+def table_exists_vnext() -> bool:
+    try:
+        if _IS_SQLITE:
+            row = run_sql(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='static_permission_risk_vnext'",
+                fetch="one",
+            )
+            return bool(row)
+        row = run_sql(
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'static_permission_risk_vnext'",
+            fetch="one",
+        )
+        return bool(row and int(row[0]) > 0)
+    except Exception:
+        return False
+
+
+def upsert_vnext(payload: Mapping[str, object]) -> None:
+    if _IS_SQLITE:
+        run_sql(SQLITE_UPSERT_VNEXT, payload)
+        return
+    run_sql(
+        """
+        INSERT INTO static_permission_risk_vnext (
+          run_id, permission_name, risk_score, risk_class, rationale_code
+        ) VALUES (
+          %(run_id)s, %(permission_name)s, %(risk_score)s, %(risk_class)s, %(rationale_code)s
+        )
+        ON DUPLICATE KEY UPDATE
+          risk_score = VALUES(risk_score),
+          risk_class = VALUES(risk_class),
+          rationale_code = VALUES(rationale_code),
+          created_at_utc = CURRENT_TIMESTAMP
+        """,
+        payload,
+    )
+
+
 def bulk_upsert(rows: Iterable[Mapping[str, object]]) -> int:
     count = 0
     for row in rows:
@@ -119,4 +183,11 @@ def bulk_upsert(rows: Iterable[Mapping[str, object]]) -> int:
     return count
 
 
-__all__ = ["ensure_table", "table_exists", "upsert", "bulk_upsert"]
+__all__ = [
+    "ensure_table",
+    "table_exists",
+    "upsert",
+    "bulk_upsert",
+    "table_exists_vnext",
+    "upsert_vnext",
+]

@@ -200,6 +200,9 @@ This is useful for regression testing or reviewing artifacts harvested outside S
 
 - Database connection and schema checks are menu-driven from **Database tools**.
 - Baseline static audit scripts accept explicit DB targets (`--db-target`) for reproducible checks.
+- Inventory determinism comparator is available from **Database tools**
+  (`Inventory determinism comparator (strict)`) and writes JSON artifacts under
+  `output/audit/comparators/inventory_guard/`.
 
 ## Project layout & docs
 

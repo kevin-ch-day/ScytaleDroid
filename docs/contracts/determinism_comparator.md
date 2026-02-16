@@ -21,6 +21,19 @@ Planned (same schema):
 3. Any disallowed diff -> `FAIL`.
 4. Any validation issue (missing required key fields, duplicate key rows) -> `FAIL`.
 
+## Allowed Diff Fields (Locked)
+
+Inventory comparator (`compare_type=inventory_guard`):
+
+1. `left.timestamp_utc`
+2. `right.timestamp_utc`
+3. `left.run_id`
+4. `right.run_id`
+
+Static comparator (`compare_type=static_analysis`):
+
+1. none (strict full payload equality)
+
 ## Required JSON Artifact Fields
 
 Top-level fields:
@@ -62,3 +75,4 @@ Default local output:
 
 1. Comparator must be key-based, not row-order based.
 2. Degraded mode is interactive-only and not enabled by default.
+3. Automation/nightly paths run strict mode only.

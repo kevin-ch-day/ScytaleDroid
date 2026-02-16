@@ -14,6 +14,7 @@ from .menu_actions import (
     ensure_dynamic_tier_migrations,
     ingest_analysis_cohort_from_publication_bundle,
     maybe_clear_screen,
+    run_inventory_determinism_comparator,
     seed_paper_dataset_profile,
     show_connection_and_config,
     show_governance_snapshot_status,
@@ -34,6 +35,7 @@ def database_menu() -> None:
         "7": ingest_analysis_cohort_from_publication_bundle,
         "8": seed_paper_dataset_profile,
         "9": sync_paper_contracts_to_db,
+        "10": run_inventory_determinism_comparator,
     }
 
     options: list[MenuOption] = [
@@ -46,6 +48,7 @@ def database_menu() -> None:
         MenuOption("7", "Ingest analysis cohort from research bundle"),
         MenuOption("8", "Seed dataset profile"),
         MenuOption("9", "Sync contract labels and ordering"),
+        MenuOption("10", "Inventory determinism comparator (strict)"),
     ]
 
     while True:

@@ -15,7 +15,9 @@ from scytaledroid.Database.db_core.session import database_session
 from scytaledroid.Database.db_func.static_analysis.persistence_failures import (
     record_static_persistence_failure,
 )
+from scytaledroid.Database.db_utils.package_utils import normalize_package_name
 from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
+from scytaledroid.Persistence import db_writer as _dw
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.version_utils import get_git_commit
 
@@ -39,12 +41,14 @@ from .metrics_writer import compute_metrics_bundle, write_buckets, write_contrib
 from .permission_matrix import persist_permission_matrix
 from .permission_risk import persist_permission_risk
 from .run_envelope import prepare_run_envelope
+from .contracts import normalize_run_status
 from .static_sections import (
     coerce_severity_counts,
     persist_static_sections,
     persist_storage_surface_data,
 )
 from .utils import (
+    canonical_decimal_text,
     canonical_severity_counts,
     first_text,
     normalise_severity_token,
@@ -642,6 +646,15 @@ def persist_run_summary(
         log.warning(message, category="static_analysis")
         outcome.add_error(message)
         return outcome
+    package_for_run = normalize_package_name(package_for_run, context="static_analysis")
+    if not package_for_run:
+        message = "identity_validation_failed: package_name missing or invalid."
+        outcome.add_error(message)
+        return outcome
+    if not str(scope_label or "").strip():
+        message = "identity_validation_failed: scope_label missing."
+        outcome.add_error(message)
+        return outcome
 
     envelope, envelope_errors = prepare_run_envelope(
         report=br,
@@ -758,6 +771,7 @@ def persist_run_summary(
             static_run_id = None
 
     outcome.static_run_id = static_run_id
+    run_status = normalize_run_status(run_status)
     metrics_bundle = compute_metrics_bundle(br, string_data)
     code_http_hosts = metrics_bundle.code_http_hosts
     asset_http_hosts = metrics_bundle.asset_http_hosts
@@ -776,6 +790,20 @@ def persist_run_summary(
         failure_stage = op
         _note_db_error(token)
         raise RuntimeError(token)
+
+    def _canonical_cvss_score(value: object, *, field: str) -> str | None:
+        if value is None:
+            return None
+        try:
+            return canonical_decimal_text(
+                value,
+                field=field,
+                scale=1,
+                min_value=0.0,
+                max_value=10.0,
+            )
+        except ValueError as exc:
+            _raise_db_error("cvss.validation", str(exc))
 
     baseline_counts = coerce_severity_counts(finding_totals)
     severity_counter: Counter[str] = Counter()
@@ -872,6 +900,10 @@ def persist_run_summary(
                     bte_score,
                     profile_meta,
                 ) = apply_profiles(base_vector, envelope.threat_profile, envelope.env_profile)
+                base_score_c = _canonical_cvss_score(base_score, field="cvss.base_score")
+                bt_score_c = _canonical_cvss_score(bt_score, field="cvss.bt_score")
+                be_score_c = _canonical_cvss_score(be_score, field="cvss.be_score")
+                bte_score_c = _canonical_cvss_score(bte_score, field="cvss.bte_score")
                 if bte_vector:
                     bte_vector_count += 1
                 taxonomy = _taxonomy_label(
@@ -898,13 +930,13 @@ def persist_run_summary(
                         "evidence_preview": truncate(evidence_preview, 256),
                         "rule_id": rule_id,
                         "cvss_v40_b_vector": base_vector,
-                        "cvss_v40_b_score": base_score,
+                        "cvss_v40_b_score": base_score_c,
                         "cvss_v40_bt_vector": bt_vector,
-                        "cvss_v40_bt_score": bt_score,
+                        "cvss_v40_bt_score": bt_score_c,
                         "cvss_v40_be_vector": be_vector,
-                        "cvss_v40_be_score": be_score,
+                        "cvss_v40_be_score": be_score_c,
                         "cvss_v40_bte_vector": bte_vector,
-                        "cvss_v40_bte_score": bte_score,
+                        "cvss_v40_bte_score": bte_score_c,
                         "cvss_v40_meta": (
                             json.dumps(meta_combined, ensure_ascii=False, default=str)
                             if meta_combined
@@ -939,7 +971,7 @@ def persist_run_summary(
                         "evidence": evidence_payload,
                         "fix": truncate(first_text(getattr(f, "remediate", None)), 2048),
                         "rule_id": truncate(rule_id, 128),
-                        "cvss_score": base_score,
+                        "cvss_score": base_score_c,
                         "masvs_control": truncate(masvs_area, 32),
                         "detector": truncate(detector_id, 64),
                         "module": truncate(module_id, 64),
@@ -1034,11 +1066,46 @@ def persist_run_summary(
     metrics_payload["cvss.base_vector_coverage_pct"] = (base_cov_pct, None)
     metrics_payload["cvss.bte_vector_coverage_pct"] = (bte_cov_pct, None)
 
+    # Canonicalize numeric metrics to deterministic fixed precision before write.
+    canonical_metrics_payload: dict[str, tuple[object | None, str | None]] = {}
+    for key, (num_value, text_value) in metrics_payload.items():
+        if num_value is None:
+            canonical_metrics_payload[key] = (None, text_value)
+            continue
+        try:
+            canonical_num = canonical_decimal_text(
+                num_value,
+                field=f"metrics.{key}",
+                scale=6,
+            )
+        except ValueError as exc:
+            _raise_db_error("metrics.validation", str(exc))
+        canonical_metrics_payload[key] = (canonical_num, text_value)
+    metrics_payload = canonical_metrics_payload
+
     persistence_failed = False
     if not dry_run:
         try:
             with database_session() as db:
                 with db.transaction():
+                    if run_id is None:
+                        try:
+                            run_id = _dw.create_run(
+                                package=package_for_run,
+                                app_label=display_name,
+                                version_code=version_code,
+                                version_name=version_name,
+                                target_sdk=target_sdk,
+                                session_stamp=session_stamp,
+                                threat_profile=envelope.threat_profile,
+                                env_profile=envelope.env_profile,
+                            )
+                        except Exception as exc:
+                            _raise_db_error("run.create", f"{exc.__class__.__name__}:{exc}")
+                        if run_id is None:
+                            _raise_db_error("run.create", "returned_null")
+                        outcome.run_id = int(run_id)
+
                     if static_run_id is None:
                         app_version_id = _ensure_app_version(
                             package_for_run=package_for_run,
@@ -1092,13 +1159,12 @@ def persist_run_summary(
                             study_tag=study_tag,
                         )
 
-                    if run_id is not None:
-                        try:
-                            ok = write_buckets(int(run_id), metrics_bundle.buckets, static_run_id=static_run_id)
-                        except Exception as exc:
-                            _raise_db_error("buckets.write", f"{exc.__class__.__name__}:{exc}")
-                        if not ok:
-                            _raise_db_error("buckets.write", "returned_false")
+                    try:
+                        ok = write_buckets(int(run_id), metrics_bundle.buckets, static_run_id=static_run_id)
+                    except Exception as exc:
+                        _raise_db_error("buckets.write", f"{exc.__class__.__name__}:{exc}")
+                    if not ok:
+                        _raise_db_error("buckets.write", "returned_false")
 
                     if finding_rows:
                         if run_id is None:
@@ -1197,20 +1263,20 @@ def persist_run_summary(
                                 scope_label=scope_label,
                                 metrics_bundle=metrics_bundle,
                                 baseline_payload=baseline_payload,
+                                permission_profiles=permission_profiles_map,
                             )
                         except Exception as exc:
                             _raise_db_error("permission_risk.write", f"{exc.__class__.__name__}:{exc}")
 
-                    if run_id is not None:
-                        try:
-                            ok = write_metrics(int(run_id), metrics_payload, static_run_id=static_run_id)
-                        except Exception as exc:
-                            _raise_db_error("metrics.write", f"{exc.__class__.__name__}:{exc}")
-                        if not ok:
-                            _raise_db_error("metrics.write", f"returned_false:run_id={run_id}")
+                    try:
+                        ok = write_metrics(int(run_id), metrics_payload, static_run_id=static_run_id)
+                    except Exception as exc:
+                        _raise_db_error("metrics.write", f"{exc.__class__.__name__}:{exc}")
+                    if not ok:
+                        _raise_db_error("metrics.write", f"returned_false:run_id={run_id}")
 
                     contributors = metrics_bundle.contributors
-                    if contributors and run_id is not None:
+                    if contributors:
                         try:
                             ok = write_contributors(int(run_id), contributors)
                         except Exception as exc:
@@ -1218,26 +1284,25 @@ def persist_run_summary(
                         if not ok:
                             _raise_db_error("contributors.write", f"returned_false:run_id={run_id}")
 
-                    if run_id is not None:
-                        baseline_section = baseline_payload.get("baseline") if isinstance(baseline_payload, Mapping) else {}
-                        string_payload = baseline_section.get("string_analysis") if isinstance(baseline_section, Mapping) else {}
-                        static_errors, baseline_written, sample_total = _persist_static_sections_wrapper(
-                            package_name=package_for_run,
-                            session_stamp=session_stamp,
-                            scope_label=scope_label,
-                            finding_totals=persisted_totals,
-                            baseline_section=baseline_section if isinstance(baseline_section, Mapping) else {},
-                            string_payload=string_payload if isinstance(string_payload, Mapping) else {},
-                            manifest=br.manifest,
-                            app_metadata=baseline_payload.get("app") if isinstance(baseline_payload, Mapping) else {},
-                            run_id=run_id,
-                            static_run_id=static_run_id,
-                        )
-                        if baseline_written:
-                            outcome.baseline_written = True
-                        outcome.string_samples_persisted = sample_total
-                        for err in static_errors:
-                            _note_db_error(err)
+                    baseline_section = baseline_payload.get("baseline") if isinstance(baseline_payload, Mapping) else {}
+                    string_payload = baseline_section.get("string_analysis") if isinstance(baseline_section, Mapping) else {}
+                    static_errors, baseline_written, sample_total = _persist_static_sections_wrapper(
+                        package_name=package_for_run,
+                        session_stamp=session_stamp,
+                        scope_label=scope_label,
+                        finding_totals=persisted_totals,
+                        baseline_section=baseline_section if isinstance(baseline_section, Mapping) else {},
+                        string_payload=string_payload if isinstance(string_payload, Mapping) else {},
+                        manifest=br.manifest,
+                        app_metadata=baseline_payload.get("app") if isinstance(baseline_payload, Mapping) else {},
+                        run_id=run_id,
+                        static_run_id=static_run_id,
+                    )
+                    if baseline_written:
+                        outcome.baseline_written = True
+                    outcome.string_samples_persisted = sample_total
+                    for err in static_errors:
+                        _note_db_error(err)
 
                     if db_errors:
                         raise RuntimeError(db_errors[-1])
@@ -1366,7 +1431,7 @@ def persist_run_summary(
 
         update_static_run_status(
             static_run_id=static_run_id,
-            status=run_status,
+            status=normalize_run_status(run_status),
             ended_at_utc=ended_at_utc,
             abort_reason=abort_reason,
             abort_signal=abort_signal,

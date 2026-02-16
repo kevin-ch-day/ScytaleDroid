@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import is_dataclass
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
 from scytaledroid.Database.db_queries.canonical import schema as canonical_schema
@@ -140,3 +141,33 @@ def first_text(*values: object | None) -> str | None:
         if text:
             return text
     return None
+
+
+def canonical_decimal_text(
+    value: object,
+    *,
+    field: str,
+    scale: int,
+    min_value: float | None = None,
+    max_value: float | None = None,
+) -> str:
+    """Return fixed-scale decimal text for deterministic scientific fields.
+
+    Raises ``ValueError`` when value is missing, non-finite, or violates bounds.
+    """
+
+    if value is None:
+        raise ValueError(f"{field} is required")
+    try:
+        dec = Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError) as exc:
+        raise ValueError(f"{field} is not numeric: {value!r}") from exc
+    if not dec.is_finite():
+        raise ValueError(f"{field} must be finite")
+    quant = Decimal("1").scaleb(-int(scale))
+    normalized = dec.quantize(quant, rounding=ROUND_HALF_UP)
+    if min_value is not None and normalized < Decimal(str(min_value)):
+        raise ValueError(f"{field} below minimum {min_value}")
+    if max_value is not None and normalized > Decimal(str(max_value)):
+        raise ValueError(f"{field} above maximum {max_value}")
+    return f"{normalized:.{int(scale)}f}"

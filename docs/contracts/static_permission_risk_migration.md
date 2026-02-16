@@ -27,6 +27,11 @@ Prepared SQL file:
 
 Phase 1 (`safe now`) creates `static_permission_risk_vnext` only.
 
+Feature gate for staged writer activation:
+
+- `SCYTALEDROID_ENABLE_SPR_VNEXT=1` enables dual-write to
+  `static_permission_risk_vnext` (default is off).
+
 ## Why Cutover Is Deferred
 
 1. Paper #2 export reproducibility is frozen during review.

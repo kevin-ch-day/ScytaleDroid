@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import getpass
+import json
 import os
 import socket
 from datetime import UTC, datetime
@@ -56,6 +57,163 @@ def show_connection_and_config() -> None:
         print("    Connection failed. Check logs for details.")
         if backend == "mysql":
             print("    Verify SCYTALEDROID_DB_URL and ensure schema is bootstrapped.")
+    prompt_utils.press_enter_to_continue()
+
+
+def run_inventory_determinism_comparator() -> None:
+    """Run strict inventory comparator on two snapshots for one device serial."""
+    from scytaledroid.DeviceAnalysis.inventory.determinism import (
+        build_snapshot_payload,
+        compare_inventory_payloads,
+    )
+    from scytaledroid.Utils.version_utils import get_git_commit
+
+    def _latest_serial() -> str | None:
+        row = core_q.run_sql(
+            """
+            SELECT device_serial
+            FROM device_inventory_snapshots
+            ORDER BY snapshot_id DESC
+            LIMIT 1
+            """,
+            fetch="one",
+        )
+        if not row:
+            return None
+        return str(row[0] or "").strip() or None
+
+    def _latest_two_snapshot_ids(device_serial: str) -> tuple[int, int] | None:
+        rows = core_q.run_sql(
+            """
+            SELECT snapshot_id
+            FROM device_inventory_snapshots
+            WHERE device_serial=%s
+            ORDER BY snapshot_id DESC
+            LIMIT 2
+            """,
+            (device_serial,),
+            fetch="all",
+        ) or []
+        if len(rows) < 2:
+            return None
+        left = int(rows[1][0])
+        right = int(rows[0][0])
+        return left, right
+
+    def _load_snapshot(snapshot_id: int) -> dict[str, object] | None:
+        row = core_q.run_sql(
+            """
+            SELECT
+              snapshot_id,
+              device_serial,
+              package_count,
+              package_list_hash,
+              package_signature_hash,
+              scope_hash,
+              captured_at
+            FROM device_inventory_snapshots
+            WHERE snapshot_id = %s
+            """,
+            (snapshot_id,),
+            fetch="one_dict",
+        )
+        return dict(row) if row else None
+
+    def _load_rows(snapshot_id: int) -> list[dict[str, object]]:
+        rows = core_q.run_sql(
+            """
+            SELECT
+              package_name,
+              version_code,
+              app_label,
+              version_name,
+              installer,
+              primary_path,
+              split_count,
+              extras,
+              apk_paths
+            FROM device_inventory
+            WHERE snapshot_id = %s
+            ORDER BY package_name ASC
+            """,
+            (snapshot_id,),
+            fetch="all_dict",
+        ) or []
+        return [dict(row) for row in rows]
+
+    print()
+    print("Inventory Determinism Comparator (Strict)")
+    print("----------------------------------------")
+    print("Mode: strict (missing/duplicate keys fail; only timestamp/run_id diffs allowed)")
+    print()
+
+    default_serial = _latest_serial()
+    if not default_serial:
+        print(status_messages.status("No inventory snapshots found in DB.", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    device_serial = (
+        prompt_utils.prompt_text(
+            "Device serial",
+            default=default_serial,
+            required=True,
+            show_arrow=False,
+        ).strip()
+        or default_serial
+    )
+    pair = _latest_two_snapshot_ids(device_serial)
+    if not pair:
+        print(status_messages.status(f"Need at least two snapshots for {device_serial}.", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
+    left_id, right_id = pair
+
+    left_snapshot = _load_snapshot(left_id)
+    right_snapshot = _load_snapshot(right_id)
+    if not left_snapshot or not right_snapshot:
+        print(status_messages.status("Failed to load snapshot metadata.", level="error"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    left_rows = _load_rows(left_id)
+    right_rows = _load_rows(right_id)
+    left_payload = build_snapshot_payload(snapshot=left_snapshot, rows=left_rows)
+    right_payload = build_snapshot_payload(snapshot=right_snapshot, rows=right_rows)
+    compare = compare_inventory_payloads(
+        left_payload=left_payload,
+        right_payload=right_payload,
+        left_meta={
+            "run_id": left_id,
+            "source": "db:device_inventory",
+            "timestamp_utc": str(left_snapshot.get("captured_at") or ""),
+        },
+        right_meta={
+            "run_id": right_id,
+            "source": "db:device_inventory",
+            "timestamp_utc": str(right_snapshot.get("captured_at") or ""),
+        },
+        tool_semver=app_config.APP_VERSION,
+        git_commit=get_git_commit(),
+        compare_type="inventory_guard",
+    )
+    stamp = datetime.now(UTC).strftime("%Y%m%d%H%M%SZ")
+    output_path = Path("output") / "audit" / "comparators" / "inventory_guard" / stamp / "diff.json"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(compare.payload, indent=2, sort_keys=True, ensure_ascii=True),
+        encoding="utf-8",
+    )
+    passed = bool(compare.passed)
+    diff_count = int(compare.payload.get("result", {}).get("diff_counts", {}).get("disallowed", 0))
+    print()
+    if passed:
+        print(status_messages.status("PASS: no disallowed diffs.", level="success"))
+    else:
+        print(status_messages.status(f"FAIL: {diff_count} disallowed diffs.", level="error"))
+    print(f"Left snapshot : {left_id}")
+    print(f"Right snapshot: {right_id}")
+    print(f"Artifact      : {output_path}")
     prompt_utils.press_enter_to_continue()
 
 
@@ -1127,6 +1285,7 @@ def log_db_op(
 __all__ = [
     "maybe_clear_screen",
     "show_connection_and_config",
+    "run_inventory_determinism_comparator",
     "seed_paper_dataset_profile",
     "apply_canonical_schema_bootstrap",
     "ensure_dynamic_tier_column",

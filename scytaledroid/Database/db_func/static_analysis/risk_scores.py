@@ -22,7 +22,7 @@ class RiskScoreRecord:
     package_name: str
     session_stamp: str
     scope_label: str
-    risk_score: float
+    risk_score: float | str
     risk_grade: str
     dangerous: int
     signature: int
@@ -30,12 +30,17 @@ class RiskScoreRecord:
     app_label: str | None = None
 
     def to_parameters(self) -> dict[str, object]:
+        risk_score_value: object
+        if isinstance(self.risk_score, str):
+            risk_score_value = self.risk_score
+        else:
+            risk_score_value = float(self.risk_score)
         return {
             "package_name": self.package_name,
             "app_label": self.app_label,
             "session_stamp": self.session_stamp,
             "scope_label": self.scope_label,
-            "risk_score": float(self.risk_score),
+            "risk_score": risk_score_value,
             "risk_grade": self.risk_grade,
             "dangerous": int(self.dangerous),
             "signature": int(self.signature),
