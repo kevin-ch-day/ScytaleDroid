@@ -25,7 +25,7 @@ from ...modules import resolve_category
 from ...persistence import ReportStorageError, save_report
 from ..core.models import AppRunResult, ArtifactOutcome, RunOutcome, RunParameters, ScopeSelection
 from ..core.run_context import StaticRunContext
-from ..persistence.run_summary import create_static_run_ledger, finalize_open_static_runs
+from ..persistence.run_summary import finalize_open_static_runs
 from .heartbeat_state import set_app as _hb_set_app
 from .heartbeat_state import set_stage as _hb_set_stage
 from .scan_identity_helpers import (
@@ -121,21 +121,21 @@ def execute_scan(
             category="static_analysis",
         )
 
-    # Crash safety: older runs can be left in RUNNING state if the process died mid-run.
+    # Crash safety: older runs can be left in STARTED state if the process died mid-run.
     # This creates persistent DB noise and breaks paper-grade audit expectations. We do not
-    # support concurrent static scans, so it is safe to finalize any open RUNNING rows here.
+    # support concurrent static scans, so it is safe to finalize any open STARTED rows here.
     if persistence_ready and not params.dry_run:
         try:
             closed = finalize_open_static_runs(
                 None,
-                status="ABORTED",
+                status="FAILED",
                 abort_reason="stale_open_run_cleanup",
                 abort_signal="cleanup",
             )
             if int(closed or 0) > 0:
                 print(
                     status_messages.status(
-                        f"Static run cleanup: finalized {closed} stale RUNNING row(s) as ABORTED.",
+                        f"Static run cleanup: finalized {closed} stale STARTED row(s) as FAILED.",
                         level="warn",
                     )
                 )
@@ -203,45 +203,7 @@ def execute_scan(
             failures.append(message)
             log.warning(message, category="static")
             continue
-        if params.session_stamp and persistence_ready:
-            static_run_id = create_static_run_ledger(
-                package_name=group.package_name,
-                session_stamp=params.session_stamp,
-                session_label=params.session_label or params.session_stamp,
-                canonical_action=params.canonical_action,
-                scope_label=params.scope_label,
-                category=group.category,
-                profile=params.profile_label,
-                display_name=str(display_name) if display_name else None,
-                version_name=str(version_name) if version_name else None,
-                version_code=_coerce_int(version_code_raw),
-                min_sdk=_coerce_int(min_sdk_raw),
-                target_sdk=_coerce_int(target_sdk_raw),
-                sha256=identity["base_apk_sha256"],
-                base_apk_sha256=identity["base_apk_sha256"],
-                artifact_set_hash=identity["artifact_set_hash"],
-                run_signature=run_signature,
-                run_signature_version=identity["run_signature_version"],
-                identity_valid=identity["identity_valid"],
-                identity_error_reason=identity["identity_error_reason"],
-                config_hash=config_hash,
-                pipeline_version=pipeline_version,
-                run_started_utc=started_at.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S"),
-                dry_run=params.dry_run,
-            )
-            if not static_run_id and not params.dry_run:
-                message = (
-                    "static_run_id creation failed; aborting static analysis to avoid orphaned evidence."
-                )
-                failures.append(message)
-                log.error(message, category="static_analysis")
-                raise RuntimeError(message)
-            if static_run_id:
-                log.info(
-                    f"static_run_id={static_run_id} created for package={group.package_name}",
-                    category="static_analysis",
-                )
-        elif not params.dry_run and not persistence_ready:
+        if not params.dry_run and not persistence_ready:
             app_result.persistence_skipped += 1
         app_result.static_run_id = static_run_id
         results.append(app_result)

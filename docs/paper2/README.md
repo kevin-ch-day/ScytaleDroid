@@ -64,7 +64,7 @@ Bundle integrity receipts (inside the bundle):
 - `output/paper/manifests/phase_e_closure_record.json` (pins freeze sha256 + bundle-manifest sha256)
 
 Semantic lint (optional, recommended before sharing a bundle):
-- `scripts/paper2/semantic_lint.py`
+- `scripts/operational/semantic_lint_operational.py`
 
 ## Key Docs
 

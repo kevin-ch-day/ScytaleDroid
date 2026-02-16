@@ -23,8 +23,7 @@ def _persist_cohort_rollup(session_stamp: str | None, scope_label: str | None) -
               COUNT(*) AS total,
               SUM(status='COMPLETED') AS completed,
               SUM(status='FAILED') AS failed,
-              SUM(status='ABORTED') AS aborted,
-              SUM(status='RUNNING') AS running
+              SUM(status='STARTED') AS running
             FROM static_analysis_runs
             WHERE session_stamp=%s AND scope_label=%s
             """,
@@ -45,7 +44,6 @@ def _persist_cohort_rollup(session_stamp: str | None, scope_label: str | None) -
     total = int(row.get("total") or 0)
     completed = int(row.get("completed") or 0)
     failed = int(row.get("failed") or 0)
-    aborted = int(row.get("aborted") or 0)
     running = int(row.get("running") or 0)
     try:
         core_q.run_sql(
@@ -67,7 +65,7 @@ def _persist_cohort_rollup(session_stamp: str | None, scope_label: str | None) -
                 total,
                 completed,
                 failed,
-                aborted,
+                0,
                 running,
             ),
         )
@@ -81,7 +79,7 @@ def _persist_cohort_rollup(session_stamp: str | None, scope_label: str | None) -
     level = "info"
     print(
         status_messages.status(
-            f"Session history (attempt rollup): Apps {total} | Completed {completed} | Failed {failed} | Aborted {aborted}",
+            f"Session history (attempt rollup): Apps {total} | Completed {completed} | Failed {failed} | Started {running}",
             level=level,
         )
     )

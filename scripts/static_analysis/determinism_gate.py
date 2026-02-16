@@ -25,6 +25,8 @@ from scytaledroid.StaticAnalysis.cli.flows import headless_run
 from scytaledroid.StaticAnalysis.cli.flows.headless_run import _artifact_group_from_path
 from scytaledroid.Utils.version_utils import get_git_commit
 
+ALLOWED_DIFF_FIELDS: tuple[str, ...] = ()
+
 
 def _configure_db_target(db_target: str) -> None:
     parsed = urlparse(db_target)
@@ -66,6 +68,11 @@ def _configure_db_target(db_target: str) -> None:
 
 def _now_stamp() -> str:
     return datetime.now(UTC).strftime("%Y%m%d%H%M%S")
+
+
+def _default_output_path() -> Path:
+    stamp = datetime.now(UTC).strftime("%Y%m%d%H%M%SZ")
+    return Path("output") / "audit" / "comparators" / "static_analysis" / stamp / "diff.json"
 
 
 def _normalize_json_like(value: Any) -> Any:
@@ -320,31 +327,78 @@ def _collector_payload(run_ref: RunRef) -> dict[str, Any]:
     return payload
 
 
-def _collect_diff(left: Any, right: Any, prefix: str = "") -> list[str]:
-    diffs: list[str] = []
+def _is_allowed(path: str) -> bool:
+    return path in ALLOWED_DIFF_FIELDS
+
+
+def _collect_diffs(left: Any, right: Any, prefix: str = "") -> list[dict[str, Any]]:
+    diffs: list[dict[str, Any]] = []
     if isinstance(left, dict) and isinstance(right, dict):
         keys = sorted(set(left.keys()) | set(right.keys()))
         for key in keys:
             child = f"{prefix}.{key}" if prefix else str(key)
             if key not in left:
-                diffs.append(f"{child}: missing in first run")
+                diffs.append({"path": child, "left": None, "right": right.get(key), "allowed": _is_allowed(child)})
                 continue
             if key not in right:
-                diffs.append(f"{child}: missing in second run")
+                diffs.append({"path": child, "left": left.get(key), "right": None, "allowed": _is_allowed(child)})
                 continue
-            diffs.extend(_collect_diff(left[key], right[key], child))
+            diffs.extend(_collect_diffs(left[key], right[key], child))
         return diffs
     if isinstance(left, list) and isinstance(right, list):
-        if len(left) != len(right):
-            diffs.append(f"{prefix}: length {len(left)} != {len(right)}")
-            return diffs
-        for idx, (l_item, r_item) in enumerate(zip(left, right, strict=True)):
+        max_len = max(len(left), len(right))
+        for idx in range(max_len):
             child = f"{prefix}[{idx}]"
-            diffs.extend(_collect_diff(l_item, r_item, child))
+            l_item = left[idx] if idx < len(left) else None
+            r_item = right[idx] if idx < len(right) else None
+            diffs.extend(_collect_diffs(l_item, r_item, child))
         return diffs
     if left != right:
-        diffs.append(f"{prefix}: {left!r} != {right!r}")
+        diffs.append({"path": prefix, "left": left, "right": right, "allowed": _is_allowed(prefix)})
     return diffs
+
+
+def _build_result_payload(
+    *,
+    apk_path: Path,
+    profile: str,
+    left_meta: dict[str, Any],
+    right_meta: dict[str, Any],
+    payload_a: dict[str, Any],
+    payload_b: dict[str, Any],
+) -> dict[str, Any]:
+    diffs = _collect_diffs(payload_a, payload_b)
+    allowed_count = sum(1 for item in diffs if bool(item.get("allowed")))
+    disallowed_count = sum(1 for item in diffs if not bool(item.get("allowed")))
+    passed = disallowed_count == 0
+
+    return {
+        "tool_semver": app_config.APP_VERSION,
+        "git_commit": get_git_commit(),
+        "compare_type": "static_analysis",
+        "apk_path": str(apk_path),
+        "profile": profile,
+        "left": left_meta,
+        "right": right_meta,
+        "allowed_diff_fields": list(ALLOWED_DIFF_FIELDS),
+        "result": {
+            "pass": passed,
+            "degraded": False,
+            "degraded_reasons": [],
+            "fail_reason": None if passed else "disallowed_diffs",
+            "validation_issues": [],
+            "diff_counts": {
+                "total": len(diffs),
+                "allowed": allowed_count,
+                "disallowed": disallowed_count,
+            },
+        },
+        "diffs": diffs,
+        "comparison": {
+            "first": payload_a,
+            "second": payload_b,
+        },
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -363,8 +417,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--output",
-        default="output/audit/determinism/result.json",
-        help="JSON output path.",
+        default=None,
+        help="JSON output path. Default: output/audit/comparators/static_analysis/<stamp>/diff.json",
     )
     parser.add_argument(
         "--allow-session-reuse",
@@ -390,40 +444,38 @@ def main(argv: list[str] | None = None) -> int:
     _run_scan(apk_path, profile=args.profile, session_stamp=session_b, allow_reuse=args.allow_session_reuse)
     run_b = _resolve_run(group.package_name, session_b)
     payload_b = _collector_payload(run_b)
-    diffs = _collect_diff(payload_a, payload_b)
-    passed = not diffs
 
-    result = {
-        "status": "PASS" if passed else "FAIL",
-        "apk_path": str(apk_path),
-        "package_name": group.package_name,
-        "profile": args.profile,
-        "sessions": {"first": session_a, "second": session_b},
-        "run_ids": {"first": run_a.run_id, "second": run_b.run_id},
-        "started_at_utc": run_started_utc,
-        "tool_semver": app_config.APP_VERSION,
-        "tool_git_commit": get_git_commit(),
-        "allowed_variance": {
-            "ignored_fields": [
-                "run_id",
-                "created_at",
-                "updated_at",
-                "timestamp fields",
-                "filesystem absolute temp paths",
-            ],
-            "comparison_strategy": "comparison payload excludes volatile fields by construction",
+    result = _build_result_payload(
+        apk_path=apk_path,
+        profile=args.profile,
+        left_meta={
+            "run_id": run_a.run_id,
+            "session_stamp": session_a,
+            "timestamp_utc": run_started_utc,
         },
-        "comparison": {
-            "first": payload_a,
-            "second": payload_b,
-            "diffs": diffs,
+        right_meta={
+            "run_id": run_b.run_id,
+            "session_stamp": session_b,
+            "timestamp_utc": datetime.now(UTC).isoformat(),
         },
-    }
-
-    output_path = Path(args.output)
+        payload_a=payload_a,
+        payload_b=payload_b,
+    )
+    output_path = Path(args.output) if args.output else _default_output_path()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")
-    print(json.dumps({"status": result["status"], "output": str(output_path), "diff_count": len(diffs)}, indent=2))
+    passed = bool(result.get("result", {}).get("pass"))
+    print(
+        json.dumps(
+            {
+                "status": "PASS" if passed else "FAIL",
+                "output": str(output_path),
+                "diff_count": int(result.get("result", {}).get("diff_counts", {}).get("disallowed", 0)),
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
     return 0 if passed else 1
 
 

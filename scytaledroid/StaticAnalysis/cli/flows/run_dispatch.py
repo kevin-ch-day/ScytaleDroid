@@ -357,7 +357,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
             render_run_results(outcome, params, run_ctx=frozen_ctx)
             run_status = "COMPLETED"
             if outcome.aborted:
-                run_status = "ABORTED"
+                run_status = "FAILED"
             elif outcome.failures:
                 run_status = "FAILED"
             abort_reason = normalize_abort_reason(outcome.abort_reason or ("SIGINT" if outcome.aborted else None))

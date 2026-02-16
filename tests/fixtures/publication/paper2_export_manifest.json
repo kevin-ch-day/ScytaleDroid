@@ -1,0 +1,29 @@
+{
+  "artifacts": [
+    {
+      "kind": "tex",
+      "normalization": "tex_whitespace_lf",
+      "path": "tables/table_4_signature_deltas.tex",
+      "sha256": "eafbc92ec93d1c716f8c98a3fe045b16a12480992c1096b07321b89fef3b944a",
+      "size_bytes": 87
+    },
+    {
+      "kind": "csv",
+      "normalization": "none",
+      "path": "tables/table_7_exposure_deviation_summary.csv",
+      "sha256": "d202fa71c96fc116acf0113a4b4bc3bdf2c3a73038e269443bf4034fb2f7610f",
+      "size_bytes": 70
+    },
+    {
+      "kind": "figure",
+      "normalization": "none",
+      "path": "figures/fig_b4_static_vs_rdi.pdf",
+      "sha256": "f7b8f1995b4d05c51f0b61e7bb44bb17edb5bf189642fa8f2b21af5ec1c00fb2",
+      "size_bytes": 14
+    }
+  ],
+  "description": "Fixture manifest for publication export gate tests.",
+  "generated_utc": "2026-02-16T18:56:27.301243+00:00",
+  "manifest_version": 1,
+  "paper": "paper2"
+}

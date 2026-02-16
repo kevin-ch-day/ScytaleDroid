@@ -457,7 +457,7 @@ def create_static_run_ledger(
     canonical_action: str | None = None,
     dry_run: bool = False,
 ) -> int | None:
-    """Create a RUNNING static_analysis_runs row before scanning begins."""
+    """Create a STARTED static_analysis_runs row before scanning begins."""
     canonical_actions = {"first_run", "replace", "auto_suffix", "append"}
     canonical_enabled = canonical_action in canonical_actions if canonical_action else False
     return _run_writers.create_static_run_ledger(
@@ -480,7 +480,7 @@ def create_static_run_ledger(
         schema_version=db_diagnostics.get_schema_version() or "<unknown>",
         findings_total=0,
         run_started_utc=run_started_utc,
-        status="RUNNING",
+        status="STARTED",
         is_canonical=True if canonical_enabled else False if canonical_action else None,
         canonical_set_at_utc=run_started_utc if canonical_enabled else None,
         canonical_reason=canonical_action if canonical_enabled else None,
@@ -572,7 +572,7 @@ def finalize_open_static_runs(
     abort_reason: str | None = None,
     abort_signal: str | None = None,
 ) -> int:
-    """Finalize any RUNNING static runs left open by crashes.
+    """Finalize any STARTED static runs left open by crashes.
 
     If `static_run_ids` is None, finalize all open runs.
     If `static_run_ids` is an empty sequence, no-op.
@@ -655,6 +655,75 @@ def persist_run_summary(
     run_id = envelope.run_id
     if run_id:
         outcome.run_id = run_id
+    display_name = getattr(manifest_obj, "app_label", None) or package_for_run
+    version_name = getattr(manifest_obj, "version_name", None) if manifest_obj else None
+    min_sdk = safe_int(
+        getattr(manifest_obj, "min_sdk", None)
+        or getattr(manifest_obj, "min_sdk_version", None)
+    )
+    target_sdk = safe_int(getattr(manifest_obj, "target_sdk", None))
+    try:
+        version_code = safe_int(getattr(manifest_obj, "version_code", None)) if manifest_obj else None
+    except Exception:
+        version_code = None
+    profile_token = first_text(
+        metadata_map.get("scan_profile") if isinstance(metadata_map, Mapping) else None,
+        metadata_map.get("run_profile") if isinstance(metadata_map, Mapping) else None,
+        baseline_payload.get("scan_profile") if isinstance(baseline_payload, Mapping) else None,
+        baseline_payload.get("profile") if isinstance(baseline_payload, Mapping) else None,
+        "Full",
+    )
+    category_token = first_text(
+        metadata_map.get("category") if isinstance(metadata_map, Mapping) else None,
+        metadata_map.get("category_name") if isinstance(metadata_map, Mapping) else None,
+        baseline_payload.get("category") if isinstance(baseline_payload, Mapping) else None,
+        baseline_payload.get("category_name") if isinstance(baseline_payload, Mapping) else None,
+    )
+    scenario_id_token = first_text(
+        metadata_map.get("scenario_id") if isinstance(metadata_map, Mapping) else None,
+        baseline_payload.get("scenario_id") if isinstance(baseline_payload, Mapping) else None,
+        "static_default",
+    )
+    device_serial_token = first_text(
+        metadata_map.get("device_serial") if isinstance(metadata_map, Mapping) else None,
+        baseline_payload.get("device_serial") if isinstance(baseline_payload, Mapping) else None,
+    )
+    manifest_sha = None
+    base_apk_sha256 = None
+    artifact_set_hash = None
+    run_signature = None
+    run_signature_version = None
+    identity_valid = None
+    identity_error_reason = None
+    if isinstance(metadata_map, Mapping):
+        manifest_sha = first_text(
+            metadata_map.get("artifact_manifest_sha256"),
+            metadata_map.get("manifest_sha256"),
+        )
+        base_apk_sha256 = first_text(metadata_map.get("base_apk_sha256"))
+        artifact_set_hash = first_text(metadata_map.get("artifact_set_hash"))
+        run_signature = first_text(metadata_map.get("run_signature"))
+        run_signature_version = first_text(metadata_map.get("run_signature_version"))
+        identity_valid = metadata_map.get("identity_valid")
+        identity_error_reason = first_text(metadata_map.get("identity_error_reason"))
+    if not manifest_sha:
+        try:
+            manifest_sha = first_text(getattr(br, "hashes", {}).get("sha256"))
+        except Exception:
+            manifest_sha = None
+    config_hash = first_text(
+        metadata_map.get("config_hash") if isinstance(metadata_map, Mapping) else None,
+    )
+    pipeline_version = first_text(
+        metadata_map.get("pipeline_version") if isinstance(metadata_map, Mapping) else None,
+    )
+    catalog_versions = first_text(
+        metadata_map.get("catalog_versions") if isinstance(metadata_map, Mapping) else None,
+    )
+    study_tag = first_text(
+        metadata_map.get("study_tag") if isinstance(metadata_map, Mapping) else None,
+    )
+    analysis_version = first_text(getattr(br, "analysis_version", None))
     if static_run_id is None:
         try:
             # Prefer an existing static_analysis_runs entry for this session/package.
@@ -688,139 +757,7 @@ def persist_run_summary(
         except Exception:
             static_run_id = None
 
-    if static_run_id is None and not dry_run:
-        # Attempt to create a static_analysis_runs row so downstream tables can
-        # be keyed by static_run_id even on fresh schemas.
-        display_name = getattr(manifest_obj, "app_label", None) or package_for_run
-        version_name = getattr(manifest_obj, "version_name", None) if manifest_obj else None
-        min_sdk = safe_int(getattr(manifest_obj, "min_sdk", None) or getattr(manifest_obj, "min_sdk_version", None))
-        target_sdk = safe_int(getattr(manifest_obj, "target_sdk", None))
-        try:
-            version_code = safe_int(getattr(manifest_obj, "version_code", None)) if manifest_obj else None
-        except Exception:
-            version_code = None
-
-        app_version_id = _ensure_app_version(
-            package_for_run=package_for_run,
-            display_name=display_name,
-            version_name=version_name,
-            version_code=version_code,
-            min_sdk=min_sdk,
-            target_sdk=target_sdk,
-        )
-        if app_version_id is not None:
-            profile_token = first_text(
-                metadata_map.get("scan_profile") if isinstance(metadata_map, Mapping) else None,
-                metadata_map.get("run_profile") if isinstance(metadata_map, Mapping) else None,
-                baseline_payload.get("scan_profile") if isinstance(baseline_payload, Mapping) else None,
-                baseline_payload.get("profile") if isinstance(baseline_payload, Mapping) else None,
-                "Full",
-            )
-            category_token = first_text(
-                metadata_map.get("category") if isinstance(metadata_map, Mapping) else None,
-                metadata_map.get("category_name") if isinstance(metadata_map, Mapping) else None,
-                baseline_payload.get("category") if isinstance(baseline_payload, Mapping) else None,
-                baseline_payload.get("category_name") if isinstance(baseline_payload, Mapping) else None,
-            )
-            static_run_id = _create_static_run(
-                app_version_id=app_version_id,
-                session_stamp=session_stamp,
-                session_label=session_stamp,
-                scope_label=scope_label,
-                category=category_token,
-                profile=profile_token,
-                profile_key=profile_token,
-                scenario_id=first_text(
-                    metadata_map.get("scenario_id") if isinstance(metadata_map, Mapping) else None,
-                    baseline_payload.get("scenario_id") if isinstance(baseline_payload, Mapping) else None,
-                    "static_default",
-                ),
-                device_serial=first_text(
-                    metadata_map.get("device_serial") if isinstance(metadata_map, Mapping) else None,
-                    baseline_payload.get("device_serial") if isinstance(baseline_payload, Mapping) else None,
-                ),
-                tool_semver=app_config.APP_VERSION,
-                tool_git_commit=get_git_commit(),
-                schema_version=db_diagnostics.get_schema_version() or "<unknown>",
-                findings_total=int(finding_totals.get("total", 0) or 0),
-                run_started_utc=None,
-                status="RUNNING",
-            )
-            if static_run_id:
-                log.info(
-                    f"Resolved static_run_id={static_run_id} for {package_for_run} (session={session_stamp})",
-                    category="static_analysis",
-                )
-        else:
-            log.warning(
-                (
-                    f"Could not resolve app_version_id for {package_for_run}; "
-                    "static_run_id will remain unset; run migrations."
-                ),
-                category="static_analysis",
-            )
-
-    if static_run_id is None and not dry_run:
-        message = (
-            "DB schema is outdated or static_run_id missing. Run migrations and retry."
-        )
-        log.error(message, category="static_analysis")
-        outcome.add_error(message)
-        return outcome
-
     outcome.static_run_id = static_run_id
-    if static_run_id and not dry_run:
-        manifest_sha = None
-        base_apk_sha256 = None
-        artifact_set_hash = None
-        run_signature = None
-        run_signature_version = None
-        identity_valid = None
-        identity_error_reason = None
-        if isinstance(metadata_map, Mapping):
-            manifest_sha = first_text(
-                metadata_map.get("artifact_manifest_sha256"),
-                metadata_map.get("manifest_sha256"),
-            )
-            base_apk_sha256 = first_text(metadata_map.get("base_apk_sha256"))
-            artifact_set_hash = first_text(metadata_map.get("artifact_set_hash"))
-            run_signature = first_text(metadata_map.get("run_signature"))
-            run_signature_version = first_text(metadata_map.get("run_signature_version"))
-            identity_valid = metadata_map.get("identity_valid")
-            identity_error_reason = first_text(metadata_map.get("identity_error_reason"))
-        if not manifest_sha:
-            try:
-                manifest_sha = first_text(getattr(br, "hashes", {}).get("sha256"))
-            except Exception:
-                manifest_sha = None
-        config_hash = first_text(
-            metadata_map.get("config_hash") if isinstance(metadata_map, Mapping) else None,
-        )
-        pipeline_version = first_text(
-            metadata_map.get("pipeline_version") if isinstance(metadata_map, Mapping) else None,
-        )
-        catalog_versions = first_text(
-            metadata_map.get("catalog_versions") if isinstance(metadata_map, Mapping) else None,
-        )
-        study_tag = first_text(
-            metadata_map.get("study_tag") if isinstance(metadata_map, Mapping) else None,
-        )
-        analysis_version = first_text(getattr(br, "analysis_version", None))
-        _update_static_run_metadata(
-            static_run_id,
-            sha256_value=base_apk_sha256 or manifest_sha,
-            base_apk_sha256=base_apk_sha256,
-            artifact_set_hash=artifact_set_hash,
-            run_signature=run_signature,
-            run_signature_version=run_signature_version,
-            identity_valid=identity_valid if isinstance(identity_valid, bool) else None,
-            identity_error_reason=identity_error_reason,
-            config_hash=config_hash,
-            pipeline_version=pipeline_version,
-            analysis_version=analysis_version,
-            catalog_versions=catalog_versions,
-            study_tag=study_tag,
-        )
     metrics_bundle = compute_metrics_bundle(br, string_data)
     code_http_hosts = metrics_bundle.code_http_hosts
     asset_http_hosts = metrics_bundle.asset_http_hosts
@@ -1102,6 +1039,59 @@ def persist_run_summary(
         try:
             with database_session() as db:
                 with db.transaction():
+                    if static_run_id is None:
+                        app_version_id = _ensure_app_version(
+                            package_for_run=package_for_run,
+                            display_name=display_name,
+                            version_name=version_name,
+                            version_code=version_code,
+                            min_sdk=min_sdk,
+                            target_sdk=target_sdk,
+                        )
+                        if app_version_id is None:
+                            _raise_db_error("static_run.create", "app_version_unresolved")
+                        static_run_id = _create_static_run(
+                            app_version_id=app_version_id,
+                            session_stamp=session_stamp,
+                            session_label=session_stamp,
+                            scope_label=scope_label,
+                            category=category_token,
+                            profile=profile_token,
+                            profile_key=profile_token,
+                            scenario_id=scenario_id_token,
+                            device_serial=device_serial_token,
+                            tool_semver=app_config.APP_VERSION,
+                            tool_git_commit=get_git_commit(),
+                            schema_version=db_diagnostics.get_schema_version() or "<unknown>",
+                            findings_total=int(finding_totals.get("total", 0) or 0),
+                            run_started_utc=None,
+                            status="STARTED",
+                        )
+                        if static_run_id is None:
+                            _raise_db_error("static_run.create", "create_failed")
+                        log.info(
+                            f"Resolved static_run_id={static_run_id} for {package_for_run} (session={session_stamp})",
+                            category="static_analysis",
+                        )
+                    outcome.static_run_id = static_run_id
+
+                    if static_run_id:
+                        _update_static_run_metadata(
+                            static_run_id,
+                            sha256_value=base_apk_sha256 or manifest_sha,
+                            base_apk_sha256=base_apk_sha256,
+                            artifact_set_hash=artifact_set_hash,
+                            run_signature=run_signature,
+                            run_signature_version=run_signature_version,
+                            identity_valid=identity_valid if isinstance(identity_valid, bool) else None,
+                            identity_error_reason=identity_error_reason,
+                            config_hash=config_hash,
+                            pipeline_version=pipeline_version,
+                            analysis_version=analysis_version,
+                            catalog_versions=catalog_versions,
+                            study_tag=study_tag,
+                        )
+
                     if run_id is not None:
                         try:
                             ok = write_buckets(int(run_id), metrics_bundle.buckets, static_run_id=static_run_id)
@@ -1269,6 +1259,9 @@ def persist_run_summary(
                     )
                 except Exception:
                     pass
+            # Transaction failed: scientific rows are rolled back and no run_id is authoritative.
+            static_run_id = None
+            outcome.static_run_id = None
         outcome.persistence_failed = persistence_failed
     else:
         if finding_rows:

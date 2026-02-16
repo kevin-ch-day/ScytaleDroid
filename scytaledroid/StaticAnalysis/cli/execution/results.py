@@ -164,7 +164,7 @@ def _render_run_results_impl(
     runtime_findings_total = sum(totals.values())
     run_status = "COMPLETED"
     if outcome.aborted:
-        run_status = "ABORTED"
+        run_status = "FAILED"
     elif outcome.failures and not params.dry_run:
         run_status = "FAILED"
     ended_at_utc = outcome.finished_at.isoformat(timespec="seconds") + "Z"
@@ -435,7 +435,7 @@ def _render_run_results_impl(
                 if outcome.aborted:
                     update_static_run_status(
                         static_run_id=app_result.static_run_id,
-                        status="ABORTED",
+                        status="FAILED",
                         ended_at_utc=ended_at_utc,
                         abort_reason=abort_reason,
                         abort_signal=abort_signal,
@@ -525,14 +525,7 @@ def _render_run_results_impl(
             for line in compact_block:
                 _emit_detail(line)
 
-        if persist_enabled and not app_result.static_run_id:
-            print(
-                status_messages.status(
-                    f"Skipping persistence for {app_result.package_name}: static_run_id missing.",
-                    level="warn",
-                )
-            )
-        if persist_enabled and app_result.static_run_id:
+        if persist_enabled:
             try:
                 outcome_status = persist_run_summary(
                     base_report,
@@ -551,6 +544,8 @@ def _render_run_results_impl(
                     dry_run=params.dry_run,
                 )
                 if outcome_status:
+                    if outcome_status.static_run_id:
+                        app_result.static_run_id = outcome_status.static_run_id
                     normalized_findings_total += int(outcome_status.persisted_findings)
                     string_samples_persisted_total += int(outcome_status.string_samples_persisted)
                 if outcome_status and not outcome_status.success:
@@ -579,7 +574,7 @@ def _render_run_results_impl(
                 )
                 persistence_errors.append(str(exc))
                 if app_result.static_run_id and persist_enabled:
-                    fail_status = "ABORTED" if outcome.aborted else "FAILED"
+                    fail_status = "FAILED"
                     finalize_static_run(
                         static_run_id=app_result.static_run_id,
                         status=fail_status,
@@ -879,7 +874,7 @@ def _render_run_results_impl(
         if outcome.aborted:
             print(
                 status_messages.status(
-                    "Status: ABORTED (SIGINT) — counts may be partial",
+                    "Status: FAILED (SIGINT) — counts may be partial",
                     level="warn",
                 )
             )
@@ -1143,7 +1138,7 @@ def _render_run_results_impl(
         static_hint = f" static_run_id={static_ids[-1]}" if static_ids else ""
         footer = [
             "────────────────────────────────────────────────────────",
-            "STATIC ANALYSIS — ABORTED",
+            "STATIC ANALYSIS — FAILED",
             f"Reason : {reason_token} (Ctrl+C)",
             f"Ended  : {ended_at_utc}",
             f"Run    : session={params.session_stamp}{static_hint}",

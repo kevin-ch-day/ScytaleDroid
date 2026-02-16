@@ -10,6 +10,7 @@ from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_core.db_queries import run_sql_write
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
+from .contracts import normalize_run_status
 from .dep_export import export_dep_json
 
 
@@ -152,6 +153,7 @@ def _create_static_run(
     study_tag: str | None = None,
 ) -> int | None:
     normalized_started_at = _normalize_datetime_value(run_started_utc)
+    canonical_status = normalize_run_status(status)
 
     def _insert_run(columns: list[str], values: list[object]) -> int | None:
         placeholders = ", ".join(["%s"] * len(columns))
@@ -218,7 +220,7 @@ def _create_static_run(
         schema_version,
         findings_total,
         normalized_started_at,
-        status,
+        canonical_status,
         1 if is_canonical else 0 if is_canonical is not None else None,
         _normalize_datetime_value(canonical_set_at_utc) if canonical_set_at_utc else None,
         canonical_reason,
@@ -466,6 +468,7 @@ def update_static_run_status(
 ) -> None:
     now = _utc_now_dbstr()
     ended_at = _normalize_datetime_value(ended_at_utc) or now
+    canonical_status = normalize_run_status(status)
     try:
         run_sql_write(
             """
@@ -476,7 +479,7 @@ def update_static_run_status(
                 abort_signal=%s
             WHERE id=%s
             """,
-            (status, ended_at, abort_reason, abort_signal, static_run_id),
+            (canonical_status, ended_at, abort_reason, abort_signal, static_run_id),
         )
     except Exception as exc:
         log.warning(
@@ -488,18 +491,19 @@ def update_static_run_status(
 def finalize_open_static_runs(
     static_run_ids: Sequence[int] | None = None,
     *,
-    status: str = "ABORTED",
+    status: str = "FAILED",
     ended_at_utc: str | None = None,
     abort_reason: str | None = None,
     abort_signal: str | None = None,
 ) -> int:
     now = _utc_now_dbstr()
     normalized_ended_at = _normalize_datetime_value(ended_at_utc) or now
+    canonical_status = normalize_run_status(status)
 
     # DB wrapper does not expose rowcount; compute a deterministic delta.
     try:
         row = core_q.run_sql(
-            "SELECT COUNT(*) FROM static_analysis_runs WHERE status='RUNNING' AND ended_at_utc IS NULL",
+            "SELECT COUNT(*) FROM static_analysis_runs WHERE status='STARTED' AND ended_at_utc IS NULL",
             (),
             fetch="one",
         )
@@ -507,11 +511,11 @@ def finalize_open_static_runs(
     except Exception:
         before = 0
 
-    params: list[object] = [status, normalized_ended_at, abort_reason, abort_signal]
+    params: list[object] = [canonical_status, normalized_ended_at, abort_reason, abort_signal]
     sql = """
         UPDATE static_analysis_runs
         SET status=%s, ended_at_utc=%s, abort_reason=%s, abort_signal=%s
-        WHERE status='RUNNING' AND ended_at_utc IS NULL
+        WHERE status='STARTED' AND ended_at_utc IS NULL
     """
 
     if static_run_ids is not None:
@@ -531,7 +535,7 @@ def finalize_open_static_runs(
 
     try:
         row = core_q.run_sql(
-            "SELECT COUNT(*) FROM static_analysis_runs WHERE status='RUNNING' AND ended_at_utc IS NULL",
+            "SELECT COUNT(*) FROM static_analysis_runs WHERE status='STARTED' AND ended_at_utc IS NULL",
             (),
             fetch="one",
         )

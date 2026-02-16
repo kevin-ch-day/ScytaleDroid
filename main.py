@@ -242,11 +242,6 @@ def handle_database() -> None:
 
     database_menu()
 
-def handle_utils() -> None:
-    from scytaledroid.Utils.System.utils_menu import utils_menu
-
-    utils_menu()
-
 
 def handle_workspace() -> None:
     from scytaledroid.Utils.System.workspace_maintenance_menu import workspace_menu

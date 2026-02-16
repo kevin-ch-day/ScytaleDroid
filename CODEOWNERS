@@ -1,0 +1,4 @@
+# Manifest governance (PM + reviewer required)
+tests/baseline/paper2_export_manifest.json @secadmin
+docs/drift/** @secadmin
+

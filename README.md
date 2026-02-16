@@ -217,6 +217,10 @@ ScytaleDroid keeps detailed operator documentation under `docs/`:
   non-negotiable architecture/runtime invariants.
 - [`docs/inventory_guard_determinism_contract.md`](docs/inventory_guard_determinism_contract.md) –
   deterministic decision contract for inventory freshness guard logic.
+- [`docs/refactor_phase_plan.md`](docs/refactor_phase_plan.md) – ordered
+  refactor phases and merge gates.
+- [`docs/refactor_execution_tracker.md`](docs/refactor_execution_tracker.md) –
+  current phase status, blockers, and ordered work queue.
 - [`docs/refactor_test_matrix.md`](docs/refactor_test_matrix.md) –
   refactor/removal acceptance matrix and risk coverage.
 - [`docs/paper2/README.md`](docs/paper2/README.md) – legacy paper export

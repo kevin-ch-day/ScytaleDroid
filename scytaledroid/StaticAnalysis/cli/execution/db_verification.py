@@ -535,7 +535,7 @@ def _render_persistence_footer(
             lines.append(("run_linkage", "ORPHAN (run_id missing)"))
         else:
             lines.append(("run_linkage", "run_id missing"))
-    if run_status == "ABORTED":
+    if run_status == "FAILED" and (abort_reason or abort_signal):
         reason_token = abort_reason or abort_signal or "SIGINT"
         lines.append(("abort_reason", reason_token))
     if len(run_ids) > 1 or len(static_run_ids) > 1:
@@ -651,14 +651,14 @@ def _render_persistence_footer(
         """
         SELECT COUNT(*)
         FROM static_analysis_runs
-        WHERE status='RUNNING'
+        WHERE status IN ('STARTED', 'RUNNING')
           AND TIMESTAMPDIFF(HOUR, created_at, UTC_TIMESTAMP()) > 24
         """,
     )
     if stale_runs:
         print(
             status_messages.status(
-                f"Legacy RUNNING rows >24h: {stale_runs} (pre-Phase-B legacy run)",
+                f"Stale STARTED/RUNNING rows >24h: {stale_runs}",
                 level="warn",
             )
         )
@@ -705,15 +705,15 @@ def _render_persistence_footer(
             db_verification_status = "ERROR (missing " + ", ".join(sorted(missing)) + ")"
         else:
             db_verification_status = "OK (canonical tables populated)"
-        if run_status == "ABORTED":
-            db_verification_status = "ABORTED (counts may be partial)"
+        if run_status == "FAILED" and (abort_reason or abort_signal):
+            db_verification_status = "FAILED (counts may be partial)"
 
     db_verification_ok = bool(db_verification_status and db_verification_status.startswith("OK"))
     db_engine = str(DB_CONFIG.get("engine", "")).lower()
 
-    if run_status == "ABORTED":
+    if run_status == "FAILED" and (abort_reason or abort_signal):
         reason_token = abort_reason or abort_signal or "SIGINT"
-        print(f"  {'status'.ljust(width)} : ABORTED ({reason_token}) — counts may be partial")
+        print(f"  {'status'.ljust(width)} : FAILED ({reason_token}) — counts may be partial")
     elif audit and audit.run_id is None and not audit.is_group_scope:
         if audit.is_orphan:
             print(f"  {'status'.ljust(width)} : WARN (orphan run_id missing)")
