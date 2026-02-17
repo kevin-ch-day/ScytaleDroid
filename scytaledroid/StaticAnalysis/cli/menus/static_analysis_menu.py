@@ -110,8 +110,6 @@ def static_analysis_menu() -> None:
         menu_utils.render_menu(back_spec)
         choice_pool = selectable_ids + ["0"]
         choice = prompt_utils.get_choice(choice_pool, default=default_choice)
-        if choice == "6" and "5" in selectable_ids:
-            choice = "5"
 
         if choice == "0":
             break
@@ -133,7 +131,7 @@ def static_analysis_menu() -> None:
             continue
 
         selection = None
-        if command.id == "5":
+        if command.selection_mode == "batch_dataset":
             from scytaledroid.StaticAnalysis.cli.flows.static_batch import run_dataset_static_batch
 
             run_dataset_static_batch(
@@ -145,12 +143,12 @@ def static_analysis_menu() -> None:
                 reset_static_analysis_data=reset_static_analysis_data,
             )
             continue
-        if command.id == "3":
+        if command.selection_mode == "last":
             selection = resolve_last_selection(groups)
             if selection is None:
                 prompt_utils.press_enter_to_continue()
                 continue
-        elif command.id == "4":
+        elif command.selection_mode == "diff_last":
             selection = resolve_last_selection(groups)
             if selection is None:
                 prompt_utils.press_enter_to_continue()

@@ -24,6 +24,8 @@ class Command:
     auto_verify: bool = False
     prompt_reset: bool = False
     force_app_scope: bool = False
+    selection_mode: str = "scope"  # "scope", "last", "diff_last", "batch_dataset"
+    force_verbose: bool = False
 
 
 __all__ = ["Command", "CommandHandler"]

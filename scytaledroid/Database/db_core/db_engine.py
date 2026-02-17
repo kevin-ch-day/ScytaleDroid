@@ -188,7 +188,35 @@ def _summarise_params(params: Any, *, many: bool) -> dict[str, Any]:
 
 
 def _is_transient(exc: Exception) -> bool:
-    return isinstance(exc, err.OperationalError) and getattr(exc, "errno", None) in TRANSIENT_ERRNOS
+    return isinstance(exc, err.OperationalError) and _mysql_errno(exc) in TRANSIENT_ERRNOS
+
+
+def _mysql_errno(exc: Exception) -> int | None:
+    code = getattr(exc, "errno", None)
+    if isinstance(code, int):
+        return code
+    args = getattr(exc, "args", None)
+    if isinstance(args, tuple) and args:
+        first = args[0]
+        if isinstance(first, int):
+            return first
+    return None
+
+
+def _cursor_in_transaction(cursor: Cursor, *, dialect: str) -> bool:
+    connection = getattr(cursor, "connection", None)
+    if connection is None:
+        return False
+    if dialect == "mysql":
+        try:
+            # MySQL/PyMySQL transaction scope is represented by autocommit=False.
+            return not bool(connection.get_autocommit())
+        except Exception:
+            return False
+    try:
+        return bool(getattr(connection, "in_transaction", False))
+    except Exception:
+        return False
 
 
 def _log_env_once(connection: pymysql.Connection) -> None:
@@ -334,6 +362,7 @@ def _execute(
     while True:
         attempt += 1
         start_ts = time.perf_counter()
+        in_transaction = _cursor_in_transaction(cursor, dialect=dialect)
         try:
             if many:
                 assert normalised.params is not None
@@ -350,6 +379,7 @@ def _execute(
                     "detected_style": normalised.detected_style,
                     "elapsed_ms": elapsed,
                     "attempt": attempt,
+                    "in_transaction": in_transaction,
                 },
             )
             return normalised
@@ -375,7 +405,7 @@ def _execute(
                     "event": "db.exec.integrity",
                     "detected_style": normalised.detected_style,
                     "err_class": exc.__class__.__name__,
-                    "err_code": getattr(exc, "errno", None),
+                    "err_code": _mysql_errno(exc),
                     "sqlstate": getattr(exc, "sqlstate", None),
                 },
                 exc_info=True,
@@ -391,13 +421,18 @@ def _execute(
                     "event": "db.exec.failed",
                     "detected_style": normalised.detected_style,
                     "err_class": exc.__class__.__name__,
-                    "err_code": getattr(exc, "errno", None),
+                    "err_code": _mysql_errno(exc),
                     "sqlstate": getattr(exc, "sqlstate", None),
                     "attempt": attempt,
                     "transient": transient,
+                    "in_transaction": in_transaction,
                 },
                 exc_info=True,
             )
+            # Never reconnect/retry inside an active transaction. Let the caller
+            # roll back the unit of work and retry from the outer boundary.
+            if transient and in_transaction:
+                raise TransientDbError(str(exc)) from exc
             if transient and attempt < MAX_RETRIES:
                 time.sleep(0.2 * attempt)
                 try:

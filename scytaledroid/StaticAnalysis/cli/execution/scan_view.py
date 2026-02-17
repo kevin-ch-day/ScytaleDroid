@@ -4,12 +4,36 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-from scytaledroid.Utils.DisplayUtils import status_messages
+from scytaledroid.Utils.DisplayUtils import colors, status_messages
 
 from ...core.detector_runner import PIPELINE_STAGES
 from ..core.models import RunParameters
 from ..core.run_context import StaticRunContext
 from .scan_progress_display import _format_elapsed
+
+
+def is_compact_card_mode(params: RunParameters) -> bool:
+    """Compact cards are used for multi-app scopes in non-verbose mode."""
+    return bool(params.scope in {"all", "profile"} and not params.verbose_output)
+
+
+def _slow_detector_parts(slowest: object, *, limit: int) -> list[str]:
+    parts: list[str] = []
+    seen: set[str] = set()
+    if not isinstance(slowest, Sequence):
+        return parts
+    for entry in slowest:
+        if not isinstance(entry, Mapping):
+            continue
+        det = str(entry.get("detector") or entry.get("section") or "").strip()
+        dur = entry.get("duration_sec")
+        if not det or det in seen or not isinstance(dur, (int, float)):
+            continue
+        seen.add(det)
+        parts.append(f"{det} {dur:.2f}s")
+        if len(parts) >= max(1, limit):
+            break
+    return parts
 
 
 def render_app_start(
@@ -83,49 +107,81 @@ def render_app_completion(
     error_count = int(summary.get("error_count", 0) or 0)
     skipped_count = int(skipped or 0)
     fail_count = finding_fail_count + policy_fail_count
-    card_mode = bool(params.scope == "all" and not params.verbose_output)
+    card_mode = is_compact_card_mode(params)
 
     if card_mode:
+        palette = colors.get_palette()
         label = (app_title or package_name or "").strip() or str(package_name or "<unknown>")
         pkg = str(package_name or "").strip()
+        header_line = ""
         if app_index is not None and app_total is not None:
             if pkg and label and label != pkg:
-                print(f"[{app_index}/{app_total}] {label}  ({pkg})")
+                header_line = f"[{app_index}/{app_total}] {label}  ({pkg})"
             elif pkg:
-                print(f"[{app_index}/{app_total}] {pkg}")
+                header_line = f"[{app_index}/{app_total}] {pkg}"
             else:
-                print(f"[{app_index}/{app_total}] {label}")
+                header_line = f"[{app_index}/{app_total}] {label}"
         else:
             if pkg and label and label != pkg:
-                print(f"{label}  ({pkg})")
+                header_line = f"{label}  ({pkg})"
             elif pkg:
-                print(pkg)
+                header_line = pkg
             else:
-                print(label)
+                header_line = label
+        print(colors.apply(header_line, palette.banner_primary, bold=True))
+        if pkg:
+            print(
+                status_messages.status(
+                    f"Package: {pkg}",
+                    level="info",
+                    show_icon=False,
+                    show_prefix=False,
+                )
+            )
 
         print(
-            "Artifacts: "
-            f"{artifact_count}   Time: {elapsed}   "
-            f"Checks: ok={ok_count} warn={warn_count} fail={fail_count} error={error_count} skipped={skipped_count}"
+            status_messages.status(
+                f"Artifacts: {artifact_count}   Time: {elapsed}",
+                level="info",
+                show_icon=False,
+                show_prefix=False,
+            )
+        )
+        print(
+            status_messages.status(
+                (
+                    f"Checks: ok={ok_count} warn={warn_count} fail={fail_count} "
+                    f"error={error_count} skipped={skipped_count}"
+                ),
+                level="info",
+                show_icon=False,
+                show_prefix=False,
+            )
         )
         p0 = int((summary.get("severity_counts") or {}).get("P0", 0) if isinstance(summary.get("severity_counts"), Mapping) else 0)
         p1 = int((summary.get("severity_counts") or {}).get("P1", 0) if isinstance(summary.get("severity_counts"), Mapping) else 0)
         p2 = int((summary.get("severity_counts") or {}).get("P2", 0) if isinstance(summary.get("severity_counts"), Mapping) else 0)
+        # Legacy detector outputs map to C/H/M in compact cards.
+        c_count, h_count, m_count = p0, p1, p2
+        l_count = int((summary.get("severity_counts") or {}).get("P3", 0) if isinstance(summary.get("severity_counts"), Mapping) else 0)
+        i_count = int((summary.get("severity_counts") or {}).get("P4", 0) if isinstance(summary.get("severity_counts"), Mapping) else 0)
         note = int((summary.get("severity_counts") or {}).get("NOTE", 0) if isinstance(summary.get("severity_counts"), Mapping) else 0)
-        print(f"Findings: P0={p0} P1={p1} P2={p2} Note={note}")
+        findings_text = (
+            f"Findings: C:{c_count} H:{h_count} M:{m_count} "
+            f"L:{l_count} I:{i_count} Note:{note}"
+        )
+        print(
+            status_messages.status(
+                findings_text,
+                level="info",
+                show_icon=False,
+                show_prefix=False,
+            )
+        )
 
-        slowest = summary.get("slowest_detectors")
-        slow_parts: list[str] = []
-        if isinstance(slowest, Sequence):
-            for entry in slowest[:2]:
-                if not isinstance(entry, Mapping):
-                    continue
-                det = entry.get("detector") or entry.get("section")
-                dur = entry.get("duration_sec")
-                if det and isinstance(dur, (int, float)):
-                    slow_parts.append(f"{det} {dur:.2f}s")
+        slow_parts = _slow_detector_parts(summary.get("slowest_detectors"), limit=2)
         if slow_parts:
-            print("Slow: " + "; ".join(slow_parts[:2]))
+            print(colors.apply("Slow: ", palette.hint, bold=True) + "; ".join(slow_parts))
 
         outlier = artifact_count > 20
         if outlier:
@@ -148,7 +204,16 @@ def render_app_completion(
                     if det and det not in failing:
                         failing.append(det)
             if failing:
-                print("Failing checks: " + ", ".join(failing[:4]))
+                print(
+                    status_messages.status(
+                        "Failing checks: " + ", ".join(failing[:4]),
+                        level="warn",
+                        show_icon=False,
+                        show_prefix=False,
+                    )
+                )
+        # Keep batch app cards visually separated for scan readability.
+        print()
         return elapsed
 
     status_line = "Checks complete"
@@ -212,30 +277,22 @@ def render_app_completion(
             reason = entry.get("reason") or "unspecified"
             print(status_messages.status(f"Detector error: {det} — {reason}", level="warn"))
 
-    severity = summary.get("severity_counts") if isinstance(summary.get("severity_counts"), Mapping) else {}
-    if severity:
-        p0 = int(severity.get("P0", 0) or 0)
-        p1 = int(severity.get("P1", 0) or 0)
-        p2 = int(severity.get("P2", 0) or 0)
-        note = int(severity.get("NOTE", 0) or 0)
+    severity_counts = summary.get("severity_counts") if isinstance(summary.get("severity_counts"), Mapping) else {}
+    if severity_counts:
+        p0 = int(severity_counts.get("P0", 0) or 0)
+        p1 = int(severity_counts.get("P1", 0) or 0)
+        p2 = int(severity_counts.get("P2", 0) or 0)
+        note = int(severity_counts.get("NOTE", 0) or 0)
         print(f"Findings: P0={p0} P1={p1} P2={p2} Note={note}")
 
-    slowest = summary.get("slowest_detectors")
-    if isinstance(slowest, Sequence) and slowest:
-        slow_parts = []
-        for entry in slowest[:3]:
-            if not isinstance(entry, Mapping):
-                continue
-            det = entry.get("detector") or entry.get("section")
-            dur = entry.get("duration_sec")
-            if det and isinstance(dur, (int, float)):
-                slow_parts.append(f"{det} {dur:.2f}s")
-        if slow_parts:
-            print("Slowest: " + "; ".join(slow_parts))
+    slow_parts = _slow_detector_parts(summary.get("slowest_detectors"), limit=3)
+    if slow_parts:
+        print("Slowest: " + "; ".join(slow_parts))
     return elapsed
 
 
 __all__ = [
+    "is_compact_card_mode",
     "render_app_completion",
     "render_app_start",
     "render_resource_warnings",

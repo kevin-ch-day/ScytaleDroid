@@ -33,6 +33,8 @@ Inventory comparator (`compare_type=inventory_guard`):
 Static comparator (`compare_type=static_analysis`):
 
 1. none (strict full payload equality)
+2. source of truth: `docs/contracts/determinism_static_rules.json`
+3. scope lock: `table_coverage_lock` in that rules file
 
 ## Required JSON Artifact Fields
 
@@ -46,10 +48,13 @@ Top-level fields:
 6. `allowed_diff_fields`
 7. `result`
 8. `diffs`
+9. `rules`
+10. `waiver`
 
 `result` object:
 
 1. `pass` (boolean)
+2. `pass_raw` (boolean)
 2. `degraded` (boolean)
 3. `degraded_reasons` (list)
 4. `fail_reason` (nullable string)
@@ -57,6 +62,7 @@ Top-level fields:
 6. `diff_counts.total`
 7. `diff_counts.allowed`
 8. `diff_counts.disallowed`
+9. `waived` (boolean)
 
 `diffs[]` item:
 
@@ -76,3 +82,6 @@ Default local output:
 1. Comparator must be key-based, not row-order based.
 2. Degraded mode is interactive-only and not enabled by default.
 3. Automation/nightly paths run strict mode only.
+4. Waivers are explicit file-based overrides (`--waiver`) with required fields:
+   `reason`, `scope`, `approver`, `expires_utc`.
+5. Waiver expiry is enforced at runtime; expired waivers are rejected.

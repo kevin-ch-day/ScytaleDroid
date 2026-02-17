@@ -49,43 +49,8 @@ def select_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
 def _select_all_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
     if not groups:
         return ScopeSelection("all", "All apps", tuple())
-    grouped: dict[str, list[ArtifactGroup]] = {}
-    order: list[str] = []
-    for group in groups:
-        package = group.package_name
-        if package not in grouped:
-            grouped[package] = []
-            order.append(package)
-        grouped[package].append(group)
-
-    collapsed: list[ArtifactGroup] = []
-    skipped_details: list[tuple[str, str, int]] = []
-    for package in order:
-        package_groups = tuple(grouped[package])
-        selected = _select_latest_groups(package_groups)
-        collapsed.extend(selected)
-        skipped = len(package_groups) - len(selected)
-        if skipped > 0:
-            newest = selected[0]
-            stamp = newest.session_stamp or "undated"
-            skipped_details.append((package, stamp, skipped))
-
-    scoped = tuple(collapsed)
-    if skipped_details:
-        total_packages = len(skipped_details)
-        total_skipped = sum(count for _, _, count in skipped_details)
-        summary = (
-            f"Selected newest artifact sets for {total_packages} package"
-            f"{'s' if total_packages != 1 else ''}; skipped {total_skipped} older capture"
-            f"{'s' if total_skipped != 1 else ''}."
-        )
-        print(status_messages.status(summary, level="info"))
-        response = prompt_utils.prompt_text(
-            "Press D for selection details, or Enter to continue",
-            required=False,
-        ).strip().lower()
-        if response == "d":
-            _render_selection_details(grouped, scoped, skipped_details)
+    grouped, scoped, skipped_details = _collapse_latest_by_package(groups)
+    _maybe_prompt_selection_details(grouped, scoped, skipped_details)
 
     return ScopeSelection("all", "All apps", scoped)
 
@@ -122,7 +87,7 @@ def select_app_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
     package_name, _, _, app_label = packages[index]
     selection_label = f"{app_label} ({package_name})" if app_label else package_name
     matching_groups = tuple(group for group in groups if group.package_name == package_name)
-    scoped = _select_latest_groups(matching_groups)
+    scoped = select_latest_groups(matching_groups)
     skipped = len(matching_groups) - len(scoped)
     if skipped > 0:
         newest = scoped[0]
@@ -162,43 +127,8 @@ def select_category_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
         )
         == category_name
     )
-    grouped: dict[str, list[ArtifactGroup]] = {}
-    order: list[str] = []
-    for group in scoped_all:
-        package = group.package_name
-        if package not in grouped:
-            grouped[package] = []
-            order.append(package)
-        grouped[package].append(group)
-
-    collapsed: list[ArtifactGroup] = []
-    skipped_details: list[tuple[str, str, int]] = []
-    for package in order:
-        package_groups = tuple(grouped[package])
-        selected = _select_latest_groups(package_groups)
-        collapsed.extend(selected)
-        skipped = len(package_groups) - len(selected)
-        if skipped > 0:
-            newest = selected[0]
-            stamp = newest.session_stamp or "undated"
-            skipped_details.append((package, stamp, skipped))
-
-    scoped = tuple(collapsed)
-    if skipped_details:
-        total_packages = len(skipped_details)
-        total_skipped = sum(count for _, _, count in skipped_details)
-        summary = (
-            f"Selected newest artifact sets for {total_packages} package"
-            f"{'s' if total_packages != 1 else ''}; skipped {total_skipped} older capture"
-            f"{'s' if total_skipped != 1 else ''}."
-        )
-        print(status_messages.status(summary, level="info"))
-        response = prompt_utils.prompt_text(
-            "Press D for selection details, or Enter to continue",
-            required=False,
-        ).strip().lower()
-        if response == "d":
-            _render_selection_details(grouped, scoped, skipped_details)
+    grouped, scoped, skipped_details = _collapse_latest_by_package(scoped_all)
+    _maybe_prompt_selection_details(grouped, scoped, skipped_details)
 
     if scoped:
         print()
@@ -242,6 +172,56 @@ def _render_profile_selection_table(groups: Sequence[ArtifactGroup]) -> None:
             )
     else:
         table_utils.render_table(["App", "Package", "Artifacts"], rows)
+
+
+def _collapse_latest_by_package(
+    groups: Sequence[ArtifactGroup],
+) -> tuple[dict[str, list[ArtifactGroup]], tuple[ArtifactGroup, ...], list[tuple[str, str, int]]]:
+    grouped: dict[str, list[ArtifactGroup]] = {}
+    order: list[str] = []
+    for group in groups:
+        package = group.package_name
+        if package not in grouped:
+            grouped[package] = []
+            order.append(package)
+        grouped[package].append(group)
+
+    collapsed: list[ArtifactGroup] = []
+    skipped_details: list[tuple[str, str, int]] = []
+    for package in order:
+        package_groups = tuple(grouped[package])
+        selected = select_latest_groups(package_groups)
+        collapsed.extend(selected)
+        skipped = len(package_groups) - len(selected)
+        if skipped > 0 and selected:
+            newest = selected[0]
+            stamp = newest.session_stamp or "undated"
+            skipped_details.append((package, stamp, skipped))
+    return grouped, tuple(collapsed), skipped_details
+
+
+def _maybe_prompt_selection_details(
+    grouped: dict[str, list[ArtifactGroup]],
+    scoped: Sequence[ArtifactGroup],
+    skipped_details: Sequence[tuple[str, str, int]],
+) -> None:
+    if not skipped_details:
+        return
+    total_packages = len(skipped_details)
+    total_skipped = sum(count for _, _, count in skipped_details)
+    summary = (
+        f"Selected newest artifact sets for {total_packages} package"
+        f"{'s' if total_packages != 1 else ''} with multiple captures; "
+        f"skipped {total_skipped} older capture"
+        f"{'s' if total_skipped != 1 else ''}."
+    )
+    print(status_messages.status(summary, level="info"))
+    response = prompt_utils.prompt_text(
+        "Press D for selection details, or Enter to continue",
+        required=False,
+    ).strip().lower()
+    if response == "d":
+        _render_selection_details(grouped, scoped, skipped_details)
 
 
 def _resolve_index(prompt: str, labels: Sequence[str]) -> int:
@@ -298,7 +278,7 @@ def _allow_multiple_latest() -> bool:
     }
 
 
-def _select_latest_groups(groups: Sequence[ArtifactGroup]) -> tuple[ArtifactGroup, ...]:
+def select_latest_groups(groups: Sequence[ArtifactGroup]) -> tuple[ArtifactGroup, ...]:
     if not groups:
         return tuple()
     if len(groups) == 1:
@@ -394,6 +374,7 @@ def _artifact_mtime(artifact) -> float:
 
 __all__ = [
     "format_scope_target",
+    "select_latest_groups",
     "select_scope",
     "select_app_scope",
     "select_category_scope",

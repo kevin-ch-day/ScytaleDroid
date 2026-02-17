@@ -25,7 +25,46 @@ from scytaledroid.StaticAnalysis.cli.flows import headless_run
 from scytaledroid.StaticAnalysis.cli.flows.headless_run import _artifact_group_from_path
 from scytaledroid.Utils.version_utils import get_git_commit
 
-ALLOWED_DIFF_FIELDS: tuple[str, ...] = ()
+DEFAULT_RULES_PATH = REPO_ROOT / "docs" / "contracts" / "determinism_static_rules.json"
+
+
+@dataclass(frozen=True)
+class GateRules:
+    schema_version: str
+    compare_type: str
+    allowed_diff_fields: tuple[str, ...]
+    table_coverage_lock: tuple[str, ...]
+
+
+def _load_rules(path: Path) -> GateRules:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    schema_version = str(payload.get("schema_version") or "v1")
+    compare_type = str(payload.get("compare_type") or "static_analysis")
+    allowed = tuple(sorted(str(item) for item in (payload.get("allowed_diff_fields") or [])))
+    table_lock = tuple(str(item) for item in (payload.get("table_coverage_lock") or []))
+    if not table_lock:
+        raise RuntimeError("determinism rules must include non-empty table_coverage_lock")
+    return GateRules(
+        schema_version=schema_version,
+        compare_type=compare_type,
+        allowed_diff_fields=allowed,
+        table_coverage_lock=table_lock,
+    )
+
+
+def _load_waiver(path: Path) -> dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    required = ("reason", "scope", "approver", "expires_utc")
+    missing = [field for field in required if not str(payload.get(field) or "").strip()]
+    if missing:
+        raise RuntimeError(f"waiver file missing required fields: {', '.join(missing)}")
+    expires = str(payload.get("expires_utc"))
+    expires_dt = datetime.fromisoformat(expires.replace("Z", "+00:00"))
+    if expires_dt.tzinfo is None:
+        expires_dt = expires_dt.replace(tzinfo=UTC)
+    if expires_dt < datetime.now(UTC):
+        raise RuntimeError("waiver expired")
+    return payload
 
 
 def _configure_db_target(db_target: str) -> None:
@@ -104,23 +143,49 @@ def _safe_decimal(value: Any) -> str | None:
     return str(value)
 
 
-def _collect_permission_risk_vnext(run_id: int) -> dict[str, Any]:
-    table_ready = False
+def _table_exists(table_name: str) -> bool:
     try:
         row = core_q.run_sql(
-            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'static_permission_risk_vnext'",
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = %s",
+            (table_name,),
             fetch="one",
         )
-        table_ready = bool(row and int(row[0]) > 0)
+        return bool(row and int(row[0]) > 0)
     except Exception:
         try:
             row = core_q.run_sql(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='static_permission_risk_vnext'",
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                (table_name,),
                 fetch="one",
             )
-            table_ready = bool(row)
+            return bool(row)
         except Exception:
-            table_ready = False
+            return False
+
+
+def _row_fingerprints(table_name: str, where_field: str, where_value: int) -> list[str]:
+    rows = core_q.run_sql(
+        f"SELECT * FROM {table_name} WHERE {where_field} = %s",
+        (where_value,),
+        fetch="all_dict",
+    ) or []
+    return sorted(_json_hash(_normalize_json_like(row)) for row in rows)
+
+
+def _table_snapshot(table_name: str, where_field: str, where_value: int) -> dict[str, Any]:
+    if not _table_exists(table_name):
+        return {"table": table_name, "present": False, "row_count": 0, "fingerprints": []}
+    fingerprints = _row_fingerprints(table_name, where_field, where_value)
+    return {
+        "table": table_name,
+        "present": True,
+        "row_count": len(fingerprints),
+        "fingerprints": fingerprints,
+    }
+
+
+def _collect_permission_risk_vnext(run_id: int) -> dict[str, Any]:
+    table_ready = _table_exists("static_permission_risk_vnext")
 
     if not table_ready:
         return {
@@ -263,7 +328,7 @@ def _finding_fingerprints(run_id: int) -> list[str]:
     return sorted(fingerprints)
 
 
-def _collector_payload(run_ref: RunRef) -> dict[str, Any]:
+def _collector_payload(run_ref: RunRef, *, rules: GateRules) -> dict[str, Any]:
     run_row = core_q.run_sql(
         """
         SELECT
@@ -332,28 +397,17 @@ def _collector_payload(run_ref: RunRef) -> dict[str, Any]:
         fetch="all",
     ) or []
 
-    persisted_counts = core_q.run_sql(
-        """
-        SELECT
-          (SELECT COUNT(*) FROM static_analysis_runs WHERE id = %s) AS runs,
-          (SELECT COUNT(*) FROM static_analysis_findings WHERE run_id = %s) AS findings,
-          (SELECT COUNT(*) FROM static_permission_matrix WHERE run_id = %s) AS permission_matrix,
-          (SELECT COUNT(*) FROM static_permission_risk WHERE package_name = %s AND session_stamp = %s) AS permission_risk,
-          (SELECT COUNT(*) FROM risk_scores WHERE package_name = %s AND session_stamp = %s) AS risk_scores
-        """,
-        (
-            run_ref.run_id,
-            run_ref.run_id,
-            run_ref.run_id,
-            run_ref.package_name,
-            run_ref.session_stamp,
-            run_ref.package_name,
-            run_ref.session_stamp,
-        ),
-        fetch="one_dict",
-    ) or {}
-
     permission_risk_vnext = _collect_permission_risk_vnext(run_ref.run_id)
+    table_snapshots: dict[str, dict[str, Any]] = {}
+    for table_name in rules.table_coverage_lock:
+        if table_name == "risk_scores":
+            table_snapshots[table_name] = {"table": table_name, "present": True, "note": "covered by scoped query"}
+            continue
+        where_field = "run_id"
+        if table_name in {"static_analysis_runs"}:
+            where_field = "id"
+        table_snapshots[table_name] = _table_snapshot(table_name, where_field, run_ref.run_id)
+
     payload = {
         "identity": {
             "package_name": run_ref.package_name,
@@ -391,36 +445,37 @@ def _collector_payload(run_ref: RunRef) -> dict[str, Any]:
             ],
             "finding_fingerprints": _finding_fingerprints(run_ref.run_id),
             "permission_risk_vnext": permission_risk_vnext,
+            "table_snapshots": table_snapshots,
         },
         "persisted_row_counts": {
-            "static_analysis_runs": int(persisted_counts.get("runs") or 0),
-            "static_analysis_findings": int(persisted_counts.get("findings") or 0),
-            "static_permission_matrix": int(persisted_counts.get("permission_matrix") or 0),
-            "static_permission_risk": int(persisted_counts.get("permission_risk") or 0),
-            "risk_scores": int(persisted_counts.get("risk_scores") or 0),
+            "static_analysis_runs": int(table_snapshots.get("static_analysis_runs", {}).get("row_count", 0) or 0),
+            "static_analysis_findings": int(table_snapshots.get("static_analysis_findings", {}).get("row_count", 0) or 0),
+            "static_permission_matrix": int(table_snapshots.get("static_permission_matrix", {}).get("row_count", 0) or 0),
+            "static_permission_risk": int(table_snapshots.get("static_permission_risk", {}).get("row_count", 0) or 0),
+            "risk_scores": len(score_rows),
             "static_permission_risk_vnext": int(permission_risk_vnext.get("row_count") or 0),
         },
     }
     return payload
 
 
-def _is_allowed(path: str) -> bool:
-    return path in ALLOWED_DIFF_FIELDS
+def _is_allowed(path: str, *, rules: GateRules) -> bool:
+    return path in set(rules.allowed_diff_fields)
 
 
-def _collect_diffs(left: Any, right: Any, prefix: str = "") -> list[dict[str, Any]]:
+def _collect_diffs(left: Any, right: Any, *, rules: GateRules, prefix: str = "") -> list[dict[str, Any]]:
     diffs: list[dict[str, Any]] = []
     if isinstance(left, dict) and isinstance(right, dict):
         keys = sorted(set(left.keys()) | set(right.keys()))
         for key in keys:
             child = f"{prefix}.{key}" if prefix else str(key)
             if key not in left:
-                diffs.append({"path": child, "left": None, "right": right.get(key), "allowed": _is_allowed(child)})
+                diffs.append({"path": child, "left": None, "right": right.get(key), "allowed": _is_allowed(child, rules=rules)})
                 continue
             if key not in right:
-                diffs.append({"path": child, "left": left.get(key), "right": None, "allowed": _is_allowed(child)})
+                diffs.append({"path": child, "left": left.get(key), "right": None, "allowed": _is_allowed(child, rules=rules)})
                 continue
-            diffs.extend(_collect_diffs(left[key], right[key], child))
+            diffs.extend(_collect_diffs(left[key], right[key], rules=rules, prefix=child))
         return diffs
     if isinstance(left, list) and isinstance(right, list):
         max_len = max(len(left), len(right))
@@ -428,10 +483,10 @@ def _collect_diffs(left: Any, right: Any, prefix: str = "") -> list[dict[str, An
             child = f"{prefix}[{idx}]"
             l_item = left[idx] if idx < len(left) else None
             r_item = right[idx] if idx < len(right) else None
-            diffs.extend(_collect_diffs(l_item, r_item, child))
+            diffs.extend(_collect_diffs(l_item, r_item, rules=rules, prefix=child))
         return diffs
     if left != right:
-        diffs.append({"path": prefix, "left": left, "right": right, "allowed": _is_allowed(prefix)})
+        diffs.append({"path": prefix, "left": left, "right": right, "allowed": _is_allowed(prefix, rules=rules)})
     return diffs
 
 
@@ -439,10 +494,13 @@ def _build_result_payload(
     *,
     apk_path: Path,
     profile: str,
+    rules: GateRules,
+    rules_path: str,
     left_meta: dict[str, Any],
     right_meta: dict[str, Any],
     payload_a: dict[str, Any],
     payload_b: dict[str, Any],
+    waiver: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     validation_issues: list[str] = []
     for side_name, payload in (("left", payload_a), ("right", payload_b)):
@@ -465,25 +523,34 @@ def _build_result_payload(
         ):
             validation_issues.append(f"{side_name}.permission_risk_vnext.non_canonical_permission_names")
 
-    diffs = _collect_diffs(payload_a, payload_b)
+    diffs = _collect_diffs(payload_a, payload_b, rules=rules)
     allowed_count = sum(1 for item in diffs if bool(item.get("allowed")))
     disallowed_count = sum(1 for item in diffs if not bool(item.get("allowed")))
     passed = disallowed_count == 0 and not validation_issues
+    waived = (not passed) and waiver is not None
 
     return {
         "tool_semver": app_config.APP_VERSION,
         "git_commit": get_git_commit(),
-        "compare_type": "static_analysis",
+        "compare_type": rules.compare_type,
         "apk_path": str(apk_path),
         "profile": profile,
+        "rules": {
+            "path": rules_path,
+            "schema_version": rules.schema_version,
+            "allowed_diff_fields": list(rules.allowed_diff_fields),
+            "table_coverage_lock": list(rules.table_coverage_lock),
+        },
         "left": left_meta,
         "right": right_meta,
-        "allowed_diff_fields": list(ALLOWED_DIFF_FIELDS),
+        "allowed_diff_fields": list(rules.allowed_diff_fields),
         "result": {
-            "pass": passed,
+            "pass": passed or waived,
+            "pass_raw": passed,
             "degraded": False,
             "degraded_reasons": [],
-            "fail_reason": None if passed else ("validation_error" if validation_issues else "disallowed_diffs"),
+            "waived": waived,
+            "fail_reason": None if (passed or waived) else ("validation_error" if validation_issues else "disallowed_diffs"),
             "validation_issues": validation_issues,
             "diff_counts": {
                 "total": len(diffs),
@@ -491,6 +558,7 @@ def _build_result_payload(
                 "disallowed": disallowed_count,
             },
         },
+        "waiver": waiver or {},
         "diffs": diffs,
         "comparison": {
             "first": payload_a,
@@ -523,8 +591,29 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Allow session reuse during scan invocations.",
     )
+    parser.add_argument(
+        "--rules",
+        default=str(DEFAULT_RULES_PATH),
+        help="Comparator rules JSON (allowed fields + table coverage lock).",
+    )
+    parser.add_argument(
+        "--waiver",
+        default=None,
+        help="Optional waiver JSON. Required fields: reason, scope, approver, expires_utc.",
+    )
     args = parser.parse_args(argv)
     _configure_db_target(str(args.db_target))
+    rules_path = Path(str(args.rules)).expanduser().resolve()
+    if not rules_path.exists():
+        raise SystemExit(f"Comparator rules file not found: {rules_path}")
+    rules = _load_rules(rules_path)
+    waiver_payload: dict[str, Any] | None = None
+    if args.waiver:
+        waiver_path = Path(str(args.waiver)).expanduser().resolve()
+        if not waiver_path.exists():
+            raise SystemExit(f"Waiver file not found: {waiver_path}")
+        waiver_payload = _load_waiver(waiver_path)
+        waiver_payload = {**waiver_payload, "path": str(waiver_path)}
 
     apk_path = Path(args.apk).expanduser().resolve()
     if not apk_path.exists():
@@ -537,15 +626,17 @@ def main(argv: list[str] | None = None) -> int:
 
     _run_scan(apk_path, profile=args.profile, session_stamp=session_a, allow_reuse=args.allow_session_reuse)
     run_a = _resolve_run(group.package_name, session_a)
-    payload_a = _collector_payload(run_a)
+    payload_a = _collector_payload(run_a, rules=rules)
 
     _run_scan(apk_path, profile=args.profile, session_stamp=session_b, allow_reuse=args.allow_session_reuse)
     run_b = _resolve_run(group.package_name, session_b)
-    payload_b = _collector_payload(run_b)
+    payload_b = _collector_payload(run_b, rules=rules)
 
     result = _build_result_payload(
         apk_path=apk_path,
         profile=args.profile,
+        rules=rules,
+        rules_path=str(rules_path),
         left_meta={
             "run_id": run_a.run_id,
             "session_stamp": session_a,
@@ -558,6 +649,7 @@ def main(argv: list[str] | None = None) -> int:
         },
         payload_a=payload_a,
         payload_b=payload_b,
+        waiver=waiver_payload,
     )
     output_path = Path(args.output) if args.output else _default_output_path()
     output_path.parent.mkdir(parents=True, exist_ok=True)

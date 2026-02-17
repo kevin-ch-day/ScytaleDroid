@@ -7,11 +7,13 @@ import os
 import shutil
 import signal
 import hashlib
+import re
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
 from scytaledroid.Config import app_config
+from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
 from scytaledroid.Database.db_utils import schema_gate
 from scytaledroid.StaticAnalysis.persistence import ingest as canonical_ingest
 from scytaledroid.StaticAnalysis.session import make_session_stamp, normalize_session_stamp
@@ -120,7 +122,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
             print(
                 status_messages.status(
                     (
-                        "Paper-grade runs require canonical schema readiness. "
+                        "Canonical-grade runs require canonical schema readiness. "
                         "Run schema bootstrap or set SCYTALEDROID_PAPER_GRADE=0 "
                         "to allow experimental runs."
                     ),
@@ -524,9 +526,39 @@ def _emit_missing_run_ids_artifact(
 ) -> None:
     stamp = (session_stamp or "").strip() or "unspecified-session"
     missing_set = set(missing_id_packages)
-    failure_lines = [str(line) for line in getattr(outcome, "failures", []) if isinstance(line, str)]
+    failure_lines = [
+        str(line)
+        for line in (
+            list(getattr(outcome, "failures", []) or [])
+            + list(getattr(outcome, "errors", []) or [])
+        )
+        if isinstance(line, str)
+    ]
+    schema_version = db_diagnostics.get_schema_version() or "<unknown>"
 
-    def _classify_missing_run_id(app: object, package: str) -> str:
+    def _failure_lines_for_package(package: str) -> list[str]:
+        package_key = (package or "").strip().lower()
+        if not package_key:
+            return []
+        return [line for line in failure_lines if package_key in line.lower()]
+
+    def _extract_retry_count(lines: list[str]) -> int:
+        max_retry = 0
+        for line in lines:
+            for pattern in (r"retry_count=(\d+)", r"retry=(\d+)", r"attempt=(\d+)"):
+                for match in re.finditer(pattern, line, flags=re.IGNORECASE):
+                    try:
+                        max_retry = max(max_retry, int(match.group(1)))
+                    except Exception:
+                        continue
+        return max_retry
+
+    def _looks_like_disconnect(lines: list[str]) -> bool:
+        markers = ("2013", "2014", "lost connection", "server has gone away", "transientdberror")
+        lowered = " ".join(lines).lower()
+        return any(marker in lowered for marker in markers)
+
+    def _classify_missing_run_id(app: object, package: str, package_failures: list[str]) -> str:
         identity_valid = getattr(app, "identity_valid", None)
         if identity_valid is False:
             return "identity_invalid"
@@ -535,29 +567,47 @@ def _emit_missing_run_ids_artifact(
         if int(getattr(app, "failed_artifacts", 0) or 0) > 0:
             return "artifact_failed"
         if int(getattr(app, "persisted_artifacts", 0) or 0) == 0:
-            package_key = (package or "").strip().lower()
-            if any("db_write_failed" in line and package_key in line.lower() for line in failure_lines):
+            if any("db_write_failed" in line.lower() for line in package_failures):
                 return "db_write_failed"
-            if any("persist" in line.lower() and package_key in line.lower() for line in failure_lines):
+            if any("persist" in line.lower() for line in package_failures):
                 return "persist_error"
             return "not_persisted"
         return "missing_static_run_id"
+
+    def _extract_stage(classification: str, package_failures: list[str]) -> str:
+        for line in package_failures:
+            if "db_write_failed:" in line:
+                parts = line.split("db_write_failed:", 1)[1].split(":")
+                token = (parts[0] if parts else "").strip()
+                if token:
+                    return token
+        if classification in {"db_write_failed", "persist_error"}:
+            return "persistence"
+        if classification == "identity_invalid":
+            return "identity_validation"
+        return "unknown"
 
     rows: list[dict[str, object]] = []
     for app in outcome.results:
         package = str(getattr(app, "package_name", "") or "")
         static_run_id = getattr(app, "static_run_id", None)
+        package_failures = _failure_lines_for_package(package)
         classification = "ok"
         if package in missing_set or static_run_id is None:
-            classification = _classify_missing_run_id(app, package)
+            classification = _classify_missing_run_id(app, package, package_failures)
+        retry_count = _extract_retry_count(package_failures)
+        db_disconnect = _looks_like_disconnect(package_failures)
         rows.append(
             {
                 "package_name": package,
                 "static_run_id": static_run_id,
                 "missing_static_run_id": package in missing_set or static_run_id is None,
-                "db_disconnect": False,
-                "retry_count": 0,
+                "db_disconnect": db_disconnect,
+                "retry_count": retry_count,
                 "classification": classification,
+                "stage": _extract_stage(classification, package_failures),
+                "exception_class": "TransientDbError" if db_disconnect else None,
+                "transaction_state": "unknown",
                 "identity_error_reason": getattr(app, "identity_error_reason", None),
                 "persisted_artifacts": int(getattr(app, "persisted_artifacts", 0) or 0),
                 "failed_artifacts": int(getattr(app, "failed_artifacts", 0) or 0),
@@ -566,6 +616,9 @@ def _emit_missing_run_ids_artifact(
         )
 
     payload = {
+        "schema_version": "v1",
+        "db_schema_version": schema_version,
+        "generated_at_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "session_stamp": stamp,
         "total_apps": len(outcome.results),
         "missing_static_run_id_count": len([row for row in rows if row["missing_static_run_id"]]),

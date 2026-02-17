@@ -29,7 +29,10 @@ def render_run_start(
     if run_ctx is not None and run_ctx.quiet and run_ctx.batch:
         return
     target_label = "Target"
-    if target and not target.startswith("Profile:") and target != "All apps":
+    if target and target.startswith("Profile:"):
+        target_label = "Target Profile"
+        target = target.split(":", 1)[1].strip() or target
+    elif target and target != "All apps":
         target_label = "Target App"
 
     header_pairs = []
@@ -38,7 +41,7 @@ def render_run_start(
 
     app_name = target
     package_name = None
-    if target_label == "App" and " (" in target and target.endswith(")"):
+    if target_label == "Target App" and " (" in target and target.endswith(")"):
         app_name, package_name = target.rsplit(" (", 1)
         package_name = package_name.rstrip(")")
     app_value = app_name

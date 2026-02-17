@@ -776,11 +776,11 @@ def run_dataset_static_batch(
 
         if paper_grade_status != "ok" and static_run_id is not None:
             blockers = audit_notes_list[:3]
-            blocker_note = f" Paper-grade blockers: {', '.join(str(b) for b in blockers)}" if blockers else ""
+            blocker_note = f" Canonical-grade blockers: {', '.join(str(b) for b in blockers)}" if blockers else ""
             print(
                 status_messages.status(
                     (
-                        "Artifacts exist, but this run is not paper-grade. "
+                        "Artifacts exist, but this run is not canonical-grade. "
                         f"See {audit['evidence_path']}.{blocker_note}"
                     ),
                     level="warn",

@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from types import SimpleNamespace
 
+from scytaledroid.Database.db_core import db_engine
 from scytaledroid.StaticAnalysis.cli.persistence import run_summary as rs
 
 
@@ -214,3 +215,95 @@ def test_persist_run_summary_rejects_missing_scope_identity(monkeypatch):
     assert called["db_session"] is False
     assert outcome.errors
     assert any("identity_validation_failed" in err for err in outcome.errors)
+
+
+def test_persist_run_summary_retries_transient_transaction_failure(monkeypatch):
+    state: dict[str, object] = {"in_tx": False, "attempts": 0}
+    monkeypatch.setattr(rs, "require_canonical_schema", lambda: None)
+    monkeypatch.setattr(rs, "database_session", lambda: _FakeDBSession(state))
+    monkeypatch.setattr(rs.app_config, "STATIC_PERSIST_TRANSIENT_RETRIES", 2, raising=False)
+    monkeypatch.setattr(
+        rs,
+        "prepare_run_envelope",
+        lambda **_kwargs: (SimpleNamespace(run_id=None, threat_profile=None, env_profile=None), []),
+    )
+    monkeypatch.setattr(rs, "compute_metrics_bundle", lambda *_args, **_kwargs: _stub_metrics_bundle())
+    monkeypatch.setattr(rs, "_ensure_app_version", lambda **_kwargs: 101)
+
+    def _create_run(**_kwargs):
+        state["attempts"] = int(state["attempts"]) + 1
+        if int(state["attempts"]) == 1:
+            raise db_engine.TransientDbError("Lost connection to MySQL server during query (2013)")
+        return 9001
+
+    monkeypatch.setattr(rs._dw, "create_run", _create_run)
+    monkeypatch.setattr(rs, "_create_static_run", lambda **_kwargs: 202)
+    monkeypatch.setattr(rs, "_update_static_run_metadata", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(rs, "write_buckets", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(rs, "write_metrics", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(rs, "persist_permission_matrix", lambda **_kwargs: None)
+    monkeypatch.setattr(rs, "persist_permission_risk", lambda **_kwargs: None)
+    monkeypatch.setattr(rs, "update_static_run_status", lambda **_kwargs: None)
+    monkeypatch.setattr(rs, "export_dep_json", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(rs.core_q, "run_sql", lambda *_args, **_kwargs: [])
+
+    outcome = rs.persist_run_summary(
+        _DummyReport(),
+        {},
+        "com.example.app",
+        session_stamp="sess-retry-1",
+        scope_label="all",
+        finding_totals={"total": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        baseline_payload={},
+        paper_grade_requested=False,
+        dry_run=False,
+    )
+
+    assert int(state["attempts"]) == 2
+    assert outcome.persistence_failed is False
+    assert outcome.run_id == 9001
+    assert outcome.static_run_id == 202
+
+
+def test_persist_run_summary_exhausts_transient_retries(monkeypatch):
+    state: dict[str, object] = {"in_tx": False, "attempts": 0}
+    monkeypatch.setattr(rs, "require_canonical_schema", lambda: None)
+    monkeypatch.setattr(rs, "database_session", lambda: _FakeDBSession(state))
+    monkeypatch.setattr(rs.app_config, "STATIC_PERSIST_TRANSIENT_RETRIES", 2, raising=False)
+    monkeypatch.setattr(
+        rs,
+        "prepare_run_envelope",
+        lambda **_kwargs: (SimpleNamespace(run_id=None, threat_profile=None, env_profile=None), []),
+    )
+    monkeypatch.setattr(rs, "compute_metrics_bundle", lambda *_args, **_kwargs: _stub_metrics_bundle())
+
+    def _create_run(**_kwargs):
+        state["attempts"] = int(state["attempts"]) + 1
+        raise db_engine.TransientDbError("Lost connection to MySQL server during query (2013)")
+
+    monkeypatch.setattr(rs._dw, "create_run", _create_run)
+    monkeypatch.setattr(rs, "write_buckets", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(rs, "write_metrics", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(rs, "persist_permission_matrix", lambda **_kwargs: None)
+    monkeypatch.setattr(rs, "persist_permission_risk", lambda **_kwargs: None)
+    monkeypatch.setattr(rs, "_update_static_run_metadata", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(rs, "update_static_run_status", lambda **_kwargs: None)
+    monkeypatch.setattr(rs, "export_dep_json", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(rs.core_q, "run_sql", lambda *_args, **_kwargs: [])
+
+    outcome = rs.persist_run_summary(
+        _DummyReport(),
+        {},
+        "com.example.app",
+        session_stamp="sess-retry-2",
+        scope_label="all",
+        finding_totals={"total": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        baseline_payload={},
+        paper_grade_requested=False,
+        dry_run=False,
+    )
+
+    assert int(state["attempts"]) == 2
+    assert outcome.persistence_failed is True
+    assert outcome.static_run_id is None
+    assert any("Static persistence transaction failed" in err for err in outcome.errors)

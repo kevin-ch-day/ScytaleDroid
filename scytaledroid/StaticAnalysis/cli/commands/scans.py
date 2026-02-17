@@ -32,6 +32,7 @@ SCAN_COMMANDS: tuple[Command, ...] = (
         profile="full",
         section="workflow",
         auto_verify=True,
+        selection_mode="last",
     ),
     Command(
         id="4",
@@ -40,6 +41,7 @@ SCAN_COMMANDS: tuple[Command, ...] = (
         kind="scan",
         profile="full",
         section="workflow",
+        selection_mode="diff_last",
     ),
     Command(
         id="5",
@@ -50,6 +52,8 @@ SCAN_COMMANDS: tuple[Command, ...] = (
         section="workflow",
         auto_verify=True,
         prompt_reset=False,
+        selection_mode="batch_dataset",
+        force_verbose=True,
     ),
     Command(
         id="D",
@@ -61,6 +65,7 @@ SCAN_COMMANDS: tuple[Command, ...] = (
         persist=False,
         dry_run=True,
         force_app_scope=True,
+        force_verbose=True,
     ),
 )
 

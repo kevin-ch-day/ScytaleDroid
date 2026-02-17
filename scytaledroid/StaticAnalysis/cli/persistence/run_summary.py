@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from scytaledroid.Config import app_config
+from scytaledroid.Database.db_core import db_engine
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_core.session import database_session
 from scytaledroid.Database.db_func.static_analysis.persistence_failures import (
@@ -144,6 +145,14 @@ def _finding_cap_for_detector(detector_id: str) -> int:
         return max(1, int(value))
     except (TypeError, ValueError):
         return max(1, default_cap)
+
+
+def _is_transient_persistence_error(exc: Exception) -> bool:
+    if isinstance(exc, db_engine.TransientDbError):
+        return True
+    text = str(exc).lower()
+    markers = ("transientdberror", "lost connection", "server has gone away", "(2013", "(2014")
+    return any(marker in text for marker in markers)
 
 
 def _taxonomy_label(*, severity: str, detector_status: object, policy_gate: bool) -> str:
@@ -1085,248 +1094,284 @@ def persist_run_summary(
 
     persistence_failed = False
     if not dry_run:
-        try:
-            with database_session() as db:
-                with db.transaction():
-                    if run_id is None:
-                        try:
-                            run_id = _dw.create_run(
-                                package=package_for_run,
-                                app_label=display_name,
-                                version_code=version_code,
-                                version_name=version_name,
-                                target_sdk=target_sdk,
-                                session_stamp=session_stamp,
-                                threat_profile=envelope.threat_profile,
-                                env_profile=envelope.env_profile,
-                            )
-                        except Exception as exc:
-                            _raise_db_error("run.create", f"{exc.__class__.__name__}:{exc}")
+        base_run_id = run_id
+        base_static_run_id = static_run_id
+        max_txn_attempts = max(1, int(getattr(app_config, "STATIC_PERSIST_TRANSIENT_RETRIES", 2) or 2))
+        attempt = 0
+        while attempt < max_txn_attempts:
+            attempt += 1
+            failure_stage = None
+            db_errors.clear()
+            run_id = base_run_id
+            static_run_id = base_static_run_id
+            outcome.run_id = int(run_id) if run_id is not None else None
+            outcome.static_run_id = static_run_id
+            outcome.baseline_written = False
+            outcome.string_samples_persisted = 0
+            attempt_error_start = len(outcome.errors)
+            try:
+                with database_session() as db:
+                    with db.transaction():
                         if run_id is None:
-                            _raise_db_error("run.create", "returned_null")
-                        outcome.run_id = int(run_id)
+                            try:
+                                run_id = _dw.create_run(
+                                    package=package_for_run,
+                                    app_label=display_name,
+                                    version_code=version_code,
+                                    version_name=version_name,
+                                    target_sdk=target_sdk,
+                                    session_stamp=session_stamp,
+                                    threat_profile=envelope.threat_profile,
+                                    env_profile=envelope.env_profile,
+                                )
+                            except Exception as exc:
+                                _raise_db_error("run.create", f"{exc.__class__.__name__}:{exc}")
+                            if run_id is None:
+                                _raise_db_error("run.create", "returned_null")
+                            outcome.run_id = int(run_id)
 
-                    if static_run_id is None:
-                        app_version_id = _ensure_app_version(
-                            package_for_run=package_for_run,
-                            display_name=display_name,
-                            version_name=version_name,
-                            version_code=version_code,
-                            min_sdk=min_sdk,
-                            target_sdk=target_sdk,
-                        )
-                        if app_version_id is None:
-                            _raise_db_error("static_run.create", "app_version_unresolved")
-                        static_run_id = _create_static_run(
-                            app_version_id=app_version_id,
-                            session_stamp=session_stamp,
-                            session_label=session_stamp,
-                            scope_label=scope_label,
-                            category=category_token,
-                            profile=profile_token,
-                            profile_key=profile_token,
-                            scenario_id=scenario_id_token,
-                            device_serial=device_serial_token,
-                            tool_semver=app_config.APP_VERSION,
-                            tool_git_commit=get_git_commit(),
-                            schema_version=db_diagnostics.get_schema_version() or "<unknown>",
-                            findings_total=int(finding_totals.get("total", 0) or 0),
-                            run_started_utc=None,
-                            status="STARTED",
-                        )
                         if static_run_id is None:
-                            _raise_db_error("static_run.create", "create_failed")
-                        log.info(
-                            f"Resolved static_run_id={static_run_id} for {package_for_run} (session={session_stamp})",
-                            category="static_analysis",
-                        )
-                    outcome.static_run_id = static_run_id
-
-                    if static_run_id:
-                        _update_static_run_metadata(
-                            static_run_id,
-                            sha256_value=base_apk_sha256 or manifest_sha,
-                            base_apk_sha256=base_apk_sha256,
-                            artifact_set_hash=artifact_set_hash,
-                            run_signature=run_signature,
-                            run_signature_version=run_signature_version,
-                            identity_valid=identity_valid if isinstance(identity_valid, bool) else None,
-                            identity_error_reason=identity_error_reason,
-                            config_hash=config_hash,
-                            pipeline_version=pipeline_version,
-                            analysis_version=analysis_version,
-                            catalog_versions=catalog_versions,
-                            study_tag=study_tag,
-                        )
-
-                    try:
-                        ok = write_buckets(int(run_id), metrics_bundle.buckets, static_run_id=static_run_id)
-                    except Exception as exc:
-                        _raise_db_error("buckets.write", f"{exc.__class__.__name__}:{exc}")
-                    if not ok:
-                        _raise_db_error("buckets.write", "returned_false")
-
-                    if finding_rows:
-                        if run_id is None:
-                            sample = finding_rows[0] if finding_rows else {}
-                            sample_view = {
-                                key: sample.get(key)
-                                for key in ("rule_id", "evidence_path", "evidence_preview", "severity")
-                            }
-                            log.info(
-                                (
-                                    f"Dry-run persistence payload for {run_package}: "
-                                    f"findings={total_findings} "
-                                    f"sample={json.dumps(sample_view, ensure_ascii=False, default=str)}"
-                                ),
-                                category="static_analysis",
+                            app_version_id = _ensure_app_version(
+                                package_for_run=package_for_run,
+                                display_name=display_name,
+                                version_name=version_name,
+                                version_code=version_code,
+                                min_sdk=min_sdk,
+                                target_sdk=target_sdk,
                             )
-                        elif not persist_findings(int(run_id), finding_rows, static_run_id=static_run_id):
-                            _raise_db_error(
-                                "findings.write",
-                                f"returned_false:run_id={run_id}:static_run_id={static_run_id}",
-                            )
-                        if static_run_id is not None:
-                            try:
-                                _persist_static_analysis_findings(
-                                    static_run_id=int(static_run_id),
-                                    rows=canonical_finding_rows,
-                                )
-                            except Exception as exc:
-                                _raise_db_error(
-                                    "canonical_findings.write",
-                                    f"{exc.__class__.__name__}:{exc}",
-                                )
-
-                    if static_run_id and correlation_rows:
-                        try:
-                            ok = _persist_correlation_results(correlation_rows)
-                        except Exception as exc:
-                            _raise_db_error("correlations.write", f"{exc.__class__.__name__}:{exc}")
-                        if not ok:
-                            _raise_db_error("correlations.write", f"returned_false:static_run_id={static_run_id}")
-
-                    if run_id is not None:
-                        if control_summary:
-                            try:
-                                persist_masvs_controls(
-                                    int(run_id),
-                                    package_for_run,
-                                    control_summary,
-                                )
-                            except Exception as exc:
-                                _raise_db_error("masvs_controls.write", f"{exc.__class__.__name__}:{exc}")
-                        else:
-                            log.info(
-                                (
-                                    f"No MASVS control coverage derived for {run_package}; "
-                                    f"total_findings={total_findings} entries={len(control_entries)}"
-                                ),
-                                category="static_analysis",
-                            )
-                        try:
-                            persist_storage_surface_data(br, session_stamp, scope_label)
-                        except Exception as exc:
-                            _raise_db_error("storage_surface.write", f"{exc.__class__.__name__}:{exc}")
-                        apk_identifier = safe_int(metadata_map.get("apk_id")) if metadata_map else None
-                        if apk_identifier is None and metadata_map:
-                            apk_identifier = safe_int(metadata_map.get("apkId"))
-                        if apk_identifier is None:
-                            apk_identifier = safe_int(metadata_map.get("android_apk_id"))
-                        if apk_identifier is None:
-                            apk_identifier = int(run_id)
-
-                        permission_profiles_map: Mapping[str, Mapping[str, object]] | None = None
-                        detector_metrics = getattr(br, "detector_metrics", None)
-                        if isinstance(detector_metrics, Mapping):
-                            permission_metrics = detector_metrics.get("permissions_profile")
-                            if isinstance(permission_metrics, Mapping):
-                                profiles = permission_metrics.get("permission_profiles")
-                                if isinstance(profiles, Mapping):
-                                    permission_profiles_map = profiles
-
-                        try:
-                            persist_permission_matrix(
-                                static_run_id=int(static_run_id) if static_run_id is not None else None,
-                                package_name=package_for_run,
-                                apk_id=apk_identifier,
-                                permission_profiles=permission_profiles_map,
-                            )
-                        except Exception as exc:
-                            _raise_db_error("permission_matrix.write", f"{exc.__class__.__name__}:{exc}")
-                        try:
-                            persist_permission_risk(
-                                run_id=int(run_id),
-                                report=br,
-                                package_name=package_for_run,
+                            if app_version_id is None:
+                                _raise_db_error("static_run.create", "app_version_unresolved")
+                            static_run_id = _create_static_run(
+                                app_version_id=app_version_id,
                                 session_stamp=session_stamp,
+                                session_label=session_stamp,
                                 scope_label=scope_label,
-                                metrics_bundle=metrics_bundle,
-                                baseline_payload=baseline_payload,
-                                permission_profiles=permission_profiles_map,
+                                category=category_token,
+                                profile=profile_token,
+                                profile_key=profile_token,
+                                scenario_id=scenario_id_token,
+                                device_serial=device_serial_token,
+                                tool_semver=app_config.APP_VERSION,
+                                tool_git_commit=get_git_commit(),
+                                schema_version=db_diagnostics.get_schema_version() or "<unknown>",
+                                findings_total=int(finding_totals.get("total", 0) or 0),
+                                run_started_utc=None,
+                                status="STARTED",
                             )
-                        except Exception as exc:
-                            _raise_db_error("permission_risk.write", f"{exc.__class__.__name__}:{exc}")
-
-                    try:
-                        ok = write_metrics(int(run_id), metrics_payload, static_run_id=static_run_id)
-                    except Exception as exc:
-                        _raise_db_error("metrics.write", f"{exc.__class__.__name__}:{exc}")
-                    if not ok:
-                        _raise_db_error("metrics.write", f"returned_false:run_id={run_id}")
-
-                    contributors = metrics_bundle.contributors
-                    if contributors:
+                            if static_run_id is None:
+                                _raise_db_error("static_run.create", "create_failed")
+                            log.info(
+                                f"Resolved static_run_id={static_run_id} for {package_for_run} (session={session_stamp})",
+                                category="static_analysis",
+                            )
+                        outcome.static_run_id = static_run_id
+    
+                        if static_run_id:
+                            _update_static_run_metadata(
+                                static_run_id,
+                                sha256_value=base_apk_sha256 or manifest_sha,
+                                base_apk_sha256=base_apk_sha256,
+                                artifact_set_hash=artifact_set_hash,
+                                run_signature=run_signature,
+                                run_signature_version=run_signature_version,
+                                identity_valid=identity_valid if isinstance(identity_valid, bool) else None,
+                                identity_error_reason=identity_error_reason,
+                                config_hash=config_hash,
+                                pipeline_version=pipeline_version,
+                                analysis_version=analysis_version,
+                                catalog_versions=catalog_versions,
+                                study_tag=study_tag,
+                            )
+    
                         try:
-                            ok = write_contributors(int(run_id), contributors)
+                            ok = write_buckets(int(run_id), metrics_bundle.buckets, static_run_id=static_run_id)
                         except Exception as exc:
-                            _raise_db_error("contributors.write", f"{exc.__class__.__name__}:{exc}")
+                            _raise_db_error("buckets.write", f"{exc.__class__.__name__}:{exc}")
                         if not ok:
-                            _raise_db_error("contributors.write", f"returned_false:run_id={run_id}")
-
-                    baseline_section = baseline_payload.get("baseline") if isinstance(baseline_payload, Mapping) else {}
-                    string_payload = baseline_section.get("string_analysis") if isinstance(baseline_section, Mapping) else {}
-                    static_errors, baseline_written, sample_total = _persist_static_sections_wrapper(
-                        package_name=package_for_run,
-                        session_stamp=session_stamp,
-                        scope_label=scope_label,
-                        finding_totals=persisted_totals,
-                        baseline_section=baseline_section if isinstance(baseline_section, Mapping) else {},
-                        string_payload=string_payload if isinstance(string_payload, Mapping) else {},
-                        manifest=br.manifest,
-                        app_metadata=baseline_payload.get("app") if isinstance(baseline_payload, Mapping) else {},
-                        run_id=run_id,
-                        static_run_id=static_run_id,
+                            _raise_db_error("buckets.write", "returned_false")
+    
+                        if finding_rows:
+                            if run_id is None:
+                                sample = finding_rows[0] if finding_rows else {}
+                                sample_view = {
+                                    key: sample.get(key)
+                                    for key in ("rule_id", "evidence_path", "evidence_preview", "severity")
+                                }
+                                log.info(
+                                    (
+                                        f"Dry-run persistence payload for {run_package}: "
+                                        f"findings={total_findings} "
+                                        f"sample={json.dumps(sample_view, ensure_ascii=False, default=str)}"
+                                    ),
+                                    category="static_analysis",
+                                )
+                            elif not persist_findings(int(run_id), finding_rows, static_run_id=static_run_id):
+                                _raise_db_error(
+                                    "findings.write",
+                                    f"returned_false:run_id={run_id}:static_run_id={static_run_id}",
+                                )
+                            if static_run_id is not None:
+                                try:
+                                    _persist_static_analysis_findings(
+                                        static_run_id=int(static_run_id),
+                                        rows=canonical_finding_rows,
+                                    )
+                                except Exception as exc:
+                                    _raise_db_error(
+                                        "canonical_findings.write",
+                                        f"{exc.__class__.__name__}:{exc}",
+                                    )
+    
+                        if static_run_id and correlation_rows:
+                            try:
+                                ok = _persist_correlation_results(correlation_rows)
+                            except Exception as exc:
+                                _raise_db_error("correlations.write", f"{exc.__class__.__name__}:{exc}")
+                            if not ok:
+                                _raise_db_error("correlations.write", f"returned_false:static_run_id={static_run_id}")
+    
+                        if run_id is not None:
+                            if control_summary:
+                                try:
+                                    persist_masvs_controls(
+                                        int(run_id),
+                                        package_for_run,
+                                        control_summary,
+                                    )
+                                except Exception as exc:
+                                    _raise_db_error("masvs_controls.write", f"{exc.__class__.__name__}:{exc}")
+                            else:
+                                log.info(
+                                    (
+                                        f"No MASVS control coverage derived for {run_package}; "
+                                        f"total_findings={total_findings} entries={len(control_entries)}"
+                                    ),
+                                    category="static_analysis",
+                                )
+                            try:
+                                persist_storage_surface_data(br, session_stamp, scope_label)
+                            except Exception as exc:
+                                _raise_db_error("storage_surface.write", f"{exc.__class__.__name__}:{exc}")
+                            apk_identifier = safe_int(metadata_map.get("apk_id")) if metadata_map else None
+                            if apk_identifier is None and metadata_map:
+                                apk_identifier = safe_int(metadata_map.get("apkId"))
+                            if apk_identifier is None:
+                                apk_identifier = safe_int(metadata_map.get("android_apk_id"))
+                            if apk_identifier is None:
+                                apk_identifier = int(run_id)
+    
+                            permission_profiles_map: Mapping[str, Mapping[str, object]] | None = None
+                            detector_metrics = getattr(br, "detector_metrics", None)
+                            if isinstance(detector_metrics, Mapping):
+                                permission_metrics = detector_metrics.get("permissions_profile")
+                                if isinstance(permission_metrics, Mapping):
+                                    profiles = permission_metrics.get("permission_profiles")
+                                    if isinstance(profiles, Mapping):
+                                        permission_profiles_map = profiles
+    
+                            try:
+                                persist_permission_matrix(
+                                    static_run_id=int(static_run_id) if static_run_id is not None else None,
+                                    package_name=package_for_run,
+                                    apk_id=apk_identifier,
+                                    permission_profiles=permission_profiles_map,
+                                )
+                            except Exception as exc:
+                                _raise_db_error("permission_matrix.write", f"{exc.__class__.__name__}:{exc}")
+                            try:
+                                persist_permission_risk(
+                                    run_id=int(run_id),
+                                    report=br,
+                                    package_name=package_for_run,
+                                    session_stamp=session_stamp,
+                                    scope_label=scope_label,
+                                    metrics_bundle=metrics_bundle,
+                                    baseline_payload=baseline_payload,
+                                    permission_profiles=permission_profiles_map,
+                                )
+                            except Exception as exc:
+                                _raise_db_error("permission_risk.write", f"{exc.__class__.__name__}:{exc}")
+    
+                        try:
+                            ok = write_metrics(int(run_id), metrics_payload, static_run_id=static_run_id)
+                        except Exception as exc:
+                            _raise_db_error("metrics.write", f"{exc.__class__.__name__}:{exc}")
+                        if not ok:
+                            _raise_db_error("metrics.write", f"returned_false:run_id={run_id}")
+    
+                        contributors = metrics_bundle.contributors
+                        if contributors:
+                            try:
+                                ok = write_contributors(int(run_id), contributors)
+                            except Exception as exc:
+                                _raise_db_error("contributors.write", f"{exc.__class__.__name__}:{exc}")
+                            if not ok:
+                                _raise_db_error("contributors.write", f"returned_false:run_id={run_id}")
+    
+                        baseline_section = baseline_payload.get("baseline") if isinstance(baseline_payload, Mapping) else {}
+                        string_payload = baseline_section.get("string_analysis") if isinstance(baseline_section, Mapping) else {}
+                        static_errors, baseline_written, sample_total = _persist_static_sections_wrapper(
+                            package_name=package_for_run,
+                            session_stamp=session_stamp,
+                            scope_label=scope_label,
+                            finding_totals=persisted_totals,
+                            baseline_section=baseline_section if isinstance(baseline_section, Mapping) else {},
+                            string_payload=string_payload if isinstance(string_payload, Mapping) else {},
+                            manifest=br.manifest,
+                            app_metadata=baseline_payload.get("app") if isinstance(baseline_payload, Mapping) else {},
+                            run_id=run_id,
+                            static_run_id=static_run_id,
+                        )
+                        if baseline_written:
+                            outcome.baseline_written = True
+                        outcome.string_samples_persisted = sample_total
+                        for err in static_errors:
+                            _note_db_error(err)
+    
+                        if db_errors:
+                            raise RuntimeError(db_errors[-1])
+                persistence_failed = False
+                break
+            except Exception as exc:
+                transient = _is_transient_persistence_error(exc)
+                if transient and attempt < max_txn_attempts:
+                    if len(outcome.errors) > attempt_error_start:
+                        del outcome.errors[attempt_error_start:]
+                    log.warning(
+                        (
+                            "Transient DB failure during static persistence "
+                            f"for {run_package}; retrying full transaction "
+                            f"(attempt={attempt}/{max_txn_attempts}): {exc}"
+                        ),
+                        category="static_analysis",
                     )
-                    if baseline_written:
-                        outcome.baseline_written = True
-                    outcome.string_samples_persisted = sample_total
-                    for err in static_errors:
-                        _note_db_error(err)
+                    continue
 
-                    if db_errors:
-                        raise RuntimeError(db_errors[-1])
-        except Exception as exc:
-            persistence_failed = True
-            message = f"Static persistence transaction failed for {run_package}: {exc}"
-            log.warning(message, category="static_analysis")
-            if message not in outcome.errors:
-                outcome.add_error(message)
-            # Best-effort durable failure record (outside the rolled-back transaction).
-            if static_run_id:
-                try:
-                    record_static_persistence_failure(
-                        static_run_id=int(static_run_id),
-                        stage=failure_stage,
-                        exc_class=exc.__class__.__name__,
-                        exc_message=str(exc),
-                        errors_tail=list(outcome.errors)[-10:],
-                    )
-                except Exception:
-                    pass
-            # Transaction failed: scientific rows are rolled back and no run_id is authoritative.
-            static_run_id = None
-            outcome.static_run_id = None
+                persistence_failed = True
+                retries_used = max(0, attempt - 1)
+                message = (
+                    f"Static persistence transaction failed for {run_package}: {exc} "
+                    f"(retry_count={retries_used})"
+                )
+                log.warning(message, category="static_analysis")
+                if message not in outcome.errors:
+                    outcome.add_error(message)
+                # Best-effort durable failure record (outside the rolled-back transaction).
+                if static_run_id:
+                    try:
+                        record_static_persistence_failure(
+                            static_run_id=int(static_run_id),
+                            stage=failure_stage,
+                            exc_class=exc.__class__.__name__,
+                            exc_message=str(exc),
+                            errors_tail=list(outcome.errors)[-10:],
+                        )
+                    except Exception:
+                        pass
+                # Transaction failed: scientific rows are rolled back and no run_id is authoritative.
+                static_run_id = None
+                outcome.static_run_id = None
+                break
         outcome.persistence_failed = persistence_failed
     else:
         if finding_rows:

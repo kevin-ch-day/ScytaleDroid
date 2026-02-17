@@ -37,6 +37,7 @@ from .scan_identity_helpers import (
 )
 from .scan_progress_display import _PipelineProgress
 from .scan_view import (
+    is_compact_card_mode,
     render_app_completion,
     render_app_start,
     render_resource_warnings,
@@ -100,6 +101,7 @@ def execute_scan(
     if run_ctx.quiet and run_ctx.batch:
         show_artifacts = False
     display_name_map = load_display_name_map(selection.groups)
+    compact_mode = is_compact_card_mode(params)
     progress = _PipelineProgress(
         total=total_artifacts,
         show_splits=show_splits,
@@ -107,9 +109,9 @@ def execute_scan(
         show_checkpoints=not params.dry_run and show_artifacts,
         run_ctx=run_ctx,
         progress_every=getattr(params, "progress_every", 5),
-        show_app_completion=not (params.scope == "all" and not params.verbose_output),
+        show_app_completion=not compact_mode,
     )
-    all_apps_compact_mode = bool(params.scope == "all" and not params.verbose_output)
+    all_apps_compact_mode = compact_mode
     total_apps = len(selection.groups)
     apps_completed = 0
     banner_last_emit = time.monotonic()
@@ -122,7 +124,7 @@ def execute_scan(
     if not persistence_ready and not params.dry_run:
         if bool(getattr(params, "paper_grade_requested", True)):
             raise RuntimeError(
-                "Static persistence gate failed; paper-grade runs require canonical schema readiness."
+                "Static persistence gate failed; canonical-grade runs require canonical schema readiness."
             )
         log.warning(
             "Static persistence gate failed; running in exploratory mode (no static_run_id, no evidence writes).",
@@ -130,7 +132,7 @@ def execute_scan(
         )
 
     # Crash safety: older runs can be left in STARTED state if the process died mid-run.
-    # This creates persistent DB noise and breaks paper-grade audit expectations. We do not
+    # This creates persistent DB noise and breaks canonical-grade audit expectations. We do not
     # support concurrent static scans, so it is safe to finalize any open STARTED rows here.
     if persistence_ready and not params.dry_run:
         try:
@@ -152,6 +154,18 @@ def execute_scan(
             pass
 
     last_elapsed_for_progress: float | None = None
+    if all_apps_compact_mode and total_apps > 0:
+        print(
+            status_messages.status(
+                (
+                    f"Progress: Apps 0/{total_apps}\n"
+                    f"Artifacts 0/{total_artifacts} • ok=0 warn=0 fail=0 error=0\n"
+                    "ETA ~ --\n"
+                    "Slow avg: --"
+                ),
+                level="info",
+            )
+        )
     for app_index, group in enumerate(selection.groups, start=1):
         app_result = AppRunResult(group.package_name, getattr(group, "category", "Uncategorized"))
         identity = _compute_run_identity(group)
@@ -233,6 +247,14 @@ def execute_scan(
         last_report_for_app: StaticAnalysisReport | None = None
         if display_name or group.package_name:
             progress.flush_line()
+            if all_apps_compact_mode:
+                app_label = str(display_name or group.package_name)
+                print(
+                    status_messages.status(
+                        f"Starting [{app_index}/{total_apps}] {app_label}",
+                        level="info",
+                    )
+                )
             render_app_start(
                 title=display_name or group.package_name,
                 package_name=group.package_name,
@@ -421,13 +443,14 @@ def execute_scan(
                     det, total_dur = max(agg_slowest.items(), key=lambda kv: kv[1])
                     avg = total_dur / max(1, apps_completed)
                     slow_label = f"{det} {avg:.1f}s"
-                print(
-                    "Progress: "
-                    f"Apps {apps_completed}/{total_apps} • "
+                progress_text = (
+                    f"Progress: Apps {apps_completed}/{total_apps}\n"
                     f"Artifacts {agg_artifacts_done}/{total_artifacts} • "
-                    f"ok={agg_checks['ok']} warn={agg_checks['warn']} fail={agg_checks['fail']} error={agg_checks['error']} • "
-                    f"ETA ~ {eta_text} • Slow avg: {slow_label}"
+                    f"ok={agg_checks['ok']} warn={agg_checks['warn']} fail={agg_checks['fail']} error={agg_checks['error']}\n"
+                    f"ETA ~ {eta_text}\n"
+                    f"Slow avg: {slow_label}"
                 )
+                print(status_messages.status(progress_text, level="info"))
                 banner_last_emit = now
         if _abort_state()[0]:
             break

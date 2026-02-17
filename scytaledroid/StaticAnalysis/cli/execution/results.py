@@ -1128,7 +1128,7 @@ def _render_run_results_impl(
                     )
             if outcome.results:
                 _persist_cohort_rollup(session_stamp, params.scope_label)
-        if not params.verbose_output and params.scope == "all":
+        if not params.verbose_output and params.scope in {"all", "profile"}:
             _render_bucketed_session_summary(
                 outcome=outcome,
                 params=params,

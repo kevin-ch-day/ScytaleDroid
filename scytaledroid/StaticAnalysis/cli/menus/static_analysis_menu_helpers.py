@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from scytaledroid.DeviceAnalysis.services.static_scope_service import static_scope_service
@@ -95,25 +94,26 @@ def collect_view_options(command: Command) -> tuple[bool, bool, bool, bool]:
         print()
         menu_utils.print_section("Details")
         details_map = {
-            "1": [
+            "full": [
                 "Runs all detectors",
                 "Resets caches when prompted",
                 "Persists results and verification digest",
             ],
-            "2": [
+            "lightweight": [
                 "Runs the lightweight detector set",
                 "Persists results and verification digest",
             ],
-            "3": [
+            "last": [
                 "Uses the most recent static run package",
                 "Falls back to latest harvested APK if needed",
             ],
-            "4": [
+            "diff_last": [
                 "Diffs latest two stored reports for the package",
                 "Same package only",
             ],
         }
-        for line in details_map.get(command.id, ("No additional details.",)):
+        detail_key = command.selection_mode if command.selection_mode != "scope" else (command.profile or "")
+        for line in details_map.get(detail_key, ("No additional details.",)):
             print(f"• {line}")
     return want_details, want_splits, want_artifacts, False
 
@@ -168,43 +168,13 @@ def choose_scope(groups):
     return select_scope(groups)
 
 
-def _latest_group_mtime(group) -> float:
-    mtime = 0.0
-    for artifact in getattr(group, "artifacts", ()):
-        path_obj = getattr(artifact, "path", None)
-        try:
-            if path_obj is not None:
-                mtime = max(mtime, Path(path_obj).stat().st_mtime)
-        except OSError:
-            continue
-    return mtime
-
-
-def _select_latest_groups(groups):
-    if not groups:
-        return tuple()
-    if len(groups) == 1:
-        return (groups[0],)
-    best = max(
-        groups,
-        key=lambda group: (
-            1 if group.session_stamp else 0,
-            group.session_stamp or "",
-            _latest_group_mtime(group),
-        ),
-    )
-    if best.session_stamp:
-        same_session = [group for group in groups if group.session_stamp == best.session_stamp]
-        if same_session:
-            return tuple(same_session)
-    return (best,)
-
-
 def _find_latest_group_for_package(groups, package_name):
+    from ..flows.selection import select_latest_groups
+
     matches = tuple(group for group in groups if group.package_name == package_name)
     if not matches:
         return None
-    selected = _select_latest_groups(matches)
+    selected = select_latest_groups(matches)
     if not selected:
         return None
     return selected[0]

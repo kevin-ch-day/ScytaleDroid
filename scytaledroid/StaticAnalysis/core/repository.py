@@ -463,10 +463,21 @@ def load_profile_map(groups: Sequence[ArtifactGroup]) -> dict[str, str]:
     profile_map: dict[str, str] = {}
     for row in rows or []:
         pkg = str(row.get("package_name") or "").strip().lower()
-        label = str(row.get("display_name") or "").strip()
+        label = _normalise_profile_label(str(row.get("display_name") or "").strip())
         if pkg and label:
             profile_map[pkg] = label
     return profile_map
+
+
+def _normalise_profile_label(label: str) -> str:
+    """Normalize legacy profile display names for operator-facing static CLI views."""
+    text = (label or "").strip()
+    if not text:
+        return text
+    lowered = text.lower()
+    if lowered.endswith("(paper #2)"):
+        return text[: -len("(paper #2)")].rstrip()
+    return text
 
 
 def load_display_name_map(groups: Sequence[ArtifactGroup]) -> dict[str, str]:
