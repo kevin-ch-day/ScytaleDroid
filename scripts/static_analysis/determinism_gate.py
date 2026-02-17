@@ -104,6 +104,80 @@ def _safe_decimal(value: Any) -> str | None:
     return str(value)
 
 
+def _collect_permission_risk_vnext(run_id: int) -> dict[str, Any]:
+    table_ready = False
+    try:
+        row = core_q.run_sql(
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'static_permission_risk_vnext'",
+            fetch="one",
+        )
+        table_ready = bool(row and int(row[0]) > 0)
+    except Exception:
+        try:
+            row = core_q.run_sql(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='static_permission_risk_vnext'",
+                fetch="one",
+            )
+            table_ready = bool(row)
+        except Exception:
+            table_ready = False
+
+    if not table_ready:
+        return {
+            "table_ready": False,
+            "row_count": 0,
+            "rows_by_key": {},
+            "validation": {
+                "missing_key_fields": [],
+                "duplicate_keys": [],
+                "non_canonical_permission_names": [],
+            },
+        }
+
+    rows = core_q.run_sql(
+        """
+        SELECT permission_name, risk_score, risk_class, rationale_code
+        FROM static_permission_risk_vnext
+        WHERE run_id = %s
+        ORDER BY permission_name ASC
+        """,
+        (run_id,),
+        fetch="all_dict",
+    ) or []
+
+    rows_by_key: dict[str, dict[str, Any]] = {}
+    duplicates: list[str] = []
+    missing_keys: list[str] = []
+    non_canonical: list[str] = []
+    for row in rows:
+        raw_name = str(row.get("permission_name") or "").strip()
+        if not raw_name:
+            missing_keys.append("<empty>")
+            continue
+        canonical_name = raw_name.lower()
+        if raw_name != canonical_name:
+            non_canonical.append(raw_name)
+        if canonical_name in rows_by_key:
+            duplicates.append(canonical_name)
+        rows_by_key[canonical_name] = {
+            "permission_name": raw_name,
+            "risk_score": _safe_decimal(row.get("risk_score")),
+            "risk_class": row.get("risk_class"),
+            "rationale_code": row.get("rationale_code"),
+        }
+
+    return {
+        "table_ready": True,
+        "row_count": len(rows_by_key),
+        "rows_by_key": {key: rows_by_key[key] for key in sorted(rows_by_key)},
+        "validation": {
+            "missing_key_fields": missing_keys,
+            "duplicate_keys": sorted(set(duplicates)),
+            "non_canonical_permission_names": sorted(set(non_canonical)),
+        },
+    }
+
+
 @dataclass(frozen=True)
 class RunRef:
     session_stamp: str
@@ -279,6 +353,7 @@ def _collector_payload(run_ref: RunRef) -> dict[str, Any]:
         fetch="one_dict",
     ) or {}
 
+    permission_risk_vnext = _collect_permission_risk_vnext(run_ref.run_id)
     payload = {
         "identity": {
             "package_name": run_ref.package_name,
@@ -315,6 +390,7 @@ def _collector_payload(run_ref: RunRef) -> dict[str, Any]:
                 for row in score_rows
             ],
             "finding_fingerprints": _finding_fingerprints(run_ref.run_id),
+            "permission_risk_vnext": permission_risk_vnext,
         },
         "persisted_row_counts": {
             "static_analysis_runs": int(persisted_counts.get("runs") or 0),
@@ -322,6 +398,7 @@ def _collector_payload(run_ref: RunRef) -> dict[str, Any]:
             "static_permission_matrix": int(persisted_counts.get("permission_matrix") or 0),
             "static_permission_risk": int(persisted_counts.get("permission_risk") or 0),
             "risk_scores": int(persisted_counts.get("risk_scores") or 0),
+            "static_permission_risk_vnext": int(permission_risk_vnext.get("row_count") or 0),
         },
     }
     return payload
@@ -367,10 +444,31 @@ def _build_result_payload(
     payload_a: dict[str, Any],
     payload_b: dict[str, Any],
 ) -> dict[str, Any]:
+    validation_issues: list[str] = []
+    for side_name, payload in (("left", payload_a), ("right", payload_b)):
+        analytics = payload.get("analytics", {})
+        if not isinstance(analytics, dict):
+            continue
+        permission_risk = analytics.get("permission_risk_vnext", {})
+        if not isinstance(permission_risk, dict):
+            continue
+        validation = permission_risk.get("validation", {})
+        if not isinstance(validation, dict):
+            continue
+        if isinstance(validation.get("missing_key_fields"), list) and validation.get("missing_key_fields"):
+            validation_issues.append(f"{side_name}.permission_risk_vnext.missing_key_fields")
+        if isinstance(validation.get("duplicate_keys"), list) and validation.get("duplicate_keys"):
+            validation_issues.append(f"{side_name}.permission_risk_vnext.duplicate_keys")
+        if (
+            isinstance(validation.get("non_canonical_permission_names"), list)
+            and validation.get("non_canonical_permission_names")
+        ):
+            validation_issues.append(f"{side_name}.permission_risk_vnext.non_canonical_permission_names")
+
     diffs = _collect_diffs(payload_a, payload_b)
     allowed_count = sum(1 for item in diffs if bool(item.get("allowed")))
     disallowed_count = sum(1 for item in diffs if not bool(item.get("allowed")))
-    passed = disallowed_count == 0
+    passed = disallowed_count == 0 and not validation_issues
 
     return {
         "tool_semver": app_config.APP_VERSION,
@@ -385,8 +483,8 @@ def _build_result_payload(
             "pass": passed,
             "degraded": False,
             "degraded_reasons": [],
-            "fail_reason": None if passed else "disallowed_diffs",
-            "validation_issues": [],
+            "fail_reason": None if passed else ("validation_error" if validation_issues else "disallowed_diffs"),
+            "validation_issues": validation_issues,
             "diff_counts": {
                 "total": len(diffs),
                 "allowed": allowed_count,

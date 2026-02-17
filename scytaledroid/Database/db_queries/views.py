@@ -18,22 +18,32 @@ WHERE ar.is_split_member = 0;
 
 CREATE_VW_LATEST_PERMISSION_RISK = """
 CREATE OR REPLACE VIEW vw_latest_permission_risk AS
-SELECT v.package_name,
-       v.apk_id,
-       v.app_id,
-       v.sha256,
-       v.session_stamp,
-       v.scope_label,
-       v.risk_score,
-       v.risk_grade,
-       v.dangerous,
-       v.signature,
-       v.vendor,
+SELECT ar.package_name,
+       ar.apk_id,
+       NULL AS app_id,
+       ar.sha256,
+       rs.session_stamp,
+       rs.scope_label,
+       rs.risk_score,
+       rs.risk_grade,
+       rs.dangerous,
+       rs.signature,
+       rs.vendor,
        ar.version_name,
        ar.version_code,
        ar.updated_at
 FROM vw_latest_apk_per_package ar
-LEFT JOIN static_permission_risk v ON v.apk_id = ar.apk_id;
+LEFT JOIN (
+  SELECT rs1.*
+  FROM risk_scores rs1
+  JOIN (
+    SELECT package_name, MAX(id) AS max_id
+    FROM risk_scores
+    GROUP BY package_name
+  ) latest
+    ON latest.max_id = rs1.id
+) rs
+  ON LOWER(rs.package_name) = LOWER(ar.package_name);
 """
 
 __all__ = [

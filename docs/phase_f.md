@@ -5,15 +5,10 @@ Phase F extends the system for operational/field use while keeping Phase E (Pape
 ## Phase F1 (Structural, No ML Math Changes)
 
 What it guarantees:
-- Freeze mode (Phase E) remains DB-free and reproduces under the pinned paper toolchain.
 - Query mode supports **N runs per app** (grouped by `base_apk_sha256`) and writes provenance to an operational snapshot.
 
-Acceptance gates:
-- Run in the UI: `Reporting → Paper / ML → Phase F1 acceptance gates (regression + query smoke)`
-- Or run headless: `python scripts/operational/write_phase_f1_closure.py`
-
-Closure artifact:
-- `data/archive/phase_f1_closure.json`
+Acceptance checks:
+- `python scripts/operational/query_mode_smoke_gate.py`
 
 ## Phase F2 (Operational Math Stability + Explainability)
 

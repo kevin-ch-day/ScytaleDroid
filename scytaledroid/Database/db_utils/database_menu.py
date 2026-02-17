@@ -11,6 +11,8 @@ from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
 
 from .menu_actions import (
     apply_canonical_schema_bootstrap,
+    audit_static_risk_coverage,
+    backfill_static_permission_risk_vnext,
     ensure_dynamic_tier_migrations,
     ingest_analysis_cohort_from_publication_bundle,
     maybe_clear_screen,
@@ -36,6 +38,8 @@ def database_menu() -> None:
         "8": seed_paper_dataset_profile,
         "9": sync_paper_contracts_to_db,
         "10": run_inventory_determinism_comparator,
+        "11": backfill_static_permission_risk_vnext,
+        "12": audit_static_risk_coverage,
     }
 
     options: list[MenuOption] = [
@@ -49,6 +53,8 @@ def database_menu() -> None:
         MenuOption("8", "Seed dataset profile"),
         MenuOption("9", "Sync contract labels and ordering"),
         MenuOption("10", "Inventory determinism comparator (strict)"),
+        MenuOption("11", "Backfill static risk tables (risk_scores + vNext)"),
+        MenuOption("12", "Audit static risk coverage gaps"),
     ]
 
     while True:

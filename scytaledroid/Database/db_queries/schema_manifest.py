@@ -90,7 +90,7 @@ def ordered_schema_statements() -> list[str]:
             string_analysis.CREATE_STRING_SAMPLE_SETS,
             string_analysis.CREATE_DOC_HOSTS_TABLE,
             static_permission_matrix.CREATE_TABLE,
-            static_permission_risk.CREATE_TABLE,
+            static_permission_risk.CREATE_TABLE_VNEXT,
             risk_scores.CREATE_TABLE,
         ]
     )

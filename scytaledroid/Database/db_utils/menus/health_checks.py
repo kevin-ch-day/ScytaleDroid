@@ -368,14 +368,15 @@ def _render_scoring_checks() -> None:
     optional_tables = {
         "contributors": "wire risk contributors emit",
         "correlations": "wire correlation detector persistence",
-        "risk_scores": "optional rollup; populate after scoring contributors",
-        "static_permission_risk": "optional per-apk rollup; populate after scoring contributors",
+        "risk_scores": "run-level canonical risk source",
+        "static_permission_risk_vnext": "run-aware permission-level risk rows",
+        "static_permission_risk": "legacy per-apk rollup (migration path only)",
     }
     for table, hint in optional_tables.items():
         count = scalar(f"SELECT COUNT(*) FROM {table}")
         if count:
             level = "ok"
-        elif table in {"correlations", "risk_scores"}:
+        elif table in {"correlations", "risk_scores", "static_permission_risk_vnext", "static_permission_risk"}:
             level = "info"
         else:
             level = "warn"

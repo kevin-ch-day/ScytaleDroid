@@ -47,3 +47,13 @@ These keys are proposed and will be finalized with persistence/UoW contracts:
 4. `risk_scores`: `(package_name, session_stamp, scope_label)`.
 5. `static_permission_risk` (target schema): `(run_id, permission_name)`.
 
+## Static Permission Risk vNext Comparator Rules
+
+For `static_permission_risk_vnext` comparisons:
+
+1. Identity key is `(run_id, permission_name)` with `permission_name` canonical lowercase.
+2. Duplicate keys are a hard `FAIL`.
+3. Missing `permission_name` is a hard `FAIL`.
+4. Case-mismatched permission names are a hard `FAIL` (canonicalization violation).
+5. Comparator compares full row payload by key:
+   `risk_score`, `risk_class`, `rationale_code`.

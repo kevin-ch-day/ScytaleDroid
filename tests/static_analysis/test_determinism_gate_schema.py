@@ -41,3 +41,38 @@ def test_static_determinism_result_payload_schema():
     assert payload["result"]["pass"] is False
     assert payload["result"]["diff_counts"]["disallowed"] >= 1
     assert isinstance(payload["diffs"], list)
+
+
+def test_static_determinism_validation_issue_sets_fail_reason():
+    gate = _load_gate_module()
+    payload = gate._build_result_payload(
+        apk_path=Path("/tmp/example.apk"),
+        profile="full",
+        left_meta={"run_id": 1},
+        right_meta={"run_id": 2},
+        payload_a={
+            "analytics": {
+                "permission_risk_vnext": {
+                    "validation": {
+                        "missing_key_fields": [],
+                        "duplicate_keys": [],
+                        "non_canonical_permission_names": ["Android.Permission.CAMERA"],
+                    }
+                }
+            }
+        },
+        payload_b={
+            "analytics": {
+                "permission_risk_vnext": {
+                    "validation": {
+                        "missing_key_fields": [],
+                        "duplicate_keys": [],
+                        "non_canonical_permission_names": [],
+                    }
+                }
+            }
+        },
+    )
+    assert payload["result"]["pass"] is False
+    assert payload["result"]["fail_reason"] == "validation_error"
+    assert payload["result"]["validation_issues"] == ["left.permission_risk_vnext.non_canonical_permission_names"]

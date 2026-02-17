@@ -26,20 +26,22 @@ Prepared SQL file:
 `migrations/2026-02-16_static_permission_risk_runid_perm.sql`
 
 Phase 1 (`safe now`) creates `static_permission_risk_vnext` only.
-
-Feature gate for staged writer activation:
-
-- `SCYTALEDROID_ENABLE_SPR_VNEXT=1` enables dual-write to
-  `static_permission_risk_vnext` (default is off).
+Runtime persistence is now vNext-authoritative.
 
 ## Why Cutover Is Deferred
 
 1. Paper #2 export reproducibility is frozen during review.
-2. Existing readers/writers still use the legacy aggregate shape.
+2. Some legacy table references are retained for migration/audit only.
 3. Cutover will happen only after:
-   1. writer path is switched behind feature gate
+   1. writer path is vNext-only
    2. determinism gates pass
    3. persistence rollback proof passes
+
+## Transition Guardrails (Current)
+
+1. Static schema gate requires canonical `risk_scores` and
+   run-aware `static_permission_risk_vnext`.
+2. Permission-risk persistence writes `risk_scores` + `static_permission_risk_vnext`.
 
 ## Current Risk Until Cutover
 

@@ -3,7 +3,7 @@
 This tracker turns the phase plan into an execution checklist with explicit
 status, blockers, and merge readiness.
 
-Last updated: 2026-02-16
+Last updated: 2026-02-17
 
 ## Merge Rule
 
@@ -16,7 +16,7 @@ Last updated: 2026-02-16
 
 1. Phase 1 (`Determinism Comparator Contract`): completed
 2. Phase 2 (`Atomic Persistence`): completed
-3. Phase 3 (`Schema/Data Contract Corrections`): in progress (migration prepared, cutover pending)
+3. Phase 3 (`Schema/Data Contract Corrections`): completed
 4. Phase 4 (`Boundary Enforcement`): not started
 5. Phase 5 (`Legacy Publication Isolation + Removal`): in progress (isolation tests present, deletion batches pending)
 
@@ -69,25 +69,46 @@ Completed evidence:
 - `scytaledroid/StaticAnalysis/cli/persistence/permission_risk.py` (identity validation + score canonicalization)
 - `scytaledroid/StaticAnalysis/cli/persistence/run_summary.py` (scope/package identity validation + canonical metric values)
 - `tests/persistence/test_numeric_canonicalization.py`
-- `scytaledroid/StaticAnalysis/cli/persistence/permission_risk.py` vNext gate:
-  `SCYTALEDROID_ENABLE_SPR_VNEXT=1` (default off)
-- `tests/persistence/test_permission_risk.py` vNext gate behavior (off-by-default,
-  opt-in path exercised)
+- `tests/persistence/test_permission_risk.py` vNext-authoritative behavior
 
 Open items:
-- Cut over writers/readers to run-aware `static_permission_risk` model after
-  freeze boundary allows merge.
 - Extend write-time float canonicalization beyond current risk/metrics path to
   remaining scientific decimal fields as needed.
 
 Recent extension:
 - CVSS finding score fields are now canonicalized at write-time in
   `persist_run_summary` (`cvss.base/bt/be/bte`).
+- Static determinism gate now includes `static_permission_risk_vnext` identity
+  payload + validation checks (missing keys, duplicate keys, non-canonical
+  permission names).
+- Permission risk persistence now attempts `risk_scores` write independently
+  before legacy table availability check, while preserving rollback semantics by
+  staying in the same UoW.
+- Permission risk runtime persistence is vNext-authoritative:
+  - writes `risk_scores` + `static_permission_risk_vnext`
+  - legacy `static_permission_risk` is no longer written by runtime
+- Cross-run overwrite proof tests were added:
+  - legacy overwrite behavior documented as intentional `xfail`
+  - vNext run-aware path proves distinct rows per run.
+- Runtime reader views now source risk data from `risk_scores` instead of
+  `static_permission_risk`:
+  - `vw_latest_permission_risk`
+  - `v_static_run_category_summary`
+- Legacy reference guard added:
+  - `tests/persistence/test_legacy_permission_risk_reference_guard.py`
+  - prevents new `static_permission_risk` references outside an allowlist.
+- Static schema gate now requires canonical `risk_scores` and
+  `static_permission_risk_vnext`.
+- Database Tools now includes:
+  - `Backfill static risk tables (risk_scores + vNext)`
+  - `Audit static risk coverage gaps`
+  These are idempotent maintenance actions for migration cleanup.
 
 Exit criteria:
 - No cross-run overwrite in scientific tables.
 - Canonical float values compare exactly in comparator/reporting paths.
 - Identity-key validation fails before write on bad rows.
+- Runtime writes are run-aware (no legacy overwrite-prone table in hot path).
 
 ## Phase 4: Boundary Enforcement (Menu -> Service -> Repository)
 
@@ -114,13 +135,10 @@ Open items:
 - Execute deletion batches only after Phase 1-4 merge gates are green.
 
 Next prune candidates (ranked):
-1. `scripts/publication/regression_gate_freeze.py`
-   - Single in-repo caller: `scripts/operational/write_phase_f1_closure.py`.
-   - Remove as a pair with `write_phase_f1_closure.py` if Phase-F closure flow is retired.
-2. `scytaledroid/Database/db_utils/menu_actions.py` paper dataset actions
+1. `scytaledroid/Database/db_utils/menu_actions.py` paper dataset actions
    - Legacy contract sync paths still present (`paper2` alias/order sync).
    - Candidate for relocation behind explicit legacy/export guard.
-3. `scytaledroid/DynamicAnalysis/tools/evidence/menu.py` paper2-only helper paths
+2. `scytaledroid/DynamicAnalysis/tools/evidence/menu.py` paper2-only helper paths
    - Review `_canonical_paper2_freeze_anchor_path` and ordering helpers for isolation.
 
 Exit criteria:
@@ -131,7 +149,7 @@ Exit criteria:
 ## Next Work Queue (Ordered)
 
 1. Phase 3: float canonicalization validation path and tests.
-2. Phase 3: identity-key enforcement at persistence boundaries.
+2. Phase 3: permission-risk reader migration map + cutover wiring.
 3. Phase 4: remove SQL from reporting/menu entrypoints.
 4. Phase 5: next low-risk deletion batch with reachability proof.
 

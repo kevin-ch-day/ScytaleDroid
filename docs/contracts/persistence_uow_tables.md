@@ -22,7 +22,7 @@ Current scientific table set:
 7. `static_fileproviders`
 8. `static_provider_acl`
 9. `risk_scores`
-10. `static_permission_risk`
+10. `static_permission_risk_vnext`
 11. `static_permission_matrix`
 12. `buckets`
 13. `metrics`

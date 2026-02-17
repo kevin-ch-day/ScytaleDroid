@@ -17,7 +17,7 @@ SCIENTIFIC_UOW_TABLES = frozenset(
         "static_provider_acl",
         # Risk and permission outputs.
         "risk_scores",
-        "static_permission_risk",
+        "static_permission_risk_vnext",
         "static_permission_matrix",
         # Metrics + contributors + section writers.
         "buckets",

@@ -30,6 +30,6 @@ def test_minimum_scientific_tables_present():
         "static_analysis_findings",
         "risk_scores",
         "static_permission_matrix",
-        "static_permission_risk",
+        "static_permission_risk_vnext",
     }
     assert expected.issubset(SCIENTIFIC_UOW_TABLES)

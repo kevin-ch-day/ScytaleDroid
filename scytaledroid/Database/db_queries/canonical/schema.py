@@ -648,14 +648,14 @@ _DDL_STATEMENTS: list[str] = [
       COALESCE(r.category, 'Uncategorized') AS category,
       COUNT(*) AS run_count,
       MAX(r.created_at) AS latest_run,
-      AVG(spr.risk_score) AS avg_risk_score,
-      COUNT(spr.id) AS risk_rows
+      AVG(rs.risk_score) AS avg_risk_score,
+      COUNT(rs.id) AS risk_rows
     FROM static_analysis_runs r
     JOIN app_versions av ON r.app_version_id = av.id
     JOIN apps a ON av.app_id = a.id
-    LEFT JOIN static_permission_risk spr
-      ON spr.session_stamp COLLATE utf8mb4_unicode_ci = r.session_stamp COLLATE utf8mb4_unicode_ci
-     AND spr.package_name COLLATE utf8mb4_unicode_ci = a.package_name COLLATE utf8mb4_unicode_ci
+    LEFT JOIN risk_scores rs
+      ON rs.session_stamp COLLATE utf8mb4_unicode_ci = r.session_stamp COLLATE utf8mb4_unicode_ci
+     AND rs.package_name COLLATE utf8mb4_unicode_ci = a.package_name COLLATE utf8mb4_unicode_ci
     GROUP BY COALESCE(r.category, 'Uncategorized');
     """,
 ]
