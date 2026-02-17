@@ -12,15 +12,41 @@ from .network import previous_network_snapshot
 from .utils import report_pointer
 
 
+def _capture_id_from_metadata(metadata: Mapping[str, object] | None) -> str | None:
+    if not isinstance(metadata, Mapping):
+        return None
+    for key in ("capture_id", "session_stamp"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
 def _collect_related_reports(
-    context: DetectorContext, split_id: str, current_sha: str | None
+    context: DetectorContext,
+    split_id: str,
+    current_sha: str | None,
+    *,
+    package_name: str | None,
+    capture_id: str | None,
 ) -> list[StoredReport]:
+    if not capture_id:
+        # Strict default: no historical or cross-session joins without an active capture boundary.
+        return []
     related_reports: list[StoredReport] = []
+    package_norm = (package_name or "").strip().lower()
     for stored in list_reports():
         report = stored.report
         metadata = getattr(report, "metadata", {})
         if not isinstance(metadata, Mapping):
             continue
+        report_capture_id = _capture_id_from_metadata(metadata)
+        if report_capture_id != capture_id:
+            continue
+        report_package = getattr(getattr(report, "manifest", None), "package_name", None)
+        if isinstance(report_package, str) and report_package.strip() and package_norm:
+            if report_package.strip().lower() != package_norm:
+                continue
         if str(metadata.get("split_group_id")) != split_id:
             continue
         if report.hashes.get("sha256") == current_sha:
@@ -39,7 +65,15 @@ def split_findings_and_metrics(
 
     split_id = str(split_group_id)
     current_sha = context.hashes.get("sha256")
-    related_reports = _collect_related_reports(context, split_id, current_sha)
+    current_capture_id = _capture_id_from_metadata(metadata)
+    package_name = getattr(context.manifest_summary, "package_name", None)
+    related_reports = _collect_related_reports(
+        context,
+        split_id,
+        current_sha,
+        package_name=package_name,
+        capture_id=current_capture_id,
+    )
 
     metrics: dict[str, object] = {
         "group_id": split_id,

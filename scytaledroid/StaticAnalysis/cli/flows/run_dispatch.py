@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import signal
+import hashlib
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -163,6 +164,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
 
     modules = _modules_for_run(params)
     scope_target = format_scope_target(selection)
+    _emit_selection_manifest(selection, params.session_stamp)
 
     workers_label = f"auto ({workers})" if isinstance(params.workers, str) else str(workers)
     if not (frozen_ctx.quiet and frozen_ctx.batch):
@@ -266,91 +268,8 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
         pass
     run_map = None
     linkage_blocked_reason = None
-    if not params.persistence_ready:
-        linkage_blocked_reason = "Persistence gate failed; skipping run_map and permission refresh."
-    elif outcome is not None and not params.dry_run:
-        missing_ids = [res.package_name for res in outcome.results if not res.static_run_id]
-        if missing_ids:
-            linkage_blocked_reason = (
-                "static_run_id missing for one or more apps; skipping run_map and permission refresh."
-            )
-    if outcome is not None and params.session_stamp:
-        if linkage_blocked_reason:
-            print(status_messages.status(linkage_blocked_reason, level="warn"))
-        else:
-            try:
-                run_map = _build_session_run_map(
-                    outcome,
-                    params.session_stamp,
-                    allow_overwrite=bool(params.run_map_overwrite),
-                )
-                if run_map and not params.dry_run:
-                    for entry in run_map.get("apps", []):
-                        missing = [
-                            field
-                            for field in ("static_run_id", *REQUIRED_FIELDS)
-                            if entry.get(field) in (None, "")
-                        ]
-                        if missing:
-                            raise RuntimeError(
-                                "run_map incomplete for package "
-                                f"{entry.get('package')}: missing {', '.join(missing)}"
-                            )
-                    validate_run_map(run_map, params.session_stamp)
-                if run_map and not params.dry_run:
-                    _persist_session_run_links(params.session_stamp, run_map)
-            except Exception as exc:
-                print(
-                    status_messages.status(
-                        f"Failed to build run map for session {params.session_stamp}: {exc}",
-                        level="error",
-                    )
-                )
-                run_map = None
-
-    if (
-        params.permission_snapshot_refresh
-        and params.profile in {"full", "lightweight"}
-        and not params.dry_run
-    ):
-        if linkage_blocked_reason:
-            print()
-            print(status_messages.status(linkage_blocked_reason, level="warn"))
-        else:
-            try:
-                if not (frozen_ctx.quiet and frozen_ctx.batch):
-                    print()
-                    print(
-                        status_messages.step(
-                            "Re-rendering permission snapshot for parity",
-                            label="Static Analysis",
-                        )
-                    )
-                execute_permission_scan(
-                    selection,
-                    params,
-                    persist_detections=True,
-                    run_map=run_map,
-                    require_run_map=True,
-                )
-            except Exception:
-                print(
-                    status_messages.status(
-                        "Permission snapshot refresh failed — see logs for details.",
-                        level="error",
-                    )
-                )
-    elif params.profile in {"full", "lightweight"} and not params.dry_run:
-        print()
-        print(
-            status_messages.status(
-                (
-                    "Post-run permission refresh skipped. Enable it in Advanced options "
-                    "or set SCYTALEDROID_STATIC_REFRESH_PERMISSION_SNAPSHOT=1."
-                ),
-                level="info",
-            )
-        )
+    linkage_warning_printed = False
+    missing_id_packages: list[str] = []
 
     try:
         if outcome is not None:
@@ -362,6 +281,98 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
                 run_status = "FAILED"
             abort_reason = normalize_abort_reason(outcome.abort_reason or ("SIGINT" if outcome.aborted else None))
             abort_signal = outcome.abort_signal
+            if not params.dry_run:
+                if not params.persistence_ready:
+                    linkage_blocked_reason = "Persistence gate failed; skipping run_map and permission refresh."
+                else:
+                    missing_id_packages = [res.package_name for res in outcome.results if not res.static_run_id]
+                    if missing_id_packages:
+                        linkage_blocked_reason = (
+                            "static_run_id missing for one or more apps; skipping run_map and permission refresh."
+                        )
+
+                if params.session_stamp:
+                    if linkage_blocked_reason:
+                        print(status_messages.status(linkage_blocked_reason, level="warn"))
+                        linkage_warning_printed = True
+                    else:
+                        try:
+                            run_map = _build_session_run_map(
+                                outcome,
+                                params.session_stamp,
+                                allow_overwrite=bool(params.run_map_overwrite),
+                            )
+                            if run_map:
+                                for entry in run_map.get("apps", []):
+                                    missing = [
+                                        field
+                                        for field in ("static_run_id", *REQUIRED_FIELDS)
+                                        if entry.get(field) in (None, "")
+                                    ]
+                                    if missing:
+                                        raise RuntimeError(
+                                            "run_map incomplete for package "
+                                            f"{entry.get('package')}: missing {', '.join(missing)}"
+                                        )
+                                validate_run_map(run_map, params.session_stamp)
+                                _persist_session_run_links(params.session_stamp, run_map)
+                        except Exception as exc:
+                            print(
+                                status_messages.status(
+                                    f"Failed to build run map for session {params.session_stamp}: {exc}",
+                                    level="error",
+                                )
+                            )
+                            run_map = None
+
+                _emit_missing_run_ids_artifact(
+                    outcome=outcome,
+                    session_stamp=params.session_stamp,
+                    linkage_blocked_reason=linkage_blocked_reason,
+                    missing_id_packages=missing_id_packages,
+                )
+
+                if params.permission_snapshot_refresh and params.profile in {"full", "lightweight"}:
+                    if linkage_blocked_reason:
+                        if not linkage_warning_printed:
+                            print()
+                            print(status_messages.status(linkage_blocked_reason, level="warn"))
+                            linkage_warning_printed = True
+                    else:
+                        try:
+                            if not (frozen_ctx.quiet and frozen_ctx.batch):
+                                print()
+                                print(
+                                    status_messages.step(
+                                        "Re-rendering permission snapshot for parity",
+                                        label="Static Analysis",
+                                    )
+                                )
+                            execute_permission_scan(
+                                selection,
+                                params,
+                                persist_detections=True,
+                                run_map=run_map,
+                                require_run_map=True,
+                            )
+                        except Exception:
+                            print(
+                                status_messages.status(
+                                    "Permission snapshot refresh failed — see logs for details.",
+                                    level="error",
+                                )
+                            )
+                elif params.profile in {"full", "lightweight"}:
+                    print()
+                    print(
+                        status_messages.status(
+                            (
+                                "Post-run permission refresh skipped. Enable it in Advanced options "
+                                "or set SCYTALEDROID_STATIC_REFRESH_PERMISSION_SNAPSHOT=1."
+                            ),
+                            level="info",
+                        )
+                    )
     except Exception as exc:
         run_status = "FAILED"
         abort_reason = classify_exception(exc)
@@ -452,6 +463,121 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
             pass
 
     return outcome
+
+
+def _emit_selection_manifest(selection: ScopeSelection, session_stamp: str | None) -> None:
+    stamp = (session_stamp or "").strip() or "unspecified-session"
+    groups = tuple(getattr(selection, "groups", ()) or ())
+    capture_distribution: dict[str, int] = {}
+    app_rows: list[dict[str, object]] = []
+    digest_inputs: list[str] = []
+
+    for group in groups:
+        artifacts = tuple(getattr(group, "artifacts", ()) or ())
+        package = str(getattr(group, "package_name", "") or "")
+        group_key = str(getattr(group, "group_key", "") or "")
+        capture_id = str(getattr(group, "capture_id", None) or "unknown")
+        capture_distribution[capture_id] = capture_distribution.get(capture_id, 0) + len(artifacts)
+        artifact_paths = sorted(
+            str(getattr(artifact, "display_path", "") or "")
+            for artifact in artifacts
+        )
+        digest_inputs.extend(path for path in artifact_paths if path)
+        app_rows.append(
+            {
+                "package_name": package,
+                "group_key": group_key,
+                "capture_id": capture_id,
+                "artifact_count": len(artifacts),
+                "artifacts": artifact_paths,
+            }
+        )
+
+    digest_payload = "\n".join(sorted(digest_inputs)).encode("utf-8")
+    manifest = {
+        "session_stamp": stamp,
+        "scope": getattr(selection, "scope", None),
+        "scope_label": getattr(selection, "label", None),
+        "group_count": len(groups),
+        "artifact_count": sum(int(row["artifact_count"]) for row in app_rows),
+        "capture_distribution": dict(sorted(capture_distribution.items())),
+        "artifact_manifest_sha256": hashlib.sha256(digest_payload).hexdigest(),
+        "apps": sorted(
+            app_rows,
+            key=lambda row: (str(row.get("package_name", "")), str(row.get("group_key", ""))),
+        ),
+    }
+
+    out_dir = Path("output") / "audit" / "selection"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{stamp}_selected_artifacts.json"
+    out_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+    print(status_messages.status(f"Selection manifest: {out_path}", level="info"))
+
+
+def _emit_missing_run_ids_artifact(
+    *,
+    outcome: RunOutcome,
+    session_stamp: str | None,
+    linkage_blocked_reason: str | None,
+    missing_id_packages: list[str],
+) -> None:
+    stamp = (session_stamp or "").strip() or "unspecified-session"
+    missing_set = set(missing_id_packages)
+    failure_lines = [str(line) for line in getattr(outcome, "failures", []) if isinstance(line, str)]
+
+    def _classify_missing_run_id(app: object, package: str) -> str:
+        identity_valid = getattr(app, "identity_valid", None)
+        if identity_valid is False:
+            return "identity_invalid"
+        if int(getattr(app, "persistence_skipped", 0) or 0) > 0:
+            return "persistence_skipped"
+        if int(getattr(app, "failed_artifacts", 0) or 0) > 0:
+            return "artifact_failed"
+        if int(getattr(app, "persisted_artifacts", 0) or 0) == 0:
+            package_key = (package or "").strip().lower()
+            if any("db_write_failed" in line and package_key in line.lower() for line in failure_lines):
+                return "db_write_failed"
+            if any("persist" in line.lower() and package_key in line.lower() for line in failure_lines):
+                return "persist_error"
+            return "not_persisted"
+        return "missing_static_run_id"
+
+    rows: list[dict[str, object]] = []
+    for app in outcome.results:
+        package = str(getattr(app, "package_name", "") or "")
+        static_run_id = getattr(app, "static_run_id", None)
+        classification = "ok"
+        if package in missing_set or static_run_id is None:
+            classification = _classify_missing_run_id(app, package)
+        rows.append(
+            {
+                "package_name": package,
+                "static_run_id": static_run_id,
+                "missing_static_run_id": package in missing_set or static_run_id is None,
+                "db_disconnect": False,
+                "retry_count": 0,
+                "classification": classification,
+                "identity_error_reason": getattr(app, "identity_error_reason", None),
+                "persisted_artifacts": int(getattr(app, "persisted_artifacts", 0) or 0),
+                "failed_artifacts": int(getattr(app, "failed_artifacts", 0) or 0),
+                "persistence_skipped": int(getattr(app, "persistence_skipped", 0) or 0),
+            }
+        )
+
+    payload = {
+        "session_stamp": stamp,
+        "total_apps": len(outcome.results),
+        "missing_static_run_id_count": len([row for row in rows if row["missing_static_run_id"]]),
+        "linkage_blocked_reason": linkage_blocked_reason,
+        "rows": rows,
+    }
+
+    out_dir = Path("output") / "audit" / "persistence"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{stamp}_missing_run_ids.json"
+    out_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    print(status_messages.status(f"Missing run-id audit: {out_path}", level="info"))
 
 
 def execute_run_spec(spec: StaticRunSpec) -> RunOutcome | None:

@@ -107,7 +107,15 @@ def execute_scan(
         show_checkpoints=not params.dry_run and show_artifacts,
         run_ctx=run_ctx,
         progress_every=getattr(params, "progress_every", 5),
+        show_app_completion=not (params.scope == "all" and not params.verbose_output),
     )
+    all_apps_compact_mode = bool(params.scope == "all" and not params.verbose_output)
+    total_apps = len(selection.groups)
+    apps_completed = 0
+    banner_last_emit = time.monotonic()
+    agg_checks: Counter[str] = Counter()
+    agg_artifacts_done = 0
+    agg_slowest: Counter[str] = Counter()
     config_hash = _compute_config_hash(params)
     pipeline_version = getattr(params, "analysis_version", None)
     persistence_ready = bool(getattr(params, "persistence_ready", True))
@@ -144,7 +152,7 @@ def execute_scan(
             pass
 
     last_elapsed_for_progress: float | None = None
-    for group in selection.groups:
+    for app_index, group in enumerate(selection.groups, start=1):
         app_result = AppRunResult(group.package_name, getattr(group, "category", "Uncategorized"))
         identity = _compute_run_identity(group)
         manifest_sha256 = _artifact_manifest_sha256(group)
@@ -230,6 +238,7 @@ def execute_scan(
                 package_name=group.package_name,
                 profile_label=params.profile_label,
                 run_ctx=run_ctx,
+                card_mode=all_apps_compact_mode,
             )
             # Batch quiet mode suppresses per-artifact streaming. Heartbeat is the operator
             # visibility channel, so update a shared state with the current app context.
@@ -362,15 +371,64 @@ def execute_scan(
         if not _abort_state()[0]:
             progress.flush_line()
             artifact_count = app_result.discovered_artifacts
-            metadata = getattr(last_report_for_app, "metadata", {}) if last_report_for_app else None
+            app_summary = _summarize_app_pipeline(app_result)
+            metadata = {"pipeline_summary": app_summary} if app_summary else (
+                getattr(last_report_for_app, "metadata", {}) if last_report_for_app else None
+            )
             render_app_completion(
                 artifact_count=artifact_count,
                 elapsed_seconds=app_result.duration_seconds or 0.0,
                 report_metadata=metadata if isinstance(metadata, Mapping) else None,
                 params=params,
                 run_ctx=run_ctx,
+                app_index=app_index,
+                app_total=total_apps,
+                app_title=str(display_name) if display_name else group.package_name,
+                package_name=group.package_name,
+                app_summary=app_summary,
             )
             progress.app_complete(artifact_count, app_result.duration_seconds or 0.0)
+            apps_completed += 1
+            agg_artifacts_done += int(app_result.executed_artifacts or 0)
+            if app_summary:
+                agg_checks["ok"] += int(app_summary.get("ok_count", 0) or 0)
+                agg_checks["warn"] += int(app_summary.get("warn_count", 0) or 0)
+                agg_checks["fail"] += int(app_summary.get("fail_count", 0) or 0)
+                agg_checks["error"] += int(app_summary.get("error_count", 0) or 0)
+                slowest = app_summary.get("slowest_detectors")
+                if isinstance(slowest, list):
+                    for entry in slowest[:1]:
+                        if isinstance(entry, Mapping):
+                            det = str(entry.get("detector") or entry.get("section") or "").strip()
+                            dur = entry.get("duration_sec")
+                            if det and isinstance(dur, (int, float)):
+                                agg_slowest[det] += float(dur)
+
+            now = time.monotonic()
+            should_emit_banner = (
+                apps_completed == total_apps
+                or apps_completed % 10 == 0
+                or (now - banner_last_emit) >= 30.0
+            )
+            if all_apps_compact_mode and should_emit_banner and total_apps > 0:
+                elapsed = max(0.0, now - progress._start)  # noqa: SLF001 - local progress clock reuse
+                apps_per_sec = (apps_completed / elapsed) if elapsed > 0 else 0.0
+                remaining_apps = max(0, total_apps - apps_completed)
+                eta_sec = int(round((remaining_apps / apps_per_sec), 0)) if apps_per_sec > 0 else -1
+                eta_text = format_duration(float(eta_sec)) if eta_sec >= 0 else "--"
+                slow_label = "--"
+                if agg_slowest:
+                    det, total_dur = max(agg_slowest.items(), key=lambda kv: kv[1])
+                    avg = total_dur / max(1, apps_completed)
+                    slow_label = f"{det} {avg:.1f}s"
+                print(
+                    "Progress: "
+                    f"Apps {apps_completed}/{total_apps} • "
+                    f"Artifacts {agg_artifacts_done}/{total_artifacts} • "
+                    f"ok={agg_checks['ok']} warn={agg_checks['warn']} fail={agg_checks['fail']} error={agg_checks['error']} • "
+                    f"ETA ~ {eta_text} • Slow avg: {slow_label}"
+                )
+                banner_last_emit = now
         if _abort_state()[0]:
             break
 
@@ -444,6 +502,69 @@ def _append_resource_warning(
         inline_lines.append(f"Count values: {', '.join(str(val) for val in sorted(set(counts)))}")
     inline_lines.append("String/resource results may be partial; re-run this APK if needed.")
     return inline_lines
+
+
+def _summarize_app_pipeline(app_result: AppRunResult) -> dict[str, object]:
+    status_counts: Counter[str] = Counter()
+    severity_counts: Counter[str] = Counter()
+    policy_fail_detectors: list[dict[str, object]] = []
+    finding_fail_detectors: list[dict[str, object]] = []
+    error_detectors: list[dict[str, object]] = []
+    slowest: list[dict[str, object]] = []
+    detector_total = 0
+    detector_executed = 0
+    detector_skipped = 0
+    total_duration_sec = 0.0
+    for artifact in app_result.artifacts:
+        report = artifact.report
+        metadata = report.metadata if isinstance(getattr(report, "metadata", None), Mapping) else {}
+        summary = metadata.get("pipeline_summary") if isinstance(metadata.get("pipeline_summary"), Mapping) else None
+        if not isinstance(summary, Mapping):
+            continue
+        detector_total += int(summary.get("detector_total", 0) or 0)
+        detector_executed += int(summary.get("detector_executed", 0) or 0)
+        detector_skipped += int(summary.get("detector_skipped", 0) or 0)
+        total_duration_sec += float(summary.get("total_duration_sec", 0.0) or 0.0)
+        for key, value in (summary.get("status_counts") or {}).items():
+            status_counts[str(key)] += int(value or 0)
+        for key, value in (summary.get("severity_counts") or {}).items():
+            severity_counts[str(key)] += int(value or 0)
+        for key, target in (
+            ("policy_fail_detectors", policy_fail_detectors),
+            ("finding_fail_detectors", finding_fail_detectors),
+            ("error_detectors", error_detectors),
+        ):
+            payload = summary.get(key)
+            if isinstance(payload, list):
+                target.extend([row for row in payload if isinstance(row, Mapping)])
+        payload = summary.get("slowest_detectors")
+        if isinstance(payload, list):
+            slowest.extend([row for row in payload if isinstance(row, Mapping)])
+    slowest_sorted = sorted(
+        slowest,
+        key=lambda row: float(row.get("duration_sec", 0.0) or 0.0),
+        reverse=True,
+    )
+    policy_fail_count = len(policy_fail_detectors)
+    finding_fail_count = len(finding_fail_detectors)
+    return {
+        "detector_total": detector_total,
+        "detector_executed": detector_executed,
+        "detector_skipped": detector_skipped,
+        "total_duration_sec": total_duration_sec,
+        "status_counts": {k: int(v) for k, v in status_counts.items()},
+        "severity_counts": {k: int(v) for k, v in severity_counts.items()},
+        "policy_fail_count": policy_fail_count,
+        "finding_fail_count": finding_fail_count,
+        "error_count": len(error_detectors),
+        "policy_fail_detectors": policy_fail_detectors,
+        "finding_fail_detectors": finding_fail_detectors,
+        "error_detectors": error_detectors,
+        "slowest_detectors": slowest_sorted[:3],
+        "ok_count": int(status_counts.get("OK", 0)),
+        "warn_count": int(status_counts.get("WARN", 0)),
+        "fail_count": int(policy_fail_count + finding_fail_count),
+    }
 
 
 def _execute_single_artifact(

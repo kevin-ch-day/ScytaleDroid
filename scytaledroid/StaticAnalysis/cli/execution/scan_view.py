@@ -18,10 +18,13 @@ def render_app_start(
     package_name: str,
     profile_label: str,
     run_ctx: StaticRunContext,
+    card_mode: bool = False,
 ) -> None:
     if run_ctx.quiet and run_ctx.batch:
         return
     if not (title or package_name):
+        return
+    if card_mode:
         return
     print()
     display = title or package_name
@@ -49,13 +52,22 @@ def render_app_completion(
     report_metadata: Mapping[str, object] | None,
     params: RunParameters,
     run_ctx: StaticRunContext,
+    app_index: int | None = None,
+    app_total: int | None = None,
+    app_title: str | None = None,
+    package_name: str | None = None,
+    app_summary: Mapping[str, object] | None = None,
 ) -> str:
     if run_ctx.quiet and run_ctx.batch:
         return _format_elapsed(elapsed_seconds or 0.0)
     elapsed = _format_elapsed(elapsed_seconds or 0.0)
-    if not isinstance(report_metadata, Mapping):
-        return elapsed
-    summary = report_metadata.get("pipeline_summary")
+    summary: Mapping[str, object] | None = None
+    if isinstance(app_summary, Mapping):
+        summary = app_summary
+    elif isinstance(report_metadata, Mapping):
+        candidate = report_metadata.get("pipeline_summary")
+        if isinstance(candidate, Mapping):
+            summary = candidate
     if not isinstance(summary, Mapping):
         return elapsed
     total = summary.get("detector_total")
@@ -70,6 +82,75 @@ def render_app_completion(
     info_count = int(status_counts.get("INFO", 0) or 0)
     error_count = int(summary.get("error_count", 0) or 0)
     skipped_count = int(skipped or 0)
+    fail_count = finding_fail_count + policy_fail_count
+    card_mode = bool(params.scope == "all" and not params.verbose_output)
+
+    if card_mode:
+        label = (app_title or package_name or "").strip() or str(package_name or "<unknown>")
+        pkg = str(package_name or "").strip()
+        if app_index is not None and app_total is not None:
+            if pkg and label and label != pkg:
+                print(f"[{app_index}/{app_total}] {label}  ({pkg})")
+            elif pkg:
+                print(f"[{app_index}/{app_total}] {pkg}")
+            else:
+                print(f"[{app_index}/{app_total}] {label}")
+        else:
+            if pkg and label and label != pkg:
+                print(f"{label}  ({pkg})")
+            elif pkg:
+                print(pkg)
+            else:
+                print(label)
+
+        print(
+            "Artifacts: "
+            f"{artifact_count}   Time: {elapsed}   "
+            f"Checks: ok={ok_count} warn={warn_count} fail={fail_count} error={error_count} skipped={skipped_count}"
+        )
+        p0 = int((summary.get("severity_counts") or {}).get("P0", 0) if isinstance(summary.get("severity_counts"), Mapping) else 0)
+        p1 = int((summary.get("severity_counts") or {}).get("P1", 0) if isinstance(summary.get("severity_counts"), Mapping) else 0)
+        p2 = int((summary.get("severity_counts") or {}).get("P2", 0) if isinstance(summary.get("severity_counts"), Mapping) else 0)
+        note = int((summary.get("severity_counts") or {}).get("NOTE", 0) if isinstance(summary.get("severity_counts"), Mapping) else 0)
+        print(f"Findings: P0={p0} P1={p1} P2={p2} Note={note}")
+
+        slowest = summary.get("slowest_detectors")
+        slow_parts: list[str] = []
+        if isinstance(slowest, Sequence):
+            for entry in slowest[:2]:
+                if not isinstance(entry, Mapping):
+                    continue
+                det = entry.get("detector") or entry.get("section")
+                dur = entry.get("duration_sec")
+                if det and isinstance(dur, (int, float)):
+                    slow_parts.append(f"{det} {dur:.2f}s")
+        if slow_parts:
+            print("Slow: " + "; ".join(slow_parts[:2]))
+
+        outlier = artifact_count > 20
+        if outlier:
+            print("⚠ OUTLIER ARTIFACT COUNT")
+            print(
+                f"Artifacts: {artifact_count} (expected <= 20)   Time: {elapsed}   "
+                "Likely cause: mixed-capture group merge (press D for selection details)."
+            )
+
+        if error_count > 0 or fail_count > 0 or p0 > 0:
+            failing: list[str] = []
+            for key in ("finding_fail_detectors", "policy_fail_detectors", "error_detectors"):
+                payload = summary.get(key)
+                if not isinstance(payload, Sequence):
+                    continue
+                for entry in payload:
+                    if not isinstance(entry, Mapping):
+                        continue
+                    det = str(entry.get("detector") or entry.get("section") or "").strip()
+                    if det and det not in failing:
+                        failing.append(det)
+            if failing:
+                print("Failing checks: " + ", ".join(failing[:4]))
+        return elapsed
+
     status_line = "Checks complete"
     if executed is not None and total is not None:
         status_line += f": {executed}/{total} executed"

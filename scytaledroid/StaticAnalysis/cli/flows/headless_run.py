@@ -35,6 +35,7 @@ def _artifact_group_from_path(apk_path: Path) -> ArtifactGroup:
         package_name=artifact.package_name,
         version_display=artifact.version_display,
         session_stamp=artifact.session_stamp,
+        capture_id=artifact.capture_id,
         artifacts=(artifact,),
     )
 

@@ -37,6 +37,7 @@ def _make_selection(tmp_path: Path) -> ScopeSelection:
         package_name="com.example.app",
         version_display="1.0",
         session_stamp="20260123-000001",
+        capture_id="20260123-000001",
         artifacts=(artifact,),
     )
     return ScopeSelection(scope="app", label="Example app", groups=(group,))

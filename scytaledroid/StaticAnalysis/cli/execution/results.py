@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
@@ -412,10 +413,19 @@ def _render_run_results_impl(
     canonical_failures: list[str] = []
     canonical_skips: list[str] = []
     baseline_written_count = 0
+    noncanonical_baseline_written_count = 0
     plan_written_count = 0
     report_reference_count = 0
     persistence_ready = bool(params.persistence_ready)
     persist_enabled = (not params.dry_run) and persistence_ready
+    try:
+        missing_runid_failfast_threshold = max(
+            1,
+            int(os.environ.get("SCYTALEDROID_STATIC_RUNID_FAILFAST_THRESHOLD", "10")),
+        )
+    except Exception:
+        missing_runid_failfast_threshold = 10
+    consecutive_missing_run_ids = 0
     compact_mode = not params.verbose_output
     if not persistence_ready and not params.dry_run:
         print(
@@ -617,12 +627,47 @@ def _render_run_results_impl(
         saved_path = None
         dynamic_plan_path = None
         if persist_enabled and not app_result.static_run_id:
+            consecutive_missing_run_ids += 1
             print(
                 status_messages.status(
-                    f"Skipping evidence outputs for {app_result.package_name}: static_run_id missing.",
+                    (
+                        f"NON-PERSISTED (IN-MEMORY ONLY): {app_result.package_name} "
+                        "(static_run_id missing; outputs are non-authoritative)."
+                    ),
                     level="warn",
                 )
             )
+            try:
+                saved_path = write_baseline_json(
+                    payload,
+                    package=app_result.package_name,
+                    profile=params.profile,
+                    scope=params.scope,
+                )
+                noncanonical_baseline_written_count += 1
+                if not compact_mode:
+                    _emit_detail(
+                        "Saved baseline JSON (NON-PERSISTED / NON-AUTHORITATIVE) "
+                        f"→ {saved_path.name}"
+                    )
+            except Exception as exc:
+                saved_path = None
+                warning = (
+                    f"Failed to write non-canonical baseline JSON for {app_result.package_name}: {exc}"
+                )
+                print(status_messages.status(warning, level="warn"))
+            if consecutive_missing_run_ids >= missing_runid_failfast_threshold:
+                warning = (
+                    "Aborting post-processing: "
+                    f"{consecutive_missing_run_ids} consecutive apps missing static_run_id "
+                    f"(threshold={missing_runid_failfast_threshold})."
+                )
+                print(status_messages.status(warning, level="error"))
+                persistence_errors.append(warning)
+                outcome.failures.append("static_run_id_failfast_threshold")
+                break
+        elif persist_enabled:
+            consecutive_missing_run_ids = 0
         if persist_enabled and app_result.static_run_id:
             try:
                 saved_path = write_baseline_json(
@@ -835,7 +880,9 @@ def _render_run_results_impl(
             print(
                 status_messages.status(
                     "Artifacts saved: "
-                    f"baseline={baseline_written_count} plan={plan_written_count} "
+                    f"baseline={baseline_written_count} "
+                    f"baseline_noncanonical={noncanonical_baseline_written_count} "
+                    f"plan={plan_written_count} "
                     f"report={report_reference_count}",
                     level="info",
                 )
@@ -1081,6 +1128,13 @@ def _render_run_results_impl(
                     )
             if outcome.results:
                 _persist_cohort_rollup(session_stamp, params.scope_label)
+        if not params.verbose_output and params.scope == "all":
+            _render_bucketed_session_summary(
+                outcome=outcome,
+                params=params,
+                runtime_findings_total=runtime_findings_total,
+                persistence_errors=persistence_errors,
+            )
 
         _render_post_run_views(
             permission_profiles,
@@ -1202,6 +1256,113 @@ def _dedupe_profile_entries(entries: Sequence[dict[str, object]]) -> list[dict[s
         seen.add(label)
         deduped.append(entry)
     return deduped
+
+
+def _summarize_app_pipeline_for_results(app_result: object) -> dict[str, int]:
+    ok = warn = fail = error = 0
+    p0 = p1 = p2 = note = 0
+    for artifact in getattr(app_result, "artifacts", []) or []:
+        report = getattr(artifact, "report", None)
+        metadata = getattr(report, "metadata", None)
+        if not isinstance(metadata, Mapping):
+            continue
+        summary = metadata.get("pipeline_summary")
+        if not isinstance(summary, Mapping):
+            continue
+        status_counts = summary.get("status_counts")
+        if isinstance(status_counts, Mapping):
+            ok += int(status_counts.get("OK", 0) or 0)
+            warn += int(status_counts.get("WARN", 0) or 0)
+        fail += int(summary.get("finding_fail_count", 0) or 0) + int(summary.get("policy_fail_count", 0) or 0)
+        error += int(summary.get("error_count", 0) or 0)
+        sev = summary.get("severity_counts")
+        if isinstance(sev, Mapping):
+            p0 += int(sev.get("P0", 0) or 0)
+            p1 += int(sev.get("P1", 0) or 0)
+            p2 += int(sev.get("P2", 0) or 0)
+            note += int(sev.get("NOTE", 0) or 0)
+    return {
+        "ok": ok,
+        "warn": warn,
+        "fail": fail,
+        "error": error,
+        "p0": p0,
+        "p1": p1,
+        "p2": p2,
+        "note": note,
+    }
+
+
+def _render_bucketed_session_summary(
+    *,
+    outcome: RunOutcome,
+    params: RunParameters,
+    runtime_findings_total: int,
+    persistence_errors: Sequence[str],
+) -> None:
+    apps_total = len(outcome.results)
+    artifacts_total = int(outcome.total_artifacts or sum(len(app.artifacts) for app in outcome.results))
+    session_label = params.session_stamp or params.session_label or "unspecified"
+    print()
+    print(f"Session {session_label} Summary")
+    print(f"Apps: {apps_total} • Artifacts: {artifacts_total} • Detector hits (raw): {runtime_findings_total}")
+
+    rows: list[dict[str, object]] = []
+    for app in outcome.results:
+        counters = _summarize_app_pipeline_for_results(app)
+        rows.append(
+            {
+                "package": app.package_name,
+                "label": app.app_label or app.package_name,
+                "artifacts": int(getattr(app, "discovered_artifacts", 0) or len(getattr(app, "artifacts", []) or [])),
+                "duration_seconds": float(getattr(app, "duration_seconds", 0.0) or 0.0),
+                "static_run_id": getattr(app, "static_run_id", None),
+                **counters,
+            }
+        )
+
+    failing = [row for row in rows if int(row["error"]) > 0 or int(row["fail"]) > 0]
+    if failing:
+        print()
+        print(f"ERRORS/FAILS ({len(failing)})")
+        for row in sorted(failing, key=lambda r: (int(r["error"]), int(r["fail"])), reverse=True)[:10]:
+            print(
+                f"- {row['package']}: fail={row['fail']} error={row['error']} "
+                f"(P0={row['p0']} P1={row['p1']} P2={row['p2']})"
+            )
+
+    p0_rows = [row for row in rows if int(row["p0"]) > 0]
+    if p0_rows:
+        print()
+        print("P0 APPS (top)")
+        for row in sorted(p0_rows, key=lambda r: (int(r["p0"]), int(r["p1"])), reverse=True)[:10]:
+            print(f"- {row['package']} (P0={row['p0']}, P1={row['p1']}, P2={row['p2']})")
+
+    outliers = [row for row in rows if int(row["artifacts"]) > 20]
+    if outliers:
+        print()
+        print("OUTLIERS")
+        for row in sorted(outliers, key=lambda r: int(r["artifacts"]), reverse=True)[:10]:
+            print(
+                f"- {row['package']}: artifacts={row['artifacts']} "
+                f"time={format_duration(float(row['duration_seconds']))}"
+            )
+
+    missing_run_ids = [row for row in rows if not row.get("static_run_id")]
+    if persistence_errors or missing_run_ids:
+        print()
+        print(
+            "PERSISTENCE "
+            f"(missing_run_id={len(missing_run_ids)} issues={len(list(dict.fromkeys(str(x) for x in persistence_errors)))})"
+        )
+        for row in missing_run_ids[:5]:
+            print(f"- missing run_id: {row['package']}")
+
+    print()
+    print("Next actions")
+    print("- D in selection prompt: inspect capture distribution/outliers")
+    print("- View options → 1: summary details for top failing apps")
+    print("- Database tools → 12: audit static risk coverage gaps")
 
 
 __all__ = ["render_run_results"]

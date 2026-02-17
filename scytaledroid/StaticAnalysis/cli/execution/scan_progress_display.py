@@ -37,6 +37,7 @@ class _PipelineProgress:
         *,
         run_ctx: StaticRunContext | None = None,
         progress_every: int = 5,
+        show_app_completion: bool = True,
     ) -> None:
         self.total = max(1, int(total))
         self.show_splits = show_splits
@@ -63,6 +64,7 @@ class _PipelineProgress:
         self._last_checkpoint = 0
         self._ended = False
         self._progress_every = max(1, int(progress_every))
+        self._show_app_completion = bool(show_app_completion)
 
     def start(self, index: int, label: str) -> None:
         if self._silent:
@@ -80,15 +82,12 @@ class _PipelineProgress:
             line = f"[{index:2d}/{self.total}] {label} OK"
             print(line)
             return
-        if not self.show_checkpoints:
-            return
-        if index == self.total or (index - self._last_checkpoint) >= self._progress_every:
-            self._last_checkpoint = index
-            self._clear_line()
-            print(f"Completed {index}/{self.total} artifacts")
+        return
 
     def app_complete(self, artifact_count: int, elapsed_seconds: float) -> None:
         if self._silent:
+            return
+        if not self._show_app_completion:
             return
         if not self.show_artifacts:
             return

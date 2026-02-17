@@ -85,12 +85,7 @@ def _select_all_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
             required=False,
         ).strip().lower()
         if response == "d":
-            for package, stamp, skipped in skipped_details:
-                message = (
-                    f"Selected newest artifact set for {package} (session {stamp}); "
-                    f"skipped {skipped} older capture{'s' if skipped != 1 else ''}."
-                )
-                print(status_messages.status(message, level="info"))
+            _render_selection_details(grouped, scoped, skipped_details)
 
     return ScopeSelection("all", "All apps", scoped)
 
@@ -203,12 +198,7 @@ def select_category_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
             required=False,
         ).strip().lower()
         if response == "d":
-            for package, stamp, skipped in skipped_details:
-                message = (
-                    f"Selected newest artifact set for {package} (session {stamp}); "
-                    f"skipped {skipped} older capture{'s' if skipped != 1 else ''}."
-                )
-                print(status_messages.status(message, level="info"))
+            _render_selection_details(grouped, scoped, skipped_details)
 
     if scoped:
         print()
@@ -329,6 +319,54 @@ def _select_latest_groups(groups: Sequence[ArtifactGroup]) -> tuple[ArtifactGrou
         ]
         return tuple(contemporaries) if contemporaries else (best_group,)
     return (best_group,)
+
+
+def _render_selection_details(
+    grouped: dict[str, list[ArtifactGroup]],
+    selected: Sequence[ArtifactGroup],
+    skipped_details: Sequence[tuple[str, str, int]],
+) -> None:
+    print()
+    print("Selection details")
+    print("-" * 80)
+    selected_by_package: dict[str, list[ArtifactGroup]] = {}
+    for group in selected:
+        selected_by_package.setdefault(group.package_name, []).append(group)
+
+    rows: list[tuple[str, int, dict[str, int], int]] = []
+    for package, package_groups in grouped.items():
+        selected_groups = selected_by_package.get(package, [])
+        selected_artifacts = sum(len(group.artifacts) for group in selected_groups)
+        if selected_artifacts <= 0:
+            continue
+        capture_counts: dict[str, int] = {}
+        for group in package_groups:
+            capture = str(group.capture_id or group.session_stamp or "unknown")
+            capture_counts[capture] = capture_counts.get(capture, 0) + len(group.artifacts)
+        skipped = len(package_groups) - len(selected_groups)
+        rows.append((package, selected_artifacts, capture_counts, skipped))
+
+    rows.sort(key=lambda row: row[1], reverse=True)
+    top_rows = rows[:10]
+    if top_rows:
+        print("Top packages by selected artifact count:")
+        for package, count, capture_counts, skipped in top_rows:
+            capture_text = ", ".join(f"{key}={value}" for key, value in sorted(capture_counts.items()))
+            suffix = f" | skipped_old={skipped}" if skipped > 0 else ""
+            print(f"- {package}: {count} (capture_id: {capture_text}){suffix}")
+    else:
+        print("- No package selection rows available.")
+
+    total_packages = len(skipped_details)
+    total_skipped = sum(count for _, _, count in skipped_details)
+    if total_skipped > 0:
+        print(
+            f"Old captures skipped: {total_skipped} across {total_packages} package"
+            f"{'s' if total_packages != 1 else ''}"
+        )
+    else:
+        print("Old captures skipped: none")
+    print("Selection manifest path is printed when the scan starts (output/audit/selection/<session>_selected_artifacts.json).")
 
 
 def _group_recency_key(group: ArtifactGroup) -> tuple[int, str, float]:

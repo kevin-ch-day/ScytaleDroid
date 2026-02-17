@@ -38,7 +38,9 @@ else:  # pragma: no cover - default logger is rarely hit in production
 
 
 NAMED_PARAM_PATTERN = re.compile(r"%\(([^)]+)\)s")
-TRANSIENT_ERRNOS = {1205, 1213, 2006}
+# Retry transient transport/lock failures. 2013/2014 are common disconnect/read timeout
+# codes seen in long-running static persistence sessions.
+TRANSIENT_ERRNOS = {1205, 1213, 2006, 2013, 2014}
 MAX_RETRIES = 3
 
 SENSITIVE_KEYS = {"api_key", "auth", "authorization", "password", "secret", "token"}

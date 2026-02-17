@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -56,6 +58,14 @@ class RepositoryArtifact:
         return "-"
 
     @property
+    def version_key(self) -> str:
+        for candidate in (self.metadata.get("version_code"), self.metadata.get("version_name")):
+            token = _normalise_token(candidate)
+            if token:
+                return token
+        return "unknown"
+
+    @property
     def split_group_id(self) -> str | None:
         value = self.metadata.get("split_group_id")
         if value is None:
@@ -93,6 +103,24 @@ class RepositoryArtifact:
         return None
 
     @property
+    def capture_id(self) -> str:
+        capture = self.session_stamp
+        if capture:
+            return capture
+
+        captured_at = self.metadata.get("captured_at_utc") or self.metadata.get("snapshot_captured_at")
+        capture_day = _capture_day_token(captured_at)
+        if capture_day:
+            return f"legacy-{capture_day}"
+
+        path_token = _capture_token_from_path(self.path)
+        if path_token:
+            return f"legacy-{path_token}"
+
+        digest = hashlib.sha1(str(self.path.resolve()).encode("utf-8")).hexdigest()[:10]
+        return f"legacy-unknown-{digest}"
+
+    @property
     def apk_id(self) -> str | None:
         value = self.metadata.get("apk_id")
         if value is None:
@@ -113,6 +141,7 @@ class ArtifactGroup:
     package_name: str
     version_display: str
     session_stamp: str | None
+    capture_id: str | None
     artifacts: tuple[RepositoryArtifact, ...]
     grouping_reason: str | None = None
     grouping_confidence: str | None = None
@@ -192,12 +221,14 @@ def group_artifacts(
         package_name = members[0].package_name if members else "unknown"
         version = members[0].version_display if members else "-"
         session_stamp = members[0].session_stamp if members else None
+        capture_id = members[0].capture_id if members else None
         reason, confidence = grouping_meta.get(key, ("unknown", "low"))
         group = ArtifactGroup(
             group_key=key,
             package_name=package_name,
             version_display=version,
             session_stamp=session_stamp,
+            capture_id=capture_id,
             artifacts=tuple(members),
             grouping_reason=reason,
             grouping_confidence=confidence,
@@ -215,6 +246,7 @@ def group_artifacts(
     groups.sort(
         key=lambda group: (
             group.package_name.lower(),
+            group.capture_id or "",
             group.version_display,
             group.session_stamp or "",
             group.group_key,
@@ -228,22 +260,65 @@ def _group_key_for_artifact(
 ) -> tuple[str, str, str]:
     """Return a deterministic grouping key for an artifact."""
 
+    package = artifact.package_name.lower()
+    capture_id = artifact.capture_id
+
     if artifact.split_group_id:
-        package = artifact.package_name.lower()
         if package:
-            return f"split-{package}-{artifact.split_group_id}", "split_group_id", "high"
-        return f"split-{artifact.split_group_id}", "split_group_id", "high"
+            return (
+                f"split-{package}-{artifact.split_group_id}-{capture_id}-{artifact.version_key}",
+                "split_group_capture_id",
+                "high",
+            )
+        return (
+            f"split-{artifact.split_group_id}-{capture_id}-{artifact.version_key}",
+            "split_group_capture_id",
+            "high",
+        )
+    if package:
+        return f"pkg-{package}-{capture_id}-{artifact.version_key}", "package_capture_id", "high"
     if artifact.apk_id:
-        package = artifact.package_name.lower()
-        if package:
-            return f"apk-{package}-{artifact.apk_id}", "apk_id", "high"
-        return f"apk-{artifact.apk_id}", "apk_id", "high"
+        return f"apk-{artifact.apk_id}-{capture_id}", "apk_id_capture_id", "high"
     if artifact.sha256:
-        return f"sha256-{artifact.sha256}", "sha256", "high"
+        return f"sha256-{artifact.sha256}-{capture_id}", "sha256_capture_id", "high"
     path_group = _path_prefix_group_key(artifact)
     if path_group:
-        return path_group, "pathgroup", "low"
-    return f"path-{artifact.display_path}", "path", "low"
+        return f"{path_group}-{capture_id}", "pathgroup_capture_id", "low"
+    return f"path-{artifact.display_path}-{capture_id}", "path_capture_id", "low"
+
+
+_TOKEN_SANITISE_RE = re.compile(r"[^A-Za-z0-9._-]+")
+_DATE_TOKEN_RE = re.compile(r"^\d{8}(?:[-_]\d{6})?$")
+
+
+def _normalise_token(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    return _TOKEN_SANITISE_RE.sub("-", text)
+
+
+def _capture_day_token(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if len(text) >= 10 and text[4] == "-" and text[7] == "-":
+        return f"{text[0:4]}{text[5:7]}{text[8:10]}"
+    if len(text) >= 8 and text[:8].isdigit():
+        return text[:8]
+    return None
+
+
+def _capture_token_from_path(path: Path) -> str | None:
+    for parent in path.parents:
+        token = parent.name.strip()
+        if _DATE_TOKEN_RE.match(token):
+            return token
+    return None
 
 
 def _path_prefix_group_key(artifact: RepositoryArtifact) -> str | None:
