@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from scytaledroid.Database.db_core import DatabaseEngine, database_session
@@ -70,6 +70,80 @@ def get_server_info() -> dict[str, Any]:
     except Exception as exc:  # pragma: no cover - relies on external MySQL
         print(f"[DB_UTILS] Failed to get server info: {exc}")
     return info
+
+
+def get_lock_health_snapshot(*, limit: int = 20) -> dict[str, Any]:
+    """Best-effort lock/process snapshot for persistence triage.
+
+    The snapshot is intentionally non-fatal: missing MySQL privileges should
+    return a structured payload with an ``error`` field instead of raising.
+    """
+
+    snapshot: dict[str, Any] = {
+        "generated_at_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "lock_wait_timeout_s": None,
+        "connection_id": None,
+        "active_process_count": 0,
+        "active_processes": [],
+        "error": None,
+    }
+    capped_limit = max(1, min(int(limit), 200))
+
+    try:
+        with _connected_engine(reuse_connection=False) as engine:
+            try:
+                row = engine.fetch_one("SELECT @@innodb_lock_wait_timeout")
+                if row:
+                    snapshot["lock_wait_timeout_s"] = int(row[0])
+            except Exception:
+                pass
+
+            try:
+                row = engine.fetch_one("SELECT CONNECTION_ID()")
+                if row:
+                    snapshot["connection_id"] = int(row[0])
+            except Exception:
+                pass
+
+            rows = engine.fetch_all_dict("SHOW FULL PROCESSLIST")
+            active_rows: list[dict[str, Any]] = []
+            own_conn = snapshot.get("connection_id")
+            for raw in rows or []:
+                rec = {str(key).lower(): value for key, value in raw.items()}
+                cmd = str(rec.get("command") or "").strip().lower()
+                if cmd == "sleep":
+                    continue
+                try:
+                    conn_id = int(rec.get("id")) if rec.get("id") is not None else None
+                except Exception:
+                    conn_id = None
+                if own_conn is not None and conn_id == own_conn:
+                    continue
+                active_rows.append(
+                    {
+                        "id": conn_id,
+                        "user": rec.get("user"),
+                        "host": rec.get("host"),
+                        "db": rec.get("db"),
+                        "command": rec.get("command"),
+                        "time_s": int(rec.get("time") or 0),
+                        "state": rec.get("state"),
+                        "info": rec.get("info"),
+                    }
+                )
+
+            active_rows.sort(
+                key=lambda row: (
+                    int(row.get("time_s") or 0),
+                    str(row.get("state") or ""),
+                ),
+                reverse=True,
+            )
+            snapshot["active_process_count"] = len(active_rows)
+            snapshot["active_processes"] = active_rows[:capped_limit]
+    except Exception as exc:  # pragma: no cover - depends on DB grants
+        snapshot["error"] = f"{exc.__class__.__name__}: {exc}"
+    return snapshot
 
 
 def check_required_tables(required_tables: list[str]) -> dict[str, bool]:

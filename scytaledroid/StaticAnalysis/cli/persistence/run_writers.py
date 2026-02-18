@@ -7,11 +7,20 @@ from datetime import UTC, datetime
 from typing import Any
 
 from scytaledroid.Database.db_core import db_queries as core_q
+from scytaledroid.Database.db_core import db_engine
 from scytaledroid.Database.db_core.db_queries import run_sql_write
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .contracts import normalize_run_status
 from .dep_export import export_dep_json
+
+
+def _is_transient_db_exc(exc: Exception) -> bool:
+    if isinstance(exc, db_engine.TransientDbError):
+        return True
+    text = str(exc).lower()
+    markers = ("transientdberror", "lost connection", "server has gone away", "(2013", "(2014")
+    return any(marker in text for marker in markers)
 
 
 def _normalize_datetime_value(value: str | None) -> str | None:
@@ -116,7 +125,9 @@ def _ensure_app_version(
             f"Failed to resolve/create app_version for {package_for_run}: {exc}",
             category="static_analysis",
         )
-        return None
+        if _is_transient_db_exc(exc):
+            raise db_engine.TransientDbError(str(exc)) from exc
+        raise
 
 
 def _create_static_run(
@@ -232,7 +243,9 @@ def _create_static_run(
             f"Failed to create static run row for {session_stamp}: {exc}",
             category="static_analysis",
         )
-        return None
+        if _is_transient_db_exc(exc):
+            raise db_engine.TransientDbError(str(exc)) from exc
+        raise
 
 
 def create_static_run_ledger(

@@ -47,7 +47,7 @@ def handle_dataset_readiness_dashboard() -> None:
         dyn_counts AS (
           SELECT package_name,
                  COUNT(*) AS total_runs,
-                 SUM(CASE WHEN grade = 'PAPER_GRADE' THEN 1 ELSE 0 END) AS paper_runs,
+                 SUM(CASE WHEN grade = 'PAPER_GRADE' THEN 1 ELSE 0 END) AS canonical_runs,
                  MAX(CASE WHEN pcap_valid = 1 THEN 1 ELSE 0 END) AS pcap_valid
           FROM dynamic_sessions
           GROUP BY package_name
@@ -62,7 +62,7 @@ def handle_dataset_readiness_dashboard() -> None:
           r.harvested_at,
           CASE WHEN s.static_run_id IS NULL THEN 'N' ELSE 'Y' END AS static_ready,
           COALESCE(d.total_runs, 0) AS dyn_runs,
-          COALESCE(d.paper_runs, 0) AS paper_runs,
+          COALESCE(d.canonical_runs, 0) AS canonical_runs,
           CASE
             WHEN d.pcap_valid IS NULL THEN 'N/A'
             WHEN d.pcap_valid = 1 THEN 'Y'
@@ -128,7 +128,7 @@ def handle_dataset_readiness_dashboard() -> None:
             harvested_at,
             static_ready,
             dyn_runs,
-            paper_runs,
+            canonical_runs,
             pcap_valid,
         ) = row
         status = "DATASET_READY"
@@ -138,7 +138,7 @@ def handle_dataset_readiness_dashboard() -> None:
             status = "NEEDS_HARVEST"
         elif static_ready == "N":
             status = "NEEDS_STATIC"
-        elif int(paper_runs or 0) == 0:
+        elif int(canonical_runs or 0) == 0:
             status = "NEEDS_DYNAMIC"
         table_rows.append(
             [
@@ -150,7 +150,7 @@ def handle_dataset_readiness_dashboard() -> None:
                 str(repo_ver or "—"),
                 str(static_ready),
                 str(dyn_runs),
-                str(paper_runs),
+                str(canonical_runs),
                 str(pcap_valid),
                 status,
             ]
@@ -170,7 +170,7 @@ def handle_write_canonical_publication_bundle() -> None:
 
     baseline_root = output_phase_e_bundle_root()
     if not baseline_root.exists():
-        print(status_messages.status("Internal Phase E baseline bundle missing; generating it first.", level="warn"))
+        print(status_messages.status("Internal baseline deliverables bundle missing; generating it first.", level="warn"))
         ok = _write_phase_e_deliverables_bundle_from_pin()
         if not ok:
             prompt_utils.press_enter_to_continue()
@@ -202,7 +202,7 @@ def handle_write_canonical_publication_bundle() -> None:
                     snapshot_dir = cand
                     snapshot_id = cand.name
     else:
-        print(status_messages.status("No operational snapshots found under output/operational; exporting Phase E only.", level="info"))
+        print(status_messages.status("No operational snapshots found under output/operational; exporting baseline only.", level="info"))
 
     print()
     menu_utils.print_header("Write Canonical Research Bundle")
@@ -310,7 +310,7 @@ def _write_phase_e_deliverables_bundle_from_pin() -> bool:
     ok, why = _pin_is_valid(rid)
     if not ok:
         print()
-        menu_utils.print_header("Write Phase E deliverables bundle")
+        menu_utils.print_header("Write baseline deliverables bundle")
         print(status_messages.status("Artifact lock pin is invalid under current PM policy.", level="warn"))
         print(status_messages.status(f"Reason: {why}", level="warn"))
         print(
@@ -366,7 +366,7 @@ def _write_phase_e_deliverables_bundle_from_pin() -> bool:
         tag = str(payload.get("interaction_tag") or "").strip() or None
 
     print()
-    menu_utils.print_header("Write Phase E deliverables bundle")
+    menu_utils.print_header("Write baseline deliverables bundle")
     print(status_messages.status("This packages already-derived tables + one flagship timeline figure.", level="info"))
     print(status_messages.status(f"Freeze anchor (copied into bundle): {relative_path(freeze_anchor_path())}", level="info"))
     print(status_messages.status(f"Fig B1 exemplar: {rid[:8]} ({tag or 'interactive'})", level="info"))

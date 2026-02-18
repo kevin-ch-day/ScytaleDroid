@@ -188,7 +188,20 @@ def _summarise_params(params: Any, *, many: bool) -> dict[str, Any]:
 
 
 def _is_transient(exc: Exception) -> bool:
-    return isinstance(exc, err.OperationalError) and _mysql_errno(exc) in TRANSIENT_ERRNOS
+    if not isinstance(exc, err.OperationalError):
+        return False
+    errno = _mysql_errno(exc)
+    if errno in TRANSIENT_ERRNOS:
+        return True
+    text = str(exc).lower()
+    markers = (
+        "lost connection",
+        "server has gone away",
+        "timed out",
+        "(2013",
+        "(2014",
+    )
+    return any(marker in text for marker in markers)
 
 
 def _mysql_errno(exc: Exception) -> int | None:
@@ -200,6 +213,13 @@ def _mysql_errno(exc: Exception) -> int | None:
         first = args[0]
         if isinstance(first, int):
             return first
+    text = str(exc)
+    match = re.search(r"\((\d{4})\b", text)
+    if match:
+        try:
+            return int(match.group(1))
+        except Exception:
+            return None
     return None
 
 
@@ -257,8 +277,8 @@ def _connect_mysql() -> pymysql.Connection:
         # Autocommit keeps single-statement writes durable for FK-linked tables.
         autocommit=True,
         connect_timeout=int(DB_CONFIG.get("connect_timeout", 5)),
-        read_timeout=int(DB_CONFIG.get("read_timeout", 30)),
-        write_timeout=int(DB_CONFIG.get("write_timeout", 30)),
+        read_timeout=int(DB_CONFIG.get("read_timeout", 120)),
+        write_timeout=int(DB_CONFIG.get("write_timeout", 120)),
     )
     _log_env_once(connection)
     return connection
@@ -478,6 +498,7 @@ class DatabaseEngine:
         self._dialect = str(DB_CONFIG.get("engine", "sqlite")).lower()
         self._connection: Any | None = self._connect_any()
         self._read_only = False
+        self._txn_depth = 0
 
     def _connect_any(self) -> Any:
         if self._dialect == "mysql":
@@ -499,6 +520,22 @@ class DatabaseEngine:
     # ------------------------------------------------------------------
     # Connection lifecycle
     # ------------------------------------------------------------------
+    def in_transaction(self) -> bool:
+        if self._txn_depth > 0:
+            return True
+        connection = self._connection
+        if connection is None:
+            return False
+        if self._dialect == "mysql":
+            try:
+                return not bool(connection.get_autocommit())
+            except Exception:
+                return False
+        try:
+            return bool(getattr(connection, "in_transaction", False))
+        except Exception:
+            return False
+
     def reconnect(self) -> None:
         connection = self._ensure_connection()
         if self._dialect == "mysql":
@@ -555,6 +592,18 @@ class DatabaseEngine:
     @contextmanager
     def transaction(self) -> Iterator[DatabaseEngine]:
         connection = self._ensure_connection()
+        is_nested = self._txn_depth > 0
+        self._txn_depth += 1
+
+        # Nested scopes share the outer transaction boundary. Do not
+        # toggle autocommit or issue intermediate commit/rollback.
+        if is_nested:
+            try:
+                yield self
+            finally:
+                self._txn_depth = max(0, self._txn_depth - 1)
+            return
+
         if self._dialect == "mysql":
             prev_autocommit = connection.get_autocommit()
             connection.autocommit(False)
@@ -575,10 +624,12 @@ class DatabaseEngine:
             finally:
                 if self._dialect == "mysql":
                     connection.autocommit(prev_autocommit)
+                self._txn_depth = max(0, self._txn_depth - 1)
             raise
         else:
             if self._dialect == "mysql":
                 connection.autocommit(prev_autocommit)
+            self._txn_depth = max(0, self._txn_depth - 1)
 
     # ------------------------------------------------------------------
     # Execution primitives

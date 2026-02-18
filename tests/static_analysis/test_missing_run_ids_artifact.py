@@ -8,8 +8,17 @@ from scytaledroid.StaticAnalysis.cli.core.models import AppRunResult, RunOutcome
 from scytaledroid.StaticAnalysis.cli.flows import run_dispatch
 
 
+def _stub_lock_snapshot(monkeypatch) -> None:
+    monkeypatch.setattr(
+        run_dispatch.db_diagnostics,
+        "get_lock_health_snapshot",
+        lambda limit=25: {"schema_version": "v1", "active_process_count": 0, "limit": limit},
+    )
+
+
 def test_emit_missing_run_ids_artifact(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
+    _stub_lock_snapshot(monkeypatch)
     results = [
         AppRunResult(package_name="com.ok", category="Test", static_run_id=12),
         AppRunResult(package_name="com.missing", category="Test", static_run_id=None),
@@ -40,10 +49,14 @@ def test_emit_missing_run_ids_artifact(tmp_path: Path, monkeypatch) -> None:
     rows = {row["package_name"]: row for row in payload["rows"]}
     assert rows["com.ok"]["missing_static_run_id"] is False
     assert rows["com.missing"]["missing_static_run_id"] is True
+    lock_path = tmp_path / "output" / "audit" / "persistence" / "20260216_db_lock_health.json"
+    lock_payload = json.loads(lock_path.read_text(encoding="utf-8"))
+    assert lock_payload["active_process_count"] == 0
 
 
 def test_emit_missing_run_ids_artifact_extracts_retry_and_disconnect(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
+    _stub_lock_snapshot(monkeypatch)
     results = [AppRunResult(package_name="com.missing", category="Test", static_run_id=None)]
     scope = ScopeSelection(scope="all", label="All apps", groups=tuple())
     now = datetime.now(UTC)
@@ -74,3 +87,85 @@ def test_emit_missing_run_ids_artifact_extracts_retry_and_disconnect(tmp_path: P
     assert missing["stage"] == "permission_risk.write"
     assert missing["db_disconnect"] is True
     assert missing["retry_count"] == 2
+
+
+def test_emit_missing_run_ids_artifact_prefers_structured_persistence_fields(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _stub_lock_snapshot(monkeypatch)
+    result = AppRunResult(package_name="com.missing", category="Test", static_run_id=None)
+    result.persistence_retry_count = 3
+    result.persistence_db_disconnect = True
+    result.persistence_transaction_state = "rolled_back"
+    result.persistence_exception_class = "TransientDbError"
+    result.persistence_failure_stage = "permission_risk.write"
+
+    scope = ScopeSelection(scope="all", label="All apps", groups=tuple())
+    now = datetime.now(UTC)
+    outcome = RunOutcome(
+        results=[result],
+        started_at=now,
+        finished_at=now,
+        scope=scope,
+        base_dir=tmp_path,
+        failures=["com.missing generic failure message without retry markers"],
+    )
+
+    run_dispatch._emit_missing_run_ids_artifact(  # noqa: SLF001 - contract guard
+        outcome=outcome,
+        session_stamp="20260216",
+        linkage_blocked_reason="static_run_id missing for one or more apps",
+        missing_id_packages=["com.missing"],
+    )
+
+    out = tmp_path / "output" / "audit" / "persistence" / "20260216_missing_run_ids.json"
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    rows = {row["package_name"]: row for row in payload["rows"]}
+    missing = rows["com.missing"]
+    assert missing["retry_count"] == 3
+    assert missing["db_disconnect"] is True
+    assert missing["transaction_state"] == "rolled_back"
+    assert missing["exception_class"] == "TransientDbError"
+    assert missing["stage"] == "permission_risk.write"
+
+
+def test_emit_missing_run_ids_artifact_classifies_lock_wait_timeout(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    _stub_lock_snapshot(monkeypatch)
+    result = AppRunResult(package_name="com.lockwait", category="Test", static_run_id=None)
+    result.persistence_retry_count = 1
+    result.persistence_db_disconnect = False
+    result.persistence_transaction_state = "rolled_back"
+    result.persistence_exception_class = "RuntimeError"
+    result.persistence_failure_stage = "buckets.write"
+
+    scope = ScopeSelection(scope="all", label="All apps", groups=tuple())
+    now = datetime.now(UTC)
+    outcome = RunOutcome(
+        results=[result],
+        started_at=now,
+        finished_at=now,
+        scope=scope,
+        base_dir=tmp_path,
+        failures=[
+            "Static persistence transaction failed for com.lockwait: "
+            "buckets.write:TransientDbError:(1205, 'Lock wait timeout exceeded; try restarting transaction') "
+            "(retry_count=1 transaction_state=rolled_back stage=buckets.write db_disconnect=0)"
+        ],
+    )
+
+    run_dispatch._emit_missing_run_ids_artifact(  # noqa: SLF001 - contract guard
+        outcome=outcome,
+        session_stamp="20260216",
+        linkage_blocked_reason="static_run_id missing for one or more apps",
+        missing_id_packages=["com.lockwait"],
+    )
+
+    out = tmp_path / "output" / "audit" / "persistence" / "20260216_missing_run_ids.json"
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    rows = {row["package_name"]: row for row in payload["rows"]}
+    missing = rows["com.lockwait"]
+    assert missing["classification"] == "db_lock_wait"
+    assert missing["db_lock_wait"] is True
+    assert missing["errno"] == 1205

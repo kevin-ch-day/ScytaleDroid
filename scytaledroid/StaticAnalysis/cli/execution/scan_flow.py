@@ -248,13 +248,8 @@ def execute_scan(
         if display_name or group.package_name:
             progress.flush_line()
             if all_apps_compact_mode:
-                app_label = str(display_name or group.package_name)
-                print(
-                    status_messages.status(
-                        f"Starting [{app_index}/{total_apps}] {app_label}",
-                        level="info",
-                    )
-                )
+                # Keep visual separation between app cards in compact batch output.
+                print()
             render_app_start(
                 title=display_name or group.package_name,
                 package_name=group.package_name,

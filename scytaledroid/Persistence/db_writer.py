@@ -12,6 +12,7 @@ from collections.abc import Mapping, Sequence
 from functools import cache
 from typing import Any
 
+from scytaledroid.Database.db_core import db_engine
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
@@ -23,6 +24,14 @@ _REQUIRED_TABLES = (
     "findings",
     "contributors",
 )
+
+
+def _is_transient_db_exc(exc: Exception) -> bool:
+    if isinstance(exc, db_engine.TransientDbError):
+        return True
+    text = str(exc).lower()
+    markers = ("transientdberror", "lost connection", "server has gone away", "(2013", "(2014")
+    return any(marker in text for marker in markers)
 
 
 def ensure_schema(*, raise_on_error: bool = False) -> bool:
@@ -162,7 +171,9 @@ def write_metrics(
             f"Failed to persist metrics for run_id={run_id} static_run_id={static_run_id}: {exc}",
             category="db",
         )
-        return False
+        if _is_transient_db_exc(exc):
+            raise db_engine.TransientDbError(str(exc)) from exc
+        raise
 
 
 def write_buckets(
@@ -210,7 +221,9 @@ def write_buckets(
             f"Failed to persist buckets for run_id={run_id} static_run_id={static_run_id}: {exc}",
             category="db",
         )
-        return False
+        if _is_transient_db_exc(exc):
+            raise db_engine.TransientDbError(str(exc)) from exc
+        raise
 
 
 def write_correlations(run_id: int, rows: Sequence[tuple[str, float, str]]) -> bool:

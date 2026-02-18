@@ -123,7 +123,8 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
                 status_messages.status(
                     (
                         "Canonical-grade runs require canonical schema readiness. "
-                        "Run schema bootstrap or set SCYTALEDROID_PAPER_GRADE=0 "
+                        "Run schema bootstrap or set SCYTALEDROID_CANONICAL_GRADE=0 "
+                        "(or legacy SCYTALEDROID_PAPER_GRADE=0) "
                         "to allow experimental runs."
                     ),
                     level="error",
@@ -167,6 +168,8 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
     modules = _modules_for_run(params)
     scope_target = format_scope_target(selection)
     _emit_selection_manifest(selection, params.session_stamp)
+    if not (frozen_ctx.quiet and frozen_ctx.batch):
+        print()
 
     workers_label = f"auto ({workers})" if isinstance(params.workers, str) else str(workers)
     if not (frozen_ctx.quiet and frozen_ctx.batch):
@@ -194,6 +197,11 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
     )
     try:
         static_logger = get_run_logger("static", run_ctx)
+        run_context_payload = dict(frozen_ctx.__dict__)
+        run_context_payload["canonical_grade_requested"] = run_context_payload.pop(
+            "paper_grade_requested",
+            bool(getattr(params, "paper_grade_requested", True)),
+        )
         static_logger.info(
             "Static RUN_START",
             extra={
@@ -208,7 +216,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
                 "cache": "purge" if not params.reuse_cache else "reuse",
                 "perm_cache": "refresh" if params.permission_snapshot_refresh else "skip",
                 "dry_run": params.dry_run,
-                "run_context": frozen_ctx.__dict__,
+                "run_context": run_context_payload,
             },
         )
     except Exception:
@@ -255,6 +263,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
     if not (frozen_ctx.quiet and frozen_ctx.batch):
         print("Starting Static Analysis pipeline")
         print(text_blocks.divider("─"))
+    _emit_db_preflight_lock_warning(params=params, run_ctx=frozen_ctx)
     outcome: RunOutcome | None = None
     run_status: str | None = None
     abort_reason: str | None = None
@@ -275,6 +284,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
 
     try:
         if outcome is not None:
+            _emit_postprocessing_step("Rendering run summary", run_ctx=frozen_ctx)
             render_run_results(outcome, params, run_ctx=frozen_ctx)
             run_status = "COMPLETED"
             if outcome.aborted:
@@ -298,6 +308,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
                         print(status_messages.status(linkage_blocked_reason, level="warn"))
                         linkage_warning_printed = True
                     else:
+                        _emit_postprocessing_step("Building session run map", run_ctx=frozen_ctx)
                         try:
                             run_map = _build_session_run_map(
                                 outcome,
@@ -327,6 +338,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
                             )
                             run_map = None
 
+                _emit_postprocessing_step("Writing persistence audit artifacts", run_ctx=frozen_ctx)
                 _emit_missing_run_ids_artifact(
                     outcome=outcome,
                     session_stamp=params.session_stamp,
@@ -342,14 +354,10 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
                             linkage_warning_printed = True
                     else:
                         try:
-                            if not (frozen_ctx.quiet and frozen_ctx.batch):
-                                print()
-                                print(
-                                    status_messages.step(
-                                        "Re-rendering permission snapshot for parity",
-                                        label="Static Analysis",
-                                    )
-                                )
+                            _emit_postprocessing_step(
+                                "Re-rendering permission snapshot for parity",
+                                run_ctx=frozen_ctx,
+                            )
                             execute_permission_scan(
                                 selection,
                                 params,
@@ -365,7 +373,10 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
                                 )
                             )
                 elif params.profile in {"full", "lightweight"}:
-                    print()
+                    _emit_postprocessing_step(
+                        "Permission snapshot refresh skipped (disabled)",
+                        run_ctx=frozen_ctx,
+                    )
                     print(
                         status_messages.status(
                             (
@@ -386,7 +397,34 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
                 for result in outcome.results
                 if result.static_run_id
             ]
+            # Recovery: persistence failures may null out static_run_id on app results
+            # after a STARTED row was created. Close any lingering STARTED rows for
+            # this session stamp so dashboards do not accumulate phantom open runs.
+            if params.session_stamp:
+                try:
+                    from scytaledroid.Database.db_core import db_queries as core_q
+
+                    rows = core_q.run_sql(
+                        """
+                        SELECT id
+                        FROM static_analysis_runs
+                        WHERE session_stamp=%s
+                          AND status='STARTED'
+                          AND ended_at_utc IS NULL
+                        """,
+                        (params.session_stamp,),
+                        fetch="all",
+                    )
+                    for row in rows or []:
+                        try:
+                            sid = int(row[0])
+                        except Exception:
+                            continue
+                        static_run_ids.append(sid)
+                except Exception:
+                    pass
             if static_run_ids:
+                static_run_ids = sorted(set(int(sid) for sid in static_run_ids if sid))
                 ended_at = outcome.finished_at.isoformat(timespec="seconds") + "Z"
                 finalize_open_runs(
                     static_run_ids,
@@ -458,6 +496,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
             evidence_root=evidence_root,
         )
     if params.session_stamp:
+        _emit_postprocessing_step("Refreshing canonical session views", run_ctx=frozen_ctx)
         try:
             canonical_ingest.upsert_base002_for_session(params.session_stamp)
             canonical_ingest.build_session_string_view(params.session_stamp)
@@ -517,6 +556,50 @@ def _emit_selection_manifest(selection: ScopeSelection, session_stamp: str | Non
     print(status_messages.status(f"Selection manifest: {out_path}", level="info"))
 
 
+def _emit_postprocessing_step(message: str, *, run_ctx: StaticRunContext) -> None:
+    if run_ctx.quiet and run_ctx.batch:
+        return
+    print()
+    print(status_messages.step(message, label="Static Analysis"))
+
+
+def _emit_db_preflight_lock_warning(*, params: RunParameters, run_ctx: StaticRunContext) -> None:
+    if run_ctx.quiet and run_ctx.batch:
+        return
+    if params.dry_run or not params.persistence_ready:
+        return
+    try:
+        snapshot = db_diagnostics.get_lock_health_snapshot(limit=10)
+    except Exception:
+        return
+    if not isinstance(snapshot, dict):
+        return
+    if snapshot.get("error"):
+        return
+    active = snapshot.get("active_processes")
+    if not isinstance(active, list) or not active:
+        return
+    long_running = [row for row in active if int(row.get("time_s") or 0) >= 5]
+    if not long_running:
+        return
+    top = long_running[0]
+    state = str(top.get("state") or "unknown")
+    time_s = int(top.get("time_s") or 0)
+    info = str(top.get("info") or "").strip()
+    preview = (info[:120] + "…") if len(info) > 120 else info
+    wait_timeout = snapshot.get("lock_wait_timeout_s")
+    print(
+        status_messages.status(
+            (
+                "DB preflight detected active SQL work that may contend with persistence "
+                f"(lock_wait_timeout={wait_timeout}s): state={state} time={time_s}s "
+                f"query={preview or '<redacted>'}"
+            ),
+            level="warn",
+        )
+    )
+
+
 def _emit_missing_run_ids_artifact(
     *,
     outcome: RunOutcome,
@@ -553,8 +636,39 @@ def _emit_missing_run_ids_artifact(
                         continue
         return max_retry
 
+    def _extract_errno(lines: list[str]) -> int | None:
+        for line in lines:
+            # Matches "(1205, ...)" and "errno=1205" forms.
+            match = re.search(r"\((\d{4})\s*,", line)
+            if match:
+                try:
+                    return int(match.group(1))
+                except Exception:
+                    pass
+            match = re.search(r"errno=(\d{4})", line, flags=re.IGNORECASE)
+            if match:
+                try:
+                    return int(match.group(1))
+                except Exception:
+                    pass
+        return None
+
+    def _extract_transaction_state(lines: list[str]) -> str | None:
+        for line in lines:
+            match = re.search(r"transaction_state=([a-zA-Z_]+)", line, flags=re.IGNORECASE)
+            if match:
+                token = str(match.group(1) or "").strip().lower()
+                if token:
+                    return token
+        return None
+
     def _looks_like_disconnect(lines: list[str]) -> bool:
         markers = ("2013", "2014", "lost connection", "server has gone away", "transientdberror")
+        lowered = " ".join(lines).lower()
+        return any(marker in lowered for marker in markers)
+
+    def _looks_like_lock_wait(lines: list[str]) -> bool:
+        markers = ("1205", "lock wait timeout", "deadlock")
         lowered = " ".join(lines).lower()
         return any(marker in lowered for marker in markers)
 
@@ -562,15 +676,22 @@ def _emit_missing_run_ids_artifact(
         identity_valid = getattr(app, "identity_valid", None)
         if identity_valid is False:
             return "identity_invalid"
+        stage_hint = str(getattr(app, "persistence_failure_stage", "") or "").strip().lower()
+        if stage_hint:
+            if _looks_like_lock_wait(package_failures):
+                return "db_lock_wait"
+            return "db_write_failed"
+        if _looks_like_lock_wait(package_failures):
+            return "db_lock_wait"
         if int(getattr(app, "persistence_skipped", 0) or 0) > 0:
             return "persistence_skipped"
+        if any("db_write_failed" in line.lower() for line in package_failures):
+            return "db_write_failed"
+        if any("persist" in line.lower() for line in package_failures):
+            return "persist_error"
         if int(getattr(app, "failed_artifacts", 0) or 0) > 0:
             return "artifact_failed"
         if int(getattr(app, "persisted_artifacts", 0) or 0) == 0:
-            if any("db_write_failed" in line.lower() for line in package_failures):
-                return "db_write_failed"
-            if any("persist" in line.lower() for line in package_failures):
-                return "persist_error"
             return "not_persisted"
         return "missing_static_run_id"
 
@@ -595,19 +716,38 @@ def _emit_missing_run_ids_artifact(
         classification = "ok"
         if package in missing_set or static_run_id is None:
             classification = _classify_missing_run_id(app, package, package_failures)
-        retry_count = _extract_retry_count(package_failures)
-        db_disconnect = _looks_like_disconnect(package_failures)
+        retry_count = int(getattr(app, "persistence_retry_count", 0) or 0)
+        if retry_count <= 0:
+            retry_count = _extract_retry_count(package_failures)
+        errno = _extract_errno(package_failures)
+        db_disconnect = bool(getattr(app, "persistence_db_disconnect", False))
+        if not db_disconnect:
+            db_disconnect = _looks_like_disconnect(package_failures)
+        db_lock_wait = _looks_like_lock_wait(package_failures) or errno in {1205, 1213}
+        tx_state = getattr(app, "persistence_transaction_state", None)
+        if not tx_state:
+            tx_state = _extract_transaction_state(package_failures)
+        if not tx_state:
+            tx_state = "unknown"
+        exc_class = getattr(app, "persistence_exception_class", None)
+        if not exc_class and db_disconnect:
+            exc_class = "TransientDbError"
+        stage = getattr(app, "persistence_failure_stage", None) or _extract_stage(
+            classification, package_failures
+        )
         rows.append(
             {
                 "package_name": package,
                 "static_run_id": static_run_id,
                 "missing_static_run_id": package in missing_set or static_run_id is None,
                 "db_disconnect": db_disconnect,
+                "db_lock_wait": bool(db_lock_wait),
+                "errno": errno,
                 "retry_count": retry_count,
                 "classification": classification,
-                "stage": _extract_stage(classification, package_failures),
-                "exception_class": "TransientDbError" if db_disconnect else None,
-                "transaction_state": "unknown",
+                "stage": stage,
+                "exception_class": exc_class,
+                "transaction_state": tx_state,
                 "identity_error_reason": getattr(app, "identity_error_reason", None),
                 "persisted_artifacts": int(getattr(app, "persisted_artifacts", 0) or 0),
                 "failed_artifacts": int(getattr(app, "failed_artifacts", 0) or 0),
@@ -631,6 +771,28 @@ def _emit_missing_run_ids_artifact(
     out_path = out_dir / f"{stamp}_missing_run_ids.json"
     out_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
     print(status_messages.status(f"Missing run-id audit: {out_path}", level="info"))
+    _emit_db_lock_health_artifact(
+        stamp=stamp,
+        rows=rows,
+    )
+
+
+def _emit_db_lock_health_artifact(*, stamp: str, rows: list[dict[str, object]]) -> None:
+    # Emit lock-health context when persistence indicates likely DB contention.
+    should_emit = any(
+        bool(row.get("missing_static_run_id"))
+        or bool(row.get("db_lock_wait"))
+        or str(row.get("classification") or "") in {"db_lock_wait", "db_write_failed"}
+        for row in rows
+    )
+    if not should_emit:
+        return
+    snapshot = db_diagnostics.get_lock_health_snapshot(limit=25)
+    out_dir = Path("output") / "audit" / "persistence"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{stamp}_db_lock_health.json"
+    out_path.write_text(json.dumps(snapshot, indent=2, sort_keys=True), encoding="utf-8")
+    print(status_messages.status(f"DB lock health: {out_path}", level="info"))
 
 
 def execute_run_spec(spec: StaticRunSpec) -> RunOutcome | None:
@@ -718,8 +880,6 @@ def _resolve_unique_session_stamp(
     base_stamp = session_stamp
     session_dir = Path(app_config.DATA_DIR) / "sessions"
     final_path = session_dir / base_stamp / "run_map.json"
-    if not final_path.exists():
-        return base_stamp, base_stamp, "first_run"
     attempts = None
     canonical_id = None
     try:
@@ -751,6 +911,12 @@ def _resolve_unique_session_stamp(
     except Exception:
         attempts = None
         canonical_id = None
+    # A local run_map may be missing after reset/cleanup while DB attempts still exist.
+    # Treat either source as "session already used".
+    has_local_session = final_path.exists()
+    has_db_attempts = isinstance(attempts, int) and attempts > 0
+    if not has_local_session and not has_db_attempts:
+        return base_stamp, base_stamp, "first_run"
     batch_mode = (run_mode == "batch")
     if batch_mode or noninteractive:
         suffix = None
@@ -767,6 +933,20 @@ def _resolve_unique_session_stamp(
         suffix = f"{attempts + 1}" if isinstance(attempts, int) else datetime.now(UTC).strftime("%H%M%S")
         new_stamp = normalize_session_stamp(f"{base_stamp}-{suffix}")
         return new_stamp, new_stamp, "append"
+    if action == "":
+        suffix = f"{attempts + 1}" if isinstance(attempts, int) else datetime.now(UTC).strftime("%H%M%S")
+        new_stamp = normalize_session_stamp(f"{base_stamp}-{suffix}")
+        if not quiet:
+            print(
+                status_messages.status(
+                    (
+                        f"Session label {base_stamp} already exists; "
+                        f"auto-suffixing to {new_stamp}."
+                    ),
+                    level="warn",
+                )
+            )
+        return new_stamp, new_stamp, "auto_suffix"
     if action in {"replace", "overwrite"}:
         try:
             archive_dir = session_dir / "_archive"

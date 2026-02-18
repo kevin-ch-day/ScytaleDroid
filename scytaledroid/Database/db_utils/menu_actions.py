@@ -555,7 +555,7 @@ def show_db_status() -> None:
 
 
 def ingest_analysis_cohort_from_publication_bundle() -> None:
-    """Phase H helper: ingest canonical output/publication artifacts into DB.
+    """Ingest canonical output/publication artifacts into DB.
 
     This is tables-only ingestion (no recomputation). Evidence packs remain the ground truth;
     DB stores the cohort index + derived aggregates for queryability.
@@ -564,10 +564,10 @@ def ingest_analysis_cohort_from_publication_bundle() -> None:
     from scytaledroid.Database.tools.analysis_ingest import ingest_publication_bundle_to_db
 
     print()
-    print("Ingest Analysis Cohort (Phase H)")
-    print("--------------------------------")
-    # Prefer the canonical research bundle location when present.
-    default_root = "output/paper" if Path("output/paper").exists() else "output/publication"
+    print("Ingest Analysis Cohort")
+    print("----------------------")
+    # Prefer canonical export location first; legacy paper path is fallback-only.
+    default_root = "output/publication" if Path("output/publication").exists() else "output/paper"
     bundle_root = (
         prompt_utils.prompt_text(
             "Bundle root",
@@ -582,6 +582,8 @@ def ingest_analysis_cohort_from_publication_bundle() -> None:
         print(status_messages.status(f"Bundle root not found: {bundle_root_path}", level="fail"))
         prompt_utils.press_enter_to_continue()
         return
+    if bundle_root_path == Path("output/paper"):
+        print(status_messages.status("Using legacy bundle root fallback: output/paper", level="warn"))
 
     # Derive stable defaults from bundle provenance when available.
     import json
@@ -1017,7 +1019,7 @@ def maybe_clear_screen() -> None:
     except Exception:
         print()
 
-def seed_paper_dataset_profile() -> None:
+def seed_dataset_profile() -> None:
     """Create or update the research dataset profile and assign packages."""
 
     from scytaledroid.Database.db_func.apps.app_labels import upsert_display_names
@@ -1069,7 +1071,7 @@ def seed_paper_dataset_profile() -> None:
             sort_order,
             is_active,
         ),
-        query_name="db_utils.seed_paper_profile",
+        query_name="db_utils.seed_dataset_profile",
     )
 
     app_sql = """
@@ -1078,7 +1080,7 @@ def seed_paper_dataset_profile() -> None:
         ON DUPLICATE KEY UPDATE profile_key=VALUES(profile_key)
     """
     payload = [(pkg, profile_key) for pkg in packages]
-    core_q.run_sql_many(app_sql, payload, query_name="db_utils.seed_paper_profile.apps")
+    core_q.run_sql_many(app_sql, payload, query_name="db_utils.seed_dataset_profile.apps")
 
     # Seed display names (best-effort).
     # Important: DB canonical display names should remain the full product name.
@@ -1105,7 +1107,7 @@ def seed_paper_dataset_profile() -> None:
     prompt_utils.press_enter_to_continue()
 
 
-def sync_paper_contracts_to_db() -> None:
+def sync_contracts_to_db() -> None:
     """Sync tracked research contracts into the DB (display names + ordering).
 
     This is a post-freeze hygiene action to reduce drift from scattered JSON maps.
@@ -1136,6 +1138,18 @@ def sync_paper_contracts_to_db() -> None:
     print(status_messages.status(f"Upserted research aliases: {n_alias}", level="success"))
     print(status_messages.status(f"Upserted ordering rows: {n_order}", level="success"))
     prompt_utils.press_enter_to_continue()
+
+
+def seed_paper_dataset_profile() -> None:
+    """Compatibility wrapper for legacy call sites."""
+
+    seed_dataset_profile()
+
+
+def sync_paper_contracts_to_db() -> None:
+    """Compatibility wrapper for legacy call sites."""
+
+    sync_contracts_to_db()
 
 
 def ensure_dynamic_tier_column(*, prompt_user: bool = True) -> bool:
@@ -1545,7 +1559,10 @@ __all__ = [
     "run_inventory_determinism_comparator",
     "backfill_static_permission_risk_vnext",
     "audit_static_risk_coverage",
+    "seed_dataset_profile",
     "seed_paper_dataset_profile",
+    "sync_contracts_to_db",
+    "sync_paper_contracts_to_db",
     "apply_canonical_schema_bootstrap",
     "ensure_dynamic_tier_column",
     "ensure_dynamic_network_quality_column",

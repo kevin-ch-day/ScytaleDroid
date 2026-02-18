@@ -18,6 +18,34 @@ class _Conn:
         self.ping_calls += 1
 
 
+class _TxnConn:
+    def __init__(self) -> None:
+        self.open = True
+        self._autocommit = True
+        self.autocommit_calls: list[bool] = []
+        self.commit_calls = 0
+        self.rollback_calls = 0
+
+    def get_autocommit(self) -> bool:
+        return self._autocommit
+
+    def autocommit(self, value: bool) -> None:
+        self._autocommit = bool(value)
+        self.autocommit_calls.append(bool(value))
+
+    def commit(self) -> None:
+        self.commit_calls += 1
+
+    def rollback(self) -> None:
+        self.rollback_calls += 1
+
+    def ping(self, reconnect: bool = False) -> None:  # noqa: ARG002
+        return None
+
+    def close(self) -> None:
+        return None
+
+
 class _Cursor:
     def __init__(self, connection: _Conn, failures_before_success: int) -> None:
         self.connection = connection
@@ -69,3 +97,34 @@ def test_transient_error_outside_transaction_retries_and_reconnects(monkeypatch)
 
     assert conn.ping_calls == 1
     assert cursor.execute_calls == 2
+
+
+def test_database_engine_transaction_depth_marks_in_transaction() -> None:
+    engine = db_engine.DatabaseEngine()
+    try:
+        assert engine.in_transaction() is False
+        with engine.transaction():
+            assert engine.in_transaction() is True
+        assert engine.in_transaction() is False
+    finally:
+        engine.close()
+
+
+def test_nested_transaction_uses_outer_boundary_only() -> None:
+    engine = db_engine.DatabaseEngine()
+    conn = _TxnConn()
+    engine._connection = conn  # noqa: SLF001 - unit-test controlled injection
+    engine._dialect = "mysql"  # noqa: SLF001 - keep test deterministic
+    try:
+        with engine.transaction():
+            assert engine.in_transaction() is True
+            with engine.transaction():
+                assert engine.in_transaction() is True
+            assert engine.in_transaction() is True
+        assert engine.in_transaction() is False
+    finally:
+        engine.close()
+
+    assert conn.commit_calls == 1
+    assert conn.rollback_calls == 0
+    assert conn.autocommit_calls == [False, True]

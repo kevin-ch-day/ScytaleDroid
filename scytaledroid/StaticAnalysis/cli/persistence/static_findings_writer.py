@@ -48,7 +48,10 @@ def persist_static_findings(
         if not _sf.ensure_tables():
             raise RuntimeError("static_findings tables unavailable (schema outdated; run migrations)")
         if static_run_id is None:
-            raise RuntimeError("static_run_id missing; run migrations")
+            raise RuntimeError(
+                "static_run_id missing; persistence transaction likely rolled back "
+                "(or schema is outdated)."
+            )
         summary_id = _sf.upsert_summary(
             package_name=package_name,
             session_stamp=session_stamp,

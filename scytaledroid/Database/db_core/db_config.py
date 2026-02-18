@@ -148,6 +148,18 @@ def _load_from_env() -> dict[str, str | int]:
         }
 
     if scheme in {"mysql", "mariadb"}:
+        try:
+            connect_timeout = int((os.environ.get("SCYTALEDROID_DB_CONNECT_TIMEOUT") or "5").strip())
+        except Exception:
+            connect_timeout = 5
+        try:
+            read_timeout = int((os.environ.get("SCYTALEDROID_DB_READ_TIMEOUT") or "120").strip())
+        except Exception:
+            read_timeout = 120
+        try:
+            write_timeout = int((os.environ.get("SCYTALEDROID_DB_WRITE_TIMEOUT") or "120").strip())
+        except Exception:
+            write_timeout = 120
         return {
             "engine": "mysql",
             "host": parsed.hostname or "localhost",
@@ -156,6 +168,9 @@ def _load_from_env() -> dict[str, str | int]:
             "password": unquote(parsed.password or ""),
             "database": (parsed.path or "").lstrip("/") or "",
             "charset": "utf8mb4",
+            "connect_timeout": max(1, connect_timeout),
+            "read_timeout": max(5, read_timeout),
+            "write_timeout": max(5, write_timeout),
         }
 
     raise ValueError(f"Unsupported DB scheme in SCYTALEDROID_DB_URL: {scheme}")

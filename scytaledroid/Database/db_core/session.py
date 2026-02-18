@@ -27,6 +27,13 @@ def get_current_engine() -> DatabaseEngine | None:
     engine = _STATE.engine
     if engine is None:
         return None
+    # Never force reconnect while a transaction is active; reconnecting a MySQL
+    # connection at this point can invalidate transaction state unexpectedly.
+    try:
+        if engine.in_transaction():
+            return engine
+    except Exception:
+        pass
     try:
         engine.reconnect()
     except Exception:
@@ -76,4 +83,3 @@ def database_session(*, reuse_connection: bool = True) -> Iterator[DatabaseEngin
 
 
 __all__ = ["database_session", "get_current_engine", "close_engine"]
-

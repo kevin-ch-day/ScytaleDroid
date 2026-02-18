@@ -276,9 +276,13 @@ __all__ = [
 
 
 _PROVIDER_PARENT_CACHE: dict[int, dict[str, str | None]] = {}
+_TABLE_COLUMNS_CACHE: dict[str, set[str]] = {}
 
 
 def _persist_analysis_snapshot(app_version_id: int, payload: Mapping[str, object]) -> None:
+    app_section = payload.get("app")
+    app = app_section if isinstance(app_section, Mapping) else {}
+    package_name = first_text(app.get("package"), app.get("package_name"))
     metadata_raw = payload.get("metadata")
     metadata = metadata_raw if isinstance(metadata_raw, Mapping) else {}
     profile = first_text(
@@ -353,7 +357,13 @@ def _persist_analysis_snapshot(app_version_id: int, payload: Mapping[str, object
         return
 
     # Legacy static_analysis_findings writes are disabled in Phase-B.
-    _persist_provider_acl(static_run_id, detector_metrics)
+    _persist_provider_acl(
+        static_run_id,
+        detector_metrics,
+        package_name=package_name,
+        session_stamp=session_stamp,
+        scope_label=scope_label,
+    )
 
 
 def _create_run_row(
@@ -420,6 +430,10 @@ def _create_finding_row(
 def _persist_provider_acl(
     run_id: int,
     detector_metrics: Mapping[str, object] | None,
+    *,
+    package_name: str | None = None,
+    session_stamp: str | None = None,
+    scope_label: str | None = None,
 ) -> None:
     _PROVIDER_PARENT_CACHE.clear()
     _require_canonical_schema()
@@ -434,7 +448,13 @@ def _persist_provider_acl(
     for entry in snapshot:
         if not isinstance(entry, Mapping):
             continue
-        provider_id = _create_provider_row(run_id, entry)
+        provider_id = _create_provider_row(
+            run_id,
+            entry,
+            package_name=package_name,
+            session_stamp=session_stamp,
+            scope_label=scope_label,
+        )
         if not provider_id:
             continue
         path_rules = entry.get("path_permissions")
@@ -461,8 +481,63 @@ def _clamp_authority(value: str | None, limit: int = 191) -> str | None:
     return text[:limit]
 
 
-def _create_provider_row(run_id: int, entry: Mapping[str, object]) -> int | None:
+def _table_columns(table_name: str) -> set[str]:
+    cached = _TABLE_COLUMNS_CACHE.get(table_name)
+    if cached is not None:
+        return cached
     try:
+        rows = core_q.run_sql(
+            f"SHOW COLUMNS FROM {table_name}",
+            fetch="all",
+        )
+    except Exception:
+        rows = []
+    columns: set[str] = set()
+    if isinstance(rows, Sequence):
+        for row in rows:
+            if not row:
+                continue
+            field = _normalise_optional_str(row[0] if isinstance(row, Sequence) else None)
+            if field:
+                columns.add(field)
+    _TABLE_COLUMNS_CACHE[table_name] = columns
+    return columns
+
+
+def _insert_table_row(
+    table_name: str,
+    row_data: Mapping[str, object | None],
+    *,
+    required_columns: Sequence[str] = (),
+    return_lastrowid: bool = False,
+) -> object | None:
+    available = _table_columns(table_name)
+    selected = [column for column in row_data.keys() if column in available]
+    if required_columns and any(column not in selected for column in required_columns):
+        return None
+    if not selected:
+        return None
+    placeholders = ", ".join(["%s"] * len(selected))
+    sql = f"INSERT INTO {table_name} ({', '.join(selected)}) VALUES ({placeholders})"
+    return core_q.run_sql(
+        sql,
+        tuple(row_data[column] for column in selected),
+        return_lastrowid=return_lastrowid,
+    )
+
+
+def _create_provider_row(
+    run_id: int,
+    entry: Mapping[str, object],
+    *,
+    package_name: str | None = None,
+    session_stamp: str | None = None,
+    scope_label: str | None = None,
+) -> int | None:
+    try:
+        provider_package = _normalise_optional_str(package_name)
+        if "package_name" in _table_columns("static_fileproviders") and not provider_package:
+            return None
         metrics_payload = {
             key: value
             for key, value in entry.items()
@@ -480,14 +555,20 @@ def _create_provider_row(run_id: int, entry: Mapping[str, object]) -> int | None
         authority = _clamp_authority(authority)
         row_data: dict[str, object | None] = {
             "run_id": run_id,
+            "package_name": provider_package,
+            "session_stamp": _normalise_optional_str(session_stamp),
+            "scope_label": _normalise_optional_str(scope_label),
             "component_name": component_name,
             "provider_name": component_name,
             "authority": authority,
             "authorities": _serialise_json(entry.get("authorities")),
             "exported": 1 if entry.get("exported") else 0,
             "base_permission": _normalise_optional_str(entry.get("base_permission")),
+            "base_perm": _normalise_optional_str(entry.get("base_permission")),
             "read_permission": _normalise_optional_str(entry.get("read_permission")),
+            "read_perm": _normalise_optional_str(entry.get("read_permission")),
             "write_permission": _normalise_optional_str(entry.get("write_permission")),
+            "write_perm": _normalise_optional_str(entry.get("write_permission")),
             "base_guard": _normalise_optional_str(entry.get("base_guard")),
             "read_guard": _normalise_optional_str(entry.get("read_guard")),
             "write_guard": _normalise_optional_str(entry.get("write_guard")),
@@ -495,13 +576,10 @@ def _create_provider_row(run_id: int, entry: Mapping[str, object]) -> int | None
             "grant_uri_permissions": 1 if entry.get("grant_uri_permissions") else 0,
             "metrics": _serialise_json(metrics_payload),
         }
-
-        columns = list(row_data.keys())
-        placeholders = ", ".join(["%s"] * len(columns))
-        sql = f"INSERT INTO static_fileproviders ({', '.join(columns)}) VALUES ({placeholders})"
-        provider_id = core_q.run_sql(
-            sql,
-            tuple(row_data[column] for column in columns),
+        provider_id = _insert_table_row(
+            "static_fileproviders",
+            row_data,
+            required_columns=("run_id", "component_name"),
             return_lastrowid=True,
         )
         provider_id_int = int(provider_id) if provider_id else None
@@ -509,6 +587,9 @@ def _create_provider_row(run_id: int, entry: Mapping[str, object]) -> int | None
             _PROVIDER_PARENT_CACHE[provider_id_int] = {
                 "authority": authority,
                 "provider_name": component_name,
+                "package_name": provider_package,
+                "session_stamp": _normalise_optional_str(session_stamp),
+                "scope_label": _normalise_optional_str(scope_label),
                 "exported": row_data.get("exported"),
             }
         return provider_id_int
@@ -521,15 +602,25 @@ def _create_provider_acl_row(provider_id: int, entry: Mapping[str, object]) -> N
         path_value = _normalise_optional_str(entry.get("path")) or "*"
         path_type = _normalise_optional_str(entry.get("pathType")) or "base"
 
+        parent = _PROVIDER_PARENT_CACHE.get(provider_id) or {}
         row_data: dict[str, object | None] = {
             "provider_id": provider_id,
+            "package_name": _normalise_optional_str(parent.get("package_name")),
+            "session_stamp": _normalise_optional_str(parent.get("session_stamp")),
+            "scope_label": _normalise_optional_str(parent.get("scope_label")),
+            "authority": _normalise_optional_str(parent.get("authority")),
+            "provider_name": _normalise_optional_str(parent.get("provider_name")),
             "path": path_value,
             "path_prefix": _normalise_optional_str(entry.get("pathPrefix")),
             "path_pattern": _normalise_optional_str(entry.get("pathPattern")),
             "read_permission": _normalise_optional_str(entry.get("read_permission")),
+            "read_perm": _normalise_optional_str(entry.get("read_permission")),
             "write_permission": _normalise_optional_str(entry.get("write_permission")),
+            "write_perm": _normalise_optional_str(entry.get("write_permission")),
+            "base_perm": _normalise_optional_str(entry.get("base_permission")),
             "read_guard": _normalise_optional_str(entry.get("read_guard")),
             "write_guard": _normalise_optional_str(entry.get("write_guard")),
+            "exported": 1 if parent.get("exported") else 0,
             "metadata": _serialise_json(
                 {
                     key: value
@@ -549,13 +640,10 @@ def _create_provider_acl_row(provider_id: int, entry: Mapping[str, object]) -> N
             ),
         }
         row_data["path_type"] = path_type
-
-        columns = list(row_data.keys())
-        placeholders = ", ".join(["%s"] * len(columns))
-        sql = f"INSERT INTO static_provider_acl ({', '.join(columns)}) VALUES ({placeholders})"
-        core_q.run_sql(
-            sql,
-            tuple(row_data[column] for column in columns),
+        _insert_table_row(
+            "static_provider_acl",
+            row_data,
+            required_columns=("provider_id",),
         )
     except Exception:
         return

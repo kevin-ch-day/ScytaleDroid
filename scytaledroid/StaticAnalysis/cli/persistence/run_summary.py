@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -94,6 +95,11 @@ class PersistenceOutcome:
     string_samples_persisted: int = 0
     persistence_failed: bool = False
     canonical_failed: bool = False
+    persistence_retry_count: int = 0
+    persistence_db_disconnect: bool = False
+    persistence_exception_class: str | None = None
+    persistence_transaction_state: str | None = None
+    persistence_failure_stage: str | None = None
     errors: list[str] = field(default_factory=list)
 
     @property
@@ -153,6 +159,40 @@ def _is_transient_persistence_error(exc: Exception) -> bool:
     text = str(exc).lower()
     markers = ("transientdberror", "lost connection", "server has gone away", "(2013", "(2014")
     return any(marker in text for marker in markers)
+
+
+def _looks_like_db_disconnect(exc: Exception) -> bool:
+    text = str(exc).lower()
+    markers = ("2013", "2014", "lost connection", "server has gone away")
+    return any(marker in text for marker in markers)
+
+
+def _looks_like_lock_wait_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    markers = ("1205", "1213", "lock wait timeout", "deadlock")
+    return any(marker in text for marker in markers)
+
+
+def _apply_mysql_session_lock_wait_timeout(db: object, timeout_s: int) -> None:
+    dialect = str(getattr(db, "_dialect", "") or "").lower()
+    if dialect != "mysql":
+        return
+    executor = getattr(db, "execute", None)
+    if not callable(executor):
+        return
+    timeout_value = max(1, int(timeout_s))
+    try:
+        executor(
+            "SET SESSION innodb_lock_wait_timeout = %s",
+            (timeout_value,),
+            query_name="static.persist.set_lock_wait_timeout",
+        )
+    except Exception as exc:
+        # Non-fatal: keep persistence path running even when session tuning is unavailable.
+        log.warning(
+            f"Unable to set innodb_lock_wait_timeout={timeout_value}: {exc}",
+            category="static_analysis",
+        )
 
 
 def _taxonomy_label(*, severity: str, detector_status: object, policy_gate: bool) -> str:
@@ -1096,7 +1136,23 @@ def persist_run_summary(
     if not dry_run:
         base_run_id = run_id
         base_static_run_id = static_run_id
-        max_txn_attempts = max(1, int(getattr(app_config, "STATIC_PERSIST_TRANSIENT_RETRIES", 2) or 2))
+        max_txn_attempts = max(1, int(getattr(app_config, "STATIC_PERSIST_TRANSIENT_RETRIES", 4) or 4))
+        max_lock_wait_attempts = max(
+            1,
+            int(getattr(app_config, "STATIC_PERSIST_LOCK_WAIT_RETRIES", 2) or 2),
+        )
+        lock_wait_timeout_s = max(
+            1,
+            int(getattr(app_config, "STATIC_PERSIST_LOCK_WAIT_TIMEOUT_S", 15) or 15),
+        )
+        retry_backoff_base_s = max(
+            0.0,
+            float(getattr(app_config, "STATIC_PERSIST_RETRY_BACKOFF_BASE_S", 0.35) or 0.35),
+        )
+        retry_backoff_max_s = max(
+            retry_backoff_base_s,
+            float(getattr(app_config, "STATIC_PERSIST_RETRY_BACKOFF_MAX_S", 3.0) or 3.0),
+        )
         attempt = 0
         while attempt < max_txn_attempts:
             attempt += 1
@@ -1108,10 +1164,13 @@ def persist_run_summary(
             outcome.static_run_id = static_run_id
             outcome.baseline_written = False
             outcome.string_samples_persisted = 0
+            outcome.persistence_retry_count = max(0, attempt - 1)
             attempt_error_start = len(outcome.errors)
             try:
                 with database_session() as db:
+                    _apply_mysql_session_lock_wait_timeout(db, lock_wait_timeout_s)
                     with db.transaction():
+                        outcome.persistence_transaction_state = "in_txn"
                         if run_id is None:
                             try:
                                 run_id = _dw.create_run(
@@ -1331,27 +1390,48 @@ def persist_run_summary(
                         if db_errors:
                             raise RuntimeError(db_errors[-1])
                 persistence_failed = False
+                outcome.persistence_transaction_state = "committed"
                 break
             except Exception as exc:
                 transient = _is_transient_persistence_error(exc)
-                if transient and attempt < max_txn_attempts:
+                lock_wait = _looks_like_lock_wait_error(exc)
+                db_disconnect = _looks_like_db_disconnect(exc)
+                outcome.persistence_db_disconnect = bool(db_disconnect)
+                outcome.persistence_exception_class = exc.__class__.__name__
+                outcome.persistence_failure_stage = failure_stage
+                outcome.persistence_transaction_state = "rolled_back"
+                outcome.persistence_retry_count = max(0, attempt - 1)
+                lock_retry_budget_exhausted = lock_wait and attempt >= max_lock_wait_attempts
+                if transient and attempt < max_txn_attempts and not lock_retry_budget_exhausted:
                     if len(outcome.errors) > attempt_error_start:
                         del outcome.errors[attempt_error_start:]
+                    sleep_seconds = min(
+                        retry_backoff_max_s,
+                        retry_backoff_base_s * (2 ** max(0, attempt - 1)),
+                    )
                     log.warning(
                         (
                             "Transient DB failure during static persistence "
                             f"for {run_package}; retrying full transaction "
-                            f"(attempt={attempt}/{max_txn_attempts}): {exc}"
+                            f"(attempt={attempt}/{max_txn_attempts}, "
+                            f"lock_wait={int(lock_wait)} "
+                            f"backoff={sleep_seconds:.2f}s): {exc}"
                         ),
                         category="static_analysis",
                     )
+                    try:
+                        time.sleep(sleep_seconds)
+                    except Exception:
+                        pass
                     continue
 
                 persistence_failed = True
                 retries_used = max(0, attempt - 1)
                 message = (
                     f"Static persistence transaction failed for {run_package}: {exc} "
-                    f"(retry_count={retries_used})"
+                    f"(retry_count={retries_used} transaction_state=rolled_back "
+                    f"stage={failure_stage or 'unknown'} db_disconnect={int(db_disconnect)} "
+                    f"db_lock_wait={int(lock_wait)})"
                 )
                 log.warning(message, category="static_analysis")
                 if message not in outcome.errors:

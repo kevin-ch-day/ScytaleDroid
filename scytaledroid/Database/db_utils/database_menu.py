@@ -17,10 +17,10 @@ from .menu_actions import (
     ingest_analysis_cohort_from_publication_bundle,
     maybe_clear_screen,
     run_inventory_determinism_comparator,
-    seed_paper_dataset_profile,
+    seed_dataset_profile,
     show_connection_and_config,
     show_governance_snapshot_status,
-    sync_paper_contracts_to_db,
+    sync_contracts_to_db,
 )
 
 
@@ -35,8 +35,8 @@ def database_menu() -> None:
         "5": show_connection_and_config,
         "6": ensure_dynamic_tier_migrations,
         "7": ingest_analysis_cohort_from_publication_bundle,
-        "8": seed_paper_dataset_profile,
-        "9": sync_paper_contracts_to_db,
+        "8": seed_dataset_profile,
+        "9": sync_contracts_to_db,
         "10": run_inventory_determinism_comparator,
         "11": backfill_static_permission_risk_vnext,
         "12": audit_static_risk_coverage,

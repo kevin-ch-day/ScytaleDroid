@@ -61,7 +61,7 @@ def persist_string_summary(
         if static_run_id is None:
             raise RuntimeError(
                 "static_run_id missing for string persistence; "
-                "run migrations or regenerate static outputs."
+                "persistence transaction likely rolled back (or schema is outdated)."
             )
         with database_session() as db:
             with db.transaction():

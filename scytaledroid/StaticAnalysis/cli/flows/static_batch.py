@@ -746,7 +746,7 @@ def run_dataset_static_batch(
         print(
             status_messages.status(
                 (f"static_run_id={static_run_id}" if static_run_id is not None else "static_run_id=—")
-                + f" | paper_grade={paper_grade_status}",
+                + f" | canonical_grade={paper_grade_status}",
                 level="info",
             )
         )

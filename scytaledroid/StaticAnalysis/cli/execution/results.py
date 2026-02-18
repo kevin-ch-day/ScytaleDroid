@@ -257,7 +257,7 @@ def _render_run_results_impl(
             session_note += f" ({', '.join(parts)})"
         subtitle_parts.append(session_note)
     subtitle = " • ".join(subtitle_parts)
-    grade_label = "PAPER_GRADE"
+    grade_label = "CANONICAL_GRADE"
     grade_reasons: list[str] = []
     if not params.dry_run:
         persistence_ready = bool(params.persistence_ready)
@@ -406,6 +406,13 @@ def _render_run_results_impl(
                 level="info",
             )
         )
+    elif outcome.results:
+        print(
+            status_messages.status(
+                f"Finalizing persistence and evidence artifacts for {len(outcome.results)} app(s)…",
+                level="info",
+            )
+        )
     print()
 
 
@@ -436,6 +443,13 @@ def _render_run_results_impl(
         )
 
     for index, app_result in enumerate(outcome.results, start=1):
+        if persist_enabled and compact_mode:
+            print(
+                status_messages.status(
+                    f"Finalizing [{index}/{len(outcome.results)}] {app_result.package_name}…",
+                    level="info",
+                )
+            )
         base_report = app_result.base_report()
         if base_report is None:
             if not params.dry_run:
@@ -556,6 +570,21 @@ def _render_run_results_impl(
                 if outcome_status:
                     if outcome_status.static_run_id:
                         app_result.static_run_id = outcome_status.static_run_id
+                    app_result.persistence_retry_count = int(
+                        getattr(outcome_status, "persistence_retry_count", 0) or 0
+                    )
+                    app_result.persistence_db_disconnect = bool(
+                        getattr(outcome_status, "persistence_db_disconnect", False)
+                    )
+                    app_result.persistence_exception_class = getattr(
+                        outcome_status, "persistence_exception_class", None
+                    )
+                    app_result.persistence_transaction_state = getattr(
+                        outcome_status, "persistence_transaction_state", None
+                    )
+                    app_result.persistence_failure_stage = getattr(
+                        outcome_status, "persistence_failure_stage", None
+                    )
                     normalized_findings_total += int(outcome_status.persisted_findings)
                     string_samples_persisted_total += int(outcome_status.string_samples_persisted)
                 if outcome_status and not outcome_status.success:
@@ -779,7 +808,7 @@ def _render_run_results_impl(
                         missing_required.append(artifact_type)
                 if missing_required:
                     warning = (
-                        f"Paper-grade artifacts missing for static_run_id={app_result.static_run_id}: "
+                        f"Canonical-grade artifacts missing for static_run_id={app_result.static_run_id}: "
                         + ", ".join(missing_required)
                     )
                     print(status_messages.status(warning, level="warn"))

@@ -231,6 +231,11 @@ class AppRunResult:
     run_signature: str | None = None
     run_signature_version: str | None = None
     dynamic_plan_path: str | None = None
+    persistence_retry_count: int = 0
+    persistence_db_disconnect: bool = False
+    persistence_exception_class: str | None = None
+    persistence_transaction_state: str | None = None
+    persistence_failure_stage: str | None = None
 
     def severity_totals(self) -> Counter[str]:
         totals: Counter[str] = Counter()
