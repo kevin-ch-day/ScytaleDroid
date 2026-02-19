@@ -70,10 +70,6 @@ def _persist_permission_risk_vnext(
         if not perm:
             continue
         canonical_perm = perm.lower()
-        if perm != canonical_perm:
-            raise RuntimeError(
-                f"PERSIST_VALIDATION_FAIL: permission_name must be canonical lowercase ({perm})"
-            )
         if canonical_perm in seen_permission_names:
             raise RuntimeError(
                 f"PERSIST_VALIDATION_FAIL: duplicate permission_name after canonicalization ({canonical_perm})"

@@ -425,13 +425,20 @@ def _render_run_results_impl(
     report_reference_count = 0
     persistence_ready = bool(params.persistence_ready)
     persist_enabled = (not params.dry_run) and persistence_ready
+    total_apps = max(1, len(outcome.results))
+    default_failfast_threshold = min(3, total_apps)
     try:
         missing_runid_failfast_threshold = max(
             1,
-            int(os.environ.get("SCYTALEDROID_STATIC_RUNID_FAILFAST_THRESHOLD", "10")),
+            int(
+                os.environ.get(
+                    "SCYTALEDROID_STATIC_RUNID_FAILFAST_THRESHOLD",
+                    str(default_failfast_threshold),
+                )
+            ),
         )
     except Exception:
-        missing_runid_failfast_threshold = 10
+        missing_runid_failfast_threshold = default_failfast_threshold
     consecutive_missing_run_ids = 0
     compact_mode = not params.verbose_output
     if not persistence_ready and not params.dry_run:

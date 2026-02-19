@@ -300,7 +300,7 @@ def test_persist_permission_risk_writes_risk_scores_before_vnext_writer(monkeypa
     assert called["risk_scores"] is True
 
 
-def test_persist_permission_risk_vnext_rejects_noncanonical_permission_name(monkeypatch):
+def test_persist_permission_risk_vnext_canonicalizes_permission_name(monkeypatch):
     session = "20250101-000015"
     report = DummyReport({"apk_id": 603, "sha256": "33" * 32})
     bundle = _bundle(1, 0, 0, 1.234, "B")
@@ -309,17 +309,19 @@ def test_persist_permission_risk_vnext_rejects_noncanonical_permission_name(monk
         lambda: True,
     )
 
-    with pytest.raises(RuntimeError, match="permission_name must be canonical lowercase"):
-        persist_permission_risk(
-            run_id=15,
-            report=report,
-            package_name="com.example.case",
-            session_stamp=session,
-            scope_label="Test",
-            metrics_bundle=bundle,
-            baseline_payload={},
-            permission_profiles={"Android.Permission.CAMERA": {"is_runtime_dangerous": True}},
-        )
+    persist_permission_risk(
+        run_id=15,
+        report=report,
+        package_name="com.example.case",
+        session_stamp=session,
+        scope_label="Test",
+        metrics_bundle=bundle,
+        baseline_payload={},
+        permission_profiles={"Android.Permission.CAMERA": {"is_runtime_dangerous": True}},
+    )
+    rows = _fetch_spr_vnext()
+    assert len(rows) == 1
+    assert rows[0][1] == "android.permission.camera"
 
 
 def test_persist_permission_risk_vnext_rejects_duplicate_after_canonicalization(monkeypatch):

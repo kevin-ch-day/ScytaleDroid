@@ -47,3 +47,12 @@ def test_get_current_engine_reconnects_when_not_in_transaction() -> None:
     finally:
         session._STATE.engine = original_engine
         session._STATE.depth = original_depth
+
+
+def test_database_session_disallows_fresh_nested_connection() -> None:
+    with session.database_session():
+        try:
+            with session.database_session(reuse_connection=False):
+                raise AssertionError("expected RuntimeError for nested reuse_connection=False")
+        except RuntimeError as exc:
+            assert "reuse_connection=False" in str(exc)

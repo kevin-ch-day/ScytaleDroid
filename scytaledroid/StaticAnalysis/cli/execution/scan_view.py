@@ -188,7 +188,7 @@ def render_app_completion(
             print("⚠ OUTLIER ARTIFACT COUNT")
             print(
                 f"Artifacts: {artifact_count} (expected <= 20)   Time: {elapsed}   "
-                "Likely cause: mixed-capture group merge (press D for selection details)."
+                "High split artifact cardinality; inspect selection manifest (press D for selection details)."
             )
 
         if error_count > 0 or fail_count > 0 or p0 > 0:

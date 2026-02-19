@@ -1134,8 +1134,7 @@ def persist_run_summary(
 
     persistence_failed = False
     if not dry_run:
-        base_run_id = run_id
-        base_static_run_id = static_run_id
+        cached_schema_version = db_diagnostics.get_schema_version() or "<unknown>"
         max_txn_attempts = max(1, int(getattr(app_config, "STATIC_PERSIST_TRANSIENT_RETRIES", 4) or 4))
         max_lock_wait_attempts = max(
             1,
@@ -1158,8 +1157,6 @@ def persist_run_summary(
             attempt += 1
             failure_stage = None
             db_errors.clear()
-            run_id = base_run_id
-            static_run_id = base_static_run_id
             outcome.run_id = int(run_id) if run_id is not None else None
             outcome.static_run_id = static_run_id
             outcome.baseline_written = False
@@ -1212,7 +1209,7 @@ def persist_run_summary(
                                 device_serial=device_serial_token,
                                 tool_semver=app_config.APP_VERSION,
                                 tool_git_commit=get_git_commit(),
-                                schema_version=db_diagnostics.get_schema_version() or "<unknown>",
+                                schema_version=cached_schema_version,
                                 findings_total=int(finding_totals.get("total", 0) or 0),
                                 run_started_utc=None,
                                 status="STARTED",
@@ -1445,6 +1442,16 @@ def persist_run_summary(
                             exc_class=exc.__class__.__name__,
                             exc_message=str(exc),
                             errors_tail=list(outcome.errors)[-10:],
+                        )
+                    except Exception:
+                        pass
+                    try:
+                        update_static_run_status(
+                            static_run_id=int(static_run_id),
+                            status="FAILED",
+                            ended_at_utc=ended_at_utc,
+                            abort_reason=abort_reason or "persist_error",
+                            abort_signal=abort_signal,
                         )
                     except Exception:
                         pass

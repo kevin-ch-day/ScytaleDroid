@@ -65,6 +65,11 @@ def database_session(*, reuse_connection: bool = True) -> Iterator[DatabaseEngin
     to ``False`` forces a brand new connection for the lifetime of the context.
     """
 
+    if not reuse_connection and _STATE.depth > 0:
+        raise RuntimeError(
+            "database_session(reuse_connection=False) is not allowed inside an active session/transaction context"
+        )
+
     engine = get_current_engine() if reuse_connection else None
     created = False
 

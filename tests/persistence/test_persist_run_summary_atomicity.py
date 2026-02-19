@@ -397,3 +397,108 @@ def test_persist_run_summary_limits_lock_wait_retries(monkeypatch):
     assert int(state["attempts"]) == 1
     assert outcome.persistence_failed is True
     assert any("db_lock_wait=1" in err for err in outcome.errors)
+
+
+def test_persist_run_summary_reuses_identity_on_retry_after_bucket_failure(monkeypatch):
+    state: dict[str, object] = {"in_tx": False, "run_create_calls": 0, "static_create_calls": 0, "bucket_calls": 0}
+    monkeypatch.setattr(rs, "require_canonical_schema", lambda: None)
+    monkeypatch.setattr(rs, "database_session", lambda: _FakeDBSession(state))
+    monkeypatch.setattr(rs.app_config, "STATIC_PERSIST_TRANSIENT_RETRIES", 2, raising=False)
+    monkeypatch.setattr(
+        rs,
+        "prepare_run_envelope",
+        lambda **_kwargs: (SimpleNamespace(run_id=None, threat_profile=None, env_profile=None), []),
+    )
+    monkeypatch.setattr(rs, "compute_metrics_bundle", lambda *_args, **_kwargs: _stub_metrics_bundle())
+    monkeypatch.setattr(rs, "_ensure_app_version", lambda **_kwargs: 101)
+
+    def _create_run(**_kwargs):
+        state["run_create_calls"] = int(state["run_create_calls"]) + 1
+        return 7001
+
+    def _create_static_run(**_kwargs):
+        state["static_create_calls"] = int(state["static_create_calls"]) + 1
+        return 8001
+
+    def _write_buckets(*_args, **_kwargs):
+        state["bucket_calls"] = int(state["bucket_calls"]) + 1
+        if int(state["bucket_calls"]) == 1:
+            raise db_engine.TransientDbError("(1205, 'Lock wait timeout exceeded; try restarting transaction')")
+        return True
+
+    monkeypatch.setattr(rs._dw, "create_run", _create_run)
+    monkeypatch.setattr(rs, "_create_static_run", _create_static_run)
+    monkeypatch.setattr(rs, "_update_static_run_metadata", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(rs, "write_buckets", _write_buckets)
+    monkeypatch.setattr(rs, "write_metrics", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(rs, "persist_permission_matrix", lambda **_kwargs: None)
+    monkeypatch.setattr(rs, "persist_permission_risk", lambda **_kwargs: None)
+    monkeypatch.setattr(rs, "update_static_run_status", lambda **_kwargs: None)
+    monkeypatch.setattr(rs, "export_dep_json", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(rs.core_q, "run_sql", lambda *_args, **_kwargs: [])
+
+    outcome = rs.persist_run_summary(
+        _DummyReport(),
+        {},
+        "com.example.app",
+        session_stamp="sess-reuse-id-1",
+        scope_label="all",
+        finding_totals={"total": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        baseline_payload={},
+        paper_grade_requested=False,
+        dry_run=False,
+    )
+
+    assert int(state["run_create_calls"]) == 1
+    assert int(state["static_create_calls"]) == 1
+    assert int(state["bucket_calls"]) == 2
+    assert outcome.persistence_failed is False
+    assert outcome.run_id == 7001
+    assert outcome.static_run_id == 8001
+
+
+def test_persist_run_summary_marks_started_row_failed_on_rollback(monkeypatch):
+    state: dict[str, object] = {"in_tx": False}
+    status_updates: list[dict[str, object]] = []
+    monkeypatch.setattr(rs, "require_canonical_schema", lambda: None)
+    monkeypatch.setattr(rs, "database_session", lambda: _FakeDBSession(state))
+    monkeypatch.setattr(
+        rs,
+        "prepare_run_envelope",
+        lambda **_kwargs: (SimpleNamespace(run_id=None, threat_profile=None, env_profile=None), []),
+    )
+    monkeypatch.setattr(rs, "compute_metrics_bundle", lambda *_args, **_kwargs: _stub_metrics_bundle())
+    monkeypatch.setattr(rs, "_ensure_app_version", lambda **_kwargs: 101)
+    monkeypatch.setattr(rs._dw, "create_run", lambda **_kwargs: 404)
+    monkeypatch.setattr(rs, "_create_static_run", lambda **_kwargs: 505)
+    monkeypatch.setattr(rs, "_update_static_run_metadata", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(rs, "write_buckets", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(rs, "write_metrics", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(rs, "persist_permission_matrix", lambda **_kwargs: None)
+    monkeypatch.setattr(rs, "persist_permission_risk", lambda **_kwargs: None)
+    monkeypatch.setattr(rs, "record_static_persistence_failure", lambda **_kwargs: None)
+    monkeypatch.setattr(rs, "export_dep_json", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(rs.core_q, "run_sql", lambda *_args, **_kwargs: [])
+
+    def _update_status(**kwargs):
+        status_updates.append(dict(kwargs))
+
+    monkeypatch.setattr(rs, "update_static_run_status", _update_status)
+
+    outcome = rs.persist_run_summary(
+        _DummyReport(),
+        {},
+        "com.example.app",
+        session_stamp="sess-failed-close-1",
+        scope_label="all",
+        finding_totals={"total": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        baseline_payload={},
+        paper_grade_requested=False,
+        dry_run=False,
+    )
+
+    assert outcome.persistence_failed is True
+    assert outcome.static_run_id is None
+    assert status_updates
+    assert status_updates[-1]["static_run_id"] == 505
+    assert status_updates[-1]["status"] == "FAILED"

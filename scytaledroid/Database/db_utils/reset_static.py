@@ -35,8 +35,13 @@ STATIC_ANALYSIS_TABLES: Sequence[str] = (
     "static_fileproviders",
     "static_findings",
     "static_findings_summary",
+    "static_analysis_findings",
     "static_permission_risk",
     "static_permission_risk_vnext",
+    "static_permission_matrix",
+    "static_correlation_results",
+    "masvs_control_coverage",
+    "doc_hosts",
     # Linkage/ledger tables (resetting findings without these leaves confusing "orphan" runs)
     "static_session_run_links",
     "static_analysis_runs",
