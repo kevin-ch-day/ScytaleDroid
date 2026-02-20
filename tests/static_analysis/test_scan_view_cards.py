@@ -54,7 +54,7 @@ def test_render_app_completion_card_mode_dedupes_slowest_detectors(capsys) -> No
     assert "[2/111] BBC News" in out
     assert "Package: bbc.mobile.news.ww" in out
     assert "Artifacts: 4   Time: 00:37" in out
-    assert "Checks: ok=10 warn=3 fail=1 error=0 skipped=5" in out
+    assert "Checks: ok=10 warn=3 policy_fail=0 finding_fail=1 error=0 skipped=5" in out
     assert "Findings: C:1 H:2 M:3 L:0 I:0 Note:0" in out
     assert "Slow:" in out
     assert out.count("correlation_engine") == 1

@@ -64,7 +64,12 @@ def _format_highlight_tokens(
     return tokens
 
 
-def _format_masvs_cell(area_counts: Mapping[str, int]) -> str:
+def _format_masvs_cell(area_counts: Mapping[str, int] | None) -> str:
+    if not isinstance(area_counts, Mapping):
+        summary = "N/A"
+        if colors.colors_enabled():
+            return colors.apply(summary, colors.style("muted"), bold=True)
+        return summary
     high = int(area_counts.get("High", 0))
     medium = int(area_counts.get("Medium", 0))
     if high > 0:

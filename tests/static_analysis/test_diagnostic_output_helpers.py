@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from datetime import UTC
+from types import SimpleNamespace
 
 from scytaledroid.StaticAnalysis.cli.execution import (
     db_verification,
     diagnostics,
     results_formatters,
 )
+from scytaledroid.Utils.System import output_prefs
 
 
 def test_hash_prefix_short_value():
@@ -130,3 +132,91 @@ def test_render_persistence_footer_prints_canonical_and_latest(monkeypatch, caps
     assert "static_run_id=718" in out
     assert "latest" in out
     assert "static_run_id=719" in out
+
+
+def test_render_db_masvs_summary_aggregates_all_static_ids(monkeypatch, capsys):
+    class _Ctx:
+        persistence_ready = True
+        session_stamp = "sess-agg"
+
+    monkeypatch.setattr(output_prefs, "get_run_context", lambda: _Ctx())
+    monkeypatch.setattr(db_verification, "load_run_map", lambda *_a, **_k: {"apps": []})
+    monkeypatch.setattr(db_verification, "extract_static_run_ids", lambda *_a, **_k: [41, 40, 39])
+
+    calls = {"many": 0, "fallback": 0}
+
+    def _many(ids):
+        calls["many"] += 1
+        assert ids == [41, 40, 39]
+        return (
+            41,
+            [
+                {
+                    "area": "NETWORK",
+                    "high": 0,
+                    "medium": 1,
+                    "low": 0,
+                    "info": 0,
+                    "cvss": {
+                        "worst_score": 7.5,
+                        "worst_severity": "High",
+                        "worst_identifier": "correlation_engine",
+                        "average_score": 7.5,
+                        "band_counts": {"High": 1},
+                    },
+                    "quality": {"coverage_status": "ok"},
+                }
+            ],
+        )
+
+    def _fallback(*_a, **_k):
+        calls["fallback"] += 1
+        return None
+
+    monkeypatch.setattr(db_verification, "fetch_db_masvs_summary_static_many", _many)
+    monkeypatch.setattr(db_verification, "fetch_db_masvs_summary", _fallback)
+
+    db_verification._render_db_masvs_summary()
+
+    out = capsys.readouterr().out
+    assert "DB MASVS Summary (run_id=41)" in out
+    assert calls["many"] == 1
+    assert calls["fallback"] == 0
+
+
+def test_render_persistence_footer_derives_snapshot_count_from_permission_apps(monkeypatch, capsys):
+    audit = SimpleNamespace(
+        counts={},
+        is_group_scope=True,
+        run_id=123,
+        is_orphan=False,
+        static_run_id=41,
+    )
+
+    def fake_run_sql(query, params=None, fetch=None):
+        sql = " ".join(str(query).split()).lower()
+        if "select run_id from runs where session_stamp" in sql:
+            return [(1,), (2,)]
+        if "select snapshot_id from permission_audit_snapshots where snapshot_key" in sql:
+            return None
+        if "select count(*) from permission_audit_snapshots where static_run_id in" in sql:
+            return (0,)
+        if "select count(distinct snapshot_id) from permission_audit_apps where static_run_id in" in sql:
+            return (4,)
+        if "select count(*) from permission_audit_apps where static_run_id in" in sql:
+            return (12,)
+        if "from static_string_sample_sets" in sql:
+            return None
+        if "select count(*) from" in sql:
+            return (0,)
+        return (0,)
+
+    monkeypatch.setattr(db_verification.core_q, "run_sql", fake_run_sql)
+    monkeypatch.setattr(db_verification, "_resolve_static_run_ids", lambda *_args, **_kwargs: [41, 40, 39])
+    monkeypatch.setattr(db_verification, "collect_static_run_counts", lambda *_args, **_kwargs: audit)
+    monkeypatch.setattr(db_verification, "_table_has_column", lambda *_args, **_kwargs: True)
+
+    db_verification._render_persistence_footer("sess-audit")
+    out = capsys.readouterr().out
+    assert "permission_audit_snapshots" in out
+    assert "this_run=4" in out

@@ -432,7 +432,10 @@ class NetworkSurfaceDetector(BaseDetector):
                 {},
                 context.manifest_flags,
             )
-            findings = _assess_policy(context.network_security_policy)
+            findings = _assess_policy(
+                context.network_security_policy,
+                has_code_http=False,
+            )
             return make_detector_result(
                 detector_id=self.detector_id,
                 section_key=self.section_key,

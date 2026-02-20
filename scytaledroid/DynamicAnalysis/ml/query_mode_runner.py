@@ -84,19 +84,21 @@ def _rows_to_matrix(rows: list[dict[str, Any]], *, window_spec: WindowSpec) -> t
     denom = float(window_spec.window_size_s) if window_spec.window_size_s > 0 else 1.0
     feature_names = ["bytes_per_sec", "packets_per_sec", "avg_packet_size_bytes"]
     data: list[list[float]] = []
-    for row in rows:
+    def _f(value: Any) -> float:
         try:
-            byte_count = float(row.get("byte_count") or 0.0)
-            pkt_count = float(row.get("packet_count") or 0.0)
-            avg_pkt = float(row.get("avg_packet_size_bytes") or 0.0)
-            bytes_per_sec = byte_count / denom
-            packets_per_sec = pkt_count / denom
-            if config.FEATURE_LOG1P:
-                bytes_per_sec = float(np.log1p(bytes_per_sec))
-                packets_per_sec = float(np.log1p(packets_per_sec))
-            data.append([bytes_per_sec, packets_per_sec, avg_pkt])
+            return float(value or 0.0)
         except Exception:
-            continue
+            return 0.0
+    for row in rows:
+        byte_count = _f(row.get("byte_count"))
+        pkt_count = _f(row.get("packet_count"))
+        avg_pkt = _f(row.get("avg_packet_size_bytes"))
+        bytes_per_sec = byte_count / denom
+        packets_per_sec = pkt_count / denom
+        if config.FEATURE_LOG1P:
+            bytes_per_sec = float(np.log1p(bytes_per_sec))
+            packets_per_sec = float(np.log1p(packets_per_sec))
+        data.append([bytes_per_sec, packets_per_sec, avg_pkt])
     if not data:
         return np.zeros((0, len(feature_names)), dtype=float), feature_names
     return np.asarray(data, dtype=float), feature_names
@@ -223,12 +225,54 @@ def _write_model_manifest(
     model_outputs: dict[str, dict[str, Any]],
     selection_manifest_path: Path,
 ) -> None:
+    pcapdroid_version = "unknown"
+    capture_mode = "unknown"
+    linktype = "unknown"
+    if isinstance(run_inputs.manifest, dict):
+        artifacts = run_inputs.manifest.get("artifacts")
+        if isinstance(artifacts, list):
+            for art in artifacts:
+                if not isinstance(art, dict) or str(art.get("type") or "") != "pcapdroid_capture_meta":
+                    continue
+                rel = art.get("relative_path")
+                if isinstance(rel, str) and rel:
+                    try:
+                        meta = json.loads((run_inputs.run_dir / rel).read_text(encoding="utf-8"))
+                        if isinstance(meta, dict):
+                            capture_mode = str(meta.get("capture_mode") or "unknown")
+                            pcapdroid_version = str(meta.get("pcapdroid_version") or "unknown")
+                    except Exception:
+                        pass
+                break
+    if isinstance(run_inputs.pcap_report, dict):
+        cap = run_inputs.pcap_report.get("capinfos")
+        parsed = (cap.get("parsed") if isinstance(cap, dict) else None) if cap is not None else None
+        if isinstance(parsed, dict):
+            linktype = str(parsed.get("file_type") or parsed.get("encapsulation") or "unknown")
+
     payload: dict[str, Any] = {
         "ml_schema_version": int(config.ML_SCHEMA_VERSION),
         "identity_key_used": identity_key_used,
         "seed": int(seed),
         "seed_salt": {"label": config.SEED_SALT_LABEL},
         "windowing": {"window_size_s": window_spec.window_size_s, "stride_s": window_spec.stride_s},
+        "paper_constants": {
+            "window_size_s": float(config.WINDOW_SIZE_S),
+            "window_stride_s": float(config.WINDOW_STRIDE_S),
+            "min_windows_baseline": int(config.MIN_WINDOWS_BASELINE),
+            "min_pcap_bytes_fallback": int(config.MIN_PCAP_BYTES_FALLBACK),
+            "np_percentile_method": str(config.NP_PERCENTILE_METHOD),
+        },
+        "capture_semantics": {
+            "capture_scope": "PCAPdroid-filtered capture restricted to the target package.",
+            "byte_semantics": "aggregate frame length (frame.len) as reported by tshark.",
+            "directionality": "no direction split is performed.",
+            "capture_tool": "PCAPdroid",
+            "filter_type": "PCAPdroid app_filter (package)",
+            "capture_mode": capture_mode,
+            "pcapdroid_version": pcapdroid_version,
+            "pcap_linktype": linktype,
+        },
         "selection_manifest_path": str(selection_manifest_path),
         "run": {
             "run_id": run_inputs.run_id,
@@ -236,6 +280,10 @@ def _write_model_manifest(
             "run_profile": run_inputs.run_profile,
         },
         "models": model_outputs,
+        "model_reporting_roles": {
+            config.MODEL_IFOREST: "primary",
+            config.MODEL_OCSVM: "secondary_model_robustness_check",
+        },
     }
     _write_json_if_missing(path, payload)
 
@@ -642,6 +690,24 @@ def run_ml_query_mode(
                 "params": dict(spec.params),
                 "score_semantics": "higher_is_more_anomalous",
                 "training_mode": training_mode,
+                "baseline_provenance": {
+                    "baseline_run_id": str(baseline_runs[0].run_id) if baseline_runs else None,
+                    "baseline_pcap_bytes_ok": bool(baseline_bytes_ok),
+                    "baseline_windows_ok": bool(baseline_windows_ok),
+                    "fallback_reason": (
+                        []
+                        if training_mode == "baseline_only"
+                        else [
+                            reason
+                            for reason, ok in (
+                                ("bytes_gate", bool(baseline_bytes_ok)),
+                                ("windows_gate", bool(baseline_windows_ok)),
+                            )
+                            if not ok
+                        ]
+                    ),
+                    "degraded_comparability": bool(training_mode == "union_fallback"),
+                },
                 "threshold_stability": stability,
                 "quality_gates": {
                     "baseline_min_pcap_bytes": int(min_bytes),

@@ -190,3 +190,56 @@ def test_launch_scan_flow_finalizes_lingering_started_rows_for_session(monkeypat
     run_dispatch.launch_scan_flow(selection, params, Path("."))
 
     assert sorted(set(captured_ids)) == [101, 102]
+
+
+def test_launch_scan_flow_skips_run_map_and_permission_refresh_when_no_results(monkeypatch) -> None:
+    now = datetime.now(UTC)
+    outcome = RunOutcome(
+        results=[],
+        started_at=now,
+        finished_at=now,
+        scope=ScopeSelection(scope="app", label="Example", groups=tuple()),
+        base_dir=Path("."),
+    )
+
+    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok"))
+    monkeypatch.setattr(run_dispatch.canonical_ingest, "ensure_provider_plumbing", lambda: None)
+    monkeypatch.setattr(run_dispatch.canonical_ingest, "build_session_string_view", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch, "execute_scan", lambda *_a, **_k: outcome)
+    monkeypatch.setattr(run_dispatch, "render_run_results", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch, "_emit_selection_manifest", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch, "finalize_open_runs", lambda *_a, **_k: None)
+
+    calls = {"run_map": 0, "perm_refresh": 0, "blocked_reason": None}
+
+    def _build_run_map(*_a, **_k):
+        calls["run_map"] += 1
+        return {}
+
+    def _execute_permission_scan(*_a, **_k):
+        calls["perm_refresh"] += 1
+
+    def _emit_missing(*_a, **kwargs):
+        calls["blocked_reason"] = kwargs.get("linkage_blocked_reason")
+
+    monkeypatch.setattr(run_dispatch, "_build_session_run_map", _build_run_map)
+    monkeypatch.setattr(run_dispatch, "execute_permission_scan", _execute_permission_scan)
+    monkeypatch.setattr(run_dispatch, "_emit_missing_run_ids_artifact", _emit_missing)
+
+    params = RunParameters(
+        profile="full",
+        scope="app",
+        scope_label="Example",
+        session_stamp="sess-empty",
+        dry_run=False,
+        persistence_ready=True,
+        permission_snapshot_refresh=True,
+        paper_grade_requested=False,
+    )
+    selection = ScopeSelection(scope="app", label="Example", groups=tuple())
+
+    run_dispatch.launch_scan_flow(selection, params, Path("."))
+
+    assert calls["run_map"] == 0
+    assert calls["perm_refresh"] == 0
+    assert calls["blocked_reason"] == "No analyzable artifacts; skipping run_map and permission refresh."

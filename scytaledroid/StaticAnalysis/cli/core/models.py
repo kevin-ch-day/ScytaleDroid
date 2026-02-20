@@ -230,6 +230,7 @@ class AppRunResult:
     artifact_set_hash: str | None = None
     run_signature: str | None = None
     run_signature_version: str | None = None
+    static_handoff_hash: str | None = None
     dynamic_plan_path: str | None = None
     persistence_retry_count: int = 0
     persistence_db_disconnect: bool = False

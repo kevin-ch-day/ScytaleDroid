@@ -218,3 +218,26 @@ GROUP BY r.run_id, r.package;
 """
 
 __all__ += ["CREATE_V_MASVS_MATRIX"]
+
+CREATE_V_STATIC_HANDOFF_V1 = """
+CREATE OR REPLACE VIEW v_static_handoff_v1 AS
+SELECT
+  sar.id AS static_run_id,
+  sar.session_label,
+  sar.base_apk_sha256,
+  sar.artifact_set_hash,
+  sar.identity_mode,
+  sar.identity_conflict_flag,
+  sar.static_handoff_hash,
+  sar.tool_semver,
+  sar.tool_git_commit,
+  sar.schema_version,
+  a.package_name AS package_name_lc,
+  av.version_code,
+  sar.static_handoff_json
+FROM static_analysis_runs sar
+JOIN app_versions av ON av.id = sar.app_version_id
+JOIN apps a ON a.id = av.app_id;
+"""
+
+__all__ += ["CREATE_V_STATIC_HANDOFF_V1"]

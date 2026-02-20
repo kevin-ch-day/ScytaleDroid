@@ -646,7 +646,7 @@ def prompt_reset_static_data() -> None:
         return
 
     started_at = datetime.now(UTC)
-    outcome = reset_static_analysis_data(include_harvest=include_harvest)
+    outcome = reset_static_analysis_data(include_harvest=include_harvest, truncate_all=True)
     finished_at = datetime.now(UTC)
     log_db_op(
         operation="reset_static_analysis",

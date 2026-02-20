@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import statistics
 from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
@@ -187,10 +188,8 @@ def _build_permission_profile(report, app_result) -> dict[str, object | None]:
 
 def _collect_masvs_profile(report) -> dict[str, object]:
     severity_map = {"P0": "High", "P1": "Medium", "P2": "Low", "NOTE": "Info"}
-    counts: dict[str, dict[str, int]] = {
-        area: {"High": 0, "Medium": 0, "Low": 0, "Info": 0} for area in ("NETWORK", "PLATFORM", "PRIVACY", "STORAGE")
-    }
-    highlights: dict[str, Counter[str]] = {area: Counter() for area in counts}
+    counts: dict[str, dict[str, int]] = {}
+    highlights: dict[str, Counter[str]] = {}
     has_values = False
     for result in getattr(report, "detector_results", []) or []:
         for finding in getattr(result, "findings", []) or []:
@@ -203,16 +202,17 @@ def _collect_masvs_profile(report) -> dict[str, object]:
             if not area_value:
                 continue
             area_key = str(area_value).upper()
-            if area_key not in counts:
+            if area_key not in {"NETWORK", "PLATFORM", "PRIVACY", "STORAGE"}:
                 continue
+            area_counts = counts.setdefault(area_key, {"High": 0, "Medium": 0, "Low": 0, "Info": 0})
             sev_gate = getattr(getattr(finding, "severity_gate", None), "value", None)
             severity_label = severity_map.get(str(sev_gate), None)
             if severity_label is None:
                 continue
-            counts[area_key][severity_label] += 1
+            area_counts[severity_label] += 1
             if severity_label in {"High", "Medium"}:
                 descriptor = finding.title or finding.finding_id or result.detector_id or "Unknown"
-                highlights[area_key][descriptor] += 1
+                highlights.setdefault(area_key, Counter())[descriptor] += 1
             has_values = True
     if not has_values:
         return {}
@@ -266,19 +266,34 @@ def _build_static_risk_row(
     legacy_storage = bool(getattr(flags, "request_legacy_external_storage", False)) if flags else False
 
     code_http_hosts, _asset_http_hosts = _code_http_counts(string_data)
-    has_code_http = code_http_hosts > 0
+    counts_section = string_data.get("counts", {}) if isinstance(string_data, Mapping) else {}
+    endpoint_hits = int(counts_section.get("endpoints", 0) or 0) if isinstance(counts_section, Mapping) else 0
+    cleartext_hits = int(counts_section.get("http_cleartext", 0) or 0) if isinstance(counts_section, Mapping) else 0
+    aggregates = string_data.get("aggregates", {}) if isinstance(string_data, Mapping) else {}
+    endpoint_roots = aggregates.get("endpoint_roots") if isinstance(aggregates, Mapping) else None
+    has_endpoint_roots = (
+        isinstance(endpoint_roots, Sequence)
+        and not isinstance(endpoint_roots, (str, bytes))
+        and len(endpoint_roots) > 0
+    )
+    has_code_http = code_http_hosts > 0 or endpoint_hits > 0 or cleartext_hits > 0 or has_endpoint_roots
     try:
         declared = list(report.permissions.declared or ())
     except Exception:
         declared = []
 
-    net_points = 12.0 if (uses_cleartext and has_code_http) else (4.0 if has_code_http else 0.0)
+    if uses_cleartext and has_code_http:
+        net_points = 12.0
+    elif uses_cleartext:
+        net_points = 8.0
+    elif has_code_http:
+        net_points = 4.0
+    else:
+        net_points = 0.0
     sto_points = 8.0 if legacy_storage else 0.0
-    comp_points = float(min(12, total_exports * 1.5))
+    comp_points = float(min(12.0, round(math.log1p(max(0, total_exports)) * 1.8, 2)))
 
-    aggregates = string_data.get("aggregates", {}) if isinstance(string_data, Mapping) else {}
     validated = len(aggregates.get("api_keys_high") or [])
-    counts_section = string_data.get("counts", {}) if isinstance(string_data, Mapping) else {}
     entropy_hits = int(counts_section.get("high_entropy", 0) or 0) if isinstance(counts_section, Mapping) else 0
     secrets_points = float(min(20, validated * 2)) + (3.0 if entropy_hits >= 10 else (1.5 if entropy_hits else 0.0))
     webssl_points = 0.0
@@ -295,9 +310,10 @@ def _build_static_risk_row(
     except Exception:
         perm_points = risk_score * 2
     perm_points = min(15.0, perm_points)
-    grade = permission_profile.get("grade") if permission_profile else "N/A"
 
     total_score = perm_points + net_points + sto_points + comp_points + secrets_points + webssl_points + corr_points
+    score_0_10 = max(0.0, min(10.0, (float(total_score) / 75.0) * 10.0))
+    grade = permission_risk_grade(score_0_10)
     package = getattr(report.manifest, "package_name", None) or app_result.package_name
     label = permission_profile.get("label") if permission_profile else package
 
@@ -508,14 +524,15 @@ def _render_masvs_matrix_local(
         row = [display]
         total_high = total_medium = total_low = total_info = 0
         for area in areas:
-            area_counts = counts.get(area, {"High": 0, "Medium": 0, "Low": 0, "Info": 0}) if isinstance(counts, Mapping) else {}
+            area_counts = counts.get(area) if isinstance(counts, Mapping) else None
             if not isinstance(area_counts, Mapping):
-                area_counts = {"High": 0, "Medium": 0, "Low": 0, "Info": 0}
+                area_counts = None
             row.append(_format_masvs_cell(area_counts))
-            total_high += int(area_counts.get("High", 0))
-            total_medium += int(area_counts.get("Medium", 0))
-            total_low += int(area_counts.get("Low", 0))
-            total_info += int(area_counts.get("Info", 0))
+            if isinstance(area_counts, Mapping):
+                total_high += int(area_counts.get("High", 0))
+                total_medium += int(area_counts.get("Medium", 0))
+                total_low += int(area_counts.get("Low", 0))
+                total_info += int(area_counts.get("Info", 0))
         totals_text = f"H{total_high} M{total_medium} L{total_low} I{total_info}"
         if colors.colors_enabled():
             if total_high:

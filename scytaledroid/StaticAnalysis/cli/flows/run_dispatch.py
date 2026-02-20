@@ -296,6 +296,10 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
             if not params.dry_run:
                 if not params.persistence_ready:
                     linkage_blocked_reason = "Persistence gate failed; skipping run_map and permission refresh."
+                elif not outcome.results:
+                    linkage_blocked_reason = (
+                        "No analyzable artifacts; skipping run_map and permission refresh."
+                    )
                 else:
                     missing_id_packages = [res.package_name for res in outcome.results if not res.static_run_id]
                     if missing_id_packages:

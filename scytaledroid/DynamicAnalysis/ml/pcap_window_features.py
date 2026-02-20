@@ -131,41 +131,24 @@ def build_window_features(
     counts = [0 for _ in windows]
     bytes_ = [0 for _ in windows]
 
-    # Sliding assignment: window i covers [start, end)
-    i = 0
-    prev_t: float | None = None
-    monotonic = True
+    # Assignment for overlapping windows: a packet can contribute to multiple
+    # windows when stride < window_size.
+    starts = [w[0] for w in windows]
     ends = [w[1] for w in windows]
     for pkt in packets:
-        if prev_t is not None and pkt.t + 1e-9 < prev_t:
-            # Defensive: if tshark output is not monotonic (should be rare), switch to
-            # window lookup by timestamp rather than relying on the sliding pointer.
-            monotonic = False
-        prev_t = pkt.t
-
-        if not monotonic:
-            j = bisect_right(ends, pkt.t)  # first end > t
-            if j <= 0 or j > len(windows):
-                continue
-            start, end = windows[j - 1]
+        # first index where end > t (discard windows ending at/before t)
+        lo = bisect_right(ends, pkt.t)
+        # last index where start <= t
+        hi = bisect_right(starts, pkt.t) - 1
+        if lo > hi:
+            continue
+        for j in range(max(0, lo), min(len(windows) - 1, hi) + 1):
+            # Defensive bounds check for floating-point edges.
+            start, end = windows[j]
             if pkt.t < start or pkt.t >= end:
                 continue
-            counts[j - 1] += 1
-            bytes_[j - 1] += int(pkt.length)
-            continue
-
-        # Advance i while packet is beyond current window.
-        while i < len(windows) and pkt.t >= windows[i][1]:
-            i += 1
-        if i >= len(windows):
-            # Continue draining the packet stream so tshark can exit cleanly and we can
-            # detect non-zero exit codes deterministically.
-            continue
-        # Packet might be before window start (shouldn't happen due to monotonic time_relative)
-        if pkt.t < windows[i][0]:
-            continue
-        counts[i] += 1
-        bytes_[i] += int(pkt.length)
+            counts[j] += 1
+            bytes_[j] += int(pkt.length)
 
     rows: list[dict[str, Any]] = []
     for (start, end), c, b in zip(windows, counts, bytes_, strict=True):

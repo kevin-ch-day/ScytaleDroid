@@ -12,7 +12,10 @@ from scytaledroid.Database.db_core.db_config import DB_CONFIG
 from scytaledroid.Database.db_scripts.static_run_audit import collect_static_run_counts
 from scytaledroid.Utils.DisplayUtils import status_messages, table_utils
 
-from ..reports.masvs_summary_report import fetch_db_masvs_summary, fetch_db_masvs_summary_static
+from ..reports.masvs_summary_report import (
+    fetch_db_masvs_summary,
+    fetch_db_masvs_summary_static_many,
+)
 from .results_formatters import _normalize_target_sdk
 from .static_run_map import extract_static_run_ids, load_run_map
 
@@ -168,7 +171,7 @@ def _render_db_masvs_summary() -> None:
             run_map = load_run_map(session_stamp)
             static_ids = extract_static_run_ids(run_map)
             if static_ids:
-                summary = fetch_db_masvs_summary_static(static_ids[-1])
+                summary = fetch_db_masvs_summary_static_many(static_ids)
         if summary is None:
             summary = fetch_db_masvs_summary()
         if not summary:
@@ -413,16 +416,24 @@ def _render_persistence_footer(
     metrics = _audit_or("metrics") or _count_by_run("metrics")
     findings = _audit_or("findings") or _count_by_run("findings")
 
+    scope_static_ids = static_run_ids if (audit and audit.is_group_scope) else latest_static_run_ids
+
     snapshot_count = _audit_or(
         "permission_audit_snapshots",
         "SELECT COUNT(*) FROM permission_audit_snapshots WHERE snapshot_key = %s",
         (snapshot_key,),
     )
-    if snapshot_count == 0 and latest_static_run_ids:
-        placeholders = ",".join(["%s"] * len(latest_static_run_ids))
+    if snapshot_count == 0 and scope_static_ids:
+        placeholders = ",".join(["%s"] * len(scope_static_ids))
         snapshot_count = _count(
             f"SELECT COUNT(*) FROM permission_audit_snapshots WHERE static_run_id IN ({placeholders})",
-            tuple(latest_static_run_ids),
+            tuple(scope_static_ids),
+        )
+    if snapshot_count == 0 and scope_static_ids:
+        placeholders = ",".join(["%s"] * len(scope_static_ids))
+        snapshot_count = _count(
+            f"SELECT COUNT(DISTINCT snapshot_id) FROM permission_audit_apps WHERE static_run_id IN ({placeholders})",
+            tuple(scope_static_ids),
         )
     snapshot_apps = _audit_or("permission_audit_apps")
     if snapshot_apps == 0 and snapshot_id is not None:
@@ -430,11 +441,11 @@ def _render_persistence_footer(
             "SELECT COUNT(*) FROM permission_audit_apps WHERE snapshot_id = %s",
             (snapshot_id,),
         )
-    if snapshot_apps == 0 and latest_static_run_ids:
-        placeholders = ",".join(["%s"] * len(latest_static_run_ids))
+    if snapshot_apps == 0 and scope_static_ids:
+        placeholders = ",".join(["%s"] * len(scope_static_ids))
         snapshot_apps = _count(
             f"SELECT COUNT(*) FROM permission_audit_apps WHERE static_run_id IN ({placeholders})",
-            tuple(latest_static_run_ids),
+            tuple(scope_static_ids),
         )
 
     runs_total = _count_total("SELECT COUNT(*) FROM runs")
@@ -669,8 +680,6 @@ def _render_persistence_footer(
         "static_string_samples": string_samples_raw,
         "buckets": buckets,
         "metrics": metrics,
-        "permission_audit_snapshots": snapshot_count,
-        "permission_audit_apps": snapshot_apps,
     }
     missing = [name for name, value in required_counts.items() if not value]
     audit_error_tables: list[str] = []

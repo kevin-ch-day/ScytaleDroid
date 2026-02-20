@@ -150,7 +150,8 @@ def render_app_completion(
         print(
             status_messages.status(
                 (
-                    f"Checks: ok={ok_count} warn={warn_count} fail={fail_count} "
+                    f"Checks: ok={ok_count} warn={warn_count} "
+                    f"policy_fail={policy_fail_count} finding_fail={finding_fail_count} "
                     f"error={error_count} skipped={skipped_count}"
                 ),
                 level="info",
@@ -193,7 +194,16 @@ def render_app_completion(
 
         if error_count > 0 or fail_count > 0 or p0 > 0:
             failing: list[str] = []
-            for key in ("finding_fail_detectors", "policy_fail_detectors", "error_detectors"):
+            error_only: list[str] = []
+            payload = summary.get("error_detectors")
+            if isinstance(payload, Sequence):
+                for entry in payload:
+                    if not isinstance(entry, Mapping):
+                        continue
+                    det = str(entry.get("detector") or entry.get("section") or "").strip()
+                    if det and det not in error_only:
+                        error_only.append(det)
+            for key in ("finding_fail_detectors", "policy_fail_detectors"):
                 payload = summary.get(key)
                 if not isinstance(payload, Sequence):
                     continue
@@ -203,10 +213,19 @@ def render_app_completion(
                     det = str(entry.get("detector") or entry.get("section") or "").strip()
                     if det and det not in failing:
                         failing.append(det)
+            if error_only:
+                print(
+                    status_messages.status(
+                        "Execution errors: " + ", ".join(error_only[:4]),
+                        level="warn",
+                        show_icon=False,
+                        show_prefix=False,
+                    )
+                )
             if failing:
                 print(
                     status_messages.status(
-                        "Failing checks: " + ", ".join(failing[:4]),
+                        "Policy/finding fails: " + ", ".join(failing[:4]),
                         level="warn",
                         show_icon=False,
                         show_prefix=False,

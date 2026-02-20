@@ -208,6 +208,7 @@ def _normalize_plan(plan: dict[str, Any]) -> dict[str, object]:
         "run_signature_version": plan.get("run_signature_version") or identity.get("run_signature_version"),
         "artifact_set_hash": plan.get("artifact_set_hash") or identity.get("artifact_set_hash"),
         "base_apk_sha256": plan.get("base_apk_sha256") or identity.get("base_apk_sha256"),
+        "static_handoff_hash": plan.get("static_handoff_hash") or identity.get("static_handoff_hash"),
         "session_stamp": plan.get("session_stamp"),
     }
 

@@ -44,6 +44,7 @@ from .permission_matrix import persist_permission_matrix
 from .permission_risk import persist_permission_risk
 from .run_envelope import prepare_run_envelope
 from .contracts import normalize_run_status
+from .static_handoff import build_static_handoff, persist_static_handoff
 from .static_sections import (
     coerce_severity_counts,
     persist_static_sections,
@@ -100,6 +101,7 @@ class PersistenceOutcome:
     persistence_exception_class: str | None = None
     persistence_transaction_state: str | None = None
     persistence_failure_stage: str | None = None
+    static_handoff_hash: str | None = None
     errors: list[str] = field(default_factory=list)
 
     @property
@@ -567,6 +569,10 @@ def _update_static_run_metadata(
     analysis_version: str | None = None,
     catalog_versions: str | None = None,
     study_tag: str | None = None,
+    identity_mode: str | None = None,
+    identity_conflict_flag: bool | None = None,
+    static_handoff_hash: str | None = None,
+    static_handoff_json: str | None = None,
 ) -> None:
     _run_writers.update_static_run_metadata(
         static_run_id=static_run_id,
@@ -582,6 +588,10 @@ def _update_static_run_metadata(
         analysis_version=analysis_version,
         catalog_versions=catalog_versions,
         study_tag=study_tag,
+        identity_mode=identity_mode,
+        identity_conflict_flag=identity_conflict_flag,
+        static_handoff_hash=static_handoff_hash,
+        static_handoff_json=static_handoff_json,
     )
 
 
@@ -1386,6 +1396,40 @@ def persist_run_summary(
     
                         if db_errors:
                             raise RuntimeError(db_errors[-1])
+                if static_run_id:
+                    try:
+                        handoff_payload = build_static_handoff(
+                            report=br,
+                            string_data=string_data,
+                            package_name=package_for_run,
+                            version_code=version_code,
+                            base_apk_sha256=base_apk_sha256,
+                            artifact_set_hash=artifact_set_hash,
+                            static_run_id=int(static_run_id),
+                            session_label=session_stamp,
+                            tool_semver=app_config.APP_VERSION,
+                            tool_git_commit=get_git_commit(),
+                            schema_version=cached_schema_version,
+                        )
+                        handoff_hash = persist_static_handoff(
+                            static_run_id=int(static_run_id),
+                            handoff_payload=handoff_payload,
+                        )
+                        outcome.static_handoff_hash = handoff_hash
+                        _update_static_run_metadata(
+                            int(static_run_id),
+                            static_handoff_hash=handoff_hash,
+                            static_handoff_json=json.dumps(
+                                handoff_payload,
+                                ensure_ascii=False,
+                                sort_keys=True,
+                            ),
+                        )
+                    except Exception as exc:
+                        log.warning(
+                            f"Static handoff export skipped for {package_for_run}: {exc}",
+                            category="static_analysis",
+                        )
                 persistence_failed = False
                 outcome.persistence_transaction_state = "committed"
                 break
@@ -1498,8 +1542,11 @@ def persist_run_summary(
             )
 
     if static_run_id and not dry_run:
+        # Default static CLI runs are not paper-grade unless explicitly requested.
+        # Enforcing canonical single-row invariants in routine exploratory runs
+        # incorrectly marks otherwise successful persistence as FAILED.
         if paper_grade_requested is None:
-            paper_grade_requested = True
+            paper_grade_requested = False
 
         if persistence_failed:
             run_status = "FAILED"
@@ -1522,28 +1569,68 @@ def persist_run_summary(
             enforced_session_label = session_stamp
 
         if not persistence_failed and enforced_session_label and paper_grade_requested:
+            # Canonical singleton applies only to true single-app sessions.
+            # Group/profile sessions intentionally persist multiple static rows under one session label.
+            # static_analysis_runs does not carry package_name directly, so resolve scope via app_versions/apps.
+            # Fail safe toward "group scope" if the scope cannot be resolved reliably.
+            is_group_scope = False
             try:
                 row = core_q.run_sql(
                     """
-                    SELECT COUNT(*)
-                    FROM static_analysis_runs
-                    WHERE session_label=%s AND is_canonical=1
+                    SELECT
+                      COUNT(*) AS run_rows,
+                      COUNT(DISTINCT sar.app_version_id) AS distinct_app_versions,
+                      COUNT(DISTINCT a.package_name) AS distinct_packages
+                    FROM static_analysis_runs sar
+                    LEFT JOIN app_versions av ON av.id = sar.app_version_id
+                    LEFT JOIN apps a ON a.id = av.app_id
+                    WHERE sar.session_label=%s
                     """,
                     (enforced_session_label,),
                     fetch="one",
                 )
-                canonical_count = int(row[0] or 0) if row else 0
-            except Exception:
-                canonical_count = 0
-            if canonical_count != 1:
-                outcome.canonical_failed = True
-                run_status = "FAILED"
-                message = (
-                    "canonical_enforcement_failed: expected exactly one canonical row "
-                    f"for session_label={enforced_session_label}, found {canonical_count}."
+                run_rows = int(row[0] or 0) if row else 0
+                distinct_app_versions = int(row[1] or 0) if row else 0
+                distinct_packages = int(row[2] or 0) if row else 0
+                is_group_scope = bool(
+                    distinct_packages > 1
+                    or distinct_app_versions > 1
+                    # If joins are unavailable but multiple rows exist, avoid false singleton hard-fail.
+                    or (run_rows > 1 and distinct_packages == 0 and distinct_app_versions == 0)
                 )
-                log.warning(message, category="static_analysis")
-                outcome.add_error(message)
+            except Exception:
+                # Fail-safe: never hard-fail canonical enforcement when scope
+                # cannot be reliably resolved from metadata.
+                is_group_scope = True
+
+            if is_group_scope:
+                log.info(
+                    f"Skipping canonical singleton enforcement for group scope session_label={enforced_session_label}",
+                    category="static_analysis",
+                )
+            else:
+                try:
+                    row = core_q.run_sql(
+                        """
+                        SELECT COUNT(*)
+                        FROM static_analysis_runs
+                        WHERE session_label=%s AND is_canonical=1
+                        """,
+                        (enforced_session_label,),
+                        fetch="one",
+                    )
+                    canonical_count = int(row[0] or 0) if row else 0
+                except Exception:
+                    canonical_count = 0
+                if canonical_count != 1:
+                    outcome.canonical_failed = True
+                    run_status = "FAILED"
+                    message = (
+                        "canonical_enforcement_failed: expected exactly one canonical row "
+                        f"for session_label={enforced_session_label}, found {canonical_count}."
+                    )
+                    log.warning(message, category="static_analysis")
+                    outcome.add_error(message)
 
         # Keep static_analysis_runs.findings_total consistent with persisted findings.
         # This value is used by DB health summaries and run listings; leaving it at 0

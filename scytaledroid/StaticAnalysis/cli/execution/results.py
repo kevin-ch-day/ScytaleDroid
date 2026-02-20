@@ -264,13 +264,6 @@ def _render_run_results_impl(
         if not persistence_ready:
             grade_label = "EXPERIMENTAL"
             grade_reasons.append("persistence gate failed")
-        missing_ids = [res.package_name for res in outcome.results if not res.static_run_id]
-        if missing_ids:
-            grade_label = "EXPERIMENTAL"
-            preview = ", ".join(missing_ids[:5])
-            if len(missing_ids) > 5:
-                preview += f", +{len(missing_ids) - 5} more"
-            grade_reasons.append(f"static_run_id missing for: {preview}")
     grade_text = f"Grade: {grade_label}"
     if grade_reasons:
         grade_text += f" ({'; '.join(grade_reasons)})"
@@ -577,6 +570,7 @@ def _render_run_results_impl(
                 if outcome_status:
                     if outcome_status.static_run_id:
                         app_result.static_run_id = outcome_status.static_run_id
+                    app_result.static_handoff_hash = getattr(outcome_status, "static_handoff_hash", None)
                     app_result.persistence_retry_count = int(
                         getattr(outcome_status, "persistence_retry_count", 0) or 0
                     )
@@ -595,7 +589,12 @@ def _render_run_results_impl(
                     normalized_findings_total += int(outcome_status.persisted_findings)
                     string_samples_persisted_total += int(outcome_status.string_samples_persisted)
                 if outcome_status and not outcome_status.success:
-                    persistence_errors.extend(outcome_status.errors)
+                    for err in outcome_status.errors:
+                        msg = str(err)
+                        if "canonical_enforcement_failed" in msg:
+                            canonical_failures.append(msg)
+                        else:
+                            persistence_errors.append(msg)
                     if app_result.static_run_id and persist_enabled:
                         finalize_static_run(
                             static_run_id=app_result.static_run_id,
@@ -662,6 +661,12 @@ def _render_run_results_impl(
 
         saved_path = None
         dynamic_plan_path = None
+        if app_result.static_handoff_hash and isinstance(payload, dict):
+            app_section = payload.get("app")
+            if isinstance(app_section, dict):
+                app_section["static_handoff_hash"] = app_result.static_handoff_hash
+        if app_result.static_handoff_hash and isinstance(base_report.metadata, dict):
+            base_report.metadata["static_handoff_hash"] = app_result.static_handoff_hash
         if persist_enabled and not app_result.static_run_id:
             consecutive_missing_run_ids += 1
             print(
@@ -1002,8 +1007,7 @@ def _render_run_results_impl(
                 f"{len(unique_failures)} package{'s' if len(unique_failures) != 1 else ''}: "
                 + preview
             )
-            if failure_message not in persistence_errors:
-                persistence_errors.append(failure_message)
+            print(status_messages.status(failure_message, level="warn"))
         printed_db_table = False
         if session_stamp and persist_enabled:
             printed_db_table = _render_db_severity_table(session_stamp)
@@ -1245,7 +1249,8 @@ def _render_run_results_impl(
         for message in sorted(set(outcome.failures)):
             print(status_messages.status(message, level="error"))
 
-    if persist_enabled:
+    has_persisted_run_id = any(getattr(app, "static_run_id", None) for app in outcome.results)
+    if persist_enabled and outcome.results and has_persisted_run_id:
         _render_db_masvs_summary()
 
 
@@ -1296,6 +1301,7 @@ def _dedupe_profile_entries(entries: Sequence[dict[str, object]]) -> list[dict[s
 
 def _summarize_app_pipeline_for_results(app_result: object) -> dict[str, int]:
     ok = warn = fail = error = 0
+    finding_fail = policy_fail = 0
     p0 = p1 = p2 = note = 0
     for artifact in getattr(app_result, "artifacts", []) or []:
         report = getattr(artifact, "report", None)
@@ -1309,6 +1315,8 @@ def _summarize_app_pipeline_for_results(app_result: object) -> dict[str, int]:
         if isinstance(status_counts, Mapping):
             ok += int(status_counts.get("OK", 0) or 0)
             warn += int(status_counts.get("WARN", 0) or 0)
+        finding_fail += int(summary.get("finding_fail_count", 0) or 0)
+        policy_fail += int(summary.get("policy_fail_count", 0) or 0)
         fail += int(summary.get("finding_fail_count", 0) or 0) + int(summary.get("policy_fail_count", 0) or 0)
         error += int(summary.get("error_count", 0) or 0)
         sev = summary.get("severity_counts")
@@ -1321,12 +1329,38 @@ def _summarize_app_pipeline_for_results(app_result: object) -> dict[str, int]:
         "ok": ok,
         "warn": warn,
         "fail": fail,
+        "finding_fail": finding_fail,
+        "policy_fail": policy_fail,
         "error": error,
         "p0": p0,
         "p1": p1,
         "p2": p2,
         "note": note,
     }
+
+
+def _collect_app_error_detectors(app_result: object) -> list[tuple[str, str]]:
+    """Return (detector, reason) tuples for pipeline execution errors."""
+    out: list[tuple[str, str]] = []
+    for artifact in getattr(app_result, "artifacts", []) or []:
+        report = getattr(artifact, "report", None)
+        metadata = getattr(report, "metadata", None)
+        if not isinstance(metadata, Mapping):
+            continue
+        summary = metadata.get("pipeline_summary")
+        if not isinstance(summary, Mapping):
+            continue
+        payload = summary.get("error_detectors")
+        if not isinstance(payload, Sequence):
+            continue
+        for entry in payload:
+            if not isinstance(entry, Mapping):
+                continue
+            detector = str(entry.get("detector") or entry.get("section") or "").strip()
+            reason = str(entry.get("reason") or "").strip()
+            if detector:
+                out.append((detector, reason))
+    return out
 
 
 def _render_bucketed_session_summary(
@@ -1357,14 +1391,40 @@ def _render_bucketed_session_summary(
             }
         )
 
-    failing = [row for row in rows if int(row["error"]) > 0 or int(row["fail"]) > 0]
-    if failing:
+    execution_errors = [row for row in rows if int(row["error"]) > 0]
+    if execution_errors:
         print()
-        print(f"ERRORS/FAILS ({len(failing)})")
-        for row in sorted(failing, key=lambda r: (int(r["error"]), int(r["fail"])), reverse=True)[:10]:
+        print(f"EXECUTION ERRORS ({len(execution_errors)})")
+        for row in sorted(execution_errors, key=lambda r: (int(r["error"]), int(r["fail"])), reverse=True)[:10]:
             print(
-                f"- {row['package']}: fail={row['fail']} error={row['error']} "
+                f"- {row['package']}: error={row['error']} fail={row['fail']} "
                 f"(P0={row['p0']} P1={row['p1']} P2={row['p2']})"
+            )
+        detector_counts: Counter[str] = Counter()
+        detector_reasons: dict[str, str] = {}
+        for app in outcome.results:
+            for detector, reason in _collect_app_error_detectors(app):
+                detector_counts[detector] += 1
+                if reason and detector not in detector_reasons:
+                    detector_reasons[detector] = reason
+        if detector_counts:
+            print()
+            print("TOP EXECUTION ERROR DETECTORS")
+            for detector, count in detector_counts.most_common(5):
+                reason = detector_reasons.get(detector, "")
+                line = f"- {detector}: {count}"
+                if reason:
+                    line += f" (example: {reason[:120]})"
+                print(line)
+
+    check_fails = [row for row in rows if int(row["fail"]) > 0]
+    if check_fails:
+        print()
+        print(f"CHECK FAILS (policy/finding) ({len(check_fails)})")
+        for row in sorted(check_fails, key=lambda r: (int(r["fail"]), int(r["p0"])), reverse=True)[:10]:
+            print(
+                f"- {row['package']}: fail={row['fail']} "
+                f"(policy={row['policy_fail']} finding={row['finding_fail']})"
             )
 
     p0_rows = [row for row in rows if int(row["p0"]) > 0]

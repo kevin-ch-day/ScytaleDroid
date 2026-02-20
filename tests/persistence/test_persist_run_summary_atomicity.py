@@ -502,3 +502,51 @@ def test_persist_run_summary_marks_started_row_failed_on_rollback(monkeypatch):
     assert status_updates
     assert status_updates[-1]["static_run_id"] == 505
     assert status_updates[-1]["status"] == "FAILED"
+
+
+def test_canonical_enforcement_scope_resolution_failure_is_fail_safe(monkeypatch):
+    state: dict[str, object] = {"in_tx": False}
+    monkeypatch.setattr(rs, "require_canonical_schema", lambda: None)
+    monkeypatch.setattr(rs, "database_session", lambda: _FakeDBSession(state))
+    monkeypatch.setattr(
+        rs,
+        "prepare_run_envelope",
+        lambda **_kwargs: (SimpleNamespace(run_id=None, threat_profile=None, env_profile=None), []),
+    )
+    monkeypatch.setattr(rs, "compute_metrics_bundle", lambda *_args, **_kwargs: _stub_metrics_bundle())
+    monkeypatch.setattr(rs, "_ensure_app_version", lambda **_kwargs: 101)
+    monkeypatch.setattr(rs._dw, "create_run", lambda **_kwargs: 7001)
+    monkeypatch.setattr(rs, "_create_static_run", lambda **_kwargs: 8001)
+    monkeypatch.setattr(rs, "_update_static_run_metadata", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(rs, "write_buckets", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(rs, "write_metrics", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(rs, "persist_permission_matrix", lambda **_kwargs: None)
+    monkeypatch.setattr(rs, "persist_permission_risk", lambda **_kwargs: None)
+    monkeypatch.setattr(rs, "update_static_run_status", lambda **_kwargs: None)
+    monkeypatch.setattr(rs, "export_dep_json", lambda *_args, **_kwargs: None)
+
+    def _run_sql(sql, params=None, fetch=None):
+        text = str(sql)
+        if "SELECT session_label FROM static_analysis_runs WHERE id=%s" in text:
+            return ("sess-canon-failsafe",)
+        if "COUNT(*) AS run_rows" in text and "COUNT(DISTINCT sar.app_version_id)" in text:
+            raise RuntimeError("simulated scope-resolution failure")
+        return []
+
+    monkeypatch.setattr(rs.core_q, "run_sql", _run_sql)
+
+    outcome = rs.persist_run_summary(
+        _DummyReport(),
+        {},
+        "com.example.app",
+        session_stamp="sess-canon-failsafe",
+        scope_label="all",
+        finding_totals={"total": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        baseline_payload={},
+        paper_grade_requested=True,
+        dry_run=False,
+    )
+
+    assert outcome.persistence_failed is False
+    assert outcome.canonical_failed is False
+    assert not any("canonical_enforcement_failed" in err for err in outcome.errors)

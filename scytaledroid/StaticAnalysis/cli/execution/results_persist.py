@@ -21,9 +21,9 @@ def _persist_cohort_rollup(session_stamp: str | None, scope_label: str | None) -
             """
             SELECT
               COUNT(*) AS total,
-              SUM(status='COMPLETED') AS completed,
-              SUM(status='FAILED') AS failed,
-              SUM(status='STARTED') AS running
+              SUM(CASE WHEN UPPER(COALESCE(status, ''))='COMPLETED' THEN 1 ELSE 0 END) AS completed,
+              SUM(CASE WHEN UPPER(COALESCE(status, ''))='FAILED' THEN 1 ELSE 0 END) AS failed,
+              SUM(CASE WHEN UPPER(COALESCE(status, '')) IN ('STARTED','RUNNING') THEN 1 ELSE 0 END) AS running
             FROM static_analysis_runs
             WHERE session_stamp=%s AND scope_label=%s
             """,

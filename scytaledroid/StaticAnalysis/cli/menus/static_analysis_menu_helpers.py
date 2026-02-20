@@ -39,7 +39,7 @@ def ask_run_controls() -> str:
     return actions.ask_run_controls()
 
 
-def confirm_reset() -> bool:
+def confirm_reset() -> str | None:
     actions = _load_menu_actions()
     return actions.confirm_reset()
 

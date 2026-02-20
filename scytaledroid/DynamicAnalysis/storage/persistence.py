@@ -103,6 +103,7 @@ def persist_dynamic_summary(
         "status": result.status,
         "evidence_path": result.evidence_path,
         "static_run_id": _safe_int(plan_identity.get("static_run_id") or config.static_run_id),
+        "static_handoff_hash": plan_identity.get("static_handoff_hash"),
         "run_signature": plan_identity.get("run_signature"),
         "run_signature_version": plan_identity.get("run_signature_version"),
         "base_apk_sha256": plan_identity.get("base_apk_sha256"),
@@ -168,7 +169,7 @@ def _require_dynamic_schema(*, require: bool) -> bool:
 
 
 def _insert_dynamic_session(row: Mapping[str, Any]) -> None:
-    columns = list(row.keys())
+    columns = _filter_existing_dynamic_session_columns(row)
     placeholders = ", ".join(["%s"] * len(columns))
     updates = ", ".join([f"{col}=VALUES({col})" for col in columns if col != "dynamic_run_id"])
     sql = f"""
@@ -177,6 +178,23 @@ def _insert_dynamic_session(row: Mapping[str, Any]) -> None:
         ON DUPLICATE KEY UPDATE {updates}
     """
     core_q.run_sql_write(sql, tuple(row[col] for col in columns), query_name="dynamic.sessions.upsert")
+
+
+def _filter_existing_dynamic_session_columns(row: Mapping[str, Any]) -> list[str]:
+    try:
+        existing_rows = core_q.run_sql(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+              AND table_name = 'dynamic_sessions'
+            """,
+            fetch="all",
+        )
+        existing = {str(item[0]) for item in (existing_rows or []) if item and item[0]}
+    except Exception:
+        existing = set(row.keys())
+    return [key for key in row.keys() if key in existing]
 
 
 def _insert_dynamic_issues(rows: Iterable[Mapping[str, Any]]) -> None:
@@ -641,7 +659,7 @@ def _extract_plan_identity(plan_payload: Mapping[str, Any]) -> dict[str, Any]:
     identity = extract_plan_identity(dict(plan_payload))
     run_identity = plan_payload.get("run_identity") or {}
     if isinstance(run_identity, dict):
-        for key in ("base_apk_sha256", "artifact_set_hash", "run_signature", "run_signature_version"):
+        for key in ("base_apk_sha256", "artifact_set_hash", "run_signature", "run_signature_version", "static_handoff_hash"):
             if run_identity.get(key) and not identity.get(key):
                 identity[key] = run_identity[key]
     for key in ("version_name", "version_code"):

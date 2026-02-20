@@ -382,6 +382,52 @@ def _write_phase_e_deliverables_bundle_from_pin() -> bool:
 
     print(status_messages.status(f"Wrote internal baseline bundle: {relative_path(output_phase_e_bundle_root())}", level="success"))
     print(status_messages.status(f"Manifest: {relative_path(artifacts.artifacts_manifest_json)}", level="info"))
+    try:
+        required_payload = json.loads(artifacts.required_fields_validation_json.read_text(encoding="utf-8"))
+        if bool(required_payload.get("paper_grade_ready")):
+            print(status_messages.status("Paper contract: READY (paper_grade)", level="success"))
+        else:
+            missing = required_payload.get("missing_by_run") if isinstance(required_payload.get("missing_by_run"), dict) else {}
+            first_missing = []
+            if missing:
+                rid, fields = next(iter(missing.items()))
+                if isinstance(fields, list):
+                    first_missing = [str(x) for x in fields[:3]]
+                missing_hint = ", ".join(first_missing) if first_missing else rid
+            else:
+                missing_hint = "required field gaps"
+            print(
+                status_messages.status(
+                    f"Paper contract: DOWNGRADED -> EXPERIMENTAL (missing: {missing_hint})",
+                    level="warn",
+                )
+            )
+    except Exception:
+        print(status_messages.status("Paper contract: DOWNGRADED -> EXPERIMENTAL (missing: validation state)", level="warn"))
+    print(
+        status_messages.status(
+            "Comparison metrics: output/paper/internal/baseline/tables/table_8_model_comparison_metrics.csv",
+            level="info",
+        )
+    )
+    print(
+        status_messages.status(
+            "Required fields validation: output/paper/internal/baseline/manifest/required_fields_validation.json",
+            level="info",
+        )
+    )
+    print(
+        status_messages.status(
+            "Report wording lint: output/paper/internal/baseline/manifest/report_contract_lint.json",
+            level="info",
+        )
+    )
+    print(
+        status_messages.status(
+            "Determinism checksums: output/paper/internal/baseline/manifest/determinism_checksums.json",
+            level="info",
+        )
+    )
     return True
 
 

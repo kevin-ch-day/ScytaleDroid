@@ -51,6 +51,42 @@ def _utc_now_dbstr() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _identity_mode(*, base_apk_sha256: str | None, version_code: int | None) -> str:
+    if base_apk_sha256:
+        return "full_hash"
+    if version_code is not None:
+        return "pkg_ver_only"
+    return "pkg_only"
+
+
+def _detect_identity_conflict(
+    *,
+    package_name: str,
+    version_code: int | None,
+    base_apk_sha256: str | None,
+) -> bool:
+    if not package_name or version_code is None or not base_apk_sha256:
+        return False
+    try:
+        row = core_q.run_sql(
+            """
+            SELECT COUNT(*)
+            FROM static_analysis_runs sar
+            JOIN app_versions av ON av.id = sar.app_version_id
+            JOIN apps a ON a.id = av.app_id
+            WHERE a.package_name=%s
+              AND av.version_code=%s
+              AND sar.base_apk_sha256 IS NOT NULL
+              AND sar.base_apk_sha256<>%s
+            """,
+            (package_name, int(version_code), base_apk_sha256),
+            fetch="one",
+        )
+        return bool(row and int(row[0] or 0) > 0)
+    except Exception:
+        return False
+
+
 def _ensure_app_version(
     *,
     package_for_run: str,
@@ -162,6 +198,8 @@ def _create_static_run(
     analysis_version: str | None = None,
     catalog_versions: str | None = None,
     study_tag: str | None = None,
+    identity_mode: str | None = None,
+    identity_conflict_flag: bool | None = None,
 ) -> int | None:
     normalized_started_at = _normalize_datetime_value(run_started_utc)
     canonical_status = normalize_run_status(status)
@@ -313,6 +351,15 @@ def create_static_run_ledger(
     )
     if app_version_id is None:
         return None
+    identity_mode = _identity_mode(
+        base_apk_sha256=base_apk_sha256,
+        version_code=version_code,
+    )
+    identity_conflict_flag = _detect_identity_conflict(
+        package_name=package_name,
+        version_code=version_code,
+        base_apk_sha256=base_apk_sha256,
+    )
     static_run_id = _create_static_run(
         app_version_id=app_version_id,
         session_stamp=session_stamp,
@@ -344,9 +391,28 @@ def create_static_run_ledger(
         analysis_version=analysis_version,
         catalog_versions=catalog_versions,
         study_tag=study_tag,
+        identity_mode=identity_mode,
+        identity_conflict_flag=identity_conflict_flag,
     )
     if static_run_id is None:
         return None
+    _update_static_run_metadata(
+        static_run_id=static_run_id,
+        run_signature=run_signature,
+        run_signature_version=run_signature_version,
+        identity_valid=identity_valid,
+        identity_error_reason=identity_error_reason,
+        artifact_set_hash=artifact_set_hash,
+        base_apk_sha256=base_apk_sha256,
+        sha256=sha256,
+        config_hash=config_hash,
+        pipeline_version=pipeline_version,
+        analysis_version=analysis_version,
+        catalog_versions=catalog_versions,
+        study_tag=study_tag,
+        identity_mode=identity_mode,
+        identity_conflict_flag=identity_conflict_flag,
+    )
     if canonical_reason:
         _maybe_set_canonical_static_run(
             static_run_id=static_run_id,
@@ -381,6 +447,10 @@ def _update_static_run_metadata(
     analysis_version: str | None = None,
     catalog_versions: str | None = None,
     study_tag: str | None = None,
+    identity_mode: str | None = None,
+    identity_conflict_flag: bool | None = None,
+    static_handoff_hash: str | None = None,
+    static_handoff_json: str | None = None,
 ) -> None:
     try:
         run_sql_write(
@@ -390,9 +460,13 @@ def _update_static_run_metadata(
                 run_signature_version=%s,
                 identity_valid=%s,
                 identity_error_reason=%s,
+                identity_mode=COALESCE(%s, identity_mode),
+                identity_conflict_flag=COALESCE(%s, identity_conflict_flag),
                 artifact_set_hash=%s,
                 base_apk_sha256=%s,
                 sha256=%s,
+                static_handoff_hash=COALESCE(%s, static_handoff_hash),
+                static_handoff_json=COALESCE(%s, static_handoff_json),
                 config_hash=%s,
                 pipeline_version=%s,
                 analysis_version=%s,
@@ -405,9 +479,13 @@ def _update_static_run_metadata(
                 run_signature_version,
                 identity_valid,
                 identity_error_reason,
+                identity_mode,
+                1 if identity_conflict_flag else 0 if identity_conflict_flag is not None else None,
                 artifact_set_hash,
                 base_apk_sha256,
                 sha256,
+                static_handoff_hash,
+                static_handoff_json,
                 config_hash,
                 pipeline_version,
                 analysis_version,

@@ -31,13 +31,25 @@ def apply_command_overrides(params: RunParameters, command: Command) -> RunParam
     return effective
 
 
-def confirm_reset() -> bool:
-    """Prompt the user to confirm resetting static-analysis tables."""
+def confirm_reset() -> str | None:
+    """Prompt reset mode.
+
+    Returns:
+      - ``"session"`` for session-scoped reset (default)
+      - ``"truncate_all"`` for full-table reset
+      - ``None`` when cancelled
+    """
 
     print()
     menu_utils.print_section("Reset static analysis")
-    print("This will truncate static analysis tables for the next run.")
-    return prompt_utils.prompt_yes_no("Proceed?", default=False)
+    print("Default reset is session-scoped (preserves historical runs).")
+    print("  [1] Session-scoped reset (recommended)")
+    print("  [2] Full reset (TRUNCATE all static tables)")
+    print("  [0] Cancel")
+    choice = prompt_utils.get_choice(["1", "2", "0"], default="1", prompt="Choice: ")
+    if choice == "0":
+        return None
+    return "truncate_all" if choice == "2" else "session"
 
 
 def render_reset_outcome(outcome: Any) -> None:
@@ -45,12 +57,15 @@ def render_reset_outcome(outcome: Any) -> None:
 
     print()
     menu_utils.print_section("Reset summary")
-    print(
-        status_messages.status(
-            "Reset uses TRUNCATE when permitted; falls back to DELETE when TRUNCATE is denied.",
-            level="info",
+    if getattr(outcome, "truncated", None):
+        print(
+            status_messages.status(
+                "Reset uses TRUNCATE when permitted; falls back to DELETE when TRUNCATE is denied.",
+                level="info",
+            )
         )
-    )
+    else:
+        print(status_messages.status("Reset mode: session-scoped DELETE", level="info"))
     if getattr(outcome, "truncated", None):
         truncated = ", ".join(outcome.truncated)
         print(

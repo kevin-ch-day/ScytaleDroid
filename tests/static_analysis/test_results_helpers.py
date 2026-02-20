@@ -134,3 +134,116 @@ def test_compute_trend_delta_handles_missing_previous(monkeypatch):
     totals = Counter({"High": 1})
 
     assert analytics._compute_trend_delta("pkg.alpha", "20251026-202635", totals) is None
+
+
+@pytest.mark.unit
+def test_format_masvs_cell_renders_na_for_missing_area():
+    assert results_formatters._format_masvs_cell(None) == "N/A"
+
+
+@pytest.mark.unit
+def test_collect_masvs_profile_keeps_missing_areas_absent():
+    class FakeCategory:
+        value = "PLATFORM"
+
+    class FakeGate:
+        value = "P1"
+
+    class FakeFinding:
+        category_masvs = FakeCategory()
+        severity_gate = FakeGate()
+        title = "Exported activity without permission"
+        finding_id = "platform_exported_activity"
+
+    class FakeResult:
+        findings = [FakeFinding()]
+        detector_id = "ipc_components"
+
+    class FakeReport:
+        detector_results = [FakeResult()]
+
+    profile = analytics._collect_masvs_profile(FakeReport())
+    counts = profile.get("counts")
+    assert isinstance(counts, dict)
+    assert "PLATFORM" in counts
+    assert "NETWORK" not in counts
+    assert "PRIVACY" not in counts
+    assert "STORAGE" not in counts
+
+
+@pytest.mark.unit
+def test_build_static_risk_row_uses_composite_grade_not_permission_grade():
+    class FakeExports:
+        def total(self):
+            return 4
+
+    class FakeFlags:
+        uses_cleartext_traffic = False
+        request_legacy_external_storage = False
+
+    class FakePermissions:
+        declared = ("android.permission.INTERNET",)
+
+    class FakeManifest:
+        package_name = "pkg.alpha"
+        app_label = "Alpha"
+
+    class FakeReport:
+        exported_components = FakeExports()
+        manifest_flags = FakeFlags()
+        permissions = FakePermissions()
+        manifest = FakeManifest()
+
+    class FakeApp:
+        package_name = "pkg.alpha"
+
+    row = analytics._build_static_risk_row(
+        FakeReport(),
+        {
+            "counts": {"endpoints": 3, "http_cleartext": 0, "high_entropy": 0},
+            "aggregates": {"endpoint_roots": ["example.com"], "api_keys_high": []},
+        },
+        {"grade": "F", "risk": 0.8, "label": "Alpha"},
+        FakeApp(),
+    )
+
+    assert row["grade"] != "F"
+    assert row["network"] == 4.0
+
+
+@pytest.mark.unit
+def test_build_static_risk_row_component_points_do_not_saturate_immediately():
+    class FakeExports:
+        def __init__(self, n: int) -> None:
+            self._n = n
+
+        def total(self):
+            return self._n
+
+    class FakeFlags:
+        uses_cleartext_traffic = False
+        request_legacy_external_storage = False
+
+    class FakePermissions:
+        declared = ()
+
+    class FakeManifest:
+        package_name = "pkg.alpha"
+        app_label = "Alpha"
+
+    class FakeReport:
+        def __init__(self, n: int) -> None:
+            self.exported_components = FakeExports(n)
+            self.manifest_flags = FakeFlags()
+            self.permissions = FakePermissions()
+            self.manifest = FakeManifest()
+
+    class FakeApp:
+        package_name = "pkg.alpha"
+
+    low = analytics._build_static_risk_row(FakeReport(8), {"counts": {}, "aggregates": {}}, {"risk": 5.0, "label": "Alpha"}, FakeApp())
+    high = analytics._build_static_risk_row(FakeReport(289), {"counts": {}, "aggregates": {}}, {"risk": 5.0, "label": "Alpha"}, FakeApp())
+
+    assert float(low["components"]) < 12.0
+    assert float(high["components"]) <= 12.0
+    assert float(high["components"]) > float(low["components"])

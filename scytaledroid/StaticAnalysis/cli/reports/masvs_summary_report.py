@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.StaticAnalysis.analytics.masvs_quality import (
@@ -321,100 +321,111 @@ def fetch_db_masvs_summary(run_id: int | None = None) -> tuple[int, list[dict[st
 
 
 def fetch_db_masvs_summary_static(static_run_id: int) -> tuple[int, list[dict[str, object | None]]] | None:
+    return fetch_db_masvs_summary_static_many([static_run_id])
+
+
+def fetch_db_masvs_summary_static_many(
+    static_run_ids: Sequence[int],
+) -> tuple[int, list[dict[str, object | None]]] | None:
+    ids = [int(value) for value in static_run_ids if value is not None]
+    if not ids:
+        return None
+    placeholders = ",".join(["%s"] * len(ids))
+    params = tuple(ids)
     try:
         rows = core_q.run_sql(
-            """
+            f"""
             SELECT masvs,
                    SUM(CASE WHEN severity='High' THEN 1 ELSE 0 END) AS high,
                    SUM(CASE WHEN severity='Medium' THEN 1 ELSE 0 END) AS medium,
                    SUM(CASE WHEN severity='Low' THEN 1 ELSE 0 END) AS low,
                    SUM(CASE WHEN severity='Info' THEN 1 ELSE 0 END) AS info
             FROM findings
-            WHERE static_run_id = %s
+            WHERE static_run_id IN ({placeholders})
             GROUP BY masvs
             """,
-            (static_run_id,),
+            params,
             fetch="all",
             dictionary=True,
         ) or []
 
         cvss_rows = core_q.run_sql(
-            """
+            f"""
             SELECT masvs,
                    cvss,
                    COALESCE(NULLIF(kind, ''), 'unknown') AS identifier,
                    severity
             FROM findings
-            WHERE static_run_id = %s AND masvs IS NOT NULL
+            WHERE static_run_id IN ({placeholders}) AND masvs IS NOT NULL
             """,
-            (static_run_id,),
+            params,
             fetch="all",
             dictionary=True,
         ) or []
 
         top_rows = core_q.run_sql(
-            """
+            f"""
             SELECT masvs,
                    severity,
                    COALESCE(NULLIF(kind, ''), 'unknown') AS identifier,
                    COUNT(*) AS occurrences
             FROM findings
-            WHERE static_run_id = %s
+            WHERE static_run_id IN ({placeholders})
             GROUP BY masvs, severity, identifier
             ORDER BY
                 CASE severity WHEN 'High' THEN 1 WHEN 'Medium' THEN 2 WHEN 'Low' THEN 3 ELSE 4 END,
                 occurrences DESC
             """,
-            (static_run_id,),
+            params,
             fetch="all",
             dictionary=True,
         ) or []
 
         if not rows and not cvss_rows and not top_rows:
             rows = core_q.run_sql(
-                """
+                f"""
                 SELECT masvs,
                        SUM(CASE WHEN severity='High' THEN 1 ELSE 0 END) AS high,
                        SUM(CASE WHEN severity='Medium' THEN 1 ELSE 0 END) AS medium,
                        SUM(CASE WHEN severity='Low' THEN 1 ELSE 0 END) AS low,
                        SUM(CASE WHEN severity='Info' THEN 1 ELSE 0 END) AS info
                 FROM static_findings
-                WHERE static_run_id = %s
+                WHERE static_run_id IN ({placeholders})
                 GROUP BY masvs
                 """,
-                (static_run_id,),
+                params,
                 fetch="all",
                 dictionary=True,
             ) or []
 
             cvss_rows = core_q.run_sql(
-                """
+                f"""
                 SELECT masvs,
                        cvss,
                        COALESCE(NULLIF(kind, ''), 'unknown') AS identifier,
                        severity
                 FROM static_findings
-                WHERE static_run_id = %s AND masvs IS NOT NULL
+                WHERE static_run_id IN ({placeholders}) AND masvs IS NOT NULL
                 """,
-                (static_run_id,),
+                params,
                 fetch="all",
                 dictionary=True,
             ) or []
 
             top_rows = core_q.run_sql(
-                """
+                f"""
                 SELECT masvs,
                        severity,
                        COALESCE(NULLIF(kind, ''), 'unknown') AS identifier,
                        COUNT(*) AS occurrences
                 FROM static_findings
-                WHERE static_run_id = %s
+                WHERE static_run_id IN ({placeholders})
                 GROUP BY masvs, severity, identifier
                 ORDER BY
                     CASE severity WHEN 'High' THEN 1 WHEN 'Medium' THEN 2 WHEN 'Low' THEN 3 ELSE 4 END,
                     occurrences DESC
                 """,
-                (static_run_id,),
+                params,
                 fetch="all",
                 dictionary=True,
             ) or []
@@ -424,7 +435,7 @@ def fetch_db_masvs_summary_static(static_run_id: int) -> tuple[int, list[dict[st
     summary = _build_summary(rows, top_rows, cvss_rows)
     if not summary:
         return None
-    return static_run_id, summary
+    return max(ids), summary
 
 
 def fetch_masvs_matrix() -> dict[str, dict[str, object]]:
@@ -678,4 +689,9 @@ def fetch_masvs_matrix() -> dict[str, dict[str, object]]:
     return matrix
 
 
-__all__ = ["fetch_db_masvs_summary", "fetch_db_masvs_summary_static", "fetch_masvs_matrix"]
+__all__ = [
+    "fetch_db_masvs_summary",
+    "fetch_db_masvs_summary_static",
+    "fetch_db_masvs_summary_static_many",
+    "fetch_masvs_matrix",
+]

@@ -300,7 +300,11 @@ _DDL_STATEMENTS: list[str] = [
       ADD COLUMN IF NOT EXISTS run_signature CHAR(64) DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS run_signature_version VARCHAR(16) DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS identity_valid TINYINT(1) DEFAULT NULL,
-      ADD COLUMN IF NOT EXISTS identity_error_reason VARCHAR(128) DEFAULT NULL;
+      ADD COLUMN IF NOT EXISTS identity_error_reason VARCHAR(128) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS identity_mode VARCHAR(32) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS identity_conflict_flag TINYINT(1) DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS static_handoff_hash CHAR(64) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS static_handoff_json JSON DEFAULT NULL;
     """,
     """
     ALTER TABLE static_analysis_runs

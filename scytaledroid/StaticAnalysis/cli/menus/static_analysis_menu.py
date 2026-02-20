@@ -190,11 +190,19 @@ def static_analysis_menu() -> None:
 
             effective_params = apply_command_overrides(params, command)
 
-            if command.prompt_reset and confirm_reset():
-                render_reset_outcome(reset_static_analysis_data(include_harvest=False))
-
             if command.persist and not effective_params.dry_run:
                 effective_params = prompt_session_label(effective_params)
+
+            if command.prompt_reset:
+                reset_mode = confirm_reset()
+                if reset_mode:
+                    render_reset_outcome(
+                        reset_static_analysis_data(
+                            include_harvest=False,
+                            session_label=effective_params.session_stamp,
+                            truncate_all=(reset_mode == "truncate_all"),
+                        )
+                    )
 
             try:
                 spec = build_static_run_spec(

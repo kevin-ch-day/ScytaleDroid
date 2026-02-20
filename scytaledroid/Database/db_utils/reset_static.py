@@ -93,8 +93,21 @@ def reset_static_analysis_data(
     *,
     include_harvest: bool = False,
     extra_exclusions: Iterable[str] | None = None,
+    session_label: str | None = None,
+    truncate_all: bool = False,
 ) -> ResetOutcome:
-    """Truncate dynamic static-analysis tables, preserving protected catalogs."""
+    """Reset static-analysis tables.
+
+    Default behavior is session-scoped deletion (non-destructive to historical runs).
+    Set ``truncate_all=True`` for maintenance-level full table truncation.
+    """
+
+    if not truncate_all:
+        return _reset_static_analysis_session_scoped(
+            include_harvest=include_harvest,
+            extra_exclusions=extra_exclusions,
+            session_label=session_label,
+        )
 
     exclusions = set(PROTECTED_TABLES)
     if extra_exclusions:
@@ -161,6 +174,139 @@ def reset_static_analysis_data(
         truncated=truncated,
         cleared=cleared,
         skipped_protected=list(dict.fromkeys(protected)),
+        skipped_missing=skipped_missing,
+        failed=failed,
+    )
+
+
+def _column_exists(engine: DatabaseEngine, table: str, column: str) -> bool:
+    try:
+        row = engine.fetch_one(
+            """
+            SELECT COUNT(*)
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+              AND table_name = %s
+              AND column_name = %s
+            """,
+            (table, column),
+        )
+        return bool(row and int(row[0] or 0) > 0)
+    except RuntimeError:
+        return False
+
+
+def _reset_static_analysis_session_scoped(
+    *,
+    include_harvest: bool,
+    extra_exclusions: Iterable[str] | None,
+    session_label: str | None,
+) -> ResetOutcome:
+    exclusions = set(PROTECTED_TABLES)
+    if extra_exclusions:
+        exclusions.update(extra_exclusions)
+
+    target_session = str(session_label or "").strip()
+    if not target_session:
+        # Safety-first default: if no session is supplied, do not wipe global history.
+        return ResetOutcome(
+            truncated=[],
+            cleared=[],
+            skipped_protected=[],
+            skipped_missing=[],
+            failed=[("session_scope", "session_label required for session-scoped reset")],
+        )
+
+    candidate_tables: list[str] = list(STATIC_ANALYSIS_TABLES)
+    if include_harvest:
+        candidate_tables.extend(HARVEST_TABLES)
+
+    seen: set[str] = set()
+    ordered_candidates: list[str] = []
+    for table in candidate_tables:
+        if table in seen or table in exclusions:
+            continue
+        ordered_candidates.append(table)
+        seen.add(table)
+    if "static_analysis_runs" in ordered_candidates:
+        ordered_candidates = [t for t in ordered_candidates if t != "static_analysis_runs"] + ["static_analysis_runs"]
+
+    cleared: list[str] = []
+    skipped_missing: list[str] = []
+    failed: list[tuple[str, str]] = []
+
+    with database_session(reuse_connection=False) as engine:
+        static_ids: list[int] = []
+        try:
+            rows = engine.fetch_all(
+                "SELECT id FROM static_analysis_runs WHERE session_label=%s",
+                (target_session,),
+            )
+            static_ids = [int(row[0]) for row in rows if row and row[0] is not None]
+        except RuntimeError as exc:
+            failed.append(("static_analysis_runs.lookup", str(exc)))
+
+        # Delete by foreign keys first, then parent tables.
+        for table in ordered_candidates:
+            if not _table_exists(engine, table):
+                skipped_missing.append(table)
+                continue
+            try:
+                if table == "static_analysis_runs":
+                    engine.execute(
+                        "DELETE FROM static_analysis_runs WHERE session_label=%s",
+                        (target_session,),
+                    )
+                    cleared.append(table)
+                    continue
+                if _column_exists(engine, table, "session_stamp"):
+                    engine.execute(f"DELETE FROM `{table}` WHERE session_stamp=%s", (target_session,))
+                    cleared.append(table)
+                    continue
+                if _column_exists(engine, table, "session_label"):
+                    engine.execute(f"DELETE FROM `{table}` WHERE session_label=%s", (target_session,))
+                    cleared.append(table)
+                    continue
+                if static_ids and _column_exists(engine, table, "static_run_id"):
+                    placeholders = ",".join(["%s"] * len(static_ids))
+                    engine.execute(
+                        f"DELETE FROM `{table}` WHERE static_run_id IN ({placeholders})",
+                        tuple(static_ids),
+                    )
+                    cleared.append(table)
+                    continue
+                if static_ids and _column_exists(engine, table, "run_id"):
+                    placeholders = ",".join(["%s"] * len(static_ids))
+                    engine.execute(
+                        f"DELETE FROM `{table}` WHERE run_id IN ({placeholders})",
+                        tuple(static_ids),
+                    )
+                    cleared.append(table)
+                    continue
+                # Keep table untouched when no safe session partition key exists.
+            except RuntimeError as exc:
+                failed.append((table, str(exc)))
+
+        # runs table is linked via session_stamp and/or static_run_id.
+        if _table_exists(engine, "runs"):
+            try:
+                if _column_exists(engine, "runs", "session_stamp"):
+                    engine.execute("DELETE FROM runs WHERE session_stamp=%s", (target_session,))
+                if static_ids and _column_exists(engine, "runs", "static_run_id"):
+                    placeholders = ",".join(["%s"] * len(static_ids))
+                    engine.execute(
+                        f"DELETE FROM runs WHERE static_run_id IN ({placeholders})",
+                        tuple(static_ids),
+                    )
+                if "runs" not in cleared:
+                    cleared.append("runs")
+            except RuntimeError as exc:
+                failed.append(("runs", str(exc)))
+
+    return ResetOutcome(
+        truncated=[],
+        cleared=cleared,
+        skipped_protected=[],
         skipped_missing=skipped_missing,
         failed=failed,
     )

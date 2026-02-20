@@ -335,6 +335,24 @@ def run_ml_on_evidence_packs(
                     "params": dict(spec.params),
                     "score_semantics": "higher_is_more_anomalous",
                     "training_mode": training_mode,
+                    "baseline_provenance": {
+                        "baseline_run_id": baseline_id,
+                        "baseline_pcap_bytes_ok": bool(bytes_ok),
+                        "baseline_windows_ok": bool(windows_ok),
+                        "fallback_reason": (
+                            []
+                            if training_mode == "baseline_only"
+                            else [
+                                reason
+                                for reason, ok in (
+                                    ("bytes_gate", bool(bytes_ok)),
+                                    ("windows_gate", bool(windows_ok)),
+                                )
+                                if not ok
+                            ]
+                        ),
+                        "degraded_comparability": bool(training_mode == "union_fallback"),
+                    },
                     "quality_gates": {
                         "baseline_min_pcap_bytes": int(min_bytes),
                         "baseline_pcap_bytes_ok": bool(bytes_ok),
@@ -433,6 +451,10 @@ def run_ml_on_evidence_packs(
                     written_run_ids.add(r.run_id)
 
             # Dataset-level derived outputs (not frozen inputs).
+            per_run_empty_windows: dict[str, int] = {
+                rid: int(sum(1 for row in rows if int(row.get("packet_count") or 0) <= 0))
+                for rid, (rows, _dropped) in per_run_rows.items()
+            }
             dataset_phase_rows.extend(
                 _compute_phase_rows(
                     identity_key=identity_key,
@@ -443,6 +465,7 @@ def run_ml_on_evidence_packs(
                     per_run_phase=per_run_phase,
                     per_run_tag=per_run_tag,
                     training_mode=training_mode,
+                    per_run_empty_windows=per_run_empty_windows,
                 )
             )
             model_overlap_rows.extend(
@@ -638,19 +661,21 @@ def _rows_to_matrix(rows: list[dict[str, Any]], *, window_spec: WindowSpec) -> t
     denom = float(window_spec.window_size_s) if window_spec.window_size_s > 0 else 1.0
     feature_names = ["bytes_per_sec", "packets_per_sec", "avg_packet_size_bytes"]
     data: list[list[float]] = []
-    for row in rows:
+    def _f(value: Any) -> float:
         try:
-            byte_count = float(row.get("byte_count") or 0.0)
-            pkt_count = float(row.get("packet_count") or 0.0)
-            avg_pkt = float(row.get("avg_packet_size_bytes") or 0.0)
-            bytes_per_sec = byte_count / denom
-            packets_per_sec = pkt_count / denom
-            if config.FEATURE_LOG1P:
-                bytes_per_sec = float(np.log1p(bytes_per_sec))
-                packets_per_sec = float(np.log1p(packets_per_sec))
-            data.append([bytes_per_sec, packets_per_sec, avg_pkt])
+            return float(value or 0.0)
         except Exception:
-            continue
+            return 0.0
+    for row in rows:
+        byte_count = _f(row.get("byte_count"))
+        pkt_count = _f(row.get("packet_count"))
+        avg_pkt = _f(row.get("avg_packet_size_bytes"))
+        bytes_per_sec = byte_count / denom
+        packets_per_sec = pkt_count / denom
+        if config.FEATURE_LOG1P:
+            bytes_per_sec = float(np.log1p(bytes_per_sec))
+            packets_per_sec = float(np.log1p(packets_per_sec))
+        data.append([bytes_per_sec, packets_per_sec, avg_pkt])
     if not data:
         return np.zeros((0, len(feature_names)), dtype=float), feature_names
     return np.asarray(data, dtype=float), feature_names
@@ -694,6 +719,7 @@ def _compute_phase_rows(
     per_run_phase: dict[str, str],
     per_run_tag: dict[str, str | None],
     training_mode: str,
+    per_run_empty_windows: dict[str, int],
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for model_name, scores_by_run in per_model_scores_by_run.items():
@@ -716,8 +742,13 @@ def _compute_phase_rows(
                     "interaction_tag": tag,
                     "model": model_name,
                     "training_mode": training_mode,
+                    "is_fallback_mode": bool(training_mode == "union_fallback"),
                     "low_signal": bool(ds.get("low_signal")) if ds.get("low_signal") is not None else None,
                     "windows_total": int(arr.shape[0]),
+                    "empty_windows": int(per_run_empty_windows.get(r.run_id, 0)),
+                    "empty_windows_pct": (
+                        float(per_run_empty_windows.get(r.run_id, 0)) / float(arr.shape[0]) if arr.shape[0] > 0 else 0.0
+                    ),
                     "median": float(statistics.median(run_scores)),
                     "p95": float(np_percentile(arr, 95.0, method=config.NP_PERCENTILE_METHOD)),
                     "max": float(np.max(arr)),
@@ -753,8 +784,11 @@ def _write_prevalence_csvs(rows: list[dict[str, Any]]) -> None:
         "interaction_tag",
         "model",
         "training_mode",
+        "is_fallback_mode",
         "low_signal",
         "windows_total",
+        "empty_windows",
+        "empty_windows_pct",
         "median",
         "p95",
         "max",
@@ -788,13 +822,16 @@ def _write_prevalence_csvs(rows: list[dict[str, Any]]) -> None:
                 "model": model,
                 "windows_total": 0,
                 "windows_flagged": 0,
+                "empty_windows": 0,
                 "training_mode": row.get("training_mode"),
+                "is_fallback_mode": row.get("is_fallback_mode"),
                 "ml_schema_version": row.get("ml_schema_version"),
             }
             agg[key] = cur
         try:
             cur["windows_total"] += int(row.get("windows_total") or 0)
             cur["windows_flagged"] += int(row.get("anomalous_windows") or 0)
+            cur["empty_windows"] += int(row.get("empty_windows") or 0)
         except Exception:
             continue
 
@@ -804,8 +841,11 @@ def _write_prevalence_csvs(rows: list[dict[str, Any]]) -> None:
         "model",
         "windows_total",
         "windows_flagged",
+        "empty_windows",
+        "empty_windows_pct",
         "flagged_pct",
         "training_mode",
+        "is_fallback_mode",
         "ml_schema_version",
     ]
     rows_out: list[dict[str, Any]] = []
@@ -813,8 +853,11 @@ def _write_prevalence_csvs(rows: list[dict[str, Any]]) -> None:
         total = int(cur.get("windows_total") or 0)
         flagged = int(cur.get("windows_flagged") or 0)
         pct = (float(flagged) / float(total)) if total > 0 else 0.0
+        empty = int(cur.get("empty_windows") or 0)
+        empty_pct = (float(empty) / float(total)) if total > 0 else 0.0
         out = dict(cur)
         out["flagged_pct"] = pct
+        out["empty_windows_pct"] = empty_pct
         rows_out.append(out)
     with main_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=main_fields)
@@ -858,6 +901,7 @@ def _compute_model_overlap_rows(
                 "phase": phase,
                 "interaction_tag": tag,
                 "training_mode": training_mode,
+                "is_fallback_mode": bool(training_mode == "union_fallback"),
                 "windows_total": int(n),
                 "iforest_flagged": int(len(a)),
                 "ocsvm_flagged": int(len(b)),
@@ -880,6 +924,7 @@ def _write_model_overlap_csv(rows: list[dict[str, Any]]) -> None:
         "phase",
         "interaction_tag",
         "training_mode",
+        "is_fallback_mode",
         "windows_total",
         "iforest_flagged",
         "ocsvm_flagged",
@@ -1598,6 +1643,48 @@ def _safe_float(v: object) -> float | None:
         return None
 
 
+def _capture_semantics_from_run_inputs(run_inputs: RunInputs) -> dict[str, Any]:
+    manifest = run_inputs.manifest if isinstance(run_inputs.manifest, dict) else {}
+    artifacts = manifest.get("artifacts") if isinstance(manifest.get("artifacts"), list) else []
+    meta_rel = None
+    for art in artifacts:
+        if isinstance(art, dict) and str(art.get("type") or "") == "pcapdroid_capture_meta":
+            rp = art.get("relative_path")
+            if isinstance(rp, str) and rp:
+                meta_rel = rp
+                break
+    pcapdroid_version = "unknown"
+    capture_mode = "unknown"
+    filter_type = "PCAPdroid app_filter (package)"
+    if meta_rel:
+        try:
+            meta_path = run_inputs.run_dir / meta_rel
+            payload = json.loads(meta_path.read_text(encoding="utf-8"))
+            if isinstance(payload, dict):
+                capture_mode = str(payload.get("capture_mode") or "unknown")
+                pkg = payload.get("pcapdroid_package")
+                if isinstance(pkg, str) and pkg.strip():
+                    pcapdroid_version = str(payload.get("pcapdroid_version") or "unknown")
+        except Exception:
+            pass
+    report = run_inputs.pcap_report if isinstance(run_inputs.pcap_report, dict) else {}
+    capinfos = report.get("capinfos") if isinstance(report.get("capinfos"), dict) else {}
+    parsed = capinfos.get("parsed") if isinstance(capinfos.get("parsed"), dict) else {}
+    linktype = (
+        parsed.get("file_type")
+        or parsed.get("encapsulation")
+        or report.get("linktype")
+        or "unknown"
+    )
+    return {
+        "capture_tool": "PCAPdroid",
+        "filter_type": filter_type,
+        "capture_mode": str(capture_mode),
+        "pcapdroid_version": str(pcapdroid_version),
+        "pcap_linktype": str(linktype),
+    }
+
+
 def _write_model_manifest(
     path: Path,
     *,
@@ -1631,6 +1718,19 @@ def _write_model_manifest(
             "drop_partial_windows": True,
             "timebase": "pcap_time_relative_seconds",
         },
+        "paper_constants": {
+            "window_size_s": float(config.WINDOW_SIZE_S),
+            "window_stride_s": float(config.WINDOW_STRIDE_S),
+            "min_windows_baseline": int(config.MIN_WINDOWS_BASELINE),
+            "min_pcap_bytes_fallback": int(config.MIN_PCAP_BYTES_FALLBACK),
+            "np_percentile_method": str(config.NP_PERCENTILE_METHOD),
+        },
+        "capture_semantics": {
+            "capture_scope": "PCAPdroid-filtered capture restricted to the target package.",
+            "byte_semantics": "aggregate frame length (frame.len) as reported by tshark.",
+            "directionality": "no direction split is performed.",
+            **_capture_semantics_from_run_inputs(run_inputs),
+        },
         "score_semantics": "higher_is_more_anomalous",
         "inputs": {
             "run_id": run_inputs.run_id,
@@ -1647,6 +1747,10 @@ def _write_model_manifest(
             "deps": deps,
         },
         "models": model_outputs,
+        "model_reporting_roles": {
+            config.MODEL_IFOREST: "primary",
+            config.MODEL_OCSVM: "secondary_model_robustness_check",
+        },
     }
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 

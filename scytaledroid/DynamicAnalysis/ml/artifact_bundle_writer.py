@@ -62,6 +62,14 @@ _LEGACY_LABEL_VARIANTS: dict[str, list[str]] = {
     "com.facebook.orca": ["Facebook Messenger", "Messenger"],
 }
 
+_PROHIBITED_PHRASES = (
+    "outbound traffic",
+    "payload bytes",
+    "application-only traffic",
+    "network requests",
+    "strict app isolation",
+)
+
 
 @dataclass(frozen=True)
 class PhaseEArtifacts:
@@ -75,8 +83,12 @@ class PhaseEArtifacts:
     table_5_csv: Path
     table_6_csv: Path
     table_7_csv: Path
+    table_8_csv: Path
     repro_appendix_md: Path
     artifacts_manifest_json: Path
+    determinism_checksums_json: Path
+    required_fields_validation_json: Path
+    report_contract_lint_json: Path
     generated_at: str
 
 
@@ -122,6 +134,9 @@ def write_phase_e_deliverables_bundle(
     table_7_csv, table_7_xlsx, table_7_tex = _write_table_7_exposure_deviation_summary(
         tables_dir, provenance=provenance
     )
+    table_8_csv, table_8_xlsx, table_8_tex = _write_table_8_model_comparison_metrics(
+        tables_dir, provenance=provenance
+    )
 
     # Freeze anchor copy (convenience; canonical stays in data/archive/).
     _copy_required(freeze_anchor_path(), output_phase_e_bundle_freeze_copy_path(), overwrite=True)
@@ -143,6 +158,24 @@ def write_phase_e_deliverables_bundle(
     # Repro appendix snippet.
     repro_appendix_md = appendix_dir / "repro_appendix_phase_e.md"
     repro_appendix_md.write_text(_render_repro_appendix(), encoding="utf-8")
+
+    # Reporting contract artifacts (lightweight, paper-governed).
+    required_fields_report = _write_required_fields_validation_report(manifest_dir=manifest_dir)
+    phrase_lint_report = _write_phrase_lint_report(
+        target_paths=(
+            repro_appendix_md,
+            table_1_tex,
+            table_2_tex,
+            table_3_tex,
+            table_4_tex,
+            table_5_tex,
+            table_6_tex,
+            table_7_tex,
+            table_8_tex,
+        ),
+        out_path=manifest_dir / "report_contract_lint.json",
+    )
+    determinism_checksums = _write_determinism_checksums(manifest_dir=manifest_dir)
 
     # Bundle README.
     readme = output_phase_e_bundle_readme_path()
@@ -176,12 +209,18 @@ def write_phase_e_deliverables_bundle(
         table_7_csv=table_7_csv,
         table_7_xlsx=table_7_xlsx,
         table_7_tex=table_7_tex,
+        table_8_csv=table_8_csv,
+        table_8_xlsx=table_8_xlsx,
+        table_8_tex=table_8_tex,
         repro_appendix_md=repro_appendix_md,
         fig_b2_png=fig_b2_png,
         fig_b2_pdf=fig_b2_pdf,
         fig_b4_png=fig_b4_png,
         fig_b4_pdf=fig_b4_pdf,
         masvs_inputs=masvs_inputs,
+        required_fields_report=required_fields_report,
+        phrase_lint_report=phrase_lint_report,
+        determinism_checksums=determinism_checksums,
     )
 
     # Close-out receipt: pins freeze + bundle-manifest hashes so a zipped bundle
@@ -202,8 +241,12 @@ def write_phase_e_deliverables_bundle(
         table_5_csv=table_5_csv,
         table_6_csv=table_6_csv,
         table_7_csv=table_7_csv,
+        table_8_csv=table_8_csv,
         repro_appendix_md=repro_appendix_md,
         artifacts_manifest_json=artifacts_manifest_json,
+        determinism_checksums_json=determinism_checksums,
+        required_fields_validation_json=required_fields_report,
+        report_contract_lint_json=phrase_lint_report,
         generated_at=datetime.now(UTC).isoformat(),
     )
 
@@ -522,8 +565,13 @@ def _render_repro_appendix() -> str:
         "# Phase E Reproducibility (Generated)\n\n"
         f"- Freeze anchor: `{freeze}`\n"
         f"- Freeze sha256: `{sha}`\n"
+        "- Capture semantics: PCAPdroid-filtered capture restricted to the target package.\n"
+        "- Feature bytes: aggregate frame length (frame.len) as reported by tshark.\n"
+        "- Directionality: no direction split is performed.\n"
         f"- Windowing: `{config.WINDOW_SIZE_S}s` window / `{config.WINDOW_STRIDE_S}s` stride (drop partials)\n"
         f"- MIN_WINDOWS_BASELINE: `{config.MIN_WINDOWS_BASELINE}`\n"
+        f"- MIN_PCAP_BYTES_FALLBACK: `{config.MIN_PCAP_BYTES_FALLBACK}`\n"
+        f"- NP_PERCENTILE_METHOD: `{config.NP_PERCENTILE_METHOD}`\n"
         f"- Thresholding: `{config.THRESHOLD_PERCENTILE}th percentile` per model×app\n"
         "- Score semantics: higher = more anomalous (normalized)\n"
         "- Selection/training/scoring: DB-free; evidence packs + freeze anchor only\n"
@@ -541,10 +589,16 @@ def _render_bundle_readme(fig_run_id: str) -> str:
         "Contents:\n"
         f"- figures/: Fig B1 timeline for exemplar run `{fig_run_id}`\n"
         "- figures/: Fig B2 prevalence summary; Fig B4 static-vs-dynamic discordance\n"
-        "- tables/: Table 1–7 (csv + xlsx + tex)\n"
+        "- tables/: Table 1–8 (csv + xlsx + tex)\n"
         "- appendix/: reproducibility snippet\n"
         "- manifest/: bundle manifest with hashes and pointers\n"
         "- manifest/: closure record (`phase_e_closure_record.json`) pins freeze + artifact hashes\n"
+        "- manifest/: `determinism_checksums.json` provides rerun-stability hash anchors\n\n"
+        "Table 8 definitions:\n"
+        "- Spearman rho is computed over app-phase rows using IF vs OC-SVM `flagged_pct`.\n"
+        "- Agreement % is window-level jointly flagged windows divided by total windows.\n\n"
+        "Capture attribution limitations:\n"
+        "- Reports use PCAPdroid-filtered capture and do not claim strict app isolation.\n"
     )
 
 
@@ -575,12 +629,18 @@ def _write_bundle_manifest(
     table_7_csv: Path,
     table_7_xlsx: Path,
     table_7_tex: Path,
+    table_8_csv: Path,
+    table_8_xlsx: Path,
+    table_8_tex: Path,
     repro_appendix_md: Path,
     fig_b2_png: Path,
     fig_b2_pdf: Path,
     fig_b4_png: Path,
     fig_b4_pdf: Path,
     masvs_inputs: list[dict[str, str]] | None = None,
+    required_fields_report: Path | None = None,
+    phrase_lint_report: Path | None = None,
+    determinism_checksums: Path | None = None,
 ) -> None:
     payload = {
         "generated_at": datetime.now(UTC).isoformat(),
@@ -620,6 +680,9 @@ def _write_bundle_manifest(
             "table_7_csv": {"path": str(table_7_csv), "sha256": _sha256_stream(table_7_csv)},
             "table_7_xlsx": {"path": str(table_7_xlsx), "sha256": _sha256_stream(table_7_xlsx)},
             "table_7_tex": {"path": str(table_7_tex), "sha256": _sha256_stream(table_7_tex)},
+            "table_8_csv": {"path": str(table_8_csv), "sha256": _sha256_stream(table_8_csv)},
+            "table_8_xlsx": {"path": str(table_8_xlsx), "sha256": _sha256_stream(table_8_xlsx)},
+            "table_8_tex": {"path": str(table_8_tex), "sha256": _sha256_stream(table_8_tex)},
             "repro_appendix": {"path": str(repro_appendix_md), "sha256": _sha256_stream(repro_appendix_md)},
             "freeze_copy": {
                 "path": str(output_phase_e_bundle_freeze_copy_path()),
@@ -631,6 +694,21 @@ def _write_bundle_manifest(
             },
         },
     }
+    if required_fields_report and required_fields_report.exists():
+        payload["files"]["required_fields_validation"] = {
+            "path": str(required_fields_report),
+            "sha256": _sha256_stream(required_fields_report),
+        }
+    if phrase_lint_report and phrase_lint_report.exists():
+        payload["files"]["report_contract_lint"] = {
+            "path": str(phrase_lint_report),
+            "sha256": _sha256_stream(phrase_lint_report),
+        }
+    if determinism_checksums and determinism_checksums.exists():
+        payload["files"]["determinism_checksums"] = {
+            "path": str(determinism_checksums),
+            "sha256": _sha256_stream(determinism_checksums),
+        }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
@@ -705,6 +783,11 @@ def _paper_provenance(*, freeze_sha256: str) -> dict[str, str]:
         "freeze_sha256": str(freeze_sha256),
         "ml_schema_version": str(config.ML_SCHEMA_VERSION),
         "report_schema_version": str(config.REPORT_SCHEMA_VERSION),
+        "window_size_s": str(config.WINDOW_SIZE_S),
+        "window_stride_s": str(config.WINDOW_STRIDE_S),
+        "min_windows_baseline": str(config.MIN_WINDOWS_BASELINE),
+        "min_pcap_bytes_fallback": str(config.MIN_PCAP_BYTES_FALLBACK),
+        "np_percentile_method": str(config.NP_PERCENTILE_METHOD),
         "generated_at_utc": datetime.now(UTC).isoformat(),
     }
 
@@ -747,6 +830,7 @@ def _clean_bundle_dirs(*, tables_dir: Path, figs_dir: Path, fig_b1_run_id: str) 
         "table_5_masvs_coverage",
         "table_6_static_posture_scores",
         "table_7_exposure_deviation_summary",
+        "table_8_model_comparison_metrics",
     }
     keep_fig_stems = {
         f"fig_b1_timeline_{fig_b1_run_id[:8]}",
@@ -905,6 +989,12 @@ def _write_table_1_rdi_prevalence(tables_dir: Path, *, provenance: dict[str, str
                 "idle_windows": int(fnum(idle_if.get("windows_total"))),
                 "interactive_windows": int(fnum(int_if.get("windows_total"))),
                 "training_mode": str(int_if.get("training_mode") or "baseline_only"),
+                "is_fallback_mode": bool(str(int_if.get("training_mode") or "baseline_only") == "union_fallback"),
+                "comparability": (
+                    "degraded comparability"
+                    if str(int_if.get("training_mode") or "baseline_only") == "union_fallback"
+                    else "baseline comparable"
+                ),
             }
         )
 
@@ -917,6 +1007,8 @@ def _write_table_1_rdi_prevalence(tables_dir: Path, *, provenance: dict[str, str
         ("idle_windows", "Idle n"),
         ("interactive_windows", "Interactive n"),
         ("training_mode", "Train"),
+        ("is_fallback_mode", "Fallback"),
+        ("comparability", "Comparability"),
     ]
     csv_path = tables_dir / "table_1_rdi_prevalence.csv"
     xlsx_path = tables_dir / "table_1_rdi_prevalence.xlsx"
@@ -1027,6 +1119,10 @@ def _write_table_3_model_agreement(tables_dir: Path, *, provenance: dict[str, st
                 "both_flagged": int(both),
                 "interactive_windows": int(windows),
                 "training_mode": training_mode,
+                "is_fallback_mode": bool(training_mode == "union_fallback"),
+                "comparability": (
+                    "degraded comparability" if training_mode == "union_fallback" else "baseline comparable"
+                ),
             }
         )
 
@@ -1038,6 +1134,8 @@ def _write_table_3_model_agreement(tables_dir: Path, *, provenance: dict[str, st
         ("both_flagged", "Both n"),
         ("interactive_windows", "Int windows"),
         ("training_mode", "Train"),
+        ("is_fallback_mode", "Fallback"),
+        ("comparability", "Comparability"),
     ]
     csv_path = tables_dir / "table_3_model_agreement.csv"
     xlsx_path = tables_dir / "table_3_model_agreement.xlsx"
@@ -1726,3 +1824,335 @@ def _write_table_7_exposure_deviation_summary(
         ),
     )
     return csv_path, xlsx_path, tex_path
+
+
+def _write_table_8_model_comparison_metrics(tables_dir: Path, *, provenance: dict[str, str]) -> tuple[Path, Path, Path]:
+    """Table 8: PM-locked IF vs OC-SVM comparison metrics."""
+    prevalence_rows = _read_csv_rows(dataset_tables_dir() / "anomaly_prevalence_per_app_phase.csv")
+    overlap_rows = _read_csv_rows(dataset_tables_dir() / "model_overlap_per_run.csv")
+    def _phase2(raw: str | None) -> str:
+        token = str(raw or "").strip().lower()
+        return "idle" if token == "idle" else "interactive"
+
+    def as_float(v: str | None) -> float:
+        try:
+            return float(v or 0.0)
+        except Exception:
+            return 0.0
+
+    def as_int(v: str | None) -> int:
+        try:
+            return int(float(v or 0))
+        except Exception:
+            return 0
+
+    prevalence: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in prevalence_rows:
+        pkg = str(row.get("package_name") or "").strip()
+        phase = _phase2(row.get("phase"))
+        model = str(row.get("model") or "").strip()
+        if not pkg or phase not in {"idle", "interactive"}:
+            continue
+        key = (pkg, phase)
+        prevalence.setdefault(key, {"flagged_pct": {}, "training_mode": None})
+        prevalence[key]["flagged_pct"][model] = as_float(row.get("flagged_pct"))
+        if model == config.MODEL_IFOREST:
+            prevalence[key]["training_mode"] = str(row.get("training_mode") or "baseline_only")
+
+    overlap_agg: dict[tuple[str, str], dict[str, int]] = {}
+    for row in overlap_rows:
+        pkg = str(row.get("package_name") or "").strip()
+        phase = _phase2(row.get("phase"))
+        if not pkg or phase not in {"idle", "interactive"}:
+            continue
+        key = (pkg, phase)
+        cur = overlap_agg.setdefault(key, {"windows": 0, "both": 0})
+        cur["windows"] += as_int(row.get("windows_total"))
+        cur["both"] += as_int(row.get("both_flagged"))
+
+    xs: list[float] = []
+    ys: list[float] = []
+    deltas: list[float] = []
+    out: list[dict[str, Any]] = []
+    for pkg, phase in sorted(prevalence.keys()):
+        if_pct = (prevalence[(pkg, phase)].get("flagged_pct") or {}).get(config.MODEL_IFOREST)
+        oc_pct = (prevalence[(pkg, phase)].get("flagged_pct") or {}).get(config.MODEL_OCSVM)
+        if if_pct is None or oc_pct is None:
+            continue
+        training_mode = str(prevalence[(pkg, phase)].get("training_mode") or "baseline_only")
+        delta = abs(float(if_pct) - float(oc_pct))
+        xs.append(float(if_pct))
+        ys.append(float(oc_pct))
+        deltas.append(delta)
+        ov = overlap_agg.get((pkg, phase), {"windows": 0, "both": 0})
+        windows = int(ov.get("windows", 0))
+        both = int(ov.get("both", 0))
+        both_pct = (float(both) / float(windows)) if windows > 0 else 0.0
+        out.append(
+            {
+                "app": config.DISPLAY_NAME_BY_PACKAGE.get(pkg, pkg),
+                "phase": phase,
+                "if_flagged_pct": round(float(if_pct), 3),
+                "ocsvm_flagged_pct": round(float(oc_pct), 3),
+                "abs_delta_flagged_pct": round(delta, 3),
+                "windows_total": windows,
+                "jointly_flagged_windows": both,
+                "jointly_flagged_pct": round(both_pct, 3),
+                "training_mode": training_mode,
+                "is_fallback_mode": bool(training_mode == "union_fallback"),
+                "comparability": "degraded comparability" if training_mode == "union_fallback" else "baseline comparable",
+            }
+        )
+
+    phase_stats: dict[str, dict[str, Any]] = {}
+    for phase_name in ("idle", "interactive"):
+        phase_rows = [row for row in out if str(row.get("phase") or "").strip().lower() == phase_name]
+        px = [float(row.get("if_flagged_pct") or 0.0) for row in phase_rows]
+        py = [float(row.get("ocsvm_flagged_pct") or 0.0) for row in phase_rows]
+        pd = [float(row.get("abs_delta_flagged_pct") or 0.0) for row in phase_rows]
+        p_windows = sum(int(row.get("windows_total") or 0) for row in phase_rows)
+        p_joint = sum(int(row.get("jointly_flagged_windows") or 0) for row in phase_rows)
+        p_agreement = (float(p_joint) / float(p_windows)) if p_windows > 0 else 0.0
+        phase_stats[phase_name] = {
+            "rho": _spearman_rho(px, py),
+            "mean_abs_delta": (sum(pd) / float(len(pd))) if pd else 0.0,
+            "mean_if_flagged_pct": (sum(px) / float(len(px))) if px else 0.0,
+            "mean_oc_flagged_pct": (sum(py) / float(len(py))) if py else 0.0,
+            "windows_total": p_windows,
+            "jointly_flagged_windows": p_joint,
+            "agreement_pct": p_agreement,
+        }
+
+    rho = _spearman_rho(xs, ys)
+    mean_abs_delta = (sum(deltas) / float(len(deltas))) if deltas else 0.0
+    mean_if_flagged_pct = (sum(xs) / float(len(xs))) if xs else 0.0
+    mean_oc_flagged_pct = (sum(ys) / float(len(ys))) if ys else 0.0
+    total_windows = sum(int(r.get("windows_total") or 0) for r in out)
+    total_joint = sum(int(r.get("jointly_flagged_windows") or 0) for r in out)
+    agreement_pct = (float(total_joint) / float(total_windows)) if total_windows > 0 else 0.0
+
+    for phase_name in ("idle", "interactive"):
+        stats = phase_stats.get(phase_name) or {}
+        out.append(
+            {
+                "app": f"__PHASE_{phase_name.upper()}__",
+                "phase": phase_name,
+                "if_flagged_pct": "",
+                "ocsvm_flagged_pct": "",
+                "abs_delta_flagged_pct": round(float(stats.get("mean_abs_delta") or 0.0), 3),
+                "windows_total": int(stats.get("windows_total") or 0),
+                "jointly_flagged_windows": int(stats.get("jointly_flagged_windows") or 0),
+                "jointly_flagged_pct": round(float(stats.get("agreement_pct") or 0.0), 3),
+                "training_mode": "",
+                "is_fallback_mode": "",
+                "comparability": "",
+                "spearman_rho_if_vs_ocsvm": "" if stats.get("rho") is None else round(float(stats["rho"]), 3),
+                "mean_abs_delta_flagged_pct": round(float(stats.get("mean_abs_delta") or 0.0), 3),
+                "mean_if_flagged_pct": round(float(stats.get("mean_if_flagged_pct") or 0.0), 3),
+                "mean_ocsvm_flagged_pct": round(float(stats.get("mean_oc_flagged_pct") or 0.0), 3),
+                "agreement_pct_jointly_flagged": round(float(stats.get("agreement_pct") or 0.0), 3),
+            }
+        )
+    out.append(
+        {
+            "app": "__OVERALL__",
+            "phase": "all",
+            "if_flagged_pct": "",
+            "ocsvm_flagged_pct": "",
+            "abs_delta_flagged_pct": round(mean_abs_delta, 3),
+            "windows_total": total_windows,
+            "jointly_flagged_windows": total_joint,
+            "jointly_flagged_pct": round(agreement_pct, 3),
+            "training_mode": "",
+            "is_fallback_mode": "",
+            "comparability": "",
+            "spearman_rho_if_vs_ocsvm": "" if rho is None else round(float(rho), 3),
+            "mean_abs_delta_flagged_pct": round(mean_abs_delta, 3),
+            "mean_if_flagged_pct": round(mean_if_flagged_pct, 3),
+            "mean_ocsvm_flagged_pct": round(mean_oc_flagged_pct, 3),
+            "agreement_pct_jointly_flagged": round(agreement_pct, 3),
+        }
+    )
+
+    cols = [
+        ("app", "App"),
+        ("phase", "Phase"),
+        ("if_flagged_pct", "IF flagged %"),
+        ("ocsvm_flagged_pct", "OC-SVM flagged %"),
+        ("abs_delta_flagged_pct", "Abs delta"),
+        ("windows_total", "Windows"),
+        ("jointly_flagged_windows", "Jointly flagged"),
+        ("jointly_flagged_pct", "Jointly flagged %"),
+        ("training_mode", "Train"),
+        ("is_fallback_mode", "Fallback"),
+        ("comparability", "Comparability"),
+        ("spearman_rho_if_vs_ocsvm", "Spearman rho"),
+        ("mean_abs_delta_flagged_pct", "Mean abs delta"),
+        ("mean_if_flagged_pct", "Mean IF flagged %"),
+        ("mean_ocsvm_flagged_pct", "Mean OC-SVM flagged %"),
+        ("agreement_pct_jointly_flagged", "Agreement %"),
+    ]
+    csv_path = tables_dir / "table_8_model_comparison_metrics.csv"
+    xlsx_path = tables_dir / "table_8_model_comparison_metrics.xlsx"
+    tex_path = tables_dir / "table_8_model_comparison_metrics.tex"
+    _write_csv_with_provenance(csv_path, [k for k, _ in cols], out, provenance=provenance)
+    _write_xlsx(xlsx_path, sheet_name="table_8", columns=cols, rows=out, provenance=provenance)
+    _write_tex_table(
+        tex_path,
+        columns=cols,
+        rows=out,
+        provenance=provenance,
+        caption_comment="Table 8: IF vs OC-SVM comparison metrics (spearman, abs delta, joint agreement).",
+    )
+    return csv_path, xlsx_path, tex_path
+
+
+def _write_required_fields_validation_report(*, manifest_dir: Path) -> Path:
+    """Required-field validation for paper-grade model manifests."""
+    freeze_payload = json.loads(freeze_anchor_path().read_text(encoding="utf-8"))
+    included_run_ids = [str(x) for x in (freeze_payload.get("included_run_ids") or []) if str(x).strip()]
+    required_paths = {
+        "seed": ("seed",),
+        "window_size_s": ("windowing", "window_size_s"),
+        "window_stride_s": ("windowing", "stride_s"),
+        "threshold_percentile": ("models", config.MODEL_IFOREST, "threshold_percentile"),
+        "np_percentile_method": ("models", config.MODEL_IFOREST, "np_percentile_method"),
+        "feature_names": ("models", config.MODEL_IFOREST, "feature_names"),
+        "model_params": ("models", config.MODEL_IFOREST, "params"),
+        "training_mode": ("models", config.MODEL_IFOREST, "training_mode"),
+        "numpy_version": ("environment", "deps", "numpy"),
+        "sklearn_version": ("environment", "deps", "sklearn"),
+        "tshark_version": ("environment", "host_tools", "tshark", "version"),
+    }
+
+    missing_by_run: dict[str, list[str]] = {}
+    for rid in included_run_ids:
+        path = (
+            Path(app_config.OUTPUT_DIR)
+            / "evidence"
+            / "dynamic"
+            / rid
+            / "analysis"
+            / "ml"
+            / config.ML_SCHEMA_LABEL
+            / "model_manifest.json"
+        )
+        if not path.exists():
+            missing_by_run[rid] = sorted(required_paths.keys())
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            missing_by_run[rid] = sorted(required_paths.keys())
+            continue
+        missing: list[str] = []
+        for field_name, token_path in required_paths.items():
+            cur: Any = payload
+            for token in token_path:
+                if isinstance(cur, dict) and token in cur:
+                    cur = cur[token]
+                else:
+                    cur = None
+                    break
+            if cur in (None, "", []):
+                missing.append(field_name)
+        if missing:
+            missing_by_run[rid] = sorted(missing)
+
+    checked_runs = len(included_run_ids)
+    failed_runs = len(missing_by_run)
+    payload = {
+        "checked_runs": checked_runs,
+        "failed_runs": failed_runs,
+        "passed_runs": checked_runs - failed_runs,
+        "paper_grade_ready": failed_runs == 0,
+        "status": "PAPER_GRADE" if failed_runs == 0 else "EXPERIMENTAL",
+        "missing_by_run": missing_by_run,
+    }
+    out_path = manifest_dir / "required_fields_validation.json"
+    out_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return out_path
+
+
+def _write_phrase_lint_report(*, target_paths: tuple[Path, ...], out_path: Path) -> Path:
+    violations: list[dict[str, str]] = []
+    for path in target_paths:
+        if not path.exists() or not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8")
+        lower = text.lower()
+        for phrase in _PROHIBITED_PHRASES:
+            if phrase in lower:
+                violations.append({"path": str(path), "phrase": phrase})
+    payload = {
+        "checked_files": [str(p) for p in target_paths if p.exists()],
+        "prohibited_phrases": list(_PROHIBITED_PHRASES),
+        "ok": len(violations) == 0,
+        "violations": violations,
+    }
+    out_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return out_path
+
+
+def _write_determinism_checksums(*, manifest_dir: Path) -> Path:
+    """Write deterministic hash anchors for paper-facing reproducibility checks."""
+    freeze_payload = json.loads(freeze_anchor_path().read_text(encoding="utf-8"))
+    included_run_ids = [str(x) for x in (freeze_payload.get("included_run_ids") or []) if str(x).strip()]
+    evidence_root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+
+    per_run: dict[str, Any] = {}
+    spec = WindowSpec(window_size_s=config.WINDOW_SIZE_S, stride_s=config.WINDOW_STRIDE_S)
+    for rid in included_run_ids:
+        run_dir = evidence_root / rid
+        model_manifest = run_dir / "analysis" / "ml" / config.ML_SCHEMA_LABEL / "model_manifest.json"
+        if_scores = run_dir / "analysis" / "ml" / config.ML_SCHEMA_LABEL / "anomaly_scores_iforest.csv"
+        oc_scores = run_dir / "analysis" / "ml" / config.ML_SCHEMA_LABEL / "anomaly_scores_ocsvm.csv"
+        record: dict[str, Any] = {
+            "model_manifest_sha256": _sha256_stream(model_manifest) if model_manifest.exists() else None,
+            "iforest_scores_sha256": _sha256_stream(if_scores) if if_scores.exists() else None,
+            "ocsvm_scores_sha256": _sha256_stream(oc_scores) if oc_scores.exists() else None,
+            "feature_matrix_sha256": None,
+        }
+        try:
+            inputs = load_run_inputs(run_dir)
+            if inputs and inputs.pcap_path and inputs.pcap_path.exists():
+                duration_s = get_sampling_duration_seconds(inputs)
+                if duration_s and duration_s > 0:
+                    rows, _ = build_window_features(
+                        extract_packet_timeline(inputs.pcap_path),
+                        duration_s=float(duration_s),
+                        spec=spec,
+                    )
+                    h = hashlib.sha256()
+                    for row in rows:
+                        # Stable, canonical per-window representation.
+                        line = (
+                            f"{float(row.get('window_start_s') or 0.0):.6f},"
+                            f"{float(row.get('window_end_s') or 0.0):.6f},"
+                            f"{int(row.get('packet_count') or 0)},"
+                            f"{int(row.get('byte_count') or 0)},"
+                            f"{float(row.get('avg_packet_size_bytes') or 0.0):.6f}\n"
+                        )
+                        h.update(line.encode("utf-8"))
+                    record["feature_matrix_sha256"] = h.hexdigest()
+        except Exception as exc:  # noqa: BLE001
+            record["feature_matrix_error"] = str(exc)
+        per_run[rid] = record
+
+    table_1 = output_phase_e_bundle_tables_dir() / "table_1_rdi_prevalence.csv"
+    table_8 = output_phase_e_bundle_tables_dir() / "table_8_model_comparison_metrics.csv"
+    payload = {
+        "freeze_anchor": str(freeze_anchor_path()),
+        "freeze_sha256": _sha256_stream(freeze_anchor_path()),
+        "ml_schema_version": int(config.ML_SCHEMA_VERSION),
+        "report_schema_version": int(config.REPORT_SCHEMA_VERSION),
+        "window_spec": {"window_size_s": float(config.WINDOW_SIZE_S), "window_stride_s": float(config.WINDOW_STRIDE_S)},
+        "table_hashes": {
+            "table_1_rdi_prevalence_csv": _sha256_stream(table_1) if table_1.exists() else None,
+            "table_8_model_comparison_metrics_csv": _sha256_stream(table_8) if table_8.exists() else None,
+        },
+        "per_run": per_run,
+    }
+    out_path = manifest_dir / "determinism_checksums.json"
+    out_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return out_path

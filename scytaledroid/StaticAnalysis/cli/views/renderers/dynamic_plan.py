@@ -65,6 +65,7 @@ def _validate_plan_schema(plan: Mapping[str, object]) -> None:
         "artifact_set_hash",
         "run_signature",
         "run_signature_version",
+        "static_handoff_hash",
         "identity_valid",
         "identity_error_reason",
     )
@@ -363,6 +364,7 @@ def build_dynamic_plan(
             "artifact_set_hash": metadata.get("artifact_set_hash"),
             "run_signature": metadata.get("run_signature"),
             "run_signature_version": metadata.get("run_signature_version"),
+            "static_handoff_hash": metadata.get("static_handoff_hash"),
             # Convenience join pointer (not part of the identity tuple).
             "static_run_id": static_run_id,
             "identity_valid": metadata.get("identity_valid"),

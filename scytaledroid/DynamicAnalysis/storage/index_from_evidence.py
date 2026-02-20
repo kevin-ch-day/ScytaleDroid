@@ -220,6 +220,7 @@ def build_dynamic_session_row_from_evidence_pack(run_dir: Path) -> dict[str, Any
         "status": str(mf.get("status") or "") or None,
         "evidence_path": str(run_dir),
         "static_run_id": int(plan.get("static_run_id") or 0) or None,
+        "static_handoff_hash": ident.get("static_handoff_hash"),
         "run_signature": ident.get("run_signature"),
         "run_signature_version": ident.get("run_signature_version"),
         "base_apk_sha256": ident.get("base_apk_sha256"),
@@ -249,7 +250,7 @@ def build_dynamic_session_row_from_evidence_pack(run_dir: Path) -> dict[str, Any
 
 
 def upsert_dynamic_session_row(row: dict[str, Any]) -> None:
-    cols = list(row.keys())
+    cols = _existing_dynamic_session_cols(row)
     placeholders = ", ".join(["%s"] * len(cols))
     updates = ", ".join([f"{c}=VALUES({c})" for c in cols if c != "dynamic_run_id"])
     sql = f"""
@@ -258,6 +259,23 @@ def upsert_dynamic_session_row(row: dict[str, Any]) -> None:
         ON DUPLICATE KEY UPDATE {updates}
     """
     core_q.run_sql_write(sql, tuple(row[c] for c in cols), query_name="dynamic.sessions.index_from_evidence")
+
+
+def _existing_dynamic_session_cols(row: dict[str, Any]) -> list[str]:
+    try:
+        rows = core_q.run_sql(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+              AND table_name = 'dynamic_sessions'
+            """,
+            fetch="all",
+        )
+        known = {str(item[0]) for item in (rows or []) if item and item[0]}
+    except Exception:
+        known = set(row.keys())
+    return [key for key in row.keys() if key in known]
 
 
 def build_dynamic_network_features_row_from_evidence_pack(run_dir: Path) -> dict[str, Any] | None:

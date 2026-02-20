@@ -160,6 +160,7 @@ def _build_selection(candidate: dict[str, object]) -> dict[str, object]:
         "version_name": candidate.get("version_name"),
         "version_code": candidate.get("version_code"),
         "base_apk_sha256": identity.get("base_apk_sha256"),
+        "static_handoff_hash": identity.get("static_handoff_hash"),
         "artifact_set_hash": identity.get("artifact_set_hash"),
         "run_signature": identity.get("run_signature"),
         "run_signature_version": identity.get("run_signature_version"),
@@ -361,6 +362,7 @@ def _identity_key(identity: dict[str, object]) -> str:
     return "|".join(
         [
             str(identity.get("base_apk_sha256") or ""),
+            str(identity.get("static_handoff_hash") or ""),
             str(identity.get("artifact_set_hash") or ""),
             str(identity.get("run_signature") or ""),
             str(identity.get("run_signature_version") or ""),
