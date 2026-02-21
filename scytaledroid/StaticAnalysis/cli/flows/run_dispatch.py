@@ -369,6 +369,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
                                 persist_detections=True,
                                 run_map=run_map,
                                 require_run_map=True,
+                                compact_output=True,
                                 fail_on_persist_error=True,
                             )
                         except Exception as exc:

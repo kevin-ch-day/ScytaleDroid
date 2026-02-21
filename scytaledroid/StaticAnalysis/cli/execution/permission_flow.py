@@ -75,16 +75,18 @@ def execute_permission_scan(
     last_report = None
     last_category = None
     audit_persist_failed = False
+    persisted_counts_total: dict[str, int] = {}
+    persisted_apps = 0
     if compact_output is None:
         if params.perm_snapshot_compact is not None:
             compact_output = params.perm_snapshot_compact
         else:
-            compact_output = selection.scope == "all" or len(scope_groups) > 15
+            compact_output = selection.scope in {"all", "profile"} or len(scope_groups) > 15
     if compact_output:
         if not output_prefs.effective_batch():
             render_compact_notice()
 
-    for group in scope_groups:
+    for idx, group in enumerate(scope_groups, start=1):
         artifacts = group.artifacts
         if not artifacts:
             continue
@@ -96,11 +98,19 @@ def execute_permission_scan(
         last_category = group.category
 
         permissions, defined, sdk = collect_permissions_and_sdk(str(artifact.path))
+        manifest_label = None
+        try:
+            manifest_label = getattr(report.manifest, "app_label", None) if report else None
+        except Exception:
+            manifest_label = None
         profile = render_permission_profile(
             package_name=group.package_name,
+            app_label=manifest_label or group.package_name,
             permissions=permissions,
             defined=defined,
             sdk=sdk,
+            index=idx,
+            total=len(scope_groups),
             compact=bool(compact_output),
             silent=bool(output_prefs.effective_batch()),
         )
@@ -112,7 +122,14 @@ def execute_permission_scan(
                 )
 
                 counts = persist_permissions_to_db(report)
-                if not output_prefs.effective_batch():
+                if isinstance(counts, dict):
+                    for key, value in counts.items():
+                        try:
+                            persisted_counts_total[key] = persisted_counts_total.get(key, 0) + int(value)
+                        except Exception:
+                            continue
+                persisted_apps += 1
+                if not output_prefs.effective_batch() and not bool(compact_output):
                     render_permission_persisted(counts)
             except Exception:
                 logging_engine.get_error_logger().exception(
@@ -149,6 +166,14 @@ def execute_permission_scan(
             score_detail=profile.get("score_detail", {}),
             vendor_present=bool(profile.get("V", 0)),
         )
+
+    if (
+        persist_detections
+        and persisted_apps
+        and not output_prefs.effective_batch()
+        and bool(compact_output)
+    ):
+        render_permission_persisted(persisted_counts_total)
 
     if require_run_map and not run_map:
         run_map = load_run_map(session_stamp)

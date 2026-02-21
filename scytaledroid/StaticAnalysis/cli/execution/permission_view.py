@@ -21,20 +21,23 @@ def render_compact_notice() -> None:
 def render_permission_profile(
     *,
     package_name: str,
+    app_label: str,
     permissions,
     defined,
     sdk,
+    index: int,
+    total: int,
     compact: bool,
     silent: bool = False,
 ):
     return render_permission_postcard(
         package_name,
-        package_name,
+        app_label,
         permissions,
         defined,
         sdk=sdk,
-        index=1,
-        total=1,
+        index=index,
+        total=total,
         compact=compact,
         silent=silent,
     )

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+import re
 from typing import Any
 
 from scytaledroid.Config import app_config
@@ -18,6 +19,58 @@ except Exception:  # pragma: no cover - DB optional
 
 from ..commands.models import Command
 from ..core.models import RunParameters
+
+
+def _scope_token(params: RunParameters) -> str:
+    scope = (params.scope or "").strip().lower()
+    label = (params.scope_label or "").strip().lower()
+    if scope == "all":
+        return "all"
+    if not label:
+        return scope or "scope"
+    # Prefer concise package tail names when scope label is a package.
+    if "." in label and " " not in label:
+        parts = [segment for segment in label.split(".") if segment]
+        if len(parts) >= 2:
+            return "-".join(parts[-2:])
+        return parts[-1]
+    slug = re.sub(r"[^a-z0-9]+", "-", label).strip("-")
+    if not slug:
+        return scope or "scope"
+    # If verbose, collapse to initials for readability.
+    if len(slug) > 18:
+        words = [word for word in slug.split("-") if word]
+        if len(words) >= 2:
+            initials = "".join(word[0] for word in words)
+            return initials[:10]
+        return slug[:18]
+    return slug
+
+
+def _profile_token(params: RunParameters) -> str:
+    profile = (params.profile or "").strip().lower()
+    aliases = {
+        "full": "full",
+        "lightweight": "lite",
+        "permissions": "perm",
+        "metadata": "meta",
+        "split": "split",
+        "custom": "custom",
+    }
+    return aliases.get(profile, profile[:8] or "run")
+
+
+def _suggest_session_label(params: RunParameters) -> str:
+    current = (params.session_stamp or "").strip()
+    if not current:
+        current = datetime.now(UTC).strftime("%Y%m%d")
+    # Respect existing explicit labels that are already descriptive.
+    if not re.fullmatch(r"\d{8}", current):
+        return current
+    scope_token = _scope_token(params)
+    profile_token = _profile_token(params)
+    suggested = f"{current}-{scope_token}-{profile_token}"
+    return normalize_session_stamp(suggested)
 
 
 def apply_command_overrides(params: RunParameters, command: Command) -> RunParameters:
@@ -107,14 +160,19 @@ def prompt_session_label(params: RunParameters) -> RunParameters:
     """Ask the user to override the generated session label."""
 
     current = params.session_stamp or ""
+    suggested = _suggest_session_label(params)
     print()
+    if suggested and suggested != current:
+        print(status_messages.status(f"Suggested: {suggested}", level="info"))
     label = prompt_utils.prompt_text(
-        "Session label (press Enter to keep auto-generated)",
-        default=current,
+        "Session label (press Enter to use default)",
+        default=suggested or current,
         required=False,
         show_arrow=True,
     ).strip()
-    if not label or label == current:
+    if not label or label == (suggested or current):
+        if suggested and suggested != current:
+            return replace(params, session_stamp=suggested)
         return params
 
     session_stamp = normalize_session_stamp(label)

@@ -336,3 +336,4 @@ def test_launch_scan_flow_passes_fail_on_persist_error_for_permission_refresh(mo
 
     run_dispatch.launch_scan_flow(selection, params, Path("."))
     assert seen.get("fail_on_persist_error") is True
+    assert seen.get("compact_output") is True
