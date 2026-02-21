@@ -59,7 +59,6 @@ def reporting_menu() -> None:
     reports_visible = reports_options
     visible_keys = {it.key for it in (core_visible + legacy_export_options + reports_visible)}
     actions = {k: v for k, v in actions_all.items() if k in visible_keys}
-    choice_keys = [it.key for it in (core_visible + legacy_export_options + reports_visible)]
 
     while True:
         print()
@@ -137,7 +136,13 @@ def reporting_menu() -> None:
         menu_utils.print_section("Reports")
         menu_utils.render_menu(MenuSpec(items=reports_visible, show_exit=False, exit_label=None, show_descriptions=False, padding=True))
         menu_utils.render_menu(MenuSpec(items=[], default=None, show_exit=True, exit_label="Back"))
-        choice = prompt_utils.get_choice(choice_keys + ["0"], default="0")
+        choice = prompt_utils.get_choice(
+            menu_utils.selectable_keys(
+                [*core_visible, *legacy_export_options, *reports_visible],
+                include_exit=True,
+            ),
+            default="0",
+        )
 
         if choice == "0":
             break

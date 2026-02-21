@@ -24,6 +24,7 @@ def _base_plan():
         "run_identity": {
             "base_apk_sha256": "base123",
             "artifact_set_hash": "hash123",
+            "static_handoff_hash": "h" * 64,
             "run_signature": "abc123",
             "run_signature_version": "v1",
             "identity_valid": True,
@@ -44,6 +45,7 @@ def _db_row():
         "run_signature": "abc123",
         "run_signature_version": "v1",
         "artifact_set_hash": "hash123",
+        "static_handoff_hash": "h" * 64,
         "base_apk_sha256": "base123",
         "pipeline_version": "2.0.0-alpha",
         "package_name": "com.example.app",
@@ -129,3 +131,21 @@ def test_plan_validation_db_signature_version_unsupported(monkeypatch):
     outcome = loader.validate_dynamic_plan(_base_plan(), package_name="com.example.app")
     assert outcome.status == "FAIL"
     assert any("unsupported db run_signature_version" in reason for reason in outcome.reasons)
+
+
+def test_plan_validation_static_handoff_hash_mismatch(monkeypatch):
+    db_row = _db_row()
+    db_row["static_handoff_hash"] = "z" * 64
+    monkeypatch.setattr(loader.core_q, "run_sql", _fake_run_sql_factory(db_row))
+    outcome = loader.validate_dynamic_plan(_base_plan(), package_name="com.example.app")
+    assert outcome.status == "FAIL"
+    assert any(mismatch["field"] == "static_handoff_hash" for mismatch in outcome.mismatches)
+
+
+def test_plan_validation_missing_static_handoff_hash(monkeypatch):
+    monkeypatch.setattr(loader.core_q, "run_sql", _fake_run_sql_factory(_db_row()))
+    plan = _base_plan()
+    plan["run_identity"].pop("static_handoff_hash")
+    outcome = loader.validate_dynamic_plan(plan, package_name="com.example.app")
+    assert outcome.status == "FAIL"
+    assert any("missing required fields" in reason for reason in outcome.reasons)

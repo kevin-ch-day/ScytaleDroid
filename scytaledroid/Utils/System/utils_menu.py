@@ -60,8 +60,10 @@ def utils_menu() -> None:
         )
         menu_utils.render_menu(spec)
 
-        valid_keys = [item.key for item in options]
-        choice = prompt_utils.get_choice(valid_keys + ["0"])
+        choice = prompt_utils.get_choice(
+            menu_utils.selectable_keys(options, include_exit=True),
+            disabled=[item.key for item in options if item.disabled],
+        )
 
         if choice == "0":
             break

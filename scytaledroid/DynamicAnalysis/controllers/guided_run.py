@@ -193,10 +193,11 @@ def run_guided_dataset_run(
         )
     )
     selected_protocol = prompt_utils.get_choice(
-        ["1", "2", "3", "4", "D", "0"],
+        menu_utils.selectable_keys(protocol_options, include_exit=True),
         default="2" if suggested_profile == "interactive_use" else "1",
         casefold=True,
         invalid_message="Choose 0-4 or D.",
+        disabled=[option.key for option in protocol_options if option.disabled],
     )
     selected_protocol = selected_protocol.upper()
     if selected_protocol == "0":
@@ -301,15 +302,16 @@ def run_guided_dataset_run(
     if package_name.lower() in messaging_pkgs:
         print()
         menu_utils.print_header("Messaging Activity (Required Tag)")
+        messaging_options = [
+            menu_utils.MenuOption("1", "None / browsing only", description="no explicit messaging activity"),
+            menu_utils.MenuOption("2", "Text only", description="send/receive text messages"),
+            menu_utils.MenuOption("3", "Voice call", description="voice calling only"),
+            menu_utils.MenuOption("4", "Video call", description="video calling only"),
+            menu_utils.MenuOption("5", "Mixed", description="text + voice/video"),
+        ]
         menu_utils.render_menu(
             menu_utils.MenuSpec(
-                items=[
-                    menu_utils.MenuOption("1", "None / browsing only", description="no explicit messaging activity"),
-                    menu_utils.MenuOption("2", "Text only", description="send/receive text messages"),
-                    menu_utils.MenuOption("3", "Voice call", description="voice calling only"),
-                    menu_utils.MenuOption("4", "Video call", description="video calling only"),
-                    menu_utils.MenuOption("5", "Mixed", description="text + voice/video"),
-                ],
+                items=messaging_options,
                 default="1",
                 exit_label=None,
                 show_exit=False,
@@ -317,7 +319,12 @@ def run_guided_dataset_run(
                 compact=True,
             )
         )
-        choice = prompt_utils.get_choice(["1", "2", "3", "4", "5"], default="1", invalid_message="Choose 1-5.")
+        choice = prompt_utils.get_choice(
+            menu_utils.selectable_keys(messaging_options, include_exit=False),
+            default="1",
+            invalid_message="Choose 1-5.",
+            disabled=[option.key for option in messaging_options if option.disabled],
+        )
         messaging_activity = {
             "1": "none",
             "2": "text_only",

@@ -55,8 +55,10 @@ NP_PERCENTILE_METHOD = "linear"
 # With 10s/5s windowing, ~180s baseline -> ~35 windows.
 MIN_WINDOWS_BASELINE = 30
 
-# PCAP bytes gate fallback (manifest value wins if present).
-MIN_PCAP_BYTES_FALLBACK = 100_000
+# Baseline PCAP bytes gate (manifest value wins if present).
+MIN_PCAP_BYTES = 50_000
+# Back-compat alias used by existing modules/docs.
+MIN_PCAP_BYTES_FALLBACK = MIN_PCAP_BYTES
 
 # ML audit thresholds (Phase F1)
 # Warning threshold for training sample size; does not affect model fitting.

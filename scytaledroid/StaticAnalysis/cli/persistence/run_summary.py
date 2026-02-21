@@ -25,6 +25,7 @@ from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.version_utils import get_git_commit
 
 from ...core.findings import Badge, Finding
+from ...core.models import StaticAnalysisReport
 from ..core.cvss_v4 import apply_profiles
 from ..core.masvs_mapper import rule_to_area, summarise_controls
 from ..core.rule_ids import derive_rule_id
@@ -217,6 +218,7 @@ def _classify_static_contract(
     schema_version: str | None,
     tool_semver: str | None,
     tool_git_commit: str | None,
+    static_config_hash: str | None,
 ) -> tuple[str, list[str]]:
     reasons: list[str] = []
     missing_required = False
@@ -232,6 +234,9 @@ def _classify_static_contract(
         reasons.append("MASVS_MAPPING_HASH_MISSING")
     if not schema_version or not tool_semver or not tool_git_commit:
         missing_required = True
+    if not static_config_hash:
+        missing_required = True
+        reasons.append("CONFIG_HASH_MISMATCH")
     mode = str(identity_mode or "").strip().lower()
     if mode != "full_hash":
         reasons.append("IDENTITY_FALLBACK_MODE")
@@ -1247,6 +1252,8 @@ def persist_run_summary(
             attempt += 1
             failure_stage = None
             db_errors.clear()
+            created_run_id_this_attempt = False
+            created_static_run_id_this_attempt = False
             outcome.run_id = int(run_id) if run_id is not None else None
             outcome.static_run_id = static_run_id
             outcome.baseline_written = False
@@ -1275,6 +1282,7 @@ def persist_run_summary(
                             if run_id is None:
                                 _raise_db_error("run.create", "returned_null")
                             outcome.run_id = int(run_id)
+                            created_run_id_this_attempt = True
 
                         if static_run_id is None:
                             app_version_id = _ensure_app_version(
@@ -1322,6 +1330,7 @@ def persist_run_summary(
                                 f"Resolved static_run_id={static_run_id} for {package_for_run} (session={session_stamp})",
                                 category="static_analysis",
                             )
+                            created_static_run_id_this_attempt = True
                         outcome.static_run_id = static_run_id
     
                         if static_run_id:
@@ -1499,7 +1508,8 @@ def persist_run_summary(
     
                         if db_errors:
                             raise RuntimeError(db_errors[-1])
-                if static_run_id:
+                handoff_failed = False
+                if static_run_id and isinstance(br, StaticAnalysisReport):
                     try:
                         handoff_payload = build_static_handoff(
                             report=br,
@@ -1547,6 +1557,7 @@ def persist_run_summary(
                             schema_version=cached_schema_version,
                             tool_semver=app_config.APP_VERSION,
                             tool_git_commit=get_git_commit(),
+                            static_config_hash=config_hash,
                         )
                         _update_static_run_metadata(
                             int(static_run_id),
@@ -1574,11 +1585,23 @@ def persist_run_summary(
                             except Exception:
                                 pass
                     except Exception as exc:
-                        log.warning(
-                            f"Static handoff export skipped for {package_for_run}: {exc}",
-                            category="static_analysis",
+                        handoff_failed = True
+                        message = f"Static handoff export failed for {package_for_run}: {exc}"
+                        log.warning(message, category="static_analysis")
+                        outcome.add_error(message)
+                if handoff_failed and static_run_id:
+                    try:
+                        _update_static_run_metadata(
+                            int(static_run_id),
+                            run_class="NON_CANONICAL",
+                            non_canonical_reasons=json.dumps(
+                                ["HANDOFF_HASH_MISSING", "PERSISTENCE_ERROR"],
+                                ensure_ascii=True,
+                            ),
                         )
-                persistence_failed = False
+                    except Exception:
+                        pass
+                persistence_failed = handoff_failed
                 outcome.persistence_transaction_state = "committed"
                 break
             except Exception as exc:
@@ -1594,6 +1617,13 @@ def persist_run_summary(
                 if transient and attempt < max_txn_attempts and not lock_retry_budget_exhausted:
                     if len(outcome.errors) > attempt_error_start:
                         del outcome.errors[attempt_error_start:]
+                    reset_identity = failure_stage in {"run.create", "static_run.create"}
+                    if reset_identity and created_run_id_this_attempt:
+                        run_id = None
+                    if reset_identity and created_static_run_id_this_attempt:
+                        static_run_id = None
+                    outcome.run_id = int(run_id) if run_id is not None else None
+                    outcome.static_run_id = int(static_run_id) if static_run_id is not None else None
                     sleep_seconds = min(
                         retry_backoff_max_s,
                         retry_backoff_base_s * (2 ** max(0, attempt - 1)),

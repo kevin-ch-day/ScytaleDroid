@@ -147,12 +147,12 @@ def format_severity_strip(
 
 # Delta-specific helpers (new/removed/updated) for reuse across dashboards
 DELTA_STYLES = {
-    "new": "severity_success",
-    "added": "severity_success",
-    "removed": "severity_error",
-    "deleted": "severity_error",
-    "updated": "severity_warning",
-    "changed": "severity_warning",
+    "new": "success",
+    "added": "success",
+    "removed": "error",
+    "deleted": "error",
+    "updated": "warning",
+    "changed": "warning",
 }
 
 

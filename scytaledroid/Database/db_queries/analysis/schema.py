@@ -140,4 +140,22 @@ _DDL_STATEMENTS: list[str] = [
       KEY idx_analysis_regime_receipt (receipt_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
+    """
+    CREATE TABLE IF NOT EXISTS analysis_dynamic_cohort_status (
+      dynamic_run_id         CHAR(36)     NOT NULL,
+      package_name           VARCHAR(255) DEFAULT NULL,
+      base_apk_sha256        CHAR(64)     DEFAULT NULL,
+      static_handoff_hash    CHAR(64)     DEFAULT NULL,
+      freeze_manifest_sha256 CHAR(64)     DEFAULT NULL,
+      status                 VARCHAR(48)  NOT NULL, -- CANONICAL_PAPER_ELIGIBLE|EXCLUDED
+      reason_code            VARCHAR(64)  DEFAULT NULL,
+      details_json           JSON         DEFAULT NULL,
+      created_at_utc         DATETIME     NOT NULL,
+      updated_at_utc         DATETIME     NOT NULL,
+      PRIMARY KEY (dynamic_run_id),
+      KEY idx_analysis_dyn_cohort_status_pkg (package_name),
+      KEY idx_analysis_dyn_cohort_status_status (status, reason_code),
+      KEY idx_analysis_dyn_cohort_status_sha (base_apk_sha256)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
 ]

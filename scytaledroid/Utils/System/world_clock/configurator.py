@@ -202,7 +202,11 @@ def _handle_reference(state: WorldClockState) -> None:
         ),
     ]
     menu_utils.print_menu(options, boxed=False)
-    choice = prompt_utils.get_choice([opt.key for opt in options] + ["0"], default="1")
+    choice = prompt_utils.get_choice(
+        menu_utils.selectable_keys(options, include_exit=True),
+        default="1",
+        disabled=[opt.key for opt in options if opt.disabled],
+    )
 
     if choice == "0":
         return
@@ -328,7 +332,11 @@ def _handle_refresh_menu(state: WorldClockState) -> None:
     ]
 
     menu_utils.print_menu(options, boxed=False)
-    choice = prompt_utils.get_choice([opt.key for opt in options] + ["0"], default="1")
+    choice = prompt_utils.get_choice(
+        menu_utils.selectable_keys(options, include_exit=True),
+        default="1",
+        disabled=[opt.key for opt in options if opt.disabled],
+    )
 
     if choice == "0":
         return

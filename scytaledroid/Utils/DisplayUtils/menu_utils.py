@@ -45,6 +45,10 @@ class MenuSpec:
     width: int | None = None
     padding: bool = False
     compact: bool = False
+    title: str | None = None
+    subtitle: str | None = None
+    hint: str | None = None
+    footer: str | None = None
 
 
 def _coerce_option(
@@ -108,6 +112,35 @@ def _normalise_options(
         else:  # pragma: no cover - defensive path
             raise TypeError(f"Unsupported menu option type: {type(entry)!r}")
     return normalised
+
+
+def selectable_keys(
+    options: Mapping[str, str]
+    | Sequence[
+        tuple[str, str]
+        | tuple[str, str, str]
+        | MenuOption
+        | MenuItemSpec
+        | tuple[str, str, str, str]
+    ],
+    *,
+    include_exit: bool = True,
+    exit_key: str = "0",
+) -> list[str]:
+    """Return selectable keys, excluding disabled entries."""
+
+    seen: set[str] = set()
+    keys: list[str] = []
+    for item in _normalise_options(options):
+        if item.disabled:
+            continue
+        if item.key in seen:
+            continue
+        keys.append(item.key)
+        seen.add(item.key)
+    if include_exit and exit_key not in seen:
+        keys.append(exit_key)
+    return keys
 
 
 def _wrap_text(text: str, width: int) -> list[str]:
@@ -266,6 +299,10 @@ def print_menu(
     width: int | None = None,
     padding: bool = False,
     compact: bool = False,
+    title: str | None = None,
+    subtitle: str | None = None,
+    hint: str | None = None,
+    footer: str | None = None,
 ) -> None:
     """Render a numbered menu with coloured keys and optional default."""
 
@@ -273,15 +310,27 @@ def print_menu(
     term_width = width if width is not None else min(get_terminal_width(), 100)
     items = _normalise_options(options)
     primary_items = [item for item in items if item.key != "0"]
+    palette = colors.get_palette()
+    key_width = max((len(str(item.key)) for item in items), default=1)
 
     indent = "  " if compact else "    "
     body_width = max(12 if compact else 20, term_width - len(indent) - 4)
+
+    if title:
+        print_header(title, subtitle=subtitle)
+    elif subtitle:
+        print(colors.apply(subtitle, palette.muted))
+    if hint:
+        print(colors.apply(hint, palette.hint))
+        if primary_items:
+            print()
 
     rendered_blocks: list[list[str]] = []
 
     for item in primary_items:
         block: list[str] = []
-        key_text = colors.apply(str(item.key), colors.style("option_key"), bold=True)
+        key_display = str(item.key).rjust(key_width)
+        key_text = colors.apply(key_display, colors.style("option_key"), bold=True)
         label_text = colors.apply(item.label, colors.style("option_text"))
         label_line = [f"{key_text}) {label_text}"]
         notes: list[str] = []
@@ -293,7 +342,7 @@ def print_menu(
         elif default and item.key == default:
             notes.append(colors.apply("(default)", colors.style("option_default"), bold=True))
         if item.hint and not show_descriptions:
-            notes.append(f"({item.hint})")
+            notes.append(colors.apply(f"({item.hint})", palette.hint))
         if notes:
             notes_text = " ".join(notes)
             label_line.append(f" {notes_text}")
@@ -302,20 +351,25 @@ def print_menu(
         if show_descriptions and item.description:
             wrapped_desc = _wrap_text(item.description, body_width)
             for line in wrapped_desc:
-                block.append(f"{indent}{line}")
+                block.append(colors.apply(f"{indent}{line}", palette.muted))
         if show_descriptions and item.hint:
             wrapped_hint = _wrap_text(item.hint, body_width)
             for line in wrapped_hint:
-                block.append(f"{indent}Hint: {line}")
+                hint_text = f"{indent}Hint: {line}"
+                block.append(colors.apply(hint_text, palette.hint))
 
         rendered_blocks.append(block)
 
     if show_exit:
         exit_text = exit_label or ("Exit" if is_main else "Back")
         exit_item = MenuOption("0", exit_text)
-        exit_label_line = f"0) {exit_item.label}"
+        exit_key = colors.apply(str(exit_item.key).rjust(key_width), colors.style("option_key"), bold=True)
+        exit_label = colors.apply(exit_item.label, colors.style("option_text"))
+        exit_label_line = f"{exit_key}) {exit_label}"
         if default == "0":
-            exit_label_line += " (default)"
+            exit_label_line += " " + colors.apply(
+                "(default)", colors.style("option_default"), bold=True
+            )
         rendered_blocks.append([exit_label_line])
 
     if boxed:
@@ -335,9 +389,13 @@ def print_menu(
     for block in rendered_blocks:
         for line in block:
             print(line)
+        if show_descriptions and len(block) > 1 and not compact:
+            print()
 
     if padding and not compact:
         print()
+    if footer:
+        print(colors.apply(footer, palette.hint))
 
 
 def format_menu_panel(
@@ -484,6 +542,10 @@ def render_menu(spec: MenuSpec) -> None:
         width=spec.width,
         padding=spec.padding,
         compact=spec.compact,
+        title=spec.title,
+        subtitle=spec.subtitle,
+        hint=spec.hint,
+        footer=spec.footer,
     )
 
 
@@ -512,6 +574,7 @@ __all__ = [
     "render_menu",
     "print_metrics",
     "print_table",
+    "selectable_keys",
     "format_menu_panel",
     "print_menu_panels",
 ]

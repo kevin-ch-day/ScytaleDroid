@@ -23,6 +23,7 @@ import numpy as np
 from scytaledroid.Config import app_config
 
 from . import ml_parameters_operational as config
+from . import ml_parameters_paper2 as paper_config
 from .anomaly_model_training import anomaly_scores, fit_model, fixed_model_specs
 from .evidence_pack_ml_preflight import (
     RunInputs,
@@ -129,6 +130,45 @@ def _apply_robust_scaling(
 def _run_output_dir(snapshot_dir: Path, run_id: str) -> Path:
     # Keep this entirely separate from evidence packs to avoid polluting archival inputs.
     return snapshot_dir / "runs" / run_id / "ml" / config.ML_SCHEMA_LABEL
+
+
+def _write_cohort_status(
+    *,
+    snapshot_dir: Path,
+    run_id: str,
+    package_name: str | None,
+    status: str,
+    reason_code: str | None,
+    details: dict[str, Any] | None = None,
+    min_windows_baseline: int | None = None,
+    min_pcap_bytes: int | None = None,
+) -> None:
+    allowed = {
+        None,
+        "ML_SKIPPED_BASELINE_GATE_FAIL",
+        "ML_SKIPPED_MISSING_FREEZE_MANIFEST",
+        "ML_SKIPPED_BAD_FREEZE_CHECKSUM",
+        "ML_SKIPPED_MISSING_STATIC_LINK",
+        "ML_SKIPPED_MISSING_BASE_APK_SHA256",
+    }
+    if reason_code not in allowed:
+        raise RuntimeError(f"Unknown paper exclusion reason code: {reason_code}")
+    out_dir = _run_output_dir(snapshot_dir, run_id)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, Any] = {
+        "ml_schema_version": int(config.ML_SCHEMA_VERSION),
+        "run_id": str(run_id),
+        "package_name": package_name,
+        "status": status,
+        "reason_code": reason_code,
+        "gates": {
+            "min_windows_baseline": int(min_windows_baseline if min_windows_baseline is not None else config.MIN_WINDOWS_BASELINE),
+            "min_pcap_bytes": int(min_pcap_bytes if min_pcap_bytes is not None else config.MIN_PCAP_BYTES_FALLBACK),
+        },
+    }
+    if details:
+        payload["details"] = details
+    (out_dir / "cohort_status.json").write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
 def _pcap_size_bytes(inputs: RunInputs) -> int | None:
@@ -452,7 +492,10 @@ def run_ml_query_mode(
     manifest_path = snapshot_dir / "selection_manifest.json"
     write_selection_manifest(manifest_path, result=selection)
 
-    # Group by base_apk_sha256 (default policy).
+    paper_mode = str(selection.selector_type or "") == "freeze"
+    min_windows_baseline_req = int(paper_config.MIN_WINDOWS_BASELINE if paper_mode else config.MIN_WINDOWS_BASELINE)
+    min_pcap_bytes_req_default = int(paper_config.MIN_PCAP_BYTES if paper_mode else config.MIN_PCAP_BYTES_FALLBACK)
+    # Group by base_apk_sha256 in paper/freeze mode; query mode keeps legacy fallback.
     groups: dict[str, list[RunInputs]] = defaultdict(list)
     skipped_runs = 0
     for ref in selection.included:
@@ -460,7 +503,58 @@ def run_ml_query_mode(
         if not inputs:
             skipped_runs += 1
             continue
+        if paper_mode:
+            ident = inputs.plan.get("run_identity") if isinstance(inputs.plan, dict) and isinstance(inputs.plan.get("run_identity"), dict) else {}
+            static_handoff_hash = str(ident.get("static_handoff_hash") or "").strip() if isinstance(ident, dict) else ""
+            if not static_handoff_hash:
+                out_dir = _run_output_dir(snapshot_dir, ref.run_id)
+                out_dir.mkdir(parents=True, exist_ok=True)
+                payload = {
+                    "ml_schema_version": int(config.ML_SCHEMA_VERSION),
+                    "run_id": str(ref.run_id),
+                    "package_name": ref.package_name,
+                    "skip": {"reason": "ML_SKIPPED_MISSING_STATIC_LINK"},
+                }
+                (out_dir / "ml_summary.json").write_text(
+                    json.dumps(payload, indent=2, sort_keys=True),
+                    encoding="utf-8",
+                )
+                _write_cohort_status(
+                    snapshot_dir=snapshot_dir,
+                    run_id=str(ref.run_id),
+                    package_name=ref.package_name,
+                    status="EXCLUDED",
+                    reason_code="ML_SKIPPED_MISSING_STATIC_LINK",
+                    min_windows_baseline=min_windows_baseline_req,
+                    min_pcap_bytes=min_pcap_bytes_req_default,
+                )
+                skipped_runs += 1
+                continue
         base_sha = ref.base_apk_sha256 or ""
+        if not base_sha and paper_mode:
+            out_dir = _run_output_dir(snapshot_dir, ref.run_id)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "ml_schema_version": int(config.ML_SCHEMA_VERSION),
+                "run_id": str(ref.run_id),
+                "package_name": ref.package_name,
+                "skip": {"reason": "ML_SKIPPED_MISSING_BASE_APK_SHA256"},
+            }
+            (out_dir / "ml_summary.json").write_text(
+                json.dumps(payload, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+            _write_cohort_status(
+                snapshot_dir=snapshot_dir,
+                run_id=str(ref.run_id),
+                package_name=ref.package_name,
+                status="EXCLUDED",
+                reason_code="ML_SKIPPED_MISSING_BASE_APK_SHA256",
+                min_windows_baseline=min_windows_baseline_req,
+                min_pcap_bytes=min_pcap_bytes_req_default,
+            )
+            skipped_runs += 1
+            continue
         if not base_sha:
             base_sha = ref.package_name or "unknown"
         groups[base_sha].append(inputs)
@@ -486,6 +580,7 @@ def run_ml_query_mode(
     runs_skipped = 0
     groups_skipped_no_baseline = 0
     groups_union_fallback = 0
+    groups_skipped_baseline_gate_fail = 0
     groups_baseline_thin = 0
 
     for group_key in sorted(groups.keys()):
@@ -595,9 +690,11 @@ def run_ml_query_mode(
         if baseline_run_count < 2:
             groups_baseline_thin += 1
 
-        # Training selection (F1 policy): concat baseline windows; union fallback uses baseline+interactive.
-        baseline_windows_ok = len(baseline_rows) >= int(config.MIN_WINDOWS_BASELINE)
-        min_bytes = int(config.MIN_PCAP_BYTES_FALLBACK)
+        # Training selection:
+        # - paper/freeze mode: baseline-only fail-closed
+        # - query mode: legacy union fallback allowed
+        baseline_windows_ok = len(baseline_rows) >= int(min_windows_baseline_req)
+        min_bytes = int(min_pcap_bytes_req_default)
         baseline_pcap_bytes_total = 0
         for r in runs:
             mode, _ = derive_run_mode(r)
@@ -616,6 +713,39 @@ def run_ml_query_mode(
         if baseline_bytes_ok and baseline_windows_ok:
             training_mode = "baseline_only"
             train_rows = baseline_rows
+        elif paper_mode:
+            groups_skipped_baseline_gate_fail += 1
+            for r in runs:
+                out_dir = _run_output_dir(snapshot_dir, r.run_id)
+                out_dir.mkdir(parents=True, exist_ok=True)
+                payload = {
+                    "ml_schema_version": int(config.ML_SCHEMA_VERSION),
+                    "run_id": str(r.run_id),
+                    "package_name": r.package_name,
+                    "skip": {"reason": "ML_SKIPPED_BASELINE_GATE_FAIL"},
+                }
+                (out_dir / "ml_summary.json").write_text(
+                    json.dumps(payload, indent=2, sort_keys=True),
+                    encoding="utf-8",
+                )
+                _write_cohort_status(
+                    snapshot_dir=snapshot_dir,
+                    run_id=str(r.run_id),
+                    package_name=r.package_name,
+                    status="EXCLUDED",
+                    reason_code="ML_SKIPPED_BASELINE_GATE_FAIL",
+                    details={
+                        "baseline_windows_total": int(len(baseline_rows)),
+                        "min_windows_baseline": int(min_windows_baseline_req),
+                        "baseline_windows_ok": bool(baseline_windows_ok),
+                        "baseline_pcap_bytes_ok": bool(baseline_bytes_ok),
+                        "baseline_min_pcap_bytes": int(min_bytes),
+                    },
+                    min_windows_baseline=min_windows_baseline_req,
+                    min_pcap_bytes=min_bytes,
+                )
+            runs_skipped += len(runs)
+            continue
         else:
             training_mode = "union_fallback"
             groups_union_fallback += 1
@@ -713,7 +843,7 @@ def run_ml_query_mode(
                     "baseline_min_pcap_bytes": int(min_bytes),
                     "baseline_pcap_bytes_total": int(baseline_pcap_bytes_total),
                     "baseline_pcap_bytes_ok": bool(baseline_bytes_ok),
-                    "min_windows_baseline": int(config.MIN_WINDOWS_BASELINE),
+                    "min_windows_baseline": int(min_windows_baseline_req),
                     "baseline_windows_total": int(len(baseline_rows)),
                     "baseline_windows_ok": bool(baseline_windows_ok),
                 },
@@ -841,6 +971,17 @@ def run_ml_query_mode(
                     dropped_partial_windows=int(dropped),
                     model_outputs=model_outputs,
                     out_dir=out_dir,
+                )
+            if paper_mode:
+                _write_cohort_status(
+                    snapshot_dir=snapshot_dir,
+                    run_id=str(r.run_id),
+                    package_name=r.package_name,
+                    status="CANONICAL_PAPER_ELIGIBLE",
+                    reason_code=None,
+                    details={"group_key": str(group_key)},
+                    min_windows_baseline=min_windows_baseline_req,
+                    min_pcap_bytes=min_pcap_bytes_req_default,
                 )
 
         # Model overlap per run (IF vs OC-SVM).
@@ -1207,6 +1348,7 @@ def run_ml_query_mode(
             "groups_trained": int(groups_trained),
             "groups_skipped_no_baseline": int(groups_skipped_no_baseline),
             "groups_union_fallback": int(groups_union_fallback),
+            "groups_skipped_baseline_gate_fail": int(groups_skipped_baseline_gate_fail),
             "groups_baseline_thin": int(groups_baseline_thin),
             "runs_selected": int(len(selection.included)),
             "runs_scored": int(runs_scored),

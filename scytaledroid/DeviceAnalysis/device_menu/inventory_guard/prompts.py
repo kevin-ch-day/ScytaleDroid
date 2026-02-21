@@ -60,7 +60,7 @@ def describe_inventory_state(
 
     return InventoryGuardMessage(
         severity="info",
-        short=f"Inventory changed since the selected snapshot ({delta.changed_packages_count} total).",
+        short=f"Inventory package metadata changed since the previous snapshot ({delta.changed_packages_count} total).",
         long=None,
     )
 

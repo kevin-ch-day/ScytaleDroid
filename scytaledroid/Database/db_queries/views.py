@@ -237,8 +237,7 @@ SELECT
   sar.schema_version,
   a.package_name AS package_name_lc,
   av.version_code,
-  sar.static_handoff_json_path,
-  sar.static_handoff_json
+  sar.static_handoff_json_path
 FROM static_analysis_runs sar
 JOIN app_versions av ON av.id = sar.app_version_id
 JOIN apps a ON a.id = av.app_id
@@ -251,3 +250,21 @@ WHERE UPPER(COALESCE(sar.status, '')) = 'COMPLETED'
 """
 
 __all__ += ["CREATE_V_STATIC_HANDOFF_V1"]
+
+CREATE_V_PAPER_DYNAMIC_COHORT_V1 = """
+CREATE OR REPLACE VIEW v_paper_dynamic_cohort_v1 AS
+SELECT
+  adcs.dynamic_run_id,
+  adcs.package_name,
+  adcs.base_apk_sha256,
+  adcs.static_handoff_hash,
+  adcs.freeze_manifest_sha256,
+  adcs.status,
+  adcs.reason_code,
+  adcs.details_json,
+  adcs.created_at_utc,
+  adcs.updated_at_utc
+FROM analysis_dynamic_cohort_status adcs;
+"""
+
+__all__ += ["CREATE_V_PAPER_DYNAMIC_COHORT_V1"]

@@ -80,7 +80,11 @@ def database_menu() -> None:
             )
         )
 
-        choice = prompt_utils.get_choice([option.key for option in options] + ["0"], default="1")
+        choice = prompt_utils.get_choice(
+            menu_utils.selectable_keys(options, include_exit=True),
+            default="1",
+            disabled=[option.key for option in options if option.disabled],
+        )
 
         if choice == "0":
             break

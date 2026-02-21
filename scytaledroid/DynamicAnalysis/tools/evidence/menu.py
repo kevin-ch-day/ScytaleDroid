@@ -166,7 +166,12 @@ def evidence_cleanup_workspace(*, pause: bool = True) -> None:
     menu_utils.render_menu(
         menu_utils.MenuSpec(items=items, exit_label="Back", show_exit=True, show_descriptions=True, compact=True)
     )
-    choice = prompt_utils.get_choice([opt.key for opt in items] + ["0"], default="0", prompt="Select cleanup option (or 0): ")
+    choice = prompt_utils.get_choice(
+        menu_utils.selectable_keys(items, include_exit=True),
+        default="0",
+        prompt="Select cleanup option (or 0): ",
+        disabled=[opt.key for opt in items if opt.disabled],
+    )
     if choice == "0":
         if pause:
             prompt_utils.press_enter_to_continue()
@@ -517,7 +522,11 @@ def evidence_view_app_runs(*, pause: bool = True) -> None:
         menu_utils.MenuOption("X", "Delete INVALID runs for this app (local)"),
     ]
     menu_utils.render_menu(menu_utils.MenuSpec(items=items2, exit_label="Back", show_exit=True))
-    action = prompt_utils.get_choice([opt.key for opt in items2] + ["0"], default="0")
+    action = prompt_utils.get_choice(
+        menu_utils.selectable_keys(items2, include_exit=True),
+        default="0",
+        disabled=[opt.key for opt in items2 if opt.disabled],
+    )
     if action == "0":
         return
     if action == "D":

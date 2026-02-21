@@ -111,6 +111,7 @@ def render_app_completion(
 
     if card_mode:
         palette = colors.get_palette()
+        large_batch_mode = bool((app_total or 0) >= 50)
         label = (app_title or package_name or "").strip() or str(package_name or "<unknown>")
         pkg = str(package_name or "").strip()
         header_line = ""
@@ -128,37 +129,6 @@ def render_app_completion(
                 header_line = pkg
             else:
                 header_line = label
-        print(colors.apply(header_line, palette.banner_primary, bold=True))
-        if pkg:
-            print(
-                status_messages.status(
-                    f"Package: {pkg}",
-                    level="info",
-                    show_icon=False,
-                    show_prefix=False,
-                )
-            )
-
-        print(
-            status_messages.status(
-                f"Artifacts: {artifact_count}   Time: {elapsed}",
-                level="info",
-                show_icon=False,
-                show_prefix=False,
-            )
-        )
-        print(
-            status_messages.status(
-                (
-                    f"Checks: ok={ok_count} warn={warn_count} "
-                    f"policy_fail={policy_fail_count} finding_fail={finding_fail_count} "
-                    f"error={error_count} skipped={skipped_count}"
-                ),
-                level="info",
-                show_icon=False,
-                show_prefix=False,
-            )
-        )
         p0 = int((summary.get("severity_counts") or {}).get("P0", 0) if isinstance(summary.get("severity_counts"), Mapping) else 0)
         p1 = int((summary.get("severity_counts") or {}).get("P1", 0) if isinstance(summary.get("severity_counts"), Mapping) else 0)
         p2 = int((summary.get("severity_counts") or {}).get("P2", 0) if isinstance(summary.get("severity_counts"), Mapping) else 0)
@@ -171,17 +141,62 @@ def render_app_completion(
             f"Findings: C:{c_count} H:{h_count} M:{m_count} "
             f"L:{l_count} I:{i_count} Note:{note}"
         )
-        print(
-            status_messages.status(
-                findings_text,
-                level="info",
-                show_icon=False,
-                show_prefix=False,
+        if large_batch_mode:
+            compact_parts = [
+                colors.apply(header_line, palette.banner_primary, bold=True),
+                f"art={artifact_count}",
+                f"time={elapsed}",
+                f"ok={ok_count}",
+                f"warn={warn_count}",
+                f"fail={fail_count}",
+                f"err={error_count}",
+                f"H={h_count}",
+                f"M={m_count}",
+            ]
+            print("  ".join(compact_parts))
+        else:
+            print(colors.apply(header_line, palette.banner_primary, bold=True))
+            if pkg:
+                print(
+                    status_messages.status(
+                        f"Package: {pkg}",
+                        level="info",
+                        show_icon=False,
+                        show_prefix=False,
+                    )
+                )
+
+            print(
+                status_messages.status(
+                    f"Artifacts: {artifact_count}   Time: {elapsed}",
+                    level="info",
+                    show_icon=False,
+                    show_prefix=False,
+                )
             )
-        )
+            print(
+                status_messages.status(
+                    (
+                        f"Checks: ok={ok_count} warn={warn_count} "
+                        f"policy_fail={policy_fail_count} finding_fail={finding_fail_count} "
+                        f"error={error_count} skipped={skipped_count}"
+                    ),
+                    level="info",
+                    show_icon=False,
+                    show_prefix=False,
+                )
+            )
+            print(
+                status_messages.status(
+                    findings_text,
+                    level="info",
+                    show_icon=False,
+                    show_prefix=False,
+                )
+            )
 
         slow_parts = _slow_detector_parts(summary.get("slowest_detectors"), limit=2)
-        if slow_parts:
+        if slow_parts and (not large_batch_mode or fail_count > 0 or error_count > 0):
             print(colors.apply("Slow: ", palette.hint, bold=True) + "; ".join(slow_parts))
 
         outlier = artifact_count > 20
@@ -192,7 +207,7 @@ def render_app_completion(
                 "High split artifact cardinality; inspect selection manifest (press D for selection details)."
             )
 
-        if error_count > 0 or fail_count > 0 or p0 > 0:
+        if error_count > 0 or fail_count > 0 or (p0 > 0 and not large_batch_mode):
             failing: list[str] = []
             error_only: list[str] = []
             payload = summary.get("error_detectors")
@@ -231,8 +246,9 @@ def render_app_completion(
                         show_prefix=False,
                     )
                 )
-        # Keep batch app cards visually separated for scan readability.
-        print()
+        # Keep regular cards visually separated; large batch mode stays dense.
+        if not large_batch_mode:
+            print()
         return elapsed
 
     status_line = "Checks complete"

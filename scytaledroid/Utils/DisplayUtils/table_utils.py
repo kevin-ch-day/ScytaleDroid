@@ -13,6 +13,13 @@ def _stringify(cell: object) -> str:
     return "" if cell is None else str(cell)
 
 
+def _safe_style(name: str, fallback: tuple[str, ...]) -> tuple[str, ...]:
+    try:
+        return colors.style(name)
+    except AttributeError:
+        return fallback
+
+
 def _pad_visible(text: str, width: int) -> str:
     visible = text_blocks.visible_width(text)
     if visible >= width:
@@ -109,7 +116,7 @@ def render_table(
         for idx, cell in enumerate(row):
             raw = _stringify(cell)
             coloured = raw
-            if use_color and palette and "\033[" not in raw:
+            if use_color and palette and not colors.has_ansi(raw):
                 style_name = None
                 if column_styles and idx < len(column_styles):
                     style_name = column_styles[idx]
@@ -125,7 +132,7 @@ def render_table(
                     else:
                         coloured = colors.apply(raw, colors.progress_color(numeric))
                 elif style_name:
-                    coloured = colors.apply(raw, colors.style(style_name))
+                    coloured = colors.apply(raw, _safe_style(style_name, palette.text))
                 elif idx == 0 and accent_first_column and raw.strip():
                     coloured = colors.apply(raw, palette.accent, bold=True)
                 elif zebra and row_index % 2 == 1:

@@ -181,9 +181,9 @@ def format_strip(
         if use_color:
             label_text = colors.apply(label_text, palette.muted)
             value_style = _strip_value_style(str(label), value)
-            if value_style and "\033[" not in value_text:
+            if value_style and not colors.has_ansi(value_text):
                 value_text = colors.apply(value_text, value_style, bold=True)
-            elif "\033[" not in value_text:
+            elif not colors.has_ansi(value_text):
                 value_text = colors.apply(value_text, palette.text)
         lines.append(f"{label_text} : {value_text}")
     return "\n".join(lines)

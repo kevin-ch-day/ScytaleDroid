@@ -23,8 +23,9 @@ def select_device() -> tuple[str, str] | None:
     device_spec = menu_utils.MenuSpec(items=device_options, exit_label="Cancel", show_exit=True)
     menu_utils.render_menu(device_spec)
     device_choice = prompt_utils.get_choice(
-        [option.key for option in device_options] + ["0"],
+        menu_utils.selectable_keys(device_options, include_exit=True),
         default="1",
+        disabled=[option.key for option in device_options if option.disabled],
     )
     if device_choice == "0":
         return None

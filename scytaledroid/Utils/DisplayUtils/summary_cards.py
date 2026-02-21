@@ -49,7 +49,10 @@ def _resolve_style(style: Sequence[str] | str | None, fallback: tuple[str, ...])
     if isinstance(style, tuple):
         return style
     if isinstance(style, str):
-        return colors.style(style)
+        try:
+            return colors.style(style)
+        except AttributeError:
+            return fallback
     if isinstance(style, SequenceABC):
         return tuple(str(code) for code in style if code)
     raise TypeError(f"Unsupported style type: {type(style)!r}")

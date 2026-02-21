@@ -74,22 +74,19 @@ def collect_view_options(command: Command) -> tuple[bool, bool, bool, bool]:
     print()
     print("[Enter] Continue with defaults")
     print("    Opens Summary details.")
-    while True:
-        response = prompt_utils.prompt_text("Select option", required=False, show_arrow=False).strip().lower()
-        if response == "":
-            return True, False, False, False
-        if response == "0":
-            return False, False, False, True
-        if response == "1":
-            want_details, want_splits, want_artifacts = True, False, False
-            break
-        if response == "2":
-            want_details, want_splits, want_artifacts = False, True, False
-            break
-        if response == "3":
-            want_details, want_splits, want_artifacts = False, False, True
-            break
-        print(status_messages.status("Invalid selection.", level="warn"))
+    choice = prompt_utils.get_choice(
+        ["1", "2", "3", "0"],
+        default="1",
+        prompt="Select option [1]: ",
+    )
+    if choice == "0":
+        return False, False, False, True
+    if choice == "1":
+        want_details, want_splits, want_artifacts = True, False, False
+    elif choice == "2":
+        want_details, want_splits, want_artifacts = False, True, False
+    else:
+        want_details, want_splits, want_artifacts = False, False, True
     if want_details:
         print()
         menu_utils.print_section("Details")

@@ -319,6 +319,32 @@ def main(argv: list[str] | None = None) -> int:
         from scytaledroid.StaticAnalysis.cli.flows import headless_run
 
         return int(headless_run.main(argv[1:]))
+    if argv and argv[0] == "dynamic-gate":
+        from scytaledroid.DynamicAnalysis.tools import paper_gate
+
+        return int(paper_gate.main(argv[1:]))
+    if argv and argv[0] == "dynamic-research-gate":
+        from scytaledroid.DynamicAnalysis.tools import paper_gate
+
+        return int(paper_gate.main(["--research", *argv[1:]]))
+    if argv and argv[0] == "dynamic":
+        dynamic_parser = argparse.ArgumentParser(description="ScytaleDroid dynamic commands")
+        dynamic_parser.add_argument(
+            "--paper-gate",
+            action="store_true",
+            help="Run canonical research gate checks and exit (legacy alias).",
+        )
+        dynamic_parser.add_argument(
+            "--research-gate",
+            action="store_true",
+            help="Run canonical research gate checks and exit.",
+        )
+        dynamic_args = dynamic_parser.parse_args(argv[1:])
+        if dynamic_args.paper_gate or dynamic_args.research_gate:
+            from scytaledroid.DynamicAnalysis.tools import paper_gate
+
+            return int(paper_gate.main(["--research"]))
+        dynamic_parser.error("No dynamic command selected. Use --research-gate.")
     if argv and argv[0] == "db":
         return _run_db_maintenance(argv[1:])
 

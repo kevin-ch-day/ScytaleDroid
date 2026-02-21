@@ -145,6 +145,7 @@ def render_plan_overview(resolution: PlanResolution) -> None:
     policy_blocked = int(stats["policy_blocked"])
     policy = str(stats["policy"])
     eligible_policy = max(scheduled_packages + policy_blocked, 0)
+    blocked_scope = max(blocked_packages - policy_blocked, 0)
     if is_harvest_simple_mode():
         return
 
@@ -152,10 +153,9 @@ def render_plan_overview(resolution: PlanResolution) -> None:
     print("-" * 86)
     print(
         f"Scope={selection.label} | candidates={candidate_count} | selected={selected_count} | "
-        f"eligible_policy={eligible_policy} | scheduled={scheduled_packages} | "
-        f"eligible_artifacts={scheduled_packages} | "
-        f"blocked_policy={policy_blocked} | blocked={blocked_packages} | "
-        f"files≈{scheduled_files} | policy={policy}"
+        f"policy_eligible={eligible_policy} | scheduled_in_scope={scheduled_packages} | "
+        f"blocked_by_policy={policy_blocked} | blocked_by_scope={blocked_scope} | "
+        f"blocked_total={blocked_packages} | files≈{scheduled_files} | policy={policy}"
     )
     if delta_line:
         print(delta_line)
@@ -331,13 +331,21 @@ def report_plan_no_artifacts() -> None:
 
 
 def report_skip_reasons(skip_reasons: dict[str, tuple[int, list[str]]]) -> None:
+    labels = {
+        "policy_non_root": "policy_non_root (system/vendor filtered)",
+        "no_paths": "no_paths (package returned no readable APK paths)",
+        "dedupe_sha256": "dedupe_sha256 (artifact already harvested)",
+        "not_in_scope": "not_in_scope (scope/policy filtered)",
+        "google_core": "google_core (core Google module filtered)",
+    }
     sorted_items = sorted(skip_reasons.items(), key=lambda item: item[1][0], reverse=True)
-    top_items = sorted_items[:3]
+    top_items = sorted_items[:5]
     for reason, (count, samples) in top_items:
         sample_text = ", ".join(samples)
+        label = labels.get(reason, reason)
         print(
             status_messages.status(
-                f"Skip reason: {reason} ({count}) e.g., {sample_text}",
+                f"Skip reason: {label} ({count}) e.g., {sample_text}",
                 level="info",
             )
         )
@@ -373,15 +381,18 @@ def report_harvest_started(
     *,
     candidate_count: int,
     selected_count: int,
-    eligible: int,
+    policy_eligible: int,
     scheduled: int,
+    blocked_policy: int,
+    blocked_scope: int,
     artifacts: int,
     policy: str,
 ) -> None:
     line = (
         "APK Harvest started • "
-        f"inventory={candidate_count} • selected={selected_count} • eligible={eligible} "
-        f"• scheduled={scheduled} • artifacts≈{artifacts} • policy={policy}"
+        f"inventory={candidate_count} • selected={selected_count} • policy_eligible={policy_eligible} "
+        f"• scheduled_in_scope={scheduled} • blocked_policy={blocked_policy} • blocked_scope={blocked_scope} "
+        f"• artifacts≈{artifacts} • policy={policy}"
     )
     print(status_messages.status(line, level="info"))
 

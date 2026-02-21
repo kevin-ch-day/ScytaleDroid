@@ -17,6 +17,7 @@ class _UIPrefs:
     compact_mode: bool = False
     use_color: bool = True
     use_unicode: bool = True
+    theme_name: str | None = None
 
 
 _PREFS = _UIPrefs()
@@ -83,6 +84,31 @@ def set_use_unicode(enabled: bool) -> None:
     use_ascii_ui(force_refresh=True)
 
 
+def get_theme() -> str:
+    from . import colors
+
+    if _PREFS.theme_name:
+        return _PREFS.theme_name
+    return colors.current_palette_name()
+
+
+def set_theme(name: str) -> str:
+    from . import colors
+
+    palette = colors.set_palette_by_name(name)
+    resolved = colors.current_palette_name()
+    _PREFS.theme_name = resolved
+    return resolved
+
+
+def reset_theme_auto() -> str:
+    from . import colors
+
+    _PREFS.theme_name = None
+    colors.reset_palette()
+    return colors.current_palette_name()
+
+
 __all__ = [
     "should_clear",
     "set_clear",
@@ -96,4 +122,7 @@ __all__ = [
     "set_use_color",
     "use_unicode",
     "set_use_unicode",
+    "get_theme",
+    "set_theme",
+    "reset_theme_auto",
 ]

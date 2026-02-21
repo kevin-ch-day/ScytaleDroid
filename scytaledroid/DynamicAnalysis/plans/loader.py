@@ -116,7 +116,7 @@ def validate_dynamic_plan(
         _compare_required_fields(
             normalized_plan,
             db_row,
-            required_fields=("run_signature", "run_signature_version", "artifact_set_hash"),
+            required_fields=("run_signature", "run_signature_version", "artifact_set_hash", "static_handoff_hash"),
         )
     )
 
@@ -219,7 +219,14 @@ def extract_plan_identity(plan: dict[str, Any]) -> dict[str, object]:
 
 
 def _missing_required_fields(plan: dict[str, object]) -> list[str]:
-    required = ("package", "static_run_id", "run_signature", "run_signature_version", "artifact_set_hash")
+    required = (
+        "package",
+        "static_run_id",
+        "run_signature",
+        "run_signature_version",
+        "artifact_set_hash",
+        "static_handoff_hash",
+    )
     missing = []
     for req_field in required:
         value = plan.get(req_field)
@@ -267,7 +274,7 @@ def _plan_schema_issues(plan: dict[str, Any]) -> list[str]:
 
 
 def _missing_db_fields(row: dict[str, object]) -> list[str]:
-    required = ("run_signature", "run_signature_version", "artifact_set_hash")
+    required = ("run_signature", "run_signature_version", "artifact_set_hash", "static_handoff_hash")
     return [req_field for req_field in required if not row.get(req_field)]
 
 
@@ -280,6 +287,7 @@ def _fetch_static_run_row(static_run_id: object | None) -> dict[str, object]:
                sar.run_signature,
                sar.run_signature_version,
                sar.artifact_set_hash,
+               sar.static_handoff_hash,
                sar.base_apk_sha256,
                sar.pipeline_version,
                a.package_name
@@ -403,6 +411,7 @@ def _event_fields(payload: dict[str, object]) -> dict[str, object]:
         "run_signature": _prefix(payload.get("run_signature") or "missing"),
         "run_signature_version": payload.get("run_signature_version"),
         "artifact_set_hash": _prefix(payload.get("artifact_set_hash") or "missing"),
+        "static_handoff_hash": _prefix(payload.get("static_handoff_hash") or "missing"),
         "base_apk_sha256": _prefix(payload.get("base_apk_sha256") or "missing"),
         "pipeline_version": payload.get("pipeline_version"),
     }

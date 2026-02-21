@@ -337,7 +337,11 @@ def workspace_menu() -> None:
             {"items": items, "exit_label": "Back", "show_exit": True}
         )
         menu_utils.render_menu(menu_utils.MenuSpec(**spec_kwargs))
-        choice = prompt_utils.get_choice([opt.key for opt in items] + ["0"], default="1")
+        choice = prompt_utils.get_choice(
+            menu_utils.selectable_keys(items, include_exit=True),
+            default="1",
+            disabled=[opt.key for opt in items if opt.disabled],
+        )
 
         if choice == "0":
             break

@@ -9,6 +9,7 @@ from scytaledroid.StaticAnalysis.modules.string_analysis import (
     CollectionSummary,
     NormalizedString,
 )
+from scytaledroid.Utils.DisplayUtils import status_messages
 
 _CONFIDENCE_PRIORITY = {"high": 2, "medium": 1, "low": 0}
 
@@ -180,8 +181,11 @@ def _exploratory_issues(summary: CollectionSummary) -> list[str]:
     )
     if sensitive_splits:
         issues.append(
-            "[INFO] Sensitive hits located in non-base splits: "
-            + ", ".join(sensitive_splits)
+            status_messages.status(
+                "Sensitive hits located in non-base splits: " + ", ".join(sensitive_splits),
+                level="info",
+                show_icon=False,
+            )
         )
 
     locale_sensitive = sorted(
@@ -194,8 +198,11 @@ def _exploratory_issues(summary: CollectionSummary) -> list[str]:
     )
     if locale_sensitive:
         issues.append(
-            "[INFO] Sensitive hits constrained to locale qualifiers: "
-            + ", ".join(locale_sensitive)
+            status_messages.status(
+                "Sensitive hits constrained to locale qualifiers: " + ", ".join(locale_sensitive),
+                level="info",
+                show_icon=False,
+            )
         )
 
     return issues

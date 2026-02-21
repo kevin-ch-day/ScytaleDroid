@@ -406,10 +406,12 @@ def apk_library_menu(device_filter: str | None = None) -> None:
             {"items": items, "exit_label": "Back", "show_exit": True}
         )
         menu_utils.render_menu(menu_utils.MenuSpec(**spec_kwargs))
+        selectable = menu_utils.selectable_keys(items, include_exit=True)
         choice = prompt_utils.get_choice(
-            [opt.key for opt in items] + ["0"],
+            selectable,
             default="d" if device_filter else "1",
             casefold=True,
+            disabled=[opt.key for opt in items if getattr(opt, "disabled", False)],
         )
 
         if choice == "0":

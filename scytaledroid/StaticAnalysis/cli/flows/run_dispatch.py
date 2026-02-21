@@ -283,15 +283,13 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
 
     try:
         if outcome is not None:
-            _emit_postprocessing_step("Rendering run summary", run_ctx=frozen_ctx)
-            render_run_results(outcome, params, run_ctx=frozen_ctx)
             run_status = "COMPLETED"
-            if outcome.aborted:
-                run_status = "FAILED"
-            elif outcome.failures:
+            if outcome.aborted or outcome.failures:
                 run_status = "FAILED"
             abort_reason = normalize_abort_reason(outcome.abort_reason or ("SIGINT" if outcome.aborted else None))
             abort_signal = outcome.abort_signal
+            _emit_postprocessing_step("Rendering run summary", run_ctx=frozen_ctx)
+            render_run_results(outcome, params, run_ctx=frozen_ctx)
             if not params.dry_run:
                 if not params.persistence_ready:
                     linkage_blocked_reason = "Persistence gate failed; skipping run_map and permission refresh."
@@ -333,6 +331,10 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
                                 validate_run_map(run_map, params.session_stamp)
                                 _persist_session_run_links(params.session_stamp, run_map)
                         except Exception as exc:
+                            if params.strict_persistence:
+                                raise RuntimeError(
+                                    f"Failed to build run map for session {params.session_stamp}: {exc}"
+                                ) from exc
                             print(
                                 status_messages.status(
                                     f"Failed to build run map for session {params.session_stamp}: {exc}",
@@ -367,11 +369,28 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
                                 persist_detections=True,
                                 run_map=run_map,
                                 require_run_map=True,
+                                fail_on_persist_error=True,
                             )
-                        except Exception:
+                        except Exception as exc:
+                            run_status = "FAILED"
+                            abort_reason = "permission_snapshot_refresh_failed"
+                            logging_engine.get_error_logger().exception(
+                                "Permission snapshot refresh failed",
+                                extra=logging_engine.ensure_trace(
+                                    {
+                                        "event": "static.permission_snapshot_refresh_failed",
+                                        "session_stamp": params.session_stamp,
+                                        "scope_label": params.scope_label,
+                                        "profile": params.profile_label,
+                                    }
+                                ),
+                            )
                             print(
                                 status_messages.status(
-                                    "Permission snapshot refresh failed — see logs for details.",
+                                    (
+                                        "Permission snapshot refresh failed — static run marked failed. "
+                                        "See logs for details."
+                                    ),
                                     level="error",
                                 )
                             )

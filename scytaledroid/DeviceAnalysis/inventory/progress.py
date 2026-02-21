@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import sys
 from datetime import UTC, datetime
 
 from scytaledroid.Utils.DisplayUtils import colors, status_messages, terminal, text_blocks
+from scytaledroid.Utils.DisplayUtils.colors import ansi
 
 # Avoid pulling in the entire device_menu stack when running headless (e.g., measure_inventory_latency).
 try:
@@ -93,6 +95,8 @@ def _format_progress_lines(
 def make_cli_progress_printer(ui_prefs=None):
     """Return a progress callback that renders a two-line, updating progress block."""
 
+    stream = getattr(sys, "stdout", None)
+    live_redraw = bool(stream and hasattr(stream, "isatty") and stream.isatty())
     current_phase_label: str | None = None
     last_elapsed: float = 0.0
     last_processed: int = 0
@@ -108,9 +112,10 @@ def make_cli_progress_printer(ui_prefs=None):
             last_elapsed = 0.0
             ema_rate = 0.0
             split_milestones_seen.clear()
-            print()  # visual separation after snapshot block
-            print()  # reserve line2
-            print("\033[F", end="")  # move cursor back to line1
+            if live_redraw:
+                print()  # visual separation after snapshot block
+                print()  # reserve line2
+                print(ansi.CURSOR_UP_ONE, end="")  # move cursor back to line1
             return True
         if phase == "progress":
             processed = int(event.get("processed", 0) or 0)
@@ -145,13 +150,23 @@ def make_cli_progress_printer(ui_prefs=None):
                 show_splits=show_splits,
                 phase_label=current_phase_label,
             )
-            # Clear each line before redraw to avoid visual residue/trailing spaces.
-            print(f"\r\033[K{line1}\n\033[K{line2}\033[F", end="", flush=True)
+            if live_redraw:
+                # Clear each line before redraw to avoid visual residue/trailing spaces.
+                print(
+                    f"{ansi.CR}{ansi.CLEAR_LINE}{line1}\n"
+                    f"{ansi.CLEAR_LINE}{line2}{ansi.CURSOR_UP_ONE}",
+                    end="",
+                    flush=True,
+                )
+            else:
+                print(line1)
+                print(line2)
         elif phase == "complete":
-            # Ensure we end on a clean line below the progress block.
-            print("\r", end="")
-            print()  # move to line2
-            print()  # blank line after progress
+            if live_redraw:
+                # Ensure we end on a clean line below the progress block.
+                print(ansi.CR, end="")
+                print()  # move to line2
+                print()  # blank line after progress
             label = event.get("phase_label") or current_phase_label or "Sync"
             done_line = f"{label} complete. Rendering summary…"
             print(status_messages.status(done_line, level="success"))
@@ -219,7 +234,7 @@ def render_snapshot_block(
         _FALLBACK_WARNED_KEYS.add(warn_key)
         print(
             status_messages.status(
-                "Non-root collection active: metadata coverage is reduced.",
+                "Non-root collection active: some system partition APK metadata and paths are unavailable; harvest scope will be policy-filtered to readable user paths.",
                 level="warn",
             )
         )

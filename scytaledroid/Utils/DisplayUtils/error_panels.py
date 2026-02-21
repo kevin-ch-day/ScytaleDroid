@@ -107,7 +107,8 @@ def format_panel(
         for line in hint_lines:
             content.append(colors.apply(line, hint_style))
 
-    top_divider = colors.apply(divider(content_width, style="divider"), border_style)
+    # Border style should be driven by panel tone; avoid layering divider color + border color.
+    top_divider = colors.apply(divider(width=content_width, style=None), border_style)
     block = [top_divider]
     block.extend(content)
     return "\n".join(block)

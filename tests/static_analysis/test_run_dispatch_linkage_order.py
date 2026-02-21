@@ -243,3 +243,96 @@ def test_launch_scan_flow_skips_run_map_and_permission_refresh_when_no_results(m
     assert calls["run_map"] == 0
     assert calls["perm_refresh"] == 0
     assert calls["blocked_reason"] == "No analyzable artifacts; skipping run_map and permission refresh."
+
+
+def test_launch_scan_flow_run_map_failure_raises_in_strict_mode(monkeypatch) -> None:
+    now = datetime.now(UTC)
+    outcome = RunOutcome(
+        results=[AppRunResult(package_name="com.example.app", category="Test", static_run_id=501)],
+        started_at=now,
+        finished_at=now,
+        scope=ScopeSelection(scope="app", label="Example", groups=tuple()),
+        base_dir=Path("."),
+    )
+
+    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok"))
+    monkeypatch.setattr(run_dispatch.canonical_ingest, "ensure_provider_plumbing", lambda: None)
+    monkeypatch.setattr(run_dispatch.canonical_ingest, "build_session_string_view", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch, "execute_scan", lambda *_a, **_k: outcome)
+    monkeypatch.setattr(run_dispatch, "render_run_results", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch, "_emit_selection_manifest", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch, "_emit_missing_run_ids_artifact", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch, "finalize_open_runs", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch, "_build_session_run_map", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(run_dispatch, "execute_permission_scan", lambda *_a, **_k: None)
+
+    params = RunParameters(
+        profile="full",
+        scope="app",
+        scope_label="Example",
+        session_stamp="sess-strict",
+        dry_run=False,
+        persistence_ready=True,
+        permission_snapshot_refresh=True,
+        strict_persistence=True,
+        paper_grade_requested=False,
+    )
+    selection = ScopeSelection(scope="app", label="Example", groups=tuple())
+
+    import pytest
+
+    with pytest.raises(RuntimeError, match="Failed to build run map"):
+        run_dispatch.launch_scan_flow(selection, params, Path("."))
+
+
+def test_launch_scan_flow_passes_fail_on_persist_error_for_permission_refresh(monkeypatch) -> None:
+    now = datetime.now(UTC)
+    outcome = RunOutcome(
+        results=[AppRunResult(package_name="com.example.app", category="Test", static_run_id=777)],
+        started_at=now,
+        finished_at=now,
+        scope=ScopeSelection(scope="app", label="Example", groups=tuple()),
+        base_dir=Path("."),
+    )
+
+    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok"))
+    monkeypatch.setattr(run_dispatch.canonical_ingest, "ensure_provider_plumbing", lambda: None)
+    monkeypatch.setattr(run_dispatch.canonical_ingest, "build_session_string_view", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch, "execute_scan", lambda *_a, **_k: outcome)
+    monkeypatch.setattr(run_dispatch, "render_run_results", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch, "_emit_selection_manifest", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch, "_emit_missing_run_ids_artifact", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch, "finalize_open_runs", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        run_dispatch,
+        "_build_session_run_map",
+        lambda *_a, **_k: {
+            "session_stamp": "sess-perm",
+            "apps": [{"package": "com.example.app", "static_run_id": 777}],
+            "by_package": {"com.example.app": {"static_run_id": 777}},
+        },
+    )
+    monkeypatch.setattr(run_dispatch, "validate_run_map", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch, "_persist_session_run_links", lambda *_a, **_k: None)
+
+    seen: dict[str, object] = {}
+
+    def _capture_permission_scan(*_a, **kwargs):
+        seen.update(kwargs)
+
+    monkeypatch.setattr(run_dispatch, "execute_permission_scan", _capture_permission_scan)
+
+    params = RunParameters(
+        profile="full",
+        scope="app",
+        scope_label="Example",
+        session_stamp="sess-perm",
+        dry_run=False,
+        persistence_ready=True,
+        permission_snapshot_refresh=True,
+        paper_grade_requested=False,
+    )
+    selection = ScopeSelection(scope="app", label="Example", groups=tuple())
+
+    run_dispatch.launch_scan_flow(selection, params, Path("."))
+    assert seen.get("fail_on_persist_error") is True

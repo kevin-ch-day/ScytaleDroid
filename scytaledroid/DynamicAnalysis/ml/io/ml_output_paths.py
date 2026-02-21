@@ -23,6 +23,10 @@ class MLOutputPaths:
         return self.output_dir / "ml_summary.json"
 
     @property
+    def cohort_status_path(self) -> Path:
+        return self.output_dir / "cohort_status.json"
+
+    @property
     def model_manifest_path(self) -> Path:
         return self.output_dir / "model_manifest.json"
 

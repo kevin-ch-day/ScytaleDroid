@@ -277,7 +277,7 @@ def _render_scope_table(
     blocked = max(candidates - eligible, 0)
     policy = "none" if is_rooted else "non_root_paths"
     print(
-        f"Status: candidates {candidates} | eligible (policy) {eligible} | "
+        f"Status: candidates {candidates} | policy-eligible {eligible} | "
         f"blocked {blocked} | policy {policy}"
     )
     print("-" * 86)

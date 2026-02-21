@@ -13,6 +13,9 @@ from .models import Palette
 from .palette import get_palette
 
 RESET = "\033[0m"
+CURSOR_UP_ONE = "\033[F"
+CLEAR_LINE = "\033[K"
+CR = "\r"
 _ANSI_PATTERN = re.compile(r"\033\[[0-9;]*m")
 
 
@@ -97,10 +100,20 @@ def strip(text: str) -> str:
     return _ANSI_PATTERN.sub("", text)
 
 
+def has_ansi(text: str) -> bool:
+    """Return ``True`` when *text* contains ANSI escape sequences."""
+
+    return strip(text) != text
+
+
 __all__ = [
+    "CLEAR_LINE",
+    "CR",
+    "CURSOR_UP_ONE",
     "RESET",
     "apply",
     "colors_enabled",
+    "has_ansi",
     "highlight",
     "strip",
     "style",

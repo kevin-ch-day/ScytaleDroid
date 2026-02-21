@@ -43,8 +43,9 @@ def run_sandbox_dynamic_run(
     scenario_spec = menu_utils.MenuSpec(items=scenario_options, exit_label="Cancel", show_exit=True)
     menu_utils.render_menu(scenario_spec)
     scenario_choice = prompt_utils.get_choice(
-        [option.key for option in scenario_options] + ["0"],
+        menu_utils.selectable_keys(scenario_options, include_exit=True),
         default="2",
+        disabled=[option.key for option in scenario_options if option.disabled],
     )
     if scenario_choice == "0":
         return

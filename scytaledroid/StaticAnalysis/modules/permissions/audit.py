@@ -670,6 +670,9 @@ class PermissionAuditAccumulator:
         """
         try:
             from scytaledroid.Database.db_core import database_session
+            from scytaledroid.Database.db_func.permissions import permission_support
+
+            permission_support.ensure_all()
 
             inventory = snapshot_payload.get("inventory", {}) if isinstance(snapshot_payload, dict) else {}
             apps_total = int(inventory.get("apps_in_scope") or self.total_groups or 0)
@@ -766,20 +769,37 @@ class PermissionAuditAccumulator:
             header_placeholders = ["%s", "%s", "%s", "%s", "%s", "%s"]
             def _persist_snapshot() -> OperationResult:
                 static_run_id_local = static_run_id
-                update_clause = ", ".join(
-                    f"{col}=VALUES({col})" for col in header_columns if col != "snapshot_key"
-                )
-                header_sql = (
-                    "INSERT INTO permission_audit_snapshots ("
-                    + ", ".join(header_columns)
-                    + ") VALUES ("
-                    + ",".join(header_placeholders)
-                    + ")"
-                    + (" ON DUPLICATE KEY UPDATE " + update_clause if update_clause else "")
-                )
-
                 try:
-                    core_q.run_sql(header_sql, tuple(header_values))
+                    # Backend-safe upsert: insert first, then update existing snapshot_key rows.
+                    insert_sql = (
+                        "INSERT INTO permission_audit_snapshots ("
+                        + ", ".join(header_columns)
+                        + ") VALUES ("
+                        + ",".join(header_placeholders)
+                        + ")"
+                    )
+                    try:
+                        core_q.run_sql(insert_sql, tuple(header_values))
+                    except Exception:
+                        core_q.run_sql(
+                            """
+                            UPDATE permission_audit_snapshots
+                            SET scope_label=%s,
+                                run_id=%s,
+                                static_run_id=%s,
+                                apps_total=%s,
+                                metadata=%s
+                            WHERE snapshot_key=%s
+                            """,
+                            (
+                                self.scope_label,
+                                run_id if run_id is not None else None,
+                                static_run_id,
+                                apps_total,
+                                meta_str,
+                                self.snapshot_id,
+                            ),
+                        )
                     row = core_q.run_sql(
                         "SELECT snapshot_id FROM permission_audit_snapshots WHERE snapshot_key=%s",
                         (self.snapshot_id,),
@@ -996,20 +1016,21 @@ class PermissionAuditAccumulator:
                     )
                     app_placeholders.extend(["%s"] * 12)
 
-                    update_clause = ", ".join(
-                        f"{col}=VALUES({col})" for col in app_columns if col != "snapshot_id"
-                    )
-                    sql = (
+                    insert_sql = (
                         "INSERT INTO permission_audit_apps ("
                         + ", ".join(app_columns)
                         + ") VALUES ("
                         + ",".join(app_placeholders)
                         + ")"
-                        + (" ON DUPLICATE KEY UPDATE " + update_clause if update_clause else "")
                     )
 
                     try:
-                        core_q.run_sql(sql, tuple(app_values))
+                        # Ensure one canonical row per (snapshot_id, package_name) across DB backends.
+                        core_q.run_sql(
+                            "DELETE FROM permission_audit_apps WHERE snapshot_id=%s AND package_name=%s",
+                            (sid, app.package),
+                        )
+                        core_q.run_sql(insert_sql, tuple(app_values))
                     except Exception:  # pragma: no cover - defensive
                         app_failures += 1
                         log.error(

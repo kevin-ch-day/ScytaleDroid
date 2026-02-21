@@ -519,6 +519,9 @@ def resolve_harvest_plan(
                     active_selection.packages
                 )
                 eligible = max(int(stats["scheduled_packages"]) + int(stats["policy_blocked"]), 0)
+                blocked_total = int(stats["blocked_packages"])
+                blocked_policy = int(stats["policy_blocked"])
+                blocked_scope = max(blocked_total - blocked_policy, 0)
                 artifacts = sum(
                     len(pkg.artifacts)
                     for pkg in active_plan.packages
@@ -527,8 +530,10 @@ def resolve_harvest_plan(
                 ui.report_harvest_started(
                     candidate_count=candidate_count,
                     selected_count=selected_count,
-                    eligible=eligible,
+                    policy_eligible=eligible,
                     scheduled=int(stats["scheduled_packages"]),
+                    blocked_policy=blocked_policy,
+                    blocked_scope=blocked_scope,
                     artifacts=artifacts,
                     policy=str(stats["policy"]),
                 )

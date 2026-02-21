@@ -817,9 +817,13 @@ def _print_progress_line(
     err_count = int(stats.get("packages_failed", 0))
     skipped = int(stats.get("packages_skipped", 0))
     package_index = min(package_index, package_total)
+    skip_hint = ""
+    if result.skipped:
+        recent_reason = str(result.skipped[0])
+        skip_hint = f" (latest_skip={recent_reason})"
     line = (
         f"Progress: {package_index}/{package_total} "
-        f"ok={ok_count} fail={err_count} skipped={skipped}"
+        f"ok={ok_count} fail={err_count} skipped={skipped}{skip_hint}"
     )
     level = "error" if err_count else "info"
     print(status_messages.status(line, level=level))

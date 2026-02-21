@@ -44,7 +44,7 @@ def confirm_reset() -> str | None:
     print("Default reset is session-scoped (preserves historical runs).")
     print("  [1] Session-scoped reset (recommended)")
     print("  [0] Cancel")
-    choice = prompt_utils.get_choice(["1", "0"], default="1", prompt="Choice: ")
+    choice = prompt_utils.get_choice(["1", "0"], default="1", prompt="Choice [1]: ")
     if choice == "0":
         return None
     return "session"
@@ -112,7 +112,7 @@ def prompt_session_label(params: RunParameters) -> RunParameters:
         "Session label (press Enter to keep auto-generated)",
         default=current,
         required=False,
-        show_arrow=False,
+        show_arrow=True,
     ).strip()
     if not label or label == current:
         return params
@@ -158,7 +158,7 @@ def prompt_session_label(params: RunParameters) -> RunParameters:
         print("  [1] Replace today's run        (overwrite local artifacts, DB history preserved)")
         print("  [2] Append as another attempt  (keep prior attempts, new suffix)")
         print("  [0] Cancel (keep previous label)")
-        choice = prompt_utils.get_choice(["1", "2", "0"], default="1", prompt="Choice: ")
+        choice = prompt_utils.get_choice(["1", "2", "0"], default="1", prompt="Choice [1]: ")
         if choice == "0":
             return params
         if choice == "1":

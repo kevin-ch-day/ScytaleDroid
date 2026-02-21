@@ -27,12 +27,34 @@ def api_menu() -> None:
             )
         )
 
-        print()
-        print("1) Start server")
-        print("2) Stop server")
-        print("3) Restart server")
-        print("0) Back")
-        choice = prompt_utils.get_choice(["1", "2", "3", "0"], default="0")
+        options = [
+            menu_utils.MenuOption(
+                "1",
+                "Start server",
+                disabled=bool(status.running),
+                hint="Already running" if status.running else None,
+            ),
+            menu_utils.MenuOption(
+                "2",
+                "Stop server",
+                disabled=not bool(status.running),
+                hint="Server is not running" if not status.running else None,
+            ),
+            menu_utils.MenuOption("3", "Restart server"),
+        ]
+        menu_utils.render_menu(
+            menu_utils.MenuSpec(
+                items=options,
+                show_exit=True,
+                exit_label="Back",
+                show_descriptions=False,
+            )
+        )
+        choice = prompt_utils.get_choice(
+            menu_utils.selectable_keys(options, include_exit=True),
+            default="0",
+            disabled=[opt.key for opt in options if opt.disabled],
+        )
 
         if choice == "0":
             return

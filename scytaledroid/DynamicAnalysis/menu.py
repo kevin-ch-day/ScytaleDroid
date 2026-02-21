@@ -78,7 +78,10 @@ def dynamic_analysis_menu() -> None:
         menu_utils.print_header("Dynamic Analysis")
         spec = MenuSpec(items=options, exit_label="Back", show_exit=True)
         menu_utils.render_menu(spec)
-        choice = prompt_utils.get_choice([option.key for option in options] + ["0"])
+        choice = prompt_utils.get_choice(
+            menu_utils.selectable_keys(options, include_exit=True),
+            disabled=[option.key for option in options if option.disabled],
+        )
 
         if choice == "0":
             break
@@ -245,7 +248,11 @@ def _select_dynamic_target() -> tuple[str, str] | None:
     ]
     target_spec = MenuSpec(items=target_options, exit_label="Cancel", show_exit=True)
     menu_utils.render_menu(target_spec)
-    choice = prompt_utils.get_choice([option.key for option in target_options] + ["0"], default="1")
+    choice = prompt_utils.get_choice(
+        menu_utils.selectable_keys(target_options, include_exit=True),
+        default="1",
+        disabled=[option.key for option in target_options if option.disabled],
+    )
     if choice == "0":
         return None
 

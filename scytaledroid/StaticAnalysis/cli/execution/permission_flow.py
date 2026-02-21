@@ -37,6 +37,7 @@ def execute_permission_scan(
     require_run_map: bool = False,
     allow_partial_audit: bool = False,
     compact_output: bool | None = None,
+    fail_on_persist_error: bool = False,
 ) -> None:
     """Run the permission analysis workflow for the selected packages."""
 
@@ -327,10 +328,16 @@ def execute_permission_scan(
             audit_persist_failed = True
             message = persist_result.user_message or "Permission audit persistence failed."
             print(status_messages.status(f"{message} See logs for traceback.", level="warn"))
+            if fail_on_persist_error:
+                raise RuntimeError(
+                    f"Permission audit persistence failed: {persist_result.error_code or 'unknown_error'}"
+                )
     except Exception as exc:
         audit_persist_failed = True
         abort_reason = classify_exception(exc)
         print(status_messages.status("Permission audit persistence failed — see logs.", level="warn"))
+        if fail_on_persist_error:
+            raise
     if audit_persist_failed:
         run_status = "FAILED"
         abort_reason = abort_reason or "persist_error"

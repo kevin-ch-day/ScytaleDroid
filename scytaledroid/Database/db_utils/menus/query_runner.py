@@ -32,7 +32,7 @@ def run_query_menu() -> None:
             padding=True,
         )
         menu_utils.render_menu(spec)
-        choice = prompt_utils.get_choice([opt[0] for opt in options] + ["0"])
+        choice = prompt_utils.get_choice(menu_utils.selectable_keys(options, include_exit=True))
 
         if choice == "1":
             show_latest_session()

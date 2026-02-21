@@ -122,9 +122,10 @@ def _run_dataset_alpha(*, session: str, profile: str, allow_session_reuse: bool)
         raise SystemExit(f"No local artifact groups found for RESEARCH_DATASET_ALPHA under {base_dir}")
 
     failures = 0
+    cohort_session = normalize_session_stamp(session)
     for group in selected:
         pkg = str(group.package_name)
-        app_session = normalize_session_stamp(f"{session}-{pkg}")
+        app_session = cohort_session
         _check_session_uniqueness(app_session, pkg, allow_session_reuse)
         selection = ScopeSelection(scope="app", label=pkg, groups=(group,))
         params = RunParameters(

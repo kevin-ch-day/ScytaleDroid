@@ -10,7 +10,7 @@ from .canonical import schema as canonical_schema
 from .dynamic import schema as dynamic_schema
 from .harvest import device_inventory, dynamic_loading
 from .permissions import governance_snapshot, permission_support
-from .views import CREATE_V_STATIC_HANDOFF_V1
+from .views import CREATE_V_PAPER_DYNAMIC_COHORT_V1, CREATE_V_STATIC_HANDOFF_V1
 from .static_analysis import (
     risk_scores,
     static_findings,
@@ -114,6 +114,7 @@ def ordered_schema_statements() -> list[str]:
 
     # Canonical static-dynamic handoff view.
     statements.append(CREATE_V_STATIC_HANDOFF_V1)
+    statements.append(CREATE_V_PAPER_DYNAMIC_COHORT_V1)
 
     return _dedupe_create_tables(statements)
 

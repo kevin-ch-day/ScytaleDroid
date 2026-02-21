@@ -89,3 +89,51 @@ def test_permission_flow_marks_failed_on_persist_failure(tmp_path, monkeypatch, 
     stdout = capsys.readouterr().out
     assert "Persistence failed" in stdout
     assert updates and updates[-1][1] == "FAILED"
+
+
+def test_permission_flow_raises_when_fail_on_persist_error_enabled(tmp_path, monkeypatch):
+    selection = _make_selection(tmp_path)
+    params = RunParameters(profile="permissions", scope="app", scope_label="Example app")
+
+    def _fake_generate_report(_artifact, _base_dir, _params):
+        return _FakeReport(manifest=_FakeManifest()), None, None, False
+
+    def _fake_collect_permissions_and_sdk(_path):
+        return [("android.permission.CAMERA", "framework")], {}, {"target_sdk": 35}
+
+    def _fake_render_permission_profile(*_args, **_kwargs):
+        return {"risk_counts": {"dangerous": 1, "signature": 0}, "V": 0, "score_detail": {"score_raw": 1}}
+
+    def _fake_persist_to_db(_payload):
+        return OperationResult.failure(
+            user_message="Permission audit persistence failed.",
+            error_code="perm_audit_snapshot_insert_failed",
+        )
+
+    monkeypatch.setattr(permission_flow, "generate_report", _fake_generate_report)
+    monkeypatch.setattr(permission_flow, "collect_permissions_and_sdk", _fake_collect_permissions_and_sdk)
+    monkeypatch.setattr(permission_flow, "render_permission_profile", _fake_render_permission_profile)
+    monkeypatch.setattr(permission_flow.PermissionAuditAccumulator, "persist_to_db", _fake_persist_to_db)
+    monkeypatch.setattr(
+        "scytaledroid.Persistence.db_writer.create_run",
+        lambda **_kwargs: 101,
+    )
+    monkeypatch.setattr(
+        "scytaledroid.Database.db_core.db_queries.run_sql",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        permission_flow,
+        "create_static_run_ledger",
+        lambda **_kwargs: 202,
+    )
+
+    import pytest
+
+    with pytest.raises(RuntimeError, match="Permission audit persistence failed"):
+        permission_flow.execute_permission_scan(
+            selection,
+            params,
+            persist_detections=True,
+            fail_on_persist_error=True,
+        )

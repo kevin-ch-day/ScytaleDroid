@@ -116,6 +116,8 @@ def _verify_required_schema(*, dialect: str) -> None:
         "analysis_signature_deltas",
         "analysis_static_exposure",
         "analysis_risk_regime_summary",
+        "analysis_dynamic_cohort_status",
+        "v_paper_dynamic_cohort_v1",
     ]
     missing: list[str] = []
     for t in required_tables:

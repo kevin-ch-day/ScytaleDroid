@@ -444,15 +444,28 @@ def _render_run_results_impl(
                 level="warn",
             )
         )
+    total_results = len(outcome.results)
+    detailed_finalization_logs = total_results <= 20
+    checkpoint_stride = 10 if total_results >= 50 else 5
 
     for index, app_result in enumerate(outcome.results, start=1):
         if persist_enabled and compact_mode:
-            print(
-                status_messages.status(
-                    f"Finalizing [{index}/{len(outcome.results)}] {app_result.package_name}…",
-                    level="info",
+            if detailed_finalization_logs:
+                print(
+                    status_messages.status(
+                        f"Finalizing [{index}/{total_results}] {app_result.package_name}…",
+                        level="info",
+                    )
                 )
-            )
+            else:
+                if index == 1 or index == total_results or index % checkpoint_stride == 0:
+                    pct = int(round((index / max(1, total_results)) * 100.0))
+                    print(
+                        status_messages.status(
+                            f"Finalizing persistence: {index}/{total_results} ({pct}%)",
+                            level="info",
+                        )
+                    )
         base_report = app_result.base_report()
         if base_report is None:
             if not params.dry_run:

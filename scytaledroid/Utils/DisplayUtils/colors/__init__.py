@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .ansi import RESET, apply, colors_enabled, highlight, strip, style
+from .ansi import RESET, apply, colors_enabled, has_ansi, highlight, strip, style
 from .palette import (
     Palette,
     available_palettes,
@@ -26,6 +26,7 @@ __all__ = [
     "apply",
     "available_palettes",
     "colors_enabled",
+    "has_ansi",
     "confidence_color",
     "current_palette_name",
     "detect_palette_name",

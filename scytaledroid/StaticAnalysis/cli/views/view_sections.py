@@ -8,6 +8,8 @@ from collections.abc import Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from scytaledroid.Utils.DisplayUtils import colors as display_colors
+
 from ...core import StaticAnalysisReport
 from ...core.findings import Badge, DetectorResult, EvidencePointer, Finding, SeverityLevel
 from ..core.cli_options import ScanDisplayOptions
@@ -47,14 +49,13 @@ SECTION_DEFINITIONS: tuple[SectionDefinition, ...] = (
 SECTION_TITLES: tuple[str, ...] = tuple(definition.title for definition in SECTION_DEFINITIONS)
 
 
-_RESET = "\x1b[0m"
-_BADGE_COLOURS = {
-    "OK": "32",
-    "INFO": "34",
-    "WARN": "33",
-    "FAIL": "31",
-    "ERROR": "31",
-    "SKIPPED": "90",
+_BADGE_STYLE_NAMES = {
+    "OK": "success",
+    "INFO": "info",
+    "WARN": "warning",
+    "FAIL": "error",
+    "ERROR": "error",
+    "SKIPPED": "muted",
 }
 
 
@@ -755,9 +756,9 @@ def format_badge(badge: Badge | str, glyphs: GlyphSet) -> str:
             value = str(badge)
 
     key = value.upper()
-    colour_code = _BADGE_COLOURS.get(key)
-    if glyphs.use_color and colour_code:
-        coloured = f"\x1b[{colour_code}m{value}{_RESET}"
+    style_name = _BADGE_STYLE_NAMES.get(key)
+    if glyphs.use_color and style_name and display_colors.colors_enabled():
+        coloured = display_colors.apply(value, display_colors.style(style_name), bold=True)
     else:
         coloured = value
     return f"[{coloured}]"
