@@ -124,6 +124,7 @@ def static_schema_gate() -> tuple[bool, str, str]:
         "static_analysis_runs",
         "static_session_run_links",
         "static_session_rollups",
+        "v_static_handoff_v1",
         "findings",
         "static_permission_matrix",
         "static_permission_risk_vnext",
@@ -137,7 +138,20 @@ def static_schema_gate() -> tuple[bool, str, str]:
         "static_correlation_results",
     ]
     required_columns = {
-        "static_analysis_runs": ["id", "app_version_id", "session_stamp"],
+        "static_analysis_runs": [
+            "id",
+            "app_version_id",
+            "session_stamp",
+            "session_label",
+            "base_apk_sha256",
+            "identity_mode",
+            "identity_conflict_flag",
+            "static_handoff_hash",
+            "static_handoff_json_path",
+            "masvs_mapping_hash",
+            "run_class",
+            "non_canonical_reasons",
+        ],
         "static_session_run_links": ["session_stamp", "package_name", "static_run_id"],
         "findings": ["static_run_id"],
     }

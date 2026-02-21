@@ -610,87 +610,18 @@ def _run_inventory_health_check() -> None:
 def prompt_reset_static_data() -> None:
     print()
     menu_utils.print_header("Reset Static Analysis Data")
-
-    menu_utils.print_section("Overview")
-    print("Use this tool to purge derived static-analysis data before a verification run.")
-    print(status_messages.status("Protected catalog tables are always retained.", level="info"))
-    print()
-
-    _print_table_list("Protected catalog tables", PROTECTED_TABLES)
-    _print_table_list("Static-analysis tables scheduled", STATIC_ANALYSIS_TABLES)
-
-    include_harvest = prompt_utils.prompt_yes_no(
-        "Also clear harvested APK inventory (requires re-pull)?",
-        default=False,
-    )
-    if include_harvest:
-        _print_table_list("Harvest tables scheduled", HARVEST_TABLES)
-
-    table_counts = _count_tables(STATIC_ANALYSIS_TABLES)
-    _print_table_counts("Static-analysis row counts", table_counts)
-    if include_harvest:
-        harvest_counts = _count_tables(HARVEST_TABLES)
-        _print_table_counts("Harvest row counts", harvest_counts)
-
-    if not prompt_utils.prompt_yes_no("Proceed?", default=False):
-        print(status_messages.status("Reset cancelled.", level="warn"))
-        prompt_utils.press_enter_to_continue()
-        return
-    confirmation = prompt_utils.prompt_text(
-        "Type RESET STATIC to confirm",
-        required=True,
-    ).strip()
-    if confirmation != "RESET STATIC":
-        print(status_messages.status("Confirmation mismatch. Reset cancelled.", level="warn"))
-        prompt_utils.press_enter_to_continue()
-        return
-
-    started_at = datetime.now(UTC)
-    outcome = reset_static_analysis_data(include_harvest=include_harvest, truncate_all=True)
-    finished_at = datetime.now(UTC)
-    log_db_op(
-        operation="reset_static_analysis",
-        started_at=started_at,
-        finished_at=finished_at,
-        success=True,
-        error_text=None,
-    )
-
-    menu_utils.print_section("Reset summary")
-    width = min(get_terminal_width(), 96)
     print(
         status_messages.status(
-            "Reset uses TRUNCATE when permitted; falls back to DELETE when TRUNCATE is denied.",
+            "Destructive static TRUNCATE is maintenance-only and no longer available from menu workflows.",
+            level="warn",
+        )
+    )
+    print(
+        status_messages.status(
+            "Use explicit maintenance command: ./run.sh db --truncate-static --i-understand DESTROY_DATA",
             level="info",
         )
     )
-
-    if outcome.truncated:
-        print(status_messages.status(f"Cleared {len(outcome.truncated)} table(s) via TRUNCATE.", level="success"))
-        _print_wrapped_table_block(outcome.truncated, width)
-    if getattr(outcome, "cleared", None):
-        print(status_messages.status(f"Cleared {len(outcome.cleared)} table(s) via DELETE.", level="success"))
-        _print_wrapped_table_block(outcome.cleared, width)
-    if not outcome.truncated and not getattr(outcome, "cleared", None):
-        print(status_messages.status("No tables were truncated.", level="warn"))
-
-    if outcome.skipped_protected:
-        print(status_messages.status(f"Skipped {len(outcome.skipped_protected)} protected table(s).", level="info"))
-        _print_wrapped_table_block(outcome.skipped_protected, width)
-
-    if outcome.skipped_missing:
-        print(status_messages.status(f"{len(outcome.skipped_missing)} table(s) not found in this database.", level="warn"))
-        _print_wrapped_table_block(outcome.skipped_missing, width)
-
-    if outcome.failed:
-        print(status_messages.status(f"Failed to truncate {len(outcome.failed)} table(s).", level="error"))
-        for table, reason in outcome.failed:
-            print(f"  • {table}")
-            wrapped = textwrap.wrap(reason, width=width - 6) or [reason]
-            for line in wrapped:
-                print(f"      {line}")
-
-    print()
     prompt_utils.press_enter_to_continue()
 
 

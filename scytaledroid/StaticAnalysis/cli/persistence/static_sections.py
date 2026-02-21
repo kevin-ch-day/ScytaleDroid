@@ -5,23 +5,16 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from scytaledroid.StaticAnalysis.cli.persistence import (
-    static_findings_writer as sf_writer,  # backwards compat
-)
-from scytaledroid.StaticAnalysis.cli.persistence import (
-    strings_writer as str_writer,  # backwards compat
-)
 from scytaledroid.StaticAnalysis.cli.persistence.static_findings_writer import (
+    coerce_severity_counts,
     persist_static_findings,
 )
-from scytaledroid.StaticAnalysis.cli.persistence.strings_writer import persist_string_summary
+from scytaledroid.StaticAnalysis.cli.persistence.strings_writer import (
+    normalise_string_counts,
+    persist_string_summary,
+)
 from scytaledroid.StaticAnalysis.cli.persistence.utils import first_text, require_canonical_schema
 from scytaledroid.StaticAnalysis.modules.string_analysis.selection import select_samples
-
-# export for existing imports
-coerce_severity_counts = sf_writer.coerce_severity_counts  # re-export
-normalise_string_counts = str_writer.normalise_string_counts  # re-export
-
 
 def persist_storage_surface_data(report, session_stamp: str, scope_label: str) -> None:
     try:
@@ -84,7 +77,7 @@ def persist_static_sections(
         else {}
     )
 
-    severity_counts = sf_writer.coerce_severity_counts(finding_totals)
+    severity_counts = coerce_severity_counts(finding_totals)
     details = {
         "app_label": first_text(
             getattr(manifest, "app_label", None) if manifest else None,
@@ -132,7 +125,7 @@ def persist_static_sections(
     else:
         baseline_written = True
 
-    counts = str_writer.normalise_string_counts(string_payload.get("counts"))
+    counts = normalise_string_counts(string_payload.get("counts"))
     samples_payload = string_payload.get("samples")
     samples = samples_payload if isinstance(samples_payload, Mapping) else {}
     selected_payload = string_payload.get("selected_samples")

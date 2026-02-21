@@ -550,3 +550,63 @@ def test_canonical_enforcement_scope_resolution_failure_is_fail_safe(monkeypatch
     assert outcome.persistence_failed is False
     assert outcome.canonical_failed is False
     assert not any("canonical_enforcement_failed" in err for err in outcome.errors)
+
+
+def test_canonical_enforcement_skips_profile_scope_fast_path(monkeypatch):
+    state: dict[str, object] = {"in_tx": False}
+    monkeypatch.setattr(rs, "require_canonical_schema", lambda: None)
+    monkeypatch.setattr(rs, "database_session", lambda: _FakeDBSession(state))
+    monkeypatch.setattr(
+        rs,
+        "prepare_run_envelope",
+        lambda **_kwargs: (SimpleNamespace(run_id=None, threat_profile=None, env_profile=None), []),
+    )
+    monkeypatch.setattr(rs, "compute_metrics_bundle", lambda *_args, **_kwargs: _stub_metrics_bundle())
+    monkeypatch.setattr(rs, "_ensure_app_version", lambda **_kwargs: 101)
+    monkeypatch.setattr(rs._dw, "create_run", lambda **_kwargs: 7002)
+    monkeypatch.setattr(rs, "_create_static_run", lambda **_kwargs: 8002)
+    monkeypatch.setattr(rs, "_update_static_run_metadata", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(rs, "write_buckets", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(rs, "write_metrics", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(rs, "persist_permission_matrix", lambda **_kwargs: None)
+    monkeypatch.setattr(rs, "persist_permission_risk", lambda **_kwargs: None)
+    monkeypatch.setattr(rs, "update_static_run_status", lambda **_kwargs: None)
+    monkeypatch.setattr(rs, "export_dep_json", lambda *_args, **_kwargs: None)
+
+    def _run_sql(sql, params=None, fetch=None):
+        text = str(sql)
+        if "SELECT session_label FROM static_analysis_runs WHERE id=%s" in text:
+            return ("sess-profile",)
+        if "COUNT(*) AS run_rows" in text and "COUNT(DISTINCT sar.app_version_id)" in text:
+            raise AssertionError("Group-scope fast-path should skip singleton count query")
+        if "WHERE session_label=%s AND is_canonical=1" in text:
+            return (0,)
+        return []
+
+    monkeypatch.setattr(rs.core_q, "run_sql", _run_sql)
+
+    outcome = rs.persist_run_summary(
+        _DummyReport(),
+        {},
+        "com.example.app",
+        session_stamp="sess-profile",
+        scope_label="Research Dataset Alpha",
+        finding_totals={"total": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        baseline_payload={},
+        paper_grade_requested=True,
+        dry_run=False,
+    )
+
+    assert outcome.persistence_failed is False
+    assert outcome.canonical_failed is False
+    assert not any("canonical_enforcement_failed" in err for err in outcome.errors)
+
+
+def test_redact_finding_evidence_payload_masks_jwt_like_tokens() -> None:
+    raw = (
+        '{"detail":"eyJhbGciOiJSU0EtU0hBMjU2IiwidmVyIjoiMSJ9.'
+        'eyJhIjoiYiJ9.c2lnbi1wYXlsb2Fk","path":"assets/api_key.txt"}'
+    )
+    redacted = rs._redact_finding_evidence_payload(raw)  # noqa: SLF001 - contract guard
+    assert "eyJhbGci" not in redacted
+    assert "[REDACTED:JWT]" in redacted

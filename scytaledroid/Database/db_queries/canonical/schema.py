@@ -304,7 +304,11 @@ _DDL_STATEMENTS: list[str] = [
       ADD COLUMN IF NOT EXISTS identity_mode VARCHAR(32) DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS identity_conflict_flag TINYINT(1) DEFAULT 0,
       ADD COLUMN IF NOT EXISTS static_handoff_hash CHAR(64) DEFAULT NULL,
-      ADD COLUMN IF NOT EXISTS static_handoff_json JSON DEFAULT NULL;
+      ADD COLUMN IF NOT EXISTS static_handoff_json JSON DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS static_handoff_json_path TEXT DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS masvs_mapping_hash CHAR(64) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS run_class VARCHAR(32) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS non_canonical_reasons JSON DEFAULT NULL;
     """,
     """
     ALTER TABLE static_analysis_runs

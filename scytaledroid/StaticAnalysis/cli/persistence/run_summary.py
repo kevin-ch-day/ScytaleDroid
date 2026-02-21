@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections import Counter
 from collections.abc import Mapping, Sequence
@@ -59,6 +60,34 @@ from .utils import (
     safe_int,
     truncate,
 )
+
+_JWT_LIKE_RE = re.compile(r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}")
+_AWS_KEY_RE = re.compile(r"AKIA[0-9A-Z]{16}")
+
+
+def _redact_secret_like_text(text: str) -> str:
+    if not text:
+        return text
+    redacted = _JWT_LIKE_RE.sub("[REDACTED:JWT]", text)
+    redacted = _AWS_KEY_RE.sub("[REDACTED:AWS_KEY]", redacted)
+    return redacted
+
+
+def _redact_finding_evidence_payload(evidence_payload: str) -> str:
+    if not evidence_payload:
+        return evidence_payload
+    try:
+        parsed = json.loads(evidence_payload)
+    except Exception:
+        return _redact_secret_like_text(evidence_payload)
+    if isinstance(parsed, dict):
+        detail = parsed.get("detail")
+        if isinstance(detail, str):
+            parsed["detail"] = _redact_secret_like_text(detail)
+    try:
+        return json.dumps(parsed, ensure_ascii=False, default=str)
+    except Exception:
+        return _redact_secret_like_text(evidence_payload)
 
 
 def _normalize_datetime_value(value: str | None) -> str | None:
@@ -173,6 +202,46 @@ def _looks_like_lock_wait_error(exc: Exception) -> bool:
     text = str(exc).lower()
     markers = ("1205", "1213", "lock wait timeout", "deadlock")
     return any(marker in text for marker in markers)
+
+
+def _classify_static_contract(
+    *,
+    package_name: str | None,
+    version_code: int | None,
+    base_apk_sha256: str | None,
+    identity_mode: str | None,
+    identity_conflict_flag: bool | None,
+    static_handoff_hash: str | None,
+    static_handoff_json_path: str | None,
+    masvs_mapping_hash: str | None,
+    schema_version: str | None,
+    tool_semver: str | None,
+    tool_git_commit: str | None,
+) -> tuple[str, list[str]]:
+    reasons: list[str] = []
+    missing_required = False
+    if not package_name or version_code is None:
+        missing_required = True
+    if not base_apk_sha256:
+        missing_required = True
+    if not static_handoff_hash:
+        reasons.append("HANDOFF_HASH_MISSING")
+    if not static_handoff_json_path:
+        reasons.append("HANDOFF_JSON_MISSING")
+    if not masvs_mapping_hash:
+        reasons.append("MASVS_MAPPING_HASH_MISSING")
+    if not schema_version or not tool_semver or not tool_git_commit:
+        missing_required = True
+    mode = str(identity_mode or "").strip().lower()
+    if mode != "full_hash":
+        reasons.append("IDENTITY_FALLBACK_MODE")
+    if bool(identity_conflict_flag):
+        reasons.append("IDENTITY_CONFLICT")
+    if missing_required:
+        reasons.append("MISSING_REQUIRED_FIELD")
+    unique_reasons = sorted(set(r for r in reasons if r))
+    run_class = "CANONICAL" if not unique_reasons else "NON_CANONICAL"
+    return run_class, unique_reasons
 
 
 def _apply_mysql_session_lock_wait_timeout(db: object, timeout_s: int) -> None:
@@ -573,6 +642,10 @@ def _update_static_run_metadata(
     identity_conflict_flag: bool | None = None,
     static_handoff_hash: str | None = None,
     static_handoff_json: str | None = None,
+    static_handoff_json_path: str | None = None,
+    masvs_mapping_hash: str | None = None,
+    run_class: str | None = None,
+    non_canonical_reasons: str | None = None,
 ) -> None:
     _run_writers.update_static_run_metadata(
         static_run_id=static_run_id,
@@ -592,6 +665,10 @@ def _update_static_run_metadata(
         identity_conflict_flag=identity_conflict_flag,
         static_handoff_hash=static_handoff_hash,
         static_handoff_json=static_handoff_json,
+        static_handoff_json_path=static_handoff_json_path,
+        masvs_mapping_hash=masvs_mapping_hash,
+        run_class=run_class,
+        non_canonical_reasons=non_canonical_reasons,
     )
 
 
@@ -669,6 +746,7 @@ def persist_run_summary(
     abort_reason: str | None = None,
     abort_signal: str | None = None,
     paper_grade_requested: bool | None = None,
+    canonical_action: str | None = None,
     dry_run: bool = False,
 ) -> PersistenceOutcome:
     outcome = PersistenceOutcome()
@@ -929,7 +1007,9 @@ def persist_run_summary(
                     path_hint=getattr(f, "path", None),
                     offset_hint=getattr(f, "offset", None),
                 )
-                evidence_payload = json.dumps(evidence.as_payload(), ensure_ascii=False, default=str)
+                evidence_payload = _redact_finding_evidence_payload(
+                    json.dumps(evidence.as_payload(), ensure_ascii=False, default=str)
+                )
                 evidence_path = evidence.path
                 evidence_offset = evidence.offset
                 evidence_preview = evidence.detail
@@ -1223,6 +1303,18 @@ def persist_run_summary(
                                 findings_total=int(finding_totals.get("total", 0) or 0),
                                 run_started_utc=None,
                                 status="STARTED",
+                                sha256=base_apk_sha256 or manifest_sha,
+                                base_apk_sha256=base_apk_sha256,
+                                artifact_set_hash=artifact_set_hash,
+                                run_signature=run_signature,
+                                run_signature_version=run_signature_version,
+                                identity_valid=identity_valid if isinstance(identity_valid, bool) else None,
+                                identity_error_reason=identity_error_reason,
+                                config_hash=config_hash,
+                                pipeline_version=pipeline_version,
+                                analysis_version=analysis_version,
+                                catalog_versions=catalog_versions,
+                                study_tag=study_tag,
                             )
                             if static_run_id is None:
                                 _raise_db_error("static_run.create", "create_failed")
@@ -1233,6 +1325,15 @@ def persist_run_summary(
                         outcome.static_run_id = static_run_id
     
                         if static_run_id:
+                            identity_mode_value = _run_writers._identity_mode(
+                                base_apk_sha256=base_apk_sha256,
+                                version_code=version_code,
+                            )
+                            identity_conflict_value = _run_writers._detect_identity_conflict(
+                                package_name=package_for_run,
+                                version_code=version_code,
+                                base_apk_sha256=base_apk_sha256,
+                            )
                             _update_static_run_metadata(
                                 static_run_id,
                                 sha256_value=base_apk_sha256 or manifest_sha,
@@ -1242,6 +1343,8 @@ def persist_run_summary(
                                 run_signature_version=run_signature_version,
                                 identity_valid=identity_valid if isinstance(identity_valid, bool) else None,
                                 identity_error_reason=identity_error_reason,
+                                identity_mode=identity_mode_value,
+                                identity_conflict_flag=identity_conflict_value,
                                 config_hash=config_hash,
                                 pipeline_version=pipeline_version,
                                 analysis_version=analysis_version,
@@ -1416,15 +1519,60 @@ def persist_run_summary(
                             handoff_payload=handoff_payload,
                         )
                         outcome.static_handoff_hash = handoff_hash
+                        handoff_json_path = str(
+                            Path("evidence") / "static_runs" / str(static_run_id) / "static_handoff.json"
+                        )
+                        identity_block = handoff_payload.get("identity", {}) if isinstance(handoff_payload, Mapping) else {}
+                        masvs_block = handoff_payload.get("masvs", {}) if isinstance(handoff_payload, Mapping) else {}
+                        identity_mode = str(identity_block.get("identity_mode") or "") if isinstance(identity_block, Mapping) else None
+                        identity_conflict_flag = (
+                            bool(identity_block.get("identity_conflict_flag"))
+                            if isinstance(identity_block, Mapping)
+                            else None
+                        )
+                        masvs_mapping_hash = (
+                            str(masvs_block.get("masvs_mapping_hash") or "")
+                            if isinstance(masvs_block, Mapping)
+                            else None
+                        )
+                        run_class, non_canonical_reasons = _classify_static_contract(
+                            package_name=package_for_run,
+                            version_code=version_code,
+                            base_apk_sha256=base_apk_sha256,
+                            identity_mode=identity_mode,
+                            identity_conflict_flag=identity_conflict_flag,
+                            static_handoff_hash=handoff_hash,
+                            static_handoff_json_path=handoff_json_path,
+                            masvs_mapping_hash=masvs_mapping_hash,
+                            schema_version=cached_schema_version,
+                            tool_semver=app_config.APP_VERSION,
+                            tool_git_commit=get_git_commit(),
+                        )
                         _update_static_run_metadata(
                             int(static_run_id),
                             static_handoff_hash=handoff_hash,
-                            static_handoff_json=json.dumps(
-                                handoff_payload,
-                                ensure_ascii=False,
-                                sort_keys=True,
+                            static_handoff_json_path=handoff_json_path,
+                            masvs_mapping_hash=masvs_mapping_hash,
+                            run_class=run_class,
+                            non_canonical_reasons=(
+                                json.dumps(non_canonical_reasons, ensure_ascii=True, sort_keys=True)
+                                if non_canonical_reasons
+                                else None
                             ),
                         )
+                        if run_class != "CANONICAL":
+                            try:
+                                core_q.run_sql(
+                                    """
+                                    UPDATE static_analysis_runs
+                                    SET is_canonical=0,
+                                        canonical_reason=COALESCE(canonical_reason, %s)
+                                    WHERE id=%s
+                                    """,
+                                    ("contract_violation", int(static_run_id)),
+                                )
+                            except Exception:
+                                pass
                     except Exception as exc:
                         log.warning(
                             f"Static handoff export skipped for {package_for_run}: {exc}",
@@ -1486,6 +1634,14 @@ def persist_run_summary(
                             exc_class=exc.__class__.__name__,
                             exc_message=str(exc),
                             errors_tail=list(outcome.errors)[-10:],
+                        )
+                    except Exception:
+                        pass
+                    try:
+                        _update_static_run_metadata(
+                            int(static_run_id),
+                            run_class="NON_CANONICAL",
+                            non_canonical_reasons=json.dumps(["PERSISTENCE_ERROR"], ensure_ascii=True),
                         )
                     except Exception:
                         pass
@@ -1568,36 +1724,69 @@ def persist_run_summary(
         if not enforced_session_label:
             enforced_session_label = session_stamp
 
+        if (
+            not persistence_failed
+            and static_run_id
+            and canonical_action in {"first_run", "replace"}
+        ):
+            try:
+                row = core_q.run_sql(
+                    "SELECT run_class FROM static_analysis_runs WHERE id=%s",
+                    (static_run_id,),
+                    fetch="one",
+                )
+                run_class_value = str(row[0] or "").upper() if row else ""
+            except Exception:
+                run_class_value = ""
+            if run_class_value == "CANONICAL":
+                try:
+                    _maybe_set_canonical_static_run(
+                        session_label=enforced_session_label or session_stamp,
+                        static_run_id=int(static_run_id),
+                        canonical_action=canonical_action,
+                    )
+                except Exception:
+                    # Canonical marker update is best-effort here; enforcement below
+                    # remains the source of truth for paper-grade singleton checks.
+                    pass
+
         if not persistence_failed and enforced_session_label and paper_grade_requested:
             # Canonical singleton applies only to true single-app sessions.
             # Group/profile sessions intentionally persist multiple static rows under one session label.
             # static_analysis_runs does not carry package_name directly, so resolve scope via app_versions/apps.
             # Fail safe toward "group scope" if the scope cannot be resolved reliably.
             is_group_scope = False
+            scope_label_norm = str(scope_label or "").strip().lower()
+            package_norm = str(package_for_run or "").strip().lower()
+            # Fast-path: if scope label is not the package name, this is not a single-app session.
+            # Example: profile/group scope labels like "Research Dataset Alpha" or "All apps".
+            if scope_label_norm and package_norm and scope_label_norm != package_norm:
+                is_group_scope = True
             try:
-                row = core_q.run_sql(
-                    """
-                    SELECT
-                      COUNT(*) AS run_rows,
-                      COUNT(DISTINCT sar.app_version_id) AS distinct_app_versions,
-                      COUNT(DISTINCT a.package_name) AS distinct_packages
-                    FROM static_analysis_runs sar
-                    LEFT JOIN app_versions av ON av.id = sar.app_version_id
-                    LEFT JOIN apps a ON a.id = av.app_id
-                    WHERE sar.session_label=%s
-                    """,
-                    (enforced_session_label,),
-                    fetch="one",
-                )
-                run_rows = int(row[0] or 0) if row else 0
-                distinct_app_versions = int(row[1] or 0) if row else 0
-                distinct_packages = int(row[2] or 0) if row else 0
-                is_group_scope = bool(
-                    distinct_packages > 1
-                    or distinct_app_versions > 1
-                    # If joins are unavailable but multiple rows exist, avoid false singleton hard-fail.
-                    or (run_rows > 1 and distinct_packages == 0 and distinct_app_versions == 0)
-                )
+                if not is_group_scope:
+                    row = core_q.run_sql(
+                        """
+                        SELECT
+                          COUNT(*) AS run_rows,
+                          COUNT(DISTINCT sar.app_version_id) AS distinct_app_versions,
+                          COUNT(DISTINCT a.package_name) AS distinct_packages
+                        FROM static_analysis_runs sar
+                        LEFT JOIN app_versions av ON av.id = sar.app_version_id
+                        LEFT JOIN apps a ON a.id = av.app_id
+                        WHERE sar.session_label=%s
+                        """,
+                        (enforced_session_label,),
+                        fetch="one",
+                    )
+                    run_rows = int(row[0] or 0) if row else 0
+                    distinct_app_versions = int(row[1] or 0) if row else 0
+                    distinct_packages = int(row[2] or 0) if row else 0
+                    is_group_scope = bool(
+                        distinct_packages > 1
+                        or distinct_app_versions > 1
+                        # If joins are unavailable but multiple rows exist, avoid false singleton hard-fail.
+                        or (run_rows > 1 and distinct_packages == 0 and distinct_app_versions == 0)
+                    )
             except Exception:
                 # Fail-safe: never hard-fail canonical enforcement when scope
                 # cannot be reliably resolved from metadata.
@@ -1647,6 +1836,24 @@ def persist_run_summary(
         except Exception:
             # Never fail the run due to a rollup write; the per-finding rows are authoritative.
             pass
+
+        if static_run_id and normalize_run_status(run_status) != "COMPLETED":
+            failure_reasons = ["RUN_STATUS_FAILED"]
+            if persistence_failed:
+                failure_reasons.append("PERSISTENCE_ERROR")
+            try:
+                _update_static_run_metadata(
+                    int(static_run_id),
+                    run_class="NON_CANONICAL",
+                    non_canonical_reasons=json.dumps(
+                        sorted(set(failure_reasons)),
+                        ensure_ascii=True,
+                    ),
+                )
+            except Exception as exc:
+                outcome.add_error(
+                    f"db_write_failed:static_run.classification_update:{exc.__class__.__name__}:{exc}"
+                )
 
         update_static_run_status(
             static_run_id=static_run_id,

@@ -228,16 +228,26 @@ SELECT
   sar.artifact_set_hash,
   sar.identity_mode,
   sar.identity_conflict_flag,
+  sar.run_class,
+  sar.non_canonical_reasons,
   sar.static_handoff_hash,
+  sar.masvs_mapping_hash,
   sar.tool_semver,
   sar.tool_git_commit,
   sar.schema_version,
   a.package_name AS package_name_lc,
   av.version_code,
+  sar.static_handoff_json_path,
   sar.static_handoff_json
 FROM static_analysis_runs sar
 JOIN app_versions av ON av.id = sar.app_version_id
-JOIN apps a ON a.id = av.app_id;
+JOIN apps a ON a.id = av.app_id
+WHERE UPPER(COALESCE(sar.status, '')) = 'COMPLETED'
+  AND sar.base_apk_sha256 IS NOT NULL
+  AND sar.identity_mode IS NOT NULL
+  AND sar.run_class IS NOT NULL
+  AND sar.static_handoff_hash IS NOT NULL
+  AND sar.masvs_mapping_hash IS NOT NULL;
 """
 
 __all__ += ["CREATE_V_STATIC_HANDOFF_V1"]

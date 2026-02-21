@@ -360,6 +360,10 @@ def create_static_run_ledger(
         version_code=version_code,
         base_apk_sha256=base_apk_sha256,
     )
+    if identity_conflict_flag:
+        is_canonical = False
+        canonical_set_at_utc = None
+        canonical_reason = "identity_conflict"
     static_run_id = _create_static_run(
         app_version_id=app_version_id,
         session_stamp=session_stamp,
@@ -413,7 +417,7 @@ def create_static_run_ledger(
         identity_mode=identity_mode,
         identity_conflict_flag=identity_conflict_flag,
     )
-    if canonical_reason:
+    if canonical_reason and is_canonical:
         _maybe_set_canonical_static_run(
             static_run_id=static_run_id,
             session_label=session_label,
@@ -451,54 +455,60 @@ def _update_static_run_metadata(
     identity_conflict_flag: bool | None = None,
     static_handoff_hash: str | None = None,
     static_handoff_json: str | None = None,
+    static_handoff_json_path: str | None = None,
+    masvs_mapping_hash: str | None = None,
+    run_class: str | None = None,
+    non_canonical_reasons: str | None = None,
 ) -> None:
-    try:
-        run_sql_write(
-            """
-            UPDATE static_analysis_runs
-            SET run_signature=%s,
-                run_signature_version=%s,
-                identity_valid=%s,
-                identity_error_reason=%s,
-                identity_mode=COALESCE(%s, identity_mode),
-                identity_conflict_flag=COALESCE(%s, identity_conflict_flag),
-                artifact_set_hash=%s,
-                base_apk_sha256=%s,
-                sha256=%s,
-                static_handoff_hash=COALESCE(%s, static_handoff_hash),
-                static_handoff_json=COALESCE(%s, static_handoff_json),
-                config_hash=%s,
-                pipeline_version=%s,
-                analysis_version=%s,
-                catalog_versions=%s,
-                study_tag=%s
-            WHERE id=%s
-            """,
-            (
-                run_signature,
-                run_signature_version,
-                identity_valid,
-                identity_error_reason,
-                identity_mode,
-                1 if identity_conflict_flag else 0 if identity_conflict_flag is not None else None,
-                artifact_set_hash,
-                base_apk_sha256,
-                sha256,
-                static_handoff_hash,
-                static_handoff_json,
-                config_hash,
-                pipeline_version,
-                analysis_version,
-                catalog_versions,
-                study_tag,
-                static_run_id,
-            ),
-        )
-    except Exception as exc:
-        log.warning(
-            f"Failed to update static run metadata for {static_run_id}: {exc}",
-            category="static_analysis",
-        )
+    run_sql_write(
+        """
+        UPDATE static_analysis_runs
+        SET run_signature=COALESCE(%s, run_signature),
+            run_signature_version=COALESCE(%s, run_signature_version),
+            identity_valid=COALESCE(%s, identity_valid),
+            identity_error_reason=COALESCE(%s, identity_error_reason),
+            identity_mode=COALESCE(%s, identity_mode),
+            identity_conflict_flag=COALESCE(%s, identity_conflict_flag),
+            artifact_set_hash=COALESCE(%s, artifact_set_hash),
+            base_apk_sha256=COALESCE(%s, base_apk_sha256),
+            sha256=COALESCE(%s, sha256),
+            static_handoff_hash=COALESCE(%s, static_handoff_hash),
+            static_handoff_json=COALESCE(%s, static_handoff_json),
+            static_handoff_json_path=COALESCE(%s, static_handoff_json_path),
+            masvs_mapping_hash=COALESCE(%s, masvs_mapping_hash),
+            run_class=COALESCE(%s, run_class),
+            non_canonical_reasons=COALESCE(%s, non_canonical_reasons),
+            config_hash=COALESCE(%s, config_hash),
+            pipeline_version=COALESCE(%s, pipeline_version),
+            analysis_version=COALESCE(%s, analysis_version),
+            catalog_versions=COALESCE(%s, catalog_versions),
+            study_tag=COALESCE(%s, study_tag)
+        WHERE id=%s
+        """,
+        (
+            run_signature,
+            run_signature_version,
+            identity_valid,
+            identity_error_reason,
+            identity_mode,
+            1 if identity_conflict_flag else 0 if identity_conflict_flag is not None else None,
+            artifact_set_hash,
+            base_apk_sha256,
+            sha256,
+            static_handoff_hash,
+            static_handoff_json,
+            static_handoff_json_path,
+            masvs_mapping_hash,
+            run_class,
+            non_canonical_reasons,
+            config_hash,
+            pipeline_version,
+            analysis_version,
+            catalog_versions,
+            study_tag,
+            static_run_id,
+        ),
+    )
 
 
 def _maybe_set_canonical_static_run(

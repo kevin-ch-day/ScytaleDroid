@@ -85,7 +85,7 @@ def _make_outcome(tmp_path: Path, *, static_run_id: int) -> RunOutcome:
 def _patch_common(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("SCYTALEDROID_PERSISTENCE_READY", "1")
-    monkeypatch.setenv("SCYTALEDROID_PAPER_GRADE", "1")
+    monkeypatch.setenv("SCYTALEDROID_CANONICAL_GRADE", "1")
     monkeypatch.setattr(results, "analyse_strings", lambda *args, **kwargs: {"selected_samples": {}})
     monkeypatch.setattr(
         results,

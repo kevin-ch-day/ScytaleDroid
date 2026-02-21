@@ -103,6 +103,7 @@ def _verify_required_schema(*, dialect: str) -> None:
         "android_app_profiles",
         "android_app_publishers",
         "android_publisher_prefix_rules",
+        "v_static_handoff_v1",
         "dynamic_sessions",
         "app_display_orderings",
         "app_display_aliases",
@@ -148,6 +149,17 @@ def _verify_required_schema(*, dialect: str) -> None:
             "ended_at_utc",
         ],
         "apps": ["package_name", "display_name", "profile_key", "publisher_key"],
+        "static_analysis_runs": [
+            "session_label",
+            "base_apk_sha256",
+            "identity_mode",
+            "identity_conflict_flag",
+            "static_handoff_hash",
+            "static_handoff_json_path",
+            "masvs_mapping_hash",
+            "run_class",
+            "non_canonical_reasons",
+        ],
     }
     for table, cols in required_columns.items():
         try:

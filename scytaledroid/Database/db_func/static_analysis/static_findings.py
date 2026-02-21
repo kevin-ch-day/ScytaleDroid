@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping, Sequence
 
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
@@ -11,6 +12,26 @@ from ...db_core import database_session, db_config, run_sql
 from ...db_queries.static_analysis import static_findings as queries
 
 _IS_SQLITE = str(db_config.DB_CONFIG.get("engine", "sqlite")).lower() == "sqlite"
+_JWT_LIKE_RE = re.compile(r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}")
+_AWS_KEY_RE = re.compile(r"AKIA[0-9A-Z]{16}")
+
+
+def _redact_secret_like(value: str) -> str:
+    redacted = _JWT_LIKE_RE.sub("[REDACTED:JWT]", value)
+    redacted = _AWS_KEY_RE.sub("[REDACTED:AWS_KEY]", redacted)
+    return redacted
+
+
+def _sanitize_evidence_payload(evidence: object) -> object:
+    if isinstance(evidence, dict):
+        payload = dict(evidence)
+        detail = payload.get("detail")
+        if isinstance(detail, str):
+            payload["detail"] = _redact_secret_like(detail)
+        return payload
+    if isinstance(evidence, str):
+        return _redact_secret_like(evidence)
+    return evidence
 
 SQLITE_CREATE_FINDINGS_SUMMARY = """
 CREATE TABLE IF NOT EXISTS static_findings_summary (
@@ -161,38 +182,52 @@ def upsert_summary(
             "run_id": int(run_id) if run_id is not None else None,
             "static_run_id": static_run_id,
         }
-        stmt = """
-        INSERT INTO static_findings_summary (
-          package_name, session_stamp, scope_label, run_id, static_run_id,
-          high, med, low, info, details
-        ) VALUES (
-          %(package_name)s, %(session_stamp)s, %(scope_label)s, %(run_id)s, %(static_run_id)s,
-          %(high)s, %(med)s, %(low)s, %(info)s, %(details)s
-        )
-        ON CONFLICT(package_name, session_stamp, scope_label) DO UPDATE SET
-          run_id=excluded.run_id,
-          static_run_id=excluded.static_run_id,
-          high=excluded.high,
-          med=excluded.med,
-          low=excluded.low,
-          info=excluded.info,
-          details=excluded.details;
-        """
         try:
             with database_session():
-                try:
-                    run_sql(stmt, payload)
-                except Exception:
-                    fallback_stmt = """
-                    INSERT INTO static_findings_summary (
-                      package_name, session_stamp, scope_label, run_id, static_run_id,
-                      high, med, low, info, details
-                    ) VALUES (
-                      %(package_name)s, %(session_stamp)s, %(scope_label)s, %(run_id)s, %(static_run_id)s,
-                      %(high)s, %(med)s, %(low)s, %(info)s, %(details)s
+                row = run_sql(
+                    "SELECT id FROM static_findings_summary "
+                    "WHERE package_name=%s AND session_stamp=%s AND scope_label=%s "
+                    "ORDER BY id DESC LIMIT 1",
+                    (package_name, session_stamp, scope_label),
+                    fetch="one",
+                )
+                if row:
+                    run_sql(
+                        """
+                        UPDATE static_findings_summary
+                        SET run_id=%s,
+                            static_run_id=%s,
+                            high=%s,
+                            med=%s,
+                            low=%s,
+                            info=%s,
+                            details=%s
+                        WHERE id=%s
+                        """,
+                        (
+                            payload["run_id"],
+                            payload["static_run_id"],
+                            payload["high"],
+                            payload["med"],
+                            payload["low"],
+                            payload["info"],
+                            payload["details"],
+                            int(row[0]),
+                        ),
                     )
-                    """
-                    run_sql(fallback_stmt, payload)
+                else:
+                    run_sql(
+                        """
+                        INSERT INTO static_findings_summary (
+                          package_name, session_stamp, scope_label, run_id, static_run_id,
+                          high, med, low, info, details
+                        ) VALUES (
+                          %(package_name)s, %(session_stamp)s, %(scope_label)s, %(run_id)s, %(static_run_id)s,
+                          %(high)s, %(med)s, %(low)s, %(info)s, %(details)s
+                        )
+                        """,
+                        payload,
+                    )
                 row = run_sql(
                     "SELECT id FROM static_findings_summary WHERE package_name=%s AND session_stamp=%s AND scope_label=%s ORDER BY id DESC LIMIT 1",
                     (package_name, session_stamp, scope_label),
@@ -254,6 +289,7 @@ def replace_findings(
                     severity = str(f.get("severity") or "Info")
                     title = str(f.get("title") or "")[:512]
                     evidence = f.get("evidence") if isinstance(f, dict) else None
+                    evidence = _sanitize_evidence_payload(evidence)
                     fix = f.get("fix") if isinstance(f, dict) else None
                     ev_json = json.dumps(evidence or {})
                     run_sql(
@@ -295,6 +331,7 @@ def replace_findings(
                 severity = str(f.get("severity") or "Info")
                 title = str(f.get("title") or "")[:512]
                 evidence = f.get("evidence") if isinstance(f, dict) else None
+                evidence = _sanitize_evidence_payload(evidence)
                 fix = f.get("fix") if isinstance(f, dict) else None
                 ev_json = json.dumps(evidence or {})
                 run_sql(

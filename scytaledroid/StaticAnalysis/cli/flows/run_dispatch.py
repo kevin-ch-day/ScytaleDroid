@@ -124,7 +124,6 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
                     (
                         "Canonical-grade runs require canonical schema readiness. "
                         "Run schema bootstrap or set SCYTALEDROID_CANONICAL_GRADE=0 "
-                        "(or legacy SCYTALEDROID_PAPER_GRADE=0) "
                         "to allow experimental runs."
                     ),
                     level="error",

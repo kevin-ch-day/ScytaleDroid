@@ -36,7 +36,6 @@ def confirm_reset() -> str | None:
 
     Returns:
       - ``"session"`` for session-scoped reset (default)
-      - ``"truncate_all"`` for full-table reset
       - ``None`` when cancelled
     """
 
@@ -44,12 +43,11 @@ def confirm_reset() -> str | None:
     menu_utils.print_section("Reset static analysis")
     print("Default reset is session-scoped (preserves historical runs).")
     print("  [1] Session-scoped reset (recommended)")
-    print("  [2] Full reset (TRUNCATE all static tables)")
     print("  [0] Cancel")
-    choice = prompt_utils.get_choice(["1", "2", "0"], default="1", prompt="Choice: ")
+    choice = prompt_utils.get_choice(["1", "0"], default="1", prompt="Choice: ")
     if choice == "0":
         return None
-    return "truncate_all" if choice == "2" else "session"
+    return "session"
 
 
 def render_reset_outcome(outcome: Any) -> None:
@@ -60,8 +58,8 @@ def render_reset_outcome(outcome: Any) -> None:
     if getattr(outcome, "truncated", None):
         print(
             status_messages.status(
-                "Reset uses TRUNCATE when permitted; falls back to DELETE when TRUNCATE is denied.",
-                level="info",
+                "Maintenance TRUNCATE occurred (not part of normal static workflow).",
+                level="warn",
             )
         )
     else:

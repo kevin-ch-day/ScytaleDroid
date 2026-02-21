@@ -275,12 +275,52 @@ def _run_diagnostics(json_mode: bool) -> None:
     run_diagnostics(json_mode=json_mode)
 
 
+def _run_db_maintenance(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        description="ScytaleDroid DB maintenance commands",
+    )
+    parser.add_argument(
+        "--truncate-static",
+        action="store_true",
+        help="Destructively truncate static-analysis tables (maintenance-only).",
+    )
+    parser.add_argument(
+        "--include-harvest",
+        action="store_true",
+        help="Also truncate harvest APK inventory tables.",
+    )
+    parser.add_argument(
+        "--i-understand",
+        default="",
+        help="Required confirmation token for destructive commands.",
+    )
+    args = parser.parse_args(argv)
+
+    if not args.truncate_static:
+        parser.error("No maintenance action selected. Use --truncate-static.")
+    if args.i_understand != "DESTROY_DATA":
+        parser.error("--i-understand must be exactly DESTROY_DATA for --truncate-static.")
+
+    from scytaledroid.Database.db_utils.reset_static import reset_static_analysis_data
+
+    outcome = reset_static_analysis_data(
+        include_harvest=bool(args.include_harvest),
+        truncate_all=True,
+    )
+    status_messages.print_status("Maintenance reset completed.", level="info")
+    for line in outcome.as_lines():
+        print(f"- {line}")
+    return 2 if outcome.failed else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if argv and argv[0] == "static":
         from scytaledroid.StaticAnalysis.cli.flows import headless_run
 
         return int(headless_run.main(argv[1:]))
+    if argv and argv[0] == "db":
+        return _run_db_maintenance(argv[1:])
 
     parser = argparse.ArgumentParser(description="ScytaleDroid CLI")
     parser.add_argument(

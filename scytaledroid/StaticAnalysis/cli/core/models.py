@@ -49,7 +49,7 @@ def _default_persistence_ready() -> bool:
 
 
 def _default_paper_grade_requested() -> bool:
-    return _env_flag("SCYTALEDROID_PAPER_GRADE", True)
+    return _env_flag("SCYTALEDROID_CANONICAL_GRADE", True)
 
 
 def _default_strict_persistence() -> bool:

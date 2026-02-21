@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from scytaledroid.StaticAnalysis.core import StaticAnalysisReport
+from scytaledroid.StaticAnalysis.cli.core import masvs_mapper
 from scytaledroid.Database.db_core import db_queries as core_q
 
 
@@ -46,6 +47,18 @@ def _masvs_status(severity_by_category: Mapping[str, Mapping[str, int]], categor
     if medium > 0 or low > 0 or info > 0:
         return "partial"
     return "pass"
+
+
+def _masvs_mapping_fingerprint() -> tuple[str, str]:
+    canonical = json.dumps(
+        {
+            "rule_to_control": dict(sorted(masvs_mapper.RULE_TO_CONTROL.items())),
+            "status_precedence": dict(sorted(masvs_mapper.STATUS_PRECEDENCE.items())),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return "v1", hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _collect_string_samples(
@@ -133,6 +146,7 @@ def build_static_handoff(
     categories = ("NETWORK", "PLATFORM", "PRIVACY", "STORAGE")
     statuses = {name: _masvs_status(sev_by_cat, name) for name in categories}
     pass_count = sum(1 for value in statuses.values() if value == "pass")
+    mapping_version, mapping_hash = _masvs_mapping_fingerprint()
     mode = _identity_mode(base_apk_sha256=base_apk_sha256, version_code=version_code)
     has_contacts = "android.permission.READ_CONTACTS" in declared or "android.permission.WRITE_CONTACTS" in declared
     has_location = (
@@ -174,8 +188,8 @@ def build_static_handoff(
             "masvs_privacy_status": statuses["PRIVACY"],
             "masvs_storage_status": statuses["STORAGE"],
             "masvs_pass_pct": round((pass_count / 4.0) * 100.0, 2),
-            "masvs_mapping_version": "v1",
-            "masvs_mapping_hash": None,
+            "masvs_mapping_version": mapping_version,
+            "masvs_mapping_hash": mapping_hash,
         },
         "exposure_surface": {
             "exported_activity_count": len(report.exported_components.activities),

@@ -6,6 +6,7 @@ This module mirrors the schema documented in
 
 from __future__ import annotations
 
+import hashlib
 import os
 from collections.abc import Iterable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
@@ -18,6 +19,7 @@ from ...db_queries.static_analysis import string_analysis as queries
 
 _IS_SQLITE = str(db_config.DB_CONFIG.get("engine", "sqlite")).lower() == "sqlite"
 _SAMPLE_BATCH_SIZE = int(os.getenv("SCYTALEDROID_STRING_SAMPLE_BATCH_SIZE", "250"))
+_SECRET_BUCKETS = {"api_keys", "high_entropy"}
 
 SQLITE_CREATE_SUMMARY = """
 CREATE TABLE IF NOT EXISTS static_string_summary (
@@ -338,57 +340,78 @@ def upsert_summary(summary: SummaryRow) -> int | None:
     if _IS_SQLITE:
         payload = _summary_params(summary)
         _require_static_run_id(payload, table="static_string_summary")
-        stmt = """
-        INSERT INTO static_string_summary (
-          package_name, session_stamp, scope_label, static_run_id,
-          endpoints, http_cleartext, api_keys, analytics_ids, cloud_refs, ipc, uris, flags, certs,
-          high_entropy, placeholders_downgraded, placeholders_suppressed, doc_hosts_suppressed,
-          doc_cdns_suppressed, trailing_punct_trimmed, ws_wss_seen, ipv6_seen
-        ) VALUES (
-          %(package_name)s, %(session_stamp)s, %(scope_label)s, %(static_run_id)s,
-          %(endpoints)s, %(http_cleartext)s, %(api_keys)s, %(analytics_ids)s, %(cloud_refs)s, %(ipc)s, %(uris)s, %(flags)s, %(certs)s,
-          %(high_entropy)s, %(placeholders_downgraded)s, %(placeholders_suppressed)s, %(doc_hosts_suppressed)s,
-          %(doc_cdns_suppressed)s, %(trailing_punct_trimmed)s, %(ws_wss_seen)s, %(ipv6_seen)s
-        )
-        ON CONFLICT(package_name, session_stamp, scope_label) DO UPDATE SET
-          static_run_id=excluded.static_run_id,
-          endpoints=excluded.endpoints,
-          http_cleartext=excluded.http_cleartext,
-          api_keys=excluded.api_keys,
-          analytics_ids=excluded.analytics_ids,
-          cloud_refs=excluded.cloud_refs,
-          ipc=excluded.ipc,
-          uris=excluded.uris,
-          flags=excluded.flags,
-          certs=excluded.certs,
-          high_entropy=excluded.high_entropy,
-          placeholders_downgraded=excluded.placeholders_downgraded,
-          placeholders_suppressed=excluded.placeholders_suppressed,
-          doc_hosts_suppressed=excluded.doc_hosts_suppressed,
-          doc_cdns_suppressed=excluded.doc_cdns_suppressed,
-          trailing_punct_trimmed=excluded.trailing_punct_trimmed,
-          ws_wss_seen=excluded.ws_wss_seen,
-          ipv6_seen=excluded.ipv6_seen;
-        """
         try:
             with database_session():
-                try:
-                    run_sql(stmt, payload)
-                except Exception:
-                    fallback_stmt = """
-                    INSERT INTO static_string_summary (
-                      package_name, session_stamp, scope_label, static_run_id,
-                      endpoints, http_cleartext, api_keys, analytics_ids, cloud_refs, ipc, uris, flags, certs,
-                      high_entropy, placeholders_downgraded, placeholders_suppressed, doc_hosts_suppressed,
-                      doc_cdns_suppressed, trailing_punct_trimmed, ws_wss_seen, ipv6_seen
-                    ) VALUES (
-                      %(package_name)s, %(session_stamp)s, %(scope_label)s, %(static_run_id)s,
-                      %(endpoints)s, %(http_cleartext)s, %(api_keys)s, %(analytics_ids)s, %(cloud_refs)s, %(ipc)s, %(uris)s, %(flags)s, %(certs)s,
-                      %(high_entropy)s, %(placeholders_downgraded)s, %(placeholders_suppressed)s, %(doc_hosts_suppressed)s,
-                      %(doc_cdns_suppressed)s, %(trailing_punct_trimmed)s, %(ws_wss_seen)s, %(ipv6_seen)s
+                row = run_sql(
+                    "SELECT id FROM static_string_summary "
+                    "WHERE package_name=%s AND session_stamp=%s AND scope_label=%s "
+                    "ORDER BY id DESC LIMIT 1",
+                    (payload["package_name"], payload["session_stamp"], payload["scope_label"]),
+                    fetch="one",
+                )
+                if row:
+                    run_sql(
+                        """
+                        UPDATE static_string_summary
+                        SET static_run_id=%s,
+                            endpoints=%s,
+                            http_cleartext=%s,
+                            api_keys=%s,
+                            analytics_ids=%s,
+                            cloud_refs=%s,
+                            ipc=%s,
+                            uris=%s,
+                            flags=%s,
+                            certs=%s,
+                            high_entropy=%s,
+                            placeholders_downgraded=%s,
+                            placeholders_suppressed=%s,
+                            doc_hosts_suppressed=%s,
+                            doc_cdns_suppressed=%s,
+                            trailing_punct_trimmed=%s,
+                            ws_wss_seen=%s,
+                            ipv6_seen=%s
+                        WHERE id=%s
+                        """,
+                        (
+                            payload["static_run_id"],
+                            payload["endpoints"],
+                            payload["http_cleartext"],
+                            payload["api_keys"],
+                            payload["analytics_ids"],
+                            payload["cloud_refs"],
+                            payload["ipc"],
+                            payload["uris"],
+                            payload["flags"],
+                            payload["certs"],
+                            payload["high_entropy"],
+                            payload["placeholders_downgraded"],
+                            payload["placeholders_suppressed"],
+                            payload["doc_hosts_suppressed"],
+                            payload["doc_cdns_suppressed"],
+                            payload["trailing_punct_trimmed"],
+                            payload["ws_wss_seen"],
+                            payload["ipv6_seen"],
+                            int(row[0]),
+                        ),
                     )
-                    """
-                    run_sql(fallback_stmt, payload)
+                else:
+                    run_sql(
+                        """
+                        INSERT INTO static_string_summary (
+                          package_name, session_stamp, scope_label, static_run_id,
+                          endpoints, http_cleartext, api_keys, analytics_ids, cloud_refs, ipc, uris, flags, certs,
+                          high_entropy, placeholders_downgraded, placeholders_suppressed, doc_hosts_suppressed,
+                          doc_cdns_suppressed, trailing_punct_trimmed, ws_wss_seen, ipv6_seen
+                        ) VALUES (
+                          %(package_name)s, %(session_stamp)s, %(scope_label)s, %(static_run_id)s,
+                          %(endpoints)s, %(http_cleartext)s, %(api_keys)s, %(analytics_ids)s, %(cloud_refs)s, %(ipc)s, %(uris)s, %(flags)s, %(certs)s,
+                          %(high_entropy)s, %(placeholders_downgraded)s, %(placeholders_suppressed)s, %(doc_hosts_suppressed)s,
+                          %(doc_cdns_suppressed)s, %(trailing_punct_trimmed)s, %(ws_wss_seen)s, %(ipv6_seen)s
+                        )
+                        """,
+                        payload,
+                    )
                 row = run_sql(
                     "SELECT id FROM static_string_summary WHERE package_name=%s AND session_stamp=%s AND scope_label=%s ORDER BY id DESC LIMIT 1",
                     (payload["package_name"], payload["session_stamp"], payload["scope_label"]),
@@ -480,7 +503,7 @@ def replace_samples_full(
                     rank = 1
                     for sample in list(entries):
                         record = _sample_to_mapping(sample)
-                        value_masked = record.get("value_masked") or record.get("value")
+                        value_masked, sample_hash = _safe_masked_value_and_hash(bucket, record)
                         src = record.get("src")
                         tag = record.get("tag")
                         source_type = record.get("source_type")
@@ -488,7 +511,6 @@ def replace_samples_full(
                         provider = record.get("provider")
                         risk_tag = record.get("risk_tag")
                         confidence = record.get("confidence")
-                        sample_hash = record.get("sample_hash")
                         root_domain = record.get("root_domain")
                         resource_name = record.get("resource_name")
                         scheme = record.get("scheme")
@@ -546,7 +568,7 @@ def replace_samples_full(
                 rank = 1
                 for sample in list(entries):
                     record = _sample_to_mapping(sample)
-                    value_masked = record.get("value_masked") or record.get("value")
+                    value_masked, sample_hash = _safe_masked_value_and_hash(bucket, record)
                     src = record.get("src")
                     tag = record.get("tag")
                     source_type = record.get("source_type")
@@ -554,7 +576,6 @@ def replace_samples_full(
                     provider = record.get("provider")
                     risk_tag = record.get("risk_tag")
                     confidence = record.get("confidence")
-                    sample_hash = record.get("sample_hash")
                     root_domain = record.get("root_domain")
                     resource_name = record.get("resource_name")
                     scheme = record.get("scheme")
@@ -629,7 +650,7 @@ def replace_selected_samples(
                     rank = 1
                     for sample in list(entries):
                         record = _sample_to_mapping(sample)
-                        value_masked = record.get("value_masked") or record.get("value")
+                        value_masked, sample_hash = _safe_masked_value_and_hash(bucket, record)
                         src = record.get("src")
                         tag = record.get("tag")
                         source_type = record.get("source_type")
@@ -637,7 +658,6 @@ def replace_selected_samples(
                         provider = record.get("provider")
                         risk_tag = record.get("risk_tag")
                         confidence = record.get("confidence")
-                        sample_hash = record.get("sample_hash")
                         root_domain = record.get("root_domain")
                         resource_name = record.get("resource_name")
                         scheme = record.get("scheme")
@@ -695,7 +715,7 @@ def replace_selected_samples(
                 rank = 1
                 for sample in list(entries):
                     record = _sample_to_mapping(sample)
-                    value_masked = record.get("value_masked") or record.get("value")
+                    value_masked, sample_hash = _safe_masked_value_and_hash(bucket, record)
                     src = record.get("src")
                     tag = record.get("tag")
                     source_type = record.get("source_type")
@@ -703,7 +723,6 @@ def replace_selected_samples(
                     provider = record.get("provider")
                     risk_tag = record.get("risk_tag")
                     confidence = record.get("confidence")
-                    sample_hash = record.get("sample_hash")
                     root_domain = record.get("root_domain")
                     resource_name = record.get("resource_name")
                     scheme = record.get("scheme")
@@ -755,6 +774,20 @@ def _sample_to_mapping(sample: SampleRow) -> MutableMapping[str, object]:
             "scheme": sample.scheme,
         }
     return dict(sample)
+
+
+def _safe_masked_value_and_hash(bucket: str, record: Mapping[str, object]) -> tuple[str | None, str | None]:
+    value_masked = record.get("value_masked")
+    value_raw = record.get("value")
+    sample_hash = record.get("sample_hash")
+    if bucket in _SECRET_BUCKETS:
+        if not value_masked and value_raw is not None:
+            value_masked = "[REDACTED]"
+        if not sample_hash and value_raw is not None:
+            sample_hash = hashlib.sha1(str(value_raw).encode("utf-8")).hexdigest()
+    value_text = str(value_masked) if value_masked is not None else None
+    hash_text = str(sample_hash) if sample_hash is not None else None
+    return value_text, hash_text
 
 
 def seed_doc_hosts(hosts: Iterable[str]) -> int:

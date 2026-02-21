@@ -42,7 +42,7 @@ LEDGER_TABLES = frozenset(
 
 AUTHORITATIVE_RUN_STATES = frozenset({"STARTED", "COMPLETED", "FAILED"})
 
-LEGACY_RUN_STATE_MAP = {
+RUN_STATE_ALIASES = {
     "RUNNING": "STARTED",
     "ABORTED": "FAILED",
     "DONE": "COMPLETED",
@@ -53,13 +53,13 @@ def normalize_run_status(status: str | None) -> str:
     token = str(status or "").strip().upper()
     if token in AUTHORITATIVE_RUN_STATES:
         return token
-    return LEGACY_RUN_STATE_MAP.get(token, "FAILED")
+    return RUN_STATE_ALIASES.get(token, "FAILED")
 
 
 __all__ = [
     "SCIENTIFIC_UOW_TABLES",
     "LEDGER_TABLES",
     "AUTHORITATIVE_RUN_STATES",
-    "LEGACY_RUN_STATE_MAP",
+    "RUN_STATE_ALIASES",
     "normalize_run_status",
 ]

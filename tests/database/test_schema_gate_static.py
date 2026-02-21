@@ -23,6 +23,16 @@ def test_static_schema_gate_requires_vnext_table(monkeypatch):
     required_tables = list(captured.get("required_tables") or [])
     assert "static_permission_risk_vnext" in required_tables
     assert "static_permission_risk" not in required_tables
+    assert "v_static_handoff_v1" in required_tables
+    required_columns = dict(captured.get("required_columns") or {})
+    static_columns = list(required_columns.get("static_analysis_runs") or [])
+    assert "identity_mode" in static_columns
+    assert "identity_conflict_flag" in static_columns
+    assert "static_handoff_hash" in static_columns
+    assert "static_handoff_json_path" in static_columns
+    assert "masvs_mapping_hash" in static_columns
+    assert "run_class" in static_columns
+    assert "non_canonical_reasons" in static_columns
 
 
 def test_static_schema_gate_propagates_module_schema_failure(monkeypatch):

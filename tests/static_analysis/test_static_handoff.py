@@ -67,6 +67,7 @@ def test_static_handoff_hash_is_deterministic(tmp_path, monkeypatch):
     h1 = persist_static_handoff(static_run_id=9, handoff_payload=payload)
     h2 = persist_static_handoff(static_run_id=9, handoff_payload=payload)
     assert h1 == h2
+    assert payload["masvs"]["masvs_mapping_hash"]
     out_path = Path("evidence/static_runs/9/static_handoff.json")
     assert out_path.exists()
 

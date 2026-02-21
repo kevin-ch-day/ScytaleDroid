@@ -264,6 +264,9 @@ def _render_run_results_impl(
         if not persistence_ready:
             grade_label = "EXPERIMENTAL"
             grade_reasons.append("persistence gate failed")
+        if outcome.failures:
+            grade_label = "EXPERIMENTAL"
+            grade_reasons.append("run failures present")
     grade_text = f"Grade: {grade_label}"
     if grade_reasons:
         grade_text += f" ({'; '.join(grade_reasons)})"
@@ -551,6 +554,36 @@ def _render_run_results_impl(
 
         if persist_enabled:
             try:
+                # Ensure persistence always receives the scan-verified identity payload,
+                # even when analyzer metadata serialization omitted these keys.
+                try:
+                    metadata_map = (
+                        dict(base_report.metadata)
+                        if isinstance(getattr(base_report, "metadata", None), Mapping)
+                        else {}
+                    )
+                    if app_result.base_apk_sha256 and not metadata_map.get("base_apk_sha256"):
+                        metadata_map["base_apk_sha256"] = app_result.base_apk_sha256
+                    if app_result.artifact_set_hash and not metadata_map.get("artifact_set_hash"):
+                        metadata_map["artifact_set_hash"] = app_result.artifact_set_hash
+                    if app_result.run_signature and not metadata_map.get("run_signature"):
+                        metadata_map["run_signature"] = app_result.run_signature
+                    if app_result.run_signature_version and not metadata_map.get("run_signature_version"):
+                        metadata_map["run_signature_version"] = app_result.run_signature_version
+                    if app_result.identity_valid is not None and metadata_map.get("identity_valid") is None:
+                        metadata_map["identity_valid"] = bool(app_result.identity_valid)
+                    if app_result.identity_error_reason and not metadata_map.get("identity_error_reason"):
+                        metadata_map["identity_error_reason"] = app_result.identity_error_reason
+                    if getattr(params, "config_hash", None) and not metadata_map.get("config_hash"):
+                        metadata_map["config_hash"] = params.config_hash
+                    if getattr(params, "analysis_version", None) and not metadata_map.get("pipeline_version"):
+                        metadata_map["pipeline_version"] = params.analysis_version
+                    if getattr(params, "catalog_versions", None) and not metadata_map.get("catalog_versions"):
+                        metadata_map["catalog_versions"] = params.catalog_versions
+                    if metadata_map:
+                        base_report.metadata = metadata_map
+                except Exception:
+                    pass
                 outcome_status = persist_run_summary(
                     base_report,
                     string_data,
@@ -565,6 +598,7 @@ def _render_run_results_impl(
                     abort_reason=abort_reason,
                     abort_signal=abort_signal,
                     paper_grade_requested=params.paper_grade_requested,
+                    canonical_action=params.canonical_action,
                     dry_run=params.dry_run,
                 )
                 if outcome_status:
@@ -603,6 +637,14 @@ def _render_run_results_impl(
                             abort_reason="persist_error",
                             abort_signal=abort_signal,
                         )
+                    warning = (
+                        "Aborting post-processing: persistence error "
+                        f"(package={app_result.package_name})."
+                    )
+                    print(status_messages.status(warning, level="error"))
+                    if "PERSISTENCE_ERROR" not in outcome.failures:
+                        outcome.failures.append("PERSISTENCE_ERROR")
+                    break
             except Exception as exc:
                 warning = f"Failed to persist run summary for {app_result.package_name}: {exc}"
                 print(status_messages.status(warning, level="warn"))
@@ -627,6 +669,14 @@ def _render_run_results_impl(
                         abort_reason=exc.__class__.__name__,
                         abort_signal=abort_signal,
                     )
+                failfast = (
+                    "Aborting post-processing: persistence exception "
+                    f"(package={app_result.package_name})."
+                )
+                print(status_messages.status(failfast, level="error"))
+                if "PERSISTENCE_ERROR" not in outcome.failures:
+                    outcome.failures.append("PERSISTENCE_ERROR")
+                break
 
             try:
                 if outcome.aborted:
@@ -668,45 +718,15 @@ def _render_run_results_impl(
         if app_result.static_handoff_hash and isinstance(base_report.metadata, dict):
             base_report.metadata["static_handoff_hash"] = app_result.static_handoff_hash
         if persist_enabled and not app_result.static_run_id:
-            consecutive_missing_run_ids += 1
-            print(
-                status_messages.status(
-                    (
-                        f"NON-PERSISTED (IN-MEMORY ONLY): {app_result.package_name} "
-                        "(static_run_id missing; outputs are non-authoritative)."
-                    ),
-                    level="warn",
-                )
+            warning = (
+                "Aborting post-processing: missing static_run_id "
+                f"(package={app_result.package_name})."
             )
-            try:
-                saved_path = write_baseline_json(
-                    payload,
-                    package=app_result.package_name,
-                    profile=params.profile,
-                    scope=params.scope,
-                )
-                noncanonical_baseline_written_count += 1
-                if not compact_mode:
-                    _emit_detail(
-                        "Saved baseline JSON (NON-PERSISTED / NON-AUTHORITATIVE) "
-                        f"→ {saved_path.name}"
-                    )
-            except Exception as exc:
-                saved_path = None
-                warning = (
-                    f"Failed to write non-canonical baseline JSON for {app_result.package_name}: {exc}"
-                )
-                print(status_messages.status(warning, level="warn"))
-            if consecutive_missing_run_ids >= missing_runid_failfast_threshold:
-                warning = (
-                    "Aborting post-processing: "
-                    f"{consecutive_missing_run_ids} consecutive apps missing static_run_id "
-                    f"(threshold={missing_runid_failfast_threshold})."
-                )
-                print(status_messages.status(warning, level="error"))
-                persistence_errors.append(warning)
-                outcome.failures.append("static_run_id_failfast_threshold")
-                break
+            print(status_messages.status(warning, level="error"))
+            persistence_errors.append("missing_static_run_id")
+            if "PERSISTENCE_ERROR" not in outcome.failures:
+                outcome.failures.append("PERSISTENCE_ERROR")
+            break
         elif persist_enabled:
             consecutive_missing_run_ids = 0
         if persist_enabled and app_result.static_run_id:
