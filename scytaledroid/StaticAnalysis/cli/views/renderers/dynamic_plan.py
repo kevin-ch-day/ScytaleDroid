@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,6 +15,8 @@ from scytaledroid.Utils.evidence_store import filesystem_safe_slug
 from .diagnostics_render import summarise_masvs_inline
 
 PLAN_SCHEMA_VERSION = "v1"
+PAPER_CONTRACT_VERSION = 1
+REASON_TAXONOMY_VERSION = 1
 
 
 def _normalize_domain(value: object) -> str:
@@ -66,6 +69,7 @@ def _validate_plan_schema(plan: Mapping[str, object]) -> None:
         "package_name_lc",
         "version_code",
         "signer_digest",
+        "signer_set_hash",
         "base_apk_sha256",
         "artifact_set_hash",
         "run_signature",
@@ -306,6 +310,16 @@ def _high_value_permissions(declared: Sequence[str]) -> list[str]:
     return sorted({perm for perm in declared if perm in high_value})
 
 
+def _normalize_hex_digest(value: object) -> str | None:
+    raw = str(value or "").strip().lower().replace(":", "")
+    if not raw:
+        return None
+    allowed = set("0123456789abcdef")
+    if any(ch not in allowed for ch in raw):
+        return None
+    return raw
+
+
 def _build_static_features_snapshot(
     *,
     report: StaticAnalysisReport,
@@ -431,7 +445,10 @@ def build_dynamic_plan(
     # on DB schema versions or implicit assumptions.
     generated_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     signatures = sorted(str(value).strip() for value in (report.signatures or ()) if str(value).strip())
-    signer_digest = signatures[0] if signatures else "UNKNOWN"
+    normalized_signers = [value for value in (_normalize_hex_digest(item) for item in signatures) if value]
+    signer_primary = normalized_signers[0] if normalized_signers else None
+    signer_set_hash = sha256(json.dumps(sorted(normalized_signers)).encode("utf-8")).hexdigest() if normalized_signers else "UNKNOWN"
+    signer_digest = signer_set_hash
     package_name_lc = str(metadata.get("package") or "").strip().lower()
 
     plan = {
@@ -448,6 +465,8 @@ def build_dynamic_plan(
             "version_name": metadata.get("version_name"),
             "version_code": metadata.get("version_code"),
             "signer_digest": signer_digest,
+            "signer_set_hash": signer_set_hash,
+            "signer_primary_digest": signer_primary,
             "base_apk_sha256": metadata.get("base_apk_sha256"),
             "artifact_set_hash": metadata.get("artifact_set_hash"),
             "run_signature": metadata.get("run_signature"),
@@ -458,6 +477,8 @@ def build_dynamic_plan(
             "identity_valid": metadata.get("identity_valid"),
             "identity_error_reason": metadata.get("identity_error_reason"),
         },
+        "paper_contract_version": PAPER_CONTRACT_VERSION,
+        "reason_taxonomy_version": REASON_TAXONOMY_VERSION,
         "exported_components": {
             "activities": list(exported.activities),
             "services": list(exported.services),

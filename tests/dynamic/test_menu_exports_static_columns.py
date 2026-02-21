@@ -84,6 +84,12 @@ def _header(path: Path) -> list[str]:
         return next(reader)
 
 
+def _contract_headers(name: str) -> list[str]:
+    contract_path = Path("docs/contracts/paper_export_schema_v1.json")
+    payload = json.loads(contract_path.read_text(encoding="utf-8"))
+    return list(payload["files"][name]["ordered_columns"])
+
+
 def test_export_dynamic_run_summary_includes_static_columns(tmp_path: Path, monkeypatch) -> None:
     output_root = tmp_path / "output"
     data_root = tmp_path / "data"
@@ -95,17 +101,7 @@ def test_export_dynamic_run_summary_includes_static_columns(tmp_path: Path, monk
     out = export_dynamic_run_summary_csv()
     assert out is not None
     header = _header(out)
-    for required in (
-        "package_name_lc",
-        "version_code",
-        "base_apk_sha256",
-        "static_risk_score",
-        "static_risk_band",
-        "masvs_total_score",
-        "perm_dangerous_n",
-        "nsc_cleartext_permitted",
-    ):
-        assert required in header
+    assert header == _contract_headers("dynamic_run_summary.csv")
 
 
 def test_export_pcap_features_includes_static_columns(tmp_path: Path, monkeypatch) -> None:
@@ -119,14 +115,4 @@ def test_export_pcap_features_includes_static_columns(tmp_path: Path, monkeypatc
     out = export_pcap_features_csv()
     assert out is not None
     header = _header(out)
-    for required in (
-        "package_name_lc",
-        "version_code",
-        "base_apk_sha256",
-        "static_risk_score",
-        "static_risk_band",
-        "masvs_total_score",
-        "perm_dangerous_n",
-        "nsc_cleartext_permitted",
-    ):
-        assert required in header
+    assert header == _contract_headers("pcap_features.csv")

@@ -4,6 +4,10 @@ from __future__ import annotations
 
 ML_SCHEMA_VERSION = 1
 ML_SCHEMA_LABEL = f"v{ML_SCHEMA_VERSION}"
+PAPER_CONTRACT_VERSION = 1
+REASON_TAXONOMY_VERSION = 1
+FREEZE_CONTRACT_VERSION = 1
+PAPER_EXPORT_SCHEMA_VERSION = 1
 
 # Report/bundle schema (paper-facing). Bump only when table/figure schemas or formatting contracts change.
 # v2: adds Table 7 and clarifies Table 5 column naming (`finding_count_*`).

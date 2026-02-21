@@ -39,6 +39,16 @@ _REQUIRED_RELATIVE_INPUTS = (
 )
 
 
+def _normalize_hex(value: object, *, n: int) -> str | None:
+    raw = str(value or "").strip().lower()
+    if not raw or len(raw) != int(n):
+        return None
+    allowed = set("0123456789abcdef")
+    if any(ch not in allowed for ch in raw):
+        return None
+    return raw
+
+
 def _read_json(path: Path) -> dict[str, Any] | None:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -101,6 +111,7 @@ def build_dataset_freeze_manifest(
     # This avoids relying on per-artifact hashes inside run_manifest.json (which are not
     # part of the Paper #2 contract and may be missing for older runs).
     run_checksums: dict[str, dict[str, Any]] = {}
+    identity_index: dict[tuple[str, str, str, str, str], str] = {}
 
     host_tool_versions: dict[str, set[str]] = {"tshark": set(), "capinfos": set()}
 
@@ -196,6 +207,20 @@ def build_dataset_freeze_manifest(
 
             ds = mf.get("dataset") if isinstance(mf.get("dataset"), dict) else {}
             op = mf.get("operator") if isinstance(mf.get("operator"), dict) else {}
+            plan = _read_json(run_dir / "inputs/static_dynamic_plan.json") or {}
+            run_identity = plan.get("run_identity") if isinstance(plan.get("run_identity"), dict) else {}
+            pkg_lc = str(run_identity.get("package_name_lc") or plan.get("package_name") or pkg).strip().lower()
+            version_code = str(run_identity.get("version_code") or plan.get("version_code") or "").strip()
+            base_sha = _normalize_hex(run_identity.get("base_apk_sha256"), n=64)
+            artifact_set_hash = _normalize_hex(run_identity.get("artifact_set_hash"), n=64)
+            signer_set_hash = _normalize_hex(run_identity.get("signer_set_hash") or run_identity.get("signer_digest"), n=64)
+            if not (pkg_lc and version_code and base_sha and artifact_set_hash and signer_set_hash):
+                raise RuntimeError(f"FREEZE_BAD_IDENTITY:{rid}")
+            identity_key = (pkg_lc, version_code, base_sha, artifact_set_hash, signer_set_hash)
+            existing = identity_index.get(identity_key)
+            if existing and existing != rid:
+                raise RuntimeError(f"FREEZE_DUPLICATE_IDENTITY:{existing},{rid}")
+            identity_index[identity_key] = rid
             run_checksums[rid] = {
                 "package_name": pkg,
                 "run_profile": str(op.get("run_profile") or ""),
@@ -208,6 +233,13 @@ def build_dataset_freeze_manifest(
                     "sha256": pcap_sha256,
                     "size_bytes": pcap_size_bytes,
                 },
+                "identity": {
+                    "package_name_lc": pkg_lc,
+                    "version_code": version_code,
+                    "base_apk_sha256": base_sha,
+                    "artifact_set_hash": artifact_set_hash,
+                    "signer_set_hash": signer_set_hash,
+                },
             }
 
     if missing_inputs:
@@ -216,6 +248,9 @@ def build_dataset_freeze_manifest(
 
     return {
         "artifact_type": "dataset_freeze",
+        "freeze_contract_version": int(paper_config.FREEZE_CONTRACT_VERSION),
+        "paper_contract_version": int(paper_config.PAPER_CONTRACT_VERSION),
+        "reason_taxonomy_version": int(paper_config.REASON_TAXONOMY_VERSION),
         "dataset_id": "Research Dataset Alpha",
         "dataset_version": "paper2_v1",
         "created_at_utc": datetime.now(UTC).isoformat(),

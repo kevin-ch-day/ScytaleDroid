@@ -152,6 +152,8 @@ def _write_cohort_status(
         "ML_SKIPPED_MISSING_BASE_APK_SHA256",
         "ML_SKIPPED_MISSING_STATIC_FEATURES",
         "ML_SKIPPED_APK_CHANGED_DURING_RUN",
+        "ML_SKIPPED_BAD_IDENTITY_HASH",
+        "ML_SKIPPED_INCOMPLETE_ARTIFACT_SET",
     }
     if reason_code not in allowed:
         raise RuntimeError(f"Unknown paper exclusion reason code: {reason_code}")
@@ -159,6 +161,8 @@ def _write_cohort_status(
     out_dir.mkdir(parents=True, exist_ok=True)
     payload: dict[str, Any] = {
         "ml_schema_version": int(config.ML_SCHEMA_VERSION),
+        "paper_contract_version": int(paper_config.PAPER_CONTRACT_VERSION),
+        "reason_taxonomy_version": int(paper_config.REASON_TAXONOMY_VERSION),
         "run_id": str(run_id),
         "package_name": package_name,
         "status": status,
@@ -166,6 +170,14 @@ def _write_cohort_status(
         "gates": {
             "min_windows_baseline": int(min_windows_baseline if min_windows_baseline is not None else config.MIN_WINDOWS_BASELINE),
             "min_pcap_bytes": int(min_pcap_bytes if min_pcap_bytes is not None else config.MIN_PCAP_BYTES_FALLBACK),
+        },
+        "identity": {
+            "identity_checked_at_start_utc": None,
+            "identity_checked_at_end_utc": None,
+            "identity_checked_at_gate_utc": None,
+            "identity_start": None,
+            "identity_end": None,
+            "identity_gate": None,
         },
     }
     if details:
@@ -293,6 +305,18 @@ def _paper_identity_consistency_issue(inputs: RunInputs) -> tuple[str | None, di
     identity = inputs.plan.get("run_identity") if isinstance(inputs.plan.get("run_identity"), dict) else {}
     if not isinstance(identity, dict):
         return "ML_SKIPPED_MISSING_STATIC_LINK", {"reason": "missing_run_identity"}
+    base_sha = _normalize_hex_hash(identity.get("base_apk_sha256"), expected_len=64)
+    static_handoff_hash = _normalize_hex_hash(identity.get("static_handoff_hash"), expected_len=64)
+    artifact_set_hash = _normalize_hex_hash(identity.get("artifact_set_hash"), expected_len=64)
+    signer_set_hash = _normalize_hex_hash(identity.get("signer_set_hash") or identity.get("signer_digest"), expected_len=64)
+    if not base_sha:
+        return "ML_SKIPPED_BAD_IDENTITY_HASH", {"field": "base_apk_sha256"}
+    if not static_handoff_hash:
+        return "ML_SKIPPED_BAD_IDENTITY_HASH", {"field": "static_handoff_hash"}
+    if not artifact_set_hash:
+        return "ML_SKIPPED_BAD_IDENTITY_HASH", {"field": "artifact_set_hash"}
+    if not signer_set_hash:
+        return "ML_SKIPPED_BAD_IDENTITY_HASH", {"field": "signer_set_hash"}
 
     package = str(identity.get("package_name_lc") or inputs.plan.get("package_name") or "").strip().lower()
     version_code = str(identity.get("version_code") or inputs.plan.get("version_code") or "").strip()
@@ -316,6 +340,16 @@ def _paper_identity_consistency_issue(inputs: RunInputs) -> tuple[str | None, di
             "observed_version_code": target_version,
         }
     return None, None
+
+
+def _normalize_hex_hash(value: object, *, expected_len: int) -> str | None:
+    raw = str(value or "").strip().lower()
+    if not raw or len(raw) != int(expected_len):
+        return None
+    allowed = set("0123456789abcdef")
+    if any(ch not in allowed for ch in raw):
+        return None
+    return raw
 
 
 def _write_json_if_missing(path: Path, payload: dict[str, Any]) -> None:

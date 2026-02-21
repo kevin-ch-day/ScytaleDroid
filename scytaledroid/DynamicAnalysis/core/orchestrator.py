@@ -211,6 +211,18 @@ class DynamicRunOrchestrator:
         target_snapshot = target_manager.prepare(run_ctx)
         if target_snapshot.metadata:
             manifest.target.update(target_snapshot.metadata)
+            plan_identity = plan_payload.get("run_identity") if isinstance(plan_payload, dict) and isinstance(plan_payload.get("run_identity"), dict) else {}
+            manifest.target["identity_checked_at_start_utc"] = self._now()
+            manifest.target["identity_start"] = {
+                "package_name_lc": str(plan_identity.get("package_name_lc") or plan_payload.get("package_name") or "").strip().lower() if isinstance(plan_payload, dict) else None,
+                "version_code": str(plan_identity.get("version_code") or plan_payload.get("version_code") or "").strip() if isinstance(plan_payload, dict) else None,
+                "base_apk_sha256": plan_identity.get("base_apk_sha256"),
+                "artifact_set_hash": plan_identity.get("artifact_set_hash"),
+                "signer_set_hash": plan_identity.get("signer_set_hash") or plan_identity.get("signer_digest"),
+                "static_handoff_hash": plan_identity.get("static_handoff_hash"),
+                "observed_package_name_lc": str((target_snapshot.metadata or {}).get("package_name") or "").strip().lower(),
+                "observed_version_code": str((target_snapshot.metadata or {}).get("version_code") or "").strip() or None,
+            }
         manifest.add_artifacts(target_snapshot.artifacts)
         event_logger.log("target_prepared", {"artifact_count": len(target_snapshot.artifacts)})
         self._emit_marker(run_ctx, "RUN_START")
@@ -389,6 +401,16 @@ class DynamicRunOrchestrator:
 
         manifest.add_artifacts(observer_artifacts)
         target_finalize = target_manager.finalize(run_ctx)
+        if target_finalize.metadata:
+            manifest.target.update(target_finalize.metadata)
+        identity_end_pkg = str((target_finalize.metadata or {}).get("package_name_end") or "").strip().lower()
+        identity_end_ver = str((target_finalize.metadata or {}).get("version_code_end") or "").strip() or None
+        if identity_end_pkg or identity_end_ver:
+            manifest.target["identity_checked_at_end_utc"] = self._now()
+            manifest.target["identity_end"] = {
+                "observed_package_name_lc": identity_end_pkg or None,
+                "observed_version_code": identity_end_ver,
+            }
         manifest.add_artifacts(target_finalize.artifacts)
         event_logger.log("target_finalized", {"artifact_count": len(target_finalize.artifacts)})
         env_finalize = env_manager.finalize(run_ctx)
@@ -591,6 +613,17 @@ class DynamicRunOrchestrator:
                 "static_plan_summary": self._summarize_plan(plan_payload),
                 "static_context_tags": static_tags,
                 "static_context": static_context,
+                "run_identity": (
+                    dict(plan_payload.get("run_identity"))
+                    if isinstance(plan_payload, dict) and isinstance(plan_payload.get("run_identity"), dict)
+                    else None
+                ),
+                "identity_checked_at_start_utc": None,
+                "identity_checked_at_end_utc": None,
+                "identity_checked_at_gate_utc": None,
+                "identity_start": None,
+                "identity_end": None,
+                "identity_gate": None,
             },
             environment={
                 "device_serial": run_ctx.device_serial,

@@ -47,6 +47,29 @@ class TargetManager:
         if not run_ctx.device_serial:
             return TargetSnapshot(metadata={}, artifacts=[])
         artifacts: list[ArtifactRecord] = []
+        metadata: dict[str, Any] = {}
+        package_info, package_artifact = self._capture_package_info(run_ctx)
+        metadata.update(
+            {
+                "package_name_end": package_info.get("package_name"),
+                "version_name_end": package_info.get("version_name"),
+                "version_code_end": package_info.get("version_code"),
+                "apk_paths_end": package_info.get("apk_paths"),
+                "package_info_end_artifact": package_info.get("package_info_artifact"),
+            }
+        )
+        artifacts.append(
+            ArtifactRecord(
+                relative_path=package_artifact.relative_path,
+                type="target_package_info_end",
+                sha256=package_artifact.sha256,
+                size_bytes=package_artifact.size_bytes,
+                produced_by=package_artifact.produced_by,
+                origin=package_artifact.origin,
+                device_path=package_artifact.device_path,
+                pull_status=package_artifact.pull_status,
+            )
+        )
         stop_output = self._force_stop_app(run_ctx)
         if stop_output:
             artifacts.append(
@@ -56,7 +79,7 @@ class TargetManager:
                     "target_stop_output",
                 )
             )
-        return TargetSnapshot(metadata={}, artifacts=artifacts)
+        return TargetSnapshot(metadata=metadata, artifacts=artifacts)
 
     def _capture_package_info(self, run_ctx: RunContext) -> tuple[dict[str, Any], ArtifactRecord]:
         package_dump = adb_shell.run_shell(

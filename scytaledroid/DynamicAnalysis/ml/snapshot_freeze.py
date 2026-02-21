@@ -31,6 +31,16 @@ _REQUIRED_RELATIVE_INPUTS = (
 )
 
 
+def _normalize_hex(value: object, *, n: int) -> str | None:
+    raw = str(value or "").strip().lower()
+    if not raw or len(raw) != int(n):
+        return None
+    allowed = set("0123456789abcdef")
+    if any(ch not in allowed for ch in raw):
+        return None
+    return raw
+
+
 def _read_json(path: Path) -> dict[str, Any] | None:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -91,6 +101,7 @@ def build_snapshot_freeze_manifest(
 
     missing_inputs: dict[str, list[str]] = {}
     run_checksums: dict[str, dict[str, Any]] = {}
+    identity_index: dict[tuple[str, str, str, str, str], str] = {}
 
     for rid in included_run_ids:
         # Prefer the evidence-pack path recorded in the selection manifest (authoritative).
@@ -152,6 +163,27 @@ def build_snapshot_freeze_manifest(
                 "size_bytes": pcap_size_bytes,
             },
         }
+        plan = _read_json(run_dir / "inputs/static_dynamic_plan.json") or {}
+        run_identity = plan.get("run_identity") if isinstance(plan.get("run_identity"), dict) else {}
+        pkg_lc = str(run_identity.get("package_name_lc") or plan.get("package_name") or meta.get("package_name") or "").strip().lower()
+        version_code = str(run_identity.get("version_code") or plan.get("version_code") or "").strip()
+        base_sha = _normalize_hex(run_identity.get("base_apk_sha256"), n=64)
+        artifact_set_hash = _normalize_hex(run_identity.get("artifact_set_hash"), n=64)
+        signer_set_hash = _normalize_hex(run_identity.get("signer_set_hash") or run_identity.get("signer_digest"), n=64)
+        if not (pkg_lc and version_code and base_sha and artifact_set_hash and signer_set_hash):
+            raise RuntimeError(f"FREEZE_BAD_IDENTITY:{rid}")
+        identity_key = (pkg_lc, version_code, base_sha, artifact_set_hash, signer_set_hash)
+        existing = identity_index.get(identity_key)
+        if existing and existing != rid:
+            raise RuntimeError(f"FREEZE_DUPLICATE_IDENTITY:{existing},{rid}")
+        identity_index[identity_key] = rid
+        run_checksums[rid]["identity"] = {
+            "package_name_lc": pkg_lc,
+            "version_code": version_code,
+            "base_apk_sha256": base_sha,
+            "artifact_set_hash": artifact_set_hash,
+            "signer_set_hash": signer_set_hash,
+        }
 
     if missing_inputs:
         raise RuntimeError(f"Missing required inputs for {len(missing_inputs)} run(s): {missing_inputs}")
@@ -162,6 +194,9 @@ def build_snapshot_freeze_manifest(
     min_pcap_bytes = int(paper_config.MIN_PCAP_BYTES if paper_mode else operational_config.MIN_PCAP_BYTES_FALLBACK)
     return {
         "artifact_type": "snapshot_freeze",
+        "freeze_contract_version": int(paper_config.FREEZE_CONTRACT_VERSION if paper_mode else 1),
+        "paper_contract_version": int(paper_config.PAPER_CONTRACT_VERSION if paper_mode else 0),
+        "reason_taxonomy_version": int(paper_config.REASON_TAXONOMY_VERSION if paper_mode else 0),
         "created_at_utc": datetime.now(UTC).isoformat(),
         "tool_semver": app_config.APP_VERSION,
         "tool_git_commit": _git_commit_hash(repo_root),

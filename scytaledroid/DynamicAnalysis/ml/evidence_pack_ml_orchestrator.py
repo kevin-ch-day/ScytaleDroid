@@ -57,6 +57,8 @@ PAPER_EXCLUSION_REASON_CODES = {
     "ML_SKIPPED_MISSING_BASE_APK_SHA256",
     "ML_SKIPPED_MISSING_STATIC_FEATURES",
     "ML_SKIPPED_APK_CHANGED_DURING_RUN",
+    "ML_SKIPPED_BAD_IDENTITY_HASH",
+    "ML_SKIPPED_INCOMPLETE_ARTIFACT_SET",
 }
 
 
@@ -2149,10 +2151,23 @@ def _resolve_paper_identity_contract(app_runs: list[RunInputs]) -> tuple[str | N
     missing_static_link_run_ids: list[str] = []
     missing_static_features: dict[str, list[str]] = {}
     apk_change_mismatches: dict[str, dict[str, str]] = {}
+    bad_identity_hashes: dict[str, str] = {}
+    artifact_set_hash_values: set[str] = set()
+    signer_set_hash_values: set[str] = set()
     for r in app_runs:
         ident = r.plan.get("run_identity") if isinstance(r.plan, dict) and isinstance(r.plan.get("run_identity"), dict) else {}
-        base_sha = str(ident.get("base_apk_sha256") or "").strip().lower() if isinstance(ident, dict) else ""
-        static_handoff_hash = str(ident.get("static_handoff_hash") or "").strip().lower() if isinstance(ident, dict) else ""
+        base_sha = _normalize_hex_hash(ident.get("base_apk_sha256"), expected_len=64) if isinstance(ident, dict) else None
+        static_handoff_hash = _normalize_hex_hash(ident.get("static_handoff_hash"), expected_len=64) if isinstance(ident, dict) else None
+        artifact_set_hash = _normalize_hex_hash(ident.get("artifact_set_hash"), expected_len=64) if isinstance(ident, dict) else None
+        signer_set_hash = _normalize_hex_hash(ident.get("signer_set_hash") or ident.get("signer_digest"), expected_len=64) if isinstance(ident, dict) else None
+        if base_sha is None:
+            bad_identity_hashes[str(r.run_id)] = "base_apk_sha256"
+        if static_handoff_hash is None:
+            bad_identity_hashes[str(r.run_id)] = "static_handoff_hash"
+        if artifact_set_hash is None:
+            bad_identity_hashes[str(r.run_id)] = "artifact_set_hash"
+        if signer_set_hash is None:
+            bad_identity_hashes[str(r.run_id)] = "signer_set_hash"
         if not base_sha:
             missing_base_sha_run_ids.append(str(r.run_id))
         else:
@@ -2161,6 +2176,10 @@ def _resolve_paper_identity_contract(app_runs: list[RunInputs]) -> tuple[str | N
             missing_static_link_run_ids.append(str(r.run_id))
         else:
             static_handoff_values.add(static_handoff_hash)
+        if artifact_set_hash:
+            artifact_set_hash_values.add(artifact_set_hash)
+        if signer_set_hash:
+            signer_set_hash_values.add(signer_set_hash)
         static_features = (
             r.plan.get("static_features")
             if isinstance(r.plan, dict) and isinstance(r.plan.get("static_features"), dict)
@@ -2198,6 +2217,8 @@ def _resolve_paper_identity_contract(app_runs: list[RunInputs]) -> tuple[str | N
 
     if missing_base_sha_run_ids:
         return None, "ML_SKIPPED_MISSING_BASE_APK_SHA256", {"run_ids": sorted(missing_base_sha_run_ids)}
+    if bad_identity_hashes:
+        return None, "ML_SKIPPED_BAD_IDENTITY_HASH", {"runs": bad_identity_hashes}
     if missing_static_link_run_ids:
         return None, "ML_SKIPPED_MISSING_STATIC_LINK", {"run_ids": sorted(set(missing_static_link_run_ids))}
     if missing_static_features:
@@ -2208,7 +2229,21 @@ def _resolve_paper_identity_contract(app_runs: list[RunInputs]) -> tuple[str | N
         return None, "ML_SKIPPED_MISSING_STATIC_LINK", {"conflicting_base_apk_sha256": sorted(base_sha_values)}
     if len(static_handoff_values) != 1:
         return None, "ML_SKIPPED_MISSING_STATIC_LINK", {"conflicting_static_handoff_hash": sorted(static_handoff_values)}
+    if len(artifact_set_hash_values) != 1:
+        return None, "ML_SKIPPED_APK_CHANGED_DURING_RUN", {"conflicting_artifact_set_hash": sorted(artifact_set_hash_values)}
+    if len(signer_set_hash_values) != 1:
+        return None, "ML_SKIPPED_APK_CHANGED_DURING_RUN", {"conflicting_signer_set_hash": sorted(signer_set_hash_values)}
     return f"base_apk_sha256:{next(iter(base_sha_values))}", None, None
+
+
+def _normalize_hex_hash(value: object, *, expected_len: int) -> str | None:
+    raw = str(value or "").strip().lower()
+    if not raw or len(raw) != int(expected_len):
+        return None
+    allowed = set("0123456789abcdef")
+    if any(ch not in allowed for ch in raw):
+        return None
+    return raw
 
 
 def _write_cohort_status(
@@ -2222,6 +2257,14 @@ def _write_cohort_status(
     paths.output_dir.mkdir(parents=True, exist_ok=True)
     payload: dict[str, Any] = {
         "ml_schema_version": int(config.ML_SCHEMA_VERSION),
+        "paper_contract_version": int(config.PAPER_CONTRACT_VERSION),
+        "reason_taxonomy_version": int(config.REASON_TAXONOMY_VERSION),
+        "freeze_contract_version": int(config.FREEZE_CONTRACT_VERSION),
+        "plan_schema_version": (
+            str(run.plan.get("plan_schema_version") or "").strip()
+            if isinstance(run.plan, dict)
+            else None
+        ),
         "run_id": run.run_id,
         "package_name": run.package_name,
         "status": status,
@@ -2234,6 +2277,22 @@ def _write_cohort_status(
     _validate_paper_reason_code(reason_code)
     if details:
         payload["details"] = details
+    target = run.manifest.get("target") if isinstance(run.manifest, dict) and isinstance(run.manifest.get("target"), dict) else {}
+    run_identity = run.plan.get("run_identity") if isinstance(run.plan, dict) and isinstance(run.plan.get("run_identity"), dict) else {}
+    payload["identity"] = {
+        "package_name_lc": run_identity.get("package_name_lc") or run.plan.get("package_name"),
+        "version_code": run_identity.get("version_code") or run.plan.get("version_code"),
+        "base_apk_sha256": run_identity.get("base_apk_sha256"),
+        "artifact_set_hash": run_identity.get("artifact_set_hash"),
+        "signer_set_hash": run_identity.get("signer_set_hash") or run_identity.get("signer_digest"),
+        "static_handoff_hash": run_identity.get("static_handoff_hash"),
+        "identity_checked_at_start_utc": target.get("identity_checked_at_start_utc"),
+        "identity_checked_at_end_utc": target.get("identity_checked_at_end_utc"),
+        "identity_checked_at_gate_utc": None,
+        "identity_start": target.get("identity_start"),
+        "identity_end": target.get("identity_end"),
+        "identity_gate": None,
+    }
     paths.cohort_status_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
     _persist_paper_cohort_status_db(
         run_id=str(run.run_id),
@@ -2242,6 +2301,7 @@ def _write_cohort_status(
         reason_code=reason_code,
         details=payload.get("details"),
         plan_identity=run.plan.get("run_identity") if isinstance(run.plan, dict) else None,
+        cohort_payload=payload,
     )
 
 
@@ -2278,10 +2338,40 @@ def _persist_paper_cohort_status_db(
     reason_code: str | None,
     details: dict[str, Any] | None,
     plan_identity: dict[str, Any] | None,
+    cohort_payload: dict[str, Any] | None,
 ) -> None:
     ident = plan_identity if isinstance(plan_identity, dict) else {}
     base_sha = str(ident.get("base_apk_sha256") or "").strip().lower() or None
     static_handoff_hash = str(ident.get("static_handoff_hash") or "").strip().lower() or None
+    artifact_set_hash = str(ident.get("artifact_set_hash") or "").strip().lower() or None
+    signer_set_hash = str(ident.get("signer_set_hash") or ident.get("signer_digest") or "").strip().lower() or None
+    signer_primary_digest = str(ident.get("signer_primary_digest") or "").strip().lower() or None
+    package_name_lc = str(ident.get("package_name_lc") or package_name or "").strip().lower() or None
+    version_name = str(ident.get("version_name") or "").strip() or None
+    version_code_raw = ident.get("version_code")
+    try:
+        version_code = int(version_code_raw) if version_code_raw not in (None, "") else None
+    except Exception:
+        version_code = None
+    identity_payload = (
+        cohort_payload.get("identity")
+        if isinstance(cohort_payload, dict) and isinstance(cohort_payload.get("identity"), dict)
+        else {}
+    )
+    plan_schema_version = None
+    if isinstance(cohort_payload, dict):
+        plan_schema_version = str(cohort_payload.get("plan_schema_version") or "").strip() or None
+    if plan_schema_version is None:
+        plan_schema_version = "v1"
+    paper_contract_version = int(config.PAPER_CONTRACT_VERSION)
+    reason_taxonomy_version = int(config.REASON_TAXONOMY_VERSION)
+    freeze_contract_version = int(config.FREEZE_CONTRACT_VERSION)
+    ml_schema_version = int(config.ML_SCHEMA_VERSION)
+    identity_check_status = "PASS" if status == "CANONICAL_PAPER_ELIGIBLE" else "FAIL"
+    checked_start = identity_payload.get("identity_checked_at_start_utc")
+    checked_end = identity_payload.get("identity_checked_at_end_utc")
+    checked_gate = identity_payload.get("identity_checked_at_gate_utc")
+    paper_eligible = 1 if status == "CANONICAL_PAPER_ELIGIBLE" else 0
     freeze_manifest_sha256 = None
     if isinstance(details, dict):
         freeze_manifest_sha256 = str(details.get("freeze_manifest_sha256") or "").strip().lower() or None
@@ -2289,13 +2379,32 @@ def _persist_paper_cohort_status_db(
         core_q.run_sql_write(
             """
             INSERT INTO analysis_dynamic_cohort_status
-              (dynamic_run_id, package_name, base_apk_sha256, static_handoff_hash, freeze_manifest_sha256, status, reason_code, details_json, created_at_utc, updated_at_utc)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,UTC_TIMESTAMP(),UTC_TIMESTAMP())
+              (dynamic_run_id, package_name, package_name_lc, version_name, version_code, base_apk_sha256, artifact_set_hash, signer_set_hash, signer_primary_digest, static_handoff_hash, freeze_manifest_sha256, paper_contract_version, reason_taxonomy_version, plan_schema_version, freeze_contract_version, ml_schema_version, identity_check_status, identity_checked_at_start_utc, identity_checked_at_end_utc, identity_checked_at_gate_utc, identity_start_json, identity_end_json, identity_gate_json, paper_eligible, status, reason_code, details_json, created_at_utc, updated_at_utc)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,UTC_TIMESTAMP(),UTC_TIMESTAMP())
             ON DUPLICATE KEY UPDATE
               package_name=VALUES(package_name),
+              package_name_lc=VALUES(package_name_lc),
+              version_name=VALUES(version_name),
+              version_code=VALUES(version_code),
               base_apk_sha256=VALUES(base_apk_sha256),
+              artifact_set_hash=VALUES(artifact_set_hash),
+              signer_set_hash=VALUES(signer_set_hash),
+              signer_primary_digest=VALUES(signer_primary_digest),
               static_handoff_hash=VALUES(static_handoff_hash),
               freeze_manifest_sha256=VALUES(freeze_manifest_sha256),
+              paper_contract_version=VALUES(paper_contract_version),
+              reason_taxonomy_version=VALUES(reason_taxonomy_version),
+              plan_schema_version=VALUES(plan_schema_version),
+              freeze_contract_version=VALUES(freeze_contract_version),
+              ml_schema_version=VALUES(ml_schema_version),
+              identity_check_status=VALUES(identity_check_status),
+              identity_checked_at_start_utc=VALUES(identity_checked_at_start_utc),
+              identity_checked_at_end_utc=VALUES(identity_checked_at_end_utc),
+              identity_checked_at_gate_utc=VALUES(identity_checked_at_gate_utc),
+              identity_start_json=VALUES(identity_start_json),
+              identity_end_json=VALUES(identity_end_json),
+              identity_gate_json=VALUES(identity_gate_json),
+              paper_eligible=VALUES(paper_eligible),
               status=VALUES(status),
               reason_code=VALUES(reason_code),
               details_json=VALUES(details_json),
@@ -2304,9 +2413,28 @@ def _persist_paper_cohort_status_db(
             (
                 run_id,
                 package_name or None,
+                package_name_lc,
+                version_name,
+                version_code,
                 base_sha,
+                artifact_set_hash,
+                signer_set_hash,
+                signer_primary_digest,
                 static_handoff_hash,
                 freeze_manifest_sha256,
+                paper_contract_version,
+                reason_taxonomy_version,
+                plan_schema_version,
+                freeze_contract_version,
+                ml_schema_version,
+                identity_check_status,
+                _to_mysql_dt(checked_start),
+                _to_mysql_dt(checked_end),
+                _to_mysql_dt(checked_gate),
+                json.dumps(identity_payload.get("identity_start"), sort_keys=True) if identity_payload.get("identity_start") is not None else None,
+                json.dumps(identity_payload.get("identity_end"), sort_keys=True) if identity_payload.get("identity_end") is not None else None,
+                json.dumps(identity_payload.get("identity_gate"), sort_keys=True) if identity_payload.get("identity_gate") is not None else None,
+                paper_eligible,
                 status,
                 reason_code,
                 json.dumps(details, sort_keys=True) if isinstance(details, dict) else None,
@@ -2316,6 +2444,19 @@ def _persist_paper_cohort_status_db(
     except Exception:
         # DB persistence is best-effort here; gate command enforces paper eligibility later.
         pass
+
+
+def _to_mysql_dt(value: object) -> str | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    if raw.endswith("Z"):
+        raw = raw[:-1]
+    if "T" in raw:
+        raw = raw.replace("T", " ")
+    if len(raw) >= 19:
+        return raw[:19]
+    return None
 
 
 __all__ = ["MlRunStats", "run_ml_on_evidence_packs"]
