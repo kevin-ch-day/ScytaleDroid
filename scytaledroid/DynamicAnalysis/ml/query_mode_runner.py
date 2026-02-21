@@ -150,6 +150,8 @@ def _write_cohort_status(
         "ML_SKIPPED_BAD_FREEZE_CHECKSUM",
         "ML_SKIPPED_MISSING_STATIC_LINK",
         "ML_SKIPPED_MISSING_BASE_APK_SHA256",
+        "ML_SKIPPED_MISSING_STATIC_FEATURES",
+        "ML_SKIPPED_APK_CHANGED_DURING_RUN",
     }
     if reason_code not in allowed:
         raise RuntimeError(f"Unknown paper exclusion reason code: {reason_code}")
@@ -246,6 +248,74 @@ def _transport_ratios_from_inputs(inputs: RunInputs) -> tuple[float | None, floa
     tcp_ratio = float(tcp_b) / total if total > 0 else None
     udp_ratio = float(udp_b) / total if total > 0 else None
     return _clamp01(tls_ratio), _clamp01(quic_ratio), _clamp01(tcp_ratio), _clamp01(udp_ratio)
+
+
+def _extract_static_features_snapshot(plan: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(plan, dict):
+        return {}
+    sf = plan.get("static_features") if isinstance(plan.get("static_features"), dict) else {}
+    if not isinstance(sf, dict):
+        return {}
+    out: dict[str, Any] = {}
+    out["static_features_schema_version"] = sf.get("schema_version")
+    for key in (
+        "permissions_total",
+        "high_value_permission_count",
+        "nsc_cleartext_domain_count",
+        "masvs_control_count_total",
+    ):
+        try:
+            if sf.get(key) is not None:
+                out[key] = int(sf.get(key))
+        except Exception:
+            continue
+    for key in ("uses_webview",):
+        if sf.get(key) is not None:
+            out[key] = bool(sf.get(key))
+    for key in ("static_risk_score",):
+        try:
+            if sf.get(key) is not None:
+                out[key] = float(sf.get(key))
+        except Exception:
+            continue
+    for key in ("static_risk_band",):
+        value = sf.get(key)
+        if isinstance(value, str) and value.strip():
+            out[key] = value.strip()
+    if "masvs_area_counts" in sf:
+        out["masvs_area_counts"] = sf.get("masvs_area_counts")
+    return out
+
+
+def _paper_identity_consistency_issue(inputs: RunInputs) -> tuple[str | None, dict[str, Any] | None]:
+    if not isinstance(inputs.plan, dict):
+        return "ML_SKIPPED_MISSING_STATIC_LINK", {"reason": "missing_plan"}
+    identity = inputs.plan.get("run_identity") if isinstance(inputs.plan.get("run_identity"), dict) else {}
+    if not isinstance(identity, dict):
+        return "ML_SKIPPED_MISSING_STATIC_LINK", {"reason": "missing_run_identity"}
+
+    package = str(identity.get("package_name_lc") or inputs.plan.get("package_name") or "").strip().lower()
+    version_code = str(identity.get("version_code") or inputs.plan.get("version_code") or "").strip()
+    signer_digest = str(identity.get("signer_digest") or "").strip()
+    if not package or not version_code:
+        return "ML_SKIPPED_MISSING_STATIC_LINK", {"reason": "missing_package_or_version"}
+    if not signer_digest or signer_digest.upper() == "UNKNOWN":
+        return "ML_SKIPPED_MISSING_STATIC_LINK", {"reason": "missing_signer_digest"}
+
+    target = inputs.manifest.get("target") if isinstance(inputs.manifest.get("target"), dict) else {}
+    target_package = str(target.get("package_name") or "").strip().lower()
+    target_version = str(target.get("version_code") or "").strip()
+    if target_package and target_package != package:
+        return "ML_SKIPPED_APK_CHANGED_DURING_RUN", {
+            "expected_package_name_lc": package,
+            "observed_package_name_lc": target_package,
+        }
+    if target_version and target_version != version_code:
+        return "ML_SKIPPED_APK_CHANGED_DURING_RUN", {
+            "expected_version_code": version_code,
+            "observed_version_code": target_version,
+        }
+    return None, None
 
 
 def _write_json_if_missing(path: Path, payload: dict[str, Any]) -> None:
@@ -530,6 +600,71 @@ def run_ml_query_mode(
                 )
                 skipped_runs += 1
                 continue
+            identity_reason, identity_details = _paper_identity_consistency_issue(inputs)
+            if identity_reason:
+                out_dir = _run_output_dir(snapshot_dir, ref.run_id)
+                out_dir.mkdir(parents=True, exist_ok=True)
+                payload = {
+                    "ml_schema_version": int(config.ML_SCHEMA_VERSION),
+                    "run_id": str(ref.run_id),
+                    "package_name": ref.package_name,
+                    "skip": {"reason": identity_reason},
+                }
+                if identity_details:
+                    payload["skip"]["details"] = identity_details
+                (out_dir / "ml_summary.json").write_text(
+                    json.dumps(payload, indent=2, sort_keys=True),
+                    encoding="utf-8",
+                )
+                _write_cohort_status(
+                    snapshot_dir=snapshot_dir,
+                    run_id=str(ref.run_id),
+                    package_name=ref.package_name,
+                    status="EXCLUDED",
+                    reason_code=identity_reason,
+                    details=identity_details,
+                    min_windows_baseline=min_windows_baseline_req,
+                    min_pcap_bytes=min_pcap_bytes_req_default,
+                )
+                skipped_runs += 1
+                continue
+            static_features = (
+                inputs.plan.get("static_features")
+                if isinstance(inputs.plan, dict) and isinstance(inputs.plan.get("static_features"), dict)
+                else {}
+            )
+            required_static_features = (
+                "exported_components_total",
+                "dangerous_permission_count",
+                "uses_cleartext_traffic",
+                "sdk_indicator_score",
+            )
+            missing_static_features = [key for key in required_static_features if key not in static_features]
+            if missing_static_features:
+                out_dir = _run_output_dir(snapshot_dir, ref.run_id)
+                out_dir.mkdir(parents=True, exist_ok=True)
+                payload = {
+                    "ml_schema_version": int(config.ML_SCHEMA_VERSION),
+                    "run_id": str(ref.run_id),
+                    "package_name": ref.package_name,
+                    "skip": {"reason": "ML_SKIPPED_MISSING_STATIC_FEATURES"},
+                }
+                (out_dir / "ml_summary.json").write_text(
+                    json.dumps(payload, indent=2, sort_keys=True),
+                    encoding="utf-8",
+                )
+                _write_cohort_status(
+                    snapshot_dir=snapshot_dir,
+                    run_id=str(ref.run_id),
+                    package_name=ref.package_name,
+                    status="EXCLUDED",
+                    reason_code="ML_SKIPPED_MISSING_STATIC_FEATURES",
+                    details={"missing_static_features": missing_static_features},
+                    min_windows_baseline=min_windows_baseline_req,
+                    min_pcap_bytes=min_pcap_bytes_req_default,
+                )
+                skipped_runs += 1
+                continue
         base_sha = ref.base_apk_sha256 or ""
         if not base_sha and paper_mode:
             out_dir = _run_output_dir(snapshot_dir, ref.run_id)
@@ -618,6 +753,7 @@ def run_ml_query_mode(
                 "C": int(static_inputs.uses_cleartext_traffic),
                 "S": float(static_inputs.sdk_indicator_score),
             }
+            static_inputs_by_group[group_key].update(_extract_static_features_snapshot(plan))
 
         # Preflight + windowing per run.
         by_run_rows: dict[str, tuple[list[dict[str, Any]], int, str]] = {}
@@ -1017,6 +1153,7 @@ def run_ml_query_mode(
                 )
 
         # Per-run prevalence rows.
+        static_ctx = static_inputs_by_group.get(group_key, {})
         for model_name, scores_by_run in per_model_scores_by_run.items():
             thr = float(per_model_thresholds.get(model_name) or 0.0)
             for rid, scores in scores_by_run.items():
@@ -1051,6 +1188,18 @@ def run_ml_query_mode(
                         "threshold_value": float(thr),
                         "threshold_percentile": float(config.THRESHOLD_PERCENTILE),
                         "np_percentile_method": str(config.NP_PERCENTILE_METHOD),
+                        "static_exposure_score": static_ctx.get("static_exposure_score"),
+                        "static_exposure_grade": static_ctx.get("exposure_grade"),
+                        "static_exported_components_total": static_ctx.get("E_raw"),
+                        "static_dangerous_permission_count": static_ctx.get("P_raw"),
+                        "static_uses_cleartext_traffic": static_ctx.get("C"),
+                        "static_sdk_indicator_score": static_ctx.get("S"),
+                        "static_permissions_total": static_ctx.get("permissions_total"),
+                        "static_high_value_permission_count": static_ctx.get("high_value_permission_count"),
+                        "static_nsc_cleartext_domain_count": static_ctx.get("nsc_cleartext_domain_count"),
+                        "static_uses_webview": static_ctx.get("uses_webview"),
+                        "static_risk_score": static_ctx.get("static_risk_score"),
+                        "static_risk_band": static_ctx.get("static_risk_band"),
                         "ml_schema_version": int(config.ML_SCHEMA_VERSION),
                     }
                 )
@@ -1070,6 +1219,18 @@ def run_ml_query_mode(
                         "anomalous_longest_streak_seconds": float(longest_s),
                         "intensity_label": intensity.label,
                         "intensity_score": float(intensity.score) if intensity.score is not None else None,
+                        "static_exposure_score": static_ctx.get("static_exposure_score"),
+                        "static_exposure_grade": static_ctx.get("exposure_grade"),
+                        "static_exported_components_total": static_ctx.get("E_raw"),
+                        "static_dangerous_permission_count": static_ctx.get("P_raw"),
+                        "static_uses_cleartext_traffic": static_ctx.get("C"),
+                        "static_sdk_indicator_score": static_ctx.get("S"),
+                        "static_permissions_total": static_ctx.get("permissions_total"),
+                        "static_high_value_permission_count": static_ctx.get("high_value_permission_count"),
+                        "static_nsc_cleartext_domain_count": static_ctx.get("nsc_cleartext_domain_count"),
+                        "static_uses_webview": static_ctx.get("uses_webview"),
+                        "static_risk_score": static_ctx.get("static_risk_score"),
+                        "static_risk_band": static_ctx.get("static_risk_band"),
                         "ml_schema_version": int(config.ML_SCHEMA_VERSION),
                     }
                 )
@@ -1161,6 +1322,16 @@ def run_ml_query_mode(
             )
             rec["exposure_grade"] = exposure_grade(rec.get("static_exposure_score"))
             static_by_group[gk] = rec
+        for row in per_run_prevalence:
+            gk = str(row.get("group_key") or "")
+            sctx = static_by_group.get(gk) or {}
+            row["static_exposure_score"] = sctx.get("static_exposure_score")
+            row["static_exposure_grade"] = sctx.get("exposure_grade")
+        for row in per_run_persistence:
+            gk = str(row.get("group_key") or "")
+            sctx = static_by_group.get(gk) or {}
+            row["static_exposure_score"] = sctx.get("static_exposure_score")
+            row["static_exposure_grade"] = sctx.get("exposure_grade")
 
     # Dynamic math audit per group/model: join stability + interactive aggregate + persistence aggregate.
     # Index interactive prevalence per group/model.

@@ -19,6 +19,8 @@ from pathlib import Path
 from typing import Any
 
 from scytaledroid.Config import app_config
+from scytaledroid.DynamicAnalysis.ml import ml_parameters_operational as operational_config
+from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper_config
 
 _REQUIRED_RELATIVE_INPUTS = (
     "run_manifest.json",
@@ -155,6 +157,9 @@ def build_snapshot_freeze_manifest(
         raise RuntimeError(f"Missing required inputs for {len(missing_inputs)} run(s): {missing_inputs}")
 
     repo_root = _repo_root()
+    selector_type = str(sel.get("selector_type") or "")
+    paper_mode = selector_type == "freeze"
+    min_pcap_bytes = int(paper_config.MIN_PCAP_BYTES if paper_mode else operational_config.MIN_PCAP_BYTES_FALLBACK)
     return {
         "artifact_type": "snapshot_freeze",
         "created_at_utc": datetime.now(UTC).isoformat(),
@@ -162,8 +167,12 @@ def build_snapshot_freeze_manifest(
         "tool_git_commit": _git_commit_hash(repo_root),
         "selection_manifest_path": str(selection_manifest_path),
         "selection_manifest_sha256": str(sel.get("selection_manifest_sha256") or ""),
-        "selector_type": str(sel.get("selector_type") or ""),
+        "selector_type": selector_type,
         "query": sel.get("query"),
+        "qa_thresholds": {
+            "min_pcap_bytes": int(min_pcap_bytes),
+        },
+        "min_pcap_bytes_used": int(min_pcap_bytes),
         "frozen_inputs_per_run": list(_REQUIRED_RELATIVE_INPUTS) + ["<pcap from manifest artifact:pcapdroid_capture>"],
         "included_run_ids": included_run_ids,
         "included_run_checksums": run_checksums,

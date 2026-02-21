@@ -55,6 +55,8 @@ PAPER_EXCLUSION_REASON_CODES = {
     "ML_SKIPPED_BAD_FREEZE_CHECKSUM",
     "ML_SKIPPED_MISSING_STATIC_LINK",
     "ML_SKIPPED_MISSING_BASE_APK_SHA256",
+    "ML_SKIPPED_MISSING_STATIC_FEATURES",
+    "ML_SKIPPED_APK_CHANGED_DURING_RUN",
 }
 
 
@@ -1919,7 +1921,7 @@ def _write_ml_summary(
                             "window_end_s": float(wr.get("window_end_s") or 0.0),
                             "score": s,
                             "threshold": float(threshold),
-                            "is_exceedance": bool(s > float(threshold)),
+                            "is_exceedance": bool(s >= float(threshold)),
                         }
                     )
                 _write_csv_dicts(canonical_scores_path, canonical_rows)
@@ -2077,7 +2079,7 @@ def _build_topk_and_zscores(
                 "window_end_s": float(wr.get("window_end_s") or 0.0),
                 "score": score,
                 "threshold": float(threshold),
-                "is_exceedance": bool(score > float(threshold)),
+                "is_exceedance": bool(score >= float(threshold)),
             }
         )
         vec = np.asarray(run_matrix[i], dtype=float)
@@ -2145,6 +2147,8 @@ def _resolve_paper_identity_contract(app_runs: list[RunInputs]) -> tuple[str | N
     static_handoff_values: set[str] = set()
     missing_base_sha_run_ids: list[str] = []
     missing_static_link_run_ids: list[str] = []
+    missing_static_features: dict[str, list[str]] = {}
+    apk_change_mismatches: dict[str, dict[str, str]] = {}
     for r in app_runs:
         ident = r.plan.get("run_identity") if isinstance(r.plan, dict) and isinstance(r.plan.get("run_identity"), dict) else {}
         base_sha = str(ident.get("base_apk_sha256") or "").strip().lower() if isinstance(ident, dict) else ""
@@ -2157,11 +2161,49 @@ def _resolve_paper_identity_contract(app_runs: list[RunInputs]) -> tuple[str | N
             missing_static_link_run_ids.append(str(r.run_id))
         else:
             static_handoff_values.add(static_handoff_hash)
+        static_features = (
+            r.plan.get("static_features")
+            if isinstance(r.plan, dict) and isinstance(r.plan.get("static_features"), dict)
+            else {}
+        )
+        required_static_features = (
+            "exported_components_total",
+            "dangerous_permission_count",
+            "uses_cleartext_traffic",
+            "sdk_indicator_score",
+        )
+        missing = [key for key in required_static_features if key not in static_features]
+        if missing:
+            missing_static_features[str(r.run_id)] = missing
+        package = str(ident.get("package_name_lc") or r.plan.get("package_name") or "").strip().lower() if isinstance(r.plan, dict) else ""
+        version_code = str(ident.get("version_code") or r.plan.get("version_code") or "").strip() if isinstance(r.plan, dict) else ""
+        signer_digest = str(ident.get("signer_digest") or "").strip() if isinstance(ident, dict) else ""
+        if not package or not version_code:
+            missing_static_link_run_ids.append(str(r.run_id))
+        if not signer_digest or signer_digest.upper() == "UNKNOWN":
+            missing_static_link_run_ids.append(str(r.run_id))
+        target = r.manifest.get("target") if isinstance(r.manifest.get("target"), dict) else {}
+        target_package = str(target.get("package_name") or "").strip().lower()
+        target_version = str(target.get("version_code") or "").strip()
+        if package and target_package and package != target_package:
+            apk_change_mismatches[str(r.run_id)] = {
+                "expected_package_name_lc": package,
+                "observed_package_name_lc": target_package,
+            }
+        if version_code and target_version and version_code != target_version:
+            apk_change_mismatches[str(r.run_id)] = {
+                "expected_version_code": version_code,
+                "observed_version_code": target_version,
+            }
 
     if missing_base_sha_run_ids:
         return None, "ML_SKIPPED_MISSING_BASE_APK_SHA256", {"run_ids": sorted(missing_base_sha_run_ids)}
     if missing_static_link_run_ids:
-        return None, "ML_SKIPPED_MISSING_STATIC_LINK", {"run_ids": sorted(missing_static_link_run_ids)}
+        return None, "ML_SKIPPED_MISSING_STATIC_LINK", {"run_ids": sorted(set(missing_static_link_run_ids))}
+    if missing_static_features:
+        return None, "ML_SKIPPED_MISSING_STATIC_FEATURES", {"runs": missing_static_features}
+    if apk_change_mismatches:
+        return None, "ML_SKIPPED_APK_CHANGED_DURING_RUN", {"runs": apk_change_mismatches}
     if len(base_sha_values) != 1:
         return None, "ML_SKIPPED_MISSING_STATIC_LINK", {"conflicting_base_apk_sha256": sorted(base_sha_values)}
     if len(static_handoff_values) != 1:

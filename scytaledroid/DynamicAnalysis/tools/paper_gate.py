@@ -46,6 +46,13 @@ def run_paper_gate(*, freeze_path: Path, evidence_root: Path) -> GateResult:
     if not isinstance(included, list) or not included:
         return GateResult(False, [f"missing_included_run_ids:{freeze_path}"], 0)
     expected_freeze_sha = _sha256_file(freeze_path)
+    freeze_threshold = _extract_freeze_min_pcap_bytes(freeze)
+    if freeze_threshold is None:
+        errors.append("freeze_manifest:missing_min_pcap_bytes_used")
+    elif int(freeze_threshold) != int(paper2_config.MIN_PCAP_BYTES):
+        errors.append(
+            f"freeze_manifest:min_pcap_bytes_mismatch:{int(freeze_threshold)}!={int(paper2_config.MIN_PCAP_BYTES)}"
+        )
     run_ids = [str(r).strip() for r in included if str(r).strip()]
     checked = 0
     for run_id in run_ids:
@@ -83,19 +90,64 @@ def run_paper_gate(*, freeze_path: Path, evidence_root: Path) -> GateResult:
         dars = _read_json(dars_path) or {}
         cohort_status = _read_json(cohort_status_path) or {}
         plan = _read_json(run_dir / "inputs" / "static_dynamic_plan.json") or {}
+        run_manifest = _read_json(run_dir / "run_manifest.json") or {}
         identity = plan.get("run_identity") if isinstance(plan.get("run_identity"), dict) else {}
 
         if str(cohort_status.get("status") or "") != "CANONICAL_PAPER_ELIGIBLE":
             errors.append(f"{run_id}:not_paper_eligible:{cohort_status.get('reason_code')}")
 
-        for key in ("static_handoff_hash", "base_apk_sha256"):
+        for key in ("static_handoff_hash", "base_apk_sha256", "package_name_lc", "version_code", "signer_digest"):
             value = identity.get(key)
             if not isinstance(value, str) or not value.strip():
-                errors.append(f"{run_id}:missing_plan_identity:{key}")
+                # version_code may be numeric in some plan payloads.
+                if key == "version_code" and value not in (None, ""):
+                    pass
+                else:
+                    errors.append(f"{run_id}:missing_plan_identity:{key}")
+        signer_digest = str(identity.get("signer_digest") or "").strip()
+        if not signer_digest or signer_digest.upper() == "UNKNOWN":
+            errors.append(f"{run_id}:missing_plan_identity:signer_digest")
+
+        target = run_manifest.get("target") if isinstance(run_manifest.get("target"), dict) else {}
+        plan_package = str(identity.get("package_name_lc") or plan.get("package_name") or "").strip().lower()
+        target_package = str(target.get("package_name") or "").strip().lower()
+        if plan_package and target_package and plan_package != target_package:
+            errors.append(f"{run_id}:apk_changed_during_run:package_name")
+        plan_version = str(identity.get("version_code") or plan.get("version_code") or "").strip()
+        target_version = str(target.get("version_code") or "").strip()
+        if plan_version and target_version and plan_version != target_version:
+            errors.append(f"{run_id}:apk_changed_during_run:version_code")
+        target_identity = target.get("run_identity") if isinstance(target.get("run_identity"), dict) else {}
+        target_base_sha = str(target_identity.get("base_apk_sha256") or "").strip().lower()
+        plan_base_sha = str(identity.get("base_apk_sha256") or "").strip().lower()
+        if target_base_sha and plan_base_sha and target_base_sha != plan_base_sha:
+            errors.append(f"{run_id}:apk_changed_during_run:base_apk_sha256")
+        static_features = plan.get("static_features") if isinstance(plan.get("static_features"), dict) else {}
+        for key in (
+            "exported_components_total",
+            "dangerous_permission_count",
+            "uses_cleartext_traffic",
+            "sdk_indicator_score",
+        ):
+            if key not in static_features:
+                errors.append(f"{run_id}:missing_static_features:{key}")
         static_handoff_hash = str(identity.get("static_handoff_hash") or "").strip().lower()
         base_apk_sha256 = str(identity.get("base_apk_sha256") or "").strip().lower()
+        package_name_lc = str(identity.get("package_name_lc") or plan.get("package_name") or "").strip().lower()
+        version_code_raw = identity.get("version_code")
+        if version_code_raw in (None, ""):
+            version_code_raw = plan.get("version_code")
+        try:
+            version_code = int(version_code_raw) if version_code_raw not in (None, "") else None
+        except Exception:
+            version_code = None
         if static_handoff_hash and base_apk_sha256:
-            if not _verify_static_link(static_handoff_hash=static_handoff_hash, base_apk_sha256=base_apk_sha256):
+            if not _verify_static_link(
+                static_handoff_hash=static_handoff_hash,
+                base_apk_sha256=base_apk_sha256,
+                package_name_lc=package_name_lc or None,
+                version_code=version_code,
+            ):
                 errors.append(f"{run_id}:static_link_db_mismatch")
 
         for key in ("tool_git_commit", "schema_version", "ml_schema_version", "feature_schema_version"):
@@ -178,23 +230,44 @@ def main(argv: list[str] | None = None) -> int:
     return 1
 
 
-def _verify_static_link(*, static_handoff_hash: str, base_apk_sha256: str) -> bool:
+def _verify_static_link(
+    *,
+    static_handoff_hash: str,
+    base_apk_sha256: str,
+    package_name_lc: str | None,
+    version_code: int | None,
+) -> bool:
     try:
-        row = core_q.run_sql(
-            """
+        sql = """
             SELECT COUNT(*)
             FROM v_static_handoff_v1
             WHERE LOWER(static_handoff_hash)=LOWER(%s)
               AND LOWER(base_apk_sha256)=LOWER(%s)
               AND UPPER(COALESCE(run_class,''))='CANONICAL'
               AND COALESCE(identity_conflict_flag,0)=0
-            """,
-            (static_handoff_hash, base_apk_sha256),
-            fetch="one",
-        )
+        """
+        args: list[Any] = [static_handoff_hash, base_apk_sha256]
+        if package_name_lc:
+            sql += " AND LOWER(package_name_lc)=LOWER(%s)"
+            args.append(package_name_lc)
+        if version_code is not None:
+            sql += " AND version_code=%s"
+            args.append(int(version_code))
+        row = core_q.run_sql(sql, tuple(args), fetch="one")
         return bool(row and int(row[0]) >= 1)
     except Exception:
         return False
+
+
+def _extract_freeze_min_pcap_bytes(freeze: dict[str, Any]) -> int | None:
+    value = freeze.get("min_pcap_bytes_used")
+    if value is None:
+        qa = freeze.get("qa_thresholds") if isinstance(freeze.get("qa_thresholds"), dict) else {}
+        value = qa.get("min_pcap_bytes") if isinstance(qa, dict) else None
+    try:
+        return int(value) if value is not None else None
+    except Exception:
+        return None
 
 
 if __name__ == "__main__":

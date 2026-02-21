@@ -11,6 +11,8 @@ from scytaledroid.Config import app_config
 from scytaledroid.StaticAnalysis.core import ManifestFlags, StaticAnalysisReport
 from scytaledroid.Utils.evidence_store import filesystem_safe_slug
 
+from .diagnostics_render import summarise_masvs_inline
+
 PLAN_SCHEMA_VERSION = "v1"
 
 
@@ -61,6 +63,9 @@ def _validate_plan_schema(plan: Mapping[str, object]) -> None:
     if not isinstance(identity, Mapping):
         raise RuntimeError("dynamic plan run_identity must be an object")
     identity_fields = (
+        "package_name_lc",
+        "version_code",
+        "signer_digest",
         "base_apk_sha256",
         "artifact_set_hash",
         "run_signature",
@@ -301,6 +306,82 @@ def _high_value_permissions(declared: Sequence[str]) -> list[str]:
     return sorted({perm for perm in declared if perm in high_value})
 
 
+def _build_static_features_snapshot(
+    *,
+    report: StaticAnalysisReport,
+    declared: Sequence[str],
+    dangerous: Sequence[str],
+    high_value: Sequence[str],
+    cleartext_domains: Sequence[str],
+    sdk_indicators: Mapping[str, object] | None,
+    webview_summary: Mapping[str, object] | None,
+) -> Mapping[str, object]:
+    exported = report.exported_components
+    masvs = summarise_masvs_inline(report)
+    masvs_summary: dict[str, dict[str, int]] = {}
+    for area in ("NETWORK", "PLATFORM", "PRIVACY", "STORAGE"):
+        block = masvs.get(area) if isinstance(masvs, Mapping) else None
+        if not isinstance(block, Mapping):
+            masvs_summary[area] = {"high": 0, "medium": 0, "low": 0, "info": 0, "control_count": 0}
+            continue
+        masvs_summary[area] = {
+            "high": int(block.get("high") or 0),
+            "medium": int(block.get("medium") or 0),
+            "low": int(block.get("low") or 0),
+            "info": int(block.get("info") or 0),
+            "control_count": int(block.get("control_count") or 0),
+        }
+    sdk_score = 0.0
+    if isinstance(sdk_indicators, Mapping) and sdk_indicators.get("score") is not None:
+        try:
+            sdk_score = float(sdk_indicators.get("score") or 0.0)
+        except Exception:
+            sdk_score = 0.0
+    sdk_score = max(0.0, min(1.0, float(sdk_score)))
+
+    total_high = sum(int((masvs_summary.get(area) or {}).get("high") or 0) for area in masvs_summary)
+    total_medium = sum(int((masvs_summary.get(area) or {}).get("medium") or 0) for area in masvs_summary)
+    total_low = sum(int((masvs_summary.get(area) or {}).get("low") or 0) for area in masvs_summary)
+    total_info = sum(int((masvs_summary.get(area) or {}).get("info") or 0) for area in masvs_summary)
+    total_controls = sum(int((masvs_summary.get(area) or {}).get("control_count") or 0) for area in masvs_summary)
+    masvs_total_score = float(
+        round((total_high * 1.0) + (total_medium * 0.5) + (total_low * 0.25) + (total_info * 0.1), 3)
+    )
+
+    exported_norm = min(float(int(exported.total())) / 100.0, 1.0)
+    dangerous_norm = min(float(int(len(dangerous))) / 20.0, 1.0)
+    cleartext_norm = 1.0 if bool(report.manifest_flags.uses_cleartext_traffic) else 0.0
+    static_risk_score = float(
+        round(100.0 * ((exported_norm * 0.25) + (dangerous_norm * 0.25) + (cleartext_norm * 0.25) + (sdk_score * 0.25)), 3)
+    )
+    if static_risk_score >= 66.7:
+        static_risk_band = "HIGH"
+    elif static_risk_score >= 33.4:
+        static_risk_band = "MEDIUM"
+    else:
+        static_risk_band = "LOW"
+
+    return {
+        "schema_version": "v1",
+        "exported_components_total": int(exported.total()),
+        "dangerous_permission_count": int(len(dangerous)),
+        "permissions_total": int(len(declared)),
+        "high_value_permission_count": int(len(high_value)),
+        "high_value_permissions": list(high_value),
+        "uses_cleartext_traffic": bool(report.manifest_flags.uses_cleartext_traffic),
+        "nsc_cleartext_permitted": bool(report.manifest_flags.uses_cleartext_traffic),
+        "nsc_cleartext_domain_count": int(len(cleartext_domains)),
+        "uses_webview": bool(webview_summary),
+        "sdk_indicator_score": float(sdk_score),
+        "perm_dangerous_n": int(len(dangerous)),
+        "masvs_total_score": masvs_total_score,
+        "masvs_control_count_total": int(total_controls),
+        "static_risk_score": static_risk_score,
+        "static_risk_band": static_risk_band,
+        "masvs_area_counts": masvs_summary,
+    }
+
+
 def build_dynamic_plan(
     report: StaticAnalysisReport,
     payload: Mapping[str, object],
@@ -349,6 +430,9 @@ def build_dynamic_plan(
     # Keep a dedicated schema version so we can evolve the plan format without relying
     # on DB schema versions or implicit assumptions.
     generated_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    signatures = sorted(str(value).strip() for value in (report.signatures or ()) if str(value).strip())
+    signer_digest = signatures[0] if signatures else "UNKNOWN"
+    package_name_lc = str(metadata.get("package") or "").strip().lower()
 
     plan = {
         "plan_schema_version": PLAN_SCHEMA_VERSION,
@@ -360,6 +444,10 @@ def build_dynamic_plan(
         "version_code": metadata.get("version_code"),
         "hashes": metadata.get("hashes"),
         "run_identity": {
+            "package_name_lc": package_name_lc,
+            "version_name": metadata.get("version_name"),
+            "version_code": metadata.get("version_code"),
+            "signer_digest": signer_digest,
             "base_apk_sha256": metadata.get("base_apk_sha256"),
             "artifact_set_hash": metadata.get("artifact_set_hash"),
             "run_signature": metadata.get("run_signature"),
@@ -401,6 +489,15 @@ def build_dynamic_plan(
     if isinstance(sdk_indicators, Mapping):
         # Keep it loosely typed; producer side may evolve. Consumer treats absent/invalid as 0.
         plan["sdk_indicators"] = dict(sdk_indicators)
+    plan["static_features"] = _build_static_features_snapshot(
+        report=report,
+        declared=declared,
+        dangerous=dangerous,
+        high_value=high_value,
+        cleartext_domains=cleartext_domains,
+        sdk_indicators=sdk_indicators if isinstance(sdk_indicators, Mapping) else None,
+        webview_summary=webview_summary if isinstance(webview_summary, Mapping) else None,
+    )
     if static_run_id is not None:
         plan["static_run_id"] = static_run_id
     _validate_plan_schema(plan)

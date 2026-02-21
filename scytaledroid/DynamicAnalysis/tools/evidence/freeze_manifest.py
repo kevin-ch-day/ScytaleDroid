@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from scytaledroid.Config import app_config
+from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper_config
 
 
 @dataclass(frozen=True)
@@ -25,7 +26,8 @@ class FreezeConfig:
     baseline_required: int = int(getattr(app_config, "DYNAMIC_DATASET_BASELINE_RUNS", 1))
     interactive_required: int = int(getattr(app_config, "DYNAMIC_DATASET_INTERACTIVE_RUNS", 2))
     min_duration_s: int = int(getattr(app_config, "DYNAMIC_MIN_DURATION_S", 120))
-    min_pcap_bytes: int = int(getattr(app_config, "DYNAMIC_MIN_PCAP_BYTES", 100000))
+    min_pcap_bytes: int = int(paper_config.MIN_PCAP_BYTES)
+    min_windows_baseline: int = int(paper_config.MIN_WINDOWS_BASELINE)
 
 
 _REQUIRED_RELATIVE_INPUTS = (
@@ -229,7 +231,9 @@ def build_dataset_freeze_manifest(
         "qa_thresholds": {
             "min_duration_s": int(config.min_duration_s),
             "min_pcap_bytes": int(config.min_pcap_bytes),
+            "min_windows_baseline": int(config.min_windows_baseline),
         },
+        "min_pcap_bytes_used": int(config.min_pcap_bytes),
         "frozen_inputs_per_run": list(_REQUIRED_RELATIVE_INPUTS) + ["<pcap from manifest artifact:pcapdroid_capture>"],
         "host_tools_versions": {k: sorted(v) for k, v in host_tool_versions.items() if v},
         "apps": included_by_app,

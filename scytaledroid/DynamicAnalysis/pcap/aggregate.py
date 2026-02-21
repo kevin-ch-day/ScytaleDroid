@@ -21,13 +21,16 @@ def export_pcap_features_csv() -> Path | None:
             continue
         features_path = run_dir / "analysis" / "pcap_features.json"
         manifest_path = run_dir / "run_manifest.json"
+        plan_path = run_dir / "inputs" / "static_dynamic_plan.json"
         if not features_path.exists() or not manifest_path.exists():
             continue
         try:
             features = json.loads(features_path.read_text(encoding="utf-8"))
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            plan = json.loads(plan_path.read_text(encoding="utf-8")) if plan_path.exists() else {}
         except (OSError, json.JSONDecodeError):
             continue
+        static_cols = _extract_static_export_columns(plan if isinstance(plan, dict) else {}, manifest)
         dataset = manifest.get("dataset") if isinstance(manifest.get("dataset"), dict) else {}
         row = _flatten_features(features)
         row.update(
@@ -50,6 +53,7 @@ def export_pcap_features_csv() -> Path | None:
                 "messaging_activity": (manifest.get("operator") or {}).get("messaging_activity"),
             }
         )
+        row.update(static_cols)
         rows.append(row)
     if not rows:
         return None
@@ -108,6 +112,8 @@ def _build_run_summary_row(
     features: dict[str, Any],
 ) -> dict[str, Any] | None:
     target = manifest.get("target") or {}
+    plan = _load_json(run_dir / "inputs" / "static_dynamic_plan.json")
+    static_cols = _extract_static_export_columns(plan if isinstance(plan, dict) else {}, manifest)
     dataset = manifest.get("dataset") if isinstance(manifest.get("dataset"), dict) else {}
     static_tags = target.get("static_context_tags")
     static_context = target.get("static_context") if isinstance(target.get("static_context"), dict) else None
@@ -132,7 +138,7 @@ def _build_run_summary_row(
     overlap_nsc = _overlap_ratio_for_source(overlap_sources, "nsc")
     overlap_strings = _overlap_ratio_for_source(overlap_sources, "strings")
     unique_domains = _unique_domains(report)
-    return {
+    row = {
         "app": target.get("package_name"),
         "run_id": manifest.get("dynamic_run_id"),
         # Alias for downstream consumers that expect an explicit dynamic_run_id field.
@@ -170,6 +176,8 @@ def _build_run_summary_row(
         "udp_ratio": proxies.get("udp_ratio"),
         "unique_domains": unique_domains,
     }
+    row.update(static_cols)
+    return row
 
 
 def _protocol_ratio(rows: list[dict[str, Any]], protocol: str) -> float | None:
@@ -223,12 +231,62 @@ def _load_json(path: Path) -> dict[str, Any] | None:
 
 
 def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
-    fieldnames = sorted({key for row in rows for key in row.keys()})
+    preferred = [
+        "dynamic_run_id",
+        "run_id",
+        "app",
+        "package_name_lc",
+        "version_code",
+        "version_name",
+        "base_apk_sha256",
+        "static_handoff_hash",
+        "signer_digest",
+        "static_risk_score",
+        "static_risk_band",
+        "masvs_total_score",
+        "perm_dangerous_n",
+        "nsc_cleartext_permitted",
+    ]
+    discovered = {key for row in rows for key in row.keys()}
+    fieldnames = [key for key in preferred if key in discovered]
+    fieldnames.extend(sorted(discovered.difference(fieldnames)))
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
         for row in rows:
             writer.writerow(row)
+
+
+def _extract_static_export_columns(plan: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any]:
+    identity = plan.get("run_identity") if isinstance(plan.get("run_identity"), dict) else {}
+    static_features = plan.get("static_features") if isinstance(plan.get("static_features"), dict) else {}
+    target = manifest.get("target") if isinstance(manifest.get("target"), dict) else {}
+    package_name_lc = str(identity.get("package_name_lc") or plan.get("package_name") or target.get("package_name") or "").strip().lower()
+    signer_digest = str(identity.get("signer_digest") or "").strip() or "UNKNOWN"
+    version_code_raw = identity.get("version_code")
+    if version_code_raw in (None, ""):
+        version_code_raw = plan.get("version_code")
+    try:
+        version_code = int(version_code_raw) if version_code_raw not in (None, "") else None
+    except Exception:
+        version_code = None
+    out: dict[str, Any] = {
+        "package_name_lc": package_name_lc or None,
+        "version_code": version_code,
+        "version_name": identity.get("version_name") or plan.get("version_name"),
+        "base_apk_sha256": identity.get("base_apk_sha256"),
+        "static_handoff_hash": identity.get("static_handoff_hash"),
+        "signer_digest": signer_digest,
+        "static_risk_score": static_features.get("static_risk_score"),
+        "static_risk_band": static_features.get("static_risk_band"),
+        "masvs_total_score": static_features.get("masvs_total_score"),
+        "perm_dangerous_n": static_features.get("perm_dangerous_n", static_features.get("dangerous_permission_count")),
+        "nsc_cleartext_permitted": static_features.get(
+            "nsc_cleartext_permitted",
+            static_features.get("uses_cleartext_traffic"),
+        ),
+    }
+    return out
 
 
 __all__ = ["export_pcap_features_csv", "export_dynamic_run_summary_csv"]

@@ -167,19 +167,29 @@ def minmax_norm(values: list[float]) -> list[float]:
 def build_static_inputs_from_plan(plan: dict[str, Any]) -> StaticPostureInputs | None:
     if not isinstance(plan, dict):
         return None
+    static_features = plan.get("static_features") if isinstance(plan.get("static_features"), dict) else {}
     exp = plan.get("exported_components") if isinstance(plan.get("exported_components"), dict) else {}
     perms = plan.get("permissions") if isinstance(plan.get("permissions"), dict) else {}
     rf = plan.get("risk_flags") if isinstance(plan.get("risk_flags"), dict) else {}
     try:
-        exported_total = int(exp.get("total") or 0)
+        exported_total = int(static_features.get("exported_components_total") or exp.get("total") or 0)
     except Exception:
         exported_total = 0
-    dangerous = perms.get("dangerous") if isinstance(perms.get("dangerous"), list) else []
-    dangerous_n = int(len([p for p in dangerous if isinstance(p, str) and p.strip()]))
-    uses_cleartext = 1 if rf.get("uses_cleartext_traffic") is True else 0
+    try:
+        dangerous_n = int(static_features.get("dangerous_permission_count"))
+    except Exception:
+        dangerous = perms.get("dangerous") if isinstance(perms.get("dangerous"), list) else []
+        dangerous_n = int(len([p for p in dangerous if isinstance(p, str) and p.strip()]))
+    cleartext_raw = static_features.get("uses_cleartext_traffic", rf.get("uses_cleartext_traffic"))
+    uses_cleartext = 1 if cleartext_raw is True or cleartext_raw == 1 else 0
     sdk_score = 0.0
+    if static_features.get("sdk_indicator_score") is not None:
+        try:
+            sdk_score = float(static_features.get("sdk_indicator_score") or 0.0)
+        except Exception:
+            sdk_score = 0.0
     sdk = plan.get("sdk_indicators")
-    if isinstance(sdk, dict) and sdk.get("score") is not None:
+    if sdk_score == 0.0 and isinstance(sdk, dict) and sdk.get("score") is not None:
         try:
             sdk_score = float(sdk.get("score") or 0.0)
         except Exception:
