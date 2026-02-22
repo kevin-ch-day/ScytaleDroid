@@ -37,7 +37,8 @@ def test_paper_gate_passes_minimal_contract(tmp_path: Path, monkeypatch) -> None
             "run_identity": {
                 "package_name_lc": "com.example.app",
                 "version_code": "123",
-                "signer_digest": "deadbeef",
+                "signer_digest": "c" * 64,
+                "signer_set_hash": "c" * 64,
                 "static_handoff_hash": "a" * 64,
                 "base_apk_sha256": "b" * 64,
             },
@@ -143,7 +144,8 @@ def test_paper_gate_fails_static_link_db_mismatch(tmp_path: Path, monkeypatch) -
             "run_identity": {
                 "package_name_lc": "com.example.app",
                 "version_code": "123",
-                "signer_digest": "deadbeef",
+                "signer_digest": "c" * 64,
+                "signer_set_hash": "c" * 64,
                 "static_handoff_hash": "a" * 64,
                 "base_apk_sha256": "b" * 64,
             },
@@ -204,7 +206,8 @@ def test_paper_gate_fails_missing_package_identity(tmp_path: Path, monkeypatch) 
             "version_code": "123",
             "run_identity": {
                 "version_code": "123",
-                "signer_digest": "deadbeef",
+                "signer_digest": "c" * 64,
+                "signer_set_hash": "c" * 64,
                 "static_handoff_hash": "a" * 64,
                 "base_apk_sha256": "b" * 64,
             },
@@ -259,7 +262,8 @@ def test_paper_gate_fails_on_freeze_min_pcap_mismatch(tmp_path: Path, monkeypatc
             "run_identity": {
                 "package_name_lc": "com.example.app",
                 "version_code": "123",
-                "signer_digest": "deadbeef",
+                "signer_digest": "c" * 64,
+                "signer_set_hash": "c" * 64,
                 "static_handoff_hash": "a" * 64,
                 "base_apk_sha256": "b" * 64,
             },
@@ -320,7 +324,8 @@ def test_paper_gate_normalizes_hashes(tmp_path: Path, monkeypatch) -> None:
             "run_identity": {
                 "package_name_lc": "com.example.app",
                 "version_code": "123",
-                "signer_digest": " C " + ("A" * 62) + " ",
+                "signer_digest": " " + ("C" * 64) + " ",
+                "signer_set_hash": " " + ("C" * 64) + " ",
                 "static_handoff_hash": " " + ("A" * 64) + " ",
                 "base_apk_sha256": " " + ("B" * 64) + " ",
             },
@@ -376,7 +381,8 @@ def test_paper_gate_fails_bad_identity_hash(tmp_path: Path, monkeypatch) -> None
             "run_identity": {
                 "package_name_lc": "com.example.app",
                 "version_code": "123",
-                "signer_digest": "deadbeef",
+                "signer_digest": "c" * 64,
+                "signer_set_hash": "c" * 64,
                 "static_handoff_hash": "nothex",
                 "base_apk_sha256": "b" * 64,
             },

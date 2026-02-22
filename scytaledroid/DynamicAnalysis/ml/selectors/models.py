@@ -99,7 +99,7 @@ def _cfg_for_selector(selector_type: SelectorType):
 def _config_fingerprint(selector_type: SelectorType) -> dict[str, Any]:
     # Use a fixed seed for fingerprinting spec templates (not app-specific seeds).
     ml_config = _cfg_for_selector(selector_type)
-    specs = fixed_model_specs(seed=0)
+    specs = fixed_model_specs(seed=0, ml_config=ml_config)
     spec_rows = [{"name": s.name, "params": dict(s.params)} for s in specs]
     return {
         "ml_schema_version": int(ml_config.ML_SCHEMA_VERSION),
@@ -109,6 +109,9 @@ def _config_fingerprint(selector_type: SelectorType) -> dict[str, Any]:
         "np_percentile_method": str(ml_config.NP_PERCENTILE_METHOD),
         "feature_log1p": bool(ml_config.FEATURE_LOG1P),
         "feature_robust_scale": bool(ml_config.FEATURE_ROBUST_SCALE),
+        "feature_winsorize": bool(getattr(ml_config, "FEATURE_WINSORIZE", False)),
+        "feature_winsorize_lower_pct": float(getattr(ml_config, "FEATURE_WINSORIZE_LOWER_PCT", 0.0)),
+        "feature_winsorize_upper_pct": float(getattr(ml_config, "FEATURE_WINSORIZE_UPPER_PCT", 100.0)),
         "model_specs_seed0": spec_rows,
     }
 

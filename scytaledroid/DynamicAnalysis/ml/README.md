@@ -17,11 +17,23 @@ under `experimental/` so it cannot accidentally drift Paper #2 semantics.
   - Windowing + metadata-only feature extraction from PCAP via tshark.
 - `anomaly_model_training.py`
   - Fixed-model training + score normalization (higher = more anomalous).
+  - Supports config-bound model specs so operational mode can tune without
+    modifying Paper #2 locked defaults.
 - `artifact_bundle_writer.py` + `deliverable_bundle_paths.py`
   - Canonical paper artifact surface under `output/paper/` (stable paths for LaTeX).
   - Internal Phase E baseline bundle under `output/paper/internal/baseline/` (regression/no-drift target).
 - `io/`
   - Evidence-pack and output path helpers.
+
+## Operational tuning hooks
+
+- `ml_parameters_operational.py`
+  - Enables feature stabilisation (`log1p`, winsorization, robust scaling).
+  - Provides operational hyperparameter overrides (e.g., IF estimator count,
+    OCSVM `nu`) while preserving deterministic seed behavior.
+- `query_mode_runner.py`
+  - Applies operational preprocessing in a deterministic order:
+    matrix build -> winsorization -> robust scaling -> model fit/score.
 
 ## Experimental (NOT used for Paper #2)
 

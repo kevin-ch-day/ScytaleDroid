@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,6 +33,7 @@ from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_mes
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
 
 _DEVICE_STATUS_CACHE: dict[str, dict[str, str]] = {}
+_RUN_IDENTITY_CACHE: dict[str, tuple[str | None, str | None]] = {}
 
 @dataclass(frozen=True)
 class _DynamicUiDefaults:
@@ -566,6 +568,7 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
         inter_label = "—"
         need_label = "—"
         runs_label = "—"
+        hist_label = "—"
         last_label = "—"
         next_label = "—"
         if package.lower() in dataset_pkgs:
@@ -575,30 +578,13 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
             # show "countable(+extra)" here rather than a quota-style "x/y".
             entry = tracker_apps.get(package) if isinstance(tracker_apps, dict) else None
             runs = entry.get("runs") if isinstance(entry, dict) else []
-            base_countable = 0
-            base_extra = 0
-            inter_countable = 0
-            inter_extra = 0
             total_runs = len(runs) if isinstance(runs, list) else 0
-            if isinstance(runs, list):
-                for r in runs:
-                    if not isinstance(r, dict):
-                        continue
-                    if r.get("valid_dataset_run") is not True:
-                        continue
-                    prof = str(r.get("run_profile") or "").lower()
-                    countable = bool(r.get("countable", True))
-                    is_baseline = ("baseline" in prof) or ("idle" in prof)
-                    if is_baseline:
-                        if countable:
-                            base_countable += 1
-                        else:
-                            base_extra += 1
-                    else:
-                        if countable:
-                            inter_countable += 1
-                        else:
-                            inter_extra += 1
+            scoped = _build_scoped_dataset_counts(package, runs if isinstance(runs, list) else [])
+            base_countable = int(scoped["baseline_countable"])
+            base_extra = int(scoped["baseline_extra"])
+            inter_countable = int(scoped["interactive_countable"])
+            inter_extra = int(scoped["interactive_extra"])
+            legacy_valid = int(scoped["legacy_valid"])
 
             base_label = str(base_countable) if base_extra <= 0 else f"{base_countable}(+{base_extra})"
             inter_label = str(inter_countable) if inter_extra <= 0 else f"{inter_countable}(+{inter_extra})"
@@ -614,6 +600,7 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
             else:
                 need_label = "0"
             runs_label = str(total_runs)
+            hist_label = str(legacy_valid) if legacy_valid > 0 else "0"
             recent = recent_tracker_runs(package, limit=1)
             if recent:
                 r = recent[0]
@@ -625,6 +612,8 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
                     last_label = "INVALID"
                 else:
                     last_label = "UNKNOWN"
+            if legacy_valid > 0 and last_label == "VALID":
+                last_label = "VALID*"
             proto = peek_next_run_protocol(package, tier="dataset") or {}
             prof = (proto.get("run_profile") or "").lower()
             if "baseline" in prof or "idle" in prof:
@@ -634,12 +623,24 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
 
         # Columns are intentionally minimal for dataset collection.
         # Column order is chosen to avoid "Next" being truncated on narrow terminals.
-        rows.append([str(idx), display, base_label, inter_label, need_label, next_label, runs_label, last_label])
+        rows.append([str(idx), display, base_label, inter_label, need_label, next_label, runs_label, hist_label, last_label])
     _render_package_table(rows)
     if any(r[2] != "—" for r in rows):
         print(
             status_messages.status(
                 "Note: Baseline/Interactive show countable valid runs; '(+N)' indicates extra valid runs (kept, out-of-dataset).",
+                level="info",
+            )
+        )
+        print(
+            status_messages.status(
+                "Build-scoped view: counts are computed for the latest app build identity; 'VALID*' means legacy valid runs from older builds exist.",
+                level="info",
+            )
+        )
+        print(
+            status_messages.status(
+                "Hist column shows valid legacy runs retained for cross-version pattern analysis (not counted toward current-build quota).",
                 level="info",
             )
         )
@@ -652,11 +653,11 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
 
 def _render_package_table(rows, *, max_preview: int = 15) -> None:
     headers = ["#", "App"]
-    if rows and len(rows[0]) >= 8:
+    if rows and len(rows[0]) >= 9:
         # Put "Next" before the trailing status columns so it is less likely to
         # get truncated when the terminal is narrow (table shrink truncates from
         # the rightmost columns first).
-        headers = ["#", "App", "Baseline", "Interactive", "Need", "Next", "Runs", "Last"]
+        headers = ["#", "App", "Baseline", "Interactive", "Need", "Next", "Runs", "Hist", "Last"]
     if len(rows) <= max_preview:
         table_utils.render_table(headers, rows, compact=True)
         return
@@ -665,6 +666,102 @@ def _render_package_table(rows, *, max_preview: int = 15) -> None:
     response = prompt_utils.prompt_text("Press L to list all, or Enter to continue", required=False)
     if response.strip().lower() == "l":
         table_utils.render_table(headers, rows, compact=True)
+
+
+def _build_scoped_dataset_counts(package_name: str, runs: list[dict]) -> dict[str, int]:
+    valid_runs: list[dict] = []
+    for r in runs:
+        if not isinstance(r, dict):
+            continue
+        if r.get("valid_dataset_run") is not True:
+            continue
+        valid_runs.append(r)
+
+    # Determine active build identity from the most recent valid run that has identity fields.
+    active_identity: tuple[str | None, str | None] | None = None
+    for r in sorted(valid_runs, key=lambda row: str(row.get("ended_at") or row.get("started_at") or ""), reverse=True):
+        ident = _resolve_tracker_run_identity(package_name, r)
+        if ident[0] or ident[1]:
+            active_identity = ident
+            break
+
+    out = {
+        "baseline_countable": 0,
+        "baseline_extra": 0,
+        "interactive_countable": 0,
+        "interactive_extra": 0,
+        "legacy_valid": 0,
+    }
+    for r in valid_runs:
+        ident = _resolve_tracker_run_identity(package_name, r)
+        if active_identity is not None and ident != active_identity:
+            out["legacy_valid"] += 1
+            continue
+        prof = str(r.get("run_profile") or "").lower()
+        countable = bool(r.get("countable", r.get("counts_toward_quota", True)))
+        is_baseline = ("baseline" in prof) or ("idle" in prof)
+        if is_baseline:
+            if countable:
+                out["baseline_countable"] += 1
+            else:
+                out["baseline_extra"] += 1
+        else:
+            if countable:
+                out["interactive_countable"] += 1
+            else:
+                out["interactive_extra"] += 1
+    return out
+
+
+def _resolve_tracker_run_identity(package_name: str, run: dict) -> tuple[str | None, str | None]:
+    version_code = str(
+        run.get("version_code")
+        or run.get("observed_version_code")
+        or ""
+    ).strip() or None
+    base_sha = str(
+        run.get("base_apk_sha256")
+        or ""
+    ).strip().lower() or None
+    if version_code or base_sha:
+        return (version_code, base_sha)
+
+    run_id = str(run.get("run_id") or "").strip()
+    if not run_id:
+        return (None, None)
+    cached = _RUN_IDENTITY_CACHE.get(run_id)
+    if cached is not None:
+        return cached
+
+    manifest_path = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic" / run_id / "run_manifest.json"
+    if not manifest_path.exists():
+        _RUN_IDENTITY_CACHE[run_id] = (None, None)
+        return (None, None)
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception:
+        _RUN_IDENTITY_CACHE[run_id] = (None, None)
+        return (None, None)
+
+    target = payload.get("target") if isinstance(payload.get("target"), dict) else {}
+    ident = target.get("run_identity") if isinstance(target.get("run_identity"), dict) else {}
+    pkg = str(target.get("package_name") or package_name or "").strip().lower()
+    if pkg and pkg != package_name.strip().lower():
+        _RUN_IDENTITY_CACHE[run_id] = (None, None)
+        return (None, None)
+
+    version_code = str(
+        ident.get("version_code")
+        or target.get("version_code")
+        or ""
+    ).strip() or None
+    base_sha = str(
+        ident.get("base_apk_sha256")
+        or ""
+    ).strip().lower() or None
+    resolved = (version_code, base_sha)
+    _RUN_IDENTITY_CACHE[run_id] = resolved
+    return resolved
 
 
 def _choose_index(prompt: str, total: int) -> int | None:

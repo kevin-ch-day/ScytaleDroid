@@ -22,7 +22,9 @@ def _run_stub(
         "run_identity": {
             "package_name_lc": "com.example.app",
             "version_code": "123",
-            "signer_digest": "deadbeef",
+            "signer_digest": "c" * 64,
+            "signer_set_hash": "c" * 64,
+            "artifact_set_hash": "d" * 64,
             "base_apk_sha256": base_sha,
             "static_handoff_hash": static_handoff_hash,
         },

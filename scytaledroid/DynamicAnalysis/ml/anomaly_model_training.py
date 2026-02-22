@@ -18,27 +18,33 @@ class ModelSpec:
     params: dict[str, Any]
 
 
-def fixed_model_specs(seed: int) -> list[ModelSpec]:
-    # Fixed params only. No tuning for Paper #2.
+def fixed_model_specs(seed: int, *, ml_config=config) -> list[ModelSpec]:
+    """Return model specs for the active ML config.
+
+    Paper mode keeps locked defaults; operational mode can override via
+    ml_parameters_operational without changing call sites.
+    """
+    iforest_name = str(getattr(ml_config, "MODEL_IFOREST", config.MODEL_IFOREST))
+    ocsvm_name = str(getattr(ml_config, "MODEL_OCSVM", config.MODEL_OCSVM))
     return [
         ModelSpec(
-            name=config.MODEL_IFOREST,
+            name=iforest_name,
             params={
-                "n_estimators": 200,
-                "max_samples": "auto",
+                "n_estimators": int(getattr(ml_config, "IFOREST_N_ESTIMATORS", 200)),
+                "max_samples": getattr(ml_config, "IFOREST_MAX_SAMPLES", "auto"),
                 "contamination": "auto",  # thresholding is percentile-based, not this field
-                "bootstrap": False,
+                "bootstrap": bool(getattr(ml_config, "IFOREST_BOOTSTRAP", False)),
                 "random_state": seed,
             },
         ),
         ModelSpec(
-            name=config.MODEL_OCSVM,
+            name=ocsvm_name,
             params={
-                "kernel": "rbf",
-                "nu": 0.05,
-                "gamma": "scale",
-                "shrinking": False,
-                "tol": 1e-3,
+                "kernel": str(getattr(ml_config, "OCSVM_KERNEL", "rbf")),
+                "nu": float(getattr(ml_config, "OCSVM_NU", 0.05)),
+                "gamma": getattr(ml_config, "OCSVM_GAMMA", "scale"),
+                "shrinking": bool(getattr(ml_config, "OCSVM_SHRINKING", False)),
+                "tol": float(getattr(ml_config, "OCSVM_TOL", 1e-3)),
             },
         ),
     ]

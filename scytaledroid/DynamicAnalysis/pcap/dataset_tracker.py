@@ -66,6 +66,7 @@ def update_dataset_tracker(
     app_entry = apps.setdefault(package, {"runs": []})
     operator = manifest.operator if isinstance(manifest.operator, dict) else {}
     target = manifest.target if isinstance(manifest.target, dict) else {}
+    target_identity = target.get("run_identity") if isinstance(target.get("run_identity"), dict) else {}
     interaction_level = operator.get("interaction_level")
     if interaction_level == "idle":
         interaction_level = "minimal"
@@ -81,6 +82,21 @@ def update_dataset_tracker(
         "run_sequence": operator.get("run_sequence"),
         "interaction_level": interaction_level,
         "messaging_activity": operator.get("messaging_activity"),
+        "version_name": target_identity.get("version_name"),
+        "version_code": (
+            target_identity.get("version_code")
+            or target.get("version_code")
+        ),
+        "observed_version_code": (
+            target_identity.get("observed_version_code")
+            or target.get("observed_version_code")
+        ),
+        "base_apk_sha256": target_identity.get("base_apk_sha256"),
+        "artifact_set_hash": target_identity.get("artifact_set_hash"),
+        "signer_set_hash": (
+            target_identity.get("signer_set_hash")
+            or target_identity.get("signer_digest")
+        ),
     }
     run_entry.update(_netstats_summary(run_dir))
     run_entry.update(_pcap_capture_stats(run_dir))

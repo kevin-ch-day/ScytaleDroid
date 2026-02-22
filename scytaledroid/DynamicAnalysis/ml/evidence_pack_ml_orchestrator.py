@@ -38,6 +38,7 @@ from .evidence_pack_ml_preflight import (
 )
 from .io import MLOutputPaths
 from .numpy_percentile import percentile as np_percentile
+from .operational_risk import build_static_inputs_from_plan
 from .pcap_window_features import (
     build_window_features,
     extract_packet_timeline,
@@ -126,6 +127,9 @@ def run_ml_on_evidence_packs(
     model_overlap_rows: list[dict[str, Any]] = []
     transport_mix_rows: list[dict[str, Any]] = []
     audit_rows: list[dict[str, Any]] = []
+    dars_component_rows: list[dict[str, Any]] = []
+    baseline_stability_rows: list[dict[str, Any]] = []
+    static_dynamic_rows: list[dict[str, Any]] = []
     exemplar_candidate: _ExemplarCandidate | None = None
 
     if frozen:
@@ -241,7 +245,7 @@ def run_ml_on_evidence_packs(
                 runs_skipped += len(app_runs)
                 continue
             seed = derive_seed(identity_key)
-            specs = fixed_model_specs(seed)
+            specs = fixed_model_specs(seed, ml_config=config)
 
             # Phase labels are freeze-derived and deterministic.
             per_run_phase = {
@@ -520,6 +524,32 @@ def run_ml_on_evidence_packs(
                     per_run_empty_windows=per_run_empty_windows,
                 )
             )
+            app_dars_rows = _compute_dars_component_rows(
+                package_name=pkg,
+                app_runs=app_runs,
+                per_model_scores_by_run=per_model_scores_by_run,
+                per_model_thresholds=per_model_thresholds,
+                per_run_phase=per_run_phase,
+                per_run_tag=per_run_tag,
+                training_mode=training_mode,
+            )
+            dars_component_rows.extend(app_dars_rows)
+            baseline_stability_rows.extend(
+                _compute_baseline_stability_rows(
+                    package_name=pkg,
+                    baseline_run_id=baseline_id,
+                    per_model_scores_by_run=per_model_scores_by_run,
+                    per_model_thresholds=per_model_thresholds,
+                    training_mode=training_mode,
+                )
+            )
+            static_dynamic_rows.append(
+                _compute_static_dynamic_stratification_row(
+                    package_name=pkg,
+                    static_snapshot=_extract_static_snapshot(app_runs),
+                    dars_rows=app_dars_rows,
+                )
+            )
             model_overlap_rows.extend(
                 _compute_model_overlap_rows(
                     package_name=pkg,
@@ -555,6 +585,9 @@ def run_ml_on_evidence_packs(
         _write_model_overlap_csv(model_overlap_rows)
         _write_transport_mix_csvs(transport_mix_rows)
         _write_ml_audit_csv(audit_rows)
+        _write_dars_components_csv(dars_component_rows)
+        _write_baseline_stability_csv(baseline_stability_rows)
+        _write_static_dynamic_stratification_csv(static_dynamic_rows)
         _maybe_write_paper_artifacts_json(
             candidate=exemplar_candidate,
             freeze_manifest_path=freeze_path,
@@ -814,6 +847,176 @@ def _compute_phase_rows(
     return rows
 
 
+def _compute_dars_component_rows(
+    *,
+    package_name: str,
+    app_runs: list[RunInputs],
+    per_model_scores_by_run: dict[str, dict[str, list[float]]],
+    per_model_thresholds: dict[str, float],
+    per_run_phase: dict[str, str],
+    per_run_tag: dict[str, str | None],
+    training_mode: str,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for model_name, scores_by_run in per_model_scores_by_run.items():
+        tau = float(per_model_thresholds.get(model_name) or 0.0)
+        for r in app_runs:
+            run_scores = scores_by_run.get(r.run_id) or []
+            n = int(len(run_scores))
+            if n <= 0:
+                continue
+            exceed_n = int(sum(1 for s in run_scores if float(s) >= tau))
+            exceed_ratio = float(exceed_n) / float(n)
+            k = int(max(1, math.ceil(0.10 * float(n))))
+            topk = sorted((float(s) for s in run_scores), reverse=True)[:k]
+            topk_mean = float(sum(topk) / float(len(topk))) if topk else 0.0
+            if tau > 0.0:
+                severity_ratio = float(topk_mean / tau)
+                dars = float(
+                    100.0
+                    * max(
+                        0.0,
+                        min(
+                            1.0,
+                            0.5 * exceed_ratio + 0.5 * max(0.0, min(1.0, severity_ratio / 2.0)),
+                        ),
+                    )
+                )
+            else:
+                severity_ratio = None
+                dars = float(100.0 * max(0.0, min(1.0, 0.5 * exceed_ratio)))
+            phase = per_run_phase.get(r.run_id) or _fallback_phase(r.run_profile)
+            rows.append(
+                {
+                    "package_name": package_name,
+                    "run_id": r.run_id,
+                    "phase": phase,
+                    "interaction_tag": per_run_tag.get(r.run_id) or "",
+                    "model": model_name,
+                    "training_mode": training_mode,
+                    "windows_total_n": n,
+                    "threshold_tau": tau,
+                    "operator": ">=",
+                    "exceedance_n": exceed_n,
+                    "exceedance_ratio": exceed_ratio,
+                    "top_k_policy": "ceil_10pct_n",
+                    "top_k_value": int(k),
+                    "top_k_mean_score": topk_mean,
+                    "severity_ratio": severity_ratio,
+                    "dars_v1": dars,
+                    "ml_schema_version": int(config.ML_SCHEMA_VERSION),
+                }
+            )
+    return rows
+
+
+def _extract_static_snapshot(app_runs: list[RunInputs]) -> dict[str, Any]:
+    baseline = next((r for r in app_runs if _fallback_phase(r.run_profile) == "idle"), None)
+    ref = baseline or (app_runs[0] if app_runs else None)
+    if not ref:
+        return {}
+    plan = ref.plan if isinstance(ref.plan, dict) else {}
+    static_inputs = build_static_inputs_from_plan(plan)
+    out: dict[str, Any] = {}
+    if static_inputs is not None:
+        out.update(
+            {
+                "exported_components_total": int(static_inputs.exported_components_total),
+                "dangerous_permission_count": int(static_inputs.dangerous_permission_count),
+                "uses_cleartext_traffic": int(static_inputs.uses_cleartext_traffic),
+                "sdk_indicator_score": float(static_inputs.sdk_indicator_score),
+            }
+        )
+    static_features = plan.get("static_features") if isinstance(plan.get("static_features"), dict) else {}
+    out["masvs_total_score"] = _safe_float(static_features.get("masvs_total_score"))
+    out["static_risk_score"] = _safe_float(static_features.get("static_risk_score"))
+    out["static_risk_band"] = (
+        str(static_features.get("static_risk_band") or "").strip() or None
+        if isinstance(static_features, dict)
+        else None
+    )
+    return out
+
+
+def _compute_static_dynamic_stratification_row(
+    *,
+    package_name: str,
+    static_snapshot: dict[str, Any],
+    dars_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if_rows = [
+        r
+        for r in dars_rows
+        if str(r.get("model") or "") == config.MODEL_IFOREST
+        and str(r.get("phase") or "").lower().startswith("interactive")
+    ]
+    dars_interactive_mean = None
+    dars_interactive_max = None
+    exceed_interactive_mean = None
+    if if_rows:
+        dars_vals = [float(r.get("dars_v1") or 0.0) for r in if_rows]
+        ex_vals = [float(r.get("exceedance_ratio") or 0.0) for r in if_rows]
+        dars_interactive_mean = float(sum(dars_vals) / float(len(dars_vals)))
+        dars_interactive_max = float(max(dars_vals))
+        exceed_interactive_mean = float(sum(ex_vals) / float(len(ex_vals)))
+    return {
+        "package_name": package_name,
+        "masvs_total_score": static_snapshot.get("masvs_total_score"),
+        "static_risk_score": static_snapshot.get("static_risk_score"),
+        "static_risk_band": static_snapshot.get("static_risk_band"),
+        "exported_components_total": static_snapshot.get("exported_components_total"),
+        "dangerous_permission_count": static_snapshot.get("dangerous_permission_count"),
+        "uses_cleartext_traffic": static_snapshot.get("uses_cleartext_traffic"),
+        "sdk_indicator_score": static_snapshot.get("sdk_indicator_score"),
+        "interactive_iforest_runs": int(len(if_rows)),
+        "interactive_iforest_exceedance_mean": exceed_interactive_mean,
+        "interactive_iforest_dars_mean": dars_interactive_mean,
+        "interactive_iforest_dars_max": dars_interactive_max,
+        "ml_schema_version": int(config.ML_SCHEMA_VERSION),
+    }
+
+
+def _compute_baseline_stability_rows(
+    *,
+    package_name: str,
+    baseline_run_id: str,
+    per_model_scores_by_run: dict[str, dict[str, list[float]]],
+    per_model_thresholds: dict[str, float],
+    training_mode: str,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for model_name, scores_by_run in per_model_scores_by_run.items():
+        base_scores = [float(s) for s in (scores_by_run.get(baseline_run_id) or [])]
+        n = int(len(base_scores))
+        if n <= 0:
+            continue
+        arr = np.asarray(base_scores, dtype=float)
+        mean_v = float(np.mean(arr))
+        std_v = float(np.std(arr))
+        cv_v = (std_v / abs(mean_v)) if abs(mean_v) > 1e-12 else None
+        tau = float(per_model_thresholds.get(model_name) or 0.0)
+        rows.append(
+            {
+                "package_name": package_name,
+                "model": model_name,
+                "training_mode": training_mode,
+                "baseline_run_id": baseline_run_id,
+                "baseline_windows_n": n,
+                "baseline_score_mean": mean_v,
+                "baseline_score_std": std_v,
+                "baseline_score_cv": cv_v,
+                "baseline_score_p95": float(np_percentile(arr, 95.0, method=config.NP_PERCENTILE_METHOD)),
+                "baseline_score_min": float(np.min(arr)),
+                "baseline_score_max": float(np.max(arr)),
+                "threshold_tau": tau,
+                "tau_minus_mean": float(tau - mean_v),
+                "tau_over_mean_abs": (float(tau / abs(mean_v)) if abs(mean_v) > 1e-12 else None),
+                "ml_schema_version": int(config.ML_SCHEMA_VERSION),
+            }
+        )
+    return rows
+
+
 def _write_prevalence_csvs(rows: list[dict[str, Any]]) -> None:
     """Write dataset-level anomaly prevalence tables.
 
@@ -1028,6 +1231,96 @@ def _write_ml_audit_csv(rows: list[dict[str, Any]]) -> None:
             writer.writerow({k: row.get(k) for k in fieldnames})
 
 
+def _write_dars_components_csv(rows: list[dict[str, Any]]) -> None:
+    out_dir = Path(app_config.DATA_DIR)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / "dars_components_per_run.csv"
+    fieldnames = [
+        "package_name",
+        "run_id",
+        "phase",
+        "interaction_tag",
+        "model",
+        "training_mode",
+        "windows_total_n",
+        "threshold_tau",
+        "operator",
+        "exceedance_n",
+        "exceedance_ratio",
+        "top_k_policy",
+        "top_k_value",
+        "top_k_mean_score",
+        "severity_ratio",
+        "dars_v1",
+        "ml_schema_version",
+    ]
+    import csv
+
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({k: row.get(k) for k in fieldnames})
+
+
+def _write_baseline_stability_csv(rows: list[dict[str, Any]]) -> None:
+    out_dir = Path(app_config.DATA_DIR)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / "baseline_score_stability_per_app_model.csv"
+    fieldnames = [
+        "package_name",
+        "model",
+        "training_mode",
+        "baseline_run_id",
+        "baseline_windows_n",
+        "baseline_score_mean",
+        "baseline_score_std",
+        "baseline_score_cv",
+        "baseline_score_p95",
+        "baseline_score_min",
+        "baseline_score_max",
+        "threshold_tau",
+        "tau_minus_mean",
+        "tau_over_mean_abs",
+        "ml_schema_version",
+    ]
+    import csv
+
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({k: row.get(k) for k in fieldnames})
+
+
+def _write_static_dynamic_stratification_csv(rows: list[dict[str, Any]]) -> None:
+    out_dir = Path(app_config.DATA_DIR)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / "static_dynamic_stratification_per_app.csv"
+    fieldnames = [
+        "package_name",
+        "masvs_total_score",
+        "static_risk_score",
+        "static_risk_band",
+        "exported_components_total",
+        "dangerous_permission_count",
+        "uses_cleartext_traffic",
+        "sdk_indicator_score",
+        "interactive_iforest_runs",
+        "interactive_iforest_exceedance_mean",
+        "interactive_iforest_dars_mean",
+        "interactive_iforest_dars_max",
+        "ml_schema_version",
+    ]
+    import csv
+
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({k: row.get(k) for k in fieldnames})
+
+
 def _compute_transport_mix_rows(
     *,
     package_name: str,
@@ -1202,6 +1495,9 @@ def _missing_dataset_level_outputs() -> list[str]:
         "model_overlap_per_run.csv",
         "transport_mix_by_phase.csv",
         "ml_audit_per_app_model.csv",
+        "dars_components_per_run.csv",
+        "baseline_score_stability_per_app_model.csv",
+        "static_dynamic_stratification_per_app.csv",
     ]
     out_dir = Path(app_config.DATA_DIR)
     missing = []
@@ -1232,6 +1528,9 @@ def _rebuild_dataset_outputs_from_v1(
     overlap_rows: list[dict[str, Any]] = []
     transport_rows: list[dict[str, Any]] = []
     audit_rows: list[dict[str, Any]] = []
+    dars_rows: list[dict[str, Any]] = []
+    baseline_stability_rows: list[dict[str, Any]] = []
+    static_dynamic_rows: list[dict[str, Any]] = []
 
     included = _load_frozen_run_ids_from_payload(freeze_payload) or set()
 
@@ -1411,11 +1710,40 @@ def _rebuild_dataset_outputs_from_v1(
                 per_run_tag=tag_by_rid,
             )
         )
+        app_dars_rows = _compute_dars_component_rows(
+            package_name=pkg,
+            app_runs=[inputs_by_rid[r] for r in run_ids],
+            per_model_scores_by_run=per_model_scores_by_run,
+            per_model_thresholds=per_model_thresholds,
+            per_run_phase=per_run_phase,
+            per_run_tag=tag_by_rid,
+            training_mode=training_mode,
+        )
+        dars_rows.extend(app_dars_rows)
+        baseline_stability_rows.extend(
+            _compute_baseline_stability_rows(
+                package_name=pkg,
+                baseline_run_id=baseline_id,
+                per_model_scores_by_run=per_model_scores_by_run,
+                per_model_thresholds=per_model_thresholds,
+                training_mode=training_mode,
+            )
+        )
+        static_dynamic_rows.append(
+            _compute_static_dynamic_stratification_row(
+                package_name=pkg,
+                static_snapshot=_extract_static_snapshot([inputs_by_rid[r] for r in run_ids]),
+                dars_rows=app_dars_rows,
+            )
+        )
 
     _write_ml_audit_csv(audit_rows)
     _write_prevalence_csvs(phase_rows)
     _write_model_overlap_csv(overlap_rows)
     _write_transport_mix_csvs(transport_rows)
+    _write_dars_components_csv(dars_rows)
+    _write_baseline_stability_csv(baseline_stability_rows)
+    _write_static_dynamic_stratification_csv(static_dynamic_rows)
 
 
 def _read_scores_and_threshold(path: Path) -> tuple[list[float], float | None]:

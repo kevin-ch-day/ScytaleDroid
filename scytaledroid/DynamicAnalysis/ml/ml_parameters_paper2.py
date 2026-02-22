@@ -81,6 +81,16 @@ SEED_SALT = "scytaledroid-paper2-ml-seed-salt-v1"
 MODEL_IFOREST = "isolation_forest"
 MODEL_OCSVM = "one_class_svm"
 
+# Model hyperparameters (locked for Paper #2).
+IFOREST_N_ESTIMATORS = 200
+IFOREST_MAX_SAMPLES = "auto"
+IFOREST_BOOTSTRAP = False
+OCSVM_KERNEL = "rbf"
+OCSVM_NU = 0.05
+OCSVM_GAMMA = "scale"
+OCSVM_SHRINKING = False
+OCSVM_TOL = 1e-3
+
 # Fig B1 exemplar selection (PM locked)
 # Exemplar must be a messaging app and must be a call (voice or video).
 EXEMPLAR_ALLOWED_INTERACTION_TAGS = {"voice", "video"}

@@ -34,10 +34,23 @@ MIN_TRAINING_SAMPLES_WARNING = 50
 # Feature stabilisation (Phase F2)
 FEATURE_LOG1P = True
 FEATURE_ROBUST_SCALE = True
+FEATURE_WINSORIZE = True
+FEATURE_WINSORIZE_LOWER_PCT = 1.0
+FEATURE_WINSORIZE_UPPER_PCT = 99.0
 
 # Models (match Phase E set)
 MODEL_IFOREST = "isolation_forest"
 MODEL_OCSVM = "one_class_svm"
+
+# Operational tuning defaults (safe, deterministic).
+IFOREST_N_ESTIMATORS = 300
+IFOREST_MAX_SAMPLES = "auto"
+IFOREST_BOOTSTRAP = False
+OCSVM_KERNEL = "rbf"
+OCSVM_NU = 0.03
+OCSVM_GAMMA = "scale"
+OCSVM_SHRINKING = False
+OCSVM_TOL = 1e-3
 
 # Seed derivation
 SEED_SALT_LABEL = "operational-ml-seed-salt-v1"

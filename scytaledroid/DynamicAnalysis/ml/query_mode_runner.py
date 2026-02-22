@@ -127,6 +127,39 @@ def _apply_robust_scaling(
     )
 
 
+def _apply_winsorization(
+    X_train: np.ndarray,
+    X_all: np.ndarray,
+    *,
+    lower_pct: float,
+    upper_pct: float,
+) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    """Clip feature extremes using train-derived percentile bounds."""
+    if X_train.size == 0:
+        return X_train, X_all, {"method": "none"}
+    lo = float(max(0.0, min(100.0, lower_pct)))
+    hi = float(max(0.0, min(100.0, upper_pct)))
+    if lo >= hi:
+        return X_train, X_all, {"method": "none", "reason": "invalid_percentiles"}
+    lower = np_percentile(X_train, lo, axis=0, method=config.NP_PERCENTILE_METHOD)
+    upper = np_percentile(X_train, hi, axis=0, method=config.NP_PERCENTILE_METHOD)
+    lower_a = np.asarray(lower, dtype=float)
+    upper_a = np.asarray(upper, dtype=float)
+    if np.any(upper_a < lower_a):
+        return X_train, X_all, {"method": "none", "reason": "degenerate_bounds"}
+    return (
+        np.clip(X_train, lower_a, upper_a),
+        np.clip(X_all, lower_a, upper_a),
+        {
+            "method": "winsorize",
+            "lower_pct": lo,
+            "upper_pct": hi,
+            "lower": [float(v) for v in lower_a],
+            "upper": [float(v) for v in upper_a],
+        },
+    )
+
+
 def _run_output_dir(snapshot_dir: Path, run_id: str) -> Path:
     # Keep this entirely separate from evidence packs to avoid polluting archival inputs.
     return snapshot_dir / "runs" / run_id / "ml" / config.ML_SCHEMA_LABEL
@@ -945,6 +978,15 @@ def run_ml_query_mode(
         if X_train.size == 0 or X_train.shape[0] < 3 or X_all.size == 0:
             continue
 
+        feature_winsorize: dict[str, Any] | None = None
+        if bool(getattr(config, "FEATURE_WINSORIZE", False)):
+            X_train, X_all, feature_winsorize = _apply_winsorization(
+                X_train,
+                X_all,
+                lower_pct=float(getattr(config, "FEATURE_WINSORIZE_LOWER_PCT", 1.0)),
+                upper_pct=float(getattr(config, "FEATURE_WINSORIZE_UPPER_PCT", 99.0)),
+            )
+
         feature_scaling: dict[str, Any] | None = None
         if config.FEATURE_ROBUST_SCALE:
             X_train, X_all, feature_scaling = _apply_robust_scaling(X_train, X_all)
@@ -952,7 +994,7 @@ def run_ml_query_mode(
         # Seed: stable per group key.
         identity_key = f"group:{group_key}"
         seed = derive_seed(identity_key)
-        specs = fixed_model_specs(seed)
+        specs = fixed_model_specs(seed, ml_config=config)
         groups_trained += 1
 
         per_model_thresholds: dict[str, float] = {}
@@ -985,6 +1027,7 @@ def run_ml_query_mode(
                 "training_samples_warning": training_samples_warning,
                 "threshold_equals_max": threshold_equals_max,
                 "feature_transform": "log1p_bytes_packets" if config.FEATURE_LOG1P else "none",
+                "feature_winsorize": feature_winsorize,
                 "feature_scaling": feature_scaling,
                 "feature_names": list(feature_names),
                 "params": dict(spec.params),

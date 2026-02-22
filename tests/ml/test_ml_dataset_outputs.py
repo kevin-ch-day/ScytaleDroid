@@ -216,3 +216,76 @@ def test_paper_artifacts_json_written_once(tmp_path, monkeypatch):
     second = json.loads(path.read_text(encoding="utf-8"))
     # Must be immutable once written.
     assert second["fig_B1_run_id"] == "rid1"
+
+
+def test_new_paper_tables_written(tmp_path, monkeypatch):
+    from scytaledroid.Config import app_config
+    from scytaledroid.DynamicAnalysis.ml import evidence_pack_ml_orchestrator as orchestrator
+
+    monkeypatch.setattr(app_config, "DATA_DIR", str(tmp_path))
+
+    dars_rows = [
+        {
+            "package_name": "com.example.a",
+            "run_id": "rid_i1",
+            "phase": "interactive_a",
+            "interaction_tag": "video",
+            "model": "isolation_forest",
+            "training_mode": "baseline_only",
+            "windows_total_n": 10,
+            "threshold_tau": 1.0,
+            "operator": ">=",
+            "exceedance_n": 2,
+            "exceedance_ratio": 0.2,
+            "top_k_policy": "ceil_10pct_n",
+            "top_k_value": 1,
+            "top_k_mean_score": 1.5,
+            "severity_ratio": 1.5,
+            "dars_v1": 47.5,
+            "ml_schema_version": 1,
+        }
+    ]
+    orchestrator._write_dars_components_csv(dars_rows)
+    assert (tmp_path / "dars_components_per_run.csv").exists()
+
+    baseline_rows = [
+        {
+            "package_name": "com.example.a",
+            "model": "isolation_forest",
+            "training_mode": "baseline_only",
+            "baseline_run_id": "rid_b",
+            "baseline_windows_n": 30,
+            "baseline_score_mean": 0.8,
+            "baseline_score_std": 0.2,
+            "baseline_score_cv": 0.25,
+            "baseline_score_p95": 1.2,
+            "baseline_score_min": 0.1,
+            "baseline_score_max": 1.5,
+            "threshold_tau": 1.0,
+            "tau_minus_mean": 0.2,
+            "tau_over_mean_abs": 1.25,
+            "ml_schema_version": 1,
+        }
+    ]
+    orchestrator._write_baseline_stability_csv(baseline_rows)
+    assert (tmp_path / "baseline_score_stability_per_app_model.csv").exists()
+
+    strat_rows = [
+        {
+            "package_name": "com.example.a",
+            "masvs_total_score": 0.72,
+            "static_risk_score": 44.0,
+            "static_risk_band": "MEDIUM",
+            "exported_components_total": 10,
+            "dangerous_permission_count": 5,
+            "uses_cleartext_traffic": 0,
+            "sdk_indicator_score": 0.3,
+            "interactive_iforest_runs": 2,
+            "interactive_iforest_exceedance_mean": 0.2,
+            "interactive_iforest_dars_mean": 41.0,
+            "interactive_iforest_dars_max": 47.5,
+            "ml_schema_version": 1,
+        }
+    ]
+    orchestrator._write_static_dynamic_stratification_csv(strat_rows)
+    assert (tmp_path / "static_dynamic_stratification_per_app.csv").exists()
