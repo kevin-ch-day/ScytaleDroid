@@ -25,6 +25,12 @@ def export_pcap_features_csv(
     if require_freeze and freeze_path is not None and not freeze_path.exists():
         raise RuntimeError(f"EXPORT_BLOCKED_MISSING_FREEZE:{freeze_path}")
     selected_run_ids = _load_freeze_included_run_ids(freeze_path) if freeze_path else None
+    if selected_run_ids is not None:
+        _ensure_freeze_ids_present(
+            selected_run_ids=selected_run_ids,
+            evidence_root=output_root,
+            freeze_path=freeze_path,
+        )
     rows: list[dict[str, Any]] = []
     for run_dir in sorted([p for p in output_root.iterdir() if p.is_dir()], key=lambda p: p.name):
         if selected_run_ids is not None and run_dir.name not in selected_run_ids:
@@ -88,6 +94,12 @@ def export_dynamic_run_summary_csv(
     if require_freeze and freeze_path is not None and not freeze_path.exists():
         raise RuntimeError(f"EXPORT_BLOCKED_MISSING_FREEZE:{freeze_path}")
     selected_run_ids = _load_freeze_included_run_ids(freeze_path) if freeze_path else None
+    if selected_run_ids is not None:
+        _ensure_freeze_ids_present(
+            selected_run_ids=selected_run_ids,
+            evidence_root=output_root,
+            freeze_path=freeze_path,
+        )
     rows: list[dict[str, Any]] = []
     for run_dir in sorted([p for p in output_root.iterdir() if p.is_dir()], key=lambda p: p.name):
         if selected_run_ids is not None and run_dir.name not in selected_run_ids:
@@ -105,6 +117,82 @@ def export_dynamic_run_summary_csv(
     if not rows:
         return None
     dest = Path(app_config.DATA_DIR) / "archive" / "dynamic_run_summary.csv"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    _write_csv(dest, rows)
+    return dest
+
+
+def export_protocol_ledger_csv(
+    *,
+    freeze_path: Path | None = None,
+    require_freeze: bool = False,
+) -> Path | None:
+    output_root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    if not output_root.exists():
+        return None
+    if require_freeze and freeze_path is None:
+        raise RuntimeError("EXPORT_BLOCKED_MISSING_FREEZE: provide freeze_path in paper mode")
+    if require_freeze and freeze_path is not None and not freeze_path.exists():
+        raise RuntimeError(f"EXPORT_BLOCKED_MISSING_FREEZE:{freeze_path}")
+    selected_run_ids = _load_freeze_included_run_ids(freeze_path) if freeze_path else None
+    if selected_run_ids is not None:
+        _ensure_freeze_ids_present(
+            selected_run_ids=selected_run_ids,
+            evidence_root=output_root,
+            freeze_path=freeze_path,
+        )
+    freeze_contract_hash = _freeze_contract_hash(freeze_path) if freeze_path else None
+    rows: list[dict[str, Any]] = []
+    for run_dir in sorted([p for p in output_root.iterdir() if p.is_dir()], key=lambda p: p.name):
+        if selected_run_ids is not None and run_dir.name not in selected_run_ids:
+            continue
+        manifest = _load_json(run_dir / "run_manifest.json")
+        if not isinstance(manifest, dict):
+            continue
+        target = manifest.get("target") if isinstance(manifest.get("target"), dict) else {}
+        operator = manifest.get("operator") if isinstance(manifest.get("operator"), dict) else {}
+        dataset = manifest.get("dataset") if isinstance(manifest.get("dataset"), dict) else {}
+        run_profile = str(operator.get("run_profile") or dataset.get("run_profile") or "")
+        all_reasons = dataset.get("paper_exclusion_all_reason_codes")
+        reason_list = [str(x) for x in all_reasons] if isinstance(all_reasons, list) else []
+        protocol_reasons = [r for r in reason_list if r.startswith("EXCLUDED_SCRIPT_") or r.startswith("EXCLUDED_PROTOCOL_")]
+        common = {
+            "dynamic_run_id": manifest.get("dynamic_run_id") or run_dir.name,
+            "package_name": target.get("package_name"),
+            "run_profile": run_profile,
+            "template_id": operator.get("template_id") or operator.get("scenario_template"),
+            "template_hash": operator.get("template_hash") or operator.get("script_hash"),
+            "interaction_protocol_version": operator.get("interaction_protocol_version"),
+            "protocol_fit": operator.get("protocol_fit"),
+            "protocol_violations": json.dumps(protocol_reasons, sort_keys=True),
+            "technical_validity": dataset.get("technical_validity") or operator.get("technical_validity"),
+            "protocol_compliance": dataset.get("protocol_compliance") or operator.get("protocol_compliance"),
+            "cohort_eligibility": dataset.get("cohort_eligibility") or operator.get("cohort_eligibility"),
+            "paper_eligible": dataset.get("paper_eligible"),
+            "paper_exclusion_primary_reason_code": dataset.get("paper_exclusion_primary_reason_code"),
+            "freeze_paper_contract_hash": freeze_contract_hash,
+        }
+        step_rows = _protocol_step_rows(run_dir / "notes" / "run_events.jsonl")
+        if step_rows:
+            for srow in step_rows:
+                row = dict(common)
+                row.update(srow)
+                rows.append(row)
+        else:
+            rows.append(
+                {
+                    **common,
+                    "step_index": None,
+                    "step_id": None,
+                    "step_variant": None,
+                    "step_start_utc": None,
+                    "step_end_utc": None,
+                    "step_elapsed_s": None,
+                }
+            )
+    if not rows:
+        return None
+    dest = Path(app_config.DATA_DIR) / "archive" / "protocol_ledger.csv"
     dest.parent.mkdir(parents=True, exist_ok=True)
     _write_csv(dest, rows)
     return dest
@@ -248,10 +336,97 @@ def _load_json(path: Path) -> dict[str, Any] | None:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(payload, dict) and path.name == "static_dynamic_plan.json":
-            return enrich_dynamic_plan(payload)
-        return payload
+            try:
+                return enrich_dynamic_plan(payload)
+            except Exception:
+                # Keep exports resilient for partial/legacy plans.
+                return payload
+        return payload if isinstance(payload, dict) else None
     except (OSError, json.JSONDecodeError):
         return None
+
+
+def _load_jsonl(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    out: list[dict[str, Any]] = []
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            text = line.strip()
+            if not text:
+                continue
+            payload = json.loads(text)
+            if isinstance(payload, dict):
+                out.append(payload)
+    except Exception:
+        return []
+    return out
+
+
+def _protocol_step_rows(events_path: Path) -> list[dict[str, Any]]:
+    events = _load_jsonl(events_path)
+    if not events:
+        return []
+    step_index: dict[int, dict[str, Any]] = {}
+    for e in events:
+        event_type = str(e.get("event_type") or "").strip().upper()
+        ts = e.get("timestamp")
+        details = e.get("details") if isinstance(e.get("details"), dict) else {}
+        if event_type == "STEP_START":
+            idx = details.get("step_index")
+            try:
+                i = int(idx)
+            except Exception:
+                continue
+            step_index.setdefault(i, {})
+            step_index[i].update(
+                {
+                    "step_index": i,
+                    "step_id": details.get("step_id"),
+                    "step_variant": details.get("step_variant"),
+                    "step_start_utc": ts,
+                }
+            )
+        elif event_type == "STEP_END":
+            idx = details.get("step_index")
+            try:
+                i = int(idx)
+            except Exception:
+                continue
+            step_index.setdefault(i, {})
+            step_index[i].update(
+                {
+                    "step_index": i,
+                    "step_id": details.get("step_id"),
+                    "step_variant": details.get("step_variant"),
+                    "step_end_utc": ts,
+                    "step_elapsed_s": details.get("elapsed_s"),
+                }
+            )
+    out = []
+    for i in sorted(step_index.keys()):
+        row = step_index[i]
+        out.append(
+            {
+                "step_index": row.get("step_index"),
+                "step_id": row.get("step_id"),
+                "step_variant": row.get("step_variant"),
+                "step_start_utc": row.get("step_start_utc"),
+                "step_end_utc": row.get("step_end_utc"),
+                "step_elapsed_s": row.get("step_elapsed_s"),
+            }
+        )
+    return out
+
+
+def _freeze_contract_hash(freeze_path: Path | None) -> str | None:
+    if freeze_path is None or not freeze_path.exists():
+        return None
+    payload = _load_json(freeze_path)
+    if not isinstance(payload, dict):
+        return None
+    value = str(payload.get("paper_contract_hash") or "").strip().lower()
+    return value or None
 
 
 def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
@@ -326,4 +501,20 @@ def _load_freeze_included_run_ids(freeze_path: Path) -> set[str]:
     return out
 
 
-__all__ = ["export_pcap_features_csv", "export_dynamic_run_summary_csv"]
+def _ensure_freeze_ids_present(
+    *,
+    selected_run_ids: set[str],
+    evidence_root: Path,
+    freeze_path: Path | None,
+) -> None:
+    available = {p.name for p in evidence_root.iterdir() if p.is_dir()}
+    found = selected_run_ids.intersection(available)
+    if found:
+        return
+    raise RuntimeError(
+        "EXPORT_BLOCKED_STALE_FREEZE:"
+        f"{freeze_path}:none_of_{len(selected_run_ids)}_included_run_ids_present_locally"
+    )
+
+
+__all__ = ["export_pcap_features_csv", "export_dynamic_run_summary_csv", "export_protocol_ledger_csv"]

@@ -8,14 +8,24 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from scytaledroid.DynamicAnalysis.datasets.research_dataset_alpha import MESSAGING_PACKAGES
+
+_MESSAGING_PACKAGES_LC = {p.lower() for p in MESSAGING_PACKAGES}
+_SOCIAL_TEMPLATE_ALLOWED = {"social_feed_basic_v2"}
+_MESSAGING_TEMPLATE_ALLOWED = {"messaging_basic_v1"}
+_LEGACY_TEMPLATE_IDS = {"social_feed_basic", "messaging_basic"}
 
 EXCLUSION_REASON_CODES: tuple[str, ...] = (
     "EXCLUDED_SCRIPT_HASH_MISMATCH",
+    "EXCLUDED_SCRIPT_TEMPLATE_MISMATCH",
+    "EXCLUDED_PROTOCOL_LEGACY_TEMPLATE",
+    "EXCLUDED_SCRIPT_PROTOCOL_SEND",
     "EXCLUDED_SCRIPT_ABORT",
     "EXCLUDED_SCRIPT_END_MISSING",
     "EXCLUDED_SCRIPT_STEP_MISSING",
     "EXCLUDED_SCRIPT_TIMEOUT",
     "EXCLUDED_SCRIPT_UI_STATE_MISMATCH",
+    "EXCLUDED_PROTOCOL_FIT_POOR",
     "EXCLUDED_MANUAL_NON_COHORT",
     "EXCLUDED_EXTRA_RUN",
     "EXCLUDED_INTENT_NOT_ALLOWED",
@@ -40,11 +50,15 @@ EXCLUSION_REASON_CODES: tuple[str, ...] = (
 EXCLUSION_REASON_PRECEDENCE: dict[str, int] = {
     # Script/protocol
     "EXCLUDED_SCRIPT_HASH_MISMATCH": 10,
-    "EXCLUDED_SCRIPT_ABORT": 11,
-    "EXCLUDED_SCRIPT_END_MISSING": 12,
-    "EXCLUDED_SCRIPT_STEP_MISSING": 13,
-    "EXCLUDED_SCRIPT_TIMEOUT": 14,
-    "EXCLUDED_SCRIPT_UI_STATE_MISMATCH": 15,
+    "EXCLUDED_PROTOCOL_LEGACY_TEMPLATE": 11,
+    "EXCLUDED_SCRIPT_TEMPLATE_MISMATCH": 12,
+    "EXCLUDED_SCRIPT_PROTOCOL_SEND": 13,
+    "EXCLUDED_SCRIPT_ABORT": 14,
+    "EXCLUDED_SCRIPT_END_MISSING": 15,
+    "EXCLUDED_SCRIPT_STEP_MISSING": 16,
+    "EXCLUDED_SCRIPT_TIMEOUT": 17,
+    "EXCLUDED_SCRIPT_UI_STATE_MISMATCH": 18,
+    "EXCLUDED_PROTOCOL_FIT_POOR": 19,
     # Identity/policy
     "EXCLUDED_IDENTITY_MISMATCH": 20,
     "EXCLUDED_POLICY_VERSION_MISMATCH": 21,
@@ -135,9 +149,24 @@ def derive_paper_eligibility(
 
         run_profile = str(ds.get("run_profile") or op.get("run_profile") or "").strip().lower()
         if run_profile.startswith("interaction_scripted"):
+            pkg_lc = _norm_str(target.get("package_name")).lower()
+            observed_template = _norm_str(op.get("template_id") or op.get("scenario_template")).lower()
+            allowed_templates = _MESSAGING_TEMPLATE_ALLOWED if pkg_lc in _MESSAGING_PACKAGES_LC else _SOCIAL_TEMPLATE_ALLOWED
+            if observed_template in _LEGACY_TEMPLATE_IDS:
+                reasons.append("EXCLUDED_PROTOCOL_LEGACY_TEMPLATE")
+            try:
+                protocol_version = int(op.get("interaction_protocol_version"))
+            except Exception:
+                protocol_version = None
+            if protocol_version is None or protocol_version < 2:
+                reasons.append("EXCLUDED_PROTOCOL_LEGACY_TEMPLATE")
+            if not observed_template or observed_template not in allowed_templates:
+                reasons.append("EXCLUDED_SCRIPT_TEMPLATE_MISMATCH")
             script_hash = str(op.get("script_hash") or "").strip().lower()
             if not script_hash:
                 reasons.append("EXCLUDED_SCRIPT_HASH_MISMATCH")
+            if _is_truthy(op.get("script_protocol_send")):
+                reasons.append("EXCLUDED_SCRIPT_PROTOCOL_SEND")
             try:
                 script_exit_code = int(op.get("script_exit_code"))
             except Exception:
@@ -154,10 +183,11 @@ def derive_paper_eligibility(
                 completed = -1
             if planned <= 0 or completed != planned:
                 reasons.append("EXCLUDED_SCRIPT_STEP_MISSING")
-            if op.get("script_timing_within_tolerance") is False:
-                reasons.append("EXCLUDED_SCRIPT_TIMEOUT")
+            # Timing drift is operationally useful but not a paper exclusion by itself.
             if op.get("script_ui_state_ok") is False:
                 reasons.append("EXCLUDED_SCRIPT_UI_STATE_MISMATCH")
+            if _norm_str(op.get("protocol_fit")).lower() == "poor":
+                reasons.append("EXCLUDED_PROTOCOL_FIT_POOR")
         if "manual" in run_profile:
             reasons.append("EXCLUDED_MANUAL_NON_COHORT")
 

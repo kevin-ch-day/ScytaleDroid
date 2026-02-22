@@ -119,7 +119,10 @@ def build_operator_guidance(plan_payload: dict[str, Any] | None, *, run_profile:
     if "PRIVACY_SENSITIVE" in tags:
         hv = ((ctx.get("permissions") or {}).get("high_value_sample") or []) if isinstance(ctx, dict) else []
         if hv:
-            lines.append(f"Optional: exercise high-value permissions (sample): {', '.join(hv)}")
+            lines.append(
+                "Optional: exercise relevant capabilities (Location/Camera/Microphone/Contacts/Notifications-IPC). "
+                "Press P to view raw permission names."
+            )
     if "EXPORT_HEAVY" in tags:
         lines.append("Optional: open deep links/notifications flows to exercise IPC surface (if safe).")
     if "NETWORK_CLEARTEXT_ALLOWED" in tags:

@@ -11,6 +11,9 @@ def _manifest(*, run_profile: str = "interaction_scripted", valid: bool = True, 
     if run_profile == "interaction_scripted":
         operator.update(
             {
+                "template_id": "social_feed_basic_v2",
+                "scenario_template": "social_feed_basic_v2",
+                "interaction_protocol_version": 2,
                 "script_hash": "e" * 64,
                 "script_exit_code": 0,
                 "script_end_marker": True,
@@ -121,6 +124,85 @@ def test_paper_eligibility_script_step_mismatch() -> None:
     )
     assert out.paper_eligible is False
     assert out.reason_code == "EXCLUDED_SCRIPT_STEP_MISSING"
+
+
+def test_paper_eligibility_script_template_mismatch() -> None:
+    manifest = _manifest()
+    manifest["operator"]["template_id"] = "messaging_basic_v1"
+    manifest["operator"]["scenario_template"] = "messaging_basic_v1"
+    out = derive_paper_eligibility(
+        manifest=manifest,
+        plan=_plan(),
+        min_windows=20,
+        required_capture_policy_version=1,
+    )
+    assert out.paper_eligible is False
+    assert out.reason_code == "EXCLUDED_SCRIPT_TEMPLATE_MISMATCH"
+
+
+def test_paper_eligibility_script_timing_drift_is_warning_only() -> None:
+    manifest = _manifest()
+    manifest["operator"]["script_timing_within_tolerance"] = False
+    out = derive_paper_eligibility(
+        manifest=manifest,
+        plan=_plan(),
+        min_windows=20,
+        required_capture_policy_version=1,
+    )
+    assert out.paper_eligible is True
+    assert out.reason_code is None
+
+
+def test_paper_eligibility_social_template_v2_allowed() -> None:
+    manifest = _manifest()
+    manifest["operator"]["scenario_template"] = "social_feed_basic_v2"
+    out = derive_paper_eligibility(
+        manifest=manifest,
+        plan=_plan(),
+        min_windows=20,
+        required_capture_policy_version=1,
+    )
+    assert out.paper_eligible is True
+
+
+def test_paper_eligibility_legacy_template_is_excluded() -> None:
+    manifest = _manifest()
+    manifest["operator"]["template_id"] = "social_feed_basic"
+    manifest["operator"]["scenario_template"] = "social_feed_basic"
+    out = derive_paper_eligibility(
+        manifest=manifest,
+        plan=_plan(),
+        min_windows=20,
+        required_capture_policy_version=1,
+    )
+    assert out.paper_eligible is False
+    assert out.reason_code == "EXCLUDED_PROTOCOL_LEGACY_TEMPLATE"
+
+
+def test_paper_eligibility_protocol_fit_poor_is_excluded() -> None:
+    manifest = _manifest()
+    manifest["operator"]["protocol_fit"] = "poor"
+    out = derive_paper_eligibility(
+        manifest=manifest,
+        plan=_plan(),
+        min_windows=20,
+        required_capture_policy_version=1,
+    )
+    assert out.paper_eligible is False
+    assert out.reason_code == "EXCLUDED_PROTOCOL_FIT_POOR"
+
+
+def test_paper_eligibility_script_send_is_excluded() -> None:
+    manifest = _manifest()
+    manifest["operator"]["script_protocol_send"] = True
+    out = derive_paper_eligibility(
+        manifest=manifest,
+        plan=_plan(),
+        min_windows=20,
+        required_capture_policy_version=1,
+    )
+    assert out.paper_eligible is False
+    assert out.reason_code == "EXCLUDED_SCRIPT_PROTOCOL_SEND"
 
 
 def test_paper_eligibility_identity_mismatch_version() -> None:

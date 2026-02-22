@@ -72,8 +72,11 @@ def _summarize_evidence_quota(dataset_pkgs: set[str], cfg) -> dict[str, int | bo
         "total_runs": 0,
         "paper_eligible_runs": 0,
         "quota_runs_counted": 0,
+        "apps_satisfied": 0,
         "excluded_runs": 0,
         "extra_eligible_runs": 0,
+        "protocol_fit_poor_runs": 0,
+        "low_signal_exploratory_runs": 0,
     }
     if not root.exists():
         return out
@@ -112,13 +115,34 @@ def _summarize_evidence_quota(dataset_pkgs: set[str], cfg) -> dict[str, int | bo
         )
         if bucket == "unknown":
             continue
+        # PM lock: low-signal idle runs are retained but exploratory-only.
+        if (
+            bucket == "baseline"
+            and bool(dataset.get("low_signal"))
+            and str(dataset.get("invalid_reason_code") or "").strip().upper() in {"", "LOW_SIGNAL_IDLE"}
+        ):
+            out["low_signal_exploratory_runs"] = int(out["low_signal_exploratory_runs"]) + 1
+            out["extra_eligible_runs"] = int(out["extra_eligible_runs"]) + 1
+            continue
         pkg_counts = per_pkg.setdefault(package, {"baseline": 0, "interactive": 0})
+        # Protocol-fit feedback can keep a run technically valid while preventing
+        # it from satisfying canonical paper cohort quota.
+        if bucket == "interactive" and str(operator.get("protocol_fit") or "").strip().lower() == "poor":
+            out["protocol_fit_poor_runs"] = int(out["protocol_fit_poor_runs"]) + 1
+            out["extra_eligible_runs"] = int(out["extra_eligible_runs"]) + 1
+            continue
         needed = int(cfg.baseline_required if bucket == "baseline" else cfg.interactive_required)
         if int(pkg_counts.get(bucket, 0)) < needed:
             pkg_counts[bucket] = int(pkg_counts.get(bucket, 0)) + 1
             out["quota_runs_counted"] = int(out["quota_runs_counted"]) + 1
         else:
             out["extra_eligible_runs"] = int(out["extra_eligible_runs"]) + 1
+    out["apps_satisfied"] = sum(
+        1
+        for counts in per_pkg.values()
+        if int(counts.get("baseline", 0)) >= int(cfg.baseline_required)
+        and int(counts.get("interactive", 0)) >= int(cfg.interactive_required)
+    )
     return out
 
 @dataclass(frozen=True)
@@ -156,10 +180,11 @@ def dynamic_analysis_menu() -> None:
         MenuOption("2", "Dataset run status"),
         MenuOption("3", "Export run summary CSV"),
         MenuOption("4", "Export PCAP features CSV"),
-        MenuOption("5", "Verify host PCAP tools (tshark + capinfos)"),
-        MenuOption("6", "Paper readiness audit (evidence packs)"),
-        MenuOption("7", "Repair/reindex tracker from evidence packs"),
-        MenuOption("8", "Prune incomplete dynamic evidence dirs"),
+        MenuOption("5", "Export protocol ledger CSV"),
+        MenuOption("6", "Verify host PCAP tools (tshark + capinfos)"),
+        MenuOption("7", "Paper readiness audit (evidence packs)"),
+        MenuOption("8", "Repair/reindex tracker from evidence packs"),
+        MenuOption("9", "Prune incomplete dynamic evidence dirs"),
     ]
 
     ui_defaults = _load_dynamic_ui_defaults()
@@ -196,20 +221,24 @@ def dynamic_analysis_menu() -> None:
             _export_pcap_features_csv()
             prompt_utils.press_enter_to_continue()
             continue
-
         if choice == "5":
+            _export_protocol_ledger_csv()
+            prompt_utils.press_enter_to_continue()
+            continue
+
+        if choice == "6":
             _verify_host_pcap_tools()
             prompt_utils.press_enter_to_continue()
             continue
-        if choice == "6":
+        if choice == "7":
             _run_paper_readiness_audit()
             prompt_utils.press_enter_to_continue()
             continue
-        if choice == "7":
+        if choice == "8":
             _repair_reindex_tracker()
             prompt_utils.press_enter_to_continue()
             continue
-        if choice == "8":
+        if choice == "9":
             _prune_incomplete_dynamic_evidence_dirs()
             prompt_utils.press_enter_to_continue()
             continue
@@ -517,6 +546,27 @@ def _export_dynamic_run_summary_csv() -> None:
     print(status_messages.status(msg, level="success"))
 
 
+def _export_protocol_ledger_csv() -> None:
+    from scytaledroid.DynamicAnalysis.pcap.aggregate import export_protocol_ledger_csv
+
+    print()
+    menu_utils.print_header("Protocol Ledger Export")
+    freeze_path = Path(app_config.DATA_DIR) / "archive" / "dataset_freeze.json"
+    try:
+        output_path = export_protocol_ledger_csv(freeze_path=freeze_path, require_freeze=True)
+    except RuntimeError as exc:
+        print(status_messages.status(str(exc), level="error"))
+        return
+    if output_path is None:
+        print(status_messages.status("No protocol ledger rows found.", level="warn"))
+        return
+    count = _count_csv_rows(output_path)
+    msg = f"Exported CSV: {output_path} [freeze-anchored]"
+    if count is not None:
+        msg += f" ({count} row(s))"
+    print(status_messages.status(msg, level="success"))
+
+
 def _count_csv_rows(path: Path) -> int | None:
     """Return data row count for a CSV (excluding header)."""
     try:
@@ -718,7 +768,7 @@ def _print_tier1_qa_result(dynamic_run_id: str) -> None:
     if failures:
         print(
             status_messages.status(
-                f"Tier-1 QA: FAIL ({', '.join(failures)})",
+                f"Tier-1 QA: FAIL ({', '.join(failures)}) [quality gate; does not override technical dataset validity]",
                 level="warn",
             )
         )
@@ -895,18 +945,17 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
         display = ((app_label or package).strip() or package)
         if display in collisions:
             display = f"{display} ({package})"
-        # Keep dataset selection tables readable on narrower terminals. We bias
-        # the width budget toward progress columns ("Base/Int/Next") so they
-        # don't get truncated into "interact…".
-        display = text_blocks.truncate_visible(display, 26)
+        # Keep app labels readable without overloading the main run-selection view.
+        display = text_blocks.truncate_visible(display, 30)
 
         base_label = "—"
         inter_label = "—"
         need_label = "—"
-        runs_label = "—"
-        hist_label = "—"
-        last_label = "—"
         next_label = "—"
+        build_label = "—"
+        total_label = "—"
+        legacy_label = "—"
+        last_label = "—"
         if package.lower() in dataset_pkgs:
             dataset_apps_total += 1
             # Important: the dataset tracker deterministically counts only the
@@ -915,7 +964,6 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
             # show "countable(+extra)" here rather than a quota-style "x/y".
             entry = tracker_apps.get(package) if isinstance(tracker_apps, dict) else None
             runs = entry.get("runs") if isinstance(entry, dict) else []
-            total_runs = len(runs) if isinstance(runs, list) else 0
             scoped = _build_scoped_dataset_counts(package, runs if isinstance(runs, list) else [], cfg=cfg)
             base_countable = int(scoped["baseline_countable"])
             base_extra = int(scoped["baseline_extra"])
@@ -931,9 +979,10 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
             elif active_version == "—":
                 active_build = "unknown (tracker-only)"
             active_runs = base_countable + base_extra + inter_countable + inter_extra
+            total_valid_runs = active_runs + legacy_valid
 
-            base_label = str(base_countable) if base_extra <= 0 else f"{base_countable}(+{base_extra})"
-            inter_label = str(inter_countable) if inter_extra <= 0 else f"{inter_countable}(+{inter_extra})"
+            base_label = str(base_countable) if base_extra <= 0 else f"{base_countable} (+{base_extra})"
+            inter_label = str(inter_countable) if inter_extra <= 0 else f"{inter_countable} (+{inter_extra})"
             need_base = max(0, int(cfg.baseline_required) - base_countable)
             need_inter = max(0, int(cfg.interactive_required) - inter_countable)
             if need_base == 0 and need_inter == 0:
@@ -942,26 +991,32 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
             if need_base or need_inter:
                 need_parts = []
                 if need_base:
-                    need_parts.append(f"B{need_base}")
+                    need_parts.append(f"{need_base}B")
                 if need_inter:
-                    need_parts.append(f"I{need_inter}")
+                    need_parts.append(f"{need_inter}I")
                 need_label = " ".join(need_parts)
             else:
                 need_label = "0"
-            runs_label = str(total_runs)
-            hist_label = str(legacy_valid) if legacy_valid > 0 else "0"
+            total_label = str(total_valid_runs)
+            legacy_label = str(legacy_valid) if legacy_valid > 0 else "0"
+            if active_runs > 0 and legacy_valid > 0:
+                build_label = "MIX"
+            elif active_runs > 0:
+                build_label = "CUR"
+            elif legacy_valid > 0:
+                build_label = "OLD"
+            else:
+                build_label = "—"
+
             recent = recent_tracker_runs(package, limit=1)
             if recent:
                 r = recent[0]
                 if r.valid is True:
                     last_label = "VALID"
                 elif r.valid is False:
-                    # Keep the selection table compact; detailed reason codes are
-                    # visible in Recent Runs and per-run summaries.
                     last_label = "INVALID"
                 else:
                     last_label = "UNKNOWN"
-                # Make identity-drift exploratory status explicit for operators.
                 if (
                     last_label == "VALID"
                     and isinstance(runs, list)
@@ -982,21 +1037,21 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
                             str(scoped.get("active_base_sha") or "") or None,
                         )
                         if recent_ident != active_ident:
-                            last_label = "VALID⚠ID_MISMATCH"
+                            last_label = "VALID (ID_MISMATCH)"
             if legacy_valid > 0 and last_label != "—":
-                # Keep legacy-presence visible without overloading "*" semantics.
-                if not last_label.endswith("+L"):
-                    last_label = f"{last_label}+L"
+                if not last_label.endswith(" (L)"):
+                    last_label = f"{last_label} (L)"
+
             proto = peek_next_run_protocol(package, tier="dataset") or {}
             prof = (proto.get("run_profile") or "").lower()
             if "baseline" in prof or "idle" in prof:
-                next_label = "base"
+                next_label = "baseline"
             elif "scripted" in prof:
-                next_label = "script"
+                next_label = "scripted"
             elif "manual" in prof:
                 next_label = "manual"
             elif prof:
-                next_label = "inter"
+                next_label = "interactive"
             build_rows.append(
                 [
                     display,
@@ -1023,29 +1078,17 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
                         continue
                     dataset_window_count_total += max(0, wc)
 
-        # Columns are intentionally minimal for dataset collection.
-        # Column order is chosen to avoid "Next" being truncated on narrow terminals.
-        rows.append([str(idx), display, base_label, inter_label, need_label, next_label, runs_label, hist_label, last_label])
+        rows.append([str(idx), display, base_label, inter_label, need_label, next_label, build_label, total_label, legacy_label, last_label])
     _render_package_table(rows)
     if any(r[2] != "—" for r in rows):
-        print(
-            status_messages.status(
-                "Note: Baseline/Interactive show countable valid runs; '(+N)' indicates extra valid runs (kept, out-of-dataset).",
-                level="info",
-            )
-        )
-        print(
-            status_messages.status(
-                "Build-scoped view: counts are computed for the latest app build identity; '+L' in Last QA indicates legacy valid runs from older builds exist.",
-                level="info",
-            )
-        )
-        print(
-            "Legacy column shows valid older-build runs retained for cross-version pattern analysis (not counted toward current-build quota)."
-        )
-        print(
-            "Last QA is derived from post-run integrity checks (PCAP threshold, capinfos/tshark parse, feature extraction, minimum window count)."
-        )
+        print()
+        print("Legend")
+        print("------")
+        print("Baseline / Interactive = countable valid runs for active build")
+        print("(+N)                   = extra valid runs (not quota-counted)")
+        print("Build                  = CUR(current build) | OLD(legacy only) | MIX(both)")
+        print("Legacy runs            = older-build valid runs")
+        print("Last QA                = latest run integrity status; '(L)' means legacy runs also exist")
         if dataset_apps_total > 0:
             evidence_summary = _summarize_evidence_quota(dataset_pkgs, cfg)
             expected_runs = dataset_apps_total * (int(cfg.baseline_required) + int(cfg.interactive_required))
@@ -1053,15 +1096,25 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
                 tracker_windows_label = f"? (missing window_count in {dataset_window_count_missing} run(s))"
             else:
                 tracker_windows_label = str(dataset_window_count_total)
-            print(
-                f"Tracker quota (informational): {dataset_apps_complete}/{dataset_apps_total} apps satisfied | valid runs={dataset_valid_runs_total}/{expected_runs} | total windows={tracker_windows_label}"
-            )
-            print(
-                "Evidence quota (authoritative): "
-                f"quota-counted eligible runs={int(evidence_summary['quota_runs_counted'])}/{expected_runs} | "
-                f"eligible discovered={int(evidence_summary['paper_eligible_runs'])} "
-                f"(extras={int(evidence_summary.get('extra_eligible_runs', 0))}, excluded={int(evidence_summary.get('excluded_runs', 0))})"
-            )
+            print()
+            print("Quota Status")
+            print("------------")
+            print("Tracker (informational)")
+            print(f"  Apps satisfied  : {dataset_apps_complete} / {dataset_apps_total}")
+            print(f"  Valid runs      : {dataset_valid_runs_total} / {expected_runs}")
+            print(f"  Total windows   : {tracker_windows_label}")
+            print("Evidence (authoritative)")
+            print(f"  Apps satisfied  : {int(evidence_summary.get('apps_satisfied', 0))} / {dataset_apps_total}")
+            print(f"  Eligible counted: {int(evidence_summary['quota_runs_counted'])} / {expected_runs}")
+            print(f"  Eligible found  : {int(evidence_summary['paper_eligible_runs'])}")
+            print(f"  Extras          : {int(evidence_summary.get('extra_eligible_runs', 0))}")
+            print(f"  Excluded        : {int(evidence_summary.get('excluded_runs', 0))}")
+            if int(evidence_summary.get("low_signal_exploratory_runs", 0)) > 0:
+                print(
+                    f"  Exploratory low-signal retained: {int(evidence_summary.get('low_signal_exploratory_runs', 0))}"
+                )
+            if int(evidence_summary.get("protocol_fit_poor_runs", 0)) > 0:
+                print(f"  Protocol fit poor: {int(evidence_summary.get('protocol_fit_poor_runs', 0))} (not quota-counted)")
             if not bool(evidence_summary.get("evidence_root_exists")):
                 print(
                     status_messages.status(
@@ -1101,11 +1154,8 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
 
 def _render_package_table(rows, *, max_preview: int = 15) -> None:
     headers = ["#", "App"]
-    if rows and len(rows[0]) >= 9:
-        # Put "Next" before the trailing status columns so it is less likely to
-        # get truncated when the terminal is narrow (table shrink truncates from
-        # the rightmost columns first).
-        headers = ["#", "App", "Baseline", "Interactive", "Need", "Next", "Runs(All)", "Legacy", "Last QA"]
+    if rows and len(rows[0]) >= 10:
+        headers = ["#", "App", "Baseline", "Interactive", "Need", "Next Action", "Build", "Total", "Legacy", "Last QA"]
     if len(rows) <= max_preview:
         table_utils.render_table(headers, rows, compact=False)
         return

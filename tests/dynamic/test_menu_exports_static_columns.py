@@ -159,8 +159,25 @@ def test_exports_fail_closed_when_freeze_required(tmp_path: Path, monkeypatch) -
     except RuntimeError as exc:
         assert "EXPORT_BLOCKED_MISSING_FREEZE" in str(exc)
 
+
+def test_exports_fail_closed_when_freeze_ids_missing_locally(tmp_path: Path, monkeypatch) -> None:
+    output_root = tmp_path / "output"
+    data_root = tmp_path / "data"
+    evidence_root = output_root / "evidence" / "dynamic"
+    _seed_run(evidence_root, run_id="r1")
+    monkeypatch.setattr("scytaledroid.Config.app_config.OUTPUT_DIR", str(output_root))
+    monkeypatch.setattr("scytaledroid.Config.app_config.DATA_DIR", str(data_root))
+    freeze_path = data_root / "archive" / "dataset_freeze.json"
+    _write_json(freeze_path, {"included_run_ids": ["missing-run-id"]})
+
     try:
-        export_pcap_features_csv(freeze_path=missing_freeze, require_freeze=True)
+        export_dynamic_run_summary_csv(freeze_path=freeze_path, require_freeze=True)
         assert False, "expected RuntimeError"
     except RuntimeError as exc:
-        assert "EXPORT_BLOCKED_MISSING_FREEZE" in str(exc)
+        assert "EXPORT_BLOCKED_STALE_FREEZE" in str(exc)
+
+    try:
+        export_pcap_features_csv(freeze_path=freeze_path, require_freeze=True)
+        assert False, "expected RuntimeError"
+    except RuntimeError as exc:
+        assert "EXPORT_BLOCKED_STALE_FREEZE" in str(exc)

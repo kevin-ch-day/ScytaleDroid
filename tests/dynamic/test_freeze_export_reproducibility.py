@@ -8,6 +8,7 @@ from pathlib import Path
 from scytaledroid.DynamicAnalysis.pcap.aggregate import (
     export_dynamic_run_summary_csv,
     export_pcap_features_csv,
+    export_protocol_ledger_csv,
 )
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import recompute_dataset_tracker
 from scytaledroid.DynamicAnalysis.tools.evidence.freeze_manifest import (
@@ -50,6 +51,9 @@ def _seed_run(root: Path, run_id: str, *, run_profile: str) -> None:
     if run_profile.startswith("interaction_scripted"):
         operator.update(
             {
+                "template_id": "social_feed_basic_v2",
+                "scenario_template": "social_feed_basic_v2",
+                "interaction_protocol_version": 2,
                 "script_hash": ("e" * 63) + str(idx),
                 "script_exit_code": 0,
                 "script_end_marker": True,
@@ -121,6 +125,27 @@ def _seed_run(root: Path, run_id: str, *, run_profile: str) -> None:
         run_dir / "analysis" / "pcap_features.json",
         {"metrics": {"data_byte_rate_bps": 42.0}, "proxies": {"quic_ratio": 0.2}, "quality": {}},
     )
+    if run_profile.startswith("interaction_scripted"):
+        events = [
+            {
+                "timestamp": f"2026-02-22T08:0{idx}:10Z",
+                "event_type": "STEP_START",
+                "details": {"step_index": 1, "step_id": "launch_feed", "step_variant": None},
+            },
+            {
+                "timestamp": f"2026-02-22T08:0{idx}:30Z",
+                "event_type": "STEP_END",
+                "details": {
+                    "step_index": 1,
+                    "step_id": "launch_feed",
+                    "elapsed_s": 20.0,
+                    "step_variant": None,
+                },
+            },
+        ]
+        lines = "\n".join(json.dumps(e, sort_keys=True) for e in events) + "\n"
+        (run_dir / "notes").mkdir(parents=True, exist_ok=True)
+        (run_dir / "notes" / "run_events.jsonl").write_text(lines, encoding="utf-8")
 
 
 def test_freeze_and_exports_are_reproducible_independent_of_tracker(tmp_path: Path, monkeypatch) -> None:
@@ -142,9 +167,11 @@ def test_freeze_and_exports_are_reproducible_independent_of_tracker(tmp_path: Pa
     _write_json(freeze_path, freeze1)
     sum_csv_1 = export_dynamic_run_summary_csv(freeze_path=freeze_path, require_freeze=True)
     feat_csv_1 = export_pcap_features_csv(freeze_path=freeze_path, require_freeze=True)
-    assert sum_csv_1 is not None and feat_csv_1 is not None
+    ledger_csv_1 = export_protocol_ledger_csv(freeze_path=freeze_path, require_freeze=True)
+    assert sum_csv_1 is not None and feat_csv_1 is not None and ledger_csv_1 is not None
     hash_sum_1 = _sha256(sum_csv_1)
     hash_feat_1 = _sha256(feat_csv_1)
+    hash_ledger_1 = _sha256(ledger_csv_1)
     include_1 = sorted(freeze1["included_run_ids"])
 
     # Corrupt tracker state, then recompute tracker from evidence.
@@ -166,15 +193,21 @@ def test_freeze_and_exports_are_reproducible_independent_of_tracker(tmp_path: Pa
     _write_json(freeze_path, freeze2)
     sum_csv_2 = export_dynamic_run_summary_csv(freeze_path=freeze_path, require_freeze=True)
     feat_csv_2 = export_pcap_features_csv(freeze_path=freeze_path, require_freeze=True)
-    assert sum_csv_2 is not None and feat_csv_2 is not None
+    ledger_csv_2 = export_protocol_ledger_csv(freeze_path=freeze_path, require_freeze=True)
+    assert sum_csv_2 is not None and feat_csv_2 is not None and ledger_csv_2 is not None
     hash_sum_2 = _sha256(sum_csv_2)
     hash_feat_2 = _sha256(feat_csv_2)
+    hash_ledger_2 = _sha256(ledger_csv_2)
     include_2 = sorted(freeze2["included_run_ids"])
 
     assert include_1 == include_2
     assert hash_sum_1 == hash_sum_2
     assert hash_feat_1 == hash_feat_2
+    assert hash_ledger_1 == hash_ledger_2
 
     with sum_csv_2.open("r", encoding="utf-8", newline="") as handle:
         rows = list(csv.DictReader(handle))
     assert sorted(row["dynamic_run_id"] for row in rows) == include_2
+    with ledger_csv_2.open("r", encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    assert sorted({row["dynamic_run_id"] for row in rows}) == include_2

@@ -7,6 +7,7 @@ import pytest
 
 from scytaledroid.DynamicAnalysis.tools.evidence.freeze_manifest import (
     build_dataset_freeze_manifest,
+    write_dataset_freeze_manifest,
 )
 
 
@@ -35,12 +36,15 @@ def _mk_run(
     if run_profile.startswith("interaction_scripted"):
         operator.update(
             {
+                "template_id": "social_feed_basic_v2",
+                "scenario_template": "social_feed_basic_v2",
                 "script_hash": ("e" * 63) + run_id[-1],
                 "script_exit_code": 0,
                 "script_end_marker": True,
                 "step_count_planned": 3,
                 "step_count_completed": 3,
                 "script_timing_within_tolerance": True,
+                "interaction_protocol_version": 2,
             }
         )
 
@@ -180,3 +184,44 @@ def test_dataset_freeze_fails_closed_when_evidence_root_missing(tmp_path: Path) 
     missing_root = tmp_path / "missing-evidence"
     with pytest.raises(RuntimeError, match=r"FREEZE_BLOCKED_NO_EVIDENCE_ROOT:"):
         build_dataset_freeze_manifest(dataset_plan_path=dataset_plan_path, evidence_root=missing_root)
+
+
+def test_dataset_freeze_fails_on_mixed_interaction_protocol_versions(tmp_path: Path) -> None:
+    evidence_root = tmp_path / "evidence"
+    dataset_plan_path = tmp_path / "dataset_plan.json"
+    _mk_dataset_plan(dataset_plan_path)
+    _mk_run(evidence_root, "r1", run_profile="baseline_idle", window_count=30)
+    _mk_run(evidence_root, "r2", run_profile="interaction_scripted", window_count=25)
+    _mk_run(evidence_root, "r3", run_profile="interaction_scripted", window_count=26)
+    # Force selected interactive runs to carry mixed protocol versions.
+    p2 = evidence_root / "r2" / "run_manifest.json"
+    p3 = evidence_root / "r3" / "run_manifest.json"
+    j2 = json.loads(p2.read_text(encoding="utf-8"))
+    j3 = json.loads(p3.read_text(encoding="utf-8"))
+    j2["operator"]["interaction_protocol_version"] = 2
+    j3["operator"]["interaction_protocol_version"] = 3
+    p2.write_text(json.dumps(j2, indent=2, sort_keys=True), encoding="utf-8")
+    p3.write_text(json.dumps(j3, indent=2, sort_keys=True), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match=r"FREEZE_MIXED_PROTOCOL_VERSIONS"):
+        build_dataset_freeze_manifest(dataset_plan_path=dataset_plan_path, evidence_root=evidence_root)
+
+
+def test_write_freeze_manifest_writes_paper_contract_artifact(tmp_path: Path, monkeypatch) -> None:
+    evidence_root = tmp_path / "output" / "evidence" / "dynamic"
+    data_root = tmp_path / "data"
+    dataset_plan_path = data_root / "archive" / "dataset_plan.json"
+    out_dir = data_root / "archive"
+    _mk_dataset_plan(dataset_plan_path)
+    _mk_run(evidence_root, "r1", run_profile="baseline_idle", window_count=30)
+    _mk_run(evidence_root, "r2", run_profile="interaction_scripted", window_count=25)
+    _mk_run(evidence_root, "r3", run_profile="interaction_scripted", window_count=26)
+
+    monkeypatch.setattr("scytaledroid.Config.app_config.DATA_DIR", str(data_root))
+    out_path = write_dataset_freeze_manifest(evidence_root=evidence_root, out_dir=out_dir, also_write_canonical=False)
+    assert out_path.exists()
+    contract_path = out_dir / "paper_contract_v1.json"
+    assert contract_path.exists()
+    payload = json.loads(contract_path.read_text(encoding="utf-8"))
+    assert payload.get("paper_contract_hash")
+    assert payload.get("paper_contract_version") == "v1"

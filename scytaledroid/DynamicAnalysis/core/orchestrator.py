@@ -31,7 +31,10 @@ from scytaledroid.DynamicAnalysis.observers.base import Observer, ObserverHandle
 from scytaledroid.DynamicAnalysis.pcap.correlate import write_static_dynamic_overlap
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
     DatasetTrackerConfig,
+    MIN_WINDOWS_PER_RUN,
+    derive_three_verdicts_for_row,
     evaluate_dataset_validity,
+    load_dataset_tracker,
     peek_next_run_protocol,
     update_dataset_tracker,
 )
@@ -39,6 +42,12 @@ from scytaledroid.DynamicAnalysis.pcap.features import write_pcap_features
 from scytaledroid.DynamicAnalysis.pcap.indexer import index_pcap_by_app
 from scytaledroid.DynamicAnalysis.pcap.report import write_pcap_report
 from scytaledroid.DynamicAnalysis.pcap.tools import collect_host_tools
+from scytaledroid.DynamicAnalysis.paper_contract import (
+    PAPER_CONTRACT_VERSION as PAPER_MODE_CONTRACT_VERSION,
+    build_paper_contract_snapshot,
+    paper_contract_hash,
+)
+from scytaledroid.DynamicAnalysis.paper_eligibility import derive_paper_eligibility
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper2_config
 from scytaledroid.DynamicAnalysis.plans.loader import (
     PlanValidationError,
@@ -346,7 +355,12 @@ class DynamicRunOrchestrator:
                     "interaction_protocol_version": int(
                         protocol.get("interaction_protocol_version") or SCRIPT_PROTOCOL_VERSION
                     ),
+                    "template_id": protocol.get("template_id"),
+                    "template_hash": protocol.get("template_hash"),
+                    "template_map_version": protocol.get("template_map_version"),
+                    "template_map_hash": protocol.get("template_map_hash"),
                     "script_name": protocol.get("script_name"),
+                    "scenario_template": protocol.get("scenario_template"),
                     "script_hash": protocol.get("script_hash"),
                     "step_count": protocol.get("step_count_completed"),
                     "step_count_planned": protocol.get("step_count_planned"),
@@ -354,6 +368,8 @@ class DynamicRunOrchestrator:
                     "script_exit_code": protocol.get("script_exit_code"),
                     "script_end_marker": protocol.get("script_end_marker"),
                     "script_timing_within_tolerance": protocol.get("timing_within_tolerance"),
+                    "script_target_overrun_s": protocol.get("target_overrun_s"),
+                    "script_target_controlled": protocol.get("target_controlled"),
                     "target_duration_s": protocol.get("target_duration_s") or manifest.operator.get("target_duration_s"),
                 }
             )
@@ -481,18 +497,22 @@ class DynamicRunOrchestrator:
         overlap = write_static_dynamic_overlap(manifest, run_dir, event_logger=event_logger)
         if overlap:
             outputs.append(overlap)
-        update_dataset_tracker(manifest, run_dir, event_logger=event_logger)
+        tier = (manifest.operator or {}).get("tier") if isinstance(manifest.operator, dict) else None
+        if not (tier and str(tier).lower() == "dataset"):
+            update_dataset_tracker(manifest, run_dir, event_logger=event_logger)
 
         # Deterministic dataset validity classification (Paper #2) must be written to the manifest.
-        tier = (manifest.operator or {}).get("tier") if isinstance(manifest.operator, dict) else None
         if tier and str(tier).lower() == "dataset":
             try:
                 entry = {"pcap_size_bytes": next((a.size_bytes for a in manifest.artifacts if a.type == "pcapdroid_capture"), 0)}
                 validity = evaluate_dataset_validity(run_dir, manifest, entry, DatasetTrackerConfig())
                 # First-class dataset validity (Paper #2). Written only to manifest.dataset.
                 if isinstance(validity, dict):
-                    manifest.dataset = dict(validity)
-                    manifest.dataset.setdefault("tier", self.config.tier)
+                    current_ds = manifest.dataset if isinstance(manifest.dataset, dict) else {}
+                    merged_ds = dict(current_ds)
+                    merged_ds.update(validity)
+                    merged_ds.setdefault("tier", self.config.tier)
+                    manifest.dataset = merged_ds
 
                     # ML readiness is separate from validity. Tag low-signal runs deterministically
                     # without changing VALID/INVALID semantics (Paper #2 contract).
@@ -508,34 +528,85 @@ class DynamicRunOrchestrator:
                         # Best-effort; absence is not a correctness failure.
                         pass
 
+                    # Derive paper-eligibility from finalized in-memory state, then
+                    # sync tracker from this final state so countability is not stale.
+                    eligibility = derive_paper_eligibility(
+                        manifest={
+                            "dataset": manifest.dataset,
+                            "operator": manifest.operator,
+                            "target": manifest.target,
+                        },
+                        plan=plan_payload if isinstance(plan_payload, dict) else {},
+                        min_windows=int(MIN_WINDOWS_PER_RUN),
+                        required_capture_policy_version=int(
+                            getattr(paper2_config, "PAPER_CONTRACT_VERSION", 1)
+                        ),
+                    )
+                    manifest.dataset["paper_eligible"] = bool(eligibility.paper_eligible)
+                    manifest.dataset["paper_exclusion_primary_reason_code"] = eligibility.reason_code
+                    manifest.dataset["paper_exclusion_all_reason_codes"] = list(
+                        eligibility.all_reason_codes
+                    )
+
+                    update_dataset_tracker(manifest, run_dir, event_logger=event_logger)
+
                     # "countable" is quota-counted by construction. Determine it from the
                     # derived tracker markings (counts_toward_quota) rather than from
                     # operator choice or run order.
+                    tracker_row: dict[str, object] | None = None
                     try:
-                        from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
-                            load_dataset_tracker,
-                        )
-
                         tracker = load_dataset_tracker()
                         apps = tracker.get("apps") if isinstance(tracker, dict) else {}
                         pkg = (manifest.target.get("package_name") or "").strip()
                         app_entry = apps.get(pkg) if isinstance(apps, dict) and pkg else None
                         runs = app_entry.get("runs") if isinstance(app_entry, dict) else []
-                        countable = None
                         if isinstance(runs, list):
-                            for r in runs:
-                                if isinstance(r, dict) and r.get("run_id") == manifest.dynamic_run_id:
-                                    countable = r.get("countable")
-                                    if isinstance(countable, bool):
-                                        break
-                                    countable = bool(r.get("counts_toward_quota"))
-                                    break
-                        if isinstance(countable, bool):
-                            manifest.dataset["countable"] = countable
-                        else:
-                            manifest.dataset.setdefault("countable", True)
+                            tracker_row = next(
+                                (
+                                    r
+                                    for r in runs
+                                    if isinstance(r, dict) and r.get("run_id") == manifest.dynamic_run_id
+                                ),
+                                None,
+                            )
                     except Exception:
+                        tracker_row = None
+
+                    countable = None
+                    if isinstance(tracker_row, dict):
+                        countable = tracker_row.get("countable")
+                        if not isinstance(countable, bool):
+                            countable = bool(tracker_row.get("counts_toward_quota"))
+                        manifest.dataset["paper_eligible"] = bool(tracker_row.get("paper_eligible"))
+                        manifest.dataset["paper_exclusion_primary_reason_code"] = (
+                            tracker_row.get("paper_exclusion_primary_reason_code")
+                        )
+                        all_codes = tracker_row.get("paper_exclusion_all_reason_codes")
+                        manifest.dataset["paper_exclusion_all_reason_codes"] = (
+                            list(all_codes) if isinstance(all_codes, list) else []
+                        )
+                    if isinstance(countable, bool):
+                        manifest.dataset["countable"] = countable
+                    else:
                         manifest.dataset.setdefault("countable", True)
+
+                    verdict_source = tracker_row if isinstance(tracker_row, dict) else {
+                        "valid_dataset_run": manifest.dataset.get("valid_dataset_run"),
+                        "paper_eligible": manifest.dataset.get("paper_eligible"),
+                        "countable": manifest.dataset.get("countable"),
+                        "paper_exclusion_all_reason_codes": manifest.dataset.get(
+                            "paper_exclusion_all_reason_codes"
+                        ),
+                    }
+                    technical_validity, protocol_compliance, cohort_eligibility = (
+                        derive_three_verdicts_for_row(verdict_source)
+                    )
+                    manifest.dataset["technical_validity"] = technical_validity
+                    manifest.dataset["protocol_compliance"] = protocol_compliance
+                    manifest.dataset["cohort_eligibility"] = cohort_eligibility
+                    manifest.operator["technical_validity"] = technical_validity
+                    manifest.operator["protocol_compliance"] = protocol_compliance
+                    manifest.operator["cohort_eligibility"] = cohort_eligibility
 
                 ds = manifest.dataset if isinstance(manifest.dataset, dict) else {}
                 event_logger.log(
@@ -549,6 +620,9 @@ class DynamicRunOrchestrator:
                         "no_traffic_observed": ds.get("no_traffic_observed"),
                         "countable": bool(ds.get("countable")),
                         "low_signal": bool(ds.get("low_signal")),
+                        "technical_validity": ds.get("technical_validity"),
+                        "protocol_compliance": ds.get("protocol_compliance"),
+                        "cohort_eligibility": ds.get("cohort_eligibility"),
                     },
                 )
             except Exception as exc:  # noqa: BLE001
@@ -693,7 +767,13 @@ class DynamicRunOrchestrator:
                 "tool_version": app_config.APP_VERSION,
                 "tool_semver": app_config.APP_VERSION,
                 "capture_policy_version": int(getattr(paper2_config, "PAPER_CONTRACT_VERSION", 1)),
+                "paper_contract_version": str(PAPER_MODE_CONTRACT_VERSION),
+                "paper_contract_hash": str(paper_contract_hash(build_paper_contract_snapshot())),
                 "interaction_protocol_version": int(SCRIPT_PROTOCOL_VERSION),
+                "template_id": None,
+                "template_hash": None,
+                "template_map_version": None,
+                "template_map_hash": None,
                 "script_name": None,
                 "script_hash": None,
                 "step_count": None,
@@ -1022,23 +1102,15 @@ class DynamicRunOrchestrator:
 
     def _build_permission_trigger_hint(self, plan_payload: dict[str, object] | None) -> str | None:
         if not plan_payload:
-            return (
-                "Trigger permissions relevant to the app (camera/mic/location/contacts). "
-                "If unsure: open app settings → permissions and attempt the related feature."
-            )
+            return None
         perms = plan_payload.get("permissions") if isinstance(plan_payload.get("permissions"), dict) else {}
         high_value = perms.get("high_value") if isinstance(perms.get("high_value"), list) else []
         if high_value:
-            shortlist = ", ".join(sorted(str(p) for p in high_value)[:6])
             return (
-                "Trigger permissions relevant to the app. "
-                f"High-value candidates: {shortlist}. "
-                "If unsure: open app settings → permissions and attempt the related feature."
+                "Optional capabilities to exercise: Location, Camera, Microphone, Contacts, Notifications/IPC. "
+                "Press P to view raw permission names."
             )
-        return (
-            "Trigger permissions relevant to the app (camera/mic/location/contacts). "
-            "If unsure: open app settings → permissions and attempt the related feature."
-        )
+        return None
 
 
 __all__ = ["DynamicRunOrchestrator"]

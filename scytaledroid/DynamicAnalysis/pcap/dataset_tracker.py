@@ -17,6 +17,7 @@ from scytaledroid.DynamicAnalysis.paper_eligibility import derive_paper_eligibil
 
 MIN_PCAP_BYTES = int(getattr(paper2_config, "MIN_PCAP_BYTES", 50000))
 MIN_WINDOWS_PER_RUN = 20
+SHORT_RUN_TOLERANCE_SECONDS = 2.0
 
 
 def _effective_min_sampling_seconds() -> float:
@@ -453,6 +454,15 @@ def _apply_quota_marking(app_entry: dict[str, Any], cfg: DatasetTrackerConfig) -
     quota_met_run_id: str | None = None
     for _, r in indexed:
         is_valid = r.get("valid_dataset_run") is True
+        # Paper-mode quota slots must not be consumed by runs explicitly marked
+        # paper-ineligible. Keep backward compatibility for historical tracker
+        # rows that do not yet have paper_eligible populated.
+        if is_valid and r.get("paper_eligible") is False:
+            is_valid = False
+        # PM lock: low-signal idle runs are retained for exploratory analysis but
+        # must never consume paper cohort quota slots.
+        if is_valid and _is_baseline_profile(r.get("run_profile"), cfg) and bool(r.get("low_signal")):
+            is_valid = False
         if not is_valid:
             continue
         prof = str(r.get("run_profile") or "")
@@ -489,6 +499,7 @@ def _apply_quota_marking(app_entry: dict[str, Any], cfg: DatasetTrackerConfig) -
     for r in runs:
         if isinstance(r, dict):
             r["countable"] = bool(r.get("counts_toward_quota"))
+    _apply_three_verdicts(runs)
 
     app_entry["quota_met"] = bool(
         baseline_seen >= baseline_needed and interactive_seen >= interactive_needed
@@ -634,7 +645,11 @@ def evaluate_dataset_validity(
             actual_sampling_seconds_source=sampling_source,
             sampling_duration_seconds=telemetry_seconds,
         )
-    if float(sampling_seconds) < _effective_target_sampling_seconds():
+    # Capinfos capture span may differ by ~1s from the guided/script target due
+    # to recorder start/stop boundaries. Keep short_run as a quality hint, but
+    # avoid flagging tiny jitter that operators cannot control.
+    short_run_floor = _effective_target_sampling_seconds() - float(SHORT_RUN_TOLERANCE_SECONDS)
+    if float(sampling_seconds) < short_run_floor:
         flags["short_run"] = 1
     window_count_original = _window_count_for_duration(
         sampling_seconds,
@@ -881,6 +896,50 @@ def _derive_paper_eligibility_fields(run_dir: Path) -> dict[str, Any]:
     }
 
 
+_PROTOCOL_REASON_CODES = {
+    "EXCLUDED_SCRIPT_HASH_MISMATCH",
+    "EXCLUDED_SCRIPT_TEMPLATE_MISMATCH",
+    "EXCLUDED_PROTOCOL_LEGACY_TEMPLATE",
+    "EXCLUDED_SCRIPT_PROTOCOL_SEND",
+    "EXCLUDED_SCRIPT_ABORT",
+    "EXCLUDED_SCRIPT_END_MISSING",
+    "EXCLUDED_SCRIPT_STEP_MISSING",
+    "EXCLUDED_SCRIPT_TIMEOUT",
+    "EXCLUDED_SCRIPT_UI_STATE_MISMATCH",
+    "EXCLUDED_PROTOCOL_FIT_POOR",
+    "EXCLUDED_MANUAL_NON_COHORT",
+    "EXCLUDED_INTENT_NOT_ALLOWED",
+}
+
+
+def derive_three_verdicts_for_row(row: dict[str, Any]) -> tuple[str, str, str]:
+    """Return (technical_validity, protocol_compliance, cohort_eligibility)."""
+    technical_validity = "VALID" if row.get("valid_dataset_run") is True else "INVALID"
+    all_reasons = row.get("paper_exclusion_all_reason_codes")
+    all_reasons_set = {str(x) for x in all_reasons} if isinstance(all_reasons, list) else set()
+    protocol_compliance = (
+        "NON_COMPLIANT"
+        if any(reason in _PROTOCOL_REASON_CODES for reason in all_reasons_set)
+        else "COMPLIANT"
+    )
+    if row.get("paper_eligible") is True:
+        cohort_eligibility = "COUNTABLE" if bool(row.get("countable")) else "EXTRA"
+    else:
+        cohort_eligibility = "EXCLUDED"
+    return technical_validity, protocol_compliance, cohort_eligibility
+
+
+def _apply_three_verdicts(runs: list[dict[str, Any]]) -> None:
+    """Populate three independent verdict layers on tracker rows."""
+    for r in runs:
+        if not isinstance(r, dict):
+            continue
+        technical_validity, protocol_compliance, cohort_eligibility = derive_three_verdicts_for_row(r)
+        r["technical_validity"] = technical_validity
+        r["protocol_compliance"] = protocol_compliance
+        r["cohort_eligibility"] = cohort_eligibility
+
+
 def _compute_overlap_stats(runs: list[dict[str, Any]]) -> dict[str, Any]:
     ratios = []
     dynamic_only = []
@@ -1109,6 +1168,7 @@ def _write_recompute_attempt(run_dir: Path, payload: dict[str, Any]) -> None:
 
 __all__ = [
     "DatasetTrackerConfig",
+    "derive_three_verdicts_for_row",
     "load_dataset_tracker",
     "peek_next_run_protocol",
     "recompute_dataset_tracker",

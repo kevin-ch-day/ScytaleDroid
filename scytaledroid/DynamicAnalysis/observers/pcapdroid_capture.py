@@ -12,6 +12,7 @@ from scytaledroid.DeviceAnalysis.adb import client as adb_client
 from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
+from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper2_config
 from scytaledroid.DynamicAnalysis.observers.base import Observer, ObserverHandle, ObserverResult
 
 PCAPDROID_PACKAGE = "com.emanuelef.remote_capture"
@@ -22,6 +23,18 @@ CAPTURE_MODE = "app_only"
 FINALIZE_MIN_WAIT_S = 5.0
 FINALIZE_MAX_WAIT_S = 12.0
 FINALIZE_STABLE_POLLS = 2
+
+
+def _effective_min_pcap_bytes(run_ctx: RunContext) -> int:
+    """Return observer-side PCAP floor aligned with run mode.
+
+    Dataset/paper runs should use the paper contract floor; other modes keep the
+    operational fallback from app config.
+    """
+    profile = str(getattr(run_ctx, "run_profile", "") or "").strip().lower()
+    if profile.startswith("baseline_") or profile.startswith("interaction_"):
+        return int(getattr(paper2_config, "MIN_PCAP_BYTES", MIN_PCAP_BYTES))
+    return int(MIN_PCAP_BYTES)
 
 
 class PcapdroidCaptureObserver(Observer):
@@ -142,6 +155,7 @@ class PcapdroidCaptureObserver(Observer):
         artifacts: list[ArtifactRecord] = []
         status = "success"
         error = None
+        min_pcap_bytes = _effective_min_pcap_bytes(run_ctx)
 
         local_path = meta_path.parent / pcap_name
         try:
@@ -179,7 +193,7 @@ class PcapdroidCaptureObserver(Observer):
                     run_ctx.device_serial,
                     device_path,
                     local_path,
-                    min_bytes=MIN_PCAP_BYTES,
+                    min_bytes=min_pcap_bytes,
                 )
             if not local_path.exists():
                 fallback_path = _latest_pcapdroid_capture(
@@ -195,7 +209,7 @@ class PcapdroidCaptureObserver(Observer):
                         run_ctx.device_serial,
                         device_path,
                         local_path,
-                        min_bytes=MIN_PCAP_BYTES,
+                        min_bytes=min_pcap_bytes,
                     )
                     if meta_path.exists():
                         try:
@@ -212,10 +226,10 @@ class PcapdroidCaptureObserver(Observer):
             mismatch_warning = None
             if local_path.exists():
                 file_size = local_path.stat().st_size
-                if file_size < MIN_PCAP_BYTES:
+                if file_size < min_pcap_bytes:
                     error = (
                         f"PCAPdroid capture file empty/too small "
-                        f"({file_size}B < {MIN_PCAP_BYTES}B)."
+                        f"({file_size}B < {min_pcap_bytes}B)."
                     )
                     status = "failed"
                     if meta_path.exists():
@@ -225,7 +239,7 @@ class PcapdroidCaptureObserver(Observer):
                             meta_payload = {}
                         meta_payload["pcap_size_bytes"] = file_size
                         meta_payload["pcap_valid"] = False
-                        meta_payload["min_pcap_bytes"] = MIN_PCAP_BYTES
+                        meta_payload["min_pcap_bytes"] = min_pcap_bytes
                         meta_path.write_text(
                             json.dumps(meta_payload, indent=2, sort_keys=True),
                             encoding="utf-8",
@@ -256,7 +270,7 @@ class PcapdroidCaptureObserver(Observer):
                             meta_payload = {}
                         meta_payload["pcap_size_bytes"] = file_size
                         meta_payload["pcap_valid"] = True
-                        meta_payload["min_pcap_bytes"] = MIN_PCAP_BYTES
+                        meta_payload["min_pcap_bytes"] = min_pcap_bytes
                         meta_path.write_text(
                             json.dumps(meta_payload, indent=2, sort_keys=True),
                             encoding="utf-8",
@@ -271,7 +285,7 @@ class PcapdroidCaptureObserver(Observer):
                         meta_payload = {}
                     meta_payload["pcap_size_bytes"] = 0
                     meta_payload["pcap_valid"] = False
-                    meta_payload["min_pcap_bytes"] = MIN_PCAP_BYTES
+                    meta_payload["min_pcap_bytes"] = min_pcap_bytes
                     meta_path.write_text(
                         json.dumps(meta_payload, indent=2, sort_keys=True),
                         encoding="utf-8",

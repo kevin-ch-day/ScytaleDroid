@@ -16,11 +16,12 @@ def print_run_summary(result, duration_label: str) -> None:
     duration_seconds = result.elapsed_seconds or result.duration_seconds
     run_dir = resolve_evidence_path(result.evidence_path) if result.evidence_path else None
     manifest = _load_manifest(run_dir) if run_dir else None
+    dataset_validity: dict[str, object] | None = None
     print()
     lines = [
         ("Package", result.package_name or "unknown"),
         ("Run ID", result.dynamic_run_id or "unknown"),
-        ("Duration", f"{duration_label} ({duration_seconds}s)"),
+        ("Session wall-clock", f"{duration_label} ({duration_seconds}s)"),
         ("Status", status),
     ]
     if manifest:
@@ -33,8 +34,25 @@ def print_run_summary(result, duration_label: str) -> None:
         messaging_activity = operator.get("messaging_activity")
         if messaging_activity:
             lines.append(("Messaging", str(messaging_activity)))
+        if str(run_profile or "").startswith("interaction_scripted"):
+            template_id = operator.get("template_id") or operator.get("scenario_template")
+            protocol_version = operator.get("interaction_protocol_version")
+            template_hash = operator.get("template_hash") or operator.get("script_hash")
+            target_overrun = operator.get("script_target_overrun_s")
+            if template_id:
+                lines.append(("Template", str(template_id)))
+            if protocol_version is not None:
+                lines.append(("Protocol version", str(protocol_version)))
+            if template_hash:
+                lines.append(("Template hash", f"{str(template_hash)[:12]}..."))
+            try:
+                if int(target_overrun or 0) > 0:
+                    lines.append(("Protocol timing", f"OVERRUN by {int(target_overrun)}s"))
+            except Exception:
+                pass
         validity = manifest.get("dataset")
         if isinstance(validity, dict):
+            dataset_validity = validity
             valid = validity.get("valid_dataset_run")
             reason = validity.get("invalid_reason_code")
             label = "—"
@@ -43,6 +61,17 @@ def print_run_summary(result, duration_label: str) -> None:
             elif valid is False:
                 label = f"❌ INVALID: {reason or 'UNKNOWN'}"
             lines.append(("Dataset validity", label))
+            if (
+                valid is False
+                and str(reason or "").strip().upper() == "PCAP_MISSING"
+                and str(run_profile or "").strip().lower() == "baseline_idle"
+            ):
+                lines.append(
+                    (
+                        "Exploratory class",
+                        "LOW_SIGNAL_IDLE (retained, not quota-counted)",
+                    )
+                )
             min_bytes = validity.get("min_pcap_bytes")
             if min_bytes is not None:
                 lines.append(("MIN_PCAP_BYTES", str(min_bytes)))
@@ -59,11 +88,16 @@ def print_run_summary(result, duration_label: str) -> None:
                 if run_profile:
                     # Do not imply ordering constraints via "slot" language.
                     lines.append(("Run profile", f"{run_profile}"))
-                if validity.get("countable") is False:
-                    lines.append(("Countable", "no (extra run)"))
+                lines.append(("Counts toward quota", _countability_label(validity, run_profile)))
+                detail = _countability_detail(str(pkg) if pkg else None, result.dynamic_run_id)
+                if detail:
+                    lines.append(("Quota detail", detail))
             elif run_profile:
                 # Fallback when tracker isn't available.
                 lines.append(("Run profile", f"{run_profile}"))
+            verdict_line = _three_verdict_label(result.dynamic_run_id)
+            if verdict_line:
+                lines.append(("Verdicts", verdict_line))
         else:
             dataset_validity = _dataset_validity_label(result.dynamic_run_id)
             if dataset_validity:
@@ -72,6 +106,9 @@ def print_run_summary(result, duration_label: str) -> None:
                     reasons = _dataset_validity_reasons(result.dynamic_run_id)
                     if reasons:
                         lines.append(("Dataset issues", ", ".join(reasons)))
+            verdict_line = _three_verdict_label(result.dynamic_run_id)
+            if verdict_line:
+                lines.append(("Verdicts", verdict_line))
 
         # DB is a derived index (not authoritative). Make its status explicit so
         # operators can spot schema/persistence problems without reading logs.
@@ -101,6 +138,7 @@ def print_run_summary(result, duration_label: str) -> None:
             telemetry_stats,
             duration_seconds,
             duration_label,
+            dataset_validity,
         )
         if telemetry_lines:
             _print_simple_list("Telemetry QA", telemetry_lines)
@@ -318,6 +356,37 @@ def _dataset_validity_label(dynamic_run_id: str | None) -> str | None:
     return None
 
 
+def _tracker_run_row(dynamic_run_id: str | None) -> dict[str, object] | None:
+    if not dynamic_run_id:
+        return None
+    tracker = load_dataset_tracker()
+    apps = tracker.get("apps") if isinstance(tracker, dict) else {}
+    if not isinstance(apps, dict):
+        return None
+    for entry in apps.values():
+        if not isinstance(entry, dict):
+            continue
+        runs = entry.get("runs")
+        if not isinstance(runs, list):
+            continue
+        for run in runs:
+            if isinstance(run, dict) and run.get("run_id") == dynamic_run_id:
+                return run
+    return None
+
+
+def _three_verdict_label(dynamic_run_id: str | None) -> str | None:
+    row = _tracker_run_row(dynamic_run_id)
+    if not isinstance(row, dict):
+        return None
+    technical = str(row.get("technical_validity") or "").strip()
+    protocol = str(row.get("protocol_compliance") or "").strip()
+    cohort = str(row.get("cohort_eligibility") or "").strip()
+    if not (technical and protocol and cohort):
+        return None
+    return f"Technical={technical} | Protocol={protocol} | Cohort={cohort}"
+
+
 def _dataset_quota_label(package_name: str | None, dynamic_run_id: str | None) -> str | None:
     if not package_name:
         return None
@@ -343,36 +412,42 @@ def _dataset_quota_label(package_name: str | None, dynamic_run_id: str | None) -
     return label
 
 
-def _dataset_validity_reasons(dynamic_run_id: str | None) -> list[str] | None:
-    if not dynamic_run_id:
+def _countability_detail(package_name: str | None, dynamic_run_id: str | None) -> str | None:
+    if not package_name or not dynamic_run_id:
         return None
     tracker = load_dataset_tracker()
     apps = tracker.get("apps") if isinstance(tracker, dict) else {}
-    if not isinstance(apps, dict):
+    entry = apps.get(str(package_name)) if isinstance(apps, dict) else None
+    runs = entry.get("runs") if isinstance(entry, dict) else None
+    if not isinstance(runs, list):
         return None
-    for entry in apps.values():
-        if not isinstance(entry, dict):
-            continue
-        runs = entry.get("runs")
-        if not isinstance(runs, list):
-            continue
-        for run in runs:
-            if not isinstance(run, dict):
-                continue
-            if run.get("run_id") != dynamic_run_id:
-                continue
-            code = run.get("invalid_reason_code")
-            flags = []
-            if run.get("short_run"):
-                flags.append("short_run")
-            if run.get("no_traffic_observed"):
-                flags.append("no_traffic_observed")
-            out = []
-            if code:
-                out.append(str(code))
-            out.extend(flags)
-            return out or None
-    return None
+    run = next((r for r in runs if isinstance(r, dict) and r.get("run_id") == dynamic_run_id), None)
+    if not isinstance(run, dict):
+        return None
+    source = "tracker_quota_marking"
+    countable = bool(run.get("countable"))
+    reason = str(run.get("paper_exclusion_primary_reason_code") or "").strip()
+    parts = [f"source={source}", f"countable={str(countable).lower()}"]
+    if reason:
+        parts.append(f"reason={reason}")
+    return ", ".join(parts)
+
+
+def _dataset_validity_reasons(dynamic_run_id: str | None) -> list[str] | None:
+    run = _tracker_run_row(dynamic_run_id)
+    if not isinstance(run, dict):
+        return None
+    code = run.get("invalid_reason_code")
+    flags = []
+    if run.get("short_run"):
+        flags.append("short_run")
+    if run.get("no_traffic_observed"):
+        flags.append("no_traffic_observed")
+    out = []
+    if code:
+        out.append(str(code))
+    out.extend(flags)
+    return out or None
 
 
 def _summary_paths(manifest: dict[str, object]) -> list[str]:
@@ -405,8 +480,9 @@ def _build_telemetry_lines(
     telemetry_stats: dict[str, object],
     duration_seconds: int | None,
     duration_label: str,
+    dataset_validity: dict[str, object] | None = None,
 ) -> list[str]:
-    if not telemetry_stats:
+    if not telemetry_stats and not dataset_validity:
         return []
     expected = telemetry_stats.get("expected_samples")
     captured = telemetry_stats.get("captured_samples")
@@ -432,7 +508,21 @@ def _build_telemetry_lines(
         lines.append(f"Max gap (excl first): {max_gap_excl_first:.2f}s")
     if sampling_duration is not None:
         try:
-            lines.append(f"Sampling window: {float(sampling_duration):.0f}s")
+            lines.append(f"Sampling window (telemetry): {float(sampling_duration):.0f}s")
+        except Exception:
+            pass
+
+    actual_sampling = None
+    actual_source = None
+    if isinstance(dataset_validity, dict):
+        actual_sampling = dataset_validity.get("actual_sampling_seconds")
+        actual_source = dataset_validity.get("actual_sampling_seconds_source")
+    if actual_sampling is not None:
+        try:
+            source_label = str(actual_source or "derived")
+            lines.append(
+                f"Sampling window (authoritative): {float(actual_sampling):.0f}s ({source_label})"
+            )
         except Exception:
             pass
 
@@ -469,7 +559,22 @@ def _clock_delta_line(
         reason = "guided/manual overhead outside sampling window: setup/teardown, observer start/stop, validation"
     else:
         reason = "overhead outside sampling window: setup/teardown, observer start/stop"
-    return f"Clock delta: {delta:.0f}s ({reason})"
+    return f"Overhead outside sampling window: {delta:.0f}s ({reason})"
+
+
+def _countability_label(validity: dict[str, object], run_profile: str | None) -> str:
+    if validity.get("valid_dataset_run") is False:
+        reason = str(validity.get("invalid_reason_code") or "INVALID")
+        return f"NO ({reason})"
+    if validity.get("low_signal") is True and str(run_profile or "").strip().lower() == "baseline_idle":
+        return "NO (LOW_SIGNAL_IDLE)"
+    if validity.get("countable") is True:
+        return f"YES ({run_profile or 'dataset'})"
+    if str(run_profile or "").strip().lower() == "interaction_manual":
+        return "NO (manual is exploratory)"
+    if validity.get("countable") is False:
+        return "NO (extra run)"
+    return "UNKNOWN"
 
 
 def _build_evidence_lines(
@@ -495,6 +600,10 @@ def _build_evidence_lines(
     if pcap_valid is False:
         size_label = f"{pcap_size}B" if pcap_size is not None else "unknown size"
         min_bytes = capture_info.get("min_pcap_bytes")
+        if min_bytes is None:
+            dataset = manifest.get("dataset") if isinstance(manifest, dict) else {}
+            if isinstance(dataset, dict):
+                min_bytes = dataset.get("min_pcap_bytes")
         threshold_label = f"{min_bytes}B" if min_bytes is not None else "unknown threshold"
         print(
             status_messages.status(

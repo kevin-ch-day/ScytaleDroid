@@ -95,7 +95,7 @@ def print_plan_selection_banner(selection: dict[str, object]) -> None:
         ("Generated", generated_at),
         ("Static run", str(static_run_id)),
     ]
-    status_messages.print_strip("Baseline selected", lines, width=70)
+    status_messages.print_strip("Static Plan Selected", lines, width=70)
 
 
 def _load_plan_candidates(package_name: str) -> tuple[list[dict[str, object]], str | None]:

@@ -11,7 +11,7 @@ def _ctx(tmp_path: Path) -> RunContext:
     run_dir = tmp_path / "run"
     return RunContext(
         dynamic_run_id="r1",
-        package_name="com.example.app",
+        package_name="com.facebook.katana",
         duration_seconds=1,
         scenario_id="basic_usage",
         run_dir=run_dir,
@@ -52,4 +52,3 @@ def test_scripted_protocol_emits_markers_and_metadata(monkeypatch, tmp_path: Pat
     assert "SCRIPT_END" in events
     assert events.count("STEP_START") == int(protocol.get("step_count_planned"))
     assert events.count("STEP_END") == int(protocol.get("step_count_planned"))
-

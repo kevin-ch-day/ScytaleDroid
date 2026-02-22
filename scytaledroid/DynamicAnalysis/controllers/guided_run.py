@@ -29,6 +29,8 @@ from scytaledroid.DynamicAnalysis.plan_selection import (
 )
 from scytaledroid.DynamicAnalysis.run_dynamic_analysis import execute_dynamic_run_spec
 from scytaledroid.DynamicAnalysis.run_summary import print_run_summary
+from scytaledroid.DynamicAnalysis.templates.category_map import template_for_package
+from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_evidence_path
 from scytaledroid.DynamicAnalysis.utils.run_cleanup import (
     dataset_tracker_counts,
     delete_dynamic_evidence_packs,
@@ -61,6 +63,11 @@ def _intent_counts_toward_quota(
         return int(interactive_valid_runs) < int(cfg.interactive_required)
     # Manual and unknown intents are exploratory by policy and never count.
     return False
+
+
+def _is_interactive_profile(profile: str) -> bool:
+    p = str(profile or "").strip().lower()
+    return ("interaction" in p) or ("interactive" in p) or ("script" in p)
 
 
 def _print_paper_mode_constants() -> None:
@@ -574,6 +581,7 @@ def _post_run_integrity_check(result) -> None:
     manifest_path = run_dir / "run_manifest.json"
     report_path = run_dir / "analysis" / "pcap_report.json"
     features_path = run_dir / "analysis" / "pcap_features.json"
+    summary_path = run_dir / "analysis" / "summary.json"
 
     dataset_valid = None
     invalid_reason = None
@@ -616,6 +624,17 @@ def _post_run_integrity_check(result) -> None:
     except Exception:
         pass
 
+    # Fallback for degraded runs where report may be skipped but summary capture
+    # still records observed PCAP size.
+    if pcap_size is None:
+        try:
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            capture = summary.get("capture") if isinstance(summary, dict) else {}
+            if isinstance(capture, dict):
+                pcap_size = capture.get("pcap_size_bytes")
+        except Exception:
+            pass
+
     try:
         features = json.loads(features_path.read_text(encoding="utf-8"))
         features_ok = (
@@ -652,7 +671,11 @@ def _post_run_integrity_check(result) -> None:
             "OK" if pcap_size_ok else "FAIL",
             f"{pcap_size_int} bytes (min {int(paper2_config.MIN_PCAP_BYTES)})",
         ],
-        ["capinfos parse", "OK" if capinfos_ok else "FAIL", "parsed packet metadata"],
+        [
+            "capinfos parse",
+            "OK" if capinfos_ok else "FAIL",
+            ("parsed packet metadata" if capinfos_ok else "packet metadata unavailable"),
+        ],
         [
             "tshark parse",
             "OK" if tshark_ok else "FAIL",
@@ -797,7 +820,7 @@ def run_guided_dataset_run(
     print()
     print("Runs recorded:")
     print(
-        f"  tracker={counts.total_runs}\tvalid={counts.valid_runs}/{total_required}\n"
+        f"  tracker={counts.total_runs}\tcountable_eligible={counts.valid_runs}/{total_required}\n"
         f"  baseline={counts.baseline_valid_runs}/{cfg.baseline_required}\t"
         f"interactive={counts.interactive_valid_runs}/{cfg.interactive_required}\n"
         f"  quota_met={int(counts.quota_met)}\tlocal_evidence={len(fs_runs)}"
@@ -837,10 +860,12 @@ def run_guided_dataset_run(
         )
     print()
 
+    suggested_is_interactive = _is_interactive_profile(suggested_profile)
+
     def _badge_for(key: str) -> str | None:
         if not suggested_slot:
             return None
-        return "suggested" if key == ("2" if "interactive" in suggested_profile else "1") else None
+        return "suggested" if key == ("2" if suggested_is_interactive else "1") else None
 
     can_reset = len(fs_runs) > 0
     protocol_options = [
@@ -850,7 +875,7 @@ def run_guided_dataset_run(
             description=(
                 "Purpose: baseline-only training. run_profile=baseline_idle | "
                 + (
-                    "Counts toward quota: YES"
+                    "Counts toward quota: YES (if VALID)"
                     if int(counts.baseline_valid_runs) < int(cfg.baseline_required)
                     else "Counts toward quota: NO (baseline quota met; saved as EXTRA)"
                 )
@@ -863,7 +888,7 @@ def run_guided_dataset_run(
             description=(
                 "Purpose: repeatable stimulus. run_profile=interaction_scripted | "
                 + (
-                    "Counts toward quota: YES"
+                    "Counts toward quota: YES (if VALID)"
                     if int(counts.interactive_valid_runs) < int(cfg.interactive_required)
                     else "Counts toward quota: NO (interactive quota met; saved as EXTRA)"
                 )
@@ -894,7 +919,7 @@ def run_guided_dataset_run(
     menu_utils.render_menu(
         menu_utils.MenuSpec(
             items=protocol_options,
-            default="2" if "interactive" in suggested_profile else "1",
+            default="2" if suggested_is_interactive else "1",
             exit_label="Exit",
             show_exit=True,
             show_descriptions=True,
@@ -903,7 +928,7 @@ def run_guided_dataset_run(
     )
     selected_protocol = prompt_utils.get_choice(
         menu_utils.selectable_keys(protocol_options, include_exit=True),
-        default="2" if "interactive" in suggested_profile else "1",
+        default="2" if suggested_is_interactive else "1",
         casefold=True,
         invalid_message="Choose 0-4 or D.",
         disabled=[option.key for option in protocol_options if option.disabled],
@@ -980,6 +1005,12 @@ def run_guided_dataset_run(
                 status = "VALID"
             elif r.valid is False:
                 status = f"INVALID:{r.invalid_reason_code or 'UNKNOWN'}"
+                if (
+                    str(r.run_profile or "").strip().lower() == "baseline_idle"
+                    and str(r.invalid_reason_code or "").strip().upper() == "PCAP_MISSING"
+                    and str(getattr(r, "messaging_activity", "") or "").strip().lower() in {"none", ""}
+                ):
+                    status += " (LOW_SIGNAL_IDLE)"
             else:
                 status = "UNKNOWN"
             rows.append(
@@ -998,6 +1029,25 @@ def run_guided_dataset_run(
             ["Ended", "Profile", "Interaction", "Msg", "Status", "Run ID"],
             rows,
         )
+        # Operator guidance: repeated baseline PCAP_MISSING usually indicates
+        # low-signal app-idle behavior; suggest a warm baseline or scripted run.
+        pcap_missing_streak = 0
+        for r in recent:
+            prof = str(r.run_profile or "").strip().lower()
+            reason = str(r.invalid_reason_code or "").strip().upper()
+            if prof == "baseline_idle" and r.valid is False and reason == "PCAP_MISSING":
+                pcap_missing_streak += 1
+                continue
+            break
+        if pcap_missing_streak >= 2:
+            print(
+                status_messages.status(
+                    "Recent baseline_idle runs repeatedly failed with PCAP_MISSING. "
+                    "If idle traffic stays low, try a minimal warm baseline (open chats list briefly) "
+                    "or collect scripted interaction first.",
+                    level="warn",
+                )
+            )
 
     # Capture modes.
     tier = "dataset"
@@ -1018,7 +1068,7 @@ def run_guided_dataset_run(
     )
     print(
         "Selected intent countability: "
-        + ("COUNTABLE" if counts_toward_completion else "EXTRA (not countable)")
+        + ("COUNTABLE (if VALID)" if counts_toward_completion else "EXTRA (not countable)")
     )
 
     messaging_activity: str | None = None
@@ -1092,6 +1142,17 @@ def run_guided_dataset_run(
     print(status_messages.status(f"Stabilizing environment ({_STABILIZATION_WAIT_S}s)...", level="info"))
     time.sleep(_STABILIZATION_WAIT_S)
     clear_logcat = prompt_utils.prompt_yes_no("Clear logcat at run start?", default=True)
+    if run_profile == "interaction_scripted":
+        mapped = template_for_package(package_name)
+        if not mapped:
+            print(
+                status_messages.status(
+                    f"BLOCKED_UNKNOWN_CATEGORY: no scripted template mapping for {package_name} in paper mode.",
+                    level="error",
+                )
+            )
+            prompt_utils.press_enter_to_continue()
+            return
 
     spec = build_dynamic_run_spec(
         package_name=package_name,
@@ -1119,6 +1180,96 @@ def run_guided_dataset_run(
     _post_run_integrity_check(result)
     if result.dynamic_run_id and print_tier1_qa_result:
         print_tier1_qa_result(result.dynamic_run_id)
+    _capture_protocol_fit_feedback(result=result, run_profile=run_profile, package_name=package_name)
+
+
+def _capture_protocol_fit_feedback(*, result, run_profile: str, package_name: str | None) -> None:
+    if run_profile != "interaction_scripted":
+        return
+    if not result or str(getattr(result, "status", "")).lower() != "success":
+        return
+    run_id = str(getattr(result, "dynamic_run_id", "") or "").strip()
+    if not run_id:
+        return
+    print()
+    menu_utils.print_header("Protocol Fit (Optional)")
+    fit_options = [
+        menu_utils.MenuOption("1", "Great", description="Steps matched app flow well."),
+        menu_utils.MenuOption("2", "Okay", description="Mostly good; minor mismatch."),
+        menu_utils.MenuOption("3", "Poor", description="Steps did not fit app well."),
+    ]
+    menu_utils.render_menu(
+        menu_utils.MenuSpec(
+            items=fit_options,
+            default="2",
+            show_exit=False,
+            show_descriptions=True,
+            compact=True,
+        )
+    )
+    fit_choice = prompt_utils.get_choice(["1", "2", "3"], default="2", invalid_message="Choose 1-3.")
+    fit_label = {"1": "great", "2": "okay", "3": "poor"}.get(fit_choice, "okay")
+
+    step_ref = ""
+    replacement_note = ""
+    if fit_label == "poor":
+        step_ref = prompt_utils.prompt_text(
+            "Which step number felt wrong? (optional, e.g., 2)",
+            required=False,
+        ).strip()
+        replacement_note = prompt_utils.prompt_text(
+            "Suggested replacement step (optional one-line note)",
+            required=False,
+        ).strip()
+        print(
+            status_messages.status(
+                "Rerun recommended with the correct template/protocol before counting this app for paper cohort.",
+                level="warn",
+            )
+        )
+
+    send_detected = False
+    messaging_pkgs = {p.lower() for p in MESSAGING_PACKAGES}
+    if str(package_name or "").strip().lower() in messaging_pkgs:
+        send_detected = prompt_utils.prompt_yes_no(
+            "Did this scripted run send a real message? (protocol violation in paper mode)",
+            default=False,
+        )
+
+    event = {
+        "timestamp_utc": datetime.now(UTC).isoformat(),
+        "event": "protocol_fit_feedback",
+        "run_id": run_id,
+        "run_profile": run_profile,
+        "fit": fit_label,
+        "step_ref": step_ref or None,
+        "replacement_note": replacement_note or None,
+        "script_protocol_send": bool(send_detected),
+    }
+    run_dir = resolve_evidence_path(getattr(result, "evidence_path", None)) if getattr(result, "evidence_path", None) else None
+    if not run_dir:
+        return
+    manifest_path = Path(run_dir) / "run_manifest.json"
+    events_path = Path(run_dir) / "notes" / "run_events.jsonl"
+    try:
+        events_path.parent.mkdir(parents=True, exist_ok=True)
+        with events_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(event, sort_keys=True) + "\n")
+    except Exception:
+        return
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if isinstance(payload, dict):
+            operator = payload.get("operator") if isinstance(payload.get("operator"), dict) else {}
+            operator["protocol_fit"] = fit_label
+            operator["protocol_fit_step_ref"] = step_ref or None
+            operator["protocol_fit_replacement_note"] = replacement_note or None
+            operator["script_protocol_send"] = bool(send_detected)
+            payload["operator"] = operator
+            manifest_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    except Exception:
+        pass
+    print(status_messages.status("Protocol fit feedback saved.", level="info"))
 
 
 __all__ = ["run_guided_dataset_run"]

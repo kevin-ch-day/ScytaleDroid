@@ -48,6 +48,9 @@ def _add_script_protocol_fields(manifest: dict) -> dict:
     if profile.startswith("interaction_scripted"):
         manifest.setdefault("operator", {}).update(
             {
+                "template_id": "social_feed_basic_v2",
+                "scenario_template": "social_feed_basic_v2",
+                "interaction_protocol_version": 2,
                 "script_hash": "e" * 64,
                 "script_exit_code": 0,
                 "script_end_marker": True,
@@ -172,3 +175,28 @@ def test_summarize_evidence_quota_excludes_when_plan_static_link_or_policy_missi
     assert int(summary["paper_eligible_runs"]) == 0
     assert int(summary["quota_runs_counted"]) == 0
     assert int(summary["excluded_runs"]) == 2
+
+
+def test_summarize_evidence_quota_tracks_low_signal_idle_as_exploratory(
+    tmp_path: Path, monkeypatch
+) -> None:
+    output_root = tmp_path / "output"
+    evidence_root = output_root / "evidence" / "dynamic"
+    monkeypatch.setattr("scytaledroid.Config.app_config.OUTPUT_DIR", str(output_root))
+
+    pkg = "com.example.app"
+    baseline = _run_manifest(package_name=pkg, run_profile="baseline_idle")
+    baseline.setdefault("dataset", {})["low_signal"] = True
+    baseline.setdefault("dataset", {})["invalid_reason_code"] = "LOW_SIGNAL_IDLE"
+    _write_json(evidence_root / "r1" / "run_manifest.json", _add_script_protocol_fields(baseline))
+    _write_plan(evidence_root / "r1")
+
+    scripted = _run_manifest(package_name=pkg, run_profile="interaction_scripted")
+    _write_json(evidence_root / "r2" / "run_manifest.json", _add_script_protocol_fields(scripted))
+    _write_plan(evidence_root / "r2")
+
+    cfg = DatasetTrackerConfig()
+    summary = _summarize_evidence_quota({pkg}, cfg)
+    assert int(summary["paper_eligible_runs"]) == 2
+    assert int(summary["quota_runs_counted"]) == 1
+    assert int(summary["low_signal_exploratory_runs"]) == 1

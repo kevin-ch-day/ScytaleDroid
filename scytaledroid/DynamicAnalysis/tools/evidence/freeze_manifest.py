@@ -20,6 +20,11 @@ from typing import Any
 
 from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper_config
+from scytaledroid.DynamicAnalysis.paper_contract import (
+    PAPER_CONTRACT_VERSION as PAPER_MODE_CONTRACT_VERSION,
+    build_paper_contract_snapshot,
+    paper_contract_hash,
+)
 from scytaledroid.DynamicAnalysis.paper_eligibility import derive_paper_eligibility
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import MIN_WINDOWS_PER_RUN
 from scytaledroid.DynamicAnalysis.plans.loader import enrich_dynamic_plan
@@ -126,6 +131,32 @@ def _safe_float(value: Any) -> float | None:
         return None
 
 
+def _resolve_pcap_size_bytes(run_dir: Path, manifest: dict[str, Any], ds: dict[str, Any]) -> int | None:
+    # Prefer manifest dataset value when present.
+    pcap_size_bytes = _safe_int(ds.get("pcap_size_bytes"))
+    if pcap_size_bytes is not None:
+        return pcap_size_bytes
+    # Fallback to pcap_report top-level field.
+    rep = _read_json(run_dir / "analysis/pcap_report.json") or {}
+    pcap_size_bytes = _safe_int(rep.get("pcap_size_bytes"))
+    if pcap_size_bytes is not None:
+        return pcap_size_bytes
+    # Final fallback to on-disk artifact size for pcapdroid_capture.
+    pcap_rel = None
+    for a in (manifest.get("artifacts") or []):
+        if isinstance(a, dict) and a.get("type") == "pcapdroid_capture":
+            pcap_rel = a.get("relative_path")
+            break
+    if isinstance(pcap_rel, str) and pcap_rel:
+        p = run_dir / pcap_rel
+        if p.exists():
+            try:
+                return int(p.stat().st_size)
+            except Exception:
+                return None
+    return None
+
+
 def build_dataset_freeze_manifest(
     *,
     dataset_plan_path: Path,
@@ -154,6 +185,11 @@ def build_dataset_freeze_manifest(
     run_checksums: dict[str, dict[str, Any]] = {}
     plan_schema_versions: set[str] = set()
     plan_paper_contract_versions: set[int] = set()
+    interaction_protocol_versions: set[int] = set()
+    paper_contract_hashes: set[str] = set()
+    paper_contract_versions: set[str] = set()
+    template_map_versions: set[str] = set()
+    template_map_hashes: set[str] = set()
     excluded_reason_counts_by_app: dict[str, dict[str, int]] = defaultdict(dict)
     legacy_runs_present = False
 
@@ -195,8 +231,14 @@ def build_dataset_freeze_manifest(
             app_counts = excluded_reason_counts_by_app[pkg]
             app_counts["EXCLUDED_INTENT_NOT_ALLOWED"] = int(app_counts.get("EXCLUDED_INTENT_NOT_ALLOWED", 0)) + 1
             continue
+        if bucket == "interactive":
+            protocol_fit = str(op.get("protocol_fit") or "").strip().lower()
+            if protocol_fit == "poor":
+                app_counts = excluded_reason_counts_by_app[pkg]
+                app_counts["FLAG_PROTOCOL_FIT_POOR"] = int(app_counts.get("FLAG_PROTOCOL_FIT_POOR", 0)) + 1
+                continue
         window_count = _safe_int(ds.get("window_count"))
-        pcap_size_bytes = _safe_int(ds.get("pcap_size_bytes"))
+        pcap_size_bytes = _resolve_pcap_size_bytes(run_dir, mf, ds)
         actual_duration_s = _safe_float(ds.get("sampling_duration_seconds"))
         capture_start_utc = str(mf.get("started_at") or (mf.get("scenario") or {}).get("started_at") or "").strip()
         if window_count is None or pcap_size_bytes is None or actual_duration_s is None or not capture_start_utc:
@@ -265,6 +307,25 @@ def build_dataset_freeze_manifest(
             expected_bucket = expected_bucket_by_run_id.get(rid, "")
             if expected_bucket and observed_bucket and expected_bucket != observed_bucket:
                 raise RuntimeError(f"FREEZE_EVIDENCE_PROFILE_MISMATCH:{rid}:{expected_bucket}!={observed_bucket}")
+            if expected_bucket == "interactive":
+                try:
+                    ipv = int(op.get("interaction_protocol_version"))
+                except Exception:
+                    ipv = None
+                if ipv is not None:
+                    interaction_protocol_versions.add(ipv)
+            pc_hash = str(op.get("paper_contract_hash") or "").strip().lower()
+            if pc_hash:
+                paper_contract_hashes.add(pc_hash)
+            pc_ver = str(op.get("paper_contract_version") or "").strip()
+            if pc_ver:
+                paper_contract_versions.add(pc_ver)
+            tm_ver = str(op.get("template_map_version") or "").strip()
+            if tm_ver:
+                template_map_versions.add(tm_ver)
+            tm_hash = str(op.get("template_map_hash") or "").strip().lower()
+            if tm_hash:
+                template_map_hashes.add(tm_hash)
             pcap_rel = None
             for a in (mf.get("artifacts") or []):
                 if isinstance(a, dict) and a.get("type") == "pcapdroid_capture":
@@ -343,13 +404,35 @@ def build_dataset_freeze_manifest(
             f"plan_schema={sorted(plan_schema_versions)}:"
             f"paper_contract={sorted(plan_paper_contract_versions)}"
         )
+    if len(interaction_protocol_versions) > 1:
+        raise RuntimeError(f"FREEZE_MIXED_PROTOCOL_VERSIONS:{sorted(interaction_protocol_versions)}")
+    if len(paper_contract_hashes) > 1:
+        raise RuntimeError(f"FREEZE_MIXED_PAPER_CONTRACT_HASHES:{sorted(paper_contract_hashes)}")
+    if len(template_map_versions) > 1:
+        raise RuntimeError(f"FREEZE_MIXED_TEMPLATE_MAP_VERSIONS:{sorted(template_map_versions)}")
+    if len(template_map_hashes) > 1:
+        raise RuntimeError(f"FREEZE_MIXED_TEMPLATE_MAP_HASHES:{sorted(template_map_hashes)}")
     required_plan_schema_version = next(iter(plan_schema_versions))
     required_plan_paper_contract_version = int(next(iter(plan_paper_contract_versions)))
+    contract_snapshot = build_paper_contract_snapshot()
+    contract_hash = paper_contract_hash(contract_snapshot)
+    if paper_contract_hashes and contract_hash not in paper_contract_hashes:
+        raise RuntimeError(
+            f"FREEZE_CONTRACT_HASH_MISMATCH:selected={sorted(paper_contract_hashes)}:freeze={contract_hash}"
+        )
+    if paper_contract_versions and str(PAPER_MODE_CONTRACT_VERSION) not in paper_contract_versions:
+        raise RuntimeError(
+            "FREEZE_CONTRACT_VERSION_MISMATCH:"
+            f"selected={sorted(paper_contract_versions)}:freeze={PAPER_MODE_CONTRACT_VERSION}"
+        )
 
     return {
         "artifact_type": "dataset_freeze",
         "freeze_contract_version": int(paper_config.FREEZE_CONTRACT_VERSION),
         "paper_contract_version": int(paper_config.PAPER_CONTRACT_VERSION),
+        "paper_mode_contract_version": str(PAPER_MODE_CONTRACT_VERSION),
+        "paper_contract_hash": str(contract_hash),
+        "paper_contract_snapshot": contract_snapshot,
         "capture_policy_version_required": int(paper_config.PAPER_CONTRACT_VERSION),
         "reason_taxonomy_version": int(paper_config.REASON_TAXONOMY_VERSION),
         "plan_schema_version_required": required_plan_schema_version,
@@ -375,6 +458,12 @@ def build_dataset_freeze_manifest(
         "min_pcap_bytes_used": int(config.min_pcap_bytes),
         "frozen_inputs_per_run": list(_REQUIRED_RELATIVE_INPUTS) + ["<pcap from manifest artifact:pcapdroid_capture>"],
         "host_tools_versions": {k: sorted(v) for k, v in host_tool_versions.items() if v},
+        "selected_run_contracts": {
+            "paper_contract_versions": sorted(paper_contract_versions),
+            "paper_contract_hashes": sorted(paper_contract_hashes),
+            "template_map_versions": sorted(template_map_versions),
+            "template_map_hashes": sorted(template_map_hashes),
+        },
         "apps": included_by_app,
         "included_run_ids": sorted(set(included_run_ids)),
         "included_run_checksums": run_checksums,
@@ -414,6 +503,17 @@ def write_dataset_freeze_manifest(
         canonical = out_dir / "dataset_freeze.json"
         if not canonical.exists():
             canonical.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+    # First-class paper contract artifact for this freeze (dataset identity anchor).
+    contract_payload = {
+        "paper_contract_version": payload.get("paper_mode_contract_version"),
+        "paper_contract_hash": payload.get("paper_contract_hash"),
+        "paper_contract_snapshot": payload.get("paper_contract_snapshot"),
+        "generated_at_utc": payload.get("created_at_utc"),
+        "source_freeze_manifest": str(out_path),
+    }
+    contract_path = out_dir / "paper_contract_v1.json"
+    contract_path.write_text(json.dumps(contract_payload, indent=2, sort_keys=True), encoding="utf-8")
 
     return out_path
 
