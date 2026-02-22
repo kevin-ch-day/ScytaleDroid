@@ -157,7 +157,7 @@ def test_update_dataset_tracker_records_run_protocol(monkeypatch, tmp_path: Path
     assert run["interaction_level"] == "minimal"
 
 
-def test_dataset_validity_allows_short_capture_span_when_other_requirements_met(monkeypatch, tmp_path: Path) -> None:
+def test_dataset_validity_prefers_pcap_capture_span_for_sampling_gate(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(dataset_tracker.app_config, "DATA_DIR", str(tmp_path))
     monkeypatch.setattr(dataset_tracker.app_config, "DYNAMIC_MIN_DURATION_S", 120)
 
@@ -222,10 +222,13 @@ def test_dataset_validity_allows_short_capture_span_when_other_requirements_met(
     out_path = dataset_tracker.update_dataset_tracker(manifest, run_dir)
     payload = json.loads(out_path.read_text(encoding="utf-8"))
     run = payload["apps"]["com.example.app"]["runs"][0]
-    assert run["valid_dataset_run"] is True
+    assert run["valid_dataset_run"] is False
+    assert run["invalid_reason_code"] == "INSUFFICIENT_DURATION"
+    assert run["actual_sampling_seconds"] == 4.0
+    assert run["actual_sampling_seconds_source"] == "capinfos_capture_duration_s"
 
 
-def test_dataset_validity_requires_minimum_window_count(monkeypatch, tmp_path: Path) -> None:
+def test_dataset_validity_enforces_paper_min_sampling_floor(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(dataset_tracker.app_config, "DATA_DIR", str(tmp_path))
     monkeypatch.setattr(dataset_tracker.app_config, "DYNAMIC_MIN_DURATION_S", 30)
 
@@ -283,4 +286,76 @@ def test_dataset_validity_requires_minimum_window_count(monkeypatch, tmp_path: P
     run = payload["apps"]["com.example.app"]["runs"][0]
     assert run["valid_dataset_run"] is False
     assert run["invalid_reason_code"] == "INSUFFICIENT_DURATION"
-    assert run.get("window_count_too_low") == 1
+    # Paper-mode sampling floor is hard-locked to >=180s; this fails before
+    # window-count-specific gating.
+    assert run.get("window_count_too_low") in (None, 0)
+
+
+def test_dataset_validity_persists_window_count_recompute_audit(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(dataset_tracker.app_config, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(dataset_tracker.app_config, "DYNAMIC_MIN_DURATION_S", 120)
+
+    run_dir = tmp_path / "run-recompute"
+    (run_dir / "analysis").mkdir(parents=True, exist_ok=True)
+    (run_dir / "analysis" / "pcap_features.json").write_text(json.dumps({}), encoding="utf-8")
+    (run_dir / "analysis" / "pcap_report.json").write_text(
+        json.dumps(
+            {
+                "report_status": "ok",
+                "missing_tools": [],
+                "capinfos": {"parsed": {"capture_duration_s": 205, "packet_count": 1000, "data_size_bytes": 10}},
+                "protocol_hierarchy": [{"protocol": "tcp", "frames": 1, "bytes": 1}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    # No sampling_duration_seconds in telemetry -> forces recompute path.
+    (run_dir / "analysis" / "summary.json").write_text(
+        json.dumps({"telemetry": {"stats": {}}}),
+        encoding="utf-8",
+    )
+
+    manifest = RunManifest(
+        run_manifest_version=1,
+        dynamic_run_id="run-recompute",
+        created_at="2026-02-07T00:00:00Z",
+        status="success",
+        target={"package_name": "com.example.app"},
+        scenario={"id": "basic_usage"},
+        operator={
+            "tier": "dataset",
+            "run_profile": "interaction_scripted",
+            "run_sequence": 2,
+            "interaction_level": "scripted",
+        },
+    )
+    manifest.add_artifacts(
+        [
+            ArtifactRecord(
+                relative_path="artifacts/pcapdroid_capture/test.pcap",
+                type="pcapdroid_capture",
+                sha256="0" * 64,
+                size_bytes=int(dataset_tracker.MIN_PCAP_BYTES) + 1,
+                produced_by="pcapdroid_capture",
+                origin="host",
+                pull_status="ok",
+            )
+        ]
+    )
+    manifest.finalize()
+
+    out_path = dataset_tracker.update_dataset_tracker(manifest, run_dir)
+    assert out_path and out_path.exists()
+    payload = json.loads(out_path.read_text(encoding="utf-8"))
+    run = payload["apps"]["com.example.app"]["runs"][0]
+    assert run["valid_dataset_run"] is True
+    assert run["window_count"] >= int(dataset_tracker.MIN_WINDOWS_PER_RUN)
+    assert run["window_count_original"] == run["window_count_final"]
+    assert run["window_count"] == run["window_count_final"]
+    assert run["window_count_source"] == "recompute_capinfos_capture_duration_s"
+    audit_path = run_dir / "analysis" / "recompute_attempt.jsonl"
+    assert audit_path.exists()
+    lines = [line for line in audit_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(lines) >= 1
+    record = json.loads(lines[0])
+    assert record["trigger_condition"] == "WINDOW_COUNT_MISSING"

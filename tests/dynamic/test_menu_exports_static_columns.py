@@ -15,12 +15,12 @@ def _write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
-def _seed_run(root: Path) -> None:
-    run_dir = root / "r1"
+def _seed_run(root: Path, *, run_id: str = "r1") -> None:
+    run_dir = root / run_id
     _write_json(
         run_dir / "run_manifest.json",
         {
-            "dynamic_run_id": "r1",
+            "dynamic_run_id": run_id,
             "target": {"package_name": "com.example.app", "version_code": "123"},
             "dataset": {"tier": "dataset", "valid_dataset_run": True, "countable": True},
             "operator": {"run_profile": "baseline_idle"},
@@ -116,3 +116,51 @@ def test_export_pcap_features_includes_static_columns(tmp_path: Path, monkeypatc
     assert out is not None
     header = _header(out)
     assert header == _contract_headers("pcap_features.csv")
+
+
+def test_exports_can_be_freeze_anchored(tmp_path: Path, monkeypatch) -> None:
+    output_root = tmp_path / "output"
+    data_root = tmp_path / "data"
+    evidence_root = output_root / "evidence" / "dynamic"
+    _seed_run(evidence_root, run_id="r1")
+    # Second run not included by freeze.
+    _seed_run(evidence_root, run_id="r2")
+    monkeypatch.setattr("scytaledroid.Config.app_config.OUTPUT_DIR", str(output_root))
+    monkeypatch.setattr("scytaledroid.Config.app_config.DATA_DIR", str(data_root))
+    freeze_path = data_root / "archive" / "dataset_freeze.json"
+    _write_json(
+        freeze_path,
+        {
+            "included_run_ids": ["r1"],
+        },
+    )
+
+    out_summary = export_dynamic_run_summary_csv(freeze_path=freeze_path)
+    out_features = export_pcap_features_csv(freeze_path=freeze_path)
+    assert out_summary is not None and out_features is not None
+    with out_summary.open("r", encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+        assert len(rows) == 1
+        assert rows[0]["dynamic_run_id"] == "r1"
+
+
+def test_exports_fail_closed_when_freeze_required(tmp_path: Path, monkeypatch) -> None:
+    output_root = tmp_path / "output"
+    data_root = tmp_path / "data"
+    evidence_root = output_root / "evidence" / "dynamic"
+    _seed_run(evidence_root, run_id="r1")
+    monkeypatch.setattr("scytaledroid.Config.app_config.OUTPUT_DIR", str(output_root))
+    monkeypatch.setattr("scytaledroid.Config.app_config.DATA_DIR", str(data_root))
+    missing_freeze = data_root / "archive" / "dataset_freeze.json"
+
+    try:
+        export_dynamic_run_summary_csv(freeze_path=missing_freeze, require_freeze=True)
+        assert False, "expected RuntimeError"
+    except RuntimeError as exc:
+        assert "EXPORT_BLOCKED_MISSING_FREEZE" in str(exc)
+
+    try:
+        export_pcap_features_csv(freeze_path=missing_freeze, require_freeze=True)
+        assert False, "expected RuntimeError"
+    except RuntimeError as exc:
+        assert "EXPORT_BLOCKED_MISSING_FREEZE" in str(exc)

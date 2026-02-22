@@ -12,6 +12,7 @@ import hashlib
 
 from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
+from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper2_config
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
 
 
@@ -31,6 +32,18 @@ SCRIPT_STEPS_BASIC_USAGE: tuple[tuple[str, str, int], ...] = (
     ("open_profile", "Open a profile page and return to feed.", 20),
     ("search_nav", "Use search/navigation briefly and return.", 20),
 )
+
+
+def _effective_min_sampling_seconds() -> int:
+    configured = int(getattr(app_config, "DYNAMIC_MIN_DURATION_S", 120))
+    paper_floor = int(getattr(paper2_config, "MIN_SAMPLING_SECONDS", 180))
+    return max(configured, paper_floor)
+
+
+def _effective_recommended_sampling_seconds() -> int:
+    configured = int(getattr(app_config, "DYNAMIC_TARGET_DURATION_S", 180))
+    paper_target = int(getattr(paper2_config, "RECOMMENDED_SAMPLING_SECONDS", 240))
+    return max(configured, paper_target)
 
 
 class ManualScenarioRunner:
@@ -53,18 +66,19 @@ class ManualScenarioRunner:
                 interaction_level = _prompt_interaction_level(profile)
 
             # Render a concise multi-line protocol block (operator-friendly).
-            min_s = int(getattr(app_config, "DYNAMIC_MIN_DURATION_S", 120))
-            target_s = int(getattr(app_config, "DYNAMIC_TARGET_DURATION_S", 180))
+            min_s = _effective_min_sampling_seconds()
+            rec_s = _effective_recommended_sampling_seconds()
 
             block: list[str] = []
             block.append(f"Scenario: {run_ctx.scenario_id}")
             if interaction_level:
                 block.append(f"Interaction: {interaction_level}")
             if duration_seconds:
-                block.append(f"Duration: {duration_seconds}s")
+                block.append(f"Target duration: {duration_seconds}s")
             else:
-                # Manual runs are stopwatch-based; still show the dataset target/minimum.
-                block.append(f"Target duration: {target_s}s (min {min_s}s)")
+                # Manual runs are stopwatch-based; still show the paper contract floors.
+                block.append(f"Target duration: {rec_s}s")
+            block.append(f"Sampling contract: min {min_s}s | recommended {rec_s}s")
             if profile:
                 block.append(f"Profile: {profile}")
             # Do not surface run sequencing/slot labels. Operators may run in any order.
@@ -85,7 +99,7 @@ class ManualScenarioRunner:
             if on_start:
                 on_start()
             if profile == "interaction_scripted":
-                target_s = duration_seconds or target_s
+                target_s = duration_seconds or rec_s
                 protocol = _run_scripted_protocol(
                     run_ctx=run_ctx,
                     target_duration_s=int(target_s),

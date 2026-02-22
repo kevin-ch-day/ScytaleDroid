@@ -12,13 +12,22 @@ from scytaledroid.DynamicAnalysis.core.static_context import compute_static_cont
 from scytaledroid.DynamicAnalysis.plans.loader import enrich_dynamic_plan
 
 
-def export_pcap_features_csv() -> Path | None:
+def export_pcap_features_csv(
+    *,
+    freeze_path: Path | None = None,
+    require_freeze: bool = False,
+) -> Path | None:
     output_root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
     if not output_root.exists():
         return None
+    if require_freeze and freeze_path is None:
+        raise RuntimeError("EXPORT_BLOCKED_MISSING_FREEZE: provide freeze_path in paper mode")
+    if require_freeze and freeze_path is not None and not freeze_path.exists():
+        raise RuntimeError(f"EXPORT_BLOCKED_MISSING_FREEZE:{freeze_path}")
+    selected_run_ids = _load_freeze_included_run_ids(freeze_path) if freeze_path else None
     rows: list[dict[str, Any]] = []
-    for run_dir in output_root.iterdir():
-        if not run_dir.is_dir():
+    for run_dir in sorted([p for p in output_root.iterdir() if p.is_dir()], key=lambda p: p.name):
+        if selected_run_ids is not None and run_dir.name not in selected_run_ids:
             continue
         features_path = run_dir / "analysis" / "pcap_features.json"
         manifest_path = run_dir / "run_manifest.json"
@@ -66,13 +75,22 @@ def export_pcap_features_csv() -> Path | None:
     return dest
 
 
-def export_dynamic_run_summary_csv() -> Path | None:
+def export_dynamic_run_summary_csv(
+    *,
+    freeze_path: Path | None = None,
+    require_freeze: bool = False,
+) -> Path | None:
     output_root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
     if not output_root.exists():
         return None
+    if require_freeze and freeze_path is None:
+        raise RuntimeError("EXPORT_BLOCKED_MISSING_FREEZE: provide freeze_path in paper mode")
+    if require_freeze and freeze_path is not None and not freeze_path.exists():
+        raise RuntimeError(f"EXPORT_BLOCKED_MISSING_FREEZE:{freeze_path}")
+    selected_run_ids = _load_freeze_included_run_ids(freeze_path) if freeze_path else None
     rows: list[dict[str, Any]] = []
-    for run_dir in output_root.iterdir():
-        if not run_dir.is_dir():
+    for run_dir in sorted([p for p in output_root.iterdir() if p.is_dir()], key=lambda p: p.name):
+        if selected_run_ids is not None and run_dir.name not in selected_run_ids:
             continue
         manifest = _load_json(run_dir / "run_manifest.json")
         summary = _load_json(run_dir / "analysis" / "summary.json")
@@ -292,6 +310,19 @@ def _extract_static_export_columns(plan: dict[str, Any], manifest: dict[str, Any
             static_features.get("uses_cleartext_traffic"),
         ),
     }
+    return out
+
+
+def _load_freeze_included_run_ids(freeze_path: Path) -> set[str]:
+    payload = _load_json(freeze_path)
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"Invalid freeze manifest JSON: {freeze_path}")
+    ids = payload.get("included_run_ids")
+    if not isinstance(ids, list):
+        raise RuntimeError(f"Freeze manifest missing included_run_ids: {freeze_path}")
+    out = {str(v).strip() for v in ids if str(v).strip()}
+    if not out:
+        raise RuntimeError(f"Freeze manifest has empty included_run_ids: {freeze_path}")
     return out
 
 

@@ -96,6 +96,14 @@ def _is_truthy(value: object) -> bool:
     return False
 
 
+def _norm_str(value: object) -> str:
+    return str(value or "").strip()
+
+
+def _norm_hex(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
 def derive_paper_eligibility(
     *,
     manifest: dict[str, Any] | None,
@@ -153,39 +161,38 @@ def derive_paper_eligibility(
         if "manual" in run_profile:
             reasons.append("EXCLUDED_MANUAL_NON_COHORT")
 
-        version_code = str(
-            target_identity.get("version_code")
-            or plan_identity.get("version_code")
-            or target.get("version_code")
-            or p.get("version_code")
-            or ""
-        ).strip()
-        base_sha = str(
-            target_identity.get("base_apk_sha256")
-            or target.get("base_apk_sha256")
-            or plan_identity.get("base_apk_sha256")
-            or ""
-        ).strip().lower()
-        artifact_set_hash = str(
-            target_identity.get("artifact_set_hash")
-            or target.get("artifact_set_hash")
-            or plan_identity.get("artifact_set_hash")
-            or ""
-        ).strip().lower()
-        signer_set_hash = str(
+        plan_package = _norm_str(plan_identity.get("package_name_lc") or p.get("package_name")).lower()
+        target_package = _norm_str(target.get("package_name")).lower()
+        plan_version = _norm_str(plan_identity.get("version_code") or p.get("version_code"))
+        target_version = _norm_str(target_identity.get("version_code") or target.get("version_code"))
+        plan_base_sha = _norm_hex(plan_identity.get("base_apk_sha256"))
+        target_base_sha = _norm_hex(target_identity.get("base_apk_sha256") or target.get("base_apk_sha256"))
+        plan_artifact_set_hash = _norm_hex(plan_identity.get("artifact_set_hash"))
+        target_artifact_set_hash = _norm_hex(target_identity.get("artifact_set_hash") or target.get("artifact_set_hash"))
+        plan_signer_set_hash = _norm_hex(plan_identity.get("signer_set_hash") or plan_identity.get("signer_digest"))
+        target_signer_set_hash = _norm_hex(
             target_identity.get("signer_set_hash")
             or target.get("signer_set_hash")
-            or plan_identity.get("signer_set_hash")
-            or plan_identity.get("signer_digest")
-            or ""
-        ).strip().lower()
-        static_handoff_hash = str(
-            plan_identity.get("static_handoff_hash")
-            or target.get("static_handoff_hash")
-            or ""
-        ).strip().lower()
+            or target_identity.get("signer_digest")
+        )
+        static_handoff_hash = _norm_hex(plan_identity.get("static_handoff_hash") or target.get("static_handoff_hash"))
+        version_code = plan_version or target_version
+        base_sha = plan_base_sha or target_base_sha
+        artifact_set_hash = plan_artifact_set_hash or target_artifact_set_hash
+        signer_set_hash = plan_signer_set_hash or target_signer_set_hash
         if not (version_code and base_sha and artifact_set_hash and signer_set_hash and static_handoff_hash):
             reasons.append("EXCLUDED_MISSING_REQUIRED_IDENTITY_FIELD")
+        # Identity must be stable between planned static identity and observed dynamic target.
+        if plan_package and target_package and plan_package != target_package:
+            reasons.append("EXCLUDED_IDENTITY_MISMATCH")
+        if plan_version and target_version and plan_version != target_version:
+            reasons.append("EXCLUDED_IDENTITY_MISMATCH")
+        if plan_base_sha and target_base_sha and plan_base_sha != target_base_sha:
+            reasons.append("EXCLUDED_IDENTITY_MISMATCH")
+        if plan_artifact_set_hash and target_artifact_set_hash and plan_artifact_set_hash != target_artifact_set_hash:
+            reasons.append("EXCLUDED_IDENTITY_MISMATCH")
+        if plan_signer_set_hash and target_signer_set_hash and plan_signer_set_hash != target_signer_set_hash:
+            reasons.append("EXCLUDED_IDENTITY_MISMATCH")
 
         wc = ds.get("window_count")
         if wc in (None, ""):

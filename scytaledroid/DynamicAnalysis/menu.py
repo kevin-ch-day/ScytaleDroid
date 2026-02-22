@@ -72,6 +72,8 @@ def _summarize_evidence_quota(dataset_pkgs: set[str], cfg) -> dict[str, int | bo
         "total_runs": 0,
         "paper_eligible_runs": 0,
         "quota_runs_counted": 0,
+        "excluded_runs": 0,
+        "extra_eligible_runs": 0,
     }
     if not root.exists():
         return out
@@ -102,6 +104,7 @@ def _summarize_evidence_quota(dataset_pkgs: set[str], cfg) -> dict[str, int | bo
             required_capture_policy_version=int(paper2_config.PAPER_CONTRACT_VERSION),
         )
         if not eligibility.paper_eligible:
+            out["excluded_runs"] = int(out["excluded_runs"]) + 1
             continue
         out["paper_eligible_runs"] = int(out["paper_eligible_runs"]) + 1
         bucket = _run_profile_bucket(
@@ -114,6 +117,8 @@ def _summarize_evidence_quota(dataset_pkgs: set[str], cfg) -> dict[str, int | bo
         if int(pkg_counts.get(bucket, 0)) < needed:
             pkg_counts[bucket] = int(pkg_counts.get(bucket, 0)) + 1
             out["quota_runs_counted"] = int(out["quota_runs_counted"]) + 1
+        else:
+            out["extra_eligible_runs"] = int(out["extra_eligible_runs"]) + 1
     return out
 
 @dataclass(frozen=True)
@@ -154,6 +159,7 @@ def dynamic_analysis_menu() -> None:
         MenuOption("5", "Verify host PCAP tools (tshark + capinfos)"),
         MenuOption("6", "Paper readiness audit (evidence packs)"),
         MenuOption("7", "Repair/reindex tracker from evidence packs"),
+        MenuOption("8", "Prune incomplete dynamic evidence dirs"),
     ]
 
     ui_defaults = _load_dynamic_ui_defaults()
@@ -203,9 +209,52 @@ def dynamic_analysis_menu() -> None:
             _repair_reindex_tracker()
             prompt_utils.press_enter_to_continue()
             continue
+        if choice == "8":
+            _prune_incomplete_dynamic_evidence_dirs()
+            prompt_utils.press_enter_to_continue()
+            continue
 
 
     return
+
+
+def _prune_incomplete_dynamic_evidence_dirs() -> None:
+    from scytaledroid.DynamicAnalysis.utils.run_cleanup import (
+        find_incomplete_dynamic_run_dirs,
+        prune_incomplete_dynamic_run_dirs,
+    )
+
+    print()
+    menu_utils.print_header("Prune Incomplete Dynamic Evidence")
+    incomplete = find_incomplete_dynamic_run_dirs()
+    if not incomplete:
+        print(status_messages.status("No incomplete evidence dirs found.", level="success"))
+        return
+
+    print(
+        status_messages.status(
+            f"Found {len(incomplete)} incomplete dir(s) missing run_manifest.json.",
+            level="warn",
+        )
+    )
+    preview = [p.name for p in incomplete[:10]]
+    if preview:
+        print(status_messages.status("Examples: " + ", ".join(preview), level="info"))
+    confirmed = prompt_utils.prompt_yes_no(
+        "Delete these incomplete dirs? (safe: valid evidence packs are not touched)",
+        default=False,
+    )
+    if not confirmed:
+        print(status_messages.status("Prune canceled.", level="info"))
+        return
+    deleted = prune_incomplete_dynamic_run_dirs()
+    remaining = len(find_incomplete_dynamic_run_dirs())
+    print(
+        status_messages.status(
+            f"Deleted incomplete dirs: {deleted}. Remaining incomplete dirs: {remaining}.",
+            level="success" if remaining == 0 else "warn",
+        )
+    )
 
 
 def _repair_reindex_tracker() -> None:
@@ -338,11 +387,14 @@ def _run_paper_readiness_audit() -> None:
     rows = [
         ("Total runs", str(summary.total_runs)),
         ("VALID runs", str(summary.valid_runs)),
+        ("Paper-eligible runs", str(summary.paper_eligible_runs)),
+        ("Incomplete dirs (no manifest)", str(summary.missing_run_manifest_dirs)),
         ("Expected valid runs", str(summary.expected_valid_runs)),
         ("Expected total runs", str(summary.expected_total_runs)),
         ("Missing capture_policy_version", str(summary.missing_capture_policy_version)),
         ("capture_policy_version mismatch", str(summary.capture_policy_version_mismatch)),
         ("Missing signer_set_hash", str(summary.missing_signer_set_hash)),
+        ("Identity mismatch", str(summary.identity_mismatch)),
         ("Missing window_count", str(summary.missing_window_count)),
         ("window_count < min", str(summary.window_count_below_min)),
         ("Tracker runs (hint)", str(summary.tracker_runs_hint)),
@@ -360,6 +412,14 @@ def _run_paper_readiness_audit() -> None:
         print(
             status_messages.status(
                 "Tracker contains historical runs but local evidence packs are missing. Recollect runs or repoint evidence root before freeze.",
+                level="warn",
+            )
+        )
+    if summary.missing_run_manifest_dirs > 0:
+        print(
+            status_messages.status(
+                "Incomplete dynamic evidence directories detected (missing run_manifest.json). "
+                "Clean up orphan run folders before freeze.",
                 level="warn",
             )
         )
@@ -420,12 +480,17 @@ def _export_pcap_features_csv() -> None:
 
     print()
     menu_utils.print_header("PCAP Features Export")
-    output_path = export_pcap_features_csv()
+    freeze_path = Path(app_config.DATA_DIR) / "archive" / "dataset_freeze.json"
+    try:
+        output_path = export_pcap_features_csv(freeze_path=freeze_path, require_freeze=True)
+    except RuntimeError as exc:
+        print(status_messages.status(str(exc), level="error"))
+        return
     if output_path is None:
         print(status_messages.status("No pcap_features.json files found.", level="warn"))
         return
     count = _count_csv_rows(output_path)
-    msg = f"Exported CSV: {output_path}"
+    msg = f"Exported CSV: {output_path} [freeze-anchored]"
     if count is not None:
         msg += f" ({count} row(s))"
     print(status_messages.status(msg, level="success"))
@@ -436,12 +501,17 @@ def _export_dynamic_run_summary_csv() -> None:
 
     print()
     menu_utils.print_header("Run Summary Export")
-    output_path = export_dynamic_run_summary_csv()
+    freeze_path = Path(app_config.DATA_DIR) / "archive" / "dataset_freeze.json"
+    try:
+        output_path = export_dynamic_run_summary_csv(freeze_path=freeze_path, require_freeze=True)
+    except RuntimeError as exc:
+        print(status_messages.status(str(exc), level="error"))
+        return
     if output_path is None:
         print(status_messages.status("No dynamic run summaries found.", level="warn"))
         return
     count = _count_csv_rows(output_path)
-    msg = f"Exported CSV: {output_path}"
+    msg = f"Exported CSV: {output_path} [freeze-anchored]"
     if count is not None:
         msg += f" ({count} row(s))"
     print(status_messages.status(msg, level="success"))
@@ -846,7 +916,7 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
             entry = tracker_apps.get(package) if isinstance(tracker_apps, dict) else None
             runs = entry.get("runs") if isinstance(entry, dict) else []
             total_runs = len(runs) if isinstance(runs, list) else 0
-            scoped = _build_scoped_dataset_counts(package, runs if isinstance(runs, list) else [])
+            scoped = _build_scoped_dataset_counts(package, runs if isinstance(runs, list) else [], cfg=cfg)
             base_countable = int(scoped["baseline_countable"])
             base_extra = int(scoped["baseline_extra"])
             inter_countable = int(scoped["interactive_countable"])
@@ -891,8 +961,32 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
                     last_label = "INVALID"
                 else:
                     last_label = "UNKNOWN"
+                # Make identity-drift exploratory status explicit for operators.
+                if (
+                    last_label == "VALID"
+                    and isinstance(runs, list)
+                    and (scoped.get("active_version_code") or scoped.get("active_base_sha"))
+                ):
+                    recent_row = next(
+                        (
+                            item
+                            for item in runs
+                            if isinstance(item, dict) and str(item.get("run_id") or "") == str(r.run_id or "")
+                        ),
+                        None,
+                    )
+                    if isinstance(recent_row, dict):
+                        recent_ident = _resolve_tracker_run_identity(package, recent_row)
+                        active_ident = (
+                            str(scoped.get("active_version_code") or "") or None,
+                            str(scoped.get("active_base_sha") or "") or None,
+                        )
+                        if recent_ident != active_ident:
+                            last_label = "VALID⚠ID_MISMATCH"
             if legacy_valid > 0 and last_label != "—":
-                last_label = f"{last_label}*"
+                # Keep legacy-presence visible without overloading "*" semantics.
+                if not last_label.endswith("+L"):
+                    last_label = f"{last_label}+L"
             proto = peek_next_run_protocol(package, tier="dataset") or {}
             prof = (proto.get("run_profile") or "").lower()
             if "baseline" in prof or "idle" in prof:
@@ -942,7 +1036,7 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
         )
         print(
             status_messages.status(
-                "Build-scoped view: counts are computed for the latest app build identity; '*' in Last QA indicates legacy valid runs from older builds exist.",
+                "Build-scoped view: counts are computed for the latest app build identity; '+L' in Last QA indicates legacy valid runs from older builds exist.",
                 level="info",
             )
         )
@@ -963,7 +1057,10 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
                 f"Tracker quota (informational): {dataset_apps_complete}/{dataset_apps_total} apps satisfied | valid runs={dataset_valid_runs_total}/{expected_runs} | total windows={tracker_windows_label}"
             )
             print(
-                f"Evidence quota (authoritative): valid runs={int(evidence_summary['quota_runs_counted'])}/{expected_runs} | paper-eligible runs discovered={int(evidence_summary['paper_eligible_runs'])}"
+                "Evidence quota (authoritative): "
+                f"quota-counted eligible runs={int(evidence_summary['quota_runs_counted'])}/{expected_runs} | "
+                f"eligible discovered={int(evidence_summary['paper_eligible_runs'])} "
+                f"(extras={int(evidence_summary.get('extra_eligible_runs', 0))}, excluded={int(evidence_summary.get('excluded_runs', 0))})"
             )
             if not bool(evidence_summary.get("evidence_root_exists")):
                 print(
@@ -1019,7 +1116,7 @@ def _render_package_table(rows, *, max_preview: int = 15) -> None:
         table_utils.render_table(headers, rows, compact=False)
 
 
-def _build_scoped_dataset_counts(package_name: str, runs: list[dict]) -> dict[str, int | str]:
+def _build_scoped_dataset_counts(package_name: str, runs: list[dict], *, cfg: object | None = None) -> dict[str, int | str]:
     valid_runs: list[dict] = []
     for r in runs:
         if not isinstance(r, dict):
@@ -1050,6 +1147,7 @@ def _build_scoped_dataset_counts(package_name: str, runs: list[dict]) -> dict[st
     if active_identity is not None:
         out["active_version_code"] = active_identity[0] or ""
         out["active_base_sha"] = active_identity[1] or ""
+    active_runs: list[dict] = []
     for r in valid_runs:
         ident = _resolve_tracker_run_identity(package_name, r)
         ident_key = (ident[0] or "", ident[1] or "")
@@ -1058,16 +1156,32 @@ def _build_scoped_dataset_counts(package_name: str, runs: list[dict]) -> dict[st
             if ident_key != ("", ""):
                 legacy_identity_seen.add(ident_key)
             continue
+        active_runs.append(r)
+
+    baseline_needed = max(0, int(getattr(cfg, "baseline_required", 1)))
+    interactive_needed = max(0, int(getattr(cfg, "interactive_required", 2)))
+    baseline_seen = 0
+    interactive_seen = 0
+    indexed: list[tuple[int, dict]] = [(i, r) for i, r in enumerate(active_runs)]
+    indexed.sort(
+        key=lambda item: (
+            str(item[1].get("ended_at") or item[1].get("started_at") or ""),
+            item[0],
+        )
+    )
+    for _, r in indexed:
         prof = str(r.get("run_profile") or "").lower()
-        countable = bool(r.get("countable", r.get("counts_toward_quota", True)))
         is_baseline = ("baseline" in prof) or ("idle" in prof)
+        is_interactive = ("interaction" in prof) or ("interactive" in prof) or ("script" in prof) or ("manual" in prof)
         if is_baseline:
-            if countable:
+            if baseline_seen < baseline_needed:
+                baseline_seen += 1
                 out["baseline_countable"] += 1
             else:
                 out["baseline_extra"] += 1
-        else:
-            if countable:
+        elif is_interactive:
+            if interactive_seen < interactive_needed:
+                interactive_seen += 1
                 out["interactive_countable"] += 1
             else:
                 out["interactive_extra"] += 1

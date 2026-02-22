@@ -16,6 +16,7 @@ from scytaledroid.DynamicAnalysis.datasets.research_dataset_alpha import (
     load_dataset_packages,
 )
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper2_config
+from scytaledroid.DynamicAnalysis.paper_eligibility import derive_paper_eligibility
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import load_dataset_tracker
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import MIN_WINDOWS_PER_RUN
@@ -25,9 +26,12 @@ from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import MIN_WINDOWS_PER_RU
 class AuditSummary:
     total_runs: int
     valid_runs: int
+    paper_eligible_runs: int
+    missing_run_manifest_dirs: int
     missing_capture_policy_version: int
     capture_policy_version_mismatch: int
     missing_signer_set_hash: int
+    identity_mismatch: int
     missing_window_count: int
     window_count_below_min: int
     evidence_root: str
@@ -64,9 +68,11 @@ def run_paper_readiness_audit(
     min_window_count = int(MIN_WINDOWS_PER_RUN)
 
     issues: dict[str, list[str]] = {
+        "missing_run_manifest_dirs": [],
         "missing_capture_policy_version": [],
         "capture_policy_version_mismatch": [],
         "missing_signer_set_hash": [],
+        "identity_mismatch": [],
         "missing_window_count": [],
         "window_count_below_min": [],
     }
@@ -74,6 +80,7 @@ def run_paper_readiness_audit(
     run_rows: list[dict[str, Any]] = []
     total_runs = 0
     valid_runs = 0
+    paper_eligible_runs = 0
     tracker_runs_hint = 0
     static_runs_hint = 0
     reasons: list[str] = []
@@ -82,6 +89,7 @@ def run_paper_readiness_audit(
         for run_dir in sorted([p for p in root.iterdir() if p.is_dir()]):
             manifest = _read_json(run_dir / "run_manifest.json")
             if not isinstance(manifest, dict):
+                issues["missing_run_manifest_dirs"].append(str(run_dir.name))
                 continue
             total_runs += 1
             run_id = str(manifest.get("dynamic_run_id") or run_dir.name)
@@ -108,6 +116,18 @@ def run_paper_readiness_audit(
             ).strip()
             if not signer_set_hash:
                 issues["missing_signer_set_hash"].append(run_id)
+
+            plan = _read_json(run_dir / "inputs" / "static_dynamic_plan.json") or {}
+            eligibility = derive_paper_eligibility(
+                manifest=manifest,
+                plan=plan if isinstance(plan, dict) else {},
+                min_windows=min_window_count,
+                required_capture_policy_version=required_policy,
+            )
+            if eligibility.paper_eligible:
+                paper_eligible_runs += 1
+            if "EXCLUDED_IDENTITY_MISMATCH" in set(eligibility.all_reason_codes):
+                issues["identity_mismatch"].append(run_id)
 
             wc_raw = dataset.get("window_count")
             try:
@@ -160,16 +180,22 @@ def run_paper_readiness_audit(
         reasons.append("NO_EVIDENCE_PACKS_FOUND")
     if valid_runs <= 0:
         reasons.append("NO_VALID_RUNS")
+    if paper_eligible_runs <= 0:
+        reasons.append("NO_PAPER_ELIGIBLE_RUNS")
     if expected_valid_runs > 0 and (
-        valid_runs < expected_valid_runs or total_runs < expected_valid_runs
+        paper_eligible_runs < expected_valid_runs or total_runs < expected_valid_runs
     ):
         reasons.append("QUOTA_NOT_SATISFIED")
     if len(issues["missing_capture_policy_version"]) > 0:
         reasons.append("MISSING_CAPTURE_POLICY_VERSION")
+    if len(issues["missing_run_manifest_dirs"]) > 0:
+        reasons.append("INCOMPLETE_EVIDENCE_DIRS_PRESENT")
     if len(issues["capture_policy_version_mismatch"]) > 0:
         reasons.append("CAPTURE_POLICY_VERSION_MISMATCH")
     if len(issues["missing_signer_set_hash"]) > 0:
         reasons.append("MISSING_SIGNER_SET_HASH")
+    if len(issues["identity_mismatch"]) > 0:
+        reasons.append("IDENTITY_MISMATCH")
     if len(issues["missing_window_count"]) > 0:
         reasons.append("MISSING_WINDOW_COUNT")
     if len(issues["window_count_below_min"]) > 0:
@@ -190,9 +216,12 @@ def run_paper_readiness_audit(
         "summary": {
             "total_runs": total_runs,
             "valid_runs": valid_runs,
+            "paper_eligible_runs": paper_eligible_runs,
+            "missing_run_manifest_dirs": len(issues["missing_run_manifest_dirs"]),
             "missing_capture_policy_version": len(issues["missing_capture_policy_version"]),
             "capture_policy_version_mismatch": len(issues["capture_policy_version_mismatch"]),
             "missing_signer_set_hash": len(issues["missing_signer_set_hash"]),
+            "identity_mismatch": len(issues["identity_mismatch"]),
             "missing_window_count": len(issues["missing_window_count"]),
             "window_count_below_min": len(issues["window_count_below_min"]),
             "tracker_runs_hint": tracker_runs_hint,
@@ -206,9 +235,12 @@ def run_paper_readiness_audit(
     return AuditSummary(
         total_runs=total_runs,
         valid_runs=valid_runs,
+        paper_eligible_runs=paper_eligible_runs,
+        missing_run_manifest_dirs=len(issues["missing_run_manifest_dirs"]),
         missing_capture_policy_version=len(issues["missing_capture_policy_version"]),
         capture_policy_version_mismatch=len(issues["capture_policy_version_mismatch"]),
         missing_signer_set_hash=len(issues["missing_signer_set_hash"]),
+        identity_mismatch=len(issues["identity_mismatch"]),
         missing_window_count=len(issues["missing_window_count"]),
         window_count_below_min=len(issues["window_count_below_min"]),
         evidence_root=str(root.resolve()),

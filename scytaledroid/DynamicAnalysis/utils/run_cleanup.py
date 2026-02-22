@@ -132,6 +132,31 @@ def find_dynamic_run_dirs(package_name: str) -> list[Path]:
     return matches
 
 
+def find_incomplete_dynamic_run_dirs() -> list[Path]:
+    """Return local dynamic run dirs missing run_manifest.json (orphan/incomplete)."""
+    output_root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    if not output_root.exists():
+        return []
+    out: list[Path] = []
+    for run_dir in sorted([p for p in output_root.iterdir() if p.is_dir()]):
+        manifest_path = run_dir / "run_manifest.json"
+        if not manifest_path.exists():
+            out.append(run_dir)
+    return out
+
+
+def prune_incomplete_dynamic_run_dirs() -> int:
+    """Delete orphan/incomplete dynamic run dirs and return count removed."""
+    deleted = 0
+    for run_dir in find_incomplete_dynamic_run_dirs():
+        try:
+            shutil.rmtree(run_dir)
+            deleted += 1
+        except OSError:
+            continue
+    return deleted
+
+
 def reset_package_dataset_tracker(package_name: str) -> bool:
     """Remove the package entry from dataset_plan.json if present."""
     tracker_path = Path(app_config.DATA_DIR) / "archive" / "dataset_plan.json"
@@ -169,5 +194,7 @@ __all__ = [
     "recent_tracker_runs",
     "delete_dynamic_evidence_packs",
     "find_dynamic_run_dirs",
+    "find_incomplete_dynamic_run_dirs",
+    "prune_incomplete_dynamic_run_dirs",
     "reset_package_dataset_tracker",
 ]

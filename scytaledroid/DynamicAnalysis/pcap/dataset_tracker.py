@@ -13,9 +13,22 @@ from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.core.event_logger import RunEventLogger
 from scytaledroid.DynamicAnalysis.core.manifest import RunManifest
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper2_config
+from scytaledroid.DynamicAnalysis.paper_eligibility import derive_paper_eligibility
 
 MIN_PCAP_BYTES = int(getattr(paper2_config, "MIN_PCAP_BYTES", 50000))
 MIN_WINDOWS_PER_RUN = 20
+
+
+def _effective_min_sampling_seconds() -> float:
+    configured = float(getattr(app_config, "DYNAMIC_MIN_DURATION_S", 120))
+    paper_floor = float(getattr(paper2_config, "MIN_SAMPLING_SECONDS", 180.0))
+    return max(configured, paper_floor)
+
+
+def _effective_target_sampling_seconds() -> float:
+    configured = float(getattr(app_config, "DYNAMIC_TARGET_DURATION_S", 180))
+    paper_target = float(getattr(paper2_config, "RECOMMENDED_SAMPLING_SECONDS", 240.0))
+    return max(configured, paper_target)
 
 
 @dataclass(frozen=True)
@@ -114,6 +127,7 @@ def update_dataset_tracker(
     run_entry.update(_pcap_capture_stats(run_dir))
     validity = evaluate_dataset_validity(run_dir, manifest, run_entry, cfg)
     run_entry.update(validity)
+    run_entry.update(_derive_paper_eligibility_fields(run_dir))
 
     # Idempotent: update existing entries so older runs can be re-evaluated when
     # QA rules evolve (e.g., PCAP span vs netstats guardrail).
@@ -565,26 +579,115 @@ def evaluate_dataset_validity(
                     return _invalid("PCAP_TOO_SMALL", flags, run_dir)
                 return _invalid("CAPTURE_INTERRUPTED", flags, run_dir)
 
-    # Duration policy: sampling window is canonical.
-    sampling_seconds = _sampling_duration_seconds(run_dir)
-    if sampling_seconds is None:
-        return _invalid("INSUFFICIENT_DURATION", flags, run_dir)
-    if float(sampling_seconds) < float(app_config.DYNAMIC_MIN_DURATION_S):
-        return _invalid("INSUFFICIENT_DURATION", flags, run_dir)
-    if float(sampling_seconds) < float(app_config.DYNAMIC_TARGET_DURATION_S):
+    report = _load_report(run_dir)
+    telemetry_seconds = _sampling_duration_seconds(run_dir)
+    capinfos_seconds = _recompute_duration_seconds_from_report(report)
+    # Paper-mode authoritative duration source:
+    # prefer parsed PCAP capture span; fallback to telemetry only if capinfos span is unavailable.
+    sampling_seconds = capinfos_seconds if capinfos_seconds is not None else telemetry_seconds
+    sampling_source = (
+        "capinfos_capture_duration_s"
+        if capinfos_seconds is not None
+        else ("telemetry_sampling_duration_seconds" if telemetry_seconds is not None else "missing")
+    )
+    if sampling_source == "capinfos_capture_duration_s" and telemetry_seconds is None:
+        recompute_wc = _window_count_for_duration(
+            float(sampling_seconds),
+            window_size_s=float(getattr(paper2_config, "WINDOW_SIZE_S", 10.0)),
+            stride_s=float(getattr(paper2_config, "WINDOW_STRIDE_S", 5.0)),
+        )
+        _write_recompute_attempt(
+            run_dir,
+            {
+                "attempt_index": 1,
+                "trigger_condition": "WINDOW_COUNT_MISSING",
+                "started_utc": datetime.now(UTC).isoformat(),
+                "ended_utc": datetime.now(UTC).isoformat(),
+                "window_count_original": None,
+                "window_count_final": int(recompute_wc),
+                "window_count_source": "recompute_capinfos_capture_duration_s",
+                "outcome": "success" if int(recompute_wc) >= int(MIN_WINDOWS_PER_RUN) else "fail",
+            },
+        )
+    if sampling_source == "missing":
+        return _invalid(
+            "INSUFFICIENT_DURATION",
+            flags,
+            run_dir,
+            window_count_original=None,
+            window_count_final=None,
+            window_count_source="missing",
+            actual_sampling_seconds=None,
+            actual_sampling_seconds_source="missing",
+            sampling_duration_seconds=telemetry_seconds,
+        )
+
+    if float(sampling_seconds) < _effective_min_sampling_seconds():
+        return _invalid(
+            "INSUFFICIENT_DURATION",
+            flags,
+            run_dir,
+            window_count_original=None,
+            window_count_final=None,
+            window_count_source="sampling_duration_seconds",
+            actual_sampling_seconds=float(sampling_seconds),
+            actual_sampling_seconds_source=sampling_source,
+            sampling_duration_seconds=telemetry_seconds,
+        )
+    if float(sampling_seconds) < _effective_target_sampling_seconds():
         flags["short_run"] = 1
-    window_count = _window_count_for_duration(
+    window_count_original = _window_count_for_duration(
         sampling_seconds,
         window_size_s=float(getattr(paper2_config, "WINDOW_SIZE_S", 10.0)),
         stride_s=float(getattr(paper2_config, "WINDOW_STRIDE_S", 5.0)),
     )
-    if int(window_count) < int(MIN_WINDOWS_PER_RUN):
-        return _invalid(
-            "INSUFFICIENT_DURATION",
-            {**flags, "window_count_too_low": 1},
-            run_dir,
-            window_count=window_count,
-        )
+    window_count_final = int(window_count_original)
+    window_count_source = (
+        "recompute_capinfos_capture_duration_s"
+        if sampling_source == "capinfos_capture_duration_s" and telemetry_seconds is None
+        else f"computed_from_{sampling_source}"
+    )
+    if int(window_count_original) < int(MIN_WINDOWS_PER_RUN):
+        recompute_duration = telemetry_seconds if sampling_source == "capinfos_capture_duration_s" else capinfos_seconds
+        recompute_wc = None
+        if recompute_duration is not None:
+            recompute_wc = _window_count_for_duration(
+                recompute_duration,
+                window_size_s=float(getattr(paper2_config, "WINDOW_SIZE_S", 10.0)),
+                stride_s=float(getattr(paper2_config, "WINDOW_STRIDE_S", 5.0)),
+            )
+            _write_recompute_attempt(
+                run_dir,
+                {
+                    "attempt_index": 1,
+                    "trigger_condition": "WINDOW_COUNT_TOO_LOW",
+                    "started_utc": datetime.now(UTC).isoformat(),
+                    "ended_utc": datetime.now(UTC).isoformat(),
+                    "window_count_original": int(window_count_original),
+                    "window_count_final": int(recompute_wc),
+                    "window_count_source": "recompute_capinfos_capture_duration_s",
+                    "outcome": "success" if int(recompute_wc) >= int(MIN_WINDOWS_PER_RUN) else "fail",
+                },
+            )
+        if recompute_wc is not None and int(recompute_wc) >= int(MIN_WINDOWS_PER_RUN):
+            window_count_final = int(recompute_wc)
+            window_count_source = "recompute_capinfos_capture_duration_s"
+        else:
+            return _invalid(
+                "INSUFFICIENT_DURATION",
+                {**flags, "window_count_too_low": 1, "retry_attempted": 1},
+                run_dir,
+                window_count_original=int(window_count_original),
+                window_count_final=(int(recompute_wc) if recompute_wc is not None else int(window_count_original)),
+                window_count_source=(
+                    "recompute_capinfos_capture_duration_s"
+                    if recompute_wc is not None
+                    else "sampling_duration_seconds"
+                ),
+                actual_sampling_seconds=float(sampling_seconds),
+                actual_sampling_seconds_source=sampling_source,
+                sampling_duration_seconds=telemetry_seconds,
+            )
 
     # PCAP size policy.
     if pcap_size_int <= 0:
@@ -593,22 +696,71 @@ def evaluate_dataset_validity(
         return _invalid("PCAP_TOO_SMALL", flags, run_dir)
 
     # PCAP report must exist and not be skipped for dataset tier.
-    report = _load_report(run_dir)
     if report is None:
-        return _invalid("PCAP_REPORT_MISSING", flags, run_dir)
+        return _invalid(
+            "PCAP_REPORT_MISSING",
+            flags,
+            run_dir,
+            window_count_original=int(window_count_original),
+            window_count_final=int(window_count_final),
+            window_count_source=window_count_source,
+            actual_sampling_seconds=float(sampling_seconds),
+            actual_sampling_seconds_source=sampling_source,
+            sampling_duration_seconds=telemetry_seconds,
+        )
     report_status = report.get("report_status")
     if report_status is None:
-        return _invalid("PCAP_REPORT_MISSING", flags, run_dir)
+        return _invalid(
+            "PCAP_REPORT_MISSING",
+            flags,
+            run_dir,
+            window_count_original=int(window_count_original),
+            window_count_final=int(window_count_final),
+            window_count_source=window_count_source,
+            actual_sampling_seconds=float(sampling_seconds),
+            actual_sampling_seconds_source=sampling_source,
+            sampling_duration_seconds=telemetry_seconds,
+        )
     if str(report_status).lower() == "skip":
-        return _invalid("PCAP_REPORT_SKIP", flags, run_dir)
+        return _invalid(
+            "PCAP_REPORT_SKIP",
+            flags,
+            run_dir,
+            window_count_original=int(window_count_original),
+            window_count_final=int(window_count_final),
+            window_count_source=window_count_source,
+            actual_sampling_seconds=float(sampling_seconds),
+            actual_sampling_seconds_source=sampling_source,
+            sampling_duration_seconds=telemetry_seconds,
+        )
 
     # Missing tools are a dataset-tier invalidation (environment not dataset-ready).
     missing = report.get("missing_tools") or []
     missing_set = {str(x).lower() for x in missing if x}
     if "tshark" in missing_set:
-        return _invalid("MISSING_TOOLS_TSHARK", flags, run_dir)
+        return _invalid(
+            "MISSING_TOOLS_TSHARK",
+            flags,
+            run_dir,
+            window_count_original=int(window_count_original),
+            window_count_final=int(window_count_final),
+            window_count_source=window_count_source,
+            actual_sampling_seconds=float(sampling_seconds),
+            actual_sampling_seconds_source=sampling_source,
+            sampling_duration_seconds=telemetry_seconds,
+        )
     if "capinfos" in missing_set:
-        return _invalid("MISSING_TOOLS_CAPINFOS", flags, run_dir)
+        return _invalid(
+            "MISSING_TOOLS_CAPINFOS",
+            flags,
+            run_dir,
+            window_count_original=int(window_count_original),
+            window_count_final=int(window_count_final),
+            window_count_source=window_count_source,
+            actual_sampling_seconds=float(sampling_seconds),
+            actual_sampling_seconds_source=sampling_source,
+            sampling_duration_seconds=telemetry_seconds,
+        )
 
     # Protocol hierarchy may be empty only with an explicit no_traffic_observed flag.
     proto = report.get("protocol_hierarchy") or []
@@ -621,20 +773,45 @@ def evaluate_dataset_validity(
         if no_traffic_int == 1:
             flags["no_traffic_observed"] = 1
         else:
-            return _invalid("PCAP_REPORT_EMPTY_NO_REASON", flags, run_dir)
+            return _invalid(
+                "PCAP_REPORT_EMPTY_NO_REASON",
+                flags,
+                run_dir,
+                window_count_original=int(window_count_original),
+                window_count_final=int(window_count_final),
+                window_count_source=window_count_source,
+                actual_sampling_seconds=float(sampling_seconds),
+                actual_sampling_seconds_source=sampling_source,
+                sampling_duration_seconds=telemetry_seconds,
+            )
 
     # Features must exist for dataset counting.
     if not _features_ok(run_dir):
         # We intentionally map this to a report parse error-like code to avoid
         # expanding the locked enum set for Paper #2.
-        return _invalid("PCAP_PARSE_ERROR", flags, run_dir)
+        return _invalid(
+            "PCAP_PARSE_ERROR",
+            flags,
+            run_dir,
+            window_count_original=int(window_count_original),
+            window_count_final=int(window_count_final),
+            window_count_source=window_count_source,
+            actual_sampling_seconds=float(sampling_seconds),
+            actual_sampling_seconds_source=sampling_source,
+            sampling_duration_seconds=telemetry_seconds,
+        )
 
     return {
         "valid_dataset_run": True,
         "invalid_reason_code": None,
-        "sampling_duration_seconds": sampling_seconds,
+        "sampling_duration_seconds": telemetry_seconds,
+        "actual_sampling_seconds": float(sampling_seconds),
+        "actual_sampling_seconds_source": sampling_source,
         "min_pcap_bytes": min_bytes,
-        "window_count": int(window_count),
+        "window_count_original": int(window_count_original),
+        "window_count_final": int(window_count_final),
+        "window_count_source": window_count_source,
+        "window_count": int(window_count_final),
         "min_window_count": int(MIN_WINDOWS_PER_RUN),
         **flags,
     }
@@ -675,6 +852,32 @@ def _pcap_capture_stats(run_dir: Path) -> dict[str, Any]:
         "pcap_packet_count": parsed.get("packet_count"),
         "pcap_capture_duration_s": parsed.get("capture_duration_s"),
         "pcap_data_size_bytes": parsed.get("data_size_bytes"),
+    }
+
+
+def _derive_paper_eligibility_fields(run_dir: Path) -> dict[str, Any]:
+    """Backfill tracker with evidence-derived paper eligibility state.
+
+    Tracker fields are cache only; canonical truth remains evidence-pack manifests.
+    """
+    manifest = _load(run_dir / "run_manifest.json")
+    plan = _load(run_dir / "inputs" / "static_dynamic_plan.json")
+    if not isinstance(manifest, dict):
+        return {
+            "paper_eligible": False,
+            "paper_exclusion_primary_reason_code": "EXCLUDED_NO_EVIDENCE_PACK",
+            "paper_exclusion_all_reason_codes": ["EXCLUDED_NO_EVIDENCE_PACK"],
+        }
+    eligibility = derive_paper_eligibility(
+        manifest=manifest if isinstance(manifest, dict) else {},
+        plan=plan if isinstance(plan, dict) else {},
+        min_windows=int(MIN_WINDOWS_PER_RUN),
+        required_capture_policy_version=int(getattr(paper2_config, "PAPER_CONTRACT_VERSION", 1)),
+    )
+    return {
+        "paper_eligible": bool(eligibility.paper_eligible),
+        "paper_exclusion_primary_reason_code": eligibility.reason_code,
+        "paper_exclusion_all_reason_codes": list(eligibility.all_reason_codes),
     }
 
 
@@ -806,15 +1009,30 @@ def _invalid(
     run_dir: Path,
     *,
     window_count: int | None = None,
+    window_count_original: int | None = None,
+    window_count_final: int | None = None,
+    window_count_source: str | None = None,
+    actual_sampling_seconds: float | None = None,
+    actual_sampling_seconds_source: str | None = None,
+    sampling_duration_seconds: float | None = None,
 ) -> dict[str, Any]:
     if code not in _VALIDITY_ENUM:
         code = "PCAP_PARSE_ERROR"
+    wc_final = window_count_final if window_count_final is not None else window_count
+    wc_original = window_count_original if window_count_original is not None else window_count
+    wc_source = str(window_count_source or "sampling_duration_seconds")
+    telemetry_sampling = sampling_duration_seconds if sampling_duration_seconds is not None else _sampling_duration_seconds(run_dir)
     return {
         "valid_dataset_run": False,
         "invalid_reason_code": code,
-        "sampling_duration_seconds": _sampling_duration_seconds(run_dir),
+        "sampling_duration_seconds": telemetry_sampling,
+        "actual_sampling_seconds": actual_sampling_seconds,
+        "actual_sampling_seconds_source": actual_sampling_seconds_source,
         "min_pcap_bytes": int(MIN_PCAP_BYTES),
-        "window_count": window_count,
+        "window_count_original": wc_original,
+        "window_count_final": wc_final,
+        "window_count_source": wc_source,
+        "window_count": wc_final,
         "min_window_count": int(MIN_WINDOWS_PER_RUN),
         **flags,
     }
@@ -859,6 +1077,34 @@ def _load_report(run_dir: Path) -> dict[str, Any] | None:
         return payload if isinstance(payload, dict) else None
     except (OSError, json.JSONDecodeError):
         return {"report_status": None}
+
+
+def _recompute_duration_seconds_from_report(report: dict[str, Any] | None) -> float | None:
+    if not isinstance(report, dict):
+        return None
+    parsed = (report.get("capinfos") or {}).get("parsed") if isinstance(report.get("capinfos"), dict) else {}
+    if not isinstance(parsed, dict):
+        return None
+    try:
+        value = float(parsed.get("capture_duration_s"))
+    except Exception:
+        return None
+    if value <= 0:
+        return None
+    return value
+
+
+def _write_recompute_attempt(run_dir: Path, payload: dict[str, Any]) -> None:
+    try:
+        analysis_dir = run_dir / "analysis"
+        analysis_dir.mkdir(parents=True, exist_ok=True)
+        path = analysis_dir / "recompute_attempt.jsonl"
+        line = json.dumps(payload, sort_keys=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+    except Exception:
+        # Audit artifact writing must never break classification.
+        return
 
 
 __all__ = [

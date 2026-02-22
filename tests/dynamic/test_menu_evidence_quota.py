@@ -117,6 +117,8 @@ def test_summarize_evidence_quota_uses_operator_run_profile(tmp_path: Path, monk
     # Manual runs are retained but excluded from canonical paper cohort.
     assert int(summary["paper_eligible_runs"]) == 2
     assert int(summary["quota_runs_counted"]) == 2
+    assert int(summary["excluded_runs"]) == 1
+    assert int(summary["extra_eligible_runs"]) == 0
 
 
 def test_summarize_evidence_quota_excludes_missing_identity_or_windows(tmp_path: Path, monkeypatch) -> None:
@@ -143,6 +145,7 @@ def test_summarize_evidence_quota_excludes_missing_identity_or_windows(tmp_path:
     assert int(summary["total_runs"]) == 2
     assert int(summary["paper_eligible_runs"]) == 0
     assert int(summary["quota_runs_counted"]) == 0
+    assert int(summary["excluded_runs"]) == 2
 
 
 def test_summarize_evidence_quota_excludes_when_plan_static_link_or_policy_missing(
@@ -168,3 +171,4 @@ def test_summarize_evidence_quota_excludes_when_plan_static_link_or_policy_missi
     assert int(summary["total_runs"]) == 2
     assert int(summary["paper_eligible_runs"]) == 0
     assert int(summary["quota_runs_counted"]) == 0
+    assert int(summary["excluded_runs"]) == 2

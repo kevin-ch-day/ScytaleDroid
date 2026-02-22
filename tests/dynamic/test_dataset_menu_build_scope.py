@@ -83,3 +83,30 @@ def test_run_identity_fallback_reads_run_manifest(tmp_path, monkeypatch) -> None
     ident = menu._resolve_tracker_run_identity("com.example.app", run)
     assert ident == ("300", "c" * 64)
 
+
+def test_build_scoped_counts_recompute_countable_within_active_build() -> None:
+    menu._RUN_IDENTITY_CACHE.clear()
+    runs = [
+        {
+            "run_id": "r_old_counted",
+            "ended_at": "2026-02-20T10:00:00Z",
+            "run_profile": "baseline_idle",
+            "valid_dataset_run": True,
+            "countable": True,
+            "version_code": "100",
+            "base_apk_sha256": "a" * 64,
+        },
+        {
+            "run_id": "r_new",
+            "ended_at": "2026-02-21T10:00:00Z",
+            "run_profile": "baseline_idle",
+            "valid_dataset_run": True,
+            "countable": False,
+            "version_code": "200",
+            "base_apk_sha256": "b" * 64,
+        },
+    ]
+    counts = menu._build_scoped_dataset_counts("com.example.app", runs)
+    assert counts["baseline_countable"] == 1
+    assert counts["baseline_extra"] == 0
+    assert counts["legacy_valid"] == 1

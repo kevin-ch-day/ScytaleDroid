@@ -47,6 +47,22 @@ _CLOCK_BLOCK_S = 30
 _STABILIZATION_WAIT_S = 15
 
 
+def _intent_counts_toward_quota(
+    *,
+    run_profile: str,
+    baseline_valid_runs: int,
+    interactive_valid_runs: int,
+    cfg: "DatasetTrackerConfig",
+) -> bool:
+    profile = str(run_profile or "").strip().lower()
+    if profile == "baseline_idle":
+        return int(baseline_valid_runs) < int(cfg.baseline_required)
+    if profile == "interaction_scripted":
+        return int(interactive_valid_runs) < int(cfg.interactive_required)
+    # Manual and unknown intents are exploratory by policy and never count.
+    return False
+
+
 def _print_paper_mode_constants() -> None:
     try:
         import numpy as _np
@@ -65,6 +81,8 @@ def _print_paper_mode_constants() -> None:
     rows = [
         ("Window size", f"{int(paper2_config.WINDOW_SIZE_S)}s"),
         ("Stride", f"{int(paper2_config.WINDOW_STRIDE_S)}s"),
+        ("Min sampling time", f"{int(getattr(paper2_config, 'MIN_SAMPLING_SECONDS', 180))}s"),
+        ("Recommended time", f"{int(getattr(paper2_config, 'RECOMMENDED_SAMPLING_SECONDS', 240))}s"),
         ("Percentile threshold", f"{int(paper2_config.THRESHOLD_PERCENTILE)}"),
         ("Percentile method", str(getattr(paper2_config, "NP_PERCENTILE_METHOD", "linear"))),
         ("Min PCAP bytes", f"{int(paper2_config.MIN_PCAP_BYTES)}"),
@@ -794,7 +812,30 @@ def run_guided_dataset_run(
         print(f"Suggested by quota (counts toward completion): {suggested_profile}")
 
     print(f"Paper cohort quota: baseline={cfg.baseline_required}, interaction={cfg.interactive_required}.")
-    print(f"This run will be {'EXTRA (not countable)' if counts.quota_met else 'COUNTABLE'} by default.")
+    baseline_recommended = max(
+        int(cfg.baseline_required),
+        int(getattr(app_config, "DYNAMIC_DATASET_BASELINE_RECOMMENDED_RUNS", 3)),
+    )
+    if baseline_recommended > int(cfg.baseline_required):
+        print(
+            "Baseline replicates recommended: "
+            f"{baseline_recommended} (extras are retained for exploratory/baseline stability analysis)."
+        )
+    suggested_counts = _intent_counts_toward_quota(
+        run_profile=suggested_profile,
+        baseline_valid_runs=int(counts.baseline_valid_runs),
+        interactive_valid_runs=int(counts.interactive_valid_runs),
+        cfg=cfg,
+    )
+    if counts.quota_met:
+        print("This run will be EXTRA (not countable) by default.")
+    else:
+        print(
+            "Default suggestion countability: "
+            + ("COUNTABLE" if suggested_counts else "EXTRA (not countable)")
+            + f" ({suggested_profile})."
+        )
+    print()
 
     def _badge_for(key: str) -> str | None:
         if not suggested_slot:
@@ -806,19 +847,33 @@ def run_guided_dataset_run(
         menu_utils.MenuOption(
             "1",
             "Idle Baseline",
-            description="Purpose: baseline-only training. run_profile=baseline_idle",
+            description=(
+                "Purpose: baseline-only training. run_profile=baseline_idle | "
+                + (
+                    "Counts toward quota: YES"
+                    if int(counts.baseline_valid_runs) < int(cfg.baseline_required)
+                    else "Counts toward quota: NO (baseline quota met; saved as EXTRA)"
+                )
+            ),
             badge=_badge_for("1"),
         ),
         menu_utils.MenuOption(
             "2",
             "Scripted Interaction",
-            description="Purpose: repeatable stimulus. run_profile=interaction_scripted",
+            description=(
+                "Purpose: repeatable stimulus. run_profile=interaction_scripted | "
+                + (
+                    "Counts toward quota: YES"
+                    if int(counts.interactive_valid_runs) < int(cfg.interactive_required)
+                    else "Counts toward quota: NO (interactive quota met; saved as EXTRA)"
+                )
+            ),
             badge=_badge_for("2"),
         ),
         menu_utils.MenuOption(
             "3",
             "Manual Interaction",
-            description="Purpose: realism/robustness. run_profile=interaction_manual",
+            description="Purpose: realism/robustness. run_profile=interaction_manual | Counts toward quota: NO (manual is exploratory)",
             badge=None,
         ),
         menu_utils.MenuOption("4", "Test app (Dry Run/No Saving)", description="no capture; checks plan + tools", badge=None),
@@ -937,7 +992,8 @@ def run_guided_dataset_run(
                     (r.run_id or "—")[:8],
                 ]
             )
-        menu_utils.print_section("Recent Runs (from tracker)")
+        print()
+        menu_utils.print_section("Recent Tracker Runs (informational)")
         menu_utils.print_table(
             ["Ended", "Profile", "Interaction", "Msg", "Status", "Run ID"],
             rows,
@@ -945,7 +1001,6 @@ def run_guided_dataset_run(
 
     # Capture modes.
     tier = "dataset"
-    counts_toward_completion = not bool(counts.quota_met)
     if selected_protocol == "1":
         run_profile = "baseline_idle"
         interaction_level = "minimal"
@@ -955,6 +1010,16 @@ def run_guided_dataset_run(
     else:
         run_profile = "interaction_manual"
         interaction_level = "manual"
+    counts_toward_completion = _intent_counts_toward_quota(
+        run_profile=run_profile,
+        baseline_valid_runs=int(counts.baseline_valid_runs),
+        interactive_valid_runs=int(counts.interactive_valid_runs),
+        cfg=cfg,
+    )
+    print(
+        "Selected intent countability: "
+        + ("COUNTABLE" if counts_toward_completion else "EXTRA (not countable)")
+    )
 
     messaging_activity: str | None = None
     messaging_pkgs = {p.lower() for p in MESSAGING_PACKAGES}

@@ -47,6 +47,12 @@ DISPLAY_NAME_BY_PACKAGE = {
 WINDOW_SIZE_S = 10.0
 WINDOW_STRIDE_S = 5.0
 
+# Sampling duration contract (paper mode)
+# Hard gate for dataset validity and paper eligibility.
+MIN_SAMPLING_SECONDS = 180.0
+# Operator target for better statistical stability (soft guidance).
+RECOMMENDED_SAMPLING_SECONDS = 240.0
+
 # Thresholding (locked)
 THRESHOLD_PERCENTILE = 95.0
 

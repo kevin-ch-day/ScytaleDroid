@@ -121,3 +121,21 @@ def test_paper_eligibility_script_step_mismatch() -> None:
     )
     assert out.paper_eligible is False
     assert out.reason_code == "EXCLUDED_SCRIPT_STEP_MISSING"
+
+
+def test_paper_eligibility_identity_mismatch_version() -> None:
+    manifest = _manifest(run_profile="baseline_idle")
+    manifest["target"]["run_identity"] = {
+        "version_code": "999",
+        "base_apk_sha256": "a" * 64,
+        "artifact_set_hash": "b" * 64,
+        "signer_set_hash": "c" * 64,
+    }
+    out = derive_paper_eligibility(
+        manifest=manifest,
+        plan=_plan(),
+        min_windows=20,
+        required_capture_policy_version=1,
+    )
+    assert out.paper_eligible is False
+    assert out.reason_code == "EXCLUDED_IDENTITY_MISMATCH"
