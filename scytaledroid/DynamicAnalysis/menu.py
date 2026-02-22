@@ -555,6 +555,7 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
     collisions = {label for label in labels if labels.count(label) > 1}
 
     rows = []
+    build_rows = []
     for idx, (package, _version, _count, app_label) in enumerate(packages, start=1):
         display = ((app_label or package).strip() or package)
         if display in collisions:
@@ -562,7 +563,7 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
         # Keep dataset selection tables readable on narrower terminals. We bias
         # the width budget toward progress columns ("Base/Int/Next") so they
         # don't get truncated into "interact…".
-        display = text_blocks.truncate_visible(display, 18)
+        display = text_blocks.truncate_visible(display, 26)
 
         base_label = "—"
         inter_label = "—"
@@ -585,6 +586,13 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
             inter_countable = int(scoped["interactive_countable"])
             inter_extra = int(scoped["interactive_extra"])
             legacy_valid = int(scoped["legacy_valid"])
+            legacy_builds = int(scoped["legacy_builds"])
+            active_version = str(scoped.get("active_version_code") or "—")
+            active_sha = str(scoped.get("active_base_sha") or "")
+            active_build = active_version
+            if active_sha:
+                active_build = f"{active_version} / {active_sha[:10]}"
+            active_runs = base_countable + base_extra + inter_countable + inter_extra
 
             base_label = str(base_countable) if base_extra <= 0 else f"{base_countable}(+{base_extra})"
             inter_label = str(inter_countable) if inter_extra <= 0 else f"{inter_countable}(+{inter_extra})"
@@ -612,14 +620,27 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
                     last_label = "INVALID"
                 else:
                     last_label = "UNKNOWN"
-            if legacy_valid > 0 and last_label == "VALID":
-                last_label = "VALID*"
+            if legacy_valid > 0 and last_label != "—":
+                last_label = f"{last_label}*"
             proto = peek_next_run_protocol(package, tier="dataset") or {}
             prof = (proto.get("run_profile") or "").lower()
             if "baseline" in prof or "idle" in prof:
                 next_label = "base"
+            elif "scripted" in prof:
+                next_label = "script"
+            elif "manual" in prof:
+                next_label = "manual"
             elif prof:
                 next_label = "inter"
+            build_rows.append(
+                [
+                    display,
+                    active_build,
+                    str(active_runs),
+                    str(legacy_valid),
+                    str(legacy_builds),
+                ]
+            )
 
         # Columns are intentionally minimal for dataset collection.
         # Column order is chosen to avoid "Next" being truncated on narrow terminals.
@@ -634,16 +655,34 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
         )
         print(
             status_messages.status(
-                "Build-scoped view: counts are computed for the latest app build identity; 'VALID*' means legacy valid runs from older builds exist.",
+                "Build-scoped view: counts are computed for the latest app build identity; '*' in Last QA indicates legacy valid runs from older builds exist.",
                 level="info",
             )
         )
         print(
             status_messages.status(
-                "Hist column shows valid legacy runs retained for cross-version pattern analysis (not counted toward current-build quota).",
+                "Legacy column shows valid older-build runs retained for cross-version pattern analysis (not counted toward current-build quota).",
                 level="info",
             )
         )
+        print(
+            status_messages.status(
+                "Last QA is derived from post-run integrity checks (PCAP threshold, capinfos/tshark parse, feature extraction).",
+                level="info",
+            )
+        )
+        data_rows = [r for r in rows if r[2] != "—"]
+        if data_rows and all(str(r[4]).strip() == "0" for r in data_rows):
+            print(status_messages.status("Dataset status: QUOTA SATISFIED. Freeze recommended.", level="success"))
+        detail_choice = prompt_utils.prompt_text("Press D for build history details, or Enter to continue", required=False)
+        if detail_choice.strip().lower() == "d":
+            print()
+            menu_utils.print_header("Build History Details")
+            table_utils.render_table(
+                ["App", "Active Build", "Active Runs", "Legacy Runs", "Legacy Builds"],
+                build_rows,
+                compact=True,
+            )
     index = _choose_index("Select app #", len(packages))
     if index is None:
         return None
@@ -657,18 +696,18 @@ def _render_package_table(rows, *, max_preview: int = 15) -> None:
         # Put "Next" before the trailing status columns so it is less likely to
         # get truncated when the terminal is narrow (table shrink truncates from
         # the rightmost columns first).
-        headers = ["#", "App", "Baseline", "Interactive", "Need", "Next", "Runs", "Hist", "Last"]
+        headers = ["#", "App", "Baseline", "Interactive", "Need", "Next", "Runs(All)", "Legacy", "Last QA"]
     if len(rows) <= max_preview:
-        table_utils.render_table(headers, rows, compact=True)
+        table_utils.render_table(headers, rows, compact=False)
         return
     preview = rows[:max_preview]
-    table_utils.render_table(headers, preview, compact=True)
+    table_utils.render_table(headers, preview, compact=False)
     response = prompt_utils.prompt_text("Press L to list all, or Enter to continue", required=False)
     if response.strip().lower() == "l":
-        table_utils.render_table(headers, rows, compact=True)
+        table_utils.render_table(headers, rows, compact=False)
 
 
-def _build_scoped_dataset_counts(package_name: str, runs: list[dict]) -> dict[str, int]:
+def _build_scoped_dataset_counts(package_name: str, runs: list[dict]) -> dict[str, int | str]:
     valid_runs: list[dict] = []
     for r in runs:
         if not isinstance(r, dict):
@@ -691,11 +730,21 @@ def _build_scoped_dataset_counts(package_name: str, runs: list[dict]) -> dict[st
         "interactive_countable": 0,
         "interactive_extra": 0,
         "legacy_valid": 0,
+        "legacy_builds": 0,
+        "active_version_code": "",
+        "active_base_sha": "",
     }
+    legacy_identity_seen: set[tuple[str, str]] = set()
+    if active_identity is not None:
+        out["active_version_code"] = active_identity[0] or ""
+        out["active_base_sha"] = active_identity[1] or ""
     for r in valid_runs:
         ident = _resolve_tracker_run_identity(package_name, r)
+        ident_key = (ident[0] or "", ident[1] or "")
         if active_identity is not None and ident != active_identity:
             out["legacy_valid"] += 1
+            if ident_key != ("", ""):
+                legacy_identity_seen.add(ident_key)
             continue
         prof = str(r.get("run_profile") or "").lower()
         countable = bool(r.get("countable", r.get("counts_toward_quota", True)))
@@ -710,6 +759,7 @@ def _build_scoped_dataset_counts(package_name: str, runs: list[dict]) -> dict[st
                 out["interactive_countable"] += 1
             else:
                 out["interactive_extra"] += 1
+    out["legacy_builds"] = len(legacy_identity_seen)
     return out
 
 

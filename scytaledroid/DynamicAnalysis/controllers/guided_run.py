@@ -3,16 +3,25 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
+import json
+import re
+import tempfile
+import time
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 
+from scytaledroid.Config import app_config
+from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
 from scytaledroid.DynamicAnalysis.controllers.device_select import select_device
 from scytaledroid.DynamicAnalysis.core.run_specs import build_dynamic_run_spec
 from scytaledroid.DynamicAnalysis.datasets.research_dataset_alpha import (
     MESSAGING_PACKAGES,
     load_dataset_packages,
 )
+from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper2_config
 from scytaledroid.DynamicAnalysis.pcap.tools import collect_host_tools, missing_required_tools
 from scytaledroid.DynamicAnalysis.plan_selection import (
     ensure_plan_or_error,
@@ -29,6 +38,481 @@ from scytaledroid.DynamicAnalysis.utils.run_cleanup import (
 )
 from scytaledroid.StaticAnalysis.core.repository import group_artifacts
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
+
+_BATTERY_WARN_PCT = 30
+_BATTERY_BLOCK_PCT = 20
+_STORAGE_BLOCK_GB = 1.5
+_CLOCK_WARN_S = 5
+_CLOCK_BLOCK_S = 30
+_STABILIZATION_WAIT_S = 15
+
+
+def _print_paper_mode_constants() -> None:
+    menu_utils.print_section("ML Parameters (Paper #2 Locked)")
+    rows = [
+        ("Window size", f"{int(paper2_config.WINDOW_SIZE_S)}s"),
+        ("Stride", f"{int(paper2_config.WINDOW_STRIDE_S)}s"),
+        ("Percentile threshold", f"{int(paper2_config.THRESHOLD_PERCENTILE)}"),
+        ("Min PCAP bytes", f"{int(paper2_config.MIN_PCAP_BYTES)}"),
+        ("Models", "Isolation Forest + OC-SVM"),
+        ("Baseline-only training", "YES"),
+    ]
+    menu_utils.print_table(["Parameter", "Value"], rows)
+
+
+def _load_plan_identity(plan_path: str) -> dict[str, str]:
+    payload = json.loads(Path(plan_path).read_text(encoding="utf-8"))
+    run_identity = (
+        payload.get("run_identity")
+        if isinstance(payload, dict) and isinstance(payload.get("run_identity"), dict)
+        else {}
+    )
+    return {
+        "package_name_lc": str(
+            run_identity.get("package_name_lc") or payload.get("package_name") or ""
+        ).strip().lower(),
+        "version_code": str(
+            run_identity.get("version_code") or payload.get("version_code") or ""
+        ).strip(),
+        "base_apk_sha256": str(run_identity.get("base_apk_sha256") or "").strip().lower(),
+        "artifact_set_hash": str(run_identity.get("artifact_set_hash") or "").strip().lower(),
+        "signer_set_hash": str(
+            run_identity.get("signer_set_hash") or run_identity.get("signer_digest") or ""
+        ).strip().lower(),
+    }
+
+
+def _read_battery_level(device_serial: str) -> int | None:
+    out = adb_shell.run_shell(device_serial, ["dumpsys", "battery"])
+    m = re.search(r"level:\s*(\d+)", out)
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except Exception:
+        return None
+
+
+def _read_storage_free_gb(device_serial: str) -> float | None:
+    out = adb_shell.run_shell(device_serial, ["df", "-k", "/data"])
+    lines = [line.strip() for line in out.splitlines() if line.strip()]
+    if len(lines) < 2:
+        return None
+    parts = lines[-1].split()
+    if len(parts) < 4:
+        return None
+    try:
+        avail_kb = int(parts[3])
+        return round(avail_kb / (1024 * 1024), 2)
+    except Exception:
+        return None
+
+
+def _read_clock_drift_seconds(device_serial: str) -> float | None:
+    out = adb_shell.run_shell(device_serial, ["date", "+%s"]).strip()
+    try:
+        device_epoch = int(out)
+    except Exception:
+        return None
+    host_epoch = int(datetime.now(UTC).timestamp())
+    return float(abs(host_epoch - device_epoch))
+
+
+def _read_vpn_state(device_serial: str) -> str:
+    out = adb_shell.run_shell(device_serial, ["dumpsys", "connectivity"]).lower()
+    if "not_vpn" in out or "not vpn" in out:
+        return "not_vpn"
+    if "vpn" in out:
+        return "vpn"
+    return "unknown"
+
+
+def _read_capture_interface(device_serial: str) -> str | None:
+    out = adb_shell.run_shell(device_serial, ["ip", "route"])
+    for line in out.splitlines():
+        line = line.strip()
+        if not line.startswith("default"):
+            continue
+        m = re.search(r"\bdev\s+(\S+)", line)
+        if m:
+            return m.group(1)
+    return None
+
+
+def _read_observed_version_code(device_serial: str, package_name: str) -> str | None:
+    out = adb_shell.run_shell(
+        device_serial,
+        ["dumpsys", "package", "--user", "0", package_name],
+    )
+    if out and "Unknown option" not in out and "Bad argument" not in out:
+        dump = out
+    else:
+        dump = adb_shell.run_shell(device_serial, ["dumpsys", "package", package_name])
+    m = re.search(r"versionCode=(\d+)", dump)
+    return m.group(1).strip() if m else None
+
+
+def _read_observed_signer_set_hash(device_serial: str, package_name: str) -> str | None:
+    out = adb_shell.run_shell(
+        device_serial,
+        ["dumpsys", "package", "--user", "0", package_name],
+    )
+    if out and "Unknown option" not in out and "Bad argument" not in out:
+        dump = out
+    else:
+        dump = adb_shell.run_shell(device_serial, ["dumpsys", "package", package_name])
+    digests: list[str] = []
+    for line in dump.splitlines():
+        low = line.lower()
+        if ("sha-256" not in low) and ("sha256" not in low) and ("sign" not in low):
+            continue
+        for match in re.finditer(r"([0-9A-Fa-f:]{64,95})", line):
+            raw = match.group(1).replace(":", "").strip().lower()
+            if len(raw) == 64 and all(ch in "0123456789abcdef" for ch in raw):
+                digests.append(raw)
+    unique = sorted(set(digests))
+    if not unique:
+        return None
+    return hashlib.sha256("|".join(unique).encode("utf-8")).hexdigest()
+
+
+def _pre_run_scientific_checks(
+    *,
+    device_serial: str,
+    package_name: str,
+    plan_path: str,
+    observer_ids: list[str],
+) -> bool:
+    hard_failures: list[str] = []
+    warnings: list[str] = []
+    rows: list[list[str]] = []
+
+    missing = missing_required_tools(tier="dataset")
+    if missing:
+        hard_failures.append(f"Missing host tools: {', '.join(missing)}")
+        rows.append(["Host tools", "FAIL", ", ".join(missing)])
+    else:
+        rows.append(["Host tools", "OK", "tshark + capinfos"])
+
+    try:
+        with tempfile.NamedTemporaryFile(
+            prefix="scytaledroid-preflight-",
+            dir=app_config.DATA_DIR,
+            delete=True,
+        ):
+            pass
+        rows.append(["PCAP tool test write", "OK", app_config.DATA_DIR])
+    except Exception as exc:
+        hard_failures.append("PCAP tool test write failed")
+        rows.append(["PCAP tool test write", "FAIL", str(exc)])
+
+    capture_iface = _read_capture_interface(device_serial)
+    if not capture_iface:
+        hard_failures.append("Capture interface unavailable")
+        rows.append(["Capture interface", "FAIL", "no default route device"])
+    else:
+        rows.append(["Capture interface", "OK", capture_iface])
+
+    vpn_state = _read_vpn_state(device_serial)
+    if vpn_state != "not_vpn":
+        hard_failures.append(f"VPN state mismatch: expected not_vpn, got {vpn_state}")
+        rows.append(["VPN state", "FAIL", vpn_state])
+    else:
+        rows.append(["VPN state", "OK", vpn_state])
+
+    battery = _read_battery_level(device_serial)
+    if battery is None:
+        warnings.append("Battery level unavailable")
+        rows.append(["Battery", "WARN", "unavailable"])
+    elif battery < _BATTERY_BLOCK_PCT:
+        hard_failures.append(f"Battery too low ({battery}%)")
+        rows.append(["Battery", "FAIL", f"{battery}% (<{_BATTERY_BLOCK_PCT}%)"])
+    elif battery < _BATTERY_WARN_PCT:
+        warnings.append(f"Battery below recommended threshold ({battery}%)")
+        rows.append(["Battery", "WARN", f"{battery}% (<{_BATTERY_WARN_PCT}%)"])
+    else:
+        rows.append(["Battery", "OK", f"{battery}%"])
+
+    storage_gb = _read_storage_free_gb(device_serial)
+    if storage_gb is None:
+        hard_failures.append("Storage check unavailable")
+        rows.append(["Free storage", "FAIL", "unable to read /data free space"])
+    elif storage_gb < _STORAGE_BLOCK_GB:
+        hard_failures.append(f"Insufficient free storage ({storage_gb:.2f} GB)")
+        rows.append(
+            ["Free storage", "FAIL", f"{storage_gb:.2f} GB (<{_STORAGE_BLOCK_GB:.1f} GB)"]
+        )
+    else:
+        rows.append(["Free storage", "OK", f"{storage_gb:.2f} GB"])
+
+    clock_drift = _read_clock_drift_seconds(device_serial)
+    if clock_drift is None:
+        warnings.append("Clock drift unavailable")
+        rows.append(["Clock drift", "WARN", "unavailable"])
+    elif clock_drift > _CLOCK_BLOCK_S:
+        hard_failures.append(f"Clock drift too high ({clock_drift:.1f}s)")
+        rows.append(["Clock drift", "FAIL", f"{clock_drift:.1f}s (>{_CLOCK_BLOCK_S}s)"])
+    elif clock_drift > _CLOCK_WARN_S:
+        warnings.append(f"Clock drift above recommended threshold ({clock_drift:.1f}s)")
+        rows.append(["Clock drift", "WARN", f"{clock_drift:.1f}s (>{_CLOCK_WARN_S}s)"])
+    else:
+        rows.append(["Clock drift", "OK", f"{clock_drift:.1f}s"])
+
+    plan_identity = _load_plan_identity(plan_path)
+    observed_vc = _read_observed_version_code(device_serial, package_name) or ""
+    expected_vc = plan_identity.get("version_code") or ""
+    if not expected_vc:
+        hard_failures.append("Plan missing version_code")
+        rows.append(["Build identity", "FAIL", "plan missing version_code"])
+    elif observed_vc != expected_vc:
+        hard_failures.append(
+            f"Build identity drift: version_code {observed_vc or 'unknown'} != {expected_vc}"
+        )
+        rows.append(
+            ["Build identity", "FAIL", f"observed={observed_vc or 'unknown'} expected={expected_vc}"]
+        )
+    else:
+        rows.append(["Build identity", "OK", f"version_code={expected_vc}"])
+
+    expected_signer = str(plan_identity.get("signer_set_hash") or "").strip().lower()
+    observed_signer = _read_observed_signer_set_hash(device_serial, package_name) or ""
+    if expected_signer:
+        if not observed_signer:
+            hard_failures.append("Signer identity missing on device")
+            rows.append(["Signer identity", "FAIL", "unable to derive signer_set_hash"])
+        elif observed_signer != expected_signer:
+            hard_failures.append("Signer identity drift detected")
+            rows.append(
+                [
+                    "Signer identity",
+                    "FAIL",
+                    f"observed={observed_signer[:12]} expected={expected_signer[:12]}",
+                ]
+            )
+        else:
+            rows.append(["Signer identity", "OK", expected_signer[:12]])
+
+    if "pcapdroid_capture" not in observer_ids:
+        hard_failures.append("Required observer missing: pcapdroid_capture")
+        rows.append(["Capture observer", "FAIL", "pcapdroid_capture required"])
+    else:
+        rows.append(["Capture observer", "OK", "pcapdroid_capture"])
+
+    print()
+    menu_utils.print_header("Dynamic Environment Validation")
+    menu_utils.print_table(["Check", "Status", "Details"], rows)
+    for msg in warnings:
+        print(status_messages.status(msg, level="warn"))
+    if hard_failures:
+        for msg in hard_failures:
+            print(status_messages.status(msg, level="error"))
+        print(
+            status_messages.status(
+                "Pre-run scientific checks failed. Run blocked in paper mode.",
+                level="error",
+            )
+        )
+        return False
+    print(status_messages.status("Status: READY", level="success"))
+    return True
+
+
+def _device_preflight_checks(device_serial: str) -> bool:
+    hard_failures: list[str] = []
+    warnings: list[str] = []
+    rows: list[list[str]] = []
+
+    missing = missing_required_tools(tier="dataset")
+    if missing:
+        hard_failures.append(f"Missing host tools: {', '.join(missing)}")
+        rows.append(["Host tools", "FAIL", ", ".join(missing)])
+    else:
+        rows.append(["Host tools", "OK", "tshark + capinfos"])
+
+    try:
+        with tempfile.NamedTemporaryFile(
+            prefix="scytaledroid-preflight-",
+            dir=app_config.DATA_DIR,
+            delete=True,
+        ):
+            pass
+        rows.append(["PCAP tool test write", "OK", app_config.DATA_DIR])
+    except Exception as exc:
+        hard_failures.append("PCAP tool test write failed")
+        rows.append(["PCAP tool test write", "FAIL", str(exc)])
+
+    capture_iface = _read_capture_interface(device_serial)
+    if not capture_iface:
+        hard_failures.append("Capture interface unavailable")
+        rows.append(["Capture interface", "FAIL", "no default route device"])
+    else:
+        rows.append(["Capture interface", "OK", capture_iface])
+
+    vpn_state = _read_vpn_state(device_serial)
+    if vpn_state != "not_vpn":
+        hard_failures.append(f"VPN state mismatch: expected not_vpn, got {vpn_state}")
+        rows.append(["VPN state", "FAIL", vpn_state])
+    else:
+        rows.append(["VPN state", "OK", vpn_state])
+
+    battery = _read_battery_level(device_serial)
+    if battery is None:
+        warnings.append("Battery level unavailable")
+        rows.append(["Battery", "WARN", "unavailable"])
+    elif battery < _BATTERY_BLOCK_PCT:
+        hard_failures.append(f"Battery too low ({battery}%)")
+        rows.append(["Battery", "FAIL", f"{battery}% (<{_BATTERY_BLOCK_PCT}%)"])
+    elif battery < _BATTERY_WARN_PCT:
+        warnings.append(f"Battery below recommended threshold ({battery}%)")
+        rows.append(["Battery", "WARN", f"{battery}% (<{_BATTERY_WARN_PCT}%)"])
+    else:
+        rows.append(["Battery", "OK", f"{battery}%"])
+
+    storage_gb = _read_storage_free_gb(device_serial)
+    if storage_gb is None:
+        hard_failures.append("Storage check unavailable")
+        rows.append(["Free storage", "FAIL", "unable to read /data free space"])
+    elif storage_gb < _STORAGE_BLOCK_GB:
+        hard_failures.append(f"Insufficient free storage ({storage_gb:.2f} GB)")
+        rows.append(
+            ["Free storage", "FAIL", f"{storage_gb:.2f} GB (<{_STORAGE_BLOCK_GB:.1f} GB)"]
+        )
+    else:
+        rows.append(["Free storage", "OK", f"{storage_gb:.2f} GB"])
+
+    clock_drift = _read_clock_drift_seconds(device_serial)
+    if clock_drift is None:
+        warnings.append("Clock drift unavailable")
+        rows.append(["Clock drift", "WARN", "unavailable"])
+    elif clock_drift > _CLOCK_BLOCK_S:
+        hard_failures.append(f"Clock drift too high ({clock_drift:.1f}s)")
+        rows.append(["Clock drift", "FAIL", f"{clock_drift:.1f}s (>{_CLOCK_BLOCK_S}s)"])
+    elif clock_drift > _CLOCK_WARN_S:
+        warnings.append(f"Clock drift above recommended threshold ({clock_drift:.1f}s)")
+        rows.append(["Clock drift", "WARN", f"{clock_drift:.1f}s (>{_CLOCK_WARN_S}s)"])
+    else:
+        rows.append(["Clock drift", "OK", f"{clock_drift:.1f}s"])
+
+    print()
+    menu_utils.print_header("Dynamic Environment Validation")
+    menu_utils.print_table(["Check", "Status", "Details"], rows)
+    for msg in warnings:
+        print(status_messages.status(msg, level="warn"))
+    if hard_failures:
+        for msg in hard_failures:
+            print(status_messages.status(msg, level="error"))
+        print(
+            status_messages.status(
+                "Environment checks failed. Resolve issues before selecting an app.",
+                level="error",
+            )
+        )
+        return False
+    print(status_messages.status("Status: READY", level="success"))
+    return True
+
+
+def _post_run_integrity_check(result) -> None:
+    if not result.dynamic_run_id or not result.evidence_path:
+        return
+    run_dir = Path(result.evidence_path)
+    manifest_path = run_dir / "run_manifest.json"
+    report_path = run_dir / "analysis" / "pcap_report.json"
+    features_path = run_dir / "analysis" / "pcap_features.json"
+
+    dataset_valid = None
+    invalid_reason = None
+    pcap_size = None
+    capinfos_ok = False
+    tshark_ok = False
+    features_ok = False
+    window_count = None
+    report: dict[str, object] = {}
+
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        dataset = (
+            manifest.get("dataset")
+            if isinstance(manifest, dict) and isinstance(manifest.get("dataset"), dict)
+            else {}
+        )
+        dataset_valid = dataset.get("valid_dataset_run")
+        invalid_reason = dataset.get("invalid_reason_code")
+        pcap_size = dataset.get("pcap_size_bytes")
+    except Exception:
+        pass
+
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        parsed = (
+            (report.get("capinfos") or {}).get("parsed")
+            if isinstance(report.get("capinfos"), dict)
+            else {}
+        )
+        capinfos_ok = isinstance(parsed, dict) and parsed.get("packet_count") is not None
+        tshark_ok = str(report.get("report_status") or "").lower() == "ok"
+        if pcap_size is None:
+            pcap_size = report.get("pcap_size_bytes")
+    except Exception:
+        pass
+
+    try:
+        features = json.loads(features_path.read_text(encoding="utf-8"))
+        features_ok = (
+            isinstance(features, dict)
+            and isinstance(features.get("metrics"), dict)
+            and isinstance(features.get("proxies"), dict)
+        )
+        ts = features.get("timeseries")
+        if isinstance(ts, dict):
+            wb = ts.get("windowing")
+            if isinstance(wb, dict):
+                window_count = wb.get("window_count")
+    except Exception:
+        pass
+
+    try:
+        pcap_size_int = int(pcap_size or 0)
+    except Exception:
+        pcap_size_int = 0
+    pcap_size_ok = pcap_size_int >= int(paper2_config.MIN_PCAP_BYTES)
+    verdict = (
+        "VALID"
+        if (dataset_valid is True and pcap_size_ok and capinfos_ok and tshark_ok and features_ok)
+        else "INVALID"
+    )
+    rows = [
+        [
+            "PCAP size",
+            "OK" if pcap_size_ok else "FAIL",
+            f"{pcap_size_int} bytes (min {int(paper2_config.MIN_PCAP_BYTES)})",
+        ],
+        ["capinfos parse", "OK" if capinfos_ok else "FAIL", "parsed packet metadata"],
+        [
+            "tshark parse",
+            "OK" if tshark_ok else "FAIL",
+            f"report_status={report.get('report_status') if isinstance(report, dict) else 'missing'}",
+        ],
+        ["Feature extraction", "OK" if features_ok else "FAIL", "analysis/pcap_features.json"],
+        [
+            "Window count",
+            "OK" if window_count is not None else "WARN",
+            str(window_count) if window_count is not None else "unavailable",
+        ],
+        ["Run verdict", "OK" if verdict == "VALID" else "FAIL", verdict],
+    ]
+    print()
+    menu_utils.print_header("Post-Run Integrity")
+    menu_utils.print_table(["Check", "Status", "Details"], rows)
+    if verdict != "VALID":
+        print(
+            status_messages.status(
+                f"Dataset validity: INVALID ({invalid_reason or 'PCAP_PARSE_ERROR'})",
+                level="error",
+            )
+        )
+    else:
+        print(status_messages.status("Dataset validity: VALID", level="success"))
 
 
 def _auto_run_static_for_package(package_name: str) -> bool:
@@ -88,11 +572,15 @@ def run_guided_dataset_run(
 ) -> None:
     print()
     menu_utils.print_header("Guided Dataset Run")
+    _print_paper_mode_constants()
     selected = select_device()
     if not selected:
         return
     device_serial, device_label = selected
     print_device_badge(device_serial, device_label)
+    if not _device_preflight_checks(device_serial):
+        prompt_utils.press_enter_to_continue()
+        return
 
     scenario_id = "basic_usage"
     duration_seconds = 0
@@ -128,7 +616,7 @@ def run_guided_dataset_run(
     from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import peek_next_run_protocol
 
     next_protocol = peek_next_run_protocol(package_name, tier="dataset") or {}
-    suggested_profile = (next_protocol.get("run_profile") or "interactive_use").strip()
+    suggested_profile = (next_protocol.get("run_profile") or "interaction_scripted").strip()
     suggested_slot = next_protocol.get("run_sequence")
     from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig
 
@@ -171,21 +659,21 @@ def run_guided_dataset_run(
     def _badge_for(key: str) -> str | None:
         if not suggested_slot:
             return None
-        return "suggested" if key == ("2" if suggested_profile == "interactive_use" else "1") else None
+        return "suggested" if key == ("2" if "interactive" in suggested_profile else "1") else None
 
     protocol_options = [
-        menu_utils.MenuOption("1", "Idle / minimal", description="baseline_idle + minimal interaction", badge=_badge_for("1")),
-        menu_utils.MenuOption("2", "Normal", description="interactive_use + normal interaction", badge=_badge_for("2")),
-        menu_utils.MenuOption("3", "Heavy", description="interactive_use + heavy interaction", badge=None),
+        menu_utils.MenuOption("1", "Idle Baseline", description="run_profile=baseline_idle", badge=_badge_for("1")),
+        menu_utils.MenuOption("2", "Scripted Interaction", description="run_profile=interaction_scripted", badge=_badge_for("2")),
+        menu_utils.MenuOption("3", "Manual Interaction", description="run_profile=interaction_manual", badge=None),
         menu_utils.MenuOption("4", "Test app (Dry Run/No Saving)", description="no capture; checks plan + tools", badge=None),
         menu_utils.MenuOption("D", "Delete previous runs", description="delete local evidence packs + reset tracker for this app", badge=None),
     ]
 
-    menu_utils.print_header("Tag Dynamic Analysis Run")
+    menu_utils.print_header("Select Run Intent")
     menu_utils.render_menu(
         menu_utils.MenuSpec(
             items=protocol_options,
-            default="2" if suggested_profile == "interactive_use" else "1",
+            default="2" if "interactive" in suggested_profile else "1",
             exit_label="Exit",
             show_exit=True,
             show_descriptions=True,
@@ -194,7 +682,7 @@ def run_guided_dataset_run(
     )
     selected_protocol = prompt_utils.get_choice(
         menu_utils.selectable_keys(protocol_options, include_exit=True),
-        default="2" if suggested_profile == "interactive_use" else "1",
+        default="2" if "interactive" in suggested_profile else "1",
         casefold=True,
         invalid_message="Choose 0-4 or D.",
         disabled=[option.key for option in protocol_options if option.disabled],
@@ -291,11 +779,11 @@ def run_guided_dataset_run(
         run_profile = "baseline_idle"
         interaction_level = "minimal"
     elif selected_protocol == "2":
-        run_profile = "interactive_use"
-        interaction_level = "normal"
+        run_profile = "interaction_scripted"
+        interaction_level = "scripted"
     else:
-        run_profile = "interactive_use"
-        interaction_level = "heavy"
+        run_profile = "interaction_manual"
+        interaction_level = "manual"
 
     messaging_activity: str | None = None
     messaging_pkgs = {p.lower() for p in MESSAGING_PACKAGES}
@@ -357,6 +845,16 @@ def run_guided_dataset_run(
     plan_path = plan_selection["plan_path"]
     static_run_id = plan_selection["static_run_id"]
     print_plan_selection_banner(plan_selection)
+    if not _pre_run_scientific_checks(
+        device_serial=device_serial,
+        package_name=package_name,
+        plan_path=plan_path,
+        observer_ids=observer_ids,
+    ):
+        prompt_utils.press_enter_to_continue()
+        return
+    print(status_messages.status(f"Stabilizing environment ({_STABILIZATION_WAIT_S}s)...", level="info"))
+    time.sleep(_STABILIZATION_WAIT_S)
     clear_logcat = prompt_utils.prompt_yes_no("Clear logcat at run start?", default=True)
 
     spec = build_dynamic_run_spec(
@@ -382,6 +880,7 @@ def run_guided_dataset_run(
     )
     result = execute_dynamic_run_spec(spec)
     print_run_summary(result, label)
+    _post_run_integrity_check(result)
     if result.dynamic_run_id and print_tier1_qa_result:
         print_tier1_qa_result(result.dynamic_run_id)
 

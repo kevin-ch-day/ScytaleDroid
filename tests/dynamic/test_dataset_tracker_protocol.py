@@ -43,7 +43,7 @@ def test_peek_next_run_protocol_baseline_until_first_valid(monkeypatch, tmp_path
     (tmp_path / "archive" / "dataset_plan.json").write_text(json.dumps(tracker), encoding="utf-8")
     proto = dataset_tracker.peek_next_run_protocol("com.example.app", tier="dataset")
     assert proto
-    assert proto["run_profile"] == "interactive_use"
+    assert proto["run_profile"] == "interaction_scripted"
     assert proto["run_sequence"] == 2
 
 
@@ -80,7 +80,7 @@ def test_peek_next_run_protocol_two_baselines_when_baseline_required_is_two(monk
     (tmp_path / "archive" / "dataset_plan.json").write_text(json.dumps(tracker), encoding="utf-8")
     proto = dataset_tracker.peek_next_run_protocol("com.example.app", tier="dataset")
     assert proto
-    assert proto["run_profile"] == "interactive_use"
+    assert proto["run_profile"] == "interaction_scripted"
     assert proto["run_sequence"] == 3
 
 
@@ -223,3 +223,64 @@ def test_dataset_validity_allows_short_capture_span_when_other_requirements_met(
     payload = json.loads(out_path.read_text(encoding="utf-8"))
     run = payload["apps"]["com.example.app"]["runs"][0]
     assert run["valid_dataset_run"] is True
+
+
+def test_dataset_validity_requires_minimum_window_count(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(dataset_tracker.app_config, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(dataset_tracker.app_config, "DYNAMIC_MIN_DURATION_S", 30)
+
+    run_dir = tmp_path / "run-low-window"
+    (run_dir / "analysis").mkdir(parents=True, exist_ok=True)
+    (run_dir / "analysis" / "pcap_features.json").write_text(json.dumps({}), encoding="utf-8")
+    (run_dir / "analysis" / "pcap_report.json").write_text(
+        json.dumps(
+            {
+                "report_status": "ok",
+                "missing_tools": [],
+                "capinfos": {"parsed": {"capture_duration_s": 90, "packet_count": 1000, "data_size_bytes": 10}},
+                "protocol_hierarchy": [{"protocol": "tcp", "frames": 1, "bytes": 1}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "analysis" / "summary.json").write_text(
+        json.dumps({"telemetry": {"stats": {"sampling_duration_seconds": 90}}}),
+        encoding="utf-8",
+    )
+
+    manifest = RunManifest(
+        run_manifest_version=1,
+        dynamic_run_id="run-low-window",
+        created_at="2026-02-07T00:00:00Z",
+        status="success",
+        target={"package_name": "com.example.app"},
+        scenario={"id": "basic_usage"},
+        operator={
+            "tier": "dataset",
+            "run_profile": "interaction_scripted",
+            "run_sequence": 2,
+            "interaction_level": "scripted",
+        },
+    )
+    manifest.add_artifacts(
+        [
+            ArtifactRecord(
+                relative_path="artifacts/pcapdroid_capture/test.pcap",
+                type="pcapdroid_capture",
+                sha256="0" * 64,
+                size_bytes=int(dataset_tracker.MIN_PCAP_BYTES) + 1,
+                produced_by="pcapdroid_capture",
+                origin="host",
+                pull_status="ok",
+            )
+        ]
+    )
+    manifest.finalize()
+
+    out_path = dataset_tracker.update_dataset_tracker(manifest, run_dir)
+    assert out_path and out_path.exists()
+    payload = json.loads(out_path.read_text(encoding="utf-8"))
+    run = payload["apps"]["com.example.app"]["runs"][0]
+    assert run["valid_dataset_run"] is False
+    assert run["invalid_reason_code"] == "INSUFFICIENT_DURATION"
+    assert run.get("window_count_too_low") == 1

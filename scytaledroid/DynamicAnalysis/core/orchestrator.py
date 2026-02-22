@@ -39,6 +39,7 @@ from scytaledroid.DynamicAnalysis.pcap.features import write_pcap_features
 from scytaledroid.DynamicAnalysis.pcap.indexer import index_pcap_by_app
 from scytaledroid.DynamicAnalysis.pcap.report import write_pcap_report
 from scytaledroid.DynamicAnalysis.pcap.tools import collect_host_tools
+from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper2_config
 from scytaledroid.DynamicAnalysis.plans.loader import (
     PlanValidationError,
     build_plan_validation_event,
@@ -219,9 +220,15 @@ class DynamicRunOrchestrator:
                 "base_apk_sha256": plan_identity.get("base_apk_sha256"),
                 "artifact_set_hash": plan_identity.get("artifact_set_hash"),
                 "signer_set_hash": plan_identity.get("signer_set_hash") or plan_identity.get("signer_digest"),
+                "observed_signer_set_hash": (target_snapshot.metadata or {}).get("signer_set_hash"),
+                "observed_signer_primary_digest": (target_snapshot.metadata or {}).get("signer_primary_digest"),
                 "static_handoff_hash": plan_identity.get("static_handoff_hash"),
                 "observed_package_name_lc": str((target_snapshot.metadata or {}).get("package_name") or "").strip().lower(),
                 "observed_version_code": str((target_snapshot.metadata or {}).get("version_code") or "").strip() or None,
+                "user_id": str((target_snapshot.metadata or {}).get("user_id") or "").strip() or "0",
+                "first_install_time": (target_snapshot.metadata or {}).get("first_install_time"),
+                "last_update_time": (target_snapshot.metadata or {}).get("last_update_time"),
+                "installer_package_name": (target_snapshot.metadata or {}).get("installer_package_name"),
             }
         manifest.add_artifacts(target_snapshot.artifacts)
         event_logger.log("target_prepared", {"artifact_count": len(target_snapshot.artifacts)})
@@ -410,6 +417,12 @@ class DynamicRunOrchestrator:
             manifest.target["identity_end"] = {
                 "observed_package_name_lc": identity_end_pkg or None,
                 "observed_version_code": identity_end_ver,
+                "observed_signer_set_hash": (target_finalize.metadata or {}).get("signer_set_hash_end"),
+                "observed_signer_primary_digest": (target_finalize.metadata or {}).get("signer_primary_digest_end"),
+                "user_id": str((target_finalize.metadata or {}).get("user_id_end") or "").strip() or "0",
+                "first_install_time": (target_finalize.metadata or {}).get("first_install_time_end"),
+                "last_update_time": (target_finalize.metadata or {}).get("last_update_time_end"),
+                "installer_package_name": (target_finalize.metadata or {}).get("installer_package_name_end"),
             }
         manifest.add_artifacts(target_finalize.artifacts)
         event_logger.log("target_finalized", {"artifact_count": len(target_finalize.artifacts)})
@@ -593,9 +606,10 @@ class DynamicRunOrchestrator:
                 # Filled deterministically at finalize-time for dataset-tier runs.
                 "valid_dataset_run": None,
                 "invalid_reason_code": None,
-                "min_pcap_bytes": getattr(app_config, "DYNAMIC_MIN_PCAP_BYTES", 100000),
+                "min_pcap_bytes": int(getattr(paper2_config, "MIN_PCAP_BYTES", 50000)),
                 "short_run": 0,
                 "no_traffic_observed": 0,
+                "capture_policy_version": int(getattr(paper2_config, "PAPER_CONTRACT_VERSION", 1)),
                 # ML-only quality flag (non-invalidating). Filled best-effort at finalize-time.
                 "low_signal": None,
                 "low_signal_reasons": [],
@@ -609,6 +623,7 @@ class DynamicRunOrchestrator:
                 "dep_static_run_id": self.config.static_run_id,
                 "harvest_session_id": self.config.harvest_session_id,
                 "profile_key": profile_key,
+                "run_intent": getattr(run_ctx, "run_profile", None),
                 "static_plan_path": plan_artifact.relative_path if plan_artifact else None,
                 "static_plan_summary": self._summarize_plan(plan_payload),
                 "static_context_tags": static_tags,
@@ -652,10 +667,12 @@ class DynamicRunOrchestrator:
                 "host": platform.node(),
                 "tool_version": app_config.APP_VERSION,
                 "tool_semver": app_config.APP_VERSION,
+                "capture_policy_version": int(getattr(paper2_config, "PAPER_CONTRACT_VERSION", 1)),
                 "tool_git_commit": get_git_commit(),
                 "schema_version": db_diagnostics.get_schema_version() or "<unknown>",
                 "host_tools": collect_host_tools(),
                 # Operator protocol metadata (not used for behavioral modeling).
+                "run_intent": getattr(run_ctx, "run_profile", None),
                 "run_profile": getattr(run_ctx, "run_profile", None),
                 "run_sequence": getattr(run_ctx, "run_sequence", None),
                 "messaging_activity": getattr(run_ctx, "messaging_activity", None),
@@ -665,7 +682,7 @@ class DynamicRunOrchestrator:
                     "interactive": bool(run_ctx.interactive),
                     "tier": self.config.tier,
                     "sampling_rate_s": self.config.sampling_rate_s,
-                    "min_pcap_bytes": getattr(app_config, "DYNAMIC_MIN_PCAP_BYTES", 100000),
+                    "min_pcap_bytes": int(getattr(paper2_config, "MIN_PCAP_BYTES", 50000)),
                     "require_dynamic_schema": bool(getattr(self.config, "require_dynamic_schema", True)),
                     "observer_prompts_enabled": bool(getattr(self.config, "observer_prompts_enabled", False)),
                     "pcapdroid_api_key_present": bool(getattr(self.config, "pcapdroid_api_key", None)),

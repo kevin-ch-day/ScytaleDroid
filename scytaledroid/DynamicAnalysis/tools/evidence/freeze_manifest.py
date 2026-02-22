@@ -112,6 +112,8 @@ def build_dataset_freeze_manifest(
     # part of the Paper #2 contract and may be missing for older runs).
     run_checksums: dict[str, dict[str, Any]] = {}
     identity_index: dict[tuple[str, str, str, str, str], str] = {}
+    plan_schema_versions: set[str] = set()
+    plan_paper_contract_versions: set[int] = set()
 
     host_tool_versions: dict[str, set[str]] = {"tshark": set(), "capinfos": set()}
 
@@ -138,7 +140,7 @@ def build_dataset_freeze_manifest(
             prof = str(r.get("run_profile") or "")
             if prof.startswith("baseline_idle"):
                 base.append(rid)
-            elif prof.startswith("interactive_use"):
+            elif prof.startswith("interactive_use") or prof.startswith("interaction_"):
                 inter.append(rid)
 
         # Basic quota sanity (do not "fix" anything here).
@@ -207,7 +209,25 @@ def build_dataset_freeze_manifest(
 
             ds = mf.get("dataset") if isinstance(mf.get("dataset"), dict) else {}
             op = mf.get("operator") if isinstance(mf.get("operator"), dict) else {}
+            capture_policy_version = op.get("capture_policy_version")
+            try:
+                capture_policy_version_i = int(capture_policy_version)
+            except Exception:
+                capture_policy_version_i = None
+            if capture_policy_version_i != int(paper_config.PAPER_CONTRACT_VERSION):
+                raise RuntimeError(
+                    f"FREEZE_CAPTURE_POLICY_VERSION_MISMATCH:{rid}:{capture_policy_version_i}"
+                )
             plan = _read_json(run_dir / "inputs/static_dynamic_plan.json") or {}
+            plan_schema_version = str(plan.get("plan_schema_version") or "").strip()
+            if not plan_schema_version:
+                raise RuntimeError(f"FREEZE_MISSING_SCHEMA_VERSION:{rid}")
+            try:
+                plan_paper_contract_version = int(plan.get("paper_contract_version"))
+            except Exception:
+                raise RuntimeError(f"FREEZE_MISSING_SCHEMA_VERSION:{rid}")
+            plan_schema_versions.add(plan_schema_version)
+            plan_paper_contract_versions.add(int(plan_paper_contract_version))
             run_identity = plan.get("run_identity") if isinstance(plan.get("run_identity"), dict) else {}
             pkg_lc = str(run_identity.get("package_name_lc") or plan.get("package_name") or pkg).strip().lower()
             version_code = str(run_identity.get("version_code") or plan.get("version_code") or "").strip()
@@ -245,12 +265,23 @@ def build_dataset_freeze_manifest(
     if missing_inputs:
         # Fail-closed: a freeze manifest must not reference incomplete packs.
         raise RuntimeError(f"Missing required frozen inputs for {len(missing_inputs)} run(s): {missing_inputs}")
+    if len(plan_schema_versions) != 1 or len(plan_paper_contract_versions) != 1:
+        raise RuntimeError(
+            "FREEZE_MIXED_SCHEMA_VERSION:"
+            f"plan_schema={sorted(plan_schema_versions)}:"
+            f"paper_contract={sorted(plan_paper_contract_versions)}"
+        )
+    required_plan_schema_version = next(iter(plan_schema_versions))
+    required_plan_paper_contract_version = int(next(iter(plan_paper_contract_versions)))
 
     return {
         "artifact_type": "dataset_freeze",
         "freeze_contract_version": int(paper_config.FREEZE_CONTRACT_VERSION),
         "paper_contract_version": int(paper_config.PAPER_CONTRACT_VERSION),
+        "capture_policy_version_required": int(paper_config.PAPER_CONTRACT_VERSION),
         "reason_taxonomy_version": int(paper_config.REASON_TAXONOMY_VERSION),
+        "plan_schema_version_required": required_plan_schema_version,
+        "plan_paper_contract_version_required": required_plan_paper_contract_version,
         "dataset_id": "Research Dataset Alpha",
         "dataset_version": "paper2_v1",
         "created_at_utc": datetime.now(UTC).isoformat(),

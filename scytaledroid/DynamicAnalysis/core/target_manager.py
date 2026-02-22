@@ -7,6 +7,7 @@ immutability anchor.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -54,6 +55,12 @@ class TargetManager:
                 "package_name_end": package_info.get("package_name"),
                 "version_name_end": package_info.get("version_name"),
                 "version_code_end": package_info.get("version_code"),
+                "user_id_end": package_info.get("user_id"),
+                "first_install_time_end": package_info.get("first_install_time"),
+                "last_update_time_end": package_info.get("last_update_time"),
+                "installer_package_name_end": package_info.get("installer_package_name"),
+                "signer_primary_digest_end": package_info.get("signer_primary_digest"),
+                "signer_set_hash_end": package_info.get("signer_set_hash"),
                 "apk_paths_end": package_info.get("apk_paths"),
                 "package_info_end_artifact": package_info.get("package_info_artifact"),
             }
@@ -82,31 +89,53 @@ class TargetManager:
         return TargetSnapshot(metadata=metadata, artifacts=artifacts)
 
     def _capture_package_info(self, run_ctx: RunContext) -> tuple[dict[str, Any], ArtifactRecord]:
-        package_dump = adb_shell.run_shell(
-            run_ctx.device_serial or "",
-            ["dumpsys", "package", run_ctx.package_name],
-        )
+        package_dump = self._read_package_dump(run_ctx)
         path = run_ctx.run_dir / "artifacts/target/package_info.txt"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(package_dump, encoding="utf-8")
         version_name = self._extract_value(package_dump, r"versionName=(\S+)")
         version_code = self._extract_value(package_dump, r"versionCode=(\d+)")
+        user_id = self._extract_value(package_dump, r"userId=(\d+)")
+        first_install_time = self._extract_value(package_dump, r"firstInstallTime=(.+)")
+        last_update_time = self._extract_value(package_dump, r"lastUpdateTime=(.+)")
+        installer_package_name = self._extract_value(package_dump, r"installerPackageName=(\S+)")
+        signer_digests = self._extract_signer_digests(package_dump)
         package_paths = self._read_package_paths(run_ctx)
         metadata = {
             "package_name": run_ctx.package_name,
             "version_name": version_name,
             "version_code": version_code,
+            "user_id": user_id or "0",
+            "first_install_time": first_install_time,
+            "last_update_time": last_update_time,
+            "installer_package_name": installer_package_name,
             "apk_paths": package_paths,
+            "signer_primary_digest": signer_digests[0] if signer_digests else None,
+            "signer_set_hash": self._compute_signer_set_hash(signer_digests),
             "package_info_artifact": str(path.relative_to(run_ctx.run_dir)),
         }
         artifact = self._artifact_record(run_ctx, path, "target_package_info")
         return metadata, artifact
 
+    def _read_package_dump(self, run_ctx: RunContext) -> str:
+        serial = run_ctx.device_serial or ""
+        package = run_ctx.package_name
+        # Paper contract: identity checks are pinned to user 0.
+        output = adb_shell.run_shell(serial, ["dumpsys", "package", "--user", "0", package])
+        if output and "Unknown option" not in output and "Bad argument" not in output:
+            return output
+        return adb_shell.run_shell(serial, ["dumpsys", "package", package])
+
     def _read_package_paths(self, run_ctx: RunContext) -> list[str]:
         output = adb_shell.run_shell(
             run_ctx.device_serial or "",
-            ["pm", "path", run_ctx.package_name],
+            ["pm", "path", "--user", "0", run_ctx.package_name],
         )
+        if output and ("Error:" in output or "Unknown option" in output):
+            output = adb_shell.run_shell(
+                run_ctx.device_serial or "",
+                ["pm", "path", run_ctx.package_name],
+            )
         paths: list[str] = []
         for line in output.splitlines():
             line = line.strip()
@@ -158,6 +187,24 @@ class TargetManager:
         if match:
             return match.group(1)
         return None
+
+    def _extract_signer_digests(self, package_dump: str) -> list[str]:
+        digests: list[str] = []
+        for line in package_dump.splitlines():
+            low = line.lower()
+            if ("sha-256" not in low) and ("sha256" not in low) and ("sign" not in low):
+                continue
+            for match in re.finditer(r"([0-9A-Fa-f:]{64,95})", line):
+                raw = match.group(1).replace(":", "").strip().lower()
+                if len(raw) == 64 and all(ch in "0123456789abcdef" for ch in raw):
+                    digests.append(raw)
+        return sorted(set(digests))
+
+    def _compute_signer_set_hash(self, digests: list[str]) -> str | None:
+        if not digests:
+            return None
+        payload = "|".join(sorted(digests)).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
 
 
 __all__ = ["TargetManager", "TargetSnapshot"]

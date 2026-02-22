@@ -44,7 +44,9 @@ class EnvironmentManager:
         )
         artifacts.append(self._artifact_record(run_ctx, device_info_path, "device_info"))
         if run_ctx.device_serial:
-            self._clear_app_data(run_ctx)
+            # Paper policy: preserve realistic app state for baseline/interactive runs.
+            # We do not clear app data or cache in non-root collection flows.
+            self._force_stop_app(run_ctx)
             permissions_before = self._capture_permissions(run_ctx, "permissions_before.txt")
             artifacts.append(
                 self._artifact_record(run_ctx, permissions_before, "permissions_snapshot")
@@ -61,8 +63,8 @@ class EnvironmentManager:
             )
         return EnvironmentSnapshot(metadata=metadata, artifacts=artifacts)
 
-    def _clear_app_data(self, run_ctx: RunContext) -> None:
-        adb_shell.run_shell(run_ctx.device_serial or "", ["pm", "clear", run_ctx.package_name])
+    def _force_stop_app(self, run_ctx: RunContext) -> None:
+        adb_shell.run_shell(run_ctx.device_serial or "", ["am", "force-stop", run_ctx.package_name])
 
     def _capture_permissions(self, run_ctx: RunContext, filename: str) -> Path:
         output = adb_shell.run_shell(

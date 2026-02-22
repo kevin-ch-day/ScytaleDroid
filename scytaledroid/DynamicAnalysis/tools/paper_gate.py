@@ -100,7 +100,15 @@ def run_paper_gate(*, freeze_path: Path, evidence_root: Path) -> GateResult:
         if str(cohort_status.get("status") or "") != "CANONICAL_PAPER_ELIGIBLE":
             errors.append(f"{run_id}:not_paper_eligible:{cohort_status.get('reason_code')}")
 
-        for key in ("static_handoff_hash", "base_apk_sha256", "package_name_lc", "version_code", "signer_digest", "signer_set_hash"):
+        for key in (
+            "static_handoff_hash",
+            "base_apk_sha256",
+            "artifact_set_hash",
+            "package_name_lc",
+            "version_code",
+            "signer_digest",
+            "signer_set_hash",
+        ):
             value = identity.get(key)
             if not isinstance(value, str) or not value.strip():
                 # version_code may be numeric in some plan payloads.
@@ -129,6 +137,29 @@ def run_paper_gate(*, freeze_path: Path, evidence_root: Path) -> GateResult:
         plan_base_sha = str(identity.get("base_apk_sha256") or "").strip().lower()
         if target_base_sha and plan_base_sha and target_base_sha != plan_base_sha:
             errors.append(f"{run_id}:apk_changed_during_run:base_apk_sha256")
+        target_signer_set_hash = str(
+            target_identity.get("signer_set_hash")
+            or target.get("signer_set_hash")
+            or ""
+        ).strip().lower()
+        plan_signer_set_hash = str(
+            identity.get("signer_set_hash")
+            or identity.get("signer_digest")
+            or ""
+        ).strip().lower()
+        if not target_signer_set_hash:
+            errors.append(f"{run_id}:missing_observed_signer_set_hash")
+        elif plan_signer_set_hash and target_signer_set_hash != plan_signer_set_hash:
+            errors.append(f"{run_id}:apk_changed_during_run:signer_set_hash")
+
+        operator = run_manifest.get("operator") if isinstance(run_manifest.get("operator"), dict) else {}
+        capture_policy_version = operator.get("capture_policy_version")
+        try:
+            capture_policy_version_i = int(capture_policy_version)
+        except Exception:
+            capture_policy_version_i = None
+        if capture_policy_version_i != int(paper2_config.PAPER_CONTRACT_VERSION):
+            errors.append(f"{run_id}:capture_policy_version_mismatch:{capture_policy_version_i}")
         static_features = plan.get("static_features") if isinstance(plan.get("static_features"), dict) else {}
         for key in (
             "exported_components_total",
@@ -140,10 +171,13 @@ def run_paper_gate(*, freeze_path: Path, evidence_root: Path) -> GateResult:
                 errors.append(f"{run_id}:missing_static_features:{key}")
         static_handoff_hash = _normalize_hex_hash(identity.get("static_handoff_hash"), expected_len=64)
         base_apk_sha256 = _normalize_hex_hash(identity.get("base_apk_sha256"), expected_len=64)
+        artifact_set_hash = _normalize_hex_hash(identity.get("artifact_set_hash"), expected_len=64)
         if static_handoff_hash is None:
             errors.append(f"{run_id}:bad_identity_hash:static_handoff_hash")
         if base_apk_sha256 is None:
             errors.append(f"{run_id}:bad_identity_hash:base_apk_sha256")
+        if artifact_set_hash is None:
+            errors.append(f"{run_id}:bad_identity_hash:artifact_set_hash")
         package_name_lc = str(identity.get("package_name_lc") or plan.get("package_name") or "").strip().lower()
         version_code_raw = identity.get("version_code")
         if version_code_raw in (None, ""):
@@ -152,10 +186,11 @@ def run_paper_gate(*, freeze_path: Path, evidence_root: Path) -> GateResult:
             version_code = int(version_code_raw) if version_code_raw not in (None, "") else None
         except Exception:
             version_code = None
-        if static_handoff_hash and base_apk_sha256:
+        if static_handoff_hash and base_apk_sha256 and artifact_set_hash:
             if not _verify_static_link(
                 static_handoff_hash=static_handoff_hash,
                 base_apk_sha256=base_apk_sha256,
+                artifact_set_hash=artifact_set_hash,
                 package_name_lc=package_name_lc or None,
                 version_code=version_code,
             ):
@@ -246,6 +281,7 @@ def _verify_static_link(
     *,
     static_handoff_hash: str,
     base_apk_sha256: str,
+    artifact_set_hash: str,
     package_name_lc: str | None,
     version_code: int | None,
 ) -> bool:
@@ -254,10 +290,11 @@ def _verify_static_link(
         FROM v_static_handoff_v1
         WHERE LOWER(static_handoff_hash)=LOWER(%s)
           AND LOWER(base_apk_sha256)=LOWER(%s)
+          AND LOWER(artifact_set_hash)=LOWER(%s)
           AND UPPER(COALESCE(run_class,''))='CANONICAL'
           AND COALESCE(identity_conflict_flag,0)=0
     """
-    args: list[Any] = [static_handoff_hash, base_apk_sha256]
+    args: list[Any] = [static_handoff_hash, base_apk_sha256, artifact_set_hash]
     if package_name_lc:
         sql += " AND LOWER(package_name_lc)=LOWER(%s)"
         args.append(package_name_lc)

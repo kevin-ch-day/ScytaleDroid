@@ -12,8 +12,10 @@ from typing import Any
 from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.core.event_logger import RunEventLogger
 from scytaledroid.DynamicAnalysis.core.manifest import RunManifest
+from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper2_config
 
-MIN_PCAP_BYTES = int(getattr(app_config, "DYNAMIC_MIN_PCAP_BYTES", 100000))
+MIN_PCAP_BYTES = int(getattr(paper2_config, "MIN_PCAP_BYTES", 50000))
+MIN_WINDOWS_PER_RUN = 20
 
 
 @dataclass(frozen=True)
@@ -25,7 +27,17 @@ class DatasetTrackerConfig:
         default_factory=lambda: int(getattr(app_config, "DYNAMIC_DATASET_INTERACTIVE_RUNS", 2))
     )
     baseline_profile: str = "baseline_idle"
-    interactive_profile: str = "interactive_use"
+    interactive_profile: str = "interaction_scripted"
+
+
+def _is_baseline_profile(profile: object, cfg: DatasetTrackerConfig) -> bool:
+    p = str(profile or "")
+    return p.startswith(cfg.baseline_profile) or "baseline" in p or "idle" in p
+
+
+def _is_interactive_profile(profile: object, cfg: DatasetTrackerConfig) -> bool:
+    p = str(profile or "")
+    return p.startswith(cfg.interactive_profile) or p.startswith("interaction_") or "interactive" in p
 
 
 _VALIDITY_ENUM = {
@@ -132,14 +144,14 @@ def update_dataset_tracker(
         for r in runs_list
         if isinstance(r, dict)
         and _counted(r)
-        and str(r.get("run_profile") or "").startswith(cfg.baseline_profile)
+        and _is_baseline_profile(r.get("run_profile"), cfg)
     )
     app_entry["interactive_valid_runs"] = sum(
         1
         for r in runs_list
         if isinstance(r, dict)
         and _counted(r)
-        and str(r.get("run_profile") or "").startswith(cfg.interactive_profile)
+        and _is_interactive_profile(r.get("run_profile"), cfg)
     )
     app_entry["app_complete"] = (
         int(app_entry["baseline_valid_runs"]) >= int(cfg.baseline_required)
@@ -206,14 +218,14 @@ def _normalize_tracker_payload(payload: dict[str, Any], cfg: DatasetTrackerConfi
             for r in runs
             if isinstance(r, dict)
             and _counted(r)
-            and str(r.get("run_profile") or "").startswith(cfg.baseline_profile)
+            and _is_baseline_profile(r.get("run_profile"), cfg)
         )
         entry["interactive_valid_runs"] = sum(
             1
             for r in runs
             if isinstance(r, dict)
             and _counted(r)
-            and str(r.get("run_profile") or "").startswith(cfg.interactive_profile)
+            and _is_interactive_profile(r.get("run_profile"), cfg)
         )
         entry["app_complete"] = (
             int(entry["baseline_valid_runs"]) >= int(cfg.baseline_required)
@@ -260,9 +272,9 @@ def peek_next_run_protocol(
                 continue
             total_valid += 1
             prof = str(r.get("run_profile") or "")
-            if prof.startswith(cfg.baseline_profile) or "baseline" in prof or "idle" in prof:
+            if _is_baseline_profile(prof, cfg):
                 baseline_valid += 1
-            elif prof.startswith(cfg.interactive_profile) or "interactive" in prof:
+            elif _is_interactive_profile(prof, cfg):
                 interactive_valid += 1
 
     # Dataset protocol numbering is by quota slot, not attempt count.
@@ -430,8 +442,8 @@ def _apply_quota_marking(app_entry: dict[str, Any], cfg: DatasetTrackerConfig) -
         if not is_valid:
             continue
         prof = str(r.get("run_profile") or "")
-        is_baseline = prof.startswith(cfg.baseline_profile) or "baseline" in prof or "idle" in prof
-        is_interactive = prof.startswith(cfg.interactive_profile) or "interactive" in prof
+        is_baseline = _is_baseline_profile(prof, cfg)
+        is_interactive = _is_interactive_profile(prof, cfg)
 
         counted = False
         if is_baseline and baseline_seen < baseline_needed:
@@ -538,7 +550,7 @@ def evaluate_dataset_validity(
     # - Otherwise, fall back to CAPTURE_INTERRUPTED.
     #
     # This avoids "CAPTURE_INTERRUPTED" masking the actionable remediation ("PCAP too small").
-    min_bytes = int(getattr(app_config, "DYNAMIC_MIN_PCAP_BYTES", 100000))
+    min_bytes = int(MIN_PCAP_BYTES)
     pcap_size = entry.get("pcap_size_bytes")
     try:
         pcap_size_int = int(pcap_size or 0)
@@ -561,6 +573,18 @@ def evaluate_dataset_validity(
         return _invalid("INSUFFICIENT_DURATION", flags, run_dir)
     if float(sampling_seconds) < float(app_config.DYNAMIC_TARGET_DURATION_S):
         flags["short_run"] = 1
+    window_count = _window_count_for_duration(
+        sampling_seconds,
+        window_size_s=float(getattr(paper2_config, "WINDOW_SIZE_S", 10.0)),
+        stride_s=float(getattr(paper2_config, "WINDOW_STRIDE_S", 5.0)),
+    )
+    if int(window_count) < int(MIN_WINDOWS_PER_RUN):
+        return _invalid(
+            "INSUFFICIENT_DURATION",
+            {**flags, "window_count_too_low": 1},
+            run_dir,
+            window_count=window_count,
+        )
 
     # PCAP size policy.
     if pcap_size_int <= 0:
@@ -610,6 +634,8 @@ def evaluate_dataset_validity(
         "invalid_reason_code": None,
         "sampling_duration_seconds": sampling_seconds,
         "min_pcap_bytes": min_bytes,
+        "window_count": int(window_count),
+        "min_window_count": int(MIN_WINDOWS_PER_RUN),
         **flags,
     }
 
@@ -774,16 +800,38 @@ def _log(event_logger: RunEventLogger | None, event: str, payload: dict[str, Any
         event_logger.log(event, payload)
 
 
-def _invalid(code: str, flags: dict[str, int], run_dir: Path) -> dict[str, Any]:
+def _invalid(
+    code: str,
+    flags: dict[str, int],
+    run_dir: Path,
+    *,
+    window_count: int | None = None,
+) -> dict[str, Any]:
     if code not in _VALIDITY_ENUM:
         code = "PCAP_PARSE_ERROR"
     return {
         "valid_dataset_run": False,
         "invalid_reason_code": code,
         "sampling_duration_seconds": _sampling_duration_seconds(run_dir),
-        "min_pcap_bytes": int(getattr(app_config, "DYNAMIC_MIN_PCAP_BYTES", 100000)),
+        "min_pcap_bytes": int(MIN_PCAP_BYTES),
+        "window_count": window_count,
+        "min_window_count": int(MIN_WINDOWS_PER_RUN),
         **flags,
     }
+
+
+def _window_count_for_duration(duration_s: float, *, window_size_s: float, stride_s: float) -> int:
+    try:
+        t = float(duration_s)
+        w = float(window_size_s)
+        s = float(stride_s)
+    except Exception:
+        return 0
+    if t <= 0 or w <= 0 or s <= 0:
+        return 0
+    if t < w:
+        return 0
+    return int(((t - w) // s) + 1)
 
 
 def _sampling_duration_seconds(run_dir: Path) -> float | None:

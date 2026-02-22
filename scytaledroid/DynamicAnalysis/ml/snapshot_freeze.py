@@ -102,6 +102,8 @@ def build_snapshot_freeze_manifest(
     missing_inputs: dict[str, list[str]] = {}
     run_checksums: dict[str, dict[str, Any]] = {}
     identity_index: dict[tuple[str, str, str, str, str], str] = {}
+    plan_schema_versions: set[str] = set()
+    plan_paper_contract_versions: set[int] = set()
 
     for rid in included_run_ids:
         # Prefer the evidence-pack path recorded in the selection manifest (authoritative).
@@ -164,6 +166,18 @@ def build_snapshot_freeze_manifest(
             },
         }
         plan = _read_json(run_dir / "inputs/static_dynamic_plan.json") or {}
+        selector_type = str(sel.get("selector_type") or "")
+        paper_mode = selector_type == "freeze"
+        if paper_mode:
+            plan_schema_version = str(plan.get("plan_schema_version") or "").strip()
+            if not plan_schema_version:
+                raise RuntimeError(f"FREEZE_MISSING_SCHEMA_VERSION:{rid}")
+            try:
+                plan_paper_contract_version = int(plan.get("paper_contract_version"))
+            except Exception:
+                raise RuntimeError(f"FREEZE_MISSING_SCHEMA_VERSION:{rid}")
+            plan_schema_versions.add(plan_schema_version)
+            plan_paper_contract_versions.add(int(plan_paper_contract_version))
         run_identity = plan.get("run_identity") if isinstance(plan.get("run_identity"), dict) else {}
         pkg_lc = str(run_identity.get("package_name_lc") or plan.get("package_name") or meta.get("package_name") or "").strip().lower()
         version_code = str(run_identity.get("version_code") or plan.get("version_code") or "").strip()
@@ -191,8 +205,18 @@ def build_snapshot_freeze_manifest(
     repo_root = _repo_root()
     selector_type = str(sel.get("selector_type") or "")
     paper_mode = selector_type == "freeze"
+    if paper_mode and (len(plan_schema_versions) != 1 or len(plan_paper_contract_versions) != 1):
+        raise RuntimeError(
+            "FREEZE_MIXED_SCHEMA_VERSION:"
+            f"plan_schema={sorted(plan_schema_versions)}:"
+            f"paper_contract={sorted(plan_paper_contract_versions)}"
+        )
+    required_plan_schema_version = next(iter(plan_schema_versions)) if (paper_mode and plan_schema_versions) else None
+    required_plan_paper_contract_version = (
+        int(next(iter(plan_paper_contract_versions))) if (paper_mode and plan_paper_contract_versions) else None
+    )
     min_pcap_bytes = int(paper_config.MIN_PCAP_BYTES if paper_mode else operational_config.MIN_PCAP_BYTES_FALLBACK)
-    return {
+    payload = {
         "artifact_type": "snapshot_freeze",
         "freeze_contract_version": int(paper_config.FREEZE_CONTRACT_VERSION if paper_mode else 1),
         "paper_contract_version": int(paper_config.PAPER_CONTRACT_VERSION if paper_mode else 0),
@@ -212,6 +236,11 @@ def build_snapshot_freeze_manifest(
         "included_run_ids": included_run_ids,
         "included_run_checksums": run_checksums,
     }
+    if required_plan_schema_version is not None:
+        payload["plan_schema_version_required"] = required_plan_schema_version
+    if required_plan_paper_contract_version is not None:
+        payload["plan_paper_contract_version_required"] = required_plan_paper_contract_version
+    return payload
 
 
 def write_snapshot_freeze_manifest(
