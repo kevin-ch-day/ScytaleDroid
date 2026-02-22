@@ -21,6 +21,7 @@ from typing import Any
 from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_operational as operational_config
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper_config
+from scytaledroid.DynamicAnalysis.plans.loader import enrich_dynamic_plan
 
 _REQUIRED_RELATIVE_INPUTS = (
     "run_manifest.json",
@@ -166,6 +167,8 @@ def build_snapshot_freeze_manifest(
             },
         }
         plan = _read_json(run_dir / "inputs/static_dynamic_plan.json") or {}
+        if isinstance(plan, dict):
+            plan = enrich_dynamic_plan(plan)
         selector_type = str(sel.get("selector_type") or "")
         paper_mode = selector_type == "freeze"
         if paper_mode:

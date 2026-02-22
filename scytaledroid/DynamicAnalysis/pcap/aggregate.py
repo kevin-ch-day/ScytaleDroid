@@ -9,6 +9,7 @@ from typing import Any
 
 from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.core.static_context import compute_static_context
+from scytaledroid.DynamicAnalysis.plans.loader import enrich_dynamic_plan
 
 
 def export_pcap_features_csv() -> Path | None:
@@ -28,6 +29,8 @@ def export_pcap_features_csv() -> Path | None:
             features = json.loads(features_path.read_text(encoding="utf-8"))
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             plan = json.loads(plan_path.read_text(encoding="utf-8")) if plan_path.exists() else {}
+            if isinstance(plan, dict):
+                plan = enrich_dynamic_plan(plan)
         except (OSError, json.JSONDecodeError):
             continue
         static_cols = _extract_static_export_columns(plan if isinstance(plan, dict) else {}, manifest)
@@ -225,7 +228,10 @@ def _load_json(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(payload, dict) and path.name == "static_dynamic_plan.json":
+            return enrich_dynamic_plan(payload)
+        return payload
     except (OSError, json.JSONDecodeError):
         return None
 

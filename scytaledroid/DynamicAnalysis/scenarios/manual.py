@@ -8,6 +8,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import hashlib
 
 from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
@@ -20,6 +21,16 @@ class ScenarioResult:
     ended_at: datetime
     notes: str | None = None
     interaction_level: str | None = None
+    protocol: dict[str, object] | None = None
+
+
+SCRIPT_PROTOCOL_VERSION = 1
+SCRIPT_STEPS_BASIC_USAGE: tuple[tuple[str, str, int], ...] = (
+    ("launch_feed", "Scroll the main feed for new content.", 25),
+    ("open_comments", "Open comments on one post and return.", 20),
+    ("open_profile", "Open a profile page and return to feed.", 20),
+    ("search_nav", "Use search/navigation briefly and return.", 20),
+)
 
 
 class ManualScenarioRunner:
@@ -29,8 +40,10 @@ class ManualScenarioRunner:
         *,
         on_start: Callable[[], None] | None = None,
         on_end: Callable[[], None] | None = None,
+        on_protocol_event: Callable[[str, dict[str, object]], None] | None = None,
     ) -> ScenarioResult:
         interaction_level = getattr(run_ctx, "interaction_level", None)
+        protocol: dict[str, object] | None = None
         if run_ctx.interactive:
             duration_seconds = max(int(run_ctx.duration_seconds or 0), 0)
             profile = getattr(run_ctx, "run_profile", None)
@@ -71,7 +84,15 @@ class ManualScenarioRunner:
             started_at = datetime.now(UTC)
             if on_start:
                 on_start()
-            if duration_seconds:
+            if profile == "interaction_scripted":
+                target_s = duration_seconds or target_s
+                protocol = _run_scripted_protocol(
+                    run_ctx=run_ctx,
+                    target_duration_s=int(target_s),
+                    on_protocol_event=on_protocol_event,
+                )
+                ended_at = datetime.now(UTC)
+            elif duration_seconds:
                 print(status_messages.status("Press Enter to stop early (optional).", level="info"))
                 ended_at = _run_countdown(duration_seconds)
             else:
@@ -88,7 +109,12 @@ class ManualScenarioRunner:
             ended_at = datetime.now(UTC)
             if on_end:
                 on_end()
-        return ScenarioResult(started_at=started_at, ended_at=ended_at, interaction_level=interaction_level)
+        return ScenarioResult(
+            started_at=started_at,
+            ended_at=ended_at,
+            interaction_level=interaction_level,
+            protocol=protocol,
+        )
 
 
 def _prompt_interaction_level(profile: str | None) -> str:
@@ -175,6 +201,93 @@ def _run_stopwatch() -> datetime:
     return datetime.now(UTC)
 
 
+def _run_scripted_protocol(
+    *,
+    run_ctx: RunContext,
+    target_duration_s: int,
+    on_protocol_event: Callable[[str, dict[str, object]], None] | None,
+) -> dict[str, object]:
+    steps = SCRIPT_STEPS_BASIC_USAGE
+    hash_payload = "|".join(step_id for step_id, _desc, _expected in steps)
+    script_hash = hashlib.sha256(hash_payload.encode("utf-8")).hexdigest()
+    protocol: dict[str, object] = {
+        "interaction_protocol_version": SCRIPT_PROTOCOL_VERSION,
+        "script_name": f"{run_ctx.scenario_id}_scripted_v1",
+        "script_hash": script_hash,
+        "step_count_planned": len(steps),
+        "step_count_completed": 0,
+        "target_duration_s": int(target_duration_s),
+        "script_exit_code": 0,
+        "script_end_marker": False,
+        "timing_within_tolerance": True,
+        "deviation_codes": [],
+    }
+    started_monotonic = time.monotonic()
+    if on_protocol_event:
+        on_protocol_event(
+            "SCRIPT_START",
+            {
+                "script_name": protocol["script_name"],
+                "script_hash": script_hash,
+                "step_count_planned": len(steps),
+                "interaction_protocol_version": SCRIPT_PROTOCOL_VERSION,
+            },
+        )
+    for idx, (step_id, step_desc, expected_s) in enumerate(steps, start=1):
+        print()
+        print(status_messages.status(f"Step {idx}/{len(steps)}: {step_id}", level="info"))
+        print(status_messages.status(f"  {step_desc}", level="info"))
+        print(status_messages.status(f"  Expected duration: {expected_s}s", level="info"))
+        if on_protocol_event:
+            on_protocol_event(
+                "STEP_START",
+                {"step_id": step_id, "step_index": idx, "expected_duration_s": expected_s},
+            )
+        step_start = time.monotonic()
+        prompt_utils.press_enter_to_continue("Press Enter when step is complete...")
+        step_elapsed = max(0.0, time.monotonic() - step_start)
+        tolerance = min(max(0.25 * float(expected_s), 5.0), 30.0)
+        within = step_elapsed <= (float(expected_s) + tolerance)
+        if not within:
+            protocol["timing_within_tolerance"] = False
+            deviations = protocol.get("deviation_codes")
+            if isinstance(deviations, list):
+                deviations.append("SCRIPT_TIMEOUT")
+        if on_protocol_event:
+            on_protocol_event(
+                "STEP_END",
+                {
+                    "step_id": step_id,
+                    "step_index": idx,
+                    "elapsed_s": round(step_elapsed, 3),
+                    "expected_duration_s": expected_s,
+                    "tolerance_s": round(tolerance, 3),
+                    "within_tolerance": bool(within),
+                },
+            )
+        protocol["step_count_completed"] = idx
+    elapsed_total = int(time.monotonic() - started_monotonic)
+    remaining = max(int(target_duration_s) - elapsed_total, 0)
+    if remaining > 0:
+        print(status_messages.status(f"Protocol completed; hold foreground for {remaining}s.", level="info"))
+        _run_countdown(remaining)
+    protocol["script_end_marker"] = True
+    protocol["actual_duration_s"] = int(time.monotonic() - started_monotonic)
+    if on_protocol_event:
+        on_protocol_event(
+            "SCRIPT_END",
+            {
+                "script_name": protocol["script_name"],
+                "script_hash": script_hash,
+                "step_count_completed": protocol["step_count_completed"],
+                "step_count_planned": protocol["step_count_planned"],
+                "script_exit_code": protocol["script_exit_code"],
+                "timing_within_tolerance": protocol["timing_within_tolerance"],
+            },
+        )
+    return protocol
+
+
 def _format_duration(seconds: int) -> str:
     if seconds < 60:
         return f"{seconds}s"
@@ -190,4 +303,4 @@ def _pulse_marker(elapsed_seconds: int) -> str:
     return ""
 
 
-__all__ = ["ManualScenarioRunner", "ScenarioResult"]
+__all__ = ["ManualScenarioRunner", "ScenarioResult", "SCRIPT_PROTOCOL_VERSION"]

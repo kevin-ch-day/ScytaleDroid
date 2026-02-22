@@ -19,6 +19,8 @@ from typing import Any
 
 from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper_config
+from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import MIN_WINDOWS_PER_RUN
+from scytaledroid.DynamicAnalysis.plans.loader import enrich_dynamic_plan
 
 
 @dataclass(frozen=True)
@@ -140,7 +142,7 @@ def build_dataset_freeze_manifest(
             prof = str(r.get("run_profile") or "")
             if prof.startswith("baseline_idle"):
                 base.append(rid)
-            elif prof.startswith("interactive_use") or prof.startswith("interaction_"):
+            elif prof.startswith("interaction_"):
                 inter.append(rid)
 
         # Basic quota sanity (do not "fix" anything here).
@@ -159,6 +161,8 @@ def build_dataset_freeze_manifest(
             "included_run_ids": included,
         }
         included_run_ids.extend(included)
+        expected_bucket_by_run_id = {rid: "baseline" for rid in base}
+        expected_bucket_by_run_id.update({rid: "interactive" for rid in inter})
 
         # Verify required inputs exist (evidence-pack correctness check at freeze time).
         for rid in included:
@@ -166,6 +170,27 @@ def build_dataset_freeze_manifest(
             miss = [rel for rel in _REQUIRED_RELATIVE_INPUTS if not (run_dir / rel).exists()]
             # Ensure canonical PCAP referenced by manifest exists.
             mf = _read_json(run_dir / "run_manifest.json") or {}
+            ds = mf.get("dataset") if isinstance(mf.get("dataset"), dict) else {}
+            op = mf.get("operator") if isinstance(mf.get("operator"), dict) else {}
+            if ds.get("valid_dataset_run") is not True:
+                raise RuntimeError(f"FREEZE_EVIDENCE_INVALID_DATASET_RUN:{rid}")
+            try:
+                wc = int(ds.get("window_count") or 0)
+            except Exception:
+                wc = 0
+            if wc < int(MIN_WINDOWS_PER_RUN):
+                raise RuntimeError(f"FREEZE_EVIDENCE_WINDOW_COUNT_INVALID:{rid}:{wc}")
+            observed_profile = str(op.get("run_profile") or ds.get("run_profile") or "").lower()
+            observed_bucket = (
+                "baseline"
+                if ("baseline" in observed_profile or "idle" in observed_profile)
+                else ("interactive" if ("interaction" in observed_profile or "interactive" in observed_profile) else "")
+            )
+            expected_bucket = expected_bucket_by_run_id.get(rid, "")
+            if expected_bucket and observed_bucket and expected_bucket != observed_bucket:
+                raise RuntimeError(
+                    f"FREEZE_EVIDENCE_PROFILE_MISMATCH:{rid}:{expected_bucket}!={observed_bucket}"
+                )
             pcap_rel = None
             for a in (mf.get("artifacts") or []):
                 if isinstance(a, dict) and a.get("type") == "pcapdroid_capture":
@@ -207,8 +232,6 @@ def build_dataset_freeze_manifest(
                         except Exception:
                             pcap_size_bytes = None
 
-            ds = mf.get("dataset") if isinstance(mf.get("dataset"), dict) else {}
-            op = mf.get("operator") if isinstance(mf.get("operator"), dict) else {}
             capture_policy_version = op.get("capture_policy_version")
             try:
                 capture_policy_version_i = int(capture_policy_version)
@@ -219,6 +242,8 @@ def build_dataset_freeze_manifest(
                     f"FREEZE_CAPTURE_POLICY_VERSION_MISMATCH:{rid}:{capture_policy_version_i}"
                 )
             plan = _read_json(run_dir / "inputs/static_dynamic_plan.json") or {}
+            if isinstance(plan, dict):
+                plan = enrich_dynamic_plan(plan)
             plan_schema_version = str(plan.get("plan_schema_version") or "").strip()
             if not plan_schema_version:
                 raise RuntimeError(f"FREEZE_MISSING_SCHEMA_VERSION:{rid}")
@@ -291,7 +316,7 @@ def build_dataset_freeze_manifest(
         "quota_policy": {
             "baseline_required": int(config.baseline_required),
             "interactive_required": int(config.interactive_required),
-            "selection_rule": "include iff valid_dataset_run==true AND counts_toward_quota==true",
+            "selection_rule": "include iff tracker(valid_dataset_run==true AND counts_toward_quota==true) AND evidence(dataset.valid_dataset_run==true, window_count>=20, profile parity)",
             "extras_policy": "extra valid runs are retained but excluded deterministically (out-of-dataset)",
         },
         "qa_thresholds": {

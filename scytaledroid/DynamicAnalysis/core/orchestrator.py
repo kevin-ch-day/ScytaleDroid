@@ -47,7 +47,7 @@ from scytaledroid.DynamicAnalysis.plans.loader import (
     render_plan_validation_block,
     validate_dynamic_plan,
 )
-from scytaledroid.DynamicAnalysis.scenarios import ManualScenarioRunner
+from scytaledroid.DynamicAnalysis.scenarios import ManualScenarioRunner, SCRIPT_PROTOCOL_VERSION
 from scytaledroid.DynamicAnalysis.telemetry.sampler import TelemetrySampler
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_engine
@@ -295,6 +295,7 @@ class DynamicRunOrchestrator:
                 run_ctx,
                 on_start=sampler.start if sampler else None,
                 on_end=None,
+                on_protocol_event=(lambda event_type, details: event_logger.log(event_type, details)),
             )
         finally:
             if monitor:
@@ -336,6 +337,30 @@ class DynamicRunOrchestrator:
                 ),
             }
         )
+        actual_duration_s = int((scenario_result.ended_at - scenario_result.started_at).total_seconds())
+        manifest.operator["actual_duration_s"] = actual_duration_s
+        if isinstance(scenario_result.protocol, dict):
+            protocol = scenario_result.protocol
+            manifest.operator.update(
+                {
+                    "interaction_protocol_version": int(
+                        protocol.get("interaction_protocol_version") or SCRIPT_PROTOCOL_VERSION
+                    ),
+                    "script_name": protocol.get("script_name"),
+                    "script_hash": protocol.get("script_hash"),
+                    "step_count": protocol.get("step_count_completed"),
+                    "step_count_planned": protocol.get("step_count_planned"),
+                    "step_count_completed": protocol.get("step_count_completed"),
+                    "script_exit_code": protocol.get("script_exit_code"),
+                    "script_end_marker": protocol.get("script_end_marker"),
+                    "script_timing_within_tolerance": protocol.get("timing_within_tolerance"),
+                    "target_duration_s": protocol.get("target_duration_s") or manifest.operator.get("target_duration_s"),
+                }
+            )
+        else:
+            profile = str(getattr(run_ctx, "run_profile", "") or "").strip().lower()
+            if profile.startswith("baseline"):
+                manifest.operator.setdefault("not_applicable", {"script": "baseline_idle"})
         interaction_level = (
             "minimal"
             if getattr(scenario_result, "interaction_level", None) == "idle"
@@ -668,6 +693,17 @@ class DynamicRunOrchestrator:
                 "tool_version": app_config.APP_VERSION,
                 "tool_semver": app_config.APP_VERSION,
                 "capture_policy_version": int(getattr(paper2_config, "PAPER_CONTRACT_VERSION", 1)),
+                "interaction_protocol_version": int(SCRIPT_PROTOCOL_VERSION),
+                "script_name": None,
+                "script_hash": None,
+                "step_count": None,
+                "step_count_planned": None,
+                "step_count_completed": None,
+                "script_exit_code": None,
+                "script_end_marker": None,
+                "script_timing_within_tolerance": None,
+                "target_duration_s": int(getattr(app_config, "DYNAMIC_TARGET_DURATION_S", 180)),
+                "actual_duration_s": None,
                 "tool_git_commit": get_git_commit(),
                 "schema_version": db_diagnostics.get_schema_version() or "<unknown>",
                 "host_tools": collect_host_tools(),

@@ -94,7 +94,7 @@ class TargetManager:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(package_dump, encoding="utf-8")
         version_name = self._extract_value(package_dump, r"versionName=(\S+)")
-        version_code = self._extract_value(package_dump, r"versionCode=(\d+)")
+        version_code = self._extract_version_code(package_dump, run_ctx.package_name)
         user_id = self._extract_value(package_dump, r"userId=(\d+)")
         first_install_time = self._extract_value(package_dump, r"firstInstallTime=(.+)")
         last_update_time = self._extract_value(package_dump, r"lastUpdateTime=(.+)")
@@ -122,7 +122,7 @@ class TargetManager:
         package = run_ctx.package_name
         # Paper contract: identity checks are pinned to user 0.
         output = adb_shell.run_shell(serial, ["dumpsys", "package", "--user", "0", package])
-        if output and "Unknown option" not in output and "Bad argument" not in output:
+        if output and "Unknown option" not in output and "Bad argument" not in output and "Unknown argument" not in output:
             return output
         return adb_shell.run_shell(serial, ["dumpsys", "package", package])
 
@@ -187,6 +187,25 @@ class TargetManager:
         if match:
             return match.group(1)
         return None
+
+    def _extract_version_code(self, package_dump: str, package_name: str) -> str | None:
+        scoped = package_dump
+        pkg_pat = re.compile(rf"(?m)^\s*Package\s+\[{re.escape(package_name)}\]\s*$")
+        pkg_match = pkg_pat.search(package_dump)
+        if pkg_match:
+            next_pkg = re.search(r"(?m)^\s*Package\s+\[[^\]]+\]\s*$", package_dump[pkg_match.end() :])
+            end = pkg_match.end() + next_pkg.start() if next_pkg else len(package_dump)
+            scoped = package_dump[pkg_match.end() : end]
+        patterns = (
+            r"(?m)^\s*versionCode=(\d+)\s+minSdk=.*$",
+            r"(?m)^\s*versionCode=(\d+)\b.*$",
+        )
+        for pat in patterns:
+            m = re.search(pat, scoped)
+            if m:
+                return m.group(1)
+        fallback = re.search(r"versionCode=(\d+)\b", package_dump)
+        return fallback.group(1) if fallback else None
 
     def _extract_signer_digests(self, package_dump: str) -> list[str]:
         digests: list[str] = []

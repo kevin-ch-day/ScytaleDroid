@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from scytaledroid.DynamicAnalysis.plans.loader import enrich_dynamic_plan
+
 from . import ml_parameters_paper2 as ml_config
 from .seed_identity import identity_key_fallback, identity_key_from_plan
 from .telemetry_windowing import WindowSpec, iter_windows
@@ -67,6 +69,8 @@ def load_run_inputs(run_dir: Path) -> RunInputs | None:
         return payload if isinstance(payload, dict) else None
 
     plan = _load_json("inputs/static_dynamic_plan.json")
+    if isinstance(plan, dict):
+        plan = enrich_dynamic_plan(plan)
     summary = _load_json("analysis/summary.json")
     pcap_report = _load_json("analysis/pcap_report.json")
     pcap_features = _load_json("analysis/pcap_features.json")

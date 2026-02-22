@@ -48,14 +48,30 @@ _STABILIZATION_WAIT_S = 15
 
 
 def _print_paper_mode_constants() -> None:
+    try:
+        import numpy as _np
+
+        numpy_version = str(getattr(_np, "__version__", "unknown"))
+    except Exception:
+        numpy_version = "unknown"
+    try:
+        import sklearn as _sk
+
+        sklearn_version = str(getattr(_sk, "__version__", "unknown"))
+    except Exception:
+        sklearn_version = "unknown"
+
     menu_utils.print_section("ML Parameters (Paper #2 Locked)")
     rows = [
         ("Window size", f"{int(paper2_config.WINDOW_SIZE_S)}s"),
         ("Stride", f"{int(paper2_config.WINDOW_STRIDE_S)}s"),
         ("Percentile threshold", f"{int(paper2_config.THRESHOLD_PERCENTILE)}"),
+        ("Percentile method", str(getattr(paper2_config, "NP_PERCENTILE_METHOD", "linear"))),
         ("Min PCAP bytes", f"{int(paper2_config.MIN_PCAP_BYTES)}"),
         ("Models", "Isolation Forest + OC-SVM"),
         ("Baseline-only training", "YES"),
+        ("NumPy version", numpy_version),
+        ("scikit-learn version", sklearn_version),
     ]
     menu_utils.print_table(["Parameter", "Value"], rows)
 
@@ -127,29 +143,140 @@ def _read_vpn_state(device_serial: str) -> str:
     return "unknown"
 
 
-def _read_capture_interface(device_serial: str) -> str | None:
-    out = adb_shell.run_shell(device_serial, ["ip", "route"])
-    for line in out.splitlines():
+def _extract_route_interface(route_output: str) -> str | None:
+    for line in route_output.splitlines():
         line = line.strip()
-        if not line.startswith("default"):
+        if not line:
+            continue
+        # Common forms:
+        # - default via 192.168.1.1 dev wlan0
+        # - 10.0.0.0/8 dev rmnet_data0 scope link
+        if " dev " not in line:
             continue
         m = re.search(r"\bdev\s+(\S+)", line)
+        if not m:
+            continue
+        iface = m.group(1).strip()
+        if iface and iface not in {"lo"}:
+            return iface
+    return None
+
+
+def _read_capture_interface(device_serial: str) -> str | None:
+    # 1) Route-based detection (preferred).
+    for cmd in (
+        ["ip", "route"],
+        ["ip", "-o", "route", "show"],
+        ["ip", "route", "show", "table", "all"],
+        ["/system/bin/ip", "route"],
+    ):
+        try:
+            out = adb_shell.run_shell(device_serial, cmd)
+        except Exception:
+            out = ""
+        iface = _extract_route_interface(out or "")
+        if iface:
+            return iface
+
+    # 2) Connectivity service fallback.
+    try:
+        conn = adb_shell.run_shell(device_serial, ["dumpsys", "connectivity"])
+    except Exception:
+        conn = ""
+    for pattern in (
+        r"\binterfaceName[:=]\s*([a-zA-Z0-9_.:-]+)",
+        r"\bIface[:=]\s*([a-zA-Z0-9_.:-]+)",
+    ):
+        m = re.search(pattern, conn or "", flags=re.IGNORECASE)
         if m:
-            return m.group(1)
+            iface = m.group(1).strip()
+            if iface and iface != "lo":
+                return iface
+
+    # 3) Property fallback for OEM/network stacks.
+    for prop in ("wifi.interface", "vendor.wifi.interface", "persist.vendor.wifi.interface"):
+        try:
+            val = adb_shell.run_shell(device_serial, ["getprop", prop]).strip()
+        except Exception:
+            val = ""
+        if val and val != "[]":
+            return val
     return None
 
 
 def _read_observed_version_code(device_serial: str, package_name: str) -> str | None:
-    out = adb_shell.run_shell(
-        device_serial,
-        ["dumpsys", "package", "--user", "0", package_name],
-    )
+    details = _read_observed_version_code_details(device_serial, package_name)
+    return details.get("version_code")
+
+
+def _read_observed_version_code_details(device_serial: str, package_name: str) -> dict[str, str]:
+    cmd_primary = ["dumpsys", "package", "--user", "0", package_name]
+    out = adb_shell.run_shell(device_serial, cmd_primary)
     if out and "Unknown option" not in out and "Bad argument" not in out:
         dump = out
+        command_used = " ".join(cmd_primary)
     else:
-        dump = adb_shell.run_shell(device_serial, ["dumpsys", "package", package_name])
-    m = re.search(r"versionCode=(\d+)", dump)
-    return m.group(1).strip() if m else None
+        cmd_fallback = ["dumpsys", "package", package_name]
+        dump = adb_shell.run_shell(device_serial, cmd_fallback)
+        command_used = " ".join(cmd_fallback)
+    parsed = _extract_version_code_details_from_dump(dump, package_name)
+    return {
+        "version_code": parsed.get("version_code", ""),
+        "command": command_used,
+        "pattern": parsed.get("pattern", ""),
+        "matched_line": parsed.get("matched_line", ""),
+    }
+
+
+def _extract_version_code_from_dump(dump: str, package_name: str) -> str | None:
+    details = _extract_version_code_details_from_dump(dump, package_name)
+    value = details.get("version_code")
+    return value or None
+
+
+def _extract_version_code_details_from_dump(dump: str, package_name: str) -> dict[str, str]:
+    text = str(dump or "")
+    if not text:
+        return {}
+    pkg = str(package_name or "").strip()
+
+    # Prefer parsing from the package's own block to avoid accidental matches.
+    scoped = text
+    if pkg:
+        marker = f"Package [{pkg}]"
+        start = text.find(marker)
+        if start >= 0:
+            next_match = re.search(r"(?m)^\s*Package \[", text[start + len(marker) :])
+            if next_match:
+                end = start + len(marker) + next_match.start()
+                scoped = text[start:end]
+            else:
+                scoped = text[start:]
+
+    patterns = (
+        # Canonical line form in dumpsys package output for the selected package.
+        ("versionCode+minSdk", r"(?m)^\s*(versionCode=(\d+)\s+minSdk=.*)$"),
+        # Fallback to a versionCode line start (avoids versionCodeMajor noise).
+        ("versionCode-line", r"(?m)^\s*(versionCode=(\d+)\b.*)$"),
+        # Last-resort broad match.
+        ("versionCode-any", r"(versionCode=(\d+)\b)"),
+    )
+    for source_name, source in (("scoped", scoped), ("full", text)):
+        for pattern_name, pat in patterns:
+            m = re.search(pat, source)
+            if m:
+                value = m.group(2).strip() if len(m.groups()) >= 2 else ""
+                matched_line = ""
+                try:
+                    matched_line = m.group(1).strip()
+                except Exception:
+                    matched_line = ""
+                return {
+                    "version_code": value,
+                    "pattern": f"{source_name}:{pattern_name}",
+                    "matched_line": matched_line,
+                }
+    return {}
 
 
 def _read_observed_signer_set_hash(device_serial: str, package_name: str) -> str | None:
@@ -259,11 +386,18 @@ def _pre_run_scientific_checks(
         rows.append(["Clock drift", "OK", f"{clock_drift:.1f}s"])
 
     plan_identity = _load_plan_identity(plan_path)
-    observed_vc = _read_observed_version_code(device_serial, package_name) or ""
+    observed_details = _read_observed_version_code_details(device_serial, package_name)
+    observed_vc = (observed_details.get("version_code") or "").strip()
     expected_vc = plan_identity.get("version_code") or ""
     if not expected_vc:
         hard_failures.append("Plan missing version_code")
         rows.append(["Build identity", "FAIL", "plan missing version_code"])
+    elif not observed_vc:
+        hard_failures.append("Observed identity parse failed (version_code unavailable)")
+        rows.append(["Build identity", "FAIL", "observed version_code unavailable"])
+        rows.append(["Identity source", "INFO", observed_details.get("command") or "unknown"])
+        rows.append(["Identity parser", "INFO", observed_details.get("pattern") or "no-match"])
+        rows.append(["Identity line", "INFO", observed_details.get("matched_line") or "no-match"])
     elif observed_vc != expected_vc:
         hard_failures.append(
             f"Build identity drift: version_code {observed_vc or 'unknown'} != {expected_vc}"
@@ -271,6 +405,9 @@ def _pre_run_scientific_checks(
         rows.append(
             ["Build identity", "FAIL", f"observed={observed_vc or 'unknown'} expected={expected_vc}"]
         )
+        rows.append(["Identity source", "INFO", observed_details.get("command") or "unknown"])
+        rows.append(["Identity parser", "INFO", observed_details.get("pattern") or "no-match"])
+        rows.append(["Identity line", "INFO", observed_details.get("matched_line") or "no-match"])
     else:
         rows.append(["Build identity", "OK", f"version_code={expected_vc}"])
 
@@ -428,6 +565,7 @@ def _post_run_integrity_check(result) -> None:
     features_ok = False
     window_count = None
     report: dict[str, object] = {}
+    dataset: dict[str, object] = {}
 
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -439,6 +577,10 @@ def _post_run_integrity_check(result) -> None:
         dataset_valid = dataset.get("valid_dataset_run")
         invalid_reason = dataset.get("invalid_reason_code")
         pcap_size = dataset.get("pcap_size_bytes")
+        try:
+            window_count = int(dataset.get("window_count")) if dataset.get("window_count") not in (None, "") else None
+        except Exception:
+            window_count = None
     except Exception:
         pass
 
@@ -467,7 +609,10 @@ def _post_run_integrity_check(result) -> None:
         if isinstance(ts, dict):
             wb = ts.get("windowing")
             if isinstance(wb, dict):
-                window_count = wb.get("window_count")
+                try:
+                    window_count = int(wb.get("window_count")) if wb.get("window_count") not in (None, "") else window_count
+                except Exception:
+                    pass
     except Exception:
         pass
 
@@ -476,9 +621,11 @@ def _post_run_integrity_check(result) -> None:
     except Exception:
         pcap_size_int = 0
     pcap_size_ok = pcap_size_int >= int(paper2_config.MIN_PCAP_BYTES)
+    min_windows = int(getattr(paper2_config, "MIN_WINDOWS_PER_RUN", 20))
+    window_count_ok = window_count is not None and int(window_count) >= int(min_windows)
     verdict = (
         "VALID"
-        if (dataset_valid is True and pcap_size_ok and capinfos_ok and tshark_ok and features_ok)
+        if (dataset_valid is True and pcap_size_ok and capinfos_ok and tshark_ok and features_ok and window_count_ok)
         else "INVALID"
     )
     rows = [
@@ -496,8 +643,12 @@ def _post_run_integrity_check(result) -> None:
         ["Feature extraction", "OK" if features_ok else "FAIL", "analysis/pcap_features.json"],
         [
             "Window count",
-            "OK" if window_count is not None else "WARN",
-            str(window_count) if window_count is not None else "unavailable",
+            "OK" if window_count_ok else "FAIL",
+            (
+                f"{window_count} (min {min_windows})"
+                if window_count is not None
+                else f"unavailable (min {min_windows})"
+            ),
         ],
         ["Run verdict", "OK" if verdict == "VALID" else "FAIL", verdict],
     ]
@@ -626,47 +777,62 @@ def run_guided_dataset_run(
     fs_runs = find_dynamic_run_dirs(package_name)
 
     print()
+    print("Runs recorded:")
     print(
-        status_messages.status(
-            f"Runs recorded: tracker={counts.total_runs} "
-            f"(valid={counts.valid_runs}/{total_required}, "
-            f"baseline={counts.baseline_valid_runs}/{cfg.baseline_required}, "
-            f"interactive={counts.interactive_valid_runs}/{cfg.interactive_required}, "
-            f"quota_met={int(counts.quota_met)}) "
-            f"| local_evidence={len(fs_runs)}",
-            level="info",
-        )
+        f"  tracker={counts.total_runs}\tvalid={counts.valid_runs}/{total_required}\n"
+        f"  baseline={counts.baseline_valid_runs}/{cfg.baseline_required}\t"
+        f"interactive={counts.interactive_valid_runs}/{cfg.interactive_required}\n"
+        f"  quota_met={int(counts.quota_met)}\tlocal_evidence={len(fs_runs)}"
     )
     if counts.quota_met:
         # Once quota is met, runs are still allowed, but they're "extra" and don't change completion.
-        print(
-            status_messages.status(
-                "Quota met. Additional runs are allowed and will be tracked as extra (do not change completion).",
-                level="info",
-            )
-        )
+        print("Quota met. Additional runs are allowed and will be tracked as extra (do not change completion).")
         suggested_slot = None
     elif suggested_slot:
-        print(
-            status_messages.status(
-                # Do not imply an ordering constraint. Operators may run in any order;
-                # the tracker deterministically counts the first N valid baseline/interactive runs.
-                f"Suggested by quota (counts toward completion): {suggested_profile}",
-                level="info",
-            )
-        )
+        # Do not imply an ordering constraint. Operators may run in any order;
+        # the tracker deterministically counts the first N valid baseline/interactive runs.
+        print(f"Suggested by quota (counts toward completion): {suggested_profile}")
+
+    print(f"Paper cohort quota: baseline={cfg.baseline_required}, interaction={cfg.interactive_required}.")
+    print(f"This run will be {'EXTRA (not countable)' if counts.quota_met else 'COUNTABLE'} by default.")
 
     def _badge_for(key: str) -> str | None:
         if not suggested_slot:
             return None
         return "suggested" if key == ("2" if "interactive" in suggested_profile else "1") else None
 
+    can_reset = len(fs_runs) > 0
     protocol_options = [
-        menu_utils.MenuOption("1", "Idle Baseline", description="run_profile=baseline_idle", badge=_badge_for("1")),
-        menu_utils.MenuOption("2", "Scripted Interaction", description="run_profile=interaction_scripted", badge=_badge_for("2")),
-        menu_utils.MenuOption("3", "Manual Interaction", description="run_profile=interaction_manual", badge=None),
+        menu_utils.MenuOption(
+            "1",
+            "Idle Baseline",
+            description="Purpose: baseline-only training. run_profile=baseline_idle",
+            badge=_badge_for("1"),
+        ),
+        menu_utils.MenuOption(
+            "2",
+            "Scripted Interaction",
+            description="Purpose: repeatable stimulus. run_profile=interaction_scripted",
+            badge=_badge_for("2"),
+        ),
+        menu_utils.MenuOption(
+            "3",
+            "Manual Interaction",
+            description="Purpose: realism/robustness. run_profile=interaction_manual",
+            badge=None,
+        ),
         menu_utils.MenuOption("4", "Test app (Dry Run/No Saving)", description="no capture; checks plan + tools", badge=None),
-        menu_utils.MenuOption("D", "Delete previous runs", description="delete local evidence packs + reset tracker for this app", badge=None),
+        menu_utils.MenuOption(
+            "D",
+            "Reset app (dangerous)",
+            description=(
+                "delete local evidence packs + reset tracker for this app"
+                if can_reset
+                else "disabled: no local evidence packs in this workspace"
+            ),
+            badge=None,
+            disabled=(not can_reset),
+        ),
     ]
 
     menu_utils.print_header("Select Run Intent")
@@ -698,8 +864,13 @@ def run_guided_dataset_run(
                 level="warn",
             )
         )
-        if not local and counts.total_runs <= 0:
-            print(status_messages.status("Nothing to delete/reset.", level="info"))
+        if not local:
+            print(
+                status_messages.status(
+                    "Delete is blocked: local evidence packs are missing in this workspace. Resetting tracker-only state is unsafe in paper mode.",
+                    level="error",
+                )
+            )
             prompt_utils.press_enter_to_continue()
             return
         confirmed = prompt_utils.prompt_yes_no(

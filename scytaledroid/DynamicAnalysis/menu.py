@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import json
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from scytaledroid.Config import app_config  # noqa: F401 - re-exported for tests
@@ -19,6 +20,8 @@ from scytaledroid.DynamicAnalysis.datasets.research_dataset_alpha import (
 from scytaledroid.DynamicAnalysis.datasets.research_dataset_alpha import (
     load_dataset_packages as _load_dataset_packages,
 )
+from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper2_config
+from scytaledroid.DynamicAnalysis.paper_eligibility import derive_paper_eligibility
 from scytaledroid.DynamicAnalysis.profile_loader import load_db_profiles, load_profile_packages
 from scytaledroid.DynamicAnalysis.services.observer_service import (
     select_observers as _service_select_observers,
@@ -34,6 +37,84 @@ from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
 
 _DEVICE_STATUS_CACHE: dict[str, dict[str, str]] = {}
 _RUN_IDENTITY_CACHE: dict[str, tuple[str | None, str | None]] = {}
+
+
+def _read_json(path: Path) -> dict | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _min_windows_per_run() -> int:
+    try:
+        from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import MIN_WINDOWS_PER_RUN
+
+        return int(MIN_WINDOWS_PER_RUN)
+    except Exception:
+        return 20
+
+
+def _run_profile_bucket(run_profile: str) -> str:
+    prof = (run_profile or "").strip().lower()
+    if "baseline" in prof or "idle" in prof:
+        return "baseline"
+    if "interaction" in prof or "interactive" in prof or "script" in prof or "manual" in prof:
+        return "interactive"
+    return "unknown"
+
+
+def _summarize_evidence_quota(dataset_pkgs: set[str], cfg) -> dict[str, int | bool]:
+    root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    out: dict[str, int | bool] = {
+        "evidence_root_exists": root.exists(),
+        "total_runs": 0,
+        "paper_eligible_runs": 0,
+        "quota_runs_counted": 0,
+    }
+    if not root.exists():
+        return out
+
+    per_pkg: dict[str, dict[str, int]] = {}
+    for run_dir in sorted([p for p in root.iterdir() if p.is_dir()], key=lambda p: p.name):
+        manifest_path = run_dir / "run_manifest.json"
+        if not manifest_path.exists():
+            continue
+        try:
+            payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        out["total_runs"] = int(out["total_runs"]) + 1
+        dataset = payload.get("dataset") if isinstance(payload.get("dataset"), dict) else {}
+        operator = payload.get("operator") if isinstance(payload.get("operator"), dict) else {}
+        target = payload.get("target") if isinstance(payload.get("target"), dict) else {}
+        package = str(target.get("package_name") or "").strip().lower()
+        if package not in dataset_pkgs:
+            continue
+        plan = _read_json(run_dir / "inputs" / "static_dynamic_plan.json") or {}
+        eligibility = derive_paper_eligibility(
+            manifest=payload,
+            plan=plan,
+            min_windows=_min_windows_per_run(),
+            required_capture_policy_version=int(paper2_config.PAPER_CONTRACT_VERSION),
+        )
+        if not eligibility.paper_eligible:
+            continue
+        out["paper_eligible_runs"] = int(out["paper_eligible_runs"]) + 1
+        bucket = _run_profile_bucket(
+            str(dataset.get("run_profile") or operator.get("run_profile") or "")
+        )
+        if bucket == "unknown":
+            continue
+        pkg_counts = per_pkg.setdefault(package, {"baseline": 0, "interactive": 0})
+        needed = int(cfg.baseline_required if bucket == "baseline" else cfg.interactive_required)
+        if int(pkg_counts.get(bucket, 0)) < needed:
+            pkg_counts[bucket] = int(pkg_counts.get(bucket, 0)) + 1
+            out["quota_runs_counted"] = int(out["quota_runs_counted"]) + 1
+    return out
 
 @dataclass(frozen=True)
 class _DynamicUiDefaults:
@@ -71,6 +152,8 @@ def dynamic_analysis_menu() -> None:
         MenuOption("3", "Export run summary CSV"),
         MenuOption("4", "Export PCAP features CSV"),
         MenuOption("5", "Verify host PCAP tools (tshark + capinfos)"),
+        MenuOption("6", "Paper readiness audit (evidence packs)"),
+        MenuOption("7", "Repair/reindex tracker from evidence packs"),
     ]
 
     ui_defaults = _load_dynamic_ui_defaults()
@@ -112,9 +195,185 @@ def dynamic_analysis_menu() -> None:
             _verify_host_pcap_tools()
             prompt_utils.press_enter_to_continue()
             continue
+        if choice == "6":
+            _run_paper_readiness_audit()
+            prompt_utils.press_enter_to_continue()
+            continue
+        if choice == "7":
+            _repair_reindex_tracker()
+            prompt_utils.press_enter_to_continue()
+            continue
 
 
     return
+
+
+def _repair_reindex_tracker() -> None:
+    from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
+        DatasetTrackerConfig,
+        load_dataset_tracker,
+        recompute_dataset_tracker,
+    )
+
+    print()
+    menu_utils.print_header("Repair/Reindex Tracker")
+    cfg = DatasetTrackerConfig()
+    tracker_before = load_dataset_tracker()
+    before_apps = tracker_before.get("apps") if isinstance(tracker_before, dict) else {}
+    before_runs = sum(
+        len(v.get("runs", []))
+        for v in before_apps.values()
+        if isinstance(v, dict) and isinstance(v.get("runs"), list)
+    ) if isinstance(before_apps, dict) else 0
+
+    if before_runs > 0:
+        print(
+            status_messages.status(
+                "Reindex rebuilds tracker from local evidence packs only and drops tracker-only historical rows.",
+                level="warn",
+            )
+        )
+        confirmed = prompt_utils.prompt_yes_no(
+            f"Proceed with reindex? current tracker runs={before_runs}",
+            default=False,
+        )
+        if not confirmed:
+            print(status_messages.status("Reindex canceled.", level="info"))
+            return
+
+    out = recompute_dataset_tracker(config=cfg)
+    if out is None:
+        print(
+            status_messages.status(
+                "No dynamic evidence root found; cannot reindex tracker. Ensure output/evidence/dynamic exists.",
+                level="error",
+            )
+        )
+        return
+
+    tracker_after = load_dataset_tracker()
+    apps = tracker_after.get("apps") if isinstance(tracker_after, dict) else {}
+    app_count = len(apps) if isinstance(apps, dict) else 0
+    run_count = 0
+    valid_count = 0
+    missing_window_count = 0
+    missing_paper_identity_count = 0
+    for entry in (apps.values() if isinstance(apps, dict) else []):
+        if not isinstance(entry, dict):
+            continue
+        runs = entry.get("runs")
+        if not isinstance(runs, list):
+            continue
+        for r in runs:
+            if not isinstance(r, dict):
+                continue
+            run_count += 1
+            if r.get("valid_dataset_run") is not True:
+                continue
+            valid_count += 1
+            if r.get("window_count") in (None, ""):
+                missing_window_count += 1
+            run_id = str(r.get("run_id") or "").strip()
+            if not run_id:
+                missing_paper_identity_count += 1
+                continue
+            manifest = _read_json(Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic" / run_id / "run_manifest.json") or {}
+            plan = _read_json(Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic" / run_id / "inputs" / "static_dynamic_plan.json") or {}
+            eligibility = derive_paper_eligibility(
+                manifest=manifest,
+                plan=plan,
+                min_windows=_min_windows_per_run(),
+                required_capture_policy_version=int(paper2_config.PAPER_CONTRACT_VERSION),
+            )
+            if not eligibility.paper_eligible and eligibility.reason_code == "EXCLUDED_MISSING_REQUIRED_IDENTITY_FIELD":
+                missing_paper_identity_count += 1
+
+    evidence_summary = _summarize_evidence_quota(
+        {pkg.lower() for pkg in _load_dataset_packages()},
+        cfg,
+    )
+    expected_runs = len(_load_dataset_packages()) * (int(cfg.baseline_required) + int(cfg.interactive_required))
+    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+    report_path = Path(app_config.OUTPUT_DIR) / "audit" / "dynamic" / f"tracker_reindex_{stamp}.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_payload = {
+        "generated_at_utc": datetime.now(UTC).isoformat(),
+        "tracker_path": str(out),
+        "tracker_before_runs": int(before_runs),
+        "tracker_after_runs": int(run_count),
+        "tracker_after_apps": int(app_count),
+        "valid_runs": int(valid_count),
+        "missing_window_count_in_valid_runs": int(missing_window_count),
+        "missing_paper_identity_in_valid_runs": int(missing_paper_identity_count),
+        "evidence_root_exists": bool(evidence_summary.get("evidence_root_exists")),
+        "evidence_quota_runs_counted": int(evidence_summary.get("quota_runs_counted", 0)),
+        "evidence_paper_eligible_runs": int(evidence_summary.get("paper_eligible_runs", 0)),
+        "expected_runs": int(expected_runs),
+    }
+    report_path.write_text(json.dumps(report_payload, indent=2, sort_keys=True), encoding="utf-8")
+
+    rows = [
+        ("Tracker runs (before)", str(before_runs)),
+        ("Tracker runs (after)", str(run_count)),
+        ("Tracker apps (after)", str(app_count)),
+        ("Valid runs (after)", str(valid_count)),
+        ("Valid runs missing window_count", str(missing_window_count)),
+        ("Valid runs missing paper identity/link", str(missing_paper_identity_count)),
+        ("Evidence quota counted", f"{int(evidence_summary.get('quota_runs_counted', 0))}/{expected_runs}"),
+        ("Evidence paper-eligible", str(int(evidence_summary.get("paper_eligible_runs", 0)))),
+    ]
+    table_utils.render_table(["Metric", "Count"], rows, compact=False)
+    print(status_messages.status(f"Tracker reindexed from evidence: {out}", level="success"))
+    print(status_messages.status(f"Report: {report_path}", level="info"))
+
+
+def _run_paper_readiness_audit() -> None:
+    from scytaledroid.DynamicAnalysis.tools.evidence.paper_readiness_audit import (
+        run_paper_readiness_audit,
+    )
+
+    summary = run_paper_readiness_audit()
+    print()
+    menu_utils.print_header("Paper Readiness Audit")
+    rows = [
+        ("Total runs", str(summary.total_runs)),
+        ("VALID runs", str(summary.valid_runs)),
+        ("Expected valid runs", str(summary.expected_valid_runs)),
+        ("Expected total runs", str(summary.expected_total_runs)),
+        ("Missing capture_policy_version", str(summary.missing_capture_policy_version)),
+        ("capture_policy_version mismatch", str(summary.capture_policy_version_mismatch)),
+        ("Missing signer_set_hash", str(summary.missing_signer_set_hash)),
+        ("Missing window_count", str(summary.missing_window_count)),
+        ("window_count < min", str(summary.window_count_below_min)),
+        ("Tracker runs (hint)", str(summary.tracker_runs_hint)),
+        ("Static runs (hint)", str(summary.static_runs_hint)),
+    ]
+    table_utils.render_table(["Metric", "Count"], rows, compact=False)
+    if summary.result != "GO":
+        print(status_messages.status("Audit result: NO-GO (paper-readiness checks failed).", level="error"))
+    else:
+        print(status_messages.status("Audit result: GO (paper-readiness checks passed).", level="success"))
+    if summary.reasons:
+        reason_text = ", ".join(summary.reasons)
+        print(status_messages.status(f"Reasons: {reason_text}", level="warn"))
+    if "NO_EVIDENCE_PACKS_FOUND" in summary.reasons and summary.tracker_runs_hint > 0:
+        print(
+            status_messages.status(
+                "Tracker contains historical runs but local evidence packs are missing. Recollect runs or repoint evidence root before freeze.",
+                level="warn",
+            )
+        )
+    if "NO_EVIDENCE_PACKS_FOUND" in summary.reasons and summary.static_runs_hint > 0:
+        print(
+            status_messages.status(
+                "Static evidence packs were found in this workspace, but dynamic evidence packs were not. Run dynamic collection on this host or copy dynamic evidence packs before freeze.",
+                level="warn",
+            )
+        )
+    print(status_messages.status(f"Evidence root: {summary.evidence_root}", level="info"))
+    print(status_messages.status(f"Evidence root exists: {str(summary.evidence_root_exists).lower()}", level="info"))
+    print(status_messages.status(f"Runs discovered from: {summary.runs_discovered_from}", level="info"))
+    print(status_messages.status(f"Report: {summary.report_path}", level="info"))
 
 
 def _render_dataset_status() -> None:
@@ -556,6 +815,12 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
 
     rows = []
     build_rows = []
+    dataset_apps_total = 0
+    dataset_apps_complete = 0
+    dataset_valid_runs_total = 0
+    dataset_window_count_total = 0
+    dataset_window_count_missing = 0
+    evidence_summary: dict[str, int | bool] | None = None
     for idx, (package, _version, _count, app_label) in enumerate(packages, start=1):
         display = ((app_label or package).strip() or package)
         if display in collisions:
@@ -573,6 +838,7 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
         last_label = "—"
         next_label = "—"
         if package.lower() in dataset_pkgs:
+            dataset_apps_total += 1
             # Important: the dataset tracker deterministically counts only the
             # first N valid runs per bucket (baseline/interactive). Operators can
             # still collect extra valid runs for exploration. To avoid confusion,
@@ -592,12 +858,17 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
             active_build = active_version
             if active_sha:
                 active_build = f"{active_version} / {active_sha[:10]}"
+            elif active_version == "—":
+                active_build = "unknown (tracker-only)"
             active_runs = base_countable + base_extra + inter_countable + inter_extra
 
             base_label = str(base_countable) if base_extra <= 0 else f"{base_countable}(+{base_extra})"
             inter_label = str(inter_countable) if inter_extra <= 0 else f"{inter_countable}(+{inter_extra})"
             need_base = max(0, int(cfg.baseline_required) - base_countable)
             need_inter = max(0, int(cfg.interactive_required) - inter_countable)
+            if need_base == 0 and need_inter == 0:
+                dataset_apps_complete += 1
+            dataset_valid_runs_total += base_countable + inter_countable
             if need_base or need_inter:
                 need_parts = []
                 if need_base:
@@ -641,6 +912,22 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
                     str(legacy_builds),
                 ]
             )
+            if isinstance(runs, list):
+                for run in runs:
+                    if not isinstance(run, dict):
+                        continue
+                    if run.get("valid_dataset_run") is not True:
+                        continue
+                    wc_raw = run.get("window_count")
+                    if wc_raw in (None, ""):
+                        dataset_window_count_missing += 1
+                        continue
+                    try:
+                        wc = int(wc_raw)
+                    except Exception:
+                        dataset_window_count_missing += 1
+                        continue
+                    dataset_window_count_total += max(0, wc)
 
         # Columns are intentionally minimal for dataset collection.
         # Column order is chosen to avoid "Next" being truncated on narrow terminals.
@@ -660,26 +947,51 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
             )
         )
         print(
-            status_messages.status(
-                "Legacy column shows valid older-build runs retained for cross-version pattern analysis (not counted toward current-build quota).",
-                level="info",
-            )
+            "Legacy column shows valid older-build runs retained for cross-version pattern analysis (not counted toward current-build quota)."
         )
         print(
-            status_messages.status(
-                "Last QA is derived from post-run integrity checks (PCAP threshold, capinfos/tshark parse, feature extraction).",
-                level="info",
-            )
+            "Last QA is derived from post-run integrity checks (PCAP threshold, capinfos/tshark parse, feature extraction, minimum window count)."
         )
+        if dataset_apps_total > 0:
+            evidence_summary = _summarize_evidence_quota(dataset_pkgs, cfg)
+            expected_runs = dataset_apps_total * (int(cfg.baseline_required) + int(cfg.interactive_required))
+            if dataset_window_count_missing > 0:
+                tracker_windows_label = f"? (missing window_count in {dataset_window_count_missing} run(s))"
+            else:
+                tracker_windows_label = str(dataset_window_count_total)
+            print(
+                f"Tracker quota (informational): {dataset_apps_complete}/{dataset_apps_total} apps satisfied | valid runs={dataset_valid_runs_total}/{expected_runs} | total windows={tracker_windows_label}"
+            )
+            print(
+                f"Evidence quota (authoritative): valid runs={int(evidence_summary['quota_runs_counted'])}/{expected_runs} | paper-eligible runs discovered={int(evidence_summary['paper_eligible_runs'])}"
+            )
+            if not bool(evidence_summary.get("evidence_root_exists")):
+                print(
+                    status_messages.status(
+                        "Evidence root missing; paper-mode freeze is blocked until dynamic evidence packs are available.",
+                        level="warn",
+                    )
+                )
         data_rows = [r for r in rows if r[2] != "—"]
-        if data_rows and all(str(r[4]).strip() == "0" for r in data_rows):
+        evidence_ready = False
+        if dataset_apps_total > 0 and evidence_summary is not None:
+            expected_runs = dataset_apps_total * (int(cfg.baseline_required) + int(cfg.interactive_required))
+            evidence_ready = bool(evidence_summary.get("evidence_root_exists")) and int(evidence_summary.get("quota_runs_counted", 0)) >= expected_runs
+        if data_rows and all(str(r[4]).strip() == "0" for r in data_rows) and evidence_ready:
             print(status_messages.status("Dataset status: QUOTA SATISFIED. Freeze recommended.", level="success"))
+        elif data_rows and all(str(r[4]).strip() == "0" for r in data_rows):
+            print(
+                status_messages.status(
+                    "Tracker quota is satisfied, but paper freeze is blocked until evidence-derived quota is satisfied and paper audit is GO.",
+                    level="warn",
+                )
+            )
         detail_choice = prompt_utils.prompt_text("Press D for build history details, or Enter to continue", required=False)
         if detail_choice.strip().lower() == "d":
             print()
             menu_utils.print_header("Build History Details")
             table_utils.render_table(
-                ["App", "Active Build", "Active Runs", "Legacy Runs", "Legacy Builds"],
+                ["App", "Identity (vc/base)", "Active Runs", "Legacy Runs", "Legacy Builds"],
                 build_rows,
                 compact=True,
             )

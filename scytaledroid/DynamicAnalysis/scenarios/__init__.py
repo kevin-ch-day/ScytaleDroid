@@ -1,5 +1,5 @@
 """Scenario runners for dynamic analysis."""
 
-from .manual import ManualScenarioRunner, ScenarioResult
+from .manual import ManualScenarioRunner, ScenarioResult, SCRIPT_PROTOCOL_VERSION
 
-__all__ = ["ManualScenarioRunner", "ScenarioResult"]
+__all__ = ["ManualScenarioRunner", "ScenarioResult", "SCRIPT_PROTOCOL_VERSION"]

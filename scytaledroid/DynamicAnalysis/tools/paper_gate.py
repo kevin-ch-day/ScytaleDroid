@@ -13,6 +13,7 @@ from typing import Any
 from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper2_config
+from scytaledroid.DynamicAnalysis.plans.loader import enrich_dynamic_plan
 
 DB_VERIFY_RETRIES = 3
 DB_VERIFY_BACKOFF_SECONDS = (0.5, 1.0, 2.0)
@@ -94,6 +95,8 @@ def run_paper_gate(*, freeze_path: Path, evidence_root: Path) -> GateResult:
         dars = _read_json(dars_path) or {}
         cohort_status = _read_json(cohort_status_path) or {}
         plan = _read_json(run_dir / "inputs" / "static_dynamic_plan.json") or {}
+        if isinstance(plan, dict):
+            plan = enrich_dynamic_plan(plan)
         run_manifest = _read_json(run_dir / "run_manifest.json") or {}
         identity = plan.get("run_identity") if isinstance(plan.get("run_identity"), dict) else {}
 
@@ -245,11 +248,6 @@ def main(argv: list[str] | None = None) -> int:
         "--research",
         action="store_true",
         help="Preferred flag; run canonical research gate checks.",
-    )
-    parser.add_argument(
-        "--paper",
-        action="store_true",
-        help="Deprecated compatibility flag; use --research.",
     )
     parser.add_argument(
         "--freeze-path",

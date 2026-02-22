@@ -396,6 +396,7 @@ def _summary_paths(manifest: dict[str, object]) -> list[str]:
 def _print_simple_list(title: str, items: list[str]) -> None:
     if not items:
         return
+    print()
     lines = [(str(index + 1), value) for index, value in enumerate(items)]
     status_messages.print_strip(title, lines, width=70)
 

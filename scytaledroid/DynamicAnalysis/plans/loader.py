@@ -40,7 +40,16 @@ def load_dynamic_plan(path: str | Path) -> dict[str, Any]:
     data = json.loads(plan_path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError("dynamic plan payload must be an object")
-    return data
+    return _enrich_legacy_plan(data)
+
+
+def enrich_dynamic_plan(plan: dict[str, Any]) -> dict[str, Any]:
+    """Normalize/enrich plan payload for runtime/tooling use.
+
+    Accepts already-loaded plan JSON and fills legacy gaps (identity/static_features)
+    using deterministic fallbacks.
+    """
+    return _enrich_legacy_plan(plan)
 
 
 def validate_dynamic_plan(
@@ -216,6 +225,145 @@ def _normalize_plan(plan: dict[str, Any]) -> dict[str, object]:
 def extract_plan_identity(plan: dict[str, Any]) -> dict[str, object]:
     """Expose normalized identity fields for plan selection."""
     return _normalize_plan(plan)
+
+
+def _as_bool(value: Any) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return int(value) != 0
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y"}:
+        return True
+    if text in {"0", "false", "no", "n"}:
+        return False
+    return None
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return int(default)
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return float(default)
+
+
+def _enrich_legacy_plan(plan: dict[str, Any]) -> dict[str, Any]:
+    # Work on a copy to keep caller semantics predictable.
+    out = dict(plan)
+    run_identity = out.get("run_identity") if isinstance(out.get("run_identity"), dict) else {}
+    run_identity = dict(run_identity)
+
+    package_name = str(out.get("package_name") or out.get("package") or "").strip()
+    if package_name and not run_identity.get("package_name_lc"):
+        run_identity["package_name_lc"] = package_name.lower()
+    if out.get("version_code") not in (None, "") and run_identity.get("version_code") in (None, ""):
+        run_identity["version_code"] = out.get("version_code")
+    if out.get("version_name") not in (None, "") and run_identity.get("version_name") in (None, ""):
+        run_identity["version_name"] = out.get("version_name")
+
+    run_sig = str(run_identity.get("run_signature") or "").strip().lower()
+    signer_digest = str(run_identity.get("signer_digest") or "").strip().lower()
+    signer_set_hash = str(run_identity.get("signer_set_hash") or "").strip().lower()
+    if not signer_digest and len(run_sig) == 64:
+        signer_digest = run_sig
+        run_identity["signer_digest"] = signer_digest
+    if not signer_set_hash and signer_digest:
+        run_identity["signer_set_hash"] = signer_digest
+        signer_set_hash = signer_digest
+    if signer_digest and not run_identity.get("signer_primary_digest"):
+        run_identity["signer_primary_digest"] = signer_digest
+
+    out["run_identity"] = run_identity
+
+    static_features = out.get("static_features") if isinstance(out.get("static_features"), dict) else {}
+    static_features = dict(static_features)
+    perms = out.get("permissions") if isinstance(out.get("permissions"), dict) else {}
+    declared = perms.get("declared") if isinstance(perms.get("declared"), list) else []
+    dangerous = perms.get("dangerous") if isinstance(perms.get("dangerous"), list) else []
+    high_value = perms.get("high_value") if isinstance(perms.get("high_value"), list) else []
+    exported = out.get("exported_components") if isinstance(out.get("exported_components"), dict) else {}
+    risk_flags = out.get("risk_flags") if isinstance(out.get("risk_flags"), dict) else {}
+    sdk_indicators = out.get("sdk_indicators") if isinstance(out.get("sdk_indicators"), dict) else {}
+
+    exported_total = _safe_int(
+        static_features.get("exported_components_total"),
+        _safe_int(exported.get("total"), 0),
+    )
+    dangerous_n = _safe_int(
+        static_features.get("dangerous_permission_count"),
+        len(dangerous),
+    )
+    cleartext_flag = _as_bool(
+        static_features.get("uses_cleartext_traffic")
+        if "uses_cleartext_traffic" in static_features
+        else risk_flags.get("uses_cleartext_traffic")
+    )
+    if cleartext_flag is None:
+        cleartext_flag = False
+    sdk_score = _safe_float(
+        static_features.get("sdk_indicator_score"),
+        _safe_float(sdk_indicators.get("score"), 0.0),
+    )
+    sdk_score = max(0.0, min(1.0, sdk_score))
+
+    # Legacy fallback risk scoring (same normalized structure used by static renderer).
+    exported_norm = min(float(exported_total) / 100.0, 1.0)
+    dangerous_norm = min(float(dangerous_n) / 20.0, 1.0)
+    cleartext_norm = 1.0 if cleartext_flag else 0.0
+    static_risk_score = float(
+        round(
+            100.0
+            * (
+                (exported_norm * 0.25)
+                + (dangerous_norm * 0.25)
+                + (cleartext_norm * 0.25)
+                + (sdk_score * 0.25)
+            ),
+            3,
+        )
+    )
+    if static_risk_score >= 66.7:
+        static_risk_band = "HIGH"
+    elif static_risk_score >= 33.4:
+        static_risk_band = "MEDIUM"
+    else:
+        static_risk_band = "LOW"
+
+    static_features.setdefault("schema_version", "v1")
+    static_features.setdefault("exported_components_total", int(exported_total))
+    static_features.setdefault("dangerous_permission_count", int(dangerous_n))
+    static_features.setdefault("permissions_total", int(len(declared)))
+    static_features.setdefault("high_value_permission_count", int(len(high_value)))
+    static_features.setdefault("high_value_permissions", list(high_value))
+    static_features.setdefault("uses_cleartext_traffic", bool(cleartext_flag))
+    static_features.setdefault("nsc_cleartext_permitted", bool(cleartext_flag))
+    static_features.setdefault("nsc_cleartext_domain_count", len((out.get("network_targets") or {}).get("cleartext_domains") or []))
+    static_features.setdefault("sdk_indicator_score", float(sdk_score))
+    static_features.setdefault("perm_dangerous_n", int(dangerous_n))
+    static_features.setdefault("masvs_total_score", None)
+    static_features.setdefault("masvs_control_count_total", 0)
+    static_features.setdefault("static_risk_score", float(static_risk_score))
+    static_features.setdefault("static_risk_band", static_risk_band)
+    static_features.setdefault(
+        "masvs_area_counts",
+        {
+            "NETWORK": {"high": 0, "medium": 0, "low": 0, "info": 0, "control_count": 0},
+            "PLATFORM": {"high": 0, "medium": 0, "low": 0, "info": 0, "control_count": 0},
+            "PRIVACY": {"high": 0, "medium": 0, "low": 0, "info": 0, "control_count": 0},
+            "STORAGE": {"high": 0, "medium": 0, "low": 0, "info": 0, "control_count": 0},
+        },
+    )
+    out["static_features"] = static_features
+    return out
 
 
 def _missing_required_fields(plan: dict[str, object]) -> list[str]:
@@ -423,6 +571,7 @@ __all__ = [
     "SUPPORTED_SIGNATURE_VERSIONS",
     "extract_plan_identity",
     "build_plan_validation_event",
+    "enrich_dynamic_plan",
     "load_dynamic_plan",
     "render_plan_validation_block",
     "validate_dynamic_plan",
