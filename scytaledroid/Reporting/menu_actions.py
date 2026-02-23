@@ -993,25 +993,49 @@ def handle_export_freeze_anchored_csvs() -> None:
 
 
 def handle_generate_paper2_results_numbers() -> None:
-    """Generate Results section numbers + a paste-ready Markdown block."""
+    """Generate paper-facing CSV/JSON exports + Results section numbers.
 
-    script = Path(__file__).resolve().parents[2] / "scripts" / "paper2" / "paper2_results_numbers.py"
-    if not script.exists():
-        print(status_messages.status(f"Missing script: {relative_path(script)}", level="error"))
-        return
+    This is intentionally deterministic and freeze-anchored. The goal is to give
+    the manuscript a single source of truth:
+    - output/publication/tables/*_summary*.csv
+    - output/publication/manifests/paper_results_v1.json
+    - output/publication/manifests/paper2_results_numbers.json
+    - output/publication/appendix/results_section_V.md
+    """
+
+    exports_script = Path(__file__).resolve().parents[2] / "scripts" / "paper2" / "paper2_publication_exports.py"
+    results_script = Path(__file__).resolve().parents[2] / "scripts" / "paper2" / "paper2_results_numbers.py"
+    for script in (exports_script, results_script):
+        if not script.exists():
+            print(status_messages.status(f"Missing script: {relative_path(script)}", level="error"))
+            return
 
     import runpy
 
     print()
-    menu_utils.print_header("Generate Paper #2 Results Numbers")
+    menu_utils.print_header("Generate Paper #2 Paper-Facing Exports + Results Numbers")
     try:
-        runpy.run_path(str(script), run_name="__main__")
+        runpy.run_path(str(exports_script), run_name="__main__")
+        runpy.run_path(str(results_script), run_name="__main__")
     except SystemExit as exc:
         if int(getattr(exc, "code", 1) or 0) != 0:
             print(status_messages.status(f"Generation failed: exit={exc.code}", level="error"))
             return
+    out_tables = Path(app_config.OUTPUT_DIR) / "publication" / "tables"
+    out_results_json = Path(app_config.OUTPUT_DIR) / "publication" / "manifests" / "paper_results_v1.json"
     out_md = Path(app_config.OUTPUT_DIR) / "publication" / "appendix" / "results_section_V.md"
     out_json = Path(app_config.OUTPUT_DIR) / "publication" / "manifests" / "paper2_results_numbers.json"
+    for name in (
+        "paper_cohort_summary_v1.csv",
+        "baseline_stability_summary.csv",
+        "interaction_delta_summary.csv",
+        "static_dynamic_correlation.csv",
+    ):
+        p = out_tables / name
+        if p.exists():
+            print(status_messages.status(f"Wrote: {relative_path(p)}", level="success"))
+    if out_results_json.exists():
+        print(status_messages.status(f"Wrote: {relative_path(out_results_json)}", level="success"))
     if out_md.exists():
         print(status_messages.status(f"Wrote: {relative_path(out_md)}", level="success"))
     if out_json.exists():

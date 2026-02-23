@@ -55,7 +55,7 @@ def reporting_menu() -> None:
         print()
         menu_utils.print_header("Reporting")
         status = fetch_publication_status()
-        audit = status.get("paper_audit_result") or "unknown"
+        audit = str(status.get("paper_audit_result") or "unknown")
         can_freeze = "YES" if status.get("can_freeze") else "NO"
         quota = status.get("evidence_quota_counted")
         expected = status.get("evidence_quota_expected")
@@ -68,34 +68,57 @@ def reporting_menu() -> None:
         figs_label = status.get("publication_figures_label") or "0"
         results_label = status.get("results_numbers_label") or "missing"
         exports_label = status.get("exports_label") or "missing"
-        summary_items = [
-            summary_cards.summary_item("Paper audit", f"{audit} (CAN_FREEZE={can_freeze})", value_style="progress"),
-            summary_cards.summary_item("Evidence quota counted", quota_label, value_style="progress"),
-            summary_cards.summary_item("Freeze dataset hash", freeze_short, value_style="muted"),
-            summary_cards.summary_item(f"Publication bundle {pub_ready}", pub_root, value_style="progress"),
-            summary_cards.summary_item("Tables", str(tables_label), value_style="muted"),
-            summary_cards.summary_item("Figures", str(figs_label), value_style="muted"),
-            summary_cards.summary_item("Results numbers (Sec V)", str(results_label), value_style="muted"),
-            summary_cards.summary_item("Freeze-anchored exports", str(exports_label), value_style="muted"),
-        ]
         footer = str(status.get("footer") or "")
-        summary_cards.print_summary_card(
-            "Paper #2 Publication Status",
-            summary_items,
-            subtitle="Evidence + Freeze + Publication bundle (paper-facing)",
-            footer=footer,
+
+        verbose = str(os.environ.get("SCYTALEDROID_UI_LEVEL") or "").strip().lower() == "debug"
+        if verbose:
+            summary_items = [
+                summary_cards.summary_item("Paper audit", f"{audit} (CAN_FREEZE={can_freeze})", value_style="progress"),
+                summary_cards.summary_item("Evidence quota counted", quota_label, value_style="progress"),
+                summary_cards.summary_item("Freeze dataset hash", freeze_short, value_style="muted"),
+                summary_cards.summary_item(f"Publication bundle {pub_ready}", pub_root, value_style="progress"),
+                summary_cards.summary_item("Tables", str(tables_label), value_style="muted"),
+                summary_cards.summary_item("Figures", str(figs_label), value_style="muted"),
+                summary_cards.summary_item("Results numbers (Sec V)", str(results_label), value_style="muted"),
+                summary_cards.summary_item("Freeze-anchored exports", str(exports_label), value_style="muted"),
+            ]
+            summary_cards.print_summary_card(
+                "Paper #2 Publication Status",
+                summary_items,
+                subtitle="Evidence + Freeze + Publication bundle (paper-facing)",
+                footer=footer,
+            )
+        else:
+            # Compact operator view (default): two short lines, no box/divider noise.
+            print(
+                status_messages.status(
+                    f"Paper audit={audit} (CAN_FREEZE={can_freeze}) | Quota={quota_label} | Freeze={freeze_short} | Bundle={pub_root} {pub_ready}",
+                    level="info",
+                )
+            )
+            print(
+                status_messages.status(
+                    f"Artifacts: Tables={tables_label} Figures={figs_label} Results={results_label} Exports={exports_label}",
+                    level="info",
+                )
+            )
+            if footer:
+                print(status_messages.status(footer, level="info"))
+
+        # Render options as a single compact list (reduce whitespace).
+        combined = [*core_visible, *reports_visible]
+        menu_utils.render_menu(
+            MenuSpec(
+                items=combined,
+                show_exit=True,
+                exit_label="Back",
+                show_descriptions=False,
+                padding=False,
+                compact=True,
+            )
         )
-        print()
-        menu_utils.print_section("Core")
-        menu_utils.render_menu(MenuSpec(items=core_visible, show_exit=False, exit_label=None, show_descriptions=False, padding=True))
-        menu_utils.print_section("Reports")
-        menu_utils.render_menu(MenuSpec(items=reports_visible, show_exit=False, exit_label=None, show_descriptions=False, padding=True))
-        menu_utils.render_menu(MenuSpec(items=[], default=None, show_exit=True, exit_label="Back"))
         choice = prompt_utils.get_choice(
-            menu_utils.selectable_keys(
-                [*core_visible, *reports_visible],
-                include_exit=True,
-            ),
+            menu_utils.selectable_keys(combined, include_exit=True),
             default="0",
         )
 

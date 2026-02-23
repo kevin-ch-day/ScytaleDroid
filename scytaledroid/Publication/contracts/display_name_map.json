@@ -1,6 +1,6 @@
 {
   "com.facebook.katana": "Facebook",
-  "com.facebook.orca": "Facebook Msg",
+  "com.facebook.orca": "Facebook Messenger",
   "com.instagram.android": "Instagram",
   "com.linkedin.android": "LinkedIn",
   "com.pinterest": "Pinterest",
@@ -12,4 +12,3 @@
   "org.telegram.messenger": "Telegram",
   "org.thoughtcrime.securesms": "Signal"
 }
-

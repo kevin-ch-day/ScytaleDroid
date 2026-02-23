@@ -57,11 +57,17 @@ def _copytree(src: Path, dst: Path, *, overwrite: bool) -> None:
     shutil.copytree(src, dst)
 
 
-def _clean_dir(dir_path: Path, *, keep: set[str]) -> None:
+def _clean_dir(dir_path: Path, *, keep: set[str], keep_globs: set[str] | None = None) -> None:
     if not dir_path.exists():
         return
+    keep_globs = set(keep_globs or set())
+    glob_keep: set[str] = set()
+    if keep_globs:
+        for pat in keep_globs:
+            for p in dir_path.glob(pat):
+                glob_keep.add(p.name)
     for p in dir_path.iterdir():
-        if p.name in keep:
+        if p.name in keep or p.name in glob_keep:
             continue
         if p.is_dir():
             shutil.rmtree(p)
@@ -296,6 +302,12 @@ def write_canonical_publication_directory(
     _clean_dir(
         tables_dir,
         keep={
+            # Paper-facing consolidated exports (manuscript inputs).
+            "paper_cohort_summary_v1.csv",
+            "baseline_stability_summary.csv",
+            "interaction_delta_summary.csv",
+            "static_dynamic_correlation.csv",
+            "appendix_table_a1_ocsvm_robustness.csv",
             "table_masvs_domain_mapping.tex",
             "table_4_signature_deltas.tex",
             "table_7_exposure_deviation_summary.tex",
@@ -307,6 +319,9 @@ def write_canonical_publication_directory(
     _clean_dir(
         figs_dir,
         keep={
+            # Paper-facing figures.
+            "fig_b2_rdi_by_app.pdf",
+            "fig_b2_rdi_by_app.png",
             "fig_b2_rdi_social_by_app.pdf",
             "fig_b2_rdi_social_by_app.png",
             "fig_b2_rdi_messaging_by_app.pdf",
@@ -314,9 +329,20 @@ def write_canonical_publication_directory(
             "fig_b4_static_vs_rdi.pdf",
             "fig_b4_static_vs_rdi.png",
         },
+        # Fig B1 is pinned to a specific run id (suffix changes deterministically),
+        # so keep by glob to avoid wiping it on bundle rewrites.
+        keep_globs={"fig_b1_timeline_*.pdf", "fig_b1_timeline_*.png"},
     )
     # Appendix is optional; keep it empty by default.
-    _clean_dir(appendix_dir, keep=set())
+    _clean_dir(
+        appendix_dir,
+        keep={
+            # Paper-facing paste-ready blocks generated from frozen cohort.
+            "results_section_V.md",
+            "paper2_ieee_paste_blocks.md",
+        },
+        keep_globs={"*.md"},
+    )
     _clean_dir(
         manifests_dir,
         keep={
@@ -327,6 +353,11 @@ def write_canonical_publication_directory(
             "toolchain.txt",
             "phase_e_closure_record.json",
             "publication_snapshot_id.txt",
+            # Paper-facing computed summaries.
+            "paper_results_v1.json",
+            "paper2_results_numbers.json",
+            "canonical_receipt.json",
+            "paper_artifacts.json",
             # Contracts / gates.
             "display_name_map.json",
             "app_ordering.json",
