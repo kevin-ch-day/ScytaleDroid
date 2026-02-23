@@ -17,6 +17,7 @@ Note:
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from scytaledroid.Config import app_config
@@ -26,6 +27,9 @@ from . import ml_parameters_paper2 as paper2_config
 
 def freeze_anchor_path() -> Path:
     """Canonical checksummed freeze anchor (authoritative input)."""
+    override = str(os.environ.get("SCYTALEDROID_FREEZE_ANCHOR_PATH") or "").strip()
+    if override:
+        return Path(override)
     return Path(app_config.DATA_DIR) / "archive" / paper2_config.FREEZE_CANONICAL_FILENAME
 
 

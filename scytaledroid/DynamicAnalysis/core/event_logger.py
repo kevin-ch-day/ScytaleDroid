@@ -30,8 +30,14 @@ class RunEventLogger:
             event_type=event_type,
             details=details or {},
         )
-        with self.path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload.__dict__, sort_keys=True) + "\n")
+        # Best-effort logging: evidence-pack deletion mid-run (e.g. an operator
+        # pruning "incomplete" dirs in another terminal) must not hard-crash a run.
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with self.path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(payload.__dict__, sort_keys=True) + "\n")
+        except OSError:
+            return
 
     def finalize(self) -> ArtifactRecord | None:
         if not self.path.exists():

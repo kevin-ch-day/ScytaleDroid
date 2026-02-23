@@ -145,6 +145,10 @@ def find_incomplete_dynamic_run_dirs() -> list[Path]:
         return []
     out: list[Path] = []
     for run_dir in sorted([p for p in output_root.iterdir() if p.is_dir()]):
+        # Never treat an active in-progress run as "incomplete".
+        # The orchestrator drops this marker after sealing run_manifest.json.
+        if (run_dir / "notes" / ".scytaledroid_in_progress").exists():
+            continue
         manifest_path = run_dir / "run_manifest.json"
         if not manifest_path.exists():
             out.append(run_dir)

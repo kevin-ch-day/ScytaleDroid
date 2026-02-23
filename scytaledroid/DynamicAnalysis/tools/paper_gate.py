@@ -14,6 +14,7 @@ from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper2_config
 from scytaledroid.DynamicAnalysis.plans.loader import enrich_dynamic_plan
+from scytaledroid.DynamicAnalysis.core.freeze_identity import compute_freeze_dataset_hash_from_path
 
 DB_VERIFY_RETRIES = 3
 DB_VERIFY_BACKOFF_SECONDS = (0.5, 1.0, 2.0)
@@ -51,6 +52,11 @@ def run_paper_gate(*, freeze_path: Path, evidence_root: Path) -> GateResult:
     if not isinstance(included, list) or not included:
         return GateResult(False, [f"missing_included_run_ids:{freeze_path}"], 0)
     expected_freeze_sha = _sha256_file(freeze_path)
+    try:
+        expected_dataset_hash = compute_freeze_dataset_hash_from_path(freeze_path)
+    except Exception as exc:
+        expected_dataset_hash = None
+        errors.append(f"freeze_manifest:bad_dataset_hash:{exc}")
     freeze_threshold = _extract_freeze_min_pcap_bytes(freeze)
     if freeze_threshold is None:
         errors.append("freeze_manifest:missing_min_pcap_bytes_used")
@@ -209,6 +215,15 @@ def run_paper_gate(*, freeze_path: Path, evidence_root: Path) -> GateResult:
             errors.append(f"{run_id}:missing_manifest_stamp:freeze_manifest_sha256")
         elif freeze_sha.strip().lower() != expected_freeze_sha.lower():
             errors.append(f"{run_id}:freeze_sha_mismatch")
+
+        # Dataset identity hash is a stable citation anchor. Enforce when present.
+        # Back-compat: older ML manifests may not contain freeze_dataset_hash.
+        dataset_hash = model_manifest.get("freeze_dataset_hash")
+        if expected_dataset_hash and dataset_hash not in (None, ""):
+            if not isinstance(dataset_hash, str) or not dataset_hash.strip():
+                errors.append(f"{run_id}:missing_manifest_stamp:freeze_dataset_hash")
+            elif dataset_hash.strip().lower() != expected_dataset_hash.strip().lower():
+                errors.append(f"{run_id}:freeze_dataset_hash_mismatch")
 
         models = model_manifest.get("models") if isinstance(model_manifest.get("models"), dict) else {}
         iforest = models.get(paper2_config.MODEL_IFOREST) if isinstance(models, dict) else None

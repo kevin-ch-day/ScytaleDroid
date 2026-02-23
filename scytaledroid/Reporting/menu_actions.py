@@ -879,6 +879,230 @@ def fetch_tier1_status() -> dict[str, object]:
     return status
 
 
+def fetch_publication_status() -> dict[str, object]:
+    """Return a compact paper-facing publication status snapshot.
+
+    This intentionally avoids DB-derived metrics. Evidence packs + freeze + publication
+    bundle are the authoritative sources for paper assembly.
+    """
+
+    from scytaledroid.DynamicAnalysis.tools.evidence.paper_readiness_audit import (
+        run_paper_readiness_audit,
+    )
+
+    status: dict[str, object] = {
+        "paper_audit_result": "unknown",
+        "can_freeze": False,
+        "evidence_quota_counted": None,
+        "evidence_quota_expected": None,
+        "freeze_dataset_hash": None,
+        "publication_ready": False,
+        "publication_root_label": "output/publication",
+        "publication_tables_label": "0",
+        "publication_figures_label": "0",
+        "results_numbers_label": "missing",
+        "exports_label": "missing",
+        "footer": "",
+    }
+
+    # Paper audit (authoritative).
+    try:
+        audit = run_paper_readiness_audit()
+        status["paper_audit_result"] = str(audit.result)
+        status["can_freeze"] = bool(audit.can_freeze)
+        # The audit module knows expected counts; surface them for the UI.
+        try:
+            status["evidence_quota_expected"] = int(audit.expected_valid_runs)
+        except Exception:
+            status["evidence_quota_expected"] = None
+        # Countable quota is tracked in the freeze manifest (if present) or by exports.
+    except Exception:
+        audit = None
+
+    # Freeze anchor (canonical for paper writing).
+    freeze_path = Path(app_config.DATA_DIR) / "archive" / "dataset_freeze.json"
+    if freeze_path.exists():
+        try:
+            payload = json.loads(freeze_path.read_text(encoding="utf-8"))
+            status["freeze_dataset_hash"] = payload.get("freeze_dataset_hash")
+            included = payload.get("included_run_ids") or []
+            status["evidence_quota_counted"] = int(len(included)) if isinstance(included, list) else None
+        except Exception:
+            status["freeze_dataset_hash"] = None
+
+    # Publication bundle surface.
+    pub_root = Path(app_config.OUTPUT_DIR) / "publication"
+    status["publication_root_label"] = str(relative_path(pub_root))
+    tables_dir = pub_root / "tables"
+    figs_dir = pub_root / "figures"
+    results_numbers = pub_root / "appendix" / "results_section_V.md"
+    exports = [
+        Path(app_config.DATA_DIR) / "archive" / "dynamic_run_summary.csv",
+        Path(app_config.DATA_DIR) / "archive" / "pcap_features.csv",
+        Path(app_config.DATA_DIR) / "archive" / "protocol_ledger.csv",
+    ]
+
+    if tables_dir.exists():
+        status["publication_tables_label"] = str(len(list(tables_dir.glob("table_*.csv"))))
+    if figs_dir.exists():
+        status["publication_figures_label"] = str(len(list(figs_dir.glob("fig_*.pdf"))))
+    if results_numbers.exists():
+        status["results_numbers_label"] = "present"
+    if all(p.exists() for p in exports):
+        status["exports_label"] = "present"
+
+    status["publication_ready"] = bool(
+        (pub_root / "manifests" / "dataset_freeze.json").exists()
+        and (tables_dir / "table_1_rdi_prevalence.csv").exists()
+        and (figs_dir / "fig_b4_static_vs_rdi.pdf").exists()
+        and results_numbers.exists()
+    )
+
+    if status["publication_ready"]:
+        status["footer"] = "All paper-facing artifacts are present under output/publication/."
+    else:
+        status["footer"] = "Missing publication artifacts. Run [1] then [2], then [4]."
+
+    return status
+
+
+def handle_export_freeze_anchored_csvs() -> None:
+    """Export freeze-anchored CSVs used in the paper writeup."""
+
+    from scytaledroid.DynamicAnalysis.pcap.aggregate import (
+        export_dynamic_run_summary_csv,
+        export_pcap_features_csv,
+        export_protocol_ledger_csv,
+    )
+
+    freeze_path = Path(app_config.DATA_DIR) / "archive" / "dataset_freeze.json"
+    if not freeze_path.exists():
+        print(status_messages.status(f"Missing freeze anchor: {relative_path(freeze_path)}", level="error"))
+        return
+
+    print()
+    menu_utils.print_header("Freeze-Anchored CSV Exports")
+    summary = export_dynamic_run_summary_csv(freeze_path=freeze_path, require_freeze=True)
+    feats = export_pcap_features_csv(freeze_path=freeze_path, require_freeze=True)
+    ledger = export_protocol_ledger_csv(freeze_path=freeze_path, require_freeze=True)
+    for label, path in (("dynamic_run_summary.csv", summary), ("pcap_features.csv", feats), ("protocol_ledger.csv", ledger)):
+        if path:
+            print(status_messages.status(f"Wrote: {relative_path(path)} ({label})", level="success"))
+        else:
+            print(status_messages.status(f"Export missing: {label}", level="warn"))
+
+
+def handle_generate_paper2_results_numbers() -> None:
+    """Generate Results section numbers + a paste-ready Markdown block."""
+
+    script = Path(__file__).resolve().parents[2] / "scripts" / "paper2" / "paper2_results_numbers.py"
+    if not script.exists():
+        print(status_messages.status(f"Missing script: {relative_path(script)}", level="error"))
+        return
+
+    import runpy
+
+    print()
+    menu_utils.print_header("Generate Paper #2 Results Numbers")
+    try:
+        runpy.run_path(str(script), run_name="__main__")
+    except SystemExit as exc:
+        if int(getattr(exc, "code", 1) or 0) != 0:
+            print(status_messages.status(f"Generation failed: exit={exc.code}", level="error"))
+            return
+    out_md = Path(app_config.OUTPUT_DIR) / "publication" / "appendix" / "results_section_V.md"
+    out_json = Path(app_config.OUTPUT_DIR) / "publication" / "manifests" / "paper2_results_numbers.json"
+    if out_md.exists():
+        print(status_messages.status(f"Wrote: {relative_path(out_md)}", level="success"))
+    if out_json.exists():
+        print(status_messages.status(f"Wrote: {relative_path(out_json)}", level="success"))
+
+
+def handle_refresh_phase_e_bundle() -> None:
+    """Run Phase E ML over the frozen cohort and refresh baseline deliverables."""
+
+    from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_orchestrator import (
+        run_ml_on_evidence_packs,
+        _select_fig_b1_exemplar_from_existing_or_inputs,
+    )
+    from scytaledroid.DynamicAnalysis.ml.artifact_bundle_writer import write_phase_e_deliverables_bundle
+
+    archive_dir = Path(app_config.DATA_DIR) / "archive"
+    freeze_path = archive_dir / "dataset_freeze.json"
+    if not freeze_path.exists():
+        print(status_messages.status(f"Missing freeze anchor: {relative_path(freeze_path)}", level="error"))
+        return
+    try:
+        freeze = json.loads(freeze_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        print(status_messages.status(f"Failed to read freeze anchor: {exc}", level="error"))
+        return
+
+    print()
+    menu_utils.print_header("Refresh Phase E Baseline Bundle")
+    print(status_messages.status("Running ML over frozen evidence packs (Phase E).", level="info"))
+    run_ml_on_evidence_packs(freeze_manifest_path=freeze_path, reuse_existing_outputs=True)
+
+    # Ensure Fig B1 exemplar pin points at a real run with ML outputs.
+    artifacts_path = archive_dir / "paper_artifacts.json"
+    rid = None
+    tag = None
+    if artifacts_path.exists():
+        try:
+            payload = json.loads(artifacts_path.read_text(encoding="utf-8"))
+            rid = str(payload.get("fig_B1_run_id") or "").strip() or None
+            tag = str(payload.get("interaction_tag") or "").strip() or None
+        except Exception:
+            rid = None
+
+    def _pin_ok(run_id: str | None) -> bool:
+        if not run_id:
+            return False
+        run_dir = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic" / run_id
+        if not (run_dir / "run_manifest.json").exists():
+            return False
+        out_dir = run_dir / "analysis" / "ml" / "v1"
+        return (out_dir / "anomaly_scores_iforest.csv").exists() and (out_dir / "anomaly_scores_ocsvm.csv").exists()
+
+    if not _pin_ok(rid):
+        exemplar = _select_fig_b1_exemplar_from_existing_or_inputs(
+            evidence_root=Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic",
+            freeze_apps=freeze.get("apps") or {},
+            checksums=freeze.get("included_run_checksums") or {},
+        )
+        if not exemplar:
+            print(status_messages.status("No eligible Fig B1 exemplar found.", level="error"))
+            return
+        rid = exemplar.run_id
+        tag = exemplar.interaction_tag
+        backup = archive_dir / f"paper_artifacts.prev-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.json"
+        if artifacts_path.exists():
+            backup.write_text(artifacts_path.read_text(encoding="utf-8"), encoding="utf-8")
+        payload = {
+            "freeze_anchor": str(freeze_path),
+            "fig_B1_run_id": rid,
+            "package_name": exemplar.package_name,
+            "interaction_tag": tag,
+            "ended_at": exemplar.ended_at,
+            "selection_metric": "sustained_bytes_per_sec_k6",
+            "tie_breakers": ["iforest_prevalence", "ocsvm_prevalence", "ended_at"],
+            "metrics": {
+                "sustained_bytes_per_sec_k6": float(exemplar.sustained_bytes_per_sec_k6),
+                "iforest_flagged_pct": float(exemplar.iforest_flagged_pct),
+                "ocsvm_flagged_pct": float(exemplar.ocsvm_flagged_pct),
+            },
+            "repinned_from": None,
+            "repinned_at": datetime.now(UTC).isoformat(),
+        }
+        artifacts_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        print(status_messages.status(f"Repinned Fig B1 exemplar: {rid[:8]} ({tag})", level="info"))
+
+    # Ensure the bundle copies the current freeze anchor.
+    os.environ["SCYTALEDROID_FREEZE_ANCHOR_PATH"] = str(freeze_path)
+    artifacts = write_phase_e_deliverables_bundle(fig_b1_run_id=str(rid), interaction_tag=tag)
+    print(status_messages.status(f"Wrote: {relative_path(artifacts.out_root)}", level="success"))
+
+
 def relative_path(path: Path) -> Path:
     """Return the path relative to the current working directory if possible."""
 
@@ -907,4 +1131,8 @@ __all__ = [
     "relative_path",
     "summarise_severity",
     "view_saved_reports",
+    "fetch_publication_status",
+    "handle_export_freeze_anchored_csvs",
+    "handle_generate_paper2_results_numbers",
+    "handle_refresh_phase_e_bundle",
 ]

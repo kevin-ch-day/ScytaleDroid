@@ -593,9 +593,13 @@ def _apply_quota_marking(app_entry: dict[str, Any], cfg: DatasetTrackerConfig) -
         # rows that do not yet have paper_eligible populated.
         if is_valid and r.get("paper_eligible") is False:
             is_valid = False
-        # PM lock: low-signal idle runs are retained for exploratory analysis but
+        # PM lock: low-signal *idle* baselines are retained for exploratory analysis but
         # must never consume paper cohort quota slots.
-        if is_valid and _is_baseline_profile(r.get("run_profile"), cfg) and bool(r.get("low_signal")):
+        #
+        # Important: do NOT apply this to baseline_connected; "low_signal" is a
+        # non-invalidating tag (and baseline_connected is required for messaging apps).
+        prof_lc = str(r.get("run_profile") or "").strip().lower()
+        if is_valid and prof_lc == "baseline_idle" and bool(r.get("low_signal")):
             is_valid = False
         if not is_valid:
             continue

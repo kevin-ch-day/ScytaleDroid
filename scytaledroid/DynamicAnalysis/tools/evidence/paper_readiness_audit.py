@@ -44,6 +44,10 @@ class AuditSummary:
     runs_discovered_from: str
     expected_valid_runs: int
     expected_total_runs: int
+    # Evidence-derived quota (authoritative) for Paper Mode: first N baseline + interaction
+    # runs per package, after eligibility + low-signal rules.
+    quota_runs_counted: int
+    apps_satisfied: int
     result: str
     reasons: tuple[str, ...]
     tracker_runs_hint: int
@@ -64,6 +68,67 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     except Exception:
         return None
     return payload if isinstance(payload, dict) else None
+
+
+def _run_profile_bucket(run_profile: str) -> str:
+    prof = (run_profile or "").strip().lower()
+    if "baseline" in prof or "idle" in prof:
+        return "baseline"
+    if "interaction" in prof or "interactive" in prof or "script" in prof or "manual" in prof:
+        return "interactive"
+    return "unknown"
+
+
+def _compute_evidence_quota(
+    *,
+    root: Path,
+    dataset_pkgs_lc: set[str],
+    cfg: DatasetTrackerConfig,
+    required_policy: int,
+    min_window_count: int,
+) -> tuple[int, int]:
+    """Return (quota_runs_counted, apps_satisfied) from evidence packs."""
+    per_pkg: dict[str, dict[str, int]] = {}
+    quota_runs_counted = 0
+    for run_dir in sorted([p for p in root.iterdir() if p.is_dir()], key=lambda p: p.name):
+        manifest = _read_json(run_dir / "run_manifest.json")
+        if not isinstance(manifest, dict):
+            continue
+        target = manifest.get("target") if isinstance(manifest.get("target"), dict) else {}
+        dataset = manifest.get("dataset") if isinstance(manifest.get("dataset"), dict) else {}
+        operator = manifest.get("operator") if isinstance(manifest.get("operator"), dict) else {}
+        package = str(target.get("package_name") or "").strip().lower()
+        if package not in dataset_pkgs_lc:
+            continue
+        plan = _read_json(run_dir / "inputs" / "static_dynamic_plan.json") or {}
+        eligibility = derive_paper_eligibility(
+            manifest=manifest,
+            plan=plan if isinstance(plan, dict) else {},
+            min_windows=min_window_count,
+            required_capture_policy_version=required_policy,
+        )
+        if not eligibility.paper_eligible:
+            continue
+        bucket = _run_profile_bucket(str(dataset.get("run_profile") or operator.get("run_profile") or ""))
+        if bucket == "unknown":
+            continue
+        # Low-signal *idle* baseline rule: retained but must not satisfy quota.
+        # baseline_connected must remain quota-eligible (low_signal is a tag, not an invalidation).
+        prof_lc = str(dataset.get("run_profile") or operator.get("run_profile") or "").strip().lower()
+        if bucket == "baseline" and prof_lc == "baseline_idle" and bool(dataset.get("low_signal")):
+            continue
+        counts = per_pkg.setdefault(package, {"baseline": 0, "interactive": 0})
+        needed = int(cfg.baseline_required if bucket == "baseline" else cfg.interactive_required)
+        if int(counts.get(bucket, 0)) < needed:
+            counts[bucket] = int(counts.get(bucket, 0)) + 1
+            quota_runs_counted += 1
+    apps_satisfied = sum(
+        1
+        for counts in per_pkg.values()
+        if int(counts.get("baseline", 0)) >= int(cfg.baseline_required)
+        and int(counts.get("interactive", 0)) >= int(cfg.interactive_required)
+    )
+    return quota_runs_counted, apps_satisfied
 
 
 def run_paper_readiness_audit(
@@ -192,6 +257,7 @@ def run_paper_readiness_audit(
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     cfg = DatasetTrackerConfig()
     dataset_pkgs = load_dataset_packages()
+    dataset_pkgs_lc = {str(p).strip().lower() for p in dataset_pkgs if str(p).strip()}
     if dataset_pkgs:
         expected_valid_runs = len(dataset_pkgs) * (
             int(cfg.baseline_required) + int(cfg.interactive_required)
@@ -199,6 +265,16 @@ def run_paper_readiness_audit(
     else:
         expected_valid_runs = 0
     expected_total_runs = expected_valid_runs
+    quota_runs_counted = 0
+    apps_satisfied = 0
+    if root.exists() and dataset_pkgs_lc:
+        quota_runs_counted, apps_satisfied = _compute_evidence_quota(
+            root=root,
+            dataset_pkgs_lc=dataset_pkgs_lc,
+            cfg=cfg,
+            required_policy=required_policy,
+            min_window_count=min_window_count,
+        )
     tracker = load_dataset_tracker()
     apps = tracker.get("apps") if isinstance(tracker, dict) else {}
     if isinstance(apps, dict):
@@ -221,7 +297,8 @@ def run_paper_readiness_audit(
     if paper_eligible_runs <= 0:
         reasons.append("NO_PAPER_ELIGIBLE_RUNS")
     if expected_valid_runs > 0 and (
-        paper_eligible_runs < expected_valid_runs or total_runs < expected_valid_runs
+        int(quota_runs_counted) < int(expected_valid_runs)
+        or int(apps_satisfied) < len(dataset_pkgs_lc)
     ):
         reasons.append("QUOTA_NOT_SATISFIED")
     if len(issues["missing_capture_policy_version"]) > 0:
@@ -271,10 +348,14 @@ def run_paper_readiness_audit(
         "required_min_window_count": min_window_count,
         "expected_valid_runs": expected_valid_runs,
         "expected_total_runs": expected_total_runs,
+        "quota_runs_counted": int(quota_runs_counted),
+        "apps_satisfied": int(apps_satisfied),
         "summary": {
             "total_runs": total_runs,
             "valid_runs": valid_runs,
             "paper_eligible_runs": paper_eligible_runs,
+            "quota_runs_counted": int(quota_runs_counted),
+            "apps_satisfied": int(apps_satisfied),
             "missing_run_manifest_dirs": len(issues["missing_run_manifest_dirs"]),
             "missing_capture_policy_version": len(issues["missing_capture_policy_version"]),
             "capture_policy_version_mismatch": len(issues["capture_policy_version_mismatch"]),
@@ -306,6 +387,8 @@ def run_paper_readiness_audit(
         runs_discovered_from="filesystem",
         expected_valid_runs=expected_valid_runs,
         expected_total_runs=expected_total_runs,
+        quota_runs_counted=int(quota_runs_counted),
+        apps_satisfied=int(apps_satisfied),
         result=result,
         reasons=tuple(reasons),
         tracker_runs_hint=tracker_runs_hint,

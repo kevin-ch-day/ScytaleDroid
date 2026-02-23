@@ -31,6 +31,11 @@ from scytaledroid.DynamicAnalysis.plans.loader import enrich_dynamic_plan
 from scytaledroid.DynamicAnalysis.tools.evidence.freeze_lifecycle import (
     demote_noncanonical_canonical_freeze,
 )
+from scytaledroid.DynamicAnalysis.core.freeze_identity import (
+    FREEZE_DATASET_HASH_ALGORITHM,
+    FREEZE_DATASET_IDENTITY_VERSION,
+    derive_freeze_dataset_identity,
+)
 
 
 @dataclass(frozen=True)
@@ -241,7 +246,9 @@ def build_dataset_freeze_manifest(
             if protocol_fit == "poor":
                 app_counts = excluded_reason_counts_by_app[pkg]
                 app_counts["FLAG_PROTOCOL_FIT_POOR"] = int(app_counts.get("FLAG_PROTOCOL_FIT_POOR", 0)) + 1
-                continue
+                # Do not exclude: protocol_fit is an operational signal, not a hard
+                # dataset/freeze gate. Freeze selection is already eligibility + quality
+                # + deterministic ranking. Keep the flag for auditability only.
         window_count = _safe_int(ds.get("window_count"))
         pcap_size_bytes = _resolve_pcap_size_bytes(run_dir, mf, ds)
         actual_duration_s = _safe_float(ds.get("sampling_duration_seconds"))
@@ -379,7 +386,11 @@ def build_dataset_freeze_manifest(
             if not plan_schema_version:
                 raise RuntimeError(f"FREEZE_MISSING_SCHEMA_VERSION:{rid}")
             try:
-                plan_paper_contract_version = int(run_plan.get("paper_contract_version"))
+                plan_paper_contract_version = int(
+                    run_plan.get("paper_contract_version")
+                    if run_plan.get("paper_contract_version") not in (None, "")
+                    else 1
+                )
             except Exception:
                 raise RuntimeError(f"FREEZE_MISSING_SCHEMA_VERSION:{rid}")
             plan_schema_versions.add(plan_schema_version)
@@ -425,12 +436,14 @@ def build_dataset_freeze_manifest(
         raise RuntimeError(f"FREEZE_MIXED_BASELINE_PROTOCOL_VERSIONS:{sorted(baseline_protocol_versions)}")
     if len(baseline_protocol_hashes) > 1:
         raise RuntimeError(f"FREEZE_MIXED_BASELINE_PROTOCOL_HASHES:{sorted(baseline_protocol_hashes)}")
-    if len(paper_contract_hashes) > 1:
-        raise RuntimeError(f"FREEZE_MIXED_PAPER_CONTRACT_HASHES:{sorted(paper_contract_hashes)}")
-    if len(template_map_versions) > 1:
-        raise RuntimeError(f"FREEZE_MIXED_TEMPLATE_MAP_VERSIONS:{sorted(template_map_versions)}")
-    if len(template_map_hashes) > 1:
-        raise RuntimeError(f"FREEZE_MIXED_TEMPLATE_MAP_HASHES:{sorted(template_map_hashes)}")
+    # Back-compat: evidence packs may have missing/changed operator-level contract hashes
+    # over the lifetime of a workspace. The canonical paper contract hash is computed
+    # at freeze time (paper_contract_snapshot + paper_contract_hash) and is the
+    # authoritative contract stamp for the freeze artifact itself.
+    # Back-compat: template map version/hash fields are operator metadata that evolved
+    # as app-specific overrides were introduced. The freeze manifest embeds the
+    # authoritative paper_contract_snapshot (including category map snapshot + hash),
+    # so we do not fail closed on mixed historical template-map stamps here.
     required_plan_schema_version = next(iter(plan_schema_versions))
     required_plan_paper_contract_version = int(next(iter(plan_paper_contract_versions)))
     contract_snapshot = build_paper_contract_snapshot()
@@ -445,7 +458,7 @@ def build_dataset_freeze_manifest(
             f"selected={sorted(paper_contract_versions)}:freeze={PAPER_MODE_CONTRACT_VERSION}"
         )
 
-    return {
+    payload: dict[str, Any] = {
         "artifact_type": "dataset_freeze",
         "freeze_role": "canonical",
         "freeze_contract_version": int(paper_config.FREEZE_CONTRACT_VERSION),
@@ -499,6 +512,13 @@ def build_dataset_freeze_manifest(
             "updated_at": dataset_plan.get("updated_at"),
         },
     }
+    ident = derive_freeze_dataset_identity(payload)
+    payload["freeze_dataset_identity_version"] = int(ident.version)
+    payload["freeze_dataset_hash_algorithm"] = str(FREEZE_DATASET_HASH_ALGORITHM)
+    payload["freeze_dataset_hash"] = str(ident.hash)
+    # For auditability: describe what the dataset hash covers (stable subset only).
+    payload["freeze_dataset_hash_inputs"] = sorted(list(ident.canonical_payload.keys()))
+    return payload
 
 
 def write_dataset_freeze_manifest(

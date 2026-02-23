@@ -442,22 +442,26 @@ def write_canonical_publication_directory(
         if p.exists():
             p.write_text(_ieeeify_tabular_booktabs(p.read_text(encoding="utf-8", errors="strict")), encoding="utf-8")
 
-    # Surface baseline figures for publication assembly.
+    # Surface remaining baseline tables for publication assembly (pure copy).
+    # Table 4 and Table 7 are already rewritten above for ordering/label stability.
+    for p in sorted(base_tables.glob("table_*.csv")):
+        if p.name in {"table_4_signature_deltas.csv", "table_7_exposure_deviation_summary.csv"}:
+            continue
+        _copy(p, tables_dir / p.name, overwrite=overwrite)
+    for p in sorted(base_tables.glob("table_*.tex")):
+        if p.name in {"table_4_signature_deltas.tex", "table_7_exposure_deviation_summary.tex"}:
+            continue
+        _copy(p, tables_dir / p.name, overwrite=overwrite)
+    for p in sorted(base_tables.glob("table_*.xlsx")):
+        _copy(p, tables_dir / p.name, overwrite=overwrite)
+
+    # Surface baseline figures for publication assembly (pure copy).
     base_figs = baseline_bundle_root / "figures"
-    _copy(base_figs / "fig_b2_rdi_social_by_app.pdf", figs_dir / "fig_b2_rdi_social_by_app.pdf", overwrite=overwrite)
-    _copy(base_figs / "fig_b2_rdi_social_by_app.png", figs_dir / "fig_b2_rdi_social_by_app.png", overwrite=overwrite)
-    _copy(
-        base_figs / "fig_b2_rdi_messaging_by_app.pdf",
-        figs_dir / "fig_b2_rdi_messaging_by_app.pdf",
-        overwrite=overwrite,
-    )
-    _copy(
-        base_figs / "fig_b2_rdi_messaging_by_app.png",
-        figs_dir / "fig_b2_rdi_messaging_by_app.png",
-        overwrite=overwrite,
-    )
-    _copy(base_figs / "fig_b4_static_vs_rdi.pdf", figs_dir / "fig_b4_static_vs_rdi.pdf", overwrite=overwrite)
-    _copy(base_figs / "fig_b4_static_vs_rdi.png", figs_dir / "fig_b4_static_vs_rdi.png", overwrite=overwrite)
+    if base_figs.exists():
+        for p in sorted(base_figs.glob("fig_*.pdf")):
+            _copy(p, figs_dir / p.name, overwrite=overwrite)
+        for p in sorted(base_figs.glob("fig_*.png")):
+            _copy(p, figs_dir / p.name, overwrite=overwrite)
 
     # Manifests: baseline + (optional) snapshot.
     base_manifest = baseline_bundle_root / "manifest"
@@ -560,8 +564,8 @@ def write_canonical_publication_directory(
                 f"- manifests: `{manifests_dir.relative_to(publication_root)}/`",
                 "",
                 "Primary artifacts (stable filenames):",
-                "- Figures: `figures/fig_b2_rdi_social_by_app.pdf`, `figures/fig_b2_rdi_messaging_by_app.pdf` (Fig B2 a/b), `figures/fig_b4_static_vs_rdi.pdf`",
-                "- Tables: `tables/table_risk_scoring.tex`, `tables/table_7_exposure_deviation_summary.tex`, `tables/table_4_signature_deltas.tex`, `tables/table_masvs_domain_mapping.tex` (context-only)",
+                "- Figures: `figures/fig_b1_timeline_*.pdf` (Fig B1 exemplar), `figures/fig_b2_*.pdf` (Fig B2 variants), `figures/fig_b4_static_vs_rdi.pdf`",
+                "- Tables: `tables/table_*.csv` + `tables/table_*.tex` (Table 1-8 + derived presentation tables).",
                 "",
                 "Internal provenance (not used directly by LaTeX):",
                 f"- internal: `{bundle_paths.output_publication_internal_root().relative_to(publication_root)}/`",

@@ -90,6 +90,21 @@ class DynamicRunOrchestrator:
         run_dir = output_root / dynamic_run_id
         writer = EvidencePackWriter(run_dir)
         writer.ensure_layout()
+        # Protect active runs from being pruned as "incomplete" before the final
+        # run_manifest.json is sealed.
+        in_progress_marker = writer.notes_dir / ".scytaledroid_in_progress"
+        try:
+            in_progress_marker.write_text(
+                json.dumps(
+                    {"dynamic_run_id": dynamic_run_id, "started_at_utc": datetime.now(UTC).isoformat()},
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+        except OSError:
+            # Best-effort; marker absence should not block capture.
+            pass
 
         try:
             plan_payload = self.plan_payload or self._load_plan_payload()
@@ -732,6 +747,10 @@ class DynamicRunOrchestrator:
         manifest.add_outputs(outputs)
         manifest.finalize()
         writer.write_manifest(manifest)
+        try:
+            in_progress_marker.unlink(missing_ok=True)
+        except OSError:
+            pass
 
         self.logger.info(
             "Dynamic run complete",

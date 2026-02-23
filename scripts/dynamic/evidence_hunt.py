@@ -312,6 +312,154 @@ def cmd_quarantine(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_quarantine_audit(args: argparse.Namespace) -> int:
+    """Quarantine run IDs listed in a paper readiness audit report."""
+    report_path = Path(args.report_path)
+    report = _read_json(report_path)
+    if not isinstance(report, dict):
+        raise SystemExit(f"failed to read report json: {report_path}")
+    issues = report.get("issues") if isinstance(report.get("issues"), dict) else {}
+
+    keys = [k.strip() for k in (args.issue_key or []) if k.strip()]
+    if not keys:
+        keys = ["identity_mismatch", "missing_window_count"]
+
+    run_ids: list[str] = []
+    for k in keys:
+        v = issues.get(k)
+        if isinstance(v, list):
+            run_ids.extend([str(x) for x in v if str(x).strip()])
+    run_ids = sorted(set(run_ids))
+    if not run_ids:
+        print(json.dumps({"status": "no_run_ids_found", "keys": keys, "report": str(report_path)}))
+        return 0
+
+    evidence_root = Path(args.evidence_root)
+    quarantine_root = Path(args.quarantine_root)
+    quarantine_root.mkdir(parents=True, exist_ok=True)
+
+    moved = 0
+    skipped = 0
+    for rid in run_ids:
+        src = evidence_root / rid
+        if not src.exists():
+            skipped += 1
+            continue
+        # Put under audit-key namespace for traceability.
+        dst = quarantine_root / "by_audit" / rid
+        if dst.exists():
+            skipped += 1
+            continue
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if args.dry_run:
+            print(json.dumps({"action": "would_move", "src": str(src), "dst": str(dst), "run_id": rid, "audit_keys": keys}))
+            continue
+        shutil.move(str(src), str(dst))
+        moved += 1
+        print(json.dumps({"action": "moved", "src": str(src), "dst": str(dst), "run_id": rid, "audit_keys": keys}))
+
+    print(json.dumps({"moved": moved, "skipped": skipped, "dry_run": bool(args.dry_run), "report": str(report_path), "keys": keys}))
+    if not args.dry_run and args.reindex_tracker:
+        from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig, recompute_dataset_tracker
+
+        recompute_dataset_tracker(config=DatasetTrackerConfig())
+        print(json.dumps({"tracker_reindexed": True}))
+    return 0
+
+
+def cmd_per_app(args: argparse.Namespace) -> int:
+    """
+    Per-package quota view from evidence (authoritative lane).
+
+    Mirrors scytaledroid.DynamicAnalysis.menu._summarize_evidence_quota bucket logic:
+    - Uses derive_paper_eligibility()
+    - Buckets run_profile to baseline vs interactive
+    - Counts first N per bucket as quota_counted; remaining as extras
+    """
+    from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper2
+    from scytaledroid.DynamicAnalysis.menu import _run_profile_bucket
+    from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig
+
+    cfg = DatasetTrackerConfig()
+    evidence_root = Path(args.evidence_root)
+    pkg_filter_lc = args.pkg.strip().lower() if args.pkg else None
+    required_policy = int(args.policy_version or paper2.PAPER_CONTRACT_VERSION)
+
+    # Re-implement evidence lane logic (matches menu._summarize_evidence_quota).
+    per: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    from scytaledroid.DynamicAnalysis.paper_eligibility import derive_paper_eligibility
+    for d in _iter_run_dirs(evidence_root):
+        man = _read_json(d / "run_manifest.json")
+        if not isinstance(man, dict):
+            continue
+        tgt = man.get("target") if isinstance(man.get("target"), dict) else {}
+        pkg = str(tgt.get("package_name") or "").strip().lower()
+        if not pkg:
+            continue
+        if pkg_filter_lc and pkg != pkg_filter_lc:
+            continue
+
+        ds = man.get("dataset") if isinstance(man.get("dataset"), dict) else {}
+        op = man.get("operator") if isinstance(man.get("operator"), dict) else {}
+
+        per[pkg]["total"] += 1
+        if ds.get("valid_dataset_run") is True:
+            per[pkg]["technical_valid"] += 1
+
+        plan = _read_json(d / "inputs/static_dynamic_plan.json") or {}
+        el = derive_paper_eligibility(
+            manifest=man,
+            plan=plan if isinstance(plan, dict) else {},
+            min_windows=int(args.min_windows),
+            required_capture_policy_version=int(required_policy),
+        )
+        if not el.paper_eligible:
+            per[pkg]["excluded"] += 1
+            per[pkg][f"excluded::{el.reason_code or 'EXCLUDED_UNKNOWN'}"] += 1
+            continue
+        per[pkg]["paper_eligible"] += 1
+
+        bucket = _run_profile_bucket(str(ds.get("run_profile") or op.get("run_profile") or ""))
+        if bucket == "unknown":
+            per[pkg]["excluded"] += 1
+            per[pkg]["excluded::EXCLUDED_UNKNOWN_BUCKET"] += 1
+            continue
+
+        # Low-signal baseline rule (menu._summarize_evidence_quota).
+        if (
+            bucket == "baseline"
+            and bool(ds.get("low_signal"))
+            and str(ds.get("invalid_reason_code") or "").strip().upper() in {"", "LOW_SIGNAL_IDLE"}
+        ):
+            per[pkg]["flag_low_signal_baseline"] += 1
+            per[pkg]["extra_eligible"] += 1
+            continue
+
+        needed = int(cfg.baseline_required if bucket == "baseline" else cfg.interactive_required)
+        seen_key = f"quota_seen::{bucket}"
+        if int(per[pkg].get(seen_key, 0)) < needed:
+            per[pkg][seen_key] += 1
+            per[pkg]["quota_counted"] += 1
+        else:
+            per[pkg]["extra_eligible"] += 1
+
+    # Print in a stable way: most shortfall first.
+    out_rows = []
+    for pkg, counts in per.items():
+        base = int(counts.get("quota_seen::baseline", 0))
+        inter = int(counts.get("quota_seen::interactive", 0))
+        need_b = max(0, int(cfg.baseline_required) - base)
+        need_i = max(0, int(cfg.interactive_required) - inter)
+        out_rows.append((need_b + need_i, pkg, base, inter, need_b, need_i, int(counts.get("paper_eligible", 0)), int(counts.get("excluded", 0))))
+
+    out_rows.sort(key=lambda r: (-r[0], r[1]))
+    print("need_total pkg baseline_counted interactive_counted need_b need_i eligible excluded flag_low_signal_baseline")
+    for need_total, pkg, base, inter, nb, ni, elig, exc in out_rows:
+        fls = int(per[pkg].get("flag_low_signal_baseline", 0))
+        print(f"{need_total:10d} {pkg:28s} {base:15d} {inter:18d} {nb:6d} {ni:6d} {elig:7d} {exc:8d} {fls:22d}")
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser()
     p.add_argument("--evidence-root", default="output/evidence/dynamic")
@@ -339,6 +487,17 @@ def _build_parser() -> argparse.ArgumentParser:
     q.add_argument("--dry-run", action="store_true", default=False)
     q.add_argument("--reindex-tracker", action="store_true", default=False)
     q.set_defaults(fn=cmd_quarantine)
+
+    qa = sub.add_parser("quarantine-audit")
+    qa.add_argument("--report-path", required=True, help="paper_readiness_audit_*.json path")
+    qa.add_argument("--issue-key", action="append", default=[], help="issues key to quarantine (repeatable)")
+    qa.add_argument("--quarantine-root", default="output/evidence/dynamic_excluded")
+    qa.add_argument("--dry-run", action="store_true", default=False)
+    qa.add_argument("--reindex-tracker", action="store_true", default=False)
+    qa.set_defaults(fn=cmd_quarantine_audit)
+
+    a = sub.add_parser("per-app")
+    a.set_defaults(fn=cmd_per_app)
 
     return p
 

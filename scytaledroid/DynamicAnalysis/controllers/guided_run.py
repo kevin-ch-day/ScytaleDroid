@@ -6,6 +6,7 @@ import contextlib
 import hashlib
 import io
 import json
+import os
 import re
 import tempfile
 import time
@@ -162,6 +163,8 @@ def _print_paper_mode_constants() -> None:
     except Exception:
         sklearn_version = "unknown"
 
+    # Default operator UX: keep this compact. Full parameter tables are available
+    # on demand to avoid drowning operators in static boilerplate.
     menu_utils.print_section("ML Parameters (Paper #2 Locked)")
     rows = [
         ("Window size", f"{int(paper2_config.WINDOW_SIZE_S)}s"),
@@ -176,6 +179,21 @@ def _print_paper_mode_constants() -> None:
         ("NumPy version", numpy_version),
         ("scikit-learn version", sklearn_version),
     ]
+    compact = (
+        str(os.environ.get("SCYTALEDROID_UI_LEVEL") or "").strip().lower() not in {"debug", "details"}
+    )
+    if compact:
+        line = (
+            f"Window={int(paper2_config.WINDOW_SIZE_S)}s/{int(paper2_config.WINDOW_STRIDE_S)}s | "
+            f"Min={int(getattr(paper2_config, 'MIN_SAMPLING_SECONDS', 180))}s | "
+            f"Rec={int(getattr(paper2_config, 'RECOMMENDED_SAMPLING_SECONDS', 240))}s | "
+            f"MinPCAP={int(paper2_config.MIN_PCAP_BYTES)} | "
+            f"Models=IF+OCSVM | Baseline-only=YES"
+        )
+        print(status_messages.status(line, level="info"))
+        # Keep guided collection fast: no extra prompt here. Operators can switch to
+        # SCYTALEDROID_UI_LEVEL=details/debug for full tables.
+        return
     menu_utils.print_table(["Parameter", "Value"], rows)
 
 
@@ -633,9 +651,22 @@ def _device_preflight_checks(device_serial: str) -> bool:
     else:
         rows.append(["Clock drift", "OK", f"{clock_drift:.1f}s"])
 
+    verbose = str(os.environ.get("SCYTALEDROID_UI_LEVEL") or "").strip().lower() == "debug"
     print()
     menu_utils.print_header("Dynamic Environment Validation")
-    menu_utils.print_table(["Check", "Status", "Details"], rows)
+    # Default operator view: only show the full table when there are warnings/failures.
+    if verbose or warnings or hard_failures:
+        menu_utils.print_table(["Check", "Status", "Details"], rows)
+    else:
+        # Multi-line success summary (operator-friendly).
+        # Hide battery/storage unless they triggered WARN/FAIL above.
+        omit = {"Battery", "Free storage"}
+        for check, _status, detail in rows:
+            if check in omit:
+                continue
+            if check == "VPN state" and str(detail).strip().lower() == "not_vpn":
+                detail = "not_vpn (No VPN)"
+            print(f"{check}={detail}")
     for msg in warnings:
         print(status_messages.status(msg, level="warn"))
     if hard_failures:
@@ -773,7 +804,17 @@ def _post_run_integrity_check(result) -> None:
     ]
     print()
     menu_utils.print_header("Post-Run Integrity")
-    menu_utils.print_table(["Check", "Status", "Details"], rows)
+    verbose = str(os.environ.get("SCYTALEDROID_UI_LEVEL") or "").strip().lower() == "debug"
+    if verdict == "VALID" and not verbose:
+        # Keep default output short; operators mostly need pass/fail quickly.
+        print(
+            status_messages.status(
+                f"VALID (pcap={pcap_size_int}B, windows={window_count}, dur={parsed.get('capture_duration_s') if isinstance(parsed, dict) else 'n/a'}s)",
+                level="success",
+            )
+        )
+    else:
+        menu_utils.print_table(["Check", "Status", "Details"], rows)
     if verdict != "VALID":
         print(
             status_messages.status(
@@ -888,13 +929,7 @@ def run_guided_dataset_run(
             level="info",
         )
     )
-    if pkg_lc in _META_FAMILY_PACKAGES:
-        print(
-            status_messages.status(
-                "Meta-family app detected. Note: Facebook, Messenger, Instagram, and WhatsApp are tracked as separate apps.",
-                level="info",
-            )
-        )
+    meta_family_note = bool(pkg_lc in _META_FAMILY_PACKAGES)
 
     # Per-app run menu: operators can run in any order and as many times as needed.
     from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import peek_next_run_protocol
@@ -937,51 +972,71 @@ def run_guided_dataset_run(
                 exclusion_reason_local[reason] = int(exclusion_reason_local.get(reason, 0)) + 1
 
     print()
-    print("Runs recorded:")
-    print(
-        f"  tracker={counts.total_runs}\ttracker_countable={counts.valid_runs}/{total_required}\n"
-        f"  paper_eligible(local)={paper_eligible_local}\tquota_counted(local)={quota_counted_local}/{total_required}\n"
-        f"  baseline={counts.baseline_valid_runs}/{cfg.baseline_required}\t"
-        f"interactive={counts.interactive_valid_runs}/{cfg.interactive_required}\n"
-        f"  quota_met={int(counts.quota_met)}\tlocal_evidence={len(fs_runs)}"
+    # Operator-default: one short status line. Details are available via [V].
+    op_line = (
+        f"Runs: baseline {counts.baseline_valid_runs}/{cfg.baseline_required}, "
+        f"interactive {counts.interactive_valid_runs}/{cfg.interactive_required} | "
+        f"quota_counted(local)={quota_counted_local}/{total_required} | "
+        f"evidence_dirs={len(fs_runs)}"
     )
-    if exclusion_reason_local:
-        top_reasons = sorted(exclusion_reason_local.items(), key=lambda kv: (-int(kv[1]), kv[0]))[:3]
-        reason_line = ", ".join([f"{k}={v}" for k, v in top_reasons])
-        print(f"  local_exclusion_top: {reason_line}")
     if counts.quota_met:
         # Once quota is met, runs are still allowed, but they're "extra" and don't change completion.
-        print("Quota met. Additional runs are allowed and will be tracked as extra (do not change completion).")
+        op_line += " | quota_met=YES (extra runs only)"
         suggested_slot = None
     elif suggested_slot:
         # Do not imply an ordering constraint. Operators may run in any order;
         # the tracker deterministically counts the first N valid baseline/interactive runs.
-        print(f"Suggested by quota (counts toward completion): {suggested_profile}")
-
-    print(f"Paper cohort quota: baseline={cfg.baseline_required}, interaction={cfg.interactive_required}.")
-    baseline_recommended = max(
-        int(cfg.baseline_required),
-        int(getattr(app_config, "DYNAMIC_DATASET_BASELINE_RECOMMENDED_RUNS", 3)),
-    )
-    if baseline_recommended > int(cfg.baseline_required):
+        op_line += f" | suggested_next={suggested_profile}"
+    print(status_messages.status(op_line, level="info"))
+    if prompt_utils.prompt_text("[Enter] Continue | [V] View details", required=False).strip().lower() in {"v", "view"}:
+        if meta_family_note:
+            print(
+                status_messages.status(
+                    "Meta-family app detected. Note: Facebook, Messenger, Instagram, and WhatsApp are tracked as separate apps.",
+                    level="info",
+                )
+            )
+        print()
+        print("Runs recorded (details):")
         print(
-            "Baseline replicates recommended: "
-            f"{baseline_recommended} (extras are retained for exploratory/baseline stability analysis)."
+            f"  tracker={counts.total_runs}\ttracker_countable={counts.valid_runs}/{total_required}\n"
+            f"  paper_eligible(local)={paper_eligible_local}\tquota_counted(local)={quota_counted_local}/{total_required}\n"
+            f"  baseline={counts.baseline_valid_runs}/{cfg.baseline_required}\t"
+            f"interactive={counts.interactive_valid_runs}/{cfg.interactive_required}\n"
+            f"  quota_met={int(counts.quota_met)}\tlocal_evidence={len(fs_runs)}"
         )
-    suggested_counts = _intent_counts_toward_quota(
-        run_profile=suggested_profile,
-        baseline_valid_runs=int(counts.baseline_valid_runs),
-        interactive_valid_runs=int(counts.interactive_valid_runs),
-        cfg=cfg,
-    )
-    if counts.quota_met:
-        print("This run will be EXTRA (not countable) by default.")
-    else:
-        print(
-            "Default suggestion countability: "
-            + ("COUNTABLE" if suggested_counts else "EXTRA (not countable)")
-            + f" ({suggested_profile})."
+        if exclusion_reason_local:
+            top_reasons = sorted(exclusion_reason_local.items(), key=lambda kv: (-int(kv[1]), kv[0]))[:3]
+            reason_line = ", ".join([f"{k}={v}" for k, v in top_reasons])
+            print(f"  local_exclusion_top: {reason_line}")
+        if counts.quota_met:
+            print("Quota met. Additional runs are allowed and will be tracked as extra (do not change completion).")
+        elif suggested_slot:
+            print(f"Suggested by quota (counts toward completion): {suggested_profile}")
+        print(f"Paper cohort quota: baseline={cfg.baseline_required}, interaction={cfg.interactive_required}.")
+        baseline_recommended = max(
+            int(cfg.baseline_required),
+            int(getattr(app_config, "DYNAMIC_DATASET_BASELINE_RECOMMENDED_RUNS", 3)),
         )
+        if baseline_recommended > int(cfg.baseline_required):
+            print(
+                "Baseline replicates recommended: "
+                f"{baseline_recommended} (extras are retained for exploratory/baseline stability analysis)."
+            )
+        suggested_counts = _intent_counts_toward_quota(
+            run_profile=suggested_profile,
+            baseline_valid_runs=int(counts.baseline_valid_runs),
+            interactive_valid_runs=int(counts.interactive_valid_runs),
+            cfg=cfg,
+        )
+        if counts.quota_met:
+            print("Default suggestion countability: EXTRA (not countable).")
+        else:
+            print(
+                "Default suggestion countability: "
+                + ("COUNTABLE" if suggested_counts else "EXTRA (not countable)")
+                + f" ({suggested_profile})."
+            )
     print()
 
     suggested_is_interactive = _is_interactive_profile(suggested_profile)

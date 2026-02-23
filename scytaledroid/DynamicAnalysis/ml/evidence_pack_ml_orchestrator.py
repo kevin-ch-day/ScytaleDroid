@@ -46,6 +46,11 @@ from .pcap_window_features import (
 )
 from .seed_identity import derive_seed, salt_metadata
 from .telemetry_windowing import WindowSpec
+from scytaledroid.DynamicAnalysis.core.freeze_identity import (
+    FREEZE_DATASET_HASH_ALGORITHM,
+    FREEZE_DATASET_IDENTITY_VERSION,
+    compute_freeze_dataset_hash_from_path,
+)
 
 FREEZE_DIR = Path(app_config.DATA_DIR) / "archive"
 DATASET_FREEZE_CANONICAL = FREEZE_DIR / config.FREEZE_CANONICAL_FILENAME
@@ -2086,17 +2091,25 @@ def _write_model_manifest(
     except Exception:
         deps = {}
     freeze_sha256 = None
+    freeze_dataset_hash = None
     if freeze_manifest_path:
         try:
             freeze_sha256 = _sha256_file(Path(freeze_manifest_path))
         except Exception:
             freeze_sha256 = None
+        try:
+            freeze_dataset_hash = compute_freeze_dataset_hash_from_path(Path(freeze_manifest_path))
+        except Exception:
+            freeze_dataset_hash = None
     payload: dict[str, Any] = {
         "ml_schema_version": config.ML_SCHEMA_VERSION,
         "generated_at": datetime.now(UTC).isoformat(),
         "frozen": bool(freeze_manifest_path),
         "freeze_manifest_path": freeze_manifest_path,
         "freeze_manifest_sha256": freeze_sha256,
+        "freeze_dataset_identity_version": int(FREEZE_DATASET_IDENTITY_VERSION) if freeze_manifest_path else None,
+        "freeze_dataset_hash_algorithm": str(FREEZE_DATASET_HASH_ALGORITHM) if freeze_manifest_path else None,
+        "freeze_dataset_hash": freeze_dataset_hash,
         "identity_key_used": identity_key_used,
         "seed": int(seed),
         **salt_metadata(),

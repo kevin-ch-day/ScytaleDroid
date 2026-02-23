@@ -656,10 +656,12 @@ def _countability_label(validity: dict[str, object], run_profile: str | None) ->
     if validity.get("valid_dataset_run") is False:
         reason = str(validity.get("invalid_reason_code") or "INVALID")
         return f"NO ({reason})"
-    if validity.get("low_signal") is True and str(run_profile or "").strip().lower().startswith("baseline"):
-        return "NO (LOW_SIGNAL_IDLE)"
     if validity.get("countable") is True:
         return f"YES ({run_profile or 'dataset'})"
+    # Low-signal is a tag, not a validity failure. Only low-signal *idle* baselines
+    # are treated as non-quota (retained as exploratory).
+    if validity.get("low_signal") is True and str(run_profile or "").strip().lower() == "baseline_idle":
+        return "NO (LOW_SIGNAL_IDLE)"
     if str(run_profile or "").strip().lower() == "interaction_manual":
         return "NO (manual is exploratory)"
     if validity.get("countable") is False:

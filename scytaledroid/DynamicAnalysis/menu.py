@@ -165,12 +165,10 @@ def _summarize_evidence_quota(dataset_pkgs: set[str], cfg) -> dict[str, int | bo
         )
         if bucket == "unknown":
             continue
-        # PM lock: low-signal idle runs are retained but exploratory-only.
-        if (
-            bucket == "baseline"
-            and bool(dataset.get("low_signal"))
-            and str(dataset.get("invalid_reason_code") or "").strip().upper() in {"", "LOW_SIGNAL_IDLE"}
-        ):
+        # PM lock: low-signal *idle* baselines are retained but exploratory-only.
+        # baseline_connected remains quota-eligible (low_signal is a tag, not an invalidation).
+        prof_lc = str(dataset.get("run_profile") or operator.get("run_profile") or "").strip().lower()
+        if bucket == "baseline" and prof_lc == "baseline_idle" and bool(dataset.get("low_signal")):
             out["low_signal_exploratory_runs"] = int(out["low_signal_exploratory_runs"]) + 1
             out["extra_eligible_runs"] = int(out["extra_eligible_runs"]) + 1
             continue
@@ -238,6 +236,13 @@ def dynamic_analysis_menu() -> None:
 
     ui_defaults = _load_dynamic_ui_defaults()
 
+    def _pause_if_verbose() -> None:
+        # Operator default: do not force extra Enter presses between actions.
+        # Details/debug users tend to want time to read the full tables.
+        level = str(os.environ.get("SCYTALEDROID_UI_LEVEL") or "").strip().lower()
+        if level in {"details", "debug"}:
+            prompt_utils.press_enter_to_continue()
+
     while True:
         print()
         menu_utils.print_header("Dynamic Analysis")
@@ -255,48 +260,48 @@ def dynamic_analysis_menu() -> None:
         if choice == "1":
             _warn_if_code_changed()
             _run_guided_dataset_run(ui_defaults)
-            prompt_utils.press_enter_to_continue()
+            _pause_if_verbose()
             continue
 
         if choice == "2":
             _render_dataset_status()
-            prompt_utils.press_enter_to_continue()
+            _pause_if_verbose()
             continue
 
         if choice == "3":
             _export_dynamic_run_summary_csv()
-            prompt_utils.press_enter_to_continue()
+            _pause_if_verbose()
             continue
 
         if choice == "4":
             _export_pcap_features_csv()
-            prompt_utils.press_enter_to_continue()
+            _pause_if_verbose()
             continue
         if choice == "5":
             _export_protocol_ledger_csv()
-            prompt_utils.press_enter_to_continue()
+            _pause_if_verbose()
             continue
 
         if choice == "6":
             _verify_host_pcap_tools()
-            prompt_utils.press_enter_to_continue()
+            _pause_if_verbose()
             continue
         if choice == "7":
             _run_paper_readiness_audit()
-            prompt_utils.press_enter_to_continue()
+            _pause_if_verbose()
             continue
         if choice == "8":
             _repair_reindex_tracker()
-            prompt_utils.press_enter_to_continue()
+            _pause_if_verbose()
             continue
         if choice == "9":
             _prune_incomplete_dynamic_evidence_dirs()
-            prompt_utils.press_enter_to_continue()
+            _pause_if_verbose()
             continue
 
         if choice == "10":
             _run_state_summary()
-            prompt_utils.press_enter_to_continue()
+            _pause_if_verbose()
             continue
 
 
@@ -460,7 +465,18 @@ def _repair_reindex_tracker() -> None:
         ("Evidence quota counted", f"{int(evidence_summary.get('quota_runs_counted', 0))}/{expected_runs}"),
         ("Evidence paper-eligible", str(int(evidence_summary.get("paper_eligible_runs", 0)))),
     ]
-    table_utils.render_table(["Metric", "Count"], rows, compact=False)
+    ui_level = str(os.environ.get("SCYTALEDROID_UI_LEVEL") or "").strip().lower()
+    verbose = ui_level in {"details", "debug"}
+    if verbose:
+        table_utils.render_table(["Metric", "Count"], rows, compact=False)
+    else:
+        quota_line = next((v for k, v in rows if k == "Evidence quota counted"), "")
+        print(
+            status_messages.status(
+                f"Reindex complete | runs={run_count} apps={app_count} valid={valid_count} | quota={quota_line}",
+                level="success",
+            )
+        )
     print(status_messages.status(f"Tracker reindexed from evidence: {out}", level="success"))
     print(status_messages.status(f"Report: {report_path}", level="info"))
 
@@ -473,6 +489,23 @@ def _run_paper_readiness_audit() -> None:
     summary = run_paper_readiness_audit()
     print()
     menu_utils.print_header("Paper Readiness Audit")
+    ui_level = str(os.environ.get("SCYTALEDROID_UI_LEVEL") or "").strip().lower()
+    verbose = ui_level in {"details", "debug"}
+    if not verbose:
+        verdict = "GO" if summary.result == "GO" else "NO-GO"
+        can_freeze = "YES" if summary.can_freeze else "NO"
+        msg = (
+            f"Audit={verdict} | CAN_FREEZE={can_freeze} | "
+            f"VALID={summary.valid_runs} | eligible={summary.paper_eligible_runs} | "
+            f"missing_window_count={summary.missing_window_count} | identity_mismatch={summary.identity_mismatch}"
+        )
+        level = "success" if summary.result == "GO" else "error"
+        print(status_messages.status(msg, level=level))
+        if summary.first_failing_reason:
+            print(status_messages.status(f"First failing reason: {summary.first_failing_reason}", level="warn"))
+        if summary.report_path:
+            print(status_messages.status(f"Report: {summary.report_path}", level="info"))
+        return
     rows = [
         ("Total runs", str(summary.total_runs)),
         ("VALID runs", str(summary.valid_runs)),
@@ -548,6 +581,19 @@ def _run_state_summary() -> None:
     state_payload = build_state_summary()
     print()
     menu_utils.print_header("State Summary")
+    ui_level = str(os.environ.get("SCYTALEDROID_UI_LEVEL") or "").strip().lower()
+    verbose = ui_level in {"details", "debug"}
+    if not verbose:
+        line = (
+            f"CAN_FREEZE={'YES' if summary.can_freeze else 'NO'}"
+            f" | total_runs={summary.total_runs}"
+            f" | eligible_runs={summary.paper_eligible_runs}"
+        )
+        if summary.first_failing_reason:
+            line += f" | first_fail={summary.first_failing_reason}"
+        print(status_messages.status(line, level="success" if summary.can_freeze else "warn"))
+        print(status_messages.status(f"Audit report: {summary.report_path}", level="info"))
+        return
     rows = [
         ("CAN_FREEZE", "YES" if summary.can_freeze else "NO"),
         ("First failing reason", str(summary.first_failing_reason or "—")),
@@ -864,13 +910,23 @@ def _verify_host_pcap_tools() -> None:
     menu_utils.print_header("Host PCAP Tools")
     tools = collect_host_tools()
     missing = missing_required_tools(tier="dataset")
+    ui_level = str(os.environ.get("SCYTALEDROID_UI_LEVEL") or "").strip().lower()
+    verbose = ui_level in {"details", "debug"}
+    if not verbose and not missing:
+        tshark_path = ((tools.get("tshark") or {}) if isinstance(tools, dict) else {}).get("path")
+        capinfos_path = ((tools.get("capinfos") or {}) if isinstance(tools, dict) else {}).get("path")
+        tshark_ok = "OK" if tshark_path else "MISSING"
+        capinfos_ok = "OK" if capinfos_path else "MISSING"
+        print(status_messages.status(f"tshark={tshark_ok} | capinfos={capinfos_ok}", level="success"))
+        print(status_messages.status("Host toolchain is dataset-ready.", level="success"))
+        return
     for name in ("tshark", "capinfos"):
         meta = tools.get(name) if isinstance(tools, dict) else None
         path = meta.get("path") if isinstance(meta, dict) else None
         version = meta.get("version") if isinstance(meta, dict) else None
         if path:
             print(status_messages.status(f"{name}: OK ({path})", level="success"))
-            if version:
+            if verbose and version:
                 print(status_messages.status(f"{name}: {version}", level="info"))
         else:
             print(status_messages.status(f"{name}: MISSING", level="warn"))
@@ -1182,7 +1238,7 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
         print(status_messages.status("No apps available for selection.", level="warn"))
         return None
     print()
-    menu_utils.print_header(title, "Select a package to run")
+    menu_utils.print_header(title)
     # Dataset progress columns (valid runs + suggested next profile) help operators
     # track collection without opening the tracker view.
     dataset_pkgs: set[str] = set()
@@ -1208,7 +1264,8 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
     labels = [((app_label or package).strip() or package) for package, _v, _c, app_label in packages]
     collisions = {label for label in labels if labels.count(label) > 1}
 
-    rows = []
+    rows = []  # full table (debug/details)
+    op_rows = []  # operator-default table
     build_rows = []
     dataset_apps_total = 0
     dataset_apps_complete = 0
@@ -1351,70 +1408,65 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
                         continue
                     dataset_window_count_total += max(0, wc)
 
-        rows.append([str(idx), display, base_label, inter_label, need_label, next_label, build_label, total_label, legacy_label, last_label])
-    _render_package_table(rows)
-    if any(r[2] != "—" for r in rows):
+        full_row = [str(idx), display, base_label, inter_label, need_label, next_label, build_label, total_label, legacy_label, last_label]
+        rows.append(full_row)
+        op_rows.append([str(idx), display, base_label, inter_label, need_label, next_label])
+
+    if dataset_apps_total > 0:
+        evidence_summary = _summarize_evidence_quota(dataset_pkgs, cfg)
+        expected_runs = dataset_apps_total * (int(cfg.baseline_required) + int(cfg.interactive_required))
+        quota = int(evidence_summary.get("quota_runs_counted", 0))
+        apps_ok = int(evidence_summary.get("apps_satisfied", 0))
+        freeze_ok = bool(evidence_summary.get("evidence_root_exists")) and quota >= int(expected_runs) and apps_ok >= int(dataset_apps_total)
+        paper_line = f"Evidence quota: {quota}/{expected_runs} | Apps satisfied: {apps_ok}/{dataset_apps_total}"
+        if freeze_ok:
+            paper_line += " | Freeze: Allowed"
+        else:
+            paper_line += f" | Freeze: BLOCKED ({max(0, int(expected_runs) - int(quota))} run(s) missing)"
+        print(paper_line)
         print()
-        print("Legend")
-        print("------")
-        print("Baseline / Interactive = countable valid runs for active build")
-        print("(+N)                   = extra valid runs (not quota-counted)")
-        print("Build                  = CUR(current build) | OLD(legacy only) | MIX(both)")
-        print("Legacy runs            = older-build valid runs")
-        print("Last QA                = latest run integrity status; '(L)' means legacy runs also exist")
-        print("Total                  = technically VALID evidence packs found (includes excluded/exploratory)")
-        print("Per-app accounting     = tracked strictly by package name (e.g., Facebook != Messenger)")
-        if dataset_apps_total > 0:
-            evidence_summary = _summarize_evidence_quota(dataset_pkgs, cfg)
-            expected_runs = dataset_apps_total * (int(cfg.baseline_required) + int(cfg.interactive_required))
-            if dataset_window_count_missing > 0:
-                tracker_windows_label = f"? (missing window_count in {dataset_window_count_missing} run(s))"
-            else:
-                tracker_windows_label = str(dataset_window_count_total)
+
+    _render_package_table(op_rows, headers=["#", "App", "Baseline", "Interactive", "Need", "Next Action"])
+
+    while True:
+        print()
+        menu_utils.print_header("Options")
+        print("1) Run App")
+        print("2) View Details")
+        print("3) Build history")
+        print("4) Help")
+        print("5) Debug")
+        print("0) Return to Dynamic Analysis")
+        choice = prompt_utils.prompt_text("Select", required=False).strip()
+
+        if choice in {"", "1"}:
+            index = _choose_index("Select app #", len(packages))
+            if index is None:
+                return None
+            package_name, _, _, _ = packages[index]
+            return package_name
+        if choice == "2":
             print()
-            print("Quota Status")
-            print("------------")
-            print("Tracker (informational)")
-            print(f"  Apps satisfied  : {dataset_apps_complete} / {dataset_apps_total}")
-            print(f"  Valid runs      : {dataset_valid_runs_total} / {expected_runs}")
-            print(f"  Total windows   : {tracker_windows_label}")
-            print("Evidence (authoritative)")
-            print(f"  Apps satisfied  : {int(evidence_summary.get('apps_satisfied', 0))} / {dataset_apps_total}")
-            print(f"  Eligible counted: {int(evidence_summary['quota_runs_counted'])} / {expected_runs}")
-            print(f"  Eligible found  : {int(evidence_summary['paper_eligible_runs'])}")
-            print(f"  Extras          : {int(evidence_summary.get('extra_eligible_runs', 0))}")
-            print(f"  Excluded        : {int(evidence_summary.get('excluded_runs', 0))}")
-            print("Technical Capture (informational)")
-            print(f"  Technical VALID : {int(evidence_summary.get('technical_valid_runs', 0))} runs (evidence-derived)")
-            if int(evidence_summary.get("low_signal_exploratory_runs", 0)) > 0:
-                print(
-                    f"  Exploratory low-signal retained: {int(evidence_summary.get('low_signal_exploratory_runs', 0))}"
-                )
-            if int(evidence_summary.get("protocol_fit_poor_runs", 0)) > 0:
-                print(f"  Protocol fit poor: {int(evidence_summary.get('protocol_fit_poor_runs', 0))} (flagged)")
-            if not bool(evidence_summary.get("evidence_root_exists")):
-                print(
-                    status_messages.status(
-                        "Evidence root missing; paper-mode freeze is blocked until dynamic evidence packs are available.",
-                        level="warn",
-                    )
-                )
-        data_rows = [r for r in rows if r[2] != "—"]
-        evidence_ready = False
-        if dataset_apps_total > 0 and evidence_summary is not None:
-            expected_runs = dataset_apps_total * (int(cfg.baseline_required) + int(cfg.interactive_required))
-            evidence_ready = bool(evidence_summary.get("evidence_root_exists")) and int(evidence_summary.get("quota_runs_counted", 0)) >= expected_runs
-        if data_rows and all(str(r[4]).strip() == "0" for r in data_rows) and evidence_ready:
-            print(status_messages.status("Dataset status: QUOTA SATISFIED. Freeze recommended.", level="success"))
-        elif data_rows and all(str(r[4]).strip() == "0" for r in data_rows):
-            print(
-                status_messages.status(
-                    "Tracker quota is satisfied, but paper freeze is blocked until evidence-derived quota is satisfied and paper audit is GO.",
-                    level="warn",
-                )
-            )
-        detail_choice = prompt_utils.prompt_text("Press D for build history details, or Enter to continue", required=False)
-        if detail_choice.strip().lower() == "d":
+            menu_utils.print_header("Details", "Tracker vs evidence (compact)")
+            if dataset_apps_total > 0:
+                evidence_summary = evidence_summary or _summarize_evidence_quota(dataset_pkgs, cfg)
+                expected_runs = dataset_apps_total * (int(cfg.baseline_required) + int(cfg.interactive_required))
+                print("Tracker (informational)")
+                print(f"  Apps satisfied  : {dataset_apps_complete} / {dataset_apps_total}")
+                print(f"  Valid runs      : {dataset_valid_runs_total} / {expected_runs}")
+                print("Evidence (authoritative)")
+                print(f"  Apps satisfied  : {int(evidence_summary.get('apps_satisfied', 0))} / {dataset_apps_total}")
+                print(f"  Eligible counted: {int(evidence_summary.get('quota_runs_counted', 0))} / {expected_runs}")
+                print(f"  Eligible found  : {int(evidence_summary.get('paper_eligible_runs', 0))}")
+                print(f"  Extras          : {int(evidence_summary.get('extra_eligible_runs', 0))}")
+                print(f"  Excluded        : {int(evidence_summary.get('excluded_runs', 0))}")
+                if int(evidence_summary.get("protocol_fit_poor_runs", 0)) > 0:
+                    print(f"  Protocol fit poor: {int(evidence_summary.get('protocol_fit_poor_runs', 0))} (flagged)")
+                if int(evidence_summary.get("low_signal_exploratory_runs", 0)) > 0:
+                    print(f"  Low-signal (exploratory): {int(evidence_summary.get('low_signal_exploratory_runs', 0))}")
+            prompt_utils.press_enter_to_continue()
+            continue
+        if choice == "3":
             print()
             menu_utils.print_header("Build History Details")
             table_utils.render_table(
@@ -1422,23 +1474,39 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
                 build_rows,
                 compact=True,
             )
-    index = _choose_index("Select app #", len(packages))
-    if index is None:
-        return None
-    package_name, _, _, _ = packages[index]
-    return package_name
+            prompt_utils.press_enter_to_continue()
+            continue
+        if choice == "4":
+            print()
+            menu_utils.print_header("Help", "Legend (short)")
+            print("Baseline / Interactive = countable valid runs for active build")
+            print("(+N)                   = extra valid runs (not quota-counted)")
+            print("Need                   = remaining quota slots for this package")
+            print("Next Action            = deterministic suggestion from Need")
+            prompt_utils.press_enter_to_continue()
+            continue
+        if choice == "5":
+            print()
+            menu_utils.print_header("Debug", "Full table + legacy/QA fields")
+            _render_package_table(
+                rows,
+                headers=["#", "App", "Baseline", "Interactive", "Need", "Next Action", "Build", "Total", "Legacy", "Last QA"],
+            )
+            prompt_utils.press_enter_to_continue()
+            continue
+        if choice == "0":
+            return None
+        print(status_messages.status("Invalid option. Choose 0-5.", level="warn"))
 
 
-def _render_package_table(rows, *, max_preview: int = 15) -> None:
-    headers = ["#", "App"]
-    if rows and len(rows[0]) >= 10:
-        headers = ["#", "App", "Baseline", "Interactive", "Need", "Next Action", "Build", "Total", "Legacy", "Last QA"]
+def _render_package_table(rows, *, headers: list[str] | None = None, max_preview: int = 15) -> None:
+    headers = list(headers) if headers else ["#", "App"]
     if len(rows) <= max_preview:
         table_utils.render_table(headers, rows, compact=False)
         return
     preview = rows[:max_preview]
     table_utils.render_table(headers, preview, compact=False)
-    response = prompt_utils.prompt_text("Press L to list all, or Enter to continue", required=False)
+    response = prompt_utils.prompt_text("[L] List all | [Enter] Continue", required=False)
     if response.strip().lower() == "l":
         table_utils.render_table(headers, rows, compact=False)
 
