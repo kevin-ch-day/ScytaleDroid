@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-import os
+import hashlib
 import json
+import os
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -38,6 +40,51 @@ from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
 _DEVICE_STATUS_CACHE: dict[str, dict[str, str]] = {}
 _RUN_IDENTITY_CACHE: dict[str, tuple[str | None, str | None]] = {}
 
+_MENU_STARTED_AT_MONOTONIC = time.monotonic()
+
+
+def _sha256_file(path: Path) -> str:
+    try:
+        data = path.read_bytes()
+    except Exception:
+        return ""
+    return hashlib.sha256(data).hexdigest()
+
+
+def _code_signature() -> dict[str, str]:
+    # If operators update code while the menu is running, the already-loaded Python
+    # modules won't reflect it. This signature lets us warn about "stale process"
+    # issues that otherwise look like protocol/template bugs.
+    root = Path(__file__).resolve().parents[0]
+    files = {
+        "menu.py": Path(__file__).resolve(),
+        "guided_run.py": (root / "controllers" / "guided_run.py").resolve(),
+        "manual.py": (root / "scenarios" / "manual.py").resolve(),
+        "manual_templates.py": (root / "scenarios" / "manual_templates.py").resolve(),
+        "paper_eligibility.py": (root / "paper_eligibility.py").resolve(),
+    }
+    return {name: _sha256_file(path) for name, path in files.items()}
+
+
+_MENU_CODE_SIGNATURE_AT_START = _code_signature()
+
+
+def _warn_if_code_changed() -> None:
+    current = _code_signature()
+    changed = [name for name, sig in current.items() if sig and sig != _MENU_CODE_SIGNATURE_AT_START.get(name, sig)]
+    if not changed:
+        return
+    # Keep it extremely obvious: stale process == stale templates.
+    changed_list = ", ".join(changed[:5]) + (" ..." if len(changed) > 5 else "")
+    status_messages.print_status(
+        f"[WARN] Code changed on disk since this Dynamic Analysis menu started ({changed_list}).",
+        level="warn",
+    )
+    status_messages.print_status(
+        "Exit ScytaleDroid completely (Main Menu -> 0) and restart to apply the new templates/logic.",
+        level="warn",
+    )
+
 
 def _read_json(path: Path) -> dict | None:
     try:
@@ -70,6 +117,7 @@ def _summarize_evidence_quota(dataset_pkgs: set[str], cfg) -> dict[str, int | bo
     out: dict[str, int | bool] = {
         "evidence_root_exists": root.exists(),
         "total_runs": 0,
+        "technical_valid_runs": 0,
         "paper_eligible_runs": 0,
         "quota_runs_counted": 0,
         "apps_satisfied": 0,
@@ -94,6 +142,8 @@ def _summarize_evidence_quota(dataset_pkgs: set[str], cfg) -> dict[str, int | bo
             continue
         out["total_runs"] = int(out["total_runs"]) + 1
         dataset = payload.get("dataset") if isinstance(payload.get("dataset"), dict) else {}
+        if dataset.get("valid_dataset_run") is True:
+            out["technical_valid_runs"] = int(out["technical_valid_runs"]) + 1
         operator = payload.get("operator") if isinstance(payload.get("operator"), dict) else {}
         target = payload.get("target") if isinstance(payload.get("target"), dict) else {}
         package = str(target.get("package_name") or "").strip().lower()
@@ -125,12 +175,10 @@ def _summarize_evidence_quota(dataset_pkgs: set[str], cfg) -> dict[str, int | bo
             out["extra_eligible_runs"] = int(out["extra_eligible_runs"]) + 1
             continue
         pkg_counts = per_pkg.setdefault(package, {"baseline": 0, "interactive": 0})
-        # Protocol-fit feedback can keep a run technically valid while preventing
-        # it from satisfying canonical paper cohort quota.
+        # Protocol-fit feedback is an operational flag only; it must not prevent
+        # an otherwise paper-eligible run from satisfying quota.
         if bucket == "interactive" and str(operator.get("protocol_fit") or "").strip().lower() == "poor":
             out["protocol_fit_poor_runs"] = int(out["protocol_fit_poor_runs"]) + 1
-            out["extra_eligible_runs"] = int(out["extra_eligible_runs"]) + 1
-            continue
         needed = int(cfg.baseline_required if bucket == "baseline" else cfg.interactive_required)
         if int(pkg_counts.get(bucket, 0)) < needed:
             pkg_counts[bucket] = int(pkg_counts.get(bucket, 0)) + 1
@@ -193,6 +241,7 @@ def dynamic_analysis_menu() -> None:
     while True:
         print()
         menu_utils.print_header("Dynamic Analysis")
+        _warn_if_code_changed()
         spec = MenuSpec(items=options, exit_label="Back", show_exit=True)
         menu_utils.render_menu(spec)
         choice = prompt_utils.get_choice(
@@ -204,6 +253,7 @@ def dynamic_analysis_menu() -> None:
             break
 
         if choice == "1":
+            _warn_if_code_changed()
             _run_guided_dataset_run(ui_defaults)
             prompt_utils.press_enter_to_continue()
             continue
@@ -590,7 +640,10 @@ def _run_state_summary() -> None:
 
 
 def _compute_tracker_vs_evidence_deltas() -> list[dict[str, object]]:
-    from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig, load_dataset_tracker
+    from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
+        DatasetTrackerConfig,
+        load_dataset_tracker,
+    )
 
     cfg = DatasetTrackerConfig()
     tracker = load_dataset_tracker()
@@ -1165,6 +1218,8 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
     evidence_summary: dict[str, int | bool] | None = None
     for idx, (package, _version, _count, app_label) in enumerate(packages, start=1):
         display = ((app_label or package).strip() or package)
+        if str(package).strip().lower() == "com.twitter.android" and display.strip().lower() == "x":
+            display = "X (Twitter)"
         if display in collisions:
             display = f"{display} ({package})"
         # Keep app labels readable without overloading the main run-selection view.
@@ -1219,7 +1274,10 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
                 need_label = " ".join(need_parts)
             else:
                 need_label = "0"
-            total_label = str(total_valid_runs)
+            # Total should reflect technical capture volume, not just paper-eligible quota math.
+            # Baseline/Interactive show countable(+extra) for the active build cohort.
+            technical_total = int(scoped.get("technical_valid_total") or total_valid_runs)
+            total_label = str(technical_total)
             legacy_label = str(legacy_valid) if legacy_valid > 0 else "0"
             if active_runs > 0 and legacy_valid > 0:
                 build_label = "MIX"
@@ -1304,6 +1362,8 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
         print("Build                  = CUR(current build) | OLD(legacy only) | MIX(both)")
         print("Legacy runs            = older-build valid runs")
         print("Last QA                = latest run integrity status; '(L)' means legacy runs also exist")
+        print("Total                  = technically VALID evidence packs found (includes excluded/exploratory)")
+        print("Per-app accounting     = tracked strictly by package name (e.g., Facebook != Messenger)")
         if dataset_apps_total > 0:
             evidence_summary = _summarize_evidence_quota(dataset_pkgs, cfg)
             expected_runs = dataset_apps_total * (int(cfg.baseline_required) + int(cfg.interactive_required))
@@ -1324,12 +1384,14 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
             print(f"  Eligible found  : {int(evidence_summary['paper_eligible_runs'])}")
             print(f"  Extras          : {int(evidence_summary.get('extra_eligible_runs', 0))}")
             print(f"  Excluded        : {int(evidence_summary.get('excluded_runs', 0))}")
+            print("Technical Capture (informational)")
+            print(f"  Technical VALID : {int(evidence_summary.get('technical_valid_runs', 0))} runs (evidence-derived)")
             if int(evidence_summary.get("low_signal_exploratory_runs", 0)) > 0:
                 print(
                     f"  Exploratory low-signal retained: {int(evidence_summary.get('low_signal_exploratory_runs', 0))}"
                 )
             if int(evidence_summary.get("protocol_fit_poor_runs", 0)) > 0:
-                print(f"  Protocol fit poor: {int(evidence_summary.get('protocol_fit_poor_runs', 0))} (not quota-counted)")
+                print(f"  Protocol fit poor: {int(evidence_summary.get('protocol_fit_poor_runs', 0))} (flagged)")
             if not bool(evidence_summary.get("evidence_root_exists")):
                 print(
                     status_messages.status(
@@ -1405,6 +1467,9 @@ def _build_scoped_dataset_counts(package_name: str, runs: list[dict], *, cfg: ob
         "interactive_extra": 0,
         "legacy_valid": 0,
         "legacy_builds": 0,
+        # Evidence-derived technical capture totals (informational lane).
+        "technical_valid_total": 0,
+        "technical_valid_active": 0,
         "active_version_code": "",
         "active_base_sha": "",
     }
@@ -1422,6 +1487,8 @@ def _build_scoped_dataset_counts(package_name: str, runs: list[dict], *, cfg: ob
                 legacy_identity_seen.add(ident_key)
             continue
         active_runs.append(r)
+    out["technical_valid_total"] = len(valid_runs)
+    out["technical_valid_active"] = len(active_runs)
 
     baseline_needed = max(0, int(getattr(cfg, "baseline_required", 1)))
     interactive_needed = max(0, int(getattr(cfg, "interactive_required", 2)))
@@ -1435,21 +1502,32 @@ def _build_scoped_dataset_counts(package_name: str, runs: list[dict], *, cfg: ob
         )
     )
     for _, r in indexed:
-        prof = str(r.get("run_profile") or "").lower()
-        is_baseline = ("baseline" in prof) or ("idle" in prof)
-        is_interactive = ("interaction" in prof) or ("interactive" in prof) or ("script" in prof) or ("manual" in prof)
+        prof = str(r.get("run_profile") or "").strip().lower()
+        # Quota-style tracker display should mirror paper-mode semantics: only
+        # technically valid + paper-eligible runs participate in countable/extra
+        # bucket math. Legacy rows may miss paper_eligible; treat missing as
+        # backward-compatible "eligible unless explicitly false".
+        paper_eligible = r.get("paper_eligible")
+        if paper_eligible is False:
+            continue
+        is_baseline = prof.startswith("baseline") or ("baseline" in prof) or ("idle" in prof)
+        # Manual interactions are interactive quota by policy (operators may use
+        # scripted or manual runs to satisfy the interactive requirement).
+        is_interactive = (("interaction" in prof) or ("interactive" in prof) or ("script" in prof))
         if is_baseline:
             if baseline_seen < baseline_needed:
                 baseline_seen += 1
                 out["baseline_countable"] += 1
             else:
                 out["baseline_extra"] += 1
-        elif is_interactive:
+            continue
+        if is_interactive:
             if interactive_seen < interactive_needed:
                 interactive_seen += 1
                 out["interactive_countable"] += 1
             else:
                 out["interactive_extra"] += 1
+            continue
     out["legacy_builds"] = len(legacy_identity_seen)
     return out
 

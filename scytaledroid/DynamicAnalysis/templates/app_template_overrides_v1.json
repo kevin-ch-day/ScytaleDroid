@@ -1,0 +1,9 @@
+{
+  "version": "v1",
+  "packages": {
+    "com.facebook.katana": "facebook_basic_v2",
+    "com.snapchat.android": "snapchat_basic_v1",
+    "com.twitter.android": "x_twitter_full_session_v1",
+    "com.whatsapp": "whatsapp_basic_v1"
+  }
+}

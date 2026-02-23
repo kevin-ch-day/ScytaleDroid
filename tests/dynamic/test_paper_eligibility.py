@@ -55,15 +55,15 @@ def test_paper_eligibility_happy_path() -> None:
     assert out.reason_code is None
 
 
-def test_paper_eligibility_manual_is_excluded() -> None:
+def test_paper_eligibility_manual_is_allowed() -> None:
     out = derive_paper_eligibility(
         manifest=_manifest(run_profile="interaction_manual"),
         plan=_plan(),
         min_windows=20,
         required_capture_policy_version=1,
     )
-    assert out.paper_eligible is False
-    assert out.reason_code == "EXCLUDED_MANUAL_NON_COHORT"
+    assert out.paper_eligible is True
+    assert out.reason_code is None
 
 
 def test_paper_eligibility_window_missing_precedence() -> None:
@@ -165,6 +165,92 @@ def test_paper_eligibility_social_template_v2_allowed() -> None:
     assert out.paper_eligible is True
 
 
+def test_paper_eligibility_snapchat_template_allowed() -> None:
+    manifest = _manifest()
+    manifest["target"]["package_name"] = "com.snapchat.android"
+    manifest["operator"]["template_id"] = "snapchat_basic_v1"
+    manifest["operator"]["scenario_template"] = "snapchat_basic_v1"
+    out = derive_paper_eligibility(
+        manifest=manifest,
+        plan=_plan(),
+        min_windows=20,
+        required_capture_policy_version=1,
+    )
+    assert out.paper_eligible is True
+
+
+def test_paper_eligibility_snapchat_wrong_template_excluded() -> None:
+    manifest = _manifest()
+    manifest["target"]["package_name"] = "com.snapchat.android"
+    manifest["operator"]["template_id"] = "social_feed_basic_v2"
+    manifest["operator"]["scenario_template"] = "social_feed_basic_v2"
+    out = derive_paper_eligibility(
+        manifest=manifest,
+        plan=_plan(),
+        min_windows=20,
+        required_capture_policy_version=1,
+    )
+    assert out.paper_eligible is False
+    assert out.reason_code == "EXCLUDED_SCRIPT_TEMPLATE_MISMATCH"
+
+
+def test_paper_eligibility_x_twitter_template_allowed() -> None:
+    manifest = _manifest()
+    manifest["target"]["package_name"] = "com.twitter.android"
+    manifest["operator"]["template_id"] = "x_twitter_full_session_v1"
+    manifest["operator"]["scenario_template"] = "x_twitter_full_session_v1"
+    out = derive_paper_eligibility(
+        manifest=manifest,
+        plan=_plan(),
+        min_windows=20,
+        required_capture_policy_version=1,
+    )
+    assert out.paper_eligible is True
+
+
+def test_paper_eligibility_x_wrong_template_excluded() -> None:
+    manifest = _manifest()
+    manifest["target"]["package_name"] = "com.twitter.android"
+    manifest["operator"]["template_id"] = "social_feed_basic_v2"
+    manifest["operator"]["scenario_template"] = "social_feed_basic_v2"
+    out = derive_paper_eligibility(
+        manifest=manifest,
+        plan=_plan(),
+        min_windows=20,
+        required_capture_policy_version=1,
+    )
+    assert out.paper_eligible is False
+    assert out.reason_code == "EXCLUDED_SCRIPT_TEMPLATE_MISMATCH"
+
+
+def test_paper_eligibility_whatsapp_template_allowed() -> None:
+    manifest = _manifest()
+    manifest["target"]["package_name"] = "com.whatsapp"
+    manifest["operator"]["template_id"] = "whatsapp_basic_v1"
+    manifest["operator"]["scenario_template"] = "whatsapp_basic_v1"
+    out = derive_paper_eligibility(
+        manifest=manifest,
+        plan=_plan(),
+        min_windows=20,
+        required_capture_policy_version=1,
+    )
+    assert out.paper_eligible is True
+
+
+def test_paper_eligibility_facebook_template_allowed() -> None:
+    manifest = _manifest()
+    manifest["target"]["package_name"] = "com.facebook.katana"
+    manifest["operator"]["template_id"] = "facebook_basic_v2"
+    manifest["operator"]["scenario_template"] = "facebook_basic_v2"
+    out = derive_paper_eligibility(
+        manifest=manifest,
+        plan=_plan(),
+        min_windows=20,
+        required_capture_policy_version=1,
+    )
+    assert out.paper_eligible is True
+
+
 def test_paper_eligibility_legacy_template_is_excluded() -> None:
     manifest = _manifest()
     manifest["operator"]["template_id"] = "social_feed_basic"
@@ -179,7 +265,7 @@ def test_paper_eligibility_legacy_template_is_excluded() -> None:
     assert out.reason_code == "EXCLUDED_PROTOCOL_LEGACY_TEMPLATE"
 
 
-def test_paper_eligibility_protocol_fit_poor_is_excluded() -> None:
+def test_paper_eligibility_protocol_fit_poor_does_not_exclude() -> None:
     manifest = _manifest()
     manifest["operator"]["protocol_fit"] = "poor"
     out = derive_paper_eligibility(
@@ -188,8 +274,8 @@ def test_paper_eligibility_protocol_fit_poor_is_excluded() -> None:
         min_windows=20,
         required_capture_policy_version=1,
     )
-    assert out.paper_eligible is False
-    assert out.reason_code == "EXCLUDED_PROTOCOL_FIT_POOR"
+    assert out.paper_eligible is True
+    assert out.reason_code is None
 
 
 def test_paper_eligibility_script_send_is_excluded() -> None:
@@ -282,3 +368,19 @@ def test_messaging_call_template_is_exploratory_only() -> None:
     )
     assert out.paper_eligible is False
     assert out.reason_code == "EXCLUDED_CALL_EXPLORATORY_ONLY"
+
+
+def test_call_action_in_non_call_template_is_excluded() -> None:
+    manifest = _manifest(run_profile="interaction_scripted", valid=True)
+    manifest["target"]["package_name"] = "com.whatsapp"
+    manifest["operator"]["template_id"] = "whatsapp_basic_v1"
+    manifest["operator"]["scenario_template"] = "whatsapp_basic_v1"
+    manifest["operator"]["script_call_in_non_call_template"] = True
+    out = derive_paper_eligibility(
+        manifest=manifest,
+        plan=_plan(),
+        min_windows=20,
+        required_capture_policy_version=1,
+    )
+    assert out.paper_eligible is False
+    assert out.reason_code == "EXCLUDED_PROTOCOL_CALL_ACTION_IN_NON_CALL_TEMPLATE"

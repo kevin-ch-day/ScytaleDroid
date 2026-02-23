@@ -200,12 +200,21 @@ class TargetManager:
             r"(?m)^\s*versionCode=(\d+)\s+minSdk=.*$",
             r"(?m)^\s*versionCode=(\d+)\b.*$",
         )
+        # Some OEM/Android builds include multiple versionCode lines in dumpsys output
+        # (e.g., embedded components showing versionCode=1). Prefer the maximum numeric
+        # value we can find in the package-scoped section.
+        candidates: list[int] = []
         for pat in patterns:
-            m = re.search(pat, scoped)
-            if m:
-                return m.group(1)
-        fallback = re.search(r"versionCode=(\d+)\b", package_dump)
-        return fallback.group(1) if fallback else None
+            for m in re.finditer(pat, scoped):
+                try:
+                    candidates.append(int(m.group(1)))
+                except Exception:
+                    continue
+        if candidates:
+            return str(max(candidates))
+        # Fallback: search whole dump, still taking max to avoid "first match wins".
+        fallback = [int(m.group(1)) for m in re.finditer(r"versionCode=(\d+)\b", package_dump)]
+        return str(max(fallback)) if fallback else None
 
     def _extract_signer_digests(self, package_dump: str) -> list[str]:
         digests: list[str] = []

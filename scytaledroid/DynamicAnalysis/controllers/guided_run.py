@@ -12,6 +12,7 @@ import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
@@ -29,9 +30,10 @@ from scytaledroid.DynamicAnalysis.plan_selection import (
 )
 from scytaledroid.DynamicAnalysis.run_dynamic_analysis import execute_dynamic_run_spec
 from scytaledroid.DynamicAnalysis.run_summary import print_run_summary
+from scytaledroid.DynamicAnalysis.scenarios.manual import preview_script_template_for_package
 from scytaledroid.DynamicAnalysis.templates.category_map import (
     category_for_package,
-    template_for_package,
+    resolved_template_for_package,
 )
 from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_evidence_path
 from scytaledroid.DynamicAnalysis.utils.run_cleanup import (
@@ -50,6 +52,12 @@ _STORAGE_BLOCK_GB = 1.5
 _CLOCK_WARN_S = 5
 _CLOCK_BLOCK_S = 30
 _STABILIZATION_WAIT_S = 15
+_META_FAMILY_PACKAGES = {
+    "com.facebook.katana",
+    "com.facebook.orca",
+    "com.instagram.android",
+    "com.whatsapp",
+}
 
 
 def _is_messaging_package_or_category(package_name: str) -> bool:
@@ -83,7 +91,7 @@ def _is_messaging_connected_baseline(
 
 
 def _messaging_baseline_connected_insufficient_duration_streak(
-    recent_runs: list["RecentTrackerRunLike"],
+    recent_runs: list[Any],
     *,
     package_name: str,
 ) -> int:
@@ -105,14 +113,13 @@ def _intent_counts_toward_quota(
     run_profile: str,
     baseline_valid_runs: int,
     interactive_valid_runs: int,
-    cfg: "DatasetTrackerConfig",
+    cfg: Any,
 ) -> bool:
     profile = str(run_profile or "").strip().lower()
     if profile.startswith("baseline"):
         return int(baseline_valid_runs) < int(cfg.baseline_required)
-    if profile == "interaction_scripted":
+    if profile.startswith("interaction_") or "interactive" in profile:
         return int(interactive_valid_runs) < int(cfg.interactive_required)
-    # Manual and unknown intents are exploratory by policy and never count.
     return False
 
 
@@ -874,6 +881,20 @@ def run_guided_dataset_run(
     package_name = select_package_from_groups(scoped_groups, title="Research Dataset Alpha apps")
     if not package_name:
         return
+    pkg_lc = str(package_name or "").strip().lower()
+    print(
+        status_messages.status(
+            f"Selected package key: {package_name} (quota/accounting is package-specific).",
+            level="info",
+        )
+    )
+    if pkg_lc in _META_FAMILY_PACKAGES:
+        print(
+            status_messages.status(
+                "Meta-family app detected. Note: Facebook, Messenger, Instagram, and WhatsApp are tracked as separate apps.",
+                level="info",
+            )
+        )
 
     # Per-app run menu: operators can run in any order and as many times as needed.
     from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import peek_next_run_protocol
@@ -889,15 +910,45 @@ def run_guided_dataset_run(
     total_required = int(cfg.baseline_required) + int(cfg.interactive_required)
     counts = dataset_tracker_counts(package_name)
     fs_runs = find_dynamic_run_dirs(package_name)
+    try:
+        from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import load_dataset_tracker
+
+        tracker_payload = load_dataset_tracker()
+        tracker_apps = tracker_payload.get("apps") if isinstance(tracker_payload, dict) else {}
+        tracker_entry = tracker_apps.get(package_name) if isinstance(tracker_apps, dict) else {}
+        tracker_rows = tracker_entry.get("runs") if isinstance(tracker_entry, dict) else []
+    except Exception:
+        tracker_rows = []
+    paper_eligible_local = 0
+    quota_counted_local = 0
+    exclusion_reason_local: dict[str, int] = {}
+    if isinstance(tracker_rows, list):
+        for row in tracker_rows:
+            if not isinstance(row, dict):
+                continue
+            if row.get("valid_dataset_run") is not True:
+                continue
+            if row.get("paper_eligible") is True:
+                paper_eligible_local += 1
+            if row.get("counts_toward_quota") is True:
+                quota_counted_local += 1
+            if row.get("paper_eligible") is False:
+                reason = str(row.get("paper_exclusion_primary_reason_code") or "EXCLUDED_UNKNOWN").strip()
+                exclusion_reason_local[reason] = int(exclusion_reason_local.get(reason, 0)) + 1
 
     print()
     print("Runs recorded:")
     print(
-        f"  tracker={counts.total_runs}\tcountable_eligible={counts.valid_runs}/{total_required}\n"
+        f"  tracker={counts.total_runs}\ttracker_countable={counts.valid_runs}/{total_required}\n"
+        f"  paper_eligible(local)={paper_eligible_local}\tquota_counted(local)={quota_counted_local}/{total_required}\n"
         f"  baseline={counts.baseline_valid_runs}/{cfg.baseline_required}\t"
         f"interactive={counts.interactive_valid_runs}/{cfg.interactive_required}\n"
         f"  quota_met={int(counts.quota_met)}\tlocal_evidence={len(fs_runs)}"
     )
+    if exclusion_reason_local:
+        top_reasons = sorted(exclusion_reason_local.items(), key=lambda kv: (-int(kv[1]), kv[0]))[:3]
+        reason_line = ", ".join([f"{k}={v}" for k, v in top_reasons])
+        print(f"  local_exclusion_top: {reason_line}")
     if counts.quota_met:
         # Once quota is met, runs are still allowed, but they're "extra" and don't change completion.
         print("Quota met. Additional runs are allowed and will be tracked as extra (do not change completion).")
@@ -973,7 +1024,14 @@ def run_guided_dataset_run(
         menu_utils.MenuOption(
             "3",
             "Manual Interaction",
-            description="Purpose: realism/robustness. run_profile=interaction_manual | Counts toward quota: NO (manual is exploratory)",
+            description=(
+                "Purpose: operator-driven stimulus. run_profile=interaction_manual | "
+                + (
+                    "Counts toward quota: YES (if VALID)"
+                    if int(counts.interactive_valid_runs) < int(cfg.interactive_required)
+                    else "Counts toward quota: NO (interactive quota met; saved as EXTRA)"
+                )
+            ),
             badge=None,
         ),
         menu_utils.MenuOption("4", "Test app (Dry Run/No Saving)", description="no capture; checks plan + tools", badge=None),
@@ -1068,6 +1126,18 @@ def run_guided_dataset_run(
         )
         if plan_selection:
             print(status_messages.status(f"Plan OK: {plan_selection['plan_path']}", level="success"))
+        mapped = resolved_template_for_package(package_name)
+        if mapped:
+            try:
+                template_id, steps = preview_script_template_for_package(package_name=package_name)
+                print()
+                menu_utils.print_section("Dry Run Script Preview")
+                print(status_messages.status(f"Template: {template_id}", level="info"))
+                rows = [[str(i), sid, str(sexp)] for i, (sid, _sdesc, sexp) in enumerate(steps, start=1)]
+                menu_utils.print_table(["#", "Step ID", "Expected (s)"], rows)
+                print(status_messages.status("Dry run validates plan/tools only; no capture or saving is performed.", level="info"))
+            except Exception as exc:
+                print(status_messages.status(f"Template preview unavailable: {exc}", level="warn"))
         prompt_utils.press_enter_to_continue()
         return
 
@@ -1181,70 +1251,60 @@ def run_guided_dataset_run(
         if not proceed:
             print(status_messages.status("Run canceled. Choose the suggested intent to fill quota.", level="info"))
             return
+
+    # Manual runs can be quota-counted (by policy), so do not gate behind an
+    # "EXPLORATORY" confirmation.
     messaging_activity: str | None = None
     if _is_messaging_package_or_category(package_name):
-        print()
-        menu_utils.print_header("Messaging Activity (Required Tag)")
+        # PM lock: messaging activity is a tag describing what happened. In manual mode, it
+        # must never affect countability. In scripted mode, it selects a deterministic
+        # template (template policy then determines cohort eligibility).
         if str(run_profile or "").strip().lower().startswith("baseline"):
+            # Keep baseline deterministic: messaging baselines are baseline_connected and the
+            # activity is "connected_idle" by definition. Do not offer a menu that can
+            # accidentally select known-low-signal "home idle" baselines.
+            messaging_activity = "connected_idle"
+            print()
+            print(status_messages.status("Messaging Activity tag: Idle (baseline_connected).", level="info"))
+        else:
+            print()
+            menu_utils.print_header("Messaging Activity (Tag)")
             messaging_options = [
-                menu_utils.MenuOption(
-                    "1",
-                    "Connected idle",
-                    description="open existing thread and keep it visible; no send/call/media upload",
-                ),
+                menu_utils.MenuOption("1", "Idle", description="browse thread/list surfaces; no sending/calls/media"),
                 menu_utils.MenuOption(
                     "2",
-                    "None / home idle",
-                    description="no explicit messaging activity (exploratory; likely low-signal)",
+                    "Text",
+                    description="send 2 fixed text messages (no media). Use Meta AI/Saved/Note-to-self if needed.",
                 ),
-                menu_utils.MenuOption("3", "Text only", description="send/receive text messages"),
-                menu_utils.MenuOption("4", "Voice call", description="voice calling only"),
-                menu_utils.MenuOption("5", "Video call", description="video calling only"),
-                menu_utils.MenuOption("6", "Mixed", description="text + voice/video"),
+                menu_utils.MenuOption("3", "Voice Call", description="start call; if connected hold ~90s; end call"),
+                menu_utils.MenuOption("4", "Video Call", description="start video call; if connected hold ~90s; end call"),
+                menu_utils.MenuOption("5", "Mixed", description="text + call (exploratory-only; non-cohort)"),
             ]
-        else:
-            messaging_options = [
-                menu_utils.MenuOption("1", "None / browsing only (default)", description="no explicit messaging activity"),
-                menu_utils.MenuOption("2", "Text only", description="send/receive text messages"),
-                menu_utils.MenuOption("3", "Voice call", description="voice calling only"),
-                menu_utils.MenuOption("4", "Video call", description="video calling only"),
-                menu_utils.MenuOption("5", "Mixed", description="text + voice/video"),
-            ]
-        menu_utils.render_menu(
-            menu_utils.MenuSpec(
-                items=messaging_options,
-                default="1",
-                exit_label=None,
-                show_exit=False,
-                show_descriptions=True,
-                compact=True,
+            menu_utils.render_menu(
+                menu_utils.MenuSpec(
+                    items=messaging_options,
+                    default="2" if str(run_profile or "").strip().lower() == "interaction_scripted" else "1",
+                    exit_label=None,
+                    show_exit=False,
+                    show_descriptions=True,
+                    compact=True,
+                )
             )
-        )
-        valid_choices = menu_utils.selectable_keys(messaging_options, include_exit=False)
-        choice = prompt_utils.get_choice(
-            valid_choices,
-            default="1",
-            invalid_message=f"Choose {valid_choices[0]}-{valid_choices[-1]}.",
-            disabled=[option.key for option in messaging_options if option.disabled],
-        )
-        if str(run_profile or "").strip().lower().startswith("baseline"):
+            valid_choices = menu_utils.selectable_keys(messaging_options, include_exit=False)
+            choice = prompt_utils.get_choice(
+                valid_choices,
+                default="2" if str(run_profile or "").strip().lower() == "interaction_scripted" else "1",
+                invalid_message=f"Choose {valid_choices[0]}-{valid_choices[-1]}.",
+                disabled=[option.key for option in messaging_options if option.disabled],
+            )
             messaging_activity = {
-                "1": "connected_idle",
-                "2": "none",
-                "3": "text_only",
-                "4": "voice_call",
-                "5": "video_call",
-                "6": "mixed",
-            }[choice]
-        else:
-            messaging_activity = {
-                "1": "none",
+                "1": "idle",
                 "2": "text_only",
                 "3": "voice_call",
                 "4": "video_call",
                 "5": "mixed",
             }[choice]
-    elif messaging_activity is None:
+    else:
         # Non-messaging apps: leave unset so downstream can distinguish "not applicable" vs "none".
         messaging_activity = None
 
@@ -1309,23 +1369,38 @@ def run_guided_dataset_run(
                 )
                 return
 
-    if (
-        _is_messaging_package_or_category(package_name)
-        and str(run_profile or "").strip().lower() == "interaction_scripted"
-        and str(messaging_activity or "").strip().lower() in {"voice_call", "video_call", "mixed"}
-    ):
-        print(
-            status_messages.status(
-                "Voice/video call selected in scripted mode. "
-                "Paper mode hard-switch: using messaging_call_basic_v1 (exploratory, non-cohort).",
-                level="warn",
+    # Template policy determines scripted countability (messaging activity is only a tag).
+    if _is_messaging_package_or_category(package_name) and str(run_profile or "").strip().lower() == "interaction_scripted":
+        try:
+            tmpl_id, _steps = preview_script_template_for_package(
+                package_name=str(package_name or "").strip().lower(),
+                messaging_activity=str(messaging_activity or "").strip().lower(),
             )
-        )
-        counts_toward_completion = False
+            print(status_messages.status(f"Script template selected: {tmpl_id}", level="info"))
+            if str(tmpl_id) == "messaging_call_basic_v1":
+                print(
+                    status_messages.status(
+                        "Template policy: Mixed/call template is exploratory-only (will NOT count toward paper quota).",
+                        level="warn",
+                    )
+                )
+                counts_toward_completion = False
+        except Exception:
+            # If preview fails, keep behavior unchanged; capture can still proceed and will
+            # be evaluated evidence-first post-run.
+            pass
+
+    # Operator-facing paper quota impact label (avoid generic "countable" wording).
+    prof_lc = str(run_profile or "").strip().lower()
+    if "manual" in prof_lc:
+        paper_impact_label = "Paper quota impact: NO (manual is exploratory by policy)"
+    elif counts_toward_completion:
+        paper_impact_label = "Paper quota impact: YES (if VALID)"
+    else:
+        paper_impact_label = "Paper quota impact: NO (extra run / policy)"
 
     print(
-        "Selected intent countability: "
-        + ("COUNTABLE (if VALID)" if counts_toward_completion else "EXTRA (not countable)")
+        paper_impact_label
     )
 
     print()
@@ -1361,7 +1436,7 @@ def run_guided_dataset_run(
     time.sleep(_STABILIZATION_WAIT_S)
     clear_logcat = prompt_utils.prompt_yes_no("Clear logcat at run start?", default=True)
     if run_profile == "interaction_scripted":
-        mapped = template_for_package(package_name)
+        mapped = resolved_template_for_package(package_name)
         if not mapped:
             print(
                 status_messages.status(
@@ -1446,12 +1521,9 @@ def _capture_protocol_fit_feedback(*, result, run_profile: str, package_name: st
             )
         )
 
+    # Messaging templates may legitimately send messages (text-mode templates). Only flag
+    # "send" as a protocol violation when it was not expected by the selected template.
     send_detected = False
-    if _is_messaging_package_or_category(str(package_name or "").strip().lower()):
-        send_detected = prompt_utils.prompt_yes_no(
-            "Did this scripted run send a real message? (protocol violation in paper mode)",
-            default=False,
-        )
 
     event = {
         "timestamp_utc": datetime.now(UTC).isoformat(),
@@ -1477,6 +1549,14 @@ def _capture_protocol_fit_feedback(*, result, run_profile: str, package_name: st
     try:
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
         if isinstance(payload, dict):
+            operator_existing = payload.get("operator") if isinstance(payload.get("operator"), dict) else {}
+            observed_template = str(operator_existing.get("template_id_actual") or operator_existing.get("template_id") or "").strip()
+            is_text_template = observed_template.endswith("_text_v1") or observed_template in {"messaging_text_v1", "whatsapp_text_v1"}
+            if _is_messaging_package_or_category(str(package_name or "").strip().lower()) and not is_text_template:
+                send_detected = prompt_utils.prompt_yes_no(
+                    "Did this scripted run send messages outside of the template steps? (protocol violation)",
+                    default=False,
+                )
             operator = payload.get("operator") if isinstance(payload.get("operator"), dict) else {}
             operator["protocol_fit"] = fit_label
             operator["protocol_fit_step_ref"] = step_ref or None

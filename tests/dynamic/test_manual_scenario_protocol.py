@@ -7,6 +7,7 @@ from scytaledroid.DynamicAnalysis.core.run_context import RunContext
 from scytaledroid.DynamicAnalysis.scenarios.manual import (
     ManualScenarioRunner,
     _build_baseline_connected_schedule,
+    _parse_timing_action,
     _resolve_script_template,
 )
 
@@ -123,4 +124,132 @@ def test_voice_call_activity_hard_switches_to_call_template(tmp_path: Path) -> N
         device_serial="SERIAL",
     )
     template_id, _steps = _resolve_script_template(ctx)
+    assert template_id == "whatsapp_voice_v1"
+
+
+def test_video_call_activity_hard_switches_to_call_template(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    ctx = RunContext(
+        dynamic_run_id="r4",
+        package_name="com.whatsapp",
+        duration_seconds=240,
+        scenario_id="basic_usage",
+        run_dir=run_dir,
+        artifacts_dir=run_dir / "artifacts",
+        analysis_dir=run_dir / "analysis",
+        notes_dir=run_dir / "notes",
+        interactive=True,
+        run_profile="interaction_scripted",
+        interaction_level="scripted",
+        messaging_activity="video_call",
+        device_serial="SERIAL",
+    )
+    template_id, _steps = _resolve_script_template(ctx)
+    assert template_id == "whatsapp_video_v1"
+
+
+def test_mixed_call_activity_hard_switches_to_call_template(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    ctx = RunContext(
+        dynamic_run_id="r5",
+        package_name="com.whatsapp",
+        duration_seconds=240,
+        scenario_id="basic_usage",
+        run_dir=run_dir,
+        artifacts_dir=run_dir / "artifacts",
+        analysis_dir=run_dir / "analysis",
+        notes_dir=run_dir / "notes",
+        interactive=True,
+        run_profile="interaction_scripted",
+        interaction_level="scripted",
+        messaging_activity="mixed",
+        device_serial="SERIAL",
+    )
+    template_id, _steps = _resolve_script_template(ctx)
     assert template_id == "messaging_call_basic_v1"
+
+
+def test_snapchat_uses_snapchat_template_override(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    ctx = RunContext(
+        dynamic_run_id="r6",
+        package_name="com.snapchat.android",
+        duration_seconds=240,
+        scenario_id="basic_usage",
+        run_dir=run_dir,
+        artifacts_dir=run_dir / "artifacts",
+        analysis_dir=run_dir / "analysis",
+        notes_dir=run_dir / "notes",
+        interactive=True,
+        run_profile="interaction_scripted",
+        interaction_level="scripted",
+        device_serial="SERIAL",
+    )
+    template_id, _steps = _resolve_script_template(ctx)
+    assert template_id == "snapchat_basic_v1"
+
+
+def test_twitter_uses_x_template_override(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    ctx = RunContext(
+        dynamic_run_id="r7",
+        package_name="com.twitter.android",
+        duration_seconds=240,
+        scenario_id="basic_usage",
+        run_dir=run_dir,
+        artifacts_dir=run_dir / "artifacts",
+        analysis_dir=run_dir / "analysis",
+        notes_dir=run_dir / "notes",
+        interactive=True,
+        run_profile="interaction_scripted",
+        interaction_level="scripted",
+        device_serial="SERIAL",
+    )
+    template_id, _steps = _resolve_script_template(ctx)
+    assert template_id == "x_twitter_full_session_v1"
+
+
+def test_whatsapp_uses_whatsapp_template_override(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    ctx = RunContext(
+        dynamic_run_id="r8",
+        package_name="com.whatsapp",
+        duration_seconds=240,
+        scenario_id="basic_usage",
+        run_dir=run_dir,
+        artifacts_dir=run_dir / "artifacts",
+        analysis_dir=run_dir / "analysis",
+        notes_dir=run_dir / "notes",
+        interactive=True,
+        run_profile="interaction_scripted",
+        interaction_level="scripted",
+        messaging_activity="none",
+        device_serial="SERIAL",
+    )
+    template_id, _steps = _resolve_script_template(ctx)
+    assert template_id == "whatsapp_idle_v1"
+
+
+def test_facebook_uses_facebook_template_override(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    ctx = RunContext(
+        dynamic_run_id="r9",
+        package_name="com.facebook.katana",
+        duration_seconds=240,
+        scenario_id="basic_usage",
+        run_dir=run_dir,
+        artifacts_dir=run_dir / "artifacts",
+        analysis_dir=run_dir / "analysis",
+        notes_dir=run_dir / "notes",
+        interactive=True,
+        run_profile="interaction_scripted",
+        interaction_level="scripted",
+        device_serial="SERIAL",
+    )
+    template_id, _steps = _resolve_script_template(ctx)
+    assert template_id == "facebook_basic_v2"
+
+
+def test_timing_action_parses_skip_aliases() -> None:
+    assert _parse_timing_action("n\n") == "skip"
+    assert _parse_timing_action("skip\n") == "skip"

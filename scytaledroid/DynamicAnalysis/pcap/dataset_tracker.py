@@ -242,10 +242,73 @@ def update_dataset_tracker(
 def load_dataset_tracker() -> dict[str, Any]:
     tracker_path = Path(app_config.DATA_DIR) / "archive" / "dataset_plan.json"
     payload = _load(tracker_path)
-    return _normalize_tracker_payload(payload, DatasetTrackerConfig())
+    dirty: list[bool] = [False]
+    normalized = _normalize_tracker_payload(payload, DatasetTrackerConfig(), dirty=dirty)
+    # The tracker JSON is a derived index. If we can deterministically repair stale
+    # derived fields (e.g., eligibility), persist the fix so downstream tools that
+    # read the raw JSON (ad-hoc scripts) see consistent results.
+    if dirty[0] and tracker_path.exists():
+        try:
+            tracker_path.write_text(
+                json.dumps(normalized, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+        except OSError:
+            # Best-effort; callers can still reindex explicitly.
+            pass
+    return normalized
 
 
-def _normalize_tracker_payload(payload: dict[str, Any], cfg: DatasetTrackerConfig) -> dict[str, Any]:
+def _refresh_paper_eligibility_in_place(r: dict[str, Any]) -> bool:
+    """Best-effort refresh of paper eligibility fields for a tracker row.
+
+    The tracker is a derived index; eligibility logic can change over time. We
+    refresh a small set of known-stale states opportunistically so operators do
+    not need to manually reindex after policy shifts.
+
+    Returns True if any field was updated.
+    """
+    if not isinstance(r, dict):
+        return False
+    run_id = str(r.get("run_id") or "").strip()
+    if not run_id:
+        return False
+    run_dir = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic" / run_id
+    manifest_path = run_dir / "run_manifest.json"
+    if not manifest_path.exists():
+        return False
+    # Note: plan may be missing in incomplete packs; in that case eligibility
+    # remains excluded by identity rules.
+    manifest = _load(manifest_path)
+    plan = _load(run_dir / "inputs" / "static_dynamic_plan.json")
+    eligibility = derive_paper_eligibility(
+        manifest=manifest if isinstance(manifest, dict) else {},
+        plan=plan if isinstance(plan, dict) else {},
+        min_windows=int(MIN_WINDOWS_PER_RUN),
+        required_capture_policy_version=int(getattr(paper2_config, "PAPER_CONTRACT_VERSION", 1)),
+    )
+    before = (
+        r.get("paper_eligible"),
+        r.get("paper_exclusion_primary_reason_code"),
+        tuple(r.get("paper_exclusion_all_reason_codes") or []),
+    )
+    r["paper_eligible"] = bool(eligibility.paper_eligible)
+    r["paper_exclusion_primary_reason_code"] = eligibility.reason_code
+    r["paper_exclusion_all_reason_codes"] = list(eligibility.all_reason_codes)
+    after = (
+        r.get("paper_eligible"),
+        r.get("paper_exclusion_primary_reason_code"),
+        tuple(r.get("paper_exclusion_all_reason_codes") or []),
+    )
+    return before != after
+
+
+def _normalize_tracker_payload(
+    payload: dict[str, Any],
+    cfg: DatasetTrackerConfig,
+    *,
+    dirty: list[bool] | None = None,
+) -> dict[str, Any]:
     """Normalize/repair derived tracker fields in-memory.
 
     The tracker JSON is a derived index. As the schema evolves, older files may
@@ -266,6 +329,27 @@ def _normalize_tracker_payload(payload: dict[str, Any], cfg: DatasetTrackerConfi
         if not isinstance(runs, list):
             runs = []
             entry["runs"] = runs
+
+        # Opportunistic repair: older trackers may have manual runs marked as paper-excluded
+        # under now-retired policy. Refresh eligibility in-memory so quota/progress displays
+        # reflect current rules even if the operator hasn't reindexed yet.
+        for r in runs:
+            if not isinstance(r, dict):
+                continue
+            primary = str(r.get("paper_exclusion_primary_reason_code") or "").strip()
+            prof = str(r.get("run_profile") or "").strip().lower()
+            # Opportunistic repairs for known policy shifts where the tracker can
+            # hold stale cached eligibility state.
+            #
+            # - Manual runs may become cohort-eligible.
+            # - Protocol fit feedback is informational (not an exclusion).
+            if (
+                (primary == "EXCLUDED_MANUAL_NON_COHORT" and "manual" in prof)
+                or (primary == "EXCLUDED_PROTOCOL_FIT_POOR")
+            ):
+                if _refresh_paper_eligibility_in_place(r):
+                    if isinstance(dirty, list) and dirty:
+                        dirty[0] = True
 
         entry["run_count"] = len([r for r in runs if isinstance(r, dict)])
         entry["target_runs"] = int(cfg.baseline_required) + int(cfg.interactive_required)
@@ -962,7 +1046,6 @@ _PROTOCOL_REASON_CODES = {
     "EXCLUDED_SCRIPT_TIMEOUT",
     "EXCLUDED_SCRIPT_UI_STATE_MISMATCH",
     "EXCLUDED_PROTOCOL_FIT_POOR",
-    "EXCLUDED_MANUAL_NON_COHORT",
     "EXCLUDED_INTENT_NOT_ALLOWED",
 }
 

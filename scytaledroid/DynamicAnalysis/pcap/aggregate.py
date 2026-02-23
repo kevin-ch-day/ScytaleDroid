@@ -167,6 +167,10 @@ def export_protocol_ledger_csv(
             "package_name": target.get("package_name"),
             "run_profile": run_profile,
             "template_id": operator.get("template_id") or operator.get("scenario_template"),
+            "template_id_requested": operator.get("template_id_requested"),
+            "template_id_actual": operator.get("template_id_actual")
+            or operator.get("template_id")
+            or operator.get("scenario_template"),
             "template_hash": operator.get("template_hash") or operator.get("script_hash"),
             "interaction_protocol_version": operator.get("interaction_protocol_version"),
             "baseline_protocol_id": operator.get("baseline_protocol_id"),
@@ -178,6 +182,11 @@ def export_protocol_ledger_csv(
             "call_connect_latency_s": operator.get("call_connect_latency_s"),
             "call_connected_duration_s": operator.get("call_connected_duration_s"),
             "call_end_reason": operator.get("call_end_reason"),
+            "call_outcome_reason": operator.get("call_outcome_reason"),
+            "call_outcome_flag": operator.get("call_outcome_flag"),
+            "ai_used": operator.get("ai_used"),
+            "ai_provider": operator.get("ai_provider"),
+            "ai_prompt_id": operator.get("ai_prompt_id"),
             "protocol_fit": operator.get("protocol_fit"),
             "protocol_violations": json.dumps(protocol_reasons, sort_keys=True),
             "technical_validity": dataset.get("technical_validity") or operator.get("technical_validity"),

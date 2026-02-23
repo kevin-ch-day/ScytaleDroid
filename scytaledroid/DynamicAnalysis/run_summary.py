@@ -36,21 +36,39 @@ def print_run_summary(result, duration_label: str) -> None:
             lines.append(("Messaging", str(messaging_activity)))
         if str(run_profile or "").startswith("interaction_scripted"):
             template_id = operator.get("template_id") or operator.get("scenario_template")
+            template_requested = operator.get("template_id_requested")
+            template_actual = operator.get("template_id_actual") or template_id
             protocol_version = operator.get("interaction_protocol_version")
             template_hash = operator.get("template_hash") or operator.get("script_hash")
             target_overrun = operator.get("script_target_overrun_s")
             if template_id:
                 lines.append(("Template", str(template_id)))
+            if template_requested and template_actual and str(template_requested) != str(template_actual):
+                lines.append(("Template requested", str(template_requested)))
+                lines.append(("Template actual", str(template_actual)))
             if protocol_version is not None:
                 lines.append(("Protocol version", str(protocol_version)))
             if template_hash:
                 lines.append(("Template hash", f"{str(template_hash)[:12]}..."))
+            if operator.get("ai_used") is not None:
+                lines.append(("AI used", str(bool(operator.get("ai_used"))).lower()))
+            if operator.get("ai_provider"):
+                lines.append(("AI provider", str(operator.get("ai_provider"))))
+            if operator.get("ai_prompt_id"):
+                lines.append(("AI prompt id", str(operator.get("ai_prompt_id"))))
             try:
                 if int(target_overrun or 0) > 0:
                     lines.append(("Protocol timing", f"OVERRUN by {int(target_overrun)}s"))
             except Exception:
                 pass
-            if str(template_id or "") == "messaging_call_basic_v1":
+            call_templates = {
+                "messaging_call_basic_v1",
+                "messaging_voice_v1",
+                "messaging_video_v1",
+                "whatsapp_voice_v1",
+                "whatsapp_video_v1",
+            }
+            if str(template_actual or template_id or "") in call_templates:
                 lines.append(("Call type", str(operator.get("call_type") or "voice")))
                 lines.append(("Call attempted", str(bool(operator.get("call_attempted"))).lower()))
                 lines.append(("Call connected", str(bool(operator.get("call_connected"))).lower()))
@@ -60,6 +78,8 @@ def print_run_summary(result, duration_label: str) -> None:
                     lines.append(("Call connected duration", f"{float(operator.get('call_connected_duration_s')):.2f}s"))
                 if operator.get("call_end_reason"):
                     lines.append(("Call end reason", str(operator.get("call_end_reason"))))
+                if operator.get("call_outcome_reason"):
+                    lines.append(("Call outcome", str(operator.get("call_outcome_reason"))))
         elif str(run_profile or "").startswith("baseline"):
             baseline_protocol_id = operator.get("baseline_protocol_id")
             baseline_protocol_version = operator.get("baseline_protocol_version")
@@ -118,6 +138,9 @@ def print_run_summary(result, duration_label: str) -> None:
             verdict_line = _three_verdict_label(result.dynamic_run_id)
             if verdict_line:
                 lines.append(("Verdicts", verdict_line))
+                reason_line = _paper_reason_line(result.dynamic_run_id)
+                if reason_line:
+                    lines.append(("Paper", reason_line))
         else:
             dataset_validity = _dataset_validity_label(result.dynamic_run_id)
             if dataset_validity:
@@ -129,6 +152,9 @@ def print_run_summary(result, duration_label: str) -> None:
             verdict_line = _three_verdict_label(result.dynamic_run_id)
             if verdict_line:
                 lines.append(("Verdicts", verdict_line))
+                reason_line = _paper_reason_line(result.dynamic_run_id)
+                if reason_line:
+                    lines.append(("Paper", reason_line))
 
         # DB is a derived index (not authoritative). Make its status explicit so
         # operators can spot schema/persistence problems without reading logs.
@@ -405,6 +431,33 @@ def _three_verdict_label(dynamic_run_id: str | None) -> str | None:
     if not (technical and protocol and cohort):
         return None
     return f"Technical={technical} | Protocol={protocol} | Cohort={cohort}"
+
+
+def _paper_reason_line(dynamic_run_id: str | None) -> str | None:
+    row = _tracker_run_row(dynamic_run_id)
+    if not isinstance(row, dict):
+        return None
+    # Only show when the run didn't advance paper cohort.
+    if row.get("paper_eligible") is True and bool(row.get("countable")):
+        return None
+    code = str(row.get("paper_exclusion_primary_reason_code") or "").strip()
+    if not code:
+        return None
+    mapping = {
+        "EXCLUDED_MANUAL_NON_COHORT": "Manual runs are exploratory-only in Paper Mode.",
+        "EXCLUDED_EXTRA_RUN": "Quota already satisfied for this app slot; saved as extra evidence.",
+        "EXCLUDED_CALL_EXPLORATORY_ONLY": "Call template is exploratory-only by paper policy.",
+        "EXCLUDED_CALL_NOT_CONNECTED": "Call did not connect (not eligible for cohort).",
+        "EXCLUDED_LOW_SIGNAL_IDLE_BASELINE": "Low-signal idle baseline (expected for messaging home-idle).",
+        "EXCLUDED_SCRIPT_TEMPLATE_MISMATCH": "Observed scripted template did not match expected template policy.",
+        "EXCLUDED_SCRIPT_PROTOCOL_SEND": "Messages sent outside allowed scripted-text template policy.",
+        "EXCLUDED_IDENTITY_MISMATCH": "Build identity mismatch vs static plan (version/signature drift).",
+        "EXCLUDED_WINDOW_COUNT_MISSING": "Window count missing (insufficient capture span or parse failure).",
+        "EXCLUDED_DURATION_TOO_SHORT": "Capture duration below minimum sampling contract.",
+        "EXCLUDED_INCOMPLETE_ARTIFACT_SET": "Incomplete artifact set (missing/invalid PCAP or parse failure).",
+    }
+    msg = mapping.get(code, code)
+    return f"Reason: {msg} ({code})."
 
 
 def _dataset_quota_label(package_name: str | None, dynamic_run_id: str | None) -> str | None:

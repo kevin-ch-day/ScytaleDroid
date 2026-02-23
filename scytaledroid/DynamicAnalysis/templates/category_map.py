@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 from functools import lru_cache
 from pathlib import Path
 
 _MAP_PATH = Path(__file__).with_name("category_map_v1.json")
+_OVERRIDE_PATH = Path(__file__).with_name("app_template_overrides_v1.json")
 _DEFAULT_VERSION = "v1"
 
 
@@ -22,17 +23,37 @@ def _load_mapping() -> dict:
     return {"version": _DEFAULT_VERSION, "categories": {}, "packages": {}}
 
 
+def _load_overrides() -> dict:
+    try:
+        payload = json.loads(_OVERRIDE_PATH.read_text(encoding="utf-8"))
+        if isinstance(payload, dict):
+            return payload
+    except Exception:
+        pass
+    return {"version": _DEFAULT_VERSION, "packages": {}}
+
+
 def mapping_version() -> str:
     payload = _load_mapping()
-    return str(payload.get("version") or _DEFAULT_VERSION)
+    overrides = _load_overrides()
+    base_ver = str(payload.get("version") or _DEFAULT_VERSION).strip() or _DEFAULT_VERSION
+    ovr_ver = str(overrides.get("version") or _DEFAULT_VERSION).strip() or _DEFAULT_VERSION
+    return f"{base_ver}+overrides:{ovr_ver}"
 
 
 def mapping_snapshot() -> dict:
     payload = _load_mapping()
+    overrides = _load_overrides()
     out = dict(payload)
     out.setdefault("version", _DEFAULT_VERSION)
     out.setdefault("categories", {})
     out.setdefault("packages", {})
+    out["app_template_overrides_version"] = str(overrides.get("version") or _DEFAULT_VERSION)
+    out["app_template_overrides"] = (
+        dict(overrides.get("packages"))
+        if isinstance(overrides.get("packages"), dict)
+        else {}
+    )
     return out
 
 
@@ -57,10 +78,23 @@ def template_for_package(package_name: str) -> str | None:
     return str(categories.get(cat) or "").strip() or None
 
 
+def template_override_for_package(package_name: str) -> str | None:
+    payload = _load_overrides()
+    packages = payload.get("packages") if isinstance(payload.get("packages"), dict) else {}
+    return str(packages.get(str(package_name or "").strip().lower()) or "").strip() or None
+
+
+def resolved_template_for_package(package_name: str) -> str | None:
+    """Return per-app override template when present; otherwise category template."""
+    return template_override_for_package(package_name) or template_for_package(package_name)
+
+
 __all__ = [
     "mapping_version",
     "mapping_snapshot",
     "mapping_sha256",
     "category_for_package",
     "template_for_package",
+    "template_override_for_package",
+    "resolved_template_for_package",
 ]

@@ -26,12 +26,21 @@ from scytaledroid.DynamicAnalysis.core.static_context import (
     compute_static_context,
 )
 from scytaledroid.DynamicAnalysis.core.target_manager import TargetManager
+from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper2_config
 from scytaledroid.DynamicAnalysis.monitor import RunMonitor, RunMonitorConfig
 from scytaledroid.DynamicAnalysis.observers.base import Observer, ObserverHandle
+from scytaledroid.DynamicAnalysis.paper_contract import (
+    PAPER_CONTRACT_VERSION as PAPER_MODE_CONTRACT_VERSION,
+)
+from scytaledroid.DynamicAnalysis.paper_contract import (
+    build_paper_contract_snapshot,
+    paper_contract_hash,
+)
+from scytaledroid.DynamicAnalysis.paper_eligibility import derive_paper_eligibility
 from scytaledroid.DynamicAnalysis.pcap.correlate import write_static_dynamic_overlap
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
-    DatasetTrackerConfig,
     MIN_WINDOWS_PER_RUN,
+    DatasetTrackerConfig,
     derive_three_verdicts_for_row,
     evaluate_dataset_validity,
     load_dataset_tracker,
@@ -42,13 +51,6 @@ from scytaledroid.DynamicAnalysis.pcap.features import write_pcap_features
 from scytaledroid.DynamicAnalysis.pcap.indexer import index_pcap_by_app
 from scytaledroid.DynamicAnalysis.pcap.report import write_pcap_report
 from scytaledroid.DynamicAnalysis.pcap.tools import collect_host_tools
-from scytaledroid.DynamicAnalysis.paper_contract import (
-    PAPER_CONTRACT_VERSION as PAPER_MODE_CONTRACT_VERSION,
-    build_paper_contract_snapshot,
-    paper_contract_hash,
-)
-from scytaledroid.DynamicAnalysis.paper_eligibility import derive_paper_eligibility
-from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper2_config
 from scytaledroid.DynamicAnalysis.plans.loader import (
     PlanValidationError,
     build_plan_validation_event,
@@ -56,7 +58,12 @@ from scytaledroid.DynamicAnalysis.plans.loader import (
     render_plan_validation_block,
     validate_dynamic_plan,
 )
-from scytaledroid.DynamicAnalysis.scenarios import ManualScenarioRunner, SCRIPT_PROTOCOL_VERSION
+from scytaledroid.DynamicAnalysis.scenarios import (
+    SCRIPT_PROTOCOL_VERSION,
+    ManualScenarioRunner,
+    ScenarioAbortRequested,
+    ScenarioResult,
+)
 from scytaledroid.DynamicAnalysis.telemetry.sampler import TelemetrySampler
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_engine
@@ -265,6 +272,8 @@ class DynamicRunOrchestrator:
         monitor = None
         clock_start = None
         clock_end = None
+        scenario_interrupted_reason: str | None = None
+        abort_discard_requested = False
         if run_ctx.device_serial:
             sampler = TelemetrySampler(
                 device_serial=run_ctx.device_serial,
@@ -300,12 +309,50 @@ class DynamicRunOrchestrator:
         try:
             if monitor:
                 monitor.start()
-            scenario_result = scenario_runner.run(
-                run_ctx,
-                on_start=sampler.start if sampler else None,
-                on_end=None,
-                on_protocol_event=(lambda event_type, details: event_logger.log(event_type, details)),
-            )
+            try:
+                scenario_result = scenario_runner.run(
+                    run_ctx,
+                    on_start=sampler.start if sampler else None,
+                    on_end=None,
+                    on_protocol_event=(lambda event_type, details: event_logger.log(event_type, details)),
+                )
+            except ScenarioAbortRequested:
+                scenario_interrupted_reason = "ABORTED_DISCARD"
+                abort_discard_requested = True
+                now = datetime.now(UTC)
+                event_logger.log("scenario_aborted_discard", {"reason": scenario_interrupted_reason})
+                scenario_result = ScenarioResult(
+                    started_at=host_start,
+                    ended_at=now,
+                    notes=scenario_interrupted_reason,
+                    interaction_level=getattr(run_ctx, "interaction_level", None),
+                    protocol={
+                        "interaction_protocol_version": int(SCRIPT_PROTOCOL_VERSION),
+                        "script_exit_code": 130,
+                        "script_end_marker": False,
+                        "deviation_codes": ["ABORTED_DISCARD"],
+                        "interrupted": True,
+                        "interrupted_reason": scenario_interrupted_reason,
+                    },
+                )
+            except KeyboardInterrupt:
+                scenario_interrupted_reason = "INTERRUPTED"
+                now = datetime.now(UTC)
+                event_logger.log("scenario_interrupted", {"reason": scenario_interrupted_reason})
+                scenario_result = ScenarioResult(
+                    started_at=host_start,
+                    ended_at=now,
+                    notes=scenario_interrupted_reason,
+                    interaction_level=getattr(run_ctx, "interaction_level", None),
+                    protocol={
+                        "interaction_protocol_version": int(SCRIPT_PROTOCOL_VERSION),
+                        "script_exit_code": 130,
+                        "script_end_marker": False,
+                        "deviation_codes": ["INTERRUPTED"],
+                        "interrupted": True,
+                        "interrupted_reason": scenario_interrupted_reason,
+                    },
+                )
         finally:
             if monitor:
                 monitor.stop()
@@ -356,6 +403,8 @@ class DynamicRunOrchestrator:
                         protocol.get("interaction_protocol_version") or SCRIPT_PROTOCOL_VERSION
                     ),
                     "template_id": protocol.get("template_id"),
+                    "template_id_requested": protocol.get("template_id_requested"),
+                    "template_id_actual": protocol.get("template_id_actual"),
                     "template_hash": protocol.get("template_hash"),
                     "template_map_version": protocol.get("template_map_version"),
                     "template_map_hash": protocol.get("template_map_hash"),
@@ -372,6 +421,7 @@ class DynamicRunOrchestrator:
                     "script_end_marker": protocol.get("script_end_marker"),
                     "script_timing_within_tolerance": protocol.get("timing_within_tolerance"),
                     "script_target_overrun_s": protocol.get("target_overrun_s"),
+                    "script_target_underrun_s": protocol.get("target_underrun_s"),
                     "script_target_controlled": protocol.get("target_controlled"),
                     "target_duration_s": protocol.get("target_duration_s") or manifest.operator.get("target_duration_s"),
                     "call_type": protocol.get("call_type"),
@@ -380,6 +430,14 @@ class DynamicRunOrchestrator:
                     "call_connect_latency_s": protocol.get("call_connect_latency_s"),
                     "call_connected_duration_s": protocol.get("call_connected_duration_s"),
                     "call_end_reason": protocol.get("call_end_reason"),
+                    "call_outcome_reason": protocol.get("call_outcome_reason"),
+                    "call_outcome_flag": protocol.get("call_outcome_flag"),
+                    "script_call_in_non_call_template": protocol.get("script_call_in_non_call_template"),
+                    "ai_used": protocol.get("ai_used"),
+                    "ai_provider": protocol.get("ai_provider"),
+                    "ai_prompt_id": protocol.get("ai_prompt_id"),
+                    "interrupted": protocol.get("interrupted"),
+                    "interrupted_reason": protocol.get("interrupted_reason"),
                 }
             )
         else:
@@ -412,6 +470,8 @@ class DynamicRunOrchestrator:
         observer_artifacts: list[ArtifactRecord] = []
         run_status = "success"
         if any(record.status == "failed" for record in observer_records):
+            run_status = "degraded"
+        if scenario_interrupted_reason:
             run_status = "degraded"
         for observer in self.observers:
             observer_record = next(
@@ -507,7 +567,7 @@ class DynamicRunOrchestrator:
         if overlap:
             outputs.append(overlap)
         tier = (manifest.operator or {}).get("tier") if isinstance(manifest.operator, dict) else None
-        if not (tier and str(tier).lower() == "dataset"):
+        if not (tier and str(tier).lower() == "dataset") and not abort_discard_requested:
             update_dataset_tracker(manifest, run_dir, event_logger=event_logger)
 
         # Deterministic dataset validity classification (Paper #2) must be written to the manifest.
@@ -561,7 +621,8 @@ class DynamicRunOrchestrator:
                         eligibility.all_reason_codes
                     )
 
-                    update_dataset_tracker(manifest, run_dir, event_logger=event_logger)
+                    if not abort_discard_requested:
+                        update_dataset_tracker(manifest, run_dir, event_logger=event_logger)
 
                     # "countable" is quota-counted by construction. Determine it from the
                     # derived tracker markings (counts_toward_quota) rather than from
@@ -622,6 +683,15 @@ class DynamicRunOrchestrator:
                     manifest.operator["cohort_eligibility"] = cohort_eligibility
 
                 ds = manifest.dataset if isinstance(manifest.dataset, dict) else {}
+                if scenario_interrupted_reason:
+                    manifest.dataset["valid_dataset_run"] = False
+                    manifest.dataset["invalid_reason_code"] = (
+                        "ABORTED_DISCARD"
+                        if scenario_interrupted_reason == "ABORTED_DISCARD"
+                        else "INTERRUPTED"
+                    )
+                    manifest.dataset["countable"] = False
+                    ds = manifest.dataset
                 event_logger.log(
                     "dataset_validity",
                     {

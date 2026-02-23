@@ -2,23 +2,47 @@
 
 from __future__ import annotations
 
+import hashlib
+import random
 import select
 import sys
 import time
-import random
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-import hashlib
+from pathlib import Path
 
 from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper2_config
+from scytaledroid.DynamicAnalysis.scenarios.manual_templates import (
+    SNAPCHAT_TEMPLATE_HINTS,
+)
+from scytaledroid.DynamicAnalysis.scenarios.manual_templates import (
+    requested_script_template as _requested_script_template_for_package,
+)
+from scytaledroid.DynamicAnalysis.scenarios.manual_templates import (
+    resolve_script_template as _resolve_script_template_for_package,
+)
+from scytaledroid.DynamicAnalysis.scenarios.manual_timing import (
+    clear_status_line as _timing_clear_status_line,
+)
+from scytaledroid.DynamicAnalysis.scenarios.manual_timing import (
+    format_duration as _timing_format_duration,
+)
+from scytaledroid.DynamicAnalysis.scenarios.manual_timing import (
+    format_duration_precise as _timing_format_duration_precise,
+)
+from scytaledroid.DynamicAnalysis.scenarios.manual_timing import (
+    parse_timing_action as _timing_parse_timing_action,
+)
+from scytaledroid.DynamicAnalysis.scenarios.manual_timing import (
+    pulse_marker as _timing_pulse_marker,
+)
 from scytaledroid.DynamicAnalysis.templates.category_map import (
     category_for_package,
     mapping_sha256,
     mapping_version,
-    template_for_package,
 )
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
 
@@ -32,34 +56,20 @@ class ScenarioResult:
     protocol: dict[str, object] | None = None
 
 
+class ScenarioAbortRequested(RuntimeError):
+    """Operator requested abort/discard during interactive timing loop."""
+
+
+class _StopScriptEarly(RuntimeError):
+    """Operator requested stop/finalize during scripted step execution."""
+
+
 SCRIPT_PROTOCOL_VERSION = 2
 BASELINE_PROTOCOL_VERSION = 2
 BASELINE_PROTOCOL_ID_CONNECTED = "baseline_connected_v2"
 BASELINE_PROTOCOL_ID_IDLE = "baseline_idle_v1"
-SCRIPT_STEPS_SOCIAL_FEED_BASIC_V2: tuple[tuple[str, str, int], ...] = (
-    ("launch_feed", "Scroll the main feed for new content.", 25),
-    ("open_reply_or_comments", "Open a reply/comments thread on one post and return.", 20),
-    (
-        "compose_post",
-        "Open composer/create-post, type a short draft, then discard/cancel and return.",
-        25,
-    ),
-    ("search_nav", "Use search/navigation briefly and return.", 20),
-)
-SCRIPT_STEPS_MESSAGING_BASIC_V1: tuple[tuple[str, str, int], ...] = (
-    ("open_thread", "Open a recent conversation thread and return.", 25),
-    ("type_draft", "Type a short draft message (do not send).", 20),
-    ("open_info_or_media", "Open conversation info OR shared media and return.", 20),
-    ("search_or_new_chat", "Open search or new chat briefly and return.", 20),
-    ("hold_foreground", "Remain on foreground until timer completes.", 0),
-)
-SCRIPT_STEPS_MESSAGING_CALL_BASIC_V1: tuple[tuple[str, str, int], ...] = (
-    ("open_thread", "Open a recent conversation thread.", 20),
-    ("start_call", "Initiate a voice call to a test contact.", 15),
-    ("call_active", "Keep call active for 90s if connected.", 90),
-    ("end_call", "End the call and return to thread.", 15),
-    ("hold_foreground", "Remain on foreground until timer completes.", 0),
-)
+CALL_CONNECT_TIMEOUT_S = 30
+CALL_MIN_CONNECTED_DURATION_S = 90
 
 
 def _effective_min_sampling_seconds() -> int:
@@ -168,12 +178,22 @@ class ManualScenarioRunner:
                         on_protocol_event=on_protocol_event,
                     )
                 elif duration_seconds:
-                    print(status_messages.status("Press Enter to stop early (optional).", level="info"))
+                    print(
+                        status_messages.status(
+                            "Press Enter to stop early (optional). S+Enter=Stop&Finalize, A+Enter=Abort&Discard.",
+                            level="info",
+                        )
+                    )
                     ended_at = _run_countdown(duration_seconds, continue_after_target=True)
                 else:
                     ended_at = _run_stopwatch()
             elif duration_seconds:
-                print(status_messages.status("Press Enter to stop early (optional).", level="info"))
+                print(
+                    status_messages.status(
+                        "Press Enter to stop early (optional). S+Enter=Stop&Finalize, A+Enter=Abort&Discard.",
+                        level="info",
+                    )
+                )
                 ended_at = _run_countdown(duration_seconds, continue_after_target=True)
             else:
                 ended_at = _run_stopwatch()
@@ -183,15 +203,20 @@ class ManualScenarioRunner:
             if profile == "interaction_scripted":
                 target_s = int((protocol or {}).get("target_duration_s") or duration_seconds or rec_s)
                 overrun_s = int((protocol or {}).get("target_overrun_s") or 0)
+                underrun_s = int((protocol or {}).get("target_underrun_s") or 0)
+                status_detail = ", on-target"
+                level = "info"
+                if overrun_s > 0:
+                    status_detail = f", overrun {overrun_s}s"
+                    level = "warn"
+                elif underrun_s > 0:
+                    status_detail = f", underrun {underrun_s}s"
+                    level = "warn"
                 print(
                     status_messages.status(
-                        (
-                            f"Protocol timer elapsed: {_format_duration(elapsed)} "
-                            f"(target {_format_duration(target_s)}"
-                            + (f", overrun {overrun_s}s" if overrun_s > 0 else ", on-target")
-                            + ")."
-                        ),
-                        level=("warn" if overrun_s > 0 else "info"),
+                        f"Protocol timer elapsed: {_format_duration(elapsed)} "
+                        f"(target {_format_duration(target_s)}{status_detail}).",
+                        level=level,
                     )
                 )
             else:
@@ -255,43 +280,70 @@ def _run_countdown(
     line_width = 56
     last_rendered = None
     target_reached_announced = False
-    while True:
-        elapsed = time.monotonic() - start
-        remaining = max(duration_seconds - int(elapsed), 0)
-        elapsed_i = int(elapsed)
-        elapsed_fmt = _format_duration(elapsed_i)
-        total = _format_duration(duration_seconds)
-        suffix = _pulse_marker(int(elapsed))
-        if remaining > 0:
-            message = f"\rElapsed time: {elapsed_fmt} (target {total}){suffix}".ljust(line_width)
-        else:
-            message = f"\rElapsed time: {elapsed_fmt} (target reached){suffix}".ljust(line_width)
-        if message != last_rendered:
-            sys.stdout.write(message)
-            sys.stdout.flush()
-            last_rendered = message
-        if remaining <= 0 and not target_reached_announced:
-            _clear_status_line(line_width)
-            if continue_after_target:
-                print(
-                    status_messages.status(
-                        "Target reached. Keep collecting if needed; press Enter when finished.",
-                        level="info",
-                    )
-                )
-            target_reached_announced = True
-            if not continue_after_target:
-                print()
-                break
-        if allow_early_stop:
-            readable, _, _ = select.select([sys.stdin], [], [], 1.0)
-            if readable:
-                _ = sys.stdin.readline()
+    try:
+        while True:
+            elapsed = time.monotonic() - start
+            remaining = max(duration_seconds - int(elapsed), 0)
+            elapsed_i = int(elapsed)
+            elapsed_fmt = _format_duration(elapsed_i)
+            total = _format_duration(duration_seconds)
+            suffix = _pulse_marker(int(elapsed))
+            if remaining > 0:
+                message = f"\rElapsed time: {elapsed_fmt} (target {total}){suffix}".ljust(line_width)
+            else:
+                message = f"\rElapsed time: {elapsed_fmt} (target reached){suffix}".ljust(line_width)
+            if message != last_rendered:
+                sys.stdout.write(message)
+                sys.stdout.flush()
+                last_rendered = message
+            if remaining <= 0 and not target_reached_announced:
                 _clear_status_line(line_width)
-                print()
-                break
-        else:
-            time.sleep(1.0)
+                if continue_after_target:
+                    print(
+                        status_messages.status(
+                            "Target reached. Keep collecting if needed; press Enter when finished.",
+                            level="info",
+                        )
+                    )
+                target_reached_announced = True
+                if not continue_after_target:
+                    print()
+                    break
+            if allow_early_stop:
+                readable, _, _ = select.select([sys.stdin], [], [], 1.0)
+                if readable:
+                    action = _parse_timing_action(sys.stdin.readline())
+                    if action == "abort":
+                        _clear_status_line(line_width)
+                        print()
+                        raise ScenarioAbortRequested("ABORT_DISCARD")
+                    if action in {"enter", "stop"}:
+                        if _should_continue_collecting(elapsed_s=elapsed_i, target_s=duration_seconds):
+                            continue
+                        _clear_status_line(line_width)
+                        print()
+                        break
+            else:
+                # Locked countdown (scripted hold): allow explicit operator escape
+                # keys without requiring Ctrl+C.
+                readable, _, _ = select.select([sys.stdin], [], [], 1.0)
+                if readable:
+                    action = _parse_timing_action(sys.stdin.readline())
+                    if action == "abort":
+                        _clear_status_line(line_width)
+                        print()
+                        raise ScenarioAbortRequested("ABORT_DISCARD")
+                    if action in {"enter", "stop"}:
+                        _clear_status_line(line_width)
+                        print()
+                        raise _StopScriptEarly("STOP_FINALIZE")
+                    # Ignore bare Enter in locked mode to avoid accidental early exits.
+    except KeyboardInterrupt:
+        _clear_status_line(line_width)
+        print()
+        if allow_early_stop:
+            raise ScenarioAbortRequested("ABORT_DISCARD") from None
+        raise _StopScriptEarly("STOP_FINALIZE") from None
     return datetime.now(UTC)
 
 
@@ -301,7 +353,7 @@ def _run_stopwatch() -> datetime:
         return datetime.now(UTC)
     start = time.monotonic()
     line_width = 32
-    print(status_messages.status("Press Enter when finished (timer stops).", level="info"))
+    print(status_messages.status("Press Enter when finished. S+Enter=Stop&Finalize, A+Enter=Abort&Discard.", level="info"))
     last_rendered = None
     while True:
         elapsed = int(time.monotonic() - start)
@@ -313,9 +365,15 @@ def _run_stopwatch() -> datetime:
             last_rendered = message
         readable, _, _ = select.select([sys.stdin], [], [], 1.0)
         if readable:
-            _ = sys.stdin.readline()
-            print()
-            break
+            action = _parse_timing_action(sys.stdin.readline())
+            if action == "abort":
+                print()
+                raise ScenarioAbortRequested("ABORT_DISCARD")
+            if action in {"enter", "stop"}:
+                if _should_continue_collecting(elapsed_s=elapsed, target_s=None):
+                    continue
+                print()
+                break
     return datetime.now(UTC)
 
 
@@ -326,10 +384,13 @@ def _run_scripted_protocol(
     on_protocol_event: Callable[[str, dict[str, object]], None] | None,
 ) -> dict[str, object]:
     template_id, steps = _resolve_script_template(run_ctx)
+    requested_template_id = _requested_script_template(run_ctx)
     template_hash = _build_template_hash(template_id, steps)
     protocol: dict[str, object] = {
         "interaction_protocol_version": SCRIPT_PROTOCOL_VERSION,
         "template_id": template_id,
+        "template_id_requested": requested_template_id,
+        "template_id_actual": template_id,
         "template_map_version": mapping_version(),
         "template_map_hash": mapping_sha256(),
         "template_hash": template_hash,
@@ -349,6 +410,11 @@ def _run_scripted_protocol(
         "call_connect_latency_s": None,
         "call_connected_duration_s": None,
         "call_end_reason": None,
+        "call_outcome_reason": None,
+        "script_call_in_non_call_template": False,
+        "ai_used": False,
+        "ai_provider": None,
+        "ai_prompt_id": None,
     }
     started_monotonic = time.monotonic()
     if on_protocol_event:
@@ -357,6 +423,8 @@ def _run_scripted_protocol(
             {
                 "scenario_template": template_id,
                 "template_id": template_id,
+                "template_id_requested": requested_template_id,
+                "template_id_actual": template_id,
                 "template_hash": template_hash,
                 "template_map_version": mapping_version(),
                 "template_map_hash": mapping_sha256(),
@@ -367,110 +435,277 @@ def _run_scripted_protocol(
             },
         )
     print(status_messages.status(f"Script template: {template_id} (protocol v{SCRIPT_PROTOCOL_VERSION})", level="info"))
-    if template_id == "messaging_call_basic_v1":
-        protocol["call_type"] = "voice"
-    for idx, (step_id, step_desc, expected_s) in enumerate(steps, start=1):
-        print()
-        print(status_messages.status(f"Step {idx}/{len(steps)}: {step_id}", level="info"))
-        print(status_messages.status(f"  {step_desc}", level="info"))
-        print(status_messages.status(f"  Expected duration: {expected_s}s", level="info"))
-        step_variant = None
-        if step_id == "open_info_or_media":
-            step_variant = _prompt_step3_variant()
-            print(status_messages.status(f"  Variant: {step_variant}", level="info"))
-        if on_protocol_event:
-            on_protocol_event(
-                "STEP_START",
-                {
-                    "step_id": step_id,
-                    "step_index": idx,
-                    "expected_duration_s": expected_s,
-                    "step_variant": step_variant,
-                },
+    print(
+        status_messages.status(
+            "Controls: Enter/D/C=step complete, N=Skip(not found), S=Stop&Finalize, A=Abort&Discard (then press Enter).",
+            level="info",
+        )
+    )
+    msg_activity_raw = str(getattr(run_ctx, "messaging_activity", "") or "").strip().lower()
+    if msg_activity_raw:
+        print(status_messages.status(f"Messaging activity: {msg_activity_raw}", level="info"))
+    call_templates = {
+        "messaging_call_basic_v1",
+        "messaging_voice_v1",
+        "messaging_video_v1",
+        "whatsapp_voice_v1",
+        "whatsapp_video_v1",
+    }
+    if template_id in call_templates:
+        msg_activity = str(getattr(run_ctx, "messaging_activity", "") or "").strip().lower()
+        protocol["call_type"] = (
+            "video"
+            if msg_activity == "video_call"
+            else ("mixed" if msg_activity == "mixed" else "voice")
+        )
+    pkg_lc = str(getattr(run_ctx, "package_name", "") or "").strip().lower()
+    show_snapchat_hints = bool(pkg_lc == "com.snapchat.android" and template_id == "social_feed_basic_v2")
+    go_live_start_skipped = False
+    try:
+        for idx, (step_id, step_desc, expected_s) in enumerate(steps, start=1):
+            step_outcome = "completed"
+            print()
+            print(status_messages.status(f"Step {idx}/{len(steps)}: {step_id}", level="info"))
+            print(status_messages.status(f"  {step_desc}", level="info"))
+            print(status_messages.status(f"  Expected duration: {expected_s}s", level="info"))
+            print(
+                status_messages.status(
+                    "  Press Enter when step is complete (in this terminal). "
+                    "If Enter feels flaky, type D+Enter. (N+Enter to skip if not found)",
+                    level="info",
+                )
             )
-        step_elapsed = 0.0
-        if step_id == "call_active":
-            if protocol.get("call_connected") is True:
-                call_hold_s = int(expected_s)
+            if show_snapchat_hints:
+                hint = SNAPCHAT_TEMPLATE_HINTS.get(str(step_id))
+                if hint:
+                    print(status_messages.status(f"  {hint}", level="info"))
+            step_variant = None
+            if step_id == "open_info_or_media":
+                step_variant = _prompt_step3_variant()
+                if step_variant == "skip":
+                    # Treat as a deterministic per-step skip rather than forcing the operator
+                    # to enter the stopwatch loop and then skip again.
+                    step_outcome = "skipped_not_found"
+                    step_variant = "skipped_not_found"
+                    print(status_messages.status("  Variant: skipped_not_found", level="warn"))
+                else:
+                    print(status_messages.status(f"  Variant: {step_variant}", level="info"))
+            if step_id == "open_map":
+                has_map = prompt_utils.prompt_yes_no("Is Snap Map available/enabled on this account?", default=True)
+                step_variant = "available" if has_map else "not_available"
+                print(status_messages.status(f"  Variant: {step_variant}", level="info"))
+            if step_id in {"my_ai_open", "my_ai_chat"}:
+                has_my_ai = prompt_utils.prompt_yes_no("Is My AI visible/available in this account?", default=True)
+                step_variant = "available" if has_my_ai else "not_available"
+                print(status_messages.status(f"  Variant: {step_variant}", level="info"))
+                if has_my_ai:
+                    protocol["ai_used"] = True
+                    protocol["ai_provider"] = "snap_my_ai"
+                    protocol["ai_prompt_id"] = (
+                        "snap_my_ai_chat_prompt_01" if step_id == "my_ai_chat" else "snap_my_ai_view_only_v1"
+                    )
+            if step_id == "team_snapchat_chat":
+                has_team_snapchat = prompt_utils.prompt_yes_no(
+                    "Is 'Team Snapchat' chat visible/available in this account?",
+                    default=True,
+                )
+                step_variant = "available" if has_team_snapchat else "not_available"
+                print(status_messages.status(f"  Variant: {step_variant}", level="info"))
+            if step_id == "ask_meta_ai":
+                has_meta_ai = prompt_utils.prompt_yes_no("Is Ask Meta AI visible/available on this account?", default=True)
+                step_variant = "available" if has_meta_ai else "not_available"
+                print(status_messages.status(f"  Variant: {step_variant}", level="info"))
+                if has_meta_ai:
+                    protocol["ai_used"] = True
+                    protocol["ai_provider"] = "meta_ai"
+                    protocol["ai_prompt_id"] = "meta_ai_prompt_01"
+            if step_id == "grok_ai_prompt":
+                has_grok = prompt_utils.prompt_yes_no("Is Grok available/enabled on this account?", default=True)
+                step_variant = "available" if has_grok else "not_available"
+                print(status_messages.status(f"  Variant: {step_variant}", level="info"))
+                if has_grok:
+                    protocol["ai_used"] = True
+                    protocol["ai_provider"] = "grok"
+                    protocol["ai_prompt_id"] = "grok_prompt_01"
+            if on_protocol_event:
+                on_protocol_event(
+                    "STEP_START",
+                    {
+                        "step_id": step_id,
+                        "step_index": idx,
+                        "expected_duration_s": expected_s,
+                        "step_variant": step_variant,
+                    },
+                )
+            step_elapsed = 0.0
+            if step_outcome == "skipped_not_found":
+                # Skip without entering the stopwatch loop.
+                if on_protocol_event:
+                    on_protocol_event(
+                        "STEP_END",
+                        {
+                            "step_id": step_id,
+                            "step_index": idx,
+                            "elapsed_s": 0.0,
+                            "expected_duration_s": expected_s,
+                            "tolerance_s": 0.0,
+                            "within_tolerance": True,
+                            "step_variant": step_variant,
+                            "step_outcome": step_outcome,
+                        },
+                    )
+                protocol["step_skipped_not_found_count"] = int(protocol.get("step_skipped_not_found_count") or 0) + 1
+                print(status_messages.status(f"Step marked skipped_not_found: {step_id}", level="warn"))
+                protocol["step_count_completed"] = idx
+                continue
+            if step_id == "call_active":
+                if protocol.get("call_connected") is True:
+                    call_hold_s = int(expected_s)
+                    _run_countdown(
+                        call_hold_s,
+                        continue_after_target=False,
+                        allow_early_stop=False,
+                    )
+                    step_elapsed = float(call_hold_s)
+                    protocol["call_connected_duration_s"] = float(call_hold_s)
+                    protocol["call_end_reason"] = protocol.get("call_end_reason") or "user_end"
+                else:
+                    print(status_messages.status("Call not connected; skipping active-hold window.", level="warn"))
+                    step_elapsed = 0.0
+                    protocol["call_connected_duration_s"] = 0.0
+                    protocol["call_end_reason"] = protocol.get("call_end_reason") or "timeout"
+            elif step_id == "go_live_hold_5s":
+                if go_live_start_skipped:
+                    step_outcome = "skipped_not_found"
+                    # Skip hold if the live entry step was skipped/not found.
+                    if on_protocol_event:
+                        on_protocol_event(
+                            "STEP_END",
+                            {
+                                "step_id": step_id,
+                                "step_index": idx,
+                                "elapsed_s": 0.0,
+                                "expected_duration_s": expected_s,
+                                "tolerance_s": 0.0,
+                                "within_tolerance": True,
+                                "step_variant": step_variant,
+                                "step_outcome": step_outcome,
+                            },
+                        )
+                    protocol["step_skipped_not_found_count"] = int(protocol.get("step_skipped_not_found_count") or 0) + 1
+                    print(status_messages.status(f"Step marked skipped_not_found: {step_id}", level="warn"))
+                    protocol["step_count_completed"] = idx
+                    continue
+                live_hold_s = max(int(expected_s), 1)
                 _run_countdown(
-                    call_hold_s,
+                    live_hold_s,
                     continue_after_target=False,
                     allow_early_stop=False,
                 )
-                step_elapsed = float(call_hold_s)
-                protocol["call_connected_duration_s"] = float(call_hold_s)
-                protocol["call_end_reason"] = protocol.get("call_end_reason") or "user_end"
+                step_elapsed = float(live_hold_s)
+            elif step_id in {"hold_foreground", "user_activity"}:
+                elapsed_total = int(time.monotonic() - started_monotonic)
+                remaining = max(int(target_duration_s) - elapsed_total, 0)
+                step_elapsed = float(max(remaining, 0))
+                if remaining > 0:
+                    print(status_messages.status(f"Protocol completed; hold foreground for {remaining}s.", level="info"))
+                    print(
+                        status_messages.status(
+                            "Press Enter to stop early (optional). S+Enter=Stop&Finalize, A+Enter=Abort&Discard.",
+                            level="info",
+                        )
+                    )
+                    _run_countdown(
+                        remaining,
+                        # Operators frequently want to continue capturing after the nominal
+                        # target (e.g., to stabilize traffic). Do not auto-stop at target.
+                        continue_after_target=True,
+                        allow_early_stop=True,
+                    )
             else:
-                print(status_messages.status("Call not connected; skipping active-hold window.", level="warn"))
-                step_elapsed = 0.0
-                protocol["call_connected_duration_s"] = 0.0
-                protocol["call_end_reason"] = protocol.get("call_end_reason") or "timeout"
-        elif step_id == "hold_foreground":
-            elapsed_total = int(time.monotonic() - started_monotonic)
-            remaining = max(int(target_duration_s) - elapsed_total, 0)
-            step_elapsed = float(max(remaining, 0))
-            if remaining > 0:
-                print(status_messages.status(f"Protocol completed; hold foreground for {remaining}s.", level="info"))
-                _run_countdown(
-                    remaining,
-                    continue_after_target=False,
-                    allow_early_stop=False,
+                step_start = time.monotonic()
+                step_outcome = _wait_for_step_completion_with_stopwatch(
+                    step_index=idx,
+                    step_count=len(steps),
+                    step_id=step_id,
+                    script_started_monotonic=started_monotonic,
+                    step_started_monotonic=step_start,
+                    target_duration_s=int(target_duration_s),
                 )
-        else:
-            step_start = time.monotonic()
-            _wait_for_step_completion_with_stopwatch(
-                step_index=idx,
-                step_count=len(steps),
-                step_id=step_id,
-                script_started_monotonic=started_monotonic,
-                step_started_monotonic=step_start,
-                target_duration_s=int(target_duration_s),
-            )
-            step_elapsed = max(0.0, time.monotonic() - step_start)
-            if step_id == "start_call":
-                protocol["call_attempted"] = True
-                connected = prompt_utils.prompt_yes_no("Did the call connect?", default=True)
-                protocol["call_connected"] = bool(connected)
-                protocol["call_connect_latency_s"] = float(round(step_elapsed, 3))
-                if not connected:
-                    protocol["call_end_reason"] = "timeout"
-                elif not protocol.get("call_end_reason"):
-                    protocol["call_end_reason"] = "user_end"
-            if step_id == "end_call" and protocol.get("call_attempted") is True:
-                protocol["call_end_reason"] = protocol.get("call_end_reason") or "user_end"
-        tolerance = min(max(0.25 * float(expected_s), 5.0), 30.0)
-        within = step_elapsed <= (float(expected_s) + tolerance)
-        if not within:
-            protocol["timing_within_tolerance"] = False
-            deviations = protocol.get("deviation_codes")
-            if isinstance(deviations, list):
-                deviations.append("SCRIPT_TIMEOUT")
-        if on_protocol_event:
-            on_protocol_event(
-                "STEP_END",
-                {
-                    "step_id": step_id,
-                    "step_index": idx,
-                    "elapsed_s": round(step_elapsed, 3),
-                    "expected_duration_s": expected_s,
-                    "tolerance_s": round(tolerance, 3),
-                    "within_tolerance": bool(within),
-                    "step_variant": step_variant,
-                },
-            )
-        protocol["step_count_completed"] = idx
+                step_elapsed = max(0.0, time.monotonic() - step_start)
+                if step_outcome == "skipped_not_found":
+                    protocol["step_skipped_not_found_count"] = int(protocol.get("step_skipped_not_found_count") or 0) + 1
+                    print(status_messages.status(f"Step marked skipped_not_found: {step_id}", level="warn"))
+                    if step_id == "go_live_start":
+                        go_live_start_skipped = True
+                if step_id == "start_call":
+                    protocol["call_attempted"] = True
+                    connected = prompt_utils.prompt_yes_no("Did the call connect?", default=True)
+                    protocol["call_connected"] = bool(connected)
+                    protocol["call_connect_latency_s"] = float(round(step_elapsed, 3))
+                    protocol["call_connect_timeout_s"] = int(CALL_CONNECT_TIMEOUT_S)
+                    if not connected:
+                        protocol["call_end_reason"] = "timeout"
+                        protocol["call_outcome_reason"] = "CALL_NOT_CONNECTED"
+                    elif not protocol.get("call_end_reason"):
+                        protocol["call_end_reason"] = "user_end"
+                if step_id == "end_call" and protocol.get("call_attempted") is True:
+                    protocol["call_end_reason"] = protocol.get("call_end_reason") or "user_end"
+            tolerance = min(max(0.25 * float(expected_s), 5.0), 30.0)
+            within = step_elapsed <= (float(expected_s) + tolerance)
+            if not within:
+                protocol["timing_within_tolerance"] = False
+                deviations = protocol.get("deviation_codes")
+                if isinstance(deviations, list):
+                    deviations.append("SCRIPT_TIMEOUT")
+            if on_protocol_event:
+                on_protocol_event(
+                    "STEP_END",
+                    {
+                        "step_id": step_id,
+                        "step_index": idx,
+                        "elapsed_s": round(step_elapsed, 3),
+                        "expected_duration_s": expected_s,
+                        "tolerance_s": round(tolerance, 3),
+                        "within_tolerance": bool(within),
+                        "step_variant": step_variant,
+                        "step_outcome": step_outcome,
+                    },
+                )
+            protocol["step_count_completed"] = idx
+    except _StopScriptEarly:
+        protocol["script_exit_code"] = int(protocol.get("script_exit_code") or 0) or 130
+        deviations = protocol.get("deviation_codes")
+        if isinstance(deviations, list):
+            deviations.append("STOPPED_EARLY")
+        print(status_messages.status("Stop requested; finalizing run early.", level="warn"))
     elapsed_total = int(time.monotonic() - started_monotonic)
     remaining = max(int(target_duration_s) - elapsed_total, 0)
+    if remaining > 0 and int(protocol.get("script_exit_code") or 0) == 0:
+        # Safety: ensure scripted runs honor target duration even if the template
+        # omitted an explicit hold step.
+        print(status_messages.status(f"Protocol completed; hold foreground for {remaining}s.", level="info"))
+        _run_countdown(
+            remaining,
+            continue_after_target=True,
+            allow_early_stop=True,
+        )
     protocol["script_end_marker"] = True
     actual_duration_s = int(time.monotonic() - started_monotonic)
     protocol["actual_duration_s"] = actual_duration_s
     overrun_s = max(0, int(actual_duration_s) - int(target_duration_s))
+    underrun_s = max(0, int(target_duration_s) - int(actual_duration_s))
     protocol["target_overrun_s"] = int(overrun_s)
-    protocol["target_controlled"] = bool(overrun_s == 0)
+    protocol["target_underrun_s"] = int(underrun_s)
+    protocol["target_controlled"] = bool(overrun_s == 0 and underrun_s == 0)
     if overrun_s > 0:
         deviations = protocol.get("deviation_codes")
         if isinstance(deviations, list):
             deviations.append("SCRIPT_TARGET_OVERRUN")
+    if underrun_s > 0:
+        deviations = protocol.get("deviation_codes")
+        if isinstance(deviations, list):
+            deviations.append("SCRIPT_TARGET_UNDERRUN")
     if on_protocol_event:
         on_protocol_event(
             "SCRIPT_END",
@@ -478,6 +713,8 @@ def _run_scripted_protocol(
                 "script_name": protocol["script_name"],
                 "script_hash": template_hash,
                 "template_id": template_id,
+                "template_id_requested": requested_template_id,
+                "template_id_actual": template_id,
                 "template_hash": template_hash,
                 "template_map_version": mapping_version(),
                 "template_map_hash": mapping_sha256(),
@@ -486,6 +723,7 @@ def _run_scripted_protocol(
                 "script_exit_code": protocol["script_exit_code"],
                 "timing_within_tolerance": protocol["timing_within_tolerance"],
                 "target_overrun_s": protocol["target_overrun_s"],
+                "target_underrun_s": protocol["target_underrun_s"],
                 "target_controlled": protocol["target_controlled"],
                 "call_type": protocol.get("call_type"),
                 "call_attempted": protocol.get("call_attempted"),
@@ -493,8 +731,46 @@ def _run_scripted_protocol(
                 "call_connect_latency_s": protocol.get("call_connect_latency_s"),
                 "call_connected_duration_s": protocol.get("call_connected_duration_s"),
                 "call_end_reason": protocol.get("call_end_reason"),
+                "call_outcome_reason": protocol.get("call_outcome_reason"),
+                "call_outcome_flag": protocol.get("call_outcome_flag"),
+                "script_call_in_non_call_template": protocol.get("script_call_in_non_call_template"),
+                "ai_used": protocol.get("ai_used"),
+                "ai_provider": protocol.get("ai_provider"),
+                "ai_prompt_id": protocol.get("ai_prompt_id"),
             },
         )
+    if (
+        template_id in call_templates
+        and protocol.get("call_connected") is True
+        and float(protocol.get("call_connected_duration_s") or 0.0) < float(CALL_MIN_CONNECTED_DURATION_S)
+    ):
+        protocol["call_outcome_flag"] = "CALL_CONNECTED_SHORT"
+        protocol["call_outcome_reason"] = "CALL_CONNECTED_SHORT"
+    if template_id in call_templates and protocol.get("call_outcome_reason") is None:
+        if protocol.get("call_connected") is True:
+            protocol["call_outcome_reason"] = "CALL_CONNECTED_OK"
+        elif protocol.get("call_connected") is False:
+            protocol["call_outcome_reason"] = "CALL_NOT_CONNECTED"
+    non_call_messaging_templates = {
+        "messaging_idle_v1",
+        "messaging_text_v1",
+        "whatsapp_idle_v1",
+        "whatsapp_text_v1",
+    }
+    if (
+        template_id in non_call_messaging_templates
+        and int(protocol.get("script_exit_code") or 0) == 0
+        and int(protocol.get("step_count_completed") or 0) == int(protocol.get("step_count_planned") or 0)
+    ):
+        call_in_non_call = prompt_utils.prompt_yes_no(
+            f"Did any voice/video call occur during this run? (protocol violation for {template_id})",
+            default=False,
+        )
+        protocol["script_call_in_non_call_template"] = bool(call_in_non_call)
+        if call_in_non_call:
+            deviations = protocol.get("deviation_codes")
+            if isinstance(deviations, list):
+                deviations.append("SCRIPT_CALL_ACTION_NON_CALL_TEMPLATE")
     return protocol
 
 
@@ -516,7 +792,12 @@ def _run_messaging_connected_baseline(
     protocol: dict[str, object],
     on_protocol_event: Callable[[str, dict[str, object]], None] | None,
 ) -> datetime:
-    print(status_messages.status("Press Enter to stop early (optional).", level="info"))
+    print(
+        status_messages.status(
+            "Press Enter to stop early (optional). S+Enter=Stop&Finalize, A+Enter=Abort&Discard.",
+            level="info",
+        )
+    )
     action_schedule_s, refresh_check_s = _build_baseline_connected_schedule(
         run_id=str(getattr(run_ctx, "dynamic_run_id", "") or ""),
         target_duration_s=int(target_duration_s),
@@ -637,10 +918,17 @@ def _run_messaging_connected_baseline(
             target_reached_announced = True
         readable, _, _ = select.select([sys.stdin], [], [], 1.0)
         if readable:
-            _ = sys.stdin.readline()
-            _clear_status_line(line_width)
-            print()
-            break
+            action = _parse_timing_action(sys.stdin.readline())
+            if action == "abort":
+                _clear_status_line(line_width)
+                print()
+                raise ScenarioAbortRequested("ABORT_DISCARD")
+            if action in {"enter", "stop"}:
+                if _should_continue_collecting(elapsed_s=elapsed_i, target_s=int(target_duration_s)):
+                    continue
+                _clear_status_line(line_width)
+                print()
+                break
     if on_protocol_event:
         on_protocol_event(
             "BASELINE_CONNECTED_END",
@@ -715,18 +1003,40 @@ def json_dumps_canonical(payload: dict[str, object]) -> str:
 
 
 def _resolve_script_template(run_ctx: RunContext) -> tuple[str, tuple[tuple[str, str, int], ...]]:
-    pkg = str(getattr(run_ctx, "package_name", "") or "").strip().lower()
-    template_id = template_for_package(pkg)
-    if not template_id:
-        raise RuntimeError(f"BLOCKED_UNKNOWN_CATEGORY:{pkg}")
     msg_activity = str(getattr(run_ctx, "messaging_activity", "") or "").strip().lower()
-    if template_id == "messaging_basic_v1" and msg_activity == "voice_call":
-        return ("messaging_call_basic_v1", SCRIPT_STEPS_MESSAGING_CALL_BASIC_V1)
-    if template_id == "messaging_basic_v1":
-        return ("messaging_basic_v1", SCRIPT_STEPS_MESSAGING_BASIC_V1)
-    if template_id == "social_feed_basic_v2":
-        return ("social_feed_basic_v2", SCRIPT_STEPS_SOCIAL_FEED_BASIC_V2)
-    raise RuntimeError(f"BLOCKED_UNKNOWN_CATEGORY:{pkg}")
+    return _resolve_script_template_for_package(
+        package_name=str(getattr(run_ctx, "package_name", "") or ""),
+        messaging_activity=msg_activity,
+    )
+
+
+def _requested_script_template(run_ctx: RunContext) -> str:
+    return _requested_script_template_for_package(
+        package_name=str(getattr(run_ctx, "package_name", "") or ""),
+    )
+
+
+def preview_script_template_for_package(
+    *,
+    package_name: str,
+    messaging_activity: str | None = None,
+) -> tuple[str, tuple[tuple[str, str, int], ...]]:
+    run_ctx = RunContext(
+        dynamic_run_id="preview",
+        package_name=str(package_name or "").strip(),
+        duration_seconds=0,
+        scenario_id="basic_usage",
+        run_dir=Path("."),
+        artifacts_dir=Path("."),
+        analysis_dir=Path("."),
+        notes_dir=Path("."),
+        interactive=True,
+        run_profile="interaction_scripted",
+        interaction_level="scripted",
+        messaging_activity=messaging_activity,
+        device_serial="preview",
+    )
+    return _resolve_script_template(run_ctx)
 
 
 def _build_template_hash(template_id: str, steps: tuple[tuple[str, str, int], ...]) -> str:
@@ -753,7 +1063,10 @@ def _prompt_step3_variant() -> str:
     print(status_messages.status("Step variant (allowed):", level="info"))
     print("  1) info")
     print("  2) media")
-    choice = prompt_utils.get_choice(["1", "2"], default="1", invalid_message="Choose 1 or 2.")
+    print("  N) skip (not found)")
+    choice = prompt_utils.get_choice(["1", "2", "N"], default="1", casefold=True, invalid_message="Choose 1, 2, or N.")
+    if choice.upper() == "N":
+        return "skip"
     return "media" if choice == "2" else "info"
 
 
@@ -781,28 +1094,15 @@ def _maybe_show_raw_high_value_permissions(run_ctx: RunContext) -> None:
 
 
 def _format_duration(seconds: int) -> str:
-    if seconds < 60:
-        return f"{seconds}s"
-    minutes, secs = divmod(seconds, 60)
-    min_label = "Min" if minutes == 1 else "Mins"
-    sec_label = "Sec" if secs == 1 else "Secs"
-    return f"{minutes} {min_label} {secs} {sec_label}"
+    return _timing_format_duration(seconds)
 
 
 def _format_duration_precise(seconds: int) -> str:
-    seconds = max(int(seconds), 0)
-    if seconds < 60:
-        return f"{seconds} sec"
-    minutes, secs = divmod(seconds, 60)
-    min_label = "min" if minutes == 1 else "mins"
-    sec_label = "sec" if secs == 1 else "sec"
-    return f"{minutes} {min_label} {secs} {sec_label} ({seconds}s)"
+    return _timing_format_duration_precise(seconds)
 
 
 def _pulse_marker(elapsed_seconds: int) -> str:
-    if elapsed_seconds > 0 and elapsed_seconds % 10 == 0:
-        return " •"
-    return ""
+    return _timing_pulse_marker(elapsed_seconds)
 
 
 def _wait_for_step_completion_with_stopwatch(
@@ -813,40 +1113,81 @@ def _wait_for_step_completion_with_stopwatch(
     script_started_monotonic: float,
     step_started_monotonic: float,
     target_duration_s: int,
-) -> None:
+) -> str:
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         prompt_utils.press_enter_to_continue("Press Enter when step is complete...")
-        return
-    line_width = 96
+        return "completed"
+    # Operators asked for a single stopwatch view (avoid total + per-step dual timers).
+    line_width = 82
     last_rendered = None
-    while True:
-        total_elapsed_i = int(time.monotonic() - script_started_monotonic)
-        step_elapsed_i = int(time.monotonic() - step_started_monotonic)
-        total_elapsed_fmt = _format_duration(total_elapsed_i)
-        step_elapsed_fmt = _format_duration(step_elapsed_i)
-        target_fmt = _format_duration(int(target_duration_s))
-        suffix = _pulse_marker(total_elapsed_i)
-        msg = (
-            f"\rElapsed: {total_elapsed_fmt} (target {target_fmt}) | "
-            f"Step {step_index}/{step_count} {step_id}: {step_elapsed_fmt} (Enter complete){suffix}"
-        ).ljust(line_width)
-        if msg != last_rendered:
-            sys.stdout.write(msg)
-            sys.stdout.flush()
-            last_rendered = msg
-        readable, _, _ = select.select([sys.stdin], [], [], 1.0)
-        if readable:
-            _ = sys.stdin.readline()
-            _clear_status_line(line_width)
-            print()
-            break
+    try:
+        while True:
+            total_elapsed_i = int(time.monotonic() - script_started_monotonic)
+            total_elapsed_fmt = _format_duration(total_elapsed_i)
+            target_fmt = _format_duration(int(target_duration_s))
+            suffix = _pulse_marker(total_elapsed_i)
+            msg = (
+                f"\rElapsed: {total_elapsed_fmt}/{target_fmt} | "
+                f"Step {step_index}/{step_count} {step_id} (Enter=done, N=skip){suffix}"
+            ).ljust(line_width)
+            if msg != last_rendered:
+                sys.stdout.write(msg)
+                sys.stdout.flush()
+                last_rendered = msg
+            readable, _, _ = select.select([sys.stdin], [], [], 1.0)
+            if readable:
+                action = _parse_timing_action(sys.stdin.readline())
+                if action == "abort":
+                    _clear_status_line(line_width)
+                    print()
+                    raise ScenarioAbortRequested("ABORT_DISCARD")
+                if action == "stop":
+                    _clear_status_line(line_width)
+                    print()
+                    raise _StopScriptEarly("STOP_FINALIZE")
+                if action == "enter":
+                    _clear_status_line(line_width)
+                    print()
+                    return "completed"
+                if action == "skip":
+                    _clear_status_line(line_width)
+                    print()
+                    return "skipped_not_found"
+    except KeyboardInterrupt:
+        _clear_status_line(line_width)
+        print()
+        raise _StopScriptEarly("STOP_FINALIZE") from None
+    return "completed"
 
 
 def _clear_status_line(line_width: int) -> None:
-    if not sys.stdout.isatty():
-        return
-    sys.stdout.write("\r" + (" " * int(line_width)) + "\r")
-    sys.stdout.flush()
+    _timing_clear_status_line(line_width)
 
 
-__all__ = ["ManualScenarioRunner", "ScenarioResult", "SCRIPT_PROTOCOL_VERSION"]
+def _parse_timing_action(raw: str | None) -> str:
+    return _timing_parse_timing_action(raw)
+
+
+def _should_continue_collecting(*, elapsed_s: int, target_s: int | None) -> bool:
+    min_s = int(_effective_min_sampling_seconds())
+    target = int(target_s) if isinstance(target_s, int) and target_s > 0 else None
+    required = min(min_s, target) if target else min_s
+    if int(elapsed_s) >= int(required):
+        return False
+    print(
+        status_messages.status(
+            f"Only {_format_duration(int(elapsed_s))} elapsed (< minimum {_format_duration(int(required))}).",
+            level="warn",
+        )
+    )
+    stop_anyway = prompt_utils.prompt_yes_no("Stop now anyway (this run will likely be INVALID)?", default=False)
+    return not bool(stop_anyway)
+
+
+__all__ = [
+    "ManualScenarioRunner",
+    "ScenarioResult",
+    "ScenarioAbortRequested",
+    "preview_script_template_for_package",
+    "SCRIPT_PROTOCOL_VERSION",
+]

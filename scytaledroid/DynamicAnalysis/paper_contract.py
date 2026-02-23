@@ -9,7 +9,11 @@ from typing import Any
 from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper2_config
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import MIN_WINDOWS_PER_RUN
-from scytaledroid.DynamicAnalysis.templates.category_map import mapping_sha256, mapping_snapshot, mapping_version
+from scytaledroid.DynamicAnalysis.templates.category_map import (
+    mapping_sha256,
+    mapping_snapshot,
+    mapping_version,
+)
 
 PAPER_CONTRACT_VERSION = "v1"
 
@@ -37,7 +41,11 @@ def build_paper_contract_snapshot() -> dict[str, Any]:
             "category_map": mapping_snapshot(),
             "canonical_template_ids": {
                 "social_feed": "social_feed_basic_v2",
+                "social_facebook": "facebook_basic_v2",
+                "social_camera_story": "snapchat_basic_v1",
+                "social_microblog": "x_twitter_full_session_v1",
                 "messaging": "messaging_basic_v1",
+                "messaging_whatsapp": "whatsapp_basic_v1",
             },
             "canonical_baseline_protocols": {
                 "default": {"id": "baseline_idle_v1", "version": 1},

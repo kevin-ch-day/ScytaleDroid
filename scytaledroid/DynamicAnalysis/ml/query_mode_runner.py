@@ -890,6 +890,7 @@ def run_ml_query_mode(
         baseline_run_count = sum(1 for _, (_, _, m) in by_run_rows.items() if m == "baseline")
         interactive_run_count = sum(1 for _, (_, _, m) in by_run_rows.items() if m == "interactive")
         unknown_run_count = sum(1 for _, (_, _, m) in by_run_rows.items() if m == "unknown")
+        baseline_run_ids = [rid for rid, (_, _, m) in by_run_rows.items() if m == "baseline"]
         if baseline_run_count < 2:
             groups_baseline_thin += 1
 
@@ -1034,7 +1035,7 @@ def run_ml_query_mode(
                 "score_semantics": "higher_is_more_anomalous",
                 "training_mode": training_mode,
                 "baseline_provenance": {
-                    "baseline_run_id": str(baseline_runs[0].run_id) if baseline_runs else None,
+                    "baseline_run_id": str(baseline_run_ids[0]) if baseline_run_ids else None,
                     "baseline_pcap_bytes_ok": bool(baseline_bytes_ok),
                     "baseline_windows_ok": bool(baseline_windows_ok),
                     "fallback_reason": (

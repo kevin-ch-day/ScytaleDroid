@@ -117,10 +117,9 @@ def test_summarize_evidence_quota_uses_operator_run_profile(tmp_path: Path, monk
     summary = _summarize_evidence_quota({pkg}, cfg)
     assert bool(summary["evidence_root_exists"]) is True
     assert int(summary["total_runs"]) == 3
-    # Manual runs are retained but excluded from canonical paper cohort.
-    assert int(summary["paper_eligible_runs"]) == 2
-    assert int(summary["quota_runs_counted"]) == 2
-    assert int(summary["excluded_runs"]) == 1
+    assert int(summary["paper_eligible_runs"]) == 3
+    assert int(summary["quota_runs_counted"]) == 3
+    assert int(summary["excluded_runs"]) == 0
     assert int(summary["extra_eligible_runs"]) == 0
 
 
