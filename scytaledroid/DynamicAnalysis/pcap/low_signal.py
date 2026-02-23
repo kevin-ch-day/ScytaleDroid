@@ -14,6 +14,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from scytaledroid.DynamicAnalysis.datasets.research_dataset_alpha import MESSAGING_PACKAGES
+from scytaledroid.DynamicAnalysis.templates.category_map import category_for_package
+
+
+_CHAT_LIKE_BASELINE_PACKAGES = {
+    "com.snapchat.android",
+}
+_RELAXED_IDLE_MIN_BYTES = 500_000  # 500KB
 
 @dataclass(frozen=True)
 class LowSignalConfig:
@@ -46,6 +54,11 @@ def compute_low_signal_from_evidence_pack(run_dir: Path, *, cfg: LowSignalConfig
     """
 
     config = cfg or LowSignalConfig()
+    effective = _effective_low_signal_config(
+        config,
+        package_name=None,
+        run_profile=None,
+    )
     features_path = run_dir / "analysis" / "pcap_features.json"
     pf = _read_json(features_path)
     if not isinstance(pf, dict):
@@ -65,41 +78,85 @@ def compute_low_signal_from_evidence_pack(run_dir: Path, *, cfg: LowSignalConfig
         dur = float(capture_duration_s) if capture_duration_s is not None else None
     except Exception:
         dur = None
-    if dur is not None and dur < float(config.min_capture_duration_s):
+    if dur is not None and dur < float(effective.min_capture_duration_s):
         reasons.append("PCAP_CAPTURE_TOO_SHORT")
 
     try:
         size_b = int(data_size_bytes) if data_size_bytes is not None else None
     except Exception:
         size_b = None
-    if size_b is not None and size_b < int(config.min_data_size_bytes):
+    if size_b is not None and size_b < int(effective.min_data_size_bytes):
         reasons.append("PCAP_BYTES_LOW")
 
     try:
         pkts = int(packet_count) if packet_count is not None else None
     except Exception:
         pkts = None
-    if pkts is not None and pkts < int(config.min_packet_count):
+    if pkts is not None and pkts < int(effective.min_packet_count):
         reasons.append("PCAP_PACKETS_LOW")
 
     try:
         doms = int(unique_domains_topn) if unique_domains_topn is not None else None
     except Exception:
         doms = None
-    if doms is not None and doms < int(config.min_unique_domains_topn):
+    if doms is not None and doms < int(effective.min_unique_domains_topn):
         reasons.append("DOMAINS_LOW")
 
     return {
         "low_signal": bool(reasons),
         "low_signal_reasons": reasons,
         "low_signal_thresholds": {
-            "min_capture_duration_s": float(config.min_capture_duration_s),
-            "min_data_size_bytes": int(config.min_data_size_bytes),
-            "min_packet_count": int(config.min_packet_count),
-            "min_unique_domains_topn": int(config.min_unique_domains_topn),
+            "min_capture_duration_s": float(effective.min_capture_duration_s),
+            "min_data_size_bytes": int(effective.min_data_size_bytes),
+            "min_packet_count": int(effective.min_packet_count),
+            "min_unique_domains_topn": int(effective.min_unique_domains_topn),
         },
     }
 
 
-__all__ = ["LowSignalConfig", "compute_low_signal_from_evidence_pack"]
+def compute_low_signal_for_run(
+    run_dir: Path,
+    *,
+    package_name: str | None,
+    run_profile: str | None,
+    cfg: LowSignalConfig | None = None,
+) -> dict[str, Any] | None:
+    """Compute low-signal with package/profile-aware thresholds."""
+    config = cfg or LowSignalConfig()
+    effective = _effective_low_signal_config(
+        config,
+        package_name=package_name,
+        run_profile=run_profile,
+    )
+    return compute_low_signal_from_evidence_pack(run_dir, cfg=effective)
 
+
+def _effective_low_signal_config(
+    config: LowSignalConfig,
+    *,
+    package_name: str | None,
+    run_profile: str | None,
+) -> LowSignalConfig:
+    pkg = str(package_name or "").strip().lower()
+    profile = str(run_profile or "").strip().lower()
+    if not profile.startswith("baseline"):
+        return config
+    messaging_pkgs = {p.lower() for p in MESSAGING_PACKAGES}
+    category = category_for_package(pkg) if pkg else None
+    is_chat_like = pkg in _CHAT_LIKE_BASELINE_PACKAGES or pkg in messaging_pkgs or category == "messaging"
+    if not is_chat_like:
+        return config
+    # Messaging/chat idle can be comparatively quiet; relax byte threshold only.
+    return LowSignalConfig(
+        min_capture_duration_s=float(config.min_capture_duration_s),
+        min_data_size_bytes=min(int(config.min_data_size_bytes), int(_RELAXED_IDLE_MIN_BYTES)),
+        min_packet_count=int(config.min_packet_count),
+        min_unique_domains_topn=int(config.min_unique_domains_topn),
+    )
+
+
+__all__ = [
+    "LowSignalConfig",
+    "compute_low_signal_from_evidence_pack",
+    "compute_low_signal_for_run",
+]

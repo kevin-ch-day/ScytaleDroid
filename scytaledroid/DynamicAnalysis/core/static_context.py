@@ -112,7 +112,7 @@ def build_operator_guidance(plan_payload: dict[str, Any] | None, *, run_profile:
 
     lines = [f"Static context tags: {tag_text}"]
 
-    if run_profile == "baseline_idle":
+    if str(run_profile or "").strip().lower().startswith("baseline"):
         return lines
 
     # Advisory suggestions only; do not imply requirements or label behavior.

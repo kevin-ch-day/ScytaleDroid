@@ -12,7 +12,7 @@ from scytaledroid.DynamicAnalysis.datasets.research_dataset_alpha import MESSAGI
 
 _MESSAGING_PACKAGES_LC = {p.lower() for p in MESSAGING_PACKAGES}
 _SOCIAL_TEMPLATE_ALLOWED = {"social_feed_basic_v2"}
-_MESSAGING_TEMPLATE_ALLOWED = {"messaging_basic_v1"}
+_MESSAGING_TEMPLATE_ALLOWED = {"messaging_basic_v1", "messaging_call_basic_v1"}
 _LEGACY_TEMPLATE_IDS = {"social_feed_basic", "messaging_basic"}
 
 EXCLUSION_REASON_CODES: tuple[str, ...] = (
@@ -34,6 +34,11 @@ EXCLUSION_REASON_CODES: tuple[str, ...] = (
     "EXCLUDED_MISSING_REQUIRED_IDENTITY_FIELD",
     "EXCLUDED_NO_EVIDENCE_PACK",
     "EXCLUDED_INCOMPLETE_ARTIFACT_SET",
+    "EXCLUDED_LOW_SIGNAL_IDLE_BASELINE",
+    "EXCLUDED_BASELINE_IDLE_NON_COHORT",
+    "EXCLUDED_BASELINE_PROTOCOL_LEGACY",
+    "EXCLUDED_CALL_EXPLORATORY_ONLY",
+    "EXCLUDED_CALL_NOT_CONNECTED",
     "EXCLUDED_TSHARK_PARSE_FAILED",
     "EXCLUDED_CAPINFOS_PARSE_FAILED",
     "EXCLUDED_FEATURE_EXTRACTION_FAILED",
@@ -66,6 +71,11 @@ EXCLUSION_REASON_PRECEDENCE: dict[str, int] = {
     # Evidence/artifacts
     "EXCLUDED_NO_EVIDENCE_PACK": 30,
     "EXCLUDED_INCOMPLETE_ARTIFACT_SET": 31,
+    "EXCLUDED_LOW_SIGNAL_IDLE_BASELINE": 30,
+    "EXCLUDED_BASELINE_IDLE_NON_COHORT": 31,
+    "EXCLUDED_BASELINE_PROTOCOL_LEGACY": 32,
+    "EXCLUDED_CALL_EXPLORATORY_ONLY": 53,
+    "EXCLUDED_CALL_NOT_CONNECTED": 54,
     "EXCLUDED_TSHARK_PARSE_FAILED": 32,
     "EXCLUDED_CAPINFOS_PARSE_FAILED": 33,
     "EXCLUDED_FEATURE_EXTRACTION_FAILED": 34,
@@ -138,6 +148,21 @@ def derive_paper_eligibility(
         if not _is_truthy(ds.get("valid_dataset_run")):
             # Keep paper-mode surface compact; artifact-level checks are done elsewhere.
             reasons.append("EXCLUDED_INCOMPLETE_ARTIFACT_SET")
+            pkg_lc = _norm_str(target.get("package_name")).lower()
+            run_profile = str(ds.get("run_profile") or op.get("run_profile") or "").strip().lower()
+            invalid_reason = _norm_str(ds.get("invalid_reason_code")).upper()
+            low_signal = _is_truthy(ds.get("low_signal"))
+            exploratory_class = _norm_str(ds.get("exploratory_class")).upper()
+            if (
+                pkg_lc in _MESSAGING_PACKAGES_LC
+                and run_profile == "baseline_idle"
+                and (
+                    invalid_reason in {"PCAP_MISSING", "PCAP_TOO_SMALL"}
+                    or low_signal
+                    or exploratory_class == "LOW_SIGNAL_IDLE"
+                )
+            ):
+                reasons.append("EXCLUDED_LOW_SIGNAL_IDLE_BASELINE")
 
         capture_policy_version = op.get("capture_policy_version")
         try:
@@ -148,8 +173,18 @@ def derive_paper_eligibility(
             reasons.append("EXCLUDED_POLICY_VERSION_MISMATCH")
 
         run_profile = str(ds.get("run_profile") or op.get("run_profile") or "").strip().lower()
+        pkg_lc = _norm_str(target.get("package_name")).lower()
+        if pkg_lc in _MESSAGING_PACKAGES_LC and run_profile == "baseline_idle":
+            reasons.append("EXCLUDED_BASELINE_IDLE_NON_COHORT")
+        if pkg_lc in _MESSAGING_PACKAGES_LC and run_profile == "baseline_connected":
+            baseline_protocol_id = _norm_str(op.get("baseline_protocol_id")).lower()
+            try:
+                baseline_protocol_version = int(op.get("baseline_protocol_version"))
+            except Exception:
+                baseline_protocol_version = None
+            if baseline_protocol_id != "baseline_connected_v2" or baseline_protocol_version is None or baseline_protocol_version < 2:
+                reasons.append("EXCLUDED_BASELINE_PROTOCOL_LEGACY")
         if run_profile.startswith("interaction_scripted"):
-            pkg_lc = _norm_str(target.get("package_name")).lower()
             observed_template = _norm_str(op.get("template_id") or op.get("scenario_template")).lower()
             allowed_templates = _MESSAGING_TEMPLATE_ALLOWED if pkg_lc in _MESSAGING_PACKAGES_LC else _SOCIAL_TEMPLATE_ALLOWED
             if observed_template in _LEGACY_TEMPLATE_IDS:
@@ -188,6 +223,11 @@ def derive_paper_eligibility(
                 reasons.append("EXCLUDED_SCRIPT_UI_STATE_MISMATCH")
             if _norm_str(op.get("protocol_fit")).lower() == "poor":
                 reasons.append("EXCLUDED_PROTOCOL_FIT_POOR")
+            if observed_template == "messaging_call_basic_v1":
+                # Paper #2 v1 policy: call templates are exploratory-only (retained, non-cohort).
+                reasons.append("EXCLUDED_CALL_EXPLORATORY_ONLY")
+                if op.get("call_connected") is False:
+                    reasons.append("EXCLUDED_CALL_NOT_CONNECTED")
         if "manual" in run_profile:
             reasons.append("EXCLUDED_MANUAL_NON_COHORT")
 

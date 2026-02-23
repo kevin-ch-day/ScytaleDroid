@@ -221,3 +221,64 @@ def test_paper_eligibility_identity_mismatch_version() -> None:
     )
     assert out.paper_eligible is False
     assert out.reason_code == "EXCLUDED_IDENTITY_MISMATCH"
+
+
+def test_messaging_baseline_idle_low_signal_reason_is_explicit() -> None:
+    manifest = _manifest(run_profile="baseline_idle", valid=False)
+    manifest["dataset"]["invalid_reason_code"] = "PCAP_MISSING"
+    manifest["dataset"]["low_signal"] = True
+    manifest["dataset"]["exploratory_class"] = "LOW_SIGNAL_IDLE"
+    manifest["target"]["package_name"] = "com.whatsapp"
+    out = derive_paper_eligibility(
+        manifest=manifest,
+        plan=_plan(),
+        min_windows=20,
+        required_capture_policy_version=1,
+    )
+    assert out.paper_eligible is False
+    assert out.reason_code == "EXCLUDED_LOW_SIGNAL_IDLE_BASELINE"
+
+
+def test_messaging_baseline_idle_is_non_cohort_even_if_valid() -> None:
+    manifest = _manifest(run_profile="baseline_idle", valid=True)
+    manifest["target"]["package_name"] = "com.whatsapp"
+    out = derive_paper_eligibility(
+        manifest=manifest,
+        plan=_plan(),
+        min_windows=20,
+        required_capture_policy_version=1,
+    )
+    assert out.paper_eligible is False
+    assert out.reason_code == "EXCLUDED_BASELINE_IDLE_NON_COHORT"
+
+
+def test_messaging_baseline_connected_v1_is_legacy_non_cohort() -> None:
+    manifest = _manifest(run_profile="baseline_connected", valid=True)
+    manifest["target"]["package_name"] = "com.whatsapp"
+    manifest["operator"]["baseline_protocol_id"] = "baseline_connected_v1"
+    manifest["operator"]["baseline_protocol_version"] = 1
+    out = derive_paper_eligibility(
+        manifest=manifest,
+        plan=_plan(),
+        min_windows=20,
+        required_capture_policy_version=1,
+    )
+    assert out.paper_eligible is False
+    assert out.reason_code == "EXCLUDED_BASELINE_PROTOCOL_LEGACY"
+
+
+def test_messaging_call_template_is_exploratory_only() -> None:
+    manifest = _manifest(run_profile="interaction_scripted", valid=True)
+    manifest["target"]["package_name"] = "com.whatsapp"
+    manifest["operator"]["template_id"] = "messaging_call_basic_v1"
+    manifest["operator"]["scenario_template"] = "messaging_call_basic_v1"
+    manifest["operator"]["call_attempted"] = True
+    manifest["operator"]["call_connected"] = True
+    out = derive_paper_eligibility(
+        manifest=manifest,
+        plan=_plan(),
+        min_windows=20,
+        required_capture_policy_version=1,
+    )
+    assert out.paper_eligible is False
+    assert out.reason_code == "EXCLUDED_CALL_EXPLORATORY_ONLY"

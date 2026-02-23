@@ -359,6 +359,9 @@ class DynamicRunOrchestrator:
                     "template_hash": protocol.get("template_hash"),
                     "template_map_version": protocol.get("template_map_version"),
                     "template_map_hash": protocol.get("template_map_hash"),
+                    "baseline_protocol_id": protocol.get("baseline_protocol_id"),
+                    "baseline_protocol_version": protocol.get("baseline_protocol_version"),
+                    "baseline_protocol_hash": protocol.get("baseline_protocol_hash"),
                     "script_name": protocol.get("script_name"),
                     "scenario_template": protocol.get("scenario_template"),
                     "script_hash": protocol.get("script_hash"),
@@ -371,12 +374,18 @@ class DynamicRunOrchestrator:
                     "script_target_overrun_s": protocol.get("target_overrun_s"),
                     "script_target_controlled": protocol.get("target_controlled"),
                     "target_duration_s": protocol.get("target_duration_s") or manifest.operator.get("target_duration_s"),
+                    "call_type": protocol.get("call_type"),
+                    "call_attempted": protocol.get("call_attempted"),
+                    "call_connected": protocol.get("call_connected"),
+                    "call_connect_latency_s": protocol.get("call_connect_latency_s"),
+                    "call_connected_duration_s": protocol.get("call_connected_duration_s"),
+                    "call_end_reason": protocol.get("call_end_reason"),
                 }
             )
         else:
             profile = str(getattr(run_ctx, "run_profile", "") or "").strip().lower()
             if profile.startswith("baseline"):
-                manifest.operator.setdefault("not_applicable", {"script": "baseline_idle"})
+                manifest.operator.setdefault("not_applicable", {"script": profile or "baseline"})
         interaction_level = (
             "minimal"
             if getattr(scenario_result, "interaction_level", None) == "idle"
@@ -518,10 +527,14 @@ class DynamicRunOrchestrator:
                     # without changing VALID/INVALID semantics (Paper #2 contract).
                     try:
                         from scytaledroid.DynamicAnalysis.pcap.low_signal import (
-                            compute_low_signal_from_evidence_pack,
+                            compute_low_signal_for_run,
                         )
 
-                        ls = compute_low_signal_from_evidence_pack(run_dir)
+                        ls = compute_low_signal_for_run(
+                            run_dir,
+                            package_name=str((manifest.target or {}).get("package_name") or ""),
+                            run_profile=str((manifest.operator or {}).get("run_profile") or ""),
+                        )
                         if isinstance(ls, dict):
                             manifest.dataset.update(ls)
                     except Exception:
@@ -774,6 +787,9 @@ class DynamicRunOrchestrator:
                 "template_hash": None,
                 "template_map_version": None,
                 "template_map_hash": None,
+                "baseline_protocol_id": None,
+                "baseline_protocol_version": None,
+                "baseline_protocol_hash": None,
                 "script_name": None,
                 "script_hash": None,
                 "step_count": None,
@@ -782,6 +798,12 @@ class DynamicRunOrchestrator:
                 "script_exit_code": None,
                 "script_end_marker": None,
                 "script_timing_within_tolerance": None,
+                "call_type": None,
+                "call_attempted": None,
+                "call_connected": None,
+                "call_connect_latency_s": None,
+                "call_connected_duration_s": None,
+                "call_end_reason": None,
                 "target_duration_s": int(getattr(app_config, "DYNAMIC_TARGET_DURATION_S", 180)),
                 "actual_duration_s": None,
                 "tool_git_commit": get_git_commit(),

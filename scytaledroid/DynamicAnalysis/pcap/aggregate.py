@@ -10,6 +10,9 @@ from typing import Any
 from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.core.static_context import compute_static_context
 from scytaledroid.DynamicAnalysis.plans.loader import enrich_dynamic_plan
+from scytaledroid.DynamicAnalysis.tools.evidence.freeze_lifecycle import (
+    demote_noncanonical_canonical_freeze,
+)
 
 
 def export_pcap_features_csv(
@@ -22,6 +25,7 @@ def export_pcap_features_csv(
         return None
     if require_freeze and freeze_path is None:
         raise RuntimeError("EXPORT_BLOCKED_MISSING_FREEZE: provide freeze_path in paper mode")
+    _prepare_canonical_freeze_for_paper(evidence_root=output_root, freeze_path=freeze_path)
     if require_freeze and freeze_path is not None and not freeze_path.exists():
         raise RuntimeError(f"EXPORT_BLOCKED_MISSING_FREEZE:{freeze_path}")
     selected_run_ids = _load_freeze_included_run_ids(freeze_path) if freeze_path else None
@@ -91,6 +95,7 @@ def export_dynamic_run_summary_csv(
         return None
     if require_freeze and freeze_path is None:
         raise RuntimeError("EXPORT_BLOCKED_MISSING_FREEZE: provide freeze_path in paper mode")
+    _prepare_canonical_freeze_for_paper(evidence_root=output_root, freeze_path=freeze_path)
     if require_freeze and freeze_path is not None and not freeze_path.exists():
         raise RuntimeError(f"EXPORT_BLOCKED_MISSING_FREEZE:{freeze_path}")
     selected_run_ids = _load_freeze_included_run_ids(freeze_path) if freeze_path else None
@@ -132,6 +137,7 @@ def export_protocol_ledger_csv(
         return None
     if require_freeze and freeze_path is None:
         raise RuntimeError("EXPORT_BLOCKED_MISSING_FREEZE: provide freeze_path in paper mode")
+    _prepare_canonical_freeze_for_paper(evidence_root=output_root, freeze_path=freeze_path)
     if require_freeze and freeze_path is not None and not freeze_path.exists():
         raise RuntimeError(f"EXPORT_BLOCKED_MISSING_FREEZE:{freeze_path}")
     selected_run_ids = _load_freeze_included_run_ids(freeze_path) if freeze_path else None
@@ -163,6 +169,15 @@ def export_protocol_ledger_csv(
             "template_id": operator.get("template_id") or operator.get("scenario_template"),
             "template_hash": operator.get("template_hash") or operator.get("script_hash"),
             "interaction_protocol_version": operator.get("interaction_protocol_version"),
+            "baseline_protocol_id": operator.get("baseline_protocol_id"),
+            "baseline_protocol_version": operator.get("baseline_protocol_version"),
+            "baseline_protocol_hash": operator.get("baseline_protocol_hash"),
+            "call_type": operator.get("call_type"),
+            "call_attempted": operator.get("call_attempted"),
+            "call_connected": operator.get("call_connected"),
+            "call_connect_latency_s": operator.get("call_connect_latency_s"),
+            "call_connected_duration_s": operator.get("call_connected_duration_s"),
+            "call_end_reason": operator.get("call_end_reason"),
             "protocol_fit": operator.get("protocol_fit"),
             "protocol_violations": json.dumps(protocol_reasons, sort_keys=True),
             "technical_validity": dataset.get("technical_validity") or operator.get("technical_validity"),
@@ -492,6 +507,11 @@ def _load_freeze_included_run_ids(freeze_path: Path) -> set[str]:
     payload = _load_json(freeze_path)
     if not isinstance(payload, dict):
         raise RuntimeError(f"Invalid freeze manifest JSON: {freeze_path}")
+    contract_hash = str(payload.get("paper_contract_hash") or "").strip()
+    if not contract_hash:
+        raise RuntimeError(
+            "EXPORT_BLOCKED_MISSING_CONTRACT_HASH: Build a new freeze under the current paper contract."
+        )
     ids = payload.get("included_run_ids")
     if not isinstance(ids, list):
         raise RuntimeError(f"Freeze manifest missing included_run_ids: {freeze_path}")
@@ -515,6 +535,34 @@ def _ensure_freeze_ids_present(
         "EXPORT_BLOCKED_STALE_FREEZE:"
         f"{freeze_path}:none_of_{len(selected_run_ids)}_included_run_ids_present_locally"
     )
+
+
+def _prepare_canonical_freeze_for_paper(*, evidence_root: Path, freeze_path: Path | None) -> None:
+    if freeze_path is None:
+        return
+    if freeze_path.name != "dataset_freeze.json":
+        return
+    if not freeze_path.exists():
+        return
+    archive_dir = freeze_path.parent
+    result = demote_noncanonical_canonical_freeze(archive_dir=archive_dir, evidence_root=evidence_root)
+    if bool(result.get("demoted")):
+        legacy_path = str(result.get("legacy_path") or "")
+        state = result.get("state") if isinstance(result.get("state"), dict) else {}
+        reasons = state.get("noncanonical_reasons") if isinstance(state.get("noncanonical_reasons"), list) else []
+        reason_set = {str(r) for r in reasons}
+        if "MISSING_CONTRACT_HASH" in reason_set:
+            raise RuntimeError(
+                "EXPORT_BLOCKED_MISSING_CONTRACT_HASH: Build a new freeze under the current paper contract. "
+                f"Renamed stale dataset_freeze.json -> {legacy_path}."
+            )
+        if "MISSING_RUN_DIRS" in reason_set:
+            raise RuntimeError(
+                "EXPORT_BLOCKED_STALE_FREEZE:"
+                f"dataset_freeze.json missing referenced run dirs locally. "
+                f"Renamed stale dataset_freeze.json -> {legacy_path}."
+            )
+        raise RuntimeError(f"EXPORT_BLOCKED_NONCANONICAL_FREEZE: Renamed stale dataset_freeze.json -> {legacy_path}.")
 
 
 __all__ = ["export_pcap_features_csv", "export_dynamic_run_summary_csv", "export_protocol_ledger_csv"]

@@ -168,3 +168,25 @@ def test_paper_readiness_audit_flags_orphan_evidence_dirs(tmp_path: Path) -> Non
     assert summary.total_runs == 1
     assert summary.missing_run_manifest_dirs == 1
     assert "INCOMPLETE_EVIDENCE_DIRS_PRESENT" in summary.reasons
+
+
+def test_paper_readiness_audit_demotes_noncanonical_freeze(tmp_path: Path, monkeypatch) -> None:
+    out_dir = tmp_path / "output" / "audit" / "dynamic"
+    output_dir = tmp_path / "output"
+    data_dir = tmp_path / "data"
+    monkeypatch.setattr("scytaledroid.Config.app_config.DATA_DIR", str(data_dir))
+    monkeypatch.setattr("scytaledroid.Config.app_config.OUTPUT_DIR", str(output_dir))
+    _write_json(
+        data_dir / "archive" / "dataset_freeze.json",
+        {
+            "included_run_ids": ["missing-run"],
+            "paper_contract_hash": "a" * 64,
+            "freeze_role": "canonical",
+        },
+    )
+    summary = run_paper_readiness_audit(out_dir=out_dir)
+    assert summary.canonical_freeze_demoted_to_legacy is not None
+    assert summary.canonical_freeze_role == "none"
+    assert summary.freeze_run_ids_total == 0
+    assert (data_dir / "archive" / "dataset_freeze.json").exists() is False
+    assert list((data_dir / "archive").glob("legacy_freeze_*.json"))

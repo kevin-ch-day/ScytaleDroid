@@ -29,7 +29,10 @@ from scytaledroid.DynamicAnalysis.plan_selection import (
 )
 from scytaledroid.DynamicAnalysis.run_dynamic_analysis import execute_dynamic_run_spec
 from scytaledroid.DynamicAnalysis.run_summary import print_run_summary
-from scytaledroid.DynamicAnalysis.templates.category_map import template_for_package
+from scytaledroid.DynamicAnalysis.templates.category_map import (
+    category_for_package,
+    template_for_package,
+)
 from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_evidence_path
 from scytaledroid.DynamicAnalysis.utils.run_cleanup import (
     dataset_tracker_counts,
@@ -49,6 +52,54 @@ _CLOCK_BLOCK_S = 30
 _STABILIZATION_WAIT_S = 15
 
 
+def _is_messaging_package_or_category(package_name: str) -> bool:
+    pkg_lc = str(package_name or "").strip().lower()
+    if not pkg_lc:
+        return False
+    category = str(category_for_package(pkg_lc) or "").strip().lower()
+    if category == "messaging":
+        return True
+    # Backstop for legacy mappings while category maps are evolving.
+    return pkg_lc in {p.lower() for p in MESSAGING_PACKAGES}
+
+
+def _canonical_baseline_profile_for_package(package_name: str) -> str:
+    if _is_messaging_package_or_category(package_name):
+        return "baseline_connected"
+    return "baseline_idle"
+
+
+def _is_messaging_connected_baseline(
+    *,
+    package_name: str,
+    run_profile: str,
+    messaging_activity: str | None,
+) -> bool:
+    return (
+        _is_messaging_package_or_category(package_name)
+        and str(run_profile or "").strip().lower() == "baseline_connected"
+        and str(messaging_activity or "").strip().lower() in {"", "connected_idle"}
+    )
+
+
+def _messaging_baseline_connected_insufficient_duration_streak(
+    recent_runs: list["RecentTrackerRunLike"],
+    *,
+    package_name: str,
+) -> int:
+    if not _is_messaging_package_or_category(package_name):
+        return 0
+    streak = 0
+    for r in recent_runs:
+        prof = str(getattr(r, "run_profile", "") or "").strip().lower()
+        reason = str(getattr(r, "invalid_reason_code", "") or "").strip().upper()
+        if prof == "baseline_connected" and getattr(r, "valid", None) is False and reason == "INSUFFICIENT_DURATION":
+            streak += 1
+            continue
+        break
+    return streak
+
+
 def _intent_counts_toward_quota(
     *,
     run_profile: str,
@@ -57,7 +108,7 @@ def _intent_counts_toward_quota(
     cfg: "DatasetTrackerConfig",
 ) -> bool:
     profile = str(run_profile or "").strip().lower()
-    if profile == "baseline_idle":
+    if profile.startswith("baseline"):
         return int(baseline_valid_runs) < int(cfg.baseline_required)
     if profile == "interaction_scripted":
         return int(interactive_valid_runs) < int(cfg.interactive_required)
@@ -68,6 +119,26 @@ def _intent_counts_toward_quota(
 def _is_interactive_profile(profile: str) -> bool:
     p = str(profile or "").strip().lower()
     return ("interaction" in p) or ("interactive" in p) or ("script" in p)
+
+
+def _apply_messaging_baseline_countability_policy(
+    *,
+    package_name: str,
+    run_profile: str,
+    messaging_activity: str | None,
+    counts_toward_completion: bool,
+) -> tuple[bool, str | None]:
+    """Messaging baseline policy: baseline is baseline_connected by default."""
+    if not counts_toward_completion:
+        return counts_toward_completion, None
+    if not _is_messaging_package_or_category(package_name):
+        return counts_toward_completion, None
+    if not str(run_profile or "").strip().lower().startswith("baseline"):
+        return counts_toward_completion, None
+    activity = str(messaging_activity or "").strip().lower()
+    if activity in {"", "none"}:
+        return False, "MESSAGING_BASELINE_NONE_EXPLORATORY"
+    return counts_toward_completion, None
 
 
 def _print_paper_mode_constants() -> None:
@@ -809,6 +880,8 @@ def run_guided_dataset_run(
 
     next_protocol = peek_next_run_protocol(package_name, tier="dataset") or {}
     suggested_profile = (next_protocol.get("run_profile") or "interaction_scripted").strip()
+    if str(suggested_profile).strip().lower() == "baseline_idle":
+        suggested_profile = _canonical_baseline_profile_for_package(package_name)
     suggested_slot = next_protocol.get("run_sequence")
     from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig
 
@@ -871,9 +944,11 @@ def run_guided_dataset_run(
     protocol_options = [
         menu_utils.MenuOption(
             "1",
-            "Idle Baseline",
+            "Baseline",
             description=(
-                "Purpose: baseline-only training. run_profile=baseline_idle | "
+                "Purpose: baseline-only training. run_profile="
+                + _canonical_baseline_profile_for_package(package_name)
+                + " | "
                 + (
                     "Counts toward quota: YES (if VALID)"
                     if int(counts.baseline_valid_runs) < int(cfg.baseline_required)
@@ -998,11 +1073,14 @@ def run_guided_dataset_run(
 
     # Show recent history before starting capture so operator can sanity-check state.
     recent = recent_tracker_runs(package_name, limit=5)
+    baseline_connected_insufficient_streak = 0
     if recent:
         rows = []
         for r in recent:
             if r.valid is True:
                 status = "VALID"
+                if str(r.run_profile or "").strip().lower() == "baseline_idle" and r.low_signal is True:
+                    status += " (LOW_SIGNAL_IDLE)"
             elif r.valid is False:
                 status = f"INVALID:{r.invalid_reason_code or 'UNKNOWN'}"
                 if (
@@ -1032,11 +1110,15 @@ def run_guided_dataset_run(
         # Operator guidance: repeated baseline PCAP_MISSING usually indicates
         # low-signal app-idle behavior; suggest a warm baseline or scripted run.
         pcap_missing_streak = 0
+        low_signal_idle_streak = 0
         for r in recent:
             prof = str(r.run_profile or "").strip().lower()
             reason = str(r.invalid_reason_code or "").strip().upper()
             if prof == "baseline_idle" and r.valid is False and reason == "PCAP_MISSING":
                 pcap_missing_streak += 1
+                continue
+            if prof == "baseline_idle" and r.valid is True and r.low_signal is True:
+                low_signal_idle_streak += 1
                 continue
             break
         if pcap_missing_streak >= 2:
@@ -1048,11 +1130,32 @@ def run_guided_dataset_run(
                     level="warn",
                 )
             )
+        if low_signal_idle_streak >= 2:
+            print(
+                status_messages.status(
+                    "Recent baseline_idle runs were VALID but LOW_SIGNAL_IDLE. "
+                    "For messaging/chat-like apps, collect scripted interaction next to avoid non-countable baselines.",
+                    level="warn",
+                )
+            )
+        baseline_connected_insufficient_streak = _messaging_baseline_connected_insufficient_duration_streak(
+            recent,
+            package_name=package_name,
+        )
+        if baseline_connected_insufficient_streak >= 2:
+            print(
+                status_messages.status(
+                    "Recent baseline_connected runs failed with INSUFFICIENT_DURATION. "
+                    "Policy: switch to scripted-first for this app/build; baseline remains pending.",
+                    level="warn",
+                )
+            )
+            suggested_profile = "interaction_scripted"
 
     # Capture modes.
     tier = "dataset"
     if selected_protocol == "1":
-        run_profile = "baseline_idle"
+        run_profile = _canonical_baseline_profile_for_package(package_name)
         interaction_level = "minimal"
     elif selected_protocol == "2":
         run_profile = "interaction_scripted"
@@ -1066,23 +1169,47 @@ def run_guided_dataset_run(
         interactive_valid_runs=int(counts.interactive_valid_runs),
         cfg=cfg,
     )
-    print(
-        "Selected intent countability: "
-        + ("COUNTABLE (if VALID)" if counts_toward_completion else "EXTRA (not countable)")
-    )
-
+    suggested_key = "2" if suggested_is_interactive else "1"
+    if selected_protocol in {"1", "2"} and selected_protocol != suggested_key and not counts_toward_completion:
+        print(
+            status_messages.status(
+                "Selected intent is not quota-suggested and will be saved as EXTRA (not countable).",
+                level="warn",
+            )
+        )
+        proceed = prompt_utils.prompt_yes_no("Proceed with EXTRA run anyway?", default=False)
+        if not proceed:
+            print(status_messages.status("Run canceled. Choose the suggested intent to fill quota.", level="info"))
+            return
     messaging_activity: str | None = None
-    messaging_pkgs = {p.lower() for p in MESSAGING_PACKAGES}
-    if package_name.lower() in messaging_pkgs:
+    if _is_messaging_package_or_category(package_name):
         print()
         menu_utils.print_header("Messaging Activity (Required Tag)")
-        messaging_options = [
-            menu_utils.MenuOption("1", "None / browsing only", description="no explicit messaging activity"),
-            menu_utils.MenuOption("2", "Text only", description="send/receive text messages"),
-            menu_utils.MenuOption("3", "Voice call", description="voice calling only"),
-            menu_utils.MenuOption("4", "Video call", description="video calling only"),
-            menu_utils.MenuOption("5", "Mixed", description="text + voice/video"),
-        ]
+        if str(run_profile or "").strip().lower().startswith("baseline"):
+            messaging_options = [
+                menu_utils.MenuOption(
+                    "1",
+                    "Connected idle",
+                    description="open existing thread and keep it visible; no send/call/media upload",
+                ),
+                menu_utils.MenuOption(
+                    "2",
+                    "None / home idle",
+                    description="no explicit messaging activity (exploratory; likely low-signal)",
+                ),
+                menu_utils.MenuOption("3", "Text only", description="send/receive text messages"),
+                menu_utils.MenuOption("4", "Voice call", description="voice calling only"),
+                menu_utils.MenuOption("5", "Video call", description="video calling only"),
+                menu_utils.MenuOption("6", "Mixed", description="text + voice/video"),
+            ]
+        else:
+            messaging_options = [
+                menu_utils.MenuOption("1", "None / browsing only (default)", description="no explicit messaging activity"),
+                menu_utils.MenuOption("2", "Text only", description="send/receive text messages"),
+                menu_utils.MenuOption("3", "Voice call", description="voice calling only"),
+                menu_utils.MenuOption("4", "Video call", description="video calling only"),
+                menu_utils.MenuOption("5", "Mixed", description="text + voice/video"),
+            ]
         menu_utils.render_menu(
             menu_utils.MenuSpec(
                 items=messaging_options,
@@ -1093,22 +1220,113 @@ def run_guided_dataset_run(
                 compact=True,
             )
         )
+        valid_choices = menu_utils.selectable_keys(messaging_options, include_exit=False)
         choice = prompt_utils.get_choice(
-            menu_utils.selectable_keys(messaging_options, include_exit=False),
+            valid_choices,
             default="1",
-            invalid_message="Choose 1-5.",
+            invalid_message=f"Choose {valid_choices[0]}-{valid_choices[-1]}.",
             disabled=[option.key for option in messaging_options if option.disabled],
         )
-        messaging_activity = {
-            "1": "none",
-            "2": "text_only",
-            "3": "voice_call",
-            "4": "video_call",
-            "5": "mixed",
-        }[choice]
+        if str(run_profile or "").strip().lower().startswith("baseline"):
+            messaging_activity = {
+                "1": "connected_idle",
+                "2": "none",
+                "3": "text_only",
+                "4": "voice_call",
+                "5": "video_call",
+                "6": "mixed",
+            }[choice]
+        else:
+            messaging_activity = {
+                "1": "none",
+                "2": "text_only",
+                "3": "voice_call",
+                "4": "video_call",
+                "5": "mixed",
+            }[choice]
     elif messaging_activity is None:
         # Non-messaging apps: leave unset so downstream can distinguish "not applicable" vs "none".
         messaging_activity = None
+
+    counts_toward_completion, policy_reason = _apply_messaging_baseline_countability_policy(
+        package_name=package_name,
+        run_profile=run_profile,
+        messaging_activity=messaging_activity,
+        counts_toward_completion=counts_toward_completion,
+    )
+    if policy_reason == "MESSAGING_BASELINE_NONE_EXPLORATORY":
+        print(
+            status_messages.status(
+                "Messaging baseline with 'none/home idle' is exploratory. "
+                "Use 'Connected idle' (open thread, no send/call) for countable messaging baseline.",
+                level="warn",
+            )
+        )
+        if prompt_utils.prompt_yes_no("Switch to connected-idle baseline now?", default=True):
+            messaging_activity = "connected_idle"
+            run_profile = "baseline_connected"
+            counts_toward_completion = _intent_counts_toward_quota(
+                run_profile=run_profile,
+                baseline_valid_runs=int(counts.baseline_valid_runs),
+                interactive_valid_runs=int(counts.interactive_valid_runs),
+                cfg=cfg,
+            )
+            print(status_messages.status("Using messaging baseline_connected behavior.", level="info"))
+
+    if _is_messaging_connected_baseline(
+        package_name=package_name,
+        run_profile=run_profile,
+        messaging_activity=messaging_activity,
+    ):
+        can_open_thread = prompt_utils.prompt_yes_no(
+            "Can you open an existing conversation thread now? (required for baseline_connected)",
+            default=True,
+        )
+        if not can_open_thread:
+            print(
+                status_messages.status(
+                    "Without an existing thread, messaging baseline is likely low-signal and may be excluded.",
+                    level="warn",
+                )
+            )
+            if prompt_utils.prompt_yes_no("Switch to scripted interaction now?", default=True):
+                run_profile = "interaction_scripted"
+                interaction_level = "scripted"
+                messaging_activity = "none"
+                counts_toward_completion = _intent_counts_toward_quota(
+                    run_profile=run_profile,
+                    baseline_valid_runs=int(counts.baseline_valid_runs),
+                    interactive_valid_runs=int(counts.interactive_valid_runs),
+                    cfg=cfg,
+                )
+                print(status_messages.status("Switched to scripted interaction.", level="info"))
+            else:
+                print(
+                    status_messages.status(
+                        "Run canceled to avoid low-signal baseline. Start again when a thread is available.",
+                        level="info",
+                    )
+                )
+                return
+
+    if (
+        _is_messaging_package_or_category(package_name)
+        and str(run_profile or "").strip().lower() == "interaction_scripted"
+        and str(messaging_activity or "").strip().lower() in {"voice_call", "video_call", "mixed"}
+    ):
+        print(
+            status_messages.status(
+                "Voice/video call selected in scripted mode. "
+                "Paper mode hard-switch: using messaging_call_basic_v1 (exploratory, non-cohort).",
+                level="warn",
+            )
+        )
+        counts_toward_completion = False
+
+    print(
+        "Selected intent countability: "
+        + ("COUNTABLE (if VALID)" if counts_toward_completion else "EXTRA (not countable)")
+    )
 
     print()
     menu_utils.print_header("Dynamic Run Observers")
@@ -1229,8 +1447,7 @@ def _capture_protocol_fit_feedback(*, result, run_profile: str, package_name: st
         )
 
     send_detected = False
-    messaging_pkgs = {p.lower() for p in MESSAGING_PACKAGES}
-    if str(package_name or "").strip().lower() in messaging_pkgs:
+    if _is_messaging_package_or_category(str(package_name or "").strip().lower()):
         send_detected = prompt_utils.prompt_yes_no(
             "Did this scripted run send a real message? (protocol violation in paper mode)",
             default=False,

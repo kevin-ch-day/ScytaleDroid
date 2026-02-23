@@ -14,6 +14,7 @@ from scytaledroid.DynamicAnalysis.core.event_logger import RunEventLogger
 from scytaledroid.DynamicAnalysis.core.manifest import RunManifest
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper2_config
 from scytaledroid.DynamicAnalysis.paper_eligibility import derive_paper_eligibility
+from scytaledroid.DynamicAnalysis.pcap.low_signal import compute_low_signal_for_run
 
 MIN_PCAP_BYTES = int(getattr(paper2_config, "MIN_PCAP_BYTES", 50000))
 MIN_WINDOWS_PER_RUN = 20
@@ -92,6 +93,7 @@ def update_dataset_tracker(
     app_entry = apps.setdefault(package, {"runs": []})
     operator = manifest.operator if isinstance(manifest.operator, dict) else {}
     target = manifest.target if isinstance(manifest.target, dict) else {}
+    dataset = manifest.dataset if isinstance(manifest.dataset, dict) else {}
     target_identity = target.get("run_identity") if isinstance(target.get("run_identity"), dict) else {}
     interaction_level = operator.get("interaction_level")
     if interaction_level == "idle":
@@ -123,12 +125,60 @@ def update_dataset_tracker(
             target_identity.get("signer_set_hash")
             or target_identity.get("signer_digest")
         ),
+        "low_signal": (
+            True
+            if dataset.get("low_signal") is True
+            else (False if dataset.get("low_signal") is False else None)
+        ),
+        "low_signal_reasons": (
+            list(dataset.get("low_signal_reasons"))
+            if isinstance(dataset.get("low_signal_reasons"), list)
+            else []
+        ),
     }
     run_entry.update(_netstats_summary(run_dir))
     run_entry.update(_pcap_capture_stats(run_dir))
+    # Recompute low-signal from evidence for tracker derivation so reindex picks
+    # up policy improvements without mutating evidence manifests.
+    ls = compute_low_signal_for_run(
+        run_dir,
+        package_name=str(package),
+        run_profile=str(operator.get("run_profile") or ""),
+    )
+    if isinstance(ls, dict):
+        run_entry["low_signal"] = (
+            True
+            if ls.get("low_signal") is True
+            else (False if ls.get("low_signal") is False else None)
+        )
+        run_entry["low_signal_reasons"] = (
+            list(ls.get("low_signal_reasons"))
+            if isinstance(ls.get("low_signal_reasons"), list)
+            else []
+        )
+    else:
+        run_entry["low_signal"] = (
+            True
+            if dataset.get("low_signal") is True
+            else (False if dataset.get("low_signal") is False else None)
+        )
+        run_entry["low_signal_reasons"] = (
+            list(dataset.get("low_signal_reasons"))
+            if isinstance(dataset.get("low_signal_reasons"), list)
+            else []
+        )
     validity = evaluate_dataset_validity(run_dir, manifest, run_entry, cfg)
     run_entry.update(validity)
-    run_entry.update(_derive_paper_eligibility_fields(run_dir))
+    run_entry.update(
+        _derive_paper_eligibility_fields(
+            run_dir,
+            manifest_payload={
+                "dataset": dict(run_entry),
+                "operator": dict(operator) if isinstance(operator, dict) else {},
+                "target": dict(target) if isinstance(target, dict) else {},
+            },
+        )
+    )
 
     # Idempotent: update existing entries so older runs can be re-evaluated when
     # QA rules evolve (e.g., PCAP span vs netstats guardrail).
@@ -870,13 +920,18 @@ def _pcap_capture_stats(run_dir: Path) -> dict[str, Any]:
     }
 
 
-def _derive_paper_eligibility_fields(run_dir: Path) -> dict[str, Any]:
+def _derive_paper_eligibility_fields(
+    run_dir: Path,
+    *,
+    manifest_payload: dict[str, Any] | None = None,
+    plan_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Backfill tracker with evidence-derived paper eligibility state.
 
     Tracker fields are cache only; canonical truth remains evidence-pack manifests.
     """
-    manifest = _load(run_dir / "run_manifest.json")
-    plan = _load(run_dir / "inputs" / "static_dynamic_plan.json")
+    manifest = manifest_payload if isinstance(manifest_payload, dict) else _load(run_dir / "run_manifest.json")
+    plan = plan_payload if isinstance(plan_payload, dict) else _load(run_dir / "inputs" / "static_dynamic_plan.json")
     if not isinstance(manifest, dict):
         return {
             "paper_eligible": False,

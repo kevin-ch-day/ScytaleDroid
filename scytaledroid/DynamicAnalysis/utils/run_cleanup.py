@@ -34,6 +34,7 @@ class RecentRun:
     messaging_activity: str | None
     valid: bool | None
     invalid_reason_code: str | None
+    low_signal: bool | None
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -108,6 +109,11 @@ def recent_tracker_runs(package_name: str, *, limit: int = 5) -> list[RecentRun]
                 valid=valid_norm,
                 invalid_reason_code=(
                     str(r.get("invalid_reason_code")) if r.get("invalid_reason_code") else None
+                ),
+                low_signal=(
+                    True
+                    if r.get("low_signal") is True
+                    else (False if r.get("low_signal") is False else None)
                 ),
             )
         )

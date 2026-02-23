@@ -157,6 +157,174 @@ def test_update_dataset_tracker_records_run_protocol(monkeypatch, tmp_path: Path
     assert run["interaction_level"] == "minimal"
 
 
+def test_update_dataset_tracker_uses_in_memory_manifest_for_eligibility(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(dataset_tracker.app_config, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(dataset_tracker.app_config, "DYNAMIC_MIN_DURATION_S", 120)
+    monkeypatch.setattr(dataset_tracker.app_config, "DYNAMIC_DATASET_BASELINE_RUNS", 1)
+    monkeypatch.setattr(dataset_tracker.app_config, "DYNAMIC_DATASET_INTERACTIVE_RUNS", 2)
+
+    run_dir = tmp_path / "run-mismatch"
+    (run_dir / "analysis").mkdir(parents=True, exist_ok=True)
+    (run_dir / "analysis" / "pcap_report.json").write_text(
+        json.dumps(
+            {
+                "report_status": "ok",
+                "missing_tools": [],
+                "capinfos": {"parsed": {"capture_duration_s": 240, "packet_count": 1000, "data_size_bytes": 123}},
+                "protocol_hierarchy": [{"protocol": "quic", "frames": 1, "bytes": 1}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "analysis" / "pcap_features.json").write_text(json.dumps({}), encoding="utf-8")
+    (run_dir / "analysis" / "summary.json").write_text(
+        json.dumps(
+            {
+                "telemetry": {
+                    "stats": {
+                        "sampling_duration_seconds": 240,
+                        "netstats_bytes_in_total": 1,
+                        "netstats_bytes_out_total": 1,
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    # Intentionally stale disk manifest to ensure tracker prefers in-memory payload.
+    (run_dir / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "dynamic_run_id": "run-mismatch",
+                "operator": {"run_profile": "baseline_idle"},
+                "target": {"package_name": "com.example.app"},
+                "dataset": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    manifest = RunManifest(
+        run_manifest_version=1,
+        dynamic_run_id="run-mismatch",
+        created_at="2026-02-07T00:00:00Z",
+        status="success",
+        target={"package_name": "com.example.app"},
+        scenario={"id": "basic_usage"},
+        operator={
+            "tier": "dataset",
+            "run_profile": "baseline_idle",
+            "run_sequence": 1,
+            "interaction_level": "minimal",
+            "capture_policy_version": 1,
+        },
+    )
+    manifest.add_artifacts(
+        [
+            ArtifactRecord(
+                relative_path="artifacts/pcapdroid_capture/test.pcap",
+                type="pcapdroid_capture",
+                sha256="0" * 64,
+                size_bytes=int(dataset_tracker.MIN_PCAP_BYTES) + 1,
+                produced_by="pcapdroid_capture",
+                origin="host",
+                pull_status="ok",
+            )
+        ]
+    )
+    manifest.finalize()
+
+    out_path = dataset_tracker.update_dataset_tracker(manifest, run_dir)
+    payload = json.loads(out_path.read_text(encoding="utf-8"))
+    run = payload["apps"]["com.example.app"]["runs"][0]
+    # Should not inherit stale on-disk exclusions from empty dataset/capture policy.
+    assert "EXCLUDED_POLICY_VERSION_MISMATCH" not in (run.get("paper_exclusion_all_reason_codes") or [])
+    assert "EXCLUDED_WINDOW_COUNT_MISSING" not in (run.get("paper_exclusion_all_reason_codes") or [])
+
+
+def test_update_dataset_tracker_recomputes_low_signal_from_evidence(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(dataset_tracker.app_config, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(dataset_tracker.app_config, "DYNAMIC_MIN_DURATION_S", 120)
+
+    run_dir = tmp_path / "snap-run"
+    (run_dir / "analysis").mkdir(parents=True, exist_ok=True)
+    (run_dir / "analysis" / "pcap_report.json").write_text(
+        json.dumps(
+            {
+                "report_status": "ok",
+                "missing_tools": [],
+                "capinfos": {"parsed": {"capture_duration_s": 254, "packet_count": 1021, "data_size_bytes": 623268}},
+                "protocol_hierarchy": [{"protocol": "quic", "frames": 1, "bytes": 1}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "analysis" / "pcap_features.json").write_text(
+        json.dumps(
+            {
+                "metrics": {
+                    "capture_duration_s": 254,
+                    "data_size_bytes": 623268,
+                    "packet_count": 1021,
+                },
+                "proxies": {"unique_domains_topn": 11},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "analysis" / "summary.json").write_text(
+        json.dumps(
+            {
+                "telemetry": {
+                    "stats": {
+                        "sampling_duration_seconds": 246,
+                        "netstats_bytes_in_total": 1,
+                        "netstats_bytes_out_total": 1,
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    manifest = RunManifest(
+        run_manifest_version=1,
+        dynamic_run_id="snap-run",
+        created_at="2026-02-07T00:00:00Z",
+        status="success",
+        target={"package_name": "com.snapchat.android"},
+        scenario={"id": "basic_usage"},
+        operator={
+            "tier": "dataset",
+            "run_profile": "baseline_idle",
+            "run_sequence": 1,
+            "interaction_level": "minimal",
+            "capture_policy_version": 1,
+        },
+        dataset={"low_signal": True, "low_signal_reasons": ["PCAP_BYTES_LOW"]},
+    )
+    manifest.add_artifacts(
+        [
+            ArtifactRecord(
+                relative_path="artifacts/pcapdroid_capture/test.pcap",
+                type="pcapdroid_capture",
+                sha256="0" * 64,
+                size_bytes=int(dataset_tracker.MIN_PCAP_BYTES) + 1,
+                produced_by="pcapdroid_capture",
+                origin="host",
+                pull_status="ok",
+            )
+        ]
+    )
+    manifest.finalize()
+
+    out_path = dataset_tracker.update_dataset_tracker(manifest, run_dir)
+    payload = json.loads(out_path.read_text(encoding="utf-8"))
+    run = payload["apps"]["com.snapchat.android"]["runs"][0]
+    assert run["low_signal"] is False
+    assert run["low_signal_reasons"] == []
+
+
 def test_dataset_validity_prefers_pcap_capture_span_for_sampling_gate(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(dataset_tracker.app_config, "DATA_DIR", str(tmp_path))
     monkeypatch.setattr(dataset_tracker.app_config, "DYNAMIC_MIN_DURATION_S", 120)
@@ -486,3 +654,57 @@ def test_normalize_quota_marking_skips_paper_ineligible_runs(monkeypatch, tmp_pa
     assert runs["r3"]["counts_toward_quota"] is False
     assert runs["r4"]["counts_toward_quota"] is True
     assert runs["r5"]["counts_toward_quota"] is True
+
+
+def test_normalize_quota_marking_skips_low_signal_baseline(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(dataset_tracker.app_config, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(dataset_tracker.app_config, "DYNAMIC_DATASET_BASELINE_RUNS", 1)
+    monkeypatch.setattr(dataset_tracker.app_config, "DYNAMIC_DATASET_INTERACTIVE_RUNS", 2)
+
+    tracker = {
+        "apps": {
+            "com.example.app": {
+                "runs": [
+                    {
+                        "run_id": "b1",
+                        "ended_at": "2026-02-22T10:00:00+00:00",
+                        "run_profile": "baseline_idle",
+                        "valid_dataset_run": True,
+                        "paper_eligible": True,
+                        "low_signal": True,
+                    },
+                    {
+                        "run_id": "b2",
+                        "ended_at": "2026-02-22T10:05:00+00:00",
+                        "run_profile": "baseline_idle",
+                        "valid_dataset_run": True,
+                        "paper_eligible": True,
+                        "low_signal": False,
+                    },
+                    {
+                        "run_id": "i1",
+                        "ended_at": "2026-02-22T10:10:00+00:00",
+                        "run_profile": "interaction_scripted",
+                        "valid_dataset_run": True,
+                        "paper_eligible": True,
+                    },
+                    {
+                        "run_id": "i2",
+                        "ended_at": "2026-02-22T10:15:00+00:00",
+                        "run_profile": "interaction_scripted",
+                        "valid_dataset_run": True,
+                        "paper_eligible": True,
+                    },
+                ]
+            }
+        }
+    }
+    (tmp_path / "archive").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "archive" / "dataset_plan.json").write_text(json.dumps(tracker), encoding="utf-8")
+
+    normalized = dataset_tracker.load_dataset_tracker()
+    app = normalized["apps"]["com.example.app"]
+    runs = {r["run_id"]: r for r in app["runs"]}
+    assert runs["b1"]["counts_toward_quota"] is False
+    assert runs["b2"]["counts_toward_quota"] is True
+    assert app["baseline_valid_runs"] == 1

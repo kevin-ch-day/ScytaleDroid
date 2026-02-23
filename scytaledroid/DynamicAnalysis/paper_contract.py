@@ -39,6 +39,10 @@ def build_paper_contract_snapshot() -> dict[str, Any]:
                 "social_feed": "social_feed_basic_v2",
                 "messaging": "messaging_basic_v1",
             },
+            "canonical_baseline_protocols": {
+                "default": {"id": "baseline_idle_v1", "version": 1},
+                "messaging": {"id": "baseline_connected_v2", "version": 2},
+            },
         },
     }
 

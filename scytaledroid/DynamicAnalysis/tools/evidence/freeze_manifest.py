@@ -28,6 +28,9 @@ from scytaledroid.DynamicAnalysis.paper_contract import (
 from scytaledroid.DynamicAnalysis.paper_eligibility import derive_paper_eligibility
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import MIN_WINDOWS_PER_RUN
 from scytaledroid.DynamicAnalysis.plans.loader import enrich_dynamic_plan
+from scytaledroid.DynamicAnalysis.tools.evidence.freeze_lifecycle import (
+    demote_noncanonical_canonical_freeze,
+)
 
 
 @dataclass(frozen=True)
@@ -186,6 +189,8 @@ def build_dataset_freeze_manifest(
     plan_schema_versions: set[str] = set()
     plan_paper_contract_versions: set[int] = set()
     interaction_protocol_versions: set[int] = set()
+    baseline_protocol_versions: set[int] = set()
+    baseline_protocol_hashes: set[str] = set()
     paper_contract_hashes: set[str] = set()
     paper_contract_versions: set[str] = set()
     template_map_versions: set[str] = set()
@@ -314,6 +319,16 @@ def build_dataset_freeze_manifest(
                     ipv = None
                 if ipv is not None:
                     interaction_protocol_versions.add(ipv)
+            if expected_bucket == "baseline":
+                try:
+                    bpv = int(op.get("baseline_protocol_version"))
+                except Exception:
+                    bpv = None
+                bph = str(op.get("baseline_protocol_hash") or "").strip().lower()
+                if bpv is not None:
+                    baseline_protocol_versions.add(bpv)
+                if bph:
+                    baseline_protocol_hashes.add(bph)
             pc_hash = str(op.get("paper_contract_hash") or "").strip().lower()
             if pc_hash:
                 paper_contract_hashes.add(pc_hash)
@@ -406,6 +421,10 @@ def build_dataset_freeze_manifest(
         )
     if len(interaction_protocol_versions) > 1:
         raise RuntimeError(f"FREEZE_MIXED_PROTOCOL_VERSIONS:{sorted(interaction_protocol_versions)}")
+    if len(baseline_protocol_versions) > 1:
+        raise RuntimeError(f"FREEZE_MIXED_BASELINE_PROTOCOL_VERSIONS:{sorted(baseline_protocol_versions)}")
+    if len(baseline_protocol_hashes) > 1:
+        raise RuntimeError(f"FREEZE_MIXED_BASELINE_PROTOCOL_HASHES:{sorted(baseline_protocol_hashes)}")
     if len(paper_contract_hashes) > 1:
         raise RuntimeError(f"FREEZE_MIXED_PAPER_CONTRACT_HASHES:{sorted(paper_contract_hashes)}")
     if len(template_map_versions) > 1:
@@ -428,6 +447,7 @@ def build_dataset_freeze_manifest(
 
     return {
         "artifact_type": "dataset_freeze",
+        "freeze_role": "canonical",
         "freeze_contract_version": int(paper_config.FREEZE_CONTRACT_VERSION),
         "paper_contract_version": int(paper_config.PAPER_CONTRACT_VERSION),
         "paper_mode_contract_version": str(PAPER_MODE_CONTRACT_VERSION),
@@ -463,6 +483,8 @@ def build_dataset_freeze_manifest(
             "paper_contract_hashes": sorted(paper_contract_hashes),
             "template_map_versions": sorted(template_map_versions),
             "template_map_hashes": sorted(template_map_hashes),
+            "baseline_protocol_versions": sorted(baseline_protocol_versions),
+            "baseline_protocol_hashes": sorted(baseline_protocol_hashes),
         },
         "apps": included_by_app,
         "included_run_ids": sorted(set(included_run_ids)),
@@ -500,6 +522,7 @@ def write_dataset_freeze_manifest(
     out_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
     if also_write_canonical:
+        demote_noncanonical_canonical_freeze(archive_dir=out_dir, evidence_root=evidence_root)
         canonical = out_dir / "dataset_freeze.json"
         if not canonical.exists():
             canonical.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")

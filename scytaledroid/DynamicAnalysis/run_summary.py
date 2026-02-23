@@ -50,6 +50,26 @@ def print_run_summary(result, duration_label: str) -> None:
                     lines.append(("Protocol timing", f"OVERRUN by {int(target_overrun)}s"))
             except Exception:
                 pass
+            if str(template_id or "") == "messaging_call_basic_v1":
+                lines.append(("Call type", str(operator.get("call_type") or "voice")))
+                lines.append(("Call attempted", str(bool(operator.get("call_attempted"))).lower()))
+                lines.append(("Call connected", str(bool(operator.get("call_connected"))).lower()))
+                if operator.get("call_connect_latency_s") is not None:
+                    lines.append(("Call connect latency", f"{float(operator.get('call_connect_latency_s')):.2f}s"))
+                if operator.get("call_connected_duration_s") is not None:
+                    lines.append(("Call connected duration", f"{float(operator.get('call_connected_duration_s')):.2f}s"))
+                if operator.get("call_end_reason"):
+                    lines.append(("Call end reason", str(operator.get("call_end_reason"))))
+        elif str(run_profile or "").startswith("baseline"):
+            baseline_protocol_id = operator.get("baseline_protocol_id")
+            baseline_protocol_version = operator.get("baseline_protocol_version")
+            baseline_protocol_hash = operator.get("baseline_protocol_hash")
+            if baseline_protocol_id:
+                lines.append(("Baseline protocol", str(baseline_protocol_id)))
+            if baseline_protocol_version is not None:
+                lines.append(("Baseline protocol version", str(baseline_protocol_version)))
+            if baseline_protocol_hash:
+                lines.append(("Baseline protocol hash", f"{str(baseline_protocol_hash)[:12]}..."))
         validity = manifest.get("dataset")
         if isinstance(validity, dict):
             dataset_validity = validity
@@ -64,7 +84,7 @@ def print_run_summary(result, duration_label: str) -> None:
             if (
                 valid is False
                 and str(reason or "").strip().upper() == "PCAP_MISSING"
-                and str(run_profile or "").strip().lower() == "baseline_idle"
+                and str(run_profile or "").strip().lower().startswith("baseline")
             ):
                 lines.append(
                     (
@@ -427,6 +447,23 @@ def _countability_detail(package_name: str | None, dynamic_run_id: str | None) -
     source = "tracker_quota_marking"
     countable = bool(run.get("countable"))
     reason = str(run.get("paper_exclusion_primary_reason_code") or "").strip()
+    # Quota-countability and paper eligibility are separate layers. For baseline
+    # low-signal policy exclusions, prefer authoritative manifest dataset flags
+    # (not tracker cache) when available.
+    low_signal = bool(run.get("low_signal"))
+    run_manifest = _load_manifest(Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic" / str(dynamic_run_id))
+    if isinstance(run_manifest, dict):
+        ds = run_manifest.get("dataset") if isinstance(run_manifest.get("dataset"), dict) else {}
+        if isinstance(ds, dict) and ds.get("low_signal") is not None:
+            low_signal = bool(ds.get("low_signal"))
+    run_profile = str(run.get("run_profile") or "").strip().lower()
+    if run.get("valid_dataset_run") is True and run_profile.startswith("baseline") and low_signal:
+        source = "low_signal_policy"
+        reason = "LOW_SIGNAL_IDLE"
+    elif run.get("valid_dataset_run") is True and not countable and bool(run.get("extra_run")):
+        source = "tracker_quota_marking"
+        if not reason:
+            reason = "EXTRA_RUN"
     parts = [f"source={source}", f"countable={str(countable).lower()}"]
     if reason:
         parts.append(f"reason={reason}")
@@ -566,7 +603,7 @@ def _countability_label(validity: dict[str, object], run_profile: str | None) ->
     if validity.get("valid_dataset_run") is False:
         reason = str(validity.get("invalid_reason_code") or "INVALID")
         return f"NO ({reason})"
-    if validity.get("low_signal") is True and str(run_profile or "").strip().lower() == "baseline_idle":
+    if validity.get("low_signal") is True and str(run_profile or "").strip().lower().startswith("baseline"):
         return "NO (LOW_SIGNAL_IDLE)"
     if validity.get("countable") is True:
         return f"YES ({run_profile or 'dataset'})"

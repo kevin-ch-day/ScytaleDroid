@@ -5,6 +5,7 @@ from __future__ import annotations
 import select
 import sys
 import time
+import random
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -14,6 +15,7 @@ from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper2_config
 from scytaledroid.DynamicAnalysis.templates.category_map import (
+    category_for_package,
     mapping_sha256,
     mapping_version,
     template_for_package,
@@ -31,6 +33,9 @@ class ScenarioResult:
 
 
 SCRIPT_PROTOCOL_VERSION = 2
+BASELINE_PROTOCOL_VERSION = 2
+BASELINE_PROTOCOL_ID_CONNECTED = "baseline_connected_v2"
+BASELINE_PROTOCOL_ID_IDLE = "baseline_idle_v1"
 SCRIPT_STEPS_SOCIAL_FEED_BASIC_V2: tuple[tuple[str, str, int], ...] = (
     ("launch_feed", "Scroll the main feed for new content.", 25),
     ("open_reply_or_comments", "Open a reply/comments thread on one post and return.", 20),
@@ -46,6 +51,13 @@ SCRIPT_STEPS_MESSAGING_BASIC_V1: tuple[tuple[str, str, int], ...] = (
     ("type_draft", "Type a short draft message (do not send).", 20),
     ("open_info_or_media", "Open conversation info OR shared media and return.", 20),
     ("search_or_new_chat", "Open search or new chat briefly and return.", 20),
+    ("hold_foreground", "Remain on foreground until timer completes.", 0),
+)
+SCRIPT_STEPS_MESSAGING_CALL_BASIC_V1: tuple[tuple[str, str, int], ...] = (
+    ("open_thread", "Open a recent conversation thread.", 20),
+    ("start_call", "Initiate a voice call to a test contact.", 15),
+    ("call_active", "Keep call active for 90s if connected.", 90),
+    ("end_call", "End the call and return to thread.", 15),
     ("hold_foreground", "Remain on foreground until timer completes.", 0),
 )
 
@@ -114,9 +126,18 @@ class ManualScenarioRunner:
 
             block.append("")
             block.append("User behavior:")
-            if profile == "baseline_idle":
-                block.append("  - Keep the app in the foreground")
-                block.append("  - Minimize interactions (baseline capture)")
+            if str(profile or "").strip().lower().startswith("baseline"):
+                category = str(category_for_package(getattr(run_ctx, "package_name", "") or "") or "").strip().lower()
+                msg_activity = str(getattr(run_ctx, "messaging_activity", "") or "").strip().lower()
+                if category == "messaging" and msg_activity in {"", "connected_idle", "none"}:
+                    block.append("  - Keep the app in the foreground")
+                    block.append("  - Open an existing conversation thread and keep it visible")
+                    block.append("  - Every 45-75s, do one non-mutating check action (small scroll OR chat-list/thread switch)")
+                    block.append("  - Perform exactly one refresh/check action around minute 2")
+                    block.append("  - Do not type, send, call, upload media, search, or open external links")
+                else:
+                    block.append("  - Keep the app in the foreground")
+                    block.append("  - Minimize interactions (baseline capture)")
             else:
                 block.append("  - Keep the app in the foreground")
                 block.append("  - Use the app normally")
@@ -136,9 +157,24 @@ class ManualScenarioRunner:
                     on_protocol_event=on_protocol_event,
                 )
                 ended_at = datetime.now(UTC)
+            elif str(profile or "").strip().lower().startswith("baseline"):
+                target_s = duration_seconds or rec_s
+                protocol = _build_baseline_protocol(run_ctx=run_ctx, target_duration_s=int(target_s))
+                if _is_messaging_connected_baseline_context(run_ctx):
+                    ended_at = _run_messaging_connected_baseline(
+                        run_ctx=run_ctx,
+                        target_duration_s=int(target_s),
+                        protocol=protocol,
+                        on_protocol_event=on_protocol_event,
+                    )
+                elif duration_seconds:
+                    print(status_messages.status("Press Enter to stop early (optional).", level="info"))
+                    ended_at = _run_countdown(duration_seconds, continue_after_target=True)
+                else:
+                    ended_at = _run_stopwatch()
             elif duration_seconds:
                 print(status_messages.status("Press Enter to stop early (optional).", level="info"))
-                ended_at = _run_countdown(duration_seconds)
+                ended_at = _run_countdown(duration_seconds, continue_after_target=True)
             else:
                 ended_at = _run_stopwatch()
             if on_end:
@@ -184,7 +220,7 @@ def _prompt_interaction_level(profile: str | None) -> str:
         ("2", "normal", "Typical interaction"),
         ("3", "heavy", "High interaction"),
     ]
-    default_key = "1" if profile == "baseline_idle" else "2"
+    default_key = "1" if str(profile or "").strip().lower().startswith("baseline") else "2"
     print(status_messages.status("Operator note: tag interaction level for this run.", level="info"))
     from scytaledroid.Utils.DisplayUtils import menu_utils
 
@@ -206,33 +242,56 @@ def _prompt_interaction_level(profile: str | None) -> str:
     return mapping.get(selection, mapping[default_key])
 
 
-def _run_countdown(duration_seconds: int) -> datetime:
+def _run_countdown(
+    duration_seconds: int,
+    *,
+    continue_after_target: bool = False,
+    allow_early_stop: bool = True,
+) -> datetime:
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         time.sleep(max(duration_seconds, 0))
         return datetime.now(UTC)
     start = time.monotonic()
-    line_width = 32
+    line_width = 56
     last_rendered = None
+    target_reached_announced = False
     while True:
         elapsed = time.monotonic() - start
         remaining = max(duration_seconds - int(elapsed), 0)
-        formatted = _format_duration(remaining)
+        elapsed_i = int(elapsed)
+        elapsed_fmt = _format_duration(elapsed_i)
         total = _format_duration(duration_seconds)
-        elapsed_fmt = _format_duration(int(elapsed))
         suffix = _pulse_marker(int(elapsed))
-        message = f"\rTime remaining: {formatted} | {elapsed_fmt}/{total}{suffix}".ljust(line_width)
+        if remaining > 0:
+            message = f"\rElapsed time: {elapsed_fmt} (target {total}){suffix}".ljust(line_width)
+        else:
+            message = f"\rElapsed time: {elapsed_fmt} (target reached){suffix}".ljust(line_width)
         if message != last_rendered:
             sys.stdout.write(message)
             sys.stdout.flush()
             last_rendered = message
-        if remaining <= 0:
-            print()
-            break
-        readable, _, _ = select.select([sys.stdin], [], [], 1.0)
-        if readable:
-            _ = sys.stdin.readline()
-            print()
-            break
+        if remaining <= 0 and not target_reached_announced:
+            _clear_status_line(line_width)
+            if continue_after_target:
+                print(
+                    status_messages.status(
+                        "Target reached. Keep collecting if needed; press Enter when finished.",
+                        level="info",
+                    )
+                )
+            target_reached_announced = True
+            if not continue_after_target:
+                print()
+                break
+        if allow_early_stop:
+            readable, _, _ = select.select([sys.stdin], [], [], 1.0)
+            if readable:
+                _ = sys.stdin.readline()
+                _clear_status_line(line_width)
+                print()
+                break
+        else:
+            time.sleep(1.0)
     return datetime.now(UTC)
 
 
@@ -284,6 +343,12 @@ def _run_scripted_protocol(
         "script_end_marker": False,
         "timing_within_tolerance": True,
         "deviation_codes": [],
+        "call_type": None,
+        "call_attempted": False,
+        "call_connected": None,
+        "call_connect_latency_s": None,
+        "call_connected_duration_s": None,
+        "call_end_reason": None,
     }
     started_monotonic = time.monotonic()
     if on_protocol_event:
@@ -302,6 +367,8 @@ def _run_scripted_protocol(
             },
         )
     print(status_messages.status(f"Script template: {template_id} (protocol v{SCRIPT_PROTOCOL_VERSION})", level="info"))
+    if template_id == "messaging_call_basic_v1":
+        protocol["call_type"] = "voice"
     for idx, (step_id, step_desc, expected_s) in enumerate(steps, start=1):
         print()
         print(status_messages.status(f"Step {idx}/{len(steps)}: {step_id}", level="info"))
@@ -322,17 +389,55 @@ def _run_scripted_protocol(
                 },
             )
         step_elapsed = 0.0
-        if step_id == "hold_foreground":
+        if step_id == "call_active":
+            if protocol.get("call_connected") is True:
+                call_hold_s = int(expected_s)
+                _run_countdown(
+                    call_hold_s,
+                    continue_after_target=False,
+                    allow_early_stop=False,
+                )
+                step_elapsed = float(call_hold_s)
+                protocol["call_connected_duration_s"] = float(call_hold_s)
+                protocol["call_end_reason"] = protocol.get("call_end_reason") or "user_end"
+            else:
+                print(status_messages.status("Call not connected; skipping active-hold window.", level="warn"))
+                step_elapsed = 0.0
+                protocol["call_connected_duration_s"] = 0.0
+                protocol["call_end_reason"] = protocol.get("call_end_reason") or "timeout"
+        elif step_id == "hold_foreground":
             elapsed_total = int(time.monotonic() - started_monotonic)
             remaining = max(int(target_duration_s) - elapsed_total, 0)
             step_elapsed = float(max(remaining, 0))
             if remaining > 0:
                 print(status_messages.status(f"Protocol completed; hold foreground for {remaining}s.", level="info"))
-                _run_countdown(remaining)
+                _run_countdown(
+                    remaining,
+                    continue_after_target=False,
+                    allow_early_stop=False,
+                )
         else:
             step_start = time.monotonic()
-            prompt_utils.press_enter_to_continue("Press Enter when step is complete...")
+            _wait_for_step_completion_with_stopwatch(
+                step_index=idx,
+                step_count=len(steps),
+                step_id=step_id,
+                script_started_monotonic=started_monotonic,
+                step_started_monotonic=step_start,
+                target_duration_s=int(target_duration_s),
+            )
             step_elapsed = max(0.0, time.monotonic() - step_start)
+            if step_id == "start_call":
+                protocol["call_attempted"] = True
+                connected = prompt_utils.prompt_yes_no("Did the call connect?", default=True)
+                protocol["call_connected"] = bool(connected)
+                protocol["call_connect_latency_s"] = float(round(step_elapsed, 3))
+                if not connected:
+                    protocol["call_end_reason"] = "timeout"
+                elif not protocol.get("call_end_reason"):
+                    protocol["call_end_reason"] = "user_end"
+            if step_id == "end_call" and protocol.get("call_attempted") is True:
+                protocol["call_end_reason"] = protocol.get("call_end_reason") or "user_end"
         tolerance = min(max(0.25 * float(expected_s), 5.0), 30.0)
         within = step_elapsed <= (float(expected_s) + tolerance)
         if not within:
@@ -382,9 +487,231 @@ def _run_scripted_protocol(
                 "timing_within_tolerance": protocol["timing_within_tolerance"],
                 "target_overrun_s": protocol["target_overrun_s"],
                 "target_controlled": protocol["target_controlled"],
+                "call_type": protocol.get("call_type"),
+                "call_attempted": protocol.get("call_attempted"),
+                "call_connected": protocol.get("call_connected"),
+                "call_connect_latency_s": protocol.get("call_connect_latency_s"),
+                "call_connected_duration_s": protocol.get("call_connected_duration_s"),
+                "call_end_reason": protocol.get("call_end_reason"),
             },
         )
     return protocol
+
+
+def _is_messaging_connected_baseline_context(run_ctx: RunContext) -> bool:
+    profile = str(getattr(run_ctx, "run_profile", "") or "").strip().lower()
+    if profile != "baseline_connected":
+        return False
+    msg_activity = str(getattr(run_ctx, "messaging_activity", "") or "").strip().lower()
+    if msg_activity not in {"", "connected_idle"}:
+        return False
+    category = str(category_for_package(getattr(run_ctx, "package_name", "") or "") or "").strip().lower()
+    return category == "messaging"
+
+
+def _run_messaging_connected_baseline(
+    *,
+    run_ctx: RunContext,
+    target_duration_s: int,
+    protocol: dict[str, object],
+    on_protocol_event: Callable[[str, dict[str, object]], None] | None,
+) -> datetime:
+    print(status_messages.status("Press Enter to stop early (optional).", level="info"))
+    action_schedule_s, refresh_check_s = _build_baseline_connected_schedule(
+        run_id=str(getattr(run_ctx, "dynamic_run_id", "") or ""),
+        target_duration_s=int(target_duration_s),
+    )
+    protocol["cadence_rule_s"] = {"min": 45, "max": 75}
+    protocol["refresh_check_window_s"] = {"min": 90, "max": 150}
+    protocol["action_schedule_s"] = list(action_schedule_s)
+    protocol["refresh_check_s"] = int(refresh_check_s)
+
+    if on_protocol_event:
+        on_protocol_event(
+            "BASELINE_CONNECTED_START",
+            {
+                "baseline_protocol_id": protocol.get("baseline_protocol_id"),
+                "baseline_protocol_version": protocol.get("baseline_protocol_version"),
+                "baseline_protocol_hash": protocol.get("baseline_protocol_hash"),
+                "target_duration_s": int(target_duration_s),
+                "cadence_rule_s": {"min": 45, "max": 75},
+                "refresh_check_window_s": {"min": 90, "max": 150},
+                "action_schedule_s": list(action_schedule_s),
+                "refresh_check_s": int(refresh_check_s),
+            },
+        )
+
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        time.sleep(max(int(target_duration_s), 0))
+        if on_protocol_event:
+            on_protocol_event(
+                "BASELINE_CONNECTED_END",
+                {"target_duration_s": int(target_duration_s), "advisory_prompts_emitted": 0},
+            )
+        return datetime.now(UTC)
+
+    start = time.monotonic()
+    line_width = 56
+    last_rendered = None
+    action_idx = 0
+    refresh_emitted = False
+    checkpoint_emitted = False
+    advisory_prompts_emitted = 0
+    target_reached_announced = False
+    while True:
+        elapsed_i = int(time.monotonic() - start)
+        remaining = max(int(target_duration_s) - elapsed_i, 0)
+
+        while action_idx < len(action_schedule_s) and elapsed_i >= int(action_schedule_s[action_idx]):
+            _clear_status_line(line_width)
+            advisory_prompts_emitted += 1
+            prompt_msg = (
+                "Baseline-connected prompt: perform one allowed non-mutating check "
+                "(small thread scroll OR chat-list/thread switch), then continue holding foreground."
+            )
+            print(status_messages.status(prompt_msg, level="info"))
+            if on_protocol_event:
+                on_protocol_event(
+                    "BASELINE_CONNECTED_ACTION_PROMPT",
+                    {
+                        "prompt_index": int(action_idx + 1),
+                        "scheduled_s": int(action_schedule_s[action_idx]),
+                        "elapsed_s": int(elapsed_i),
+                    },
+                )
+            action_idx += 1
+
+        if (not refresh_emitted) and elapsed_i >= int(refresh_check_s):
+            _clear_status_line(line_width)
+            advisory_prompts_emitted += 1
+            print(
+                status_messages.status(
+                    "Baseline-connected prompt: perform the single refresh/check action now, then return to thread and hold.",
+                    level="info",
+                )
+            )
+            if on_protocol_event:
+                on_protocol_event(
+                    "BASELINE_CONNECTED_REFRESH_PROMPT",
+                    {
+                        "scheduled_s": int(refresh_check_s),
+                        "elapsed_s": int(elapsed_i),
+                    },
+                )
+            refresh_emitted = True
+
+        if (not checkpoint_emitted) and elapsed_i >= 120:
+            _clear_status_line(line_width)
+            print(
+                status_messages.status(
+                    "120s checkpoint: if packet span appears low, do one allowed non-mutating check action now.",
+                    level="warn",
+                )
+            )
+            if on_protocol_event:
+                on_protocol_event(
+                    "BASELINE_CONNECTED_CHECKPOINT_120",
+                    {"elapsed_s": int(elapsed_i)},
+                )
+            checkpoint_emitted = True
+
+        total = _format_duration(int(target_duration_s))
+        elapsed_fmt = _format_duration(elapsed_i)
+        suffix = _pulse_marker(elapsed_i)
+        if remaining > 0:
+            message = f"\rElapsed time: {elapsed_fmt} (target {total}){suffix}".ljust(line_width)
+        else:
+            message = f"\rElapsed time: {elapsed_fmt} (target reached){suffix}".ljust(line_width)
+        if message != last_rendered:
+            sys.stdout.write(message)
+            sys.stdout.flush()
+            last_rendered = message
+        if remaining <= 0 and not target_reached_announced:
+            _clear_status_line(line_width)
+            print(
+                status_messages.status(
+                    "Target reached. Keep collecting if needed; press Enter when finished.",
+                    level="info",
+                )
+            )
+            target_reached_announced = True
+        readable, _, _ = select.select([sys.stdin], [], [], 1.0)
+        if readable:
+            _ = sys.stdin.readline()
+            _clear_status_line(line_width)
+            print()
+            break
+    if on_protocol_event:
+        on_protocol_event(
+            "BASELINE_CONNECTED_END",
+            {
+                "target_duration_s": int(target_duration_s),
+                "advisory_prompts_emitted": int(advisory_prompts_emitted),
+                "refresh_prompt_emitted": bool(refresh_emitted),
+                "checkpoint_120_emitted": bool(checkpoint_emitted),
+            },
+        )
+    protocol["advisory_prompts_emitted"] = int(advisory_prompts_emitted)
+    protocol["refresh_prompt_emitted"] = bool(refresh_emitted)
+    protocol["checkpoint_120_emitted"] = bool(checkpoint_emitted)
+    return datetime.now(UTC)
+
+
+def _build_baseline_connected_schedule(*, run_id: str, target_duration_s: int) -> tuple[list[int], int]:
+    # Deterministic bounded variation: schedule differs per run_id but stays within
+    # PM-locked cadence constraints (45-75s).
+    seed = int(hashlib.sha256(str(run_id or "baseline").encode("utf-8")).hexdigest()[:8], 16)
+    rng = random.Random(seed)
+    max_t = max(int(target_duration_s), 1)
+    times: list[int] = []
+    t = rng.randint(45, 75)
+    while t < max_t:
+        times.append(int(t))
+        t += rng.randint(45, 75)
+    refresh_lo = 90
+    refresh_hi = min(150, max_t)
+    if refresh_hi < refresh_lo:
+        refresh_check_s = int(max(1, min(max_t, 90)))
+    else:
+        refresh_check_s = int(rng.randint(refresh_lo, refresh_hi))
+    return times, refresh_check_s
+
+
+def _build_baseline_protocol(*, run_ctx: RunContext, target_duration_s: int) -> dict[str, object]:
+    category = str(category_for_package(getattr(run_ctx, "package_name", "") or "") or "").strip().lower()
+    msg_activity = str(getattr(run_ctx, "messaging_activity", "") or "").strip().lower()
+    is_messaging_connected = category == "messaging" and msg_activity == "connected_idle"
+    protocol_id = BASELINE_PROTOCOL_ID_CONNECTED if is_messaging_connected else BASELINE_PROTOCOL_ID_IDLE
+    payload = {
+        "protocol_id": protocol_id,
+        "protocol_version": int(BASELINE_PROTOCOL_VERSION),
+        "category": category or "unknown",
+        "messaging_activity": msg_activity or None,
+        "cadence_rule_s": {"min": 45, "max": 75} if is_messaging_connected else None,
+        "refresh_check_window_s": {"min": 90, "max": 150} if is_messaging_connected else None,
+        "constraints": {
+            "no_typing": True,
+            "no_send": True,
+            "no_call": True,
+            "no_media_upload": True,
+            "no_search": True,
+            "no_external_links": True,
+        },
+    }
+    material = json_dumps_canonical(payload)
+    protocol_hash = hashlib.sha256(material.encode("utf-8")).hexdigest()
+    return {
+        "baseline_protocol_id": protocol_id,
+        "baseline_protocol_version": int(BASELINE_PROTOCOL_VERSION),
+        "baseline_protocol_hash": protocol_hash,
+        "target_duration_s": int(target_duration_s),
+    }
+
+
+def json_dumps_canonical(payload: dict[str, object]) -> str:
+    import json
+
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
 
 def _resolve_script_template(run_ctx: RunContext) -> tuple[str, tuple[tuple[str, str, int], ...]]:
@@ -392,6 +719,9 @@ def _resolve_script_template(run_ctx: RunContext) -> tuple[str, tuple[tuple[str,
     template_id = template_for_package(pkg)
     if not template_id:
         raise RuntimeError(f"BLOCKED_UNKNOWN_CATEGORY:{pkg}")
+    msg_activity = str(getattr(run_ctx, "messaging_activity", "") or "").strip().lower()
+    if template_id == "messaging_basic_v1" and msg_activity == "voice_call":
+        return ("messaging_call_basic_v1", SCRIPT_STEPS_MESSAGING_CALL_BASIC_V1)
     if template_id == "messaging_basic_v1":
         return ("messaging_basic_v1", SCRIPT_STEPS_MESSAGING_BASIC_V1)
     if template_id == "social_feed_basic_v2":
@@ -473,6 +803,50 @@ def _pulse_marker(elapsed_seconds: int) -> str:
     if elapsed_seconds > 0 and elapsed_seconds % 10 == 0:
         return " •"
     return ""
+
+
+def _wait_for_step_completion_with_stopwatch(
+    *,
+    step_index: int,
+    step_count: int,
+    step_id: str,
+    script_started_monotonic: float,
+    step_started_monotonic: float,
+    target_duration_s: int,
+) -> None:
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        prompt_utils.press_enter_to_continue("Press Enter when step is complete...")
+        return
+    line_width = 96
+    last_rendered = None
+    while True:
+        total_elapsed_i = int(time.monotonic() - script_started_monotonic)
+        step_elapsed_i = int(time.monotonic() - step_started_monotonic)
+        total_elapsed_fmt = _format_duration(total_elapsed_i)
+        step_elapsed_fmt = _format_duration(step_elapsed_i)
+        target_fmt = _format_duration(int(target_duration_s))
+        suffix = _pulse_marker(total_elapsed_i)
+        msg = (
+            f"\rElapsed: {total_elapsed_fmt} (target {target_fmt}) | "
+            f"Step {step_index}/{step_count} {step_id}: {step_elapsed_fmt} (Enter complete){suffix}"
+        ).ljust(line_width)
+        if msg != last_rendered:
+            sys.stdout.write(msg)
+            sys.stdout.flush()
+            last_rendered = msg
+        readable, _, _ = select.select([sys.stdin], [], [], 1.0)
+        if readable:
+            _ = sys.stdin.readline()
+            _clear_status_line(line_width)
+            print()
+            break
+
+
+def _clear_status_line(line_width: int) -> None:
+    if not sys.stdout.isatty():
+        return
+    sys.stdout.write("\r" + (" " * int(line_width)) + "\r")
+    sys.stdout.flush()
 
 
 __all__ = ["ManualScenarioRunner", "ScenarioResult", "SCRIPT_PROTOCOL_VERSION"]

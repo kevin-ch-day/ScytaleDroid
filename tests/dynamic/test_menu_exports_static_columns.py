@@ -132,6 +132,8 @@ def test_exports_can_be_freeze_anchored(tmp_path: Path, monkeypatch) -> None:
         freeze_path,
         {
             "included_run_ids": ["r1"],
+            "paper_contract_hash": "a" * 64,
+            "freeze_role": "canonical",
         },
     )
 
@@ -168,16 +170,77 @@ def test_exports_fail_closed_when_freeze_ids_missing_locally(tmp_path: Path, mon
     monkeypatch.setattr("scytaledroid.Config.app_config.OUTPUT_DIR", str(output_root))
     monkeypatch.setattr("scytaledroid.Config.app_config.DATA_DIR", str(data_root))
     freeze_path = data_root / "archive" / "dataset_freeze.json"
-    _write_json(freeze_path, {"included_run_ids": ["missing-run-id"]})
+    _write_json(
+        freeze_path,
+        {
+            "included_run_ids": ["missing-run-id"],
+            "paper_contract_hash": "a" * 64,
+            "freeze_role": "canonical",
+        },
+    )
 
     try:
         export_dynamic_run_summary_csv(freeze_path=freeze_path, require_freeze=True)
         assert False, "expected RuntimeError"
     except RuntimeError as exc:
         assert "EXPORT_BLOCKED_STALE_FREEZE" in str(exc)
+    assert list((data_root / "archive").glob("legacy_freeze_*.json"))
+    assert not freeze_path.exists()
 
     try:
         export_pcap_features_csv(freeze_path=freeze_path, require_freeze=True)
         assert False, "expected RuntimeError"
     except RuntimeError as exc:
-        assert "EXPORT_BLOCKED_STALE_FREEZE" in str(exc)
+        assert "EXPORT_BLOCKED_MISSING_FREEZE" in str(exc)
+
+
+def test_exports_fail_closed_when_contract_hash_missing(tmp_path: Path, monkeypatch) -> None:
+    output_root = tmp_path / "output"
+    data_root = tmp_path / "data"
+    evidence_root = output_root / "evidence" / "dynamic"
+    _seed_run(evidence_root, run_id="r1")
+    monkeypatch.setattr("scytaledroid.Config.app_config.OUTPUT_DIR", str(output_root))
+    monkeypatch.setattr("scytaledroid.Config.app_config.DATA_DIR", str(data_root))
+    freeze_path = data_root / "archive" / "dataset_freeze.json"
+    _write_json(freeze_path, {"included_run_ids": ["r1"], "freeze_role": "canonical"})
+
+    try:
+        export_dynamic_run_summary_csv(freeze_path=freeze_path, require_freeze=True)
+        assert False, "expected RuntimeError"
+    except RuntimeError as exc:
+        assert "EXPORT_BLOCKED_MISSING_CONTRACT_HASH" in str(exc)
+    assert list((data_root / "archive").glob("legacy_freeze_*.json"))
+    assert not freeze_path.exists()
+
+
+def test_exports_auto_demote_noncanonical_canonical_freeze(tmp_path: Path, monkeypatch) -> None:
+    output_root = tmp_path / "output"
+    data_root = tmp_path / "data"
+    evidence_root = output_root / "evidence" / "dynamic"
+    _seed_run(evidence_root, run_id="r1")
+    monkeypatch.setattr("scytaledroid.Config.app_config.OUTPUT_DIR", str(output_root))
+    monkeypatch.setattr("scytaledroid.Config.app_config.DATA_DIR", str(data_root))
+    freeze_path = data_root / "archive" / "dataset_freeze.json"
+    _write_json(
+        freeze_path,
+        {
+            "included_run_ids": ["r1"],
+            "paper_contract_hash": "a" * 64,
+            "freeze_role": "legacy",
+        },
+    )
+
+    try:
+        export_dynamic_run_summary_csv(freeze_path=freeze_path, require_freeze=True)
+        assert False, "expected RuntimeError"
+    except RuntimeError as exc:
+        assert "EXPORT_BLOCKED_NONCANONICAL_FREEZE" in str(exc)
+    legacy = list((data_root / "archive").glob("legacy_freeze_*.json"))
+    assert legacy
+    assert not freeze_path.exists()
+
+    try:
+        export_pcap_features_csv(freeze_path=freeze_path, require_freeze=True)
+        assert False, "expected RuntimeError"
+    except RuntimeError as exc:
+        assert "EXPORT_BLOCKED_MISSING_FREEZE" in str(exc)
