@@ -33,7 +33,12 @@ def test_publication_contract_lint_minimal_ok(tmp_path: Path) -> None:
     _touch(pub / "tables" / "baseline_stability_summary.csv")
     _touch(pub / "tables" / "interaction_delta_summary.csv")
     _touch(pub / "tables" / "static_dynamic_correlation.csv")
+    _touch(pub / "tables" / "static_feature_groups_v1.csv")
+    _touch(pub / "tables" / "stimulus_coverage_v1.csv")
     _touch(pub / "tables" / "appendix_table_a1_ocsvm_robustness.csv")
+    _touch(pub / "tables" / "table_dynamic_summary_v1.tex")
+    _touch(pub / "tables" / "table_static_components_v1.tex")
+    _touch(pub / "tables" / "table_appendix_a1_ocsvm_robustness_v1.tex")
 
     lint = lint_publication_bundle(pub)
     assert lint.ok

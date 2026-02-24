@@ -442,6 +442,12 @@ def main() -> int:
         "freeze_sha256": freeze_sha,
         "freeze_dataset_hash": freeze_hash,
         "unit_of_analysis": "application (n=12), paired idle vs interactive means",
+        "baseline_integrity": {
+            "threshold_source": "tau = P95(baseline anomaly scores) computed from baseline run windows only",
+            "training_scope": "per-app",
+            "training_mode": "baseline_only",
+            "leakage_between_idle_and_interactive": False,
+        },
         "wilcoxon": {
             "n": len(deltas),
             "idle_rdi": idle_rdi_from_scores,
@@ -456,6 +462,12 @@ def main() -> int:
             "rho": float(sp.statistic),
             "p": float(sp.pvalue),
             "unique_static_scores": unique_static,
+            "static_score_min": float(min(xs)) if xs else None,
+            "static_score_max": float(max(xs)) if xs else None,
+            "static_score_mean": float(sum(xs) / float(len(xs))) if xs else None,
+            "static_score_sd_sample": (
+                float(statistics.stdev(xs)) if xs and len(xs) > 1 else None
+            ),
         },
     }
     stats_path.write_text(json.dumps(stats_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")

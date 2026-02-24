@@ -43,7 +43,13 @@ REQUIRED_FILES = {
     Path("tables") / "baseline_stability_summary.csv",
     Path("tables") / "interaction_delta_summary.csv",
     Path("tables") / "static_dynamic_correlation.csv",
+    Path("tables") / "static_feature_groups_v1.csv",
+    Path("tables") / "stimulus_coverage_v1.csv",
     Path("tables") / "appendix_table_a1_ocsvm_robustness.csv",
+    # LaTeX renderings for manuscript inclusion.
+    Path("tables") / "table_dynamic_summary_v1.tex",
+    Path("tables") / "table_static_components_v1.tex",
+    Path("tables") / "table_appendix_a1_ocsvm_robustness_v1.tex",
     # Core paper figures (the manuscript must cite one of the Fig B2 variants).
     Path("figures") / "fig_b4_static_vs_rdi_social.pdf",
     Path("figures") / "fig_b4_static_vs_rdi_messaging.pdf",
@@ -61,6 +67,7 @@ SHOULD_HAVE_FILES = {
     Path("qa") / "qa_threshold_validation.csv",
     Path("qa") / "qa_distribution_summary.csv",
     Path("qa") / "paper2_pipeline_audit_v1.json",
+    Path("qa") / "qa_interactive_consistency.csv",
 }
 
 # Hard-banned top-level directories inside the canonical publication bundle.

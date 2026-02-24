@@ -305,7 +305,13 @@ def write_canonical_publication_directory(
             "baseline_stability_summary.csv",
             "interaction_delta_summary.csv",
             "static_dynamic_correlation.csv",
+            "static_feature_groups_v1.csv",
+            "stimulus_coverage_v1.csv",
             "appendix_table_a1_ocsvm_robustness.csv",
+            # Paper-facing LaTeX renderings (manuscript include files).
+            "table_dynamic_summary_v1.tex",
+            "table_static_components_v1.tex",
+            "table_appendix_a1_ocsvm_robustness_v1.tex",
         },
     )
     _clean_dir(
