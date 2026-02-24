@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from collections.abc import Callable
 from datetime import datetime
@@ -118,7 +119,7 @@ def main_menu() -> None:
     default_choice = "1"
     while True:
         print()
-        _print_tier1_status_banner()
+        status_snapshot = _print_tier1_status_banner()
         print()
         menu_utils.print_header("Main Menu")
         spec = MenuSpec(
@@ -130,9 +131,16 @@ def main_menu() -> None:
         )
         menu_utils.render_menu(spec)
 
+        extra_valid: list[str] = []
+        if status_snapshot.get("allow_copy_freeze_hash"):
+            extra_valid.append("h")
+        if status_snapshot.get("allow_details"):
+            extra_valid.append("d")
+
         choice = prompt_utils.get_choice(
-            valid=valid_choices + ["0"],
+            valid=valid_choices + ["0", *extra_valid],
             default=default_choice,
+            casefold=True,
         )
 
         if choice == "0":
@@ -149,6 +157,14 @@ def main_menu() -> None:
             status_messages.print_status("Goodbye!", level="info")
             break
 
+        if choice.lower() == "h" and status_snapshot.get("allow_copy_freeze_hash"):
+            _handle_copy_freeze_hash(status_snapshot)
+            continue
+
+        if choice.lower() == "d" and status_snapshot.get("allow_details"):
+            _handle_main_menu_details(status_snapshot)
+            continue
+
         selected = handlers.get(choice)
         if not selected:
             log.warning(f"Invalid menu choice: {choice}", category="application")
@@ -160,42 +176,169 @@ def main_menu() -> None:
         callback()
 
 
-def _print_tier1_status_banner() -> None:
-    """Render a compact dataset readiness summary for the main menu."""
+def _resolve_operator_mode(*, pub_status: dict[str, object]) -> str:
+    """Resolve operator UI mode (paper/collection).
+
+    Default: auto-detect based on paper audit + freeze presence.
+    Override: SCYTALEDROID_MODE=paper2|collection.
+    """
+
+    override = str(os.environ.get("SCYTALEDROID_MODE") or "").strip().lower()
+    if override in {"paper", "paper2", "freeze"}:
+        return "paper"
+    if override in {"collection", "collect"}:
+        return "collection"
+
+    # Auto-detect: we treat "paper freeze" as locked only when we have both
+    # an audit GO and a freeze anchor present (freeze hash exists).
+    has_freeze = bool(pub_status.get("freeze_dataset_hash"))
+    audit_go = str(pub_status.get("paper_audit_result") or "").strip().upper() == "GO"
+    can_freeze = bool(pub_status.get("can_freeze"))
+    if has_freeze and audit_go and can_freeze:
+        return "paper"
+    return "collection"
+
+
+def _load_paper_cohort_counts() -> dict[str, int] | None:
+    """Return compact cohort counts from paper_results_v1.json if present."""
+
+    try:
+        import json
+        from pathlib import Path
+
+        p = Path(app_config.OUTPUT_DIR) / "publication" / "manifests" / "paper_results_v1.json"
+        if not p.exists():
+            return None
+        payload = json.loads(p.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            return None
+        return {
+            "apps": int(payload.get("n_apps") or 0),
+            "runs": int(payload.get("runs_total") or 0),
+            "windows": int(payload.get("windows_total") or 0),
+        }
+    except Exception:
+        return None
+
+
+def _handle_copy_freeze_hash(snapshot: dict[str, object]) -> None:
+    freeze_hash = str(snapshot.get("freeze_dataset_hash") or "")
+    if not freeze_hash:
+        print(status_messages.status("No freeze hash available.", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
+    try:
+        from scytaledroid.Utils.System.clipboard import copy_text
+    except Exception:
+        copy_text = None
+    ok = bool(copy_text and copy_text(freeze_hash))
+    if ok:
+        print(status_messages.status("Copied freeze hash to clipboard.", level="success"))
+    else:
+        print(status_messages.status("Clipboard copy unavailable; full freeze hash:", level="info"))
+        print(freeze_hash)
+    prompt_utils.press_enter_to_continue()
+
+
+def _handle_main_menu_details(snapshot: dict[str, object]) -> None:
+    print()
+    menu_utils.print_header("Dataset Status (Details)")
+    for k in (
+        "mode",
+        "locked",
+        "paper_audit_result",
+        "can_freeze",
+        "evidence_quota_counted",
+        "evidence_quota_expected",
+        "freeze_dataset_hash",
+        "publication_root",
+        "publication_ready",
+    ):
+        if k in snapshot:
+            print(f"- {k}: {snapshot.get(k)}")
+    override = str(os.environ.get("SCYTALEDROID_MODE") or "").strip()
+    if override:
+        print(f"- SCYTALEDROID_MODE (override): {override}")
+    prompt_utils.press_enter_to_continue()
+
+
+def _print_tier1_status_banner() -> dict[str, object]:
+    """Render the main-menu mode banner. Returns a snapshot for extra actions."""
 
     try:
         from scytaledroid.Reporting.menu_actions import fetch_tier1_status
     except Exception:
-        return
+        return {}
 
     try:
-        status = fetch_tier1_status()
+        tier1 = fetch_tier1_status()
     except Exception:
-        return
+        tier1 = {}
 
-    schema_ver = status.get("schema_version") or "<unknown>"
-    expected = status.get("expected_schema") or "<unknown>"
-    tier1_ready = status.get("tier1_ready_runs", 0)
-    db_dataset = int(status.get("db_dynamic_sessions_dataset") or 0)
-    ev_dataset_total = int(status.get("evidence_dataset_packs") or 0)
-    ev_dataset_valid = int(status.get("evidence_dataset_valid") or 0)
-    schema_outdated = schema_ver != expected
-    schema_label = (
-        f"{schema_ver} (expects {expected})" if schema_outdated else str(schema_ver)
-    )
-    print("Dataset readiness")
-    print("─────────────────────")
-    print("• Baseline Snapshot")
-    print(f"• Schema: {schema_label}")
-    # "Baseline-ready runs" is a DB-derived counter; evidence packs remain the authoritative source.
-    badge = " ✅" if tier1_ready and int(tier1_ready) > 0 else ""
-    print(f"• Baseline-ready runs (DB): {tier1_ready}{badge}")
-    # When dynamic DB persistence is not tracking runs, show evidence-pack counts so
-    # operators can trust what they actually collected (evidence-pack contract).
-    if db_dataset == 0 and ev_dataset_total > 0:
-        print(f"• Evidence packs (dataset): {ev_dataset_valid}/{ev_dataset_total} valid (DB tracking: 0)")
-    from scytaledroid.Utils.System.paper_grade_inputs import render_dataset_readiness_line
-    render_dataset_readiness_line()
+    # Paper-facing status (authoritative for manuscript work).
+    try:
+        from scytaledroid.Reporting.menu_actions import fetch_publication_status
+
+        pub_status = fetch_publication_status()
+    except Exception:
+        pub_status = {}
+
+    mode = _resolve_operator_mode(pub_status=pub_status)
+    audit = str(pub_status.get("paper_audit_result") or "unknown").upper()
+    can_freeze = bool(pub_status.get("can_freeze"))
+    freeze_hash = str(pub_status.get("freeze_dataset_hash") or "")
+    freeze_short = freeze_hash[:12] if freeze_hash else "missing"
+    quota = pub_status.get("evidence_quota_counted")
+    expected = pub_status.get("evidence_quota_expected")
+    quota_label = f"{quota}/{expected}" if quota is not None and expected is not None else "unknown"
+    pub_root = str(pub_status.get("publication_root_label") or "output/publication")
+    pub_ready = bool(pub_status.get("publication_ready"))
+
+    locked = bool(mode == "paper" and freeze_hash and audit == "GO" and can_freeze)
+    lock_label = "LOCKED" if locked else "NOT LOCKED"
+
+    snapshot: dict[str, object] = {
+        "mode": mode,
+        "locked": locked,
+        "paper_audit_result": audit,
+        "can_freeze": can_freeze,
+        "evidence_quota_counted": quota,
+        "evidence_quota_expected": expected,
+        "freeze_dataset_hash": freeze_hash,
+        "publication_root": pub_root,
+        "publication_ready": pub_ready,
+        "allow_copy_freeze_hash": bool(locked and freeze_hash),
+        "allow_details": True,
+    }
+
+    # Loud, impossible-to-miss banner (PM acceptance criteria).
+    if mode == "paper":
+        banner = f"Mode: PAPER FREEZE ({lock_label}) | Freeze: {freeze_short} | Audit: {audit}"
+        print(status_messages.status(banner, level="success" if locked else "warn"))
+        counts = _load_paper_cohort_counts() or {}
+        apps = counts.get("apps")
+        runs = counts.get("runs")
+        windows = counts.get("windows")
+        if apps and runs and windows:
+            print(f"Cohort: {apps} apps | {runs} runs | {windows} windows | Quota: {quota_label}")
+        else:
+            print(f"Quota: {quota_label} | Publication: {'READY' if pub_ready else 'MISSING'}")
+        print(f"Publication: {'READY' if pub_ready else 'MISSING'} | Path: {pub_root}")
+        print("Commands: [H] Copy freeze hash | [D] Details")
+        return snapshot
+
+    # Collection/default mode: keep it compact; avoid DB noise unless needed.
+    reason = ""
+    if audit != "GO":
+        reason = f" (Audit: {audit})"
+    print(status_messages.status(f"Mode: COLLECTION | Quota: {quota_label}{reason}", level="info"))
+    # Keep a single legacy hint if schema mismatch is present.
+    schema_ver = tier1.get("schema_version") or "<unknown>"
+    expected_schema = tier1.get("expected_schema") or "<unknown>"
+    if schema_ver and expected_schema and schema_ver != expected_schema:
+        print(status_messages.status(f"DB schema mismatch: {schema_ver} (expects {expected_schema})", level="warn"))
+    print("Commands: [D] Details")
+    return snapshot
 
 
 # --- Handlers for each menu option ---

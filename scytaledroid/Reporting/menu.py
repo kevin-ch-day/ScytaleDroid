@@ -8,9 +8,10 @@ should not dominate the default operator view when writing a paper.
 from __future__ import annotations
 
 import os
+import traceback
 
-from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, summary_cards
-from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
+from scytaledroid.Utils.DisplayUtils import error_panels, menu_utils, prompt_utils, status_messages
+from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption
 
 from .menu_actions import (
     # Back-compat: some tests and older tooling monkeypatch this symbol.
@@ -18,7 +19,11 @@ from .menu_actions import (
     fetch_tier1_status as fetch_tier1_status,
     fetch_publication_status,
     handle_export_freeze_anchored_csvs,
+    handle_generate_paper2_exploratory_risk_scoring,
     handle_generate_paper2_results_numbers,
+    handle_generate_paper2_scientific_qa,
+    handle_generate_paper2_pipeline_audit,
+    handle_print_manuscript_snapshot,
     handle_refresh_phase_e_bundle,
     handle_write_canonical_publication_bundle,
     view_saved_reports,
@@ -30,25 +35,35 @@ def reporting_menu() -> None:
 
     actions_all = {
         "1": handle_refresh_phase_e_bundle,
-        "2": handle_write_canonical_publication_bundle,
-        "3": handle_export_freeze_anchored_csvs,
-        "4": handle_generate_paper2_results_numbers,
-        "5": view_saved_reports,
+        "2": handle_generate_paper2_results_numbers,
+        "3": handle_generate_paper2_scientific_qa,
+        "4": handle_generate_paper2_pipeline_audit,
+        "5": handle_write_canonical_publication_bundle,
+        "6": handle_export_freeze_anchored_csvs,
+        "7": handle_print_manuscript_snapshot,
+        "8": handle_generate_paper2_exploratory_risk_scoring,
+        "9": view_saved_reports,
     }
 
-    core_options = [
-        MenuOption("1", "Refresh Phase E baseline bundle (ML + tables + figures)"),
-        MenuOption("2", "Write canonical publication directory (output/publication/)"),
-        MenuOption("3", "Export freeze-anchored CSVs (run summary + PCAP features + protocol ledger)"),
-        MenuOption("4", "Generate Paper #2 Results numbers (Section V)"),
+    publication_control_options = [
+        MenuOption("1", "Regenerate publication artifacts"),
+        MenuOption("2", "Generate Results section (Section V)"),
+        MenuOption("3", "Generate Scientific QA"),
+        MenuOption("4", "Generate Pipeline audit"),
     ]
-    reports_options = [
-        MenuOption("5", "View saved reports"),
+    export_options = [
+        MenuOption("5", "Write canonical publication bundle (output/publication/)"),
+        MenuOption("6", "Export freeze-anchored CSVs (paper-facing)"),
+        MenuOption("7", "Print manuscript snapshot (1-screen)"),
     ]
+    exploratory_options = [
+        MenuOption("8", "Experimental risk model (SRS/DRS/FRS) (NOT FOR PAPER)"),
+    ]
+    reports_options = [MenuOption("9", "View saved reports")]
 
-    core_visible = core_options
-    reports_visible = reports_options
-    visible_keys = {it.key for it in (core_visible + reports_visible)}
+    visible_keys = {
+        it.key for it in (publication_control_options + export_options + exploratory_options + reports_options)
+    }
     actions = {k: v for k, v in actions_all.items() if k in visible_keys}
 
     while True:
@@ -56,69 +71,59 @@ def reporting_menu() -> None:
         menu_utils.print_header("Reporting")
         status = fetch_publication_status()
         audit = str(status.get("paper_audit_result") or "unknown")
-        can_freeze = "YES" if status.get("can_freeze") else "NO"
         quota = status.get("evidence_quota_counted")
         expected = status.get("evidence_quota_expected")
-        quota_label = f"{quota}/{expected}" if quota is not None and expected is not None else "unknown"
         freeze_hash = str(status.get("freeze_dataset_hash") or "")
         freeze_short = freeze_hash[:12] if freeze_hash else "missing"
-        pub_ready = "✅" if status.get("publication_ready") else "⚠️"
-        pub_root = status.get("publication_root_label") or "output/publication"
+        pub_ready = "READY" if status.get("publication_ready") else "MISSING"
         tables_label = status.get("publication_tables_label") or "0"
         figs_label = status.get("publication_figures_label") or "0"
-        results_label = status.get("results_numbers_label") or "missing"
-        exports_label = status.get("exports_label") or "missing"
-        footer = str(status.get("footer") or "")
+        results_ok = (status.get("results_numbers_label") or "").strip().lower() == "present"
+        qa_ok = (status.get("qa_label") or "").strip().lower() == "present"
 
-        verbose = str(os.environ.get("SCYTALEDROID_UI_LEVEL") or "").strip().lower() == "debug"
-        if verbose:
-            summary_items = [
-                summary_cards.summary_item("Paper audit", f"{audit} (CAN_FREEZE={can_freeze})", value_style="progress"),
-                summary_cards.summary_item("Evidence quota counted", quota_label, value_style="progress"),
-                summary_cards.summary_item("Freeze dataset hash", freeze_short, value_style="muted"),
-                summary_cards.summary_item(f"Publication bundle {pub_ready}", pub_root, value_style="progress"),
-                summary_cards.summary_item("Tables", str(tables_label), value_style="muted"),
-                summary_cards.summary_item("Figures", str(figs_label), value_style="muted"),
-                summary_cards.summary_item("Results numbers (Sec V)", str(results_label), value_style="muted"),
-                summary_cards.summary_item("Freeze-anchored exports", str(exports_label), value_style="muted"),
-            ]
-            summary_cards.print_summary_card(
-                "Paper #2 Publication Status",
-                summary_items,
-                subtitle="Evidence + Freeze + Publication bundle (paper-facing)",
-                footer=footer,
-            )
+        # Compact paper-facing status card.
+        if quota is not None and expected is not None:
+            counts = f"{quota}/{expected} runs"
         else:
-            # Compact operator view (default): two short lines, no box/divider noise.
-            print(
-                status_messages.status(
-                    f"Paper audit={audit} (CAN_FREEZE={can_freeze}) | Quota={quota_label} | Freeze={freeze_short} | Bundle={pub_root} {pub_ready}",
-                    level="info",
-                )
-            )
-            print(
-                status_messages.status(
-                    f"Artifacts: Tables={tables_label} Figures={figs_label} Results={results_label} Exports={exports_label}",
-                    level="info",
-                )
-            )
-            if footer:
-                print(status_messages.status(footer, level="info"))
+            counts = "runs unknown"
+        print("Paper #2 (Freeze Anchored)")
+        print(f"Audit: {audit} | {counts} | Freeze {freeze_short} | Publication {pub_ready}")
+        print(f"Artifacts: Tables {tables_label} | Figures {figs_label} | Results {'✓' if results_ok else '✗'} | QA {'✓' if qa_ok else '✗'}")
+        print("Model: Isolation Forest (RDI)")
 
-        # Render options as a single compact list (reduce whitespace).
-        combined = [*core_visible, *reports_visible]
-        menu_utils.render_menu(
-            MenuSpec(
-                items=combined,
-                show_exit=True,
-                exit_label="Back",
-                show_descriptions=False,
-                padding=False,
-                compact=True,
-            )
+        menu_utils.print_section("Publication Control")
+        menu_utils.print_menu(
+            publication_control_options,
+            show_exit=False,
+            show_descriptions=False,
+            compact=True,
+        )
+        menu_utils.print_section("Exports")
+        menu_utils.print_menu(
+            export_options,
+            show_exit=False,
+            show_descriptions=False,
+            compact=True,
+        )
+        menu_utils.print_section("Exploratory (Not for Paper)")
+        menu_utils.print_menu(
+            exploratory_options,
+            show_exit=True,
+            exit_label="Back",
+            show_descriptions=False,
+            compact=True,
+        )
+        menu_utils.print_menu(
+            reports_options,
+            show_exit=False,
+            show_descriptions=False,
+            compact=True,
         )
         choice = prompt_utils.get_choice(
-            menu_utils.selectable_keys(combined, include_exit=True),
+            menu_utils.selectable_keys(
+                [*publication_control_options, *export_options, *exploratory_options, *reports_options],
+                include_exit=True,
+            ),
             default="0",
         )
 
@@ -127,7 +132,20 @@ def reporting_menu() -> None:
 
         action = actions.get(choice)
         if action:
-            action()
+            try:
+                action()
+            except Exception as exc:  # pragma: no cover - operator-facing guard
+                debug = str(os.environ.get("SCYTALEDROID_UI_LEVEL") or "").strip().lower() == "debug"
+                details = []
+                if debug:
+                    details = traceback.format_exc().splitlines()[-20:]
+                error_panels.print_error_panel(
+                    "Reporting Action Failed",
+                    str(exc),
+                    details=details,
+                    hint="Re-run with SCYTALEDROID_UI_LEVEL=debug for a full traceback.",
+                )
+                prompt_utils.press_enter_to_continue()
         else:  # pragma: no cover - defensive path
             print(status_messages.status("Invalid selection.", level="warn"))
             prompt_utils.press_enter_to_continue()

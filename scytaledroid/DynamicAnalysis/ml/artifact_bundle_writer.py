@@ -71,6 +71,39 @@ _PROHIBITED_PHRASES = (
 )
 
 
+def _apply_ieee_figure_style() -> None:
+    """Apply consistent, print-friendly matplotlib styling (IEEE-oriented).
+
+    This only affects rendering (fonts/colors/spacing). It does not change any
+    underlying metrics or cohort selection.
+    """
+
+    plt.rcParams.update(
+        {
+            "figure.facecolor": "white",
+            "axes.facecolor": "white",
+            "axes.edgecolor": "#111111",
+            "axes.labelcolor": "#111111",
+            "axes.titlesize": 11,
+            "axes.titleweight": "regular",
+            "axes.labelsize": 10,
+            "xtick.color": "#111111",
+            "ytick.color": "#111111",
+            "xtick.labelsize": 9,
+            "ytick.labelsize": 9,
+            "grid.color": "#000000",
+            "grid.alpha": 0.18,
+            "grid.linewidth": 0.6,
+            "legend.frameon": False,
+            "legend.fontsize": 9,
+            "font.size": 10,
+            "savefig.facecolor": "white",
+            "savefig.bbox": "tight",
+            "savefig.pad_inches": 0.03,
+        }
+    )
+
+
 @dataclass(frozen=True)
 class PhaseEArtifacts:
     out_root: Path
@@ -153,7 +186,9 @@ def write_phase_e_deliverables_bundle(
     (_fig_b2_social_png, _fig_b2_social_pdf), (_fig_b2_msg_png, _fig_b2_msg_pdf) = _write_fig_b2_split(
         figs_dir, overwrite=True
     )
-    fig_b4_png, fig_b4_pdf = _write_fig_b4(figs_dir, provenance=provenance, overwrite=True)
+    (_fig_b4_social_png, _fig_b4_social_pdf), (_fig_b4_msg_png, _fig_b4_msg_pdf) = _write_fig_b4_split(
+        figs_dir, provenance=provenance, overwrite=True
+    )
 
     # Repro appendix snippet.
     repro_appendix_md = appendix_dir / "repro_appendix_phase_e.md"
@@ -215,8 +250,10 @@ def write_phase_e_deliverables_bundle(
         repro_appendix_md=repro_appendix_md,
         fig_b2_png=fig_b2_png,
         fig_b2_pdf=fig_b2_pdf,
-        fig_b4_png=fig_b4_png,
-        fig_b4_pdf=fig_b4_pdf,
+        fig_b4_social_png=_fig_b4_social_png,
+        fig_b4_social_pdf=_fig_b4_social_pdf,
+        fig_b4_messaging_png=_fig_b4_msg_png,
+        fig_b4_messaging_pdf=_fig_b4_msg_pdf,
         masvs_inputs=masvs_inputs,
         required_fields_report=required_fields_report,
         phrase_lint_report=phrase_lint_report,
@@ -254,6 +291,7 @@ def write_phase_e_deliverables_bundle(
 def _write_fig_b1(
     fig_run_id: str, figs_dir: Path, *, interaction_tag: str | None, overwrite: bool
 ) -> tuple[Path, Path]:
+    _apply_ieee_figure_style()
     stem = f"fig_b1_timeline_{fig_run_id[:8]}"
     png = figs_dir / f"{stem}.png"
     pdf = figs_dir / f"{stem}.pdf"
@@ -301,7 +339,7 @@ def _write_fig_b1(
     tag = interaction_tag or _interaction_tag(inputs.manifest) or "interactive"
     title = f"Fig B1: {pkg} ({tag})"
 
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10.5, 6.5), sharex=True)
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10.2, 6.2), sharex=True)
     fig.suptitle(title, fontsize=12)
 
     ax1.plot(xs, bytes_ps, color=OKABE_ITO["blue"], linewidth=1.6)
@@ -327,7 +365,7 @@ def _write_fig_b1(
     ax2.text(0.01, 0.02, note, transform=ax2.transAxes, fontsize=8, alpha=0.8)
 
     fig.tight_layout(rect=[0, 0.02, 1, 0.95])
-    fig.savefig(png, dpi=200)
+    fig.savefig(png, dpi=300)
     fig.savefig(pdf)
     plt.close(fig)
     return png, pdf
@@ -335,6 +373,7 @@ def _write_fig_b1(
 
 def _write_fig_b2(figs_dir: Path, *, provenance: dict[str, str], overwrite: bool) -> tuple[Path, Path]:
     """Fig B2: RDI prevalence by app (idle vs interactive), faceted by model."""
+    _apply_ieee_figure_style()
     stem = "fig_b2_rdi_by_app"
     png = figs_dir / f"{stem}.png"
     pdf = figs_dir / f"{stem}.pdf"
@@ -372,9 +411,27 @@ def _write_fig_b2(figs_dir: Path, *, provenance: dict[str, str], overwrite: bool
     ):
         idle_vals = [get(a, "idle", model_key) for a in apps]
         int_vals = [get(a, "interactive", model_key) for a in apps]
-        ax.bar(x - width / 2, idle_vals, width, label="Idle", color=colors["idle"], alpha=0.92)
-        ax.bar(x + width / 2, int_vals, width, label="Interactive", color=colors["interactive"], alpha=0.92)
-        ax.set_ylabel("RDI (flagged %)")
+        ax.bar(
+            x - width / 2,
+            idle_vals,
+            width,
+            label="Idle",
+            color=colors["idle"],
+            alpha=0.95,
+            edgecolor="#111111",
+            linewidth=0.3,
+        )
+        ax.bar(
+            x + width / 2,
+            int_vals,
+            width,
+            label="Interactive",
+            color=colors["interactive"],
+            alpha=0.95,
+            edgecolor="#111111",
+            linewidth=0.3,
+        )
+        ax.set_ylabel("RDI (fraction flagged)")
         ax.set_title(model_label, fontsize=10)
         ax.grid(True, axis="y", alpha=0.25)
         ax.set_ylim(0.0, 1.0)
@@ -383,7 +440,7 @@ def _write_fig_b2(figs_dir: Path, *, provenance: dict[str, str], overwrite: bool
     axes[-1].set_xlabel("App")
     fig.suptitle("Fig B2: Runtime Deviation Index (RDI) by App (Idle vs Interactive)", fontsize=12)
     fig.tight_layout(rect=[0, 0.02, 1, 0.95])
-    fig.savefig(png, dpi=200)
+    fig.savefig(png, dpi=300)
     fig.savefig(pdf)
     plt.close(fig)
     return png, pdf
@@ -398,6 +455,7 @@ def _write_fig_b2_subset(
     overwrite: bool,
 ) -> tuple[Path, Path]:
     """Variant of Fig B2 restricted to a subset of apps (to reduce width)."""
+    _apply_ieee_figure_style()
     png = figs_dir / f"{stem}.png"
     pdf = figs_dir / f"{stem}.pdf"
     if not overwrite and png.exists() and pdf.exists():
@@ -431,9 +489,27 @@ def _write_fig_b2_subset(
     ):
         idle_vals = [get(a, "idle", model_key) for a in apps]
         int_vals = [get(a, "interactive", model_key) for a in apps]
-        ax.bar(x - width / 2, idle_vals, width, label="Idle", color=colors["idle"], alpha=0.92)
-        ax.bar(x + width / 2, int_vals, width, label="Interactive", color=colors["interactive"], alpha=0.92)
-        ax.set_ylabel("RDI (flagged %)")
+        ax.bar(
+            x - width / 2,
+            idle_vals,
+            width,
+            label="Idle",
+            color=colors["idle"],
+            alpha=0.95,
+            edgecolor="#111111",
+            linewidth=0.3,
+        )
+        ax.bar(
+            x + width / 2,
+            int_vals,
+            width,
+            label="Interactive",
+            color=colors["interactive"],
+            alpha=0.95,
+            edgecolor="#111111",
+            linewidth=0.3,
+        )
+        ax.set_ylabel("RDI (fraction flagged)")
         ax.set_title(model_label, fontsize=10)
         ax.grid(True, axis="y", alpha=0.25)
         ax.set_ylim(0.0, 1.0)
@@ -442,7 +518,7 @@ def _write_fig_b2_subset(
     axes[-1].set_xlabel("App")
     fig.suptitle(title, fontsize=12)
     fig.tight_layout(rect=[0, 0.02, 1, 0.95])
-    fig.savefig(png, dpi=200)
+    fig.savefig(png, dpi=300)
     fig.savefig(pdf)
     plt.close(fig)
     return png, pdf
@@ -482,6 +558,7 @@ def _write_fig_b2_split(figs_dir: Path, *, overwrite: bool) -> tuple[tuple[Path,
 
 def _write_fig_b4(figs_dir: Path, *, provenance: dict[str, str], overwrite: bool) -> tuple[Path, Path]:
     """Fig B4: static posture vs interactive RDI (context only)."""
+    _apply_ieee_figure_style()
     stem = "fig_b4_static_vs_rdi"
     png = figs_dir / f"{stem}.png"
     pdf = figs_dir / f"{stem}.pdf"
@@ -503,7 +580,7 @@ def _write_fig_b4(figs_dir: Path, *, provenance: dict[str, str], overwrite: bool
 
     rho = _spearman_rho(xs, ys)
 
-    fig, ax = plt.subplots(1, 1, figsize=(9.5, 6.2))
+    fig, ax = plt.subplots(1, 1, figsize=(8.6, 5.4))
     # Color by cohort to add readable structure without adding semantics.
     msg = set(config.MESSAGING_PACKAGES)
     xs_social = [posture[p][0] for p in pkgs if p not in msg]
@@ -514,26 +591,26 @@ def _write_fig_b4(figs_dir: Path, *, provenance: dict[str, str], overwrite: bool
         ax.scatter(
             xs_social,
             ys_social,
-            s=52,
+            s=72,
             color=OKABE_ITO["bluish_green"],
-            alpha=0.88,
-            edgecolor="white",
-            linewidth=0.5,
+            alpha=0.9,
+            edgecolor="#111111",
+            linewidth=0.35,
             label="Social media",
         )
     if xs_msg and ys_msg:
         ax.scatter(
             xs_msg,
             ys_msg,
-            s=52,
+            s=72,
             color=OKABE_ITO["reddish_purple"],
-            alpha=0.88,
-            edgecolor="white",
-            linewidth=0.5,
+            alpha=0.9,
+            edgecolor="#111111",
+            linewidth=0.35,
             label="Messaging",
         )
     ax.set_xlabel("Static Posture Score (0–100, context only)")
-    ax.set_ylabel("Interactive RDI (IF flagged %)")
+    ax.set_ylabel("Interactive RDI (IF, fraction flagged)")
     ax.grid(True, alpha=0.25)
     ax.set_ylim(0.0, 1.0)
 
@@ -545,16 +622,106 @@ def _write_fig_b4(figs_dir: Path, *, provenance: dict[str, str], overwrite: bool
 
     for pkg, x0, y0 in zip(pkgs, xs, ys, strict=True):
         name = contracts.display_name_by_package.get(pkg, config.DISPLAY_NAME_BY_PACKAGE.get(pkg, pkg))
-        ax.text(x0 + 0.8, y0 + 0.01, name, fontsize=8, alpha=0.85)
+        ax.text(x0 + 0.8, y0 + 0.012, name, fontsize=9, alpha=0.85)
 
     subtitle = "Spearman rho: n/a" if rho is None else f"Spearman rho={rho:.2f}"
     ax.set_title("Fig B4: Static Posture vs Runtime Deviation (Discordance)", fontsize=12)
     ax.text(0.01, 0.02, subtitle, transform=ax.transAxes, fontsize=9, alpha=0.85)
     fig.tight_layout()
-    fig.savefig(png, dpi=200)
+    fig.savefig(png, dpi=300)
     fig.savefig(pdf)
     plt.close(fig)
     return png, pdf
+
+
+def _write_fig_b4_subset(
+    figs_dir: Path,
+    *,
+    pkgs: list[str],
+    posture: dict[str, tuple[float, list[str]]],
+    rdi: dict[str, float],
+    stem: str,
+    title: str,
+    color: str,
+    overwrite: bool,
+) -> tuple[Path, Path]:
+    """Write a cohort-specific Fig B4 panel (social vs messaging)."""
+    png = figs_dir / f"{stem}.png"
+    pdf = figs_dir / f"{stem}.pdf"
+    if not overwrite and png.exists() and pdf.exists():
+        return png, pdf
+
+    from scytaledroid.Publication.contract_inputs import load_publication_contracts
+
+    contracts = load_publication_contracts(fail_closed=False)
+    xs = [posture[p][0] for p in pkgs]
+    ys = [rdi[p] for p in pkgs]
+    rho = _spearman_rho(xs, ys)
+
+    fig, ax = plt.subplots(1, 1, figsize=(8.6, 5.0))
+    ax.scatter(xs, ys, s=72, color=color, alpha=0.92, edgecolor="#111111", linewidth=0.35)
+    ax.set_xlabel("Static Posture Score (0–100, context only)")
+    ax.set_ylabel("Interactive RDI (IF, fraction flagged)")
+    ax.grid(True, alpha=0.25)
+    ax.set_ylim(0.0, 1.0)
+
+    if xs and ys:
+        ax.axvline(float(np.median(xs)), color=OKABE_ITO["gray"], linewidth=1.0, alpha=0.75)
+        ax.axhline(float(np.median(ys)), color=OKABE_ITO["gray"], linewidth=1.0, alpha=0.75)
+
+    # Labels are acceptable here because each panel is smaller (6 apps).
+    for pkg, x0, y0 in zip(pkgs, xs, ys, strict=True):
+        name = contracts.display_name_by_package.get(pkg, config.DISPLAY_NAME_BY_PACKAGE.get(pkg, pkg))
+        ax.text(x0 + 0.8, y0 + 0.012, name, fontsize=9, alpha=0.85)
+
+    subtitle = "Spearman rho: n/a" if rho is None else f"Spearman rho={rho:.2f}"
+    ax.set_title(title, fontsize=12)
+    ax.text(0.01, 0.02, subtitle, transform=ax.transAxes, fontsize=9, alpha=0.85)
+    fig.tight_layout()
+    fig.savefig(png, dpi=300)
+    fig.savefig(pdf)
+    plt.close(fig)
+    return png, pdf
+
+
+def _write_fig_b4_split(figs_dir: Path, *, provenance: dict[str, str], overwrite: bool) -> tuple[tuple[Path, Path], tuple[Path, Path]]:
+    """Split Fig B4 into two panels (social media vs messaging) to avoid label crowding."""
+    _apply_ieee_figure_style()
+
+    from scytaledroid.Publication.contract_inputs import load_publication_contracts
+
+    posture = _compute_static_posture_scores()
+    rdi = _load_interactive_rdi_iforest()
+    pkgs_all = list(sorted(set(posture.keys()) & set(rdi.keys())))
+    contracts = load_publication_contracts(fail_closed=False)
+    if contracts.package_order:
+        pkgs_all = [p for p in contracts.package_order if p in set(pkgs_all)]
+
+    msg = set(config.MESSAGING_PACKAGES)
+    pkgs_social = [p for p in pkgs_all if p not in msg]
+    pkgs_msg = [p for p in pkgs_all if p in msg]
+
+    social_paths = _write_fig_b4_subset(
+        figs_dir,
+        pkgs=pkgs_social,
+        posture=posture,
+        rdi=rdi,
+        stem="fig_b4_static_vs_rdi_social",
+        title="Fig B4(a): Static Posture vs Runtime Deviation (Social Media)",
+        color=OKABE_ITO["bluish_green"],
+        overwrite=overwrite,
+    )
+    msg_paths = _write_fig_b4_subset(
+        figs_dir,
+        pkgs=pkgs_msg,
+        posture=posture,
+        rdi=rdi,
+        stem="fig_b4_static_vs_rdi_messaging",
+        title="Fig B4(b): Static Posture vs Runtime Deviation (Messaging)",
+        color=OKABE_ITO["reddish_purple"],
+        overwrite=overwrite,
+    )
+    return social_paths, msg_paths
 
 
 def _render_repro_appendix() -> str:
@@ -635,8 +802,10 @@ def _write_bundle_manifest(
     repro_appendix_md: Path,
     fig_b2_png: Path,
     fig_b2_pdf: Path,
-    fig_b4_png: Path,
-    fig_b4_pdf: Path,
+    fig_b4_social_png: Path,
+    fig_b4_social_pdf: Path,
+    fig_b4_messaging_png: Path,
+    fig_b4_messaging_pdf: Path,
     masvs_inputs: list[dict[str, str]] | None = None,
     required_fields_report: Path | None = None,
     phrase_lint_report: Path | None = None,
@@ -657,8 +826,16 @@ def _write_bundle_manifest(
             "fig_b1_pdf": {"path": str(fig_b1_pdf), "sha256": _sha256_stream(fig_b1_pdf)},
             "fig_b2_png": {"path": str(fig_b2_png), "sha256": _sha256_stream(fig_b2_png)},
             "fig_b2_pdf": {"path": str(fig_b2_pdf), "sha256": _sha256_stream(fig_b2_pdf)},
-            "fig_b4_png": {"path": str(fig_b4_png), "sha256": _sha256_stream(fig_b4_png)},
-            "fig_b4_pdf": {"path": str(fig_b4_pdf), "sha256": _sha256_stream(fig_b4_pdf)},
+            "fig_b4_social_png": {"path": str(fig_b4_social_png), "sha256": _sha256_stream(fig_b4_social_png)},
+            "fig_b4_social_pdf": {"path": str(fig_b4_social_pdf), "sha256": _sha256_stream(fig_b4_social_pdf)},
+            "fig_b4_messaging_png": {
+                "path": str(fig_b4_messaging_png),
+                "sha256": _sha256_stream(fig_b4_messaging_png),
+            },
+            "fig_b4_messaging_pdf": {
+                "path": str(fig_b4_messaging_pdf),
+                "sha256": _sha256_stream(fig_b4_messaging_pdf),
+            },
             "table_1_csv": {"path": str(table_1_csv), "sha256": _sha256_stream(table_1_csv)},
             "table_1_xlsx": {"path": str(table_1_xlsx), "sha256": _sha256_stream(table_1_xlsx)},
             "table_1_tex": {"path": str(table_1_tex), "sha256": _sha256_stream(table_1_tex)},
@@ -837,7 +1014,8 @@ def _clean_bundle_dirs(*, tables_dir: Path, figs_dir: Path, fig_b1_run_id: str) 
         "fig_b2_rdi_by_app",
         "fig_b2_rdi_social_by_app",
         "fig_b2_rdi_messaging_by_app",
-        "fig_b4_static_vs_rdi",
+        "fig_b4_static_vs_rdi_social",
+        "fig_b4_static_vs_rdi_messaging",
     }
     keep_exts = {".csv", ".xlsx", ".tex", ".png", ".pdf"}
 
@@ -1020,7 +1198,7 @@ def _write_table_1_rdi_prevalence(tables_dir: Path, *, provenance: dict[str, str
         columns=cols,
         rows=out,
         provenance=provenance,
-        caption_comment="Table 1: RDI prevalence (flagged %) per app (idle vs interactive).",
+        caption_comment="Table 1: RDI prevalence (fraction flagged) per app (idle vs interactive).",
     )
     return csv_path, xlsx_path, tex_path
 
@@ -1977,19 +2155,19 @@ def _write_table_8_model_comparison_metrics(tables_dir: Path, *, provenance: dic
     cols = [
         ("app", "App"),
         ("phase", "Phase"),
-        ("if_flagged_pct", "IF flagged %"),
-        ("ocsvm_flagged_pct", "OC-SVM flagged %"),
+        ("if_flagged_pct", "IF flagged fraction"),
+        ("ocsvm_flagged_pct", "OC-SVM flagged fraction"),
         ("abs_delta_flagged_pct", "Abs delta"),
         ("windows_total", "Windows"),
         ("jointly_flagged_windows", "Jointly flagged"),
-        ("jointly_flagged_pct", "Jointly flagged %"),
+        ("jointly_flagged_pct", "Jointly flagged fraction"),
         ("training_mode", "Train"),
         ("is_fallback_mode", "Fallback"),
         ("comparability", "Comparability"),
         ("spearman_rho_if_vs_ocsvm", "Spearman rho"),
         ("mean_abs_delta_flagged_pct", "Mean abs delta"),
-        ("mean_if_flagged_pct", "Mean IF flagged %"),
-        ("mean_ocsvm_flagged_pct", "Mean OC-SVM flagged %"),
+        ("mean_if_flagged_pct", "Mean IF flagged fraction"),
+        ("mean_ocsvm_flagged_pct", "Mean OC-SVM flagged fraction"),
         ("agreement_pct_jointly_flagged", "Agreement %"),
     ]
     csv_path = tables_dir / "table_8_model_comparison_metrics.csv"

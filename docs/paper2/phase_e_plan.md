@@ -111,7 +111,8 @@ Paper-ready deliverables bundle (zip-and-share; operator/paper-facing):
   - `figures/` (main figures)
     - `fig_b1_timeline_<runid8>.png/.pdf`
     - `fig_b2_rdi_by_app.png/.pdf`
-    - `fig_b4_static_vs_rdi.png/.pdf`
+    - `fig_b4_static_vs_rdi_social.png/.pdf`
+    - `fig_b4_static_vs_rdi_messaging.png/.pdf`
   - `tables/` (main paper tables; **triple-format**)
     - `table_1_rdi_prevalence.csv/.xlsx/.tex`
     - `table_2_transport_mix.csv/.xlsx/.tex`

@@ -73,14 +73,28 @@
     {
       "kind": "figure",
       "normalization": "none",
-      "path": "figures/fig_b4_static_vs_rdi.pdf",
+      "path": "figures/fig_b4_static_vs_rdi_social.pdf",
       "sha256": "43d15e75419e06603338bd343086e4a84ef51b83f0dfb09b0e558eba9ea7a07c",
       "size_bytes": 20176
     },
     {
       "kind": "figure",
       "normalization": "none",
-      "path": "figures/fig_b4_static_vs_rdi.png",
+      "path": "figures/fig_b4_static_vs_rdi_social.png",
+      "sha256": "0ff3210cb766f78bf8c154cb0a680cd2fb0c30f8a36038c443e8347365c7a0f1",
+      "size_bytes": 110069
+    },
+    {
+      "kind": "figure",
+      "normalization": "none",
+      "path": "figures/fig_b4_static_vs_rdi_messaging.pdf",
+      "sha256": "43d15e75419e06603338bd343086e4a84ef51b83f0dfb09b0e558eba9ea7a07c",
+      "size_bytes": 20176
+    },
+    {
+      "kind": "figure",
+      "normalization": "none",
+      "path": "figures/fig_b4_static_vs_rdi_messaging.png",
       "sha256": "0ff3210cb766f78bf8c154cb0a680cd2fb0c30f8a36038c443e8347365c7a0f1",
       "size_bytes": 110069
     }

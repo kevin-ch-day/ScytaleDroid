@@ -27,6 +27,8 @@ from scytaledroid.Publication.contract_inputs import (
     display_name_map_path,
     load_publication_contracts,
 )
+from scytaledroid.Utils.LatexUtils import render_tabular_only
+from scytaledroid.Utils.IO.csv_with_provenance import read_csv_with_provenance
 
 
 def _sha256_file(p: Path) -> str:
@@ -83,12 +85,8 @@ def _pick_one(dir_path: Path, glob_pat: str) -> Path:
 
 
 def _read_csv_rows(path: Path) -> list[dict[str, str]]:
-    import csv
-
-    text = path.read_text(encoding="utf-8", errors="strict").splitlines()
-    # No comment headers expected for operational snapshot CSVs; keep simple.
-    r = csv.DictReader([ln for ln in text if ln.strip()])
-    return [dict(row) for row in r]
+    # Prefer the canonical reader even for non-provenance CSVs.
+    return read_csv_with_provenance(path).rows
 
 
 def _split_csv_comment_header(text: str) -> tuple[list[str], list[str]]:
@@ -110,15 +108,7 @@ def _split_csv_comment_header(text: str) -> tuple[list[str], list[str]]:
 
 
 def _read_csv_skip_comments(path: Path) -> list[dict[str, str]]:
-    import csv
-
-    text = path.read_text(encoding="utf-8", errors="strict")
-    _, data_lines = _split_csv_comment_header(text)
-    data_lines = [ln for ln in data_lines if ln.strip()]
-    if not data_lines:
-        return []
-    r = csv.DictReader(data_lines)
-    return [dict(row) for row in r]
+    return read_csv_with_provenance(path).rows
 
 
 def _write_csv_text_with_header(*, comment_header: list[str], fieldnames: list[str], rows: list[dict[str, str]]) -> str:
@@ -141,23 +131,16 @@ def _render_tabular_from_rows(
     rows: list[dict[str, str]],
     caption_comment: str | None = None,
 ) -> str:
-    """Render a tabular-only LaTeX table with booktabs rules."""
+    """Render a tabular-only LaTeX table with booktabs rules (centralized escaping)."""
     keys = [k for k, _ in columns]
     headers = [h for _, h in columns]
-    spec = "l" + ("r" * (len(columns) - 1))
-    out: list[str] = []
-    if caption_comment:
-        out.append(f"% {caption_comment}")
-    out.append(f"\\begin{{tabular}}{{{spec}}}")
-    out.append("\\toprule")
-    out.append(" & ".join(headers) + " \\\\")
-    out.append("\\midrule")
-    for r in rows:
-        vals = [str(r.get(k, "")).replace("_", "\\_") for k in keys]
-        out.append(" & ".join(vals) + " \\\\")
-    out.append("\\bottomrule")
-    out.append("\\end{tabular}")
-    return "\n".join(out) + "\n"
+    body = [[r.get(k, "") for k in keys] for r in rows]
+    return render_tabular_only(
+        headers=headers,
+        rows=body,
+        align=None,
+        comment_lines=[caption_comment] if caption_comment else None,
+    )
 
 
 _LEGACY_LABEL_VARIANTS: dict[str, list[str]] = {
@@ -194,23 +177,30 @@ def _render_risk_scoring_tabular_tex(
         s = (g or "").strip().lower()
         return {"low": "L", "medium": "M", "high": "H"}.get(s, (g or "").strip()[:1].upper() or "n/a")
 
-    lines: list[str] = []
-    lines.append("% Risk scoring & grades (tabular-only; manuscript owns float/caption/label).")
-    lines.append("% Notes: Dynamic score is deviation (RDI-derived), not measured security harm.")
-    lines.append("\\begin{tabular}{lccc}")
-    lines.append("\\toprule")
-    lines.append("App & Static Exposure (score/grade) & Dynamic Deviation (score/grade) & Final Regime (grade) \\\\")
-    lines.append("\\midrule")
+    headers = [
+        "App",
+        "Static Exposure (score/grade)",
+        "Dynamic Deviation (score/grade)",
+        "Final Regime (grade)",
+    ]
+    body: list[list[object]] = []
     for pkg in ordered_pkgs:
         r = row_by_pkg[pkg]
         app_disp = display_name_by_package.get(pkg, pkg) or pkg
         static_cell = f"{fmt_score(r.get('static_exposure_score',''))}/{fmt_grade(r.get('exposure_grade',''))}"
         dyn_cell = f"{fmt_score(r.get('dynamic_deviation_score_if',''))}/{fmt_grade(r.get('deviation_grade_if',''))}"
         final_cell = fmt_grade(r.get("final_grade_if", ""))
-        lines.append(f"{app_disp} & {static_cell} & {dyn_cell} & {final_cell} \\\\")
-    lines.append("\\bottomrule")
-    lines.append("\\end{tabular}")
-    return "\n".join(lines) + "\n"
+        body.append([app_disp, static_cell, dyn_cell, final_cell])
+
+    return render_tabular_only(
+        headers=headers,
+        rows=body,
+        align="lccc",
+        comment_lines=[
+            "Risk scoring & grades (tabular-only; manuscript owns float/caption/label).",
+            "Notes: Dynamic score is deviation (RDI-derived), not measured security harm.",
+        ],
+    )
 
 
 def _render_masvs_domain_mapping_tabular_tex() -> str:
@@ -298,6 +288,14 @@ def write_canonical_publication_directory(
     for d in (publication_root, tables_dir, figs_dir, appendix_dir, manifests_dir, internal_prov, internal_snaps):
         d.mkdir(parents=True, exist_ok=True)
 
+    # Legacy cleanup: older builds placed internal/exploratory content under output/publication/.
+    # Keep the paper-facing bundle minimal by removing these directories when overwriting.
+    if overwrite:
+        for legacy in ("internal", "explore", "review"):
+            p = publication_root / legacy
+            if p.exists() and p.is_dir():
+                shutil.rmtree(p, ignore_errors=True)
+
     # Keep the canonical surface clean: only the publication-facing artifacts live here.
     _clean_dir(
         tables_dir,
@@ -308,12 +306,6 @@ def write_canonical_publication_directory(
             "interaction_delta_summary.csv",
             "static_dynamic_correlation.csv",
             "appendix_table_a1_ocsvm_robustness.csv",
-            "table_masvs_domain_mapping.tex",
-            "table_4_signature_deltas.tex",
-            "table_7_exposure_deviation_summary.tex",
-            "table_4_signature_deltas.csv",
-            "table_7_exposure_deviation_summary.csv",
-            "table_risk_scoring.tex",
         },
     )
     _clean_dir(
@@ -326,8 +318,10 @@ def write_canonical_publication_directory(
             "fig_b2_rdi_social_by_app.png",
             "fig_b2_rdi_messaging_by_app.pdf",
             "fig_b2_rdi_messaging_by_app.png",
-            "fig_b4_static_vs_rdi.pdf",
-            "fig_b4_static_vs_rdi.png",
+            "fig_b4_static_vs_rdi_social.pdf",
+            "fig_b4_static_vs_rdi_social.png",
+            "fig_b4_static_vs_rdi_messaging.pdf",
+            "fig_b4_static_vs_rdi_messaging.png",
         },
         # Fig B1 is pinned to a specific run id (suffix changes deterministically),
         # so keep by glob to avoid wiping it on bundle rewrites.
@@ -346,145 +340,22 @@ def write_canonical_publication_directory(
     _clean_dir(
         manifests_dir,
         keep={
+            # Reproducibility anchors (PM-locked).
             "dataset_freeze.json",
-            "selection_manifest.json",
-            "freeze_manifest.json",
-            "model_registry.json",
-            "toolchain.txt",
-            "phase_e_closure_record.json",
-            "publication_snapshot_id.txt",
-            # Paper-facing computed summaries.
             "paper_results_v1.json",
-            "paper2_results_numbers.json",
             "canonical_receipt.json",
-            "paper_artifacts.json",
-            # Contracts / gates.
+            "toolchain.txt",
+            # Small helper manifests for consistent ordering and display names.
             "display_name_map.json",
             "app_ordering.json",
-            "publication_contract.json",
-            "publication_traceability.csv",
-            "crosschecks.json",
+            # Derived helper (not required, but useful for humans).
+            "paper2_results_numbers.json",
         },
     )
 
-    contracts = load_publication_contracts(fail_closed=True)
-
-    # Surface baseline tables (csv + tex) for publication assembly.
-    base_tables = baseline_bundle_root / "tables"
-    (tables_dir / "table_masvs_domain_mapping.tex").write_text(
-        _render_masvs_domain_mapping_tabular_tex(), encoding="utf-8"
-    )
-
-    # Rewrite Table 4/7 to enforce ordering + alias contracts (publication-facing).
-    # This does not change values; it only stabilizes ordering/labels and avoids nested floats in LaTeX.
-    # Table 7: keyed by package_name.
-    t7_src = base_tables / "table_7_exposure_deviation_summary.csv"
-    t7_comment, _ = _split_csv_comment_header(t7_src.read_text(encoding="utf-8", errors="strict"))
-    t7_rows = _read_csv_skip_comments(t7_src)
-    t7_by_pkg = {(r.get("package_name") or "").strip(): r for r in t7_rows if (r.get("package_name") or "").strip()}
-    ordered_t7: list[dict[str, str]] = []
-    for pkg in contracts.package_order:
-        if pkg not in t7_by_pkg:
-            raise RuntimeError(f"Missing Table 7 row for package: {pkg}")
-        row = dict(t7_by_pkg[pkg])
-        row["app"] = contracts.display_name_by_package.get(pkg, row.get("app") or pkg)
-        ordered_t7.append(row)
-    if ordered_t7:
-        (tables_dir / "table_7_exposure_deviation_summary.csv").write_text(
-            _write_csv_text_with_header(
-                comment_header=t7_comment,
-                fieldnames=list(ordered_t7[0].keys()),
-                rows=ordered_t7,
-            ),
-            encoding="utf-8",
-        )
-    (tables_dir / "table_7_exposure_deviation_summary.tex").write_text(
-        _render_tabular_from_rows(
-            columns=[
-                ("app", "App"),
-                ("package_name", "Package"),
-                ("static_posture_score", "Exposure (StaticPostureScore)"),
-                ("exposure_grade", "Exposure Grade"),
-                ("rdi_if_interactive", "Deviation (RDI IF, interactive)"),
-                ("deviation_grade_if", "Deviation Grade (IF)"),
-                ("regime_if", "Regime (IF)"),
-                ("rdi_ocsvm_interactive", "RDI OC-SVM (interactive)"),
-                ("training_mode_if", "Train (IF)"),
-                ("notes", "Notes"),
-            ],
-            rows=ordered_t7,
-            caption_comment=(
-                "Table 7: Interpretive Exposure–Deviation Summary over the frozen 12-app dataset. "
-                "Exposure Grade and Deviation Grade are rank-based tertile bins (4/4/4) computed on full-precision values "
-                "with deterministic tie-breaking by package_name. Grades and quadrant labels are interpretive overlays "
-                "(not system outputs) and do not represent measured security risk."
-            ),
-        ),
-        encoding="utf-8",
-    )
-
-    # Table 4: keyed by app label only (legacy); remap to canonical alias per package.
-    t4_src = base_tables / "table_4_signature_deltas.csv"
-    t4_comment, _ = _split_csv_comment_header(t4_src.read_text(encoding="utf-8", errors="strict"))
-    t4_rows = _read_csv_skip_comments(t4_src)
-    t4_by_app = {(r.get("app") or "").strip(): r for r in t4_rows if (r.get("app") or "").strip()}
-    ordered_t4: list[dict[str, str]] = []
-    for pkg in contracts.package_order:
-        canonical = contracts.display_name_by_package.get(pkg, pkg)
-        candidates = [canonical] + _legacy_label_variants_for_pkg(pkg)
-        found: dict[str, str] | None = None
-        for label in candidates:
-            if label in t4_by_app:
-                found = dict(t4_by_app[label])
-                break
-        if not found:
-            raise RuntimeError(f"Missing Table 4 row for package {pkg}; tried labels {candidates}")
-        found["app"] = canonical
-        ordered_t4.append(found)
-    if ordered_t4:
-        (tables_dir / "table_4_signature_deltas.csv").write_text(
-            _write_csv_text_with_header(
-                comment_header=t4_comment,
-                fieldnames=list(ordered_t4[0].keys()),
-                rows=ordered_t4,
-            ),
-            encoding="utf-8",
-        )
-    (tables_dir / "table_4_signature_deltas.tex").write_text(
-        _render_tabular_from_rows(
-            columns=[
-                ("app", "App"),
-                ("bytes_p50_delta", "Bytes/s Δ p50"),
-                ("bytes_p95_delta", "Bytes/s Δ p95"),
-                ("pps_p50_delta", "PPS Δ p50"),
-                ("pps_p95_delta", "PPS Δ p95"),
-                ("pkt_size_p50_delta", "PktSz Δ p50"),
-                ("pkt_size_p95_delta", "PktSz Δ p95"),
-            ],
-            rows=ordered_t4,
-            caption_comment="Table 4: Behavioral signature deltas (idle vs interactive), window stats (p50/p95 deltas).",
-        ),
-        encoding="utf-8",
-    )
-
-    # IEEE style touch-up for surfaced tabular-only TeX tables (booktabs rules).
-    for stem in ("table_4_signature_deltas", "table_7_exposure_deviation_summary"):
-        p = tables_dir / f"{stem}.tex"
-        if p.exists():
-            p.write_text(_ieeeify_tabular_booktabs(p.read_text(encoding="utf-8", errors="strict")), encoding="utf-8")
-
-    # Surface remaining baseline tables for publication assembly (pure copy).
-    # Table 4 and Table 7 are already rewritten above for ordering/label stability.
-    for p in sorted(base_tables.glob("table_*.csv")):
-        if p.name in {"table_4_signature_deltas.csv", "table_7_exposure_deviation_summary.csv"}:
-            continue
-        _copy(p, tables_dir / p.name, overwrite=overwrite)
-    for p in sorted(base_tables.glob("table_*.tex")):
-        if p.name in {"table_4_signature_deltas.tex", "table_7_exposure_deviation_summary.tex"}:
-            continue
-        _copy(p, tables_dir / p.name, overwrite=overwrite)
-    for p in sorted(base_tables.glob("table_*.xlsx")):
-        _copy(p, tables_dir / p.name, overwrite=overwrite)
+    # NOTE: The canonical publication bundle intentionally does NOT surface internal baseline tables
+    # (Table 1-8, TeX renderings, etc.). Those live under output/_internal/paper2/baseline/ and can be
+    # used for exploration without polluting the submission bundle.
 
     # Surface baseline figures for publication assembly (pure copy).
     base_figs = baseline_bundle_root / "figures"
@@ -496,23 +367,10 @@ def write_canonical_publication_directory(
 
     # Manifests: baseline + (optional) snapshot.
     base_manifest = baseline_bundle_root / "manifest"
-    _copy(base_manifest / "dataset_freeze.json", manifests_dir / "dataset_freeze.json", overwrite=overwrite)
-    _copy(base_manifest / "phase_e_closure_record.json", manifests_dir / "phase_e_closure_record.json", overwrite=overwrite)
+    if (base_manifest / "dataset_freeze.json").exists():
+        _copy(base_manifest / "dataset_freeze.json", manifests_dir / "dataset_freeze.json", overwrite=overwrite)
     _copy(display_name_map_path(), manifests_dir / "display_name_map.json", overwrite=overwrite)
     _copy(app_ordering_path(), manifests_dir / "app_ordering.json", overwrite=overwrite)
-
-    # Crosschecks prefer a self-contained source for "RDI truth" rather than reading from gitignored data/.
-    # This is a pure copy; it does not regenerate or alter any values.
-    try:
-        internal_inputs = (publication_root / "internal" / "baseline" / "inputs")
-        internal_inputs.mkdir(parents=True, exist_ok=True)
-        repo_root = Path(__file__).resolve().parents[2]
-        src = repo_root / "data" / "anomaly_prevalence_per_app_phase.csv"
-        if src.exists():
-            _copy(src, internal_inputs / "anomaly_prevalence_per_app_phase.csv", overwrite=overwrite)
-    except Exception:
-        # Non-fatal: gates will fall back (or fail-closed) depending on posture.
-        pass
 
     # Prefer the snapshot's pinned toolchain text if present; fallback to repo pins.
     toolchain_src = None
@@ -544,17 +402,21 @@ def write_canonical_publication_directory(
             (snapshot_id or snapshot_dir.name) + "\n", encoding="utf-8"
         )
 
-        # Render compact TeX risk scoring table from snapshot tables.
-        snap_tables = snapshot_dir / "tables"
-        risk_rows = _read_csv_rows(snap_tables / "risk_summary_per_group.csv")
-        (tables_dir / "table_risk_scoring.tex").write_text(
-            _render_risk_scoring_tabular_tex(
-                risk_rows,
-                package_order=contracts.package_order,
-                display_name_by_package=contracts.display_name_by_package,
-            ),
-            encoding="utf-8",
-        )
+        # Render compact TeX risk scoring table from snapshot tables for provenance only.
+        # Keep this out of paper-facing tables until authors finalize naming/placement.
+        try:
+            snap_tables = snapshot_dir / "tables"
+            risk_rows = _read_csv_rows(snap_tables / "risk_summary_per_group.csv")
+            (internal_prov / "risk_scoring_group_summary.tex").write_text(
+                _render_risk_scoring_tabular_tex(
+                    risk_rows,
+                    package_order=contracts.package_order,
+                    display_name_by_package=contracts.display_name_by_package,
+                ),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
 
         # Archive full snapshot under internal/ for provenance.
         sid = snapshot_id or snapshot_dir.name
@@ -595,11 +457,8 @@ def write_canonical_publication_directory(
                 f"- manifests: `{manifests_dir.relative_to(publication_root)}/`",
                 "",
                 "Primary artifacts (stable filenames):",
-                "- Figures: `figures/fig_b1_timeline_*.pdf` (Fig B1 exemplar), `figures/fig_b2_*.pdf` (Fig B2 variants), `figures/fig_b4_static_vs_rdi.pdf`",
-                "- Tables: `tables/table_*.csv` + `tables/table_*.tex` (Table 1-8 + derived presentation tables).",
-                "",
-                "Internal provenance (not used directly by LaTeX):",
-                f"- internal: `{bundle_paths.output_publication_internal_root().relative_to(publication_root)}/`",
+                "- Figures: `figures/fig_b1_timeline_*.pdf` (Fig B1 exemplar), `figures/fig_b2_*.pdf` (Fig B2 variants), `figures/fig_b4_static_vs_rdi_{social,messaging}.pdf`",
+                "- Tables: `tables/paper_*.csv` (cohort + baseline + delta + correlation + Appendix A1).",
                 "",
                 "Snapshot surfaced:",
                 f"- `{surfaced['snapshot_id']}`" if surfaced["snapshot_id"] else "- (none)",

@@ -10,8 +10,8 @@ Outputs are written to stable manuscript-facing paths under `output/publication/
 
 Inputs:
 - data/archive/dataset_freeze.json (canonical freeze anchor)
-- output/publication/tables/table_1_rdi_prevalence.csv (RDI prevalence by app/phase)
-- output/publication/tables/table_7_exposure_deviation_summary.csv (static-vs-dynamic)
+- output/_internal/paper2/baseline/tables/table_1_rdi_prevalence.csv (RDI prevalence by app/phase)
+- output/_internal/paper2/baseline/tables/table_7_exposure_deviation_summary.csv (static-vs-dynamic)
 - output/evidence/dynamic/<run_id>/run_manifest.json (window_count + run_profile)
 """
 
@@ -32,8 +32,12 @@ from pathlib import Path
 import numpy as np
 import scipy.stats
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scytaledroid.Utils.IO.csv_with_provenance import read_csv_with_provenance
+
 FREEZE = REPO_ROOT / "data" / "archive" / "dataset_freeze.json"
 EVIDENCE_ROOT = REPO_ROOT / "output" / "evidence" / "dynamic"
 
@@ -41,11 +45,16 @@ PUB_ROOT = REPO_ROOT / "output" / "publication"
 PUB_TABLES = PUB_ROOT / "tables"
 PUB_MANIFESTS = PUB_ROOT / "manifests"
 
+# Baseline bundle is the source-of-truth for internal baseline tables (Table 1-8).
+# Publication outputs should stay minimal and paper-facing; do not depend on
+# publication/ containing internal baseline tables.
+INTERNAL_BASELINE_ROOT = REPO_ROOT / "output" / "_internal" / "paper2" / "baseline"
+
 APP_ORDER = PUB_MANIFESTS / "app_ordering.json"
 DISPLAY_MAP = PUB_MANIFESTS / "display_name_map.json"
 
-TABLE_1 = PUB_TABLES / "table_1_rdi_prevalence.csv"
-TABLE_7 = PUB_TABLES / "table_7_exposure_deviation_summary.csv"
+TABLE_1 = INTERNAL_BASELINE_ROOT / "tables" / "table_1_rdi_prevalence.csv"
+TABLE_7 = INTERNAL_BASELINE_ROOT / "tables" / "table_7_exposure_deviation_summary.csv"
 APPENDIX_A1_OCSVM = PUB_TABLES / "appendix_table_a1_ocsvm_robustness.csv"
 
 
@@ -58,22 +67,21 @@ def _sha256_file(path: Path) -> str:
 
 
 def _read_csv_skip_comments(path: Path) -> list[dict[str, str]]:
-    lines: list[str] = []
-    for ln in path.read_text(encoding="utf-8", errors="strict").splitlines():
-        if not ln.strip():
-            continue
-        if ln.lstrip().startswith("#"):
-            continue
-        lines.append(ln + "\n")
-    rdr = csv.DictReader(lines)
-    return [dict(r) for r in rdr]
+    return read_csv_with_provenance(path).rows
 
 
-def _write_csv_with_comments(path: Path, *, comments: list[str], fieldnames: list[str], rows: list[dict[str, object]]) -> None:
+def _write_csv_paper_facing(path: Path, *, fieldnames: list[str], rows: list[dict[str, object]]) -> None:
+    """Write a plain CSV (no comment headers).
+
+    Paper-facing CSVs should be directly sortable/filterable in standard tools
+    (Excel/LibreOffice/pandas) without special provenance-aware parsing.
+
+    Provenance lives in:
+    - output/publication/manifests/paper_results_v1.json
+    - output/publication/manifests/canonical_receipt.json
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as f:
-        for c in comments:
-            f.write(f"# {c}\n")
         w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         w.writeheader()
         for r in rows:
@@ -116,6 +124,12 @@ def _bootstrap_spearman_ci(xs: list[float], ys: list[float], *, n: int = 10_000,
     lo = float(np.quantile(stats, alpha / 2.0))
     hi = float(np.quantile(stats, 1.0 - alpha / 2.0))
     return lo, hi
+
+
+def _q(values: list[float], q: float) -> float:
+    if not values:
+        return float("nan")
+    return float(np.quantile(np.array(values, dtype=float), q, method="linear"))
 
 
 @dataclass(frozen=True)
@@ -321,17 +335,37 @@ def main() -> int:
     runs_by_pkg: dict[str, dict[str, int]] = {pkg: {"idle": 0, "scripted": 0, "manual": 0, "other": 0} for pkg in order}
     windows_by_pkg: dict[str, dict[str, int]] = {pkg: {"idle": 0, "scripted": 0, "manual": 0, "other": 0} for pkg in order}
     per_run_windows: list[int] = []
+    def _ml_window_count(run_id: str) -> int | None:
+        """Preferred window count source: ML-scored windows (authoritative for RDI)."""
+        p = EVIDENCE_ROOT / run_id / "analysis" / "ml" / "v1" / "anomaly_scores_iforest.csv"
+        if not p.exists():
+            return None
+        try:
+            # Count data rows; ignore header + blank lines.
+            n = 0
+            with p.open("r", encoding="utf-8") as f:
+                for i, ln in enumerate(f):
+                    if i == 0:
+                        continue
+                    if ln.strip():
+                        n += 1
+            return int(n)
+        except Exception:
+            return None
+
     for rid in included_run_ids:
         man_path = EVIDENCE_ROOT / rid / "run_manifest.json"
         man = json.loads(man_path.read_text(encoding="utf-8"))
         tgt = man.get("target") if isinstance(man.get("target"), dict) else {}
         pkg = str(tgt.get("package_name") or "").strip().lower()
         ds = man.get("dataset") if isinstance(man.get("dataset"), dict) else {}
-        wc = ds.get("window_count")
-        try:
-            wc_i = int(wc) if wc not in (None, "") else 0
-        except Exception:
-            wc_i = 0
+        wc_i = _ml_window_count(rid)
+        if wc_i is None:
+            wc = ds.get("window_count")
+            try:
+                wc_i = int(wc) if wc not in (None, "") else 0
+            except Exception:
+                wc_i = 0
         per_run_windows.append(wc_i)
         op = man.get("operator") if isinstance(man.get("operator"), dict) else {}
         run_profile = str(op.get("run_profile") or ds.get("run_profile") or "").strip().lower()
@@ -351,37 +385,47 @@ def main() -> int:
     windows_per_run_mean = float(windows_total / float(n_runs_total)) if n_runs_total else 0.0
     windows_per_run_min = int(min(per_run_windows)) if per_run_windows else 0
     windows_per_run_max = int(max(per_run_windows)) if per_run_windows else 0
+    runs_scripted_total = int(sum(runs_by_pkg[p]["scripted"] for p in order))
+    runs_manual_total = int(sum(runs_by_pkg[p]["manual"] for p in order))
+    runs_other_total = int(sum(runs_by_pkg[p]["other"] for p in order))
+    runs_interactive_total = int(runs_scripted_total + runs_manual_total + runs_other_total)
+    runs_idle_total_by_bucket = int(sum(runs_by_pkg[p]["idle"] for p in order))
+    windows_scripted_total = int(sum(windows_by_pkg[p]["scripted"] for p in order))
+    windows_manual_total = int(sum(windows_by_pkg[p]["manual"] for p in order))
+    windows_other_total = int(sum(windows_by_pkg[p]["other"] for p in order))
+    windows_interactive_total_by_bucket = int(windows_scripted_total + windows_manual_total + windows_other_total)
+    windows_idle_total_by_bucket = int(sum(windows_by_pkg[p]["idle"] for p in order))
 
     # Export: paper_cohort_summary_v1.csv
     excluded_counts = freeze.get("excluded_reason_counts_by_app") if isinstance(freeze.get("excluded_reason_counts_by_app"), dict) else {}
     cohort_rows: list[dict[str, object]] = []
     for pkg in order:
+        runs_interactive = int(runs_by_pkg[pkg]["scripted"] + runs_by_pkg[pkg]["manual"] + runs_by_pkg[pkg]["other"])
+        windows_interactive = int(
+            windows_by_pkg[pkg]["scripted"] + windows_by_pkg[pkg]["manual"] + windows_by_pkg[pkg]["other"]
+        )
         cohort_rows.append(
             {
                 "app": display.get(pkg, pkg),
                 "package_name": pkg,
                 "runs_idle": runs_by_pkg[pkg]["idle"],
                 "runs_scripted": runs_by_pkg[pkg]["scripted"],
+                "runs_manual": runs_by_pkg[pkg]["manual"],
+                "runs_other": runs_by_pkg[pkg]["other"],
+                "runs_interactive": runs_interactive,
                 "runs_total": sum(runs_by_pkg[pkg].values()),
                 "windows_idle": windows_by_pkg[pkg]["idle"],
                 "windows_scripted": windows_by_pkg[pkg]["scripted"],
+                "windows_manual": windows_by_pkg[pkg]["manual"],
+                "windows_other": windows_by_pkg[pkg]["other"],
+                "windows_interactive": windows_interactive,
                 "windows_total": sum(windows_by_pkg[pkg].values()),
                 "excluded_runs_total": int(sum((excluded_counts.get(pkg) or {}).values())) if isinstance(excluded_counts.get(pkg), dict) else 0,
                 "excluded_reasons": json.dumps(excluded_counts.get(pkg) or {}, sort_keys=True),
             }
         )
     cohort_path = PUB_TABLES / "paper_cohort_summary_v1.csv"
-    _write_csv_with_comments(
-        cohort_path,
-        comments=[
-            f"freeze_anchor: {FREEZE.relative_to(REPO_ROOT)}",
-            f"freeze_sha256: {freeze_sha}",
-            "schema: paper_cohort_summary_v1",
-            f"generated_at_utc: {datetime.now(UTC).isoformat()}",
-        ],
-        fieldnames=list(cohort_rows[0].keys()),
-        rows=cohort_rows,
-    )
+    _write_csv_paper_facing(cohort_path, fieldnames=list(cohort_rows[0].keys()), rows=cohort_rows)
 
     # Export: baseline_stability_summary.csv (per-app + cohort summary).
     baseline_rows: list[dict[str, object]] = []
@@ -399,19 +443,7 @@ def main() -> int:
             }
         )
     baseline_path = PUB_TABLES / "baseline_stability_summary.csv"
-    _write_csv_with_comments(
-        baseline_path,
-        comments=[
-            f"freeze_anchor: {FREEZE.relative_to(REPO_ROOT)}",
-            f"freeze_sha256: {freeze_sha}",
-            "note: if_idle_sd_per_app is blank because each app has 1 idle run in the frozen cohort.",
-            f"mu_baseline_if: {if_idle_mean:.6f}",
-            f"sigma_baseline_if_sample: {if_idle_sd:.6f}",
-            f"mu_baseline_if_ci95: [{mu_ci[0]:.6f}, {mu_ci[1]:.6f}]",
-        ],
-        fieldnames=list(baseline_rows[0].keys()),
-        rows=baseline_rows,
-    )
+    _write_csv_paper_facing(baseline_path, fieldnames=list(baseline_rows[0].keys()), rows=baseline_rows)
 
     # Export: interaction_delta_summary.csv
     delta_rows: list[dict[str, object]] = []
@@ -419,31 +451,25 @@ def main() -> int:
         app, r = _t1_row_for_pkg(pkg)
         idle = _f(r["if_idle"])
         inter = _f(r["if_interactive"])
+        runs_interactive = int(runs_by_pkg[pkg]["scripted"] + runs_by_pkg[pkg]["manual"] + runs_by_pkg[pkg]["other"])
         delta_rows.append(
             {
                 "app": app,
                 "package_name": pkg,
                 "if_idle_mean": idle,
-                "if_scripted_mean": inter,
+                # NOTE: this is *interactive* mean (two interactive runs, may include scripted+manual depending on cohort).
+                "if_interactive_mean": inter,
                 "if_delta": inter - idle,
                 "idle_windows": _i(r["idle_windows"]),
-                "scripted_windows_total": _i(r["interactive_windows"]),
+                "interactive_windows_total": _i(r["interactive_windows"]),
+                "runs_interactive_total": runs_interactive,
+                "runs_interactive_scripted": runs_by_pkg[pkg]["scripted"],
+                "runs_interactive_manual": runs_by_pkg[pkg]["manual"],
+                "runs_interactive_other": runs_by_pkg[pkg]["other"],
             }
         )
     delta_path = PUB_TABLES / "interaction_delta_summary.csv"
-    _write_csv_with_comments(
-        delta_path,
-        comments=[
-            f"freeze_anchor: {FREEZE.relative_to(REPO_ROOT)}",
-            f"freeze_sha256: {freeze_sha}",
-            f"delta_mean_if: {if_delta_mean:.6f}",
-            f"delta_mean_if_ci95: [{d_ci[0]:.6f}, {d_ci[1]:.6f}]",
-            f"pct_apps_scripted_gt_idle: {if_delta_pos_pct:.6f}",
-            f"cohens_dz_paired: {dz:.6f}",
-        ],
-        fieldnames=list(delta_rows[0].keys()),
-        rows=delta_rows,
-    )
+    _write_csv_paper_facing(delta_path, fieldnames=list(delta_rows[0].keys()), rows=delta_rows)
 
     # Export: Appendix Table A1 (OC-SVM robustness summary).
     oc_rows: list[dict[str, object]] = []
@@ -451,32 +477,23 @@ def main() -> int:
         app, r = _t1_row_for_pkg(pkg)
         idle = _f(r["oc_idle"])
         inter = _f(r["oc_interactive"])
+        runs_interactive = int(runs_by_pkg[pkg]["scripted"] + runs_by_pkg[pkg]["manual"] + runs_by_pkg[pkg]["other"])
         oc_rows.append(
             {
                 "app": str(display.get(pkg, app) or app),
                 "package_name": pkg,
                 "oc_idle_mean": idle,
-                "oc_scripted_mean": inter,
+                "oc_interactive_mean": inter,
                 "oc_delta": inter - idle,
                 "idle_windows": _i(r["idle_windows"]),
-                "scripted_windows_total": _i(r["interactive_windows"]),
+                "interactive_windows_total": _i(r["interactive_windows"]),
+                "runs_interactive_total": runs_interactive,
+                "runs_interactive_scripted": runs_by_pkg[pkg]["scripted"],
+                "runs_interactive_manual": runs_by_pkg[pkg]["manual"],
+                "runs_interactive_other": runs_by_pkg[pkg]["other"],
             }
         )
-    _write_csv_with_comments(
-        APPENDIX_A1_OCSVM,
-        comments=[
-            f"freeze_anchor: {FREEZE.relative_to(REPO_ROOT)}",
-            f"freeze_sha256: {freeze_sha}",
-            "appendix_table: A1",
-            "metric: RDI (ratio in [0,1]) derived from OCSVM flagged windows",
-            f"oc_delta_mean: {oc_delta_mean:.6f}",
-            f"oc_pct_apps_scripted_gt_idle: {oc_pos_pct:.6f} ({oc_pos_apps}/{n_apps})",
-            f"oc_spearman_rho_static_vs_oc_scripted: {oc_rho:.6f}",
-            f"oc_spearman_p_static_vs_oc_scripted: {oc_p:.6f}",
-        ],
-        fieldnames=list(oc_rows[0].keys()),
-        rows=oc_rows,
-    )
+    _write_csv_paper_facing(APPENDIX_A1_OCSVM, fieldnames=list(oc_rows[0].keys()), rows=oc_rows)
 
     # Export: static_dynamic_correlation.csv
     corr_rows: list[dict[str, object]] = []
@@ -490,22 +507,13 @@ def main() -> int:
                 "app": str(display.get(pkg, pkg) or pkg),
                 "package_name": pkg,
                 "static_exposure_score": _f(r["static_exposure_score"]),
-                "if_scripted_rdi_mean": _f(r["rdi_if_interactive"]),
+                "if_interactive_rdi_mean": _f(r["rdi_if_interactive"]),
+                "runs_interactive_scripted": int(runs_by_pkg[pkg]["scripted"]),
+                "runs_interactive_manual": int(runs_by_pkg[pkg]["manual"]),
             }
         )
     corr_path = PUB_TABLES / "static_dynamic_correlation.csv"
-    _write_csv_with_comments(
-        corr_path,
-        comments=[
-            f"freeze_anchor: {FREEZE.relative_to(REPO_ROOT)}",
-            f"freeze_sha256: {freeze_sha}",
-            f"spearman_rho: {float(sp.statistic):.6f}",
-            f"spearman_p: {float(sp.pvalue):.6f}",
-            f"spearman_rho_ci95_bootstrap: [{rho_ci[0]:.6f}, {rho_ci[1]:.6f}]",
-        ],
-        fieldnames=list(corr_rows[0].keys()),
-        rows=corr_rows,
-    )
+    _write_csv_paper_facing(corr_path, fieldnames=list(corr_rows[0].keys()), rows=corr_rows)
 
     # Export consolidated paper_results_v1.json (single source of truth for numbers).
     toolchain = {
@@ -539,10 +547,17 @@ def main() -> int:
             "app": str(display.get(pkg, app) or app),
             "package_name": str(pkg),
             "idle_rdi_mean": float(idle),
+            "interactive_rdi_mean": float(inter),
+            # Back-compat alias.
             "scripted_rdi_mean": float(inter),
             "delta_rdi": float(d),
             "idle_windows": int(_i(r["idle_windows"])),
+            "interactive_windows_total": int(_i(r["interactive_windows"])),
+            # Back-compat alias.
             "scripted_windows_total": int(_i(r["interactive_windows"])),
+            "runs_interactive_scripted": int(runs_by_pkg[pkg]["scripted"]),
+            "runs_interactive_manual": int(runs_by_pkg[pkg]["manual"]),
+            "runs_interactive_other": int(runs_by_pkg[pkg]["other"]),
         }
         per_app.append(row)
         if d < 0:
@@ -597,15 +612,54 @@ def main() -> int:
             "delta_negative_apps": delta_negative,
             "delta_near_zero_apps_abs_le_0_01": delta_near_zero,
             "spearman_observations_n": n_apps,
-            "static_dynamic_fields": ["static_exposure_score", "scripted_rdi_mean"],
+            "static_dynamic_fields": ["static_exposure_score", "interactive_rdi_mean"],
             "paired_design": "per-app means computed before cohort aggregation",
             "ocsvm_appendix_a1_path": str(APPENDIX_A1_OCSVM.relative_to(REPO_ROOT)),
             "ocsvm_delta_mean": oc_delta_mean,
             "ocsvm_pos_apps": oc_pos_apps,
             "ocsvm_pos_pct": oc_pos_pct,
             "ocsvm_pct_positive": oc_pos_pct,
+            "ocsvm_spearman_rho_static_vs_oc_interactive": oc_rho,
+            "ocsvm_spearman_p_static_vs_oc_interactive": oc_p,
+            # Back-compat keys.
             "ocsvm_spearman_rho_static_vs_oc_scripted": oc_rho,
             "ocsvm_spearman_p_static_vs_oc_scripted": oc_p,
+            "interaction_run_level_breakdown": {
+                "runs_scripted_total": runs_scripted_total,
+                "runs_manual_total": runs_manual_total,
+                "runs_other_total": runs_other_total,
+                "runs_interactive_total": runs_interactive_total,
+                "runs_idle_total_by_bucket": runs_idle_total_by_bucket,
+                "windows_scripted_total": windows_scripted_total,
+                "windows_manual_total": windows_manual_total,
+                "windows_other_total": windows_other_total,
+                "windows_interactive_total_by_bucket": windows_interactive_total_by_bucket,
+                "windows_idle_total_by_bucket": windows_idle_total_by_bucket,
+            },
+            # Distribution descriptors (reviewer-friendly).
+            "idle_rdi_median": float(_q([float(r["idle_rdi_mean"]) for r in per_app], 0.5)),
+            "idle_rdi_q25": float(_q([float(r["idle_rdi_mean"]) for r in per_app], 0.25)),
+            "idle_rdi_q75": float(_q([float(r["idle_rdi_mean"]) for r in per_app], 0.75)),
+            "idle_rdi_min": float(min(float(r["idle_rdi_mean"]) for r in per_app)),
+            "idle_rdi_max": float(max(float(r["idle_rdi_mean"]) for r in per_app)),
+            "interactive_rdi_median": float(_q([float(r["interactive_rdi_mean"]) for r in per_app], 0.5)),
+            "interactive_rdi_q25": float(_q([float(r["interactive_rdi_mean"]) for r in per_app], 0.25)),
+            "interactive_rdi_q75": float(_q([float(r["interactive_rdi_mean"]) for r in per_app], 0.75)),
+            "delta_rdi_median": float(_q([float(r["delta_rdi"]) for r in per_app], 0.5)),
+            "delta_rdi_q25": float(_q([float(r["delta_rdi"]) for r in per_app], 0.25)),
+            "delta_rdi_q75": float(_q([float(r["delta_rdi"]) for r in per_app], 0.75)),
+            "delta_rdi_min": float(min(float(r["delta_rdi"]) for r in per_app)),
+            "delta_rdi_max": float(max(float(r["delta_rdi"]) for r in per_app)),
+            "interactive_rdi_max": float(max(float(r["interactive_rdi_mean"]) for r in per_app)),
+            "interactive_rdi_min": float(min(float(r["interactive_rdi_mean"]) for r in per_app)),
+            "interactive_rdi_ge_0_95_apps": int(sum(1 for r in per_app if float(r["interactive_rdi_mean"]) >= 0.95)),
+            # Back-compat duplicates (do not interpret as scripted-only unless manual_total==0).
+            "scripted_rdi_median": float(_q([float(r["scripted_rdi_mean"]) for r in per_app], 0.5)),
+            "scripted_rdi_q25": float(_q([float(r["scripted_rdi_mean"]) for r in per_app], 0.25)),
+            "scripted_rdi_q75": float(_q([float(r["scripted_rdi_mean"]) for r in per_app], 0.75)),
+            "scripted_rdi_max": float(max(float(r["scripted_rdi_mean"]) for r in per_app)),
+            "scripted_rdi_min": float(min(float(r["scripted_rdi_mean"]) for r in per_app)),
+            "scripted_rdi_ge_0_95_apps": int(sum(1 for r in per_app if float(r["scripted_rdi_mean"]) >= 0.95)),
         },
         toolchain=toolchain,
         host=host,

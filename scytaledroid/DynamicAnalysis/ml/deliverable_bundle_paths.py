@@ -6,8 +6,8 @@ Policy:
   - output/publication/figures
   - output/publication/appendix
   - output/publication/manifests
-- Snapshot/provenance separation exists only under `output/publication/internal/` so
-  authors don't need to navigate internal trees.
+- Provenance and internal regression artifacts must NOT live under `output/publication/`.
+  They are written under `output/_internal/` to keep the paper bundle minimal.
 
 Note:
 - Some older modules still refer to these as "paper" paths. Legacy helper names remain
@@ -59,8 +59,14 @@ def output_publication_manifests_dir() -> Path:
     return output_publication_root() / "manifests"
 
 
+def output_internal_root() -> Path:
+    """Non-paper internal outputs (provenance, regressions, snapshots)."""
+    return Path(app_config.OUTPUT_DIR) / "_internal"
+
+
 def output_publication_internal_root() -> Path:
-    return output_publication_root() / "internal"
+    # Keep legacy function name, but move internal artifacts out of the canonical paper bundle.
+    return output_internal_root() / "publication"
 
 
 def output_publication_internal_provenance_dir() -> Path:
@@ -77,7 +83,8 @@ def output_publication_internal_snapshot_dir(snapshot_id: str) -> Path:
 
 # Internal Phase E baseline bundle (deterministic, used for regression gates).
 def output_phase_e_bundle_root() -> Path:
-    return output_publication_internal_root() / "baseline"
+    # Keep deterministic Phase E artifacts outside the paper bundle.
+    return output_internal_root() / "paper2" / "baseline"
 
 
 def output_phase_e_bundle_figures_dir() -> Path:

@@ -2,8 +2,8 @@
 
 APP_NAME = "ScytaleDroid"
 APP_VERSION = "2.0.1"
-APP_RELEASE = "Alpha"
-APP_DESCRIPTION = "Android Security Research Platform"
+APP_RELEASE = "Research"
+APP_DESCRIPTION = "Android Application Behavioral Risk Research Platform"
 APP_AUTHOR = "Kevin Day"
 
 # Github

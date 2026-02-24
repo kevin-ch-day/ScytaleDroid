@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import shutil
 from collections.abc import Iterable
 from datetime import UTC, datetime
@@ -380,7 +381,7 @@ def _write_phase_e_deliverables_bundle_from_pin() -> bool:
         print(status_messages.status(f"Bundle generation failed: {exc}", level="fail"))
         return False
 
-    print(status_messages.status(f"Wrote internal baseline bundle: {relative_path(output_phase_e_bundle_root())}", level="success"))
+    print(status_messages.status(f"Wrote baseline bundle: {relative_path(output_phase_e_bundle_root())}", level="success"))
     print(status_messages.status(f"Manifest: {relative_path(artifacts.artifacts_manifest_json)}", level="info"))
     try:
         required_payload = json.loads(artifacts.required_fields_validation_json.read_text(encoding="utf-8"))
@@ -404,30 +405,7 @@ def _write_phase_e_deliverables_bundle_from_pin() -> bool:
             )
     except Exception:
         print(status_messages.status("Paper contract: DOWNGRADED -> EXPERIMENTAL (missing: validation state)", level="warn"))
-    print(
-        status_messages.status(
-            "Comparison metrics: output/paper/internal/baseline/tables/table_8_model_comparison_metrics.csv",
-            level="info",
-        )
-    )
-    print(
-        status_messages.status(
-            "Required fields validation: output/paper/internal/baseline/manifest/required_fields_validation.json",
-            level="info",
-        )
-    )
-    print(
-        status_messages.status(
-            "Report wording lint: output/paper/internal/baseline/manifest/report_contract_lint.json",
-            level="info",
-        )
-    )
-    print(
-        status_messages.status(
-            "Determinism checksums: output/paper/internal/baseline/manifest/determinism_checksums.json",
-            level="info",
-        )
-    )
+    # Keep output short; deep audit paths live in the bundle manifest + pipeline audit.
     return True
 
 
@@ -902,6 +880,7 @@ def fetch_publication_status() -> dict[str, object]:
         "publication_figures_label": "0",
         "results_numbers_label": "missing",
         "exports_label": "missing",
+        "qa_label": "missing",
         "footer": "",
     }
 
@@ -933,9 +912,13 @@ def fetch_publication_status() -> dict[str, object]:
     # Publication bundle surface.
     pub_root = Path(app_config.OUTPUT_DIR) / "publication"
     status["publication_root_label"] = str(relative_path(pub_root))
+    from scytaledroid.Publication.publication_contract import lint_publication_bundle
+    lint = lint_publication_bundle(pub_root)
     tables_dir = pub_root / "tables"
     figs_dir = pub_root / "figures"
     results_numbers = pub_root / "appendix" / "results_section_V.md"
+    paste_blocks = pub_root / "appendix" / "paper2_ieee_paste_blocks.md"
+    qa_dir = pub_root / "qa"
     exports = [
         Path(app_config.DATA_DIR) / "archive" / "dynamic_run_summary.csv",
         Path(app_config.DATA_DIR) / "archive" / "pcap_features.csv",
@@ -943,25 +926,33 @@ def fetch_publication_status() -> dict[str, object]:
     ]
 
     if tables_dir.exists():
-        status["publication_tables_label"] = str(len(list(tables_dir.glob("table_*.csv"))))
+        # Paper assembly needs all surfaced CSVs (not only `table_*.csv`).
+        status["publication_tables_label"] = str(len(list(tables_dir.glob("*.csv"))))
     if figs_dir.exists():
-        status["publication_figures_label"] = str(len(list(figs_dir.glob("fig_*.pdf"))))
-    if results_numbers.exists():
+        # Paper-facing figures live under output/publication/figures. Exploratory/post-paper
+        # figures should live under output/publication/explore/ and must not inflate the
+        # paper status snapshot.
+        paper_figs = []
+        for p in figs_dir.glob("*.pdf"):
+            stem = p.stem.lower()
+            if stem.startswith(("fig_b1", "fig_b2", "fig_b3", "fig_b4")):
+                paper_figs.append(p)
+        status["publication_figures_label"] = str(len(paper_figs))
+    if results_numbers.exists() or paste_blocks.exists():
         status["results_numbers_label"] = "present"
     if all(p.exists() for p in exports):
         status["exports_label"] = "present"
+    if qa_dir.exists() and (qa_dir / "qa_stats_validation.json").exists():
+        status["qa_label"] = "present"
 
-    status["publication_ready"] = bool(
-        (pub_root / "manifests" / "dataset_freeze.json").exists()
-        and (tables_dir / "table_1_rdi_prevalence.csv").exists()
-        and (figs_dir / "fig_b4_static_vs_rdi.pdf").exists()
-        and results_numbers.exists()
-    )
+    status["publication_ready"] = bool(lint.ok)
 
-    if status["publication_ready"]:
-        status["footer"] = "All paper-facing artifacts are present under output/publication/."
+    if not status["publication_ready"]:
+        # Keep it short; detailed reasons exist in saved reports / audits.
+        first = lint.errors[0] if lint.errors else "unknown"
+        status["footer"] = f"Publication bundle NOT READY ({first}). Run: 1) Regenerate artifacts, then 5) Write bundle."
     else:
-        status["footer"] = "Missing publication artifacts. Run [1] then [2], then [4]."
+        status["footer"] = ""
 
     return status
 
@@ -1042,8 +1033,154 @@ def handle_generate_paper2_results_numbers() -> None:
         print(status_messages.status(f"Wrote: {relative_path(out_json)}", level="success"))
 
 
+def handle_generate_paper2_exploratory_risk_scoring() -> None:
+    """Generate exploratory risk scoring artifacts (neutral filenames).
+
+    These are intentionally not wired into the paper bundle's canonical filenames
+    until the authors sign off on naming, interpretation, and placement.
+    """
+
+    script = Path(__file__).resolve().parents[2] / "scripts" / "paper2" / "paper2_risk_scoring_artifacts.py"
+    if not script.exists():
+        print(status_messages.status(f"Missing script: {relative_path(script)}", level="error"))
+        return
+
+    import runpy
+
+    print()
+    menu_utils.print_header("Exploratory Risk Scoring (Not Paper-Named)")
+    try:
+        runpy.run_path(str(script), run_name="__main__")
+    except SystemExit as exc:
+        if int(getattr(exc, "code", 1) or 0) != 0:
+            print(status_messages.status(f"Generation failed: exit={exc.code}", level="error"))
+            return
+
+    explore_dir = Path(app_config.OUTPUT_DIR) / "experimental" / "paper2"
+    for name in (
+        "risk_scores_v1.csv",
+        "risk_scores_v1.json",
+        "risk_scores_v1.tex",
+        "risk_scores_v1_sorted_by_frs.csv",
+        "risk_scores_v1_sorted_by_drs.csv",
+        "risk_scores_v1_sorted_by_srs.csv",
+        "scatter_static_vs_dynamic_scores.pdf",
+        "ranked_fused_scores.pdf",
+    ):
+        p = explore_dir / name
+        if p.exists():
+            print(status_messages.status(f"Wrote: {relative_path(p)}", level="success"))
+
+
+def handle_generate_paper2_scientific_qa() -> None:
+    """Generate scientific QA reports for the frozen cohort (Paper #2)."""
+
+    script = Path(__file__).resolve().parents[2] / "scripts" / "paper2" / "paper2_scientific_qa.py"
+    if not script.exists():
+        print(status_messages.status(f"Missing script: {relative_path(script)}", level="error"))
+        return
+
+    import runpy
+
+    print()
+    menu_utils.print_header("Generate Paper #2 Scientific QA (Frozen Cohort)")
+    try:
+        runpy.run_path(str(script), run_name="__main__")
+    except SystemExit as exc:
+        if int(getattr(exc, "code", 1) or 0) != 0:
+            print(status_messages.status(f"QA generation failed: exit={exc.code}", level="error"))
+            return
+    out_dir = Path(app_config.OUTPUT_DIR) / "publication" / "qa"
+    if out_dir.exists():
+        print(status_messages.status(f"Wrote QA reports under: {relative_path(out_dir)}", level="success"))
+    prompt_utils.press_enter_to_continue()
+
+
+def handle_generate_paper2_pipeline_audit() -> None:
+    """Generate a deep ML+dynamic pipeline audit for Paper #2 (freeze-anchored)."""
+
+    script = Path(__file__).resolve().parents[2] / "scripts" / "paper2" / "paper2_pipeline_audit.py"
+    if not script.exists():
+        print(status_messages.status(f"Missing script: {relative_path(script)}", level="error"))
+        return
+
+    import runpy
+
+    print()
+    menu_utils.print_header("Paper #2 Pipeline Audit (ML + Dynamic)")
+    try:
+        runpy.run_path(str(script), run_name="__main__")
+    except SystemExit as exc:
+        if int(getattr(exc, "code", 1) or 0) != 0:
+            print(status_messages.status(f"Audit completed with errors: exit={exc.code}", level="error"))
+            prompt_utils.press_enter_to_continue()
+            return
+
+    out = Path(app_config.OUTPUT_DIR) / "publication" / "qa" / "paper2_pipeline_audit_v1.json"
+    if out.exists():
+        print(status_messages.status(f"Wrote: {relative_path(out)}", level="success"))
+    prompt_utils.press_enter_to_continue()
+
+
+def handle_print_manuscript_snapshot() -> None:
+    """Print a one-screen manuscript snapshot for meetings/reviews (freeze-anchored)."""
+
+    import json
+    from pathlib import Path
+
+    print()
+    menu_utils.print_header("Manuscript Snapshot (Paper #2)")
+    pub_root = Path(app_config.OUTPUT_DIR) / "publication"
+    results_path = pub_root / "manifests" / "paper_results_v1.json"
+    if not results_path.exists():
+        print(status_messages.status(f"Missing: {relative_path(results_path)}", level="error"))
+        print(status_messages.status("Fix: Reporting → Generate Results (Section V)", level="info"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    try:
+        payload = json.loads(results_path.read_text(encoding="utf-8"))
+    except Exception:
+        payload = None
+    if not isinstance(payload, dict):
+        print(status_messages.status("paper_results_v1.json parse failed.", level="error"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    freeze_hash = str(payload.get("freeze_dataset_hash") or "")
+    freeze_short = freeze_hash[:12] if freeze_hash else "missing"
+    n_apps = int(payload.get("n_apps") or 0)
+    runs_total = int(payload.get("n_runs_total") or 0)
+    runs_idle = int(payload.get("n_runs_idle") or 0)
+    runs_interactive = int(payload.get("n_runs_interactive") or 0)
+    windows_total = int(payload.get("windows_total") or 0)
+    windows_idle = int(payload.get("windows_idle_total") or 0)
+    windows_interactive = int(payload.get("windows_interactive_total") or 0)
+
+    mu = payload.get("if_idle_mean")
+    sd = payload.get("if_idle_sd_sample")
+    delta = payload.get("if_delta_mean")
+    w_p = payload.get("wilcoxon_p_value")
+    rho = payload.get("spearman_rho_static_vs_if_interactive")
+    pval = payload.get("spearman_p_static_vs_if_interactive")
+
+    # Keep it short and copy/paste friendly.
+    print(
+        f"Cohort: {n_apps} apps | {runs_total} runs ({runs_idle} idle, {runs_interactive} interactive) | {windows_total} windows ({windows_idle} idle, {windows_interactive} interactive)"
+    )
+    if mu is not None and sd is not None:
+        print(f"Baseline RDI (IF): mu={mu:.4f} sd={sd:.4f}")
+    if delta is not None and w_p is not None:
+        print(f"Interaction effect (IF): delta_mean={delta:.4f} | Wilcoxon p={w_p}")
+    if rho is not None and pval is not None:
+        print(f"Static vs Dynamic (Spearman): rho={rho} p={pval}")
+    print(f"Freeze: {freeze_short}")
+    print(status_messages.status(f"Source: {relative_path(results_path)}", level="info"))
+    prompt_utils.press_enter_to_continue()
+
+
 def handle_refresh_phase_e_bundle() -> None:
-    """Run Phase E ML over the frozen cohort and refresh baseline deliverables."""
+    """Run ML over the frozen cohort and refresh publication artifacts inputs."""
 
     from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_orchestrator import (
         run_ml_on_evidence_packs,
@@ -1063,8 +1200,8 @@ def handle_refresh_phase_e_bundle() -> None:
         return
 
     print()
-    menu_utils.print_header("Refresh Phase E Baseline Bundle")
-    print(status_messages.status("Running ML over frozen evidence packs (Phase E).", level="info"))
+    menu_utils.print_header("Regenerate Publication Artifacts")
+    print(status_messages.status("Running ML over frozen evidence packs.", level="info"))
     run_ml_on_evidence_packs(freeze_manifest_path=freeze_path, reuse_existing_outputs=True)
 
     # Ensure Fig B1 exemplar pin points at a real run with ML outputs.

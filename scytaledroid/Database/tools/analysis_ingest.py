@@ -112,11 +112,24 @@ class BundlePaths:
 def resolve_bundle_paths(*, bundle_root: Path) -> BundlePaths:
     bundle_root = bundle_root.resolve()
     manifests = bundle_root / "manifests"
-    internal_baseline = bundle_root / "internal" / "baseline"
     if not manifests.exists():
         raise RuntimeError(f"bundle_root missing manifests/: {manifests}")
+    # Newer bundles keep internal provenance/regression artifacts outside output/publication/.
+    internal_baseline = None
+    receipt = manifests / "canonical_receipt.json"
+    if receipt.exists():
+        try:
+            payload = _read_json(receipt)
+            internal_baseline = payload.get("baseline_bundle_root")
+        except Exception:
+            internal_baseline = None
+    if internal_baseline:
+        internal_baseline = Path(str(internal_baseline)).resolve()
+    else:
+        # Back-compat: older bundles stored internal baseline under output/publication/internal/baseline/.
+        internal_baseline = (bundle_root / "internal" / "baseline").resolve()
     if not internal_baseline.exists():
-        raise RuntimeError(f"bundle_root missing internal/baseline/: {internal_baseline}")
+        raise RuntimeError(f"internal baseline bundle missing: {internal_baseline}")
 
     snapshot_id = None
     snap_dir = None
@@ -126,9 +139,21 @@ def resolve_bundle_paths(*, bundle_root: Path) -> BundlePaths:
             continue
         snapshot_id = sid_path.read_text(encoding="utf-8").strip() or None
         if snapshot_id:
-            cand = bundle_root / "internal" / "snapshots" / snapshot_id
-            if cand.exists():
-                snap_dir = cand
+            # Prefer receipt (internal snapshots may be outside the publication root).
+            if receipt.exists():
+                try:
+                    payload = _read_json(receipt)
+                    internal_root = payload.get("paths", {}).get("internal")
+                    if internal_root:
+                        cand = Path(str(internal_root)).resolve() / "snapshots" / snapshot_id
+                        if cand.exists():
+                            snap_dir = cand
+                except Exception:
+                    pass
+            if not snap_dir:
+                cand = bundle_root / "internal" / "snapshots" / snapshot_id
+                if cand.exists():
+                    snap_dir = cand
         break
     return BundlePaths(
         bundle_root=bundle_root,

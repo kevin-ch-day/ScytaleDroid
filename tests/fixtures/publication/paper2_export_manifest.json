@@ -17,7 +17,14 @@
     {
       "kind": "figure",
       "normalization": "none",
-      "path": "figures/fig_b4_static_vs_rdi.pdf",
+      "path": "figures/fig_b4_static_vs_rdi_social.pdf",
+      "sha256": "f7b8f1995b4d05c51f0b61e7bb44bb17edb5bf189642fa8f2b21af5ec1c00fb2",
+      "size_bytes": 14
+    },
+    {
+      "kind": "figure",
+      "normalization": "none",
+      "path": "figures/fig_b4_static_vs_rdi_messaging.pdf",
       "sha256": "f7b8f1995b4d05c51f0b61e7bb44bb17edb5bf189642fa8f2b21af5ec1c00fb2",
       "size_bytes": 14
     }

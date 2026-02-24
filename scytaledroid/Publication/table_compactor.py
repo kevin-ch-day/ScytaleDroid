@@ -11,6 +11,8 @@ import csv
 from dataclasses import dataclass
 from pathlib import Path
 
+from scytaledroid.Utils.LatexUtils import LatexTableSpec, RawLatex, render_tabular_only, render_table_float
+
 
 @dataclass(frozen=True)
 class Table4Row:
@@ -84,16 +86,12 @@ def write_table_4_compact_tex(
         ("PktSz", "pkt_size_p50_delta", "pkt_size_p95_delta"),
     ]
 
-    out_lines: list[str] = []
-    out_lines.append("% Table 4 (compact): Behavioral signature deltas (idle vs interactive).")
-    out_lines.append("% NOTE: Presentation-only rewrite from table_4_signature_deltas.csv; no recomputation.")
-    out_lines.append("\\begin{table}[t]")
-    out_lines.append("\\centering")
-    out_lines.append("\\scriptsize")
-    out_lines.append("\\begin{tabular}{llrr}")
-    out_lines.append("\\toprule")
-    out_lines.append("App & Metric & $\\Delta p50$ & $\\Delta p95$ \\\\")
-    out_lines.append("\\midrule")
+    comment = [
+        "Table 4 (compact): Behavioral signature deltas (idle vs interactive).",
+        "NOTE: Presentation-only rewrite from table_4_signature_deltas.csv; no recomputation.",
+    ]
+    headers = ["App", "Metric", RawLatex("$\\Delta p50$"), RawLatex("$\\Delta p95$")]
+    body: list[list[str]] = []
 
     for tr in rows:
         scored: list[tuple[float, str, str, str]] = []
@@ -107,16 +105,20 @@ def write_table_4_compact_tex(
         for _, label, v50_s, v95_s in pick:
             app_cell = tr.app if first else ""
             first = False
-            out_lines.append(f"{app_cell} & {label} & {v50_s} & {v95_s} \\\\")
-        out_lines.append("\\addlinespace[2pt]")
+            body.append([app_cell, label, v50_s, v95_s])
 
-    out_lines.append("\\bottomrule")
-    out_lines.append("\\end{tabular}")
-    out_lines.append("\\caption{Behavioral signature deltas (idle vs interactive), shown as median ($\\Delta p50$) and tail ($\\Delta p95$) shifts.}")
-    out_lines.append("\\label{tab:signature_deltas}")
-    out_lines.append("\\end{table}")
-    out_lines.append("")
+    tabular = render_tabular_only(headers=headers, rows=body, align="llrr", comment_lines=comment)
+    out_tex = render_table_float(
+        spec=LatexTableSpec(
+            caption=RawLatex(
+                "Behavioral signature deltas (idle vs interactive), shown as median ($\\Delta p50$) and tail ($\\Delta p95$) shifts."
+            ),
+            label="tab:signature_deltas",
+            placement="t",
+            size_cmd="\\scriptsize",
+        ),
+        tabular_tex=tabular,
+    )
 
     dst_tex.parent.mkdir(parents=True, exist_ok=True)
-    dst_tex.write_text("\n".join(out_lines), encoding="utf-8")
-
+    dst_tex.write_text(out_tex, encoding="utf-8")

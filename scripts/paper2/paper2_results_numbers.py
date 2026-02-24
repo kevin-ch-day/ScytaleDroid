@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Compute Paper #2 Results-section numbers from the canonical publication bundle.
 
-Inputs (stable, publication-facing):
-- output/publication/tables/table_1_rdi_prevalence.csv
-- output/publication/tables/table_7_exposure_deviation_summary.csv
+Inputs (stable, internal baseline bundle):
+- output/_internal/paper2/baseline/tables/table_1_rdi_prevalence.csv
+- output/_internal/paper2/baseline/tables/table_7_exposure_deviation_summary.csv
 - data/archive/dataset_freeze.json
 
 Outputs:
@@ -18,6 +18,7 @@ import hashlib
 import json
 import math
 import statistics
+import sys
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -25,10 +26,15 @@ from pathlib import Path
 import scipy.stats
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scytaledroid.Utils.IO.csv_with_provenance import read_csv_with_provenance
 
 PUB_ROOT = REPO_ROOT / "output" / "publication"
-TABLE_1 = PUB_ROOT / "tables" / "table_1_rdi_prevalence.csv"
-TABLE_7 = PUB_ROOT / "tables" / "table_7_exposure_deviation_summary.csv"
+INTERNAL_BASELINE_ROOT = REPO_ROOT / "output" / "_internal" / "paper2" / "baseline"
+TABLE_1 = INTERNAL_BASELINE_ROOT / "tables" / "table_1_rdi_prevalence.csv"
+TABLE_7 = INTERNAL_BASELINE_ROOT / "tables" / "table_7_exposure_deviation_summary.csv"
 FREEZE = REPO_ROOT / "data" / "archive" / "dataset_freeze.json"
 PAPER_RESULTS = PUB_ROOT / "manifests" / "paper_results_v1.json"
 
@@ -41,15 +47,7 @@ def _sha256_file(path: Path) -> str:
 
 
 def _read_csv_skip_comments(path: Path) -> list[dict[str, str]]:
-    lines: list[str] = []
-    for ln in path.read_text(encoding="utf-8", errors="strict").splitlines():
-        if not ln.strip():
-            continue
-        if ln.lstrip().startswith("#"):
-            continue
-        lines.append(ln + "\n")
-    rdr = csv.DictReader(lines)
-    return [dict(r) for r in rdr]
+    return read_csv_with_provenance(path).rows
 
 
 def _f(x: str) -> float:
@@ -188,8 +186,8 @@ def main() -> int:
                 "",
                 "## Cohort Summary",
                 f"- N_apps: {res.n_apps}",
-                f"- Runs: idle={res.n_runs_idle}, scripted={res.n_runs_interactive}, total={res.n_runs_total}",
-                f"- Windows: idle={res.windows_idle_total}, scripted={res.windows_interactive_total}, total={res.windows_total}",
+                f"- Runs: idle={res.n_runs_idle}, interactive={res.n_runs_interactive}, total={res.n_runs_total}",
+                f"- Windows: idle={res.windows_idle_total}, interactive={res.windows_interactive_total}, total={res.windows_total}",
                 f"- Windows/run (mean): {res.windows_per_run_mean:.2f}",
                 "",
                 "## Baseline Stability (IF primary)",
@@ -198,11 +196,11 @@ def main() -> int:
                 f"- sigma_baseline (IF idle sd, sample across apps): {res.if_idle_sd_sample:.3f}",
                 "",
                 "## Interaction-Induced Deviation (IF primary)",
-                f"- mean_delta (IF scripted - idle RDI): {res.if_delta_mean:.3f}",
-                f"- % apps where scripted > idle: {res.if_delta_pos_pct:.1f}% ({res.if_delta_pos_apps}/{res.n_apps})",
+                f"- mean_delta (IF interactive - idle RDI): {res.if_delta_mean:.3f}",
+                f"- % apps where interactive > idle: {res.if_delta_pos_pct:.1f}% ({res.if_delta_pos_apps}/{res.n_apps})",
                 "",
                 "## Static–Dynamic Relationship",
-                f"- Spearman rho(static_exposure_score, IF scripted RDI): {res.spearman_rho_static_vs_if_interactive:.3f}",
+                f"- Spearman rho(static_exposure_score, IF interactive RDI): {res.spearman_rho_static_vs_if_interactive:.3f}",
                 f"- p-value: {res.spearman_p_static_vs_if_interactive:.3f}",
                 "",
             ]
@@ -226,6 +224,26 @@ def main() -> int:
     pval = float(paper_results.get("spearman_p_static_vs_if_interactive", res.spearman_p_static_vs_if_interactive))
 
     ieee = PUB_ROOT / "appendix" / "paper2_ieee_paste_blocks.md"
+    notes = paper_results.get("notes") if isinstance(paper_results.get("notes"), dict) else {}
+    idle_med = notes.get("idle_rdi_median")
+    idle_q25 = notes.get("idle_rdi_q25")
+    idle_q75 = notes.get("idle_rdi_q75")
+    idle_min = notes.get("idle_rdi_min")
+    idle_max = notes.get("idle_rdi_max")
+    delta_med = notes.get("delta_rdi_median")
+    delta_q25 = notes.get("delta_rdi_q25")
+    delta_q75 = notes.get("delta_rdi_q75")
+    delta_min = notes.get("delta_rdi_min")
+    delta_max = notes.get("delta_rdi_max")
+    # Prefer corrected "interactive_*" keys; fall back to legacy scripted_* aliases.
+    interactive_ge_095 = notes.get("interactive_rdi_ge_0_95_apps", notes.get("scripted_rdi_ge_0_95_apps"))
+    interactive_min = notes.get("interactive_rdi_min", notes.get("scripted_rdi_min"))
+    interactive_max = notes.get("interactive_rdi_max", notes.get("scripted_rdi_max"))
+
+    # Paper #2 (ICECCO) proceeds with the frozen cohort as-collected. Interactive sessions may
+    # include scripted and controlled manual interaction depending on automation feasibility.
+    interaction_term = "interactive"
+
     ieee.write_text(
         "\n".join(
             [
@@ -253,9 +271,15 @@ def main() -> int:
                 "V. RESULTS",
                 "A. Cohort and Experimental Summary",
                 "",
-                "The final frozen cohort consisted of 12 Android applications evaluated under controlled idle and scripted interaction sessions. For each application, one idle baseline session and two scripted interaction sessions were collected, yielding 36 total frozen runs.",
+                (
+                    "The final frozen cohort consisted of 12 Android applications evaluated under controlled idle and "
+                    + "interactive sessions (scripted and controlled manual interaction)"
+                    + ". For each application, one idle baseline session and two interaction sessions were collected, yielding 36 total frozen runs."
+                ),
                 "",
-                "Across these sessions, 2,165 telemetry windows were extracted under fixed windowing parameters ($\\Delta=10\\,\\mathrm{s}$, $s=5\\,\\mathrm{s}$), comprising 636 idle windows and 1,529 scripted windows. The mean number of windows per run was 60.14. All applications satisfied baseline sufficiency gating and deterministic freeze criteria, anchored by dataset hash:",
+                "Not all applications permitted fully scripted automation; therefore, interaction sessions include both scripted and controlled manual interaction depending on application automation feasibility. This does not affect the baseline-derived anomaly definition (per-app thresholding) but may introduce operator variability.",
+                "",
+                "Across these sessions, 2,165 telemetry windows were extracted under fixed windowing parameters ($\\Delta=10\\,\\mathrm{s}$, $s=5\\,\\mathrm{s}$), comprising 636 idle windows and 1,529 interaction windows. The mean number of windows per run was 60.14. All applications satisfied baseline sufficiency gating and deterministic freeze criteria, anchored by dataset hash:",
                 "",
                 f"`{freeze_hash}`",
                 "",
@@ -267,21 +291,54 @@ def main() -> int:
                 "",
                 f"$\\sigma$ (sample) $= {if_idle_sd:.4f}$",
                 "",
+                (
+                    f"The baseline distribution was narrow (median={idle_med:.4f}, IQR=[{idle_q25:.4f}, {idle_q75:.4f}])."
+                    if isinstance(idle_med, (int, float))
+                    else "The baseline distribution was narrow (see Appendix QA artifacts for per-app values)."
+                ),
+                (
+                    f"Across applications, idle RDI ranged from {idle_min:.4f} to {idle_max:.4f}."
+                    if isinstance(idle_min, (int, float)) and isinstance(idle_max, (int, float))
+                    else ""
+                ),
+                "",
                 "The 95% confidence interval for the mean baseline RDI remained narrow, confirming stable estimation of normal execution behavior. No application exhibited anomalous inflation of baseline deviation relative to its learned distribution.",
                 "",
                 "C. Interaction-Induced Deviation",
                 "",
-                "Scripted interaction sessions demonstrated substantially elevated deviation relative to idle baselines. The mean paired per-application difference was:",
+                "Interactive sessions demonstrated substantially elevated deviation relative to idle baselines. The mean paired per-application difference was:",
                 "",
                 f"$\\Delta_\\mathrm{{mean}} = {if_delta_mean:.4f}$",
                 "",
-                f"In {pos_apps} of 12 applications ({pos_pct:.1f}%), scripted interaction produced higher deviation than idle execution.",
+                (
+                    f"The median paired shift was {delta_med:.4f} (IQR=[{delta_q25:.4f}, {delta_q75:.4f}])."
+                    if isinstance(delta_med, (int, float))
+                    else "The median paired shift was consistent with the mean (see Appendix QA artifacts)."
+                ),
+                (
+                    f"Across applications, $\\Delta$ ranged from {delta_min:.4f} to {delta_max:.4f}."
+                    if isinstance(delta_min, (int, float)) and isinstance(delta_max, (int, float))
+                    else ""
+                ),
+                "",
+                f"In {pos_apps} of 12 applications ({pos_pct:.1f}%), interaction produced higher deviation than idle execution.",
                 "",
                 "Paired statistical analysis confirmed this effect:",
                 "",
                 f"Wilcoxon signed-rank statistic: $W = {w_stat}$" if w_stat is not None else "Wilcoxon signed-rank statistic: (not available)",
                 f"$p = {w_p}$" if w_p is not None else "$p$: (not available)",
                 f"Effect size (Cohen's $d_z$) $= {dz}$" if dz is not None else "Effect size (Cohen's $d_z$): (not available)",
+                "",
+                (
+                    f"Interactive RDI did not saturate uniformly (apps with interactive RDI $\\ge 0.95$: {int(interactive_ge_095)}/{res.n_apps})."
+                    if isinstance(interactive_ge_095, (int, float))
+                    else "Interactive RDI did not saturate uniformly across applications."
+                ),
+                (
+                    f"Interactive RDI ranged from {interactive_min:.3f} to {interactive_max:.3f} across applications."
+                    if isinstance(interactive_min, (int, float)) and isinstance(interactive_max, (int, float))
+                    else ""
+                ),
                 "",
                 # Robustness note: OC-SVM trends are not identical for every app; keep wording conservative.
                 # These values are sourced from paper_results_v1.json (freeze-anchored).
@@ -290,20 +347,39 @@ def main() -> int:
                     f"(mean $\\Delta_\\mathrm{{OC}}\\approx {float(paper_results.get('notes', {}).get('ocsvm_delta_mean', float('nan'))):.3f}$; "
                     f"{int(paper_results.get('notes', {}).get('ocsvm_pos_apps', 0) or 0)}/"
                     f"{res.n_apps} apps with $\\Delta_\\mathrm{{OC}}>0$; Appendix Table A1), "
-                    "supporting robustness of the primary Isolation Forest results."
+                    "but should be interpreted cautiously (Appendix Table A1). In low-dimensional feature space, "
+                    "OC-SVM scores can exhibit plateaus/ties that make percentile thresholding degenerate for some applications; "
+                    "accordingly, we treat OC-SVM as a secondary qualitative trend signal rather than a primary quantitative validator."
                 ),
                 "",
                 "One application (WhatsApp) exhibited a slight negative delta ($\\Delta=-0.048$), while TikTok demonstrated near-zero change ($\\Delta\\approx 0.006$). These exceptions did not materially affect aggregate findings.",
                 "",
                 "D. Static–Dynamic Relationship",
                 "",
-                "To assess the relationship between declared exposure and runtime deviation, Spearman's rank correlation was computed between static exposure scores and mean scripted-phase RDI across applications ($n=12$). The resulting correlation was:",
+                "To assess the relationship between declared exposure and runtime deviation, Spearman's rank correlation was computed between static exposure scores and mean interactive-phase RDI across applications ($n=12$). The resulting correlation was:",
                 "",
                 f"$\\rho = {rho:.3f}$",
                 "",
                 f"$p = {pval:.3f}$",
                 "",
-                "Bootstrap 95% confidence intervals encompassed zero. This indicates no observable monotonic association within the evaluated cohort, suggesting that declared static exposure and runtime behavioral deviation represent largely orthogonal dimensions.",
+                "Bootstrap 95% confidence intervals encompassed zero. No monotonic association was observed in this cohort; these results suggest that declared static exposure and runtime behavioral deviation may represent largely independent dimensions.",
+                "",
+                "## Discussion (One-Sentence Robustness Note)",
+                "",
+                (
+                    "OC-SVM is included as a secondary robustness signal; however, tied-score plateaus in low-dimensional feature space "
+                    "can make percentile thresholding degenerate in some applications, so OC-SVM results are treated as qualitative trend context (Appendix Table A1)."
+                ),
+                "",
+                "## Appendix A (LaTeX Skeleton + Table A1 Placement)",
+                "",
+                "\\appendices",
+                "\\section{Model Robustness Analysis}",
+                "% Table A1: OC-SVM Robustness Summary (keep compact; Appendix-only)",
+                "\\begin{table}[h]",
+                "\\caption{OC-SVM Robustness Summary}",
+                "% \\input{<path-to-appendix_table_a1_ocsvm_robustness.tex>} % if you generate a TeX tabular, or embed directly",
+                "\\end{table}",
                 "",
             ]
         )

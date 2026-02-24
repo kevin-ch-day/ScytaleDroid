@@ -16,7 +16,10 @@ REPORT_SCHEMA_VERSION = 2
 # Canonical Paper #2 dataset anchor (PM/reviewer locked).
 # Phase E must select ONLY `included_run_ids` from this freeze file and fail closed if
 # it is missing or not checksummed.
-FREEZE_CANONICAL_FILENAME = "dataset_freeze-20260208T201527Z.json"
+#
+# The canonical *filename* is stable; the dataset identity is the freeze_dataset_hash
+# inside the JSON (and its included run checksums), not this path string.
+FREEZE_CANONICAL_FILENAME = "dataset_freeze.json"
 
 # Messaging cohort for Paper #2 (used for exemplar selection + optional stratification).
 # This must remain stable for Paper #2.

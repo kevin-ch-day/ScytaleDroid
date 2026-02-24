@@ -221,18 +221,24 @@ def dynamic_analysis_menu() -> None:
             level="warn",
         )
 
-    options = [
-        MenuOption("1", "Run Research Dataset Alpha (guided)"),
-        MenuOption("2", "Dataset run status"),
-        MenuOption("3", "Export run summary CSV"),
-        MenuOption("4", "Export PCAP features CSV"),
-        MenuOption("5", "Export protocol ledger CSV"),
-        MenuOption("6", "Verify host PCAP tools (tshark + capinfos)"),
-        MenuOption("7", "Paper readiness audit (evidence packs)"),
-        MenuOption("8", "Repair/reindex tracker from evidence packs"),
-        MenuOption("9", "Prune incomplete dynamic evidence dirs"),
-        MenuOption("10", "State summary (freeze/evidence/tracker deltas)"),
+    # Paper-facing exports are consolidated under Reporting (single canonical surface).
+    collection_options = [
+        MenuOption("1", "Guided cohort run (Research Dataset Alpha)"),
+        MenuOption("2", "Cohort status overview"),
     ]
+    integrity_options = [
+        MenuOption("3", "Paper readiness audit (evidence packs)"),
+        MenuOption("4", "Reindex/repair tracker from evidence packs"),
+        MenuOption("5", "Prune incomplete dynamic evidence dirs"),
+    ]
+    export_options = [
+        MenuOption("6", "Export freeze-anchored CSVs (Reporting)"),
+    ]
+    system_options = [
+        MenuOption("7", "Verify host PCAP tools (tshark + capinfos)"),
+        MenuOption("8", "State summary (freeze/evidence/tracker deltas)"),
+    ]
+    options = [*collection_options, *integrity_options, *export_options, *system_options]
 
     ui_defaults = _load_dynamic_ui_defaults()
 
@@ -247,8 +253,20 @@ def dynamic_analysis_menu() -> None:
         print()
         menu_utils.print_header("Dynamic Analysis")
         _warn_if_code_changed()
-        spec = MenuSpec(items=options, exit_label="Back", show_exit=True)
-        menu_utils.render_menu(spec)
+        menu_utils.print_section("Collection")
+        menu_utils.print_menu(collection_options, show_exit=False, show_descriptions=False, compact=True)
+        menu_utils.print_section("Integrity & Audit")
+        menu_utils.print_menu(integrity_options, show_exit=False, show_descriptions=False, compact=True)
+        menu_utils.print_section("Exports")
+        menu_utils.print_menu(export_options, show_exit=False, show_descriptions=False, compact=True)
+        menu_utils.print_section("System")
+        menu_utils.print_menu(
+            system_options,
+            show_exit=True,
+            exit_label="Back",
+            show_descriptions=False,
+            compact=True,
+        )
         choice = prompt_utils.get_choice(
             menu_utils.selectable_keys(options, include_exit=True),
             disabled=[option.key for option in options if option.disabled],
@@ -269,37 +287,36 @@ def dynamic_analysis_menu() -> None:
             continue
 
         if choice == "3":
-            _export_dynamic_run_summary_csv()
+            _run_paper_readiness_audit()
             _pause_if_verbose()
             continue
 
         if choice == "4":
-            _export_pcap_features_csv()
-            _pause_if_verbose()
-            continue
-        if choice == "5":
-            _export_protocol_ledger_csv()
-            _pause_if_verbose()
-            continue
-
-        if choice == "6":
-            _verify_host_pcap_tools()
-            _pause_if_verbose()
-            continue
-        if choice == "7":
-            _run_paper_readiness_audit()
-            _pause_if_verbose()
-            continue
-        if choice == "8":
             _repair_reindex_tracker()
             _pause_if_verbose()
             continue
-        if choice == "9":
+        if choice == "5":
             _prune_incomplete_dynamic_evidence_dirs()
             _pause_if_verbose()
             continue
 
-        if choice == "10":
+        if choice == "6":
+            # Single canonical paper-facing export surface lives in Reporting.
+            try:
+                from scytaledroid.Reporting.menu_actions import handle_export_freeze_anchored_csvs
+
+                handle_export_freeze_anchored_csvs()
+            except Exception:
+                print(status_messages.status("Failed to open export helper (Reporting).", level="error"))
+            _pause_if_verbose()
+            continue
+
+        if choice == "7":
+            _verify_host_pcap_tools()
+            _pause_if_verbose()
+            continue
+
+        if choice == "8":
             _run_state_summary()
             _pause_if_verbose()
             continue
@@ -784,7 +801,8 @@ def _next_action_from_need(need_baseline: int, need_interactive: int) -> str:
         return "baseline"
     if ni > 0:
         return "scripted"
-    return "scripted"
+    # Quota satisfied: avoid implying additional action is required.
+    return "—"
 
 
 def _render_dataset_status() -> None:
@@ -1284,6 +1302,8 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
 
         base_label = "—"
         inter_label = "—"
+        scripted_label = "—"
+        manual_label = "—"
         need_label = "—"
         next_label = "—"
         build_label = "—"
@@ -1303,6 +1323,10 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
             base_extra = int(scoped["baseline_extra"])
             inter_countable = int(scoped["interactive_countable"])
             inter_extra = int(scoped["interactive_extra"])
+            scripted_countable = int(scoped.get("interactive_scripted_countable") or 0)
+            scripted_extra = int(scoped.get("interactive_scripted_extra") or 0)
+            manual_countable = int(scoped.get("interactive_manual_countable") or 0)
+            manual_extra = int(scoped.get("interactive_manual_extra") or 0)
             legacy_valid = int(scoped["legacy_valid"])
             legacy_builds = int(scoped["legacy_builds"])
             active_version = str(scoped.get("active_version_code") or "—")
@@ -1317,6 +1341,10 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
 
             base_label = str(base_countable) if base_extra <= 0 else f"{base_countable} (+{base_extra})"
             inter_label = str(inter_countable) if inter_extra <= 0 else f"{inter_countable} (+{inter_extra})"
+            scripted_label = (
+                str(scripted_countable) if scripted_extra <= 0 else f"{scripted_countable} (+{scripted_extra})"
+            )
+            manual_label = str(manual_countable) if manual_extra <= 0 else f"{manual_countable} (+{manual_extra})"
             need_base = max(0, int(cfg.baseline_required) - base_countable)
             need_inter = max(0, int(cfg.interactive_required) - inter_countable)
             if need_base == 0 and need_inter == 0:
@@ -1382,6 +1410,9 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
             # Keep "Next Action" deterministic from displayed need to avoid
             # confusion when tracker recommendation and scoped display diverge.
             next_label = _next_action_from_need(need_base, need_inter)
+            # When quota is satisfied, avoid showing an action label in the table.
+            if need_label == "0":
+                next_label = "—"
             build_rows.append(
                 [
                     display,
@@ -1408,9 +1439,34 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
                         continue
                     dataset_window_count_total += max(0, wc)
 
-        full_row = [str(idx), display, base_label, inter_label, need_label, next_label, build_label, total_label, legacy_label, last_label]
+        full_row = [
+            str(idx),
+            display,
+            base_label,
+            inter_label,
+            need_label,
+            next_label,
+            build_label,
+            total_label,
+            legacy_label,
+            last_label,
+        ]
         rows.append(full_row)
-        op_rows.append([str(idx), display, base_label, inter_label, need_label, next_label])
+        # Operator view: include a few high-signal columns without dumping the full debug table.
+        op_rows.append(
+            [
+                str(idx),
+                display,
+                base_label,
+                scripted_label,
+                manual_label,
+                need_label,
+                next_label,
+                build_label,
+                total_label,
+                last_label,
+            ]
+        )
 
     if dataset_apps_total > 0:
         evidence_summary = _summarize_evidence_quota(dataset_pkgs, cfg)
@@ -1426,7 +1482,7 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
         print(paper_line)
         print()
 
-    _render_package_table(op_rows, headers=["#", "App", "Baseline", "Interactive", "Need", "Next Action"])
+    _render_package_table(op_rows, headers=["#", "App", "Baseline", "Scripted", "Manual", "Need", "Next", "Build", "Total", "QA"])
 
     while True:
         print()
@@ -1480,9 +1536,13 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
             print()
             menu_utils.print_header("Help", "Legend (short)")
             print("Baseline / Interactive = countable valid runs for active build")
+            print("Scripted / Manual      = interactive run breakdown (countable(+extra))")
             print("(+N)                   = extra valid runs (not quota-counted)")
             print("Need                   = remaining quota slots for this package")
-            print("Next Action            = deterministic suggestion from Need")
+            print("Next                   = deterministic suggestion from Need")
+            print("Build                  = CUR(current build) | OLD(legacy only) | MIX(both)")
+            print("Total                  = technically VALID evidence packs found (includes excluded/exploratory)")
+            print("QA                     = latest tracker QA status (may include identity mismatch note)")
             prompt_utils.press_enter_to_continue()
             continue
         if choice == "5":
@@ -1533,6 +1593,12 @@ def _build_scoped_dataset_counts(package_name: str, runs: list[dict], *, cfg: ob
         "baseline_extra": 0,
         "interactive_countable": 0,
         "interactive_extra": 0,
+        "interactive_scripted_countable": 0,
+        "interactive_scripted_extra": 0,
+        "interactive_manual_countable": 0,
+        "interactive_manual_extra": 0,
+        "interactive_other_countable": 0,
+        "interactive_other_extra": 0,
         "legacy_valid": 0,
         "legacy_builds": 0,
         # Evidence-derived technical capture totals (informational lane).
@@ -1579,9 +1645,7 @@ def _build_scoped_dataset_counts(package_name: str, runs: list[dict], *, cfg: ob
         if paper_eligible is False:
             continue
         is_baseline = prof.startswith("baseline") or ("baseline" in prof) or ("idle" in prof)
-        # Manual interactions are interactive quota by policy (operators may use
-        # scripted or manual runs to satisfy the interactive requirement).
-        is_interactive = (("interaction" in prof) or ("interactive" in prof) or ("script" in prof))
+        is_interactive = ("interaction" in prof) or ("interactive" in prof)
         if is_baseline:
             if baseline_seen < baseline_needed:
                 baseline_seen += 1
@@ -1590,11 +1654,18 @@ def _build_scoped_dataset_counts(package_name: str, runs: list[dict], *, cfg: ob
                 out["baseline_extra"] += 1
             continue
         if is_interactive:
+            kind = "other"
+            if "interaction_manual" in prof or prof.endswith("_manual") or "manual" in prof:
+                kind = "manual"
+            elif "interaction_scripted" in prof or "scripted" in prof or "script" in prof:
+                kind = "scripted"
             if interactive_seen < interactive_needed:
                 interactive_seen += 1
                 out["interactive_countable"] += 1
+                out[f"interactive_{kind}_countable"] += 1
             else:
                 out["interactive_extra"] += 1
+                out[f"interactive_{kind}_extra"] += 1
             continue
     out["legacy_builds"] = len(legacy_identity_seen)
     return out

@@ -24,10 +24,10 @@ from typing import Any
 
 import numpy as np
 from scytaledroid.Config import app_config
-from scytaledroid.Database.db_core import db_queries as core_q
 
 from . import ml_parameters_paper2 as config
 from .anomaly_model_training import anomaly_scores, fit_model, fixed_model_specs
+from .config_fingerprint import compute_ml_config_fingerprint, paper2_fingerprint_payload
 from .evidence_pack_ml_preflight import (
     RunInputs,
     compute_ml_preflight,
@@ -122,6 +122,8 @@ def run_ml_on_evidence_packs(
     frozen = True
 
     window_spec = WindowSpec(window_size_s=config.WINDOW_SIZE_S, stride_s=config.WINDOW_STRIDE_S)
+    ml_fp_payload = paper2_fingerprint_payload(ml_config=config)
+    ml_fp = compute_ml_config_fingerprint(payload=ml_fp_payload)
 
     apps_trained = 0
     runs_scored = 0  # "ready/complete" runs (includes reused outputs)
@@ -165,6 +167,34 @@ def run_ml_on_evidence_packs(
         # regenerable but required for the paper bundle). If missing, rebuild from
         # existing v1 outputs without touching per-run artifacts.
         if reuse_existing_outputs and _all_frozen_v1_outputs_exist(root, included_run_ids):
+            # Reuse safety: require semantic config fingerprint match across ALL included runs.
+            mismatched: list[dict[str, str]] = []
+            missing_fp: list[str] = []
+            for rid in sorted(included_run_ids):
+                run_dir = root / str(rid)
+                out_dir = _ml_output_dir(run_dir, frozen=True)
+                found = _read_ml_config_fingerprint(out_dir)
+                if not found:
+                    missing_fp.append(str(rid))
+                    continue
+                if found != ml_fp:
+                    mismatched.append({"run_id": str(rid), "reason": "fingerprint_mismatch"})
+            if missing_fp or mismatched:
+                # Back-compat: older runs may not have a fingerprint yet. Force a recompute
+                # (reuse_existing_outputs=False) rather than silently trusting stale outputs.
+                if missing_fp:
+                    # Fingerprint is config-only; we can write it without touching any ML outputs.
+                    for rid in missing_fp:
+                        out_dir = _ml_output_dir(root / rid, frozen=True)
+                        _write_ml_semantic_config(out_dir, ml_config_fingerprint=ml_fp, ml_config_fingerprint_payload=ml_fp_payload)
+                else:
+                    raise RuntimeError(
+                        "Refusing reuse_existing_outputs: ml_config_fingerprint mismatch (paper mode). "
+                        f"Example mismatch: {mismatched[0]}"
+                    )
+            if reuse_existing_outputs:
+                # Safe to reuse; proceed to dataset-level regeneration if needed.
+                pass
             apps_seen = 0
             for _pkg, entry in sorted(freeze_apps.items()):
                 if not isinstance(entry, dict):
@@ -483,6 +513,8 @@ def run_ml_on_evidence_packs(
                         window_spec=window_spec,
                         model_outputs=model_outputs,
                         freeze_manifest_path=str(freeze_path),
+                        ml_config_fingerprint=ml_fp,
+                        ml_config_fingerprint_payload=ml_fp_payload,
                     )
                     wrote_any = True
                 if not summary_path.exists():
@@ -2079,6 +2111,8 @@ def _write_model_manifest(
     window_spec: WindowSpec,
     model_outputs: dict[str, dict[str, Any]],
     freeze_manifest_path: str | None,
+    ml_config_fingerprint: str,
+    ml_config_fingerprint_payload: dict[str, Any],
 ) -> None:
     env = run_inputs.manifest.get("environment") or {}
     env_dict = env if isinstance(env, dict) else {}
@@ -2104,6 +2138,8 @@ def _write_model_manifest(
     payload: dict[str, Any] = {
         "ml_schema_version": config.ML_SCHEMA_VERSION,
         "generated_at": datetime.now(UTC).isoformat(),
+        "ml_config_fingerprint": str(ml_config_fingerprint),
+        "ml_config_fingerprint_payload": ml_config_fingerprint_payload,
         "frozen": bool(freeze_manifest_path),
         "freeze_manifest_path": freeze_manifest_path,
         "freeze_manifest_sha256": freeze_sha256,
@@ -2162,6 +2198,54 @@ def _write_model_manifest(
         },
     }
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    # Also write semantic config sidecar for reuse safety without rewriting immutable manifests.
+    _write_ml_semantic_config(
+        path.parent,
+        ml_config_fingerprint=str(ml_config_fingerprint),
+        ml_config_fingerprint_payload=ml_config_fingerprint_payload,
+    )
+
+
+def _semantic_config_path(out_dir: Path) -> Path:
+    return out_dir / "ml_semantic_config.json"
+
+
+def _write_ml_semantic_config(
+    out_dir: Path,
+    *,
+    ml_config_fingerprint: str,
+    ml_config_fingerprint_payload: dict[str, Any],
+) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    p = _semantic_config_path(out_dir)
+    if p.exists():
+        return
+    payload = {
+        "ml_config_fingerprint": str(ml_config_fingerprint),
+        "ml_config_fingerprint_payload": ml_config_fingerprint_payload,
+    }
+    p.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _read_ml_config_fingerprint(out_dir: Path) -> str | None:
+    # Prefer sidecar (stable, no timestamps). Fall back to model_manifest.json for back-compat.
+    p = _semantic_config_path(out_dir)
+    if p.exists():
+        try:
+            obj = json.loads(p.read_text(encoding="utf-8"))
+            fp = str(obj.get("ml_config_fingerprint") or "").strip()
+            return fp or None
+        except Exception:
+            return None
+    man = out_dir / "model_manifest.json"
+    if man.exists():
+        try:
+            obj = json.loads(man.read_text(encoding="utf-8"))
+            fp = str(obj.get("ml_config_fingerprint") or "").strip()
+            return fp or None
+        except Exception:
+            return None
+    return None
 
 
 def _write_ml_summary(
@@ -2635,15 +2719,6 @@ def _write_cohort_status(
         "identity_gate": None,
     }
     paths.cohort_status_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-    _persist_paper_cohort_status_db(
-        run_id=str(run.run_id),
-        package_name=str(run.package_name or ""),
-        status=str(status),
-        reason_code=reason_code,
-        details=payload.get("details"),
-        plan_identity=run.plan.get("run_identity") if isinstance(run.plan, dict) else None,
-        cohort_payload=payload,
-    )
 
 
 def _write_global_cohort_status(root: Path, *, reason: str, details: dict[str, Any] | None = None) -> None:
@@ -2669,122 +2744,6 @@ def _validate_paper_reason_code(reason_code: str | None) -> None:
         return
     if reason_code not in PAPER_EXCLUSION_REASON_CODES:
         raise RuntimeError(f"Unknown paper exclusion reason code: {reason_code}")
-
-
-def _persist_paper_cohort_status_db(
-    *,
-    run_id: str,
-    package_name: str,
-    status: str,
-    reason_code: str | None,
-    details: dict[str, Any] | None,
-    plan_identity: dict[str, Any] | None,
-    cohort_payload: dict[str, Any] | None,
-) -> None:
-    ident = plan_identity if isinstance(plan_identity, dict) else {}
-    base_sha = str(ident.get("base_apk_sha256") or "").strip().lower() or None
-    static_handoff_hash = str(ident.get("static_handoff_hash") or "").strip().lower() or None
-    artifact_set_hash = str(ident.get("artifact_set_hash") or "").strip().lower() or None
-    signer_set_hash = str(ident.get("signer_set_hash") or ident.get("signer_digest") or "").strip().lower() or None
-    signer_primary_digest = str(ident.get("signer_primary_digest") or "").strip().lower() or None
-    package_name_lc = str(ident.get("package_name_lc") or package_name or "").strip().lower() or None
-    version_name = str(ident.get("version_name") or "").strip() or None
-    version_code_raw = ident.get("version_code")
-    try:
-        version_code = int(version_code_raw) if version_code_raw not in (None, "") else None
-    except Exception:
-        version_code = None
-    identity_payload = (
-        cohort_payload.get("identity")
-        if isinstance(cohort_payload, dict) and isinstance(cohort_payload.get("identity"), dict)
-        else {}
-    )
-    plan_schema_version = None
-    if isinstance(cohort_payload, dict):
-        plan_schema_version = str(cohort_payload.get("plan_schema_version") or "").strip() or None
-    if plan_schema_version is None:
-        plan_schema_version = "v1"
-    paper_contract_version = int(config.PAPER_CONTRACT_VERSION)
-    reason_taxonomy_version = int(config.REASON_TAXONOMY_VERSION)
-    freeze_contract_version = int(config.FREEZE_CONTRACT_VERSION)
-    ml_schema_version = int(config.ML_SCHEMA_VERSION)
-    identity_check_status = "PASS" if status == "CANONICAL_PAPER_ELIGIBLE" else "FAIL"
-    checked_start = identity_payload.get("identity_checked_at_start_utc")
-    checked_end = identity_payload.get("identity_checked_at_end_utc")
-    checked_gate = identity_payload.get("identity_checked_at_gate_utc")
-    paper_eligible = 1 if status == "CANONICAL_PAPER_ELIGIBLE" else 0
-    freeze_manifest_sha256 = None
-    if isinstance(details, dict):
-        freeze_manifest_sha256 = str(details.get("freeze_manifest_sha256") or "").strip().lower() or None
-    try:
-        core_q.run_sql_write(
-            """
-            INSERT INTO analysis_dynamic_cohort_status
-              (dynamic_run_id, package_name, package_name_lc, version_name, version_code, base_apk_sha256, artifact_set_hash, signer_set_hash, signer_primary_digest, static_handoff_hash, freeze_manifest_sha256, paper_contract_version, reason_taxonomy_version, plan_schema_version, freeze_contract_version, ml_schema_version, identity_check_status, identity_checked_at_start_utc, identity_checked_at_end_utc, identity_checked_at_gate_utc, identity_start_json, identity_end_json, identity_gate_json, paper_eligible, status, reason_code, details_json, created_at_utc, updated_at_utc)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,UTC_TIMESTAMP(),UTC_TIMESTAMP())
-            ON DUPLICATE KEY UPDATE
-              package_name=VALUES(package_name),
-              package_name_lc=VALUES(package_name_lc),
-              version_name=VALUES(version_name),
-              version_code=VALUES(version_code),
-              base_apk_sha256=VALUES(base_apk_sha256),
-              artifact_set_hash=VALUES(artifact_set_hash),
-              signer_set_hash=VALUES(signer_set_hash),
-              signer_primary_digest=VALUES(signer_primary_digest),
-              static_handoff_hash=VALUES(static_handoff_hash),
-              freeze_manifest_sha256=VALUES(freeze_manifest_sha256),
-              paper_contract_version=VALUES(paper_contract_version),
-              reason_taxonomy_version=VALUES(reason_taxonomy_version),
-              plan_schema_version=VALUES(plan_schema_version),
-              freeze_contract_version=VALUES(freeze_contract_version),
-              ml_schema_version=VALUES(ml_schema_version),
-              identity_check_status=VALUES(identity_check_status),
-              identity_checked_at_start_utc=VALUES(identity_checked_at_start_utc),
-              identity_checked_at_end_utc=VALUES(identity_checked_at_end_utc),
-              identity_checked_at_gate_utc=VALUES(identity_checked_at_gate_utc),
-              identity_start_json=VALUES(identity_start_json),
-              identity_end_json=VALUES(identity_end_json),
-              identity_gate_json=VALUES(identity_gate_json),
-              paper_eligible=VALUES(paper_eligible),
-              status=VALUES(status),
-              reason_code=VALUES(reason_code),
-              details_json=VALUES(details_json),
-              updated_at_utc=UTC_TIMESTAMP()
-            """,
-            (
-                run_id,
-                package_name or None,
-                package_name_lc,
-                version_name,
-                version_code,
-                base_sha,
-                artifact_set_hash,
-                signer_set_hash,
-                signer_primary_digest,
-                static_handoff_hash,
-                freeze_manifest_sha256,
-                paper_contract_version,
-                reason_taxonomy_version,
-                plan_schema_version,
-                freeze_contract_version,
-                ml_schema_version,
-                identity_check_status,
-                _to_mysql_dt(checked_start),
-                _to_mysql_dt(checked_end),
-                _to_mysql_dt(checked_gate),
-                json.dumps(identity_payload.get("identity_start"), sort_keys=True) if identity_payload.get("identity_start") is not None else None,
-                json.dumps(identity_payload.get("identity_end"), sort_keys=True) if identity_payload.get("identity_end") is not None else None,
-                json.dumps(identity_payload.get("identity_gate"), sort_keys=True) if identity_payload.get("identity_gate") is not None else None,
-                paper_eligible,
-                status,
-                reason_code,
-                json.dumps(details, sort_keys=True) if isinstance(details, dict) else None,
-            ),
-            query_name="dynamic.paper_cohort_status.upsert",
-        )
-    except Exception:
-        # DB persistence is best-effort here; gate command enforces paper eligibility later.
-        pass
 
 
 def _to_mysql_dt(value: object) -> str | None:
