@@ -282,10 +282,11 @@ def write_canonical_publication_directory(
     figs_dir = bundle_paths.output_publication_figures_dir()
     appendix_dir = bundle_paths.output_publication_appendix_dir()
     manifests_dir = bundle_paths.output_publication_manifests_dir()
+    qa_dir = bundle_paths.output_publication_qa_dir()
     internal_prov = bundle_paths.output_publication_internal_provenance_dir()
     internal_snaps = bundle_paths.output_publication_internal_snapshots_root()
 
-    for d in (publication_root, tables_dir, figs_dir, appendix_dir, manifests_dir, internal_prov, internal_snaps):
+    for d in (publication_root, tables_dir, figs_dir, appendix_dir, manifests_dir, qa_dir, internal_prov, internal_snaps):
         d.mkdir(parents=True, exist_ok=True)
 
     # Legacy cleanup: older builds placed internal/exploratory content under output/publication/.
@@ -345,9 +346,8 @@ def write_canonical_publication_directory(
         keep={
             # Paper-facing paste-ready blocks generated from frozen cohort.
             "results_section_V.md",
-            "paper2_ieee_paste_blocks.md",
+            "publication_paste_blocks.md",
         },
-        keep_globs={"*.md"},
     )
     _clean_dir(
         manifests_dir,
@@ -361,7 +361,22 @@ def write_canonical_publication_directory(
             "display_name_map.json",
             "app_ordering.json",
             # Derived helper (not required, but useful for humans).
-            "paper2_results_numbers.json",
+            "publication_results_numbers.json",
+        },
+    )
+
+    # QA is reviewer-defense material, not manuscript-facing, but it should still be clean and stable.
+    _clean_dir(
+        qa_dir,
+        keep={
+            "qa_cohort_structure_report.json",
+            "qa_distribution_summary.csv",
+            "qa_threshold_validation.csv",
+            "qa_stats_validation.json",
+            "qa_interactive_consistency.csv",
+            "pipeline_audit_v1.json",
+            "ml_audit_report_v1.json",
+            "ml_audit_report_v1.csv",
         },
     )
 

@@ -21,7 +21,7 @@ def test_publication_contract_lint_minimal_ok(tmp_path: Path) -> None:
 
     # Minimal required files.
     _touch(pub / "appendix" / "results_section_V.md")
-    _touch(pub / "appendix" / "paper2_ieee_paste_blocks.md")
+    _touch(pub / "appendix" / "publication_paste_blocks.md")
     _touch(pub / "figures" / "fig_b4_static_vs_rdi_social.png")
     _touch(pub / "figures" / "fig_b4_static_vs_rdi_messaging.png")
     _touch(pub / "figures" / "fig_b2_rdi_social_by_app.png")

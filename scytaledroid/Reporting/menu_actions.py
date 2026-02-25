@@ -917,7 +917,8 @@ def fetch_publication_status() -> dict[str, object]:
     tables_dir = pub_root / "tables"
     figs_dir = pub_root / "figures"
     results_numbers = pub_root / "appendix" / "results_section_V.md"
-    paste_blocks = pub_root / "appendix" / "paper2_ieee_paste_blocks.md"
+    paste_blocks = pub_root / "appendix" / "publication_paste_blocks.md"
+    paste_blocks_legacy = pub_root / "appendix" / "paper2_ieee_paste_blocks.md"
     qa_dir = pub_root / "qa"
     exports = [
         Path(app_config.DATA_DIR) / "archive" / "dynamic_run_summary.csv",
@@ -933,12 +934,12 @@ def fetch_publication_status() -> dict[str, object]:
         # figures should live under output/publication/explore/ and must not inflate the
         # paper status snapshot.
         paper_figs = []
-        for p in figs_dir.glob("*.pdf"):
+        for p in figs_dir.glob("*.png"):
             stem = p.stem.lower()
             if stem.startswith(("fig_b1", "fig_b2", "fig_b3", "fig_b4")):
                 paper_figs.append(p)
         status["publication_figures_label"] = str(len(paper_figs))
-    if results_numbers.exists() or paste_blocks.exists():
+    if results_numbers.exists() or paste_blocks.exists() or paste_blocks_legacy.exists():
         status["results_numbers_label"] = "present"
     if all(p.exists() for p in exports):
         status["exports_label"] = "present"
@@ -983,19 +984,19 @@ def handle_export_freeze_anchored_csvs() -> None:
             print(status_messages.status(f"Export missing: {label}", level="warn"))
 
 
-def handle_generate_paper2_results_numbers() -> None:
-    """Generate paper-facing CSV/JSON exports + Results section numbers.
+def handle_generate_publication_results_numbers() -> None:
+    """Generate publication-facing CSV/JSON exports + Results section numbers.
 
     This is intentionally deterministic and freeze-anchored. The goal is to give
     the manuscript a single source of truth:
     - output/publication/tables/*_summary*.csv
     - output/publication/manifests/paper_results_v1.json
-    - output/publication/manifests/paper2_results_numbers.json
+    - output/publication/manifests/publication_results_numbers.json
     - output/publication/appendix/results_section_V.md
     """
 
-    exports_script = Path(__file__).resolve().parents[2] / "scripts" / "paper2" / "paper2_publication_exports.py"
-    results_script = Path(__file__).resolve().parents[2] / "scripts" / "paper2" / "paper2_results_numbers.py"
+    exports_script = Path(__file__).resolve().parents[2] / "scripts" / "publication" / "publication_exports.py"
+    results_script = Path(__file__).resolve().parents[2] / "scripts" / "publication" / "publication_results_numbers.py"
     for script in (exports_script, results_script):
         if not script.exists():
             print(status_messages.status(f"Missing script: {relative_path(script)}", level="error"))
@@ -1004,7 +1005,7 @@ def handle_generate_paper2_results_numbers() -> None:
     import runpy
 
     print()
-    menu_utils.print_header("Generate Paper #2 Paper-Facing Exports + Results Numbers")
+    menu_utils.print_header("Generate Publication Exports + Results Numbers")
     try:
         runpy.run_path(str(exports_script), run_name="__main__")
         runpy.run_path(str(results_script), run_name="__main__")
@@ -1015,7 +1016,8 @@ def handle_generate_paper2_results_numbers() -> None:
     out_tables = Path(app_config.OUTPUT_DIR) / "publication" / "tables"
     out_results_json = Path(app_config.OUTPUT_DIR) / "publication" / "manifests" / "paper_results_v1.json"
     out_md = Path(app_config.OUTPUT_DIR) / "publication" / "appendix" / "results_section_V.md"
-    out_json = Path(app_config.OUTPUT_DIR) / "publication" / "manifests" / "paper2_results_numbers.json"
+    out_json = Path(app_config.OUTPUT_DIR) / "publication" / "manifests" / "publication_results_numbers.json"
+    out_json_legacy = Path(app_config.OUTPUT_DIR) / "publication" / "manifests" / "paper2_results_numbers.json"
     for name in (
         "paper_cohort_summary_v1.csv",
         "baseline_stability_summary.csv",
@@ -1031,16 +1033,24 @@ def handle_generate_paper2_results_numbers() -> None:
         print(status_messages.status(f"Wrote: {relative_path(out_md)}", level="success"))
     if out_json.exists():
         print(status_messages.status(f"Wrote: {relative_path(out_json)}", level="success"))
+    if out_json_legacy.exists():
+        print(status_messages.status(f"Wrote: {relative_path(out_json_legacy)} (legacy)", level="info"))
+
+#
+# Back-compat alias (older UI/tests/tooling may still call the paper2-named handler).
+#
+def handle_generate_paper2_results_numbers() -> None:  # pragma: no cover
+    return handle_generate_publication_results_numbers()
 
 
-def handle_generate_paper2_exploratory_risk_scoring() -> None:
+def handle_generate_exploratory_risk_scoring() -> None:
     """Generate exploratory risk scoring artifacts (neutral filenames).
 
     These are intentionally not wired into the paper bundle's canonical filenames
     until the authors sign off on naming, interpretation, and placement.
     """
 
-    script = Path(__file__).resolve().parents[2] / "scripts" / "paper2" / "paper2_risk_scoring_artifacts.py"
+    script = Path(__file__).resolve().parents[2] / "scripts" / "publication" / "exploratory_risk_scoring.py"
     if not script.exists():
         print(status_messages.status(f"Missing script: {relative_path(script)}", level="error"))
         return
@@ -1071,11 +1081,14 @@ def handle_generate_paper2_exploratory_risk_scoring() -> None:
         if p.exists():
             print(status_messages.status(f"Wrote: {relative_path(p)}", level="success"))
 
+def handle_generate_paper2_exploratory_risk_scoring() -> None:  # pragma: no cover
+    return handle_generate_exploratory_risk_scoring()
 
-def handle_generate_paper2_scientific_qa() -> None:
-    """Generate scientific QA reports for the frozen cohort (Paper #2)."""
 
-    script = Path(__file__).resolve().parents[2] / "scripts" / "paper2" / "paper2_scientific_qa.py"
+def handle_generate_publication_scientific_qa() -> None:
+    """Generate scientific QA reports for the frozen cohort (freeze-anchored)."""
+
+    script = Path(__file__).resolve().parents[2] / "scripts" / "publication" / "publication_scientific_qa.py"
     if not script.exists():
         print(status_messages.status(f"Missing script: {relative_path(script)}", level="error"))
         return
@@ -1083,7 +1096,7 @@ def handle_generate_paper2_scientific_qa() -> None:
     import runpy
 
     print()
-    menu_utils.print_header("Generate Paper #2 Scientific QA (Frozen Cohort)")
+    menu_utils.print_header("Generate Scientific QA (Frozen Cohort)")
     try:
         runpy.run_path(str(script), run_name="__main__")
     except SystemExit as exc:
@@ -1095,11 +1108,14 @@ def handle_generate_paper2_scientific_qa() -> None:
         print(status_messages.status(f"Wrote QA reports under: {relative_path(out_dir)}", level="success"))
     prompt_utils.press_enter_to_continue()
 
+def handle_generate_paper2_scientific_qa() -> None:  # pragma: no cover
+    return handle_generate_publication_scientific_qa()
 
-def handle_generate_paper2_pipeline_audit() -> None:
-    """Generate a deep ML+dynamic pipeline audit for Paper #2 (freeze-anchored)."""
 
-    script = Path(__file__).resolve().parents[2] / "scripts" / "paper2" / "paper2_pipeline_audit.py"
+def handle_generate_publication_pipeline_audit() -> None:
+    """Generate a deep ML+dynamic pipeline audit (freeze-anchored)."""
+
+    script = Path(__file__).resolve().parents[2] / "scripts" / "publication" / "publication_pipeline_audit.py"
     if not script.exists():
         print(status_messages.status(f"Missing script: {relative_path(script)}", level="error"))
         return
@@ -1107,7 +1123,7 @@ def handle_generate_paper2_pipeline_audit() -> None:
     import runpy
 
     print()
-    menu_utils.print_header("Paper #2 Pipeline Audit (ML + Dynamic)")
+    menu_utils.print_header("Pipeline Audit (ML + Dynamic)")
     try:
         runpy.run_path(str(script), run_name="__main__")
     except SystemExit as exc:
@@ -1116,10 +1132,13 @@ def handle_generate_paper2_pipeline_audit() -> None:
             prompt_utils.press_enter_to_continue()
             return
 
-    out = Path(app_config.OUTPUT_DIR) / "publication" / "qa" / "paper2_pipeline_audit_v1.json"
+    out = Path(app_config.OUTPUT_DIR) / "publication" / "qa" / "pipeline_audit_v1.json"
     if out.exists():
         print(status_messages.status(f"Wrote: {relative_path(out)}", level="success"))
     prompt_utils.press_enter_to_continue()
+
+def handle_generate_paper2_pipeline_audit() -> None:  # pragma: no cover
+    return handle_generate_publication_pipeline_audit()
 
 
 def handle_print_manuscript_snapshot() -> None:
@@ -1129,7 +1148,7 @@ def handle_print_manuscript_snapshot() -> None:
     from pathlib import Path
 
     print()
-    menu_utils.print_header("Manuscript Snapshot (Paper #2)")
+    menu_utils.print_header("Manuscript Snapshot")
     pub_root = Path(app_config.OUTPUT_DIR) / "publication"
     results_path = pub_root / "manifests" / "paper_results_v1.json"
     if not results_path.exists():
@@ -1294,6 +1313,14 @@ __all__ = [
     "view_saved_reports",
     "fetch_publication_status",
     "handle_export_freeze_anchored_csvs",
+    "handle_generate_publication_results_numbers",
+    "handle_generate_publication_scientific_qa",
+    "handle_generate_publication_pipeline_audit",
+    "handle_generate_exploratory_risk_scoring",
+    # Back-compat exports.
     "handle_generate_paper2_results_numbers",
+    "handle_generate_paper2_scientific_qa",
+    "handle_generate_paper2_pipeline_audit",
+    "handle_generate_paper2_exploratory_risk_scoring",
     "handle_refresh_phase_e_bundle",
 ]

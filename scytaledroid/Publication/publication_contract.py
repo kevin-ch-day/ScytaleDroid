@@ -1,9 +1,9 @@
-"""Publication bundle contract (Paper #2).
+"""Publication bundle contract.
 
 This module defines what *must* exist under `output/publication/` for a submission-grade
 paper bundle. Keeping this centralized prevents brittle allowlists from drifting.
 
-Paper policy (PM-locked):
+Bundle policy:
 - `output/publication/` is paper-facing and must remain minimal.
 - Figures are PNG-only (we do not ship PDFs in the publication bundle).
 """
@@ -30,7 +30,7 @@ REQUIRED_DIRS = {
     "tables",
 }
 
-# Minimal required files for "paper bundle ready" (PM-locked, ICECCO Paper #2).
+# Minimal required files for "publication bundle ready".
 #
 # Keep this list paper-facing: no internal baseline tables, no exploratory outputs.
 REQUIRED_FILES = {
@@ -41,7 +41,7 @@ REQUIRED_FILES = {
     Path("manifests") / "toolchain.txt",
     # Paste-ready text blocks.
     Path("appendix") / "results_section_V.md",
-    Path("appendix") / "paper2_ieee_paste_blocks.md",
+    Path("appendix") / "publication_paste_blocks.md",
     # Paper-facing tables (authoritative for writing Section V).
     Path("tables") / "paper_cohort_summary_v1.csv",
     Path("tables") / "baseline_stability_summary.csv",
@@ -69,7 +69,7 @@ SHOULD_HAVE_FILES = {
     Path("qa") / "qa_stats_validation.json",
     Path("qa") / "qa_threshold_validation.csv",
     Path("qa") / "qa_distribution_summary.csv",
-    Path("qa") / "paper2_pipeline_audit_v1.json",
+    Path("qa") / "pipeline_audit_v1.json",
     Path("qa") / "qa_interactive_consistency.csv",
     # Optional depth artifacts (derived only).
     Path("tables") / "delta_distribution_summary.csv",

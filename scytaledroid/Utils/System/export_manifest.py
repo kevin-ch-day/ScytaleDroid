@@ -14,6 +14,9 @@ from pathlib import Path
 from typing import Any
 
 MANIFEST_VERSION = 1
+# Legacy schema field name is `paper`. Keep accepting paper ids for back-compat.
+# Newer tooling should treat this as a generic export/profile id, not a paper id.
+ALLOWED_PAPER_IDS = {"paper2", "publication"}
 PAPER_ID = "paper2"
 NORM_NONE = "none"
 NORM_TEX_WHITESPACE_LF = "tex_whitespace_lf"
@@ -61,7 +64,8 @@ def validate_manifest_schema(payload: dict[str, Any]) -> list[str]:
     issues: list[str] = []
     if int(payload.get("manifest_version") or -1) != MANIFEST_VERSION:
         issues.append("manifest_version_invalid")
-    if str(payload.get("paper") or "").strip() != PAPER_ID:
+    paper_id = str(payload.get("paper") or "").strip()
+    if paper_id not in ALLOWED_PAPER_IDS:
         issues.append("paper_invalid")
 
     artifacts = payload.get("artifacts")

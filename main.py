@@ -177,14 +177,15 @@ def main_menu() -> None:
 
 
 def _resolve_operator_mode(*, pub_status: dict[str, object]) -> str:
-    """Resolve operator UI mode (paper/collection).
+    """Resolve operator UI mode (publication/collection).
 
-    Default: auto-detect based on paper audit + freeze presence.
-    Override: SCYTALEDROID_MODE=paper2|collection.
+    Default: auto-detect based on audit + freeze presence.
+    Override: SCYTALEDROID_MODE=freeze|publication|collection.
     """
 
     override = str(os.environ.get("SCYTALEDROID_MODE") or "").strip().lower()
-    if override in {"paper", "paper2", "freeze"}:
+    # Back-compat aliases: "paper"/"paper2" map to publication mode.
+    if override in {"paper", "paper2", "freeze", "publication", "pub"}:
         return "paper"
     if override in {"collection", "collect"}:
         return "collection"

@@ -18,7 +18,7 @@ STATIC_ANALYSIS_RETENTION_DAYS = 30
 DYNAMIC_MIN_DURATION_S = 120
 DYNAMIC_TARGET_DURATION_S = 180
 
-# Dynamic dataset QA (Paper #2)
+# Dynamic dataset QA
 # Default can be overridden at process start via SCYTALEDROID_MIN_PCAP_BYTES.
 # Env is read at import time (entrypoint default) and must not be read mid-run.
 import os  # noqa: E402
@@ -28,7 +28,7 @@ try:
 except Exception:
     DYNAMIC_MIN_PCAP_BYTES = 100000
 
-# Dataset protocol (Paper #2, locked)
+# Dataset protocol (locked)
 # Quotas are a methods-level contract and must not be overridden via environment variables
 # in dataset-tier collection paths (prevents accidental scope creep).
 DYNAMIC_DATASET_BASELINE_RUNS = 1
@@ -37,7 +37,7 @@ DYNAMIC_DATASET_INTERACTIVE_RUNS = 2
 # paper cohort quota/freeze contract unless baseline quota is explicitly changed).
 DYNAMIC_DATASET_BASELINE_RECOMMENDED_RUNS = 3
 
-# Total quota slots (Paper #2 locked): baseline + interactive.
+# Total quota slots (locked): baseline + interactive.
 DYNAMIC_DATASET_RUNS_PER_APP = int(DYNAMIC_DATASET_BASELINE_RUNS) + int(DYNAMIC_DATASET_INTERACTIVE_RUNS)
 
 # Device module paths
@@ -120,7 +120,7 @@ HARVEST_META_FIELDS = (
     "artifact",
 )
 
-# Static analysis noise controls (Paper #1 baseline)
+# Static analysis noise controls (baseline)
 # Hard cap on persisted findings per detector to keep corpus outputs readable.
 STATIC_FINDINGS_CAP_PER_DETECTOR = 20
 # Optional detector-specific overrides (detector_id -> cap).

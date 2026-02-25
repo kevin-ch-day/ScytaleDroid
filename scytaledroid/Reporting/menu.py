@@ -19,10 +19,10 @@ from .menu_actions import (
     fetch_tier1_status as fetch_tier1_status,
     fetch_publication_status,
     handle_export_freeze_anchored_csvs,
-    handle_generate_paper2_exploratory_risk_scoring,
-    handle_generate_paper2_results_numbers,
-    handle_generate_paper2_scientific_qa,
-    handle_generate_paper2_pipeline_audit,
+    handle_generate_exploratory_risk_scoring,
+    handle_generate_publication_results_numbers,
+    handle_generate_publication_scientific_qa,
+    handle_generate_publication_pipeline_audit,
     handle_print_manuscript_snapshot,
     handle_refresh_phase_e_bundle,
     handle_write_canonical_publication_bundle,
@@ -35,13 +35,13 @@ def reporting_menu() -> None:
 
     actions_all = {
         "1": handle_refresh_phase_e_bundle,
-        "2": handle_generate_paper2_results_numbers,
-        "3": handle_generate_paper2_scientific_qa,
-        "4": handle_generate_paper2_pipeline_audit,
+        "2": handle_generate_publication_results_numbers,
+        "3": handle_generate_publication_scientific_qa,
+        "4": handle_generate_publication_pipeline_audit,
         "5": handle_write_canonical_publication_bundle,
         "6": handle_export_freeze_anchored_csvs,
         "7": handle_print_manuscript_snapshot,
-        "8": handle_generate_paper2_exploratory_risk_scoring,
+        "8": handle_generate_exploratory_risk_scoring,
         "9": view_saved_reports,
     }
 
@@ -86,7 +86,7 @@ def reporting_menu() -> None:
             counts = f"{quota}/{expected} runs"
         else:
             counts = "runs unknown"
-        print("Paper #2 (Freeze Anchored)")
+        print("Publication (Freeze Anchored)")
         print(f"Audit: {audit} | {counts} | Freeze {freeze_short} | Publication {pub_ready}")
         print(f"Artifacts: Tables {tables_label} | Figures {figs_label} | Results {'✓' if results_ok else '✗'} | QA {'✓' if qa_ok else '✗'}")
         print("Model: Isolation Forest (RDI)")

@@ -58,6 +58,9 @@ def output_publication_appendix_dir() -> Path:
 def output_publication_manifests_dir() -> Path:
     return output_publication_root() / "manifests"
 
+def output_publication_qa_dir() -> Path:
+    return output_publication_root() / "qa"
+
 
 def output_internal_root() -> Path:
     """Non-paper internal outputs (provenance, regressions, snapshots)."""

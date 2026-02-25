@@ -1,6 +1,6 @@
-# Paper #2 Export Manifest Contract
+# Export Manifest Contract
 
-This contract defines how frozen Paper #2 export artifacts are verified.
+This contract defines how frozen export artifacts are verified.
 
 ## Source of Truth
 
@@ -45,7 +45,7 @@ Default compare target:
 
 1. baseline manifest: `tests/baseline/paper2_export_manifest.json`
 2. artifact root: `output/paper`
-3. diff output: `output/audit/comparators/paper2_export/<timestamp>/diff.json`
+3. diff output: `output/audit/comparators/publication_export/<timestamp>/diff.json`
 
 Pass rule:
 

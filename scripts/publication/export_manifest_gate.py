@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare Paper #2 export artifacts against a frozen baseline manifest."""
+"""Compare frozen export artifacts against a baseline manifest."""
 
 from __future__ import annotations
 
@@ -28,12 +28,12 @@ def _stamp() -> str:
 
 
 def _default_diff_path() -> Path:
-    return Path("output") / "audit" / "comparators" / "paper2_export" / _stamp() / "diff.json"
+    return Path("output") / "audit" / "comparators" / "publication_export" / _stamp() / "diff.json"
 
 
 def _run_compare(*, manifest_path: Path, artifact_root: Path, output_path: Path) -> int:
     baseline = load_manifest(manifest_path)
-    result = compare_manifest(baseline_manifest=baseline, artifact_root=artifact_root, compare_type="paper2_export")
+    result = compare_manifest(baseline_manifest=baseline, artifact_root=artifact_root, compare_type="publication_export")
 
     payload = {
         "tool_semver": app_config.APP_VERSION,
@@ -71,7 +71,7 @@ def _run_refresh(*, manifest_path: Path, artifact_root: Path, output_manifest: P
         generated_utc=datetime.now(UTC).isoformat(),
         description=str(
             baseline.get("description")
-            or "Frozen Paper #2 export artifact manifest. Update only with approved drift rationale."
+            or "Frozen export artifact manifest. Update only with approved drift rationale."
         ),
     )
     dump_manifest(output_manifest, refreshed)
@@ -94,7 +94,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--output",
         default=None,
-        help="Diff artifact output path. Default: output/audit/comparators/paper2_export/<stamp>/diff.json",
+        help="Diff artifact output path. Default: output/audit/comparators/publication_export/<stamp>/diff.json",
     )
     parser.add_argument(
         "--refresh-manifest",
