@@ -37,7 +37,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scytaledroid.Utils.IO.csv_with_provenance import read_csv_with_provenance
-from scytaledroid.Utils.LatexUtils import LatexTableSpec, render_tabular_only, render_table_float
+from scytaledroid.Utils.LatexUtils import LatexTableSpec, RawLatex, render_tabular_only, render_table_float
 
 FREEZE = REPO_ROOT / "data" / "archive" / "dataset_freeze.json"
 EVIDENCE_ROOT = REPO_ROOT / "output" / "evidence" / "dynamic"
@@ -64,6 +64,18 @@ APPENDIX_A1_OCSVM = PUB_TABLES / "appendix_table_a1_ocsvm_robustness.csv"
 TEX_DYNAMIC_SUMMARY = PUB_TABLES / "table_dynamic_summary_v1.tex"
 TEX_STATIC_COMPONENTS = PUB_TABLES / "table_static_components_v1.tex"
 TEX_OCSVM_ROBUSTNESS = PUB_TABLES / "table_appendix_a1_ocsvm_robustness_v1.tex"
+
+CSV_DELTA_DISTRIBUTION = PUB_TABLES / "delta_distribution_summary.csv"
+TEX_DELTA_DISTRIBUTION = PUB_TABLES / "table_delta_distribution_summary_v1.tex"
+TEX_COHORT_VARIANCE = PUB_TABLES / "table_cohort_variance_summary_v1.tex"
+CSV_STATIC_DYNAMIC_COMPOSITE = PUB_TABLES / "static_dynamic_composite_v1.csv"
+TEX_STATIC_DYNAMIC_COMPOSITE = PUB_TABLES / "table_static_dynamic_composite_v1.tex"
+TEX_EFFECT_SIZE = PUB_TABLES / "table_effect_size_summary_v1.tex"
+TEX_INTERACTION_CONSISTENCY = PUB_TABLES / "table_interaction_consistency_v1.tex"
+CSV_PHASE_DISPERSION_STATS = PUB_TABLES / "phase_dispersion_stats_summary.csv"
+TEX_PHASE_DISPERSION_STATS = PUB_TABLES / "table_phase_dispersion_stats_v1.tex"
+
+FIG_DELTA_DISTRIBUTION_PNG = PUB_ROOT / "figures" / "fig_delta_distribution.png"
 
 
 def _sha256_file(path: Path) -> str:
@@ -220,7 +232,73 @@ def _fmt_float_cell(x: object, *, ndp: int = 4) -> str:
         return s
 
 
-def _write_paper_latex_tables() -> None:
+def _bootstrap_ci(
+    values: list[float],
+    *,
+    statistic_fn,
+    n: int = 10_000,
+    alpha: float = 0.05,
+    seed: int = 1337,
+) -> tuple[float, float]:
+    if not values:
+        return (float("nan"), float("nan"))
+    rng = np.random.default_rng(seed)
+    arr = np.array(values, dtype=float)
+    stats = []
+    for _ in range(int(n)):
+        samp = rng.choice(arr, size=len(arr), replace=True)
+        stats.append(float(statistic_fn(list(samp))))
+    lo = float(np.quantile(stats, alpha / 2.0))
+    hi = float(np.quantile(stats, 1.0 - alpha / 2.0))
+    return lo, hi
+
+
+def _try_write_delta_distribution_figure(*, deltas: list[float]) -> None:
+    """Best-effort cohort-level ΔD distribution visualization.
+
+    This is optional for the paper; failure to render should not fail exports.
+    """
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except Exception:
+        return
+
+    if not deltas:
+        return
+
+    figs_dir = (PUB_ROOT / "figures")
+    figs_dir.mkdir(parents=True, exist_ok=True)
+
+    xs = np.array(deltas, dtype=float)
+    fig = plt.figure(figsize=(4.0, 2.4))
+    ax = fig.add_subplot(1, 1, 1)
+    ax.boxplot(
+        xs,
+        vert=False,
+        widths=0.6,
+        patch_artist=True,
+        boxprops={"facecolor": "#E9EEF6", "edgecolor": "#2B3A55", "linewidth": 1.0},
+        medianprops={"color": "#2B3A55", "linewidth": 1.2},
+        whiskerprops={"color": "#2B3A55", "linewidth": 1.0},
+        capprops={"color": "#2B3A55", "linewidth": 1.0},
+    )
+    # Overlay points (n=12 is small enough to be readable).
+    rng = np.random.default_rng(1337)
+    jitter = rng.uniform(-0.08, 0.08, size=len(xs))
+    ax.scatter(xs, 1.0 + jitter, s=18, color="#1F6FEB", alpha=0.85, linewidths=0.0)
+    ax.axvline(0.0, color="#666666", linewidth=0.8, linestyle="--")
+    ax.set_yticks([])
+    ax.set_xlabel(r"$\Delta D$ (per-app)")
+    ax.grid(axis="x", alpha=0.25, linewidth=0.6)
+    fig.tight_layout()
+    fig.savefig(FIG_DELTA_DISTRIBUTION_PNG, dpi=220, bbox_inches="tight")
+    plt.close(fig)
+
+
+def _write_paper_latex_tables(*, paper_results_payload: dict[str, object] | None = None) -> None:
     """Write minimal IEEE-friendly LaTeX tables for manuscript inclusion.
 
     CSVs remain the authoritative paper-facing exports; LaTeX is a rendering layer.
@@ -229,7 +307,7 @@ def _write_paper_latex_tables() -> None:
 
     # Table: Dynamic summary (primary paper table)
     _, delta_rows = _read_plain_csv(PUB_TABLES / "interaction_delta_summary.csv")
-    headers = ["App", "RDI (Idle)", "RDI (Interactive)", "ΔD"]
+    headers = ["App", "RDI (Idle)", "RDI (Interactive)", RawLatex(r"$\Delta D$")]
     body = []
     for r in delta_rows:
         body.append(
@@ -244,8 +322,11 @@ def _write_paper_latex_tables() -> None:
     TEX_DYNAMIC_SUMMARY.write_text(
         render_table_float(
             spec=LatexTableSpec(
-                caption="Per-application Runtime Deviation Index (RDI) under idle and interactive execution (Isolation Forest).",
-                label="tab:paper2_dynamic_summary",
+                caption=RawLatex(
+                    r"Per-application Runtime Deviation Index (RDI) under idle and interactive execution (Isolation Forest), "
+                    r"where $\Delta D = RDI_{\mathrm{int}} - RDI_{\mathrm{idle}}$."
+                ),
+                label="tab:dynamic_summary",
                 placement="t",
                 size_cmd="\\scriptsize",
             ),
@@ -274,7 +355,7 @@ def _write_paper_latex_tables() -> None:
         render_table_float(
             spec=LatexTableSpec(
                 caption="Static exposure score components (0--100) used for contextual reporting and static--dynamic visualization.",
-                label="tab:paper2_static_components",
+                label="tab:static_components",
                 placement="t",
                 size_cmd="\\scriptsize",
             ),
@@ -285,7 +366,7 @@ def _write_paper_latex_tables() -> None:
 
     # Table: Appendix A1 (OC-SVM robustness summary)
     _, oc_rows = _read_plain_csv(PUB_TABLES / "appendix_table_a1_ocsvm_robustness.csv")
-    headers = ["App", "RDI (Idle)", "RDI (Interactive)", "Δ"]
+    headers = ["App", "RDI (Idle)", "RDI (Interactive)", RawLatex(r"$\Delta$")]
     body = []
     for r in oc_rows:
         body.append(
@@ -301,7 +382,398 @@ def _write_paper_latex_tables() -> None:
         render_table_float(
             spec=LatexTableSpec(
                 caption="OC-SVM robustness summary (RDI under idle vs interactive execution).",
-                label="tab:paper2_ocsvm_robustness",
+                label="tab:ocsvm_robustness",
+                placement="t",
+                size_cmd="\\scriptsize",
+            ),
+            tabular_tex=tab,
+        ),
+        encoding="utf-8",
+    )
+
+    # --- Additional cohort-level artifacts (non-invasive, interpretation/stats support) ---
+    # These are derived summaries only; they do not alter freeze selection or ML.
+
+    # Delta distribution summary (CSV + LaTeX)
+    deltas = [float(r.get("delta_d") or 0.0) for r in delta_rows]
+    if deltas:
+        delta_mean = float(statistics.mean(deltas))
+        delta_sd = float(statistics.stdev(deltas)) if len(deltas) > 1 else 0.0
+        delta_median = float(_q(deltas, 0.5))
+        delta_q25 = float(_q(deltas, 0.25))
+        delta_q75 = float(_q(deltas, 0.75))
+        delta_min = float(min(deltas))
+        delta_max = float(max(deltas))
+        delta_pos = int(sum(1 for d in deltas if d > 0.0))
+        delta_neg = int(sum(1 for d in deltas if d < 0.0))
+
+        dd_rows = [
+            {
+                "n_apps": str(len(deltas)),
+                "mean": f"{delta_mean:.6f}",
+                "median": f"{delta_median:.6f}",
+                "q25": f"{delta_q25:.6f}",
+                "q75": f"{delta_q75:.6f}",
+                "min": f"{delta_min:.6f}",
+                "max": f"{delta_max:.6f}",
+                "sd_sample": f"{delta_sd:.6f}",
+                "pos_apps": str(delta_pos),
+                "neg_apps": str(delta_neg),
+            }
+        ]
+        _write_csv_paper_facing(CSV_DELTA_DISTRIBUTION, fieldnames=list(dd_rows[0].keys()), rows=dd_rows)
+
+        headers = ["n", "Mean", "Median", "Q1", "Q3", "Min", "Max", "SD", "+", "−"]
+        body = [
+            [
+                str(len(deltas)),
+                f"{delta_mean:.4f}",
+                f"{delta_median:.4f}",
+                f"{delta_q25:.4f}",
+                f"{delta_q75:.4f}",
+                f"{delta_min:.4f}",
+                f"{delta_max:.4f}",
+                f"{delta_sd:.4f}",
+                str(delta_pos),
+                str(delta_neg),
+            ]
+        ]
+        tab = render_tabular_only(headers=headers, rows=body, align="lrrrrrrrrr")
+        TEX_DELTA_DISTRIBUTION.write_text(
+            render_table_float(
+                spec=LatexTableSpec(
+                    caption=RawLatex(r"Distribution summary of per-application deviation shifts $\Delta D$ (Isolation Forest)."),
+                    label="tab:delta_distribution_summary",
+                    placement="t",
+                    size_cmd="\\scriptsize",
+                ),
+                tabular_tex=tab,
+            ),
+            encoding="utf-8",
+        )
+
+        _try_write_delta_distribution_figure(deltas=deltas)
+
+    # Cohort-level variance comparison (idle vs interactive, across apps)
+    idle_vals = [float(r.get("if_idle_mean") or 0.0) for r in delta_rows]
+    int_vals = [float(r.get("if_interactive_mean") or 0.0) for r in delta_rows]
+    if idle_vals and int_vals:
+        idle_mu = float(statistics.mean(idle_vals))
+        idle_sd = float(statistics.stdev(idle_vals)) if len(idle_vals) > 1 else 0.0
+        int_mu = float(statistics.mean(int_vals))
+        int_sd = float(statistics.stdev(int_vals)) if len(int_vals) > 1 else 0.0
+        var_ratio = float((int_sd * int_sd) / (idle_sd * idle_sd)) if idle_sd > 0 else float("nan")
+
+        headers = ["Metric", "Idle", "Interactive"]
+        body = [
+            ["Mean", f"{idle_mu:.4f}", f"{int_mu:.4f}"],
+            ["SD (sample)", f"{idle_sd:.4f}", f"{int_sd:.4f}"],
+            [RawLatex(r"Variance ratio ($\sigma^2_{\mathrm{int}}/\sigma^2_{\mathrm{idle}}$)"), "", f"{var_ratio:.2f}"],
+        ]
+        tab = render_tabular_only(headers=headers, rows=body, align="lrr")
+        TEX_COHORT_VARIANCE.write_text(
+            render_table_float(
+                spec=LatexTableSpec(
+                    caption="Cohort-level idle vs interactive summary statistics (across applications; Isolation Forest).",
+                    label="tab:cohort_variance_summary",
+                    placement="t",
+                    size_cmd="\\scriptsize",
+                ),
+                tabular_tex=tab,
+            ),
+            encoding="utf-8",
+        )
+
+    # Effect size / inferential summary (pull from paper_results payload to avoid drift).
+    # Keep this table app-level (n=12).
+    if paper_results_payload is None:
+        paper_results_payload = {}
+        try:
+            paper_results_payload = json.loads((PUB_MANIFESTS / "paper_results_v1.json").read_text(encoding="utf-8"))
+        except Exception:
+            paper_results_payload = {}
+
+    dz = paper_results_payload.get("effect_size_cohens_dz")
+    w_stat = paper_results_payload.get("wilcoxon_w_statistic")
+    w_p = paper_results_payload.get("wilcoxon_p_value")
+    delta_mean = paper_results_payload.get("if_delta_mean")
+    delta_ci = paper_results_payload.get("if_delta_mean_ci95")
+
+    # Hedges' g small-sample correction for paired dz (df=n-1).
+    hedges_gz = None
+    try:
+        if dz is not None and deltas and len(deltas) >= 2:
+            df = float(len(deltas) - 1)
+            j = 1.0 - (3.0 / (4.0 * df - 1.0))
+            hedges_gz = float(j * float(dz))
+    except Exception:
+        hedges_gz = None
+
+    headers = ["Statistic", "Value"]
+    body: list[list[str]] = []
+    if w_stat is not None and w_p is not None:
+        body.append([RawLatex(r"Wilcoxon signed-rank ($W$)"), f"{float(w_stat):.1f} (p={float(w_p):.6g})"])
+    if dz is not None:
+        body.append([RawLatex(r"Cohen's $d_z$ (paired)"), f"{float(dz):.4f}"])
+    if hedges_gz is not None:
+        body.append([RawLatex(r"Hedges' $g_z$ (paired)"), f"{float(hedges_gz):.4f}"])
+    if delta_mean is not None and isinstance(delta_ci, list) and len(delta_ci) == 2:
+        body.append(
+            [
+                RawLatex(r"$\Delta_{\mathrm{mean}}$ (paired)"),
+                f"{float(delta_mean):.4f} (95% CI [{float(delta_ci[0]):.4f}, {float(delta_ci[1]):.4f}])",
+            ]
+        )
+    tab = render_tabular_only(headers=headers, rows=body, align="lr")
+    TEX_EFFECT_SIZE.write_text(
+        render_table_float(
+            spec=LatexTableSpec(
+                caption="Inferential and effect size summary (Isolation Forest; application-level).",
+                label="tab:effect_size_summary",
+                placement="t",
+                size_cmd="\\scriptsize",
+            ),
+            tabular_tex=tab,
+        ),
+        encoding="utf-8",
+    )
+
+    # Phase dispersion / distribution diagnostics (application-level; n=12).
+    # These are descriptive and do not change any paper numbers.
+    if idle_vals and int_vals and len(idle_vals) == len(int_vals):
+        try:
+            idle_mu = float(statistics.mean(idle_vals))
+            idle_sd = float(statistics.stdev(idle_vals)) if len(idle_vals) > 1 else 0.0
+            int_mu = float(statistics.mean(int_vals))
+            int_sd = float(statistics.stdev(int_vals)) if len(int_vals) > 1 else 0.0
+
+            # 95% CI for mean via t-interval (n small).
+            n = len(idle_vals)
+            tcrit = float(scipy.stats.t.ppf(0.975, df=n - 1)) if n > 1 else float("nan")
+            idle_ci = (
+                float(idle_mu - tcrit * idle_sd / math.sqrt(n)),
+                float(idle_mu + tcrit * idle_sd / math.sqrt(n)),
+            )
+            int_ci = (
+                float(int_mu - tcrit * int_sd / math.sqrt(n)),
+                float(int_mu + tcrit * int_sd / math.sqrt(n)),
+            )
+
+            cv_idle = float(idle_sd / idle_mu) if idle_mu != 0 else float("nan")
+            cv_int = float(int_sd / int_mu) if int_mu != 0 else float("nan")
+
+            idle_skew = float(scipy.stats.skew(idle_vals, bias=False))
+            idle_kurt = float(scipy.stats.kurtosis(idle_vals, fisher=True, bias=False))
+            int_skew = float(scipy.stats.skew(int_vals, bias=False))
+            int_kurt = float(scipy.stats.kurtosis(int_vals, fisher=True, bias=False))
+
+            sh_idle = scipy.stats.shapiro(idle_vals)
+            sh_int = scipy.stats.shapiro(int_vals)
+
+            mad_int = float(scipy.stats.median_abs_deviation(int_vals, scale=1.0))
+
+            # Dispersion comparison (Levene / Brown-Forsythe).
+            lev = scipy.stats.levene(idle_vals, int_vals, center="mean")
+            bf = scipy.stats.levene(idle_vals, int_vals, center="median")
+
+            # Unpaired Cohen's d for phase mean separation (idle vs interactive across apps).
+            pooled = float(math.sqrt(((n - 1) * idle_sd * idle_sd + (n - 1) * int_sd * int_sd) / (2 * n - 2))) if n > 2 else float("nan")
+            d_unpaired = float((int_mu - idle_mu) / pooled) if pooled and pooled == pooled and pooled > 0 else float("nan")
+            j_unpaired = 1.0 - (3.0 / (4.0 * (2 * n - 2) - 1.0)) if n > 2 else float("nan")
+            g_unpaired = float(j_unpaired * d_unpaired) if d_unpaired == d_unpaired else float("nan")
+
+            rows = [
+                {
+                    "n_apps": n,
+                    "idle_mu": idle_mu,
+                    "idle_mu_ci95_lo": idle_ci[0],
+                    "idle_mu_ci95_hi": idle_ci[1],
+                    "idle_sd_sample": idle_sd,
+                    "idle_cv": cv_idle,
+                    "idle_skew": idle_skew,
+                    "idle_kurtosis_fisher": idle_kurt,
+                    "idle_shapiro_w": float(sh_idle.statistic),
+                    "idle_shapiro_p": float(sh_idle.pvalue),
+                    "int_mu": int_mu,
+                    "int_mu_ci95_lo": int_ci[0],
+                    "int_mu_ci95_hi": int_ci[1],
+                    "int_sd_sample": int_sd,
+                    "int_cv": cv_int,
+                    "int_skew": int_skew,
+                    "int_kurtosis_fisher": int_kurt,
+                    "int_shapiro_w": float(sh_int.statistic),
+                    "int_shapiro_p": float(sh_int.pvalue),
+                    "int_mad": mad_int,
+                    "variance_ratio_int_over_idle": float((int_sd * int_sd) / (idle_sd * idle_sd)) if idle_sd > 0 else float("nan"),
+                    "levene_f_center_mean": float(lev.statistic),
+                    "levene_p_center_mean": float(lev.pvalue),
+                    "brown_forsythe_f_center_median": float(bf.statistic),
+                    "brown_forsythe_p_center_median": float(bf.pvalue),
+                    "cohens_d_unpaired_phase_means": d_unpaired,
+                    "hedges_g_unpaired_phase_means": g_unpaired,
+                }
+            ]
+            _write_csv_paper_facing(
+                CSV_PHASE_DISPERSION_STATS,
+                fieldnames=list(rows[0].keys()),
+                rows=rows,
+            )
+
+            headers = ["Metric", "Idle", "Interactive"]
+            body = [
+                [RawLatex(r"Mean $\mu$ (95\% CI)"), f"{idle_mu:.4f} [{idle_ci[0]:.4f}, {idle_ci[1]:.4f}]", f"{int_mu:.4f} [{int_ci[0]:.4f}, {int_ci[1]:.4f}]"],
+                ["SD (sample)", f"{idle_sd:.4f}", f"{int_sd:.4f}"],
+                ["CV (SD/Mean)", f"{cv_idle:.3f}", f"{cv_int:.3f}"],
+                ["Skewness", f"{idle_skew:.3f}", f"{int_skew:.3f}"],
+                [RawLatex(r"Kurtosis (Fisher)"), f"{idle_kurt:.3f}", f"{int_kurt:.3f}"],
+                [RawLatex(r"Shapiro--Wilk ($W$, $p$)"), f"{float(sh_idle.statistic):.3f}, {float(sh_idle.pvalue):.3f}", f"{float(sh_int.statistic):.3f}, {float(sh_int.pvalue):.3f}"],
+                ["MAD", "—", f"{mad_int:.4f}"],
+                [RawLatex(r"Variance ratio $\sigma^2_{\mathrm{int}}/\sigma^2_{\mathrm{idle}}$"), "—", f"{float((int_sd*int_sd)/(idle_sd*idle_sd)):.2f}" if idle_sd > 0 else ""],
+                [RawLatex(r"Levene (center=mean) ($F$, $p$)"), "—", f"{float(lev.statistic):.3f}, {float(lev.pvalue):.3g}"],
+                [RawLatex(r"Brown--Forsythe (center=median) ($F$, $p$)"), "—", f"{float(bf.statistic):.3f}, {float(bf.pvalue):.3g}"],
+                [RawLatex(r"Cohen's $d$ (unpaired)"), "—", f"{d_unpaired:.3f}" if d_unpaired == d_unpaired else ""],
+                [RawLatex(r"Hedges' $g$ (unpaired)"), "—", f"{g_unpaired:.3f}" if g_unpaired == g_unpaired else ""],
+            ]
+            tab = render_tabular_only(headers=headers, rows=body, align="lrr")
+            TEX_PHASE_DISPERSION_STATS.write_text(
+                render_table_float(
+                    spec=LatexTableSpec(
+                        caption=RawLatex(
+                            r"Phase-level distribution and dispersion diagnostics computed from per-application mean RDI values (Isolation Forest; $n=12$)."
+                        ),
+                        label="tab:phase_dispersion_stats",
+                        placement="t",
+                        size_cmd="\\scriptsize",
+                    ),
+                    tabular_tex=tab,
+                ),
+                encoding="utf-8",
+            )
+        except Exception:
+            # Best-effort only; do not fail paper exports on stats diagnostics.
+            pass
+
+    # Interactive consistency (scripted vs manual) where both modes exist.
+    # Use the per-app means (paired design; n apps).
+    scripted: list[float] = []
+    manual: list[float] = []
+    for r in delta_rows:
+        s = str(r.get("if_scripted_mean") or "").strip()
+        m = str(r.get("if_manual_mean") or "").strip()
+        if s and m:
+            scripted.append(float(s))
+            manual.append(float(m))
+
+    rho = float("nan")
+    pval = float("nan")
+    if len(scripted) >= 2:
+        try:
+            sp = scipy.stats.spearmanr(scripted, manual)
+            rho = float(sp.statistic)
+            pval = float(sp.pvalue)
+        except Exception:
+            rho = float("nan")
+            pval = float("nan")
+
+    diffs = [(s - m) for s, m in zip(scripted, manual)]
+    abs_diffs = [abs(d) for d in diffs]
+    mean_abs = float(statistics.mean(abs_diffs)) if abs_diffs else float("nan")
+    med_abs = float(statistics.median(abs_diffs)) if abs_diffs else float("nan")
+    max_abs = float(max(abs_diffs)) if abs_diffs else float("nan")
+    rmse = float(math.sqrt(statistics.mean([d * d for d in diffs]))) if diffs else float("nan")
+
+    headers = [
+        "n",
+        RawLatex(r"Spearman $\rho$"),
+        RawLatex(r"$p$"),
+        RawLatex(r"Mean $|\Delta|$"),
+        RawLatex(r"Median $|\Delta|$"),
+        RawLatex(r"Max $|\Delta|$"),
+        "RMSE",
+    ]
+    body = [
+        [
+            str(len(diffs)),
+            f"{rho:.3f}" if rho == rho else "",
+            ("<0.001" if (pval == pval and pval < 0.001) else (f"{pval:.3f}" if pval == pval else "")),
+            f"{mean_abs:.4f}" if mean_abs == mean_abs else "",
+            f"{med_abs:.4f}" if med_abs == med_abs else "",
+            f"{max_abs:.4f}" if max_abs == max_abs else "",
+            f"{rmse:.4f}" if rmse == rmse else "",
+        ]
+    ]
+    tab = render_tabular_only(headers=headers, rows=body, align="lrrrrrr")
+    TEX_INTERACTION_CONSISTENCY.write_text(
+        render_table_float(
+            spec=LatexTableSpec(
+                caption=RawLatex(
+                    r"Scripted vs.\ manual interactive comparison (Isolation Forest; descriptive) for applications where both modes were executed ($n$ apps). "
+                    r"Differences are computed per application using mean interactive RDI per mode."
+                ),
+                label="tab:interaction_consistency",
+                placement="t",
+                size_cmd="\\scriptsize",
+                pre_tabular_tex="\\setlength{\\tabcolsep}{4pt}",
+            ),
+            tabular_tex=tab,
+        ),
+        encoding="utf-8",
+    )
+
+    # Static–dynamic composite table (explicitly exploratory; derived only)
+    # Composite = 0.5 * StaticScore + 0.5 * DeltaNorm100, where DeltaNorm100 is min-max scaled in-cohort.
+    _, static_rows = _read_plain_csv(PUB_TABLES / "static_feature_groups_v1.csv")
+    static_by_app = {r.get("app", ""): r for r in static_rows}
+    delta_min = min(deltas) if deltas else 0.0
+    delta_max = max(deltas) if deltas else 0.0
+    comp_rows = []
+    for r in delta_rows:
+        app = r.get("app", "")
+        st = static_by_app.get(app, {})
+        static_score = float(str(st.get("static_exposure_score") or "0").strip() or 0.0)
+        d = float(r.get("delta_d") or 0.0)
+        if delta_max > delta_min:
+            d_norm = 100.0 * (d - delta_min) / (delta_max - delta_min)
+        else:
+            d_norm = 0.0
+        comp = 0.5 * static_score + 0.5 * d_norm
+        comp_rows.append(
+            {
+                "app": app,
+                "package_name": r.get("package_name", ""),
+                "static_score_0_100": f"{static_score:.2f}",
+                "rdi_idle": _fmt_float_cell(r.get("if_idle_mean", ""), ndp=4),
+                "rdi_interactive": _fmt_float_cell(r.get("if_interactive_mean", ""), ndp=4),
+                "delta_d": _fmt_float_cell(r.get("delta_d", ""), ndp=4),
+                "delta_d_norm_0_100": f"{d_norm:.2f}",
+                "composite_0_100": f"{comp:.2f}",
+            }
+        )
+    # Rank by composite descending for convenience.
+    comp_rows.sort(key=lambda rr: (-float(rr.get("composite_0_100") or 0.0), str(rr.get("app") or "")))
+    _write_csv_paper_facing(CSV_STATIC_DYNAMIC_COMPOSITE, fieldnames=list(comp_rows[0].keys()), rows=comp_rows)
+
+    headers = ["App", "Static", RawLatex(r"$\Delta D$"), RawLatex(r"$\Delta D$ (norm)"), "Composite"]
+    body = [
+        [
+            rr["app"],
+            rr["static_score_0_100"],
+            rr["delta_d"],
+            rr["delta_d_norm_0_100"],
+            rr["composite_0_100"],
+        ]
+        for rr in comp_rows
+    ]
+    tab = render_tabular_only(headers=headers, rows=body, align="lrrrr")
+    TEX_STATIC_DYNAMIC_COMPOSITE.write_text(
+        render_table_float(
+            spec=LatexTableSpec(
+                caption=RawLatex(
+                    r"Exploratory static--dynamic composite ranking (interpretive only): "
+                    r"Composite $=0.5\cdot S + 0.5\cdot \Delta D_{\mathrm{norm}}$, "
+                    r"where $S$ is the static exposure score (0--100) and $\Delta D_{\mathrm{norm}}$ is min--max scaled within cohort."
+                ),
+                label="tab:static_dynamic_composite",
                 placement="t",
                 size_cmd="\\scriptsize",
             ),

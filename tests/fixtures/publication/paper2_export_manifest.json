@@ -17,15 +17,15 @@
     {
       "kind": "figure",
       "normalization": "none",
-      "path": "figures/fig_b4_static_vs_rdi_social.pdf",
-      "sha256": "f7b8f1995b4d05c51f0b61e7bb44bb17edb5bf189642fa8f2b21af5ec1c00fb2",
+      "path": "figures/fig_b4_static_vs_rdi_social.png",
+      "sha256": "e366a29dbff79909f1c9822be1ba1d78ff8cfae10d0213b0b7ebcfd5fe3befdc",
       "size_bytes": 14
     },
     {
       "kind": "figure",
       "normalization": "none",
-      "path": "figures/fig_b4_static_vs_rdi_messaging.pdf",
-      "sha256": "f7b8f1995b4d05c51f0b61e7bb44bb17edb5bf189642fa8f2b21af5ec1c00fb2",
+      "path": "figures/fig_b4_static_vs_rdi_messaging.png",
+      "sha256": "e366a29dbff79909f1c9822be1ba1d78ff8cfae10d0213b0b7ebcfd5fe3befdc",
       "size_bytes": 14
     }
   ],

@@ -312,26 +312,32 @@ def write_canonical_publication_directory(
             "table_dynamic_summary_v1.tex",
             "table_static_components_v1.tex",
             "table_appendix_a1_ocsvm_robustness_v1.tex",
+            # Optional depth artifacts (derived only; do not affect frozen ML).
+            "delta_distribution_summary.csv",
+            "static_dynamic_composite_v1.csv",
+            "table_delta_distribution_summary_v1.tex",
+            "table_cohort_variance_summary_v1.tex",
+            "table_effect_size_summary_v1.tex",
+            "table_interaction_consistency_v1.tex",
+            "table_static_dynamic_composite_v1.tex",
+            "phase_dispersion_stats_summary.csv",
+            "table_phase_dispersion_stats_v1.tex",
         },
     )
     _clean_dir(
         figs_dir,
         keep={
             # Paper-facing figures.
-            "fig_b2_rdi_by_app.pdf",
-            "fig_b2_rdi_by_app.png",
-            "fig_b2_rdi_social_by_app.pdf",
             "fig_b2_rdi_social_by_app.png",
-            "fig_b2_rdi_messaging_by_app.pdf",
             "fig_b2_rdi_messaging_by_app.png",
-            "fig_b4_static_vs_rdi_social.pdf",
             "fig_b4_static_vs_rdi_social.png",
-            "fig_b4_static_vs_rdi_messaging.pdf",
             "fig_b4_static_vs_rdi_messaging.png",
+            # Optional cohort-level distribution view.
+            "fig_delta_distribution.png",
         },
         # Fig B1 is pinned to a specific run id (suffix changes deterministically),
         # so keep by glob to avoid wiping it on bundle rewrites.
-        keep_globs={"fig_b1_timeline_*.pdf", "fig_b1_timeline_*.png"},
+        keep_globs={"fig_b1_timeline_*.png"},
     )
     # Appendix is optional; keep it empty by default.
     _clean_dir(
@@ -366,10 +372,21 @@ def write_canonical_publication_directory(
     # Surface baseline figures for publication assembly (pure copy).
     base_figs = baseline_bundle_root / "figures"
     if base_figs.exists():
-        for p in sorted(base_figs.glob("fig_*.pdf")):
-            _copy(p, figs_dir / p.name, overwrite=overwrite)
         for p in sorted(base_figs.glob("fig_*.png")):
             _copy(p, figs_dir / p.name, overwrite=overwrite)
+        # Re-apply the publication allowlist after copying from the baseline bundle,
+        # so we don't accidentally accumulate extra figure variants in output/publication/.
+        _clean_dir(
+            figs_dir,
+            keep={
+                "fig_b2_rdi_social_by_app.png",
+                "fig_b2_rdi_messaging_by_app.png",
+                "fig_b4_static_vs_rdi_social.png",
+                "fig_b4_static_vs_rdi_messaging.png",
+                "fig_delta_distribution.png",
+            },
+            keep_globs={"fig_b1_timeline_*.png"},
+        )
 
     # Manifests: baseline + (optional) snapshot.
     base_manifest = baseline_bundle_root / "manifest"
@@ -463,7 +480,8 @@ def write_canonical_publication_directory(
                 f"- manifests: `{manifests_dir.relative_to(publication_root)}/`",
                 "",
                 "Primary artifacts (stable filenames):",
-                "- Figures: `figures/fig_b1_timeline_*.pdf` (Fig B1 exemplar), `figures/fig_b2_*.pdf` (Fig B2 variants), `figures/fig_b4_static_vs_rdi_{social,messaging}.pdf`",
+                "- Figures (PNG): `figures/fig_b2_rdi_{social,messaging}_by_app.png`, `figures/fig_b4_static_vs_rdi_{social,messaging}.png`",
+                "- Optional (not for main 8-page manuscript): `figures/fig_b1_timeline_*.png` (single-run exemplar), `figures/fig_delta_distribution.png` (cohort ΔD distribution).",
                 "- Tables: `tables/paper_*.csv` (cohort + baseline + delta + correlation + Appendix A1).",
                 "",
                 "Snapshot surfaced:",
@@ -488,7 +506,7 @@ def write_canonical_publication_directory(
             continue
         if p.name.startswith("."):
             continue
-        if p.suffix.lower() not in {".json", ".csv", ".tex", ".png", ".pdf", ".md", ".txt"}:
+        if p.suffix.lower() not in {".json", ".csv", ".tex", ".png", ".md", ".txt"}:
             continue
         rel = str(p.relative_to(publication_root))
         receipt["sha256"][rel] = _sha256_file(p)

@@ -2,6 +2,10 @@
 
 This module defines what *must* exist under `output/publication/` for a submission-grade
 paper bundle. Keeping this centralized prevents brittle allowlists from drifting.
+
+Paper policy (PM-locked):
+- `output/publication/` is paper-facing and must remain minimal.
+- Figures are PNG-only (we do not ship PDFs in the publication bundle).
 """
 
 from __future__ import annotations
@@ -51,14 +55,13 @@ REQUIRED_FILES = {
     Path("tables") / "table_static_components_v1.tex",
     Path("tables") / "table_appendix_a1_ocsvm_robustness_v1.tex",
     # Core paper figures (the manuscript must cite one of the Fig B2 variants).
-    Path("figures") / "fig_b4_static_vs_rdi_social.pdf",
-    Path("figures") / "fig_b4_static_vs_rdi_messaging.pdf",
+    Path("figures") / "fig_b4_static_vs_rdi_social.png",
+    Path("figures") / "fig_b4_static_vs_rdi_messaging.png",
 }
 
 # Figure contract: require at least one valid "Fig B2" representation.
 REQUIRED_ONE_OF: list[set[Path]] = [
-    {Path("figures") / "fig_b2_rdi_by_app.pdf"},
-    {Path("figures") / "fig_b2_rdi_social_by_app.pdf", Path("figures") / "fig_b2_rdi_messaging_by_app.pdf"},
+    {Path("figures") / "fig_b2_rdi_social_by_app.png", Path("figures") / "fig_b2_rdi_messaging_by_app.png"},
 ]
 
 # Extra artifacts that are strongly recommended but not strictly required to declare READY.
@@ -68,6 +71,14 @@ SHOULD_HAVE_FILES = {
     Path("qa") / "qa_distribution_summary.csv",
     Path("qa") / "paper2_pipeline_audit_v1.json",
     Path("qa") / "qa_interactive_consistency.csv",
+    # Optional depth artifacts (derived only).
+    Path("tables") / "delta_distribution_summary.csv",
+    Path("tables") / "table_delta_distribution_summary_v1.tex",
+    Path("tables") / "table_cohort_variance_summary_v1.tex",
+    Path("tables") / "table_effect_size_summary_v1.tex",
+    Path("tables") / "table_interaction_consistency_v1.tex",
+    Path("tables") / "phase_dispersion_stats_summary.csv",
+    Path("tables") / "table_phase_dispersion_stats_v1.tex",
 }
 
 # Hard-banned top-level directories inside the canonical publication bundle.
@@ -79,6 +90,10 @@ NOT_ALLOWED_TOP_DIRS = {
     "_internal",
     "review",
 }
+
+# Hard-banned file suffixes inside the canonical publication bundle.
+# This keeps the submission surface small and avoids toolchain drift issues.
+HARD_BANNED_SUFFIXES = {".pdf"}
 
 
 def lint_publication_bundle(pub_root: Path) -> PublicationLint:
@@ -127,6 +142,13 @@ def lint_publication_bundle(pub_root: Path) -> PublicationLint:
         else:
             errors.append(f"unexpected_file:{p.name}")
 
+    # Enforce "PNG-only" policy in publication/ to prevent bundle bloat.
+    for p in sorted(pub_root.rglob("*")):
+        if not p.is_file():
+            continue
+        if p.suffix.lower() in HARD_BANNED_SUFFIXES:
+            errors.append(f"banned_suffix:{p.relative_to(pub_root).as_posix()}")
+
     return PublicationLint(ok=(len(errors) == 0), errors=errors, warnings=warnings)
 
 
@@ -137,5 +159,6 @@ __all__ = [
     "REQUIRED_ONE_OF",
     "SHOULD_HAVE_FILES",
     "NOT_ALLOWED_TOP_DIRS",
+    "HARD_BANNED_SUFFIXES",
     "lint_publication_bundle",
 ]

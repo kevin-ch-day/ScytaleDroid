@@ -21,6 +21,7 @@ class LatexTableSpec:
     placement: str = "t"
     centering: bool = True
     size_cmd: str | None = "\\scriptsize"
+    pre_tabular_tex: str | None = None
 
 
 def _align_spec(align: str | None, ncols: int) -> str:
@@ -80,6 +81,8 @@ def render_table_float(*, spec: LatexTableSpec, tabular_tex: str) -> str:
         out.append("\\centering")
     if spec.size_cmd:
         out.append(spec.size_cmd)
+    if spec.pre_tabular_tex:
+        out.append(str(spec.pre_tabular_tex).rstrip("\n"))
     # IEEE style: caption before label, label after caption.
     out.append(f"\\caption{{{latex_escape_text(spec.caption)}}}")
     if spec.label:

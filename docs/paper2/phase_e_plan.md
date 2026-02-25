@@ -109,10 +109,11 @@ Dataset-level derived outputs (not frozen inputs):
 Paper-ready deliverables bundle (zip-and-share; operator/paper-facing):
 - Canonical paper artifact surface: `output/paper/` (tables/figures/appendix/manifests).
   - `figures/` (main figures)
-    - `fig_b1_timeline_<runid8>.png/.pdf`
-    - `fig_b2_rdi_by_app.png/.pdf`
-    - `fig_b4_static_vs_rdi_social.png/.pdf`
-    - `fig_b4_static_vs_rdi_messaging.png/.pdf`
+    - `fig_b1_timeline_<runid8>.png`
+    - `fig_b2_rdi_social_by_app.png`
+    - `fig_b2_rdi_messaging_by_app.png`
+    - `fig_b4_static_vs_rdi_social.png`
+    - `fig_b4_static_vs_rdi_messaging.png`
   - `tables/` (main paper tables; **triple-format**)
     - `table_1_rdi_prevalence.csv/.xlsx/.tex`
     - `table_2_transport_mix.csv/.xlsx/.tex`
