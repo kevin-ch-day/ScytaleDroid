@@ -1,8 +1,11 @@
-"""Schema bootstrapper for local (SQLite) and MySQL deployments.
+"""Schema bootstrapper for MySQL/MariaDB deployments.
 
 Usage:
     python -m scytaledroid.Database.tools.bootstrap
     or call bootstrap_database() from application setup.
+
+Note: SQLite bootstrap is supported for unit tests only. OSS vNext requires
+MySQL/MariaDB when DB is enabled.
 """
 
 from __future__ import annotations
@@ -184,12 +187,18 @@ def _verify_required_schema(*, dialect: str) -> None:
 
 
 def bootstrap_database() -> None:
-    dialect = str(DB_CONFIG.get("engine", "sqlite")).lower()
+    dialect = str(DB_CONFIG.get("engine", "disabled")).lower()
     ddl_blocks: list[str] = []
+
+    if dialect == "disabled":
+        raise SystemExit(
+            "Database is disabled. Configure SCYTALEDROID_DB_URL (mysql/mariadb) "
+            "or SCYTALEDROID_DB_NAME/USER/PASSWD/HOST/PORT to bootstrap schema."
+        )
 
     if dialect == "sqlite":
         log.warning(
-            "SQLite bootstrap uses relaxed constraints; MariaDB/MySQL is canonical.",
+            "SQLite bootstrap uses relaxed constraints; MySQL/MariaDB is canonical.",
             category="database",
         )
 

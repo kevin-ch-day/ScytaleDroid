@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping, Sequence
 
+from scytaledroid.Database.db_core import db_config
 from scytaledroid.Database.db_utils import diagnostics
 
 MIN_SCHEMA_VERSION = "0.2.6"
@@ -43,6 +44,12 @@ def _missing_columns(required: Mapping[str, Sequence[str]]) -> dict[str, list[st
 
 def check_base_schema() -> tuple[bool, str, str]:
     """Global base check: DB reachable, schema_version and apps exist."""
+    if not db_config.db_enabled():
+        return (
+            False,
+            "Database disabled.",
+            "DB is optional. Configure SCYTALEDROID_DB_URL (mysql/mariadb) to enable persistence features.",
+        )
     if not diagnostics.check_connection():
         return False, "Database connection failed.", "Check DB URL/credentials."
     tables = diagnostics.check_required_tables(["schema_version", "apps"])

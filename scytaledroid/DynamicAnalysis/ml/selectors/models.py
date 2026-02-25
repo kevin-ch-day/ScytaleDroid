@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_operational as operational_config
-from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper_config
+from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as paper_config
 from scytaledroid.DynamicAnalysis.ml.anomaly_model_training import fixed_model_specs
 from scytaledroid.Utils.toolchain_versions import gather_toolchain_versions
 

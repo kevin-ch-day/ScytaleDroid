@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from scytaledroid.DynamicAnalysis.tools.paper_gate import run_paper_gate
+from scytaledroid.DynamicAnalysis.tools.freeze_gate import run_freeze_gate
 
 
 def _write_json(path: Path, payload: dict) -> None:
@@ -12,7 +12,7 @@ def _write_json(path: Path, payload: dict) -> None:
 
 
 def test_paper_gate_passes_minimal_contract(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr("scytaledroid.DynamicAnalysis.tools.paper_gate._verify_static_link", lambda **_k: True)
+    monkeypatch.setattr("scytaledroid.DynamicAnalysis.tools.freeze_gate._verify_static_link", lambda **_k: True)
     freeze_path = tmp_path / "freeze.json"
     evidence_root = tmp_path / "evidence"
     run_id = "r1"
@@ -98,14 +98,14 @@ def test_paper_gate_passes_minimal_contract(tmp_path: Path, monkeypatch) -> None
         encoding="utf-8",
     )
 
-    result = run_paper_gate(freeze_path=freeze_path, evidence_root=evidence_root)
+    result = run_freeze_gate(freeze_path=freeze_path, evidence_root=evidence_root)
     assert result.passed is True
     assert result.errors == []
     assert result.checked_runs == 1
 
 
 def test_paper_gate_fails_missing_linkage(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr("scytaledroid.DynamicAnalysis.tools.paper_gate._verify_static_link", lambda **_k: True)
+    monkeypatch.setattr("scytaledroid.DynamicAnalysis.tools.freeze_gate._verify_static_link", lambda **_k: True)
     freeze_path = tmp_path / "freeze.json"
     evidence_root = tmp_path / "evidence"
     run_id = "r1"
@@ -134,14 +134,14 @@ def test_paper_gate_fails_missing_linkage(tmp_path: Path, monkeypatch) -> None:
     (ml_dir / "top_anomalous_windows.csv").write_text("", encoding="utf-8")
     (ml_dir / "attribution_proxy.csv").write_text("", encoding="utf-8")
 
-    result = run_paper_gate(freeze_path=freeze_path, evidence_root=evidence_root)
+    result = run_freeze_gate(freeze_path=freeze_path, evidence_root=evidence_root)
     assert result.passed is False
     assert result.checked_runs == 1
     assert any("missing_plan_identity:static_handoff_hash" in err for err in result.errors)
 
 
 def test_paper_gate_fails_static_link_db_mismatch(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr("scytaledroid.DynamicAnalysis.tools.paper_gate._verify_static_link", lambda **_k: False)
+    monkeypatch.setattr("scytaledroid.DynamicAnalysis.tools.freeze_gate._verify_static_link", lambda **_k: False)
     freeze_path = tmp_path / "freeze.json"
     evidence_root = tmp_path / "evidence"
     run_id = "r1"
@@ -200,13 +200,13 @@ def test_paper_gate_fails_static_link_db_mismatch(tmp_path: Path, monkeypatch) -
     (ml_dir / "window_scores.csv").write_text("window_start_s,window_end_s,score,threshold,is_anomalous\n", encoding="utf-8")
     (ml_dir / "top_anomalous_windows.csv").write_text("", encoding="utf-8")
     (ml_dir / "attribution_proxy.csv").write_text("", encoding="utf-8")
-    result = run_paper_gate(freeze_path=freeze_path, evidence_root=evidence_root)
+    result = run_freeze_gate(freeze_path=freeze_path, evidence_root=evidence_root)
     assert result.passed is False
     assert any("static_link_db_mismatch" in err for err in result.errors)
 
 
 def test_paper_gate_fails_missing_package_identity(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr("scytaledroid.DynamicAnalysis.tools.paper_gate._verify_static_link", lambda **_k: True)
+    monkeypatch.setattr("scytaledroid.DynamicAnalysis.tools.freeze_gate._verify_static_link", lambda **_k: True)
     freeze_path = tmp_path / "freeze.json"
     evidence_root = tmp_path / "evidence"
     run_id = "r1"
@@ -265,13 +265,13 @@ def test_paper_gate_fails_missing_package_identity(tmp_path: Path, monkeypatch) 
     (ml_dir / "window_scores.csv").write_text("window_start_s,window_end_s,score,threshold,is_anomalous\n", encoding="utf-8")
     (ml_dir / "top_anomalous_windows.csv").write_text("", encoding="utf-8")
     (ml_dir / "attribution_proxy.csv").write_text("", encoding="utf-8")
-    result = run_paper_gate(freeze_path=freeze_path, evidence_root=evidence_root)
+    result = run_freeze_gate(freeze_path=freeze_path, evidence_root=evidence_root)
     assert result.passed is False
     assert any("missing_plan_identity:package_name_lc" in err for err in result.errors)
 
 
 def test_paper_gate_fails_on_freeze_min_pcap_mismatch(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr("scytaledroid.DynamicAnalysis.tools.paper_gate._verify_static_link", lambda **_k: True)
+    monkeypatch.setattr("scytaledroid.DynamicAnalysis.tools.freeze_gate._verify_static_link", lambda **_k: True)
     freeze_path = tmp_path / "freeze.json"
     evidence_root = tmp_path / "evidence"
     run_id = "r1"
@@ -332,7 +332,7 @@ def test_paper_gate_fails_on_freeze_min_pcap_mismatch(tmp_path: Path, monkeypatc
     (ml_dir / "window_scores.csv").write_text("window_start_s,window_end_s,score,threshold,is_anomalous\n", encoding="utf-8")
     (ml_dir / "top_anomalous_windows.csv").write_text("", encoding="utf-8")
     (ml_dir / "attribution_proxy.csv").write_text("", encoding="utf-8")
-    result = run_paper_gate(freeze_path=freeze_path, evidence_root=evidence_root)
+    result = run_freeze_gate(freeze_path=freeze_path, evidence_root=evidence_root)
     assert result.passed is False
     assert any("freeze_manifest:min_pcap_bytes_mismatch" in err for err in result.errors)
 
@@ -344,7 +344,7 @@ def test_paper_gate_normalizes_hashes(tmp_path: Path, monkeypatch) -> None:
         seen.update(kwargs)
         return True
 
-    monkeypatch.setattr("scytaledroid.DynamicAnalysis.tools.paper_gate._verify_static_link", _verify)
+    monkeypatch.setattr("scytaledroid.DynamicAnalysis.tools.freeze_gate._verify_static_link", _verify)
     freeze_path = tmp_path / "freeze.json"
     evidence_root = tmp_path / "evidence"
     run_id = "r1"
@@ -405,7 +405,7 @@ def test_paper_gate_normalizes_hashes(tmp_path: Path, monkeypatch) -> None:
     (ml_dir / "window_scores.csv").write_text("window_start_s,window_end_s,score,threshold,is_anomalous\n", encoding="utf-8")
     (ml_dir / "top_anomalous_windows.csv").write_text("", encoding="utf-8")
     (ml_dir / "attribution_proxy.csv").write_text("", encoding="utf-8")
-    result = run_paper_gate(freeze_path=freeze_path, evidence_root=evidence_root)
+    result = run_freeze_gate(freeze_path=freeze_path, evidence_root=evidence_root)
     assert result.passed is True
     assert seen["static_handoff_hash"] == ("a" * 64)
     assert seen["base_apk_sha256"] == ("b" * 64)
@@ -413,7 +413,7 @@ def test_paper_gate_normalizes_hashes(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_paper_gate_fails_bad_identity_hash(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr("scytaledroid.DynamicAnalysis.tools.paper_gate._verify_static_link", lambda **_k: True)
+    monkeypatch.setattr("scytaledroid.DynamicAnalysis.tools.freeze_gate._verify_static_link", lambda **_k: True)
     freeze_path = tmp_path / "freeze.json"
     evidence_root = tmp_path / "evidence"
     run_id = "r1"
@@ -474,13 +474,13 @@ def test_paper_gate_fails_bad_identity_hash(tmp_path: Path, monkeypatch) -> None
     (ml_dir / "window_scores.csv").write_text("window_start_s,window_end_s,score,threshold,is_anomalous\n", encoding="utf-8")
     (ml_dir / "top_anomalous_windows.csv").write_text("", encoding="utf-8")
     (ml_dir / "attribution_proxy.csv").write_text("", encoding="utf-8")
-    result = run_paper_gate(freeze_path=freeze_path, evidence_root=evidence_root)
+    result = run_freeze_gate(freeze_path=freeze_path, evidence_root=evidence_root)
     assert result.passed is False
     assert any("bad_identity_hash:static_handoff_hash" in err for err in result.errors)
 
 
 def test_paper_gate_fails_missing_artifact_set_hash(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr("scytaledroid.DynamicAnalysis.tools.paper_gate._verify_static_link", lambda **_k: True)
+    monkeypatch.setattr("scytaledroid.DynamicAnalysis.tools.freeze_gate._verify_static_link", lambda **_k: True)
     freeze_path = tmp_path / "freeze.json"
     evidence_root = tmp_path / "evidence"
     run_id = "r1"
@@ -540,6 +540,6 @@ def test_paper_gate_fails_missing_artifact_set_hash(tmp_path: Path, monkeypatch)
     (ml_dir / "window_scores.csv").write_text("window_start_s,window_end_s,score,threshold,is_anomalous\n", encoding="utf-8")
     (ml_dir / "top_anomalous_windows.csv").write_text("", encoding="utf-8")
     (ml_dir / "attribution_proxy.csv").write_text("", encoding="utf-8")
-    result = run_paper_gate(freeze_path=freeze_path, evidence_root=evidence_root)
+    result = run_freeze_gate(freeze_path=freeze_path, evidence_root=evidence_root)
     assert result.passed is False
     assert any("missing_plan_identity:artifact_set_hash" in err for err in result.errors)

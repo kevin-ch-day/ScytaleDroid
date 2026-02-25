@@ -4,8 +4,8 @@ import json
 from pathlib import Path
 
 
-def test_paper2_export_manifest_exists_and_has_schema():
-    path = Path("tests/baseline/paper2_export_manifest.json")
+def test_publication_export_manifest_exists_and_has_schema():
+    path = Path("tests/baseline/publication_export_manifest.json")
     assert path.exists()
     payload = json.loads(path.read_text(encoding="utf-8"))
     assert payload.get("manifest_version") == 1

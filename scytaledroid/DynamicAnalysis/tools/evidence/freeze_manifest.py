@@ -1,4 +1,4 @@
-"""Dataset freeze manifest generator (Paper #2).
+"""Dataset freeze manifest generator.
 
 PM-locked goals:
 - Evidence packs remain authoritative and immutable after freeze.
@@ -19,11 +19,11 @@ from pathlib import Path
 from typing import Any
 
 from scytaledroid.Config import app_config
-from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper_config
-from scytaledroid.DynamicAnalysis.paper_contract import (
-    PAPER_CONTRACT_VERSION as PAPER_MODE_CONTRACT_VERSION,
-    build_paper_contract_snapshot,
-    paper_contract_hash,
+from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as paper_config
+from scytaledroid.DynamicAnalysis.freeze_contract import (
+    FREEZE_CONTRACT_VERSION as FREEZE_MODE_CONTRACT_VERSION,
+    build_freeze_contract_snapshot,
+    freeze_contract_hash,
 )
 from scytaledroid.DynamicAnalysis.paper_eligibility import derive_paper_eligibility
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import MIN_WINDOWS_PER_RUN
@@ -437,25 +437,25 @@ def build_dataset_freeze_manifest(
     if len(baseline_protocol_hashes) > 1:
         raise RuntimeError(f"FREEZE_MIXED_BASELINE_PROTOCOL_HASHES:{sorted(baseline_protocol_hashes)}")
     # Back-compat: evidence packs may have missing/changed operator-level contract hashes
-    # over the lifetime of a workspace. The canonical paper contract hash is computed
-    # at freeze time (paper_contract_snapshot + paper_contract_hash) and is the
+    # over the lifetime of a workspace. The canonical contract hash is computed
+    # at freeze time (contract snapshot + contract hash) and is the
     # authoritative contract stamp for the freeze artifact itself.
     # Back-compat: template map version/hash fields are operator metadata that evolved
     # as app-specific overrides were introduced. The freeze manifest embeds the
-    # authoritative paper_contract_snapshot (including category map snapshot + hash),
+    # authoritative contract snapshot (including category map snapshot + hash),
     # so we do not fail closed on mixed historical template-map stamps here.
     required_plan_schema_version = next(iter(plan_schema_versions))
     required_plan_paper_contract_version = int(next(iter(plan_paper_contract_versions)))
-    contract_snapshot = build_paper_contract_snapshot()
-    contract_hash = paper_contract_hash(contract_snapshot)
+    contract_snapshot = build_freeze_contract_snapshot()
+    contract_hash = freeze_contract_hash(contract_snapshot)
     if paper_contract_hashes and contract_hash not in paper_contract_hashes:
         raise RuntimeError(
             f"FREEZE_CONTRACT_HASH_MISMATCH:selected={sorted(paper_contract_hashes)}:freeze={contract_hash}"
         )
-    if paper_contract_versions and str(PAPER_MODE_CONTRACT_VERSION) not in paper_contract_versions:
+    if paper_contract_versions and str(FREEZE_MODE_CONTRACT_VERSION) not in paper_contract_versions:
         raise RuntimeError(
             "FREEZE_CONTRACT_VERSION_MISMATCH:"
-            f"selected={sorted(paper_contract_versions)}:freeze={PAPER_MODE_CONTRACT_VERSION}"
+            f"selected={sorted(paper_contract_versions)}:freeze={FREEZE_MODE_CONTRACT_VERSION}"
         )
 
     payload: dict[str, Any] = {
@@ -463,7 +463,7 @@ def build_dataset_freeze_manifest(
         "freeze_role": "canonical",
         "freeze_contract_version": int(paper_config.FREEZE_CONTRACT_VERSION),
         "paper_contract_version": int(paper_config.PAPER_CONTRACT_VERSION),
-        "paper_mode_contract_version": str(PAPER_MODE_CONTRACT_VERSION),
+        "paper_mode_contract_version": str(FREEZE_MODE_CONTRACT_VERSION),
         "paper_contract_hash": str(contract_hash),
         "paper_contract_snapshot": contract_snapshot,
         "capture_policy_version_required": int(paper_config.PAPER_CONTRACT_VERSION),

@@ -26,15 +26,13 @@ from scytaledroid.DynamicAnalysis.core.static_context import (
     compute_static_context,
 )
 from scytaledroid.DynamicAnalysis.core.target_manager import TargetManager
-from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper2_config
+from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
 from scytaledroid.DynamicAnalysis.monitor import RunMonitor, RunMonitorConfig
 from scytaledroid.DynamicAnalysis.observers.base import Observer, ObserverHandle
-from scytaledroid.DynamicAnalysis.paper_contract import (
-    PAPER_CONTRACT_VERSION as PAPER_MODE_CONTRACT_VERSION,
-)
-from scytaledroid.DynamicAnalysis.paper_contract import (
-    build_paper_contract_snapshot,
-    paper_contract_hash,
+from scytaledroid.DynamicAnalysis.freeze_contract import (
+    FREEZE_CONTRACT_VERSION as FREEZE_MODE_CONTRACT_VERSION,
+    build_freeze_contract_snapshot,
+    freeze_contract_hash,
 )
 from scytaledroid.DynamicAnalysis.paper_eligibility import derive_paper_eligibility
 from scytaledroid.DynamicAnalysis.pcap.correlate import write_static_dynamic_overlap
@@ -585,12 +583,12 @@ class DynamicRunOrchestrator:
         if not (tier and str(tier).lower() == "dataset") and not abort_discard_requested:
             update_dataset_tracker(manifest, run_dir, event_logger=event_logger)
 
-        # Deterministic dataset validity classification (Paper #2) must be written to the manifest.
+        # Deterministic dataset validity classification (freeze/profile) must be written to the manifest.
         if tier and str(tier).lower() == "dataset":
             try:
                 entry = {"pcap_size_bytes": next((a.size_bytes for a in manifest.artifacts if a.type == "pcapdroid_capture"), 0)}
                 validity = evaluate_dataset_validity(run_dir, manifest, entry, DatasetTrackerConfig())
-                # First-class dataset validity (Paper #2). Written only to manifest.dataset.
+                # First-class dataset validity (freeze/profile). Written only to manifest.dataset.
                 if isinstance(validity, dict):
                     current_ds = manifest.dataset if isinstance(manifest.dataset, dict) else {}
                     merged_ds = dict(current_ds)
@@ -599,7 +597,7 @@ class DynamicRunOrchestrator:
                     manifest.dataset = merged_ds
 
                     # ML readiness is separate from validity. Tag low-signal runs deterministically
-                    # without changing VALID/INVALID semantics (Paper #2 contract).
+                    # without changing VALID/INVALID semantics (freeze/profile contract).
                     try:
                         from scytaledroid.DynamicAnalysis.pcap.low_signal import (
                             compute_low_signal_for_run,
@@ -627,7 +625,7 @@ class DynamicRunOrchestrator:
                         plan=plan_payload if isinstance(plan_payload, dict) else {},
                         min_windows=int(MIN_WINDOWS_PER_RUN),
                         required_capture_policy_version=int(
-                            getattr(paper2_config, "PAPER_CONTRACT_VERSION", 1)
+                            getattr(profile_config, "PAPER_CONTRACT_VERSION", 1)
                         ),
                     )
                     manifest.dataset["paper_eligible"] = bool(eligibility.paper_eligible)
@@ -807,10 +805,10 @@ class DynamicRunOrchestrator:
                 # Filled deterministically at finalize-time for dataset-tier runs.
                 "valid_dataset_run": None,
                 "invalid_reason_code": None,
-                "min_pcap_bytes": int(getattr(paper2_config, "MIN_PCAP_BYTES", 50000)),
+                "min_pcap_bytes": int(getattr(profile_config, "MIN_PCAP_BYTES", 50000)),
                 "short_run": 0,
                 "no_traffic_observed": 0,
-                "capture_policy_version": int(getattr(paper2_config, "PAPER_CONTRACT_VERSION", 1)),
+                "capture_policy_version": int(getattr(profile_config, "PAPER_CONTRACT_VERSION", 1)),
                 # ML-only quality flag (non-invalidating). Filled best-effort at finalize-time.
                 "low_signal": None,
                 "low_signal_reasons": [],
@@ -868,9 +866,9 @@ class DynamicRunOrchestrator:
                 "host": platform.node(),
                 "tool_version": app_config.APP_VERSION,
                 "tool_semver": app_config.APP_VERSION,
-                "capture_policy_version": int(getattr(paper2_config, "PAPER_CONTRACT_VERSION", 1)),
-                "paper_contract_version": str(PAPER_MODE_CONTRACT_VERSION),
-                "paper_contract_hash": str(paper_contract_hash(build_paper_contract_snapshot())),
+                "capture_policy_version": int(getattr(profile_config, "PAPER_CONTRACT_VERSION", 1)),
+                "paper_contract_version": str(FREEZE_MODE_CONTRACT_VERSION),
+                "paper_contract_hash": str(freeze_contract_hash(build_freeze_contract_snapshot())),
                 "interaction_protocol_version": int(SCRIPT_PROTOCOL_VERSION),
                 "template_id": None,
                 "template_hash": None,
@@ -909,7 +907,7 @@ class DynamicRunOrchestrator:
                     "interactive": bool(run_ctx.interactive),
                     "tier": self.config.tier,
                     "sampling_rate_s": self.config.sampling_rate_s,
-                    "min_pcap_bytes": int(getattr(paper2_config, "MIN_PCAP_BYTES", 50000)),
+                    "min_pcap_bytes": int(getattr(profile_config, "MIN_PCAP_BYTES", 50000)),
                     "require_dynamic_schema": bool(getattr(self.config, "require_dynamic_schema", True)),
                     "observer_prompts_enabled": bool(getattr(self.config, "observer_prompts_enabled", False)),
                     "pcapdroid_api_key_present": bool(getattr(self.config, "pcapdroid_api_key", None)),

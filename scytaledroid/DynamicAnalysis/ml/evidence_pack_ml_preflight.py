@@ -9,7 +9,7 @@ from typing import Any
 
 from scytaledroid.DynamicAnalysis.plans.loader import enrich_dynamic_plan
 
-from . import ml_parameters_paper2 as ml_config
+from . import ml_parameters_profile as ml_config
 from .seed_identity import identity_key_fallback, identity_key_from_plan
 from .telemetry_windowing import WindowSpec, iter_windows
 

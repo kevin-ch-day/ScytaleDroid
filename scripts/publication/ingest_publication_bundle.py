@@ -2,12 +2,12 @@
 """Ingest the canonical publication bundle into the DB (optional).
 
 Policy:
-- Paper truth is filesystem: output/publication/* (rebuildable from evidence).
-- DB is a mirror/index/cache. This step is optional and may fail without blocking paper work.
+- Canonical truth is filesystem: output/publication/* (rebuildable from evidence).
+- DB is a mirror/index/cache. This step is optional and may fail without blocking workflows.
 
 This script reads output/publication/manifests/paper_results_v1.json to derive a
 deterministic cohort_id keyed by freeze_dataset_hash, then invokes the existing
-DB ingest tool (Phase H1).
+DB ingest tool.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ def main(argv: list[str] | None = None) -> int:
         print("paper_results_v1.json missing freeze_dataset_hash", file=sys.stderr)
         return 2
 
-    cohort_id = f"paper2_{freeze_hash}"
+    cohort_id = f"freeze_{freeze_hash}"
     name = args.name or f"Freeze {freeze_hash[:12]}"
 
     cmd = [

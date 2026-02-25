@@ -27,7 +27,7 @@ from openpyxl import Workbook  # noqa: E402
 from openpyxl.styles import Alignment, Font  # noqa: E402
 from scytaledroid.Config import app_config
 
-from . import ml_parameters_paper2 as config
+from . import ml_parameters_profile as config
 from .deliverable_bundle_paths import (
     dataset_tables_dir,
     freeze_anchor_path,
@@ -130,7 +130,7 @@ def write_phase_e_deliverables_bundle(
     fig_b1_run_id: str,
     interaction_tag: str | None = None,
 ) -> PhaseEArtifacts:
-    """Write Phase E deliverables under output/paper/internal/baseline/.
+    """Write Phase E deliverables under output/_internal/* (not under output/publication/).
 
     Assumes:
     - Freeze anchor exists and is checksummed.
@@ -153,7 +153,7 @@ def write_phase_e_deliverables_bundle(
     freeze_sha256 = _sha256_stream(freeze_anchor_path())
     provenance = _paper_provenance(freeze_sha256=freeze_sha256)
 
-    # Tables (PM locked): emit csv + xlsx + tex under output/paper/...
+    # Tables (locked): emit csv + xlsx + tex under output/_internal/* (regression/provenance surface).
     table_1_csv, table_1_xlsx, table_1_tex = _write_table_1_rdi_prevalence(tables_dir, provenance=provenance)
     table_2_csv, table_2_xlsx, table_2_tex = _write_table_2_transport_mix(tables_dir, provenance=provenance)
     table_3_csv, table_3_xlsx, table_3_tex = _write_table_3_model_agreement(tables_dir, provenance=provenance)

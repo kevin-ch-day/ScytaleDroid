@@ -492,10 +492,22 @@ def _execute(
             )
             raise DatabaseError(str(exc)) from exc
 class DatabaseEngine:
-    """Convenience wrapper around a dedicated database connection (MySQL or SQLite)."""
+    """Convenience wrapper around a dedicated database connection.
+
+    OSS vNext posture:
+    - DB is optional; when disabled, core workflows must not instantiate this class.
+    - When enabled, MySQL/MariaDB is required (no SQLite fallback for operators).
+
+    Unit tests may use SQLite as a local backend.
+    """
 
     def __init__(self) -> None:
-        self._dialect = str(DB_CONFIG.get("engine", "sqlite")).lower()
+        self._dialect = str(DB_CONFIG.get("engine", "disabled")).lower()
+        if self._dialect == "disabled":
+            raise RuntimeError(
+                "Database is disabled. Configure SCYTALEDROID_DB_URL (mysql/mariadb) or "
+                "SCYTALEDROID_DB_NAME/USER/PASSWD/HOST/PORT to enable DB features."
+            )
         self._connection: Any | None = self._connect_any()
         self._read_only = False
         self._txn_depth = 0
@@ -503,6 +515,8 @@ class DatabaseEngine:
     def _connect_any(self) -> Any:
         if self._dialect == "mysql":
             return _connect_mysql()
+        if self._dialect == "disabled":
+            raise RuntimeError("Database is disabled (no backend configured).")
         return _connect_sqlite()
 
     def _ensure_connection(self) -> Any:
@@ -823,7 +837,7 @@ __all__ = [
 def ensure_db_ready(*, require_schema: bool = True) -> None:
     """Fail fast when MariaDB is configured but unreachable or missing schema."""
 
-    dialect = str(DB_CONFIG.get("engine", "sqlite")).lower()
+    dialect = str(DB_CONFIG.get("engine", "disabled")).lower()
     if dialect != "mysql":
         return
 
@@ -838,7 +852,7 @@ def ensure_db_ready(*, require_schema: bool = True) -> None:
         raise SystemExit(
             f"Database connection failed for configured MariaDB backend "
             f"({DB_CONFIG.get('user', '<unknown>')}@{_fmt_cfg('host')}:{_fmt_cfg('port')}/{_fmt_cfg('database')}): {exc}\n"
-            "Fix credentials/host or unset SCYTALEDROID_DB_URL to use SQLite."
+            "Fix credentials/host, or disable DB by unsetting SCYTALEDROID_DB_URL (filesystem remains canonical)."
         ) from exc
 
     if not require_schema:

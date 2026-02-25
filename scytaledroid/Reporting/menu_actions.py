@@ -227,6 +227,13 @@ def handle_write_canonical_publication_bundle() -> None:
         return
 
     print(status_messages.status(f"Wrote: {relative_path(res.publication_root)}", level="success"))
+    if getattr(res, "warnings_count", 0):
+        print(
+            status_messages.status(
+                f"Warnings: {res.warnings_count} (see logs; optional provenance artifacts may be missing)",
+                level="warn",
+            )
+        )
     prompt_utils.press_enter_to_continue()
 
 
@@ -243,7 +250,7 @@ def _write_phase_e_deliverables_bundle_from_pin() -> bool:
         freeze_anchor_path,
         output_phase_e_bundle_root,
     )
-    from scytaledroid.DynamicAnalysis.ml.ml_parameters_paper2 import (
+    from scytaledroid.DynamicAnalysis.ml.ml_parameters_profile import (
         EXEMPLAR_ALLOWED_INTERACTION_TAGS,
         FREEZE_CANONICAL_FILENAME,
         MESSAGING_PACKAGES,
@@ -386,7 +393,7 @@ def _write_phase_e_deliverables_bundle_from_pin() -> bool:
     try:
         required_payload = json.loads(artifacts.required_fields_validation_json.read_text(encoding="utf-8"))
         if bool(required_payload.get("paper_grade_ready")):
-            print(status_messages.status("Paper contract: READY (paper_grade)", level="success"))
+            print(status_messages.status("Freeze contract: READY (strict)", level="success"))
         else:
             missing = required_payload.get("missing_by_run") if isinstance(required_payload.get("missing_by_run"), dict) else {}
             first_missing = []
@@ -399,12 +406,12 @@ def _write_phase_e_deliverables_bundle_from_pin() -> bool:
                 missing_hint = "required field gaps"
             print(
                 status_messages.status(
-                    f"Paper contract: DOWNGRADED -> EXPERIMENTAL (missing: {missing_hint})",
+                    f"Freeze contract: DOWNGRADED -> EXPERIMENTAL (missing: {missing_hint})",
                     level="warn",
                 )
             )
     except Exception:
-        print(status_messages.status("Paper contract: DOWNGRADED -> EXPERIMENTAL (missing: validation state)", level="warn"))
+        print(status_messages.status("Freeze contract: DOWNGRADED -> EXPERIMENTAL (missing: validation state)", level="warn"))
     # Keep output short; deep audit paths live in the bundle manifest + pipeline audit.
     return True
 
@@ -858,10 +865,10 @@ def fetch_tier1_status() -> dict[str, object]:
 
 
 def fetch_publication_status() -> dict[str, object]:
-    """Return a compact paper-facing publication status snapshot.
+    """Return a compact publication status snapshot.
 
     This intentionally avoids DB-derived metrics. Evidence packs + freeze + publication
-    bundle are the authoritative sources for paper assembly.
+    bundle are the authoritative sources for publication exports.
     """
 
     from scytaledroid.DynamicAnalysis.tools.evidence.paper_readiness_audit import (
@@ -884,7 +891,7 @@ def fetch_publication_status() -> dict[str, object]:
         "footer": "",
     }
 
-    # Paper audit (authoritative).
+    # Freeze readiness audit (authoritative).
     try:
         audit = run_paper_readiness_audit()
         status["paper_audit_result"] = str(audit.result)
@@ -898,7 +905,7 @@ def fetch_publication_status() -> dict[str, object]:
     except Exception:
         audit = None
 
-    # Freeze anchor (canonical for paper writing).
+    # Freeze anchor (canonical for publication exports).
     freeze_path = Path(app_config.DATA_DIR) / "archive" / "dataset_freeze.json"
     if freeze_path.exists():
         try:
@@ -939,6 +946,8 @@ def fetch_publication_status() -> dict[str, object]:
             if stem.startswith(("fig_b1", "fig_b2", "fig_b3", "fig_b4")):
                 paper_figs.append(p)
         status["publication_figures_label"] = str(len(paper_figs))
+    # Legacy paste blocks remain readable for older runs, but new runs should not
+    # write them unless explicitly enabled.
     if results_numbers.exists() or paste_blocks.exists() or paste_blocks_legacy.exists():
         status["results_numbers_label"] = "present"
     if all(p.exists() for p in exports):
@@ -1033,8 +1042,17 @@ def handle_generate_publication_results_numbers() -> None:
         print(status_messages.status(f"Wrote: {relative_path(out_md)}", level="success"))
     if out_json.exists():
         print(status_messages.status(f"Wrote: {relative_path(out_json)}", level="success"))
-    if out_json_legacy.exists():
-        print(status_messages.status(f"Wrote: {relative_path(out_json_legacy)} (legacy)", level="info"))
+    # Legacy alias is opt-in; do not advertise it unless it was explicitly written.
+    import os
+
+    legacy_enabled = str(os.environ.get("SCYTALEDROID_WRITE_LEGACY_ALIASES") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if legacy_enabled and out_json_legacy.exists():
+        print(status_messages.status(f"Wrote: {relative_path(out_json_legacy)} (legacy alias)", level="info"))
 
 #
 # Back-compat alias (older UI/tests/tooling may still call the paper2-named handler).

@@ -1,7 +1,8 @@
 """DB writer for run-level metrics, buckets, correlations, findings, contributors.
 
-Best-effort: functions return None/False if DB not reachable. Schema is
-verified only; migrations are handled by the canonical schema tools.
+OSS vNext posture:
+- DB is optional; when disabled, DB writer functions should not be invoked.
+- When DB is enabled, persistence is strict and fail-fast (exceptions propagate).
 """
 
 from __future__ import annotations
@@ -235,11 +236,10 @@ def write_correlations(run_id: int, rows: Sequence[tuple[str, float, str]]) -> b
             )
         return True
     except Exception as exc:
-        log.warning(
-            f"Correlations write failed for run_id={run_id}: {exc}",
-            category="db",
-        )
-        return False
+        log.error(f"Correlations write failed for run_id={run_id}: {exc}", category="db")
+        if _is_transient_db_exc(exc):
+            raise db_engine.TransientDbError(str(exc)) from exc
+        raise
 
 
 FindingRow = (
@@ -265,7 +265,7 @@ def write_findings(run_id: int, rows: Sequence[FindingRow]) -> bool:
                 else:
                     severity, masvs, cvss, kind, evidence_payload = row[:5]
                     module_id = None
-            evidence = _serialise_evidence(evidence_payload)
+            evidence = _serialise_evidence(evidence_payload, run_id=run_id)
             if isinstance(evidence, str) and len(evidence) > 512:
                 log.warning(
                     f"Truncating evidence payload for run_id={run_id} (len={len(evidence)})",
@@ -282,18 +282,33 @@ def write_findings(run_id: int, rows: Sequence[FindingRow]) -> bool:
             f"Failed to persist findings for run_id={run_id}: {exc}",
             category="db",
         )
-        return False
+        if _is_transient_db_exc(exc):
+            raise db_engine.TransientDbError(str(exc)) from exc
+        raise
 
 
-def _serialise_evidence(payload: Any) -> str | None:
+def _serialise_evidence(payload: Any, *, run_id: int | None = None) -> str | None:
     if payload is None:
         return None
     if isinstance(payload, str):
         return payload
     try:
         return json.dumps(payload, ensure_ascii=False)
-    except Exception:
-        return json.dumps({}, ensure_ascii=False)
+    except Exception as exc:
+        raw = repr(payload)
+        if len(raw) > 220:
+            raw = raw[:217] + "..."
+        sentinel = {
+            "_serialization_error": f"{exc.__class__.__name__}: {exc}",
+            "_serialization_type": payload.__class__.__name__,
+            "_raw_repr": raw,
+        }
+        log.warning(
+            f"Evidence serialization failed for run_id={run_id}: {exc.__class__.__name__}: {exc}",
+            category="db",
+            extra={"table": "findings", "column": "evidence", "run_id": run_id},
+        )
+        return json.dumps(sentinel, ensure_ascii=False)
 
 
 def write_contributors(run_id: int, rows: Sequence[tuple[str, float, str, int]]) -> bool:
@@ -305,11 +320,10 @@ def write_contributors(run_id: int, rows: Sequence[tuple[str, float, str, int]])
             )
         return True
     except Exception as exc:
-        log.error(
-            f"Failed to persist contributors for run_id={run_id}: {exc}",
-            category="db",
-        )
-        return False
+        log.error(f"Failed to persist contributors for run_id={run_id}: {exc}", category="db")
+        if _is_transient_db_exc(exc):
+            raise db_engine.TransientDbError(str(exc)) from exc
+        raise
 
 
 __all__ = [

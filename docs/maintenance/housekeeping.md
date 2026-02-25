@@ -19,7 +19,7 @@ safe cleanup. Typical actions include:
 Important:
 - Evidence packs are authoritative.
 - The DB is derived/rebuildable and may drift if runs are deleted locally.
-- Legacy paper export/repro docs remain under `docs/paper2/` as an optional path.
+- Legacy paper export/repro docs remain under `docs/legacy/paper2/` as an optional path.
 
 ## Static analysis caches & retention
 

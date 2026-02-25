@@ -7,7 +7,7 @@ Policy:
   - output/publication/appendix
   - output/publication/manifests
 - Provenance and internal regression artifacts must NOT live under `output/publication/`.
-  They are written under `output/_internal/` to keep the paper bundle minimal.
+  They are written under `output/_internal/` to keep the publication bundle minimal.
 
 Note:
 - Some older modules still refer to these as "paper" paths. Legacy helper names remain
@@ -22,7 +22,7 @@ from pathlib import Path
 
 from scytaledroid.Config import app_config
 
-from . import ml_parameters_paper2 as paper2_config
+from . import ml_parameters_profile as profile_config
 
 
 def freeze_anchor_path() -> Path:
@@ -30,11 +30,11 @@ def freeze_anchor_path() -> Path:
     override = str(os.environ.get("SCYTALEDROID_FREEZE_ANCHOR_PATH") or "").strip()
     if override:
         return Path(override)
-    return Path(app_config.DATA_DIR) / "archive" / paper2_config.FREEZE_CANONICAL_FILENAME
+    return Path(app_config.DATA_DIR) / "archive" / profile_config.FREEZE_CANONICAL_FILENAME
 
 
 def dataset_tables_dir() -> Path:
-    """Dataset-level derived tables written by the Phase E runner (regenerable)."""
+    """Dataset-level derived tables written by the publication runner (regenerable)."""
     return Path(app_config.DATA_DIR)
 
 

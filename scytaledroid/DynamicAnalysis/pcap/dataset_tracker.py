@@ -12,25 +12,26 @@ from typing import Any
 from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.core.event_logger import RunEventLogger
 from scytaledroid.DynamicAnalysis.core.manifest import RunManifest
-from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper2_config
+from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
 from scytaledroid.DynamicAnalysis.paper_eligibility import derive_paper_eligibility
 from scytaledroid.DynamicAnalysis.pcap.low_signal import compute_low_signal_for_run
+from scytaledroid.Utils.IO.atomic_write import atomic_write_text
 
-MIN_PCAP_BYTES = int(getattr(paper2_config, "MIN_PCAP_BYTES", 50000))
+MIN_PCAP_BYTES = int(getattr(profile_config, "MIN_PCAP_BYTES", 50000))
 MIN_WINDOWS_PER_RUN = 20
 SHORT_RUN_TOLERANCE_SECONDS = 2.0
 
 
 def _effective_min_sampling_seconds() -> float:
     configured = float(getattr(app_config, "DYNAMIC_MIN_DURATION_S", 120))
-    paper_floor = float(getattr(paper2_config, "MIN_SAMPLING_SECONDS", 180.0))
-    return max(configured, paper_floor)
+    profile_floor = float(getattr(profile_config, "MIN_SAMPLING_SECONDS", 180.0))
+    return max(configured, profile_floor)
 
 
 def _effective_target_sampling_seconds() -> float:
     configured = float(getattr(app_config, "DYNAMIC_TARGET_DURATION_S", 180))
-    paper_target = float(getattr(paper2_config, "RECOMMENDED_SAMPLING_SECONDS", 240.0))
-    return max(configured, paper_target)
+    profile_target = float(getattr(profile_config, "RECOMMENDED_SAMPLING_SECONDS", 240.0))
+    return max(configured, profile_target)
 
 
 @dataclass(frozen=True)
@@ -224,7 +225,7 @@ def update_dataset_tracker(
     )
     app_entry["overlap_stats"] = _compute_overlap_stats(runs_list)
     payload["updated_at"] = datetime.now(UTC).isoformat()
-    tracker_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    atomic_write_text(tracker_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
     _log(
         event_logger,
         "dataset_tracker_update",
@@ -249,10 +250,7 @@ def load_dataset_tracker() -> dict[str, Any]:
     # read the raw JSON (ad-hoc scripts) see consistent results.
     if dirty[0] and tracker_path.exists():
         try:
-            tracker_path.write_text(
-                json.dumps(normalized, indent=2, sort_keys=True),
-                encoding="utf-8",
-            )
+            atomic_write_text(tracker_path, json.dumps(normalized, indent=2, sort_keys=True) + "\n")
         except OSError:
             # Best-effort; callers can still reindex explicitly.
             pass
@@ -285,7 +283,7 @@ def _refresh_paper_eligibility_in_place(r: dict[str, Any]) -> bool:
         manifest=manifest if isinstance(manifest, dict) else {},
         plan=plan if isinstance(plan, dict) else {},
         min_windows=int(MIN_WINDOWS_PER_RUN),
-        required_capture_policy_version=int(getattr(paper2_config, "PAPER_CONTRACT_VERSION", 1)),
+        required_capture_policy_version=int(getattr(profile_config, "PAPER_CONTRACT_VERSION", 1)),
     )
     before = (
         r.get("paper_eligible"),
@@ -742,8 +740,8 @@ def evaluate_dataset_validity(
     if sampling_source == "capinfos_capture_duration_s" and telemetry_seconds is None:
         recompute_wc = _window_count_for_duration(
             float(sampling_seconds),
-            window_size_s=float(getattr(paper2_config, "WINDOW_SIZE_S", 10.0)),
-            stride_s=float(getattr(paper2_config, "WINDOW_STRIDE_S", 5.0)),
+            window_size_s=float(getattr(profile_config, "WINDOW_SIZE_S", 10.0)),
+            stride_s=float(getattr(profile_config, "WINDOW_STRIDE_S", 5.0)),
         )
         _write_recompute_attempt(
             run_dir,
@@ -791,8 +789,8 @@ def evaluate_dataset_validity(
         flags["short_run"] = 1
     window_count_original = _window_count_for_duration(
         sampling_seconds,
-        window_size_s=float(getattr(paper2_config, "WINDOW_SIZE_S", 10.0)),
-        stride_s=float(getattr(paper2_config, "WINDOW_STRIDE_S", 5.0)),
+        window_size_s=float(getattr(profile_config, "WINDOW_SIZE_S", 10.0)),
+        stride_s=float(getattr(profile_config, "WINDOW_STRIDE_S", 5.0)),
     )
     window_count_final = int(window_count_original)
     window_count_source = (
@@ -806,8 +804,8 @@ def evaluate_dataset_validity(
         if recompute_duration is not None:
             recompute_wc = _window_count_for_duration(
                 recompute_duration,
-                window_size_s=float(getattr(paper2_config, "WINDOW_SIZE_S", 10.0)),
-                stride_s=float(getattr(paper2_config, "WINDOW_STRIDE_S", 5.0)),
+                window_size_s=float(getattr(profile_config, "WINDOW_SIZE_S", 10.0)),
+                stride_s=float(getattr(profile_config, "WINDOW_STRIDE_S", 5.0)),
             )
             _write_recompute_attempt(
                 run_dir,
@@ -1030,7 +1028,7 @@ def _derive_paper_eligibility_fields(
         manifest=manifest if isinstance(manifest, dict) else {},
         plan=plan if isinstance(plan, dict) else {},
         min_windows=int(MIN_WINDOWS_PER_RUN),
-        required_capture_policy_version=int(getattr(paper2_config, "PAPER_CONTRACT_VERSION", 1)),
+        required_capture_policy_version=int(getattr(profile_config, "PAPER_CONTRACT_VERSION", 1)),
     )
     return {
         "paper_eligible": bool(eligibility.paper_eligible),

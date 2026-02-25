@@ -3,7 +3,7 @@
 These settings apply to query-mode / operational snapshots under output/operational/.
 
 Contract:
-- Phase E (Paper #2) is controlled by ml_parameters_paper2.py and remains frozen.
+- Phase E (freeze/profile mode) is controlled by ml_parameters_profile.py and remains frozen.
 - Operational mode may evolve; changes here should be accompanied by snapshot manifests.
 """
 

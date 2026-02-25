@@ -226,8 +226,8 @@ ScytaleDroid keeps detailed operator documentation under `docs/`:
   current phase status, blockers, and ordered work queue.
 - [`docs/refactor_test_matrix.md`](docs/refactor_test_matrix.md) –
   refactor/removal acceptance matrix and risk coverage.
-- [`docs/paper2/README.md`](docs/paper2/README.md) – legacy paper export
-  reproducibility notes (optional path, not core runtime).
+- [`docs/legacy/paper2/README.md`](docs/legacy/paper2/README.md) – legacy paper
+  export reproducibility notes (history; not core runtime).
 - [`docs/static_analysis/static_analysis_pipeline_plan.md`](docs/static_analysis/static_analysis_pipeline_plan.md) – roadmap,
   implementation status, and research backlog.
 - [`docs/maintenance/housekeeping.md`](docs/maintenance/housekeeping.md) – log
@@ -275,6 +275,16 @@ max_score = 10.0
 
 Additional configuration for persistence, database promotion, and analytics can be found in
 [`docs/runbook.md`](docs/runbook.md).
+
+## Supported interfaces
+
+The supported public interface is intentionally small. See:
+
+- [`docs/supported_entrypoints.md`](docs/supported_entrypoints.md)
+
+Deprecation/versioning policy:
+
+- [`docs/versioning.md`](docs/versioning.md)
 
 ## Contributing
 

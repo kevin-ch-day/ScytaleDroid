@@ -10,7 +10,6 @@ This is a reviewer-simulation / bug-hunting tool. It cross-checks:
 
 Outputs:
   output/publication/qa/pipeline_audit_v1.json (canonical)
-  output/publication/qa/paper2_pipeline_audit_v1.json (legacy alias)
 """
 
 from __future__ import annotations
@@ -31,7 +30,17 @@ FREEZE = REPO_ROOT / "data" / "archive" / "dataset_freeze.json"
 EVIDENCE_ROOT = REPO_ROOT / "output" / "evidence" / "dynamic"
 PAPER_RESULTS = REPO_ROOT / "output" / "publication" / "manifests" / "paper_results_v1.json"
 OUT = REPO_ROOT / "output" / "publication" / "qa" / "pipeline_audit_v1.json"
-OUT_LEGACY = REPO_ROOT / "output" / "publication" / "qa" / "paper2_pipeline_audit_v1.json"
+
+
+def _write_legacy_aliases() -> bool:
+    import os
+
+    return str((os.environ.get("SCYTALEDROID_WRITE_LEGACY_ALIASES") or "")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def _rjson(p: Path):
@@ -258,7 +267,10 @@ def main() -> int:
         )
         + "\n"
     )
-    for p in (OUT, OUT_LEGACY):
+    targets = [OUT]
+    if _write_legacy_aliases():
+        targets.append(REPO_ROOT / "output" / "publication" / "qa" / "paper2_pipeline_audit_v1.json")
+    for p in targets:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(payload, encoding="utf-8")
     print(str(OUT))

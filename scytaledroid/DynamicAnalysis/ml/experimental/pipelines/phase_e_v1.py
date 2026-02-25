@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ... import ml_parameters_paper2 as config
+from ... import ml_parameters_profile as config
 from ...evidence_pack_ml_preflight import (
     compute_ml_preflight,
     load_run_inputs,

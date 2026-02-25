@@ -1,7 +1,11 @@
 """db_config.py - Environment-aware database configuration.
 
-Default is a local SQLite file under ``data/db/scytaledroid.sqlite``.
-MySQL/MariaDB remains available via DSN (e.g., mysql://user:pass@host:3306/dbname).
+OSS vNext posture:
+- Filesystem artifacts are canonical.
+- Database support is optional.
+- When enabled, MySQL/MariaDB is required (no SQLite fallback).
+
+Unit tests may still use SQLite as a local backend for isolated execution.
 """
 
 from __future__ import annotations
@@ -107,17 +111,14 @@ def _load_from_env() -> dict[str, str | int]:
             raw_url = raw_url.strip()
         if not raw_url:
             raw_url = _compose_db_url_from_parts()
-        if not raw_url and not os.environ.get("SCYTALEDROID_ALLOW_SQLITE"):
-            env_path = Path(os.environ.get("SCYTALEDROID_ENV_FILE") or _DOTENV_DEFAULT)
-            source = "missing"
-            if env_path.exists():
-                source = "empty" if loaded_dotenv else "missing_key"
-            raise RuntimeError(
-                "Database configuration is required for non-test runs. "
-                f"({source} in .env). Set SCYTALEDROID_DB_URL or set "
-                "SCYTALEDROID_DB_NAME/USER/PASSWD/HOST/PORT, or set "
-                "SCYTALEDROID_ALLOW_SQLITE=1 to use the local SQLite fallback."
-            )
+        if not raw_url:
+            # OSS posture: DB is optional. Absence of config means "DB disabled".
+            return {
+                "engine": "disabled",
+                "database": "",
+                "charset": "utf8",
+                "readonly": 1,
+            }
     if not raw_url:
         # Default: SQLite under data/db/
         sqlite_path = _default_sqlite_path()
@@ -134,18 +135,11 @@ def _load_from_env() -> dict[str, str | int]:
     parsed = urlparse(raw_url)
     scheme = parsed.scheme.lower()
     if scheme in {"sqlite", "file"}:
-        db_path = parsed.path or parsed.netloc
-        if not db_path:
-            db_path = str(_default_sqlite_path())
-        readonly = not _sqlite_allow_write()
-        if any("pytest" in arg for arg in sys.argv[:1]) or "PYTEST_CURRENT_TEST" in os.environ:
-            readonly = False
-        return {
-            "engine": "sqlite",
-            "database": db_path,
-            "charset": "utf8",
-            "readonly": readonly,
-        }
+        # OSS posture: no SQLite backend when DB is explicitly configured.
+        raise RuntimeError(
+            "SQLite backend is not supported for OSS vNext. "
+            "Remove SCYTALEDROID_DB_URL (to disable DB) or configure a mysql/mariadb DSN."
+        )
 
     if scheme in {"mysql", "mariadb"}:
         try:
@@ -177,11 +171,14 @@ def _load_from_env() -> dict[str, str | int]:
 
 
 DB_CONFIG: dict[str, str | int] = _load_from_env()
-DB_CONFIG_SOURCE: str = (
-    "env:SCYTALEDROID_DB_URL"
-    if os.environ.get("SCYTALEDROID_DB_URL")
-    else ("env:SCYTALEDROID_DB_*" if os.environ.get("SCYTALEDROID_DB_NAME") else "default-sqlite")
-)
+if str(DB_CONFIG.get("engine", "")).lower() == "disabled":
+    DB_CONFIG_SOURCE = "disabled"
+else:
+    DB_CONFIG_SOURCE = (
+        "env:SCYTALEDROID_DB_URL"
+        if os.environ.get("SCYTALEDROID_DB_URL")
+        else ("env:SCYTALEDROID_DB_*" if os.environ.get("SCYTALEDROID_DB_NAME") else "default-sqlite")
+    )
 
 _DEFAULT_DATABASE = DB_CONFIG.get("database", "")
 _DEFAULT_ENGINE = DB_CONFIG.get("engine", "sqlite")
@@ -205,4 +202,10 @@ def override_database(database: str | None) -> None:
         DB_CONFIG["engine"] = _DEFAULT_ENGINE
 
 
-__all__ = ["DB_CONFIG", "DB_CONFIG_SOURCE", "allow_auto_create", "override_database"]
+def db_enabled() -> bool:
+    """Return True when the DB backend is enabled (MySQL/MariaDB)."""
+
+    return str(DB_CONFIG.get("engine", "")).lower() in {"mysql", "mariadb"}
+
+
+__all__ = ["DB_CONFIG", "DB_CONFIG_SOURCE", "allow_auto_create", "db_enabled", "override_database"]

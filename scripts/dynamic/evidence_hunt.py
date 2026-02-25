@@ -136,7 +136,7 @@ def _derive_eligibility_rows(
 
 
 def cmd_summary(args: argparse.Namespace) -> int:
-    from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper2
+    from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as paper2
 
     evidence_root = Path(args.evidence_root)
     rows = _derive_eligibility_rows(
@@ -175,7 +175,7 @@ def cmd_summary(args: argparse.Namespace) -> int:
 
 
 def cmd_list_excluded(args: argparse.Namespace) -> int:
-    from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper2
+    from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as paper2
 
     reasons_filter = {s.strip() for s in (args.reason or []) if s.strip()}
     evidence_root = Path(args.evidence_root)
@@ -209,7 +209,7 @@ def cmd_list_excluded(args: argparse.Namespace) -> int:
 
 
 def cmd_drift(args: argparse.Namespace) -> int:
-    from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper2
+    from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as paper2
     from scytaledroid.DynamicAnalysis.paper_eligibility import derive_paper_eligibility
 
     evidence_root = Path(args.evidence_root)
@@ -263,7 +263,7 @@ def cmd_quarantine(args: argparse.Namespace) -> int:
     This is non-destructive (move, not delete). It will change what ScytaleDroid sees,
     because many tools scan output/evidence/dynamic directly.
     """
-    from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper2
+    from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as paper2
 
     evidence_root = Path(args.evidence_root)
     quarantine_root = Path(args.quarantine_root)
@@ -313,7 +313,7 @@ def cmd_quarantine(args: argparse.Namespace) -> int:
 
 
 def cmd_quarantine_audit(args: argparse.Namespace) -> int:
-    """Quarantine run IDs listed in a paper readiness audit report."""
+    """Quarantine run IDs listed in a freeze readiness audit report."""
     report_path = Path(args.report_path)
     report = _read_json(report_path)
     if not isinstance(report, dict):
@@ -376,7 +376,7 @@ def cmd_per_app(args: argparse.Namespace) -> int:
     - Buckets run_profile to baseline vs interactive
     - Counts first N per bucket as quota_counted; remaining as extras
     """
-    from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper2
+    from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as paper2
     from scytaledroid.DynamicAnalysis.menu import _run_profile_bucket
     from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig
 
@@ -508,7 +508,7 @@ def main() -> int:
     if getattr(args, "policy_version", 0) == 0:
         # Use paper2 default without importing at top-level in non-repo contexts.
         try:
-            from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper2
+            from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as paper2
 
             args.policy_version = int(paper2.PAPER_CONTRACT_VERSION)
         except Exception:

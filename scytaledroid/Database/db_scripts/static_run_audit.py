@@ -33,17 +33,13 @@ if str(_REPO_ROOT) not in sys.path:
 def _configure_db_target(db_target: str) -> None:
     parsed = urlparse(db_target)
     scheme = (parsed.scheme or "").lower()
-    if scheme not in {"mysql", "mariadb", "sqlite", "file"}:
-        raise RuntimeError("Unsupported --db-target scheme. Use mysql://... or sqlite:///...")
+    if scheme not in {"mysql", "mariadb"}:
+        raise RuntimeError("Unsupported --db-target scheme. Use mysql://... (SQLite is not supported).")
     os.environ["SCYTALEDROID_DB_URL"] = db_target
-    if scheme in {"sqlite", "file"}:
-        path = parsed.path or parsed.netloc
-        print(f"[DB TARGET] backend=sqlite path={path}")
-    else:
-        host = parsed.hostname or "localhost"
-        port = parsed.port or 3306
-        db_name = (parsed.path or "").lstrip("/")
-        print(f"[DB TARGET] backend=mysql host={host} port={port} db={db_name}")
+    host = parsed.hostname or "localhost"
+    port = parsed.port or 3306
+    db_name = (parsed.path or "").lstrip("/")
+    print(f"[DB TARGET] backend=mysql host={host} port={port} db={db_name}")
 
 def _imports():  # noqa: ANN202 - small script helper
     # Local import so this script can be run both as `python ...` and with repo-root sys.path tweak.
@@ -368,7 +364,7 @@ def main() -> None:
     ap.add_argument(
         "--db-target",
         required=True,
-        help="Explicit DB target DSN (mysql://... or sqlite:///...). Required for audit safety.",
+        help="Explicit DB target DSN (mysql://...). Required for audit safety (SQLite is not supported).",
     )
     ap.add_argument("--session", help="session_stamp (e.g., 20251128-203341)")
     ap.add_argument("--run-id", type=int, help="static_analysis_runs.id")

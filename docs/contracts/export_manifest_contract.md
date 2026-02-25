@@ -6,7 +6,7 @@ This contract defines how frozen export artifacts are verified.
 
 Baseline manifest path:
 
-`tests/baseline/paper2_export_manifest.json`
+`tests/baseline/publication_export_manifest.json`
 
 Changes require:
 
@@ -43,8 +43,8 @@ Command:
 
 Default compare target:
 
-1. baseline manifest: `tests/baseline/paper2_export_manifest.json`
-2. artifact root: `output/paper`
+1. baseline manifest: `tests/baseline/publication_export_manifest.json`
+2. artifact root: `output/publication`
 3. diff output: `output/audit/comparators/publication_export/<timestamp>/diff.json`
 
 Pass rule:

@@ -105,7 +105,7 @@ def reporting_menu() -> None:
             show_descriptions=False,
             compact=True,
         )
-        menu_utils.print_section("Exploratory (Not for Paper)")
+        menu_utils.print_section("Exploratory (Non-Canonical)")
         menu_utils.print_menu(
             exploratory_options,
             show_exit=True,

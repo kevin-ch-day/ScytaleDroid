@@ -10,8 +10,6 @@ This is a deeper ML-focused audit than the general pipeline audit:
 Outputs:
   output/publication/qa/ml_audit_report_v1.json (canonical)
   output/publication/qa/ml_audit_report_v1.csv (canonical)
-  output/publication/qa/paper2_ml_audit_report_v1.json (legacy alias)
-  output/publication/qa/paper2_ml_audit_report_v1.csv (legacy alias)
 """
 
 from __future__ import annotations
@@ -24,19 +22,29 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+import os
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper2  # noqa: E402
+from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as paper2  # noqa: E402
 
 FREEZE = REPO_ROOT / "data" / "archive" / "dataset_freeze.json"
 EVIDENCE_ROOT = REPO_ROOT / "output" / "evidence" / "dynamic"
 OUT_DIR = REPO_ROOT / "output" / "publication" / "qa"
 OUT_JSON = OUT_DIR / "ml_audit_report_v1.json"
 OUT_CSV = OUT_DIR / "ml_audit_report_v1.csv"
-OUT_JSON_LEGACY = OUT_DIR / "paper2_ml_audit_report_v1.json"
-OUT_CSV_LEGACY = OUT_DIR / "paper2_ml_audit_report_v1.csv"
+
+
+def _write_legacy_aliases() -> bool:
+    # Opt-in only: reduces bundle clutter for OSS users.
+    return str((os.environ.get("SCYTALEDROID_WRITE_LEGACY_ALIASES") or "")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def _rjson(p: Path):
@@ -269,7 +277,7 @@ def main() -> int:
                 )
             )
 
-    # Write JSON + CSV (canonical + legacy aliases).
+    # Write JSON + CSV (canonical). Legacy aliases are opt-in.
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     payload = (
         json.dumps(
@@ -291,11 +299,17 @@ def main() -> int:
         )
         + "\n"
     )
-    for p in (OUT_JSON, OUT_JSON_LEGACY):
+    json_targets = [OUT_JSON]
+    if _write_legacy_aliases():
+        json_targets.append(OUT_DIR / "paper2_ml_audit_report_v1.json")
+    for p in json_targets:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(payload, encoding="utf-8")
 
-    for p in (OUT_CSV, OUT_CSV_LEGACY):
+    csv_targets = [OUT_CSV]
+    if _write_legacy_aliases():
+        csv_targets.append(OUT_DIR / "paper2_ml_audit_report_v1.csv")
+    for p in csv_targets:
         p.parent.mkdir(parents=True, exist_ok=True)
         with p.open("w", encoding="utf-8", newline="") as f:
             w = csv.DictWriter(f, fieldnames=list(asdict(rows[0]).keys()) if rows else [])

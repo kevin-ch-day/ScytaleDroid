@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from scytaledroid.DynamicAnalysis.tools.evidence.paper_readiness_audit import (
-    run_paper_readiness_audit,
+from scytaledroid.DynamicAnalysis.tools.evidence.freeze_readiness_audit import (
+    run_freeze_readiness_audit,
 )
 
 
@@ -39,7 +39,7 @@ def test_paper_readiness_audit_detects_policy_signer_and_window_issues(tmp_path:
         },
     )
 
-    summary = run_paper_readiness_audit(evidence_root=evidence_root, out_dir=out_dir)
+    summary = run_freeze_readiness_audit(evidence_root=evidence_root, out_dir=out_dir)
     assert summary.total_runs == 2
     assert summary.valid_runs == 2
     assert summary.paper_eligible_runs == 0
@@ -69,7 +69,7 @@ def test_paper_readiness_audit_uses_default_output_root_only(tmp_path: Path, mon
             "dataset": {"valid_dataset_run": True, "window_count": 25},
         },
     )
-    summary = run_paper_readiness_audit(out_dir=out_dir)
+    summary = run_freeze_readiness_audit(out_dir=out_dir)
     assert summary.total_runs == 1
     assert summary.missing_run_manifest_dirs == 0
     assert summary.evidence_root.endswith("output/evidence/dynamic")
@@ -79,7 +79,7 @@ def test_paper_readiness_audit_no_runs_is_no_go_with_reasons(tmp_path: Path) -> 
     evidence_root = tmp_path / "empty-evidence"
     out_dir = tmp_path / "audit"
 
-    summary = run_paper_readiness_audit(evidence_root=evidence_root, out_dir=out_dir)
+    summary = run_freeze_readiness_audit(evidence_root=evidence_root, out_dir=out_dir)
     assert summary.total_runs == 0
     assert summary.valid_runs == 0
     assert summary.paper_eligible_runs == 0
@@ -97,7 +97,7 @@ def test_paper_readiness_audit_surfaces_static_runs_hint(tmp_path: Path, monkeyp
     static_root = tmp_path / "evidence" / "static_runs" / "1"
     _write_json(static_root / "run_manifest.json", {"static_run_id": 1})
 
-    summary = run_paper_readiness_audit(out_dir=out_dir)
+    summary = run_freeze_readiness_audit(out_dir=out_dir)
     assert summary.total_runs == 0
     assert summary.paper_eligible_runs == 0
     assert summary.missing_run_manifest_dirs == 0
@@ -143,7 +143,7 @@ def test_paper_readiness_audit_detects_identity_mismatch(tmp_path: Path) -> None
             },
         },
     )
-    summary = run_paper_readiness_audit(evidence_root=evidence_root, out_dir=out_dir)
+    summary = run_freeze_readiness_audit(evidence_root=evidence_root, out_dir=out_dir)
     assert summary.total_runs == 1
     assert summary.paper_eligible_runs == 0
     assert summary.missing_run_manifest_dirs == 0
@@ -164,7 +164,7 @@ def test_paper_readiness_audit_flags_orphan_evidence_dirs(tmp_path: Path) -> Non
             "dataset": {"valid_dataset_run": True, "window_count": 25},
         },
     )
-    summary = run_paper_readiness_audit(evidence_root=evidence_root, out_dir=out_dir)
+    summary = run_freeze_readiness_audit(evidence_root=evidence_root, out_dir=out_dir)
     assert summary.total_runs == 1
     assert summary.missing_run_manifest_dirs == 1
     assert "INCOMPLETE_EVIDENCE_DIRS_PRESENT" in summary.reasons
@@ -184,7 +184,7 @@ def test_paper_readiness_audit_demotes_noncanonical_freeze(tmp_path: Path, monke
             "freeze_role": "canonical",
         },
     )
-    summary = run_paper_readiness_audit(out_dir=out_dir)
+    summary = run_freeze_readiness_audit(out_dir=out_dir)
     assert summary.canonical_freeze_demoted_to_legacy is not None
     assert summary.canonical_freeze_role == "none"
     assert summary.freeze_run_ids_total == 0

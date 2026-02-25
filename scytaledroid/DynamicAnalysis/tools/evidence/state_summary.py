@@ -10,7 +10,7 @@ from typing import Any
 
 from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.datasets.research_dataset_alpha import load_dataset_packages
-from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper2_config
+from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
 from scytaledroid.DynamicAnalysis.paper_eligibility import derive_paper_eligibility
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig, load_dataset_tracker
 from scytaledroid.DynamicAnalysis.templates.category_map import category_for_package
@@ -129,12 +129,12 @@ def _tracker_vs_evidence_per_app() -> list[dict[str, Any]]:
             if pkg not in dataset_pkgs:
                 continue
             plan = _read_json(run_dir / "inputs" / "static_dynamic_plan.json") or {}
-            eligibility = derive_paper_eligibility(
-                manifest=manifest,
-                plan=plan,
-                min_windows=_min_windows_per_run(),
-                required_capture_policy_version=int(paper2_config.PAPER_CONTRACT_VERSION),
-            )
+                eligibility = derive_paper_eligibility(
+                    manifest=manifest,
+                    plan=plan,
+                    min_windows=_min_windows_per_run(),
+                    required_capture_policy_version=int(profile_config.PAPER_CONTRACT_VERSION),
+                )
             if not eligibility.paper_eligible:
                 per_pkg[pkg]["excluded"] += 1
                 continue

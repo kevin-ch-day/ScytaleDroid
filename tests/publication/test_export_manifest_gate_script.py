@@ -9,8 +9,8 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = _ROOT / "scripts" / "publication" / "export_manifest_gate.py"
 _FIXTURE_ROOT = _ROOT / "tests" / "fixtures" / "publication"
-_MANIFEST = _FIXTURE_ROOT / "paper2_export_manifest.json"
-_BUNDLE = _FIXTURE_ROOT / "paper2_bundle"
+_MANIFEST = _FIXTURE_ROOT / "publication_export_manifest.json"
+_BUNDLE = _FIXTURE_ROOT / "publication_bundle"
 
 
 def _run(*args: str) -> subprocess.CompletedProcess[str]:
@@ -44,4 +44,3 @@ def test_export_manifest_gate_script_fails_on_drift(tmp_path: Path):
     payload = json.loads(output.read_text(encoding="utf-8"))
     assert payload["result"]["pass"] is False
     assert payload["result"]["diff_counts"]["disallowed"] >= 1
-

@@ -12,7 +12,7 @@ from scytaledroid.DeviceAnalysis.adb import client as adb_client
 from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
-from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper2_config
+from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
 from scytaledroid.DynamicAnalysis.observers.base import Observer, ObserverHandle, ObserverResult
 
 PCAPDROID_PACKAGE = "com.emanuelef.remote_capture"
@@ -28,12 +28,12 @@ FINALIZE_STABLE_POLLS = 2
 def _effective_min_pcap_bytes(run_ctx: RunContext) -> int:
     """Return observer-side PCAP floor aligned with run mode.
 
-    Dataset/paper runs should use the paper contract floor; other modes keep the
+    Dataset/freeze runs should use the freeze contract floor; other modes keep the
     operational fallback from app config.
     """
     profile = str(getattr(run_ctx, "run_profile", "") or "").strip().lower()
     if profile.startswith("baseline_") or profile.startswith("interaction_"):
-        return int(getattr(paper2_config, "MIN_PCAP_BYTES", MIN_PCAP_BYTES))
+        return int(getattr(profile_config, "MIN_PCAP_BYTES", MIN_PCAP_BYTES))
     return int(MIN_PCAP_BYTES)
 
 

@@ -28,6 +28,8 @@ from scytaledroid.Publication.contract_inputs import (
     load_publication_contracts,
 )
 from scytaledroid.Utils.LatexUtils import render_tabular_only
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
+from scytaledroid.Utils.IO.atomic_write import atomic_copyfile, atomic_write_text
 from scytaledroid.Utils.IO.csv_with_provenance import read_csv_with_provenance
 
 
@@ -45,7 +47,7 @@ def _copy(src: Path, dst: Path, *, overwrite: bool) -> None:
     dst.parent.mkdir(parents=True, exist_ok=True)
     if dst.exists() and not overwrite:
         return
-    dst.write_bytes(src.read_bytes())
+    atomic_copyfile(src, dst)
 
 
 def _copytree(src: Path, dst: Path, *, overwrite: bool) -> None:
@@ -261,6 +263,7 @@ class CanonicalPublicationResult:
     snapshot_id: str | None
     snapshot_source_dir: Path | None
     ok: bool
+    warnings_count: int = 0
 
 
 def write_canonical_publication_directory(
@@ -285,6 +288,7 @@ def write_canonical_publication_directory(
     qa_dir = bundle_paths.output_publication_qa_dir()
     internal_prov = bundle_paths.output_publication_internal_provenance_dir()
     internal_snaps = bundle_paths.output_publication_internal_snapshots_root()
+    warnings_count = 0
 
     for d in (publication_root, tables_dir, figs_dir, appendix_dir, manifests_dir, qa_dir, internal_prov, internal_snaps):
         d.mkdir(parents=True, exist_ok=True)
@@ -436,25 +440,28 @@ def write_canonical_publication_directory(
         _copy(snap_manifest / "selection_manifest.json", manifests_dir / "selection_manifest.json", overwrite=overwrite)
         _copy(snap_manifest / "freeze_manifest.json", manifests_dir / "freeze_manifest.json", overwrite=overwrite)
         _copy(snap_manifest / "model_registry.json", manifests_dir / "model_registry.json", overwrite=overwrite)
-        (manifests_dir / "publication_snapshot_id.txt").write_text(
-            (snapshot_id or snapshot_dir.name) + "\n", encoding="utf-8"
-        )
+        atomic_write_text(manifests_dir / "publication_snapshot_id.txt", (snapshot_id or snapshot_dir.name) + "\n")
 
         # Render compact TeX risk scoring table from snapshot tables for provenance only.
         # Keep this out of paper-facing tables until authors finalize naming/placement.
         try:
             snap_tables = snapshot_dir / "tables"
             risk_rows = _read_csv_rows(snap_tables / "risk_summary_per_group.csv")
-            (internal_prov / "risk_scoring_group_summary.tex").write_text(
+            atomic_write_text(
+                internal_prov / "risk_scoring_group_summary.tex",
                 _render_risk_scoring_tabular_tex(
                     risk_rows,
                     package_order=contracts.package_order,
                     display_name_by_package=contracts.display_name_by_package,
                 ),
-                encoding="utf-8",
             )
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001 - warn-only provenance helper
+            warnings_count += 1
+            log.warning(
+                f"Optional snapshot provenance TeX render skipped: {exc.__class__.__name__}: {exc}",
+                category="publication",
+                extra={"artifact": "risk_scoring_group_summary.tex", "snapshot_dir": str(snapshot_dir)},
+            )
 
         # Archive full snapshot under internal/ for provenance.
         sid = snapshot_id or snapshot_dir.name
@@ -481,7 +488,8 @@ def write_canonical_publication_directory(
             "internal": str(bundle_paths.output_publication_internal_root()),
         },
     }
-    (publication_root / "README.md").write_text(
+    atomic_write_text(
+        publication_root / "README.md",
         "\n".join(
             [
                 "# Canonical Publication Bundle",
@@ -505,7 +513,6 @@ def write_canonical_publication_directory(
             ]
         )
         + "\n",
-        encoding="utf-8",
     )
 
     # Also write a machine-readable receipt with hashes of surfaced top-level artifacts.
@@ -525,8 +532,9 @@ def write_canonical_publication_directory(
             continue
         rel = str(p.relative_to(publication_root))
         receipt["sha256"][rel] = _sha256_file(p)
-    (bundle_paths.output_publication_manifests_dir() / "canonical_receipt.json").write_text(
-        json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    atomic_write_text(
+        bundle_paths.output_publication_manifests_dir() / "canonical_receipt.json",
+        json.dumps(receipt, indent=2, sort_keys=True) + "\n",
     )
 
     return CanonicalPublicationResult(
@@ -535,4 +543,5 @@ def write_canonical_publication_directory(
         snapshot_id=(snapshot_id or (snapshot_dir.name if snapshot_dir else None)),
         snapshot_source_dir=snap_source_dir,
         ok=True,
+        warnings_count=warnings_count,
     )

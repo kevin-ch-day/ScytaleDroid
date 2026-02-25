@@ -50,8 +50,8 @@ Location: `scytaledroid/DynamicAnalysis/ml/`
 
 ### Locked parameters
 
-- `ml_parameters_paper2.py`
-  - PM/reviewer locked constants: freeze anchor filename, windowing, gates, thresholds, model IDs.
+- `ml_parameters_profile.py`
+  - Locked constants: freeze anchor filename, windowing, gates, thresholds, model IDs.
 
 ### Paths + deliverables bundle
 
@@ -59,6 +59,5 @@ Location: `scytaledroid/DynamicAnalysis/ml/`
   - Centralizes `data/` vs `output/` path conventions for Phase E.
 
 - `artifact_bundle_writer.py`
-  - Generates a zip-and-share paper bundle under:
-    - `output/paper/` (canonical paper artifact surface; internal provenance under `output/paper/internal/`)
-  - Copies canonical tables, copies freeze anchor for convenience, writes Fig B1 timeline, writes a bundle manifest with hashes.
+  - Generates publication artifacts under `output/publication/` and regression/provenance artifacts under `output/_internal/`.
+  - Copies canonical tables, copies freeze anchor for convenience, writes timeline/B2/B4 figures, and writes a bundle manifest with hashes.

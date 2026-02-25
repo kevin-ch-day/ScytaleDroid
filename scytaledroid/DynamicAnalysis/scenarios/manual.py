@@ -14,7 +14,7 @@ from pathlib import Path
 
 from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
-from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper2_config
+from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
 from scytaledroid.DynamicAnalysis.scenarios.manual_templates import (
     SNAPCHAT_TEMPLATE_HINTS,
 )
@@ -74,14 +74,14 @@ CALL_MIN_CONNECTED_DURATION_S = 90
 
 def _effective_min_sampling_seconds() -> int:
     configured = int(getattr(app_config, "DYNAMIC_MIN_DURATION_S", 120))
-    paper_floor = int(getattr(paper2_config, "MIN_SAMPLING_SECONDS", 180))
-    return max(configured, paper_floor)
+    profile_floor = int(getattr(profile_config, "MIN_SAMPLING_SECONDS", 180))
+    return max(configured, profile_floor)
 
 
 def _effective_recommended_sampling_seconds() -> int:
     configured = int(getattr(app_config, "DYNAMIC_TARGET_DURATION_S", 180))
-    paper_target = int(getattr(paper2_config, "RECOMMENDED_SAMPLING_SECONDS", 240))
-    return max(configured, paper_target)
+    profile_target = int(getattr(profile_config, "RECOMMENDED_SAMPLING_SECONDS", 240))
+    return max(configured, profile_target)
 
 
 class ManualScenarioRunner:

@@ -276,7 +276,7 @@ def _print_tier1_status_banner() -> dict[str, object]:
     except Exception:
         tier1 = {}
 
-    # Paper-facing status (authoritative for manuscript work).
+    # Publication-facing status (authoritative for freeze-anchored exports).
     try:
         from scytaledroid.Reporting.menu_actions import fetch_publication_status
 
@@ -314,7 +314,7 @@ def _print_tier1_status_banner() -> dict[str, object]:
 
     # Loud, impossible-to-miss banner (PM acceptance criteria).
     if mode == "paper":
-        banner = f"Mode: PAPER FREEZE ({lock_label}) | Freeze: {freeze_short} | Audit: {audit}"
+        banner = f"Mode: FREEZE ({lock_label}) | Freeze: {freeze_short} | Audit: {audit}"
         print(status_messages.status(banner, level="success" if locked else "warn"))
         counts = _load_paper_cohort_counts() or {}
         apps = counts.get("apps")

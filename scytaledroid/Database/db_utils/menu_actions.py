@@ -23,7 +23,7 @@ def show_connection_and_config() -> None:
 
     try:
         cfg = db_config.DB_CONFIG
-        backend = str(cfg.get("engine", "sqlite"))
+        backend = str(cfg.get("engine", "disabled"))
         host = str(cfg.get("host", "<unknown>"))
         port_display = str(cfg.get("port", "<unknown>"))
         database = str(cfg.get("database", "<unknown>"))
@@ -528,7 +528,7 @@ def show_db_status() -> None:
     """Show backend/schema status, config source, and env hints."""
 
     cfg = db_config.DB_CONFIG
-    backend = str(cfg.get("engine", "sqlite"))
+    backend = str(cfg.get("engine", "disabled"))
     host = str(cfg.get("host", "<unknown>"))
     port_display = str(cfg.get("port", "<unknown>"))
     database = str(cfg.get("database", "<unknown>"))
@@ -566,8 +566,8 @@ def ingest_analysis_cohort_from_publication_bundle() -> None:
     print()
     print("Ingest Analysis Cohort")
     print("----------------------")
-    # Prefer canonical export location first; legacy paper path is fallback-only.
-    default_root = "output/publication" if Path("output/publication").exists() else "output/paper"
+    # Prefer canonical export location. Legacy output/paper fallback is opt-in only.
+    default_root = "output/publication"
     bundle_root = (
         prompt_utils.prompt_text(
             "Bundle root",
@@ -583,6 +583,22 @@ def ingest_analysis_cohort_from_publication_bundle() -> None:
         prompt_utils.press_enter_to_continue()
         return
     if bundle_root_path == Path("output/paper"):
+        legacy_ok = str(os.environ.get("SCYTALEDROID_ALLOW_LEGACY_OUTPUT_PAPER") or "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        if not legacy_ok:
+            print(
+                status_messages.status(
+                    "Legacy bundle root output/paper is disabled. Use output/publication, or set "
+                    "SCYTALEDROID_ALLOW_LEGACY_OUTPUT_PAPER=1 to explicitly allow legacy ingest.",
+                    level="fail",
+                )
+            )
+            prompt_utils.press_enter_to_continue()
+            return
         print(status_messages.status("Using legacy bundle root fallback: output/paper", level="warn"))
 
     # Derive stable defaults from bundle provenance when available.
@@ -1156,7 +1172,7 @@ def ensure_dynamic_tier_column(*, prompt_user: bool = True) -> bool:
     """Ensure dynamic_sessions has a tier column (DB migration helper)."""
 
     cfg = db_config.DB_CONFIG
-    backend = str(cfg.get("engine", "sqlite"))
+    backend = str(cfg.get("engine", "disabled"))
     if backend != "mysql":
         print(
             status_messages.status(
@@ -1188,7 +1204,7 @@ def ensure_dynamic_network_quality_column(*, prompt_user: bool = True) -> bool:
     """Ensure dynamic_sessions has a network_signal_quality column (DB migration helper)."""
 
     cfg = db_config.DB_CONFIG
-    backend = str(cfg.get("engine", "sqlite"))
+    backend = str(cfg.get("engine", "disabled"))
     if backend != "mysql":
         print(
             status_messages.status(
@@ -1220,7 +1236,7 @@ def ensure_dynamic_pcap_columns(*, prompt_user: bool = True) -> bool:
     """Ensure dynamic_sessions has PCAP metadata columns (DB migration helper)."""
 
     cfg = db_config.DB_CONFIG
-    backend = str(cfg.get("engine", "sqlite"))
+    backend = str(cfg.get("engine", "disabled"))
     if backend != "mysql":
         print(
             status_messages.status(
@@ -1282,7 +1298,7 @@ def ensure_dynamic_netstats_rows_columns(*, prompt_user: bool = True) -> bool:
     """Ensure dynamic_sessions has netstats row counters (DB migration helper)."""
 
     cfg = db_config.DB_CONFIG
-    backend = str(cfg.get("engine", "sqlite"))
+    backend = str(cfg.get("engine", "disabled"))
     if backend != "mysql":
         print(
             status_messages.status(
@@ -1326,7 +1342,7 @@ def ensure_dynamic_sampling_duration_columns(*, prompt_user: bool = True) -> boo
     """Ensure dynamic_sessions has sampling duration alignment columns."""
 
     cfg = db_config.DB_CONFIG
-    backend = str(cfg.get("engine", "sqlite"))
+    backend = str(cfg.get("engine", "disabled"))
     if backend != "mysql":
         print(
             status_messages.status(
@@ -1370,7 +1386,7 @@ def ensure_dynamic_gap_columns(*, prompt_user: bool = True) -> bool:
     """Ensure dynamic_sessions has warm-up gap columns."""
 
     cfg = db_config.DB_CONFIG
-    backend = str(cfg.get("engine", "sqlite"))
+    backend = str(cfg.get("engine", "disabled"))
     if backend != "mysql":
         print(
             status_messages.status(

@@ -2,7 +2,7 @@
 
 This document is **historic** and preserved for context only.
 It does not represent the current implementation plan. Legacy paper export
-references are optional and kept under `docs/paper2/`.
+references are optional and kept under `docs/legacy/paper2/`.
 
 ## Phase / Sprint Status (historic)
 - **Phase 2C (telemetry stabilization + Tier-1 readiness):** complete.

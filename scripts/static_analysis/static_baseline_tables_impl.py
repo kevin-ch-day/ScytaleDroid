@@ -72,23 +72,10 @@ def _category(value: str | None) -> str:
 def _configure_db_target(db_target: str) -> None:
     parsed = urlparse(db_target)
     scheme = (parsed.scheme or "").lower()
-    if scheme not in {"mysql", "mariadb", "sqlite", "file"}:
-        raise RuntimeError("Unsupported --db-target scheme. Use mysql://... or sqlite:///...")
+    if scheme not in {"mysql", "mariadb"}:
+        raise RuntimeError("Unsupported --db-target scheme. Use mysql://... (SQLite is not supported).")
 
     os.environ["SCYTALEDROID_DB_URL"] = db_target
-    if scheme in {"sqlite", "file"}:
-        db_path = parsed.path or parsed.netloc
-        if not db_path:
-            raise RuntimeError("sqlite --db-target must include a path, e.g. sqlite:///abs/path.db")
-        db_config.DB_CONFIG = {
-            "engine": "sqlite",
-            "database": db_path,
-            "charset": "utf8",
-            "readonly": False,
-        }
-        db_config.DB_CONFIG_SOURCE = "cli:--db-target"
-        print(f"[DB TARGET] backend=sqlite path={db_path}")
-        return
 
     db_config.DB_CONFIG = {
         "engine": "mysql",
@@ -470,7 +457,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--db-target",
         required=True,
-        help="Explicit DB target DSN (mysql://... or sqlite:///...). Required for audit safety.",
+        help="Explicit DB target DSN (mysql://...). Required for audit safety (SQLite is not supported).",
     )
     parser.add_argument("--out-dir", default="output/audit/static_baseline", help="Output directory.")
     parser.add_argument(

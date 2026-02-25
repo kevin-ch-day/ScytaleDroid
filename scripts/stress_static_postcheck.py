@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Static batch stress post-check (Paper #2).
+Static batch stress post-check (freeze-anchored research profile).
 
 This script does NOT run scans. It validates that a completed static batch run
 produced the expected artifacts and left the DB in a sane state.

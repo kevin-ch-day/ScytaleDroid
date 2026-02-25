@@ -1,4 +1,9 @@
-"""Report database backend status, connection, and schema version."""
+"""Report database backend status, connection, and schema version.
+
+OSS vNext posture:
+- DB is optional.
+- When enabled, MySQL/MariaDB is required.
+"""
 
 from __future__ import annotations
 
@@ -10,7 +15,7 @@ from scytaledroid.Database.db_core.db_engine import DatabaseEngine
 
 def main() -> int:
     cfg = db_config.DB_CONFIG
-    backend = str(cfg.get("engine", "sqlite"))
+    backend = str(cfg.get("engine", "disabled"))
     host = str(cfg.get("host", "<unknown>"))
     port = str(cfg.get("port", "<unknown>"))
     database = str(cfg.get("database", "<unknown>"))
@@ -25,6 +30,11 @@ def main() -> int:
     print(f"User    : {user}")
     print(f"Config  : {getattr(db_config, 'DB_CONFIG_SOURCE', 'default')}")
     print("")
+
+    if not db_config.db_enabled():
+        print("Connection: DISABLED (DB not configured)")
+        print("Schema version: n/a")
+        return 0
 
     engine = None
     try:

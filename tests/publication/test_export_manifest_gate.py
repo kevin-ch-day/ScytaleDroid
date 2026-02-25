@@ -10,8 +10,8 @@ from scytaledroid.Utils.System.export_manifest import (
 )
 
 _FIXTURE_ROOT = Path(__file__).resolve().parents[1] / "fixtures" / "publication"
-_BUNDLE_ROOT = _FIXTURE_ROOT / "paper2_bundle"
-_MANIFEST_PATH = _FIXTURE_ROOT / "paper2_export_manifest.json"
+_BUNDLE_ROOT = _FIXTURE_ROOT / "publication_bundle"
+_MANIFEST_PATH = _FIXTURE_ROOT / "publication_export_manifest.json"
 
 
 def _load_fixture_manifest() -> dict[str, object]:
@@ -61,4 +61,3 @@ def test_export_manifest_comparator_fails_on_csv_drift(tmp_path: Path):
     assert result.payload["result"]["diff_counts"]["disallowed"] >= 1
     fields = {str(item.get("field")) for item in result.payload.get("diffs", [])}
     assert "sha256" in fields
-

@@ -3,7 +3,7 @@ import json
 
 def test_paper_provenance_includes_locked_constants():
     from scytaledroid.DynamicAnalysis.ml import artifact_bundle_writer as writer
-    from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as config
+    from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as config
 
     payload = writer._paper_provenance(freeze_sha256="abc123")
     assert payload["window_size_s"] == str(config.WINDOW_SIZE_S)

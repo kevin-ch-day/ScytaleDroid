@@ -2,7 +2,7 @@
 
 Note: This document tracks a legacy internal migration plan for the DeviceAnalysis package.
 It is not the active implementation plan. Legacy paper export/repro notes are
-kept under `docs/paper2/` as an optional reference path.
+kept under `docs/legacy/paper2/` as an optional reference path.
 
 ## Layering rules
 - **UI-only printing/prompting:** Any `print()`, prompts, panels, or progress UI must live in the UI layer.

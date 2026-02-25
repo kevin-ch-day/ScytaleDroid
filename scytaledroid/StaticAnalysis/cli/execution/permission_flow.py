@@ -188,7 +188,7 @@ def execute_permission_scan(
     snapshot_payload = accumulator.finalize()
     run_id = None
     static_run_id = None
-    if session_stamp and len(accumulator.apps) == 1:
+    if session_stamp and len(accumulator.apps) == 1 and getattr(params, "persistence_ready", False):
         package_name = accumulator.apps[0].package
         try:
             from scytaledroid.Database.db_core import db_queries as core_q

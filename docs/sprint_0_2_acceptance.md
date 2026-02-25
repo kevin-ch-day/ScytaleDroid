@@ -3,7 +3,7 @@
 Note: This is a historic acceptance checklist for early identity/linkage work.
 Current implementation contracts live in `docs/engineering_invariants.md` and
 `docs/refactor_phase_plan.md`. Legacy paper export references are optional and
-kept under `docs/paper2/`.
+kept under `docs/legacy/paper2/`.
 
 Scope: static run identity, run_map linkage, and diagnostic linkage reporting.
 

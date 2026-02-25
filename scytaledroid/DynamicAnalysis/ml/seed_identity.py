@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-from . import ml_parameters_paper2 as config
+from . import ml_parameters_profile as config
 
 
 def identity_key_from_plan(plan: dict[str, Any] | None) -> str | None:

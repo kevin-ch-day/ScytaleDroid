@@ -83,13 +83,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--manifest",
-        default="tests/baseline/paper2_export_manifest.json",
+        default="tests/baseline/publication_export_manifest.json",
         help="Baseline manifest path.",
     )
     parser.add_argument(
         "--artifact-root",
-        default="output/paper",
-        help="Root directory containing frozen export artifacts.",
+        default="output/publication",
+        help="Root directory containing frozen export artifacts (canonical: output/publication).",
     )
     parser.add_argument(
         "--output",

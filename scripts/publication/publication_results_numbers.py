@@ -7,8 +7,8 @@ Inputs (stable, internal baseline bundle):
 - data/archive/dataset_freeze.json
 
 Outputs:
-- output/publication/manifests/publication_results_numbers.json (canonical)
-- output/publication/manifests/paper2_results_numbers.json (legacy alias)
+  - output/publication/manifests/publication_results_numbers.json (canonical)
+  - output/publication/manifests/paper2_results_numbers.json (legacy alias; opt-in)
 - output/publication/appendix/results_section_V.md
 """
 
@@ -171,9 +171,21 @@ def main() -> int:
         freeze_manifest_sha256=freeze_sha256,
     )
 
+    import os
+
+    def _write_legacy_aliases() -> bool:
+        return str((os.environ.get("SCYTALEDROID_WRITE_LEGACY_ALIASES") or "")).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+
     out_json = PUB_ROOT / "manifests" / "publication_results_numbers.json"
-    out_json_legacy = PUB_ROOT / "manifests" / "paper2_results_numbers.json"
-    for p in (out_json, out_json_legacy):
+    json_targets = [out_json]
+    if _write_legacy_aliases():
+        json_targets.append(PUB_ROOT / "manifests" / "paper2_results_numbers.json")
+    for p in json_targets:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps(asdict(res), indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
@@ -226,9 +238,11 @@ def main() -> int:
     rho = float(paper_results.get("spearman_rho_static_vs_if_interactive", res.spearman_rho_static_vs_if_interactive))
     pval = float(paper_results.get("spearman_p_static_vs_if_interactive", res.spearman_p_static_vs_if_interactive))
 
-    # Canonical paste blocks filename (plus a legacy alias for older tooling).
+    # Canonical paste blocks filename (legacy alias is opt-in).
     ieee = PUB_ROOT / "appendix" / "publication_paste_blocks.md"
-    ieee_legacy = PUB_ROOT / "appendix" / "paper2_ieee_paste_blocks.md"
+    md_targets = [ieee]
+    if _write_legacy_aliases():
+        md_targets.append(PUB_ROOT / "appendix" / "paper2_ieee_paste_blocks.md")
     notes = paper_results.get("notes") if isinstance(paper_results.get("notes"), dict) else {}
     idle_med = notes.get("idle_rdi_median")
     idle_q25 = notes.get("idle_rdi_q25")
@@ -390,7 +404,7 @@ def main() -> int:
         )
         + "\n"
     )
-    for p in (ieee, ieee_legacy):
+    for p in md_targets:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(content, encoding="utf-8")
 

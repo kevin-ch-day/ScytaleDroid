@@ -23,7 +23,7 @@ from scytaledroid.DynamicAnalysis.datasets.research_dataset_alpha import (
     MESSAGING_PACKAGES,
     load_dataset_packages,
 )
-from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper2_config
+from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
 from scytaledroid.DynamicAnalysis.pcap.tools import collect_host_tools, missing_required_tools
 from scytaledroid.DynamicAnalysis.plan_selection import (
     ensure_plan_or_error,
@@ -165,15 +165,15 @@ def _print_paper_mode_constants() -> None:
 
     # Default operator UX: keep this compact. Full parameter tables are available
     # on demand to avoid drowning operators in static boilerplate.
-    menu_utils.print_section("ML Parameters (Paper #2 Locked)")
+    menu_utils.print_section("ML Parameters (Locked)")
     rows = [
-        ("Window size", f"{int(paper2_config.WINDOW_SIZE_S)}s"),
-        ("Stride", f"{int(paper2_config.WINDOW_STRIDE_S)}s"),
-        ("Min sampling time", f"{int(getattr(paper2_config, 'MIN_SAMPLING_SECONDS', 180))}s"),
-        ("Recommended time", f"{int(getattr(paper2_config, 'RECOMMENDED_SAMPLING_SECONDS', 240))}s"),
-        ("Percentile threshold", f"{int(paper2_config.THRESHOLD_PERCENTILE)}"),
-        ("Percentile method", str(getattr(paper2_config, "NP_PERCENTILE_METHOD", "linear"))),
-        ("Min PCAP bytes", f"{int(paper2_config.MIN_PCAP_BYTES)}"),
+        ("Window size", f"{int(profile_config.WINDOW_SIZE_S)}s"),
+        ("Stride", f"{int(profile_config.WINDOW_STRIDE_S)}s"),
+        ("Min sampling time", f"{int(getattr(profile_config, 'MIN_SAMPLING_SECONDS', 180))}s"),
+        ("Recommended time", f"{int(getattr(profile_config, 'RECOMMENDED_SAMPLING_SECONDS', 240))}s"),
+        ("Percentile threshold", f"{int(profile_config.THRESHOLD_PERCENTILE)}"),
+        ("Percentile method", str(getattr(profile_config, "NP_PERCENTILE_METHOD", "linear"))),
+        ("Min PCAP bytes", f"{int(profile_config.MIN_PCAP_BYTES)}"),
         ("Models", "Isolation Forest + OC-SVM"),
         ("Baseline-only training", "YES"),
         ("NumPy version", numpy_version),
@@ -184,10 +184,10 @@ def _print_paper_mode_constants() -> None:
     )
     if compact:
         line = (
-            f"Window={int(paper2_config.WINDOW_SIZE_S)}s/{int(paper2_config.WINDOW_STRIDE_S)}s | "
-            f"Min={int(getattr(paper2_config, 'MIN_SAMPLING_SECONDS', 180))}s | "
-            f"Rec={int(getattr(paper2_config, 'RECOMMENDED_SAMPLING_SECONDS', 240))}s | "
-            f"MinPCAP={int(paper2_config.MIN_PCAP_BYTES)} | "
+            f"Window={int(profile_config.WINDOW_SIZE_S)}s/{int(profile_config.WINDOW_STRIDE_S)}s | "
+            f"Min={int(getattr(profile_config, 'MIN_SAMPLING_SECONDS', 180))}s | "
+            f"Rec={int(getattr(profile_config, 'RECOMMENDED_SAMPLING_SECONDS', 240))}s | "
+            f"MinPCAP={int(profile_config.MIN_PCAP_BYTES)} | "
             f"Models=IF+OCSVM | Baseline-only=YES"
         )
         print(status_messages.status(line, level="info"))
@@ -766,8 +766,8 @@ def _post_run_integrity_check(result) -> None:
         pcap_size_int = int(pcap_size or 0)
     except Exception:
         pcap_size_int = 0
-    pcap_size_ok = pcap_size_int >= int(paper2_config.MIN_PCAP_BYTES)
-    min_windows = int(getattr(paper2_config, "MIN_WINDOWS_PER_RUN", 20))
+    pcap_size_ok = pcap_size_int >= int(profile_config.MIN_PCAP_BYTES)
+    min_windows = int(getattr(profile_config, "MIN_WINDOWS_PER_RUN", 20))
     window_count_ok = window_count is not None and int(window_count) >= int(min_windows)
     verdict = (
         "VALID"
@@ -778,7 +778,7 @@ def _post_run_integrity_check(result) -> None:
         [
             "PCAP size",
             "OK" if pcap_size_ok else "FAIL",
-            f"{pcap_size_int} bytes (min {int(paper2_config.MIN_PCAP_BYTES)})",
+            f"{pcap_size_int} bytes (min {int(profile_config.MIN_PCAP_BYTES)})",
         ],
         [
             "capinfos parse",

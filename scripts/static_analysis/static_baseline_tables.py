@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Compatibility wrapper for static baseline corpus table generation."""
+"""Entrypoint for static baseline corpus table generation."""
 
 from __future__ import annotations
 
-from paper1_tables import main
+from static_baseline_tables_impl import main
 
 
 if __name__ == "__main__":

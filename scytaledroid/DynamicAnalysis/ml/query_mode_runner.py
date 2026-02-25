@@ -23,7 +23,7 @@ import numpy as np
 from scytaledroid.Config import app_config
 
 from . import ml_parameters_operational as config
-from . import ml_parameters_paper2 as paper_config
+from . import ml_parameters_profile as paper_config
 from .anomaly_model_training import anomaly_scores, fit_model, fixed_model_specs
 from .evidence_pack_ml_preflight import (
     RunInputs,

@@ -571,7 +571,7 @@ def evidence_verify_freeze_immutability(*, pause: bool = True) -> None:
     out_dir = Path(app_config.DATA_DIR) / "archive"
     # Paper #2 (PM-locked): always prefer the canonical checksummed freeze anchor
     # used by Phase E. Only fall back to other freeze files if that anchor is absent.
-    from scytaledroid.DynamicAnalysis.ml.ml_parameters_paper2 import FREEZE_CANONICAL_FILENAME
+    from scytaledroid.DynamicAnalysis.ml.ml_parameters_profile import FREEZE_CANONICAL_FILENAME
 
     freeze_path = out_dir / FREEZE_CANONICAL_FILENAME
     if not freeze_path.exists():

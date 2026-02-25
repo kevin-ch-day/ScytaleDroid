@@ -22,7 +22,7 @@ from scytaledroid.DynamicAnalysis.datasets.research_dataset_alpha import (
 from scytaledroid.DynamicAnalysis.datasets.research_dataset_alpha import (
     load_dataset_packages as _load_dataset_packages,
 )
-from scytaledroid.DynamicAnalysis.ml import ml_parameters_paper2 as paper2_config
+from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
 from scytaledroid.DynamicAnalysis.paper_eligibility import derive_paper_eligibility
 from scytaledroid.DynamicAnalysis.profile_loader import load_db_profiles, load_profile_packages
 from scytaledroid.DynamicAnalysis.services.observer_service import (
@@ -154,7 +154,7 @@ def _summarize_evidence_quota(dataset_pkgs: set[str], cfg) -> dict[str, int | bo
             manifest=payload,
             plan=plan,
             min_windows=_min_windows_per_run(),
-            required_capture_policy_version=int(paper2_config.PAPER_CONTRACT_VERSION),
+            required_capture_policy_version=int(profile_config.PAPER_CONTRACT_VERSION),
         )
         if not eligibility.paper_eligible:
             out["excluded_runs"] = int(out["excluded_runs"]) + 1
@@ -210,7 +210,7 @@ def dynamic_analysis_menu() -> None:
     from scytaledroid.Database.db_utils import schema_gate
     ok, message, detail = schema_gate.dynamic_schema_gate()
     if not ok:
-        # Paper #2 contract: evidence packs are authoritative; DB is a derived index.
+        # Freeze/profile contract: evidence packs are authoritative; DB is a derived index.
         # Do not block capture/collection on DB readiness. Surface a warning and
         # allow DB-free workflows to proceed.
         status_messages.print_status(f"[WARN] {message}", level="warn")
@@ -221,13 +221,13 @@ def dynamic_analysis_menu() -> None:
             level="warn",
         )
 
-    # Paper-facing exports are consolidated under Reporting (single canonical surface).
+    # Publication exports are consolidated under Reporting (single canonical surface).
     collection_options = [
         MenuOption("1", "Guided cohort run (Research Dataset Alpha)"),
         MenuOption("2", "Cohort status overview"),
     ]
     integrity_options = [
-        MenuOption("3", "Paper readiness audit (evidence packs)"),
+        MenuOption("3", "Freeze readiness audit (evidence packs)"),
         MenuOption("4", "Reindex/repair tracker from evidence packs"),
         MenuOption("5", "Prune incomplete dynamic evidence dirs"),
     ]
@@ -443,7 +443,7 @@ def _repair_reindex_tracker() -> None:
                 manifest=manifest,
                 plan=plan,
                 min_windows=_min_windows_per_run(),
-                required_capture_policy_version=int(paper2_config.PAPER_CONTRACT_VERSION),
+                required_capture_policy_version=int(profile_config.PAPER_CONTRACT_VERSION),
             )
             if not eligibility.paper_eligible and eligibility.reason_code == "EXCLUDED_MISSING_REQUIRED_IDENTITY_FIELD":
                 missing_paper_identity_count += 1
@@ -478,9 +478,9 @@ def _repair_reindex_tracker() -> None:
         ("Tracker apps (after)", str(app_count)),
         ("Valid runs (after)", str(valid_count)),
         ("Valid runs missing window_count", str(missing_window_count)),
-        ("Valid runs missing paper identity/link", str(missing_paper_identity_count)),
+        ("Valid runs missing required identity fields", str(missing_paper_identity_count)),
         ("Evidence quota counted", f"{int(evidence_summary.get('quota_runs_counted', 0))}/{expected_runs}"),
-        ("Evidence paper-eligible", str(int(evidence_summary.get("paper_eligible_runs", 0)))),
+        ("Evidence eligible", str(int(evidence_summary.get("paper_eligible_runs", 0)))),
     ]
     ui_level = str(os.environ.get("SCYTALEDROID_UI_LEVEL") or "").strip().lower()
     verbose = ui_level in {"details", "debug"}
@@ -499,13 +499,13 @@ def _repair_reindex_tracker() -> None:
 
 
 def _run_paper_readiness_audit() -> None:
-    from scytaledroid.DynamicAnalysis.tools.evidence.paper_readiness_audit import (
-        run_paper_readiness_audit,
+    from scytaledroid.DynamicAnalysis.tools.evidence.freeze_readiness_audit import (
+        run_freeze_readiness_audit,
     )
 
-    summary = run_paper_readiness_audit()
+    summary = run_freeze_readiness_audit()
     print()
-    menu_utils.print_header("Paper Readiness Audit")
+    menu_utils.print_header("Freeze Readiness Audit")
     ui_level = str(os.environ.get("SCYTALEDROID_UI_LEVEL") or "").strip().lower()
     verbose = ui_level in {"details", "debug"}
     if not verbose:
@@ -526,7 +526,7 @@ def _run_paper_readiness_audit() -> None:
     rows = [
         ("Total runs", str(summary.total_runs)),
         ("VALID runs", str(summary.valid_runs)),
-        ("Paper-eligible runs", str(summary.paper_eligible_runs)),
+        ("Cohort-eligible runs", str(summary.paper_eligible_runs)),
         ("CAN_FREEZE", "YES" if summary.can_freeze else "NO"),
         ("First failing reason", str(summary.first_failing_reason or "—")),
         ("Incomplete dirs (no manifest)", str(summary.missing_run_manifest_dirs)),
@@ -546,9 +546,9 @@ def _run_paper_readiness_audit() -> None:
     ]
     table_utils.render_table(["Metric", "Count"], rows, compact=False)
     if summary.result != "GO":
-        print(status_messages.status("Audit result: NO-GO (paper-readiness checks failed).", level="error"))
+        print(status_messages.status("Audit result: NO-GO (freeze readiness checks failed).", level="error"))
     else:
-        print(status_messages.status("Audit result: GO (paper-readiness checks passed).", level="success"))
+        print(status_messages.status("Audit result: GO (freeze readiness checks passed).", level="success"))
     if summary.reasons:
         reason_text = ", ".join(summary.reasons)
         print(status_messages.status(f"Reasons: {reason_text}", level="warn"))
@@ -588,12 +588,12 @@ def _run_paper_readiness_audit() -> None:
 
 
 def _run_state_summary() -> None:
-    from scytaledroid.DynamicAnalysis.tools.evidence.paper_readiness_audit import (
-        run_paper_readiness_audit,
+    from scytaledroid.DynamicAnalysis.tools.evidence.freeze_readiness_audit import (
+        run_freeze_readiness_audit,
     )
     from scytaledroid.DynamicAnalysis.tools.evidence.state_summary import build_state_summary
 
-    summary = run_paper_readiness_audit()
+    summary = run_freeze_readiness_audit()
     payload = _read_json(Path(summary.report_path)) or {}
     state_payload = build_state_summary()
     print()
@@ -619,7 +619,7 @@ def _run_state_summary() -> None:
         ("Freeze run IDs present", f"{summary.freeze_run_ids_present}/{summary.freeze_run_ids_total}"),
         ("Evidence root", str(summary.evidence_root)),
         ("Total runs", str(summary.total_runs)),
-        ("Paper-eligible runs", str(summary.paper_eligible_runs)),
+        ("Cohort-eligible runs", str(summary.paper_eligible_runs)),
     ]
     table_utils.render_table(["Metric", "Value"], rows, compact=False)
 
@@ -730,7 +730,7 @@ def _compute_tracker_vs_evidence_deltas() -> list[dict[str, object]]:
                 manifest=manifest,
                 plan=plan,
                 min_windows=_min_windows_per_run(),
-                required_capture_policy_version=int(paper2_config.PAPER_CONTRACT_VERSION),
+                required_capture_policy_version=int(profile_config.PAPER_CONTRACT_VERSION),
             )
             if not eligibility.paper_eligible:
                 per_pkg[pkg]["excluded"] += 1

@@ -25,6 +25,11 @@ Static persistence is all-or-nothing at the unit-of-work boundary.
 - Failures must not leave orphan rows.
 - Scientific run state vocabulary is fixed to `STARTED`, `COMPLETED`, `FAILED`.
 
+Derived filesystem artifacts (indexes, manifests, receipts, small JSON/CSV outputs)
+are written atomically (temp + replace) to avoid corrupt partial files. See:
+
+- `docs/io_atomic_write_coverage.md`
+
 ## 4) Determinism Comparator Is Contractual
 
 Determinism gates are key-based and machine-readable.
@@ -53,6 +58,6 @@ Legacy publication/export code is isolated and disabled by default.
 
 Frozen Paper #2 exports are validated against a versioned baseline manifest.
 
-- Source of truth: `tests/baseline/paper2_export_manifest.json`.
+- Source of truth: `tests/baseline/publication_export_manifest.json`.
 - Verification is hash+size based using declared normalization rules.
 - Drift requires a documented rationale under `docs/drift/` and approval.

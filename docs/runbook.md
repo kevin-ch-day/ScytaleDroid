@@ -5,8 +5,8 @@ running scanners, persisting results, and verifying database coverage. It assume
 `requirements.txt` has been installed (via `./setup.sh`) and that you have
 credentials for the canonical database target.
 
-Paper #2 dynamic collection + ML:
-- Optional legacy export/repro notes live under `docs/paper2/`.
+Legacy paper export/repro notes:
+- Optional legacy notes live under `docs/legacy/paper2/`.
 
 ## 1. Prepare the session
 

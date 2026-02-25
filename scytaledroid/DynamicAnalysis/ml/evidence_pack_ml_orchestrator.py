@@ -25,7 +25,7 @@ from typing import Any
 import numpy as np
 from scytaledroid.Config import app_config
 
-from . import ml_parameters_paper2 as config
+from . import ml_parameters_profile as config
 from .anomaly_model_training import anomaly_scores, fit_model, fixed_model_specs
 from .config_fingerprint import compute_ml_config_fingerprint, paper2_fingerprint_payload
 from .evidence_pack_ml_preflight import (
@@ -51,6 +51,7 @@ from scytaledroid.DynamicAnalysis.core.freeze_identity import (
     FREEZE_DATASET_IDENTITY_VERSION,
     compute_freeze_dataset_hash_from_path,
 )
+from scytaledroid.Utils.IO.atomic_write import atomic_write_text
 
 FREEZE_DIR = Path(app_config.DATA_DIR) / "archive"
 DATASET_FREEZE_CANONICAL = FREEZE_DIR / config.FREEZE_CANONICAL_FILENAME
@@ -179,19 +180,19 @@ def run_ml_on_evidence_packs(
                     continue
                 if found != ml_fp:
                     mismatched.append({"run_id": str(rid), "reason": "fingerprint_mismatch"})
-            if missing_fp or mismatched:
-                # Back-compat: older runs may not have a fingerprint yet. Force a recompute
-                # (reuse_existing_outputs=False) rather than silently trusting stale outputs.
-                if missing_fp:
-                    # Fingerprint is config-only; we can write it without touching any ML outputs.
-                    for rid in missing_fp:
-                        out_dir = _ml_output_dir(root / rid, frozen=True)
-                        _write_ml_semantic_config(out_dir, ml_config_fingerprint=ml_fp, ml_config_fingerprint_payload=ml_fp_payload)
-                else:
-                    raise RuntimeError(
-                        "Refusing reuse_existing_outputs: ml_config_fingerprint mismatch (paper mode). "
-                        f"Example mismatch: {mismatched[0]}"
-                    )
+            if missing_fp:
+                # Freeze/profile mode contract: never "patch in" fingerprints for reuse.
+                # Missing fingerprints means the existing outputs may be stale and cannot be
+                # safely reused without recomputation.
+                raise RuntimeError(
+                    "Refusing reuse_existing_outputs: ml_config_fingerprint missing for existing outputs "
+                    f"(runs={sorted(missing_fp)}). Outputs may be stale. Re-run with reuse disabled."
+                )
+            if mismatched:
+                raise RuntimeError(
+                    "Refusing reuse_existing_outputs: ml_config_fingerprint mismatch (freeze/profile mode). "
+                    f"Example mismatch: {mismatched[0]}. Re-run with reuse disabled."
+                )
             if reuse_existing_outputs:
                 # Safe to reuse; proceed to dataset-level regeneration if needed.
                 pass
@@ -2197,7 +2198,7 @@ def _write_model_manifest(
             config.MODEL_OCSVM: "secondary_model_robustness_check",
         },
     }
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
     # Also write semantic config sidecar for reuse safety without rewriting immutable manifests.
     _write_ml_semantic_config(
         path.parent,
@@ -2224,7 +2225,7 @@ def _write_ml_semantic_config(
         "ml_config_fingerprint": str(ml_config_fingerprint),
         "ml_config_fingerprint_payload": ml_config_fingerprint_payload,
     }
-    p.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    atomic_write_text(p, json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
 def _read_ml_config_fingerprint(out_dir: Path) -> str | None:
@@ -2379,7 +2380,7 @@ def _write_ml_summary(
         dars_payload["scores"][model_name] = dars_row
     threshold_path = out_dir / "baseline_threshold.json"
     if not threshold_path.exists():
-        threshold_path.write_text(json.dumps(threshold_payload, indent=2, sort_keys=True), encoding="utf-8")
+        atomic_write_text(threshold_path, json.dumps(threshold_payload, indent=2, sort_keys=True) + "\n")
     dars_path = out_dir / "dars_v1.json"
     dars_hash_path = out_dir / "dars_v1.sha256"
     if dars_payload.get("scores"):
@@ -2388,10 +2389,10 @@ def _write_ml_summary(
             dars_hash = hashlib.sha256(dars_body).hexdigest()
             dars_emit = dict(dars_payload)
             dars_emit["hash_of_dars_artifact"] = dars_hash
-            dars_path.write_text(json.dumps(dars_emit, indent=2, sort_keys=True), encoding="utf-8")
+            atomic_write_text(dars_path, json.dumps(dars_emit, indent=2, sort_keys=True) + "\n")
         if not dars_hash_path.exists():
-            dars_hash_path.write_text(_sha256_file(dars_path) + "\n", encoding="utf-8")
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+            atomic_write_text(dars_hash_path, _sha256_file(dars_path) + "\n")
+    atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
 def _load_scores(csv_path: Path) -> list[float]:
@@ -2554,7 +2555,7 @@ def _write_run_skip(run: RunInputs, *, frozen: bool, reason: str, details: dict[
         }
         if details:
             payload["skip"]["details"] = details
-        paths.summary_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        atomic_write_text(paths.summary_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
     _write_cohort_status(run, status="EXCLUDED", reason_code=reason, details=details)
 
 
@@ -2718,7 +2719,7 @@ def _write_cohort_status(
         "identity_end": target.get("identity_end"),
         "identity_gate": None,
     }
-    paths.cohort_status_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    atomic_write_text(paths.cohort_status_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
 def _write_global_cohort_status(root: Path, *, reason: str, details: dict[str, Any] | None = None) -> None:
@@ -2736,7 +2737,7 @@ def _write_global_cohort_status(root: Path, *, reason: str, details: dict[str, A
     _validate_paper_reason_code(reason)
     if details:
         payload["details"] = details
-    out.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    atomic_write_text(out, json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
 def _validate_paper_reason_code(reason_code: str | None) -> None:
