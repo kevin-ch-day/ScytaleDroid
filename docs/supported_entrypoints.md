@@ -24,5 +24,4 @@ These are intended for reproducible artifact generation and automation:
 ## Not supported (best-effort)
 
 - Anything under `scripts/` that is not listed above.
-- `scripts/paper2/` (removed; paper-era wrappers are no longer shipped).
 - Developer-only or exploratory utilities under `scripts/experimental/`.

@@ -11,8 +11,8 @@ canonical database schema for fast cross-run analytics. Dynamic analysis is
 evidence-pack-first: evidence packs are authoritative and the DB is a rebuildable
 accelerator (derived index) for querying/reporting.
 
-Paper export support is optional and isolated from core workflows. The primary
-operator experience is the menu-driven CLI launched via `./run.sh`.
+Publication bundle exports are optional and isolated from core workflows. The
+primary operator experience is the menu-driven CLI launched via `./run.sh`.
 
 Dynamic analysis runs are executed on physical devices (non-root telemetry),
 structured as dynamic sessions, and designed to support time-series anomaly
@@ -87,8 +87,9 @@ ScytaleDroid targets modern Linux hosts. Before running the toolkit make sure yo
   interpreter is required for the CLI and utilities.
 - **ADB** with access to the devices you plan to inventory. Confirm `adb devices`
   returns the hardware you want to target.
-- **SQLite 3.35+** (ships with modern distros) for the local persistence layer. If you
-  point the CLI at a remote database, provision credentials with read/write access.
+- (Optional) **MariaDB/MySQL** if you want DB-backed persistence and cross-run analytics.
+  The tool runs end-to-end without a DB; when enabled, DB writes are strict and require
+  a compatible MySQL/MariaDB backend.
 - **Virtual environment (recommended).** Use `python -m venv .venv && source .venv/bin/activate`
   to keep dependencies isolated.
 
@@ -218,32 +219,19 @@ ScytaleDroid keeps detailed operator documentation under `docs/`:
   frozen-input contract, freeze manifest semantics, and ML output paths.
 - [`docs/engineering_invariants.md`](docs/engineering_invariants.md) –
   non-negotiable architecture/runtime invariants.
-- [`docs/inventory_guard_determinism_contract.md`](docs/inventory_guard_determinism_contract.md) –
-  deterministic decision contract for inventory freshness guard logic.
-- [`docs/refactor_phase_plan.md`](docs/refactor_phase_plan.md) – ordered
-  refactor phases and merge gates.
-- [`docs/refactor_execution_tracker.md`](docs/refactor_execution_tracker.md) –
-  current phase status, blockers, and ordered work queue.
-- [`docs/refactor_test_matrix.md`](docs/refactor_test_matrix.md) –
-  refactor/removal acceptance matrix and risk coverage.
-- [`docs/legacy/paper2/README.md`](docs/legacy/paper2/README.md) – legacy paper
-  export reproducibility notes (history; not core runtime).
-- [`docs/static_analysis/static_analysis_pipeline_plan.md`](docs/static_analysis/static_analysis_pipeline_plan.md) – roadmap,
-  implementation status, and research backlog.
+- [`docs/legacy/paper2/README.md`](docs/legacy/paper2/README.md) – legacy research
+  export notes (history; not core runtime).
 - [`docs/maintenance/housekeeping.md`](docs/maintenance/housekeeping.md) – log
   locations, housekeeping behaviour, and retention policy controls.
 - [`docs/database`](docs/database) – schema notes and read-side query
   blueprints for downstream portals.
 - [`docs/database/derived_index.md`](docs/database/derived_index.md) – DB
   posture (derived/rebuildable; ML is DB-free).
-- [`docs/database/permission_analysis_schema.md`](docs/database/permission_analysis_schema.md) – risk
-  snapshots and proposed matrix/rationale tables.
-- [`docs/static_analysis_analytics.md`](docs/static_analysis_analytics.md) –
-  severity/category matrices, workload profiling, and novelty indicators.
-- [`docs/static_analysis_improvement_plan.md`](docs/static_analysis_improvement_plan.md) –
-  current milestone recap and next tightening steps.
 - [`docs/runbook.md`](docs/runbook.md) – step-by-step static analysis and persistence runbook.
 - [`RENAME_GUIDE.md`](RENAME_GUIDE.md) – module naming map and deprecation plan.
+
+Developer/internal planning notes (not part of the supported interface surface) live under `docs/` as well,
+including refactor trackers and execution matrices.
 
 ## Configuration
 

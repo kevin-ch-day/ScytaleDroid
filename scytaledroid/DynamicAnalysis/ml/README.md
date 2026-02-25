@@ -22,7 +22,7 @@ under `experimental/` so it cannot accidentally drift locked semantics.
 - `artifact_bundle_writer.py` + `deliverable_bundle_paths.py`
   - Canonical publication artifact surface under `output/publication/`.
   - Internal regression/provenance bundle under `output/_internal/` (no-drift target).
-- `io/`
+  - `io/`
   - Evidence-pack and output path helpers.
 
 ## Operational tuning hooks

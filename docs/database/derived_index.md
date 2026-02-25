@@ -1,6 +1,6 @@
-# Database as a Derived Index (Paper #2)
+# Database as a Derived Index (Freeze/Profile Mode)
 
-Paper #2 posture:
+Freeze/profile posture:
 - Evidence packs are authoritative.
 - The DB is a rebuildable **accelerator** (fast querying/reporting), not ground truth.
 
@@ -12,7 +12,7 @@ Paper #2 posture:
 
 ## What the DB must NOT be used for
 
-- Selecting the frozen dataset for Phase E (ML).
+- Selecting the frozen dataset for freeze/profile ML.
 - Training/scoring ML (no DB reads in ML runner).
 - Any logic that changes run validity or dataset inclusion.
 

@@ -3,6 +3,11 @@
 This folder contains the **authoritative operator + implementation contracts**
 for Paper #2.
 
+> Note: this is a legacy document kept for historical reproducibility context.
+> Current ScytaleDroid versions use freeze/profile terminology and write the
+> canonical publication bundle under `output/publication/` (with internal
+> provenance under `output/_internal/`).
+
 ## What Paper #2 is (and is not)
 
 Paper #2 thesis (locked):
@@ -54,14 +59,18 @@ Derived dataset tables (regenerable; developer/analyst-facing):
 - `data/transport_mix_by_phase.csv`
 - `data/transport_mix_per_run.csv` *(appendix; per-run transport ratios)*
 
-Paper-ready deliverables bundle (zip-and-share; operator/paper-facing):
-- Canonical paper artifact surface: `output/paper/`
-  - Paper-facing: `output/paper/tables/`, `output/paper/figures/`, `output/paper/appendix/`, `output/paper/manifests/`
-  - Internal provenance: `output/paper/internal/`
+Publication deliverables bundle (zip-and-share; operator-facing):
+- Canonical publication artifact surface: `output/publication/`
+  - `output/publication/tables/`, `output/publication/figures/`,
+    `output/publication/appendix/`, `output/publication/manifests/`
+- Internal provenance/regression outputs: `output/_internal/`
 
-Bundle integrity receipts (inside the bundle):
-- `output/paper/internal/provenance/phase_e_artifacts_manifest.json` (hashes + provenance pointers)
-- `output/paper/manifests/phase_e_closure_record.json` (pins freeze sha256 + bundle-manifest sha256)
+Older versions of the bundle writer used `output/paper/`. New builds should not
+write to that path by default.
+
+Bundle integrity receipts:
+- See `output/publication/manifests/` for canonical receipts/manifests.
+- See `output/_internal/` for provenance bundles and internal audit trails.
 
 Semantic lint (optional, recommended before sharing a bundle):
 - `scripts/operational/semantic_lint_operational.py`

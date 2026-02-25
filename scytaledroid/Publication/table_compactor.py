@@ -1,8 +1,8 @@
 """Presentation-only compaction helpers for Table 4 (signature deltas).
 
-This module is intentionally paper-facing only:
+This module is intentionally publication-facing only:
 - It reads already-emitted `table_4_signature_deltas.csv` (no recomputation).
-- It rewrites a narrower LaTeX table variant suitable for IEEE two-column fit.
+- It rewrites a narrower LaTeX table variant suitable for two-column layouts.
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ def _as_float(x: str | None) -> float:
 
 
 def load_table_4_csv(csv_path: Path) -> list[Table4Row]:
-    """Load the canonical Table 4 CSV emitted by Phase E bundle writer."""
+    """Load the canonical Table 4 CSV emitted by the publication bundle writer."""
 
     rows: list[Table4Row] = []
     with csv_path.open("r", encoding="utf-8", newline="") as f:

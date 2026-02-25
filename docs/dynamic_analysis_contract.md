@@ -4,10 +4,10 @@ This document defines the contract, data model, and evidence rules for dynamic
 analysis in ScytaleDroid. It is intentionally tool-agnostic and focused on
 research-grade reproducibility.
 
-Paper #2 notes:
+Freeze/profile notes:
 - Evidence packs are authoritative.
 - The DB is derived/rebuildable (accelerator), not ground truth.
-- Phase E (ML) selects runs from a dataset-level freeze manifest and consumes evidence packs only.
+- Freeze/profile ML selects runs from a dataset-level freeze manifest and consumes evidence packs only.
 
 ## 0. Cross-Cutting Rules
 
@@ -23,10 +23,10 @@ Paper #2 notes:
   metadata.
 - **Evidence integrity (per-run):** Artifacts should be registered in the manifest
   with relative paths. Per-artifact hashes are best-effort and should be treated
-  as an audit aid, not the Paper #2 immutability anchor. Only immutable artifacts
+  as an audit aid, not the dataset immutability anchor. Only immutable artifacts
   should carry `sha256` in the registry; mutable note/log artifacts should omit
   hashes.
-- **Evidence integrity (dataset-level):** Paper #2 relies on a checksummed dataset
+- **Evidence integrity (dataset-level):** Freeze/profile mode relies on a checksummed dataset
   freeze manifest (`included_run_checksums`) to verify immutability of frozen inputs.
 - **Redaction:** Raw artifacts are preserved. Redaction occurs only in
   summaries or rendered output.
@@ -90,7 +90,7 @@ must include:
 - `artifacts` (global registry, sorted by relative path)
 - `outputs` (analysis summaries, notes)
 
-### Dataset validity block (Paper #2)
+### Dataset validity block (freeze/profile mode)
 
 Dataset validity is recorded in the manifest and treated as authoritative:
 - `dataset.tier` (e.g., `"dataset"`)
@@ -116,12 +116,11 @@ Artifact registry entries must be sorted by `relative_path` for deterministic
 output. An optional `manifest_sha256` may be stored after the manifest is
 finalized.
 
-## 3.1 Dataset freeze (Paper #2 selector + immutability anchor)
+## 3.1 Dataset freeze (selector + immutability anchor)
 
 The frozen dataset is selected by a dataset-level freeze manifest:
-- Canonical anchor (PM/reviewer locked for Paper #2):
-  - `data/archive/dataset_freeze-20260208T201527Z.json`
-- `included_run_ids` lists the exact run_ids included for Paper #2 (36).
+- Canonical anchor: `data/archive/dataset_freeze.json`
+- `included_run_ids` lists the exact run_ids included for the frozen cohort.
 - `included_run_checksums` provides SHA-256 checksums for the frozen inputs per included run.
 
 Freeze rules:
@@ -253,7 +252,7 @@ drafting.
 
 ## 8.2 ML outputs (derived, versioned)
 
-Phase E writes derived outputs under the evidence pack:
+Freeze/profile ML writes derived outputs under the evidence pack:
 
 ```
 output/evidence/dynamic/<dynamic_run_id>/analysis/ml/v<ml_schema_version>/
