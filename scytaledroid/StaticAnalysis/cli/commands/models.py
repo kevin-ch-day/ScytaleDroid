@@ -24,7 +24,7 @@ class Command:
     auto_verify: bool = False
     prompt_reset: bool = False
     force_app_scope: bool = False
-    selection_mode: str = "scope"  # "scope", "last", "diff_last", "batch_dataset"
+    selection_mode: str = "scope"  # "scope", "last", "diff_last", "batch_dataset", "batch_profile_v3"
     force_verbose: bool = False
 
 

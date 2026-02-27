@@ -69,21 +69,28 @@ def lint_profile_v3_bundle(root: Path) -> ProfileV3Lint:
     per_app_csv = root / "tables" / "per_app_dynamic_summary_v3.csv"
     if per_app_csv.exists():
         try:
+            rows: list[dict[str, str]] = []
             with per_app_csv.open("r", encoding="utf-8", newline="") as f:
                 reader = csv.DictReader(f)
                 headers = reader.fieldnames or []
                 hs = {str(h).strip() for h in headers}
-            missing = [c for c in REQUIRED_PER_APP_COLUMNS if c not in hs]
-            if missing:
-                errors.append(f"bad_schema:per_app_dynamic_summary_v3.csv:missing_cols:{','.join(missing)}")
-            else:
+                missing = [c for c in REQUIRED_PER_APP_COLUMNS if c not in hs]
+                if missing:
+                    errors.append(f"bad_schema:per_app_dynamic_summary_v3.csv:missing_cols:{','.join(missing)}")
+                else:
+                    rows = [dict(r) for r in reader]
+
+            if rows:
                 # Determinism + basic data hygiene checks.
                 last_key = None
                 row_idx = 0
-                for row in reader:
+                seen_pkgs: set[str] = set()
+                for row in rows:
                     row_idx += 1
                     cat = str(row.get("app_category") or "").strip()
                     pkg = str(row.get("package") or "").strip()
+                    if pkg:
+                        seen_pkgs.add(pkg)
                     if cat and cat not in ALLOWED_CATEGORIES:
                         errors.append(f"bad_value:app_category:{cat}:{pkg}")
                     # Primary metric columns must not be NaN/inf or empty.
@@ -104,6 +111,29 @@ def lint_profile_v3_bundle(root: Path) -> ProfileV3Lint:
                     if last_key is not None and cur_key < last_key:
                         errors.append(f"nondeterministic_order:row{row_idx}:{cur_key}<{last_key}")
                     last_key = cur_key
+
+                # Cohort enforcement (paper-safety): if manifest includes catalog packages, enforce exact match.
+                manifest_path = root / "manifests" / "profile_v3_manifest.json"
+                if manifest_path.exists():
+                    try:
+                        import json
+
+                        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+                        inputs = payload.get("inputs") if isinstance(payload, dict) else {}
+                        catalog_pkgs = inputs.get("catalog_packages") if isinstance(inputs, dict) else None
+                        if isinstance(catalog_pkgs, list) and catalog_pkgs:
+                            expected = {str(x).strip() for x in catalog_pkgs if str(x).strip()}
+                            if expected:
+                                if len(rows) != len(expected):
+                                    errors.append(f"bad_cohort:row_count:{len(rows)}!=expected:{len(expected)}")
+                                extra = sorted(seen_pkgs - expected)
+                                missing_pkgs = sorted(expected - seen_pkgs)
+                                if extra:
+                                    errors.append(f"bad_cohort:unexpected_packages:{','.join(extra)}")
+                                if missing_pkgs:
+                                    errors.append(f"bad_cohort:missing_packages:{','.join(missing_pkgs)}")
+                    except Exception as exc:  # noqa: BLE001
+                        warnings.append(f"cohort_check_unavailable:{type(exc).__name__}")
         except Exception as exc:  # noqa: BLE001
             errors.append(f"bad_schema:per_app_dynamic_summary_v3.csv:{type(exc).__name__}")
 

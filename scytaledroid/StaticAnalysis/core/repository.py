@@ -475,8 +475,13 @@ def _normalise_profile_label(label: str) -> str:
     if not text:
         return text
     lowered = text.lower()
-    if lowered.endswith("(paper #2)"):
-        return text[: -len("(paper #2)")].rstrip()
+    # Legacy suffix: "(Paper #N)" where N is an integer. Strip it for display.
+    if lowered.endswith(")") and "paper #" in lowered:
+        import re
+
+        m = re.search(r"\s*\(\s*paper\s*#\s*\d+\s*\)\s*$", text, flags=re.IGNORECASE)
+        if m:
+            return text[: m.start()].rstrip()
     return text
 
 

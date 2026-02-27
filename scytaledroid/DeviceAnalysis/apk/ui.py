@@ -341,6 +341,15 @@ def report_delta_scope_applied(delta_count: int) -> None:
     )
 
 
+def report_full_refresh_scope_applied(selected_count: int) -> None:
+    print(
+        status_messages.status(
+            f"Full refresh scope: {selected_count} package(s) scheduled (changed-only mode disabled).",
+            level="info",
+        )
+    )
+
+
 def report_plan_no_artifacts() -> None:
     print(
         status_messages.status(

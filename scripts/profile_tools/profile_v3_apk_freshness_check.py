@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Profile v3 APK freshness gate (paper-grade, fail-closed).
+"""Profile v3 APK freshness gate (publication-grade, fail-closed).
 
 Checks that for every package in the v3 catalog:
 - the package exists in the latest device inventory snapshot

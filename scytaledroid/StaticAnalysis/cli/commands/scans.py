@@ -56,6 +56,18 @@ SCAN_COMMANDS: tuple[Command, ...] = (
         force_verbose=True,
     ),
     Command(
+        id="6",
+        title="Run Profile v3 Structural Cohort (batch)",
+        description="Run full analysis across Profile v3 cohort apps in the APK library",
+        kind="scan",
+        profile="full",
+        section="workflow",
+        auto_verify=True,
+        prompt_reset=False,
+        selection_mode="batch_profile_v3",
+        force_verbose=True,
+    ),
+    Command(
         id="D",
         title="Single APK drilldown (read-only)",
         description="Inspect a single APK without writing to the database",

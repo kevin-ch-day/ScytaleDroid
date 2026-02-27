@@ -548,6 +548,8 @@ def main(argv: list[str] | None = None) -> int:
             "manifest_sha256": _sha256_file(manifest_path),
             "catalog_path": str(catalog_path),
             "catalog_sha256": _sha256_file(catalog_path),
+            "catalog_n_packages": int(len(catalog)),
+            "catalog_packages": sorted(catalog.keys()),
             "evidence_root": str(evidence_root),
         },
         "locks": {

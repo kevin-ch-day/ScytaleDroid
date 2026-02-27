@@ -868,4 +868,178 @@ def run_dataset_static_batch(
     print(status_messages.status(f"Batch summary → {batch_summary_path}", level="info"))
 
 
-__all__ = ["run_dataset_static_batch"]
+def run_profile_v3_static_batch(
+    *,
+    groups,
+    base_dir: Path,
+    command,
+    static_service,
+    query_runner,
+    reset_static_analysis_data,
+) -> None:
+    """Run static analysis for the Profile v3 structural cohort (batch).
+
+    Cohort membership is catalog-driven (profiles/profile_v3_app_catalog.json).
+    """
+    from scytaledroid.StaticAnalysis.cli.core.models import RunParameters, ScopeSelection
+    from scytaledroid.StaticAnalysis.cli.menus.static_analysis_menu_helpers import (
+        apply_command_overrides,
+    )
+    from scytaledroid.StaticAnalysis.session import normalize_session_stamp
+    from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils
+
+    catalog_path = Path("profiles") / "profile_v3_app_catalog.json"
+    try:
+        payload = json.loads(catalog_path.read_text(encoding="utf-8"))
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    cohort_pkgs = {str(pkg).strip().lower() for pkg in payload.keys() if str(pkg).strip()}
+    if not cohort_pkgs:
+        print(status_messages.status("Profile v3 catalog has no apps.", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    batch_groups = _resolve_batch_groups(groups, cohort_pkgs)
+    if not batch_groups:
+        print(
+            status_messages.status(
+                "No APK artifacts found for Profile v3 cohort in the local library.",
+                level="warn",
+            )
+        )
+        print(status_messages.status(f"Library root: {base_dir}.", level="info"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    quiet = True
+    batch_id = datetime.now(UTC).strftime("static-batch-v3-%Y%m%dT%H%M%SZ")
+    batch_out_dir = Path("output") / "batches" / "static"
+    batch_out_dir.mkdir(parents=True, exist_ok=True)
+    batch_summary_path = batch_out_dir / f"{batch_id}.json"
+    batch_rows: list[dict[str, object]] = []
+
+    failures: list[str] = []
+    total = len(batch_groups)
+    completed = 0
+    batch_start = time.monotonic()
+
+    print()
+    menu_utils.print_section("Running Profile v3 cohort (batch static)")
+    for group in batch_groups:
+        app_started_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+        session_stamp = normalize_session_stamp(f"{batch_id}-{group.package_name}")
+
+        display_name = ""
+        for artifact in group.artifacts:
+            label = artifact.metadata.get("app_label")
+            if isinstance(label, str) and label.strip():
+                display_name = label.strip()
+                break
+        selection_label = f"{display_name} ({group.package_name})" if display_name else group.package_name
+        selection = ScopeSelection(scope="app", label=selection_label, groups=(group,))
+        index = completed + 1
+        print(
+            status_messages.status(
+                f"Batch {index}/{total}: {selection_label} | done={completed} fail={len(failures)}",
+                level="info",
+            )
+        )
+
+        params = RunParameters(
+            profile=command.profile,
+            scope=selection.scope,
+            scope_label=selection.label,
+            selected_tests=tuple(),
+            session_stamp=session_stamp,
+            session_label=session_stamp,
+            canonical_action="first_run",
+            show_split_summaries=False,
+            scan_splits=False,
+        )
+        effective_params = apply_command_overrides(params, command)
+
+        outcome = None
+        try:
+            outcome = _execute_batch_run(
+                group=group,
+                selection=selection,
+                effective_params=effective_params,
+                base_dir=base_dir,
+                batch_id=batch_id,
+            )
+        except Exception as exc:
+            failures.append(f"{group.package_name}:{exc.__class__.__name__}")
+
+        completed += 1
+        elapsed = time.monotonic() - batch_start
+        avg = elapsed / completed if completed else 0.0
+        remaining = total - completed
+        eta = avg * remaining if avg > 0 else 0.0
+
+        batch_rows.append(
+            {
+                "package_name": group.package_name,
+                "display_name": display_name,
+                "started_at_utc": app_started_at,
+                "completed": bool(outcome is not None),
+                "failures": len(failures),
+                "elapsed_s": round(elapsed, 3),
+            }
+        )
+
+        print(
+            status_messages.status(
+                f"Progress: {completed}/{total} | fail={len(failures)} | ETA {_format_eta(eta)}",
+                level="info",
+            )
+        )
+        print()
+
+        try:
+            _write_batch_summary(
+                batch_summary_path=batch_summary_path,
+                batch_id=batch_id,
+                batch_rows=batch_rows,
+                apps_total=total,
+                apps_completed=completed,
+                apps_failed=len(failures),
+                ended_at=None,
+            )
+        except Exception:
+            pass
+
+        if command.auto_verify and not effective_params.dry_run and not quiet:
+            session_key = getattr(outcome, "session_stamp", None) if outcome else None
+            if not session_key:
+                session_key = effective_params.session_stamp
+            if session_key:
+                query_runner.render_session_digest(session_key)
+
+    print()
+    menu_utils.print_section("Batch summary")
+    if failures:
+        for failure in failures:
+            print(status_messages.status(f"Failed: {failure}", level="warn"))
+    else:
+        print(status_messages.status("All batch runs completed.", level="success"))
+
+    elapsed = time.monotonic() - batch_start
+    try:
+        _write_batch_summary(
+            batch_summary_path=batch_summary_path,
+            batch_id=batch_id,
+            batch_rows=batch_rows,
+            apps_total=total,
+            apps_completed=completed,
+            apps_failed=len(failures),
+            ended_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        )
+    except Exception as exc:
+        print(status_messages.status(f"Failed to write batch summary: {exc}", level="warn"))
+    print(status_messages.status(f"Completed {completed}/{total} apps in {elapsed:.1f}s.", level="info"))
+    print(status_messages.status(f"Batch summary → {batch_summary_path}", level="info"))
+
+
+__all__ = ["run_dataset_static_batch", "run_profile_v3_static_batch"]

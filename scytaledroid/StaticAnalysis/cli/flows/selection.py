@@ -115,8 +115,10 @@ def select_category_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
     if catalog:
         wanted = set(catalog.keys())
         available = {g.package_name.strip().lower() for g in groups if g.package_name}
-        v3_count = len(wanted.intersection(available))
-        categories = list(categories) + [("Profile v3 Structural Cohort", v3_count)]
+        v3_available = len(wanted.intersection(available))
+        v3_total = len(wanted)
+        v3_label = f"Profile v3 Structural Cohort ({v3_available}/{v3_total} in library)"
+        categories = list(categories) + [(v3_label, v3_available)]
 
     print()
     print("Static Analysis · Scope (Profile)")
@@ -127,7 +129,7 @@ def select_category_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
 
     index = _resolve_index("Select profile #", [category for category, _ in categories])
     category_name, _ = categories[index]
-    if category_name == "Profile v3 Structural Cohort":
+    if category_name.startswith("Profile v3 Structural Cohort"):
         return select_profile_v3_scope(groups)
     profile_map = load_profile_map(groups)
     scoped_all = tuple(
@@ -426,6 +428,8 @@ def select_profile_v3_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
         return ScopeSelection("all", "All apps", tuple(groups))
 
     wanted = set(catalog.keys())
+    available = {g.package_name.strip().lower() for g in groups if g.package_name}
+    missing = sorted(wanted - available)
     scoped_all = tuple(g for g in groups if g.package_name.strip().lower() in wanted)
     if not scoped_all:
         print(
@@ -436,6 +440,15 @@ def select_profile_v3_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
         )
         prompt_utils.press_enter_to_continue()
         return ScopeSelection("all", "All apps", tuple(groups))
+
+    if missing:
+        sample = ", ".join(missing[:8]) + (" …" if len(missing) > 8 else "")
+        print(
+            status_messages.status(
+                f"Profile v3 catalog packages missing from local APK library: {len(missing)} (e.g., {sample})",
+                level="warn",
+            )
+        )
 
     # Deterministic ordering: by catalog category then package.
     scoped_all = tuple(

@@ -129,12 +129,12 @@ def _tracker_vs_evidence_per_app() -> list[dict[str, Any]]:
             if pkg not in dataset_pkgs:
                 continue
             plan = _read_json(run_dir / "inputs" / "static_dynamic_plan.json") or {}
-                eligibility = derive_paper_eligibility(
-                    manifest=manifest,
-                    plan=plan,
-                    min_windows=_min_windows_per_run(),
-                    required_capture_policy_version=int(profile_config.PAPER_CONTRACT_VERSION),
-                )
+            eligibility = derive_paper_eligibility(
+                manifest=manifest,
+                plan=plan,
+                min_windows=_min_windows_per_run(),
+                required_capture_policy_version=int(profile_config.PAPER_CONTRACT_VERSION),
+            )
             if not eligibility.paper_eligible:
                 per_pkg[pkg]["excluded"] += 1
                 continue

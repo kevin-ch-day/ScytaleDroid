@@ -79,12 +79,35 @@ def print_banner(*, show_clocks: bool = False) -> None:
         app_config.APP_DESCRIPTION,
         build_id=get_git_commit(),
         metrics=metrics,
+        hero_lines=[f"Repo: {get_git_toplevel() or Path(__file__).resolve().parent}"],
     )
 
     log.info(
         f"Application started - {app_config.APP_NAME} {app_config.APP_VERSION} ({app_config.APP_RELEASE})",
         category="application",
     )
+
+
+def get_git_toplevel() -> str | None:
+    """Return the git repo toplevel directory if available.
+
+    Operational safety: helps operators confirm they are running the working tree
+    they think they are (not an installed wheel or a different checkout).
+    """
+    try:
+        import subprocess
+        from pathlib import Path
+
+        out = subprocess.check_output(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=Path(__file__).resolve().parent,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=2.0,
+        ).strip()
+        return out or None
+    except Exception:
+        return None
 
 
 def main_menu() -> None:
@@ -372,9 +395,9 @@ def handle_reporting() -> None:
 
 
 def handle_data_workspace() -> None:
-    from scytaledroid.Utils.System.paper_grade_inputs import render_paper_grade_inputs
+    from scytaledroid.Utils.System.governance_inputs import render_governance_inputs
 
-    render_paper_grade_inputs()
+    render_governance_inputs()
 
 
 def handle_api() -> None:

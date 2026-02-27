@@ -143,6 +143,18 @@ def static_analysis_menu() -> None:
                 reset_static_analysis_data=reset_static_analysis_data,
             )
             continue
+        if command.selection_mode == "batch_profile_v3":
+            from scytaledroid.StaticAnalysis.cli.flows.static_batch import run_profile_v3_static_batch
+
+            run_profile_v3_static_batch(
+                groups=groups,
+                base_dir=base_dir,
+                command=command,
+                static_service=static_service,
+                query_runner=query_runner,
+                reset_static_analysis_data=reset_static_analysis_data,
+            )
+            continue
         if command.selection_mode == "last":
             selection = resolve_last_selection(groups)
             if selection is None:
