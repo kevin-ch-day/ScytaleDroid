@@ -21,6 +21,7 @@ from .menu_actions import (
     handle_export_freeze_anchored_csvs,
     handle_generate_exploratory_risk_scoring,
     handle_generate_publication_results_numbers,
+    handle_generate_profile_v3_exports,
     handle_generate_publication_scientific_qa,
     handle_generate_publication_pipeline_audit,
     handle_print_manuscript_snapshot,
@@ -41,6 +42,7 @@ def reporting_menu() -> None:
         "5": handle_write_canonical_publication_bundle,
         "6": handle_export_freeze_anchored_csvs,
         "7": handle_print_manuscript_snapshot,
+        "10": handle_generate_profile_v3_exports,
         "8": handle_generate_exploratory_risk_scoring,
         "9": view_saved_reports,
     }
@@ -60,9 +62,10 @@ def reporting_menu() -> None:
         MenuOption("8", "Experimental risk model (SRS/DRS/FRS) (NOT FOR PAPER)"),
     ]
     reports_options = [MenuOption("9", "View saved reports")]
+    profile_options = [MenuOption("10", "Generate Profile v3 exports (structural)")]
 
     visible_keys = {
-        it.key for it in (publication_control_options + export_options + exploratory_options + reports_options)
+        it.key for it in (publication_control_options + export_options + exploratory_options + reports_options + profile_options)
     }
     actions = {k: v for k, v in actions_all.items() if k in visible_keys}
 
@@ -119,9 +122,15 @@ def reporting_menu() -> None:
             show_descriptions=False,
             compact=True,
         )
+        menu_utils.print_menu(
+            profile_options,
+            show_exit=False,
+            show_descriptions=False,
+            compact=True,
+        )
         choice = prompt_utils.get_choice(
             menu_utils.selectable_keys(
-                [*publication_control_options, *export_options, *exploratory_options, *reports_options],
+                [*publication_control_options, *export_options, *exploratory_options, *reports_options, *profile_options],
                 include_exit=True,
             ),
             default="0",

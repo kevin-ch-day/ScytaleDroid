@@ -22,6 +22,7 @@ from scytaledroid.Utils.System.world_clock.display import (
     snapshot_clocks,
 )
 from scytaledroid.Utils.System.world_clock.state import WorldClockState, load_state
+from scytaledroid.Utils.version_utils import get_git_commit
 
 
 def _resolve_timezones() -> WorldClockState:
@@ -76,6 +77,7 @@ def print_banner(*, show_clocks: bool = False) -> None:
         app_config.APP_VERSION,
         app_config.APP_RELEASE,
         app_config.APP_DESCRIPTION,
+        build_id=get_git_commit(),
         metrics=metrics,
     )
 

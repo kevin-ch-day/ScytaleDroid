@@ -294,6 +294,12 @@ def resolve_harvest_plan(
     guard_decision = get_last_guard_decision()
     pull_mode: str | None = None
     auto_selection = None
+    # Applies only within this pull session. Once a user opts into/out of delta filtering,
+    # keep it stable across re-scopes to avoid confusing behavior changes mid-run.
+    apply_delta_filter_choice: bool | None = None
+    # Harvest mode: delta (changed-only) vs full_refresh. Defaults to delta when a delta
+    # summary exists unless the scope explicitly disables delta filtering.
+    harvest_mode: str | None = None
     if auto_scope or noninteractive:
         auto_selection = harvest.select_package_scope_auto(
             rows,
@@ -351,6 +357,15 @@ def resolve_harvest_plan(
         )
         delta_applied = False
         delta_count = len(selection.packages)
+        if summary and not bool(selection.metadata.get("disable_delta_filter")):
+            if apply_delta_filter_choice is None and not noninteractive:
+                apply_delta_filter_choice = ui.prompt_delta_filter_mode(summary)
+            if apply_delta_filter_choice is False:
+                selection.metadata["disable_delta_filter"] = True
+                harvest_mode = "full_refresh"
+            else:
+                harvest_mode = "delta"
+
         if summary and not bool(selection.metadata.get("disable_delta_filter")):
             include = delta.collect_delta_package_names(summary)
             filtered_rows = delta.apply_delta_filter(selection.packages, include=include)
@@ -536,6 +551,8 @@ def resolve_harvest_plan(
                     blocked_scope=blocked_scope,
                     artifacts=artifacts,
                     policy=str(stats["policy"]),
+                    harvest_mode=(str(active_selection.metadata.get("harvest_mode") or "").strip() or harvest_mode),
+                    delta_filter_applied=bool(active_selection.metadata.get("delta_filter_applied")) if summary else None,
                 )
             return planner.build_plan(
                 active_selection,

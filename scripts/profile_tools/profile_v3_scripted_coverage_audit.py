@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+"""Audit scripted/manual interaction coverage for runs imported from a base freeze.
+
+This is an operator-facing helper for Paper #3 planning:
+- Identify packages with 0 scripted interaction runs in the base freeze evidence.
+- Provide the exact run_ids that are scripted vs manual for recapture planning.
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scytaledroid.DynamicAnalysis.run_profile_norm import (  # noqa: E402
+    normalize_run_profile,
+    resolve_run_profile_from_manifest,
+)
+
+
+def _rjson(path: Path) -> dict:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"expected object: {path}")
+    return payload
+
+
+def _read_run_manifest(evidence_root: Path, run_id: str) -> dict:
+    p = evidence_root / run_id / "run_manifest.json"
+    if not p.exists():
+        raise SystemExit(f"Missing run_manifest.json for run_id={run_id}: {p}")
+    return _rjson(p)
+
+
+def _package_name(man: dict) -> str:
+    tgt = man.get("target") if isinstance(man.get("target"), dict) else {}
+    pkg = str(tgt.get("package_name") or tgt.get("package") or "").strip()
+    if not pkg:
+        raise SystemExit("run_manifest missing target.package_name")
+    return pkg
+
+
+def main(argv: list[str] | None = None) -> int:
+    p = argparse.ArgumentParser(description="Audit scripted interaction coverage in a base freeze")
+    p.add_argument(
+        "--base-freeze",
+        default=str(REPO_ROOT / "data" / "archive" / "dataset_freeze.json"),
+        help="Path to base freeze (v2) dataset_freeze.json.",
+    )
+    p.add_argument(
+        "--evidence-root",
+        default=str(REPO_ROOT / "output" / "evidence" / "dynamic"),
+        help="Dynamic evidence root containing run directories.",
+    )
+    p.add_argument(
+        "--out",
+        default=str(REPO_ROOT / "output" / "audit" / "profile_v3" / "scripted_coverage_from_base_freeze.csv"),
+        help="Output CSV path.",
+    )
+    args = p.parse_args(argv)
+
+    base = _rjson(Path(args.base_freeze))
+    evidence_root = Path(args.evidence_root)
+    apps = base.get("apps") if isinstance(base.get("apps"), dict) else {}
+
+    rows: list[dict[str, object]] = []
+    for pkg in sorted(apps.keys()):
+        meta = apps[pkg] if isinstance(apps.get(pkg), dict) else {}
+        inters = meta.get("interactive_run_ids") if isinstance(meta.get("interactive_run_ids"), list) else []
+        scripted: list[str] = []
+        manual: list[str] = []
+        other: list[str] = []
+        for rid in [str(r).strip() for r in inters if str(r).strip()]:
+            man = _read_run_manifest(evidence_root, rid)
+            if _package_name(man) != pkg:
+                other.append(rid)
+                continue
+            rp = resolve_run_profile_from_manifest(man, strict_conflict=True).normalized
+            rp = normalize_run_profile(rp)
+            if rp == "interaction_scripted":
+                scripted.append(rid)
+            elif rp == "interaction_manual":
+                manual.append(rid)
+            else:
+                other.append(rid)
+
+        rows.append(
+            {
+                "package": pkg,
+                "n_interactive_runs": len(inters),
+                "n_scripted_interactive_runs": len(scripted),
+                "n_manual_interactive_runs": len(manual),
+                "n_other_interactive_runs": len(other),
+                "scripted_run_ids": " ".join(scripted),
+                "manual_run_ids": " ".join(manual),
+                "other_run_ids": " ".join(other),
+                "needs_scripted_recapture": 1 if len(scripted) == 0 else 0,
+            }
+        )
+
+    out_path = Path(args.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("w", encoding="utf-8", newline="") as f:
+        w = csv.DictWriter(
+            f,
+            fieldnames=[
+                "package",
+                "n_interactive_runs",
+                "n_scripted_interactive_runs",
+                "n_manual_interactive_runs",
+                "n_other_interactive_runs",
+                "needs_scripted_recapture",
+                "scripted_run_ids",
+                "manual_run_ids",
+                "other_run_ids",
+            ],
+        )
+        w.writeheader()
+        for r in rows:
+            w.writerow(r)
+
+    need = [r for r in rows if int(r["needs_scripted_recapture"]) == 1]
+    print(f"[OK] Wrote: {out_path}")
+    print(f"[OK] packages_total={len(rows)} needs_scripted_recapture={len(need)}")
+    if need:
+        print("[INFO] missing scripted interaction for:")
+        for r in need:
+            print(f"  - {r['package']} (manual={r['n_manual_interactive_runs']}, other={r['n_other_interactive_runs']})")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+

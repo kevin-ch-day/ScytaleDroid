@@ -5,14 +5,15 @@ This script generates additional exploratory tables to help interpret the ML res
 without changing any frozen methodology (windowing/thresholding/features).
 
 Outputs (neutral names, for exploration/review only):
-  output/experimental/paper2/ml_time_bucketed_rdi_iforest.csv
-  output/experimental/paper2/ml_interactive_run_consistency_iforest.csv
-  output/experimental/paper2/ml_threshold_sensitivity_iforest.csv
-  output/experimental/paper2/network_expansion_idle_vs_interactive.csv
+  output/experimental/diagnostics/ml/ml_time_bucketed_rdi_iforest.csv
+  output/experimental/diagnostics/ml/ml_interactive_run_consistency_iforest.csv
+  output/experimental/diagnostics/ml/ml_threshold_sensitivity_iforest.csv
+  output/experimental/diagnostics/ml/network_expansion_idle_vs_interactive.csv
 """
 
 from __future__ import annotations
 
+import argparse
 import csv
 import hashlib
 import json
@@ -29,7 +30,7 @@ FREEZE = REPO_ROOT / "data" / "archive" / "dataset_freeze.json"
 EVIDENCE_ROOT = REPO_ROOT / "output" / "evidence" / "dynamic"
 RUN_SUMMARY = REPO_ROOT / "data" / "archive" / "dynamic_run_summary.csv"
 
-OUT_DIR = REPO_ROOT / "output" / "experimental" / "paper2"
+DEFAULT_OUT_DIR = REPO_ROOT / "output" / "experimental" / "diagnostics" / "ml"
 
 
 def _sha256_file(path: Path) -> str:
@@ -103,7 +104,16 @@ def _write_csv(path: Path, rows: list[dict[str, object]], fieldnames: list[str],
             w.writerow({k: r.get(k, "") for k in fieldnames})
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Exploratory ML diagnostics (freeze-anchored)")
+    parser.add_argument(
+        "--out-dir",
+        default=str(DEFAULT_OUT_DIR),
+        help="Output directory for exploratory diagnostics artifacts.",
+    )
+    args = parser.parse_args(argv)
+    out_dir = Path(args.out_dir)
+
     if not FREEZE.exists():
         raise SystemExit(f"Missing freeze anchor: {FREEZE}")
     freeze = _rjson(FREEZE)
@@ -154,7 +164,7 @@ def main() -> int:
             )
 
     _write_csv(
-        OUT_DIR / "ml_time_bucketed_rdi_iforest.csv",
+        out_dir / "ml_time_bucketed_rdi_iforest.csv",
         time_rows,
         [
             "run_id",
@@ -218,7 +228,7 @@ def main() -> int:
         )
 
     _write_csv(
-        OUT_DIR / "ml_interactive_run_consistency_iforest.csv",
+        out_dir / "ml_interactive_run_consistency_iforest.csv",
         consistency_rows,
         [
             "package_name",
@@ -286,7 +296,7 @@ def main() -> int:
             )
 
     _write_csv(
-        OUT_DIR / "ml_threshold_sensitivity_iforest.csv",
+        out_dir / "ml_threshold_sensitivity_iforest.csv",
         sens_rows,
         ["package_name", "percentile", "tau_value", "idle_rdi", "interactive_rdi_mean_weighted", "delta"],
         header_lines=[
@@ -361,7 +371,7 @@ def main() -> int:
             fields += [f"{key}_idle_mean", f"{key}_interactive_mean", f"{key}_delta"]
 
         _write_csv(
-            OUT_DIR / "network_expansion_idle_vs_interactive.csv",
+            out_dir / "network_expansion_idle_vs_interactive.csv",
             out_rows,
             fields,
             header_lines=[
@@ -374,11 +384,11 @@ def main() -> int:
             ],
         )
 
-    print(str(OUT_DIR / "ml_time_bucketed_rdi_iforest.csv"))
-    print(str(OUT_DIR / "ml_interactive_run_consistency_iforest.csv"))
-    print(str(OUT_DIR / "ml_threshold_sensitivity_iforest.csv"))
-    if (OUT_DIR / "network_expansion_idle_vs_interactive.csv").exists():
-        print(str(OUT_DIR / "network_expansion_idle_vs_interactive.csv"))
+    print(str(out_dir / "ml_time_bucketed_rdi_iforest.csv"))
+    print(str(out_dir / "ml_interactive_run_consistency_iforest.csv"))
+    print(str(out_dir / "ml_threshold_sensitivity_iforest.csv"))
+    if (out_dir / "network_expansion_idle_vs_interactive.csv").exists():
+        print(str(out_dir / "network_expansion_idle_vs_interactive.csv"))
     return 0
 
 

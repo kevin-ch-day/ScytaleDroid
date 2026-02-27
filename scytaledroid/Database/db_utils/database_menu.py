@@ -20,6 +20,7 @@ from .menu_actions import (
     seed_dataset_profile,
     show_connection_and_config,
     show_governance_snapshot_status,
+    write_db_schema_snapshot_audit,
     sync_contracts_to_db,
 )
 
@@ -40,6 +41,7 @@ def database_menu() -> None:
         "10": run_inventory_determinism_comparator,
         "11": backfill_static_permission_risk_vnext,
         "12": audit_static_risk_coverage,
+        "13": write_db_schema_snapshot_audit,
     }
 
     options: list[MenuOption] = [
@@ -55,6 +57,7 @@ def database_menu() -> None:
         MenuOption("10", "Inventory determinism comparator (strict)"),
         MenuOption("11", "Backfill static risk tables (risk_scores + vNext)"),
         MenuOption("12", "Audit static risk coverage gaps"),
+        MenuOption("13", "Write DB schema snapshot (audit, read-only)"),
     ]
 
     while True:

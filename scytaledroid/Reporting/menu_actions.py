@@ -1054,6 +1054,28 @@ def handle_generate_publication_results_numbers() -> None:
     if legacy_enabled and out_json_legacy.exists():
         print(status_messages.status(f"Wrote: {relative_path(out_json_legacy)} (legacy alias)", level="info"))
 
+
+def handle_generate_profile_v3_exports() -> None:
+    """Generate Profile v3 structural exports (freeze/profile mode)."""
+
+    script = Path(__file__).resolve().parents[2] / "scripts" / "publication" / "profile_v3_exports.py"
+    if not script.exists():
+        print(status_messages.status(f"Missing script: {relative_path(script)}", level="error"))
+        return
+
+    import runpy
+
+    print()
+    menu_utils.print_header("Generate Profile v3 Exports")
+    try:
+        runpy.run_path(str(script), run_name="__main__")
+    except SystemExit as exc:
+        if int(getattr(exc, "code", 1) or 0) != 0:
+            print(status_messages.status(f"Generation failed: exit={exc.code}", level="error"))
+            return
+    out_root = Path(app_config.OUTPUT_DIR) / "publication" / "profile_v3"
+    print(status_messages.status(f"Wrote: {relative_path(out_root)}", level="success"))
+
 #
 # Back-compat alias (older UI/tests/tooling may still call the paper2-named handler).
 #

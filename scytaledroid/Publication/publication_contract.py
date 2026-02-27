@@ -129,7 +129,10 @@ def lint_publication_bundle(pub_root: Path) -> PublicationLint:
             warnings.append(f"missing_recommended:{rel.as_posix()}")
 
     # Unexpected top-level directories add noise and often indicate accidental mixing of layers.
-    allowed_top = set(REQUIRED_DIRS) | {"README.md"}
+    #
+    # `profile_v3/` is an additive publication surface for a distinct profile and must not
+    # affect v2 bundle readiness checks.
+    allowed_top = set(REQUIRED_DIRS) | {"README.md", "profile_v3"}
     for p in sorted(pub_root.iterdir()):
         if p.name in allowed_top:
             continue

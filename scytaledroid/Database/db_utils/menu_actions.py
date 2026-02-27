@@ -14,6 +14,7 @@ from scytaledroid.Database.db_core import db_config
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_core.session import database_session
 from scytaledroid.Database.db_utils import diagnostics
+from scytaledroid.Database.db_utils import schema_gate
 from scytaledroid.Database.tools.bootstrap import bootstrap_database
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
 
@@ -57,6 +58,113 @@ def show_connection_and_config() -> None:
         print("    Connection failed. Check logs for details.")
         if backend == "mysql":
             print("    Verify SCYTALEDROID_DB_URL and ensure schema is bootstrapped.")
+    prompt_utils.press_enter_to_continue()
+
+
+def write_db_schema_snapshot_audit() -> None:
+    """Write a read-only DB schema snapshot under output/audit/db/.
+
+    OSS posture:
+    - Filesystem is canonical.
+    - DB is optional. If disabled, we do nothing and return cleanly.
+    """
+
+    if not db_config.db_enabled():
+        print(
+            status_messages.status(
+                "DB is disabled (no mysql/mariadb config). Schema snapshot skipped.",
+                level="info",
+            )
+        )
+        prompt_utils.press_enter_to_continue()
+        return
+
+    out_dir = Path(app_config.OUTPUT_DIR) / "audit" / "db"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(UTC).strftime("%Y%m%d%H%M%SZ")
+    out_path = out_dir / f"db_schema_snapshot_{stamp}.json"
+    latest_path = out_dir / "latest.json"
+
+    cfg = dict(db_config.DB_CONFIG)
+    # Never write secrets to disk.
+    if "password" in cfg:
+        cfg["password"] = "***"
+
+    snapshot: dict[str, object] = {
+        "generated_at_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "db_enabled": True,
+        "db_config_source": getattr(db_config, "DB_CONFIG_SOURCE", "unknown"),
+        "db_config": cfg,
+        "server_info": diagnostics.get_server_info(),
+        "schema_version": diagnostics.get_schema_version(),
+        "required_tables": {
+            "base": diagnostics.check_required_tables(["schema_version", "apps"]),
+            "inventory": diagnostics.check_required_tables(
+                [
+                    "device_inventory_snapshots",
+                    "device_inventory",
+                    "apps",
+                    "android_apk_repository",
+                    "apk_split_groups",
+                    "harvest_artifact_paths",
+                    "harvest_source_paths",
+                    "harvest_storage_roots",
+                ]
+            ),
+            "static": diagnostics.check_required_tables(
+                [
+                    "static_analysis_runs",
+                    "static_session_run_links",
+                    "static_session_rollups",
+                    "findings",
+                    "static_permission_matrix",
+                    "risk_scores",
+                ]
+            ),
+            "dynamic": diagnostics.check_required_tables(
+                [
+                    "dynamic_sessions",
+                    "dynamic_session_issues",
+                    "dynamic_telemetry_process",
+                    "dynamic_telemetry_network",
+                ]
+            ),
+        },
+        "gates": {
+            "base_schema_gate": schema_gate.check_base_schema(),
+            "inventory_schema_gate": schema_gate.inventory_schema_gate(),
+            "static_schema_gate": schema_gate.static_schema_gate(),
+            "dynamic_schema_gate": schema_gate.dynamic_schema_gate(),
+            "permissions_schema_gate": schema_gate.permissions_schema_gate(),
+        },
+        "tables": {},
+        "tables_error": None,
+    }
+
+    try:
+        table_names = diagnostics.list_tables()
+        counts = diagnostics.table_counts(table_names)
+        snapshot["tables"] = {
+            name: {"row_count": counts.get(name)} for name in table_names
+        }
+        # Schema version history (best-effort).
+        try:
+            rows = core_q.run_sql(
+                "SELECT version, applied_at_utc, note FROM schema_version ORDER BY applied_at_utc ASC",
+                fetch="all_dict",
+            ) or []
+            snapshot["schema_version_history"] = [dict(r) for r in rows]
+        except Exception as exc:  # noqa: BLE001
+            snapshot["schema_version_history"] = []
+            snapshot["schema_version_history_error"] = f"{type(exc).__name__}: {exc}"
+    except Exception as exc:  # noqa: BLE001
+        snapshot["tables_error"] = f"{type(exc).__name__}: {exc}"
+
+    out_path.write_text(json.dumps(snapshot, indent=2, sort_keys=True, ensure_ascii=True) + "\n", encoding="utf-8")
+    latest_path.write_text(json.dumps(snapshot, indent=2, sort_keys=True, ensure_ascii=True) + "\n", encoding="utf-8")
+
+    print(status_messages.status("DB schema snapshot written.", level="success"))
+    print(f"  {out_path}")
     prompt_utils.press_enter_to_continue()
 
 

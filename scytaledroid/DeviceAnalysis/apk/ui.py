@@ -168,8 +168,8 @@ def render_plan_overview(resolution: PlanResolution) -> None:
 
 
 def prompt_plan_action(resolution: PlanResolution) -> str:
-    print("1) Full Pull (default)   - download APK splits + metadata")
-    print("2) Test Pull             - dry run (list only)")
+    print("1) Pull APKs (default)   - download APK splits + metadata")
+    print("2) Preview plan          - dry run (list only)")
     print("0) Cancel")
     choice = prompt_utils.get_choice(["1", "2", "0"], default="1", prompt="Select: ")
     if choice == "1":
@@ -177,6 +177,26 @@ def prompt_plan_action(resolution: PlanResolution) -> str:
     if choice == "2":
         return "dry-run"
     return "cancel"
+
+
+def prompt_delta_filter_mode(summary: Mapping[str, object]) -> bool:
+    """Return True to apply delta filtering, False to disable it for this pull session."""
+
+    total_changed = summary.get("total_changed")
+    total_text = f"{int(total_changed)}" if isinstance(total_changed, int) else "some"
+    print()
+    print("Harvest Mode")
+    print("────────────")
+    print(
+        status_messages.status(
+            f"Recent package changes detected ({total_text}).",
+            level="info",
+        )
+    )
+    print("1) Pull changed packages only (default)  - faster, avoids re-downloading unchanged APKs")
+    print("2) Pull all packages in selected scope   - forces a full refresh on disk")
+    choice = prompt_utils.get_choice(["1", "2"], default="1", prompt="Select: ")
+    return choice == "1"
 
 
 def maybe_save_watchlist(selection: harvest.ScopeSelection) -> None:
@@ -315,7 +335,7 @@ def report_delta_scope_empty() -> None:
 def report_delta_scope_applied(delta_count: int) -> None:
     print(
         status_messages.status(
-            f"Δ harvest scope: {delta_count} package(s) scheduled.",
+            f"Δ harvest scope: {delta_count} package(s) scheduled (changed-only mode).",
             level="info",
         )
     )
@@ -387,6 +407,8 @@ def report_harvest_started(
     blocked_scope: int,
     artifacts: int,
     policy: str,
+    harvest_mode: str | None = None,
+    delta_filter_applied: bool | None = None,
 ) -> None:
     line = (
         "APK Harvest started • "
@@ -394,6 +416,10 @@ def report_harvest_started(
         f"• scheduled_in_scope={scheduled} • blocked_policy={blocked_policy} • blocked_scope={blocked_scope} "
         f"• artifacts≈{artifacts} • policy={policy}"
     )
+    if harvest_mode:
+        line += f" • harvest_mode={harvest_mode}"
+    if delta_filter_applied is not None:
+        line += f" • delta_filter_applied={'true' if delta_filter_applied else 'false'}"
     print(status_messages.status(line, level="info"))
 
 

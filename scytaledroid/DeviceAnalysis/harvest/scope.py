@@ -6,6 +6,7 @@ import re
 from collections import Counter
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
 
@@ -134,6 +135,38 @@ def select_package_scope(
             ),
         )
 
+        # Profile v3 structural cohort (catalog-driven, paper-grade defaults).
+        try:
+            from scytaledroid.Publication.profile_v3_metrics import load_profile_v3_catalog
+
+            catalog = load_profile_v3_catalog(Path("profiles") / "profile_v3_app_catalog.json")
+            v3_pkgs = {p.lower() for p in catalog.keys()}
+        except Exception:
+            v3_pkgs = set()
+        v3_rows = [row for row in rows if row.package_name.lower() in v3_pkgs] if v3_pkgs else []
+        _add_entry(
+            "V",
+            "Profile v3 Structural Cohort",
+            packages=len(v3_rows),
+            files=estimated_files(v3_rows),
+            note="paper-grade (full refresh; catalog-driven)",
+            handler=lambda rows=v3_rows: ScopeSelection(
+                label="Profile v3 Structural Cohort",
+                packages=list(rows),
+                kind="profile_v3",
+                metadata={
+                    "estimated_files": estimated_files(rows),
+                    "candidate_count": len(rows),
+                    "selected_count": len(rows),
+                    "profile_key": "PROFILE_V3_STRUCTURAL",
+                    # Paper-grade: never delta-filter; always refresh the full cohort.
+                    "disable_delta_filter": True,
+                    "harvest_mode": "full_refresh",
+                    "policy": "non_root_paths" if not is_rooted else "none",
+                },
+            ),
+        )
+
         _add_entry(
             "2",
             "Play & user apps",
@@ -174,6 +207,8 @@ def select_package_scope(
                     "estimated_files": context["everything"].get("files", 0),
                     "candidate_count": len(rows),
                     "selected_count": len(rows),
+                    # Default to delta-filter for huge scopes unless the operator overrides it.
+                    # The workflow will prompt for delta-vs-full-refresh when a delta summary exists.
                     "policy": "non_root_paths" if not is_rooted else "none",
                 },
             ),

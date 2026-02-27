@@ -196,6 +196,7 @@ def print_main_banner(
     app_release: str,
     app_description: str,
     *,
+    build_id: str | None = None,
     menu_title: str | None = None,
     menu_subtitle: str | None = None,
     metrics: Sequence[tuple[str, object]] = (),
@@ -217,6 +218,8 @@ def print_main_banner(
     )
 
     banner_lines = [header, version_line]
+    if build_id:
+        banner_lines.append(colors.apply(f"Build: {build_id}", palette.muted))
     if app_description:
         for line in _wrap_text(app_description, inner_width):
             banner_lines.append(colors.apply(line, palette.muted))

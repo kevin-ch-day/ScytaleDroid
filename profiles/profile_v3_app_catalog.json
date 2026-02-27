@@ -1,0 +1,78 @@
+{
+    "com.facebook.katana": {
+        "app": "Facebook",
+        "app_category": "social_messaging"
+    },
+    "com.facebook.orca": {
+        "app": "Facebook Messenger",
+        "app_category": "social_messaging"
+    },
+    "com.instagram.android": {
+        "app": "Instagram",
+        "app_category": "social_messaging"
+    },
+    "com.linkedin.android": {
+        "app": "LinkedIn",
+        "app_category": "social_messaging"
+    },
+    "com.pinterest": {
+        "app": "Pinterest",
+        "app_category": "social_messaging"
+    },
+    "com.reddit.frontpage": {
+        "app": "Reddit",
+        "app_category": "social_messaging"
+    },
+    "com.snapchat.android": {
+        "app": "Snapchat",
+        "app_category": "social_messaging"
+    },
+    "com.twitter.android": {
+        "app": "X (Twitter)",
+        "app_category": "social_messaging"
+    },
+    "com.whatsapp": {
+        "app": "WhatsApp",
+        "app_category": "social_messaging"
+    },
+    "com.zhiliaoapp.musically": {
+        "app": "TikTok",
+        "app_category": "social_messaging"
+    },
+    "org.telegram.messenger": {
+        "app": "Telegram",
+        "app_category": "social_messaging"
+    },
+    "org.thoughtcrime.securesms": {
+        "app": "Signal",
+        "app_category": "social_messaging"
+    },
+    "com.adobe.reader": {
+        "app": "Adobe Acrobat Reader",
+        "app_category": "cloud_productivity"
+    },
+    "com.discord": {
+        "app": "Discord",
+        "app_category": "rtc_collaboration"
+    },
+    "com.dropbox.android": {
+        "app": "Dropbox",
+        "app_category": "cloud_productivity"
+    },
+    "com.google.android.apps.docs": {
+        "app": "Google Docs",
+        "app_category": "cloud_productivity"
+    },
+    "com.google.android.apps.tachyon": {
+        "app": "Google Meet",
+        "app_category": "rtc_collaboration"
+    },
+    "notion.id": {
+        "app": "Notion",
+        "app_category": "cloud_productivity"
+    },
+    "us.zoom.videomeetings": {
+        "app": "Zoom",
+        "app_category": "rtc_collaboration"
+    }
+}

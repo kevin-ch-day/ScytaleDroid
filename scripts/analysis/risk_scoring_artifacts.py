@@ -5,15 +5,16 @@ This does NOT claim maliciousness or harm. These are interpretable, deterministi
 scores for static exposure + dynamic deviation prevalence under controlled runs.
 
 Outputs:
-  output/experimental/paper2/risk_scores_v1.csv
-  output/experimental/paper2/risk_scores_v1.json
-  output/experimental/paper2/risk_scores_v1.tex
-  output/experimental/paper2/scatter_static_vs_dynamic_scores.pdf + .png
-  output/experimental/paper2/ranked_fused_scores.pdf + .png
+  output/experimental/analysis/risk_scoring/risk_scores_v1.csv
+  output/experimental/analysis/risk_scoring/risk_scores_v1.json
+  output/experimental/analysis/risk_scoring/risk_scores_v1.tex
+  output/experimental/analysis/risk_scoring/scatter_static_vs_dynamic_scores.pdf + .png
+  output/experimental/analysis/risk_scoring/ranked_fused_scores.pdf + .png
 """
 
 from __future__ import annotations
 
+import argparse
 import csv
 import json
 import math
@@ -39,17 +40,8 @@ TABLE_6 = PUB_ROOT / "tables" / "table_6_static_posture_scores.csv"
 TABLE_5 = PUB_ROOT / "tables" / "table_5_masvs_coverage.csv"
 PCAP_FEATURES = REPO_ROOT / "data" / "archive" / "pcap_features.csv"
 
-EXPLORE_DIR = REPO_ROOT / "output" / "experimental" / "paper2"
-OUT_TABLE_CSV = EXPLORE_DIR / "risk_scores_v1.csv"
-OUT_TABLE_JSON = EXPLORE_DIR / "risk_scores_v1.json"
-OUT_TABLE_TEX = EXPLORE_DIR / "risk_scores_v1.tex"
-OUT_SORTED_BY_FRS = EXPLORE_DIR / "risk_scores_v1_sorted_by_frs.csv"
-OUT_SORTED_BY_DRS = EXPLORE_DIR / "risk_scores_v1_sorted_by_drs.csv"
-OUT_SORTED_BY_SRS = EXPLORE_DIR / "risk_scores_v1_sorted_by_srs.csv"
-FIG_SCATTER_PDF = EXPLORE_DIR / "scatter_static_vs_dynamic_scores.pdf"
-FIG_SCATTER_PNG = EXPLORE_DIR / "scatter_static_vs_dynamic_scores.png"
-FIG_RANK_PDF = EXPLORE_DIR / "ranked_fused_scores.pdf"
-FIG_RANK_PNG = EXPLORE_DIR / "ranked_fused_scores.png"
+DEFAULT_OUT_DIR = REPO_ROOT / "output" / "experimental" / "analysis" / "risk_scoring"
+LEGACY_OUT_DIR = REPO_ROOT / "output" / "experimental" / "paper2"
 
 
 def _read_csv_skip_comments(path: Path) -> list[dict[str, str]]:
@@ -154,7 +146,32 @@ def _render_tabular_tex(rows: list[Row]) -> str:
     )
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Exploratory risk scoring artifacts (freeze-anchored)")
+    parser.add_argument(
+        "--out-dir",
+        default=str(DEFAULT_OUT_DIR),
+        help="Output directory for exploratory artifacts.",
+    )
+    parser.add_argument(
+        "--legacy-output-dir",
+        action="store_true",
+        help="Write to legacy output/experimental/paper2 for backward compatibility.",
+    )
+    args = parser.parse_args(argv)
+    out_dir = LEGACY_OUT_DIR if args.legacy_output_dir else Path(args.out_dir)
+
+    OUT_TABLE_CSV = out_dir / "risk_scores_v1.csv"
+    OUT_TABLE_JSON = out_dir / "risk_scores_v1.json"
+    OUT_TABLE_TEX = out_dir / "risk_scores_v1.tex"
+    OUT_SORTED_BY_FRS = out_dir / "risk_scores_v1_sorted_by_frs.csv"
+    OUT_SORTED_BY_DRS = out_dir / "risk_scores_v1_sorted_by_drs.csv"
+    OUT_SORTED_BY_SRS = out_dir / "risk_scores_v1_sorted_by_srs.csv"
+    FIG_SCATTER_PDF = out_dir / "scatter_static_vs_dynamic_scores.pdf"
+    FIG_SCATTER_PNG = out_dir / "scatter_static_vs_dynamic_scores.png"
+    FIG_RANK_PDF = out_dir / "ranked_fused_scores.pdf"
+    FIG_RANK_PNG = out_dir / "ranked_fused_scores.png"
+
     for p in (TABLE_7, TABLE_6, TABLE_5, PCAP_FEATURES, PAPER_RESULTS, FREEZE):
         if not p.exists():
             raise SystemExit(f"Missing required input: {p}")

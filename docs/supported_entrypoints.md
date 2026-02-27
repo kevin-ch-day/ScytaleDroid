@@ -20,6 +20,7 @@ These are intended for reproducible artifact generation and automation:
 - `scripts/publication/publication_pipeline_audit.py`
 - `scripts/publication/publication_ml_audit_report.py`
 - `scripts/publication/ingest_publication_bundle.py` (optional; DB mirror ingest)
+- `scripts/publication/profile_v3_exports.py`
 
 ## Not supported (best-effort)
 

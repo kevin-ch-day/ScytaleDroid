@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Sequence
 from pathlib import Path
@@ -107,6 +108,16 @@ def select_category_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
         prompt_utils.press_enter_to_continue()
         return ScopeSelection("all", "All apps", tuple(groups))
 
+    # Inject Profile v3 cohort as an explicit "profile" choice so operators don't have to use
+    # "All apps" and accidentally analyze 100+ packages.
+    catalog_path = Path("profiles") / "profile_v3_app_catalog.json"
+    catalog = _load_profile_v3_catalog(catalog_path)
+    if catalog:
+        wanted = set(catalog.keys())
+        available = {g.package_name.strip().lower() for g in groups if g.package_name}
+        v3_count = len(wanted.intersection(available))
+        categories = list(categories) + [("Profile v3 Structural Cohort", v3_count)]
+
     print()
     print("Static Analysis · Scope (Profile)")
     print("-" * 86)
@@ -116,6 +127,8 @@ def select_category_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
 
     index = _resolve_index("Select profile #", [category for category, _ in categories])
     category_name, _ = categories[index]
+    if category_name == "Profile v3 Structural Cohort":
+        return select_profile_v3_scope(groups)
     profile_map = load_profile_map(groups)
     scoped_all = tuple(
         group
@@ -372,10 +385,85 @@ def _artifact_mtime(artifact) -> float:
         return 0.0
 
 
+def _load_profile_v3_catalog(path: Path) -> dict[str, dict[str, str]]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except Exception:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    out: dict[str, dict[str, str]] = {}
+    for pkg, meta in payload.items():
+        if not isinstance(pkg, str) or not pkg.strip():
+            continue
+        if not isinstance(meta, dict):
+            continue
+        out[pkg.strip().lower()] = {
+            "app": str(meta.get("app") or "").strip(),
+            "app_category": str(meta.get("app_category") or "").strip(),
+        }
+    return out
+
+
+def select_profile_v3_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
+    """Select the Profile v3 structural cohort (catalog-driven).
+
+    This prevents operator error where "All apps" selects 100+ packages and pollutes
+    the static analysis DB/session for cohort work.
+    """
+    catalog_path = Path("profiles") / "profile_v3_app_catalog.json"
+    catalog = _load_profile_v3_catalog(catalog_path)
+    if not catalog:
+        print(
+            status_messages.status(
+                f"Profile v3 catalog not found or invalid: {catalog_path}",
+                level="warn",
+            )
+        )
+        prompt_utils.press_enter_to_continue()
+        return ScopeSelection("all", "All apps", tuple(groups))
+
+    wanted = set(catalog.keys())
+    scoped_all = tuple(g for g in groups if g.package_name.strip().lower() in wanted)
+    if not scoped_all:
+        print(
+            status_messages.status(
+                "No APK artifacts found for Profile v3 cohort in the local library.",
+                level="warn",
+            )
+        )
+        prompt_utils.press_enter_to_continue()
+        return ScopeSelection("all", "All apps", tuple(groups))
+
+    # Deterministic ordering: by catalog category then package.
+    scoped_all = tuple(
+        sorted(
+            scoped_all,
+            key=lambda g: (
+                catalog.get(g.package_name.strip().lower(), {}).get("app_category", ""),
+                g.package_name.strip().lower(),
+            ),
+        )
+    )
+
+    grouped, scoped, skipped_details = _collapse_latest_by_package(scoped_all)
+    _maybe_prompt_selection_details(grouped, scoped, skipped_details)
+
+    if scoped:
+        print()
+        menu_utils.print_header("Profile selection", "Profile v3 Structural Cohort selected (latest capture)")
+        _render_profile_selection_table(scoped)
+
+    return ScopeSelection("profile", "Profile v3 Structural Cohort", scoped)
+
+
 __all__ = [
     "format_scope_target",
     "select_latest_groups",
     "select_scope",
     "select_app_scope",
     "select_category_scope",
+    "select_profile_v3_scope",
 ]
