@@ -10,6 +10,9 @@ Goal: reproduce the archived Paper #2 outputs from the frozen 12-app cohort.
 
 1. Launch TUI:
    - `./run.sh`
+1. (Recommended) Record provenance (commit + cohort hashes):
+   - `python3 scripts/operator/provenance_stamp.py --write-audit`
+   - Final freeze option (fail-closed on dirty tree): `python3 scripts/operator/provenance_stamp.py --write-audit --fail-on-dirty`
 1. Reporting:
    - Reporting -> Profile v2 (FROZEN)
 1. Generate artifacts + bundle:
@@ -33,6 +36,9 @@ Goal: run integrity gates, export Profile v3 structural artifacts, and lint READ
 
 Paper-grade order (do not deviate):
 
+0. Record provenance (commit + cohort hashes):
+   - `python3 scripts/operator/provenance_stamp.py --write-audit`
+   - Final freeze option (fail-closed on dirty tree): `python3 scripts/operator/provenance_stamp.py --write-audit --fail-on-dirty`
 1. Sync device inventory (mandatory for v3)
 1. Install all cohort apps on device (Drive/Sheets included)
 1. Freeze catalog to exactly 21 apps:
@@ -58,4 +64,3 @@ scripts/profile_tools/profile_v3_integrity_gates.py
 Outputs:
 - `output/publication/profile_v3/` (publication-facing v3 artifacts)
 - `output/experimental/profile_v3/` (exploratory clustering artifacts)
-

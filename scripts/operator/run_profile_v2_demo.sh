@@ -3,6 +3,9 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../.."
 
+echo "[provenance] stamp..."
+python3 scripts/operator/provenance_stamp.py --write-audit
+
 echo "[profile_v2] export..."
 python3 scripts/publication/export_profile.py --profile v2 --v2-include-results-numbers
 echo "EXPORT PASS"
@@ -18,4 +21,3 @@ if not lint.ok:
     raise SystemExit("LINT FAIL: " + "; ".join(lint.errors))
 print("LINT PASS")
 PY
-

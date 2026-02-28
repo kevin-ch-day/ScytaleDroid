@@ -4,7 +4,24 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from scytaledroid.Database.db_utils.package_utils import normalize_package_name
+try:
+    from scytaledroid.Database.db_utils.package_utils import normalize_package_name  # type: ignore
+except Exception:  # pragma: no cover
+    from scytaledroid.Utils.LoggingUtils import logging_utils as log
+
+    _SUSPICIOUS_TOKENS = ("/", "\\", "=", "base.apk")
+
+    def normalize_package_name(value: str, *, context: str = "inventory") -> str:
+        cleaned = (value or "").strip().lower()
+        if not cleaned:
+            return ""
+        suspicious = (" " in cleaned) or any(token in cleaned for token in _SUSPICIOUS_TOKENS)
+        if suspicious:
+            log.warning(
+                f"Suspicious package_name '{value}' encountered; normalizing to '{cleaned}'.",
+                category=context,
+            )
+        return cleaned
 
 from .normalizers import display_version, normalise_version_code
 

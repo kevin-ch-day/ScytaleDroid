@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import getpass
+import json
 import platform
 import shutil
 import uuid
@@ -750,6 +751,57 @@ class DynamicRunOrchestrator:
         except OSError:
             pass
 
+        # Phase 2 churn reduction: emit a one-line v3 post-run validator result and
+        # opportunistically derive v3 ML artifacts when needed.
+        try:
+            import os
+
+            strict = str(os.environ.get("SCYTALEDROID_PAPER_STRICT") or "").strip().lower() in {"1", "true", "yes", "on"}
+            v3_scenario = str(getattr(self.config, "scenario_id", "") or "").strip() == "paper3_profile_v3"
+            want_check = v3_scenario and strict
+            if str(os.environ.get("SCYTALEDROID_V3_POSTRUN_CHECK") or "").strip().lower() in {"1", "true", "yes", "on"}:
+                want_check = True
+
+            if want_check:
+                from scytaledroid.DynamicAnalysis.utils.v3_postrun_check import (
+                    validate_run_dir_for_profile_v3,
+                )
+
+                check = validate_run_dir_for_profile_v3(run_dir)
+                # If we're in v3 strict capture and ML artifacts are missing, derive them now
+                # and re-check so the operator gets a definitive PASS/FAIL line.
+                if v3_scenario and strict and (not check.ok) and any(
+                    r in {"missing_window_scores_csv", "missing_baseline_threshold_json"} for r in (check.reasons or [])
+                ):
+                    try:
+                        from scytaledroid.DynamicAnalysis.ml.profile_v3_ml_derive import (
+                            derive_profile_v3_ml_for_package,
+                        )
+
+                        derive_profile_v3_ml_for_package(package=str(check.package))
+                        check = validate_run_dir_for_profile_v3(run_dir)
+                    except Exception:
+                        pass
+                status = "PASS" if check.ok else "FAIL"
+                reason = ",".join(check.reasons) if check.reasons else ""
+                print(
+                    (
+                        f"[COPY] v3_run_complete status={status} run_id={check.run_id} package={check.package} "
+                        f"run_profile={check.run_profile} phase={check.phase} version_code={check.version_code or 'na'} "
+                        f"windows={check.windows if check.windows is not None else 'na'} min_windows={check.min_windows_required} "
+                        f"pcap_bytes={check.pcap_bytes if check.pcap_bytes is not None else 'na'} min_pcap_bytes={check.min_pcap_bytes_required} "
+                        f"scores={int(check.has_window_scores)} threshold={int(check.has_baseline_threshold)} reason={reason}"
+                    ),
+                    flush=True,
+                )
+                # Write derived check artifact for audits (does not mutate sealed manifest).
+                try:
+                    writer.write_json("analysis/index/v1/v3_postrun_check.json", check.to_dict())
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
         self.logger.info(
             "Dynamic run complete",
             extra={
@@ -805,6 +857,8 @@ class DynamicRunOrchestrator:
                 # Filled deterministically at finalize-time for dataset-tier runs.
                 "valid_dataset_run": None,
                 "invalid_reason_code": None,
+                # Record the effective PCAP minima for this run (visibility only; dataset-tier
+                # gating is computed deterministically later).
                 "min_pcap_bytes": int(getattr(profile_config, "MIN_PCAP_BYTES", 50000)),
                 "short_run": 0,
                 "no_traffic_observed": 0,
@@ -926,6 +980,23 @@ class DynamicRunOrchestrator:
                 },
             },
         )
+        # For Profile v3 (Paper #3) captures, use phase-specific minima in the manifest so
+        # operator UX and post-run receipts reflect the actual contract.
+        try:
+            scenario_id = str(run_ctx.scenario_id or "").strip()
+            rp = str(getattr(run_ctx, "run_profile", None) or "").strip().lower()
+            if scenario_id == "paper3_profile_v3":
+                min_idle = int(getattr(profile_config, "MIN_PCAP_BYTES_V3_IDLE", 0))
+                min_scripted = int(
+                    getattr(profile_config, "MIN_PCAP_BYTES_V3_SCRIPTED", getattr(profile_config, "MIN_PCAP_BYTES", 50_000))
+                )
+                eff = min_idle if rp == "baseline_idle" else (min_scripted if rp == "interaction_scripted" else min_scripted)
+                if isinstance(manifest.dataset, dict):
+                    manifest.dataset["min_pcap_bytes"] = int(eff)
+                if isinstance(manifest.operator, dict) and isinstance(manifest.operator.get("run_context"), dict):
+                    manifest.operator["run_context"]["min_pcap_bytes"] = int(eff)
+        except Exception:
+            pass
         if plan_artifact:
             manifest.add_artifacts([plan_artifact])
         dep_artifact = self._attach_dep_snapshot(run_ctx, writer, manifest)

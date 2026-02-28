@@ -124,6 +124,7 @@ def run_apk_pull(
                 config=app_config,
                 verbose=resolution.verbose,
                 pull_mode=resolution.pull_mode,
+                overwrite_existing=str(resolution.selection.metadata.get("harvest_mode") or "").strip() == "full_refresh",
                 run_id=run_id,
                 harvest_logger=harvest_logger,
                 scope_label=resolution.selection.label,

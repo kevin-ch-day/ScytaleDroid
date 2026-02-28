@@ -14,7 +14,6 @@ from pathlib import Path
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis.adb import client as adb_client
 from scytaledroid.DeviceAnalysis.adb import packages as adb_packages
-from scytaledroid.Database.db_core import db_config as core_db_config
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
@@ -82,6 +81,10 @@ class HarvestOptions:
     write_meta: bool = True
     meta_fields: tuple[str, ...] = DEFAULT_META_FIELDS
     pull_mode: str = "inventory"
+    # When true, re-pull artifacts even if the destination path already exists.
+    # This is required for paper-grade "full refresh" harvests where filenames
+    # may be stable (same version_code) but the on-device artifact changed.
+    overwrite_existing: bool = False
 
 
 def load_options(config: object, *, pull_mode: str) -> HarvestOptions:
@@ -99,7 +102,14 @@ def load_options(config: object, *, pull_mode: str) -> HarvestOptions:
     # OSS posture: DB is optional. If the DB backend is disabled, never attempt DB writes.
     # This prevents harvest from skipping packages due to DB connectivity/schema errors.
     write_db_cfg = bool(getattr(config, "HARVEST_WRITE_DB", True))
-    write_db = bool(write_db_cfg and core_db_config.db_enabled())
+    db_enabled = False
+    try:
+        from scytaledroid.Database.db_core import db_config as core_db_config  # local import (optional DB)
+
+        db_enabled = bool(core_db_config.db_enabled())
+    except Exception:
+        db_enabled = False
+    write_db = bool(write_db_cfg and db_enabled)
     write_meta = bool(getattr(config, "HARVEST_WRITE_META", True))
 
     meta_fields_raw = getattr(config, "HARVEST_META_FIELDS", DEFAULT_META_FIELDS)
@@ -123,6 +133,7 @@ def load_options(config: object, *, pull_mode: str) -> HarvestOptions:
         write_meta=write_meta,
         meta_fields=meta_fields,
         pull_mode=pull_mode,
+        overwrite_existing=False,
     )
 
 
@@ -216,11 +227,18 @@ def adb_pull(
     dest_path: Path,
     package_name: str,
     verbose: bool,
+    overwrite_existing: bool = False,
 ):
     """Ensure *dest_path* exists locally by issuing ``adb pull``."""
 
-    if dest_path.exists():
+    if dest_path.exists() and not overwrite_existing:
         return True
+    if dest_path.exists() and overwrite_existing:
+        # Full refresh mode: remove the existing artifact so adb pull writes the new one.
+        try:
+            dest_path.unlink()
+        except Exception as exc:
+            return ArtifactError(source_path=source_path, reason=f"overwrite_unlink_failed: {exc}")
 
     command = [adb_path, "-s", serial, "pull", source_path, str(dest_path)]
     if verbose:

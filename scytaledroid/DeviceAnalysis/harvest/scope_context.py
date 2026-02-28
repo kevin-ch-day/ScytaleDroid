@@ -5,8 +5,6 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Sequence
 
-from scytaledroid.Database.db_core import db_queries
-
 from . import rules
 from .models import InventoryRow
 from .watchlists import Watchlist, filter_rows_by_watchlist, load_watchlists
@@ -30,6 +28,8 @@ def maybe_str(value: object) -> str | None:
 
 
 def load_app_names(package_names: Sequence[str]) -> dict[str, str]:
+    # DB is optional/mirror-only for harvest scope selection. Do not import DB modules
+    # at module import time; clean machines may not have DB deps installed.
     missing = [name for name in package_names if name not in _APP_NAME_CACHE]
     if missing:
         placeholders = ", ".join(["%s"] * len(missing))
@@ -39,6 +39,8 @@ def load_app_names(package_names: Sequence[str]) -> dict[str, str]:
             f"WHERE package_name IN ({placeholders})"
         )
         try:
+            from scytaledroid.Database.db_core import db_queries  # local import (optional DB)
+
             rows = db_queries.run_sql(query, tuple(missing), fetch="all", dictionary=True)
         except Exception:
             rows = []
@@ -267,7 +269,12 @@ def _fetch_category_map(package_names: Sequence[str]) -> dict[str, str]:
         f"WHERE d.package_name IN ({placeholders})"
     )
 
-    rows = db_queries.run_sql(query, tuple(package_names), fetch="all", dictionary=True)
+    try:
+        from scytaledroid.Database.db_core import db_queries  # local import (optional DB)
+
+        rows = db_queries.run_sql(query, tuple(package_names), fetch="all", dictionary=True)
+    except Exception:
+        rows = []
     mapping: dict[str, str] = {}
     if rows:
         for row in rows:
@@ -308,7 +315,12 @@ def _fetch_latest_harvest_versions(package_names: Sequence[str]) -> dict[str, di
         f"WHERE package_name IN ({placeholders}) "
         "GROUP BY package_name"
     )
-    rows = db_queries.run_sql(query, tuple(package_names), fetch="all", dictionary=True) or []
+    try:
+        from scytaledroid.Database.db_core import db_queries  # local import (optional DB)
+
+        rows = db_queries.run_sql(query, tuple(package_names), fetch="all", dictionary=True) or []
+    except Exception:
+        rows = []
     mapping: dict[str, dict[str, object]] = {}
     for row in rows:
         pkg = maybe_str(row.get("package_name"))

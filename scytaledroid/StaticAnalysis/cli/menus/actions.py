@@ -103,7 +103,7 @@ def confirm_reset() -> str | None:
     return "session"
 
 
-def render_reset_outcome(outcome: Any) -> None:
+def render_reset_outcome(outcome: Any, *, session_label: str | None = None) -> None:
     """Display the result of a static-analysis reset request."""
 
     print()
@@ -117,6 +117,8 @@ def render_reset_outcome(outcome: Any) -> None:
         )
     else:
         print(status_messages.status("Reset mode: session-scoped DELETE", level="info"))
+        if session_label:
+            print(status_messages.status(f"Session label: {session_label}", level="info"))
     if getattr(outcome, "truncated", None):
         truncated = ", ".join(outcome.truncated)
         print(
@@ -129,7 +131,7 @@ def render_reset_outcome(outcome: Any) -> None:
         cleared = ", ".join(outcome.cleared)
         print(
             status_messages.status(
-                f"Cleared tables (DELETE): {cleared}",
+                f"Cleared session rows (DELETE): {cleared}",
                 level="success",
             )
         )

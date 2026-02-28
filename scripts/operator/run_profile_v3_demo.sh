@@ -3,6 +3,11 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../.."
 
+export SCYTALEDROID_PAPER_STRICT=1
+
+echo "[provenance] stamp..."
+python3 scripts/operator/provenance_stamp.py --write-audit
+
 echo "[profile_v3] catalog validate..."
 python3 scripts/profile_tools/profile_v3_catalog_validate.py
 

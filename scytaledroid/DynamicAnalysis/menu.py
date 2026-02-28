@@ -210,6 +210,20 @@ def _print_profile_v3_capture_runbook() -> None:
 
     print()
     menu_utils.print_header("Profile v3 Capture Runbook", "Paper #3 (scripted-only)")
+    # Keep the runbook aligned with strict-manifest enforcement.
+    try:
+        from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import MIN_WINDOWS_PER_RUN
+        from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
+
+        min_windows = int(MIN_WINDOWS_PER_RUN)
+        min_pcap_idle = int(getattr(profile_config, "MIN_PCAP_BYTES_V3_IDLE", 0))
+        min_pcap_scripted = int(
+            getattr(profile_config, "MIN_PCAP_BYTES_V3_SCRIPTED", getattr(profile_config, "MIN_PCAP_BYTES", 50_000))
+        )
+    except Exception:
+        min_windows = 20
+        min_pcap_idle = 0
+        min_pcap_scripted = 40_000
     lines = [
         "Goal: collect paper-grade dynamic evidence for the v3 catalog cohort.",
         "",
@@ -218,8 +232,8 @@ def _print_profile_v3_capture_runbook() -> None:
         "- cohort is catalog-defined (profiles/profile_v3_app_catalog.json).",
         "",
         "Required per app (minimum):",
-        "- baseline_idle run that passes min_windows/min_bytes gates",
-        "- interaction_scripted run that passes min_windows/min_bytes gates",
+        f"- baseline_idle: windows>={min_windows}, pcap_bytes>={min_pcap_idle}",
+        f"- interaction_scripted: windows>={min_windows}, pcap_bytes>={min_pcap_scripted}",
         "",
         "Recommended order:",
         "1. Device Analysis: Sync inventory; Pull APKs -> Paper #3 Dataset (full refresh).",
@@ -236,6 +250,228 @@ def _print_profile_v3_capture_runbook() -> None:
     for line in lines:
         print(status_messages.status(line, level="info") if line else "")
     prompt_utils.press_enter_to_continue()
+
+
+def _run_profile_v3_guided_phase2_capture() -> None:
+    """Guided Phase 2 helper for Profile v3 (paper-grade scripted-only capture).
+
+    This is intentionally lightweight: it surfaces the dashboard as a cohort table plus a
+    recapture plan, so operators can burn down blockers without copy/pasting between screens.
+    """
+
+    import csv
+    import io
+    import runpy
+    import sys
+    from contextlib import redirect_stdout
+    from datetime import UTC, datetime
+
+    print()
+    menu_utils.print_header("Profile v3 Guided Capture", "Phase 2 burn-down (idle + scripted)")
+
+    repo_root = Path(__file__).resolve().parents[2]
+    audit_dir = repo_root / "output" / "audit" / "profile_v3"
+    script = repo_root / "scripts" / "profile_tools" / "profile_v3_capture_status.py"
+    if script.exists():
+        # Refresh the dashboard artifacts so the guided view is current.
+        #
+        # The dashboard script prints a verbose blockers list; for this guided screen we keep
+        # output tight and replay only its stable [COPY] lines (PM/audit-friendly).
+        # It may exit non-zero (blockers present); that's expected, so swallow SystemExit.
+        argv_saved = list(sys.argv)
+        try:
+            sys.argv = [str(script), "--write-audit"]
+            try:
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    runpy.run_path(str(script), run_name="__main__")
+            except SystemExit:
+                pass
+            finally:
+                # Replay only [COPY] lines so the operator can paste receipts without noise.
+                try:
+                    out = buf.getvalue().splitlines()
+                except Exception:
+                    out = []
+                for line in out:
+                    if line.startswith("[COPY] "):
+                        print(line)
+        finally:
+            sys.argv = argv_saved
+
+    status_csvs = sorted(audit_dir.glob("capture_status_*.csv"))
+    if not status_csvs:
+        print(status_messages.status("No v3 capture_status CSV found. Run the dashboard first.", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
+    status_csv = status_csvs[-1]
+
+    recapture_plans = sorted(audit_dir.glob("recapture_plan_*.csv"))
+    recapture_csv = recapture_plans[-1] if recapture_plans else None
+
+    rows: list[dict[str, str]] = []
+    try:
+        with status_csv.open("r", encoding="utf-8", newline="") as f:
+            r = csv.DictReader(f)
+            for row in r:
+                if not isinstance(row, dict):
+                    continue
+                rows.append({k: (row.get(k) or "").strip() for k in (r.fieldnames or [])})
+    except Exception as exc:
+        print(status_messages.status(f"Failed to read capture status CSV: {exc}", level="error"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    pass_n = sum(1 for r in rows if (r.get("status") or "").strip().upper() == "PASS")
+    block_n = sum(1 for r in rows if (r.get("status") or "").strip().upper() != "PASS")
+    strict = os.environ.get("SCYTALEDROID_PAPER_STRICT", "0").strip() or "0"
+    postrun = os.environ.get("SCYTALEDROID_V3_POSTRUN_CHECK", "0").strip() or "0"
+    min_windows = (rows[0].get("min_windows_required") if rows else "") or "?"
+    min_pcap_idle = (rows[0].get("min_pcap_bytes_required_idle") if rows else "") or "?"
+    min_pcap_scripted = (rows[0].get("min_pcap_bytes_required_scripted") if rows else "") or "?"
+    print(status_messages.status(f"Status: PASS={pass_n} BLOCKERS={block_n} strict={strict} postrun_check={postrun}", level="info"))
+    print(
+        status_messages.status(
+            f"Minima: windows>={min_windows} idle_pcap_bytes>={min_pcap_idle} scripted_pcap_bytes>={min_pcap_scripted} (per run)",
+            level="info",
+        )
+    )
+
+    # Operator summary: how many need which action (derived from reasons, not from UI labels).
+    need_both = 0
+    need_idle = 0
+    need_scripted = 0
+    for r in rows:
+        if (r.get("status") or "").strip().upper() == "PASS":
+            continue
+        reasons = r.get("reasons") or ""
+        miss_idle = "missing_required_phase_idle" in reasons
+        miss_scripted = "missing_required_phase_scripted" in reasons
+        if miss_idle and miss_scripted:
+            need_both += 1
+        elif miss_idle:
+            need_idle += 1
+        elif miss_scripted:
+            need_scripted += 1
+    if block_n:
+        print(status_messages.status(f"Next actions: capture_both={need_both} capture_idle={need_idle} capture_scripted={need_scripted}", level="warn"))
+
+    table_rows: list[list[str]] = []
+    for idx, r in enumerate(rows, start=1):
+        app = r.get("app") or r.get("package") or ""
+        pkg = r.get("package") or ""
+        idle_ok = r.get("idle_runs_eligible") or "0"
+        scr_ok = r.get("scripted_runs_eligible") or "0"
+        reasons = r.get("reasons") or ""
+        need = ""
+        if "missing_required_phase_idle" in reasons and "missing_required_phase_scripted" in reasons:
+            need = "CAPTURE_BOTH"
+        elif "missing_required_phase_idle" in reasons:
+            need = "CAPTURE_IDLE"
+        elif "missing_required_phase_scripted" in reasons:
+            need = "CAPTURE_SCRIPTED"
+        status = r.get("status") or ""
+        table_rows.append([str(idx), app, pkg, str(idle_ok), str(scr_ok), need or status])
+    table_utils.render_table(["#", "App", "Package", "Idle eligible", "Scripted eligible", "Need/Status"], table_rows, padding=1)
+
+    print()
+    opts = [
+        menu_utils.MenuOption("1", "Show recapture plan (ordered)"),
+        menu_utils.MenuOption("2", "Run capture for a package"),
+        menu_utils.MenuOption("3", "Help (capture runbook)"),
+        menu_utils.MenuOption("4", "Open capture status dashboard"),
+        menu_utils.MenuOption("5", "Build v3 manifest (included runs)"),
+        menu_utils.MenuOption("6", "Run integrity gates (Reporting)"),
+    ]
+    menu_utils.render_menu(menu_utils.MenuSpec(items=opts, default="1", show_exit=True, exit_label="Back", compact=True))
+    choice = prompt_utils.get_choice(menu_utils.selectable_keys(opts, include_exit=True), default="1", casefold=True)
+    if choice == "0":
+        return
+    if choice == "1":
+        print()
+        menu_utils.print_header("Recapture Plan", "Ordered actions to reach blockers=0")
+        if not recapture_csv or not recapture_csv.exists():
+            print(status_messages.status("No recapture_plan CSV found. Re-run dashboard with --write-audit.", level="warn"))
+            prompt_utils.press_enter_to_continue()
+            return
+        print(status_messages.status(f"Source: {recapture_csv.relative_to(repo_root)}", level="info"))
+        try:
+            with recapture_csv.open("r", encoding="utf-8", newline="") as f:
+                r = csv.DictReader(f)
+                plan_rows = []
+                for row in r:
+                    if not isinstance(row, dict):
+                        continue
+                    plan_rows.append(row)
+        except Exception as exc:
+            print(status_messages.status(f"Failed to read recapture plan: {exc}", level="error"))
+            prompt_utils.press_enter_to_continue()
+            return
+        for row in plan_rows[:30]:
+            pkg = (row.get("package") or "").strip()
+            action = (row.get("action") or "").strip()
+            reasons = (row.get("reasons") or "").strip()
+            print(f"- {action:14} {pkg}  ({reasons})")
+        if len(plan_rows) > 30:
+            print(f"- ... ({len(plan_rows) - 30} more)")
+        prompt_utils.press_enter_to_continue()
+        return
+    if choice == "2":
+        # Launch a v2-like per-app run menu for v3 capture.
+        from scytaledroid.DynamicAnalysis.controllers.profile_v3_phase2_capture import run_profile_v3_capture_menu
+
+        # Prefer blocked apps first.
+        blocked_rows = [r for r in rows if (r.get("status") or "").strip().upper() != "PASS"]
+        candidates = blocked_rows or rows
+        labels = []
+        pkgs = []
+        needs = []
+        for r in candidates:
+            pkg = (r.get("package") or "").strip()
+            app = (r.get("app") or pkg).strip()
+            reasons = (r.get("reasons") or "").strip()
+            need = ""
+            if "missing_required_phase_idle" in reasons and "missing_required_phase_scripted" in reasons:
+                need = "IDLE+SCRIPTED"
+            elif "missing_required_phase_idle" in reasons:
+                need = "IDLE"
+            elif "missing_required_phase_scripted" in reasons:
+                need = "SCRIPTED"
+            labels.append(f"{app} ({pkg}) [{need or (r.get('status') or '')}]")
+            pkgs.append(pkg)
+            needs.append(need or (r.get("status") or ""))
+        print()
+        menu_utils.print_header("Select App", "Profile v3 capture (Phase 2)")
+        table_utils.render_table(["#", "App"], [[str(i + 1), labels[i]] for i in range(len(labels))], compact=True)
+        idx = prompt_utils.get_choice([str(i + 1) for i in range(len(labels))] + ["0"], default="1")
+        if idx == "0":
+            return
+        try:
+            i = int(idx) - 1
+        except Exception:
+            return
+        if i < 0 or i >= len(pkgs):
+            return
+        run_profile_v3_capture_menu(package_name=pkgs[i], need=needs[i], ui_prompt_observers=_load_dynamic_ui_defaults().observer_prompts_enabled)
+        return
+    if choice == "3":
+        _print_profile_v3_capture_runbook()
+        return
+    if choice == "4":
+        _run_profile_v3_capture_status_dashboard()
+        return
+    if choice == "5":
+        _run_profile_v3_manifest_build()
+        return
+    if choice == "6":
+        try:
+            from scytaledroid.Reporting.menu_actions import handle_profile_v3_integrity_gates
+
+            handle_profile_v3_integrity_gates()
+        except Exception:
+            print(status_messages.status("Failed to open v3 integrity gates (Reporting).", level="error"))
+            prompt_utils.press_enter_to_continue()
+        return
 
 
 def _run_profile_v3_manifest_build() -> None:
@@ -259,6 +495,28 @@ def _run_profile_v3_manifest_build() -> None:
             prompt_utils.press_enter_to_continue()
             return
     print(status_messages.status("Manifest build completed.", level="success"))
+    prompt_utils.press_enter_to_continue()
+
+
+def _run_profile_v3_capture_status_dashboard() -> None:
+    """Show per-app Phase 2 capture readiness (idle + scripted + minima + artifacts)."""
+
+    print()
+    menu_utils.print_header("Profile v3 Capture Status (Dashboard)")
+    script = Path(__file__).resolve().parents[2] / "scripts" / "profile_tools" / "profile_v3_capture_status.py"
+    if not script.exists():
+        print(status_messages.status(f"Missing script: {script}", level="error"))
+        prompt_utils.press_enter_to_continue()
+        return
+    import runpy
+
+    try:
+        runpy.run_path(str(script), run_name="__main__")
+    except SystemExit as exc:
+        # The dashboard may return non-zero in strict mode; do not treat that as a crash.
+        code = int(getattr(exc, "code", 1) or 0)
+        if code != 0:
+            print(status_messages.status(f"Dashboard reported blockers (exit={code}).", level="warn"))
     prompt_utils.press_enter_to_continue()
 
 
@@ -286,21 +544,22 @@ def dynamic_analysis_menu() -> None:
     # Paper #3 uses the same capture engine but a different cohort contract and reporting outputs.
     # Keep the operator surface explicit so v2/v3 runs are not confused during demos.
     v3_options = [
-        MenuOption("3", "Capture runbook (scripted-only)"),
-        MenuOption("4", "Run integrity gates (Reporting)"),
-        MenuOption("5", "Build v3 manifest (included runs)"),
+        MenuOption("3", "Guided cohort capture (Phase 2)"),
+        MenuOption("4", "Capture status dashboard (Phase 2)"),
+        MenuOption("5", "Run integrity gates (Reporting)"),
+        MenuOption("6", "Build v3 manifest (included runs)"),
     ]
     integrity_options = [
-        MenuOption("6", "Freeze readiness audit (evidence packs)"),
-        MenuOption("7", "Reindex/repair tracker from evidence packs"),
-        MenuOption("8", "Prune incomplete dynamic evidence dirs"),
+        MenuOption("7", "Freeze readiness audit (evidence packs)"),
+        MenuOption("8", "Reindex/repair tracker from evidence packs"),
+        MenuOption("9", "Prune incomplete dynamic evidence dirs"),
     ]
     reporting_options = [
-        MenuOption("9", "Export freeze-anchored CSVs (Reporting)"),
+        MenuOption("10", "Export freeze-anchored CSVs (Reporting)"),
     ]
     system_options = [
-        MenuOption("10", "Verify host PCAP tools (tshark + capinfos)"),
-        MenuOption("11", "State summary (freeze/evidence/tracker deltas)"),
+        MenuOption("11", "Verify host PCAP tools (tshark + capinfos)"),
+        MenuOption("12", "State summary (freeze/evidence/tracker deltas)"),
     ]
     options = [
         *v2_options,
@@ -359,11 +618,16 @@ def dynamic_analysis_menu() -> None:
             continue
 
         if choice == "3":
-            _print_profile_v3_capture_runbook()
+            _run_profile_v3_guided_phase2_capture()
             _pause_if_verbose()
             continue
 
         if choice == "4":
+            _run_profile_v3_capture_status_dashboard()
+            _pause_if_verbose()
+            continue
+
+        if choice == "5":
             try:
                 from scytaledroid.Reporting.menu_actions import handle_profile_v3_integrity_gates
 
@@ -374,27 +638,27 @@ def dynamic_analysis_menu() -> None:
             _pause_if_verbose()
             continue
 
-        if choice == "5":
+        if choice == "6":
             _run_profile_v3_manifest_build()
             _pause_if_verbose()
             continue
 
-        if choice == "6":
+        if choice == "7":
             _run_paper_readiness_audit()
             _pause_if_verbose()
             continue
 
-        if choice == "7":
+        if choice == "8":
             _repair_reindex_tracker()
             _pause_if_verbose()
             continue
 
-        if choice == "8":
+        if choice == "9":
             _prune_incomplete_dynamic_evidence_dirs()
             _pause_if_verbose()
             continue
 
-        if choice == "9":
+        if choice == "10":
             # Single canonical paper-facing export surface lives in Reporting.
             try:
                 from scytaledroid.Reporting.menu_actions import handle_export_freeze_anchored_csvs
@@ -405,12 +669,12 @@ def dynamic_analysis_menu() -> None:
             _pause_if_verbose()
             continue
 
-        if choice == "10":
+        if choice == "11":
             _verify_host_pcap_tools()
             _pause_if_verbose()
             continue
 
-        if choice == "11":
+        if choice == "12":
             _run_state_summary()
             _pause_if_verbose()
             continue

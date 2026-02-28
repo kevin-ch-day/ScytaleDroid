@@ -9,6 +9,7 @@ in the canonical DB schema.
 from __future__ import annotations
 
 import json
+import signal
 import sys
 from pathlib import Path
 
@@ -26,6 +27,11 @@ def _load_catalog(catalog_path: Path) -> dict[str, object]:
 
 
 def main() -> int:
+    try:
+        signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+    except Exception:
+        pass
+
     catalog_path = Path("profiles") / "profile_v3_app_catalog.json"
     catalog = _load_catalog(catalog_path)
     pkgs = [str(k).strip().lower() for k in catalog.keys() if str(k).strip()]
@@ -45,39 +51,50 @@ def main() -> int:
         return 2
 
     placeholders = ", ".join(["%s"] * len(pkgs))
-    # Latest run per package (by static_analysis_runs.id).
+    # Paper readiness should be based on "has at least one COMPLETED static run".
+    # A later failed re-run should not regress readiness if a completed run exists.
     rows = core_q.run_sql(
         f"""
         SELECT
-          a.package_name,
-          MAX(sar.id) AS static_run_id
+          LOWER(a.package_name) AS package_name,
+          MAX(CASE WHEN UPPER(sar.status) = 'COMPLETED' THEN sar.id ELSE NULL END) AS completed_static_run_id,
+          MAX(sar.id) AS latest_static_run_id
         FROM static_analysis_runs sar
         JOIN app_versions av ON av.id = sar.app_version_id
         JOIN apps a ON a.id = av.app_id
         WHERE LOWER(a.package_name) IN ({placeholders})
-        GROUP BY a.package_name
+        GROUP BY LOWER(a.package_name)
         """,
         tuple(pkgs),
         fetch="all",
         dictionary=True,
     ) or []
 
-    latest: dict[str, int] = {}
+    completed_by_pkg: dict[str, int] = {}
+    latest_by_pkg: dict[str, int] = {}
     for r in rows:
         if not isinstance(r, dict):
             continue
         pkg = str(r.get("package_name") or "").strip().lower()
-        rid = r.get("static_run_id")
-        if pkg and rid is not None:
+        if not pkg:
+            continue
+        comp = r.get("completed_static_run_id")
+        lat = r.get("latest_static_run_id")
+        if comp is not None:
             try:
-                latest[pkg] = int(rid)
+                completed_by_pkg[pkg] = int(comp)
             except Exception:
-                continue
+                pass
+        if lat is not None:
+            try:
+                latest_by_pkg[pkg] = int(lat)
+            except Exception:
+                pass
 
-    missing = sorted(set(pkgs) - set(latest.keys()))
-    bad: list[tuple[str, str, str]] = []
-    if latest:
-        run_ids = sorted(set(latest.values()))
+    missing = sorted(set(pkgs) - set(completed_by_pkg.keys()))
+    warnings: list[tuple[str, str, str]] = []
+    if latest_by_pkg:
+        run_ids = sorted(set(latest_by_pkg.values()))
         ph = ", ".join(["%s"] * len(run_ids))
         status_rows = core_q.run_sql(
             f"""
@@ -100,33 +117,39 @@ def main() -> int:
             status = str(r.get("status") or "").strip().upper()
             stamp = str(r.get("session_stamp") or "").strip()
             status_by_id[rid] = (status, stamp)
-
-        for pkg, rid in sorted(latest.items()):
+        for pkg, rid in sorted(latest_by_pkg.items()):
             status, stamp = status_by_id.get(rid, ("", ""))
-            if status != "COMPLETED":
-                bad.append((pkg, status or "UNKNOWN", stamp or ""))
+            if status and status != "COMPLETED" and pkg in completed_by_pkg:
+                warnings.append((pkg, status, stamp))
 
-    ok = (not missing) and (not bad)
+    ok = (not missing)
     if ok:
         print(f"[OK] Profile v3 static readiness: PASS (apps={len(pkgs)})")
         print(f"[COPY] v3_static_ready=PASS apps={len(pkgs)}")
+        if warnings:
+            print("[WARN] Latest static run is not COMPLETED for some packages, but a COMPLETED run exists:")
+            for pkg, status, stamp in warnings[:8]:
+                suffix = f" session={stamp}" if stamp else ""
+                print(f"- {pkg} latest_status={status}{suffix}")
         return 0
 
     print("[FAIL] Profile v3 static readiness: FAIL")
-    print(f"[COPY] v3_static_ready=FAIL apps={len(pkgs)} missing={len(missing)} bad={len(bad)}")
+    print(f"[COPY] v3_static_ready=FAIL apps={len(pkgs)} missing={len(missing)} bad=0")
     if missing:
         print("Missing static run:")
         for pkg in missing:
             print(f"- {pkg}")
-    if bad:
-        print("Latest static run not COMPLETED:")
-        for pkg, status, stamp in bad:
-            suffix = f" session={stamp}" if stamp else ""
-            print(f"- {pkg} status={status}{suffix}")
     print("Next steps:")
     print("- Static APK analysis -> Run Profile v3 Structural Cohort (batch)")
     return 2
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except BrokenPipeError:
+        try:
+            sys.stdout.close()
+        except Exception:
+            pass
+        raise SystemExit(0)

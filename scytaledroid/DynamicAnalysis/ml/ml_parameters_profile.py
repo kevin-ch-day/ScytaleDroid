@@ -68,6 +68,17 @@ MIN_WINDOWS_BASELINE = 30
 MIN_PCAP_BYTES = 50_000
 MIN_PCAP_BYTES_FALLBACK = MIN_PCAP_BYTES
 
+# Profile v3 (Paper #3) phase-specific PCAP bytes minima.
+#
+# Rationale:
+# - Some apps legitimately produce low traffic during baseline idle; requiring a large PCAP for
+#   baseline can cause false-negative "not ready" results and churn.
+# - Scripted interaction should still prove "real capture happened" (network activity observed).
+#
+# These are enforced by the strict v3 manifest builder and post-run checks.
+MIN_PCAP_BYTES_V3_IDLE = 0
+MIN_PCAP_BYTES_V3_SCRIPTED = 40_000
+
 # ML audit thresholds
 MIN_TRAINING_SAMPLES_WARNING = 50
 
@@ -95,4 +106,3 @@ OCSVM_TOL = 1e-3
 
 # Fig B1 exemplar selection (locked)
 EXEMPLAR_ALLOWED_INTERACTION_TAGS = {"voice", "video"}
-

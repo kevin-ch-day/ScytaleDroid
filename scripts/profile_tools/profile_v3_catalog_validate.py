@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import signal
 import sys
 from pathlib import Path
 
@@ -45,6 +46,11 @@ def _package_from_run_manifest(path: Path) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+    except Exception:
+        pass
+
     p = argparse.ArgumentParser(description="Validate profile v3 app catalog coverage")
     p.add_argument(
         "--manifest",
@@ -72,7 +78,28 @@ def main(argv: list[str] | None = None) -> int:
     catalog_path = Path(args.catalog)
     evidence_root = Path(args.evidence_root)
 
-    manifest = load_profile_v3_manifest(manifest_path)
+    try:
+        manifest = load_profile_v3_manifest(manifest_path)
+    except ProfileV3Error as exc:
+        # In gate context, treat empty manifests as "NOT READY" without a traceback.
+        msg = str(exc)
+        if "empty included_run_ids" in msg:
+            catalog_n = "unknown"
+            try:
+                catalog_n = str(len(load_profile_v3_catalog(catalog_path)))
+            except Exception:
+                pass
+            print("[FAIL] Profile v3 NOT READY: manifest contains 0 included_run_ids.")
+            print(f"manifest: {manifest_path}")
+            print(f"catalog : {catalog_path} (packages={catalog_n})")
+            print(f"evidence: {evidence_root}")
+            print()
+            print("Next steps:")
+            print("- Run: Reporting -> Profile v3 -> Run v3 integrity gates")
+            print("- Capture scripted dynamic runs for the v3 cohort")
+            print("- Rebuild the v3 manifest to populate included_run_ids (profile_v3_manifest_build.py)")
+            return 2
+        raise
     included = [str(r).strip() for r in (manifest.get("included_run_ids") or []) if str(r).strip()]
     if not included:
         catalog_n = "unknown"
@@ -110,6 +137,7 @@ def main(argv: list[str] | None = None) -> int:
         print("[FAIL] Missing packages in profiles/profile_v3_app_catalog.json:")
         for pkg in pkgs:
             print(f"- {pkg} (runs_included={seen.get(pkg, 0)})")
+        print(f"[COPY] v3_catalog_validate=FAIL missing_packages={len(pkgs)} unique_packages_in_manifest={len(seen)}")
         if args.emit_json_snippet:
             print()
             print("JSON snippet to paste into the catalog (fill app/app_category):")
@@ -117,8 +145,16 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     print(f"[OK] Catalog covers all included packages (unique_packages={len(seen)}).")
+    print(f"[COPY] v3_catalog_validate=PASS unique_packages_in_manifest={len(seen)}")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except BrokenPipeError:
+        try:
+            sys.stdout.close()
+        except Exception:
+            pass
+        raise SystemExit(0)

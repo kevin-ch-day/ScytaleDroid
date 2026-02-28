@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import signal
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -30,6 +31,12 @@ EXPECTED_PAPER_GRADE_COHORT_SIZE = 21
 
 
 def main(argv: list[str] | None = None) -> int:
+    # If output is piped (e.g., to `head`), avoid noisy BrokenPipeError messages.
+    try:
+        signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+    except Exception:
+        pass
+
     p = argparse.ArgumentParser(description="Profile v3 catalog freeze check (fail-closed)")
     p.add_argument(
         "--catalog",
@@ -59,6 +66,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"catalog: {catalog_path}")
         for e in errors:
             print(f"  - {e}")
+        print(f"[COPY] v3_catalog_frozen=FAIL catalog_packages={len(catalog)} expected={EXPECTED_PAPER_GRADE_COHORT_SIZE}")
         print()
         print("Next steps:")
         print("- Install missing apps on the capture device (e.g., Drive/Sheets).")
@@ -75,8 +83,16 @@ def main(argv: list[str] | None = None) -> int:
     print("[PASS] Profile v3 catalog frozen (paper-grade).")
     print(f"  catalog_packages={len(catalog)}")
     print(f"  category_counts={counts}")
+    print(f"[COPY] v3_catalog_frozen=PASS catalog_packages={len(catalog)} expected={EXPECTED_PAPER_GRADE_COHORT_SIZE} category_counts={counts}")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except BrokenPipeError:
+        try:
+            sys.stdout.close()
+        except Exception:
+            pass
+        raise SystemExit(0)

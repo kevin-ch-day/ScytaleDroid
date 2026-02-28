@@ -8,7 +8,6 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
-from scytaledroid.Database.db_func.harvest import apk_repository as repo
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_engine
 from scytaledroid.Utils.LoggingUtils import logging_events as log_events
@@ -43,6 +42,7 @@ def execute_harvest(
     *,
     verbose: bool = False,
     pull_mode: str = "inventory",
+    overwrite_existing: bool = False,
     run_id: str | None = None,
     harvest_logger: logging_engine.ContextAdapter | None = None,
     scope_label: str | None = None,
@@ -52,6 +52,16 @@ def execute_harvest(
     """Execute the provided harvest plan and return per-package results."""
 
     options = load_options(config, pull_mode=pull_mode)
+    if overwrite_existing:
+        options = HarvestOptions(
+            dedupe_sha256=options.dedupe_sha256,
+            keep_last=options.keep_last,
+            write_db=options.write_db,
+            write_meta=options.write_meta,
+            meta_fields=options.meta_fields,
+            pull_mode=options.pull_mode,
+            overwrite_existing=True,
+        )
     # DB is optional for OSS vNext. If the backend is configured but not reachable,
     # do not skip filesystem harvests due to DB mirror failures.
     if options.write_db:
@@ -72,6 +82,7 @@ def execute_harvest(
                     write_meta=options.write_meta,
                     meta_fields=options.meta_fields,
                     pull_mode=options.pull_mode,
+                    overwrite_existing=options.overwrite_existing,
                 )
         except Exception:
             # If diagnostics isn't available, keep the existing posture; DB failures will
@@ -173,51 +184,22 @@ def execute_harvest(
         },
     )
 
-    storage_root_id: int | None
+    storage_root_id: int | None = None
     if options.write_db:
-        host_name, data_root = resolve_storage_root()
+        # Import DB repositories only when DB writes are enabled. This keeps harvest usable
+        # on clean machines where DB deps/connectors/migrations may be absent.
         try:
-            storage_root_id = repo.ensure_storage_root(
-                host_name,
-                data_root,
-                context={**base_context, "event": "storage_root.ensure"},
-            )
-            stats["db_storage_root"] += 1
-            try:
-                run_logger = get_run_logger(
-                    "harvest",
-                    RunContext(
-                        subsystem="harvest",
-                        device_serial=resolved_serial,
-                        device_model=None,
-                        run_id=run_identifier,
-                        scope=scope_label,
-                        profile=pull_mode,
-                    ),
-                )
-                run_logger.info(
-                    "Harvest db.persist",
-                    extra={
-                        "event": log_events.DB_PERSIST,
-                        "entity": "harvest.storage_root",
-                        "rows": 1,
-                        "host": host_name,
-                    },
-                )
-            except Exception:
-                pass
+            from scytaledroid.Database.db_func.harvest import apk_repository as repo  # local import (optional DB)
         except Exception as exc:
             stats["db_errors"] += 1
             _emit(
                 "error",
                 "harvest.db.error",
-                extra={"stage": "ensure_storage_root", "error": str(exc)},
+                extra={"stage": "import_db_repo", "error": str(exc)},
             )
-            # DB is a mirror/index layer for harvest; filesystem artifacts are canonical.
-            # Do not block a paper-grade APK pull due to DB mirror failure.
             print(
                 status_messages.status(
-                    "DB mirror unavailable (storage root write failed); continuing harvest without DB writes.",
+                    "DB mirror unavailable (DB repository import failed); continuing harvest without DB writes.",
                     level="warn",
                 )
             )
@@ -228,10 +210,64 @@ def execute_harvest(
                 write_meta=options.write_meta,
                 meta_fields=options.meta_fields,
                 pull_mode=options.pull_mode,
+                overwrite_existing=options.overwrite_existing,
             )
-            storage_root_id = None
-    else:
-        storage_root_id = None
+        if options.write_db:
+            host_name, data_root = resolve_storage_root()
+            try:
+                storage_root_id = repo.ensure_storage_root(
+                    host_name,
+                    data_root,
+                    context={**base_context, "event": "storage_root.ensure"},
+                )
+                stats["db_storage_root"] += 1
+                try:
+                    run_logger = get_run_logger(
+                        "harvest",
+                        RunContext(
+                            subsystem="harvest",
+                            device_serial=resolved_serial,
+                            device_model=None,
+                            run_id=run_identifier,
+                            scope=scope_label,
+                            profile=pull_mode,
+                        ),
+                    )
+                    run_logger.info(
+                        "Harvest db.persist",
+                        extra={
+                            "event": log_events.DB_PERSIST,
+                            "entity": "harvest.storage_root",
+                            "rows": 1,
+                            "host": host_name,
+                        },
+                    )
+                except Exception:
+                    pass
+            except Exception as exc:
+                stats["db_errors"] += 1
+                _emit(
+                    "error",
+                    "harvest.db.error",
+                    extra={"stage": "ensure_storage_root", "error": str(exc)},
+                )
+                # DB is a mirror/index layer for harvest; filesystem artifacts are canonical.
+                # Do not block a paper-grade APK pull due to DB mirror failure.
+                print(
+                    status_messages.status(
+                        "DB mirror unavailable (storage root write failed); continuing harvest without DB writes.",
+                        level="warn",
+                    )
+                )
+                options = HarvestOptions(
+                    dedupe_sha256=options.dedupe_sha256,
+                    keep_last=options.keep_last,
+                    write_db=False,
+                    write_meta=options.write_meta,
+                    meta_fields=options.meta_fields,
+                    pull_mode=options.pull_mode,
+                )
+                storage_root_id = None
 
     results: list[PullResult] = []
     total = len(plans)
@@ -549,6 +585,7 @@ def _pull_and_record(
         dest_path=dest_path,
         package_name=plan.inventory.package_name,
         verbose=verbose_output,
+        overwrite_existing=options.overwrite_existing,
     )
     if isinstance(pull_result, ArtifactError):
         common.print_artifact_status(

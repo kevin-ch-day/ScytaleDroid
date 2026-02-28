@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import signal
 import sys
 from pathlib import Path
 
@@ -30,6 +31,7 @@ from scytaledroid.DynamicAnalysis.run_profile_norm import (  # noqa: E402
 )
 
 from scytaledroid.Publication.profile_v3_metrics import (  # noqa: E402
+    ProfileV3Error,
     load_profile_v3_catalog,
     load_profile_v3_manifest,
 )
@@ -58,6 +60,11 @@ def _package_name(man: dict) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+    except Exception:
+        pass
+
     p = argparse.ArgumentParser(description="Audit profile v3 scripted coverage (catalog x manifest)")
     p.add_argument(
         "--manifest",
@@ -90,7 +97,21 @@ def main(argv: list[str] | None = None) -> int:
     catalog_path = Path(args.catalog)
     evidence_root = Path(args.evidence_root)
 
-    manifest = load_profile_v3_manifest(manifest_path)
+    try:
+        manifest = load_profile_v3_manifest(manifest_path)
+    except ProfileV3Error as exc:
+        msg = str(exc)
+        if "empty included_run_ids" in msg:
+            print("[FAIL] Profile v3 NOT READY: manifest contains 0 included_run_ids.")
+            print(f"manifest: {manifest_path}")
+            print(f"catalog : {catalog_path}")
+            print(f"evidence: {evidence_root}")
+            print()
+            print("Next steps:")
+            print("- Capture scripted dynamic runs for the v3 cohort")
+            print("- Rebuild the v3 manifest to populate included_run_ids (profile_v3_manifest_build.py)")
+            return 2
+        raise
     included = [str(r).strip() for r in (manifest.get("included_run_ids") or []) if str(r).strip()]
     if not included:
         print("[FAIL] Profile v3 NOT READY: manifest contains 0 included_run_ids.")
@@ -233,11 +254,32 @@ def main(argv: list[str] | None = None) -> int:
         print("[FAIL] Profile v3 scripted coverage: FAIL")
         for line in failures:
             print("  " + line)
+        missing_idle = sum(1 for r in rows if int(r.get("needs_idle") or 0) == 1)
+        missing_scripted = sum(1 for r in rows if int(r.get("needs_scripted_interaction") or 0) == 1)
+        manual_included = sum(1 for r in rows if int(r.get("n_manual_interaction_runs") or 0) > 0)
+        print(
+            "[COPY] v3_scripted_coverage=FAIL "
+            f"catalog_packages={len(catalog)} missing_idle={missing_idle} missing_scripted={missing_scripted} "
+            f"manual_packages={manual_included} out_csv='{out_path.relative_to(REPO_ROOT)}' "
+            f"recapture_plan='{rec_path.relative_to(REPO_ROOT)}'"
+        )
         return 2
 
     print("[PASS] Profile v3 scripted coverage: PASS")
+    print(
+        "[COPY] v3_scripted_coverage=PASS "
+        f"catalog_packages={len(catalog)} out_csv='{out_path.relative_to(REPO_ROOT)}' "
+        f"recapture_plan='{rec_path.relative_to(REPO_ROOT)}'"
+    )
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except BrokenPipeError:
+        try:
+            sys.stdout.close()
+        except Exception:
+            pass
+        raise SystemExit(0)

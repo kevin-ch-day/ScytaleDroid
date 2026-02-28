@@ -236,7 +236,8 @@ def static_analysis_menu() -> None:
                             include_harvest=False,
                             session_label=effective_params.session_stamp,
                             truncate_all=(reset_mode == "truncate_all"),
-                        )
+                        ),
+                        session_label=effective_params.session_stamp,
                     )
 
             try:

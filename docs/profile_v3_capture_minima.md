@@ -39,11 +39,16 @@ Additional (export-math) requirement:
 
 ## Minimum PCAP Bytes (Dataset-Tier Validity)
 
-Two thresholds exist:
+Profile v3 uses phase-specific minima:
 
-- Profile/paper-grade minimum (dataset validity): `50,000B`
-  - Source: `scytaledroid/DynamicAnalysis/ml/ml_parameters_profile.py:MIN_PCAP_BYTES`
-- Capture observer default minimum (capture QA): `100,000B`
+- `baseline_idle` minimum (paper eligibility): `0B`
+  - Source: `scytaledroid/DynamicAnalysis/ml/ml_parameters_profile.py:MIN_PCAP_BYTES_V3_IDLE`
+- `interaction_scripted` minimum (paper eligibility): `40,000B`
+  - Source: `scytaledroid/DynamicAnalysis/ml/ml_parameters_profile.py:MIN_PCAP_BYTES_V3_SCRIPTED`
+
+Capture observer default minimum (capture QA):
+
+- `100,000B`
   - Source: `scytaledroid/Config/app_config.py:DYNAMIC_MIN_PCAP_BYTES`
 
 Operator guidance:

@@ -61,6 +61,9 @@ def lint_profile_v3_bundle(root: Path) -> ProfileV3Lint:
     for rel in sorted(REQUIRED_FILES):
         if not (root / rel).exists():
             errors.append(f"missing_file:{rel.as_posix()}")
+    # Export provenance receipt (new; helps prevent "wrong manifest / drift" confusion).
+    if not (root / "qa" / "profile_v3_export_receipt.json").exists():
+        warnings.append("missing_optional_file:qa/profile_v3_export_receipt.json")
     # Optional QA artifacts (may be skipped if SciPy is unavailable).
     if not (root / "qa" / "profile_v3_correlations.csv").exists():
         warnings.append("missing_optional_file:qa/profile_v3_correlations.csv")
@@ -89,6 +92,8 @@ def lint_profile_v3_bundle(root: Path) -> ProfileV3Lint:
             errors.append("strict_missing_file:qa/profile_v3_correlations.csv")
         if not (root / "figures" / "fig_v3_stability_sensitivity_plane.png").exists():
             errors.append("strict_missing_file:figures/fig_v3_stability_sensitivity_plane.png")
+        if not (root / "qa" / "profile_v3_export_receipt.json").exists():
+            errors.append("strict_missing_file:qa/profile_v3_export_receipt.json")
 
     # Schema check: per-app CSV headers must match required set (order ignored; presence required).
     per_app_csv = root / "tables" / "per_app_dynamic_summary_v3.csv"

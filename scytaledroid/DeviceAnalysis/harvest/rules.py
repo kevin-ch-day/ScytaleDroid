@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 
 from scytaledroid.Config import app_config
-from scytaledroid.Database.db_core import db_queries
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 PLAY_STORE_INSTALLER = "com.android.vending"
@@ -89,6 +88,8 @@ def load_google_allowlist(candidates: Sequence[str | None] = None) -> set[str]:
     )
 
     try:
+        from scytaledroid.Database.db_core import db_queries  # local import (optional DB)
+
         rows = db_queries.run_sql(query, tuple(sorted(baseline)), fetch="all", dictionary=True)
     except Exception as exc:  # pragma: no cover - defensive logging path
         log.warning(
@@ -113,6 +114,7 @@ def load_google_allowlist(candidates: Sequence[str | None] = None) -> set[str]:
     return discovered | (baseline - discovered)
 
 
+# DB is optional; allow DB-derived allow-lists when available, but never crash if DB is absent.
 GOOGLE_ALLOWLIST: set[str] = load_google_allowlist()
 
 

@@ -27,6 +27,33 @@ from .watchlists import Watchlist
 
 _LAST_SCOPE: ScopeSelection | None = None
 
+
+def _load_latest_scoped_inventory_packages(*, device_serial: str, scope_id: str) -> list[dict[str, object]] | None:
+    """Best-effort: load latest scoped inventory snapshot packages for *scope_id*.
+
+    This allows paper-grade cohorts (v2/v3) to use fresh version_code/version_name and
+    APK paths without requiring a full-device inventory sync.
+    """
+
+    # Scoped snapshots are persisted under:
+    # data/state/<serial>/inventory/scoped/latest_scoped_<scope_id>.json
+    p = Path("data") / "state" / device_serial / "inventory" / "scoped" / f"latest_scoped_{scope_id}.json"
+    if not p.exists():
+        return None
+    try:
+        import json
+
+        payload = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if str(payload.get("scope_id") or "").strip() != str(scope_id).strip():
+        return None
+    pkgs = payload.get("packages")
+    return pkgs if isinstance(pkgs, list) else None
+
+
 def _append_non_root_note(label: str) -> str:
     return label
 
@@ -35,6 +62,32 @@ def _maybe_str(value: object) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+def _merge_rows_prefer_scoped(
+    *,
+    rows: Sequence[InventoryRow],
+    scoped_rows: Sequence[InventoryRow],
+) -> list[InventoryRow]:
+    """Merge *scoped_rows* into *rows*, replacing any existing packages.
+
+    Paper-grade scoped inventory snapshots should win for version_code/version_name
+    and APK paths. Appending would create duplicate package entries, and downstream
+    planning may pick the wrong one depending on iteration order.
+    """
+
+    by_pkg: dict[str, InventoryRow] = {}
+    for row in rows:
+        pkg = (row.package_name or "").strip().lower()
+        if not pkg:
+            continue
+        # Keep the first-seen row for non-scoped inventory; scoped_rows will overwrite.
+        by_pkg.setdefault(pkg, row)
+    for row in scoped_rows:
+        pkg = (row.package_name or "").strip().lower()
+        if not pkg:
+            continue
+        by_pkg[pkg] = row
+    return list(by_pkg.values())
 
 def _hydrate_missing_rows_from_adb(
     *,
@@ -316,6 +369,14 @@ def select_package_scope(
             dataset_pkgs = {p.lower() for p in load_profile_packages("RESEARCH_DATASET_ALPHA")}
         except Exception:
             dataset_pkgs = set()
+        # Prefer a scoped snapshot for paper cohorts when available (faster and fresher than full inventory).
+        scoped_alpha = _load_latest_scoped_inventory_packages(device_serial=device_serial, scope_id="paper2_alpha")
+        if scoped_alpha:
+            scoped_rows = build_inventory_rows(scoped_alpha)
+            # Keep only the cohort packages; ignore other entries.
+            scoped_rows = [row for row in scoped_rows if row.package_name.lower() in dataset_pkgs]
+            if scoped_rows:
+                rows = _merge_rows_prefer_scoped(rows=rows, scoped_rows=scoped_rows)
         # If the operator just installed a missing dataset app but hasn't re-synced the full
         # inventory snapshot yet, try to hydrate those missing rows directly from ADB so the
         # paper cohort precheck and harvest selection are accurate.
@@ -361,6 +422,14 @@ def select_package_scope(
             v3_pkgs = set()
             v3_catalog_n = 0
             v3_labels = {}
+        # Prefer latest scoped v3 snapshot when available (paper-grade speed + freshness).
+        scoped_v3 = _load_latest_scoped_inventory_packages(device_serial=device_serial, scope_id="paper3_beta")
+        if scoped_v3:
+            scoped_rows = build_inventory_rows(scoped_v3)
+            scoped_rows = [row for row in scoped_rows if row.package_name.lower() in v3_pkgs]
+            if scoped_rows:
+                rows = _merge_rows_prefer_scoped(rows=rows, scoped_rows=scoped_rows)
+                existing_pkgs = {row.package_name.strip().lower() for row in rows if row.package_name}
         missing_v3 = {p for p in v3_pkgs if p and p not in existing_pkgs}
         if missing_v3:
             rows = list(rows) + _hydrate_missing_rows_from_adb(device_serial=device_serial, missing_packages=missing_v3)

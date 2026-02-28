@@ -5,7 +5,30 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from scytaledroid.Database.db_utils.package_utils import normalize_package_name
+try:
+    # Prefer the shared normalizer when DB utilities are available.
+    from scytaledroid.Database.db_utils.package_utils import normalize_package_name  # type: ignore
+except Exception:  # pragma: no cover - clean machines may not have DB deps installed
+    from scytaledroid.Utils.LoggingUtils import logging_utils as log
+
+    _SUSPICIOUS_TOKENS = ("/", "\\", "=", "base.apk")
+
+    def normalize_package_name(value: str, *, context: str = "inventory") -> str:
+        cleaned = (value or "").strip().lower()
+        if not cleaned:
+            return ""
+        suspicious = (" " in cleaned) or any(token in cleaned for token in _SUSPICIOUS_TOKENS)
+        if suspicious:
+            log.warning(
+                f"Suspicious package_name '{value}' encountered; normalizing to '{cleaned}'.",
+                category=context,
+            )
+        elif cleaned.endswith(".apk"):
+            log.warning(
+                f"package_name '{value}' ends with .apk; allowing but flagging for review.",
+                category=context,
+            )
+        return cleaned
 
 
 def extract_delta_summary(snapshot_rows: Mapping[str, object]) -> Mapping[str, object] | None:

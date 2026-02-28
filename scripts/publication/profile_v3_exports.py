@@ -35,6 +35,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from scytaledroid.Publication.paper_mode import PaperModeContext  # noqa: E402
+
 from scytaledroid.Publication.profile_v3_metrics import (  # noqa: E402
     ENGINE_IFOREST,
     ProfileV3Error,
@@ -59,6 +61,19 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: f.read(1024 * 1024), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def _minima_source_hashes() -> dict[str, str]:
+    """Hash the Python sources that define paper-grade minima (prevents constants drift ambiguity)."""
+    sources = {
+        "ml_parameters_profile.py": REPO_ROOT / "scytaledroid" / "DynamicAnalysis" / "ml" / "ml_parameters_profile.py",
+        "dataset_tracker.py": REPO_ROOT / "scytaledroid" / "DynamicAnalysis" / "pcap" / "dataset_tracker.py",
+    }
+    out: dict[str, str] = {}
+    for name, path in sources.items():
+        if path.exists():
+            out[name] = _sha256_file(path)
+    return out
 
 
 def _write_csv(path: Path, fieldnames: list[str], rows: list[dict[str, object]]) -> None:
@@ -290,10 +305,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = p.parse_args(argv)
 
-    strict = bool(args.strict) or str(os.environ.get("SCYTALEDROID_PAPER_STRICT") or "").strip().lower() in {"1", "true", "yes", "on"}
-    if strict:
-        # Ensure downstream lint/gates run in strict mode as well.
-        os.environ["SCYTALEDROID_PAPER_STRICT"] = "1"
+    mode = PaperModeContext.detect(repo_root=REPO_ROOT, strict_arg=bool(args.strict))
+    mode.apply_env()
+    mode.assert_clean_if_required()
+    strict = bool(mode.strict)
     if strict:
         try:
             import scipy.stats  # type: ignore  # noqa: F401
@@ -648,6 +663,7 @@ def main(argv: list[str] | None = None) -> int:
         (pub_qa / "profile_v3_plane_unavailable.txt").write_text(plane_note, encoding="utf-8")
 
     # Manifest output (receipt-ish).
+    minima_hashes = dict(mode.receipt_fields().get("minima_source_sha256") or _minima_source_hashes())
     out_manifest = {
         "schema_version": 1,
         "profile_id": "profile_v3_structural",
@@ -657,6 +673,7 @@ def main(argv: list[str] | None = None) -> int:
             "manifest_sha256": _sha256_file(manifest_path),
             "catalog_path": str(catalog_path),
             "catalog_sha256": _sha256_file(catalog_path),
+            "minima_source_sha256": minima_hashes,
             "catalog_n_packages": int(len(catalog)),
             "catalog_packages": sorted(catalog.keys()),
             "expected_paper_grade_catalog_n_packages": int(EXPECTED_PAPER_GRADE_COHORT_SIZE),
@@ -695,6 +712,25 @@ def main(argv: list[str] | None = None) -> int:
             "stability_sensitivity_plane_note": plane_note or "",
         },
     }
+
+    # A small, stable provenance receipt alongside paper-facing outputs.
+    receipt_path = pub_qa / "profile_v3_export_receipt.json"
+    receipt = {
+        "generated_at_utc": datetime.now(UTC).isoformat(),
+        "profile_id": "profile_v3_structural",
+        **mode.receipt_fields(),
+        "inputs": {
+            "manifest_path": str(manifest_path),
+            "manifest_sha256": _sha256_file(manifest_path),
+            "catalog_path": str(catalog_path),
+            "catalog_sha256": _sha256_file(catalog_path),
+            "minima_source_sha256": minima_hashes,
+        },
+        "counts": {"n_apps": int(len(per_app_rows)), "n_included_runs": int(len(included))},
+    }
+    receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True), encoding="utf-8")
+    out_manifest["outputs"]["export_receipt_json"] = str(receipt_path.relative_to(REPO_ROOT))
+
     (pub_manifests / "profile_v3_manifest.json").write_text(
         json.dumps(out_manifest, indent=2, sort_keys=True),
         encoding="utf-8",

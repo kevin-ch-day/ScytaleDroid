@@ -36,6 +36,36 @@ def _slow_detector_parts(slowest: object, *, limit: int) -> list[str]:
     return parts
 
 
+def _error_detector_parts(payload: object, *, limit: int) -> list[str]:
+    parts: list[str] = []
+    seen: set[str] = set()
+    if not isinstance(payload, Sequence):
+        return parts
+    for entry in payload:
+        if not isinstance(entry, Mapping):
+            continue
+        det = str(entry.get("detector") or entry.get("section") or "").strip()
+        if not det or det in seen:
+            continue
+        seen.add(det)
+        reason = None
+        for key in ("reason", "error", "message", "exception", "detail"):
+            candidate = entry.get(key)
+            if isinstance(candidate, str) and candidate.strip():
+                reason = candidate.strip()
+                break
+        if reason:
+            reason = " ".join(reason.split())
+            if len(reason) > 90:
+                reason = reason[:87].rstrip() + "..."
+            parts.append(f"{det}: {reason}")
+        else:
+            parts.append(f"{det}: <no reason>")
+        if len(parts) >= max(1, int(limit)):
+            break
+    return parts
+
+
 def render_app_start(
     *,
     title: str | None,
@@ -156,7 +186,12 @@ def render_app_completion(
             print("  ".join(compact_parts))
         else:
             print(colors.apply(header_line, palette.banner_primary, bold=True))
-            if pkg:
+            # Avoid redundant "Package:" line when the header already includes it.
+            show_pkg = bool(pkg)
+            if show_pkg and pkg:
+                if f"({pkg})" in header_line or header_line.strip().endswith(f"] {pkg}"):
+                    show_pkg = False
+            if show_pkg and pkg:
                 print(
                     status_messages.status(
                         f"Package: {pkg}",
@@ -209,15 +244,7 @@ def render_app_completion(
 
         if error_count > 0 or fail_count > 0 or (p0 > 0 and not large_batch_mode):
             failing: list[str] = []
-            error_only: list[str] = []
-            payload = summary.get("error_detectors")
-            if isinstance(payload, Sequence):
-                for entry in payload:
-                    if not isinstance(entry, Mapping):
-                        continue
-                    det = str(entry.get("detector") or entry.get("section") or "").strip()
-                    if det and det not in error_only:
-                        error_only.append(det)
+            error_parts = _error_detector_parts(summary.get("error_detectors"), limit=3)
             for key in ("finding_fail_detectors", "policy_fail_detectors"):
                 payload = summary.get(key)
                 if not isinstance(payload, Sequence):
@@ -228,10 +255,10 @@ def render_app_completion(
                     det = str(entry.get("detector") or entry.get("section") or "").strip()
                     if det and det not in failing:
                         failing.append(det)
-            if error_only:
+            if error_parts:
                 print(
                     status_messages.status(
-                        "Execution errors: " + ", ".join(error_only[:4]),
+                        "Execution errors: " + ", ".join(error_parts),
                         level="warn",
                         show_icon=False,
                         show_prefix=False,

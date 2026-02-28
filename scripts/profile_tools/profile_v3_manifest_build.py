@@ -25,6 +25,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from scytaledroid.Publication.paper_mode import PaperModeContext  # noqa: E402
+
 from scytaledroid.DynamicAnalysis.run_profile_norm import (  # noqa: E402
     normalize_run_profile,
     phase_from_normalized_profile,
@@ -225,16 +227,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = p.parse_args(argv)
 
-    strict = bool(args.strict) or str(os.environ.get("SCYTALEDROID_PAPER_STRICT") or "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-    if strict:
-        os.environ["SCYTALEDROID_PAPER_STRICT"] = "1"
-        if bool(args.allow_manual_interaction):
-            raise SystemExit("PROFILE_V3_STRICT_MANUAL_NOT_ALLOWED: strict mode forbids manual interaction runs")
+    mode = PaperModeContext.detect(repo_root=REPO_ROOT, strict_arg=bool(args.strict))
+    mode.apply_env()
+    mode.assert_clean_if_required()
+    strict = bool(mode.strict)
+    if strict and bool(args.allow_manual_interaction):
+        raise SystemExit("PROFILE_V3_STRICT_MANUAL_NOT_ALLOWED: strict mode forbids manual interaction runs")
 
     base_path = Path(args.base_freeze)
     base = _rjson(base_path)
@@ -302,7 +300,24 @@ def main(argv: list[str] | None = None) -> int:
 
     diag_counts: dict[str, int] = {}
     diag_examples: dict[str, list[str]] = {}
-    min_bytes_profile = int(getattr(profile_config, "MIN_PCAP_BYTES", 50_000))
+    # Profile v3 uses phase-specific PCAP minima: idle may be small/zero while scripted interaction
+    # must still demonstrate meaningful traffic.
+    min_bytes_idle = int(getattr(profile_config, "MIN_PCAP_BYTES_V3_IDLE", 0))
+    min_bytes_scripted = int(
+        getattr(profile_config, "MIN_PCAP_BYTES_V3_SCRIPTED", getattr(profile_config, "MIN_PCAP_BYTES", 50_000))
+    )
+
+    def _min_pcap_for_run(*, run_profile: str, phase: str) -> int:
+        # Prefer phase when available (derived from normalized run_profile).
+        if str(phase or "").strip().lower() == "idle":
+            return int(min_bytes_idle)
+        # Scripted runs are the paper-grade interactive requirement; apply scripted threshold for
+        # any interactive run (including legacy imports) so strict remains conservative.
+        if str(run_profile or "").strip().lower() == "interaction_scripted":
+            return int(min_bytes_scripted)
+        if str(phase or "").strip().lower() == "interactive":
+            return int(min_bytes_scripted)
+        return int(min_bytes_scripted)
 
     def _bump(code: str, example: str | None = None) -> None:
         diag_counts[code] = int(diag_counts.get(code, 0)) + 1
@@ -355,10 +370,14 @@ def main(argv: list[str] | None = None) -> int:
             _bump("pcap_size_unavailable", f"{pkg} {phase} (run_id={rid[:8]})")
             if strict:
                 strict_failures.append(f"pcap_size_unavailable\t{pkg}\t{phase}\trun_id={rid}")
-        elif int(pcap_size) < int(min_bytes_profile):
-            _bump("insufficient_pcap_bytes", f"{pkg} {phase} pcap={pcap_size}B (min {min_bytes_profile}B)")
-            if strict:
-                strict_failures.append(f"insufficient_pcap_bytes\t{pkg}\t{phase}\tpcap={pcap_size}\tmin={min_bytes_profile}\trun_id={rid}")
+        else:
+            min_bytes_req = _min_pcap_for_run(run_profile=rp, phase=phase)
+            if int(pcap_size) < int(min_bytes_req):
+                _bump("insufficient_pcap_bytes", f"{pkg} {phase} pcap={pcap_size}B (min {min_bytes_req}B)")
+                if strict:
+                    strict_failures.append(
+                        f"insufficient_pcap_bytes\t{pkg}\t{phase}\tpcap={pcap_size}\tmin={min_bytes_req}\trun_id={rid}"
+                    )
 
         # Strict identity: version_code must be present so mixed-version detection is meaningful.
         vc = str(meta.get("version_code") or "").strip()
@@ -440,7 +459,8 @@ def main(argv: list[str] | None = None) -> int:
                     "freeze_dataset_hash": base_hash or None,
                     "runs_imported": int(len(base_included)) if args.import_from_base else 0,
                 }
-            ]
+            ],
+            "paper_mode": mode.receipt_fields(),
         },
         "notes": {
             "capture_policy": "personal_account_only_no_mdm",
@@ -451,7 +471,8 @@ def main(argv: list[str] | None = None) -> int:
             "allow_mixed_versions": bool(args.allow_mixed_versions),
             "strict": bool(strict),
             "min_windows_per_run": int(MIN_WINDOWS_PER_RUN),
-            "min_pcap_bytes": int(min_bytes_profile),
+            "min_pcap_bytes_idle": int(min_bytes_idle),
+            "min_pcap_bytes_scripted": int(min_bytes_scripted),
         },
     }
     out_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")

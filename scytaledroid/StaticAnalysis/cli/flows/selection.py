@@ -164,8 +164,13 @@ def select_category_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
     return ScopeSelection("profile", category_name, scoped)
 
 
-def _render_profile_selection_table(groups: Sequence[ArtifactGroup]) -> None:
+def _render_profile_selection_table(
+    groups: Sequence[ArtifactGroup],
+    *,
+    label_overrides: dict[str, str] | None = None,
+) -> None:
     display_map = load_display_name_map(groups)
+    overrides = {str(k).strip().lower(): str(v).strip() for k, v in (label_overrides or {}).items() if str(k).strip()}
     rows: list[list[str]] = []
     for group in groups:
         base_artifact = group.base_artifact or next(iter(group.artifacts), None)
@@ -174,31 +179,26 @@ def _render_profile_selection_table(groups: Sequence[ArtifactGroup]) -> None:
         display_name = metadata.get("display_name") if isinstance(metadata, dict) else None
         package = group.package_name
         preferred = display_map.get(package.lower())
-        label = app_label or display_name or preferred or package
+        override = overrides.get(package.lower())
+        label = override or app_label or display_name or preferred or package
         rows.append([str(label), group.package_name, str(len(group.artifacts))])
 
-    max_rows = 15
-    if len(rows) > max_rows:
-        table_utils.render_table(
-            ["App", "Package", "Artifacts"],
-            rows[:max_rows],
-        )
-        print(f"Showing {max_rows} of {len(rows)} apps.")
-        response = prompt_utils.prompt_text(
-            "Press L to list all, or Enter to continue",
-            required=False,
-        ).strip().lower()
-        if response == "l":
-            table_utils.render_table(
-                ["App", "Package", "Artifacts"],
-                rows,
-            )
-            _ = prompt_utils.prompt_text(
-                "Press Enter to continue",
-                required=False,
-            )
-    else:
+    # Operator UX: for paper cohorts (<= ~30 apps), show the full list to avoid
+    # confusion ("Showing 15 of 21") and extra prompts mid-demo.
+    if len(rows) <= 30:
         table_utils.render_table(["App", "Package", "Artifacts"], rows)
+        return
+
+    max_rows = 15
+    table_utils.render_table(["App", "Package", "Artifacts"], rows[:max_rows])
+    print(f"Showing {max_rows} of {len(rows)} apps.")
+    response = prompt_utils.prompt_text(
+        "Press L to list all, or Enter to continue",
+        required=False,
+    ).strip().lower()
+    if response == "l":
+        table_utils.render_table(["App", "Package", "Artifacts"], rows)
+        _ = prompt_utils.prompt_text("Press Enter to continue", required=False)
 
 
 def _collapse_latest_by_package(
@@ -297,6 +297,11 @@ def _resolve_index(prompt: str, labels: Sequence[str]) -> int:
 
 
 def _allow_multiple_latest() -> bool:
+    # Paper-grade runs should be deterministic and not influenced by environment toggles
+    # that widen the selected cohort inputs.
+    strict = os.getenv("SCYTALEDROID_PAPER_STRICT", "0").strip().lower() in {"1", "true", "yes", "on"}
+    if strict:
+        return False
     return os.getenv("SCYTALEDROID_STATIC_ALLOW_MULTI_GROUPS", "0").strip().lower() in {
         "1",
         "true",
@@ -555,7 +560,8 @@ def select_profile_v3_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
     if scoped:
         print()
         menu_utils.print_header("Profile selection", "Profile v3 Structural Cohort selected (latest capture)")
-        _render_profile_selection_table(scoped)
+        label_map = {pkg: meta.get("app", "") for pkg, meta in catalog.items() if meta.get("app")}
+        _render_profile_selection_table(scoped, label_overrides=label_map)
 
     return ScopeSelection("profile", "Profile v3 Structural Cohort", scoped)
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from collections import Counter
@@ -46,6 +47,35 @@ from .scan_view import (
 _abort_requested = False
 _abort_reason: str | None = None
 _abort_signal: str | None = None
+
+
+def _load_v3_catalog_label_overrides(selection: ScopeSelection) -> dict[str, str]:
+    """Return per-package display-name overrides for Profile v3 scans.
+
+    We want cohort-facing labels (from the v3 catalog) to show up in pipeline output,
+    even when APK metadata contains a different app label (e.g., Drive vs Docs).
+    """
+    if selection.scope != "profile":
+        return {}
+    if not str(selection.label or "").strip().lower().startswith("profile v3"):
+        return {}
+    catalog_path = Path("profiles") / "profile_v3_app_catalog.json"
+    try:
+        payload = json.loads(catalog_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    overrides: dict[str, str] = {}
+    for pkg, meta in payload.items():
+        if not isinstance(pkg, str) or not pkg.strip():
+            continue
+        if not isinstance(meta, Mapping):
+            continue
+        label = meta.get("app")
+        if isinstance(label, str) and label.strip():
+            overrides[pkg.strip().lower()] = label.strip()
+    return overrides
 
 
 def request_abort(reason: str = "SIGINT", signal: str = "SIGINT") -> None:
@@ -101,6 +131,7 @@ def execute_scan(
     if run_ctx.quiet and run_ctx.batch:
         show_artifacts = False
     display_name_map = load_display_name_map(selection.groups)
+    v3_label_overrides = _load_v3_catalog_label_overrides(selection)
     compact_mode = is_compact_card_mode(params)
     progress = _PipelineProgress(
         total=total_artifacts,
@@ -192,6 +223,10 @@ def execute_scan(
             version_code_raw = None
             min_sdk_raw = None
             target_sdk_raw = None
+
+        override = v3_label_overrides.get(group.package_name.lower())
+        if override:
+            display_name = override
 
         if not display_name or str(display_name).strip().lower() == group.package_name.lower():
             display_name = display_name_map.get(group.package_name.lower()) or display_name
@@ -404,6 +439,27 @@ def execute_scan(
                 package_name=group.package_name,
                 app_summary=app_summary,
             )
+            # PM/operator friendly line: one-row completion marker that can be pasted into updates.
+            # Keep it stable and low-noise; detailed findings remain in the card output above.
+            if all_apps_compact_mode:
+                ok = int(app_summary.get("ok_count", 0) or 0) if app_summary else 0
+                warn = int(app_summary.get("warn_count", 0) or 0) if app_summary else 0
+                fail = int(app_summary.get("fail_count", 0) or 0) if app_summary else 0
+                err = int(app_summary.get("error_count", 0) or 0) if app_summary else 0
+                print(
+                    status_messages.status(
+                        (
+                            "[COPY] static_app_done "
+                            f"app_index={app_index} app_total={total_apps} "
+                            f"package={group.package_name} "
+                            f"label='{(display_name or group.package_name)}' "
+                            f"artifacts={artifact_count} "
+                            f"time_s={round(float(app_result.duration_seconds or 0.0), 3)} "
+                            f"ok={ok} warn={warn} fail={fail} error={err}"
+                        ),
+                        level="info",
+                    )
+                )
             progress.app_complete(artifact_count, app_result.duration_seconds or 0.0)
             apps_completed += 1
             agg_artifacts_done += int(app_result.executed_artifacts or 0)
