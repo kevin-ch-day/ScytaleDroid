@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import random
 import select
 import sys
@@ -17,6 +18,10 @@ from scytaledroid.DynamicAnalysis.core.run_context import RunContext
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
 from scytaledroid.DynamicAnalysis.scenarios.manual_templates import (
     SNAPCHAT_TEMPLATE_HINTS,
+)
+from scytaledroid.DynamicAnalysis.scenarios.manual_templates import (
+    V3_BASELINE_REPRO_TIPS,
+    V3_SCRIPTED_REPRO_TIPS,
 )
 from scytaledroid.DynamicAnalysis.scenarios.manual_templates import (
     requested_script_template as _requested_script_template_for_package,
@@ -130,6 +135,15 @@ class ManualScenarioRunner:
                     block.append(f"Template: {template_id}")
                     block.append(f"Protocol version: {SCRIPT_PROTOCOL_VERSION}")
                     block.append(f"Template hash: {template_hash[:12]}...")
+
+                    # Paper #3: print short per-template reproducibility tips before capture begins.
+                    if str(run_ctx.scenario_id or "") == "paper3_profile_v3":
+                        tips = V3_SCRIPTED_REPRO_TIPS.get(str(template_id).strip())
+                        if tips:
+                            block.append("")
+                            block.append("Repro tips:")
+                            for t in tips:
+                                block.append(f"  - {t}")
                 except Exception as exc:
                     block.append(f"Template: unavailable ({exc})")
             # Do not surface run sequencing/slot labels. Operators may run in any order.
@@ -148,6 +162,13 @@ class ManualScenarioRunner:
                 else:
                     block.append("  - Keep the app in the foreground")
                     block.append("  - Minimize interactions (baseline capture)")
+                if str(run_ctx.scenario_id or "") == "paper3_profile_v3":
+                    tips = V3_BASELINE_REPRO_TIPS.get(str(getattr(run_ctx, "package_name", "") or "").strip().lower())
+                    if tips:
+                        block.append("")
+                        block.append("Repro tips:")
+                        for t in tips:
+                            block.append(f"  - {t}")
             else:
                 block.append("  - Keep the app in the foreground")
                 block.append("  - Use the app normally")
@@ -155,6 +176,27 @@ class ManualScenarioRunner:
             if run_ctx.scenario_hint:
                 print(status_messages.status(run_ctx.scenario_hint, level="info"))
             _maybe_show_raw_high_value_permissions(run_ctx)
+
+            # Paper #3 operator hardening: baseline runs are easy to "accidentally interact" with.
+            # In strict mode, offer an explicit preflight pause to force-stop and relaunch before the timer starts.
+            strict = str(os.environ.get("SCYTALEDROID_PAPER_STRICT") or "").strip().lower() in {"1", "true", "yes", "on"}
+            if (
+                strict
+                and str(run_ctx.scenario_id or "") == "paper3_profile_v3"
+                and str(profile or "").strip().lower().startswith("baseline")
+            ):
+                pkg_lc = str(getattr(run_ctx, "package_name", "") or "").strip().lower()
+                if pkg_lc in V3_BASELINE_REPRO_TIPS:
+                    # Allow disabling if the operator is running rapid repeats.
+                    pref = str(os.environ.get("SCYTALEDROID_V3_PREFLIGHT_FORCESTOP") or "1").strip().lower()
+                    if pref in {"1", "true", "yes", "on"}:
+                        print(
+                            status_messages.status(
+                                "Preflight (recommended): force-stop the app now, then relaunch to the home surface and return here.",
+                                level="warn",
+                            )
+                        )
+                        prompt_utils.press_enter_to_continue("Press Enter when the app is relaunched and idle in foreground...")
             prompt_utils.press_enter_to_continue("Press Enter to begin (timer starts)...")
             started_at = datetime.now(UTC)
             if on_start:
@@ -208,7 +250,9 @@ class ManualScenarioRunner:
                 level = "info"
                 if overrun_s > 0:
                     status_detail = f", overrun {overrun_s}s"
-                    level = "warn"
+                    # For Paper #3, minor overruns are expected and not a validity problem.
+                    if str(run_ctx.scenario_id or "") != "paper3_profile_v3":
+                        level = "warn"
                 elif underrun_s > 0:
                     status_detail = f", underrun {underrun_s}s"
                     level = "warn"
@@ -272,6 +316,7 @@ def _run_countdown(
     *,
     continue_after_target: bool = False,
     allow_early_stop: bool = True,
+    ignore_stop_inputs: bool = False,
 ) -> datetime:
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         time.sleep(max(duration_seconds, 0))
@@ -333,7 +378,7 @@ def _run_countdown(
                         _clear_status_line(line_width)
                         print()
                         raise ScenarioAbortRequested("ABORT_DISCARD")
-                    if action in {"enter", "stop"}:
+                    if action in {"enter", "stop"} and not ignore_stop_inputs:
                         _clear_status_line(line_width)
                         print()
                         raise _StopScriptEarly("STOP_FINALIZE")
@@ -342,6 +387,9 @@ def _run_countdown(
         _clear_status_line(line_width)
         print()
         if allow_early_stop:
+            raise ScenarioAbortRequested("ABORT_DISCARD") from None
+        if ignore_stop_inputs:
+            # Strict scripted hold should not silently "finalize early" on Ctrl+C.
             raise ScenarioAbortRequested("ABORT_DISCARD") from None
         raise _StopScriptEarly("STOP_FINALIZE") from None
     return datetime.now(UTC)
@@ -417,6 +465,8 @@ def _run_scripted_protocol(
         "ai_prompt_id": None,
     }
     started_monotonic = time.monotonic()
+    strict_paper = str(os.environ.get("SCYTALEDROID_PAPER_STRICT") or "").strip().lower() in {"1", "true", "yes", "on"}
+    is_paper3 = str(getattr(run_ctx, "scenario_id", "") or "").strip() == "paper3_profile_v3"
     if on_protocol_event:
         on_protocol_event(
             "SCRIPT_START",
@@ -609,18 +659,19 @@ def _run_scripted_protocol(
                 step_elapsed = float(max(remaining, 0))
                 if remaining > 0:
                     print(status_messages.status(f"Protocol completed; hold foreground for {remaining}s.", level="info"))
-                    print(
-                        status_messages.status(
-                            "Press Enter to stop early (optional). S+Enter=Stop&Finalize, A+Enter=Abort&Discard.",
-                            level="info",
+                    if strict_paper and is_paper3:
+                        print(
+                            status_messages.status(
+                                "Strict hold: do not press Enter; this step auto-completes. (Abort: A+Enter)",
+                                level="warn",
+                            )
                         )
-                    )
                     _run_countdown(
                         remaining,
-                        # Operators frequently want to continue capturing after the nominal
-                        # target (e.g., to stabilize traffic). Do not auto-stop at target.
-                        continue_after_target=True,
-                        allow_early_stop=True,
+                        # In strict paper mode, do not allow accidental early-stop.
+                        continue_after_target=not (strict_paper and is_paper3),
+                        allow_early_stop=not (strict_paper and is_paper3),
+                        ignore_stop_inputs=bool(strict_paper and is_paper3),
                     )
             else:
                 step_start = time.monotonic()
@@ -687,8 +738,9 @@ def _run_scripted_protocol(
         print(status_messages.status(f"Protocol completed; hold foreground for {remaining}s.", level="info"))
         _run_countdown(
             remaining,
-            continue_after_target=True,
-            allow_early_stop=True,
+            continue_after_target=not (strict_paper and is_paper3),
+            allow_early_stop=not (strict_paper and is_paper3),
+            ignore_stop_inputs=bool(strict_paper and is_paper3),
         )
     protocol["script_end_marker"] = True
     actual_duration_s = int(time.monotonic() - started_monotonic)
@@ -1156,6 +1208,10 @@ def _wait_for_step_completion_with_stopwatch(
     except KeyboardInterrupt:
         _clear_status_line(line_width)
         print()
+        # In strict paper mode, do not finalize partially-completed scripted runs.
+        strict = str(os.environ.get("SCYTALEDROID_PAPER_STRICT") or "").strip().lower() in {"1", "true", "yes", "on"}
+        if strict:
+            raise ScenarioAbortRequested("ABORT_DISCARD") from None
         raise _StopScriptEarly("STOP_FINALIZE") from None
     return "completed"
 

@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import argparse
 import os
+import json
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -29,6 +31,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Enable strict mode (equivalent to SCYTALEDROID_PAPER_STRICT=1).",
     )
+    p.add_argument(
+        "--write-audit",
+        action="store_true",
+        help="Write a small lint receipt JSON under <root>/qa/ (paper-path transparency).",
+    )
     args = p.parse_args(argv)
 
     mode = PaperModeContext.detect(repo_root=REPO_ROOT, strict_arg=bool(args.strict))
@@ -37,6 +44,26 @@ def main(argv: list[str] | None = None) -> int:
 
     root = Path(args.root)
     lint = lint_profile_v3_bundle(root)
+    if args.write_audit:
+        try:
+            qa = root / "qa"
+            qa.mkdir(parents=True, exist_ok=True)
+            receipt_path = qa / "profile_v3_lint_receipt.json"
+            receipt = {
+                "generated_at_utc": datetime.now(UTC).isoformat(),
+                "profile_id": "profile_v3_structural",
+                **mode.receipt_fields(),
+                "inputs": {"root": str(root)},
+                "ok": bool(lint.ok),
+                "counts": {"errors": int(len(lint.errors)), "warnings": int(len(lint.warnings))},
+                "errors": list(lint.errors),
+                "warnings": list(lint.warnings),
+            }
+            receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True), encoding="utf-8")
+            print(f"[COPY] v3_lint_receipt path='{receipt_path.relative_to(REPO_ROOT)}'")
+        except Exception:
+            # Best-effort; lint result itself is authoritative.
+            pass
     if lint.ok:
         print("[PASS] Profile v3 lint: READY")
         print(

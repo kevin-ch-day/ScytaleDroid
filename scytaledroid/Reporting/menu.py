@@ -136,10 +136,12 @@ def _reporting_menu_v3_structural() -> None:
     actions = {
         "1": handle_profile_v3_integrity_gates,
         "2": handle_generate_profile_v3_exports,
+        "3": handle_generate_profile_v3_phase2_exports,
     }
     options = [
         MenuOption("1", "Run v3 integrity gates (catalog + freshness + scripted coverage)"),
         MenuOption("2", "Generate v3 exports (tables/figures/tests)"),
+        MenuOption("3", "Generate Phase 2 draft exports (uses current runs; no manifest)"),
     ]
     from pathlib import Path
 

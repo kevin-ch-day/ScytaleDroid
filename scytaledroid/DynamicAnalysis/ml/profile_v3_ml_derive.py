@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -96,6 +97,7 @@ def _find_latest_runs_for_package(*, evidence_root: Path, package: str) -> tuple
 
     latest_baseline: tuple[str, str] | None = None  # (ended_at, run_id)
     latest_scripted: tuple[str, str] | None = None
+    accept_manual = str(os.environ.get("SCYTALEDROID_V3_ACCEPT_MANUAL_INTERACTIVE") or "").strip().lower() in {"1", "true", "yes", "on"}
 
     for mf in sorted(evidence_root.glob("*/run_manifest.json")):
         run_dir = mf.parent
@@ -115,7 +117,7 @@ def _find_latest_runs_for_package(*, evidence_root: Path, package: str) -> tuple
         if phase == "idle":
             if latest_baseline is None or ended_key > latest_baseline[0]:
                 latest_baseline = (ended_key, inputs.run_id)
-        if rp == "interaction_scripted":
+        if rp == "interaction_scripted" or (accept_manual and rp == "interaction_manual"):
             if latest_scripted is None or ended_key > latest_scripted[0]:
                 latest_scripted = (ended_key, inputs.run_id)
 

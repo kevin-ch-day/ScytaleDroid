@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import dataclass
-from datetime import UTC
+from pathlib import Path
 
 from scytaledroid.DynamicAnalysis.controllers.device_select import select_device
 from scytaledroid.DynamicAnalysis.core.run_specs import build_dynamic_run_spec
@@ -51,6 +51,9 @@ def _defaults() -> V3CaptureDefaults:
 def run_profile_v3_capture_for_package(*, package_name: str, run_profile: str, ui_prompt_observers: bool) -> None:
     """Run a single v3 capture for a package with the given run_profile."""
 
+    # Ensure scripted template resolution uses the Profile v3 catalog mapping.
+    os.environ.setdefault("SCYTALEDROID_TEMPLATE_MAP_PROFILE", "v3")
+
     selected = select_device()
     if not selected:
         return
@@ -88,7 +91,30 @@ def run_profile_v3_capture_for_package(*, package_name: str, run_profile: str, u
         return
     plan_path = plan_selection["plan_path"]
     static_run_id = plan_selection["static_run_id"]
-    print_plan_selection_banner(plan_selection)
+    # v3 capture operators asked to reduce noise: the full static plan banner is useful
+    # for forensic review, but slows Phase 2 burn-down. Keep a compact one-line summary
+    # by default, and allow opt-in to the full banner.
+    show_full_banner = str(os.environ.get("SCYTALEDROID_V3_SHOW_STATIC_PLAN_BANNER") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if show_full_banner:
+        print_plan_selection_banner(plan_selection)
+    else:
+        # Prefer stable identifiers: package + version_code + artifact sha (short) + static_run_id.
+        ver_code = str(plan_selection.get("version_code") or plan_selection.get("observed_version_code") or "").strip()
+        artifact_sha = str(plan_selection.get("artifact_sha256") or "").strip()
+        artifact_short = (artifact_sha[:8] + "…") if artifact_sha else ""
+        ver_disp = f" version_code={ver_code}" if ver_code else ""
+        art_disp = f" artifact={artifact_short}" if artifact_short else ""
+        print(
+            status_messages.status(
+                f"Static plan: package={package_name}{ver_disp}{art_disp} static_run={static_run_id}",
+                level="info",
+            )
+        )
 
     defaults = _defaults()
     print(status_messages.status(f"Stabilizing environment ({_STABILIZATION_WAIT_S}s)...", level="info"))
@@ -116,7 +142,11 @@ def run_profile_v3_capture_for_package(*, package_name: str, run_profile: str, u
 
     result = execute_dynamic_run_spec(spec)
     # print_run_summary expects a short wall-clock label (kept for back-compat across flows).
-    print_run_summary(result, f"Profile v3 ({run_profile})")
+    try:
+        print_run_summary(result, f"Profile v3 ({run_profile})")
+    except Exception as exc:  # noqa: BLE001
+        # Capture already succeeded; don't crash the operator flow on summary rendering bugs.
+        print(status_messages.status(f"Run summary rendering failed (non-blocking): {type(exc).__name__}: {exc}", level="warn"))
     prompt_utils.press_enter_to_continue()
 
 
@@ -124,11 +154,18 @@ def run_profile_v3_capture_menu(*, package_name: str, need: str, ui_prompt_obser
     """Small per-app run intent menu (baseline/scripted/both) based on need."""
 
     need = str(need or "").strip().upper()
-    suggested = "2" if need in {"SCRIPTED", "IDLE+SCRIPTED"} else "1"
+    accept_manual = str(os.environ.get("SCYTALEDROID_V3_ACCEPT_MANUAL_INTERACTIVE") or "").strip().lower() in {"1", "true", "yes", "on"}
+    if accept_manual and need in {"SCRIPTED", "IDLE+SCRIPTED", "INTERACTIVE", "IDLE+INTERACTIVE"}:
+        # Time-constrained Phase 2 mode: default to manual interactive when allowed.
+        suggested = "4"
+    else:
+        suggested = "2" if need in {"SCRIPTED", "IDLE+SCRIPTED", "INTERACTIVE", "IDLE+INTERACTIVE"} else "1"
     items = [
         menu_utils.MenuOption("1", "Baseline (idle)", description="run_profile=baseline_idle (phase=idle)", badge=None),
-        menu_utils.MenuOption("2", "Scripted interaction", description="run_profile=interaction_scripted (phase=interactive)", badge=None),
+        menu_utils.MenuOption("2", "Interactive (scripted)", description="run_profile=interaction_scripted (phase=interactive)", badge=None),
         menu_utils.MenuOption("3", "Both (idle then scripted)", description="runs two captures back-to-back", badge=None),
+        menu_utils.MenuOption("4", "Interactive (manual, fast)", description="run_profile=interaction_manual (phase=interactive)", badge=None),
+        menu_utils.MenuOption("5", "Both (idle then manual)", description="runs two captures back-to-back", badge=None),
     ]
     menu_utils.render_menu(
         menu_utils.MenuSpec(items=items, default=suggested, show_exit=True, exit_label="Back", show_descriptions=True, compact=True)
@@ -145,6 +182,15 @@ def run_profile_v3_capture_menu(*, package_name: str, need: str, ui_prompt_obser
     if choice == "3":
         run_profile_v3_capture_for_package(package_name=package_name, run_profile="baseline_idle", ui_prompt_observers=ui_prompt_observers)
         run_profile_v3_capture_for_package(package_name=package_name, run_profile="interaction_scripted", ui_prompt_observers=ui_prompt_observers)
+        return
+    if choice == "4":
+        # Manual interaction is allowed for Phase 2 burn-down when time-constrained.
+        # Strict manifest/paper policies may still exclude manual runs by default.
+        run_profile_v3_capture_for_package(package_name=package_name, run_profile="interaction_manual", ui_prompt_observers=ui_prompt_observers)
+        return
+    if choice == "5":
+        run_profile_v3_capture_for_package(package_name=package_name, run_profile="baseline_idle", ui_prompt_observers=ui_prompt_observers)
+        run_profile_v3_capture_for_package(package_name=package_name, run_profile="interaction_manual", ui_prompt_observers=ui_prompt_observers)
         return
 
 

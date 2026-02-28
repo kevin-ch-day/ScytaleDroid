@@ -755,6 +755,7 @@ class DynamicRunOrchestrator:
         # opportunistically derive v3 ML artifacts when needed.
         try:
             import os
+            import time
 
             strict = str(os.environ.get("SCYTALEDROID_PAPER_STRICT") or "").strip().lower() in {"1", "true", "yes", "on"}
             v3_scenario = str(getattr(self.config, "scenario_id", "") or "").strip() == "paper3_profile_v3"
@@ -763,27 +764,62 @@ class DynamicRunOrchestrator:
                 want_check = True
 
             if want_check:
-                from scytaledroid.DynamicAnalysis.utils.v3_postrun_check import (
-                    validate_run_dir_for_profile_v3,
-                )
+                from scytaledroid.DynamicAnalysis.utils.v3_postrun_check import validate_run_dir_for_profile_v3
+
+                derive_attempted = False
+                derive_ok = False
+                derive_error = ""
+
+                # In v3 strict mode, derive ML artifacts immediately so the operator sees
+                # a definitive PASS/FAIL at the end of the run (no "later manifest build" surprises).
+                if v3_scenario and strict:
+                    derive_attempted = True
+                    try:
+                        from scytaledroid.DynamicAnalysis.ml.profile_v3_ml_derive import derive_profile_v3_ml_for_package
+
+                        # Best-effort retry: PCAP file finalization can lag by a moment after
+                        # observers stop. Retry avoids spurious "missing_window_scores_csv".
+                        output_root = Path(self.config.output_root or "output/evidence/dynamic")
+                        last_exc: Exception | None = None
+                        derive_result = None
+                        for _i in range(2):
+                            try:
+                                res = derive_profile_v3_ml_for_package(
+                                    package=str(self.config.package_name),
+                                    evidence_root=output_root,
+                                )
+                                derive_result = res
+                                if not res.errors:
+                                    derive_ok = True
+                                    break
+                                derive_error = ";".join(list(res.errors)[:3])
+                                break
+                            except Exception as exc:  # noqa: BLE001
+                                last_exc = exc
+                                time.sleep(1.5)
+                        if (not derive_ok) and (not derive_error) and last_exc is not None:
+                            derive_error = f"{type(last_exc).__name__}:{last_exc}"
+                        # Persist a tiny derive receipt inside the run dir for operator/debugging speed.
+                        # This is independent of the sealed run_manifest.json.
+                        try:
+                            if derive_result is not None:
+                                writer.write_json("analysis/index/v1/v3_ml_derive.json", derive_result.__dict__)
+                        except Exception:
+                            pass
+                    except Exception as exc:  # noqa: BLE001
+                        derive_ok = False
+                        derive_error = f"{type(exc).__name__}:{exc}"
 
                 check = validate_run_dir_for_profile_v3(run_dir)
-                # If we're in v3 strict capture and ML artifacts are missing, derive them now
-                # and re-check so the operator gets a definitive PASS/FAIL line.
-                if v3_scenario and strict and (not check.ok) and any(
-                    r in {"missing_window_scores_csv", "missing_baseline_threshold_json"} for r in (check.reasons or [])
-                ):
-                    try:
-                        from scytaledroid.DynamicAnalysis.ml.profile_v3_ml_derive import (
-                            derive_profile_v3_ml_for_package,
-                        )
-
-                        derive_profile_v3_ml_for_package(package=str(check.package))
-                        check = validate_run_dir_for_profile_v3(run_dir)
-                    except Exception:
-                        pass
                 status = "PASS" if check.ok else "FAIL"
                 reason = ",".join(check.reasons) if check.reasons else ""
+                if derive_attempted:
+                    suffix = "derive_ok" if derive_ok else "derive_fail"
+                    reason = f"{reason},{suffix}" if reason else suffix
+                    if (not derive_ok) and derive_error:
+                        # Keep it short; full details are in logs.
+                        safe = derive_error[:160].replace("\n", " ")
+                        reason = f"{reason}:{safe}"
                 print(
                     (
                         f"[COPY] v3_run_complete status={status} run_id={check.run_id} package={check.package} "

@@ -35,6 +35,10 @@ from scytaledroid.DynamicAnalysis.run_profile_norm import (  # noqa: E402
 
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import MIN_WINDOWS_PER_RUN  # noqa: E402
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config  # noqa: E402
+from scytaledroid.DynamicAnalysis.utils.profile_v3_minima import (  # noqa: E402
+    effective_min_pcap_bytes_idle,
+    effective_min_pcap_bytes_scripted,
+)
 
 
 def _sha256_file(path: Path) -> str:
@@ -300,12 +304,9 @@ def main(argv: list[str] | None = None) -> int:
 
     diag_counts: dict[str, int] = {}
     diag_examples: dict[str, list[str]] = {}
-    # Profile v3 uses phase-specific PCAP minima: idle may be small/zero while scripted interaction
-    # must still demonstrate meaningful traffic.
-    min_bytes_idle = int(getattr(profile_config, "MIN_PCAP_BYTES_V3_IDLE", 0))
-    min_bytes_scripted = int(
-        getattr(profile_config, "MIN_PCAP_BYTES_V3_SCRIPTED", getattr(profile_config, "MIN_PCAP_BYTES", 50_000))
-    )
+    # Profile v3 uses phase-specific PCAP minima (centralized for dashboard/post-run/strict consistency).
+    min_bytes_idle = int(effective_min_pcap_bytes_idle())
+    min_bytes_scripted = int(effective_min_pcap_bytes_scripted())
 
     def _min_pcap_for_run(*, run_profile: str, phase: str) -> int:
         # Prefer phase when available (derived from normalized run_profile).

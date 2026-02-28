@@ -46,6 +46,11 @@ Profile v3 uses phase-specific minima:
 - `interaction_scripted` minimum (paper eligibility): `40,000B`
   - Source: `scytaledroid/DynamicAnalysis/ml/ml_parameters_profile.py:MIN_PCAP_BYTES_V3_SCRIPTED`
 
+If you enable manual interaction for Phase 2 capture acceleration:
+
+- `interaction_manual` is treated as an interactive phase for Phase 2 dashboards and draft exports when `SCYTALEDROID_V3_ACCEPT_MANUAL_INTERACTIVE=1`.
+- Paper-grade exports should still include a scripted-only sensitivity dataset unless explicitly re-scoped.
+
 Capture observer default minimum (capture QA):
 
 - `100,000B`
@@ -64,6 +69,12 @@ Profile v3 publication exports are scripted-only by default:
 
 - Included: `interaction_scripted`
 - Excluded (default): `interaction_manual`
+
+Recommended reporting for Paper #3:
+
+- Primary dataset: interactive = scripted|manual (if manual is used operationally)
+- Sensitivity A: scripted-only
+- Sensitivity B: single-version-only
 
 ## Related Tools
 

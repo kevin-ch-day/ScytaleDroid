@@ -17,6 +17,7 @@ def print_run_summary(result, duration_label: str) -> None:
     run_dir = resolve_evidence_path(result.evidence_path) if result.evidence_path else None
     manifest = _load_manifest(run_dir) if run_dir else None
     dataset_validity: dict[str, object] | None = None
+    verdict_line = None  # Always initialize; some branches may not set it.
     print()
     lines = [
         ("Package", result.package_name or "unknown"),
@@ -132,6 +133,7 @@ def print_run_summary(result, duration_label: str) -> None:
                 detail = _countability_detail(str(pkg) if pkg else None, result.dynamic_run_id)
                 if detail:
                     lines.append(("Quota detail", detail))
+                verdict_line = _three_verdict_label(result.dynamic_run_id)
             elif run_profile:
                 # Fallback when tracker isn't available.
                 lines.append(("Run profile", f"{run_profile}"))

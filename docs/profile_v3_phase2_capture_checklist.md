@@ -13,15 +13,19 @@ It exists to prevent redo work by making the strict manifest/export gates true
 
 ## During Capture (Per-App)
 
-For each of the 21 catalog apps, capture:
+For each of the 21 catalog apps, capture (Phase 2 burn-down target):
 
-- `baseline_idle`
-- `interaction_scripted`
+- `baseline_idle` (target: 3 eligible runs)
+- `interaction_scripted` (target: 3 eligible runs)
+
+If time-constrained, you may capture interactive runs as **scripted or manual**, but this must be explicit in the run manifest/receipt:
+
+- `interaction_scripted` OR `interaction_manual`
 
 Run must satisfy (per-run hard minima):
 
 - windows >= 20
-- PCAP bytes >= 50,000
+- PCAP bytes >= phase minimum (see `docs/profile_v3_capture_minima.md`)
 - ML artifacts exist:
   - `analysis/ml/v1/window_scores.csv`
   - `analysis/ml/v1/baseline_threshold.json`
@@ -59,4 +63,3 @@ Phase 2 is complete when the dashboard reports:
 Then proceed to Phase 3:
 
 - Build strict v3 manifest (`profile_v3_manifest_build.py --strict`)
-

@@ -37,9 +37,16 @@ from scytaledroid.DynamicAnalysis.run_profile_norm import (  # noqa: E402
     phase_from_normalized_profile,
     resolve_run_profile_from_manifest,
 )
-from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import MIN_WINDOWS_PER_RUN  # noqa: E402
-from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config  # noqa: E402
+from scytaledroid.DynamicAnalysis.utils.profile_v3_minima import (  # noqa: E402
+    effective_min_pcap_bytes_idle,
+    effective_min_pcap_bytes_scripted,
+    effective_min_windows_per_run,
+)
 from scytaledroid.Publication.profile_v3_metrics import load_profile_v3_catalog  # noqa: E402
+
+
+def _truthy_env(name: str, default: str = "0") -> bool:
+    return str(os.environ.get(name) or default).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _sha256_file(path: Path) -> str:
@@ -61,6 +68,12 @@ def _git_commit(repo_root: Path) -> str:
         return out or "UNKNOWN"
     except Exception:
         return "UNKNOWN"
+
+def _relpath_under_repo(path: Path) -> str:
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except Exception:
+        return str(path)
 
 
 def _rjson(path: Path) -> dict:
@@ -140,8 +153,12 @@ class RunObs:
     has_scores: bool
     has_threshold: bool
 
-    def is_scripted(self) -> bool:
-        return self.run_profile == "interaction_scripted"
+    def is_scripted(self, *, accept_manual: bool) -> bool:
+        if self.run_profile == "interaction_scripted":
+            return True
+        if accept_manual and self.run_profile == "interaction_manual":
+            return True
+        return False
 
     def is_idle(self) -> bool:
         return self.phase == "idle"
@@ -273,6 +290,30 @@ def main(argv: list[str] | None = None) -> int:
 
     strict_env = str(os.environ.get("SCYTALEDROID_PAPER_STRICT") or "").strip().lower() in {"1", "true", "yes", "on"}
     strict = bool(args.strict or strict_env)
+    accept_manual_interaction = _truthy_env("SCYTALEDROID_V3_ACCEPT_MANUAL_INTERACTIVE", default="0")
+    mixed_versions_policy = str(os.environ.get("SCYTALEDROID_V3_MIXED_VERSIONS_POLICY") or "").strip().lower() or "warn"
+    if mixed_versions_policy not in {"warn", "block"}:
+        mixed_versions_policy = "warn"
+
+    # Optional operator-quality target: how many *eligible* runs per package.
+    # This does not change strict manifest requirements (idle>=1 + scripted>=1); it's a Phase 2
+    # capture-day target so you can average/robustify against misruns.
+    try:
+        env_idle = str(os.environ.get("SCYTALEDROID_V3_IDLE_ELIGIBLE_TARGET") or "").strip()
+        idle_target = int(env_idle or ("3" if strict else "1"))
+    except Exception:
+        idle_target = 3 if strict else 1
+    if idle_target < 1:
+        idle_target = 1
+
+    # Default in strict is 3 for redundancy; override via env to keep scripted lighter.
+    try:
+        env_scripted = str(os.environ.get("SCYTALEDROID_V3_SCRIPTED_ELIGIBLE_TARGET") or "").strip()
+        scripted_target = int(env_scripted or ("3" if strict else "1"))
+    except Exception:
+        scripted_target = 3 if strict else 1
+    if scripted_target < 1:
+        scripted_target = 1
 
     catalog_path = Path(args.catalog)
     catalog = load_profile_v3_catalog(catalog_path)
@@ -281,16 +322,14 @@ def main(argv: list[str] | None = None) -> int:
     evidence_root = Path(args.evidence_root)
     runs = _scan_runs(evidence_root)
 
-    min_windows = int(MIN_WINDOWS_PER_RUN)
-    min_pcap_bytes_idle = int(getattr(profile_config, "MIN_PCAP_BYTES_V3_IDLE", 0))
-    min_pcap_bytes_scripted = int(
-        getattr(profile_config, "MIN_PCAP_BYTES_V3_SCRIPTED", getattr(profile_config, "MIN_PCAP_BYTES", 50_000))
-    )
+    min_windows = int(effective_min_windows_per_run())
+    min_pcap_bytes_idle = int(effective_min_pcap_bytes_idle())
+    min_pcap_bytes_scripted = int(effective_min_pcap_bytes_scripted())
 
     def _min_pcap_for_obs(o: RunObs) -> int:
         if o.is_idle():
             return int(min_pcap_bytes_idle)
-        if o.is_scripted():
+        if o.is_scripted(accept_manual=accept_manual_interaction):
             return int(min_pcap_bytes_scripted)
         # Conservative default: treat non-idle as interactive.
         return int(min_pcap_bytes_scripted)
@@ -303,6 +342,10 @@ def main(argv: list[str] | None = None) -> int:
     # Build per-package summary rows.
     rows: list[dict[str, str]] = []
     blockers: list[str] = []
+    warnings: list[str] = []
+    idle_gap_n = 0
+    scripted_gap_n = 0
+    targets_met_n = 0
 
     for pkg in pkgs:
         meta = catalog.get(pkg) or {}
@@ -319,14 +362,20 @@ def main(argv: list[str] | None = None) -> int:
             and bool(o.version_code)
         ]
         elig_idle = [o for o in eligible if o.is_idle()]
-        elig_scripted = [o for o in eligible if o.is_scripted()]
+        elig_scripted = [o for o in eligible if o.is_scripted(accept_manual=accept_manual_interaction)]
 
         idle_ok = len(elig_idle) > 0
         scripted_ok = len(elig_scripted) > 0
+        idle_gap = max(0, int(idle_target) - int(len(elig_idle)))
+        if idle_gap > 0:
+            idle_gap_n += 1
+        scripted_gap = max(0, int(scripted_target) - int(len(elig_scripted)))
+        if scripted_gap > 0:
+            scripted_gap_n += 1
 
         # Diagnostics for "best seen" values (even if not eligible).
         idle_all = [o for o in obs if o.is_idle()]
-        scripted_all = [o for o in obs if o.is_scripted()]
+        scripted_all = [o for o in obs if o.is_scripted(accept_manual=accept_manual_interaction)]
 
         def _min_int(vals: list[int]) -> str:
             return str(min(vals)) if vals else ""
@@ -342,8 +391,11 @@ def main(argv: list[str] | None = None) -> int:
         status = "PASS"
         reasons: list[str] = []
         if mixed_versions == "1":
-            status = "BLOCK"
             reasons.append("MIXED_VERSIONS")
+            if mixed_versions_policy == "block":
+                status = "BLOCK"
+            else:
+                warnings.append(f"{pkg}:MIXED_VERSIONS:{'|'.join(versions)}")
 
         if not idle_ok:
             status = "BLOCK"
@@ -368,6 +420,9 @@ def main(argv: list[str] | None = None) -> int:
 
         if status != "PASS":
             blockers.append(f"{pkg}:{','.join(reasons) if reasons else 'BLOCK'}")
+        else:
+            if idle_gap == 0 and scripted_gap == 0:
+                targets_met_n += 1
 
         rows.append(
             {
@@ -380,6 +435,10 @@ def main(argv: list[str] | None = None) -> int:
                 "scripted_runs_total": str(len(scripted_all)),
                 "idle_runs_eligible": str(len(elig_idle)),
                 "scripted_runs_eligible": str(len(elig_scripted)),
+                "idle_runs_eligible_target": str(idle_target),
+                "idle_runs_eligible_gap": str(idle_gap),
+                "scripted_runs_eligible_target": str(scripted_target),
+                "scripted_runs_eligible_gap": str(scripted_gap),
                 "idle_windows_min": idle_wc_min,
                 "scripted_windows_min": scr_wc_min,
                 "idle_pcap_bytes_min": idle_pcap_min,
@@ -395,15 +454,41 @@ def main(argv: list[str] | None = None) -> int:
     total = len(pkgs)
     ok_n = sum(1 for r in rows if r["status"] == "PASS")
     block_n = total - ok_n
+    # Action taxonomy (matches guided capture UI labels).
+    need_both = 0
+    need_idle = 0
+    need_scripted = 0
+    for r in rows:
+        if (r.get("status") or "").strip().upper() == "PASS":
+            continue
+        reasons = r.get("reasons") or ""
+        miss_idle = "missing_required_phase_idle" in reasons
+        miss_scripted = "missing_required_phase_scripted" in reasons
+        if miss_idle and miss_scripted:
+            need_both += 1
+        elif miss_idle:
+            need_idle += 1
+        elif miss_scripted:
+            need_scripted += 1
 
     # One-line PM copy/paste summary.
     print(
         "[COPY] v3_capture_status "
-        f"git_commit={_git_commit(REPO_ROOT)} strict={int(strict)} "
+        f"git_commit={_git_commit(REPO_ROOT)} strict={int(strict)} accept_manual_interaction={int(accept_manual_interaction)} "
         f"catalog_packages={total} pass={ok_n} blockers={block_n} "
         f"min_windows={min_windows} min_pcap_bytes_idle={min_pcap_bytes_idle} min_pcap_bytes_scripted={min_pcap_bytes_scripted} "
-        f"evidence_root='{evidence_root.relative_to(REPO_ROOT) if evidence_root.is_absolute() is False else str(evidence_root)}'"
+        f"idle_target={idle_target} scripted_target={scripted_target} "
+        f"idle_gap_apps={idle_gap_n} scripted_gap_apps={scripted_gap_n} targets_met={targets_met_n} "
+        f"need_both={need_both} need_idle={need_idle} need_scripted={need_scripted} "
+        f"evidence_root='{_relpath_under_repo(evidence_root)}'"
     )
+
+    if warnings:
+        print("Warnings (first 10):")
+        for w in warnings[:10]:
+            print(f"- {w}")
+        if len(warnings) > 10:
+            print(f"- ... ({len(warnings) - 10} more)")
 
     # Print a small actionable recap (top blockers only).
     if blockers:
@@ -438,8 +523,20 @@ def main(argv: list[str] | None = None) -> int:
                 "min_windows_required": int(min_windows),
                 "min_pcap_bytes_required_idle": int(min_pcap_bytes_idle),
                 "min_pcap_bytes_required_scripted": int(min_pcap_bytes_scripted),
+                "idle_runs_eligible_target": int(idle_target),
+                "scripted_runs_eligible_target": int(scripted_target),
+                "accept_manual_interaction": bool(accept_manual_interaction),
             },
-            "summary": {"catalog_packages": total, "pass": ok_n, "blockers": block_n},
+            "summary": {
+                "catalog_packages": total,
+                "pass": ok_n,
+                "blockers": block_n,
+                "targets_met": targets_met_n,
+                "need_both": int(need_both),
+                "need_idle": int(need_idle),
+                "need_scripted": int(need_scripted),
+            },
+            "warnings": warnings,
             "csv_path": str(csv_path),
             "rows": rows,
         }
@@ -451,16 +548,44 @@ def main(argv: list[str] | None = None) -> int:
         plan_rows: list[dict[str, str]] = []
         for r in rows:
             if r["status"] == "PASS":
-                continue
+                # Optional burn-down: if you want redundancy, keep these in the plan.
+                try:
+                    idle_gap = int(r.get("idle_runs_eligible_gap") or "0")
+                    scr_gap = int(r.get("scripted_runs_eligible_gap") or "0")
+                    if int(idle_target) <= 1 and int(scripted_target) <= 1:
+                        continue
+                    if idle_gap <= 0 and scr_gap <= 0:
+                        continue
+                except Exception:
+                    continue
             pkg = r["package"]
             reasons_s = r.get("reasons") or ""
             reason_set = {x for x in reasons_s.split(",") if x}
             # Priority: missing phase > missing artifacts > under minima > mixed versions.
             priority = 90
             action = "capture_both"
+            # Redundancy is lowest priority (quality target only).
+            if (r.get("status") or "") == "PASS":
+                try:
+                    idle_gap = int(r.get("idle_runs_eligible_gap") or "0")
+                    scr_gap = int(r.get("scripted_runs_eligible_gap") or "0")
+                    if idle_gap > 0 and scr_gap > 0:
+                        priority = 95
+                        action = "capture_both"
+                    elif idle_gap > 0:
+                        priority = 95
+                        action = "capture_idle"
+                    elif scr_gap > 0:
+                        priority = 95
+                        action = "capture_scripted"
+                except Exception:
+                    pass
             if "MIXED_VERSIONS" in reason_set:
-                priority = 10
-                action = "reharvest_recapture"
+                # Mixed versions are tracked as an audit warning; do not force churn during Phase 2
+                # unless the operator explicitly sets policy=block.
+                if mixed_versions_policy == "block":
+                    priority = 10
+                    action = "reharvest_recapture"
             missing_idle = "missing_required_phase_idle" in reason_set
             missing_scripted = "missing_required_phase_scripted" in reason_set
             if missing_idle and missing_scripted:
@@ -471,15 +596,17 @@ def main(argv: list[str] | None = None) -> int:
                 action = "capture_idle"
             elif missing_scripted:
                 priority = min(priority, 30)
-                action = "capture_scripted"
+                action = "capture_interactive" if accept_manual_interaction else "capture_scripted"
             else:
                 # Non-missing blockers: likely artifacts/minima; choose phase-specific action when obvious.
-                if any(x.startswith("IDLE_") for x in reason_set) and not any(x.startswith("SCRIPTED_") for x in reason_set):
+                idle_only = any(":idle" in x for x in reason_set) and not any(":scripted" in x for x in reason_set)
+                scripted_only = any(":scripted" in x for x in reason_set) and not any(":idle" in x for x in reason_set)
+                if idle_only and not scripted_only:
                     priority = min(priority, 50)
                     action = "recapture_idle"
-                elif any(x.startswith("SCRIPTED_") for x in reason_set) and not any(x.startswith("IDLE_") for x in reason_set):
+                elif scripted_only and not idle_only:
                     priority = min(priority, 50)
-                    action = "recapture_scripted"
+                    action = "recapture_interactive" if accept_manual_interaction else "recapture_scripted"
                 else:
                     priority = min(priority, 60)
                     action = "recapture_both"

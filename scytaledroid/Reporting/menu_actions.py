@@ -1109,6 +1109,29 @@ def handle_generate_profile_v3_exports() -> None:
     prompt_utils.press_enter_to_continue()
 
 
+def handle_generate_profile_v3_phase2_exports() -> None:
+    """Generate Profile v3 Phase 2 draft exports (uses current runs; no manifest required)."""
+
+    script = Path(__file__).resolve().parents[2] / "scripts" / "publication" / "profile_v3_phase2_exports.py"
+    if not script.exists():
+        print(status_messages.status(f"Missing script: {relative_path(script)}", level="error"))
+        return
+
+    import runpy
+
+    print()
+    menu_utils.print_header("Generate Profile v3 Phase 2 Draft Exports")
+    try:
+        runpy.run_path(str(script), run_name="__main__")
+    except SystemExit as exc:
+        if int(getattr(exc, "code", 1) or 0) != 0:
+            print(status_messages.status(f"Generation failed: exit={exc.code}", level="error"))
+            return
+    out_root = Path(app_config.OUTPUT_DIR) / "audit" / "profile_v3" / "phase2_exports"
+    print(status_messages.status(f"Wrote: {relative_path(out_root)}", level="success"))
+    prompt_utils.press_enter_to_continue()
+
+
 def handle_profile_v3_integrity_gates() -> None:
     """Run Profile v3 integrity gates (catalog + freshness + scripted coverage)."""
 

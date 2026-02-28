@@ -18,8 +18,10 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
-from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import MIN_WINDOWS_PER_RUN
+from scytaledroid.DynamicAnalysis.utils.profile_v3_minima import (
+    effective_min_pcap_bytes_for_phase,
+    effective_min_windows_per_run,
+)
 from scytaledroid.DynamicAnalysis.run_profile_norm import (
     normalize_run_profile,
     phase_from_normalized_profile,
@@ -135,13 +137,8 @@ def validate_run_dir_for_profile_v3(run_dir: Path) -> V3PostRunCheck:
     ident = _run_identity(man)
     version_code = str(ident.get("version_code") or ident.get("observed_version_code") or "").strip()
 
-    min_windows = int(MIN_WINDOWS_PER_RUN)
-    min_pcap_idle = int(getattr(profile_config, "MIN_PCAP_BYTES_V3_IDLE", 0))
-    min_pcap_scripted = int(
-        getattr(profile_config, "MIN_PCAP_BYTES_V3_SCRIPTED", getattr(profile_config, "MIN_PCAP_BYTES", 50_000))
-    )
-    # Apply phase-specific minima. Idle can be small/zero; scripted must demonstrate meaningful traffic.
-    min_pcap_bytes = int(min_pcap_idle) if str(phase or "").strip().lower() == "idle" else int(min_pcap_scripted)
+    min_windows = effective_min_windows_per_run()
+    min_pcap_bytes = effective_min_pcap_bytes_for_phase(phase=str(phase))
 
     scores_path = _window_scores_path(run_dir)
     thr_path = _threshold_path(run_dir)
