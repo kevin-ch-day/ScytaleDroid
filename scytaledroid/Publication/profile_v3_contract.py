@@ -17,7 +17,7 @@ class ProfileV3Lint:
     warnings: list[str]
 
 
-REQUIRED_DIRS = {"tables", "manifests", "qa"}
+REQUIRED_DIRS = {"tables", "manifests", "qa", "figures"}
 
 REQUIRED_FILES = {
     Path("tables") / "per_app_dynamic_summary_v3.csv",
@@ -64,6 +64,31 @@ def lint_profile_v3_bundle(root: Path) -> ProfileV3Lint:
     # Optional QA artifacts (may be skipped if SciPy is unavailable).
     if not (root / "qa" / "profile_v3_correlations.csv").exists():
         warnings.append("missing_optional_file:qa/profile_v3_correlations.csv")
+    if not (root / "figures" / "fig_v3_stability_sensitivity_plane.png").exists():
+        warnings.append("missing_optional_file:figures/fig_v3_stability_sensitivity_plane.png")
+
+    import os
+
+    strict = str(os.environ.get("SCYTALEDROID_PAPER_STRICT") or "").strip().lower() in {"1", "true", "yes", "on"}
+    if strict:
+        # In strict paper/demo mode, missing stats outputs should block READY.
+        cat_tests = root / "qa" / "profile_v3_category_tests.json"
+        if not cat_tests.exists():
+            errors.append("strict_missing_file:qa/profile_v3_category_tests.json")
+        else:
+            try:
+                import json
+
+                payload = json.loads(cat_tests.read_text(encoding="utf-8"))
+                if payload.get("stats_available") is not True:
+                    reason = str(payload.get("reason") or "stats_unavailable").strip() or "stats_unavailable"
+                    errors.append(f"strict_stats_unavailable:{reason}")
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"strict_invalid_json:qa/profile_v3_category_tests.json:{type(exc).__name__}")
+        if not (root / "qa" / "profile_v3_correlations.csv").exists():
+            errors.append("strict_missing_file:qa/profile_v3_correlations.csv")
+        if not (root / "figures" / "fig_v3_stability_sensitivity_plane.png").exists():
+            errors.append("strict_missing_file:figures/fig_v3_stability_sensitivity_plane.png")
 
     # Schema check: per-app CSV headers must match required set (order ignored; presence required).
     per_app_csv = root / "tables" / "per_app_dynamic_summary_v3.csv"

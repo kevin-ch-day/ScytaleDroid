@@ -68,13 +68,30 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = p.parse_args(argv)
 
-    manifest = load_profile_v3_manifest(Path(args.manifest))
+    manifest_path = Path(args.manifest)
+    catalog_path = Path(args.catalog)
+    evidence_root = Path(args.evidence_root)
+
+    manifest = load_profile_v3_manifest(manifest_path)
     included = [str(r).strip() for r in (manifest.get("included_run_ids") or []) if str(r).strip()]
     if not included:
-        raise SystemExit("PROFILE_V3_BAD_MANIFEST: included_run_ids is empty")
+        catalog_n = "unknown"
+        try:
+            catalog_n = str(len(load_profile_v3_catalog(catalog_path)))
+        except Exception:
+            pass
+        print("[FAIL] Profile v3 NOT READY: manifest contains 0 included_run_ids.")
+        print(f"manifest: {manifest_path}")
+        print(f"catalog : {catalog_path} (packages={catalog_n})")
+        print(f"evidence: {evidence_root}")
+        print()
+        print("Next steps:")
+        print("- Run: Reporting -> Profile v3 -> Run v3 integrity gates")
+        print("- Capture scripted dynamic runs for the v3 cohort")
+        print("- Rebuild the v3 manifest to populate included_run_ids (profile_v3_manifest_build.py)")
+        return 2
 
-    catalog = load_profile_v3_catalog(Path(args.catalog))
-    evidence_root = Path(args.evidence_root)
+    catalog = load_profile_v3_catalog(catalog_path)
 
     missing: dict[str, dict[str, str]] = {}
     seen: dict[str, int] = {}
@@ -105,4 +122,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

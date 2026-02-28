@@ -24,6 +24,7 @@ from pymysql import err
 from pymysql.cursors import Cursor, DictCursor
 
 from .db_config import DB_CONFIG
+from . import db_config
 
 try:  # pragma: no cover - logging configuration may be unavailable in tests
     from scytaledroid.Utils.LoggingUtils import logging_engine as _logging_engine
@@ -507,6 +508,11 @@ class DatabaseEngine:
             raise RuntimeError(
                 "Database is disabled. Configure SCYTALEDROID_DB_URL (mysql/mariadb) or "
                 "SCYTALEDROID_DB_NAME/USER/PASSWD/HOST/PORT to enable DB features."
+            )
+        if self._dialect == "sqlite" and not db_config.is_test_env():
+            raise RuntimeError(
+                "SQLite backend is not supported for OSS operator runs. "
+                "Remove DB config to disable DB, or configure a mysql/mariadb DSN."
             )
         self._connection: Any | None = self._connect_any()
         self._read_only = False

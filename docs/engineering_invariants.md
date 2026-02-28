@@ -61,3 +61,15 @@ Frozen Paper #2 exports are validated against a versioned baseline manifest.
 - Source of truth: `tests/baseline/publication_export_manifest.json`.
 - Verification is hash+size based using declared normalization rules.
 - Drift requires a documented rationale under `docs/drift/` and approval.
+
+## 8) Profiles Are Explicit And Isolated
+
+The tool supports multiple paper/research profiles. Operators must never rely on
+"latest runs" selection when generating paper-facing exports.
+
+- Filesystem artifacts are canonical; DB is optional and derived.
+- Profile v2 (FROZEN) is archival truth and must never expand beyond the frozen cohort.
+- Profile v3 (STRUCTURAL) is catalog-defined and must match the catalog package set exactly.
+- Refresh snapshots (when implemented) must be stamped and must never overwrite archival v2 outputs:
+  - `output/publication/profile_v2_refresh/<stamp>/`
+- Paper-facing exports are manifest-driven (no implicit "newest artifacts").

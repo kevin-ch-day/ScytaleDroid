@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from importlib import import_module
+from pathlib import Path
 
 from scytaledroid.DeviceAnalysis import device_manager
 from scytaledroid.DeviceAnalysis.services import device_service, info_service
@@ -416,21 +419,70 @@ def _run_inventory_sync(active_device: dict[str, str | None | None]) -> None:
     from scytaledroid.DeviceAnalysis.workflows import inventory_workflow
 
     status = device_service.fetch_inventory_metadata(serial)
-    if status and status.status_label.upper() == "FRESH" and not status.is_stale:
-        if not prompt_utils.prompt_yes_no(f"Inventory sync (baseline) for {serial}?", default=False):
-            return
-
     try:
         root_state = (active_device or {}).get("is_rooted") or "Unknown"
         allow_fallbacks = str(root_state).strip().lower() != "yes"
         set_allow_inventory_fallbacks(allow_fallbacks)
         print()
-        inventory_workflow.run_inventory_sync(
-            serial,
-            ui_prefs=None,
-            progress_sink="cli",
-            allow_fallbacks=allow_fallbacks,
+        # Offer a scoped sync mode to speed up paper/dataset harvest workflows.
+        menu_utils.print_header("Inventory Sync", "Choose sync scope")
+        sync_opts = [
+            menu_utils.MenuOption("1", "Full device inventory sync (canonical)"),
+            menu_utils.MenuOption("2", "Scoped sync: Paper #2 Dataset (Research Dataset Alpha)"),
+            menu_utils.MenuOption("3", "Scoped sync: Paper #3 Dataset (Profile v3 Structural cohort)"),
+        ]
+        menu_utils.render_menu(
+            menu_utils.MenuSpec(items=sync_opts, exit_label="Back", show_exit=True, show_descriptions=False, compact=True)
         )
+        choice = prompt_utils.get_choice(
+            menu_utils.selectable_keys(sync_opts, include_exit=True),
+            default="1",
+            prompt="Select sync mode (or 0): ",
+        )
+        if choice == "0":
+            return
+
+        if choice == "1":
+            # Full sync is the slow path; if the inventory is already fresh, ask once.
+            if status and status.status_label.upper() == "FRESH" and not status.is_stale:
+                print()
+                if not prompt_utils.prompt_yes_no(
+                    f"Inventory is already FRESH. Re-sync full inventory for {serial}?",
+                    default=False,
+                ):
+                    return
+            inventory_workflow.run_inventory_sync(
+                serial,
+                ui_prefs=None,
+                progress_sink="cli",
+                allow_fallbacks=allow_fallbacks,
+            )
+        else:
+            packages: set[str] = set()
+            scope_id = "unknown"
+            if choice == "2":
+                scope_id = "paper2_alpha"
+                from scytaledroid.DynamicAnalysis.profile_loader import load_profile_packages
+
+                packages = {p.strip().lower() for p in load_profile_packages("RESEARCH_DATASET_ALPHA") if str(p).strip()}
+            elif choice == "3":
+                scope_id = "paper3_beta"
+                from scytaledroid.Publication.profile_v3_metrics import load_profile_v3_catalog
+
+                catalog = load_profile_v3_catalog(Path("profiles") / "profile_v3_app_catalog.json")
+                packages = {p.strip().lower() for p in catalog.keys() if str(p).strip()}
+            if not packages:
+                print(status_messages.status("Scoped sync cancelled: no packages resolved for scope.", level="warn"))
+                prompt_utils.press_enter_to_continue()
+                return
+            inventory_workflow.run_inventory_scoped_sync(
+                serial=serial,
+                scope_id=scope_id,
+                packages=packages,
+                ui_prefs=None,
+                progress_sink="cli",
+                allow_fallbacks=allow_fallbacks,
+            )
     except Exception as exc:
         error_panels.print_error_panel(
             "Inventory & database sync",

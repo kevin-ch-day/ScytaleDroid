@@ -22,8 +22,7 @@ When an interface is deprecated:
 
 - A compatibility shim/wrapper may be kept for **one major cycle**.
 - The shim must emit a one-line stderr warning when executed directly, including
-  the planned removal version (e.g., "removal planned in v3.0").
+  the planned removal version (e.g., "removal planned in v4.0").
 - Deprecated shims are removed in the next major release.
 
-Example: If the current release line is v2.x, deprecated wrappers are removed in v3.0.
-
+Example: If the current release line is v3.x, deprecated wrappers are removed in v4.0.

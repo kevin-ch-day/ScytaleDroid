@@ -1,7 +1,10 @@
-"""Bootstrap the database schema for the active backend (MariaDB or SQLite).
+"""Bootstrap the database schema for the active backend (MySQL/MariaDB).
 
 Usage:
     python -m scytaledroid.Database.tools.db_init
+
+Note: SQLite is supported for unit tests only. OSS vNext requires MySQL/MariaDB
+when DB features are enabled.
 """
 
 from __future__ import annotations
@@ -14,10 +17,16 @@ from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
 def main() -> int:
-    backend = str(DB_CONFIG.get("engine", "sqlite"))
+    backend = str(DB_CONFIG.get("engine", "disabled"))
     db = str(DB_CONFIG.get("database", "<unknown>"))
     host = str(DB_CONFIG.get("host", "<local>"))
     log.info(f"Initializing schema for backend={backend} db={db} host={host}", category="database")
+    if backend.lower() == "disabled":
+        log.error(
+            "DB init requested but DB is disabled. Configure SCYTALEDROID_DB_URL (mysql/mariadb) to enable DB features.",
+            category="database",
+        )
+        return 1
     try:
         bootstrap_database()
     except SystemExit:

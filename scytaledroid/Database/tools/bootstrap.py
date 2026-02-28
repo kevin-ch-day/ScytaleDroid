@@ -50,7 +50,6 @@ def _normalize_sqlite(sql: str) -> str:
 
     # Strip MySQL KEY/CONSTRAINT lines that SQLite won't parse cleanly
     cleaned_lines: list[str] = []
-    cleaned_lines: list[str] = []
     for line in sql.splitlines():
         stripped = line.strip()
         upper = stripped.upper()
@@ -212,6 +211,15 @@ def bootstrap_database() -> None:
     log.info(f"Bootstrapping schema for {dialect} with {len(ddl_blocks)} statements.", category="database")
     _execute_statements(ddl_blocks, dialect=dialect)
     _verify_required_schema(dialect=dialect)
+
+    # Seed minimal reference dictionaries required by FK-constrained deployments.
+    # This is idempotent and safe to run on existing schemas.
+    try:
+        from scytaledroid.Database.db_utils.reference_seed import ensure_default_reference_rows
+
+        ensure_default_reference_rows()
+    except Exception as exc:  # pragma: no cover - depends on external DB
+        log.warning(f"Reference seed skipped/failed: {exc}", category="database")
     # Record schema version after successful bootstrap (append-only, if empty)
     try:
         row = run_sql("SELECT COUNT(*) FROM schema_version", fetch="one")

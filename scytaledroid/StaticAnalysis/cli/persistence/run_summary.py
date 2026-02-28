@@ -1459,6 +1459,7 @@ def persist_run_summary(
                             try:
                                 persist_permission_risk(
                                     run_id=int(run_id),
+                                    static_run_id=int(static_run_id) if static_run_id is not None else None,
                                     report=br,
                                     package_name=package_for_run,
                                     session_stamp=session_stamp,

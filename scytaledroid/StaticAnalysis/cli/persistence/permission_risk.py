@@ -9,6 +9,7 @@ from scytaledroid.Database.db_func.static_analysis import (
     risk_scores as risk_scores_db,
     static_permission_risk as permission_risk_db,
 )
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .utils import canonical_decimal_text, first_text, require_canonical_schema
 
@@ -90,6 +91,7 @@ def _persist_permission_risk_vnext(
 def persist_permission_risk(
     *,
     run_id: int | None,
+    static_run_id: int | None = None,
     report: object,
     package_name: str,
     session_stamp: str,
@@ -100,6 +102,10 @@ def persist_permission_risk(
 ) -> None:
     if run_id is None:
         raise RuntimeError("permission_risk.write requires run_id")
+    # vNext permission risk rows are keyed by static_analysis_runs.id (static_run_id).
+    # Some legacy callers only know about "run_id"; prefer static_run_id when provided.
+    if static_run_id is None:
+        static_run_id = run_id
     require_canonical_schema()
     _ = baseline_payload
 
@@ -160,7 +166,7 @@ def persist_permission_risk(
     profiles = permission_profiles if isinstance(permission_profiles, Mapping) else {}
     try:
         _persist_permission_risk_vnext(
-            run_id=int(run_id),
+            run_id=int(static_run_id),
             risk_score_text=str(risk_score),
             permission_profiles=profiles,
         )

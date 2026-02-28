@@ -23,6 +23,7 @@ import argparse
 import csv
 import json
 import math
+import os
 import sys
 from dataclasses import asdict
 from datetime import UTC, datetime
@@ -45,6 +46,9 @@ from scytaledroid.Publication.profile_v3_metrics import (  # noqa: E402
 )
 from scytaledroid.Utils.LatexUtils import LatexTableSpec, RawLatex, render_tabular_only, render_table_float  # noqa: E402
 from scytaledroid.Publication.profile_v3_contract import lint_profile_v3_bundle  # noqa: E402
+
+
+EXPECTED_PAPER_GRADE_COHORT_SIZE = 21
 
 
 def _sha256_file(path: Path) -> str:
@@ -264,6 +268,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Fail if included runs span multiple device fingerprints.",
     )
     p.add_argument(
+        "--strict",
+        action="store_true",
+        help="Paper/demo strict mode: require SciPy for KW/ε² stats (fail if unavailable).",
+    )
+    p.add_argument(
         "--allow-manual-interaction",
         action="store_true",
         help="Allow interaction_manual runs in the v3 manifest (default: excluded, fail-closed).",
@@ -273,7 +282,24 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Allow sigma_idle==0 or mu_idle<=0 by exporting null ISC/BSI (default: fail-closed).",
     )
+    p.add_argument(
+        "--require-catalog-size",
+        type=int,
+        default=None,
+        help="Fail if the v3 catalog package count does not match this value (completeness gate).",
+    )
     args = p.parse_args(argv)
+
+    strict = bool(args.strict) or str(os.environ.get("SCYTALEDROID_PAPER_STRICT") or "").strip().lower() in {"1", "true", "yes", "on"}
+    if strict:
+        # Ensure downstream lint/gates run in strict mode as well.
+        os.environ["SCYTALEDROID_PAPER_STRICT"] = "1"
+    if strict:
+        try:
+            import scipy.stats  # type: ignore  # noqa: F401
+        except Exception as exc:  # noqa: BLE001
+            print(f"[FAIL] PROFILE_V3_STRICT_MISSING_DEP:scipy ({type(exc).__name__})")
+            return 2
 
     manifest_path = Path(args.manifest)
     catalog_path = Path(args.catalog)
@@ -289,6 +315,27 @@ def main(argv: list[str] | None = None) -> int:
 
     included = [str(r).strip() for r in (manifest.get("included_run_ids") or []) if str(r).strip()]
     catalog = load_profile_v3_catalog(catalog_path)
+    if not included:
+        print("[FAIL] Profile v3 NOT READY: manifest contains 0 included_run_ids.")
+        print(f"manifest: {manifest_path}")
+        print(f"catalog : {catalog_path} (packages={len(catalog)})")
+        print(f"evidence: {evidence_root}")
+        print()
+        print("Next steps:")
+        print("- Run: Reporting -> Profile v3 -> Run v3 integrity gates")
+        print("- Capture scripted dynamic runs for the v3 cohort")
+        print("- Rebuild the v3 manifest to populate included_run_ids (profile_v3_manifest_build.py)")
+        return 2
+    if args.require_catalog_size is not None and len(catalog) != int(args.require_catalog_size):
+        print(
+            f"[FAIL] Catalog size mismatch: catalog_n={len(catalog)} require={int(args.require_catalog_size)} "
+            f"(catalog={catalog_path})"
+        )
+        return 2
+    if len(catalog) != EXPECTED_PAPER_GRADE_COHORT_SIZE:
+        print(
+            f"[WARN] Profile v3 catalog size is {len(catalog)} (expected {EXPECTED_PAPER_GRADE_COHORT_SIZE} for paper-grade cohort)."
+        )
 
     allow_multi = env_allow_multi_model()
 
@@ -319,7 +366,8 @@ def main(argv: list[str] | None = None) -> int:
     pub_tables = out_pub / "tables"
     pub_manifests = out_pub / "manifests"
     pub_qa = out_pub / "qa"
-    for d in (pub_tables, pub_manifests, pub_qa):
+    pub_figs = out_pub / "figures"
+    for d in (pub_tables, pub_manifests, pub_qa, pub_figs):
         d.mkdir(parents=True, exist_ok=True)
 
     per_app_rows = []
@@ -538,6 +586,67 @@ def main(argv: list[str] | None = None) -> int:
         )
     corr_meta = _write_correlations(pub_qa, per_app_rows=per_app_rows)
 
+    # Identity figure: stability-sensitivity plane (BSI vs ISC), colored by category.
+    plane_png = pub_figs / "fig_v3_stability_sensitivity_plane.png"
+    plane_note = None
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")  # deterministic, headless
+        import matplotlib.pyplot as plt
+
+        cat_colors = {
+            "social_messaging": "#1f77b4",
+            "cloud_productivity": "#2ca02c",
+            "rtc_collaboration": "#d62728",
+        }
+        fig, ax = plt.subplots(figsize=(6.0, 4.0), dpi=200)
+        ax.set_title("Profile v3: Stability–Sensitivity Plane")
+        ax.set_xlabel("BSI (baseline stability index)")
+        ax.set_ylabel("ISC (interaction sensitivity coefficient)")
+        ax.grid(True, linestyle=":", linewidth=0.6, alpha=0.7)
+
+        plotted_any = False
+        cats = sorted({str(r.get("app_category") or "") for r in per_app_rows if str(r.get("app_category") or "")})
+        for c in cats:
+            xs = []
+            ys = []
+            labels = []
+            for r in per_app_rows:
+                if str(r.get("app_category") or "") != c:
+                    continue
+                if r.get("isc") in ("", None) or r.get("bsi") in ("", None):
+                    continue
+                xs.append(float(r["bsi"]))
+                ys.append(float(r["isc"]))
+                labels.append(str(r.get("app") or r.get("package") or ""))
+            if not xs:
+                continue
+            plotted_any = True
+            ax.scatter(
+                xs,
+                ys,
+                s=28,
+                alpha=0.9,
+                label=f"{c} (n={len(xs)})",
+                color=cat_colors.get(c, "#7f7f7f"),
+                edgecolors="black",
+                linewidths=0.3,
+            )
+        if not plotted_any:
+            plane_note = "no_nonnull_points"
+        ax.legend(loc="best", frameon=True, fontsize=8)
+        fig.tight_layout()
+        fig.savefig(plane_png, format="png")
+        plt.close(fig)
+    except Exception as exc:  # noqa: BLE001
+        plane_note = f"matplotlib_unavailable:{type(exc).__name__}"
+        # In strict mode, missing identity figure is a hard fail (paper-facing artifact).
+        if strict:
+            print(f"[FAIL] PROFILE_V3_STRICT_MISSING_DEP:matplotlib ({type(exc).__name__})")
+            return 2
+        (pub_qa / "profile_v3_plane_unavailable.txt").write_text(plane_note, encoding="utf-8")
+
     # Manifest output (receipt-ish).
     out_manifest = {
         "schema_version": 1,
@@ -550,6 +659,7 @@ def main(argv: list[str] | None = None) -> int:
             "catalog_sha256": _sha256_file(catalog_path),
             "catalog_n_packages": int(len(catalog)),
             "catalog_packages": sorted(catalog.keys()),
+            "expected_paper_grade_catalog_n_packages": int(EXPECTED_PAPER_GRADE_COHORT_SIZE),
             "evidence_root": str(evidence_root),
         },
         "locks": {
@@ -581,6 +691,8 @@ def main(argv: list[str] | None = None) -> int:
             "per_category_tex": str(per_cat_tex.relative_to(REPO_ROOT)),
             "category_tests_json": str(tests_path.relative_to(REPO_ROOT)),
             "correlations": corr_meta,
+            "stability_sensitivity_plane_png": str(plane_png.relative_to(REPO_ROOT)) if plane_png.exists() else "",
+            "stability_sensitivity_plane_note": plane_note or "",
         },
     }
     (pub_manifests / "profile_v3_manifest.json").write_text(

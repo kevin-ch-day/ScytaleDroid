@@ -237,6 +237,37 @@ def handle_write_canonical_publication_bundle() -> None:
     prompt_utils.press_enter_to_continue()
 
 
+def handle_lint_profile_v2_bundle() -> None:
+    """Lint the v2 (frozen) publication bundle and print PASS/FAIL reasons.
+
+    This is a visibility-only helper to avoid relying on the status card when
+    debugging readiness.
+    """
+
+    from scytaledroid.Publication.publication_contract import lint_publication_bundle
+
+    pub_root = Path(app_config.OUTPUT_DIR) / "publication"
+    lint = lint_publication_bundle(pub_root)
+    print()
+    menu_utils.print_header("Lint · Profile v2 (FROZEN)")
+    print(status_messages.status(f"Bundle root: {relative_path(pub_root)}", level="info"))
+    if lint.ok:
+        print(status_messages.status("LINT PASS", level="success"))
+    else:
+        print(status_messages.status("LINT FAIL", level="error"))
+        for e in lint.errors[:12]:
+            print(status_messages.status(f"- {e}", level="error"))
+        if len(lint.errors) > 12:
+            print(status_messages.status(f"... ({len(lint.errors)} errors total)", level="warn"))
+    if lint.warnings:
+        print(status_messages.status(f"Warnings: {len(lint.warnings)}", level="warn"))
+        for w in lint.warnings[:12]:
+            print(status_messages.status(f"- {w}", level="warn"))
+        if len(lint.warnings) > 12:
+            print(status_messages.status(f"... ({len(lint.warnings)} warnings total)", level="warn"))
+    prompt_utils.press_enter_to_continue()
+
+
 def _write_phase_e_deliverables_bundle_from_pin() -> bool:
     """Write the research baseline Phase E deliverable bundle under output/ (zip-and-share).
 
@@ -1014,7 +1045,7 @@ def handle_generate_publication_results_numbers() -> None:
     import runpy
 
     print()
-    menu_utils.print_header("Generate Publication Exports + Results Numbers")
+    menu_utils.print_header("Generate Profile v2 Exports + Results Numbers")
     try:
         runpy.run_path(str(exports_script), run_name="__main__")
         runpy.run_path(str(results_script), run_name="__main__")
@@ -1075,6 +1106,32 @@ def handle_generate_profile_v3_exports() -> None:
             return
     out_root = Path(app_config.OUTPUT_DIR) / "publication" / "profile_v3"
     print(status_messages.status(f"Wrote: {relative_path(out_root)}", level="success"))
+    prompt_utils.press_enter_to_continue()
+
+
+def handle_profile_v3_integrity_gates() -> None:
+    """Run Profile v3 integrity gates (catalog + freshness + scripted coverage)."""
+
+    print()
+    menu_utils.print_header("Profile v3 Integrity Gates")
+    script = Path(__file__).resolve().parents[2] / "scripts" / "profile_tools" / "profile_v3_integrity_gates.py"
+    if not script.exists():
+        print(status_messages.status(f"Missing script: {relative_path(script)}", level="error"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    import runpy
+
+    try:
+        runpy.run_path(str(script), run_name="__main__")
+    except SystemExit as exc:
+        if int(getattr(exc, "code", 1) or 0) != 0:
+            print(status_messages.status(f"Gates failed: exit={exc.code}", level="error"))
+            prompt_utils.press_enter_to_continue()
+            return
+
+    print(status_messages.status("Profile v3 gates: PASS", level="success"))
+    prompt_utils.press_enter_to_continue()
 
 #
 # Back-compat alias (older UI/tests/tooling may still call the paper2-named handler).
@@ -1106,7 +1163,12 @@ def handle_generate_exploratory_risk_scoring() -> None:
             print(status_messages.status(f"Generation failed: exit={exc.code}", level="error"))
             return
 
-    explore_dir = Path(app_config.OUTPUT_DIR) / "experimental" / "paper2"
+    # New location is paper-neutral; keep legacy path readable for one major cycle.
+    # Legacy path removal is planned in v4.0.
+    explore_dir = Path(app_config.OUTPUT_DIR) / "experimental" / "analysis" / "risk_scoring"
+    legacy_dir = Path(app_config.OUTPUT_DIR) / "experimental" / "paper2"
+    if not explore_dir.exists() and legacy_dir.exists():
+        explore_dir = legacy_dir
     for name in (
         "risk_scores_v1.csv",
         "risk_scores_v1.json",
@@ -1357,6 +1419,8 @@ __all__ = [
     "handle_generate_publication_scientific_qa",
     "handle_generate_publication_pipeline_audit",
     "handle_generate_exploratory_risk_scoring",
+    "handle_generate_profile_v3_exports",
+    "handle_profile_v3_integrity_gates",
     # Back-compat exports.
     "handle_generate_paper2_results_numbers",
     "handle_generate_paper2_scientific_qa",

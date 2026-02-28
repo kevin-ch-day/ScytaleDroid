@@ -60,7 +60,15 @@
         "app_category": "cloud_productivity"
     },
     "com.google.android.apps.docs": {
+        "app": "Google Drive",
+        "app_category": "cloud_productivity"
+    },
+    "com.google.android.apps.docs.editors.docs": {
         "app": "Google Docs",
+        "app_category": "cloud_productivity"
+    },
+    "com.google.android.apps.docs.editors.sheets": {
+        "app": "Google Sheets",
         "app_category": "cloud_productivity"
     },
     "com.google.android.apps.tachyon": {

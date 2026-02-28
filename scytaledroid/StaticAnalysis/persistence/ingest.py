@@ -156,6 +156,7 @@ def _get_or_create_app(package_name: str, display_name: str | None = None) -> in
     try:
         from scytaledroid.Database.db_utils.package_utils import normalize_package_name
         from scytaledroid.Database.db_utils.publisher_rules import apply_publisher_mapping
+        from scytaledroid.Database.db_utils.reference_seed import ensure_default_reference_rows
 
         cleaned_package = normalize_package_name(package_name, context="database")
         if not cleaned_package:
@@ -167,9 +168,12 @@ def _get_or_create_app(package_name: str, display_name: str | None = None) -> in
         )
         if row and row[0]:
             return int(row[0])
+        # Defensive: some deployments enforce FK constraints from apps.profile_key/publisher_key.
+        # Ensure the default reference rows exist before inserting into apps.
+        ensure_default_reference_rows()
         new_id = core_q.run_sql(
-            "INSERT INTO apps (package_name, display_name, profile_key) VALUES (%s, %s, %s)",
-            (cleaned_package, display_name, "UNKNOWN"),
+            "INSERT INTO apps (package_name, display_name, profile_key, publisher_key) VALUES (%s, %s, %s, %s)",
+            (cleaned_package, display_name, "UNCLASSIFIED", "UNKNOWN"),
             return_lastrowid=True,
         )
         apply_publisher_mapping([cleaned_package])

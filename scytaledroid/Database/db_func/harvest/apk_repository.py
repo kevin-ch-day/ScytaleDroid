@@ -13,6 +13,7 @@ from ...db_core import database_session, run_sql
 from ...db_queries.harvest import apk_repository as queries
 from ...db_utils.package_utils import normalize_package_name
 from ...db_utils.publisher_rules import apply_publisher_mapping
+from ...db_utils.reference_seed import ensure_default_reference_rows
 
 
 @dataclass
@@ -203,6 +204,9 @@ def ensure_app_definition(
     query_context.setdefault("package_name", cleaned_package)
 
     with database_session():
+        # Defensive: some deployments enforce FK constraints from apps.publisher_key/profile_key.
+        # Ensure the default dictionary rows exist before inserting into apps.
+        ensure_default_reference_rows()
         run_sql(
             queries.UPSERT_APP_DEFINITION,
             (cleaned_package, label),

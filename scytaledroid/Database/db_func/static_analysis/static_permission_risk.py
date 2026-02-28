@@ -9,7 +9,10 @@ from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from ...db_core import db_config, run_sql
 from ...db_queries.static_analysis import static_permission_risk as queries
 
-_IS_SQLITE = str(db_config.DB_CONFIG.get("engine", "sqlite")).lower() == "sqlite"
+_ENGINE = str(db_config.DB_CONFIG.get("engine", "")).strip().lower()
+_IS_SQLITE = _ENGINE == "sqlite"
+if _IS_SQLITE and not db_config.is_test_env():
+    raise RuntimeError("SQLite backend is test-only; configure MySQL/MariaDB or disable DB.")
 
 SQLITE_CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS static_permission_risk (

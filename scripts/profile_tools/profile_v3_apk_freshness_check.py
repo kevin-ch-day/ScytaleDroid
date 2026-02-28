@@ -79,7 +79,11 @@ def _latest_harvested_version(device_apks_root: Path, package: str) -> tuple[str
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Profile v3 APK freshness check (fail-closed)")
-    p.add_argument("--serial", required=True, help="Device serial (e.g., ZY22JK89DR)")
+    p.add_argument(
+        "--serial",
+        default="",
+        help="Device serial (e.g., ZY22JK89DR). If omitted, uses data/state/active_device.json active_serial.",
+    )
     p.add_argument(
         "--catalog",
         default=str(REPO_ROOT / "profiles" / "profile_v3_app_catalog.json"),
@@ -97,11 +101,21 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = p.parse_args(argv)
 
+    serial = str(args.serial or "").strip()
+    if not serial:
+        try:
+            active = _rjson(REPO_ROOT / "data" / "state" / "active_device.json")
+            serial = str(active.get("active_serial") or active.get("last_serial") or "").strip()
+        except Exception:
+            serial = ""
+    if not serial:
+        raise SystemExit("PROFILE_V3_NO_ACTIVE_DEVICE: provide --serial or set data/state/active_device.json")
+
     catalog = load_profile_v3_catalog(Path(args.catalog))
-    snapshot_path = _latest_inventory_snapshot(args.serial)
+    snapshot_path = _latest_inventory_snapshot(serial)
     inv = _load_inventory_versions(snapshot_path)
 
-    device_apks_root = Path(args.device_apks_root) / args.serial
+    device_apks_root = Path(args.device_apks_root) / serial
     if not device_apks_root.exists():
         raise SystemExit(f"PROFILE_V3_NO_DEVICE_APKS_ROOT: {device_apks_root}")
 

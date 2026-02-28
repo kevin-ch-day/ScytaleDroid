@@ -207,5 +207,14 @@ def db_enabled() -> bool:
 
     return str(DB_CONFIG.get("engine", "")).lower() in {"mysql", "mariadb"}
 
+def is_test_env() -> bool:
+    """Return True when running under pytest/unit tests.
 
-__all__ = ["DB_CONFIG", "DB_CONFIG_SOURCE", "allow_auto_create", "db_enabled", "override_database"]
+    SQLite is allowed in tests only. In normal operator runs, DB is either
+    disabled or MySQL/MariaDB-backed.
+    """
+
+    return ("PYTEST_CURRENT_TEST" in os.environ) or any("pytest" in arg for arg in sys.argv[:1])
+
+
+__all__ = ["DB_CONFIG", "DB_CONFIG_SOURCE", "allow_auto_create", "db_enabled", "is_test_env", "override_database"]

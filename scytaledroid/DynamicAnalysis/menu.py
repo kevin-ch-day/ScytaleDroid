@@ -205,6 +205,62 @@ def _load_dynamic_ui_defaults() -> _DynamicUiDefaults:
         pcapdroid_api_key=os.environ.get("SCYTALEDROID_PCAPDROID_API_KEY"),
     )
 
+def _print_profile_v3_capture_runbook() -> None:
+    """Print a concise operator runbook for Paper #3 dynamic capture."""
+
+    print()
+    menu_utils.print_header("Profile v3 Capture Runbook", "Paper #3 (scripted-only)")
+    lines = [
+        "Goal: collect paper-grade dynamic evidence for the v3 catalog cohort.",
+        "",
+        "Hard locks:",
+        "- interaction is scripted-only for Paper #3 (no manual runs in the v3 manifest).",
+        "- cohort is catalog-defined (profiles/profile_v3_app_catalog.json).",
+        "",
+        "Required per app (minimum):",
+        "- baseline_idle run that passes min_windows/min_bytes gates",
+        "- interaction_scripted run that passes min_windows/min_bytes gates",
+        "",
+        "Recommended order:",
+        "1. Device Analysis: Sync inventory; Pull APKs -> Paper #3 Dataset (full refresh).",
+        "2. Static Analysis: Run Profile v3 Structural Cohort (batch).",
+        "3. Reporting: Run v3 integrity gates (freshness + scripted coverage).",
+        "4. Dynamic Analysis: capture missing scripted runs (baseline_idle + interaction_scripted).",
+        "5. Dynamic Analysis: Build v3 manifest (included runs).",
+        "6. Reporting: Strict v3 export + strict lint -> READY.",
+        "",
+        "Notes:",
+        "- If v3 exporter fails with included_run_ids=0, you have not built the manifest yet.",
+        "- If scripted coverage gate FAILs, recapture scripted interaction for the listed apps.",
+    ]
+    for line in lines:
+        print(status_messages.status(line, level="info") if line else "")
+    prompt_utils.press_enter_to_continue()
+
+
+def _run_profile_v3_manifest_build() -> None:
+    """Build/update the v3 manifest (included runs list) from existing evidence packs."""
+
+    print()
+    menu_utils.print_header("Profile v3 Manifest Build")
+    script = Path(__file__).resolve().parents[2] / "scripts" / "profile_tools" / "profile_v3_manifest_build.py"
+    if not script.exists():
+        print(status_messages.status(f"Missing script: {script}", level="error"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    import runpy
+
+    try:
+        runpy.run_path(str(script), run_name="__main__")
+    except SystemExit as exc:
+        if int(getattr(exc, "code", 1) or 0) != 0:
+            print(status_messages.status(f"Manifest build failed: exit={exc.code}", level="error"))
+            prompt_utils.press_enter_to_continue()
+            return
+    print(status_messages.status("Manifest build completed.", level="success"))
+    prompt_utils.press_enter_to_continue()
+
 
 def dynamic_analysis_menu() -> None:
     from scytaledroid.Database.db_utils import schema_gate
@@ -222,23 +278,37 @@ def dynamic_analysis_menu() -> None:
         )
 
     # Publication exports are consolidated under Reporting (single canonical surface).
-    collection_options = [
+    # Keep menu numbering sequential to avoid operator mistakes under time pressure.
+    v2_options = [
         MenuOption("1", "Guided cohort run (Research Dataset Alpha)"),
         MenuOption("2", "Cohort status overview"),
     ]
-    integrity_options = [
-        MenuOption("3", "Freeze readiness audit (evidence packs)"),
-        MenuOption("4", "Reindex/repair tracker from evidence packs"),
-        MenuOption("5", "Prune incomplete dynamic evidence dirs"),
+    # Paper #3 uses the same capture engine but a different cohort contract and reporting outputs.
+    # Keep the operator surface explicit so v2/v3 runs are not confused during demos.
+    v3_options = [
+        MenuOption("3", "Capture runbook (scripted-only)"),
+        MenuOption("4", "Run integrity gates (Reporting)"),
+        MenuOption("5", "Build v3 manifest (included runs)"),
     ]
-    export_options = [
-        MenuOption("6", "Export freeze-anchored CSVs (Reporting)"),
+    integrity_options = [
+        MenuOption("6", "Freeze readiness audit (evidence packs)"),
+        MenuOption("7", "Reindex/repair tracker from evidence packs"),
+        MenuOption("8", "Prune incomplete dynamic evidence dirs"),
+    ]
+    reporting_options = [
+        MenuOption("9", "Export freeze-anchored CSVs (Reporting)"),
     ]
     system_options = [
-        MenuOption("7", "Verify host PCAP tools (tshark + capinfos)"),
-        MenuOption("8", "State summary (freeze/evidence/tracker deltas)"),
+        MenuOption("10", "Verify host PCAP tools (tshark + capinfos)"),
+        MenuOption("11", "State summary (freeze/evidence/tracker deltas)"),
     ]
-    options = [*collection_options, *integrity_options, *export_options, *system_options]
+    options = [
+        *v2_options,
+        *v3_options,
+        *integrity_options,
+        *reporting_options,
+        *system_options,
+    ]
 
     ui_defaults = _load_dynamic_ui_defaults()
 
@@ -253,12 +323,14 @@ def dynamic_analysis_menu() -> None:
         print()
         menu_utils.print_header("Dynamic Analysis")
         _warn_if_code_changed()
-        menu_utils.print_section("Collection")
-        menu_utils.print_menu(collection_options, show_exit=False, show_descriptions=False, compact=True)
+        menu_utils.print_section("Profile v2 (Paper #2)")
+        menu_utils.print_menu(v2_options, show_exit=False, show_descriptions=False, compact=True)
+        menu_utils.print_section("Profile v3 (Paper #3)")
+        menu_utils.print_menu(v3_options, show_exit=False, show_descriptions=False, compact=True)
         menu_utils.print_section("Integrity & Audit")
         menu_utils.print_menu(integrity_options, show_exit=False, show_descriptions=False, compact=True)
-        menu_utils.print_section("Exports")
-        menu_utils.print_menu(export_options, show_exit=False, show_descriptions=False, compact=True)
+        menu_utils.print_section("Reporting")
+        menu_utils.print_menu(reporting_options, show_exit=False, show_descriptions=False, compact=True)
         menu_utils.print_section("System")
         menu_utils.print_menu(
             system_options,
@@ -287,20 +359,42 @@ def dynamic_analysis_menu() -> None:
             continue
 
         if choice == "3":
-            _run_paper_readiness_audit()
+            _print_profile_v3_capture_runbook()
             _pause_if_verbose()
             continue
 
         if choice == "4":
-            _repair_reindex_tracker()
+            try:
+                from scytaledroid.Reporting.menu_actions import handle_profile_v3_integrity_gates
+
+                handle_profile_v3_integrity_gates()
+            except Exception:
+                print(status_messages.status("Failed to open v3 integrity gates (Reporting).", level="error"))
+                prompt_utils.press_enter_to_continue()
             _pause_if_verbose()
             continue
+
         if choice == "5":
-            _prune_incomplete_dynamic_evidence_dirs()
+            _run_profile_v3_manifest_build()
             _pause_if_verbose()
             continue
 
         if choice == "6":
+            _run_paper_readiness_audit()
+            _pause_if_verbose()
+            continue
+
+        if choice == "7":
+            _repair_reindex_tracker()
+            _pause_if_verbose()
+            continue
+
+        if choice == "8":
+            _prune_incomplete_dynamic_evidence_dirs()
+            _pause_if_verbose()
+            continue
+
+        if choice == "9":
             # Single canonical paper-facing export surface lives in Reporting.
             try:
                 from scytaledroid.Reporting.menu_actions import handle_export_freeze_anchored_csvs
@@ -311,12 +405,12 @@ def dynamic_analysis_menu() -> None:
             _pause_if_verbose()
             continue
 
-        if choice == "7":
+        if choice == "10":
             _verify_host_pcap_tools()
             _pause_if_verbose()
             continue
 
-        if choice == "8":
+        if choice == "11":
             _run_state_summary()
             _pause_if_verbose()
             continue

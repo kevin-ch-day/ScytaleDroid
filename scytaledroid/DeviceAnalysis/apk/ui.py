@@ -243,6 +243,30 @@ def prompt_inventory_sync() -> bool:
     return prompt_utils.prompt_yes_no("Run an inventory sync now?", default=True)
 
 
+def report_profile_v3_requires_inventory_sync(summary: Mapping[str, object]) -> None:
+    total_changed = summary.get("total_changed")
+    total_text = f"{int(total_changed)}" if isinstance(total_changed, int) else "some"
+    print()
+    print("Inventory Sync Required")
+    print("───────────────────────")
+    print(
+        status_messages.status(
+            "Profile v3 Structural Cohort harvest is paper-grade and requires a fresh inventory snapshot.",
+            level="warn",
+        )
+    )
+    print(
+        status_messages.status(
+            f"Device packages changed since the last snapshot ({total_text} change(s)). Sync before pulling APKs.",
+            level="warn",
+        )
+    )
+
+
+def prompt_profile_v3_inventory_sync_now() -> bool:
+    return prompt_utils.prompt_yes_no("Sync inventory now before pulling Profile v3 APKs?", default=True)
+
+
 def report_inventory_sync_failure(exc: Exception) -> None:
     error_panels.print_error_panel("APK Pull", f"Inventory sync failed: {exc}")
     prompt_utils.press_enter_to_continue()

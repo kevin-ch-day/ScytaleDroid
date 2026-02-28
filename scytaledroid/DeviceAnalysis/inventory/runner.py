@@ -126,6 +126,7 @@ def run_full_sync(
     rows, coll_stats = package_collection.collect_inventory(
         serial=serial,
         filter_fn=effective_filter,
+        package_allowlist=None,
         progress_cb=_progress_adapter if progress_cb else None,
         allow_fallbacks=resolved_config.allow_fallbacks,
     )
@@ -240,4 +241,105 @@ def run_full_sync(
     except Exception:
         pass
 
+    return result
+
+
+def run_scoped_sync(
+    *,
+    serial: str,
+    package_allowlist: set[str],
+    scope_id: str,
+    progress_cb: ProgressCallback | None = None,
+    mode: str | None = None,
+    config: InventoryConfig | None = None,
+) -> InventoryResult:
+    """Run an inventory sync for a scoped package set (fast, does not replace canonical snapshot).
+
+    This is intended for paper/dataset operator workflows where only a small set
+    of packages is needed to verify freshness or enable harvesting, without
+    incurring the cost of a full-device sync.
+    """
+
+    resolved_config = config or InventoryConfig.from_env()
+    mode = (mode or resolved_config.mode.value).lower().strip()
+
+    # Progress adapter uses the allowlisted total (collect_inventory filters early).
+    def _progress_adapter(
+        processed: int,
+        total: int,
+        elapsed_seconds: float,
+        eta_seconds: float | None,
+        split_apks: int,
+    ) -> None:
+        if progress_cb:
+            progress_cb(
+                {
+                    "phase": "progress",
+                    "phase_label": "Collecting packages",
+                    "processed": processed,
+                    "total": total,
+                    "elapsed_seconds": elapsed_seconds,
+                    "eta_seconds": eta_seconds,
+                    "split_processed": split_apks,
+                }
+            )
+
+    if progress_cb:
+        progress_cb({"phase": "start", "total": None, "phase_label": "Collecting packages"})
+
+    collect_start = time.time()
+    rows, coll_stats = package_collection.collect_inventory(
+        serial=serial,
+        filter_fn=None,
+        package_allowlist={p.strip().lower() for p in package_allowlist if str(p).strip()},
+        progress_cb=_progress_adapter if progress_cb else None,
+        allow_fallbacks=resolved_config.allow_fallbacks,
+    )
+    collect_elapsed = time.time() - collect_start
+
+    stats = InventorySyncStats(
+        total_packages=int(getattr(coll_stats, "total_packages", len(rows)) or len(rows)),
+        split_packages=int(getattr(coll_stats, "split_packages", 0) or 0),
+        elapsed_seconds=float(getattr(coll_stats, "elapsed_seconds", collect_elapsed) or collect_elapsed),
+        fallback_used=bool(getattr(coll_stats, "fallback_used", False)),
+    )
+
+    # Persist as a scoped snapshot (filesystem only; does not overwrite latest.json; no DB writes).
+    persist_start = time.time()
+    persist_result = snapshot_io.persist_scoped_snapshot(
+        serial=serial,
+        rows=rows,  # type: ignore[arg-type]
+        scope_id=str(scope_id),
+        package_hash=getattr(coll_stats, "package_hash", None),
+        package_list_hash=getattr(coll_stats, "package_list_hash", None),
+        package_signature_hash=getattr(coll_stats, "package_signature_hash", None),
+        build_fingerprint=getattr(coll_stats, "build_fingerprint", None),
+        duration_seconds=getattr(coll_stats, "elapsed_seconds", None),
+    )
+    _ = time.time() - persist_start
+
+    result = InventoryResult(
+        serial=serial,
+        snapshot_path=persist_result.path,
+        snapshot_id=None,
+        expected_rows=stats.total_packages,
+        persisted_rows=persist_result.persisted_rows,
+        rows=rows,
+        stats=stats,
+        fallback_used=bool(getattr(coll_stats, "fallback_used", False)),
+        previous_total=None,
+        previous_split=None,
+        synced_app_definitions=0,
+        elapsed_seconds=stats.elapsed_seconds,
+        delta=InventoryDelta(new_count=0, removed_count=0, updated_count=0, changed_packages_count=0),
+        first_snapshot=False,
+    )
+    if progress_cb:
+        progress_cb(
+            {
+                "phase": "complete",
+                "elapsed_seconds": stats.elapsed_seconds,
+                "phase_label": "Collecting packages",
+            }
+        )
     return result

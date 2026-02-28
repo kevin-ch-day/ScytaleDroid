@@ -24,7 +24,7 @@ def export_pcap_features_csv(
     if not output_root.exists():
         return None
     if require_freeze and freeze_path is None:
-        raise RuntimeError("EXPORT_BLOCKED_MISSING_FREEZE: provide freeze_path in paper mode")
+        raise RuntimeError("EXPORT_BLOCKED_MISSING_FREEZE: provide freeze_path in freeze/profile mode")
     _prepare_canonical_freeze_for_paper(evidence_root=output_root, freeze_path=freeze_path)
     if require_freeze and freeze_path is not None and not freeze_path.exists():
         raise RuntimeError(f"EXPORT_BLOCKED_MISSING_FREEZE:{freeze_path}")
@@ -94,7 +94,7 @@ def export_dynamic_run_summary_csv(
     if not output_root.exists():
         return None
     if require_freeze and freeze_path is None:
-        raise RuntimeError("EXPORT_BLOCKED_MISSING_FREEZE: provide freeze_path in paper mode")
+        raise RuntimeError("EXPORT_BLOCKED_MISSING_FREEZE: provide freeze_path in freeze/profile mode")
     _prepare_canonical_freeze_for_paper(evidence_root=output_root, freeze_path=freeze_path)
     if require_freeze and freeze_path is not None and not freeze_path.exists():
         raise RuntimeError(f"EXPORT_BLOCKED_MISSING_FREEZE:{freeze_path}")
@@ -136,7 +136,7 @@ def export_protocol_ledger_csv(
     if not output_root.exists():
         return None
     if require_freeze and freeze_path is None:
-        raise RuntimeError("EXPORT_BLOCKED_MISSING_FREEZE: provide freeze_path in paper mode")
+        raise RuntimeError("EXPORT_BLOCKED_MISSING_FREEZE: provide freeze_path in freeze/profile mode")
     _prepare_canonical_freeze_for_paper(evidence_root=output_root, freeze_path=freeze_path)
     if require_freeze and freeze_path is not None and not freeze_path.exists():
         raise RuntimeError(f"EXPORT_BLOCKED_MISSING_FREEZE:{freeze_path}")

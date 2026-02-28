@@ -58,11 +58,21 @@ def static_analysis_menu() -> None:
         return
 
     base_dir = Path(app_config.DATA_DIR) / "device_apks"
-    groups = tuple(group_artifacts(base_dir))
+
+    def _load_groups() -> tuple:
+        """Reload groups from disk.
+
+        Static analysis operators often pull APKs and then immediately return here; if we cache
+        the library at menu entry, the UI can report stale counts (e.g. 15/21 in library) until
+        the user restarts the menu. Reloading on-demand avoids that operator trap.
+        """
+        return tuple(group_artifacts(base_dir))
+
+    groups = _load_groups()
     if not groups:
         print(
             status_messages.status(
-                "No harvested APK groups found. Run Device Analysis → 2 to pull artifacts.",
+                "No harvested APK groups found. Run Device Analysis → Pull APKs, then retry.",
                 level="warn",
             )
         )
@@ -124,6 +134,19 @@ def static_analysis_menu() -> None:
                 command.handler()
             else:
                 print(status_messages.status(f"{command.title} not yet implemented.", level="warn"))
+            continue
+
+        # Refresh groups at the moment we are about to execute a workflow command, so any
+        # newly harvested APKs are visible without restarting the TUI.
+        groups = _load_groups()
+        if not groups:
+            print(
+                status_messages.status(
+                    "No harvested APK groups found. Run Device Analysis → Pull APKs, then retry.",
+                    level="warn",
+                )
+            )
+            prompt_utils.press_enter_to_continue()
             continue
 
         if not command.profile:

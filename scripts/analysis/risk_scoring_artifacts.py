@@ -33,7 +33,6 @@ from scytaledroid.Utils.LatexUtils import RawLatex, render_tabular_only
 from scytaledroid.Utils.IO.csv_with_provenance import read_csv_with_provenance
 
 PUB_ROOT = REPO_ROOT / "output" / "publication"
-TABLE_7 = PUB_ROOT / "tables" / "table_7_exposure_deviation_summary.csv"
 PAPER_RESULTS = PUB_ROOT / "manifests" / "paper_results_v1.json"
 FREEZE = REPO_ROOT / "data" / "archive" / "dataset_freeze.json"
 TABLE_6 = PUB_ROOT / "tables" / "table_6_static_posture_scores.csv"
@@ -84,6 +83,19 @@ def _row_by_pkg(rows: list[dict[str, str]], key: str = "package_name") -> dict[s
         if pkg:
             out[pkg] = r
     return out
+
+
+def _mean_in_runs(runs: list[dict[str, str]], col: str) -> float:
+    vals: list[float] = []
+    for rr in runs:
+        v = rr.get(col)
+        if v in (None, ""):
+            continue
+        try:
+            vals.append(float(v))
+        except Exception:
+            continue
+    return float(sum(vals) / len(vals)) if vals else 0.0
 
 
 @dataclass(frozen=True)
@@ -172,14 +184,13 @@ def main(argv: list[str] | None = None) -> int:
     FIG_RANK_PDF = out_dir / "ranked_fused_scores.pdf"
     FIG_RANK_PNG = out_dir / "ranked_fused_scores.png"
 
-    for p in (TABLE_7, TABLE_6, TABLE_5, PCAP_FEATURES, PAPER_RESULTS, FREEZE):
+    for p in (TABLE_6, TABLE_5, PCAP_FEATURES, PAPER_RESULTS, FREEZE):
         if not p.exists():
             raise SystemExit(f"Missing required input: {p}")
 
     freeze = json.loads(FREEZE.read_text(encoding="utf-8"))
     freeze_hash = str(freeze.get("freeze_dataset_hash") or "")
 
-    t7_by_pkg = _row_by_pkg(_read_csv_skip_comments(TABLE_7))
     t6_by_pkg = _row_by_pkg(_read_csv_skip_comments(TABLE_6))
     t5_by_pkg = _row_by_pkg(_read_csv_skip_comments(TABLE_5))
     pcap_rows = _read_csv_skip_comments(PCAP_FEATURES)
@@ -217,24 +228,12 @@ def main(argv: list[str] | None = None) -> int:
         runs = interactive_by_pkg.get(pkg) or []
         # proxies_unique_domains_topn is a stable proxy for "unique domains".
         # If missing, fallback to 0.
-        def mean(col: str) -> float:
-            vals = []
-            for rr in runs:
-                v = rr.get(col)
-                if v in (None, ""):
-                    continue
-                try:
-                    vals.append(float(v))
-                except Exception:
-                    continue
-            return float(sum(vals) / len(vals)) if vals else 0.0
-
-        raw_domains[pkg] = mean("proxies_unique_domains_topn")
-        raw_dns[pkg] = mean("proxies_unique_dns_qname_count")
+        raw_domains[pkg] = _mean_in_runs(runs, "proxies_unique_domains_topn")
+        raw_dns[pkg] = _mean_in_runs(runs, "proxies_unique_dns_qname_count")
         # Prefer bytes_out if present; otherwise fall back to total bytes.
-        out = mean("metrics_bytes_out_per_sec")
+        out = _mean_in_runs(runs, "metrics_bytes_out_per_sec")
         if out <= 0.0:
-            out = mean("metrics_bytes_per_sec")
+            out = _mean_in_runs(runs, "metrics_bytes_per_sec")
         raw_out[pkg] = out
         # "cleartext attempts": use nsc_cleartext_permitted from static context in pcap_features if present,
         # but for runtime we can only claim "cleartext permitted statically" here; do not overclaim runtime HTTP.

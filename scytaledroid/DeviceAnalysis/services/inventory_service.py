@@ -224,3 +224,66 @@ def run_full_sync(
         pass
 
     return result
+
+
+def run_scoped_sync(
+    *,
+    serial: str,
+    packages: set[str],
+    scope_id: str,
+    ui_prefs,
+    progress_sink: str = "cli",
+    mode: str | None = None,
+    allow_fallbacks: bool | None = None,
+) -> runner.InventoryResult:
+    """Run a scoped inventory sync for a small package set (filesystem-only)."""
+
+    if not serial:
+        raise InventoryServiceError("No device serial provided for inventory sync.")
+    if not packages:
+        raise InventoryServiceError("No packages provided for scoped inventory sync.")
+
+    meta = snapshot_io.load_latest_snapshot_meta(serial)
+    resolved_config = InventoryConfig.from_env()
+    if allow_fallbacks is None:
+        allow_fallbacks = allow_inventory_fallbacks()
+    resolved_config.allow_fallbacks = bool(allow_fallbacks)
+    mode = (mode or os.getenv("SCYTALEDROID_INVENTORY_MODE", "baseline")).lower().strip()
+
+    progress_cb = None
+    if progress_sink == "cli":
+        # Reuse the snapshot block for consistent UX, but make it explicit that this is scoped.
+        progress.render_snapshot_block(
+            meta,
+            ui_prefs=ui_prefs,
+            mode=f"{mode} (scoped:{scope_id})",
+            serial=serial,
+            allow_fallbacks=resolved_config.allow_fallbacks,
+        )
+        progress_cb = progress.make_cli_progress_printer(ui_prefs=ui_prefs)
+
+    try:
+        result = runner.run_scoped_sync(
+            serial=serial,
+            package_allowlist={str(p).strip().lower() for p in packages if str(p).strip()},
+            scope_id=str(scope_id),
+            progress_cb=progress_cb,
+            mode=mode,
+            config=resolved_config,
+        )
+    except InventoryCollectionError as exc:  # pragma: no cover
+        completed = max(0, exc.index - 1)
+        msg = (
+            f"Scoped inventory sync failed for {serial}: package={exc.package} "
+            f"stage={exc.stage} progress={completed}/{exc.total}."
+        )
+        print(status_messages.status(msg, level="error"))
+        raise InventoryServiceError(msg) from exc
+    except Exception as exc:  # pragma: no cover
+        msg = f"Scoped inventory sync failed for {serial}: {exc}."
+        print(status_messages.status(msg, level="error"))
+        raise InventoryServiceError(msg) from exc
+
+    if progress_sink == "cli":
+        views.print_inventory_run_summary_from_result(result)
+    return result

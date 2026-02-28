@@ -6,8 +6,6 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-from sklearn.ensemble import IsolationForest
-from sklearn.svm import OneClassSVM
 
 from . import ml_parameters_profile as config
 
@@ -51,11 +49,21 @@ def fixed_model_specs(seed: int, *, ml_config=config) -> list[ModelSpec]:
 
 
 def fit_model(spec: ModelSpec, X: np.ndarray):
+    # sklearn is an optional dependency for some operators (and can be broken in some environments).
+    # Import it lazily so non-ML workflows don't fail at import time.
     if spec.name == config.MODEL_IFOREST:
+        try:
+            from sklearn.ensemble import IsolationForest  # type: ignore
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(f"SKLEARN_UNAVAILABLE:IsolationForest:{type(exc).__name__}") from exc
         model = IsolationForest(**spec.params)
         model.fit(X)
         return model
     if spec.name == config.MODEL_OCSVM:
+        try:
+            from sklearn.svm import OneClassSVM  # type: ignore
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(f"SKLEARN_UNAVAILABLE:OneClassSVM:{type(exc).__name__}") from exc
         model = OneClassSVM(**spec.params)
         model.fit(X)
         return model

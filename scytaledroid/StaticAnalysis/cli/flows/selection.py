@@ -35,15 +35,21 @@ def format_scope_target(selection: ScopeSelection) -> str:
 def select_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
     print()
     menu_utils.print_header("Scope", "Select the analysis scope (app, profile, or all)")
-    options = {"1": "App", "2": "Profile", "3": "All apps"}
-    for key, label in options.items():
+    options: list[tuple[str, str]] = [("1", "App"), ("2", "Profile"), ("3", "All apps")]
+    catalog_path = Path("profiles") / "profile_v3_app_catalog.json"
+    if _load_profile_v3_catalog(catalog_path):
+        # Provide a top-level shortcut so operators don't have to dig into Profile lists.
+        options.append(("4", "Profile v3 Structural Cohort"))
+    for key, label in options:
         print(f" {key}) {label}")
-    choice = prompt_utils.get_choice(list(options.keys()), default="1")
+    choice = prompt_utils.get_choice([key for key, _ in options], default="1")
 
     if choice == "1":
         return select_app_scope(groups)
     if choice == "2":
         return select_category_scope(groups)
+    if choice == "4":
+        return select_profile_v3_scope(groups)
     return _select_all_scope(groups)
 
 
@@ -114,7 +120,13 @@ def select_category_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
     catalog = _load_profile_v3_catalog(catalog_path)
     if catalog:
         wanted = set(catalog.keys())
-        available = {g.package_name.strip().lower() for g in groups if g.package_name}
+        # Count only packages that have a base artifact present in the local library.
+        # (Split-only captures cannot be analyzed without a base APK.)
+        available = {
+            g.package_name.strip().lower()
+            for g in groups
+            if g.package_name and (g.base_artifact is not None)
+        }
         v3_available = len(wanted.intersection(available))
         v3_total = len(wanted)
         v3_label = f"Profile v3 Structural Cohort ({v3_available}/{v3_total} in library)"
@@ -307,11 +319,11 @@ def select_latest_groups(groups: Sequence[ArtifactGroup]) -> tuple[ArtifactGroup
         if contemporaries:
             return tuple(contemporaries)
 
-    best_mtime = _group_latest_mtime(best_group)
     if _allow_multiple_latest():
-        contemporaries = [
-            group for group in groups if abs(_group_latest_mtime(group) - best_mtime) < 0.0001
-        ]
+        # Prefer deterministic contemporaries: same recency key prefix (capture day + version_code + stamp).
+        best_key = _group_recency_key(best_group)
+        prefix = best_key[:6]
+        contemporaries = [group for group in groups if _group_recency_key(group)[:6] == prefix]
         return tuple(contemporaries) if contemporaries else (best_group,)
     return (best_group,)
 
@@ -365,8 +377,69 @@ def _render_selection_details(
 
 
 def _group_recency_key(group: ArtifactGroup) -> tuple[int, str, float]:
+    """Deterministic ordering key for "latest" group selection.
+
+    Avoid relying on filesystem mtimes because they are easy to disturb (copying, rsync, zip/unzip),
+    which can silently change "newest capture" selection in paper-grade workflows.
+    """
+
+    # Prefer capture day extracted from the on-disk path: data/device_apks/<serial>/<YYYYMMDD>/...
+    capture_day = _group_capture_day(group)
+    version_code = _group_version_code(group)
     stamp = group.session_stamp or ""
-    return (1 if stamp else 0, stamp, _group_latest_mtime(group))
+    # Tie-breakers: stable group_key and latest-mtime only as a last resort.
+    return (
+        1 if capture_day is not None else 0,
+        int(capture_day) if capture_day is not None else 0,
+        1 if version_code is not None else 0,
+        int(version_code) if version_code is not None else 0,
+        1 if stamp else 0,
+        stamp,
+        str(getattr(group, "group_key", "") or ""),
+        _group_latest_mtime(group),
+    )
+
+
+def _group_capture_day(group: ArtifactGroup) -> int | None:
+    def _parse_day(part: str) -> int | None:
+        token = part.strip()
+        if len(token) != 8 or not token.isdigit():
+            return None
+        value = int(token)
+        # Sanity bounds: YYYYMMDD.
+        if value < 20000101 or value > 20991231:
+            return None
+        return value
+
+    best: int | None = None
+    for artifact in getattr(group, "artifacts", []) or []:
+        path_obj = getattr(artifact, "path", None)
+        if not isinstance(path_obj, Path):
+            try:
+                path_obj = Path(str(path_obj))
+            except Exception:
+                continue
+        for part in path_obj.parts:
+            day = _parse_day(part)
+            if day is not None and (best is None or day > best):
+                best = day
+    return best
+
+
+def _group_version_code(group: ArtifactGroup) -> int | None:
+    base = getattr(group, "base_artifact", None)
+    if base is None:
+        return None
+    meta = getattr(base, "metadata", None)
+    if not isinstance(meta, dict):
+        return None
+    raw = meta.get("version_code")
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
 
 
 def _group_latest_mtime(group: ArtifactGroup) -> float:
@@ -428,7 +501,11 @@ def select_profile_v3_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
         return ScopeSelection("all", "All apps", tuple(groups))
 
     wanted = set(catalog.keys())
-    available = {g.package_name.strip().lower() for g in groups if g.package_name}
+    available = {
+        g.package_name.strip().lower()
+        for g in groups
+        if g.package_name and (g.base_artifact is not None)
+    }
     missing = sorted(wanted - available)
     scoped_all = tuple(g for g in groups if g.package_name.strip().lower() in wanted)
     if not scoped_all:
@@ -449,6 +526,17 @@ def select_profile_v3_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
                 level="warn",
             )
         )
+        strict = os.environ.get("SCYTALEDROID_PAPER_STRICT", "0").strip().lower() in {"1", "true", "yes", "on"}
+        if strict:
+            print(
+                status_messages.status(
+                    "Strict mode is enabled; refusing to proceed with partial Profile v3 scope. "
+                    "Pull APKs for the Paper #3 Dataset and re-run.",
+                    level="error",
+                )
+            )
+            prompt_utils.press_enter_to_continue()
+            return ScopeSelection("all", "All apps", tuple(groups))
 
     # Deterministic ordering: by catalog category then package.
     scoped_all = tuple(

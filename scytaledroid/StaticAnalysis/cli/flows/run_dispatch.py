@@ -793,7 +793,8 @@ def _emit_missing_run_ids_artifact(
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{stamp}_missing_run_ids.json"
     out_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-    print(status_messages.status(f"Missing run-id audit: {out_path}", level="info"))
+    # This artifact is emitted even on success; it serves as a persistence linkage receipt.
+    print(status_messages.status(f"Persistence audit: {out_path}", level="info"))
     _emit_db_lock_health_artifact(
         stamp=stamp,
         rows=rows,

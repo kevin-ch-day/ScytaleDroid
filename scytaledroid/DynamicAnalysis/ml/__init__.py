@@ -1,13 +1,19 @@
 """ML module for Paper #2 (unsupervised, offline, evidence-pack driven).
 
-Primary contract (PM-locked):
-- ML runs as a batch command over frozen evidence packs (DB-free).
-- Inputs are immutable evidence-pack artifacts.
-- Outputs are versioned under analysis/ml/v<ml_schema_version>/.
+Keep imports lazy because sklearn/scipy are optional for some operator flows.
 """
 
-from .evidence_pack_ml_orchestrator import run_ml_on_evidence_packs
+from __future__ import annotations
 
-# Paper #2 entrypoint (authoritative). Experimental pipeline scaffolding lives under
-# scytaledroid/DynamicAnalysis/ml/experimental/ and is intentionally not exported.
+from typing import Any
+
 __all__ = ["run_ml_on_evidence_packs"]
+
+
+def __getattr__(name: str) -> Any:  # pragma: no cover - import-time shim
+    if name == "run_ml_on_evidence_packs":
+        from .evidence_pack_ml_orchestrator import run_ml_on_evidence_packs as fn
+
+        return fn
+    raise AttributeError(name)
+

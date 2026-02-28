@@ -1,3 +1,4 @@
+from collections import Counter
 from pathlib import Path
 
 from scytaledroid.DeviceAnalysis.harvest.models import (
@@ -81,7 +82,8 @@ def test_render_harvest_summary_structured(capsys):
         packages_with_errors=0,
         packages_failed=0,
         packages_skipped_runtime=0,
-        runtime_skips={},
+        runtime_skips=Counter(),
+        runtime_notes=Counter(),
         preflight_skips={},
     )
     render_harvest_summary_structured(

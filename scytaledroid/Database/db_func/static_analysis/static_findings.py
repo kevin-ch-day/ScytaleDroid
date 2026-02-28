@@ -11,7 +11,10 @@ from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from ...db_core import database_session, db_config, run_sql
 from ...db_queries.static_analysis import static_findings as queries
 
-_IS_SQLITE = str(db_config.DB_CONFIG.get("engine", "sqlite")).lower() == "sqlite"
+_ENGINE = str(db_config.DB_CONFIG.get("engine", "")).strip().lower()
+_IS_SQLITE = _ENGINE == "sqlite"
+if _IS_SQLITE and not db_config.is_test_env():
+    raise RuntimeError("SQLite backend is test-only; configure MySQL/MariaDB or disable DB.")
 _JWT_LIKE_RE = re.compile(r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}")
 _AWS_KEY_RE = re.compile(r"AKIA[0-9A-Z]{16}")
 

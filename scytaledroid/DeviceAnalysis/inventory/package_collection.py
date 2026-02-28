@@ -52,6 +52,7 @@ def collect_inventory(
     serial: str,
     *,
     filter_fn: Callable[[dict[str, object | None], bool]] = None,
+    package_allowlist: set[str] | None = None,
     progress_cb: ProgressCallback | None = None,
     use_bulk: bool | None = None,
     allow_fallbacks: bool = False,
@@ -87,6 +88,22 @@ def collect_inventory(
             },
         )
 
+    allowlist = {normalize_package_name(p, context="inventory") or str(p).strip().lower() for p in (package_allowlist or set()) if str(p).strip()}
+    if allowlist:
+        # Filter early (before per-package metadata/path calls) for speed.
+        filtered_names: list[str] = []
+        for pkg in package_names:
+            canon = normalize_package_name(pkg, context="inventory") or pkg.strip().lower()
+            if canon in allowlist:
+                filtered_names.append(pkg)
+        package_names = filtered_names
+        filtered_with_versions = []
+        for pkg, version_code, third in packages_with_versions:
+            canon = normalize_package_name(pkg, context="inventory") or str(pkg).strip().lower()
+            if canon in allowlist:
+                filtered_with_versions.append((pkg, version_code, third))
+        packages_with_versions = filtered_with_versions
+
     total = len(package_names)
 
     _emit_progress(progress_cb, processed=0, total=total, elapsed=0.0, eta=None, split_apks=0)
@@ -114,7 +131,13 @@ def collect_inventory(
             version_by_package[canonical_name] = version_code.strip()
 
     package_definitions: dict[str, str | None] = {}
-    progress_interval = max(20, total // 20 or 1)
+    # Progress cadence: for small scoped cohorts (e.g., paper profiles with ~19-21 packages),
+    # emitting only every 20 items results in "0/N" appearing to hang. Emit every package for
+    # small totals, otherwise ~20 updates per run.
+    if total <= 50:
+        progress_interval = 1
+    else:
+        progress_interval = max(20, total // 20 or 1)
     scan_start = time.time()
     split_processed = 0
     profile_enabled = os.getenv("SCYTALEDROID_INVENTORY_PROFILE", "0").strip() in {"1", "true", "yes", "on"}

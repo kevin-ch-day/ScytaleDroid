@@ -135,12 +135,12 @@ def print_run_summary(result, duration_label: str) -> None:
             elif run_profile:
                 # Fallback when tracker isn't available.
                 lines.append(("Run profile", f"{run_profile}"))
-            verdict_line = _three_verdict_label(result.dynamic_run_id)
+                verdict_line = _three_verdict_label(result.dynamic_run_id)
             if verdict_line:
                 lines.append(("Verdicts", verdict_line))
                 reason_line = _paper_reason_line(result.dynamic_run_id)
                 if reason_line:
-                    lines.append(("Paper", reason_line))
+                    lines.append(("Cohort", reason_line))
         else:
             dataset_validity = _dataset_validity_label(result.dynamic_run_id)
             if dataset_validity:
@@ -154,7 +154,7 @@ def print_run_summary(result, duration_label: str) -> None:
                 lines.append(("Verdicts", verdict_line))
                 reason_line = _paper_reason_line(result.dynamic_run_id)
                 if reason_line:
-                    lines.append(("Paper", reason_line))
+                    lines.append(("Cohort", reason_line))
 
         # DB is a derived index (not authoritative). Make its status explicit so
         # operators can spot schema/persistence problems without reading logs.
@@ -444,9 +444,9 @@ def _paper_reason_line(dynamic_run_id: str | None) -> str | None:
     if not code:
         return None
     mapping = {
-        "EXCLUDED_MANUAL_NON_COHORT": "Manual runs are exploratory-only in Paper Mode.",
+        "EXCLUDED_MANUAL_NON_COHORT": "Manual runs are exploratory-only in locked cohort mode.",
         "EXCLUDED_EXTRA_RUN": "Quota already satisfied for this app slot; saved as extra evidence.",
-        "EXCLUDED_CALL_EXPLORATORY_ONLY": "Call template is exploratory-only by paper policy.",
+        "EXCLUDED_CALL_EXPLORATORY_ONLY": "Call template is exploratory-only by cohort policy.",
         "EXCLUDED_CALL_NOT_CONNECTED": "Call did not connect (not eligible for cohort).",
         "EXCLUDED_LOW_SIGNAL_IDLE_BASELINE": "Low-signal idle baseline (expected for messaging home-idle).",
         "EXCLUDED_SCRIPT_TEMPLATE_MISMATCH": "Observed scripted template did not match expected template policy.",

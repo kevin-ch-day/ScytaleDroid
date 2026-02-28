@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from collections import Counter
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from scytaledroid.Config import app_config
@@ -37,9 +37,14 @@ _POLICY_LABELS = {
 _SKIP_LABELS = {
     "policy_non_root": "System/vendor/mainline filtered by policy",
     "no_paths": "Package returned no APK paths",
-    "app_definition_failed": "Failed to record app definition",
+    # DB mirror/index warnings (filesystem artifacts remain canonical).
+    "app_definition_failed": "DB mirror: failed to record app definition (non-fatal)",
+    "split_group_failed": "DB mirror: failed to record split group (non-fatal)",
     "dedupe_sha256": "Duplicate artifact (sha256 dedupe)",
 }
+
+# Reasons that should never be presented as "skips" when artifacts were written.
+_NON_FATAL_NOTES = {"app_definition_failed", "split_group_failed"}
 
 
 @dataclass
@@ -58,7 +63,11 @@ class HarvestRunMetrics:
     packages_failed: int
     packages_skipped_runtime: int
     runtime_skips: Counter[str]
+    runtime_notes: Counter[str]
     preflight_skips: Counter[str]
+    # Optional: which packages produced non-fatal runtime notes (e.g., DB mirror issues).
+    # Kept out of strict contracts; used only to make operator output actionable.
+    runtime_note_packages: dict[str, list[str]] = field(default_factory=dict)
 
     @property
     def dedupe_skips(self) -> int:
@@ -77,6 +86,12 @@ class HarvestRunMetrics:
         """Total skips encountered during pull execution."""
 
         return sum(self.runtime_skips.values())
+
+    @property
+    def runtime_note_total(self) -> int:
+        """Total non-fatal notes encountered during pull execution."""
+
+        return sum(self.runtime_notes.values())
 
     @property
     def artifact_status_excluding_written(self) -> Counter[str]:
@@ -144,8 +159,22 @@ class HarvestRunMetrics:
                 packages_skipped_runtime += 1
 
         runtime_skips: Counter[str] = Counter()
+        runtime_notes: Counter[str] = Counter()
+        runtime_note_packages: dict[str, set[str]] = {}
         for result in results:
-            runtime_skips.update(result.skipped)
+            # If we wrote artifacts, DB mirror failures should be treated as notes rather than skips.
+            wrote_any = bool(result.ok)
+            for reason in result.skipped:
+                if wrote_any and reason in _NON_FATAL_NOTES:
+                    runtime_notes[reason] += 1
+                    try:
+                        pkg = (result.plan.inventory.package_name or "").strip()
+                    except Exception:
+                        pkg = ""
+                    if pkg:
+                        runtime_note_packages.setdefault(str(reason), set()).add(pkg)
+                else:
+                    runtime_skips[reason] += 1
 
         for reason, count in preflight_skips.items():
             remaining = runtime_skips.get(reason, 0) - count
@@ -172,6 +201,8 @@ class HarvestRunMetrics:
             packages_failed=packages_failed,
             packages_skipped_runtime=packages_skipped_runtime,
             runtime_skips=runtime_skips,
+            runtime_notes=runtime_notes,
+            runtime_note_packages={k: sorted(v) for k, v in runtime_note_packages.items()},
             preflight_skips=preflight_skips,
         )
 
@@ -343,6 +374,99 @@ def render_harvest_summary(
         if metrics.packages_failed or metrics.packages_with_partial_errors:
             status = "partial"
         print(status_messages.status(f"status: {status}", level="success" if status == "success" else "warn"))
+
+        # Copy/paste friendly one-liner for tickets/PM updates.
+        harvest_mode = metadata.get("harvest_mode") or ""
+        delta_applied = bool(metadata.get("delta_filter_applied"))
+        note_pkg_count = 0
+        try:
+            affected = set()
+            for pkgs in (metrics.runtime_note_packages or {}).values():
+                affected.update(pkgs)
+            note_pkg_count = len(affected)
+        except Exception:
+            note_pkg_count = 0
+        print(
+            status_messages.status(
+                "[COPY] harvest "
+                f"scope={selection.label!r} "
+                f"status={status} "
+                f"packages_total={metrics.total_packages} "
+                f"clean={metrics.packages_successful} "
+                f"partial={metrics.packages_with_partial_errors} "
+                f"failed={metrics.packages_failed} "
+                f"artifacts_planned={metrics.planned_artifacts} "
+                f"artifacts_written={metrics.artifacts_written} "
+                f"artifacts_failed={metrics.artifacts_failed} "
+                f"harvest_mode={harvest_mode!s} "
+                f"delta_applied={'true' if delta_applied else 'false'} "
+                f"runtime_notes={metrics.runtime_note_total} "
+                f"runtime_note_pkgs={note_pkg_count} "
+                f"runtime_skips={sum(metrics.runtime_skips.values())}",
+                level="info",
+            )
+        )
+        output_root = _run_output_root(harvest_result)
+        if output_root:
+            print(status_messages.status(f"output: {output_root}", level="info"))
+        if metadata.get("delta_filter_applied"):
+            delta_total = metadata.get("delta_filter_total")
+            delta_matched = metadata.get("delta_filter_matched")
+            parts: list[str] = []
+            if delta_total is not None:
+                parts.append(f"changed={delta_total}")
+            if delta_matched is not None:
+                parts.append(f"matched_in_scope={delta_matched}")
+            detail = f" ({', '.join(parts)})" if parts else ""
+            print(status_messages.status(f"delta: applied{detail}", level="info"))
+        if metrics.runtime_notes:
+            top = metrics.runtime_notes.most_common(2)
+            note_text = ", ".join(f"{reason}={count}" for reason, count in top)
+            if metrics.runtime_note_total > sum(c for _r, c in top):
+                note_text = f"{note_text}, ..."
+            affected = set()
+            for pkgs in (metrics.runtime_note_packages or {}).values():
+                affected.update(pkgs)
+            note_line = (
+                f"notes: db_mirror={metrics.runtime_note_total} ({note_text})"
+                + (f" affected_pkgs={len(affected)}" if affected else "")
+            )
+            print(status_messages.status(note_line, level="info"))
+            if metrics.runtime_note_packages:
+                # Default: if only a few packages are affected, print them inline to avoid forcing
+                # operators to re-run with verbose flags just to answer "which packages?".
+                # Verbose mode prints full per-reason detail regardless of count.
+                if _harvest_verbose_mode():
+                    for reason, pkgs in sorted(metrics.runtime_note_packages.items()):
+                        if not pkgs:
+                            continue
+                        joined = ", ".join(pkgs)
+                        print(status_messages.status(f"notes detail: {reason}: {joined}", level="info"))
+                else:
+                    for reason, pkgs in sorted(metrics.runtime_note_packages.items()):
+                        if not pkgs:
+                            continue
+                        if len(pkgs) <= 10:
+                            joined = ", ".join(pkgs)
+                            print(status_messages.status(f"notes pkgs: {reason}: {joined}", level="info"))
+
+        if metrics.preflight_skips or metrics.runtime_skips:
+            skip_parts: list[str] = []
+            if metrics.preflight_skips:
+                total = sum(metrics.preflight_skips.values())
+                skip_parts.append(f"preflight={total}")
+            if metrics.runtime_skips:
+                total = sum(metrics.runtime_skips.values())
+                skip_parts.append(f"runtime={total}")
+            if skip_parts:
+                print(status_messages.status(f"skips: {', '.join(skip_parts)}", level="info"))
+
+        # Compact mode: avoid duplicating information already captured by the [COPY] line above.
+        # Leave the evidence path + notes/skips lines intact.
+        if _harvest_compact_mode():
+            return
+
+        # Non-compact: print the human-readable rollups as well.
         print(
             status_messages.status(
                 (
@@ -366,33 +490,6 @@ def render_harvest_summary(
                 level="info",
             )
         )
-        output_root = _run_output_root(harvest_result)
-        if output_root:
-            print(status_messages.status(f"output: {output_root}", level="info"))
-        if metadata.get("delta_filter_applied"):
-            delta_total = metadata.get("delta_filter_total")
-            delta_matched = metadata.get("delta_filter_matched")
-            parts: list[str] = []
-            if delta_total is not None:
-                parts.append(f"changed={delta_total}")
-            if delta_matched is not None:
-                parts.append(f"matched_in_scope={delta_matched}")
-            detail = f" ({', '.join(parts)})" if parts else ""
-            print(status_messages.status(f"delta: applied{detail}", level="info"))
-        if metrics.preflight_skips or metrics.runtime_skips:
-            skip_parts: list[str] = []
-            if metrics.preflight_skips:
-                total = sum(metrics.preflight_skips.values())
-                skip_parts.append(f"preflight={total}")
-            if metrics.runtime_skips:
-                total = sum(metrics.runtime_skips.values())
-                skip_parts.append(f"runtime={total}")
-            print(
-                status_messages.status(
-                    f"skips: {', '.join(skip_parts)}",
-                    level="info",
-                )
-            )
         return
 
     if not simple_mode:
@@ -1021,6 +1118,26 @@ def _harvest_simple_mode() -> bool:
 
 def is_harvest_simple_mode() -> bool:
     return _harvest_simple_mode()
+
+
+def _harvest_compact_mode() -> bool:
+    # Default to compact operator output for harvest; detailed logs are available via verbose flags.
+    return os.getenv("SCYTALEDROID_HARVEST_COMPACT", "1").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _harvest_verbose_mode() -> bool:
+    # When enabled, include extra operator-facing detail (e.g., list affected packages for notes).
+    return os.getenv("SCYTALEDROID_HARVEST_VERBOSE", "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 

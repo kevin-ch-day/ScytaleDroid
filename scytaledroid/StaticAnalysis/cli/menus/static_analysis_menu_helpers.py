@@ -278,14 +278,16 @@ def _sort_report_key(stored):
     except (TypeError, ValueError):
         code_value = None
     generated_at = report.generated_at or ""
+    # Avoid filesystem mtimes for ordering. Prefer deterministic keys.
+    file_name = ""
     try:
-        file_mtime = stored.path.stat().st_mtime
-    except OSError:
-        file_mtime = 0.0
+        file_name = stored.path.name
+    except Exception:
+        file_name = ""
     return (
         code_value if code_value is not None else -1,
         generated_at,
-        file_mtime,
+        file_name,
     )
 
 

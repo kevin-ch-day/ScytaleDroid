@@ -100,6 +100,10 @@ def _ensure_app_version(
     try:
         from scytaledroid.Database.db_utils.package_utils import normalize_package_name
         from scytaledroid.Database.db_utils.publisher_rules import apply_publisher_mapping
+        from scytaledroid.Database.db_utils.reference_seed import ensure_default_reference_rows
+
+        # Defensive: some deployments enforce FKs from apps.profile_key/publisher_key.
+        ensure_default_reference_rows()
 
         cleaned_package = normalize_package_name(package_for_run, context="database")
         if not cleaned_package:
@@ -124,11 +128,28 @@ def _ensure_app_version(
                     (display_name, app_id),
                 )
         else:
-            app_id = core_q.run_sql(
-                "INSERT INTO apps (package_name, display_name, profile_key) VALUES (%s,%s,%s)",
-                (cleaned_package, display_name, "UNKNOWN"),
-                return_lastrowid=True,
+            # Canonical schema includes publisher_key; older schemas may not. Try the full insert first,
+            # then fall back to the legacy column set if the DB lacks publisher_key.
+            insert_sql_full = (
+                "INSERT INTO apps (package_name, display_name, profile_key, publisher_key) VALUES (%s,%s,%s,%s)"
             )
+            insert_sql_legacy = "INSERT INTO apps (package_name, display_name, profile_key) VALUES (%s,%s,%s)"
+            try:
+                app_id = core_q.run_sql(
+                    insert_sql_full,
+                    (cleaned_package, display_name, "UNCLASSIFIED", "UNKNOWN"),
+                    return_lastrowid=True,
+                )
+            except Exception as exc:
+                text = str(exc).lower()
+                if "unknown column" in text and "publisher_key" in text:
+                    app_id = core_q.run_sql(
+                        insert_sql_legacy,
+                        (cleaned_package, display_name, "UNCLASSIFIED"),
+                        return_lastrowid=True,
+                    )
+                else:
+                    raise
             app_id = int(app_id) if app_id else None
             apply_publisher_mapping([cleaned_package])
         if app_id is None:

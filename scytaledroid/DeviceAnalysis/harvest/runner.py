@@ -52,6 +52,31 @@ def execute_harvest(
     """Execute the provided harvest plan and return per-package results."""
 
     options = load_options(config, pull_mode=pull_mode)
+    # DB is optional for OSS vNext. If the backend is configured but not reachable,
+    # do not skip filesystem harvests due to DB mirror failures.
+    if options.write_db:
+        try:
+            from scytaledroid.Database.db_utils import diagnostics  # local import (optional DB)
+
+            if not diagnostics.check_connection():
+                print(
+                    status_messages.status(
+                        "DB configured but unreachable; continuing harvest without DB writes.",
+                        level="warn",
+                    )
+                )
+                options = HarvestOptions(
+                    dedupe_sha256=options.dedupe_sha256,
+                    keep_last=options.keep_last,
+                    write_db=False,
+                    write_meta=options.write_meta,
+                    meta_fields=options.meta_fields,
+                    pull_mode=options.pull_mode,
+                )
+        except Exception:
+            # If diagnostics isn't available, keep the existing posture; DB failures will
+            # still be logged by the DB session helpers.
+            pass
     compact_mode = _compact_mode()
     tracker = DedupeTracker(options)
     resolved_serial = serial or dest_root.name
@@ -188,7 +213,23 @@ def execute_harvest(
                 "harvest.db.error",
                 extra={"stage": "ensure_storage_root", "error": str(exc)},
             )
-            raise
+            # DB is a mirror/index layer for harvest; filesystem artifacts are canonical.
+            # Do not block a paper-grade APK pull due to DB mirror failure.
+            print(
+                status_messages.status(
+                    "DB mirror unavailable (storage root write failed); continuing harvest without DB writes.",
+                    level="warn",
+                )
+            )
+            options = HarvestOptions(
+                dedupe_sha256=options.dedupe_sha256,
+                keep_last=options.keep_last,
+                write_db=False,
+                write_meta=options.write_meta,
+                meta_fields=options.meta_fields,
+                pull_mode=options.pull_mode,
+            )
+            storage_root_id = None
     else:
         storage_root_id = None
 
@@ -334,8 +375,11 @@ def _execute_package_plan(
     package_dir = dest_root / package_name
     package_dir.mkdir(parents=True, exist_ok=True)
 
+    # DB is a mirror for harvest; if any DB op fails for this package, proceed with filesystem
+    # harvest and record the reason in result.skipped for operator visibility.
+    effective_options = options
     app_id: int | None = None
-    if options.write_db:
+    if effective_options.write_db:
         try:
             app_id = repo.ensure_app_definition(
                 package_name,
@@ -346,10 +390,10 @@ def _execute_package_plan(
             stats["db_app_definitions"] += 1
         except Exception as exc:
             message = f"Failed to ensure app definition for {package_name}: {exc}"
-            log.error(message, category="database")
+            log.warning(message, category="database")
             stats["db_errors"] += 1
             emit(
-                "error",
+                "warning",
                 "harvest.db.error",
                 extra={
                     "package_name": package_name,
@@ -358,10 +402,17 @@ def _execute_package_plan(
                 },
             )
             result.skipped.append("app_definition_failed")
-            return result
+            effective_options = HarvestOptions(
+                dedupe_sha256=options.dedupe_sha256,
+                keep_last=options.keep_last,
+                write_db=False,
+                write_meta=options.write_meta,
+                meta_fields=options.meta_fields,
+                pull_mode=options.pull_mode,
+            )
 
     group_id: int | None = None
-    if options.write_db and len(plan.artifacts) > 1:
+    if effective_options.write_db and len(plan.artifacts) > 1:
         try:
             group_id = repo.ensure_split_group(
                 package_name,
@@ -370,10 +421,10 @@ def _execute_package_plan(
             stats["db_split_groups"] += 1
         except Exception as exc:
             message = f"Failed to ensure split group for {package_name}: {exc}"
-            log.error(message, category="database")
+            log.warning(message, category="database")
             stats["db_errors"] += 1
             emit(
-                "error",
+                "warning",
                 "harvest.db.error",
                 extra={
                     "package_name": package_name,
@@ -381,8 +432,16 @@ def _execute_package_plan(
                     "error": str(exc),
                 },
             )
-            result.errors.append(ArtifactError(source_path="split-group", reason=str(exc)))
-            return result
+            result.skipped.append("split_group_failed")
+            effective_options = HarvestOptions(
+                dedupe_sha256=options.dedupe_sha256,
+                keep_last=options.keep_last,
+                write_db=False,
+                write_meta=options.write_meta,
+                meta_fields=options.meta_fields,
+                pull_mode=options.pull_mode,
+            )
+            group_id = None
 
     ui_index = display_index or package_index
     ui_total = display_total or package_total
@@ -410,7 +469,7 @@ def _execute_package_plan(
             app_id=app_id,
             group_id=group_id,
             verbose=verbose,
-            options=options,
+            options=effective_options,
             tracker=tracker,
             session_stamp=session_stamp,
             storage_root_id=storage_root_id,
@@ -819,8 +878,17 @@ def _print_progress_line(
     package_index = min(package_index, package_total)
     skip_hint = ""
     if result.skipped:
-        recent_reason = str(result.skipped[0])
-        skip_hint = f" (latest_skip={recent_reason})"
+        # Avoid misleading "latest_skip" when the package still wrote artifacts and the
+        # skip reason is a non-fatal DB mirror note.
+        non_fatal = {"app_definition_failed", "split_group_failed"}
+        recent_reason = ""
+        for r in result.skipped:
+            if r in non_fatal and result.ok:
+                continue
+            recent_reason = str(r)
+            break
+        if recent_reason:
+            skip_hint = f" (latest_skip={recent_reason})"
     line = (
         f"Progress: {package_index}/{package_total} "
         f"ok={ok_count} fail={err_count} skipped={skipped}{skip_hint}"

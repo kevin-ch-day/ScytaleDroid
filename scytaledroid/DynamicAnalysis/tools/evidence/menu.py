@@ -18,9 +18,24 @@ from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_mes
 def _dynamic_evidence_root() -> Path:
     return Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
 
-def _canonical_paper2_freeze_anchor_path() -> Path:
-    # Paper #2 citation anchor (PM/reviewer locked).
-    return Path(app_config.DATA_DIR) / "archive" / "dataset_freeze-20260208T201527Z.json"
+def _canonical_profile_v2_freeze_anchor_path() -> Path:
+    """Return the canonical Profile v2 freeze anchor path.
+
+    Prefer the stable filename `data/archive/dataset_freeze.json`. Fall back to
+    the historically pinned timestamped filename if present.
+    """
+
+    archive = Path(app_config.DATA_DIR) / "archive"
+    stable = archive / "dataset_freeze.json"
+    if stable.exists():
+        return stable
+    legacy = archive / "dataset_freeze-20260208T201527Z.json"
+    return legacy
+
+
+# Back-compat alias (internal name only; keep callable for older imports).
+def _canonical_paper2_freeze_anchor_path() -> Path:  # pragma: no cover
+    return _canonical_profile_v2_freeze_anchor_path()
 
 
 def _safe_rmtree(path: Path, *, root: Path) -> bool:
@@ -148,7 +163,7 @@ def _cleanup_dynamic_workspace(
 def evidence_cleanup_workspace(*, pause: bool = True) -> None:
     """Operator-facing cleanup for dynamic evidence workspace (safe)."""
     root = _dynamic_evidence_root()
-    freeze_path = _canonical_paper2_freeze_anchor_path()
+    freeze_path = _canonical_profile_v2_freeze_anchor_path()
     freeze_ids = _load_freeze_included_ids(freeze_path=freeze_path) if freeze_path.exists() else None
 
     print()
@@ -357,13 +372,19 @@ def _list_packages_db() -> list[str]:
     return out
 
 
-def _fetch_paper2_ordering_db() -> list[str]:
-    """Best-effort fetch of DB-backed 'paper2' ordering (post-paper hygiene)."""
+def _fetch_profile_v2_ordering_db() -> list[str]:
+    """Best-effort fetch of DB-backed v2 ordering (post-paper hygiene)."""
     try:
         from scytaledroid.Database.db_func.apps.app_ordering import fetch_ordering
     except Exception:
         return []
+    # Ordering key remains 'paper2' for DB compatibility.
     return fetch_ordering("paper2")
+
+
+# Back-compat alias (internal name only).
+def _fetch_paper2_ordering_db() -> list[str]:  # pragma: no cover
+    return _fetch_profile_v2_ordering_db()
 
 
 def _render_app_runs(root: Path, display_name: str, package_name: str, runs: list[dict]) -> None:
@@ -446,7 +467,7 @@ def evidence_view_app_runs(*, pause: bool = True) -> None:
         return
     labels = _load_app_labels(packages)
     app_list: list[tuple[str, str]] = []
-    ordered = _fetch_paper2_ordering_db()
+    ordered = _fetch_profile_v2_ordering_db()
     if ordered:
         seen = set()
         for pkg in ordered:

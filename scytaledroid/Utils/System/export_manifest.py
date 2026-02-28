@@ -1,4 +1,4 @@
-"""Paper export manifest helpers.
+"""Publication/export manifest helpers (legacy schema key compatibility).
 
 This module implements deterministic manifest comparison for frozen export
 artifacts. It is intentionally file-system only (no DB access).
@@ -16,8 +16,11 @@ from typing import Any
 MANIFEST_VERSION = 1
 # Legacy schema field name is `paper`. Keep accepting paper ids for back-compat.
 # Newer tooling should treat this as a generic export/profile id, not a paper id.
-ALLOWED_PAPER_IDS = {"paper2", "publication"}
-PAPER_ID = "paper2"
+ALLOWED_EXPORT_IDS = {"paper2", "publication"}
+EXPORT_ID = "paper2"
+# Back-compat aliases (internal API only).
+ALLOWED_PAPER_IDS = ALLOWED_EXPORT_IDS
+PAPER_ID = EXPORT_ID
 NORM_NONE = "none"
 NORM_TEX_WHITESPACE_LF = "tex_whitespace_lf"
 _HEX_64_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -65,7 +68,7 @@ def validate_manifest_schema(payload: dict[str, Any]) -> list[str]:
     if int(payload.get("manifest_version") or -1) != MANIFEST_VERSION:
         issues.append("manifest_version_invalid")
     paper_id = str(payload.get("paper") or "").strip()
-    if paper_id not in ALLOWED_PAPER_IDS:
+    if paper_id not in ALLOWED_EXPORT_IDS:
         issues.append("paper_invalid")
 
     artifacts = payload.get("artifacts")
@@ -223,6 +226,9 @@ def dump_manifest(path: Path, payload: dict[str, Any]) -> None:
 
 __all__ = [
     "MANIFEST_VERSION",
+    "ALLOWED_EXPORT_IDS",
+    "EXPORT_ID",
+    "ALLOWED_PAPER_IDS",
     "PAPER_ID",
     "NORM_NONE",
     "NORM_TEX_WHITESPACE_LF",

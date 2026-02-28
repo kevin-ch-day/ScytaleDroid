@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -332,6 +333,87 @@ class PersistedSnapshot:
     persisted_rows: int
 
 
+def persist_scoped_snapshot(
+    serial: str,
+    rows: list[dict[str, object]],
+    *,
+    scope_id: str,
+    package_hash: str | None = None,
+    package_list_hash: str | None = None,
+    package_signature_hash: str | None = None,
+    build_fingerprint: str | None = None,
+    duration_seconds: float | None = None,
+) -> PersistedSnapshot:
+    """Persist a scoped inventory snapshot under data/state/<serial>/inventory/scoped/.
+
+    This is filesystem-only:
+    - does NOT update inventory/latest.json (canonical snapshot pointer)
+    - does NOT write to the database
+    """
+
+    captured_at = datetime.now(UTC)
+    timestamp = captured_at.strftime("%Y%m%d-%H%M%S")
+    device_dir = _STATE_ROOT / serial / "inventory" / "scoped"
+    device_dir.mkdir(parents=True, exist_ok=True)
+
+    normalized_rows: list[dict[str, object]] = []
+    for entry in rows:
+        if not isinstance(entry, dict):
+            continue
+        raw_name = entry.get("package_name")
+        if isinstance(raw_name, str) and raw_name.strip():
+            cleaned = normalize_package_name(raw_name, context="inventory")
+            if cleaned and cleaned != raw_name:
+                entry = dict(entry)
+                entry["raw_package_name"] = raw_name
+                entry["package_name"] = cleaned
+        normalized_rows.append(entry)
+
+    payload: dict[str, object] = {
+        "generated_at": captured_at.isoformat().replace("+00:00", "Z"),
+        "device_serial": serial,
+        "snapshot_type": "scoped",
+        "scope_id": str(scope_id),
+        "package_count": len(normalized_rows),
+        "packages": normalized_rows,
+    }
+    if package_hash:
+        payload["package_hash"] = package_hash
+    if package_list_hash:
+        payload["package_list_hash"] = package_list_hash
+    if package_signature_hash:
+        payload["package_signature_hash"] = package_signature_hash
+    if build_fingerprint:
+        payload["build_fingerprint"] = build_fingerprint
+    if duration_seconds is not None:
+        payload["duration_seconds"] = duration_seconds
+
+    slug = re.sub(r"[^a-zA-Z0-9_\\-]+", "_", str(scope_id).strip())[:40] or "scope"
+    target_file = device_dir / f"inventory_scoped_{slug}_{timestamp}.json"
+    payload_text = json.dumps(payload, indent=2, sort_keys=True)
+    target_file.write_text(payload_text, encoding="utf-8")
+
+    latest_scoped = device_dir / f"latest_scoped_{slug}.json"
+    latest_scoped.write_text(payload_text, encoding="utf-8")
+
+    resolved_path = target_file.resolve()
+    try:
+        display_path = resolved_path.relative_to(Path.cwd())
+    except ValueError:
+        display_path = resolved_path
+
+    # Best-effort retention for scoped history files (separate from canonical inventory retention).
+    try:
+        scoped_files = sorted([p for p in device_dir.glob(f"inventory_scoped_{slug}_*.json") if p.is_file()], reverse=True)
+        for p in scoped_files[_INVENTORY_RETENTION_N :]:
+            p.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+    log.info(f"Scoped inventory written to {display_path}", category="device")
+    return PersistedSnapshot(path=display_path, snapshot_id=None, persisted_rows=len(normalized_rows))
+
+
 def persist_snapshot(
     serial: str,
     rows: list[dict[str, object]],
@@ -518,6 +600,7 @@ __all__ = [
     "load_latest_inventory",
     "load_latest_snapshot_meta",
     "persist_snapshot",
+    "persist_scoped_snapshot",
     "load_canonical_metadata",
     "PersistedSnapshot",
 ]

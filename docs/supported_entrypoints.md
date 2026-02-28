@@ -14,6 +14,7 @@ public interface and are expected to remain compatible across minor releases.
 
 These are intended for reproducible artifact generation and automation:
 
+- `scripts/publication/export_profile.py` (preferred dispatcher; requires `--profile v2|v3`)
 - `scripts/publication/publication_exports.py`
 - `scripts/publication/publication_results_numbers.py`
 - `scripts/publication/publication_scientific_qa.py`
@@ -21,6 +22,9 @@ These are intended for reproducible artifact generation and automation:
 - `scripts/publication/publication_ml_audit_report.py`
 - `scripts/publication/ingest_publication_bundle.py` (optional; DB mirror ingest)
 - `scripts/publication/profile_v3_exports.py`
+- `scripts/operator/run_profile_v2_demo.sh` (prints `EXPORT PASS` / `LINT PASS`)
+- `scripts/operator/run_profile_v3_demo.sh` (prints `EXPORT PASS` / `LINT PASS`)
+- `scripts/profile_tools/profile_v3_integrity_gates.py` (one-screen PASS/FAIL summary; v3 paper gate runner)
 
 ## Not supported (best-effort)
 

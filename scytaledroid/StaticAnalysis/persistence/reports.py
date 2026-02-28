@@ -124,11 +124,34 @@ def list_reports() -> list[StoredReport]:
     if not REPORTS_DIR.exists():
         return []
 
+    def _sort_key(entry: StoredReport) -> tuple:
+        report = entry.report
+        # Deterministic ordering: avoid filesystem mtimes (easy to disturb via copy/unzip/rsync).
+        generated_at = str(getattr(report, "generated_at", "") or "")
+        meta = getattr(report, "metadata", None)
+        session_stamp = ""
+        if isinstance(meta, dict):
+            session_stamp = str(meta.get("session_stamp") or "")
+        version_code = getattr(getattr(report, "manifest", None), "version_code", None)
+        try:
+            version_code_i = int(version_code) if version_code is not None else -1
+        except (TypeError, ValueError):
+            version_code_i = -1
+        return (
+            1 if generated_at else 0,
+            generated_at,
+            1 if session_stamp else 0,
+            session_stamp,
+            version_code_i,
+            entry.path.name,
+        )
+
     entries: list[StoredReport] = []
-    for path in sorted(REPORTS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+    for path in REPORTS_DIR.glob("*.json"):
         report = _read_report(path)
         if report:
             entries.append(StoredReport(path=path, report=report))
+    entries.sort(key=_sort_key, reverse=True)
     return entries
 
 

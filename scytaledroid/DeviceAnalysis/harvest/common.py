@@ -14,6 +14,7 @@ from pathlib import Path
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis.adb import client as adb_client
 from scytaledroid.DeviceAnalysis.adb import packages as adb_packages
+from scytaledroid.Database.db_core import db_config as core_db_config
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
@@ -95,7 +96,10 @@ def load_options(config: object, *, pull_mode: str) -> HarvestOptions:
     if keep_last < 1:
         keep_last = 1
 
-    write_db = bool(getattr(config, "HARVEST_WRITE_DB", True))
+    # OSS posture: DB is optional. If the DB backend is disabled, never attempt DB writes.
+    # This prevents harvest from skipping packages due to DB connectivity/schema errors.
+    write_db_cfg = bool(getattr(config, "HARVEST_WRITE_DB", True))
+    write_db = bool(write_db_cfg and core_db_config.db_enabled())
     write_meta = bool(getattr(config, "HARVEST_WRITE_META", True))
 
     meta_fields_raw = getattr(config, "HARVEST_META_FIELDS", DEFAULT_META_FIELDS)

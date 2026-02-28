@@ -178,7 +178,10 @@ def _artifact_manifest_sha256(group) -> str | None:
 def _dedupe_artifacts(artifacts: Sequence) -> list:
     """Return artifacts de-duplicated by digest + split label, preferring newest."""
 
-    preferred: dict[tuple[str, str], tuple[object, float, int]] = {}
+    # Avoid filesystem mtime as a primary ordering signal; it is easy to disturb (copy, unzip, rsync)
+    # and can introduce silent drift in paper-grade workflows. Instead, prefer deterministic keys
+    # derived from the on-disk library structure and artifact metadata.
+    preferred: dict[tuple[str, str], tuple[object, tuple, int]] = {}
     for index, artifact in enumerate(artifacts):
         try:
             sha = getattr(artifact, "sha256", None)
@@ -195,10 +198,10 @@ def _dedupe_artifacts(artifacts: Sequence) -> list:
         except Exception:
             split_label = ""
         key = (_normalise_digest(sha, artifact), split_label or "")
-        mtime = _artifact_mtime(artifact)
+        recency = _artifact_recency_key(artifact)
         existing = preferred.get(key)
-        if existing is None or mtime > existing[1]:
-            preferred[key] = (artifact, mtime, index)
+        if existing is None or recency > existing[1]:
+            preferred[key] = (artifact, recency, index)
     ordered = sorted(preferred.values(), key=lambda item: item[2])
     return [item[0] for item in ordered]
 
@@ -230,6 +233,63 @@ def _artifact_mtime(artifact) -> float:
     except Exception:
         return 0.0
     return 0.0
+
+
+def _artifact_recency_key(artifact) -> tuple:
+    """Deterministic key used to prefer one artifact when duplicates are present."""
+
+    # Prefer capture day extracted from the on-disk path: data/device_apks/<serial>/<YYYYMMDD>/...
+    capture_day = 0
+    try:
+        path = getattr(artifact, "path", None)
+        if path:
+            path_obj = Path(path)
+            for part in path_obj.parts:
+                if len(part) == 8 and part.isdigit():
+                    value = int(part)
+                    if 20000101 <= value <= 20991231 and value > capture_day:
+                        capture_day = value
+    except Exception:
+        capture_day = 0
+
+    # Next, prefer higher version_code when present.
+    version_code = 0
+    try:
+        meta = getattr(artifact, "metadata", {}) or {}
+        raw = meta.get("version_code") if isinstance(meta, Mapping) else None
+        if raw is not None:
+            version_code = int(raw)
+    except Exception:
+        version_code = 0
+
+    # Next, prefer explicit session stamps in metadata.
+    session_stamp = ""
+    try:
+        meta = getattr(artifact, "metadata", {}) or {}
+        if isinstance(meta, Mapping):
+            session_stamp = str(meta.get("session_stamp") or "")
+    except Exception:
+        session_stamp = ""
+
+    # Stable tie-breakers.
+    try:
+        path_text = str(Path(getattr(artifact, "path", "")).as_posix())
+    except Exception:
+        path_text = ""
+    try:
+        label = str(getattr(artifact, "artifact_label", None) or "")
+    except Exception:
+        label = ""
+    return (
+        1 if capture_day else 0,
+        capture_day,
+        1 if version_code else 0,
+        version_code,
+        1 if session_stamp else 0,
+        session_stamp,
+        label,
+        path_text,
+    )
 
 
 __all__ = [

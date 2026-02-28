@@ -1,4 +1,4 @@
-"""Deterministic ML configuration fingerprinting (Paper #2).
+"""Deterministic ML configuration fingerprinting (Profile v2 / legacy keys).
 
 Existence checks are not sufficient for reuse safety. This module computes a stable
 fingerprint over the semantic configuration that affects model outputs.
@@ -17,8 +17,8 @@ def compute_ml_config_fingerprint(*, payload: dict[str, Any]) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
-def paper2_fingerprint_payload(*, ml_config: Any) -> dict[str, Any]:
-    """Build the semantic fingerprint payload for Paper #2.
+def profile_v2_fingerprint_payload(*, ml_config: Any) -> dict[str, Any]:
+    """Build the semantic fingerprint payload for Profile v2 (legacy paper2 keys).
 
     Include only items that can change outputs. Exclude timestamps, hostnames, paths.
     """
@@ -67,6 +67,9 @@ def paper2_fingerprint_payload(*, ml_config: Any) -> dict[str, Any]:
         },
     }
 
+def paper2_fingerprint_payload(*, ml_config: Any) -> dict[str, Any]:
+    """Back-compat alias for the v2 fingerprint payload builder."""
+    return profile_v2_fingerprint_payload(ml_config=ml_config)
 
-__all__ = ["compute_ml_config_fingerprint", "paper2_fingerprint_payload"]
 
+__all__ = ["compute_ml_config_fingerprint", "paper2_fingerprint_payload", "profile_v2_fingerprint_payload"]

@@ -47,6 +47,27 @@ def _safe_split_token(value: object) -> str | None:
     return token if token else None
 
 
+def _json_safe_list(values: object, *, limit: int = 3) -> list[str]:
+    """Best-effort stringify list-like values for JSON batch summaries."""
+
+    if values is None:
+        return []
+    if isinstance(values, (str, bytes)):
+        return [str(values)[:200]]
+    if not isinstance(values, list):
+        try:
+            values = list(values)  # type: ignore[arg-type]
+        except Exception:
+            return [str(values)[:200]]
+    out: list[str] = []
+    for item in values[: max(0, int(limit))]:
+        try:
+            out.append(str(item)[:200])
+        except Exception:
+            out.append("<unstringifiable>")
+    return out
+
+
 def _artifact_set_for_batch_log(artifact: object) -> str:
     """Resolve artifact set for batch logs ("base" or a split token)."""
     from scytaledroid.StaticAnalysis.cli.views.view_sections import extract_integrity_profiles
@@ -77,7 +98,7 @@ def _artifact_set_for_batch_log(artifact: object) -> str:
 
 
 def _resolve_batch_groups(groups, dataset_pkgs: set[str]) -> list[object]:
-    # Batch determinism: select one "best" artifact group per package (newest by session stamp + mtime).
+    # Batch determinism: select one "best" artifact group per package (avoid filesystem mtimes as primary key).
     def _artifact_mtime(artifact) -> float:
         path_obj = getattr(artifact, "path", None)
         if isinstance(path_obj, Path):
@@ -94,9 +115,59 @@ def _resolve_batch_groups(groups, dataset_pkgs: set[str]) -> list[object]:
     def _group_latest_mtime(group) -> float:
         return max((_artifact_mtime(a) for a in getattr(group, "artifacts", []) or []), default=0.0)
 
-    def _group_recency_key(group) -> tuple[int, str, float]:
+    def _group_capture_day(group) -> int | None:
+        def _parse_day(part: str) -> int | None:
+            token = part.strip()
+            if len(token) != 8 or not token.isdigit():
+                return None
+            value = int(token)
+            if value < 20000101 or value > 20991231:
+                return None
+            return value
+
+        best: int | None = None
+        for artifact in getattr(group, "artifacts", []) or []:
+            path_obj = getattr(artifact, "path", None)
+            if not isinstance(path_obj, Path):
+                try:
+                    path_obj = Path(str(path_obj))
+                except Exception:
+                    continue
+            for part in path_obj.parts:
+                day = _parse_day(part)
+                if day is not None and (best is None or day > best):
+                    best = day
+        return best
+
+    def _group_version_code(group) -> int | None:
+        base = getattr(group, "base_artifact", None)
+        if base is None:
+            return None
+        meta = getattr(base, "metadata", None)
+        if not isinstance(meta, dict):
+            return None
+        raw = meta.get("version_code")
+        if raw is None:
+            return None
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return None
+
+    def _group_recency_key(group) -> tuple:
+        day = _group_capture_day(group)
+        ver = _group_version_code(group)
         stamp = str(getattr(group, "session_stamp", None) or "")
-        return (1 if stamp else 0, stamp, _group_latest_mtime(group))
+        return (
+            1 if day is not None else 0,
+            int(day) if day is not None else 0,
+            1 if ver is not None else 0,
+            int(ver) if ver is not None else 0,
+            1 if stamp else 0,
+            stamp,
+            str(getattr(group, "group_key", "") or ""),
+            _group_latest_mtime(group),
+        )
 
     def _group_has_any_existing_artifact(group) -> bool:
         for artifact in getattr(group, "artifacts", []) or []:
@@ -176,10 +247,26 @@ def _write_batch_summary(
     apps_failed: int,
     ended_at: str | None,
 ) -> None:
+    batch_summary_path.parent.mkdir(parents=True, exist_ok=True)
+    started_at = None
+    if batch_rows:
+        # Older dataset batch rows used "started_at"; v3 batch rows use "started_at_utc".
+        first = batch_rows[0]
+        started_at = first.get("started_at") or first.get("started_at_utc")
+        if not started_at:
+            for row in batch_rows:
+                candidate = row.get("started_at") or row.get("started_at_utc")
+                if candidate:
+                    started_at = candidate
+                    break
     payload = {
         "batch_id": batch_id,
-        "started_at": batch_rows[0]["started_at"] if batch_rows else None,
+        # Backward compatible keys
+        "started_at": started_at,
         "ended_at": ended_at,
+        # Preferred explicit UTC keys
+        "started_at_utc": started_at,
+        "ended_at_utc": ended_at,
         "apps_total": apps_total,
         "apps_completed": apps_completed,
         "apps_failed": apps_failed,
@@ -433,6 +520,7 @@ def run_dataset_static_batch(
     batch_rows: list[dict[str, object]] = []
 
     failures: list[str] = []
+    failed_apps: set[str] = set()
     total = len(batch_groups)
     completed = 0
     batch_start = time.monotonic()
@@ -455,7 +543,7 @@ def run_dataset_static_batch(
         index = completed + 1
         print(
             status_messages.status(
-                f"Batch {index}/{total}: {selection_label} | done={completed} fail={len(failures)}",
+                f"Batch {index}/{total}: {selection_label} | done={completed} fail={len(failed_apps)}",
                 level="info",
             )
         )
@@ -802,7 +890,7 @@ def run_dataset_static_batch(
                 "plan_path": plan_path,
                 "plan_exists": bool(plan_exists),
                 "failures_count": len(getattr(outcome, "failures", []) or []) if outcome else 0,
-                "failures_sample": (getattr(outcome, "failures", []) or [])[:3] if outcome else [],
+                "failures_sample": _json_safe_list(getattr(outcome, "failures", []) if outcome else [], limit=3),
                 "aborted": bool(getattr(outcome, "aborted", False)) if outcome else False,
                 "abort_reason": getattr(outcome, "abort_reason", None) if outcome else None,
                 "started_at": app_started_at,
@@ -862,10 +950,15 @@ def run_dataset_static_batch(
             apps_failed=len(failures),
             ended_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         )
+        wrote_summary = True
     except Exception as exc:
+        wrote_summary = False
         print(status_messages.status(f"Failed to write batch summary: {exc}", level="warn"))
     print(status_messages.status(f"Completed {completed}/{total} apps in {elapsed:.1f}s.", level="info"))
-    print(status_messages.status(f"Batch summary → {batch_summary_path}", level="info"))
+    if wrote_summary:
+        print(status_messages.status(f"Batch summary → {batch_summary_path}", level="info"))
+    else:
+        print(status_messages.status("Batch summary NOT WRITTEN (see warning above).", level="warn"))
 
 
 def run_profile_v3_static_batch(
@@ -895,9 +988,33 @@ def run_profile_v3_static_batch(
         payload = {}
     if not isinstance(payload, dict):
         payload = {}
+    # Prefer catalog app display names for v3 batch logs to avoid "Drive vs Docs" ambiguity.
+    try:
+        catalog_name_map = {
+            str(pkg).strip().lower(): str((meta or {}).get("app") or "").strip()
+            for pkg, meta in payload.items()
+            if str(pkg).strip()
+        }
+    except Exception:
+        catalog_name_map = {}
     cohort_pkgs = {str(pkg).strip().lower() for pkg in payload.keys() if str(pkg).strip()}
     if not cohort_pkgs:
         print(status_messages.status("Profile v3 catalog has no apps.", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    # Fail closed: batch v3 cohort runs should not silently drop apps.
+    available = {g.package_name.strip().lower() for g in groups if g.package_name and (g.base_artifact is not None)}
+    missing = sorted(cohort_pkgs - available)
+    if missing:
+        sample = ", ".join(missing[:8]) + (" …" if len(missing) > 8 else "")
+        print(
+            status_messages.status(
+                f"Profile v3 cohort packages missing from local APK library: {len(missing)} (e.g., {sample})",
+                level="error",
+            )
+        )
+        print(status_messages.status("Run Device Analysis → Pull APKs → Paper #3 Dataset, then retry.", level="info"))
         prompt_utils.press_enter_to_continue()
         return
 
@@ -921,28 +1038,36 @@ def run_profile_v3_static_batch(
     batch_rows: list[dict[str, object]] = []
 
     failures: list[str] = []
+    failed_apps: set[str] = set()
     total = len(batch_groups)
     completed = 0
     batch_start = time.monotonic()
 
     print()
     menu_utils.print_section("Running Profile v3 cohort (batch static)")
+    print(
+        status_messages.status(
+            f"[COPY] static_v3_batch start batch_id={batch_id} apps_total={total} catalog={catalog_path}",
+            level="info",
+        )
+    )
     for group in batch_groups:
         app_started_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
         session_stamp = normalize_session_stamp(f"{batch_id}-{group.package_name}")
 
-        display_name = ""
-        for artifact in group.artifacts:
-            label = artifact.metadata.get("app_label")
-            if isinstance(label, str) and label.strip():
-                display_name = label.strip()
-                break
+        display_name = catalog_name_map.get(group.package_name.strip().lower(), "")
+        if not display_name:
+            for artifact in group.artifacts:
+                label = artifact.metadata.get("app_label")
+                if isinstance(label, str) and label.strip():
+                    display_name = label.strip()
+                    break
         selection_label = f"{display_name} ({group.package_name})" if display_name else group.package_name
         selection = ScopeSelection(scope="app", label=selection_label, groups=(group,))
         index = completed + 1
         print(
             status_messages.status(
-                f"Batch {index}/{total}: {selection_label} | done={completed} fail={len(failures)}",
+                f"Batch {index}/{total}: {selection_label} | done={completed} fail={len(failed_apps)}",
                 level="info",
             )
         )
@@ -970,7 +1095,21 @@ def run_profile_v3_static_batch(
                 batch_id=batch_id,
             )
         except Exception as exc:
+            failed_apps.add(group.package_name)
             failures.append(f"{group.package_name}:{exc.__class__.__name__}")
+            outcome = None
+
+        # Treat non-exception run failures (e.g., DB persistence rollback) as failures for batch accounting.
+        outcome_failures = list(getattr(outcome, "failures", []) or []) if outcome is not None else []
+        outcome_failures_count = len(outcome_failures)
+        if outcome_failures_count > 0:
+            failed_apps.add(group.package_name)
+            token = outcome_failures[0]
+            try:
+                token = str(token)
+            except Exception:
+                token = "run_failure"
+            failures.append(f"{group.package_name}:run_failed:{token[:80]}")
 
         completed += 1
         elapsed = time.monotonic() - batch_start
@@ -983,15 +1122,18 @@ def run_profile_v3_static_batch(
                 "package_name": group.package_name,
                 "display_name": display_name,
                 "started_at_utc": app_started_at,
+                "ended_at_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
                 "completed": bool(outcome is not None),
-                "failures": len(failures),
+                "app_failed": bool(outcome_failures_count > 0) or (group.package_name in failed_apps),
+                "failures_count": outcome_failures_count,
+                "failures_sample": _json_safe_list(outcome_failures, limit=3),
                 "elapsed_s": round(elapsed, 3),
             }
         )
 
         print(
             status_messages.status(
-                f"Progress: {completed}/{total} | fail={len(failures)} | ETA {_format_eta(eta)}",
+                f"Progress: {completed}/{total} | fail={len(failed_apps)} | ETA {_format_eta(eta)}",
                 level="info",
             )
         )
@@ -1004,7 +1146,7 @@ def run_profile_v3_static_batch(
                 batch_rows=batch_rows,
                 apps_total=total,
                 apps_completed=completed,
-                apps_failed=len(failures),
+                apps_failed=len(failed_apps),
                 ended_at=None,
             )
         except Exception:
@@ -1033,13 +1175,24 @@ def run_profile_v3_static_batch(
             batch_rows=batch_rows,
             apps_total=total,
             apps_completed=completed,
-            apps_failed=len(failures),
+            apps_failed=len(failed_apps),
             ended_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         )
+        wrote_summary = True
     except Exception as exc:
+        wrote_summary = False
         print(status_messages.status(f"Failed to write batch summary: {exc}", level="warn"))
     print(status_messages.status(f"Completed {completed}/{total} apps in {elapsed:.1f}s.", level="info"))
-    print(status_messages.status(f"Batch summary → {batch_summary_path}", level="info"))
+    if wrote_summary:
+        print(status_messages.status(f"Batch summary → {batch_summary_path}", level="info"))
+    else:
+        print(status_messages.status("Batch summary NOT WRITTEN (see warning above).", level="warn"))
+    print(
+        status_messages.status(
+            f"[COPY] static_v3_batch end batch_id={batch_id} apps_completed={completed} apps_failed={len(failed_apps)}",
+            level="info",
+        )
+    )
 
 
 __all__ = ["run_dataset_static_batch", "run_profile_v3_static_batch"]

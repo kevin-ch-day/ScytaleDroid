@@ -148,6 +148,6 @@ def test_static_determinism_load_waiver_requires_fields(tmp_path: Path):
     waiver.write_text(json.dumps({"reason": "x"}), encoding="utf-8")
     try:
         gate._load_waiver(waiver)
-        assert False, "expected missing-field failure"
+        raise AssertionError("expected missing-field failure")
     except RuntimeError as exc:
         assert "missing required fields" in str(exc)

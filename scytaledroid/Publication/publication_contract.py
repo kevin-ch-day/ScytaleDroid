@@ -10,6 +10,7 @@ Bundle policy:
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -96,6 +97,80 @@ NOT_ALLOWED_TOP_DIRS = {
 HARD_BANNED_SUFFIXES = {".pdf"}
 
 
+def _cohort_enforcement_v2(pub_root: Path) -> list[str]:
+    """Fail-closed cohort enforcement for Profile v2 (Paper #2) publication bundle.
+
+    Contract:
+    - `manifests/dataset_freeze.json` is the source of truth for the v2 cohort packages.
+    - The publication results manifest must describe exactly the same package set.
+
+    This prevents accidental "scope drift" (e.g., exporting results for >12 apps or mixing cohorts).
+    """
+
+    errs: list[str] = []
+    freeze_path = pub_root / "manifests" / "dataset_freeze.json"
+    results_path = pub_root / "manifests" / "paper_results_v1.json"
+
+    try:
+        freeze = json.loads(freeze_path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        return [f"invalid_json:manifests/dataset_freeze.json:{type(exc).__name__}"]
+    try:
+        results = json.loads(results_path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        return [f"invalid_json:manifests/paper_results_v1.json:{type(exc).__name__}"]
+
+    apps = freeze.get("apps")
+    if not isinstance(apps, dict) or not apps:
+        return ["cohort_invalid_freeze_schema:missing_apps_dict"]
+    freeze_pkgs = {str(k).strip().lower() for k in apps.keys() if str(k).strip()}
+    if len(freeze_pkgs) != len(apps):
+        errs.append("cohort_invalid_freeze_schema:empty_or_duplicate_package_keys")
+
+    # v2 frozen cohort is locked to 12 apps. Keep this explicit and fail-closed.
+    if len(freeze_pkgs) != 12:
+        errs.append(f"cohort_expected_n_packages_v2:12:got:{len(freeze_pkgs)}")
+
+    per_app = results.get("per_app")
+    if not isinstance(per_app, list) or not per_app:
+        errs.append("cohort_invalid_results_schema:missing_per_app_list")
+        return errs
+    results_pkgs = set()
+    for item in per_app:
+        if not isinstance(item, dict):
+            continue
+        pkg = str(item.get("package_name") or "").strip().lower()
+        if pkg:
+            results_pkgs.add(pkg)
+    if len(results_pkgs) != len(per_app):
+        errs.append("cohort_invalid_results_schema:per_app_package_name_missing_or_duplicate")
+
+    n_apps = results.get("n_apps")
+    if n_apps is not None:
+        try:
+            n = int(n_apps)
+        except Exception:
+            n = None
+        if n is None:
+            errs.append("cohort_invalid_results_schema:n_apps_not_int")
+        elif n != 12:
+            errs.append(f"cohort_expected_n_apps_v2:12:got:{n}")
+
+    missing = sorted(freeze_pkgs - results_pkgs)
+    extra = sorted(results_pkgs - freeze_pkgs)
+    if missing or extra:
+        # Keep the error short but actionable: show a bounded list.
+        miss_s = ",".join(missing[:5])
+        extra_s = ",".join(extra[:5])
+        errs.append(
+            "cohort_package_mismatch_v2:"
+            + f"missing={len(missing)}({miss_s})"
+            + f":extra={len(extra)}({extra_s})"
+        )
+
+    return errs
+
+
 def lint_publication_bundle(pub_root: Path) -> PublicationLint:
     errors: list[str] = []
     warnings: list[str] = []
@@ -151,6 +226,11 @@ def lint_publication_bundle(pub_root: Path) -> PublicationLint:
             continue
         if p.suffix.lower() in HARD_BANNED_SUFFIXES:
             errors.append(f"banned_suffix:{p.relative_to(pub_root).as_posix()}")
+
+    # Cohort enforcement is a correctness guardrail for the submission-facing v2 bundle.
+    # It should never "expand" beyond the frozen cohort.
+    if (pub_root / "manifests" / "dataset_freeze.json").exists() and (pub_root / "manifests" / "paper_results_v1.json").exists():
+        errors.extend(_cohort_enforcement_v2(pub_root))
 
     return PublicationLint(ok=(len(errors) == 0), errors=errors, warnings=warnings)
 

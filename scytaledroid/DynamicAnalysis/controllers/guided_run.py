@@ -561,12 +561,12 @@ def _pre_run_scientific_checks(
     menu_utils.print_table(["Check", "Status", "Details"], rows)
     for msg in warnings:
         print(status_messages.status(msg, level="warn"))
-    if hard_failures:
-        for msg in hard_failures:
-            print(status_messages.status(msg, level="error"))
+        if hard_failures:
+            for msg in hard_failures:
+                print(status_messages.status(msg, level="error"))
         print(
             status_messages.status(
-                "Pre-run scientific checks failed. Run blocked in paper mode.",
+                "Pre-run scientific checks failed. Run blocked in freeze/profile mode.",
                 level="error",
             )
         )
@@ -1013,7 +1013,7 @@ def run_guided_dataset_run(
             print("Quota met. Additional runs are allowed and will be tracked as extra (do not change completion).")
         elif suggested_slot:
             print(f"Suggested by quota (counts toward completion): {suggested_profile}")
-        print(f"Paper cohort quota: baseline={cfg.baseline_required}, interaction={cfg.interactive_required}.")
+        print(f"Freeze cohort quota: baseline={cfg.baseline_required}, interaction={cfg.interactive_required}.")
         baseline_recommended = max(
             int(cfg.baseline_required),
             int(getattr(app_config, "DYNAMIC_DATASET_BASELINE_RECOMMENDED_RUNS", 3)),
@@ -1135,7 +1135,7 @@ def run_guided_dataset_run(
         if not local:
             print(
                 status_messages.status(
-                    "Delete is blocked: local evidence packs are missing in this workspace. Resetting tracker-only state is unsafe in paper mode.",
+                    "Delete is blocked: local evidence packs are missing in this workspace. Resetting tracker-only state is unsafe in freeze/profile mode.",
                     level="error",
                 )
             )
@@ -1448,11 +1448,11 @@ def run_guided_dataset_run(
     # Operator-facing paper quota impact label (avoid generic "countable" wording).
     prof_lc = str(run_profile or "").strip().lower()
     if "manual" in prof_lc:
-        paper_impact_label = "Paper quota impact: NO (manual is exploratory by policy)"
+        paper_impact_label = "Cohort quota impact: NO (manual is exploratory by policy)"
     elif counts_toward_completion:
-        paper_impact_label = "Paper quota impact: YES (if VALID)"
+        paper_impact_label = "Cohort quota impact: YES (if VALID)"
     else:
-        paper_impact_label = "Paper quota impact: NO (extra run / policy)"
+        paper_impact_label = "Cohort quota impact: NO (extra run / policy)"
 
     print(
         paper_impact_label
@@ -1495,7 +1495,7 @@ def run_guided_dataset_run(
         if not mapped:
             print(
                 status_messages.status(
-                    f"BLOCKED_UNKNOWN_CATEGORY: no scripted template mapping for {package_name} in paper mode.",
+                    f"BLOCKED_UNKNOWN_CATEGORY: no scripted template mapping for {package_name} in freeze/profile mode.",
                     level="error",
                 )
             )

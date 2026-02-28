@@ -12,13 +12,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import shutil
 import sys
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 # Allow running as a standalone script without installing the package.
 _REPO_ROOT = Path(__file__).resolve().parents[2]

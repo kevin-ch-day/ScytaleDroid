@@ -294,6 +294,9 @@ def resolve_harvest_plan(
     guard_decision = get_last_guard_decision()
     pull_mode: str | None = None
     auto_selection = None
+    active_rows = list(rows)
+    active_snapshot_id = snapshot_id
+    active_snapshot_captured_at = snapshot_captured_at
     # Applies only within this pull session. Once a user opts into/out of delta filtering,
     # keep it stable across re-scopes to avoid confusing behavior changes mid-run.
     apply_delta_filter_choice: bool | None = None
@@ -302,7 +305,7 @@ def resolve_harvest_plan(
     harvest_mode: str | None = None
     if auto_scope or noninteractive:
         auto_selection = harvest.select_package_scope_auto(
-            rows,
+            active_rows,
             device_serial=serial,
             is_rooted=is_rooted,
             google_allowlist=google_allowlist,
@@ -325,7 +328,7 @@ def resolve_harvest_plan(
                 pass
         else:
             selection = harvest.select_package_scope(
-                rows,
+                active_rows,
                 device_serial=serial,
                 is_rooted=is_rooted,
                 google_allowlist=google_allowlist,
@@ -348,13 +351,44 @@ def resolve_harvest_plan(
         apply_guard_metadata(
             selection,
             guard_decision,
-            snapshot_id,
-            snapshot_captured_at,
+            active_snapshot_id,
+            active_snapshot_captured_at,
         )
 
         summary = delta.extract_delta_summary(selection.metadata) or delta.extract_delta_summary(
             guard_metadata or {}
         )
+
+        # Paper-grade guardrail: Profile v3 cohort harvest must not proceed when the device
+        # package state differs from the last inventory snapshot. Otherwise freshness gates
+        # compare against stale inventory version_code and become meaningless.
+        if selection.kind == "profile_v3" and summary and int(summary.get("total_changed") or 0) > 0:
+            if noninteractive:
+                print("[FAIL] PROFILE_V3_REQUIRES_INVENTORY_SYNC: inventory drift detected; sync required before pull.")
+                return None
+            ui.report_profile_v3_requires_inventory_sync(summary)
+            if not ui.prompt_profile_v3_inventory_sync_now():
+                ui.report_apk_pull_cancelled()
+                return None
+            from scytaledroid.DeviceAnalysis.services import inventory_service
+
+            try:
+                inventory_service.run_full_sync(serial=serial, ui_prefs=text_blocks.UI_PREFS)
+            except Exception as exc:
+                ui.report_inventory_sync_issue(exc)
+                return None
+            refreshed = inventory.load_latest_inventory(serial)
+            if not refreshed or not refreshed.get("packages"):
+                ui.report_refresh_snapshot_invalid()
+                return None
+            active_snapshot_id = refreshed.get("snapshot_id") if isinstance(refreshed.get("snapshot_id"), int) else None
+            active_snapshot_captured_at = str(refreshed.get("generated_at") or "") or None
+            active_rows = harvest.build_inventory_rows(refreshed.get("packages", []))
+            if not active_rows:
+                ui.report_refresh_snapshot_empty()
+                return None
+            # Restart selection with fresh inventory.
+            continue
         delta_applied = False
         delta_count = len(selection.packages)
         if summary and not bool(selection.metadata.get("disable_delta_filter")):
