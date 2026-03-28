@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from scytaledroid.StaticAnalysis.cli.core.run_specs import build_static_run_spec
-from scytaledroid.StaticAnalysis.cli.flows.headless_run import _check_session_uniqueness
+from scytaledroid.StaticAnalysis.cli.flows.session_uniqueness import check_session_uniqueness
 from scytaledroid.StaticAnalysis.cli.flows.run_dispatch import execute_run_spec_detailed
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
@@ -102,7 +102,7 @@ def run_scan(
     try:
         package_name = _primary_package_name(selection)
         if package_name:
-            _check_session_uniqueness(
+            check_session_uniqueness(
                 getattr(effective_params, "session_stamp", None),
                 package_name,
                 allow_session_reuse,

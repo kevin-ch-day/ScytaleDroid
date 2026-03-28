@@ -8,9 +8,9 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from hashlib import sha256
 from typing import TYPE_CHECKING
-from urllib.parse import urlsplit
 
 from ..analytics import build_finding_matrices, build_workload_profile
+from ..modules.string_analysis.parsing.urlsafe import safe_urlsplit
 from .findings import Badge, DetectorResult
 from .manifest_utils import build_manifest_evidence
 
@@ -471,9 +471,8 @@ def _summarise_string_index(string_index) -> Mapping[str, object]:
             origin_counter[entry.origin] += 1
         value = (entry.value or "").strip()
         if value.lower().startswith(("http://", "https://")):
-            try:
-                parsed = urlsplit(value)
-            except ValueError:
+            parsed = safe_urlsplit(value)
+            if parsed is None:
                 continue
             host = parsed.netloc.lower()
             if host:

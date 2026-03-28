@@ -67,6 +67,7 @@ def test_scan_job_marks_failed_when_run_does_not_complete(monkeypatch, tmp_path:
     def _fake_run_scan(selection, params, base_dir, *, allow_session_reuse=True, **_kwargs):
         seen["allow_session_reuse"] = allow_session_reuse
         seen["session_stamp"] = params.session_stamp
+        seen["paper_grade_requested"] = params.paper_grade_requested
         return _make_run_result(
             completed=False,
             session_stamp="resolved-failed-session",
@@ -96,6 +97,7 @@ def test_scan_job_marks_failed_when_run_does_not_complete(monkeypatch, tmp_path:
     status = client.get(f"/job/{job_id}").json()
     assert seen["allow_session_reuse"] is False
     assert seen["session_stamp"] == "requested-session"
+    assert seen["paper_grade_requested"] is False
     assert status["state"] == "FAILED"
     assert status["detail"] == "Persistence gate failed."
     assert status["session_stamp"] == "resolved-failed-session"

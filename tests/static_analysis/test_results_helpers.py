@@ -1,9 +1,19 @@
 from __future__ import annotations
 
 from collections import Counter
+from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
 from scytaledroid.StaticAnalysis.cli.execution import analytics, results, results_formatters
+from scytaledroid.StaticAnalysis.cli.core.models import (
+    AppRunResult,
+    ArtifactOutcome,
+    RunOutcome,
+    RunParameters,
+    ScopeSelection,
+)
+from scytaledroid.StaticAnalysis.cli.core.run_context import StaticRunContext
 
 
 @pytest.mark.unit
@@ -247,3 +257,123 @@ def test_build_static_risk_row_component_points_do_not_saturate_immediately():
     assert float(low["components"]) < 12.0
     assert float(high["components"]) <= 12.0
     assert float(high["components"]) > float(low["components"])
+
+
+@pytest.mark.unit
+def test_analyse_strings_for_results_degrades_to_empty_payload_on_error(monkeypatch):
+    class _SilentLogger:
+        def exception(self, *_args, **_kwargs):
+            return None
+
+    def _raise(*_args, **_kwargs):
+        raise ValueError("Invalid IPv6 URL")
+
+    monkeypatch.setattr(results, "analyse_strings", _raise)
+    monkeypatch.setattr(results.logging_engine, "get_error_logger", lambda: _SilentLogger())
+
+    warnings: list[str] = []
+    payload = results._analyse_strings_for_results(
+        "/tmp/example.apk",
+        params=RunParameters(profile="full", scope="all", scope_label="All apps"),
+        package_name="com.example.app",
+        warning_sink=warnings,
+    )
+
+    assert payload["counts"] == {}
+    assert payload["samples"] == {}
+    assert payload["selected_samples"] == {}
+    assert payload["warnings"] == ["ValueError: Invalid IPv6 URL"]
+    assert len(warnings) == 1
+    assert "com.example.app" in warnings[0]
+
+
+@pytest.mark.unit
+def test_render_results_reuses_cached_base_string_payload(tmp_path, monkeypatch):
+    now = datetime.now(UTC)
+    manifest = SimpleNamespace(app_label="Example", package_name="com.example.app")
+    report = SimpleNamespace(
+        manifest=manifest,
+        exported_components=SimpleNamespace(providers=[]),
+        detector_results=[],
+        file_path="/tmp/example.apk",
+        metadata={"duration_seconds": 0.1},
+    )
+    artifact = ArtifactOutcome(
+        label="base.apk",
+        report=report,
+        severity=Counter(),
+        duration_seconds=0.1,
+        saved_path=None,
+        started_at=now,
+        finished_at=now,
+        metadata={},
+    )
+    cached_string_payload = {
+        "counts": {"endpoints": 2},
+        "samples": {},
+        "selected_samples": {},
+        "aggregates": {"endpoint_roots": ["example.com"]},
+    }
+    app = AppRunResult(
+        package_name="com.example.app",
+        category="Test",
+        artifacts=[artifact],
+        base_string_data=cached_string_payload,
+    )
+    outcome = RunOutcome(
+        results=[app],
+        started_at=now,
+        finished_at=now,
+        scope=ScopeSelection(scope="all", label="All apps", groups=tuple()),
+        base_dir=tmp_path,
+    )
+    params = RunParameters(
+        profile="full",
+        scope="all",
+        scope_label="All apps",
+        dry_run=True,
+        verbose_output=False,
+    )
+    run_ctx = StaticRunContext(
+        run_mode="batch",
+        quiet=True,
+        batch=True,
+        noninteractive=True,
+        show_splits=False,
+        session_stamp=params.session_stamp,
+        persistence_ready=False,
+        paper_grade_requested=False,
+    )
+
+    def _unexpected_analyse(*_args, **_kwargs):
+        raise AssertionError("analyse_strings should not be called")
+
+    monkeypatch.setattr(results, "analyse_strings", _unexpected_analyse)
+    monkeypatch.setattr(results, "_derive_highlight_stats", lambda *_a, **_k: {"providers": 0, "nsc_guard": 0, "secrets_suppressed": 0})
+    monkeypatch.setattr(results, "_build_permission_profile", lambda *_a, **_k: None)
+    monkeypatch.setattr(results, "_collect_component_stats", lambda *_a, **_k: {})
+    monkeypatch.setattr(results, "_build_static_risk_row", lambda *_a, **_k: None)
+    monkeypatch.setattr(results, "_collect_secret_stats", lambda *_a, **_k: {})
+    monkeypatch.setattr(results, "_collect_masvs_profile", lambda *_a, **_k: None)
+    monkeypatch.setattr(results, "_collect_finding_signatures", lambda *_a, **_k: {})
+    monkeypatch.setattr(results, "_bulk_trend_deltas", lambda *_a, **_k: [])
+    monkeypatch.setattr(results, "_apply_display_names", lambda *_a, **_k: None)
+    monkeypatch.setattr(results, "_persist_cohort_rollup", lambda *_a, **_k: None)
+    monkeypatch.setattr(results, "app_detail_loop", lambda *_a, **_k: None)
+    monkeypatch.setattr(results, "_render_post_run_views", lambda *_a, **_k: None)
+    monkeypatch.setattr(results, "_render_cross_app_insights", lambda *_a, **_k: None)
+    monkeypatch.setattr(results, "_render_db_masvs_summary", lambda *_a, **_k: None)
+    monkeypatch.setattr(results, "_render_db_severity_table", lambda *_a, **_k: None)
+    monkeypatch.setattr(results, "_render_persistence_footer", lambda *_a, **_k: None)
+
+    captured: dict[str, object] = {}
+
+    def _render_app_result(_report, *, string_data=None, **_kwargs):
+        captured["string_data"] = string_data
+        return ["line"], {"baseline": {"findings": []}}, {"High": 0, "Medium": 0, "Low": 0, "Info": 0}
+
+    monkeypatch.setattr(results, "render_app_result", _render_app_result)
+
+    results.render_run_results(outcome, params, run_ctx=run_ctx)
+
+    assert captured["string_data"] is cached_string_payload

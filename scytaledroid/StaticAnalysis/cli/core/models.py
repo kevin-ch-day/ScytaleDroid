@@ -237,6 +237,16 @@ class AppRunResult:
     persistence_exception_class: str | None = None
     persistence_transaction_state: str | None = None
     persistence_failure_stage: str | None = None
+    harvest_manifest_path: str | None = None
+    harvest_capture_status: str | None = None
+    harvest_persistence_status: str | None = None
+    harvest_research_status: str | None = None
+    harvest_matches_planned_artifacts: bool | None = None
+    harvest_observed_hashes_complete: bool | None = None
+    research_usable: bool | None = None
+    exploratory_only: bool = False
+    research_block_reasons: tuple[str, ...] = tuple()
+    base_string_data: Mapping[str, object] | None = None
 
     def severity_totals(self) -> Counter[str]:
         totals: Counter[str] = Counter()

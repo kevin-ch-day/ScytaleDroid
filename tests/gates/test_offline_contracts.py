@@ -8,6 +8,7 @@ import main as app_main
 from scytaledroid.Database.db_utils import schema_gate
 from scytaledroid.StaticAnalysis.cli.core.models import ScopeSelection
 from scytaledroid.StaticAnalysis.cli.flows import headless_run
+from scytaledroid.StaticAnalysis.cli.flows import session_uniqueness
 from scytaledroid.StaticAnalysis.core.repository import ArtifactGroup, RepositoryArtifact
 
 
@@ -117,7 +118,7 @@ def test_headless_dry_run_skips_schema_gate_and_uniqueness(monkeypatch, tmp_path
         "static_schema_gate",
         lambda: (False, "Static Analysis schema unavailable.", "offline"),
     )
-    monkeypatch.setattr(headless_run, "core_q", _CoreQueries())
+    monkeypatch.setattr(session_uniqueness, "core_q", _CoreQueries())
     monkeypatch.setattr(headless_run, "_artifact_group_from_path", lambda _path: dummy_group)
     monkeypatch.setattr(headless_run, "build_static_run_spec", lambda **kwargs: captured.setdefault("spec", kwargs))
     monkeypatch.setattr(headless_run, "execute_run_spec", lambda spec: captured.setdefault("executed", spec))
@@ -126,6 +127,7 @@ def test_headless_dry_run_skips_schema_gate_and_uniqueness(monkeypatch, tmp_path
 
     assert result == 0
     assert captured["spec"]["params"].dry_run is True
+    assert captured["spec"]["params"].paper_grade_requested is False
 
 
 def test_artifact_group_from_path_extracts_identity_without_sidecar(monkeypatch, tmp_path):

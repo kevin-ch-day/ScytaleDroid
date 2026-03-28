@@ -5,10 +5,9 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
-from urllib.parse import urlsplit
-
 from ..constants import ENDPOINT_PATTERN
 from .punctuation import strip_wrap_punct
+from .urlsafe import safe_urlsplit
 from .validators import is_ip, is_placeholder, looks_like_domain
 
 _TOKEN_PATTERN = re.compile(r"[^\s]+")
@@ -32,7 +31,9 @@ class Candidate:
 
 def _candidate_from_url(raw: str, offset: int) -> Candidate | None:
     trimmed = strip_wrap_punct(raw)
-    parsed = urlsplit(trimmed)
+    parsed = safe_urlsplit(trimmed)
+    if parsed is None:
+        return None
     scheme = parsed.scheme.lower() if parsed.scheme else None
     if scheme and scheme in _IGNORED_SCHEMES:
         return None
@@ -88,7 +89,9 @@ def _candidate_from_token(raw: str, offset: int) -> Candidate | None:
     if scheme_hint and scheme_hint not in _ALLOWED_SCHEMES:
         return None
     guess = trimmed
-    parsed = urlsplit(f"//{trimmed}")
+    parsed = safe_urlsplit(f"//{trimmed}")
+    if parsed is None:
+        return None
     host = parsed.hostname
     if host and not (looks_like_domain(host) or is_ip(host) or is_placeholder(host)):
         host = None

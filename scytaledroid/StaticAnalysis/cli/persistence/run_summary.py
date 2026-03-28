@@ -219,6 +219,13 @@ def _classify_static_contract(
     tool_semver: str | None,
     tool_git_commit: str | None,
     static_config_hash: str | None,
+    harvest_manifest_path: str | None,
+    harvest_capture_status: str | None,
+    harvest_research_status: str | None,
+    harvest_matches_planned_artifacts: bool | None,
+    harvest_observed_hashes_complete: bool | None,
+    harvest_non_canonical_reasons: Sequence[str] | None,
+    research_usable: bool | None,
 ) -> tuple[str, list[str]]:
     reasons: list[str] = []
     missing_required = False
@@ -242,6 +249,27 @@ def _classify_static_contract(
         reasons.append("IDENTITY_FALLBACK_MODE")
     if bool(identity_conflict_flag):
         reasons.append("IDENTITY_CONFLICT")
+    if not harvest_manifest_path:
+        reasons.append("HARVEST_MANIFEST_MISSING")
+    capture_status = str(harvest_capture_status or "").strip().lower()
+    if capture_status == "drifted":
+        reasons.append("HARVEST_DRIFTED")
+    elif capture_status == "partial":
+        reasons.append("HARVEST_CAPTURE_PARTIAL")
+    elif capture_status == "failed":
+        reasons.append("HARVEST_CAPTURE_FAILED")
+    if harvest_matches_planned_artifacts is False:
+        reasons.append("HARVEST_PLANNED_OBSERVED_MISMATCH")
+    if harvest_observed_hashes_complete is False:
+        reasons.append("HARVEST_OBSERVED_HASHES_INCOMPLETE")
+    if str(harvest_research_status or "").strip().lower() == "ineligible":
+        reasons.append("HARVEST_RESEARCH_INELIGIBLE")
+    if research_usable is False:
+        reasons.append("HARVEST_RESEARCH_INELIGIBLE")
+    for reason in harvest_non_canonical_reasons or ():
+        token = str(reason or "").strip()
+        if token:
+            reasons.append(token)
     if missing_required:
         reasons.append("MISSING_REQUIRED_FIELD")
     unique_reasons = sorted(set(r for r in reasons if r))
@@ -879,6 +907,41 @@ def persist_run_summary(
         metadata_map.get("study_tag") if isinstance(metadata_map, Mapping) else None,
     )
     analysis_version = first_text(getattr(br, "analysis_version", None))
+    harvest_manifest_path = first_text(
+        metadata_map.get("harvest_manifest_path") if isinstance(metadata_map, Mapping) else None,
+    )
+    harvest_capture_status = first_text(
+        metadata_map.get("harvest_capture_status") if isinstance(metadata_map, Mapping) else None,
+    )
+    harvest_persistence_status = first_text(
+        metadata_map.get("harvest_persistence_status") if isinstance(metadata_map, Mapping) else None,
+    )
+    harvest_research_status = first_text(
+        metadata_map.get("harvest_research_status") if isinstance(metadata_map, Mapping) else None,
+    )
+    harvest_matches_planned_artifacts = (
+        metadata_map.get("harvest_matches_planned_artifacts")
+        if isinstance(metadata_map, Mapping)
+        else None
+    )
+    harvest_observed_hashes_complete = (
+        metadata_map.get("harvest_observed_hashes_complete")
+        if isinstance(metadata_map, Mapping)
+        else None
+    )
+    harvest_non_canonical_reasons = (
+        metadata_map.get("harvest_non_canonical_reasons")
+        if isinstance(metadata_map, Mapping)
+        else None
+    )
+    if isinstance(harvest_non_canonical_reasons, Sequence) and not isinstance(
+        harvest_non_canonical_reasons,
+        (str, bytes),
+    ):
+        harvest_non_canonical_reason_list = [str(item) for item in harvest_non_canonical_reasons if str(item).strip()]
+    else:
+        harvest_non_canonical_reason_list = []
+    research_usable = metadata_map.get("research_usable") if isinstance(metadata_map, Mapping) else None
     if static_run_id is None:
         try:
             # Prefer an existing static_analysis_runs entry for this session/package.
@@ -1559,6 +1622,23 @@ def persist_run_summary(
                             tool_semver=app_config.APP_VERSION,
                             tool_git_commit=get_git_commit(),
                             static_config_hash=config_hash,
+                            harvest_manifest_path=harvest_manifest_path,
+                            harvest_capture_status=harvest_capture_status,
+                            harvest_research_status=harvest_research_status,
+                            harvest_matches_planned_artifacts=(
+                                bool(harvest_matches_planned_artifacts)
+                                if harvest_matches_planned_artifacts is not None
+                                else None
+                            ),
+                            harvest_observed_hashes_complete=(
+                                bool(harvest_observed_hashes_complete)
+                                if harvest_observed_hashes_complete is not None
+                                else None
+                            ),
+                            harvest_non_canonical_reasons=harvest_non_canonical_reason_list,
+                            research_usable=(
+                                bool(research_usable) if research_usable is not None else None
+                            ),
                         )
                         _update_static_run_metadata(
                             int(static_run_id),

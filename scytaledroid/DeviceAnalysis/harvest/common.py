@@ -267,43 +267,11 @@ def adb_pull(
         stderr = (completed.stderr or "").strip()
         stderr = stderr or stdout or "adb pull failed"
         if _is_stale_path_error(stderr):
-            from scytaledroid.DeviceAnalysis.runtime_flags import allow_inventory_fallbacks
-
-            allow_fallbacks = allow_inventory_fallbacks()
-            try:
-                refreshed = adb_packages.get_package_paths(
-                    serial,
-                    package_name,
-                    refresh=True,
-                    allow_fallbacks=allow_fallbacks,
-                )
-            except RuntimeError as exc:
-                log.warning(
-                    f"adb pull refresh blocked for {package_name}: {exc}",
-                    category="device",
-                )
-                refreshed = []
-            replacement = _match_refreshed_path(source_path, refreshed)
-            if replacement:
-                if verbose:
-                    print(
-                        status_messages.status(
-                            f"Re-resolving stale path → {replacement}",
-                            level="warn",
-                        )
-                    )
-                retry = adb_client.run_adb_command(
-                    ["-s", serial, "pull", replacement, str(dest_path)],
-                    capture_output=not verbose,
-                    text=True,
-                    check=False,
-                )
-                if retry.returncode == 0:
-                    return True
-                retry_err = (retry.stderr or retry.stdout or "").strip() or "adb pull failed"
-                stderr = f"path stale; retry failed: {retry_err}"
-            else:
-                stderr = "path stale; no refreshed path found via pm path"
+            log.warning(
+                f"adb pull hit stale path for {package_name}: {source_path}",
+                category="device",
+            )
+            return ArtifactError(source_path=source_path, reason="path_stale")
         log.warning(
             f"adb pull returned {completed.returncode} for {package_name}: {stderr}",
             category="device",
@@ -331,14 +299,6 @@ def format_file_size(num_bytes: int) -> str:
 def _is_stale_path_error(message: str) -> bool:
     lowered = message.lower()
     return "failed to stat remote object" in lowered or "no such file or directory" in lowered
-
-
-def _match_refreshed_path(source_path: str, refreshed_paths: list[str]) -> str | None:
-    target_name = Path(source_path).name
-    for path in refreshed_paths:
-        if Path(path).name == target_name:
-            return path
-    return None
 
 
 def print_artifact_status(

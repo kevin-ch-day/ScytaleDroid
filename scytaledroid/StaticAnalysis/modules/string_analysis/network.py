@@ -4,10 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
-from urllib.parse import urlsplit
-
 from .constants import HTTP_URL_PATTERN
 from .extractor import IndexedString, StringIndex
+from .parsing.urlsafe import safe_urlsplit
 
 _TRUST_MANAGER_KEYWORDS = (
     "x509trustmanager",
@@ -57,7 +56,9 @@ def extract_endpoints(index: StringIndex) -> Sequence[EndpointMatch]:
             continue
         for match in HTTP_URL_PATTERN.finditer(value):
             candidate = match.group(0)
-            parsed = urlsplit(candidate)
+            parsed = safe_urlsplit(candidate)
+            if parsed is None:
+                continue
             if parsed.scheme not in {"http", "https"}:
                 continue
             host = parsed.netloc.lower()

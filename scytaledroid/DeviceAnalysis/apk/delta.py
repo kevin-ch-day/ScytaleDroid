@@ -12,6 +12,7 @@ except Exception:  # pragma: no cover - clean machines may not have DB deps inst
     from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
     _SUSPICIOUS_TOKENS = ("/", "\\", "=", "base.apk")
+    _SEEN_PACKAGE_WARNINGS: set[tuple[str, str, str]] = set()
 
     def normalize_package_name(value: str, *, context: str = "inventory") -> str:
         cleaned = (value or "").strip().lower()
@@ -19,16 +20,27 @@ except Exception:  # pragma: no cover - clean machines may not have DB deps inst
             return ""
         suspicious = (" " in cleaned) or any(token in cleaned for token in _SUSPICIOUS_TOKENS)
         if suspicious:
-            log.warning(
-                f"Suspicious package_name '{value}' encountered; normalizing to '{cleaned}'.",
-                category=context,
+            _warn_package_name_once(
+                context=context,
+                warning_type="suspicious",
+                cleaned=cleaned,
+                message=f"Suspicious package_name '{value}' encountered; normalizing to '{cleaned}'.",
             )
         elif cleaned.endswith(".apk"):
-            log.warning(
-                f"package_name '{value}' ends with .apk; allowing but flagging for review.",
-                category=context,
+            _warn_package_name_once(
+                context=context,
+                warning_type="apk_suffix",
+                cleaned=cleaned,
+                message=f"package_name '{value}' ends with .apk; allowing but flagging for review.",
             )
         return cleaned
+
+    def _warn_package_name_once(*, context: str, warning_type: str, cleaned: str, message: str) -> None:
+        key = (context, warning_type, cleaned)
+        if key in _SEEN_PACKAGE_WARNINGS:
+            return
+        _SEEN_PACKAGE_WARNINGS.add(key)
+        log.warning(message, category=context)
 
 
 def extract_delta_summary(snapshot_rows: Mapping[str, object]) -> Mapping[str, object] | None:

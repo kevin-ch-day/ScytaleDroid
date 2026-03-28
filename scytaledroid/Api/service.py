@@ -137,7 +137,12 @@ def _run_static_scan(
     try:
         group = _artifact_group_from_path(apk_path)
         selection = ScopeSelection(scope="app", label=scope_label, groups=(group,))
-        params = RunParameters(profile=profile, scope="app", scope_label=scope_label)
+        params = RunParameters(
+            profile=profile,
+            scope="app",
+            scope_label=scope_label,
+            paper_grade_requested=False,
+        )
         params = replace(params, session_stamp=session_stamp, session_label=session_stamp)
         base_dir = Path(app_config.DATA_DIR) / "device_apks"
         run_result = static_service.run_scan(

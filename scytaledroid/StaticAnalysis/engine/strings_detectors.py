@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from urllib.parse import urlsplit
-
 from ..modules.string_analysis.constants import (
     ANALYTICS_PATTERNS,
     API_KEY_PATTERNS,
@@ -23,6 +21,7 @@ from ..modules.string_analysis.constants import (
 )
 from ..modules.string_analysis.parsing.host_normalizer import registrable_domain
 from ..modules.string_analysis.parsing.punctuation import strip_wrap_punct
+from ..modules.string_analysis.parsing.urlsafe import safe_urlsplit
 from .strings_helpers import _entropy, _host_risk_tag, _ip_categories
 from .strings_models import AnalyticsMatch, CloudReference, EndpointInfo, TokenMatch
 
@@ -47,7 +46,9 @@ def _detect_endpoints(value: str) -> Iterable[EndpointInfo]:
         return
     for raw in ENDPOINT_PATTERN.findall(value):
         sanitized, trimmed = _sanitize_endpoint_value(raw)
-        parsed = urlsplit(sanitized)
+        parsed = safe_urlsplit(sanitized)
+        if parsed is None:
+            continue
         scheme = (parsed.scheme or "").lower()
         host = parsed.hostname
         categories: list[str] = ["endpoints"]

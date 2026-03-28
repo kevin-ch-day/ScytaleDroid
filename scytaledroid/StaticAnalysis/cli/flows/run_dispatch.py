@@ -16,7 +16,6 @@ from pathlib import Path
 from scytaledroid.Config import app_config
 from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
 from scytaledroid.Database.db_utils import schema_gate
-from scytaledroid.StaticAnalysis.persistence import ingest as canonical_ingest
 from scytaledroid.StaticAnalysis.session import make_session_stamp, normalize_session_stamp
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_engine
@@ -43,6 +42,7 @@ from ..execution import (
 )
 from ..execution.static_run_map import REQUIRED_FIELDS, validate_run_map
 from ..views.view_layouts import render_run_start, render_run_summary
+from . import persistence_runtime
 from .selection import format_scope_target
 
 
@@ -192,16 +192,18 @@ def _launch_scan_flow_resolved(
         persistence_ready=bool(getattr(params, "persistence_ready", True)),
         paper_grade_requested=bool(getattr(params, "paper_grade_requested", True)),
     )
+    run_persistence_enabled = persistence_runtime.persistence_enabled(
+        dry_run=params.dry_run,
+        persistence_ready=bool(params.persistence_ready),
+    )
 
-    try:
-        canonical_ingest.ensure_provider_plumbing()
-        if params.session_stamp:
-            canonical_ingest.build_session_string_view(params.session_stamp)
-    except Exception as exc:
-        if params.strict_persistence:
-            raise RuntimeError(f"Static analysis setup failed: {exc}") from exc
-        log.warning(f"Static analysis setup warning: {exc}", category="static")
-        print(status_messages.status(f"Static analysis setup warning: {exc}", level="warn"))
+    if run_persistence_enabled:
+        persistence_runtime.bootstrap_runtime_persistence(
+            session_stamp=params.session_stamp,
+            dry_run=params.dry_run,
+            persistence_ready=bool(params.persistence_ready),
+            strict_persistence=bool(params.strict_persistence),
+        )
 
     workers = _resolve_workers(params.workers)
     if not params.reuse_cache:
@@ -332,6 +334,7 @@ def _launch_scan_flow_resolved(
     linkage_blocked_reason = None
     linkage_warning_printed = False
     missing_id_packages: list[str] = []
+    summary_render_failed = False
 
     try:
         if outcome is not None:
@@ -341,9 +344,41 @@ def _launch_scan_flow_resolved(
             abort_reason = normalize_abort_reason(outcome.abort_reason or ("SIGINT" if outcome.aborted else None))
             abort_signal = outcome.abort_signal
             _emit_postprocessing_step("Rendering run summary", run_ctx=frozen_ctx)
-            render_run_results(outcome, params, run_ctx=frozen_ctx)
+            try:
+                render_run_results(outcome, params, run_ctx=frozen_ctx)
+            except Exception as exc:
+                run_status = "FAILED"
+                abort_reason = "run_summary_render_failed"
+                summary_render_failed = True
+                failure_code = f"run_summary_render_failed:{exc.__class__.__name__}"
+                if failure_code not in outcome.failures:
+                    outcome.failures.append(failure_code)
+                logging_engine.get_error_logger().exception(
+                    "Run summary rendering failed",
+                    extra=logging_engine.ensure_trace(
+                        {
+                            "event": "static.run_summary_render_failed",
+                            "session_stamp": params.session_stamp,
+                            "scope_label": params.scope_label,
+                            "profile": params.profile_label,
+                        }
+                    ),
+                )
+                print(
+                    status_messages.status(
+                        (
+                            "Run summary finalization failed — static run marked failed. "
+                            "Skipping downstream post-processing."
+                        ),
+                        level="error",
+                    )
+                )
             if not params.dry_run:
-                if not params.persistence_ready:
+                if summary_render_failed:
+                    linkage_blocked_reason = (
+                        "Run summary finalization failed; skipping run_map and permission refresh."
+                    )
+                elif not params.persistence_ready:
                     linkage_blocked_reason = "Persistence gate failed; skipping run_map and permission refresh."
                 elif not outcome.results:
                     linkage_blocked_reason = (
@@ -464,6 +499,10 @@ def _launch_scan_flow_resolved(
     except Exception as exc:
         run_status = "FAILED"
         abort_reason = classify_exception(exc)
+        if outcome is not None:
+            failure_code = f"postprocess_exception:{exc.__class__.__name__}"
+            if failure_code not in outcome.failures:
+                outcome.failures.append(failure_code)
         raise
     finally:
         if outcome is not None and not params.dry_run and run_status:
@@ -570,11 +609,14 @@ def _launch_scan_flow_resolved(
             run_ctx=frozen_ctx,
             evidence_root=evidence_root,
         )
-    if params.session_stamp:
+    if run_persistence_enabled and params.session_stamp:
         _emit_postprocessing_step("Refreshing canonical session views", run_ctx=frozen_ctx)
         try:
-            canonical_ingest.upsert_base002_for_session(params.session_stamp)
-            canonical_ingest.build_session_string_view(params.session_stamp)
+            persistence_runtime.refresh_session_views(
+                session_stamp=params.session_stamp,
+                dry_run=params.dry_run,
+                persistence_ready=bool(params.persistence_ready),
+            )
         except Exception:
             pass
 
@@ -830,20 +872,24 @@ def _emit_missing_run_ids_artifact(
             }
         )
 
+    missing_count = len([row for row in rows if row["missing_static_run_id"]])
+    artifact_kind = "missing_run_ids" if missing_count else "persistence_audit"
     payload = {
         "schema_version": "v1",
         "db_schema_version": schema_version,
+        "artifact_kind": artifact_kind,
         "generated_at_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "session_stamp": stamp,
         "total_apps": len(outcome.results),
-        "missing_static_run_id_count": len([row for row in rows if row["missing_static_run_id"]]),
+        "missing_static_run_id_count": missing_count,
         "linkage_blocked_reason": linkage_blocked_reason,
         "rows": rows,
     }
 
     out_dir = Path("output") / "audit" / "persistence"
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"{stamp}_missing_run_ids.json"
+    suffix = "missing_run_ids" if missing_count else "persistence_audit"
+    out_path = out_dir / f"{stamp}_{suffix}.json"
     out_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
     # This artifact is emitted even on success; it serves as a persistence linkage receipt.
     print(status_messages.status(f"Persistence audit: {out_path}", level="info"))

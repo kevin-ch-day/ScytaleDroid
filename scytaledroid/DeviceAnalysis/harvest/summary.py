@@ -1056,6 +1056,7 @@ def _build_harvest_result(
             errors=list(pull.errors),
             preflight_reason=pull.preflight_reason,
             mirror_failure_reasons=list(pull.mirror_failure_reasons),
+            drift_reasons=list(pull.drift_reasons),
             capture_status=pull.capture_status,
             persistence_status=pull.persistence_status,
             research_status=pull.research_status,

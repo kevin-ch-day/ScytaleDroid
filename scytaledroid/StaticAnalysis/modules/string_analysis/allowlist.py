@@ -5,9 +5,8 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from urllib.parse import urlsplit
-
 from .parsing.host_normalizer import registrable_domain
+from .parsing.urlsafe import safe_urlsplit
 
 try:  # Python 3.11+
     import tomllib
@@ -515,8 +514,8 @@ def _host_components(host: str | None) -> tuple[str | None, str | None]:
     if not candidate:
         return None, None
     if "//" in candidate:
-        parsed = urlsplit(candidate)
-        candidate = (parsed.hostname or "").strip(".")
+        parsed = safe_urlsplit(candidate)
+        candidate = (parsed.hostname or "").strip(".") if parsed is not None else ""
     else:
         candidate = candidate.split("/", 1)[0].strip(".")
     if not candidate:

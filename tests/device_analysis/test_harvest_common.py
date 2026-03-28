@@ -71,3 +71,34 @@ def test_adb_pull_overwrites_when_requested(tmp_path: Path, monkeypatch: pytest.
     assert called["count"] == 1
     assert dest.read_bytes() == b"new"
 
+
+def test_adb_pull_returns_path_stale_error_for_stale_remote_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scytaledroid.DeviceAnalysis.harvest import common
+    from scytaledroid.DeviceAnalysis.harvest.models import ArtifactError
+
+    dest = tmp_path / "base.apk"
+
+    monkeypatch.setattr(
+        common.adb_client,
+        "run_adb_command",
+        lambda *_args, **_kwargs: _Completed(
+            returncode=1,
+            stderr="failed to stat remote object '/data/app/base.apk': No such file or directory",
+        ),
+    )
+
+    result = common.adb_pull(
+        adb_path="adb",
+        serial="SERIAL",
+        source_path="/data/app/base.apk",
+        dest_path=dest,
+        package_name="pkg",
+        verbose=False,
+        overwrite_existing=False,
+    )
+
+    assert isinstance(result, ArtifactError)
+    assert result.reason == "path_stale"

@@ -145,6 +145,8 @@ class ArtifactGroup:
     artifacts: tuple[RepositoryArtifact, ...]
     grouping_reason: str | None = None
     grouping_confidence: str | None = None
+    harvest_manifest_path: str | None = None
+    harvest_manifest: Mapping[str, object] | None = None
 
     @property
     def base_artifact(self) -> RepositoryArtifact | None:
@@ -159,6 +161,72 @@ class ArtifactGroup:
             return "Uncategorized"
         return self.artifacts[0].category
 
+    @property
+    def harvest_execution_state(self) -> str | None:
+        manifest = self.harvest_manifest
+        if not isinstance(manifest, Mapping):
+            return None
+        value = manifest.get("execution_state")
+        return str(value).strip() if isinstance(value, str) and value.strip() else None
+
+    @property
+    def harvest_capture_status(self) -> str | None:
+        return _manifest_status_value(self.harvest_manifest, "capture_status")
+
+    @property
+    def harvest_persistence_status(self) -> str | None:
+        return _manifest_status_value(self.harvest_manifest, "persistence_status")
+
+    @property
+    def harvest_research_status(self) -> str | None:
+        return _manifest_status_value(self.harvest_manifest, "research_status")
+
+    @property
+    def harvest_comparison(self) -> Mapping[str, object]:
+        manifest = self.harvest_manifest
+        if not isinstance(manifest, Mapping):
+            return {}
+        comparison = manifest.get("comparison")
+        if isinstance(comparison, Mapping):
+            return comparison
+        return {}
+
+    @property
+    def matches_planned_artifacts(self) -> bool | None:
+        return _bool_from_mapping(self.harvest_comparison, "matches_planned_artifacts")
+
+    @property
+    def observed_hashes_complete(self) -> bool | None:
+        return _bool_from_mapping(self.harvest_comparison, "observed_hashes_complete")
+
+    @property
+    def harvest_non_canonical_reasons(self) -> tuple[str, ...]:
+        reasons: list[str] = []
+        if not self.harvest_manifest:
+            return ("HARVEST_MANIFEST_MISSING",)
+        execution_state = (self.harvest_execution_state or "").lower()
+        if execution_state and execution_state != "completed":
+            reasons.append("HARVEST_EXECUTION_INCOMPLETE")
+        capture_status = (self.harvest_capture_status or "").lower()
+        if capture_status == "drifted":
+            reasons.append("HARVEST_DRIFTED")
+        elif capture_status == "partial":
+            reasons.append("HARVEST_CAPTURE_PARTIAL")
+        elif capture_status == "failed":
+            reasons.append("HARVEST_CAPTURE_FAILED")
+        if self.matches_planned_artifacts is False:
+            reasons.append("HARVEST_PLANNED_OBSERVED_MISMATCH")
+        if self.observed_hashes_complete is False:
+            reasons.append("HARVEST_OBSERVED_HASHES_INCOMPLETE")
+        research_status = (self.harvest_research_status or "").lower()
+        if research_status == "ineligible":
+            reasons.append("HARVEST_RESEARCH_INELIGIBLE")
+        return tuple(sorted(set(reason for reason in reasons if reason)))
+
+    @property
+    def harvest_research_usable(self) -> bool:
+        return not self.harvest_non_canonical_reasons
+
 
 def _load_metadata(apk_path: Path) -> Mapping[str, object]:
     meta_path = apk_path.with_suffix(apk_path.suffix + ".meta.json")
@@ -172,6 +240,20 @@ def _load_metadata(apk_path: Path) -> Mapping[str, object]:
     if isinstance(payload, Mapping):
         return payload
     return {}
+
+
+def _load_package_manifest(package_dir: Path) -> tuple[str | None, Mapping[str, object] | None]:
+    manifest_path = package_dir / "harvest_package_manifest.json"
+    if not manifest_path.exists():
+        return None, None
+    try:
+        with manifest_path.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return str(manifest_path), None
+    if isinstance(payload, Mapping):
+        return str(manifest_path), payload
+    return str(manifest_path), None
 
 
 def discover_repository_artifacts(base_dir: Path | None = None) -> list[RepositoryArtifact]:
@@ -223,6 +305,10 @@ def group_artifacts(
         session_stamp = members[0].session_stamp if members else None
         capture_id = members[0].capture_id if members else None
         reason, confidence = grouping_meta.get(key, ("unknown", "low"))
+        manifest_path: str | None = None
+        harvest_manifest: Mapping[str, object] | None = None
+        if members:
+            manifest_path, harvest_manifest = _load_package_manifest(members[0].path.parent)
         group = ArtifactGroup(
             group_key=key,
             package_name=package_name,
@@ -232,6 +318,8 @@ def group_artifacts(
             artifacts=tuple(members),
             grouping_reason=reason,
             grouping_confidence=confidence,
+            harvest_manifest_path=manifest_path,
+            harvest_manifest=harvest_manifest,
         )
         if predicate and not predicate(group):
             continue
@@ -289,6 +377,23 @@ def _group_key_for_artifact(
 
 _TOKEN_SANITISE_RE = re.compile(r"[^A-Za-z0-9._-]+")
 _DATE_TOKEN_RE = re.compile(r"^\d{8}(?:[-_]\d{6})?$")
+
+
+def _manifest_status_value(manifest: Mapping[str, object] | None, key: str) -> str | None:
+    if not isinstance(manifest, Mapping):
+        return None
+    status = manifest.get("status")
+    if not isinstance(status, Mapping):
+        return None
+    value = status.get(key)
+    return str(value).strip() if isinstance(value, str) and value.strip() else None
+
+
+def _bool_from_mapping(payload: Mapping[str, object], key: str) -> bool | None:
+    value = payload.get(key)
+    if isinstance(value, bool):
+        return value
+    return None
 
 
 def _normalise_token(value: object) -> str | None:

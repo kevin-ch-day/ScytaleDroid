@@ -24,8 +24,9 @@ def test_launch_scan_flow_builds_run_map_after_render_persistence(monkeypatch) -
     }
 
     monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok"))
-    monkeypatch.setattr(run_dispatch.canonical_ingest, "ensure_provider_plumbing", lambda: None)
-    monkeypatch.setattr(run_dispatch.canonical_ingest, "build_session_string_view", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
+    monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
+    monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
     monkeypatch.setattr(run_dispatch, "execute_scan", lambda *_a, **_k: outcome)
 
     def _render_and_persist(_outcome, *_a, **_k):
@@ -148,8 +149,9 @@ def test_launch_scan_flow_finalizes_lingering_started_rows_for_session(monkeypat
     )
 
     monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok"))
-    monkeypatch.setattr(run_dispatch.canonical_ingest, "ensure_provider_plumbing", lambda: None)
-    monkeypatch.setattr(run_dispatch.canonical_ingest, "build_session_string_view", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
+    monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
+    monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
     monkeypatch.setattr(run_dispatch, "execute_scan", lambda *_a, **_k: outcome)
     monkeypatch.setattr(run_dispatch, "render_run_results", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "_emit_selection_manifest", lambda *_a, **_k: None)
@@ -203,8 +205,9 @@ def test_launch_scan_flow_skips_run_map_and_permission_refresh_when_no_results(m
     )
 
     monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok"))
-    monkeypatch.setattr(run_dispatch.canonical_ingest, "ensure_provider_plumbing", lambda: None)
-    monkeypatch.setattr(run_dispatch.canonical_ingest, "build_session_string_view", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
+    monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
+    monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
     monkeypatch.setattr(run_dispatch, "execute_scan", lambda *_a, **_k: outcome)
     monkeypatch.setattr(run_dispatch, "render_run_results", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "_emit_selection_manifest", lambda *_a, **_k: None)
@@ -245,6 +248,71 @@ def test_launch_scan_flow_skips_run_map_and_permission_refresh_when_no_results(m
     assert calls["blocked_reason"] == "No analyzable artifacts; skipping run_map and permission refresh."
 
 
+def test_launch_scan_flow_records_render_failure_and_skips_follow_on_postprocessing(monkeypatch) -> None:
+    class _SilentLogger:
+        def exception(self, *_args, **_kwargs):
+            return None
+
+    now = datetime.now(UTC)
+    outcome = RunOutcome(
+        results=[AppRunResult(package_name="com.example.app", category="Test", static_run_id=501)],
+        started_at=now,
+        finished_at=now,
+        scope=ScopeSelection(scope="app", label="Example", groups=tuple()),
+        base_dir=Path("."),
+    )
+
+    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok"))
+    monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
+    monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
+    monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
+    monkeypatch.setattr(run_dispatch, "execute_scan", lambda *_a, **_k: outcome)
+    monkeypatch.setattr(run_dispatch, "_emit_selection_manifest", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch, "finalize_open_runs", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch, "_emit_db_preflight_lock_warning", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch.logging_engine, "get_error_logger", lambda: _SilentLogger())
+
+    calls = {"run_map": 0, "perm_refresh": 0, "blocked_reason": None}
+
+    def _raise_render(*_a, **_k):
+        raise ValueError("bad summary payload")
+
+    def _build_run_map(*_a, **_k):
+        calls["run_map"] += 1
+        return {}
+
+    def _execute_permission_scan(*_a, **_k):
+        calls["perm_refresh"] += 1
+
+    def _emit_missing(*_a, **kwargs):
+        calls["blocked_reason"] = kwargs.get("linkage_blocked_reason")
+
+    monkeypatch.setattr(run_dispatch, "render_run_results", _raise_render)
+    monkeypatch.setattr(run_dispatch, "_build_session_run_map", _build_run_map)
+    monkeypatch.setattr(run_dispatch, "execute_permission_scan", _execute_permission_scan)
+    monkeypatch.setattr(run_dispatch, "_emit_missing_run_ids_artifact", _emit_missing)
+
+    params = RunParameters(
+        profile="full",
+        scope="app",
+        scope_label="Example",
+        session_stamp="sess-render-fail",
+        dry_run=False,
+        persistence_ready=True,
+        permission_snapshot_refresh=True,
+        paper_grade_requested=False,
+    )
+    selection = ScopeSelection(scope="app", label="Example", groups=tuple())
+
+    result = run_dispatch.launch_scan_flow(selection, params, Path("."))
+
+    assert result is outcome
+    assert "run_summary_render_failed:ValueError" in outcome.failures
+    assert calls["run_map"] == 0
+    assert calls["perm_refresh"] == 0
+    assert calls["blocked_reason"] == "Run summary finalization failed; skipping run_map and permission refresh."
+
+
 def test_launch_scan_flow_run_map_failure_raises_in_strict_mode(monkeypatch) -> None:
     now = datetime.now(UTC)
     outcome = RunOutcome(
@@ -256,8 +324,9 @@ def test_launch_scan_flow_run_map_failure_raises_in_strict_mode(monkeypatch) -> 
     )
 
     monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok"))
-    monkeypatch.setattr(run_dispatch.canonical_ingest, "ensure_provider_plumbing", lambda: None)
-    monkeypatch.setattr(run_dispatch.canonical_ingest, "build_session_string_view", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
+    monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
+    monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
     monkeypatch.setattr(run_dispatch, "execute_scan", lambda *_a, **_k: outcome)
     monkeypatch.setattr(run_dispatch, "render_run_results", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "_emit_selection_manifest", lambda *_a, **_k: None)
@@ -296,8 +365,9 @@ def test_launch_scan_flow_passes_fail_on_persist_error_for_permission_refresh(mo
     )
 
     monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok"))
-    monkeypatch.setattr(run_dispatch.canonical_ingest, "ensure_provider_plumbing", lambda: None)
-    monkeypatch.setattr(run_dispatch.canonical_ingest, "build_session_string_view", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
+    monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
+    monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
     monkeypatch.setattr(run_dispatch, "execute_scan", lambda *_a, **_k: outcome)
     monkeypatch.setattr(run_dispatch, "render_run_results", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "_emit_selection_manifest", lambda *_a, **_k: None)

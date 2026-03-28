@@ -15,6 +15,7 @@ from .analysis.risk_scoring_engine import (
     permission_risk_score_detail,
 )
 from .permission_manifest_extract import _format_permission
+from .permission_matrix_view import render_permission_matrix
 from .permission_protection_lookup import _fetch_protections
 
 
@@ -571,116 +572,6 @@ def _abbr_from_name(name: str) -> str:
     no_vowels = "".join(ch for ch in tail if ch not in "AEIOU")
     token = (head + no_vowels)[:5]
     return token.ljust(5, " ")
-
-
-_MATRIX_ROWS = [
-    ("Location", ["ACCESS_FINE_LOCATION", "ACCESS_BACKGROUND_LOCATION"]),
-    ("Camera & Microphone", ["CAMERA", "RECORD_AUDIO"]),
-    ("Overlay & Notifications", ["SYSTEM_ALERT_WINDOW", "POST_NOTIFICATIONS"]),
-    ("Contacts & Accounts", ["READ_CONTACTS", "GET_ACCOUNTS"]),
-    ("Phone & SMS", ["READ_CALL_LOG", "READ_PHONE_STATE", "SEND_SMS"]),
-    ("Storage & Media", ["READ_MEDIA_IMAGES", "READ_MEDIA_VIDEO", "ACCESS_MEDIA_LOCATION"]),
-    ("Bluetooth & Nearby", ["BLUETOOTH_SCAN", "BLUETOOTH_ADVERTISE", "BLUETOOTH_CONNECT"]),
-    ("Ads / Attribution", ["ACCESS_ADSERVICES_AD_ID", "com.google.android.gms.permission.AD_ID"]),
-]
-
-
-def render_permission_matrix(
-    profiles: Sequence[Mapping[str, object]],
-    *,
-    scope_label: str,
-    show: int = 4,
-) -> None:
-    from datetime import datetime
-
-    from scytaledroid.Utils.DisplayUtils import text_blocks
-
-    if not profiles:
-        return
-
-    top = list(sorted(profiles, key=lambda p: p.get("risk", 0.0), reverse=True))[: max(1, show)]
-    display_labels = []
-    for profile in top:
-        label = str(profile.get("display_name") or profile.get("label") or "").strip()
-        if not label:
-            label = str(profile.get("package") or "")
-        if not label:
-            label = _abbr_from_name(profile.get("label") or "APP").strip()
-        display_labels.append(label)
-    now = datetime.now().strftime("%Y-%m-%d %-I:%M %p") if hasattr(datetime.now(), "strftime") else datetime.now().strftime("%Y-%m-%d %I:%M %p")
-
-    print("\nApplication Permission Matrix")
-    print("High-signal matrix (governance-mapped)")
-    print(f"Scope: {scope_label}")
-    print(f"Snapshot: {now}")
-    print(f"View: Apps 1–{len(top)}/{len(profiles)}")
-    print()
-
-    headers = ["Permission"] + display_labels
-    rows: list[list[str]] = []
-
-    def _pad_center(value: str, width: int) -> str:
-        visible = text_blocks.visible_width(value)
-        if visible >= width:
-            return value
-        total = width - visible
-        left = total // 2
-        right = total - left
-        return (" " * left) + value + (" " * right)
-
-    for group_title, perms in _MATRIX_ROWS:
-        rows.append([group_title] + ["" for _ in top])
-        for perm in perms:
-            display = perm
-            row = [f"  {display}"]
-            for item in top:
-                fw_ds = {key.upper() for key in item.get("fw_ds", set())}
-                vendor = set(item.get("vendor_names", set()))
-                mark = "-"
-                if perm.startswith("com."):
-                    mark = "*" if perm in vendor else "-"
-                else:
-                    mark = "X" if perm.upper() in fw_ds else "-"
-                from scytaledroid.Utils.DisplayUtils import colors as _colors
-                _pal = _colors.get_palette() if _colors.colors_enabled() else None
-                if _pal:
-                    if mark == "X":
-                        row.append(_colors.apply(mark, _pal.accent, bold=True))
-                    elif mark == "*":
-                        row.append(_colors.apply(mark, _pal.warning, bold=True))
-                    else:
-                        row.append(_colors.apply(mark, _pal.muted))
-                else:
-                    row.append(mark)
-            rows.append(row)
-
-    headers = [text_blocks.truncate_visible(label, 18) for label in headers]
-    first_col = max(text_blocks.visible_width("Permission"), *(text_blocks.visible_width(row[0]) for row in rows))
-    app_col = max(5, *(text_blocks.visible_width(label) for label in headers[1:]))
-    widths = [first_col] + [app_col for _ in headers[1:]]
-    pad = "  "
-
-    header_cells = [
-        row.ljust(widths[idx])
-        for idx, row in enumerate(headers)
-    ]
-    print(pad.join(header_cells))
-    print(pad.join("-" * width for width in widths))
-
-    for row in rows:
-        cells = []
-        for idx, cell in enumerate(row):
-            text = str(cell)
-            if idx == 0:
-                cells.append(text.ljust(widths[idx]))
-            else:
-                cells.append(_pad_center(text, widths[idx]))
-        print(pad.join(cells))
-
-    print("\nLegend:")
-    print("X = framework (dangerous/signature)")
-    print("* = oem/custom/ads")
-    print("- = not requested")
 
 
 __all__ = [

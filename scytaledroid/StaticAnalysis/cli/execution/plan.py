@@ -30,6 +30,19 @@ def build_dynamic_plan_artifact(
             )
         )
         return None
+    research_usable = metadata_map.get("research_usable") if isinstance(metadata_map, Mapping) else None
+    exploratory_only = metadata_map.get("exploratory_only") if isinstance(metadata_map, Mapping) else None
+    if research_usable is False or exploratory_only is True:
+        print(
+            status_messages.status(
+                (
+                    f"Skipping dynamic plan generation for {package_name}: "
+                    "harvest contract marked this scan exploratory-only."
+                ),
+                level="warn",
+            )
+        )
+        return None
     try:
         # Freeze provenance into the plan at build time; dynamic must not do
         # ad-hoc DB lookups to understand the static snapshot.

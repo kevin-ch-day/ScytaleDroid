@@ -16,6 +16,8 @@ from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.LoggingUtils.logging_context import RunContext, get_run_logger
 
 from . import common
+from . import package_contract
+from . import package_refresh
 from .common import (
     DedupeTracker,
     HarvestOptions,
@@ -437,8 +439,8 @@ def _execute_package_plan(
     package_name = inventory.package_name
     package_dir = dest_root / package_name
     package_dir.mkdir(parents=True, exist_ok=True)
-    result.package_manifest_path = _package_manifest_path(package_dir)
-    _write_package_manifest(
+    result.package_manifest_path = package_contract.package_manifest_path(package_dir)
+    package_contract.write_package_manifest(
         result=result,
         package_dir=package_dir,
         serial=serial,
@@ -532,14 +534,18 @@ def _execute_package_plan(
         },
     )
 
-    artifact_total = len(plan.artifacts)
+    active_plan = plan
+    stale_replan_attempted = False
+    artifact_total = len(active_plan.artifacts)
     package_stats = {"saved": 0, "skipped": 0, "errors": 0, "bytes": 0}
-    for artifact_index, artifact in enumerate(plan.artifacts, start=1):
+    artifact_index = 1
+    while artifact_index <= len(active_plan.artifacts):
+        artifact = active_plan.artifacts[artifact_index - 1]
         artifact_result, skip_reason = _pull_and_record(
             serial=serial,
             adb_path=adb_path,
             package_dir=package_dir,
-            plan=plan,
+            plan=active_plan,
             artifact=artifact,
             app_id=app_id,
             group_id=group_id,
@@ -558,6 +564,66 @@ def _execute_package_plan(
             snapshot_id=snapshot_id,
             snapshot_captured_at=snapshot_captured_at,
         )
+        if (
+            isinstance(artifact_result, ArtifactError)
+            and artifact_result.reason == "path_stale"
+            and not stale_replan_attempted
+        ):
+            stale_replan_attempted = True
+            refreshed_plan, drift_reasons = package_refresh.replan_package_after_stale_path(
+                serial=serial,
+                plan=active_plan,
+            )
+            if refreshed_plan is not None:
+                emit(
+                    "warning",
+                    "harvest.package.replanned",
+                    extra={
+                        "package_name": package_name,
+                        "artifact_path": artifact.source_path,
+                        "artifact_index": artifact_index,
+                        "artifact_total": artifact_total,
+                        "drift_detected": bool(drift_reasons),
+                        "drift_reasons": ",".join(drift_reasons) if drift_reasons else None,
+                    },
+                )
+                log.warning(
+                    (
+                        f"Package stale path detected; replanning from live package state for {package_name}"
+                        + (f" ({','.join(drift_reasons)})" if drift_reasons else "")
+                    ),
+                    category="device",
+                )
+                if drift_reasons:
+                    result.drift_reasons = list(drift_reasons)
+                    result.capture_status = "drifted"
+                    if result.ok:
+                        result.errors.append(
+                            ArtifactError(
+                                source_path=artifact.source_path,
+                                reason="package_drift_detected_after_partial_pull",
+                            )
+                        )
+                        package_stats["errors"] += 1
+                        stats["artifacts_failed"] += 1
+                        break
+                active_plan = refreshed_plan
+                artifact_total = len(active_plan.artifacts)
+                artifact_index = package_refresh.next_unwritten_artifact_index(active_plan, result.ok)
+                if artifact_index <= len(active_plan.artifacts):
+                    continue
+                break
+            result.capture_status = "drifted"
+            result.drift_reasons = ["package_refresh_failed"]
+            result.errors.append(
+                ArtifactError(
+                    source_path=artifact.source_path,
+                    reason="package_replan_failed_after_stale_path",
+                )
+            )
+            package_stats["errors"] += 1
+            stats["artifacts_failed"] += 1
+            break
         if skip_reason:
             result.skipped.append(skip_reason)
             package_stats["skipped"] += 1
@@ -581,9 +647,10 @@ def _execute_package_plan(
             result.errors.append(artifact_result)
             package_stats["errors"] += 1
             stats["artifacts_failed"] += 1
+        artifact_index += 1
 
-    _finalize_package_result(result, write_db_requested=options.write_db)
-    _write_package_manifest(
+    package_contract.finalize_package_result(result, write_db_requested=options.write_db)
+    package_contract.write_package_manifest(
         result=result,
         package_dir=package_dir,
         serial=serial,
@@ -1092,151 +1159,6 @@ def _print_package_footer(
         ),
         category="device",
     )
-
-
-def _package_manifest_path(package_dir: Path) -> Path:
-    return package_dir / "harvest_package_manifest.json"
-
-
-def _planned_artifact_entries(plan: PackagePlan) -> list[dict[str, object]]:
-    total = len(plan.artifacts)
-    captured_paths = [str(path) for path in plan.inventory.apk_paths if str(path).strip()]
-    entries: list[dict[str, object]] = []
-    for index, artifact in enumerate(plan.artifacts, start=1):
-        entries.append(
-            {
-                "artifact_index": index,
-                "artifact_total": total,
-                "split_label": artifact.artifact,
-                "file_name": artifact.file_name,
-                "is_base": not artifact.is_split_member,
-                "planned_source_path": artifact.source_path,
-                "inventory_captured_path_set": captured_paths,
-            }
-        )
-    return entries
-
-
-def _observed_artifact_entries(result: PullResult) -> list[dict[str, object]]:
-    entries: list[dict[str, object]] = []
-    for artifact in result.ok:
-        entries.append(
-            {
-                "split_label": artifact.artifact_label or artifact.file_name,
-                "file_name": artifact.file_name,
-                "is_base": bool(artifact.is_base) if artifact.is_base is not None else None,
-                "local_artifact_path": normalise_local_path(artifact.dest_path),
-                "observed_source_path": artifact.observed_source_path or artifact.source_path,
-                "sha256": artifact.sha256,
-                "file_size": artifact.file_size,
-                "pulled_at": artifact.pulled_at,
-                "pull_outcome": artifact.status,
-                "mirror_failure_reasons": list(artifact.mirror_failure_reasons),
-            }
-        )
-    return entries
-
-
-def _comparison_key(entry: Mapping[str, object]) -> tuple[str, str]:
-    return (
-        str(entry.get("split_label") or "").strip(),
-        str(entry.get("file_name") or "").strip(),
-    )
-
-
-def _build_package_comparison(plan: PackagePlan, result: PullResult) -> dict[str, object]:
-    planned = _planned_artifact_entries(plan)
-    observed = _observed_artifact_entries(result)
-    observed_keys = {_comparison_key(entry) for entry in observed}
-    planned_keys = {_comparison_key(entry) for entry in planned}
-    missing = [entry for entry in planned if _comparison_key(entry) not in observed_keys]
-    unexpected = [entry for entry in observed if _comparison_key(entry) not in planned_keys]
-    return {
-        "planned_artifact_count": len(planned),
-        "observed_artifact_count": len(observed),
-        "missing_artifacts": missing,
-        "unexpected_artifacts": unexpected,
-        "matches_planned_artifacts": not missing and not unexpected and len(observed) == len(planned),
-        "observed_hashes_complete": all(bool(entry.get("sha256")) for entry in observed),
-    }
-
-
-def _finalize_package_result(result: PullResult, *, write_db_requested: bool) -> None:
-    comparison = _build_package_comparison(result.plan, result)
-    result.comparison = comparison
-    if result.capture_status != "drifted":
-        if comparison["matches_planned_artifacts"] and not result.errors:
-            result.capture_status = "clean"
-        elif result.ok:
-            result.capture_status = "partial"
-        else:
-            result.capture_status = "failed"
-    if write_db_requested:
-        result.persistence_status = "mirror_failed" if result.mirror_failure_reasons else "mirrored"
-    else:
-        result.persistence_status = "not_requested"
-    if result.capture_status in {"partial", "failed", "drifted"}:
-        result.research_status = "ineligible"
-    elif not comparison["matches_planned_artifacts"] or not comparison["observed_hashes_complete"]:
-        result.research_status = "ineligible"
-    else:
-        result.research_status = "pending_audit"
-
-
-def _write_package_manifest(
-    *,
-    result: PullResult,
-    package_dir: Path,
-    serial: str,
-    session_stamp: str,
-    snapshot_id: int | None,
-    snapshot_captured_at: str | None,
-    execution_state: str,
-) -> None:
-    manifest_path = result.package_manifest_path or _package_manifest_path(package_dir)
-    result.package_manifest_path = manifest_path
-    inventory = result.plan.inventory
-    payload = {
-        "schema": "harvest_package_manifest_v1",
-        "generated_at_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-        "execution_state": execution_state,
-        "package": {
-            "package_name": inventory.package_name,
-            "app_label": inventory.app_label,
-            "version_name": inventory.version_name,
-            "version_code": inventory.version_code,
-            "device_serial": serial,
-            "snapshot_id": snapshot_id,
-            "snapshot_captured_at": snapshot_captured_at,
-            "session_label": session_stamp,
-            "package_dir": normalise_local_path(package_dir),
-        },
-        "planning": {
-            "preflight_reason": result.preflight_reason,
-            "total_paths": result.plan.total_paths,
-            "policy_filtered_count": result.plan.policy_filtered_count,
-            "policy_filtered_reason": result.plan.policy_filtered_reason,
-            "expected_artifacts": _planned_artifact_entries(result.plan),
-        },
-        "execution": {
-            "observed_artifacts": _observed_artifact_entries(result),
-            "errors": [
-                {"source_path": error.source_path, "reason": error.reason}
-                for error in result.errors
-            ],
-            "runtime_skips": list(result.skipped),
-            "mirror_failure_reasons": list(result.mirror_failure_reasons),
-        },
-        "status": {
-            "capture_status": result.capture_status,
-            "persistence_status": result.persistence_status,
-            "research_status": result.research_status,
-        },
-        "comparison": dict(result.comparison),
-    }
-    common.write_json_manifest(manifest_path, payload)
-
-
 def _derive_run_state(
     stats: Mapping[str, int],
     *,

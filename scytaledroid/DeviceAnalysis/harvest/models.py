@@ -122,6 +122,7 @@ class PullResult:
     skipped: list[str] = field(default_factory=list)
     preflight_reason: str | None = None
     mirror_failure_reasons: list[str] = field(default_factory=list)
+    drift_reasons: list[str] = field(default_factory=list)
     capture_status: str | None = None
     persistence_status: str = "not_requested"
     research_status: str = "pending_audit"
@@ -151,6 +152,7 @@ class PackageHarvestResult:
     skipped_reasons: list[str] = field(default_factory=list)
     preflight_reason: str | None = None
     mirror_failure_reasons: list[str] = field(default_factory=list)
+    drift_reasons: list[str] = field(default_factory=list)
     capture_status: str | None = None
     persistence_status: str = "not_requested"
     research_status: str = "pending_audit"
@@ -174,6 +176,7 @@ class PackageHarvestResult:
             "skipped_reasons": list(self.skipped_reasons),
             "preflight_reason": self.preflight_reason,
             "mirror_failure_reasons": list(self.mirror_failure_reasons),
+            "drift_reasons": list(self.drift_reasons),
             "capture_status": self.capture_status,
             "persistence_status": self.persistence_status,
             "research_status": self.research_status,

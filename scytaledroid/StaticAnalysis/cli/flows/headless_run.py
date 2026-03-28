@@ -16,6 +16,9 @@ from scytaledroid.DynamicAnalysis.profile_loader import load_profile_packages
 from scytaledroid.StaticAnalysis.cli.core.run_specs import build_static_run_spec
 from scytaledroid.StaticAnalysis.cli.core.models import RunParameters, ScopeSelection
 from scytaledroid.StaticAnalysis.cli.flows.run_dispatch import execute_run_spec
+from scytaledroid.StaticAnalysis.cli.flows.session_uniqueness import (
+    check_session_uniqueness as _check_session_uniqueness,
+)
 from scytaledroid.StaticAnalysis.core.repository import (
     ArtifactGroup,
     RepositoryArtifact,
@@ -25,11 +28,6 @@ from scytaledroid.StaticAnalysis.core.repository import (
 from scytaledroid.StaticAnalysis.session import normalize_session_stamp
 from scytaledroid.Utils.System import output_prefs
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
-
-try:  # optional during offline runs
-    from scytaledroid.Database.db_core import db_queries as core_q
-except Exception:  # pragma: no cover - offline mode
-    core_q = None
 
 
 def _artifact_group_from_path(apk_path: Path) -> ArtifactGroup:
@@ -92,33 +90,6 @@ def _resolve_artifact_metadata(apk_path: Path, metadata: dict[str, Any] | object
     return resolved
 
 
-def _check_session_uniqueness(session_stamp: str | None, package_name: str, allow_reuse: bool, *, dry_run: bool = False) -> None:
-    if allow_reuse or dry_run or not session_stamp or core_q is None:
-        return
-    try:
-        rows = core_q.run_sql(
-            """
-            SELECT sar.id
-            FROM static_analysis_runs sar
-            JOIN app_versions av ON av.id = sar.app_version_id
-            JOIN apps a ON a.id = av.app_id
-            WHERE sar.session_stamp = %s
-              AND a.package_name = %s
-            """,
-            (session_stamp, package_name),
-            fetch="all",
-        )
-        if rows:
-            raise SystemExit(
-                f"Session '{session_stamp}' for package '{package_name}' already exists "
-                "(static_analysis_runs). Use a new --session or --allow-session-reuse explicitly."
-            )
-    except SystemExit:
-        raise
-    except Exception as exc:  # pragma: no cover - DB optional
-        log.warning(f"Session uniqueness check failed (skipping): {exc}", category="static")
-
-
 def _run_single_apk(
     *,
     apk_path: Path,
@@ -137,6 +108,7 @@ def _run_single_apk(
         scope="app",
         scope_label=resolved_scope_label,
         dry_run=dry_run,
+        paper_grade_requested=False,
     )
     if session:
         params = replace(params, session_stamp=session, session_label=session)
@@ -171,7 +143,6 @@ def _run_dataset_alpha(*, session: str, profile: str, allow_session_reuse: bool,
     dataset_pkgs = {pkg.lower() for pkg in load_profile_packages("RESEARCH_DATASET_ALPHA")}
     if not dataset_pkgs:
         raise SystemExit("Profile RESEARCH_DATASET_ALPHA has no packages.")
-    selected: list[ArtifactGroup] = []
     by_pkg: dict[str, ArtifactGroup] = {}
     for group in groups:
         pkg = str(getattr(group, "package_name", "")).lower()
@@ -183,37 +154,39 @@ def _run_dataset_alpha(*, session: str, profile: str, allow_session_reuse: bool,
     if not selected:
         raise SystemExit(f"No local artifact groups found for RESEARCH_DATASET_ALPHA under {base_dir}")
 
-    failures = 0
     cohort_session = normalize_session_stamp(session)
     for group in selected:
         pkg = str(group.package_name)
-        app_session = cohort_session
-        _check_session_uniqueness(app_session, pkg, allow_session_reuse, dry_run=dry_run)
-        selection = ScopeSelection(scope="app", label=pkg, groups=(group,))
-        params = RunParameters(
-            profile=profile,
-            scope="app",
-            scope_label=pkg,
-            session_stamp=app_session,
-            session_label=app_session,
-            canonical_action="first_run",
-            dry_run=dry_run,
-        )
-        spec = build_static_run_spec(
-            selection=selection,
-            params=params,
-            base_dir=base_dir,
-            run_mode="batch",
-            quiet=True,
-            noninteractive=True,
-        )
-        try:
-            execute_run_spec(spec)
-            print(f"[OK] {pkg} session={app_session}")
-        except Exception as exc:
-            failures += 1
-            print(f"[FAIL] {pkg} session={app_session} error={exc}")
-    return 1 if failures else 0
+        _check_session_uniqueness(cohort_session, pkg, allow_session_reuse, dry_run=dry_run)
+
+    selection = ScopeSelection(
+        scope="profile",
+        label="Research Dataset Alpha",
+        groups=tuple(selected),
+    )
+    params = RunParameters(
+        profile=profile,
+        scope="profile",
+        scope_label=selection.label,
+        session_stamp=cohort_session,
+        session_label=cohort_session,
+        canonical_action="first_run",
+        dry_run=dry_run,
+    )
+    spec = build_static_run_spec(
+        selection=selection,
+        params=params,
+        base_dir=base_dir,
+        run_mode="batch",
+        quiet=True,
+        noninteractive=True,
+    )
+    execute_run_spec(spec)
+    print(
+        "Static analysis completed: "
+        f"session={cohort_session} profile=research_dataset_alpha apps={len(selected)}"
+    )
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:

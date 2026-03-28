@@ -67,6 +67,7 @@ from .results_formatters import _format_highlight_tokens
 from .results_persist import _build_ingest_payload, _persist_cohort_rollup
 from .run_db_queries import _apply_display_names
 from .scan_flow import format_duration
+from .string_analysis_payload import analyse_string_payload, empty_string_analysis_payload
 from .view import DetailBuffer
 
 # Back-compat: tests and older callers patch these names.
@@ -106,6 +107,26 @@ def write_dynamic_plan_json(
         profile=profile,
         scope=scope,
         static_run_id=static_run_id,
+    )
+
+
+def _empty_string_analysis_payload(*, warning: str | None = None) -> Mapping[str, object]:
+    return empty_string_analysis_payload(warning=warning)
+
+
+def _analyse_strings_for_results(
+    apk_path: str,
+    *,
+    params: RunParameters,
+    package_name: str,
+    warning_sink: list[str] | None = None,
+) -> Mapping[str, object]:
+    return analyse_string_payload(
+        apk_path,
+        params=params,
+        package_name=package_name,
+        warning_sink=warning_sink,
+        analyse_fn=analyse_strings,
     )
 
 
@@ -490,13 +511,15 @@ def _render_run_results_impl(
                     )
             continue
 
-        string_data = analyse_strings(
-            base_report.file_path,
-            mode=params.strings_mode,
-            min_entropy=params.string_min_entropy,
-            max_samples=params.string_max_samples,
-            cleartext_only=params.string_cleartext_only,
-            include_https_risk=params.string_include_https_risk,
+        string_data = (
+            app_result.base_string_data
+            if isinstance(app_result.base_string_data, Mapping)
+            else _analyse_strings_for_results(
+                base_report.file_path,
+                params=params,
+                package_name=app_result.package_name,
+                warning_sink=outcome.warnings,
+            )
         )
         manifest = base_report.manifest
 
@@ -587,6 +610,34 @@ def _render_run_results_impl(
                         metadata_map["identity_valid"] = bool(app_result.identity_valid)
                     if app_result.identity_error_reason and not metadata_map.get("identity_error_reason"):
                         metadata_map["identity_error_reason"] = app_result.identity_error_reason
+                    if app_result.harvest_manifest_path and not metadata_map.get("harvest_manifest_path"):
+                        metadata_map["harvest_manifest_path"] = app_result.harvest_manifest_path
+                    if app_result.harvest_capture_status and not metadata_map.get("harvest_capture_status"):
+                        metadata_map["harvest_capture_status"] = app_result.harvest_capture_status
+                    if app_result.harvest_persistence_status and not metadata_map.get("harvest_persistence_status"):
+                        metadata_map["harvest_persistence_status"] = app_result.harvest_persistence_status
+                    if app_result.harvest_research_status and not metadata_map.get("harvest_research_status"):
+                        metadata_map["harvest_research_status"] = app_result.harvest_research_status
+                    if (
+                        app_result.harvest_matches_planned_artifacts is not None
+                        and metadata_map.get("harvest_matches_planned_artifacts") is None
+                    ):
+                        metadata_map["harvest_matches_planned_artifacts"] = bool(
+                            app_result.harvest_matches_planned_artifacts
+                        )
+                    if (
+                        app_result.harvest_observed_hashes_complete is not None
+                        and metadata_map.get("harvest_observed_hashes_complete") is None
+                    ):
+                        metadata_map["harvest_observed_hashes_complete"] = bool(
+                            app_result.harvest_observed_hashes_complete
+                        )
+                    if app_result.research_usable is not None and metadata_map.get("research_usable") is None:
+                        metadata_map["research_usable"] = bool(app_result.research_usable)
+                    if metadata_map.get("exploratory_only") is None:
+                        metadata_map["exploratory_only"] = bool(app_result.exploratory_only)
+                    if app_result.research_block_reasons and not metadata_map.get("harvest_non_canonical_reasons"):
+                        metadata_map["harvest_non_canonical_reasons"] = list(app_result.research_block_reasons)
                     if getattr(params, "config_hash", None) and not metadata_map.get("config_hash"):
                         metadata_map["config_hash"] = params.config_hash
                     if getattr(params, "analysis_version", None) and not metadata_map.get("pipeline_version"):

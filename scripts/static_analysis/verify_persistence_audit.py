@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Verify static persistence reliability from missing-run-id audit artifacts.
+"""Verify static persistence reliability from persistence audit artifacts.
 
-This script validates the latest (or a specified) artifact produced at:
+This script validates the latest (or a specified) artifact produced at either:
+  output/audit/persistence/<session>_persistence_audit.json
   output/audit/persistence/<session>_missing_run_ids.json
 
 Default systemic-failure gate:
@@ -21,7 +22,10 @@ from typing import Any
 def _latest_artifact(root: Path) -> Path | None:
     if not root.exists():
         return None
-    files = sorted(root.glob("*_missing_run_ids.json"))
+    files = sorted(
+        list(root.glob("*_persistence_audit.json"))
+        + list(root.glob("*_missing_run_ids.json"))
+    )
     return files[-1] if files else None
 
 
@@ -70,12 +74,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Verify static persistence audit artifact for systemic failures.")
     parser.add_argument(
         "--artifact",
-        help="Path to a specific missing-run-id artifact JSON. If omitted, latest under output/audit/persistence is used.",
+        help="Path to a specific persistence audit artifact JSON. If omitted, latest under output/audit/persistence is used.",
     )
     parser.add_argument(
         "--audit-dir",
         default="output/audit/persistence",
-        help="Directory containing *_missing_run_ids.json artifacts (default: output/audit/persistence).",
+        help="Directory containing persistence audit artifacts (default: output/audit/persistence).",
     )
     parser.add_argument(
         "--max-consecutive-missing",
@@ -128,4 +132,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

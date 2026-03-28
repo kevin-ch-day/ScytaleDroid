@@ -14,8 +14,6 @@ import re
 import zlib
 from collections.abc import Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
-from urllib.parse import urlsplit
-
 from .allowlist import NoisePolicy
 from .bucketing.classifier import BucketDecision, classify
 from .constants import (
@@ -40,6 +38,7 @@ from .indexing import IndexedString, StringIndex, build_string_index
 from .parsing.host_normalizer import NormalizedHost, normalize_host
 from .parsing.punctuation import strip_wrap_punct
 from .parsing.url_tokenizer import Candidate, extract_candidates
+from .parsing.urlsafe import safe_urlsplit
 from .parsing.validators import is_private_ip
 from .policy.evaluator import evaluate as evaluate_policy
 
@@ -1088,8 +1087,8 @@ def _tags_from_decoded(text: str) -> list[str]:
     match = ENDPOINT_PATTERN.search(text)
     if match:
         url = match.group("url")
-        parsed = urlsplit(url)
-        tags.extend(_tags_for_url(url, host=parsed.hostname, context=text))
+        parsed = safe_urlsplit(url)
+        tags.extend(_tags_for_url(url, host=parsed.hostname if parsed is not None else None, context=text))
     if AWS_ACCESS_KEY_PATTERN.search(text) and AWS_SECRET_KEY_PATTERN.search(text):
         tags.extend(["aws-pair", "auth-adjacent"])
     if JWT_PATTERN.search(text):
@@ -1211,7 +1210,8 @@ def _looks_obfuscated(entry: IndexedString) -> bool:
 
 def _tags_for_url(url: str, *, host: str | None, context: str) -> list[str]:
     tags = ["endpoint"]
-    scheme = urlsplit(url).scheme.lower()
+    parsed = safe_urlsplit(url)
+    scheme = parsed.scheme.lower() if parsed and parsed.scheme else ""
     if scheme in {"http", "ws"}:
         tags.append("cleartext")
     if scheme in {"ws", "wss"}:

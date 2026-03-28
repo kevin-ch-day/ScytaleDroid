@@ -27,6 +27,41 @@ def bootstrap_sqlite_schema() -> None:
         pytest.skip(f"SQLite bootstrap failed: {exc}")
 
 
+@pytest.fixture(scope="session", autouse=True)
+def isolate_test_logs(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    """Redirect test logging away from the shared workspace log directory."""
+
+    from scytaledroid.Utils.LoggingUtils import logging_core, logging_engine
+
+    monkeypatch = pytest.MonkeyPatch()
+    log_root = tmp_path_factory.mktemp("logs")
+
+    def _reset_loggers() -> None:
+        for adapter in list(logging_engine._HARVEST_LOGGERS.values()):  # noqa: SLF001 - test cleanup
+            logger = adapter.logger
+            for handler in list(logger.handlers):
+                logger.removeHandler(handler)
+                try:
+                    handler.close()
+                except Exception:
+                    pass
+        logging_engine._HARVEST_LOGGERS.clear()  # noqa: SLF001 - test cleanup
+
+        for logger in list(logging_engine._LOGGERS.values()):  # noqa: SLF001 - test cleanup
+            logging_engine._clear_handlers(logger)  # noqa: SLF001 - test cleanup
+        logging_engine._LOGGERS.clear()  # noqa: SLF001 - test cleanup
+
+    _reset_loggers()
+    monkeypatch.setattr(logging_core, "LOG_DIR", log_root)
+    monkeypatch.setattr(logging_engine, "LOG_DIR", log_root)
+
+    try:
+        yield
+    finally:
+        _reset_loggers()
+        monkeypatch.undo()
+
+
 @pytest.fixture(autouse=True)
 def isolate_integration_db(request: pytest.FixtureRequest) -> Iterator[None]:
     """Point integration tests at the dedicated test schema and truncate it."""

@@ -89,3 +89,56 @@ def test_capture_id_fallback_uses_path_date_token_when_session_missing(tmp_path:
     groups = [g for g in group_artifacts(root) if g.package_name == package]
     assert len(groups) == 2
     assert sorted(g.capture_id for g in groups) == ["legacy-20260101", "legacy-20260201"]
+
+
+def test_grouping_loads_harvest_package_manifest(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    package = "com.example.manifested"
+    day = "20260328"
+    metadata = {
+        "package_name": package,
+        "version_code": "101",
+        "version_name": "1.0.1",
+        "split_group_id": 55,
+        "session_stamp": day,
+        "artifact": "base",
+        "is_split_member": False,
+    }
+    _write_artifact(
+        root,
+        day=day,
+        package=package,
+        filename="base.apk",
+        metadata=metadata,
+    )
+    manifest_path = root / day / package / "harvest_package_manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema": "harvest_package_manifest_v1",
+                "execution_state": "completed",
+                "status": {
+                    "capture_status": "clean",
+                    "persistence_status": "mirror_failed",
+                    "research_status": "pending_audit",
+                },
+                "comparison": {
+                    "matches_planned_artifacts": True,
+                    "observed_hashes_complete": True,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    groups = [g for g in group_artifacts(root) if g.package_name == package]
+
+    assert len(groups) == 1
+    group = groups[0]
+    assert group.harvest_manifest_path == str(manifest_path)
+    assert group.harvest_capture_status == "clean"
+    assert group.harvest_persistence_status == "mirror_failed"
+    assert group.harvest_research_status == "pending_audit"
+    assert group.matches_planned_artifacts is True
+    assert group.observed_hashes_complete is True
+    assert group.harvest_research_usable is True

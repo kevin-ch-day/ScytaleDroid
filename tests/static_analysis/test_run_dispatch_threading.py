@@ -25,8 +25,9 @@ def test_execute_run_spec_detailed_skips_sigint_handler_in_worker_thread(monkeyp
         lambda session_stamp, **_kwargs: (session_stamp, session_stamp, "first_run"),
     )
     monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok"))
-    monkeypatch.setattr(run_dispatch.canonical_ingest, "ensure_provider_plumbing", lambda: None)
-    monkeypatch.setattr(run_dispatch.canonical_ingest, "build_session_string_view", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
+    monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
+    monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
     monkeypatch.setattr(run_dispatch, "execute_scan", lambda *_a, **_k: outcome)
     monkeypatch.setattr(run_dispatch, "render_run_results", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "_emit_selection_manifest", lambda *_a, **_k: None)

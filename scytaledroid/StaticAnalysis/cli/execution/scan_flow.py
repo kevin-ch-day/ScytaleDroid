@@ -43,6 +43,7 @@ from .scan_view import (
     render_app_start,
     render_resource_warnings,
 )
+from .string_analysis_payload import analyse_string_payload
 
 _abort_requested = False
 _abort_reason: str | None = None
@@ -89,6 +90,29 @@ def request_abort(reason: str = "SIGINT", signal: str = "SIGINT") -> None:
 
 def _abort_state() -> tuple[bool, str | None, str | None]:
     return _abort_requested, _abort_reason, _abort_signal
+
+
+def _harvest_non_canonical_reasons(group) -> tuple[str, ...]:
+    reasons = getattr(group, "harvest_non_canonical_reasons", ())
+    if isinstance(reasons, tuple):
+        return reasons
+    if isinstance(reasons, list):
+        return tuple(str(reason) for reason in reasons if str(reason).strip())
+    return tuple()
+
+
+def _apply_harvest_contract(app_result: AppRunResult, group) -> tuple[bool, tuple[str, ...]]:
+    app_result.harvest_manifest_path = getattr(group, "harvest_manifest_path", None)
+    app_result.harvest_capture_status = getattr(group, "harvest_capture_status", None)
+    app_result.harvest_persistence_status = getattr(group, "harvest_persistence_status", None)
+    app_result.harvest_research_status = getattr(group, "harvest_research_status", None)
+    app_result.harvest_matches_planned_artifacts = getattr(group, "matches_planned_artifacts", None)
+    app_result.harvest_observed_hashes_complete = getattr(group, "observed_hashes_complete", None)
+    reasons = _harvest_non_canonical_reasons(group)
+    app_result.research_block_reasons = reasons
+    app_result.research_usable = not reasons
+    app_result.exploratory_only = bool(reasons)
+    return bool(app_result.research_usable), reasons
 
 
 def execute_scan(
@@ -199,6 +223,7 @@ def execute_scan(
         )
     for app_index, group in enumerate(selection.groups, start=1):
         app_result = AppRunResult(group.package_name, getattr(group, "category", "Uncategorized"))
+        harvest_research_usable, harvest_block_reasons = _apply_harvest_contract(app_result, group)
         identity = _compute_run_identity(group)
         manifest_sha256 = _artifact_manifest_sha256(group)
         run_signature = _run_signature_sha256(
@@ -260,6 +285,18 @@ def execute_scan(
             failures.append(message)
             log.warning(message, category="static")
             continue
+        if harvest_block_reasons:
+            reason_text = ",".join(harvest_block_reasons)
+            message = (
+                "Harvest contract marks package exploratory-only; "
+                f"package={group.package_name}; reasons={reason_text}"
+            )
+            if not params.dry_run and bool(getattr(params, "paper_grade_requested", True)):
+                failures.append(message)
+                log.warning(message, category="static")
+                results.append(app_result)
+                continue
+            log.warning(message, category="static")
         if not params.dry_run and not persistence_ready:
             app_result.persistence_skipped += 1
         app_result.static_run_id = static_run_id
@@ -325,6 +362,15 @@ def execute_scan(
                         "run_signature_version": identity["run_signature_version"],
                         "identity_valid": identity["identity_valid"],
                         "identity_error_reason": identity["identity_error_reason"],
+                        "harvest_manifest_path": app_result.harvest_manifest_path,
+                        "harvest_capture_status": app_result.harvest_capture_status,
+                        "harvest_persistence_status": app_result.harvest_persistence_status,
+                        "harvest_research_status": app_result.harvest_research_status,
+                        "harvest_matches_planned_artifacts": app_result.harvest_matches_planned_artifacts,
+                        "harvest_observed_hashes_complete": app_result.harvest_observed_hashes_complete,
+                        "research_usable": harvest_research_usable,
+                        "exploratory_only": bool(harvest_block_reasons),
+                        "harvest_non_canonical_reasons": list(harvest_block_reasons),
                     },
                 )
             except Exception as exc:
@@ -420,6 +466,14 @@ def execute_scan(
                 break
         app_result.duration_seconds = time.monotonic() - app_start
         last_elapsed_for_progress = app_result.duration_seconds
+        base_report_for_app = app_result.base_report()
+        if base_report_for_app is not None and app_result.base_string_data is None:
+            app_result.base_string_data = analyse_string_payload(
+                base_report_for_app.file_path,
+                params=params,
+                package_name=app_result.package_name,
+                warning_sink=warnings,
+            )
         if not _abort_state()[0]:
             progress.flush_line()
             artifact_count = app_result.discovered_artifacts

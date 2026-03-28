@@ -42,6 +42,7 @@ def test_emit_missing_run_ids_artifact(tmp_path: Path, monkeypatch) -> None:
 
     out = tmp_path / "output" / "audit" / "persistence" / "20260216_missing_run_ids.json"
     payload = json.loads(out.read_text(encoding="utf-8"))
+    assert payload["artifact_kind"] == "missing_run_ids"
     assert payload["schema_version"] == "v1"
     assert payload["db_schema_version"]
     assert payload["generated_at_utc"]
@@ -52,6 +53,34 @@ def test_emit_missing_run_ids_artifact(tmp_path: Path, monkeypatch) -> None:
     lock_path = tmp_path / "output" / "audit" / "persistence" / "20260216_db_lock_health.json"
     lock_payload = json.loads(lock_path.read_text(encoding="utf-8"))
     assert lock_payload["active_process_count"] == 0
+
+
+def test_emit_missing_run_ids_artifact_uses_neutral_name_when_no_missing(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    _stub_lock_snapshot(monkeypatch)
+    results = [AppRunResult(package_name="com.ok", category="Test", static_run_id=12)]
+    scope = ScopeSelection(scope="all", label="All apps", groups=tuple())
+    now = datetime.now(UTC)
+    outcome = RunOutcome(
+        results=results,
+        started_at=now,
+        finished_at=now,
+        scope=scope,
+        base_dir=tmp_path,
+    )
+
+    run_dispatch._emit_missing_run_ids_artifact(  # noqa: SLF001 - contract guard
+        outcome=outcome,
+        session_stamp="20260216",
+        linkage_blocked_reason=None,
+        missing_id_packages=[],
+    )
+
+    out = tmp_path / "output" / "audit" / "persistence" / "20260216_persistence_audit.json"
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert payload["artifact_kind"] == "persistence_audit"
+    assert payload["missing_static_run_id_count"] == 0
+    assert not (tmp_path / "output" / "audit" / "persistence" / "20260216_missing_run_ids.json").exists()
 
 
 def test_emit_missing_run_ids_artifact_extracts_retry_and_disconnect(tmp_path: Path, monkeypatch) -> None:
@@ -80,6 +109,7 @@ def test_emit_missing_run_ids_artifact_extracts_retry_and_disconnect(tmp_path: P
 
     out = tmp_path / "output" / "audit" / "persistence" / "20260216_missing_run_ids.json"
     payload = json.loads(out.read_text(encoding="utf-8"))
+    assert payload["artifact_kind"] == "missing_run_ids"
     rows = {row["package_name"]: row for row in payload["rows"]}
     missing = rows["com.missing"]
     assert missing["missing_static_run_id"] is True

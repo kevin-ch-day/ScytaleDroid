@@ -594,12 +594,18 @@ def _render_post_run_views(
     static_risk_rows: Sequence[dict[str, object]],
     *,
     scope_label: str,
+    snapshot_at: object | None = None,
 ) -> None:
     rendered_any = False
     if permission_profiles:
         limit = min(15, len(permission_profiles))
         try:
-            render_permission_matrix(permission_profiles, scope_label=scope_label, show=limit)
+            render_permission_matrix(
+                permission_profiles,
+                scope_label=scope_label,
+                show=limit,
+                snapshot_at=snapshot_at,
+            )
             rendered_any = True
         except Exception:
             pass

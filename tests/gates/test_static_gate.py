@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from types import SimpleNamespace
 
 import pytest
 
@@ -246,3 +247,52 @@ def test_secret_redaction_no_raw_secret_leak_db_scan():
 def test_headless_dataset_mode_requires_session():
     with pytest.raises(SystemExit):
         headless_run.main(["--profile-key", "research_dataset_alpha"])
+
+
+def test_headless_dataset_mode_builds_single_profile_run(monkeypatch):
+    captured: dict[str, object] = {}
+    groups = (
+        SimpleNamespace(package_name="com.alpha.app"),
+        SimpleNamespace(package_name="com.beta.app"),
+    )
+
+    monkeypatch.setattr(headless_run, "group_artifacts", lambda *_a, **_k: groups)
+    monkeypatch.setattr(
+        headless_run,
+        "load_profile_packages",
+        lambda key: ["com.beta.app", "com.alpha.app"] if key == "RESEARCH_DATASET_ALPHA" else [],
+    )
+    monkeypatch.setattr(headless_run, "_check_session_uniqueness", lambda *_a, **_k: None)
+
+    def _build_spec(**kwargs):
+        captured["selection"] = kwargs["selection"]
+        captured["params"] = kwargs["params"]
+        return SimpleNamespace(selection=kwargs["selection"], params=kwargs["params"])
+
+    monkeypatch.setattr(headless_run, "build_static_run_spec", _build_spec)
+    monkeypatch.setattr(headless_run, "execute_run_spec", lambda spec: captured.setdefault("spec", spec))
+
+    rc = headless_run.main(
+        [
+            "--profile-key",
+            "research_dataset_alpha",
+            "--session",
+            "20260328-rda-contract",
+            "--profile",
+            "full",
+            "--dry-run",
+        ]
+    )
+
+    assert rc == 0
+    selection = captured["selection"]
+    params = captured["params"]
+    assert selection.scope == "profile"
+    assert selection.label == "Research Dataset Alpha"
+    assert tuple(group.package_name for group in selection.groups) == (
+        "com.alpha.app",
+        "com.beta.app",
+    )
+    assert params.scope == "profile"
+    assert params.scope_label == "Research Dataset Alpha"
+    assert params.session_stamp == "20260328-rda-contract"
