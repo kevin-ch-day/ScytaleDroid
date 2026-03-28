@@ -15,6 +15,7 @@ from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis.adb import client as adb_client
 from scytaledroid.DeviceAnalysis.adb import packages as adb_packages
 from scytaledroid.Utils.DisplayUtils import status_messages
+from scytaledroid.Utils.IO.atomic_write import atomic_write_text
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .models import ArtifactError, InventoryRow
@@ -217,6 +218,13 @@ def write_metadata_sidecar(
     meta_path = dest_path.with_suffix(dest_path.suffix + ".meta.json")
     meta_path.write_text(json.dumps(filtered, indent=2, sort_keys=True), encoding="utf-8")
     return meta_path
+
+
+def write_json_manifest(path: Path, payload: Mapping[str, object]) -> Path:
+    """Write a small JSON manifest atomically."""
+
+    atomic_write_text(path, json.dumps(dict(payload), indent=2, sort_keys=True) + "\n")
+    return path
 
 
 def adb_pull(

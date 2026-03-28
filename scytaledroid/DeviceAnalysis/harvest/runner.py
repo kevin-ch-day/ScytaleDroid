@@ -53,6 +53,7 @@ def execute_harvest(
     """Execute the provided harvest plan and return per-package results."""
 
     options = load_options(config, pull_mode=pull_mode)
+    requested_db_mirror = bool(options.write_db)
     if overwrite_existing:
         options = HarvestOptions(
             dedupe_sha256=options.dedupe_sha256,
@@ -161,6 +162,8 @@ def execute_harvest(
         "packages_clean": 0,
         "packages_partial": 0,
         "packages_failed": 0,
+        "packages_drifted": 0,
+        "packages_mirror_failed": 0,
         "artifacts_planned": sum(len(plan.artifacts) for plan in plans),
         "artifacts_written": 0,
         "artifacts_failed": 0,
@@ -182,6 +185,7 @@ def execute_harvest(
             "package_total": stats["packages_total"],
             "artifact_total": stats["artifacts_planned"],
             "write_db": options.write_db,
+            "write_db_requested": requested_db_mirror,
         },
     )
 
@@ -337,6 +341,11 @@ def execute_harvest(
             "package_total": stats["packages_total"],
             "packages_skipped": stats["packages_skipped"],
             "packages_processed": stats["packages_total"] - stats["packages_skipped"],
+            "packages_clean": stats["packages_clean"],
+            "packages_partial": stats["packages_partial"],
+            "packages_failed": stats["packages_failed"],
+            "packages_drifted": stats["packages_drifted"],
+            "packages_mirror_failed": stats["packages_mirror_failed"],
             "artifacts_planned": stats["artifacts_planned"],
             "artifacts_written": stats["artifacts_written"],
             "artifacts_failed": stats["artifacts_failed"],
@@ -349,6 +358,14 @@ def execute_harvest(
             "db_artifact_paths": stats["db_artifact_paths"],
             "db_source_paths": stats["db_source_paths"],
             "db_errors": stats["db_errors"],
+            "write_db_requested": requested_db_mirror,
+            "write_db_effective": options.write_db,
+            "run_state": _derive_run_state(
+                stats,
+                run_failed=run_failed,
+                write_db_requested=requested_db_mirror,
+                write_db_effective=options.write_db,
+            ),
             "run_failed": run_failed,
             "run_error": run_error,
         }
@@ -395,9 +412,13 @@ def _execute_package_plan(
     snapshot_id: int | None,
     snapshot_captured_at: str | None,
 ) -> PullResult:
-    result = PullResult(plan=plan)
+    result = PullResult(
+        plan=plan,
+        persistence_status="mirrored" if options.write_db else "not_requested",
+    )
 
     if plan.skip_reason:
+        result.preflight_reason = plan.skip_reason
         result.skipped.append(plan.skip_reason)
         stats["packages_skipped"] += 1
         emit(
@@ -416,6 +437,16 @@ def _execute_package_plan(
     package_name = inventory.package_name
     package_dir = dest_root / package_name
     package_dir.mkdir(parents=True, exist_ok=True)
+    result.package_manifest_path = _package_manifest_path(package_dir)
+    _write_package_manifest(
+        result=result,
+        package_dir=package_dir,
+        serial=serial,
+        session_stamp=session_stamp,
+        snapshot_id=snapshot_id,
+        snapshot_captured_at=snapshot_captured_at,
+        execution_state="started",
+    )
 
     # DB is a mirror for harvest; if any DB op fails for this package, proceed with filesystem
     # harvest and record the reason in result.skipped for operator visibility.
@@ -443,6 +474,7 @@ def _execute_package_plan(
                     "error": str(exc),
                 },
             )
+            result.mirror_failure_reasons.append("app_definition_failed")
             result.skipped.append("app_definition_failed")
             effective_options = HarvestOptions(
                 dedupe_sha256=options.dedupe_sha256,
@@ -474,6 +506,7 @@ def _execute_package_plan(
                     "error": str(exc),
                 },
             )
+            result.mirror_failure_reasons.append("split_group_failed")
             result.skipped.append("split_group_failed")
             effective_options = HarvestOptions(
                 dedupe_sha256=options.dedupe_sha256,
@@ -531,6 +564,9 @@ def _execute_package_plan(
             stats["artifacts_skipped"] += 1
         elif isinstance(artifact_result, ArtifactResult):
             result.ok.append(artifact_result)
+            if artifact_result.mirror_failure_reasons:
+                result.mirror_failure_reasons.extend(artifact_result.mirror_failure_reasons)
+                result.skipped.extend(artifact_result.mirror_failure_reasons)
             package_stats["saved"] += 1
             try:
                 package_stats["bytes"] += artifact_result.dest_path.stat().st_size
@@ -545,6 +581,17 @@ def _execute_package_plan(
             result.errors.append(artifact_result)
             package_stats["errors"] += 1
             stats["artifacts_failed"] += 1
+
+    _finalize_package_result(result, write_db_requested=options.write_db)
+    _write_package_manifest(
+        result=result,
+        package_dir=package_dir,
+        serial=serial,
+        session_stamp=session_stamp,
+        snapshot_id=snapshot_id,
+        snapshot_captured_at=snapshot_captured_at,
+        execution_state="completed",
+    )
 
     _print_package_footer(plan, package_stats, ui_index, ui_total, compact_mode=compact_mode)
     emit(
@@ -647,6 +694,7 @@ def _pull_and_record(
     local_rel_path = normalise_local_path(dest_path)
 
     apk_id: int | None = None
+    mirror_failure_reasons: list[str] = []
     if options.write_db and db_repo is not None:
         record = db_repo.ApkRecord(
             package_name=plan.inventory.package_name,
@@ -694,9 +742,9 @@ def _pull_and_record(
                     "error": str(exc),
                 },
             )
-            return ArtifactError(source_path=artifact.source_path, reason=str(exc)), None
+            mirror_failure_reasons.append("apk_record_failed")
 
-        if storage_root_id is not None:
+        if apk_id and storage_root_id is not None:
             try:
                 db_repo.upsert_artifact_path(
                     apk_id,
@@ -726,6 +774,7 @@ def _pull_and_record(
                         "error": str(exc),
                     },
                 )
+                mirror_failure_reasons.append("artifact_path_failed")
 
         if apk_id and artifact.source_path:
             try:
@@ -756,6 +805,7 @@ def _pull_and_record(
                         "error": str(exc),
                     },
                 )
+                mirror_failure_reasons.append("source_path_failed")
 
     artifact_payload = {
         "source_path": artifact.source_path,
@@ -818,6 +868,12 @@ def _pull_and_record(
             dest_path=dest_path,
             source_path=artifact.source_path,
             sha256=hashes.get("sha256"),
+            file_size=dest_path.stat().st_size if dest_path.exists() else None,
+            pulled_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            artifact_label=artifact.artifact,
+            is_base=not artifact.is_split_member,
+            observed_source_path=artifact.source_path,
+            mirror_failure_reasons=mirror_failure_reasons,
         ),
         None,
     )
@@ -871,14 +927,18 @@ def _progress_every() -> int:
 
 
 def _update_package_outcome(stats: dict[str, int], result: PullResult) -> None:
-    if result.skipped and not result.ok and not result.errors:
+    if result.preflight_reason:
         return
-    if result.errors and result.ok:
+    if result.capture_status == "drifted":
+        stats["packages_drifted"] += 1
+    elif result.capture_status == "partial":
         stats["packages_partial"] += 1
-    elif result.errors and not result.ok:
+    elif result.capture_status == "failed":
         stats["packages_failed"] += 1
     else:
         stats["packages_clean"] += 1
+    if result.persistence_status == "mirror_failed":
+        stats["packages_mirror_failed"] += 1
 
 
 def _maybe_print_progress(
@@ -917,15 +977,25 @@ def _print_progress_line(
 ) -> None:
     if not _quiet_mode() and not force:
         return
-    ok_count = int(stats.get("packages_clean", 0)) + int(stats.get("packages_partial", 0))
+    clean_count = int(stats.get("packages_clean", 0))
+    partial_count = int(stats.get("packages_partial", 0))
     err_count = int(stats.get("packages_failed", 0))
+    drifted_count = int(stats.get("packages_drifted", 0))
     skipped = int(stats.get("packages_skipped", 0))
     package_index = min(package_index, package_total)
     skip_hint = ""
-    if result.skipped:
+    if result.preflight_reason:
+        skip_hint = f" (latest_preflight={result.preflight_reason})"
+    elif result.skipped:
         # Avoid misleading "latest_skip" when the package still wrote artifacts and the
         # skip reason is a non-fatal DB mirror note.
-        non_fatal = {"app_definition_failed", "split_group_failed"}
+        non_fatal = {
+            "app_definition_failed",
+            "split_group_failed",
+            "apk_record_failed",
+            "artifact_path_failed",
+            "source_path_failed",
+        }
         recent_reason = ""
         for r in result.skipped:
             if r in non_fatal and result.ok:
@@ -936,9 +1006,10 @@ def _print_progress_line(
             skip_hint = f" (latest_skip={recent_reason})"
     line = (
         f"Progress: {package_index}/{package_total} "
-        f"ok={ok_count} fail={err_count} skipped={skipped}{skip_hint}"
+        f"clean={clean_count} partial={partial_count} failed={err_count} "
+        f"drifted={drifted_count} preflight_skipped={skipped}{skip_hint}"
     )
-    level = "error" if err_count else "info"
+    level = "error" if err_count or drifted_count else "info"
     print(status_messages.status(line, level=level))
 
 
@@ -1021,6 +1092,171 @@ def _print_package_footer(
         ),
         category="device",
     )
+
+
+def _package_manifest_path(package_dir: Path) -> Path:
+    return package_dir / "harvest_package_manifest.json"
+
+
+def _planned_artifact_entries(plan: PackagePlan) -> list[dict[str, object]]:
+    total = len(plan.artifacts)
+    captured_paths = [str(path) for path in plan.inventory.apk_paths if str(path).strip()]
+    entries: list[dict[str, object]] = []
+    for index, artifact in enumerate(plan.artifacts, start=1):
+        entries.append(
+            {
+                "artifact_index": index,
+                "artifact_total": total,
+                "split_label": artifact.artifact,
+                "file_name": artifact.file_name,
+                "is_base": not artifact.is_split_member,
+                "planned_source_path": artifact.source_path,
+                "inventory_captured_path_set": captured_paths,
+            }
+        )
+    return entries
+
+
+def _observed_artifact_entries(result: PullResult) -> list[dict[str, object]]:
+    entries: list[dict[str, object]] = []
+    for artifact in result.ok:
+        entries.append(
+            {
+                "split_label": artifact.artifact_label or artifact.file_name,
+                "file_name": artifact.file_name,
+                "is_base": bool(artifact.is_base) if artifact.is_base is not None else None,
+                "local_artifact_path": normalise_local_path(artifact.dest_path),
+                "observed_source_path": artifact.observed_source_path or artifact.source_path,
+                "sha256": artifact.sha256,
+                "file_size": artifact.file_size,
+                "pulled_at": artifact.pulled_at,
+                "pull_outcome": artifact.status,
+                "mirror_failure_reasons": list(artifact.mirror_failure_reasons),
+            }
+        )
+    return entries
+
+
+def _comparison_key(entry: Mapping[str, object]) -> tuple[str, str]:
+    return (
+        str(entry.get("split_label") or "").strip(),
+        str(entry.get("file_name") or "").strip(),
+    )
+
+
+def _build_package_comparison(plan: PackagePlan, result: PullResult) -> dict[str, object]:
+    planned = _planned_artifact_entries(plan)
+    observed = _observed_artifact_entries(result)
+    observed_keys = {_comparison_key(entry) for entry in observed}
+    planned_keys = {_comparison_key(entry) for entry in planned}
+    missing = [entry for entry in planned if _comparison_key(entry) not in observed_keys]
+    unexpected = [entry for entry in observed if _comparison_key(entry) not in planned_keys]
+    return {
+        "planned_artifact_count": len(planned),
+        "observed_artifact_count": len(observed),
+        "missing_artifacts": missing,
+        "unexpected_artifacts": unexpected,
+        "matches_planned_artifacts": not missing and not unexpected and len(observed) == len(planned),
+        "observed_hashes_complete": all(bool(entry.get("sha256")) for entry in observed),
+    }
+
+
+def _finalize_package_result(result: PullResult, *, write_db_requested: bool) -> None:
+    comparison = _build_package_comparison(result.plan, result)
+    result.comparison = comparison
+    if result.capture_status != "drifted":
+        if comparison["matches_planned_artifacts"] and not result.errors:
+            result.capture_status = "clean"
+        elif result.ok:
+            result.capture_status = "partial"
+        else:
+            result.capture_status = "failed"
+    if write_db_requested:
+        result.persistence_status = "mirror_failed" if result.mirror_failure_reasons else "mirrored"
+    else:
+        result.persistence_status = "not_requested"
+    if result.capture_status in {"partial", "failed", "drifted"}:
+        result.research_status = "ineligible"
+    elif not comparison["matches_planned_artifacts"] or not comparison["observed_hashes_complete"]:
+        result.research_status = "ineligible"
+    else:
+        result.research_status = "pending_audit"
+
+
+def _write_package_manifest(
+    *,
+    result: PullResult,
+    package_dir: Path,
+    serial: str,
+    session_stamp: str,
+    snapshot_id: int | None,
+    snapshot_captured_at: str | None,
+    execution_state: str,
+) -> None:
+    manifest_path = result.package_manifest_path or _package_manifest_path(package_dir)
+    result.package_manifest_path = manifest_path
+    inventory = result.plan.inventory
+    payload = {
+        "schema": "harvest_package_manifest_v1",
+        "generated_at_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "execution_state": execution_state,
+        "package": {
+            "package_name": inventory.package_name,
+            "app_label": inventory.app_label,
+            "version_name": inventory.version_name,
+            "version_code": inventory.version_code,
+            "device_serial": serial,
+            "snapshot_id": snapshot_id,
+            "snapshot_captured_at": snapshot_captured_at,
+            "session_label": session_stamp,
+            "package_dir": normalise_local_path(package_dir),
+        },
+        "planning": {
+            "preflight_reason": result.preflight_reason,
+            "total_paths": result.plan.total_paths,
+            "policy_filtered_count": result.plan.policy_filtered_count,
+            "policy_filtered_reason": result.plan.policy_filtered_reason,
+            "expected_artifacts": _planned_artifact_entries(result.plan),
+        },
+        "execution": {
+            "observed_artifacts": _observed_artifact_entries(result),
+            "errors": [
+                {"source_path": error.source_path, "reason": error.reason}
+                for error in result.errors
+            ],
+            "runtime_skips": list(result.skipped),
+            "mirror_failure_reasons": list(result.mirror_failure_reasons),
+        },
+        "status": {
+            "capture_status": result.capture_status,
+            "persistence_status": result.persistence_status,
+            "research_status": result.research_status,
+        },
+        "comparison": dict(result.comparison),
+    }
+    common.write_json_manifest(manifest_path, payload)
+
+
+def _derive_run_state(
+    stats: Mapping[str, int],
+    *,
+    run_failed: bool,
+    write_db_requested: bool,
+    write_db_effective: bool,
+) -> str:
+    if run_failed:
+        return "FAILED"
+    scheduled_packages = max(int(stats.get("packages_total", 0)) - int(stats.get("packages_skipped", 0)), 0)
+    mirror_failed = int(stats.get("packages_mirror_failed", 0))
+    if write_db_requested and scheduled_packages > 0 and (mirror_failed >= scheduled_packages or not write_db_effective):
+        return "DEGRADED_DB_MIRROR_TOTAL_LOSS"
+    if write_db_requested and mirror_failed > 0:
+        return "DEGRADED"
+    if int(stats.get("packages_drifted", 0)) > 0:
+        return "PARTIAL"
+    if int(stats.get("packages_failed", 0)) > 0 or int(stats.get("packages_partial", 0)) > 0:
+        return "PARTIAL"
+    return "SUCCESS"
 
 
 __all__ = ["execute_harvest"]

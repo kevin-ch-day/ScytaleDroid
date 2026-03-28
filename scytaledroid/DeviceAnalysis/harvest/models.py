@@ -96,6 +96,12 @@ class ArtifactResult:
     sha256: str | None = None
     status: str = "written"
     skip_reason: str | None = None
+    file_size: int | None = None
+    pulled_at: str | None = None
+    artifact_label: str | None = None
+    is_base: bool | None = None
+    observed_source_path: str | None = None
+    mirror_failure_reasons: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -114,6 +120,13 @@ class PullResult:
     ok: list[ArtifactResult] = field(default_factory=list)
     errors: list[ArtifactError] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
+    preflight_reason: str | None = None
+    mirror_failure_reasons: list[str] = field(default_factory=list)
+    capture_status: str | None = None
+    persistence_status: str = "not_requested"
+    research_status: str = "pending_audit"
+    comparison: dict[str, object] = field(default_factory=dict)
+    package_manifest_path: Path | None = None
 
 
 @dataclass
@@ -136,6 +149,12 @@ class PackageHarvestResult:
     artifacts: list[ArtifactSummary] = field(default_factory=list)
     errors: list[ArtifactError] = field(default_factory=list)
     skipped_reasons: list[str] = field(default_factory=list)
+    preflight_reason: str | None = None
+    mirror_failure_reasons: list[str] = field(default_factory=list)
+    capture_status: str | None = None
+    persistence_status: str = "not_requested"
+    research_status: str = "pending_audit"
+    manifest_path: str | None = None
 
     def display_name(self) -> str:
         return (self.app_label or self.package_name).strip()
@@ -153,6 +172,12 @@ class PackageHarvestResult:
             "artifacts": [asdict(a) for a in self.artifacts],
             "errors": [asdict(err) for err in self.errors],
             "skipped_reasons": list(self.skipped_reasons),
+            "preflight_reason": self.preflight_reason,
+            "mirror_failure_reasons": list(self.mirror_failure_reasons),
+            "capture_status": self.capture_status,
+            "persistence_status": self.persistence_status,
+            "research_status": self.research_status,
+            "manifest_path": self.manifest_path,
         }
 
 

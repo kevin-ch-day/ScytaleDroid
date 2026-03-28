@@ -99,6 +99,8 @@ def render_harvest_summary_structured(
             f"clean={metrics.packages_successful}  "
             f"partial={metrics.packages_with_partial_errors}  "
             f"failed={metrics.packages_failed}  "
+            f"drifted={metrics.packages_drifted}  "
+            f"mirror_failed={metrics.packages_with_mirror_failures}  "
             f"runtime_skipped={metrics.packages_skipped_runtime}"
         ),
     }

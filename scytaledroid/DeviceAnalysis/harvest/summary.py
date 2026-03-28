@@ -40,11 +40,20 @@ _SKIP_LABELS = {
     # DB mirror/index warnings (filesystem artifacts remain canonical).
     "app_definition_failed": "DB mirror: failed to record app definition (non-fatal)",
     "split_group_failed": "DB mirror: failed to record split group (non-fatal)",
+    "apk_record_failed": "DB mirror: failed to record APK metadata (non-fatal)",
+    "artifact_path_failed": "DB mirror: failed to record artifact path (non-fatal)",
+    "source_path_failed": "DB mirror: failed to record source path (non-fatal)",
     "dedupe_sha256": "Duplicate artifact (sha256 dedupe)",
 }
 
 # Reasons that should never be presented as "skips" when artifacts were written.
-_NON_FATAL_NOTES = {"app_definition_failed", "split_group_failed"}
+_NON_FATAL_NOTES = {
+    "app_definition_failed",
+    "split_group_failed",
+    "apk_record_failed",
+    "artifact_path_failed",
+    "source_path_failed",
+}
 
 
 @dataclass
@@ -61,6 +70,8 @@ class HarvestRunMetrics:
     packages_with_writes: int
     packages_with_errors: int
     packages_failed: int
+    packages_drifted: int
+    packages_with_mirror_failures: int
     packages_skipped_runtime: int
     runtime_skips: Counter[str]
     runtime_notes: Counter[str]
@@ -79,7 +90,10 @@ class HarvestRunMetrics:
     def packages_successful(self) -> int:
         """Packages that wrote artifacts without triggering errors."""
 
-        return max(self.packages_with_writes - self.packages_with_partial_errors, 0)
+        return max(
+            self.packages_with_writes - self.packages_with_partial_errors - self.packages_drifted,
+            0,
+        )
 
     @property
     def runtime_skip_total(self) -> int:
@@ -131,7 +145,9 @@ class HarvestRunMetrics:
         packages_with_writes = 0
         packages_with_errors = 0
         packages_failed = 0
+        packages_drifted = 0
         packages_skipped_runtime = 0
+        packages_with_mirror_failures = 0
 
         for package in harvest_result.packages:
             has_written = False
@@ -143,6 +159,10 @@ class HarvestRunMetrics:
 
             has_errors = bool(package.errors)
             has_skips = bool(package.skipped_reasons)
+            if package.capture_status == "drifted":
+                packages_drifted += 1
+            if package.persistence_status == "mirror_failed":
+                packages_with_mirror_failures += 1
 
             if has_written:
                 packages_with_writes += 1
@@ -199,6 +219,8 @@ class HarvestRunMetrics:
             packages_with_writes=packages_with_writes,
             packages_with_errors=packages_with_errors,
             packages_failed=packages_failed,
+            packages_drifted=packages_drifted,
+            packages_with_mirror_failures=packages_with_mirror_failures,
             packages_skipped_runtime=packages_skipped_runtime,
             runtime_skips=runtime_skips,
             runtime_notes=runtime_notes,
@@ -371,9 +393,18 @@ def render_harvest_summary(
     if simple_mode:
         print()
         status = "success"
-        if metrics.packages_failed or metrics.packages_with_partial_errors:
+        if metrics.packages_with_mirror_failures and metrics.executed_packages and (
+            metrics.packages_with_mirror_failures >= metrics.executed_packages
+        ):
+            status = "degraded_db_mirror_total_loss"
+        elif metrics.packages_with_mirror_failures:
+            status = "degraded"
+        elif metrics.packages_drifted or metrics.packages_failed or metrics.packages_with_partial_errors:
             status = "partial"
-        print(status_messages.status(f"status: {status}", level="success" if status == "success" else "warn"))
+        level = "success" if status == "success" else "warn"
+        if status == "degraded_db_mirror_total_loss":
+            level = "error"
+        print(status_messages.status(f"status: {status}", level=level))
 
         # Copy/paste friendly one-liner for tickets/PM updates.
         harvest_mode = metadata.get("harvest_mode") or ""
@@ -395,6 +426,8 @@ def render_harvest_summary(
                 f"clean={metrics.packages_successful} "
                 f"partial={metrics.packages_with_partial_errors} "
                 f"failed={metrics.packages_failed} "
+                f"drifted={metrics.packages_drifted} "
+                f"mirror_failed={metrics.packages_with_mirror_failures} "
                 f"artifacts_planned={metrics.planned_artifacts} "
                 f"artifacts_written={metrics.artifacts_written} "
                 f"artifacts_failed={metrics.artifacts_failed} "
@@ -1021,6 +1054,12 @@ def _build_harvest_result(
             app_label=inventory.display_name(),
             skipped_reasons=list(pull.skipped),
             errors=list(pull.errors),
+            preflight_reason=pull.preflight_reason,
+            mirror_failure_reasons=list(pull.mirror_failure_reasons),
+            capture_status=pull.capture_status,
+            persistence_status=pull.persistence_status,
+            research_status=pull.research_status,
+            manifest_path=normalise_local_path(pull.package_manifest_path) if pull.package_manifest_path else None,
         )
 
         for artifact in pull.ok:

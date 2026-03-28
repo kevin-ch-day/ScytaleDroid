@@ -141,9 +141,110 @@ def test_execute_harvest_keeps_db_repo_available_for_package_writes(
     assert results[0].errors == []
     assert len(results[0].ok) == 1
     assert results[0].ok[0].apk_id == 23
+    assert results[0].capture_status == "clean"
+    assert results[0].persistence_status == "mirrored"
+    assert results[0].research_status == "pending_audit"
+    assert results[0].package_manifest_path is not None
+    assert results[0].package_manifest_path.exists()
     assert calls == [
         ("app_definition", "com.example.app", "TEST_PROFILE"),
         ("apk_record", "com.example.app", results[0].ok[0].sha256),
         ("artifact_path", 23, 7, "SERIAL123/20260328/com.example.app/com_example_app_1__base.apk"),
         ("source_path", 23, "/data/app/com.example.app/base.apk"),
     ]
+
+
+def test_execute_harvest_preserves_capture_when_db_mirror_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scytaledroid.Database.db_func.harvest import apk_repository
+    from scytaledroid.Database.db_utils import diagnostics
+    from scytaledroid.DeviceAnalysis.harvest import runner
+    from scytaledroid.DeviceAnalysis.harvest.common import HarvestOptions
+    from scytaledroid.DeviceAnalysis.harvest.models import ArtifactPlan, InventoryRow, PackagePlan
+
+    monkeypatch.setattr(
+        runner,
+        "load_options",
+        lambda config, *, pull_mode: HarvestOptions(
+            write_db=True,
+            write_meta=False,
+            pull_mode=pull_mode,
+        ),
+    )
+    monkeypatch.setattr(diagnostics, "check_connection", lambda: True)
+    monkeypatch.setattr(runner, "get_run_logger", lambda *args, **kwargs: _FakeRunLogger())
+    monkeypatch.setattr(runner.log, "harvest_adapter", lambda *args, **kwargs: _FakeAdapter())
+    monkeypatch.setattr(runner.log, "close_harvest_adapter", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner.log, "info", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner.log, "warning", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner.log, "error", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner, "resolve_storage_root", lambda: ("test-host", tmp_path.as_posix()))
+    monkeypatch.setattr(runner, "_quiet_mode", lambda: True)
+    monkeypatch.setattr(runner, "_compact_mode", lambda: True)
+
+    def _fake_pull(**kwargs):
+        dest_path = kwargs["dest_path"]
+        dest_path.write_bytes(b"apk-bytes")
+        return True
+
+    monkeypatch.setattr(runner, "adb_pull", _fake_pull)
+    monkeypatch.setattr(apk_repository, "ensure_storage_root", lambda *args, **kwargs: 7)
+    monkeypatch.setattr(apk_repository, "ensure_app_definition", lambda *args, **kwargs: 11)
+
+    def _raise_db_write(*args, **kwargs):
+        raise RuntimeError("db write failed")
+
+    monkeypatch.setattr(apk_repository, "upsert_apk_record", _raise_db_write)
+
+    inventory = InventoryRow(
+        raw={},
+        package_name="com.example.dbfail",
+        app_label="DB Fail",
+        installer="com.android.vending",
+        category=None,
+        primary_path="/data/app/com.example.dbfail/base.apk",
+        profile_key="TEST_PROFILE",
+        profile=None,
+        version_name="1.0",
+        version_code="1",
+        apk_paths=["/data/app/com.example.dbfail/base.apk"],
+        split_count=1,
+    )
+    plan = PackagePlan(
+        inventory=inventory,
+        artifacts=[
+            ArtifactPlan(
+                source_path="/data/app/com.example.dbfail/base.apk",
+                artifact="base",
+                file_name="com_example_dbfail_1__base.apk",
+                is_split_member=False,
+            )
+        ],
+        total_paths=1,
+    )
+
+    results = runner.execute_harvest(
+        serial="SERIAL123",
+        adb_path="adb",
+        dest_root=tmp_path / "SERIAL123" / "20260328",
+        session_stamp="20260328",
+        plans=[plan],
+        config=object(),
+        pull_mode="inventory",
+    )
+
+    assert len(results) == 1
+    result = results[0]
+    assert result.errors == []
+    assert len(result.ok) == 1
+    assert result.capture_status == "clean"
+    assert result.persistence_status == "mirror_failed"
+    assert result.research_status == "pending_audit"
+    assert "apk_record_failed" in result.mirror_failure_reasons
+    assert "apk_record_failed" in result.skipped
+    assert result.package_manifest_path is not None
+    payload = result.package_manifest_path.read_text(encoding="utf-8")
+    assert '"persistence_status": "mirror_failed"' in payload
+    assert '"capture_status": "clean"' in payload
