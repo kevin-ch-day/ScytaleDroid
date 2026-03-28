@@ -8,7 +8,8 @@ import shutil
 import signal
 import hashlib
 import re
-from dataclasses import replace
+import threading
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -45,8 +46,24 @@ from ..views.view_layouts import render_run_start, render_run_summary
 from .selection import format_scope_target
 
 
-def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir: Path) -> RunOutcome | None:
-    """Primary entry point for running static analysis flows from the CLI."""
+@dataclass(frozen=True)
+class RunExecutionResult:
+    """Execution result plus the effective parameters used for the run."""
+
+    outcome: RunOutcome | None
+    params: RunParameters
+    completed: bool
+    detail: str | None = None
+
+
+def _resolve_effective_run_params(
+    params: RunParameters,
+    *,
+    run_mode: str,
+    noninteractive: bool,
+    quiet: bool,
+) -> tuple[RunParameters | None, str | None]:
+    """Resolve session identity and persistence readiness before execution."""
 
     previous_stamp = (params.session_stamp or "").strip()
     session_stamp = make_session_stamp()
@@ -76,9 +93,9 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
         try:
             resolved_stamp, session_label, canonical_action = _resolve_unique_session_stamp(
                 params.session_stamp,
-                run_mode=output_prefs.effective_run_mode(),
-                noninteractive=output_prefs.effective_noninteractive(),
-                quiet=output_prefs.effective_quiet(),
+                run_mode=run_mode,
+                noninteractive=noninteractive,
+                quiet=quiet,
                 canonical_action=params.canonical_action,
             )
             params = replace(
@@ -89,14 +106,14 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
             )
         except RuntimeError as exc:
             print(status_messages.status(str(exc), level="error"))
-            return None
+            return None, str(exc)
     else:
         try:
             resolved_stamp, session_label, canonical_action = _resolve_unique_session_stamp(
                 session_stamp,
-                run_mode=output_prefs.effective_run_mode(),
-                noninteractive=output_prefs.effective_noninteractive(),
-                quiet=output_prefs.effective_quiet(),
+                run_mode=run_mode,
+                noninteractive=noninteractive,
+                quiet=quiet,
                 canonical_action=params.canonical_action,
             )
             params = replace(
@@ -107,7 +124,7 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
             )
         except RuntimeError as exc:
             print(status_messages.status(str(exc), level="error"))
-            return None
+            return None, str(exc)
     # Honor output prefs when execute_run_spec has already set them.
     output_prefs.set_verbose(bool(params.verbose_output))
 
@@ -135,7 +152,33 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
                     level="info",
                 )
             )
-            return None
+            return None, (
+                f"{persistence_note} Canonical-grade runs require canonical schema readiness."
+            )
+
+    return params, None
+
+
+def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir: Path) -> RunOutcome | None:
+    """Primary entry point for running static analysis flows from the CLI."""
+
+    effective_params, _ = _resolve_effective_run_params(
+        params,
+        run_mode=output_prefs.effective_run_mode(),
+        noninteractive=output_prefs.effective_noninteractive(),
+        quiet=output_prefs.effective_quiet(),
+    )
+    if effective_params is None:
+        return None
+    return _launch_scan_flow_resolved(selection, effective_params, base_dir)
+
+
+def _launch_scan_flow_resolved(
+    selection: ScopeSelection,
+    params: RunParameters,
+    base_dir: Path,
+) -> RunOutcome | None:
+    """Execute the static scan using already-resolved parameters."""
 
     # Freeze run context once. Deep execution/render paths must not read env vars or
     # mutable output prefs after this point.
@@ -231,15 +274,23 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
             abort_notified["shown"] = True
         request_abort(reason="SIGINT", signal="SIGINT")
 
-    previous_handler = signal.getsignal(signal.SIGINT)
-    signal.signal(signal.SIGINT, _handle_sigint)
+    previous_handler = None
+    sigint_installed = False
+    try:
+        if threading.current_thread() is threading.main_thread():
+            previous_handler = signal.getsignal(signal.SIGINT)
+            signal.signal(signal.SIGINT, _handle_sigint)
+            sigint_installed = True
+    except ValueError as exc:  # pragma: no cover - defensive
+        log.warning(f"Skipping SIGINT handler install: {exc}", category="static")
 
     if params.profile == "permissions":
         print(status_messages.step("Starting permission analysis workflow", label="Static Analysis"))
         try:
             execute_permission_scan(selection, params)
         finally:
-            signal.signal(signal.SIGINT, previous_handler)
+            if sigint_installed and previous_handler is not None:
+                signal.signal(signal.SIGINT, previous_handler)
         return None
 
     if params.dry_run:
@@ -270,7 +321,8 @@ def launch_scan_flow(selection: ScopeSelection, params: RunParameters, base_dir:
     try:
         outcome = execute_scan(selection, params, base_dir, run_ctx=frozen_ctx)
     finally:
-        signal.signal(signal.SIGINT, previous_handler)
+        if sigint_installed and previous_handler is not None:
+            signal.signal(signal.SIGINT, previous_handler)
     try:
         if outcome is not None:
             outcome.session_stamp = params.session_stamp
@@ -819,8 +871,8 @@ def _emit_db_lock_health_artifact(*, stamp: str, rows: list[dict[str, object]]) 
     print(status_messages.status(f"DB lock health: {out_path}", level="info"))
 
 
-def execute_run_spec(spec: StaticRunSpec) -> RunOutcome | None:
-    """Execute a prepared run spec without prompting."""
+def execute_run_spec_detailed(spec: StaticRunSpec) -> RunExecutionResult:
+    """Execute a prepared run spec and return the effective params plus completion state."""
 
     prev_prefs = output_prefs.snapshot()
     prev_ctx = output_prefs.get_run_context()
@@ -844,11 +896,36 @@ def execute_run_spec(spec: StaticRunSpec) -> RunOutcome | None:
         )
     )
     try:
-        return launch_scan_flow(spec.selection, spec.params, spec.base_dir)
+        effective_params, detail = _resolve_effective_run_params(
+            spec.params,
+            run_mode=spec.run_mode,
+            noninteractive=spec.noninteractive,
+            quiet=spec.quiet,
+        )
+        if effective_params is None:
+            return RunExecutionResult(
+                outcome=None,
+                params=spec.params,
+                completed=False,
+                detail=detail,
+            )
+        outcome = _launch_scan_flow_resolved(spec.selection, effective_params, spec.base_dir)
+        return RunExecutionResult(
+            outcome=outcome,
+            params=effective_params,
+            completed=True,
+            detail=detail,
+        )
     finally:
         output_prefs.restore(prev_prefs)
         output_prefs.set_run_context(prev_ctx)
         _set_strings_cfg(prev_strings_cfg)
+
+
+def execute_run_spec(spec: StaticRunSpec) -> RunOutcome | None:
+    """Execute a prepared run spec without prompting."""
+
+    return execute_run_spec_detailed(spec).outcome
 
 
 def _modules_for_run(params: RunParameters) -> tuple[str, ...]:
@@ -1257,6 +1334,8 @@ def _write_run_map_atomic(session_stamp: str, run_map: dict, *, allow_overwrite:
 
 __all__ = [
     "launch_scan_flow",
+    "execute_run_spec",
+    "execute_run_spec_detailed",
     "configure_logging_for_cli",
     "execute_scan",
     "execute_permission_scan",

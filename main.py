@@ -115,16 +115,6 @@ def main_menu() -> None:
 
     ensure_db_ready()
     from scytaledroid.Database.db_utils import schema_gate
-    ok, message, detail = schema_gate.check_base_schema()
-    if not ok:
-        status_messages.print_status(f"[ERROR] {message}", level="error")
-        if detail:
-            status_messages.print_status(detail, level="error")
-        status_messages.print_status(
-            "Fix: Verify database connection and schema. Then run Database Tools → Apply baseline schema migrations (or import canonical DB export).",
-            level="error",
-        )
-        return
     menu_actions: list[tuple[str, str, Callable[[], None]]] = [
         ("1", "Android Device Analysis", handle_device),
         ("2", "Static APK analysis", handle_static),
@@ -146,6 +136,28 @@ def main_menu() -> None:
         print()
         status_snapshot = _print_tier1_status_banner()
         print()
+        ok, message, detail = schema_gate.check_base_schema()
+        db_warning: tuple[str, str] | None = None
+        if not ok:
+            db_warning = (message, detail)
+            log.warning(
+                "Main menu continuing without base schema readiness",
+                category="application",
+                extra={"schema_gate_message": message, "schema_gate_detail": detail},
+            )
+        if db_warning is not None:
+            warn_message, warn_detail = db_warning
+            status_messages.print_status(
+                f"[WARN] Persistence is unavailable: {warn_message}",
+                level="warn",
+            )
+            if warn_detail:
+                status_messages.print_status(warn_detail, level="warn")
+            status_messages.print_status(
+                "DB-backed actions will gate individually. Filesystem-first workflows remain available.",
+                level="warn",
+            )
+            print()
         menu_utils.print_header("Main Menu")
         spec = MenuSpec(
             items=[menu_utils.MenuOption(key, label) for key, label, _ in menu_actions],

@@ -7,6 +7,7 @@ from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from types import ModuleType
 
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_engine
@@ -185,11 +186,14 @@ def execute_harvest(
     )
 
     storage_root_id: int | None = None
+    db_repo: ModuleType | None = None
     if options.write_db:
         # Import DB repositories only when DB writes are enabled. This keeps harvest usable
         # on clean machines where DB deps/connectors/migrations may be absent.
         try:
             from scytaledroid.Database.db_func.harvest import apk_repository as repo  # local import (optional DB)
+
+            db_repo = repo
         except Exception as exc:
             stats["db_errors"] += 1
             _emit(
@@ -215,7 +219,7 @@ def execute_harvest(
         if options.write_db:
             host_name, data_root = resolve_storage_root()
             try:
-                storage_root_id = repo.ensure_storage_root(
+                storage_root_id = db_repo.ensure_storage_root(
                     host_name,
                     data_root,
                     context={**base_context, "event": "storage_root.ensure"},
@@ -298,6 +302,7 @@ def execute_harvest(
                 display_index=current_display_index,
                 display_total=display_total,
                 base_context=base_context,
+                db_repo=db_repo,
                 emit=_emit,
                 stats=stats,
                 snapshot_id=snapshot_id,
@@ -384,6 +389,7 @@ def _execute_package_plan(
     display_index: int | None,
     display_total: int,
     base_context: Mapping[str, object],
+    db_repo: ModuleType | None,
     emit: Callable[[str, str, Mapping[str, object | None], str | None], None],
     stats: dict[str, int],
     snapshot_id: int | None,
@@ -415,9 +421,9 @@ def _execute_package_plan(
     # harvest and record the reason in result.skipped for operator visibility.
     effective_options = options
     app_id: int | None = None
-    if effective_options.write_db:
+    if effective_options.write_db and db_repo is not None:
         try:
-            app_id = repo.ensure_app_definition(
+            app_id = db_repo.ensure_app_definition(
                 package_name,
                 inventory.app_label,
                 profile_key=inventory.profile_key,
@@ -448,9 +454,9 @@ def _execute_package_plan(
             )
 
     group_id: int | None = None
-    if effective_options.write_db and len(plan.artifacts) > 1:
+    if effective_options.write_db and db_repo is not None and len(plan.artifacts) > 1:
         try:
-            group_id = repo.ensure_split_group(
+            group_id = db_repo.ensure_split_group(
                 package_name,
                 context={**base_context, "package_name": package_name},
             )
@@ -513,6 +519,7 @@ def _execute_package_plan(
             artifact_total=artifact_total,
             verbose_output=verbose,
             base_context=base_context,
+            db_repo=db_repo,
             emit=emit,
             stats=stats,
             snapshot_id=snapshot_id,
@@ -572,6 +579,7 @@ def _pull_and_record(
     artifact_total: int,
     verbose_output: bool,
     base_context: Mapping[str, object],
+    db_repo: ModuleType | None,
     emit: Callable[[str, str, Mapping[str, object | None], str | None], None],
     stats: dict[str, int],
     snapshot_id: int | None,
@@ -639,8 +647,8 @@ def _pull_and_record(
     local_rel_path = normalise_local_path(dest_path)
 
     apk_id: int | None = None
-    if options.write_db:
-        record = repo.ApkRecord(
+    if options.write_db and db_repo is not None:
+        record = db_repo.ApkRecord(
             package_name=plan.inventory.package_name,
             app_id=app_id,
             file_name=dest_path.name,
@@ -659,7 +667,7 @@ def _pull_and_record(
         )
 
         try:
-            apk_id = repo.upsert_apk_record(
+            apk_id = db_repo.upsert_apk_record(
                 record,
                 context={
                     **base_context,
@@ -690,7 +698,7 @@ def _pull_and_record(
 
         if storage_root_id is not None:
             try:
-                repo.upsert_artifact_path(
+                db_repo.upsert_artifact_path(
                     apk_id,
                     storage_root_id=storage_root_id,
                     local_rel_path=local_rel_path,
@@ -721,7 +729,7 @@ def _pull_and_record(
 
         if apk_id and artifact.source_path:
             try:
-                repo.upsert_source_path(
+                db_repo.upsert_source_path(
                     apk_id,
                     artifact.source_path,
                     context={

@@ -8,21 +8,27 @@ import tempfile
 import threading
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from scytaledroid.Config import app_config
 from scytaledroid.StaticAnalysis.cli.core.models import RunParameters, ScopeSelection
-from scytaledroid.StaticAnalysis.cli.flows.headless_run import (
-    _artifact_group_from_path,
-    _check_session_uniqueness,
-)
+from scytaledroid.StaticAnalysis.cli.flows.headless_run import _artifact_group_from_path
 from scytaledroid.StaticAnalysis.persistence import list_reports
 from scytaledroid.StaticAnalysis.services import static_service
 from scytaledroid.StaticAnalysis.session import make_session_stamp, normalize_session_stamp
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
+
+try:  # optional API dependency
+    from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Request, UploadFile
+    from fastapi.responses import FileResponse, JSONResponse
+    from pydantic import BaseModel
+except Exception:  # pragma: no cover - API is optional
+    BackgroundTasks = Depends = FastAPI = File = HTTPException = Request = UploadFile = None
+    FileResponse = JSONResponse = None
+    BaseModel = object
 
 try:  # optional database access for status queries
     from scytaledroid.Database.db_core import db_queries as core_q
@@ -47,6 +53,14 @@ class JobRecord:
     detail: str | None = None
 
 
+class ScanRequest(BaseModel):
+    apk_path: str
+    session_stamp: str | None = None
+    profile: str = "full"
+    scope_label: str | None = None
+    allow_session_reuse: bool = True
+
+
 _jobs: dict[str, JobRecord] = {}
 _jobs_lock = threading.Lock()
 
@@ -59,7 +73,14 @@ def _record_job(job: JobRecord) -> None:
                 _jobs.pop(stale.job_id, None)
 
 
-def _update_job(job_id: str, *, state: str, detail: str | None = None) -> None:
+def _update_job(
+    job_id: str,
+    *,
+    state: str,
+    detail: str | None = None,
+    session_stamp: str | None = None,
+    package_name: str | None = None,
+) -> None:
     with _jobs_lock:
         existing = _jobs.get(job_id)
         if not existing:
@@ -68,8 +89,8 @@ def _update_job(job_id: str, *, state: str, detail: str | None = None) -> None:
             job_id=existing.job_id,
             state=state,
             created_at=existing.created_at,
-            session_stamp=existing.session_stamp,
-            package_name=existing.package_name,
+            session_stamp=session_stamp or existing.session_stamp,
+            package_name=package_name or existing.package_name,
             detail=detail,
         )
 
@@ -112,19 +133,70 @@ def _run_static_scan(
     allow_reuse: bool,
 ) -> None:
     _update_job(job_id, state="RUNNING")
+    group = None
     try:
         group = _artifact_group_from_path(apk_path)
         selection = ScopeSelection(scope="app", label=scope_label, groups=(group,))
         params = RunParameters(profile=profile, scope="app", scope_label=scope_label)
-        params = params.__class__(**{**params.__dict__, "session_stamp": session_stamp})
-
-        _check_session_uniqueness(session_stamp, group.package_name, allow_reuse)
+        params = replace(params, session_stamp=session_stamp, session_label=session_stamp)
         base_dir = Path(app_config.DATA_DIR) / "device_apks"
-        static_service.run_scan(selection, params, base_dir)
-        _update_job(job_id, state="OK")
-    except Exception as exc:  # pragma: no cover - async path
+        run_result = static_service.run_scan(
+            selection,
+            params,
+            base_dir,
+            allow_session_reuse=allow_reuse,
+        )
+        resolved_stamp = run_result.session_stamp or session_stamp
+        if not run_result.completed:
+            _update_job(
+                job_id,
+                state="FAILED",
+                detail=run_result.detail or "Static analysis did not complete.",
+                session_stamp=resolved_stamp,
+                package_name=group.package_name,
+            )
+            return
+        _update_job(
+            job_id,
+            state="OK",
+            detail=run_result.detail,
+            session_stamp=resolved_stamp,
+            package_name=group.package_name,
+        )
+    except BaseException as exc:  # pragma: no cover - async path
+        detail = str(exc) or exc.__class__.__name__
         log.error(f"API scan failed: {exc}", category="api")
-        _update_job(job_id, state="FAILED", detail=str(exc))
+        _update_job(
+            job_id,
+            state="FAILED",
+            detail=detail,
+            session_stamp=session_stamp,
+            package_name=getattr(group, "package_name", None),
+        )
+
+
+def _start_scan_worker(
+    job_id: str,
+    apk_path: Path,
+    session_stamp: str,
+    profile: str,
+    scope_label: str,
+    allow_reuse: bool,
+) -> threading.Thread:
+    worker = threading.Thread(
+        target=_run_static_scan,
+        args=(
+            job_id,
+            apk_path,
+            session_stamp,
+            profile,
+            scope_label,
+            allow_reuse,
+        ),
+        daemon=True,
+    )
+    worker.start()
+    return worker
 
 
 def _hash_file(path: Path) -> str:
@@ -133,6 +205,37 @@ def _hash_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _write_upload_sidecar(
+    apk_path: Path,
+    *,
+    upload_id: str,
+    original_filename: str | None,
+    digest: str,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "upload_id": upload_id,
+        "uploaded_filename": original_filename or apk_path.name,
+        "sha256": digest,
+        "artifact": "base",
+        "is_split_member": False,
+        "source_kind": "api_upload",
+    }
+    try:
+        group = _artifact_group_from_path(apk_path)
+        artifact = group.artifacts[0] if group.artifacts else None
+        if artifact is not None:
+            payload.update(dict(artifact.metadata))
+        payload.setdefault("package_name", group.package_name)
+        if artifact is not None:
+            payload.setdefault("artifact", artifact.artifact_label)
+            payload.setdefault("is_split_member", artifact.is_split_member)
+    except Exception as exc:
+        log.warning(f"Upload metadata extraction failed for {apk_path.name}: {exc}", category="api")
+    sidecar_path = apk_path.with_suffix(apk_path.suffix + ".meta.json")
+    sidecar_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    return payload
 
 
 def _resolve_api_key() -> str | None:
@@ -206,18 +309,10 @@ def _collect_run_status(session_stamp: str) -> dict[str, Any]:
 
 
 def build_api_app() -> FastAPI:
-    from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Request, UploadFile
-    from fastapi.responses import FileResponse, JSONResponse
-    from pydantic import BaseModel
+    if FastAPI is None or File is None or JSONResponse is None:
+        raise RuntimeError("FastAPI dependencies are unavailable. Install API extras to use the server.")
 
     app = FastAPI(title="ScytaleDroid API", version=app_config.APP_VERSION)
-
-    class ScanRequest(BaseModel):
-        apk_path: str
-        session_stamp: str | None = None
-        profile: str = "full"
-        scope_label: str | None = None
-        allow_session_reuse: bool = True
 
     upload_file = File(...)
 
@@ -254,11 +349,20 @@ def build_api_app() -> FastAPI:
                 handle.write(chunk)
 
         digest = _hash_file(destination)
+        metadata = _write_upload_sidecar(
+            destination,
+            upload_id=upload_id,
+            original_filename=file.filename,
+            digest=digest,
+        )
         return {
             "upload_id": upload_id,
             "path": str(destination),
             "sha256": digest,
             "size_bytes": destination.stat().st_size,
+            "package_name": metadata.get("package_name"),
+            "version_code": metadata.get("version_code"),
+            "version_name": metadata.get("version_name"),
         }
 
     @app.post("/scan")
@@ -289,19 +393,14 @@ def build_api_app() -> FastAPI:
         )
         _record_job(record)
 
-        worker = threading.Thread(
-            target=_run_static_scan,
-            args=(
-                job_id,
-                apk_path,
-                session_stamp,
-                payload.profile,
-                scope_label,
-                payload.allow_session_reuse,
-            ),
-            daemon=True,
+        _start_scan_worker(
+            job_id,
+            apk_path,
+            session_stamp,
+            payload.profile,
+            scope_label,
+            payload.allow_session_reuse,
         )
-        worker.start()
 
         return JSONResponse(
             {

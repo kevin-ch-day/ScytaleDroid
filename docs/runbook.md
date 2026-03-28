@@ -35,7 +35,7 @@ Legacy paper export/repro notes:
 
 Launch the CLI and choose the **Static analysis** path:
 ```bash
-./run.sh static --profile full --scope QA --session $(date +%Y%m%d-%H%M%S)
+./run.sh static --apk /path/to/app.apk --profile full --session $(date +%Y%m%d-%H%M%S)
 ```
 Key prompts:
 - The main menu banner now shows session, scope, and DB status immediately.
@@ -87,7 +87,7 @@ Persistence happens automatically at the end of each run:
 
 To simulate a run without touching the database use the CLI dry-run flag:
 ```bash
-python -m scytaledroid.StaticAnalysis.cli.run --profile full --dry-run
+python -m scytaledroid static --apk /path/to/app.apk --profile full --dry-run
 ```
 This still exercises detector output and summary cards but skips all INSERTs.
 
@@ -183,7 +183,7 @@ client.
 * **Smoke test (scan → persist → digest)**
   ```bash
   SESSION=$(date +%Y%m%d-%H%M%S)
-  ./run.sh static --profile lightweight --scope "Smoke" --session "$SESSION"
+  ./run.sh static --apk /path/to/app.apk --profile lightweight --session "$SESSION"
   python - <<'PY'
   from scytaledroid.Database.db_utils.menus import query_runner
   query_runner.render_session_digest("$SESSION")

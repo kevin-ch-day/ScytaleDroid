@@ -160,7 +160,7 @@ Passing `--help` reveals every sub-command:
 Static analysis pipelines run directly from the menu or via the module entry point:
 
 ```bash
-./run.sh static --profile full --scope QA --session "$(date +%Y%m%d-%H%M%S)"
+./run.sh static --apk /path/to/app.apk --profile full --session "$(date +%Y%m%d-%H%M%S)"
 ```
 
 During a run the CLI prints severity-aware progress and highlight ribbons for items like
@@ -170,7 +170,7 @@ canonical tables and exported under `data/static_analysis/reports/`.
 To simulate a run without touching the database use a dry-run:
 
 ```bash
-python -m scytaledroid.StaticAnalysis.cli.run --profile full --dry-run
+python -m scytaledroid static --apk /path/to/app.apk --profile full --dry-run
 ```
 
 ### Baseline Audit Commands

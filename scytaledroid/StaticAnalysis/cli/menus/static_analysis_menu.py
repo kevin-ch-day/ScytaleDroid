@@ -46,17 +46,6 @@ def static_analysis_menu() -> None:
     from ..core.models import RunParameters
     from ..core.run_prompts import default_custom_tests, prompt_advanced_options
 
-    ok, message, detail = schema_gate.static_schema_gate()
-    if not ok:
-        status_messages.print_status(f"[ERROR] {message}", level="error")
-        if detail:
-            status_messages.print_status(detail, level="error")
-        status_messages.print_status(
-            "Fix: Database Tools → Apply Tier-1 schema migrations (or import canonical DB export), then retry.",
-            level="error",
-        )
-        return
-
     base_dir = Path(app_config.DATA_DIR) / "device_apks"
 
     def _load_groups() -> tuple:
@@ -79,26 +68,52 @@ def static_analysis_menu() -> None:
         prompt_utils.press_enter_to_continue()
         return
 
-    workflow_commands = tuple(cmd for cmd in iter_commands("scan") if cmd.section == "workflow")
-    selectable_ids = [cmd.id for cmd in workflow_commands]
+    scan_commands = tuple(iter_commands("scan"))
+    workflow_commands = tuple(cmd for cmd in scan_commands if cmd.section == "workflow")
+    tool_commands = tuple(cmd for cmd in scan_commands if cmd.section != "workflow")
+    selectable_ids = [cmd.id for cmd in (*workflow_commands, *tool_commands)]
 
     if not selectable_ids:
         print(status_messages.status("No static analysis commands are registered.", level="error"))
         prompt_utils.press_enter_to_continue()
         return
 
-    default_key = workflow_commands[0].id if workflow_commands else None
-    default_choice = default_key or selectable_ids[0]
+    default_choice = workflow_commands[0].id if workflow_commands else selectable_ids[0]
+
+    def _persistence_gate_status() -> tuple[bool, str | None]:
+        ok_base, message_base, detail_base = schema_gate.check_base_schema()
+        if not ok_base:
+            detail = f" {detail_base}" if detail_base else ""
+            return False, f"{message_base}{detail}"
+        ok_static, message_static, detail_static = schema_gate.static_schema_gate()
+        if not ok_static:
+            detail = f" {detail_static}" if detail_static else ""
+            return False, f"{message_static}{detail}"
+        return True, None
 
     while True:
         print()
         menu_utils.print_header("Android APK Static Analysis")
+        persistence_ready, persistence_detail = _persistence_gate_status()
         selected_apks = static_scope_service.count()
         if selected_apks:
             print(
                 status_messages.status(
                     f"Library selection: {selected_apks} APKs marked. You can run scans on this selection.",
                     level="info",
+                )
+            )
+        if not persistence_ready:
+            print(
+                status_messages.status(
+                    f"Persistence unavailable: {persistence_detail}",
+                    level="warn",
+                )
+            )
+            print(
+                status_messages.status(
+                    "Dry-run commands remain available; persisted scans will gate when selected.",
+                    level="warn",
                 )
             )
         workflow_spec = MenuSpec(
@@ -110,6 +125,16 @@ def static_analysis_menu() -> None:
             print("Primary actions")
             print("---------------")
         menu_utils.render_menu(workflow_spec)
+        if tool_commands:
+            print()
+            print("Tools")
+            print("-----")
+            tool_spec = MenuSpec(
+                items=[_command_option(cmd) for cmd in tool_commands],
+                show_exit=False,
+                show_descriptions=False,
+            )
+            menu_utils.render_menu(tool_spec)
         print()
         back_spec = MenuSpec(
             items=[],
@@ -128,6 +153,24 @@ def static_analysis_menu() -> None:
         if command is None:
             print(status_messages.status("Unsupported option selected.", level="warn"))
             continue
+
+        if command.persist and not command.dry_run:
+            persistence_ready, persistence_detail = _persistence_gate_status()
+            if not persistence_ready:
+                print(
+                    status_messages.status(
+                        f"Static analysis persistence gate failed: {persistence_detail}",
+                        level="error",
+                    )
+                )
+                print(
+                    status_messages.status(
+                        "Run Database Tools → Apply Tier-1 schema migrations, or use a dry-run command.",
+                        level="error",
+                    )
+                )
+                prompt_utils.press_enter_to_continue()
+                continue
 
         if command.kind == "readonly":
             if command.handler:

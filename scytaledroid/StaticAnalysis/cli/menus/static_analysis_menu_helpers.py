@@ -49,9 +49,9 @@ def prompt_session_label(params: RunParameters) -> RunParameters:
     return actions.prompt_session_label(params)
 
 
-def render_reset_outcome(outcome: object) -> None:
+def render_reset_outcome(outcome: object, *, session_label: str | None = None) -> None:
     actions = _load_menu_actions()
-    actions.render_reset_outcome(outcome)
+    actions.render_reset_outcome(outcome, session_label=session_label)
 
 
 def collect_view_options(command: Command) -> tuple[bool, bool, bool, bool]:

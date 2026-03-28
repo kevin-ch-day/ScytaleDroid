@@ -34,3 +34,23 @@ def test_collect_view_options_defaults_to_summary(monkeypatch):
 def test_collect_view_options_return_to_menu(monkeypatch):
     monkeypatch.setattr(helpers.prompt_utils, "get_choice", lambda *_a, **_k: "0")
     assert helpers.collect_view_options(_command()) == (False, False, False, True)
+
+
+def test_render_reset_outcome_forwards_session_label(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _Actions:
+        @staticmethod
+        def render_reset_outcome(outcome, *, session_label=None):
+            captured["outcome"] = outcome
+            captured["session_label"] = session_label
+
+    monkeypatch.setattr(helpers, "_load_menu_actions", lambda: _Actions())
+
+    marker = object()
+    helpers.render_reset_outcome(marker, session_label="20260328-all-full")
+
+    assert captured == {
+        "outcome": marker,
+        "session_label": "20260328-all-full",
+    }
