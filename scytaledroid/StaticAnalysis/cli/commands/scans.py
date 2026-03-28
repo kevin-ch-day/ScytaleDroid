@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .models import Command
+from .models import Command, SelectionMode
 
 SCAN_COMMANDS: tuple[Command, ...] = (
     Command(
@@ -32,7 +32,7 @@ SCAN_COMMANDS: tuple[Command, ...] = (
         profile="full",
         section="workflow",
         auto_verify=True,
-        selection_mode="last",
+        selection_mode=SelectionMode.LAST,
     ),
     Command(
         id="4",
@@ -40,32 +40,8 @@ SCAN_COMMANDS: tuple[Command, ...] = (
         description="Compare the latest two versions for the most recent package",
         kind="scan",
         profile="full",
-        section="workflow",
-        selection_mode="diff_last",
-    ),
-    Command(
-        id="5",
-        title="Run Research Dataset Alpha (batch)",
-        description="Run full analysis across all dataset apps in the APK library",
-        kind="scan",
-        profile="full",
-        section="workflow",
-        auto_verify=True,
-        prompt_reset=False,
-        selection_mode="batch_dataset",
-        force_verbose=True,
-    ),
-    Command(
-        id="6",
-        title="Run Profile v3 Structural Cohort (batch)",
-        description="Run full analysis across Profile v3 cohort apps in the APK library",
-        kind="scan",
-        profile="full",
-        section="workflow",
-        auto_verify=True,
-        prompt_reset=False,
-        selection_mode="batch_profile_v3",
-        force_verbose=True,
+        section="history",
+        selection_mode=SelectionMode.DIFF_LAST,
     ),
     Command(
         id="D",

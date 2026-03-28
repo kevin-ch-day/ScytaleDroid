@@ -897,8 +897,6 @@ def build_analysis_config(params: RunParameters) -> AnalysisConfig:
     profile = profile_map.get(params.profile, "full")
     enabled_detectors = _map_tests_to_detectors(params)
     enable_string_index = params.profile not in {"metadata", "permissions"}
-    if params.profile == "custom" and any(test in params.selected_tests for test in ("secrets", "strings")):
-        enable_string_index = True
 
     sampler = SecretsSamplerConfig(
         entropy_threshold=max(0.0, float(params.secrets_entropy)),
@@ -932,25 +930,7 @@ def _map_tests_to_detectors(params: RunParameters) -> tuple[str, ...]:
         return ("crypto_hygiene",)
     if params.profile == "sdk":
         return ("sdk_inventory",)
-    if params.profile != "custom":
-        return tuple()
-
-    mapping = {
-        "manifest": ("integrity_identity", "manifest_baseline", "ipc_components", "provider_acl"),
-        "provider_acl": ("provider_acl",),
-        "nsc": ("network_surface",),
-        "webview": ("webview",),
-        "secrets": ("secrets",),
-    }
-    detectors: list[str] = []
-    for test_key in params.selected_tests:
-        value = mapping.get(test_key)
-        if value:
-            if isinstance(value, tuple):
-                detectors.extend(value)
-            else:
-                detectors.append(value)
-    return tuple(dict.fromkeys(detectors))
+    return tuple()
 
 
 def format_duration(seconds: float) -> str:

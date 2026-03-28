@@ -1265,6 +1265,7 @@ def _render_run_results_impl(
             masvs_matrix,
             static_risk_rows,
             scope_label=params.scope_label,
+            snapshot_at=outcome.finished_at,
         )
         if len(outcome.results) > 1:
             _render_cross_app_insights(

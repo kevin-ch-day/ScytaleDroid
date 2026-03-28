@@ -55,6 +55,8 @@ def render_reset_outcome(outcome: object, *, session_label: str | None = None) -
 
 
 def collect_view_options(command: Command) -> tuple[bool, bool, bool, bool]:
+    from ..commands.models import SelectionMode
+
     print("View options")
     print("------------------------")
     print("[1] Summary details")
@@ -109,7 +111,11 @@ def collect_view_options(command: Command) -> tuple[bool, bool, bool, bool]:
                 "Same package only",
             ],
         }
-        detail_key = command.selection_mode if command.selection_mode != "scope" else (command.profile or "")
+        detail_key = (
+            str(command.selection_mode)
+            if command.selection_mode is not SelectionMode.SCOPE
+            else (command.profile or "")
+        )
         for line in details_map.get(detail_key, ("No additional details.",)):
             print(f"• {line}")
     return want_details, want_splits, want_artifacts, False

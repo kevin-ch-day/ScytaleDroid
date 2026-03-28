@@ -9,19 +9,7 @@ from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_mes
 
 from .models import RunParameters
 
-MICRO_TESTS: tuple[tuple[str, str], ...] = (
-    ("manifest", "Manifest-only"),
-    ("provider_acl", "Provider ACL only"),
-    ("nsc", "NSC only"),
-    ("webview", "WebView quick"),
-    ("secrets", "Secrets sampler"),
-)
-
 EVIDENCE_STEPS = (1, 2, 4)
-
-
-def default_custom_tests() -> tuple[str, ...]:
-    return tuple(key for key, _ in MICRO_TESTS)
 
 
 def prompt_advanced_options(base_params: RunParameters) -> RunParameters:
@@ -34,12 +22,6 @@ def prompt_advanced_options(base_params: RunParameters) -> RunParameters:
     table_utils.render_key_value_pairs(_summarise_params(params))
     if not prompt_utils.prompt_yes_no("Modify advanced options?", default=False):
         return params
-
-    selected_tests = params.selected_tests or (
-        default_custom_tests() if params.profile == "custom" else tuple()
-    )
-    if params.profile == "custom":
-        selected_tests = prompt_custom_tests(selected_tests)
 
     evidence = prompt_int("Evidence lines", params.evidence_lines, choices=EVIDENCE_STEPS)
     findings = prompt_int("Max findings/test", params.finding_limit, minimum=1)
@@ -108,7 +90,6 @@ def prompt_advanced_options(base_params: RunParameters) -> RunParameters:
 
     return replace(
         params,
-        selected_tests=selected_tests,
         evidence_lines=evidence,
         finding_limit=findings,
         secrets_entropy=entropy,
@@ -140,9 +121,6 @@ def _summarise_params(params: RunParameters) -> tuple[tuple[str, object], ...]:
         ("Secrets hits/bucket", params.secrets_hits_per_bucket),
         ("Secrets scope", params.secrets_scope_label),
     ]
-
-    if params.profile == "custom":
-        pairs.append(("Custom tests", _describe_custom_tests(params.selected_tests)))
 
     if params.profile == "strings":
         pairs.extend(
@@ -182,42 +160,6 @@ def _summarise_params(params: RunParameters) -> tuple[tuple[str, object], ...]:
 
 def _format_bool(value: bool) -> str:
     return "Yes" if value else "No"
-
-
-def _describe_custom_tests(selected: tuple[str, ...]) -> str:
-    if not selected:
-        return "All micro-tests"
-    labels = {key: label for key, label in MICRO_TESTS}
-    ordered = [labels.get(key, key) for key in selected]
-    return ", ".join(ordered)
-
-
-def prompt_custom_tests(selected: tuple[str, ...]) -> tuple[str, ...]:
-    rows = []
-    for idx, (key, label) in enumerate(MICRO_TESTS, start=1):
-        marker = "x" if key in selected else " "
-        rows.append([str(idx), f"[{marker}] {label}"])
-    table_utils.render_table(["#", "Test"], rows)
-    default = ",".join(str(idx) for idx, (key, _) in enumerate(MICRO_TESTS, start=1) if key in selected)
-    response = prompt_utils.prompt_text(
-        "Select tests (comma-separated #)",
-        default=default,
-        required=False,
-    )
-    if not response.strip():
-        return selected if selected else tuple(key for key, _ in MICRO_TESTS)
-
-    tokens = {token.strip() for token in response.split(",") if token.strip()}
-    chosen: list[str] = []
-    for token in tokens:
-        if not token.isdigit():
-            continue
-        index = int(token) - 1
-        if 0 <= index < len(MICRO_TESTS):
-            chosen.append(MICRO_TESTS[index][0])
-    return tuple(chosen or (key for key, _ in MICRO_TESTS))
-
-
 def prompt_int(label: str, default: int, *, choices: Sequence[int] | None = None, minimum: int = 1) -> int:
     if choices:
         print(f"{label} options: {', '.join(str(value) for value in choices)}")
@@ -257,11 +199,8 @@ def prompt_choice(label: str, options: dict[str, str], *, default: str) -> str:
 
 
 __all__ = [
-    "MICRO_TESTS",
     "EVIDENCE_STEPS",
-    "default_custom_tests",
     "prompt_advanced_options",
-    "prompt_custom_tests",
     "prompt_int",
     "prompt_float",
     "prompt_choice",

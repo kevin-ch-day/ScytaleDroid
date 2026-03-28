@@ -4,8 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import StrEnum
 
 CommandHandler = Callable[[], None]
+
+
+class SelectionMode(StrEnum):
+    SCOPE = "scope"
+    LAST = "last"
+    DIFF_LAST = "diff_last"
 
 
 @dataclass(frozen=True)
@@ -24,8 +31,8 @@ class Command:
     auto_verify: bool = False
     prompt_reset: bool = False
     force_app_scope: bool = False
-    selection_mode: str = "scope"  # "scope", "last", "diff_last", "batch_dataset", "batch_profile_v3"
+    selection_mode: SelectionMode = SelectionMode.SCOPE
     force_verbose: bool = False
 
 
-__all__ = ["Command", "CommandHandler"]
+__all__ = ["Command", "CommandHandler", "SelectionMode"]

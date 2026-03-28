@@ -55,7 +55,6 @@ def _profile_token(params: RunParameters) -> str:
         "permissions": "perm",
         "metadata": "meta",
         "split": "split",
-        "custom": "custom",
     }
     return aliases.get(profile, profile[:8] or "run")
 

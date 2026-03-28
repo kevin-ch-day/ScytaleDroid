@@ -975,8 +975,6 @@ def execute_run_spec(spec: StaticRunSpec) -> RunOutcome | None:
 
 
 def _modules_for_run(params: RunParameters) -> tuple[str, ...]:
-    if params.profile == "custom" and params.selected_tests:
-        return params.selected_tests
     return run_modules_for_profile(params.profile)
 
 

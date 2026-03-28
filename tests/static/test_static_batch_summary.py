@@ -2,7 +2,7 @@ from pathlib import Path
 
 
 def test_write_batch_summary_accepts_started_at_utc(tmp_path: Path):
-    from scytaledroid.StaticAnalysis.cli.flows.static_batch import _write_batch_summary
+    from scytaledroid.StaticAnalysis.cli.flows.batch_summary import write_batch_summary
 
     out = tmp_path / "nested" / "batch.json"
     rows = [
@@ -13,7 +13,7 @@ def test_write_batch_summary_accepts_started_at_utc(tmp_path: Path):
             "completed": True,
         }
     ]
-    _write_batch_summary(
+    write_batch_summary(
         batch_summary_path=out,
         batch_id="batch-1",
         batch_rows=rows,
@@ -29,11 +29,11 @@ def test_write_batch_summary_accepts_started_at_utc(tmp_path: Path):
 
 
 def test_write_batch_summary_accepts_started_at(tmp_path: Path):
-    from scytaledroid.StaticAnalysis.cli.flows.static_batch import _write_batch_summary
+    from scytaledroid.StaticAnalysis.cli.flows.batch_summary import write_batch_summary
 
     out = tmp_path / "batch.json"
     rows = [{"started_at": "2026-02-28T00:00:00Z"}]
-    _write_batch_summary(
+    write_batch_summary(
         batch_summary_path=out,
         batch_id="batch-2",
         batch_rows=rows,

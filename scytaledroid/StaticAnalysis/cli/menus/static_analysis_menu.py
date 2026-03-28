@@ -43,8 +43,9 @@ def static_analysis_menu() -> None:
     from scytaledroid.StaticAnalysis.services import static_service
 
     from ..commands import get_command, iter_commands
+    from ..commands.models import SelectionMode
     from ..core.models import RunParameters
-    from ..core.run_prompts import default_custom_tests, prompt_advanced_options
+    from ..core.run_prompts import prompt_advanced_options
 
     base_dir = Path(app_config.DATA_DIR) / "device_apks"
 
@@ -58,6 +59,9 @@ def static_analysis_menu() -> None:
         return tuple(group_artifacts(base_dir))
 
     groups = _load_groups()
+    static_scope_service.prune_missing_paths(
+        tuple(str(artifact.path) for group in groups for artifact in group.artifacts)
+    )
     if not groups:
         print(
             status_messages.status(
@@ -70,8 +74,9 @@ def static_analysis_menu() -> None:
 
     scan_commands = tuple(iter_commands("scan"))
     workflow_commands = tuple(cmd for cmd in scan_commands if cmd.section == "workflow")
-    tool_commands = tuple(cmd for cmd in scan_commands if cmd.section != "workflow")
-    selectable_ids = [cmd.id for cmd in (*workflow_commands, *tool_commands)]
+    history_commands = tuple(cmd for cmd in scan_commands if cmd.section == "history")
+    tool_commands = tuple(cmd for cmd in scan_commands if cmd.section == "tools")
+    selectable_ids = [cmd.id for cmd in (*workflow_commands, *history_commands, *tool_commands)]
 
     if not selectable_ids:
         print(status_messages.status("No static analysis commands are registered.", level="error"))
@@ -125,6 +130,16 @@ def static_analysis_menu() -> None:
             print("Primary actions")
             print("---------------")
         menu_utils.render_menu(workflow_spec)
+        if history_commands:
+            print()
+            print("History")
+            print("-------")
+            history_spec = MenuSpec(
+                items=[_command_option(cmd) for cmd in history_commands],
+                show_exit=False,
+                show_descriptions=False,
+            )
+            menu_utils.render_menu(history_spec)
         if tool_commands:
             print()
             print("Tools")
@@ -182,6 +197,9 @@ def static_analysis_menu() -> None:
         # Refresh groups at the moment we are about to execute a workflow command, so any
         # newly harvested APKs are visible without restarting the TUI.
         groups = _load_groups()
+        static_scope_service.prune_missing_paths(
+            tuple(str(artifact.path) for group in groups for artifact in group.artifacts)
+        )
         if not groups:
             print(
                 status_messages.status(
@@ -197,36 +215,12 @@ def static_analysis_menu() -> None:
             continue
 
         selection = None
-        if command.selection_mode == "batch_dataset":
-            from scytaledroid.StaticAnalysis.cli.flows.static_batch import run_dataset_static_batch
-
-            run_dataset_static_batch(
-                groups=groups,
-                base_dir=base_dir,
-                command=command,
-                static_service=static_service,
-                query_runner=query_runner,
-                reset_static_analysis_data=reset_static_analysis_data,
-            )
-            continue
-        if command.selection_mode == "batch_profile_v3":
-            from scytaledroid.StaticAnalysis.cli.flows.static_batch import run_profile_v3_static_batch
-
-            run_profile_v3_static_batch(
-                groups=groups,
-                base_dir=base_dir,
-                command=command,
-                static_service=static_service,
-                query_runner=query_runner,
-                reset_static_analysis_data=reset_static_analysis_data,
-            )
-            continue
-        if command.selection_mode == "last":
+        if command.selection_mode is SelectionMode.LAST:
             selection = resolve_last_selection(groups)
             if selection is None:
                 prompt_utils.press_enter_to_continue()
                 continue
-        elif command.selection_mode == "diff_last":
+        elif command.selection_mode is SelectionMode.DIFF_LAST:
             selection = resolve_last_selection(groups)
             if selection is None:
                 prompt_utils.press_enter_to_continue()
@@ -234,7 +228,7 @@ def static_analysis_menu() -> None:
             render_version_diff(selection.label)
             prompt_utils.press_enter_to_continue()
             continue
-        else:
+        elif selection is None:
             selection = choose_scope(groups)
             if selection is None:
                 continue
@@ -250,9 +244,7 @@ def static_analysis_menu() -> None:
             profile=command.profile,
             scope=selection.scope,
             scope_label=selection.label,
-            selected_tests=(
-                default_custom_tests() if command.profile == "custom" else tuple()
-            ),
+            selected_tests=tuple(),
         )
         if show_artifacts:
             params = replace(params, artifact_detail=True)

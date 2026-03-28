@@ -170,7 +170,6 @@ class RunParameters:
             "lightweight": "Lightweight",
             "full": "Full",
             "split": "Split-APK composition",
-            "custom": "Custom",
         }.get(self.profile, self.profile.title())
 
     @property
