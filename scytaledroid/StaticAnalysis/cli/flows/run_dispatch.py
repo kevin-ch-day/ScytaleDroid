@@ -40,6 +40,7 @@ from ..execution import (
     render_run_results,
     request_abort,
 )
+from ..execution.db_verification import _render_persistence_footer
 from ..execution.static_run_map import REQUIRED_FIELDS, validate_run_map
 from ..views.view_layouts import render_run_start, render_run_summary
 from . import persistence_runtime
@@ -345,7 +346,12 @@ def _launch_scan_flow_resolved(
             abort_signal = outcome.abort_signal
             _emit_postprocessing_step("Rendering run summary", run_ctx=frozen_ctx)
             try:
-                render_run_results(outcome, params, run_ctx=frozen_ctx)
+                render_run_results(
+                    outcome,
+                    params,
+                    run_ctx=frozen_ctx,
+                    defer_persistence_footer=True,
+                )
             except Exception as exc:
                 run_status = "FAILED"
                 abort_reason = "run_summary_render_failed"
@@ -609,7 +615,7 @@ def _launch_scan_flow_resolved(
             run_ctx=frozen_ctx,
             evidence_root=evidence_root,
         )
-    if run_persistence_enabled and params.session_stamp:
+    if run_persistence_enabled and params.session_stamp and outcome is not None:
         _emit_postprocessing_step("Refreshing canonical session views", run_ctx=frozen_ctx)
         try:
             persistence_runtime.refresh_session_views(
@@ -619,6 +625,21 @@ def _launch_scan_flow_resolved(
             )
         except Exception:
             pass
+        canonical_failures = [
+            str(note.get("message") or "")
+            for note in getattr(outcome, "audit_notes", []) or []
+            if isinstance(note, dict)
+            and str(note.get("code") or "").strip().lower() == "canonical_error"
+            and str(note.get("message") or "").strip()
+        ]
+        _render_persistence_footer(
+            params.session_stamp,
+            had_errors=bool(getattr(outcome, "persistence_failed", False)),
+            canonical_failures=canonical_failures,
+            run_status=run_status,
+            abort_reason=abort_reason,
+            abort_signal=abort_signal,
+        )
 
     return outcome
 

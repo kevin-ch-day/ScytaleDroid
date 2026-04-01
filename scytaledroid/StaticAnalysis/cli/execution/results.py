@@ -135,6 +135,7 @@ def render_run_results(
     params: RunParameters,
     *,
     run_ctx: StaticRunContext | None = None,
+    defer_persistence_footer: bool = False,
 ) -> None:
     """Persist and (optionally) render run results.
 
@@ -150,10 +151,20 @@ def render_run_results(
 
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(buffer):
-            _render_run_results_impl(outcome, params, run_ctx=run_ctx)
+            _render_run_results_impl(
+                outcome,
+                params,
+                run_ctx=run_ctx,
+                defer_persistence_footer=defer_persistence_footer,
+            )
         return
 
-    _render_run_results_impl(outcome, params, run_ctx=run_ctx)
+    _render_run_results_impl(
+        outcome,
+        params,
+        run_ctx=run_ctx,
+        defer_persistence_footer=defer_persistence_footer,
+    )
 
 
 def _render_run_results_impl(
@@ -161,6 +172,7 @@ def _render_run_results_impl(
     params: RunParameters,
     *,
     run_ctx: StaticRunContext | None,
+    defer_persistence_footer: bool,
 ) -> None:
     """Internal implementation for render_run_results (may print)."""
     # Keep verbose flag owned by callers; this function reads params directly.
@@ -1221,7 +1233,7 @@ def _render_run_results_impl(
                             level="warn",
                         )
                     )
-        if session_stamp and persist_enabled:
+        if session_stamp and persist_enabled and not defer_persistence_footer:
             _render_persistence_footer(
                 session_stamp,
                 had_errors=bool(persistence_errors),

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import shutil
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
+from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core import database_session
 from scytaledroid.Database.db_core.db_engine import DatabaseEngine
 
@@ -43,6 +46,7 @@ STATIC_ANALYSIS_TABLES: Sequence[str] = (
     "masvs_control_coverage",
     "doc_hosts",
     # Linkage/ledger tables (resetting findings without these leaves confusing "orphan" runs)
+    "static_session_rollups",
     "static_session_run_links",
     "static_analysis_runs",
     # Run-level persistence
@@ -303,6 +307,11 @@ def _reset_static_analysis_session_scoped(
             except RuntimeError as exc:
                 failed.append(("runs", str(exc)))
 
+    try:
+        _clear_local_session_metadata(target_session)
+    except OSError as exc:
+        failed.append(("local_session_metadata", str(exc)))
+
     return ResetOutcome(
         truncated=[],
         cleared=cleared,
@@ -386,6 +395,16 @@ def _table_exists(engine: DatabaseEngine, table: str) -> bool:
     except RuntimeError:  # pragma: no cover - unlikely
         return False
     return bool(result)
+
+
+def _clear_local_session_metadata(session_label: str) -> None:
+    session_dir = Path(app_config.DATA_DIR) / "sessions" / str(session_label).strip()
+    if not session_dir.exists():
+        return
+    if session_dir.is_file():
+        session_dir.unlink()
+        return
+    shutil.rmtree(session_dir)
 
 
 __all__ = [

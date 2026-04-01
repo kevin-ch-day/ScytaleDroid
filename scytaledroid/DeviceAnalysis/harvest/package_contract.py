@@ -121,6 +121,15 @@ def write_package_manifest(
             "session_label": session_stamp,
             "package_dir": normalise_local_path(package_dir),
         },
+        "inventory": {
+            "installer": inventory.installer,
+            "category": inventory.category,
+            "profile_key": inventory.profile_key,
+            "profile_name": inventory.profile,
+            "primary_path": inventory.primary_path,
+            "apk_paths": list(inventory.apk_paths),
+            "split_count": inventory.split_count,
+        },
         "planning": {
             "preflight_reason": result.preflight_reason,
             "total_paths": result.plan.total_paths,

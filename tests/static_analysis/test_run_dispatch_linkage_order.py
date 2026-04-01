@@ -407,3 +407,85 @@ def test_launch_scan_flow_passes_fail_on_persist_error_for_permission_refresh(mo
     run_dispatch.launch_scan_flow(selection, params, Path("."))
     assert seen.get("fail_on_persist_error") is True
     assert seen.get("compact_output") is True
+
+
+def test_launch_scan_flow_defers_persistence_footer_until_after_permission_refresh(monkeypatch) -> None:
+    now = datetime.now(UTC)
+    outcome = RunOutcome(
+        results=[AppRunResult(package_name="com.example.app", category="Test", static_run_id=None)],
+        started_at=now,
+        finished_at=now,
+        scope=ScopeSelection(scope="app", label="Example", groups=tuple()),
+        base_dir=Path("."),
+    )
+
+    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok"))
+    monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
+    monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
+    monkeypatch.setattr(run_dispatch, "execute_scan", lambda *_a, **_k: outcome)
+    monkeypatch.setattr(run_dispatch, "_emit_selection_manifest", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch, "finalize_open_runs", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch, "_emit_missing_run_ids_artifact", lambda *_a, **_k: None)
+
+    calls: list[tuple[str, object]] = []
+
+    def _render_and_persist(_outcome, *_a, **kwargs):
+        calls.append(("render", kwargs.get("defer_persistence_footer")))
+        _outcome.results[0].static_run_id = 777
+        _outcome.persistence_failed = False
+        _outcome.audit_notes = [{"code": "canonical_error", "message": "canon gap"}]
+
+    monkeypatch.setattr(run_dispatch, "render_run_results", _render_and_persist)
+    monkeypatch.setattr(
+        run_dispatch,
+        "_build_session_run_map",
+        lambda *_a, **_k: {
+            "session_stamp": "sess-ordered",
+            "apps": [
+                {
+                    "package": "com.example.app",
+                    "static_run_id": 777,
+                    "pipeline_version": "2.0.0-alpha",
+                    "run_signature": "sig",
+                    "run_signature_version": "v1",
+                    "base_apk_sha256": "aa" * 32,
+                    "artifact_set_hash": "bb" * 32,
+                }
+            ],
+            "by_package": {"com.example.app": {"static_run_id": 777}},
+        },
+    )
+    monkeypatch.setattr(run_dispatch, "validate_run_map", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch, "_persist_session_run_links", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch, "execute_permission_scan", lambda *_a, **_k: calls.append(("perm", None)))
+    monkeypatch.setattr(
+        run_dispatch.persistence_runtime,
+        "refresh_session_views",
+        lambda **_k: calls.append(("refresh", None)),
+    )
+    monkeypatch.setattr(
+        run_dispatch,
+        "_render_persistence_footer",
+        lambda *_a, **kwargs: calls.append(("footer", kwargs)),
+    )
+
+    params = RunParameters(
+        profile="full",
+        scope="app",
+        scope_label="Example",
+        session_stamp="sess-ordered",
+        dry_run=False,
+        persistence_ready=True,
+        permission_snapshot_refresh=True,
+        paper_grade_requested=False,
+    )
+    selection = ScopeSelection(scope="app", label="Example", groups=tuple())
+
+    run_dispatch.launch_scan_flow(selection, params, Path("."))
+
+    assert calls[0] == ("render", True)
+    assert [name for name, _ in calls[-3:]] == ["perm", "refresh", "footer"]
+    footer_kwargs = calls[-1][1]
+    assert isinstance(footer_kwargs, dict)
+    assert footer_kwargs.get("had_errors") is False
+    assert footer_kwargs.get("canonical_failures") == ["canon gap"]
