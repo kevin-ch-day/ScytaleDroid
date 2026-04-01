@@ -6,6 +6,8 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
+from scytaledroid.DeviceAnalysis.services import artifact_store
+
 from . import common
 from .common import normalise_local_path
 from .models import PackagePlan, PullResult
@@ -43,6 +45,7 @@ def observed_artifact_entries(result: PullResult) -> list[dict[str, object]]:
                 "file_name": artifact.file_name,
                 "is_base": bool(artifact.is_base) if artifact.is_base is not None else None,
                 "local_artifact_path": normalise_local_path(artifact.dest_path),
+                "canonical_store_path": artifact.canonical_store_path,
                 "observed_source_path": artifact.observed_source_path or artifact.source_path,
                 "sha256": artifact.sha256,
                 "file_size": artifact.file_size,
@@ -154,7 +157,20 @@ def write_package_manifest(
         },
         "comparison": dict(result.comparison),
     }
+    receipt_path = artifact_store.harvest_receipt_path(
+        session_label=session_stamp,
+        package_name=inventory.package_name,
+    )
+    payload["paths"] = {
+        "legacy_manifest_path": normalise_local_path(manifest_path),
+        "receipt_path": artifact_store.repo_relative_path(receipt_path),
+    }
     common.write_json_manifest(manifest_path, payload)
+    artifact_store.write_harvest_receipt(
+        session_label=session_stamp,
+        package_name=inventory.package_name,
+        payload=payload,
+    )
 
 
 def _comparison_key(entry: Mapping[str, object]) -> tuple[str, str]:

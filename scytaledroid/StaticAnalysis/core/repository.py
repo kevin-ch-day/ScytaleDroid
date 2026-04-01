@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from scytaledroid.Config import app_config
+from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ..modules import resolve_category
@@ -242,6 +243,15 @@ def _load_metadata(apk_path: Path) -> Mapping[str, object]:
     return {}
 
 
+def _load_receipt(receipt_path: Path) -> Mapping[str, object] | None:
+    try:
+        with receipt_path.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, Mapping) else None
+
+
 def _load_package_manifest(package_dir: Path) -> tuple[str | None, Mapping[str, object] | None]:
     manifest_path = package_dir / "harvest_package_manifest.json"
     if not manifest_path.exists():
@@ -260,10 +270,16 @@ def discover_repository_artifacts(base_dir: Path | None = None) -> list[Reposito
     """Return every APK artifact tracked within the repository."""
 
     if base_dir is None:
-        base_dir = (Path(app_config.DATA_DIR) / "device_apks").resolve()
-    else:
-        base_dir = base_dir.resolve()
+        return _discover_receipt_artifacts(artifact_store.harvest_receipts_root().resolve())
 
+    resolved_root = base_dir.resolve()
+    receipt_root = _resolve_receipt_root(resolved_root)
+    if receipt_root is not None:
+        return _discover_receipt_artifacts(receipt_root)
+    return _discover_path_artifacts(resolved_root)
+
+
+def _discover_path_artifacts(base_dir: Path) -> list[RepositoryArtifact]:
     artifacts: list[RepositoryArtifact] = []
     if not base_dir.exists():
         return artifacts
@@ -276,6 +292,116 @@ def discover_repository_artifacts(base_dir: Path | None = None) -> list[Reposito
             display = apk_path.name
         artifacts.append(RepositoryArtifact(path=apk_path, display_path=display, metadata=metadata))
     return artifacts
+
+
+def _discover_receipt_artifacts(receipt_root: Path) -> list[RepositoryArtifact]:
+    artifacts: list[RepositoryArtifact] = []
+    if not receipt_root.exists():
+        return artifacts
+
+    for receipt_path in sorted(receipt_root.glob("*/*.json")):
+        payload = _load_receipt(receipt_path)
+        if not payload:
+            continue
+        artifacts.extend(_artifacts_from_receipt(receipt_path, payload))
+    return artifacts
+
+
+def _resolve_receipt_root(base_dir: Path) -> Path | None:
+    if not base_dir.exists():
+        return None
+    if base_dir.name == "harvest" and base_dir.parent.name == "receipts":
+        return base_dir
+    if base_dir.name == "receipts" and (base_dir / "harvest").exists():
+        return (base_dir / "harvest").resolve()
+    if any(base_dir.glob("*/*.json")) and not any(base_dir.glob("*.apk")):
+        return base_dir
+    return None
+
+
+def _artifacts_from_receipt(receipt_path: Path, payload: Mapping[str, object]) -> list[RepositoryArtifact]:
+    package = payload.get("package")
+    inventory = payload.get("inventory")
+    execution = payload.get("execution")
+    if not isinstance(package, Mapping) or not isinstance(execution, Mapping):
+        return []
+
+    observed = execution.get("observed_artifacts")
+    if not isinstance(observed, Sequence):
+        return []
+
+    package_name = str(package.get("package_name") or "").strip().lower()
+    session_stamp = str(package.get("session_label") or "").strip()
+    version_name = package.get("version_name")
+    version_code = package.get("version_code")
+    app_label = package.get("app_label")
+    installer = inventory.get("installer") if isinstance(inventory, Mapping) else None
+    category = inventory.get("category") if isinstance(inventory, Mapping) else None
+    profile_key = inventory.get("profile_key") if isinstance(inventory, Mapping) else None
+    profile_name = inventory.get("profile_name") if isinstance(inventory, Mapping) else None
+    captured_at = payload.get("generated_at_utc")
+
+    artifacts: list[RepositoryArtifact] = []
+    for entry in observed:
+        if not isinstance(entry, Mapping):
+            continue
+        resolved_path = _resolve_receipt_artifact_path(entry)
+        if resolved_path is None or not resolved_path.exists():
+            continue
+        metadata = dict(_load_metadata(resolved_path))
+        metadata.setdefault("package_name", package_name)
+        metadata.setdefault("app_label", app_label)
+        metadata.setdefault("installer", installer)
+        metadata.setdefault("category", category)
+        metadata.setdefault("profile_key", profile_key)
+        metadata.setdefault("profile_name", profile_name)
+        metadata.setdefault("version_name", version_name)
+        metadata.setdefault("version_code", version_code)
+        metadata.setdefault("file_name", entry.get("file_name") or resolved_path.name)
+        metadata.setdefault("file_size", entry.get("file_size"))
+        metadata.setdefault("sha256", entry.get("sha256"))
+        metadata.setdefault("artifact", entry.get("split_label") or entry.get("file_name"))
+        metadata.setdefault("artifact_kind", "apk")
+        metadata.setdefault("is_split_member", not bool(entry.get("is_base")))
+        metadata.setdefault("observed_source_path", entry.get("observed_source_path"))
+        metadata.setdefault("source_path", entry.get("observed_source_path"))
+        metadata.setdefault("session_stamp", session_stamp or None)
+        metadata.setdefault("captured_at_utc", captured_at)
+        metadata.setdefault("canonical_store_path", entry.get("canonical_store_path"))
+        metadata.setdefault("local_artifact_path", entry.get("local_artifact_path"))
+        metadata.setdefault("receipt_path", artifact_store.repo_relative_path(receipt_path))
+        metadata.setdefault("harvest_manifest_path", artifact_store.repo_relative_path(receipt_path))
+        try:
+            display = resolved_path.resolve().relative_to(Path.cwd().resolve()).as_posix()
+        except ValueError:
+            display = resolved_path.name
+        artifacts.append(RepositoryArtifact(path=resolved_path, display_path=display, metadata=metadata))
+    return artifacts
+
+
+def _resolve_receipt_artifact_path(entry: Mapping[str, object]) -> Path | None:
+    canonical = str(entry.get("canonical_store_path") or "").strip()
+    if canonical:
+        candidate = Path(canonical)
+        if not candidate.is_absolute():
+            candidate = Path.cwd() / canonical
+        if candidate.exists():
+            return candidate.resolve()
+
+    sha256 = str(entry.get("sha256") or "").strip().lower()
+    if sha256:
+        candidate = artifact_store.canonical_apk_path(sha256)
+        if candidate.exists():
+            return candidate.resolve()
+
+    local_path = str(entry.get("local_artifact_path") or "").strip()
+    if local_path:
+        candidate = Path(local_path)
+        if not candidate.is_absolute():
+            candidate = Path.cwd() / local_path
+        if candidate.exists():
+            return candidate.resolve()
+    return None
 
 
 def group_artifacts(
@@ -308,7 +434,11 @@ def group_artifacts(
         manifest_path: str | None = None
         harvest_manifest: Mapping[str, object] | None = None
         if members:
-            manifest_path, harvest_manifest = _load_package_manifest(members[0].path.parent)
+            manifest_path = str(members[0].metadata.get("harvest_manifest_path") or "").strip() or None
+            if manifest_path:
+                harvest_manifest = _load_receipt(Path(manifest_path))
+            else:
+                manifest_path, harvest_manifest = _load_package_manifest(members[0].path.parent)
         group = ArtifactGroup(
             group_key=key,
             package_name=package_name,

@@ -89,13 +89,17 @@ def clean_static_analysis_artifacts(*, retention_days: int | None = None) -> Non
     reports_dir = static_root / "reports"
     tmp_dir = static_root / "tmp"
     cache_dir = static_root / "cache"
-    html_root = Path(app_config.OUTPUT_DIR) / "reports" / "static_analysis"
+    html_roots = (
+        Path(app_config.OUTPUT_DIR) / "reports" / "static_analysis",
+        Path(app_config.OUTPUT_DIR) / "reports" / "static" / "latest",
+        Path(app_config.OUTPUT_DIR) / "reports" / "static" / "archive",
+    )
 
     cutoff = datetime.now(UTC) - timedelta(days=resolved_retention)
 
     report_patterns = ("*.json", "*.ndjson", "*.ndjson.gz", "*.json.gz", "*.zip", "*.tar.gz")
     removed_reports = _prune_files(reports_dir, report_patterns, cutoff)
-    removed_html = _prune_files(html_root, ("*.html", "*.htm"), cutoff)
+    removed_html = _prune_many_files(html_roots, ("*.html", "*.htm"), cutoff)
     removed_tmp = _clear_directory(tmp_dir)
     removed_cache = _clear_directory(cache_dir)
 
@@ -158,7 +162,7 @@ def _prune_files(
 
     removed = _RemovalStats()
     for pattern in patterns:
-        for path in directory.glob(pattern):
+        for path in directory.rglob(pattern):
             try:
                 modified = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
                 if modified < cutoff:
@@ -172,6 +176,21 @@ def _prune_files(
                     )
                 )
     return removed
+
+
+def _prune_many_files(
+    directories: Iterable[Path], patterns: Iterable[str], cutoff: datetime
+) -> _RemovalStats | None:
+    aggregate = _RemovalStats()
+    found_any = False
+    for directory in directories:
+        stats = _prune_files(directory, patterns, cutoff)
+        if stats is None:
+            continue
+        found_any = True
+        aggregate.count += stats.count
+        aggregate.bytes_freed += stats.bytes_freed
+    return aggregate if found_any else None
 
 
 def _clear_directory(directory: Path) -> _RemovalStats | None:

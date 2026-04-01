@@ -1,4 +1,4 @@
-"""Canonical Research Dataset Alpha definition (Paper #2).
+"""Canonical Research Dataset Alpha definition.
 
 This module provides a DB-free fallback for dataset orchestration.
 The DB can be used as a derived index (labels/profiles), but dataset capture
@@ -11,7 +11,7 @@ from collections.abc import Sequence
 
 PROFILE_KEY = "RESEARCH_DATASET_ALPHA"
 
-# PM-locked canonical 12 apps for Paper #2 dataset collection.
+# Canonical 12-app cohort definition used by the operational dataset flow.
 CANONICAL_PACKAGES: tuple[str, ...] = (
     "com.zhiliaoapp.musically",  # TikTok
     "com.facebook.katana",  # Facebook

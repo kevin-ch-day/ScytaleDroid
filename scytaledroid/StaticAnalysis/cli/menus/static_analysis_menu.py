@@ -8,10 +8,9 @@ lives in separate modules.
 from __future__ import annotations
 
 from dataclasses import replace
-from pathlib import Path
 from typing import TYPE_CHECKING
 
-from scytaledroid.Config import app_config
+from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.DeviceAnalysis.services.static_scope_service import static_scope_service
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuItemSpec, MenuSpec
@@ -47,7 +46,7 @@ def static_analysis_menu() -> None:
     from ..core.models import RunParameters
     from ..core.run_prompts import prompt_advanced_options
 
-    base_dir = Path(app_config.DATA_DIR) / "device_apks"
+    analysis_root = artifact_store.analysis_apk_root()
 
     def _load_groups() -> tuple:
         """Reload groups from disk.
@@ -56,7 +55,7 @@ def static_analysis_menu() -> None:
         the library at menu entry, the UI can report stale counts (e.g. 15/21 in library) until
         the user restarts the menu. Reloading on-demand avoids that operator trap.
         """
-        return tuple(group_artifacts(base_dir))
+        return tuple(group_artifacts())
 
     groups = _load_groups()
     static_scope_service.prune_missing_paths(
@@ -279,7 +278,7 @@ def static_analysis_menu() -> None:
                 spec = build_static_run_spec(
                     selection=selection,
                     params=effective_params,
-                    base_dir=base_dir,
+                    base_dir=analysis_root,
                     run_mode="interactive",
                     quiet=False,
                     noninteractive=False,

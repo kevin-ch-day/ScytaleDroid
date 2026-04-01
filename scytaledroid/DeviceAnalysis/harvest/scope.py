@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import os
-import re
-from collections import Counter
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,7 +29,7 @@ _LAST_SCOPE: ScopeSelection | None = None
 def _load_latest_scoped_inventory_packages(*, device_serial: str, scope_id: str) -> list[dict[str, object]] | None:
     """Best-effort: load latest scoped inventory snapshot packages for *scope_id*.
 
-    This allows paper-grade cohorts (v2/v3) to use fresh version_code/version_name and
+    This allows profile-scoped harvesting to use fresh version_code/version_name and
     APK paths without requiring a full-device inventory sync.
     """
 
@@ -70,7 +68,7 @@ def _merge_rows_prefer_scoped(
 ) -> list[InventoryRow]:
     """Merge *scoped_rows* into *rows*, replacing any existing packages.
 
-    Paper-grade scoped inventory snapshots should win for version_code/version_name
+    Profile-scoped inventory snapshots should win for version_code/version_name
     and APK paths. Appending would create duplicate package entries, and downstream
     planning may pick the wrong one depending on iteration order.
     """
@@ -96,12 +94,11 @@ def _hydrate_missing_rows_from_adb(
 ) -> list[InventoryRow]:
     """Best-effort: build InventoryRow entries for a small missing set via ADB.
 
-    This is used only for paper/dataset cohorts to avoid forcing a full inventory
+    This is used for profile-scoped harvesting to avoid forcing a full inventory
     sync when the canonical snapshot is slightly stale but the operator has just
     installed a small number of missing apps (e.g., Drive/Sheets).
 
-    If hydration fails for a package, it remains missing and the paper precheck
-    will fail-closed.
+    If hydration fails for a package, it remains missing from the scoped selection.
     """
 
     if not missing_packages:
@@ -163,7 +160,7 @@ def _hydrate_missing_rows_from_adb(
     return hydrated
 
 
-def _precheck_paper_dataset(
+def _precheck_required_packages(
     *,
     title: str,
     expected_packages: set[str],
@@ -218,7 +215,7 @@ def _precheck_paper_dataset(
             missing_n = max(int(expected_catalog_size) - int(actual_catalog_size), 0)
             print(
                 status_messages.status(
-                    f"Paper-grade harvest is blocked until the catalog is frozen (missing {missing_n} catalog entr{'y' if missing_n == 1 else 'ies'}).",
+                    f"Harvest is blocked until the scoped catalog is complete (missing {missing_n} catalog entr{'y' if missing_n == 1 else 'ies'}).",
                     level="warn",
                 )
             )
@@ -282,6 +279,61 @@ def _precheck_paper_dataset(
     return False, reason
 
 
+def _load_active_profile_scopes(
+    rows: Sequence[InventoryRow],
+    *,
+    device_serial: str,
+) -> list[dict[str, object]]:
+    from scytaledroid.DynamicAnalysis.profile_loader import load_db_profiles, load_profile_packages
+
+    scopes: list[dict[str, object]] = []
+    for profile in load_db_profiles():
+        profile_key = str(profile.get("profile_key") or "").strip().upper()
+        if not profile_key:
+            continue
+        display_name = str(profile.get("display_name") or profile_key).strip() or profile_key
+        scope_id = f"profile::{profile_key.lower()}"
+        expected = {
+            str(package).strip().lower()
+            for package in load_profile_packages(profile_key)
+            if str(package).strip()
+        }
+        if not expected:
+            continue
+
+        working_rows = list(rows)
+        scoped_packages = _load_latest_scoped_inventory_packages(device_serial=device_serial, scope_id=scope_id)
+        if scoped_packages:
+            scoped_rows = build_inventory_rows(scoped_packages)
+            scoped_rows = [row for row in scoped_rows if row.package_name.lower() in expected]
+            if scoped_rows:
+                working_rows = _merge_rows_prefer_scoped(rows=working_rows, scoped_rows=scoped_rows)
+
+        existing_pkgs = {row.package_name.strip().lower() for row in working_rows if row.package_name}
+        missing_packages = {pkg for pkg in expected if pkg and pkg not in existing_pkgs}
+        if missing_packages:
+            working_rows.extend(
+                _hydrate_missing_rows_from_adb(
+                    device_serial=device_serial,
+                    missing_packages=missing_packages,
+                )
+            )
+
+        profile_rows = [row for row in working_rows if row.package_name.lower() in expected]
+        scopes.append(
+            {
+                "profile_key": profile_key,
+                "display_name": display_name,
+                "scope_id": scope_id,
+                "expected_packages": expected,
+                "rows": profile_rows,
+            }
+        )
+
+    scopes.sort(key=lambda item: str(item["display_name"]).casefold())
+    return scopes
+
+
 @dataclass(frozen=True)
 class _WatchlistEntry:
     watchlist: Watchlist
@@ -306,7 +358,6 @@ def select_package_scope(
 
     allow = set(google_allowlist or rules.GOOGLE_ALLOWLIST)
     context = build_scope_context(rows, allow)
-    profile_counts = context["profile_counts"]  # type: ignore[assignment]
     # Note: profile groups / watchlists are rendered inside build_scope_context() output.
 
     default_rows, _ = apply_default_scope(rows, allow)
@@ -362,130 +413,27 @@ def select_package_scope(
                 handler=lambda: _LAST_SCOPE,
             )
 
-        # Primary: research dataset collection.
-        try:
-            from scytaledroid.DynamicAnalysis.profile_loader import load_profile_packages
-
-            dataset_pkgs = {p.lower() for p in load_profile_packages("RESEARCH_DATASET_ALPHA")}
-        except Exception:
-            dataset_pkgs = set()
-        # Prefer a scoped snapshot for paper cohorts when available (faster and fresher than full inventory).
-        scoped_alpha = _load_latest_scoped_inventory_packages(device_serial=device_serial, scope_id="paper2_alpha")
-        if scoped_alpha:
-            scoped_rows = build_inventory_rows(scoped_alpha)
-            # Keep only the cohort packages; ignore other entries.
-            scoped_rows = [row for row in scoped_rows if row.package_name.lower() in dataset_pkgs]
-            if scoped_rows:
-                rows = _merge_rows_prefer_scoped(rows=rows, scoped_rows=scoped_rows)
-        # If the operator just installed a missing dataset app but hasn't re-synced the full
-        # inventory snapshot yet, try to hydrate those missing rows directly from ADB so the
-        # paper cohort precheck and harvest selection are accurate.
-        existing_pkgs = {row.package_name.strip().lower() for row in rows if row.package_name}
-        missing_dataset = {p for p in dataset_pkgs if p and p not in existing_pkgs}
-        if missing_dataset:
-            rows = list(rows) + _hydrate_missing_rows_from_adb(device_serial=device_serial, missing_packages=missing_dataset)
-            existing_pkgs = {row.package_name.strip().lower() for row in rows if row.package_name}
-        dataset_rows = [row for row in rows if row.package_name.lower() in dataset_pkgs] if dataset_pkgs else []
+        profile_scopes = _load_active_profile_scopes(rows, device_serial=device_serial)
+        profile_scope_count = len(profile_scopes)
+        profile_scope_packages = sum(len(scope["rows"]) for scope in profile_scopes)
         _add_entry(
             "1",
-            "Paper #2 Dataset",
-            packages=len(dataset_rows),
-            files=estimated_files(dataset_rows),
-            note="Research Dataset Alpha",
-            handler=lambda rows=dataset_rows, expected=dataset_pkgs: ScopeSelection(
-                label="Research Dataset Alpha",
-                packages=list(rows),
-                kind="research_dataset",
-                metadata={
-                    "estimated_files": estimated_files(rows),
-                    "candidate_count": len(rows),
-                    "selected_count": len(rows),
-                    "profile_key": "RESEARCH_DATASET_ALPHA",
-                    "paper_dataset": True,
-                    "expected_packages": sorted(list(expected)),
-                    # Always pull the full dataset set; do not delta-filter these runs.
-                    "disable_delta_filter": True,
-                    "policy": "non_root_paths" if not is_rooted else "none",
-                },
-            ),
+            "App profile",
+            packages=profile_scope_packages if profile_scope_packages else None,
+            note=f"{profile_scope_count} active" if profile_scope_count else "none available",
+            handler=lambda: _scope_profiles(rows, allow, device_serial=device_serial, is_rooted=is_rooted),
         )
 
-        # Profile v3 structural cohort (catalog-driven, paper-grade defaults).
-        try:
-            from scytaledroid.Publication.profile_v3_metrics import load_profile_v3_catalog
-
-            catalog = load_profile_v3_catalog(Path("profiles") / "profile_v3_app_catalog.json")
-            v3_pkgs = {p.lower() for p in catalog.keys()}
-            v3_catalog_n = int(len(catalog))
-            v3_labels = {str(pkg).strip().lower(): str((meta or {}).get("app") or "").strip() for pkg, meta in catalog.items()}
-        except Exception:
-            v3_pkgs = set()
-            v3_catalog_n = 0
-            v3_labels = {}
-        # Prefer latest scoped v3 snapshot when available (paper-grade speed + freshness).
-        scoped_v3 = _load_latest_scoped_inventory_packages(device_serial=device_serial, scope_id="paper3_beta")
-        if scoped_v3:
-            scoped_rows = build_inventory_rows(scoped_v3)
-            scoped_rows = [row for row in scoped_rows if row.package_name.lower() in v3_pkgs]
-            if scoped_rows:
-                rows = _merge_rows_prefer_scoped(rows=rows, scoped_rows=scoped_rows)
-                existing_pkgs = {row.package_name.strip().lower() for row in rows if row.package_name}
-        missing_v3 = {p for p in v3_pkgs if p and p not in existing_pkgs}
-        if missing_v3:
-            rows = list(rows) + _hydrate_missing_rows_from_adb(device_serial=device_serial, missing_packages=missing_v3)
-            existing_pkgs = {row.package_name.strip().lower() for row in rows if row.package_name}
-        v3_rows = [row for row in rows if row.package_name.lower() in v3_pkgs] if v3_pkgs else []
-        expected_v3_n = 21
-        v3_note = "Research Dataset Beta"
-        v3_handler = lambda rows=v3_rows, expected=v3_pkgs, labels=v3_labels, n=v3_catalog_n, exp_n=expected_v3_n: ScopeSelection(
-            label="Profile v3 Structural Cohort",
-            packages=list(rows),
-            kind="profile_v3",
-            metadata={
-                "estimated_files": estimated_files(rows),
-                "candidate_count": len(rows),
-                "selected_count": len(rows),
-                "profile_key": "PROFILE_V3_STRUCTURAL",
-                "paper_dataset": True,
-                "expected_packages": sorted(list(expected)),
-                "package_labels": labels,
-                "catalog_size": int(n),
-                "expected_catalog_size": int(exp_n),
-                # Paper-grade: never delta-filter; always refresh the full cohort.
-                "disable_delta_filter": True,
-                "harvest_mode": "full_refresh",
-                "policy": "non_root_paths" if not is_rooted else "none",
-            },
-        )
         _add_entry(
             "2",
-            "Paper #3 Dataset",
-            packages=len(v3_rows),
-            files=estimated_files(v3_rows),
-            note=v3_note,
-            handler=v3_handler,
-        )
-
-        _add_entry(
-            "3",
             "Play & user apps",
             packages=context["default_counts"].get("packages"),
             files=context["default_counts"].get("files"),
             note="default",
             handler=lambda: _scope_default(rows, allow),
         )
-        # Primary: profiled apps. This is the research dataset adjacent view, without being a hard-coded list.
         _add_entry(
-            "4",
-            "Target app profiles",
-            packages=context["profile_summary"].get("packages"),
-            files=context["profile_summary"].get("files"),
-            note="",
-            handler=lambda: _scope_profiles(rows, profile_counts, allow),
-        )
-
-        _add_entry(
-            "5",
+            "3",
             "Google allow-list",
             packages=context["google_exceptions"].get("packages"),
             files=context["google_exceptions"].get("files"),
@@ -493,7 +441,7 @@ def select_package_scope(
             handler=lambda: _scope_google_allowlist(rows, allow),
         )
         _add_entry(
-            "6",
+            "4",
             "Everything",
             packages=context["everything"].get("packages"),
             files=context["everything"].get("files"),
@@ -530,7 +478,7 @@ def select_package_scope(
 
         choice = prompt_utils.get_choice(
             [str(entry["key"]) for entry in entries] + ["0"],
-            default="1",
+            default="2",
             casefold=True,
             prompt="Select scope #: ",
         )
@@ -546,32 +494,20 @@ def select_package_scope(
         if selection is None:
             continue
 
-        # Paper dataset precheck is run after selection so the table stays compact.
-        if bool(selection.metadata.get("paper_dataset")) and selection.metadata.get("expected_packages"):
+        # Scoped profile selections can still benefit from an explicit inventory precheck.
+        if bool(selection.metadata.get("profile_scope")) and selection.metadata.get("expected_packages"):
             expected = {str(p).strip() for p in (selection.metadata.get("expected_packages") or []) if str(p).strip()}
             labels = selection.metadata.get("package_labels")
             pkg_labels = labels if isinstance(labels, dict) else None
 
-            # Special v3 lock: do not allow harvest until catalog is frozen at expected size.
-            if selection.kind == "profile_v3":
-                cat_n = selection.metadata.get("catalog_size")
-                exp_n = selection.metadata.get("expected_catalog_size")
-                expected_size = int(exp_n) if isinstance(exp_n, int) else None
-                actual_size = int(cat_n) if isinstance(cat_n, int) else None
-
-            ok, reason = _precheck_paper_dataset(
-                title="Paper #2 Dataset" if selection.kind == "research_dataset" else "Paper #3 Dataset",
+            ok, _reason = _precheck_required_packages(
+                title=str(selection.label),
                 expected_packages=expected,
                 inventory_rows=rows,
                 is_rooted=is_rooted,
                 package_labels=pkg_labels,
-                expected_catalog_size=expected_size if selection.kind == "profile_v3" else None,
-                actual_catalog_size=actual_size if selection.kind == "profile_v3" else None,
             )
             if not ok:
-                # Paper-grade v3 harvesting is always blocked until the cohort catalog is frozen.
-                if selection.kind == "profile_v3" and reason == "catalog_not_frozen":
-                    continue
                 proceed = prompt_utils.prompt_yes_no("Proceed anyway?", default=False)
                 if not proceed:
                     continue
@@ -702,67 +638,50 @@ def _scope_updated_only(
 
 def _scope_profiles(
     rows: Sequence[InventoryRow],
-    profile_counts: Counter[str],
     allow: set[str],
+    *,
+    device_serial: str,
+    is_rooted: bool,
 ) -> ScopeSelection | None:
-    if not profile_counts:
-        print(status_messages.status("No profiled packages available.", level="warn"))
+    profile_scopes = _load_active_profile_scopes(rows, device_serial=device_serial)
+    if not profile_scopes:
+        print(status_messages.status("No active app profiles are available.", level="warn"))
         return None
 
-    print()
-    menu_utils.print_header("Choose profile(s)")
-    target_profiles = {"SOCIAL", "MESSAGING", "MEDIA", "BROWSER", "PRODUCTIVITY", "SHOPPING", "NEWS"}
-    sorted_profiles = sorted(
-        [(name, count) for name, count in profile_counts.items() if name in target_profiles],
-        key=lambda item: (-item[1], item[0].lower()),
-    )
-    profile_menu: dict[str, str] = {}
-    for index, (profile, count) in enumerate(sorted_profiles, start=1):
-        profile_menu[str(index)] = f"{profile} ({count})"
-    profile_menu["A"] = "All profiles"
-
-    menu_utils.print_menu(profile_menu, is_main=False)
-    while True:
-        raw = prompt_utils.prompt_text(
-            "Selection (e.g., 1,3 or A)",
-            default="",
-            required=False,
-        ).strip()
-        if not raw:
-            print(status_messages.status("Profile selection cancelled.", level="warn"))
+    if len(profile_scopes) == 1:
+        selected_profile = profile_scopes[0]
+        print(
+            status_messages.status(
+                f"Only one active profile is available; selecting {selected_profile['display_name']}.",
+                level="info",
+            )
+        )
+    else:
+        print()
+        menu_utils.print_header("Harvest Scope · Profile")
+        rows_data = [
+            [
+                str(idx),
+                str(profile["display_name"]),
+                str(len(profile["rows"])),
+                str(estimated_files(profile["rows"])),
+            ]
+            for idx, profile in enumerate(profile_scopes, start=1)
+        ]
+        table_utils.render_table(["#", "Profile", "Packages", "Est.Files"], rows_data, compact=True)
+        print(status_messages.status(f"Status: profiles={len(profile_scopes)}", level="info"))
+        choice = prompt_utils.get_choice(
+            [str(index) for index in range(1, len(profile_scopes) + 1)] + ["0"],
+            default="1",
+            prompt="Select profile # [1] ",
+        )
+        if choice == "0":
             return None
+        selected_profile = profile_scopes[int(choice) - 1]
 
-        if raw.upper() == "A":
-            selected = {name for name, _ in sorted_profiles}
-            break
-
-        tokens = [token.strip() for token in re.split(r"[,\s]+", raw) if token.strip()]
-        if not tokens:
-            print(status_messages.status("No profiles selected.", level="warn"))
-            continue
-        if not all(token.isdigit() for token in tokens):
-            print(status_messages.status("Use numeric selections or A for all.", level="warn"))
-            continue
-
-        indices = {int(token) for token in tokens}
-        if any(idx < 1 or idx > len(sorted_profiles) for idx in indices):
-            print(status_messages.status("Selection out of range. Try again.", level="warn"))
-            continue
-
-        selected = {sorted_profiles[idx - 1][0] for idx in indices}
-        break
-
-    if not selected:
-        print(status_messages.status("No valid profiles selected.", level="warn"))
-        return None
-
-    profile_rows = [
-        row
-        for row in rows
-        if (row.profile_key or "").upper() in selected
-    ]
+    profile_rows = list(selected_profile["rows"])
     if not profile_rows:
-        print(status_messages.status("No packages matched the selected profiles.", level="warn"))
+        print(status_messages.status("No packages matched the selected profile.", level="warn"))
         return None
 
     filtered, excluded = apply_default_scope(profile_rows, allow)
@@ -770,128 +689,37 @@ def _scope_profiles(
     if not filtered:
         print(
             status_messages.status(
-                "Selected profiles matched only packages filtered by scope rules.",
+                "Selected profile matched only packages filtered by scope rules.",
                 level="warn",
             )
         )
         return None
 
+    package_labels = {
+        row.package_name: row.display_name()
+        for row in profile_rows
+        if row.package_name
+    }
     metadata = {
-        "profiles": sorted(selected),
+        "profile_scope": True,
+        "profile_key": str(selected_profile["profile_key"]),
+        "scope_id": str(selected_profile["scope_id"]),
+        "profiles": [str(selected_profile["profile_key"])],
+        "expected_packages": sorted(str(pkg) for pkg in set(selected_profile["expected_packages"])),
+        "package_labels": package_labels,
         "estimated_files": estimated_files(filtered),
         "excluded_counts": excluded,
         "sample_names": sample_names(filtered),
         "excluded_samples": excluded_samples,
         "candidate_count": len(profile_rows),
         "selected_count": len(filtered),
+        "disable_delta_filter": True,
+        "policy": "non_root_paths" if not is_rooted else "none",
     }
     return ScopeSelection(
-        label=f"Profiles: {', '.join(sorted(selected))}",
+        label=str(selected_profile["display_name"]),
         packages=filtered,
-        kind="profiles",
-        metadata=metadata,
-    )
-
-
-def _scope_google_user_apps(
-    rows: Sequence[InventoryRow], allow: set[str]
-) -> ScopeSelection | None:
-    candidates = [row for row in rows if rules.is_google_user_app(row.package_name)]
-    if not candidates:
-        print(status_messages.status("No Google user apps present on device.", level="warn"))
-        return None
-
-    filtered, excluded = apply_default_scope(candidates, allow)
-    if not filtered:
-        print(
-            status_messages.status(
-                "Google user apps present but filtered by scope policy.", level="warn"
-            )
-        )
-        return None
-
-    metadata = {
-        "estimated_files": estimated_files(filtered),
-        "excluded_counts": excluded,
-        "sample_names": sample_names(filtered),
-        "candidate_count": len(candidates),
-        "selected_count": len(filtered),
-    }
-    return ScopeSelection("Google user apps", filtered, "google_user", metadata)
-
-
-def _scope_profile_subset(
-    rows: Sequence[InventoryRow],
-    allow: set[str],
-    profiles: set[str],
-    *,
-    label: str,
-) -> ScopeSelection | None:
-    normalized = {profile.lower() for profile in profiles}
-    subset = [row for row in rows if row.profile and row.profile.lower() in normalized]
-    if not subset:
-        print(status_messages.status(f"No packages tagged as {label}.", level="warn"))
-        return None
-
-    filtered, excluded = apply_default_scope(subset, allow)
-    if not filtered:
-        print(
-            status_messages.status(
-                f"{label} packages present but filtered by scope policy.", level="warn"
-            )
-        )
-        return None
-
-    metadata = {
-        "profiles": sorted({row.profile for row in subset if row.profile}),
-        "estimated_files": estimated_files(filtered),
-        "excluded_counts": excluded,
-        "sample_names": sample_names(filtered),
-        "candidate_count": len(subset),
-        "selected_count": len(filtered),
-    }
-    return ScopeSelection(
-        label=f"{label} apps",
-        packages=filtered,
-        kind="profile_subset",
-        metadata=metadata,
-    )
-
-
-def _scope_profile_key_subset(
-    rows: Sequence[InventoryRow],
-    allow: set[str],
-    profiles: set[str],
-    *,
-    label: str,
-) -> ScopeSelection | None:
-    normalized = {profile.upper() for profile in profiles}
-    subset = [row for row in rows if (row.profile_key or "").upper() in normalized]
-    if not subset:
-        print(status_messages.status(f"No packages tagged as {label}.", level="warn"))
-        return None
-
-    filtered, excluded = apply_default_scope(subset, allow)
-    if not filtered:
-        print(
-            status_messages.status(
-                f"{label} packages present but filtered by scope policy.", level="warn"
-            )
-        )
-        return None
-
-    metadata = {
-        "profiles": sorted({(row.profile_key or "").upper() for row in subset if row.profile_key}),
-        "estimated_files": estimated_files(filtered),
-        "excluded_counts": excluded,
-        "sample_names": sample_names(filtered),
-        "candidate_count": len(subset),
-        "selected_count": len(filtered),
-    }
-    return ScopeSelection(
-        label=f"{label} apps",
-        packages=filtered,
-        kind="profile_key_subset",
+        kind="profile_scope",
         metadata=metadata,
     )
 
@@ -997,78 +825,6 @@ def _scope_google_allowlist(
     return ScopeSelection("Google exceptions", filtered, "google_allow", metadata)
 
 
-def _scope_families(rows: Sequence[InventoryRow]) -> ScopeSelection | None:
-    filtered = [row for row in rows if rules.family(row.package_name) in {"android", "google", "motorola"}]
-    if not filtered:
-        print(status_messages.status("No Android/Google/Motorola packages found.", level="warn"))
-        return None
-    excluded_samples: dict[str, list[str]] = {}
-    metadata = {
-        "estimated_files": estimated_files(filtered),
-        "sample_names": sample_names(filtered),
-        "candidate_count": len(filtered),
-        "selected_count": len(filtered),
-        "excluded_counts": {},
-        "excluded_samples": excluded_samples,
-    }
-    return ScopeSelection("System families", filtered, "families", metadata)
-
-
-def _scope_custom(rows: Sequence[InventoryRow], allow: set[str]) -> ScopeSelection | None:
-    print()
-    print(
-        status_messages.status(
-            "Enter package names (comma separated, prefix * wildcards supported). Leave blank to cancel.",
-            level="info",
-        )
-    )
-    raw = prompt_utils.prompt_text("Packages", default="", required=False).strip()
-    if not raw:
-        print(status_messages.status("Custom selection cancelled.", level="warn"))
-        return None
-
-    patterns = [token.strip().lower() for token in re.split(r"[\s,]+", raw) if token.strip()]
-    if not patterns:
-        print(status_messages.status("No valid package identifiers provided.", level="warn"))
-        return None
-
-    matches: list[InventoryRow] = []
-    for row in rows:
-        name = row.package_name.lower()
-        if any(_pattern_matches(pattern, name) for pattern in patterns):
-            matches.append(row)
-
-    if not matches:
-        print(status_messages.status("No packages matched the provided patterns.", level="warn"))
-        return None
-
-    filtered, excluded = apply_default_scope(matches, allow)
-    if not filtered:
-        print(
-            status_messages.status(
-                "Custom patterns matched packages filtered by scope policy.",
-                level="warn",
-            )
-        )
-        return None
-
-    metadata = {
-        "patterns": patterns,
-        "estimated_files": estimated_files(filtered),
-        "excluded_counts": excluded,
-        "sample_names": sample_names(filtered),
-        "excluded_samples": collect_exclusion_samples(matches, filtered, allow),
-        "candidate_count": len(matches),
-        "selected_count": len(filtered),
-    }
-    return ScopeSelection(
-        label=f"Custom ({', '.join(patterns)})",
-        packages=filtered,
-        kind="custom",
-        metadata=metadata,
-    )
-
-
 def _store_last_scope(selection: ScopeSelection) -> None:
     global _LAST_SCOPE
     _LAST_SCOPE = selection
@@ -1115,35 +871,6 @@ def _print_selection_diagnostics(selection: ScopeSelection) -> None:
     if breakdown:
         detail = f"{detail} ({'; '.join(breakdown)})"
     print(status_messages.status(detail, level="info"))
-
-
-def _scope_option_label(
-    title: str,
-    *,
-    packages: int | None = None,
-    files: int | None = None,
-    note: str | None = None,
-) -> str:
-    parts: list[str] = [title]
-    metrics: list[str] = []
-    if packages is not None:
-        metrics.append(f"{packages} pkg(s)")
-    if files is not None:
-        metrics.append(f"~{files} file(s)")
-    if metrics:
-        parts.append("· " + " · ".join(metrics))
-    if note:
-        parts.append(f"— {note}")
-    return " ".join(parts)
-
-
-def _pattern_matches(pattern: str, value: str) -> bool:
-    if "*" in pattern:
-        regex = "^" + re.escape(pattern).replace("\\*", ".*") + "$"
-        return re.match(regex, value) is not None
-    if "." not in pattern:
-        return pattern in value
-    return pattern == value
 
 
 def _print_scope_overview(

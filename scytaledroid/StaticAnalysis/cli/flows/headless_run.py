@@ -10,8 +10,8 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from scytaledroid.Config import app_config
 from scytaledroid.Database.db_utils import schema_gate
+from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.DynamicAnalysis.profile_loader import load_profile_packages
 from scytaledroid.StaticAnalysis.cli.core.run_specs import build_static_run_spec
 from scytaledroid.StaticAnalysis.cli.core.models import RunParameters, ScopeSelection
@@ -123,7 +123,7 @@ def _run_single_apk(
         allow_session_reuse,
         dry_run=params.dry_run,
     )
-    base_dir = Path(app_config.DATA_DIR) / "device_apks"
+    base_dir = artifact_store.analysis_apk_root()
     spec = build_static_run_spec(
         selection=selection,
         params=params,
@@ -138,8 +138,8 @@ def _run_single_apk(
 
 
 def _run_dataset_alpha(*, session: str, profile: str, allow_session_reuse: bool, dry_run: bool) -> int:
-    base_dir = Path(app_config.DATA_DIR) / "device_apks"
-    groups = tuple(group_artifacts(base_dir))
+    base_dir = artifact_store.analysis_apk_root()
+    groups = tuple(group_artifacts())
     dataset_pkgs = {pkg.lower() for pkg in load_profile_packages("RESEARCH_DATASET_ALPHA")}
     if not dataset_pkgs:
         raise SystemExit("Profile RESEARCH_DATASET_ALPHA has no packages.")
@@ -152,7 +152,7 @@ def _run_dataset_alpha(*, session: str, profile: str, allow_session_reuse: bool,
             by_pkg[pkg] = group
     selected = [by_pkg[pkg] for pkg in sorted(by_pkg.keys())]
     if not selected:
-        raise SystemExit(f"No local artifact groups found for RESEARCH_DATASET_ALPHA under {base_dir}")
+        raise SystemExit("No local artifact groups found for RESEARCH_DATASET_ALPHA in the canonical receipt store.")
 
     cohort_session = normalize_session_stamp(session)
     for group in selected:

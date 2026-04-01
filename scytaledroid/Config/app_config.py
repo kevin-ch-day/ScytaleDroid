@@ -23,6 +23,15 @@ DYNAMIC_TARGET_DURATION_S = 180
 # Env is read at import time (entrypoint default) and must not be read mid-run.
 import os  # noqa: E402
 
+STATIC_HTML_MODE = str(os.getenv("SCYTALEDROID_STATIC_HTML_MODE", "latest")).strip().lower()
+if STATIC_HTML_MODE not in {"latest", "archive", "both"}:
+    STATIC_HTML_MODE = "latest"
+STATIC_REPORT_JSON_MODE = str(
+    os.getenv("SCYTALEDROID_STATIC_REPORT_JSON_MODE", "latest")
+).strip().lower()
+if STATIC_REPORT_JSON_MODE not in {"latest", "archive", "both"}:
+    STATIC_REPORT_JSON_MODE = "latest"
+
 try:
     DYNAMIC_MIN_PCAP_BYTES = int(os.getenv("SCYTALEDROID_MIN_PCAP_BYTES", "100000"))
 except Exception:
@@ -118,6 +127,8 @@ HARVEST_META_FIELDS = (
     "occurrence_index",
     "category",
     "artifact",
+    "artifact_kind",
+    "canonical_store_path",
 )
 
 # Static analysis noise controls (baseline)

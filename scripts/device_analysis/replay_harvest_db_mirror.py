@@ -14,6 +14,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scytaledroid.Config import app_config
+from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.DeviceAnalysis.harvest.replay import (
     find_package_manifests,
     load_package_manifest,
@@ -22,7 +23,7 @@ from scytaledroid.DeviceAnalysis.harvest.replay import (
 
 
 def _default_root() -> Path:
-    return (Path(app_config.DATA_DIR) / "device_apks").resolve()
+    return artifact_store.harvest_receipts_root().resolve()
 
 
 def _summarize(results: list[dict[str, Any]]) -> dict[str, Any]:

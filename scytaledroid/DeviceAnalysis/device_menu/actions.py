@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from importlib import import_module
-from pathlib import Path
 
 from scytaledroid.DeviceAnalysis import device_manager
 from scytaledroid.DeviceAnalysis.services import device_service, info_service
@@ -422,12 +421,12 @@ def _run_inventory_sync(active_device: dict[str, str | None | None]) -> None:
         allow_fallbacks = str(root_state).strip().lower() != "yes"
         set_allow_inventory_fallbacks(allow_fallbacks)
         print()
-        # Offer a scoped sync mode to speed up paper/dataset harvest workflows.
+        # Keep the operator contract simple: canonical full sync, or scoped sync
+        # against one of the currently active app profiles.
         menu_utils.print_header("Inventory Sync", "Choose sync scope")
         sync_opts = [
             menu_utils.MenuOption("1", "Full device inventory sync (canonical)"),
-            menu_utils.MenuOption("2", "Scoped sync: Paper #2 Dataset (Research Dataset Alpha)"),
-            menu_utils.MenuOption("3", "Scoped sync: Paper #3 Dataset (Profile v3 Structural cohort)"),
+            menu_utils.MenuOption("2", "Scoped sync: app profile"),
         ]
         menu_utils.render_menu(
             menu_utils.MenuSpec(items=sync_opts, exit_label="Back", show_exit=True, show_descriptions=False, compact=True)
@@ -456,26 +455,17 @@ def _run_inventory_sync(active_device: dict[str, str | None | None]) -> None:
                 allow_fallbacks=allow_fallbacks,
             )
         else:
-            packages: set[str] = set()
-            scope_id = "unknown"
-            if choice == "2":
-                scope_id = "paper2_alpha"
-                from scytaledroid.DynamicAnalysis.profile_loader import load_profile_packages
-
-                packages = {p.strip().lower() for p in load_profile_packages("RESEARCH_DATASET_ALPHA") if str(p).strip()}
-            elif choice == "3":
-                scope_id = "paper3_beta"
-                from scytaledroid.Publication.profile_v3_metrics import load_profile_v3_catalog
-
-                catalog = load_profile_v3_catalog(Path("profiles") / "profile_v3_app_catalog.json")
-                packages = {p.strip().lower() for p in catalog.keys() if str(p).strip()}
+            selected_profile = _select_inventory_sync_profile()
+            if selected_profile is None:
+                return
+            packages = set(selected_profile["packages"])
             if not packages:
-                print(status_messages.status("Scoped sync cancelled: no packages resolved for scope.", level="warn"))
+                print(status_messages.status("Scoped sync cancelled: selected profile has no packages.", level="warn"))
                 prompt_utils.press_enter_to_continue()
                 return
             inventory_workflow.run_inventory_scoped_sync(
                 serial=serial,
-                scope_id=scope_id,
+                scope_id=str(selected_profile["scope_id"]),
                 packages=packages,
                 ui_prefs=None,
                 progress_sink="cli",
@@ -488,5 +478,66 @@ def _run_inventory_sync(active_device: dict[str, str | None | None]) -> None:
         )
         prompt_utils.press_enter_to_continue()
         return
+
+
+def _select_inventory_sync_profile() -> dict[str, object] | None:
+    from scytaledroid.DynamicAnalysis.profile_loader import load_db_profiles, load_profile_packages
+
+    raw_profiles = load_db_profiles()
+    profiles: list[dict[str, object]] = []
+    for profile in raw_profiles:
+        profile_key = str(profile.get("profile_key") or "").strip()
+        if not profile_key:
+            continue
+        display_name = str(profile.get("display_name") or profile_key).strip() or profile_key
+        packages = {
+            str(package).strip().lower()
+            for package in load_profile_packages(profile_key)
+            if str(package).strip()
+        }
+        profiles.append(
+            {
+                "profile_key": profile_key,
+                "display_name": display_name,
+                "scope_id": f"profile::{profile_key.lower()}",
+                "packages": packages,
+                "app_count": len(packages),
+            }
+        )
+
+    profiles = [profile for profile in profiles if profile["packages"]]
+    profiles.sort(key=lambda profile: str(profile["display_name"]).lower())
+
+    if not profiles:
+        print(status_messages.status("No active app profiles are available for scoped inventory sync.", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return None
+
+    if len(profiles) == 1:
+        selected = profiles[0]
+        print(
+            status_messages.status(
+                f"Only one active profile is available; selecting {selected['display_name']}.",
+                level="info",
+            )
+        )
+        return selected
+
+    print()
+    menu_utils.print_header("Inventory Sync · Scope (Profile)")
+    rows = [
+        [str(idx), str(profile["display_name"]), str(int(profile["app_count"]))]
+        for idx, profile in enumerate(profiles, start=1)
+    ]
+    table_utils.render_table(["#", "Profile", "Apps"], rows, compact=True)
+    print(status_messages.status(f"Status: profiles={len(profiles)}", level="info"))
+    choice = prompt_utils.get_choice(
+        [str(index) for index in range(1, len(profiles) + 1)] + ["0"],
+        default="1",
+        prompt="Select profile # [1] ",
+    )
+    if choice == "0":
+        return None
+    return profiles[int(choice) - 1]
 
 __all__ = ["handle_choice", "build_main_menu_options"]

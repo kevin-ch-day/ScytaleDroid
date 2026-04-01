@@ -17,6 +17,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from scytaledroid.Config import app_config
+from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.StaticAnalysis.cli.core.models import RunParameters, ScopeSelection
 from scytaledroid.StaticAnalysis.cli.flows.selection import _select_latest_groups
 from scytaledroid.StaticAnalysis.core.repository import group_artifacts
@@ -45,8 +46,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Headless static analysis (all apps)")
     parser.add_argument(
         "--base-dir",
-        default=str(Path(app_config.DATA_DIR) / "device_apks"),
-        help="Root directory containing harvested APKs (default: data/device_apks)",
+        default=str(artifact_store.harvest_receipts_root()),
+        help="Receipt root containing canonical harvest package receipts (default: data/receipts/harvest)",
     )
     parser.add_argument("--session", required=True, help="Session label/stamp for this run")
     parser.add_argument("--profile", default="full", choices=["full", "lightweight", "permissions", "metadata", "split"])
@@ -58,10 +59,11 @@ def main(argv: list[str] | None = None) -> int:
     output_prefs.set_run_mode("batch")
     output_prefs.set_quiet(True)
 
-    base_dir = Path(args.base_dir).expanduser().resolve()
-    groups = group_artifacts(base_dir)
+    discovery_root = Path(args.base_dir).expanduser().resolve()
+    analysis_root = artifact_store.analysis_apk_root()
+    groups = group_artifacts(discovery_root)
     if not groups:
-        raise SystemExit(f"No APK artifacts discovered under: {base_dir}")
+        raise SystemExit(f"No APK artifacts discovered under: {discovery_root}")
 
     scoped = _select_latest_per_package(groups)
     selection = ScopeSelection(scope="all", label="All apps", groups=scoped)
@@ -78,7 +80,7 @@ def main(argv: list[str] | None = None) -> int:
         verbose_output=False,
     )
 
-    static_service.run_scan(selection, params, base_dir)
+    static_service.run_scan(selection, params, analysis_root)
     print(f"Static analysis completed: session={session_stamp} apps={len(scoped)}")
     return 0
 

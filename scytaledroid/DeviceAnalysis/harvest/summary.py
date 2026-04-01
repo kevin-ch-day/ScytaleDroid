@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from scytaledroid.Config import app_config
+from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.Utils.DisplayUtils import status_messages, text_blocks
 from scytaledroid.Utils.LoggingUtils import logging_engine
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
@@ -1093,9 +1094,9 @@ def _package_dest_dir(package: PackageHarvestResult) -> str | None:
 
 
 def _run_output_root(result: HarvestResult) -> str | None:
-    if not (result.serial and result.run_timestamp):
+    if not result.run_timestamp:
         return None
-    base = Path(app_config.DATA_DIR) / "device_apks" / result.serial / result.run_timestamp
+    base = artifact_store.harvest_receipts_root() / result.run_timestamp
     return str(base)
 
 

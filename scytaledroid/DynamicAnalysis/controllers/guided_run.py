@@ -832,7 +832,7 @@ def _auto_run_static_for_package(package_name: str) -> bool:
     This is non-interactive and intended only to unblock dataset collection.
     """
 
-    from scytaledroid.Config import app_config
+    from scytaledroid.DeviceAnalysis.services import artifact_store
     from scytaledroid.StaticAnalysis.cli.core.models import RunParameters, ScopeSelection
     from scytaledroid.StaticAnalysis.cli.core.run_specs import build_static_run_spec
     from scytaledroid.StaticAnalysis.cli.flows.run_dispatch import execute_run_spec
@@ -855,15 +855,13 @@ def _auto_run_static_for_package(package_name: str) -> bool:
         # Noninteractive run: never prompt on collisions.
         canonical_action="append",
     )
-    base_dir = Path(app_config.DATA_DIR) / "device_apks"
-
     buffer_out = io.StringIO()
     buffer_err = io.StringIO()
     with contextlib.redirect_stdout(buffer_out), contextlib.redirect_stderr(buffer_err):
         spec = build_static_run_spec(
             selection=selection,
             params=params,
-            base_dir=base_dir,
+            base_dir=artifact_store.analysis_apk_root(),
             run_mode="batch",
             quiet=True,
             noninteractive=True,

@@ -10,6 +10,7 @@ from types import ModuleType
 from typing import Any
 
 from . import common
+from ..services import artifact_store
 
 
 @dataclass(slots=True)
@@ -40,7 +41,13 @@ class ReplayPackageOutcome:
 
 
 def find_package_manifests(root: Path) -> list[Path]:
-    return sorted(path for path in root.rglob("harvest_package_manifest.json") if path.is_file())
+    root = root.resolve()
+    legacy = sorted(path for path in root.rglob("harvest_package_manifest.json") if path.is_file())
+    if legacy:
+        return legacy
+    if root.name == "receipts" and (root / "harvest").exists():
+        root = (root / "harvest").resolve()
+    return sorted(path for path in root.glob("*/*.json") if path.is_file())
 
 
 def load_package_manifest(path: Path) -> dict[str, Any]:
@@ -227,17 +234,25 @@ def _replay_artifact(
 ) -> ReplayArtifactOutcome:
     file_name = str(artifact.get("file_name") or "").strip()
     local_artifact_path = str(artifact.get("local_artifact_path") or "").strip()
+    canonical_store_path = str(artifact.get("canonical_store_path") or "").strip()
     observed_source_path = str(artifact.get("observed_source_path") or "").strip() or None
     if not file_name:
         return ReplayArtifactOutcome(file_name="", status="failed", reason="file_name_missing")
-    if not local_artifact_path:
-        return ReplayArtifactOutcome(file_name=file_name, status="failed", reason="local_artifact_path_missing")
+    if not local_artifact_path and not canonical_store_path:
+        return ReplayArtifactOutcome(file_name=file_name, status="failed", reason="artifact_path_missing")
 
-    absolute_path = _resolve_absolute_artifact_path(local_artifact_path)
+    absolute_path = _resolve_absolute_artifact_path(
+        local_artifact_path=local_artifact_path,
+        canonical_store_path=canonical_store_path,
+    )
     if not absolute_path.exists():
         return ReplayArtifactOutcome(file_name=file_name, status="failed", reason="artifact_file_missing")
 
-    local_rel_path = _manifest_local_rel_path(local_artifact_path, absolute_path)
+    local_rel_path = _manifest_local_rel_path(
+        local_artifact_path=local_artifact_path,
+        canonical_store_path=canonical_store_path,
+        absolute_path=absolute_path,
+    )
     sha256 = str(artifact.get("sha256") or "").strip()
     if not sha256:
         sha256 = common.compute_hashes(absolute_path)["sha256"]
@@ -314,15 +329,24 @@ def _ensure_storage_root_id(repo: ModuleType | object) -> int:
     )
 
 
-def _resolve_absolute_artifact_path(local_artifact_path: str) -> Path:
+def _resolve_absolute_artifact_path(*, local_artifact_path: str, canonical_store_path: str) -> Path:
+    if canonical_store_path:
+        path = Path(canonical_store_path)
+        if not path.is_absolute():
+            path = Path.cwd() / canonical_store_path
+        if path.exists():
+            return path.resolve()
     path = Path(local_artifact_path)
     if path.is_absolute():
         return path
     _, data_root = common.resolve_storage_root()
-    return Path(data_root) / path
+    return (Path(data_root) / path).resolve()
 
 
-def _manifest_local_rel_path(local_artifact_path: str, absolute_path: Path) -> str:
+def _manifest_local_rel_path(*, local_artifact_path: str, canonical_store_path: str, absolute_path: Path) -> str:
+    if canonical_store_path:
+        path = Path(canonical_store_path)
+        return path.as_posix() if not path.is_absolute() else artifact_store.repo_relative_path(absolute_path)
     path = Path(local_artifact_path)
     if not path.is_absolute():
         return path.as_posix()

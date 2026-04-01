@@ -238,7 +238,7 @@ def handle_write_canonical_publication_bundle() -> None:
 
 
 def handle_lint_profile_v2_bundle() -> None:
-    """Lint the v2 (frozen) publication bundle and print PASS/FAIL reasons.
+    """Lint the frozen cohort archive bundle and print PASS/FAIL reasons.
 
     This is a visibility-only helper to avoid relying on the status card when
     debugging readiness.
@@ -249,7 +249,7 @@ def handle_lint_profile_v2_bundle() -> None:
     pub_root = Path(app_config.OUTPUT_DIR) / "publication"
     lint = lint_publication_bundle(pub_root)
     print()
-    menu_utils.print_header("Lint · Profile v2 (FROZEN)")
+    menu_utils.print_header("Lint · Frozen Cohort Archive")
     print(status_messages.status(f"Bundle root: {relative_path(pub_root)}", level="info"))
     if lint.ok:
         print(status_messages.status("LINT PASS", level="success"))
@@ -999,7 +999,7 @@ def fetch_publication_status() -> dict[str, object]:
 
 
 def handle_export_freeze_anchored_csvs() -> None:
-    """Export freeze-anchored CSVs used in the paper writeup."""
+    """Export archived frozen-cohort CSVs from the freeze anchor."""
 
     from scytaledroid.DynamicAnalysis.pcap.aggregate import (
         export_dynamic_run_summary_csv,
@@ -1013,7 +1013,7 @@ def handle_export_freeze_anchored_csvs() -> None:
         return
 
     print()
-    menu_utils.print_header("Freeze-Anchored CSV Exports")
+    menu_utils.print_header("Frozen Cohort CSV Exports")
     summary = export_dynamic_run_summary_csv(freeze_path=freeze_path, require_freeze=True)
     feats = export_pcap_features_csv(freeze_path=freeze_path, require_freeze=True)
     ledger = export_protocol_ledger_csv(freeze_path=freeze_path, require_freeze=True)
@@ -1025,7 +1025,7 @@ def handle_export_freeze_anchored_csvs() -> None:
 
 
 def handle_generate_publication_results_numbers() -> None:
-    """Generate publication-facing CSV/JSON exports + Results section numbers.
+    """Generate archived CSV/JSON exports plus frozen-cohort results numbers.
 
     This is intentionally deterministic and freeze-anchored. The goal is to give
     the manuscript a single source of truth:
@@ -1045,7 +1045,7 @@ def handle_generate_publication_results_numbers() -> None:
     import runpy
 
     print()
-    menu_utils.print_header("Generate Profile v2 Exports + Results Numbers")
+    menu_utils.print_header("Generate Frozen Archive Results Numbers")
     try:
         runpy.run_path(str(exports_script), run_name="__main__")
         runpy.run_path(str(results_script), run_name="__main__")
@@ -1087,7 +1087,7 @@ def handle_generate_publication_results_numbers() -> None:
 
 
 def handle_generate_profile_v3_exports() -> None:
-    """Generate Profile v3 structural exports (freeze/profile mode)."""
+    """Generate structural archive exports."""
 
     script = Path(__file__).resolve().parents[2] / "scripts" / "publication" / "profile_v3_exports.py"
     if not script.exists():
@@ -1097,7 +1097,7 @@ def handle_generate_profile_v3_exports() -> None:
     import runpy
 
     print()
-    menu_utils.print_header("Generate Profile v3 Exports")
+    menu_utils.print_header("Generate Structural Archive Exports")
     try:
         runpy.run_path(str(script), run_name="__main__")
     except SystemExit as exc:
@@ -1110,7 +1110,7 @@ def handle_generate_profile_v3_exports() -> None:
 
 
 def handle_generate_profile_v3_phase2_exports() -> None:
-    """Generate Profile v3 Phase 2 draft exports (uses current runs; no manifest required)."""
+    """Generate structural archive draft exports from current runs."""
 
     script = Path(__file__).resolve().parents[2] / "scripts" / "publication" / "profile_v3_phase2_exports.py"
     if not script.exists():
@@ -1120,7 +1120,7 @@ def handle_generate_profile_v3_phase2_exports() -> None:
     import runpy
 
     print()
-    menu_utils.print_header("Generate Profile v3 Phase 2 Draft Exports")
+    menu_utils.print_header("Generate Structural Archive Draft Exports")
     try:
         runpy.run_path(str(script), run_name="__main__")
     except SystemExit as exc:
@@ -1133,10 +1133,10 @@ def handle_generate_profile_v3_phase2_exports() -> None:
 
 
 def handle_profile_v3_integrity_gates() -> None:
-    """Run Profile v3 integrity gates (catalog + freshness + scripted coverage)."""
+    """Run structural archive integrity gates."""
 
     print()
-    menu_utils.print_header("Profile v3 Integrity Gates")
+    menu_utils.print_header("Structural Archive Integrity Gates")
     script = Path(__file__).resolve().parents[2] / "scripts" / "profile_tools" / "profile_v3_integrity_gates.py"
     if not script.exists():
         print(status_messages.status(f"Missing script: {relative_path(script)}", level="error"))
@@ -1153,15 +1153,8 @@ def handle_profile_v3_integrity_gates() -> None:
             prompt_utils.press_enter_to_continue()
             return
 
-    print(status_messages.status("Profile v3 gates: PASS", level="success"))
+    print(status_messages.status("Structural archive gates: PASS", level="success"))
     prompt_utils.press_enter_to_continue()
-
-#
-# Back-compat alias (older UI/tests/tooling may still call the paper2-named handler).
-#
-def handle_generate_paper2_results_numbers() -> None:  # pragma: no cover
-    return handle_generate_publication_results_numbers()
-
 
 def handle_generate_exploratory_risk_scoring() -> None:
     """Generate exploratory risk scoring artifacts (neutral filenames).
@@ -1206,12 +1199,8 @@ def handle_generate_exploratory_risk_scoring() -> None:
         if p.exists():
             print(status_messages.status(f"Wrote: {relative_path(p)}", level="success"))
 
-def handle_generate_paper2_exploratory_risk_scoring() -> None:  # pragma: no cover
-    return handle_generate_exploratory_risk_scoring()
-
-
 def handle_generate_publication_scientific_qa() -> None:
-    """Generate scientific QA reports for the frozen cohort (freeze-anchored)."""
+    """Generate scientific QA reports for the frozen archive."""
 
     script = Path(__file__).resolve().parents[2] / "scripts" / "publication" / "publication_scientific_qa.py"
     if not script.exists():
@@ -1221,7 +1210,7 @@ def handle_generate_publication_scientific_qa() -> None:
     import runpy
 
     print()
-    menu_utils.print_header("Generate Scientific QA (Frozen Cohort)")
+    menu_utils.print_header("Generate Scientific QA (Frozen Archive)")
     try:
         runpy.run_path(str(script), run_name="__main__")
     except SystemExit as exc:
@@ -1233,12 +1222,8 @@ def handle_generate_publication_scientific_qa() -> None:
         print(status_messages.status(f"Wrote QA reports under: {relative_path(out_dir)}", level="success"))
     prompt_utils.press_enter_to_continue()
 
-def handle_generate_paper2_scientific_qa() -> None:  # pragma: no cover
-    return handle_generate_publication_scientific_qa()
-
-
 def handle_generate_publication_pipeline_audit() -> None:
-    """Generate a deep ML+dynamic pipeline audit (freeze-anchored)."""
+    """Generate a deep ML+dynamic pipeline audit for the frozen archive."""
 
     script = Path(__file__).resolve().parents[2] / "scripts" / "publication" / "publication_pipeline_audit.py"
     if not script.exists():
@@ -1262,12 +1247,8 @@ def handle_generate_publication_pipeline_audit() -> None:
         print(status_messages.status(f"Wrote: {relative_path(out)}", level="success"))
     prompt_utils.press_enter_to_continue()
 
-def handle_generate_paper2_pipeline_audit() -> None:  # pragma: no cover
-    return handle_generate_publication_pipeline_audit()
-
-
 def handle_print_manuscript_snapshot() -> None:
-    """Print a one-screen manuscript snapshot for meetings/reviews (freeze-anchored)."""
+    """Print a one-screen archive snapshot for meetings/reviews."""
 
     import json
     from pathlib import Path
@@ -1444,10 +1425,5 @@ __all__ = [
     "handle_generate_exploratory_risk_scoring",
     "handle_generate_profile_v3_exports",
     "handle_profile_v3_integrity_gates",
-    # Back-compat exports.
-    "handle_generate_paper2_results_numbers",
-    "handle_generate_paper2_scientific_qa",
-    "handle_generate_paper2_pipeline_audit",
-    "handle_generate_paper2_exploratory_risk_scoring",
     "handle_refresh_phase_e_bundle",
 ]

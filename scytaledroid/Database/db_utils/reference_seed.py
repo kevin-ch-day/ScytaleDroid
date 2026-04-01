@@ -26,6 +26,10 @@ _DEFAULT_PUBLISHERS: dict[str, tuple[str, str, int]] = {
     "VERIZON": ("Verizon", "Verizon carrier packages", 70),
 }
 
+_CANONICAL_PROFILE_LABELS: dict[str, str] = {
+    "RESEARCH_DATASET_ALPHA": "Research Dataset Alpha",
+}
+
 def _insert_ignore_keyword() -> str:
     """Return the dialect-appropriate INSERT ignore keyword.
 
@@ -79,15 +83,34 @@ def ensure_default_profiles() -> None:
         )
 
 
+def repair_legacy_profile_labels() -> None:
+    """Normalize stale profile display names to their canonical labels."""
+
+    sql = """
+        UPDATE android_app_profiles
+        SET display_name = %s
+        WHERE profile_key = %s
+          AND display_name <> %s
+    """
+    for profile_key, display_name in _CANONICAL_PROFILE_LABELS.items():
+        run_sql(
+            sql,
+            (display_name, profile_key, display_name),
+            query_name="db_utils.reference_seed.profile_labels",
+        )
+
+
 def ensure_default_reference_rows() -> None:
     """Ensure all minimal reference dictionaries exist (idempotent)."""
 
     ensure_default_publishers()
     ensure_default_profiles()
+    repair_legacy_profile_labels()
 
 
 __all__ = [
     "ensure_default_publishers",
     "ensure_default_profiles",
+    "repair_legacy_profile_labels",
     "ensure_default_reference_rows",
 ]

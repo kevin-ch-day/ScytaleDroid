@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 
 def _run_reporting_menu_once(monkeypatch) -> None:
@@ -48,3 +49,18 @@ def test_reporting_menu_does_not_probe_publication_scripts_when_legacy_disabled(
     _run_reporting_menu_once(monkeypatch)
     assert touched == []
 
+
+def test_reporting_menu_structural_archive_submenu_opens(monkeypatch):
+    from scytaledroid.Reporting import menu as reporting_menu
+    from scytaledroid.Publication import profile_v3_contract
+
+    monkeypatch.setattr(
+        profile_v3_contract,
+        "lint_profile_v3_bundle",
+        lambda _root: SimpleNamespace(ok=True, errors=[], warnings=[]),
+    )
+    choices = iter(["2", "0", "0"])
+    monkeypatch.setattr(reporting_menu.prompt_utils, "get_choice", lambda *_a, **_k: next(choices))
+    monkeypatch.setattr(reporting_menu.prompt_utils, "press_enter_to_continue", lambda: None)
+
+    reporting_menu.reporting_menu()

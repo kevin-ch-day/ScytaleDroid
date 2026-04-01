@@ -18,7 +18,6 @@ if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
     pass
 
 
-REPORTS_DIR = Path(app_config.DATA_DIR) / "static_analysis" / "reports"
 _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
@@ -49,30 +48,29 @@ def save_report(report: StaticAnalysisReport) -> SavedReportPaths:
     # Import via package; re-exports ensure stable import path
     from ..reporting import build_report_view, save_html_report
 
-    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     sha256 = report.hashes.get("sha256")
-    session_stamp = None
-    if isinstance(report.metadata, dict):
-        session_stamp = report.metadata.get("session_stamp")
-    session_suffix = _safe_filename(str(session_stamp)) if session_stamp else ""
-    generated_suffix = _safe_filename(report.generated_at)
-    if sha256:
-        if session_suffix:
-            filename = f"{sha256}_{session_suffix}.json"
-        else:
-            filename = f"{sha256}_{generated_suffix}.json"
-    else:
-        filename = f"report_{generated_suffix}.json"
-    path = REPORTS_DIR / filename
+    metadata = report.metadata if isinstance(report.metadata, dict) else {}
+    session_stamp = metadata.get("session_stamp")
+    mode = _normalize_report_mode(getattr(app_config, "STATIC_REPORT_JSON_MODE", "latest"))
+    latest_path, archive_path = _resolve_report_paths(report, sha256=sha256, session_stamp=session_stamp)
 
     view_payload = dict(build_report_view(report))
     payload = report.to_dict()
     payload["view"] = view_payload
     try:
-        with path.open("w", encoding="utf-8") as handle:
-            json.dump(payload, handle, indent=2, sort_keys=True, default=str)
+        if mode in {"latest", "both"}:
+            latest_path.parent.mkdir(parents=True, exist_ok=True)
+            with latest_path.open("w", encoding="utf-8") as handle:
+                json.dump(payload, handle, indent=2, sort_keys=True, default=str)
+        if mode in {"archive", "both"} and archive_path is not None:
+            archive_path.parent.mkdir(parents=True, exist_ok=True)
+            with archive_path.open("w", encoding="utf-8") as handle:
+                json.dump(payload, handle, indent=2, sort_keys=True, default=str)
     except OSError as exc:  # pragma: no cover - filesystem errors
-        raise ReportStorageError(f"Unable to write report to {path}: {exc}") from exc
+        target = latest_path if mode in {"latest", "both"} else archive_path or latest_path
+        raise ReportStorageError(f"Unable to write report to {target}: {exc}") from exc
+
+    path = latest_path if mode in {"latest", "both"} else archive_path or latest_path
 
     html_path: Path | None
     try:
@@ -121,7 +119,8 @@ def _read_report(path: Path) -> StaticAnalysisReport | None:
 def list_reports() -> list[StoredReport]:
     """Return all stored reports ordered by newest first."""
 
-    if not REPORTS_DIR.exists():
+    roots = _report_search_roots()
+    if not any(root.exists() for root in roots):
         return []
 
     def _sort_key(entry: StoredReport) -> tuple:
@@ -147,9 +146,14 @@ def list_reports() -> list[StoredReport]:
         )
 
     entries: list[StoredReport] = []
-    for path in REPORTS_DIR.glob("*.json"):
+    seen_identities: set[tuple[str, str, str, str, str]] = set()
+    for path in _iter_report_paths():
         report = _read_report(path)
         if report:
+            identity = _report_identity(report)
+            if identity in seen_identities:
+                continue
+            seen_identities.add(identity)
             entries.append(StoredReport(path=path, report=report))
     entries.sort(key=_sort_key, reverse=True)
     return entries
@@ -162,6 +166,78 @@ def load_report(path: Path) -> StaticAnalysisReport:
     if report is None:
         raise ReportStorageError(f"Report at {path} could not be loaded.")
     return report
+
+
+def _reports_root() -> Path:
+    return Path(app_config.DATA_DIR) / "static_analysis" / "reports"
+
+
+def _normalize_report_mode(mode: str) -> str:
+    normalized = str(mode or "latest").strip().lower()
+    return normalized if normalized in {"latest", "archive", "both"} else "latest"
+
+
+def _resolve_report_paths(
+    report: StaticAnalysisReport,
+    *,
+    sha256: str | None,
+    session_stamp: object | None,
+) -> tuple[Path, Path]:
+    reports_root = _reports_root()
+    file_stem = _report_file_stem(report, sha256=sha256)
+    latest_path = reports_root / "latest" / f"{file_stem}.json"
+    archive_session = _report_archive_session(report, session_stamp=session_stamp)
+    archive_path = reports_root / "archive" / archive_session / f"{file_stem}.json"
+    return latest_path, archive_path
+
+
+def _report_file_stem(report: StaticAnalysisReport, *, sha256: str | None) -> str:
+    if sha256:
+        return _safe_filename(sha256)
+    generated_suffix = _safe_filename(report.generated_at)
+    return f"report_{generated_suffix}"
+
+
+def _report_archive_session(report: StaticAnalysisReport, *, session_stamp: object | None) -> str:
+    if isinstance(session_stamp, str) and session_stamp.strip():
+        return _safe_filename(session_stamp)
+    generated_suffix = _safe_filename(report.generated_at)
+    return generated_suffix or "session"
+
+
+def _report_search_roots() -> tuple[Path, ...]:
+    reports_root = _reports_root()
+    return (
+        reports_root / "latest",
+        reports_root / "archive",
+        reports_root,
+    )
+
+
+def _iter_report_paths() -> list[Path]:
+    roots = _report_search_roots()
+    seen_paths: set[Path] = set()
+    ordered_paths: list[Path] = []
+    for root in roots:
+        if not root.exists():
+            continue
+        for path in sorted(root.rglob("*.json")):
+            if path in seen_paths:
+                continue
+            seen_paths.add(path)
+            ordered_paths.append(path)
+    return ordered_paths
+
+
+def _report_identity(report: StaticAnalysisReport) -> tuple[str, str, str, str, str]:
+    metadata = report.metadata if isinstance(report.metadata, dict) else {}
+    return (
+        str(report.hashes.get("sha256") or ""),
+        str(metadata.get("session_stamp") or ""),
+        str(report.manifest.package_name or ""),
+        str(report.generated_at or ""),
+        str(report.file_name or ""),
+    )
 
 
 __all__ = [

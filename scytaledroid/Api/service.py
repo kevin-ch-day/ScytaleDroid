@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from scytaledroid.Config import app_config
+from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.StaticAnalysis.cli.core.models import RunParameters, ScopeSelection
 from scytaledroid.StaticAnalysis.cli.flows.headless_run import _artifact_group_from_path
 from scytaledroid.StaticAnalysis.persistence import list_reports
@@ -144,7 +145,7 @@ def _run_static_scan(
             paper_grade_requested=False,
         )
         params = replace(params, session_stamp=session_stamp, session_label=session_stamp)
-        base_dir = Path(app_config.DATA_DIR) / "device_apks"
+        base_dir = artifact_store.analysis_apk_root()
         run_result = static_service.run_scan(
             selection,
             params,
@@ -224,8 +225,10 @@ def _write_upload_sidecar(
         "uploaded_filename": original_filename or apk_path.name,
         "sha256": digest,
         "artifact": "base",
+        "artifact_kind": "apk",
         "is_split_member": False,
         "source_kind": "api_upload",
+        "canonical_store_path": artifact_store.repo_relative_path(apk_path),
     }
     try:
         group = _artifact_group_from_path(apk_path)
@@ -273,25 +276,32 @@ def _resolve_max_upload_bytes() -> int:
     return mb * 1024 * 1024
 
 
-def _resolve_allowed_apk_base() -> Path:
-    return (Path(app_config.DATA_DIR) / "device_apks").resolve()
+def _resolve_allowed_apk_bases() -> tuple[Path, ...]:
+    return (artifact_store.analysis_apk_root().resolve(),)
 
 
 def _validate_apk_path(apk_path: Path) -> Path:
     from fastapi import HTTPException
 
-    base_dir = _resolve_allowed_apk_base()
+    base_dirs = _resolve_allowed_apk_bases()
     resolved = apk_path.expanduser().resolve()
-    try:
-        resolved.relative_to(base_dir)
-    except ValueError as exc:
+    if not any(_is_relative_to(resolved, base_dir) for base_dir in base_dirs):
+        allowed = ", ".join(str(base_dir) for base_dir in base_dirs)
         raise HTTPException(
             status_code=400,
-            detail=f"APK path must be within {base_dir}",
-        ) from exc
+            detail=f"APK path must be within one of: {allowed}",
+        )
     if not resolved.exists():
         raise HTTPException(status_code=404, detail=f"APK not found: {resolved}")
     return resolved
+
+
+def _is_relative_to(path: Path, base: Path) -> bool:
+    try:
+        path.relative_to(base)
+        return True
+    except ValueError:
+        return False
 
 
 def _collect_run_status(session_stamp: str) -> dict[str, Any]:
@@ -329,7 +339,7 @@ def build_api_app() -> FastAPI:
         file: UploadFile = upload_file,
         _: None = Depends(require_api_key),
     ) -> dict[str, Any]:
-        upload_dir = Path(app_config.DATA_DIR) / "device_apks" / "repo_uploads"
+        upload_dir = artifact_store.upload_inbox_root()
         upload_dir.mkdir(parents=True, exist_ok=True)
         suffix = Path(file.filename or "upload.apk").suffix or ".apk"
         upload_id = uuid.uuid4().hex
@@ -354,20 +364,37 @@ def build_api_app() -> FastAPI:
                 handle.write(chunk)
 
         digest = _hash_file(destination)
-        metadata = _write_upload_sidecar(
+        canonical_path = artifact_store.materialize_apk(
             destination,
+            sha256_digest=digest,
+            suffix=suffix,
+            move=True,
+        )
+        metadata = _write_upload_sidecar(
+            canonical_path,
             upload_id=upload_id,
             original_filename=file.filename,
             digest=digest,
         )
+        receipt_payload = {
+            **metadata,
+            "upload_id": upload_id,
+            "canonical_store_path": artifact_store.repo_relative_path(canonical_path),
+            "size_bytes": canonical_path.stat().st_size,
+        }
+        receipt_path = artifact_store.write_upload_receipt(
+            upload_id=upload_id,
+            payload=receipt_payload,
+        )
         return {
             "upload_id": upload_id,
-            "path": str(destination),
+            "path": str(canonical_path),
             "sha256": digest,
-            "size_bytes": destination.stat().st_size,
+            "size_bytes": canonical_path.stat().st_size,
             "package_name": metadata.get("package_name"),
             "version_code": metadata.get("version_code"),
             "version_name": metadata.get("version_name"),
+            "receipt_path": artifact_store.repo_relative_path(receipt_path),
         }
 
     @app.post("/scan")

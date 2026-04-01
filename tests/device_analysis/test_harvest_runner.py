@@ -3,6 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from scytaledroid.Config import app_config
+
+
+@pytest.fixture(autouse=True)
+def _isolate_storage_contract(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(app_config, "DATA_DIR", "data")
+    monkeypatch.setattr(app_config, "OUTPUT_DIR", "output")
 
 
 class _FakeAdapter:
@@ -144,8 +152,19 @@ def test_execute_harvest_keeps_db_repo_available_for_package_writes(
     assert results[0].capture_status == "clean"
     assert results[0].persistence_status == "mirrored"
     assert results[0].research_status == "pending_audit"
+    assert results[0].ok[0].canonical_store_path == (
+        f"data/store/apk/sha256/{results[0].ok[0].sha256[:2]}/{results[0].ok[0].sha256}.apk"
+    )
     assert results[0].package_manifest_path is not None
     assert results[0].package_manifest_path.exists()
+    receipt_path = (
+        Path("data")
+        / "receipts"
+        / "harvest"
+        / "20260328"
+        / "com.example.app.json"
+    )
+    assert receipt_path.exists()
     assert calls == [
         ("app_definition", "com.example.app", "TEST_PROFILE"),
         ("apk_record", "com.example.app", results[0].ok[0].sha256),

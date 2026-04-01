@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 
-from scytaledroid.Config import app_config
+from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.StaticAnalysis.core.repository import ArtifactGroup, group_artifacts
 
 
@@ -17,7 +17,7 @@ def list_groups(
 ) -> list[ArtifactGroup]:
     """Return grouped APK artifacts with optional device/session filters."""
 
-    resolved_dir = base_dir or Path(app_config.DATA_DIR) / "device_apks"
+    resolved_dir = base_dir or artifact_store.harvest_receipts_root()
     device_filter_set = {s.strip() for s in device_filter or () if s} or None
     session_filter_set = {s.strip() for s in session_filter or () if s} or None
 

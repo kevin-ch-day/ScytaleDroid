@@ -6,7 +6,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from scytaledroid.Config import app_config
+from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_engine
 from scytaledroid.Utils.System import output_prefs
@@ -46,7 +46,7 @@ def execute_permission_scan(
         print(status_messages.status("No scope groups resolved for permission scan.", level="warn"))
         return
 
-    base_dir = Path(app_config.DATA_DIR) / "device_apks"
+    base_dir = artifact_store.analysis_apk_root()
     session_stamp = params.session_stamp or ""
     if not session_stamp:
         session_stamp = make_session_stamp()

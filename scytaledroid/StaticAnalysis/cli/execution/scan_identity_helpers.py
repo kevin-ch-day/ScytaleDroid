@@ -238,7 +238,7 @@ def _artifact_mtime(artifact) -> float:
 def _artifact_recency_key(artifact) -> tuple:
     """Deterministic key used to prefer one artifact when duplicates are present."""
 
-    # Prefer capture day extracted from the on-disk path: data/device_apks/<serial>/<YYYYMMDD>/...
+    # Prefer capture day extracted from the artifact path/session token when available.
     capture_day = 0
     try:
         path = getattr(artifact, "path", None)

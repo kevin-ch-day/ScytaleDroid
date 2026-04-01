@@ -102,6 +102,7 @@ class ArtifactResult:
     is_base: bool | None = None
     observed_source_path: str | None = None
     mirror_failure_reasons: list[str] = field(default_factory=list)
+    canonical_store_path: str | None = None
 
 
 @dataclass

@@ -56,7 +56,7 @@ def test_scan_job_marks_failed_when_run_does_not_complete(monkeypatch, tmp_path:
     with api_service._jobs_lock:
         api_service._jobs.clear()
 
-    apk_path = tmp_path / "device_apks" / "repo_uploads" / "failure.apk"
+    apk_path = tmp_path / "store" / "apk" / "sha256" / "aa" / "failure.apk"
     apk_path.parent.mkdir(parents=True, exist_ok=True)
     apk_path.write_bytes(b"apk")
 
@@ -110,7 +110,7 @@ def test_scan_job_marks_ok_when_execution_completes_without_run_outcome(monkeypa
     with api_service._jobs_lock:
         api_service._jobs.clear()
 
-    apk_path = tmp_path / "device_apks" / "repo_uploads" / "permissions.apk"
+    apk_path = tmp_path / "store" / "apk" / "sha256" / "bb" / "permissions.apk"
     apk_path.parent.mkdir(parents=True, exist_ok=True)
     apk_path.write_bytes(b"apk")
 

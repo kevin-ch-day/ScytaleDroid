@@ -43,6 +43,8 @@ DEFAULT_META_FIELDS: tuple[str, ...] = (
     "occurrence_index",
     "category",
     "artifact",
+    "artifact_kind",
+    "canonical_store_path",
 )
 
 

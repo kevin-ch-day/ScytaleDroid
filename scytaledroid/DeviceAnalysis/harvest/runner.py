@@ -14,6 +14,7 @@ from scytaledroid.Utils.LoggingUtils import logging_engine
 from scytaledroid.Utils.LoggingUtils import logging_events as log_events
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.LoggingUtils.logging_context import RunContext, get_run_logger
+from scytaledroid.DeviceAnalysis.services import artifact_store
 
 from . import common
 from . import package_contract
@@ -759,6 +760,19 @@ def _pull_and_record(
         return None, "dedupe_sha256"
 
     local_rel_path = normalise_local_path(dest_path)
+    canonical_store_path: str | None = None
+    try:
+        canonical_path = artifact_store.materialize_apk(
+            dest_path,
+            sha256_digest=hashes["sha256"],
+            suffix=dest_path.suffix or ".apk",
+        )
+        canonical_store_path = artifact_store.repo_relative_path(canonical_path)
+    except Exception as exc:
+        log.warning(
+            f"Failed to materialize canonical APK store entry for {dest_path}: {exc}",
+            category="filesystem",
+        )
 
     apk_id: int | None = None
     mirror_failure_reasons: list[str] = []
@@ -884,6 +898,8 @@ def _pull_and_record(
         "apk_id": apk_id,
         "occurrence_index": occurrence,
         "artifact": artifact.artifact,
+        "artifact_kind": "apk",
+        "canonical_store_path": canonical_store_path,
     }
     if snapshot_id is not None:
         extra_meta["snapshot_id"] = snapshot_id
@@ -941,6 +957,7 @@ def _pull_and_record(
             is_base=not artifact.is_split_member,
             observed_source_path=artifact.source_path,
             mirror_failure_reasons=mirror_failure_reasons,
+            canonical_store_path=canonical_store_path,
         ),
         None,
     )

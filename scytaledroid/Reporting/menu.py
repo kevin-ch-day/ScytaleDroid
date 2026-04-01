@@ -1,9 +1,4 @@
-"""Menu dispatcher for reporting workflows.
-
-Reporting is paper-facing and should reflect current publication artifacts first.
-Older DB-centric "baseline pack" helpers remain available elsewhere, but they
-should not dominate the default operator view when writing a paper.
-"""
+"""Menu dispatcher for reporting workflows."""
 
 from __future__ import annotations
 
@@ -14,13 +9,12 @@ from scytaledroid.Utils.DisplayUtils import error_panels, menu_utils, prompt_uti
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption
 
 from .menu_actions import (
-    # Back-compat: some tests and older tooling monkeypatch this symbol.
-    # It is no longer used by the default paper-facing reporting UI.
     fetch_tier1_status as fetch_tier1_status,
     fetch_publication_status,
     handle_export_freeze_anchored_csvs,
     handle_generate_exploratory_risk_scoring,
     handle_generate_publication_results_numbers,
+    handle_generate_profile_v3_phase2_exports,
     handle_generate_profile_v3_exports,
     handle_profile_v3_integrity_gates,
     handle_lint_profile_v2_bundle,
@@ -40,9 +34,9 @@ def reporting_menu() -> None:
         print()
         menu_utils.print_header("Reporting")
         options = [
-            MenuOption("1", "Profile v2 (FROZEN) publication bundle (Paper #2 archival)"),
-            MenuOption("2", "Profile v3 (STRUCTURAL) publication bundle (Paper #3)"),
-            MenuOption("3", "Exploratory / Saved reports"),
+            MenuOption("1", "Frozen cohort archive tools"),
+            MenuOption("2", "Structural cohort archive tools"),
+            MenuOption("3", "Exploratory / saved reports"),
         ]
         menu_utils.print_menu(options, show_exit=True, exit_label="Back", show_descriptions=False, compact=True)
         top_choice = prompt_utils.get_choice(menu_utils.selectable_keys(options, include_exit=True), default="0")
@@ -75,25 +69,25 @@ def _reporting_menu_v2_frozen() -> None:
         "8": handle_lint_profile_v2_bundle,
     }
     options = [
-        MenuOption("1", "Regenerate v2 artifacts (Frozen 12-app cohort)"),
-        MenuOption("2", "Generate v2 Results section (Section V)"),
-        MenuOption("3", "Generate v2 Scientific QA"),
-        MenuOption("4", "Generate v2 Pipeline audit"),
-        MenuOption("5", "Write v2 canonical publication bundle (output/publication/)"),
-        MenuOption("6", "Export v2 freeze-anchored CSVs (paper-facing)"),
-        MenuOption("7", "Print v2 manuscript snapshot (1-screen)"),
-        MenuOption("8", "Lint v2 publication bundle (PASS/FAIL)"),
-        MenuOption("9", "v2 refresh snapshot exports (COMING SOON)", disabled=True),
+        MenuOption("1", "Refresh frozen archive artifacts"),
+        MenuOption("2", "Generate archived results numbers"),
+        MenuOption("3", "Generate archived scientific QA"),
+        MenuOption("4", "Generate archived pipeline audit"),
+        MenuOption("5", "Write frozen-cohort archive bundle (output/publication/)"),
+        MenuOption("6", "Export archived frozen-cohort CSVs"),
+        MenuOption("7", "Print archived manuscript snapshot"),
+        MenuOption("8", "Lint frozen-cohort archive bundle"),
+        MenuOption("9", "Snapshot export refresh (COMING SOON)", disabled=True),
     ]
 
     while True:
         print()
-        menu_utils.print_header("Reporting · Profile v2 (FROZEN)")
+        menu_utils.print_header("Reporting · Frozen Cohort Archive")
         status = fetch_publication_status()
         freeze_hash = str(status.get("freeze_dataset_hash") or "")
         freeze_short = freeze_hash[:12] if freeze_hash else "missing"
         pub_root = str(status.get("publication_root_label") or "output/publication")
-        print(f"Active export profile: v2 (FROZEN)")
+        print("Active export profile: frozen cohort archive")
         print(f"Output root: {pub_root}")
         print(f"Freeze: {freeze_short}")
 
@@ -139,9 +133,9 @@ def _reporting_menu_v3_structural() -> None:
         "3": handle_generate_profile_v3_phase2_exports,
     }
     options = [
-        MenuOption("1", "Run v3 integrity gates (catalog + freshness + scripted coverage)"),
-        MenuOption("2", "Generate v3 exports (tables/figures/tests)"),
-        MenuOption("3", "Generate Phase 2 draft exports (uses current runs; no manifest)"),
+        MenuOption("1", "Run structural archive integrity gates"),
+        MenuOption("2", "Generate structural archive exports"),
+        MenuOption("3", "Generate structural archive draft exports"),
     ]
     from pathlib import Path
 
@@ -149,11 +143,11 @@ def _reporting_menu_v3_structural() -> None:
 
     while True:
         print()
-        menu_utils.print_header("Reporting · Profile v3 (STRUCTURAL)")
+        menu_utils.print_header("Reporting · Structural Cohort Archive")
         out_root = Path("output") / "publication" / "profile_v3"
         lint = lint_profile_v3_bundle(out_root)
         ready = "READY" if lint.ok else "NOT READY"
-        print("Active export profile: v3 (STRUCTURAL)")
+        print("Active export profile: structural cohort archive")
         print(f"Output root: {out_root}")
         print(f"Bundle: {ready}")
         if lint.errors:
@@ -186,7 +180,7 @@ def _reporting_menu_exploratory() -> None:
         "2": view_saved_reports,
     }
     options = [
-        MenuOption("1", "Experimental risk model (SRS/DRS/FRS) (NOT FOR PAPER)"),
+        MenuOption("1", "Experimental risk model (SRS/DRS/FRS)"),
         MenuOption("2", "View saved reports"),
     ]
     while True:

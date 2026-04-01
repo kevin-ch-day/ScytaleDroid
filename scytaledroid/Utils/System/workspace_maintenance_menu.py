@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from scytaledroid.Config import app_config
+from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.Utils.DisplayUtils import (
     display_settings,
     menu_utils,
@@ -59,7 +60,8 @@ def _count_dirs(path: Path) -> int:
 
 def _show_summary() -> None:
     data_dir = Path("data")
-    apks_dir = data_dir / "device_apks"
+    apks_dir = artifact_store.analysis_apk_root()
+    receipts_dir = artifact_store.receipts_root()
     logs_dir = Path("logs")
     output_dir = Path(app_config.OUTPUT_DIR)
     cache_dirs = [data_dir / "static_analysis" / "cache", output_dir / "cache"]
@@ -80,6 +82,8 @@ def _show_summary() -> None:
         ["APK storage", str(apks_dir)],
         ["APK files", f"{len(apk_files)}"],
         ["APK size", _humanize_bytes(apks_size)],
+        ["Receipts dir", str(receipts_dir)],
+        ["Receipts size", _humanize_bytes(_dir_size_bytes(receipts_dir))],
         ["Logs dir", str(logs_dir)],
         ["Logs size", _humanize_bytes(logs_size)],
         ["Output dir", str(output_dir)],

@@ -206,10 +206,10 @@ def _load_dynamic_ui_defaults() -> _DynamicUiDefaults:
     )
 
 def _print_profile_v3_capture_runbook() -> None:
-    """Print a concise operator runbook for Paper #3 dynamic capture."""
+    """Print a concise operator runbook for the archived structural cohort flow."""
 
     print()
-    menu_utils.print_header("Profile v3 Capture Runbook", "Paper #3 (scripted-only)")
+    menu_utils.print_header("Structural Cohort Capture Runbook", "archived scripted flow")
     # Keep the runbook aligned with strict-manifest enforcement.
     try:
         from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import MIN_WINDOWS_PER_RUN
@@ -225,10 +225,10 @@ def _print_profile_v3_capture_runbook() -> None:
         min_pcap_idle = 0
         min_pcap_scripted = 40_000
     lines = [
-        "Goal: collect paper-grade dynamic evidence for the v3 catalog cohort.",
+        "Goal: collect archive-grade dynamic evidence for the structural cohort.",
         "",
         "Hard locks:",
-        "- interaction is scripted-only for Paper #3 (no manual runs in the v3 manifest).",
+        "- interaction is scripted-only for the structural manifest flow.",
         "- cohort is catalog-defined (profiles/profile_v3_app_catalog.json).",
         "",
         "Required per app (minimum):",
@@ -236,9 +236,9 @@ def _print_profile_v3_capture_runbook() -> None:
         f"- interaction_scripted: windows>={min_windows}, pcap_bytes>={min_pcap_scripted}",
         "",
         "Recommended order:",
-        "1. Device Analysis: Sync inventory; Pull APKs -> Paper #3 Dataset (full refresh).",
-        "2. Static Analysis: Run Profile v3 Structural Cohort (batch).",
-        "3. Reporting: Run v3 integrity gates (freshness + scripted coverage).",
+        "1. Device Analysis: Sync inventory; Pull APKs -> app profile (full refresh).",
+        "2. Static Analysis: Full analysis -> Profile.",
+        "3. Reporting: Run structural archive integrity gates (freshness + scripted coverage).",
         "4. Dynamic Analysis: capture missing scripted runs (baseline_idle + interaction_scripted).",
         "5. Dynamic Analysis: Build v3 manifest (included runs).",
         "6. Reporting: Strict v3 export + strict lint -> READY.",
@@ -253,7 +253,7 @@ def _print_profile_v3_capture_runbook() -> None:
 
 
 def _run_profile_v3_guided_phase2_capture() -> None:
-    """Guided Phase 2 helper for Profile v3 (paper-grade scripted-only capture).
+    """Guided capture helper for the archived structural cohort flow.
 
     This is intentionally lightweight: it surfaces the dashboard as a cohort table plus a
     recapture plan, so operators can burn down blockers without copy/pasting between screens.
@@ -275,12 +275,12 @@ def _run_profile_v3_guided_phase2_capture() -> None:
         if strict_env:
             os.environ["SCYTALEDROID_V3_ACCEPT_MANUAL_INTERACTIVE"] = "1"
     accept_manual = str(os.environ.get("SCYTALEDROID_V3_ACCEPT_MANUAL_INTERACTIVE") or "").strip().lower() in {"1", "true", "yes", "on"}
-    subtitle = "Phase 2 burn-down (idle + interactive)"
+    subtitle = "Archive burn-down (idle + interactive)"
     if accept_manual:
         subtitle += " (scripted|manual)"
     else:
         subtitle += " (scripted)"
-    menu_utils.print_header("Profile v3 Guided Capture", subtitle)
+    menu_utils.print_header("Structural Cohort Guided Capture", subtitle)
 
     repo_root = Path(__file__).resolve().parents[2]
     audit_dir = repo_root / "output" / "audit" / "profile_v3"
@@ -395,7 +395,7 @@ def _run_profile_v3_guided_phase2_capture() -> None:
                 )
                 print(
                     status_messages.status(
-                        "Set: export SCYTALEDROID_V3_ACCEPT_MANUAL_INTERACTIVE=1 (Phase 2 only).",
+                        "Set: export SCYTALEDROID_V3_ACCEPT_MANUAL_INTERACTIVE=1 (archive flow only).",
                         level="warn",
                     )
                 )
@@ -560,10 +560,10 @@ def _run_profile_v3_guided_phase2_capture() -> None:
 
 
 def _run_profile_v3_manifest_build() -> None:
-    """Build/update the v3 manifest (included runs list) from existing evidence packs."""
+    """Build/update the structural cohort manifest from existing evidence packs."""
 
     print()
-    menu_utils.print_header("Profile v3 Manifest Build")
+    menu_utils.print_header("Structural Cohort Manifest Build")
     script = Path(__file__).resolve().parents[2] / "scripts" / "profile_tools" / "profile_v3_manifest_build.py"
     if not script.exists():
         print(status_messages.status(f"Missing script: {script}", level="error"))
@@ -584,10 +584,10 @@ def _run_profile_v3_manifest_build() -> None:
 
 
 def _run_profile_v3_capture_status_dashboard() -> None:
-    """Show per-app Phase 2 capture readiness (idle + scripted + minima + artifacts)."""
+    """Show per-app structural cohort capture readiness."""
 
     print()
-    menu_utils.print_header("Profile v3 Capture Status (Dashboard)")
+    menu_utils.print_header("Structural Cohort Capture Status")
     script = Path(__file__).resolve().parents[2] / "scripts" / "profile_tools" / "profile_v3_capture_status.py"
     if not script.exists():
         print(status_messages.status(f"Missing script: {script}", level="error"))
@@ -606,12 +606,12 @@ def _run_profile_v3_capture_status_dashboard() -> None:
 
 
 def _run_profile_v3_recapture_plan_view() -> None:
-    """Show latest Profile v3 recapture plan (ordered)."""
+    """Show the latest structural cohort recapture plan."""
 
     import csv
 
     print()
-    menu_utils.print_header("Profile v3 Recapture Plan", "Ordered actions to reach blockers=0")
+    menu_utils.print_header("Structural Cohort Recapture Plan", "Ordered actions to reach blockers=0")
     repo_root = Path(__file__).resolve().parents[2]
     audit_dir = repo_root / "output" / "audit" / "profile_v3"
     recapture_plans = sorted(audit_dir.glob("recapture_plan_*.csv"))
@@ -639,6 +639,55 @@ def _run_profile_v3_recapture_plan_view() -> None:
     prompt_utils.press_enter_to_continue()
 
 
+def _legacy_structural_archive_menu(*, pause_if_verbose) -> None:
+    options = [
+        MenuOption("1", "Guided capture"),
+        MenuOption("2", "Runbook"),
+        MenuOption("3", "Recapture plan"),
+        MenuOption("4", "Status dashboard"),
+        MenuOption("5", "Integrity gates"),
+        MenuOption("6", "Manifest build"),
+    ]
+
+    while True:
+        print()
+        menu_utils.print_header("Archived Structural Cohort")
+        menu_utils.print_menu(options, show_exit=True, exit_label="Back", show_descriptions=False, compact=True)
+        choice = prompt_utils.get_choice(menu_utils.selectable_keys(options, include_exit=True), default="0")
+        if choice == "0":
+            return
+        if choice == "1":
+            _run_profile_v3_guided_phase2_capture()
+            pause_if_verbose()
+            continue
+        if choice == "2":
+            _print_profile_v3_capture_runbook()
+            pause_if_verbose()
+            continue
+        if choice == "3":
+            _run_profile_v3_recapture_plan_view()
+            pause_if_verbose()
+            continue
+        if choice == "4":
+            _run_profile_v3_capture_status_dashboard()
+            pause_if_verbose()
+            continue
+        if choice == "5":
+            try:
+                from scytaledroid.Reporting.menu_actions import handle_profile_v3_integrity_gates
+
+                handle_profile_v3_integrity_gates()
+            except Exception:
+                print(status_messages.status("Failed to open structural archive integrity gates (Reporting).", level="error"))
+                prompt_utils.press_enter_to_continue()
+            pause_if_verbose()
+            continue
+        if choice == "6":
+            _run_profile_v3_manifest_build()
+            pause_if_verbose()
+            continue
+
+
 def dynamic_analysis_menu() -> None:
     from scytaledroid.Database.db_utils import schema_gate
     ok, message, detail = schema_gate.dynamic_schema_gate()
@@ -654,37 +703,28 @@ def dynamic_analysis_menu() -> None:
             level="warn",
         )
 
-    # Publication exports are consolidated under Reporting (single canonical surface).
-    # Keep menu numbering sequential to avoid operator mistakes under time pressure.
     v2_options = [
         MenuOption("1", "Guided cohort run (Research Dataset Alpha)"),
         MenuOption("2", "Cohort status overview"),
     ]
-    # Paper #3 uses the same capture engine but a different cohort contract and reporting outputs.
-    # Keep the operator surface explicit so v2/v3 runs are not confused during demos.
-    v3_options = [
-        MenuOption("3", "Guided cohort capture (Phase 2)"),
-        MenuOption("4", "Capture runbook (scripted-only)"),
-        MenuOption("5", "Recapture plan (latest)"),
-        MenuOption("6", "Capture status dashboard (Phase 2)"),
-        MenuOption("7", "Run integrity gates (Reporting)"),
-        MenuOption("8", "Build v3 manifest (included runs)"),
+    archive_options = [
+        MenuOption("3", "Archived structural cohort tools"),
     ]
     integrity_options = [
-        MenuOption("9", "Freeze readiness audit (evidence packs)"),
-        MenuOption("10", "Reindex/repair tracker from evidence packs"),
-        MenuOption("11", "Prune incomplete dynamic evidence dirs"),
+        MenuOption("4", "Freeze readiness audit (evidence packs)"),
+        MenuOption("5", "Reindex/repair tracker from evidence packs"),
+        MenuOption("6", "Prune incomplete dynamic evidence dirs"),
     ]
     reporting_options = [
-        MenuOption("12", "Export freeze-anchored CSVs (Reporting)"),
+        MenuOption("7", "Export frozen archive CSVs (Reporting)"),
     ]
     system_options = [
-        MenuOption("13", "Verify host PCAP tools (tshark + capinfos)"),
-        MenuOption("14", "State summary (freeze/evidence/tracker deltas)"),
+        MenuOption("8", "Verify host PCAP tools (tshark + capinfos)"),
+        MenuOption("9", "State summary (freeze/evidence/tracker deltas)"),
     ]
     options = [
         *v2_options,
-        *v3_options,
+        *archive_options,
         *integrity_options,
         *reporting_options,
         *system_options,
@@ -703,10 +743,10 @@ def dynamic_analysis_menu() -> None:
         print()
         menu_utils.print_header("Dynamic Analysis")
         _warn_if_code_changed()
-        menu_utils.print_section("Profile v2 (Paper #2)")
+        menu_utils.print_section("Operational Cohort")
         menu_utils.print_menu(v2_options, show_exit=False, show_descriptions=False, compact=True)
-        menu_utils.print_section("Profile v3 (Paper #3)")
-        menu_utils.print_menu(v3_options, show_exit=False, show_descriptions=False, compact=True)
+        menu_utils.print_section("Legacy / Archive")
+        menu_utils.print_menu(archive_options, show_exit=False, show_descriptions=False, compact=True)
         menu_utils.print_section("Integrity & Audit")
         menu_utils.print_menu(integrity_options, show_exit=False, show_descriptions=False, compact=True)
         menu_utils.print_section("Reporting")
@@ -739,58 +779,26 @@ def dynamic_analysis_menu() -> None:
             continue
 
         if choice == "3":
-            _run_profile_v3_guided_phase2_capture()
-            _pause_if_verbose()
+            _legacy_structural_archive_menu(pause_if_verbose=_pause_if_verbose)
             continue
 
         if choice == "4":
-            _print_profile_v3_capture_runbook()
-            _pause_if_verbose()
-            continue
-
-        if choice == "5":
-            _run_profile_v3_recapture_plan_view()
-            _pause_if_verbose()
-            continue
-
-        if choice == "6":
-            _run_profile_v3_capture_status_dashboard()
-            _pause_if_verbose()
-            continue
-
-        if choice == "7":
-            try:
-                from scytaledroid.Reporting.menu_actions import handle_profile_v3_integrity_gates
-
-                handle_profile_v3_integrity_gates()
-            except Exception:
-                print(status_messages.status("Failed to open v3 integrity gates (Reporting).", level="error"))
-                prompt_utils.press_enter_to_continue()
-            _pause_if_verbose()
-            continue
-
-        if choice == "8":
-            _run_profile_v3_manifest_build()
-            _pause_if_verbose()
-            continue
-
-        if choice == "9":
             _run_paper_readiness_audit()
             _pause_if_verbose()
             continue
 
-        if choice == "10":
+        if choice == "5":
             _repair_reindex_tracker()
             _pause_if_verbose()
             continue
 
-        if choice == "11":
+        if choice == "6":
             _prune_incomplete_dynamic_evidence_dirs()
             _pause_if_verbose()
             continue
 
-        if choice == "12":
-            # Single canonical paper-facing export surface lives in Reporting.
+        if choice == "7":
+            # Single canonical frozen-cohort export surface lives in Reporting.
             try:
                 from scytaledroid.Reporting.menu_actions import handle_export_freeze_anchored_csvs
 
@@ -800,12 +808,12 @@ def dynamic_analysis_menu() -> None:
             _pause_if_verbose()
             continue
 
-        if choice == "13":
+        if choice == "8":
             _verify_host_pcap_tools()
             _pause_if_verbose()
             continue
 
-        if choice == "14":
+        if choice == "9":
             _run_state_summary()
             _pause_if_verbose()
             continue
@@ -1348,7 +1356,7 @@ def _export_pcap_features_csv() -> None:
         print(status_messages.status("No pcap_features.json files found.", level="warn"))
         return
     count = _count_csv_rows(output_path)
-    msg = f"Exported CSV: {output_path} [freeze-anchored]"
+    msg = f"Exported CSV: {output_path} [frozen-archive]"
     if count is not None:
         msg += f" ({count} row(s))"
     print(status_messages.status(msg, level="success"))
@@ -1369,7 +1377,7 @@ def _export_dynamic_run_summary_csv() -> None:
         print(status_messages.status("No dynamic run summaries found.", level="warn"))
         return
     count = _count_csv_rows(output_path)
-    msg = f"Exported CSV: {output_path} [freeze-anchored]"
+    msg = f"Exported CSV: {output_path} [frozen-archive]"
     if count is not None:
         msg += f" ({count} row(s))"
     print(status_messages.status(msg, level="success"))
@@ -1390,7 +1398,7 @@ def _export_protocol_ledger_csv() -> None:
         print(status_messages.status("No protocol ledger rows found.", level="warn"))
         return
     count = _count_csv_rows(output_path)
-    msg = f"Exported CSV: {output_path} [freeze-anchored]"
+    msg = f"Exported CSV: {output_path} [frozen-archive]"
     if count is not None:
         msg += f" ({count} row(s))"
     print(status_messages.status(msg, level="success"))

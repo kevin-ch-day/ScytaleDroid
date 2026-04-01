@@ -251,7 +251,7 @@ def report_profile_v3_requires_inventory_sync(summary: Mapping[str, object]) -> 
     print("───────────────────────")
     print(
         status_messages.status(
-            "Profile v3 Structural Cohort harvest is paper-grade and requires a fresh inventory snapshot.",
+            "Structural cohort harvest requires a fresh inventory snapshot before pulling APKs.",
             level="warn",
         )
     )
@@ -264,7 +264,7 @@ def report_profile_v3_requires_inventory_sync(summary: Mapping[str, object]) -> 
 
 
 def prompt_profile_v3_inventory_sync_now() -> bool:
-    return prompt_utils.prompt_yes_no("Sync inventory now before pulling Profile v3 APKs?", default=True)
+    return prompt_utils.prompt_yes_no("Sync inventory now before pulling structural cohort APKs?", default=True)
 
 
 def report_inventory_sync_failure(exc: Exception) -> None:

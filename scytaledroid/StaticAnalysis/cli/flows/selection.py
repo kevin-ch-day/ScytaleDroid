@@ -384,7 +384,7 @@ def _group_recency_key(group: ArtifactGroup) -> tuple[int, str, float]:
     which can silently change "newest capture" selection in paper-grade workflows.
     """
 
-    # Prefer capture day extracted from the on-disk path: data/device_apks/<serial>/<YYYYMMDD>/...
+    # Prefer capture day extracted from the session label or artifact path when available.
     capture_day = _group_capture_day(group)
     version_code = _group_version_code(group)
     stamp = group.session_stamp or ""

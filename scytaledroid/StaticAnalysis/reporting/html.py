@@ -202,6 +202,7 @@ def save_html_report(
     view: Mapping[str, Any] | None = None,
     *,
     output_root: Path | None = None,
+    mode: str | None = None,
 ) -> Path:
     """Persist a rendered HTML report for *report* and return the file path."""
 
@@ -219,26 +220,23 @@ def save_html_report(
             "artifact",
         )
     )
-    version_code = _slugify(
-        str(
-            _first_non_empty(
-                manifest.version_code,
-                metadata.get("version_code"),
-                "unknown",
-            )
-        )
+    artifact = _artifact_slug(metadata.get("artifact") or report.file_name)
+    resolved_mode = _normalize_html_mode(mode or getattr(app_config, "STATIC_HTML_MODE", "latest"))
+    latest_path, archive_path = _resolve_output_paths(
+        report,
+        package=package,
+        artifact=artifact,
+        output_root=Path(output_root or app_config.OUTPUT_DIR),
     )
-    artifact = _slugify(metadata.get("artifact") or report.file_name)
 
-    timestamp = _coerce_timestamp(report.generated_at)
+    if resolved_mode in {"latest", "both"}:
+        latest_path.parent.mkdir(parents=True, exist_ok=True)
+        latest_path.write_text(html_content, encoding="utf-8")
+    if resolved_mode in {"archive", "both"} and archive_path is not None:
+        archive_path.parent.mkdir(parents=True, exist_ok=True)
+        archive_path.write_text(html_content, encoding="utf-8")
 
-    root = Path(output_root or app_config.OUTPUT_DIR) / "reports" / "static_analysis" / package
-    root.mkdir(parents=True, exist_ok=True)
-
-    filename = f"{package}_{version_code}_{artifact}_{timestamp}.html"
-    path = root / filename
-    path.write_text(html_content, encoding="utf-8")
-    return path
+    return latest_path if resolved_mode in {"latest", "both"} else archive_path or latest_path
 
 
 def _render_permission_rows(permissions: Sequence[Mapping[str, Any]]) -> list[str]:
@@ -284,6 +282,13 @@ def _slugify(value: str) -> str:
     return "".join(safe).strip("-") or "artifact"
 
 
+def _artifact_slug(value: Any) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return "artifact"
+    return _slugify(Path(raw).stem)
+
+
 def _first_non_empty(*candidates: Any) -> Any:
     for value in candidates:
         if isinstance(value, str) and value.strip():
@@ -301,6 +306,38 @@ def _coerce_timestamp(timestamp: str | None) -> str:
     except ValueError:
         return datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     return parsed.astimezone(UTC).strftime("%Y%m%d-%H%M%S")
+
+
+def _normalize_html_mode(mode: str) -> str:
+    normalized = str(mode or "latest").strip().lower()
+    return normalized if normalized in {"latest", "archive", "both"} else "latest"
+
+
+def _resolve_output_paths(
+    report: StaticAnalysisReport,
+    *,
+    package: str,
+    artifact: str,
+    output_root: Path,
+) -> tuple[Path, Path | None]:
+    latest_path = output_root / "reports" / "static" / "latest" / package / f"{artifact}.html"
+
+    metadata = report.metadata or {}
+    if isinstance(metadata, Mapping):
+        session_label = metadata.get("session_stamp") or metadata.get("session_label")
+    else:
+        session_label = None
+    archive_session = _slugify(str(session_label)) if session_label else _coerce_timestamp(report.generated_at)
+    archive_path = (
+        output_root
+        / "reports"
+        / "static"
+        / "archive"
+        / archive_session
+        / package
+        / f"{artifact}.html"
+    )
+    return latest_path, archive_path
 
 
 __all__ = ["render_html_report", "save_html_report"]

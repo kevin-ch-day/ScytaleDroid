@@ -468,6 +468,11 @@ def test_launch_scan_flow_defers_persistence_footer_until_after_permission_refre
         "_render_persistence_footer",
         lambda *_a, **kwargs: calls.append(("footer", kwargs)),
     )
+    monkeypatch.setattr(
+        run_dispatch,
+        "_persist_cohort_rollup",
+        lambda session_stamp, scope_label: calls.append(("rollup", (session_stamp, scope_label))),
+    )
 
     params = RunParameters(
         profile="full",
@@ -484,8 +489,9 @@ def test_launch_scan_flow_defers_persistence_footer_until_after_permission_refre
     run_dispatch.launch_scan_flow(selection, params, Path("."))
 
     assert calls[0] == ("render", True)
-    assert [name for name, _ in calls[-3:]] == ["perm", "refresh", "footer"]
-    footer_kwargs = calls[-1][1]
+    assert [name for name, _ in calls[-4:]] == ["perm", "refresh", "footer", "rollup"]
+    footer_kwargs = calls[-2][1]
     assert isinstance(footer_kwargs, dict)
     assert footer_kwargs.get("had_errors") is False
     assert footer_kwargs.get("canonical_failures") == ["canon gap"]
+    assert calls[-1][1] == ("sess-ordered", "Example")

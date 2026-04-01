@@ -41,6 +41,7 @@ from ..execution import (
     request_abort,
 )
 from ..execution.db_verification import _render_persistence_footer
+from ..execution.results_persist import _persist_cohort_rollup
 from ..execution.static_run_map import REQUIRED_FIELDS, validate_run_map
 from ..views.view_layouts import render_run_start, render_run_summary
 from . import persistence_runtime
@@ -640,6 +641,8 @@ def _launch_scan_flow_resolved(
             abort_reason=abort_reason,
             abort_signal=abort_signal,
         )
+        if outcome.results and not summary_render_failed:
+            _persist_cohort_rollup(params.session_stamp, params.scope_label)
 
     return outcome
 

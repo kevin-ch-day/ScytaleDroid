@@ -14,3 +14,4 @@ def test_reference_seed_executes_inserts(monkeypatch):
     # We expect at least the publishers + profiles inserts to run.
     assert any("android_app_publishers" in sql for sql, _p, _q in calls)
     assert any("android_app_profiles" in sql for sql, _p, _q in calls)
+    assert any("SET display_name" in sql for sql, _p, _q in calls)
