@@ -3,11 +3,10 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-import pytest
-
 from scytaledroid.Api import service as api_service
 from scytaledroid.StaticAnalysis.core.repository import ArtifactGroup, RepositoryArtifact
 from scytaledroid.StaticAnalysis.services.static_service import RunResult
+from tests.api.helpers import require_fastapi_testclient
 
 
 def _make_group(apk_path: Path, package_name: str) -> ArtifactGroup:
@@ -51,7 +50,7 @@ def _make_run_result(
 
 
 def test_scan_job_marks_failed_when_run_does_not_complete(monkeypatch, tmp_path: Path) -> None:
-    testclient = pytest.importorskip("fastapi.testclient")
+    testclient = require_fastapi_testclient()
     monkeypatch.setattr(api_service.app_config, "DATA_DIR", str(tmp_path))
     with api_service._jobs_lock:
         api_service._jobs.clear()
@@ -105,7 +104,7 @@ def test_scan_job_marks_failed_when_run_does_not_complete(monkeypatch, tmp_path:
 
 
 def test_scan_job_marks_ok_when_execution_completes_without_run_outcome(monkeypatch, tmp_path: Path) -> None:
-    testclient = pytest.importorskip("fastapi.testclient")
+    testclient = require_fastapi_testclient()
     monkeypatch.setattr(api_service.app_config, "DATA_DIR", str(tmp_path))
     with api_service._jobs_lock:
         api_service._jobs.clear()

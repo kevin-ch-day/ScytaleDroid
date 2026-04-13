@@ -1,7 +1,5 @@
-import json
 import hashlib
-
-import pytest
+import json
 
 from scytaledroid.DynamicAnalysis.core.freeze_identity import (
     compute_freeze_dataset_hash_from_payload,
@@ -61,4 +59,3 @@ def test_derive_freeze_dataset_identity_includes_canonical_payload_keys():
     assert isinstance(ident.hash, str) and len(ident.hash) == 64
     assert "included_run_ids" in ident.canonical_payload
     assert "included_run_checksums" in ident.canonical_payload
-

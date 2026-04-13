@@ -81,6 +81,8 @@ def test_render_harvest_summary_structured(capsys):
         packages_with_writes=1,
         packages_with_errors=0,
         packages_failed=0,
+        packages_drifted=0,
+        packages_with_mirror_failures=0,
         packages_skipped_runtime=0,
         runtime_skips=Counter(),
         runtime_notes=Counter(),

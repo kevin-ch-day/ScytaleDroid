@@ -4,7 +4,6 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
 
 
 def _write_json(path: Path, payload: dict) -> None:
