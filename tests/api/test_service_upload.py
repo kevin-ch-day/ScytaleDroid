@@ -3,14 +3,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from scytaledroid.Api import service as api_service
 from scytaledroid.StaticAnalysis.core.repository import ArtifactGroup, RepositoryArtifact
+from tests.api.helpers import require_fastapi_testclient
 
 
 def test_upload_writes_sidecar_with_package_identity(monkeypatch, tmp_path):
-    testclient = pytest.importorskip("fastapi.testclient")
+    testclient = require_fastapi_testclient()
     monkeypatch.setattr(api_service.app_config, "DATA_DIR", str(tmp_path))
     monkeypatch.chdir(tmp_path)
     artifact = RepositoryArtifact(

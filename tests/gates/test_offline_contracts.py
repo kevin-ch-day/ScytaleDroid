@@ -7,8 +7,7 @@ from types import SimpleNamespace
 import main as app_main
 from scytaledroid.Database.db_utils import schema_gate
 from scytaledroid.StaticAnalysis.cli.core.models import ScopeSelection
-from scytaledroid.StaticAnalysis.cli.flows import headless_run
-from scytaledroid.StaticAnalysis.cli.flows import session_uniqueness
+from scytaledroid.StaticAnalysis.cli.flows import headless_run, session_uniqueness
 from scytaledroid.StaticAnalysis.core.repository import ArtifactGroup, RepositoryArtifact
 
 
@@ -67,7 +66,7 @@ def test_static_menu_allows_dry_run_when_schema_gate_fails(monkeypatch):
     )
     monkeypatch.setattr(
         "scytaledroid.StaticAnalysis.core.repository.group_artifacts",
-        lambda _base_dir: (dummy_group,),
+        lambda *_args, **_kwargs: (dummy_group,),
     )
     monkeypatch.setattr(menu_module.static_scope_service, "count", lambda: 0)
     monkeypatch.setattr(

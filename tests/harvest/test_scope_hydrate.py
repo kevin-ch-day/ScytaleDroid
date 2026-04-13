@@ -1,6 +1,3 @@
-from types import SimpleNamespace
-
-
 def test_hydrate_missing_rows_includes_version_code(monkeypatch):
     # Import inside test so monkeypatches apply to the module under test.
     from scytaledroid.DeviceAnalysis.harvest import scope as scope_mod

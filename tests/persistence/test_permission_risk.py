@@ -41,15 +41,24 @@ def _bundle(dangerous: int, signature: int, vendor: int, score: float, grade: st
 def clear_permission_tables():
     from scytaledroid.Database.db_core import db_queries as core_q
 
-    core_q.run_sql("DELETE FROM static_permission_risk")
+    core_q.run_sql("DROP TABLE IF EXISTS static_permission_risk_vnext")
+    core_q.run_sql(
+        """
+        CREATE TABLE static_permission_risk_vnext (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id INTEGER NOT NULL,
+            permission_name TEXT NOT NULL,
+            risk_score REAL NOT NULL,
+            risk_class TEXT NULL,
+            rationale_code TEXT NULL,
+            created_at_utc TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(run_id, permission_name)
+        )
+        """
+    )
     core_q.run_sql("DELETE FROM static_permission_risk_vnext")
-    core_q.run_sql("DELETE FROM risk_scores")
-    core_q.run_sql("DELETE FROM permission_audit_apps")
-    core_q.run_sql("DELETE FROM permission_audit_snapshots")
     yield
-    core_q.run_sql("DELETE FROM static_permission_risk")
     core_q.run_sql("DELETE FROM static_permission_risk_vnext")
-    core_q.run_sql("DELETE FROM risk_scores")
 
 
 @pytest.fixture(autouse=True)
